@@ -4,2132 +4,1446 @@
 
 *Released 2026-08-31*
 
-### Double-clicking a PDF opens it again
-
-- With Spectra PDF set as the default viewer, double-clicking a PDF — or choosing it from Open with — launched nothing when the app was not already running: the command-line parser rejected the file path Windows passes on launch and exited before the window appeared. The launcher now recognizes a file path and opens the app with the document, while the headless command-line subcommands, `--help`, `--version` and exit codes behave exactly as before.
+### Fixes
+- **File-association launch** — double-clicking a PDF (or Open with) with the app not running opened nothing: the command-line parser rejected the file path Windows passes and exited before the window appeared; the launcher now accepts a file path and opens the document. Headless subcommands, `--help`, `--version` and exit codes unchanged
 
 ## 1.1.19
 
 *Released 2026-08-29*
 
-### Protected documents, on your terms
+### Protected Documents
+- **Compress/Grayscale/Rebuild on encrypted PDFs** — work again; operation runs first and asks only when protection is actually in the way. Per-document consent dialog states the output is an unprotected copy (no password, no permission restrictions, source unchanged), Cancel focused; result line marks the output unprotected
+- **Still refused** — owner-password-held permissions and certificate-recipient encryption (no password to supply, no recipient list to reauthor); watched folders, scheduled runs and batch (nobody present to consent)
+- **MRC preset bypass fixed** — the MRC quality preset ran compression before the protection check, silently returning an unprotected file; the check now precedes both compression paths
 
-- Compress, Grayscale and Rebuild work on a password-protected document again. The operation is attempted first and asks only where the protection is genuinely in the way: a dialog names the trade — what it writes is an unprotected copy, without the password and without the permission restrictions, and the document you started from is not changed — with Cancel focused. Proceed writes that copy and the result line says it is unprotected. Cancel runs nothing.
-- Documents whose permissions are held by an owner password, and documents encrypted to certificate recipients, still refuse: no answer given here can supply a password nobody holds or reauthor a recipient list.
-- Consent is per document. Watched folders, scheduled runs and batch keep refusing, because a folder run has nobody at the screen to ask.
-- Fixed alongside: choosing the MRC quality preset ran the compression before the protection check, so that one path was still quietly returning an unprotected file. The check now runs ahead of both compression paths.
+### Crop Editing
+- **Crop rectangle handles** — eight resize handles like other resizable objects; Alt suspends snapping, Shift holds aspect, Escape abandons the drag; works on rotated pages; nothing applies until committed from Page Boxes
 
-### Crop rectangles can be adjusted
+### Localization
+- **Pluralized counts** — Scan & Enhance measurement/result lines use each language's plural grammar instead of "page(s)": pages to straighten/whiten/turn upright, specks removed, pages enhanced, uncertain/untreated orientation cases; dual/few/many forms carry the governed case, in all 28 shipped languages
+- **Table review cell count** — shape line now says "non-empty" (the number counts only cells with text, not rows × columns)
 
-- A drawn crop rectangle now carries the same eight handles every other resizable object has, with the same gesture: Alt suspends snapping, Shift holds the aspect ratio, and Escape abandons a drag without committing it. Correcting a crop no longer means drawing it over again, and a crop on a turned page still trims the edges you pointed at. Nothing reaches the document until you apply it from Page Boxes.
+### Guided Actions
+- **Input placeholders** — ten empty inputs across Watermark, Search & Redact, Prepare Forms, Header & Footer and both export page ranges show example values; literal accepted values (pattern names, field types, page tokens) stay verbatim in every language
+- **Inline step validation** — a step that cannot run (Watermark with no text/image/PDF or two of them set; Header & Footer with empty text) says so while configuring, using the same condition Save enforces; does not block editing
 
-### Counts read as real sentences
-
-- Scan & Enhance's measurement and result lines are written with each language's own plural grammar instead of a count-invariant "page(s)" frame: pages to straighten, whiten or turn upright, specks removed, pages enhanced, and the pages the orientation check was unsure about or would not treat. Languages with dual, few and many forms carry the case their verb governs rather than a phrasing chosen to avoid the number, in all 28 shipped languages.
-- The table review's shape line said "cells" for a number that counts only the cells holding text, read directly beside the rows and columns it does not multiply to. It now says "non-empty", and is counted rather than framed.
-
-### Guided Actions tells you what a step needs
-
-- Ten empty inputs across Watermark, Search & Redact, Prepare Forms, Header & Footer and the two export page ranges now show an example of what belongs in them, in the same convention the panels already use. Values a field literally accepts — pattern names, field types, the page tokens — stay verbatim in every language; only the wording around them is translated.
-- A step that cannot run as configured now says so on the step while you configure it: a Watermark with no text, image or PDF set, one with two of them set, or a Header & Footer with an empty text names what is missing or conflicting, instead of being accepted and refused at Save. The cue is the same condition Save enforces, so the two can never disagree, and it does not block editing.
-
-### Smaller corrections
-
-- "Turn the page when at least" now reads "Turn the page when confidence is at least" — the value is the orientation detector's own score, and the sentence had no object.
-- The watermark's "Direction" is now "Text direction": it sets the axis the text runs along, which is independent of the Angle field beside it.
-- The paragraph editor's resize corner is drawn as part of the edit box rather than as the browser's own grey hatch, which on the page read as a rendering artefact.
+### Fixes
+- **"Turn the page when at least"** — now "Turn the page when confidence is at least" (the value is the orientation detector's score)
+- **Watermark "Direction"** — renamed "Text direction"; sets the text axis, independent of the Angle field
+- **Paragraph editor resize corner** — drawn as part of the edit box instead of the browser's grey hatch
 
 ## 1.1.18
 
 *Released 2026-08-28*
 
-### Your protection is never silently removed
+### Protected Documents
+- **Encryption preserved through whole-file rewrites** — repair, recover, rotate, merge, split and imposition keep the source's encryption, cipher and permission bits; previously they wrote a decrypted copy with print/copy/modify permissions dropped
+- **Refusals where protection cannot carry** — owner-password-held permissions (open with the password or decrypt first), certificate-recipient encryption (recipient list cannot be reauthored), and combining documents with differing protection (one output can carry only one)
+- **Compress/Grayscale/Rebuild** — refuse on encrypted documents rather than returning them unprotected. PDF/A conversion still drops encryption (the standard forbids it) and reports the drop
 
-- A password-protected document keeps its protection through the operations that rewrite it whole — repair, recover, rotate, merge, split and imposition now hand back a file with the source's own encryption, cipher and permission bits, where before they wrote out a decrypted copy with print, copy and modify permissions quietly discarded.
-- Where the protection genuinely cannot be carried, the operation refuses and says why instead of degrading the file: a document whose permissions are held by an owner password (that password cannot be read back out of the file — open it with the password, or decrypt it first), and a document encrypted to certificate recipients (the recipient list cannot be reauthored). Combining documents that do not all carry the same protection refuses for the same reason: one combined document can only have one.
-- Compress, Grayscale and Rebuild refuse on an encrypted document rather than returning it unprotected. Conversion to PDF/A still drops encryption, because the standard forbids an encrypted PDF/A file, and reports the drop as it always has.
+### Archival Conformance
+- **PDF/A-1 preserved through Repair/Recover/Optimize** — part-1 files are written without object streams and without the cross-reference stream/version bump they force; parts 2–4 keep the requested layout. On a 2,907-file corpus: 866 conformance regressions reduced to none, 45 additional files left valid
+- **Object-stream layout preserved** — Repair and Recover keep a document's own layout instead of imposing one
+- **Signed-document rewrites** — repairing/recovering removes signatures the rewrite would invalidate and reports how many (a rewritten file cannot satisfy a signature's byte range); documents whose signatures must survive editing still take the append-only path
 
-### Archival documents stay conformant
+### Interface
+- **Menus and dropdowns themed** — chevron positioned correctly at every size and in right-to-left layouts; overlong values ellipsize instead of truncating mid-word
+- **Colour swatches** — one shared boundary across highlight palettes, comment colours, ink chips, object inspector, paragraph editor colour well; visible in every theme, selection indicated
+- **Contrast floor** — primary buttons take one accent treatment product-wide; signature pane detail lines legible; Read Out Loud's five transport controls one matched set (two rendered as coloured emoji plates before)
+- **Measurement tool default colour** — meets the contrast floor on white, same hue; identical on screen, in preview and in the written mark; user-picked colours unchanged
+- **Measurements as dimensions** — end ticks plus value chip on the line; two measurements on one page no longer ambiguous
+- **Search-term highlighting** — matched term highlighted in toolbar search, Search panel and Search & Redact
+- **Size columns** — one unit and precision per column, chosen from the column's values; a 70-byte reclaim no longer rounds to zero
+- **Smaller fixes** — Export region name no longer overprints the table's first cell; field-action rows fit their panel; page box resets to the document's page label, not "1"; Batch OCR header shows a dismiss glyph instead of a second Close; "Invisible" reads as the width value; Details buttons aligned; Edit Text/Snapshot/Export get their own icons
 
-- Repair, Recover and Optimize no longer break a PDF/A-1 document by rewriting it. A file that declares part 1 is written without object streams and without the cross-reference stream and version bump they force; parts 2, 3 and 4 keep the layout you asked for. Across a 2,907-file corpus this turned 866 conformance regressions into none, and left 45 more files valid than before.
-- Repair and Recover now preserve a document's own object-stream layout instead of imposing one, so an ordinary file's structure is not silently upgraded either.
-- Repairing or recovering a signed document removes signatures the rewrite would invalidate, and reports how many — a rewritten file cannot satisfy a signature's byte range, and presenting one that can never verify is worse than removing it. Documents whose signatures must survive editing continue to take the append-only path, unchanged.
+### Ghostscript
+- **Missing-Ghostscript launch notice** — shown once at launch on the primary window with an offer to open Settings ▸ Engine; Cancel dismisses, "Don't ask again" persists, a Settings ▸ Engine checkbox re-enables. Never shown when a path is configured. Per-feature notices unchanged
 
-### A more consistent interface
-
-- Menus and dropdowns are themed throughout: the chevron sits where it belongs at every size and in right-to-left layouts, and a value too long for its control ends in an ellipsis instead of being cut mid-word.
-- Colour swatches everywhere — highlight palettes, comment colours, ink chips, the object inspector, the paragraph editor's colour well — draw one shared boundary that stays visible in every theme, so a black swatch reads as black rather than as an empty one, and the row shows which colour is selected.
-- Text and controls that fell below the contrast floor were fixed rather than recoloured by hand: primary buttons take one accent treatment across the product, the signature pane's detail lines are legible, and Read Out Loud's five transport controls are one matched set instead of two of them rendering as coloured emoji plates.
-- The measurement tool's default line colour now meets the contrast floor on white paper, in the same hue, and the same colour is used on screen, in the preview and in the mark written to the file. A colour you pick yourself is unchanged.
-- Measurements are drawn as real dimensions — end ticks and the value on a chip riding the line — so a page with two measurements is no longer ambiguous.
-- Search results highlight the matched term in all three places you can search from: the toolbar search box, the Search panel and Search & Redact.
-- Size columns are written in one unit and one precision per column, chosen from the column's own values, so rows can be compared at a glance and a row that reclaimed 70 bytes never rounds to zero.
-- Smaller corrections: a region name in Export no longer prints on top of the table's first cell, field-action rows no longer overflow their panel, the page box resets to the document's own page label rather than a literal "1", Batch OCR's header shows a dismiss glyph instead of a second Close, "Invisible" reads as the width value it describes, Details buttons line up on one edge, and Edit Text, Snapshot and Export have their own icons instead of borrowing a neighbour's.
-
-### Ghostscript set-up
-
-- A copy with no Ghostscript available now says so once at launch, on the primary window, and offers to open Settings ▸ Engine, where the path is set. Cancel dismisses it, "Don't ask again" turns it off for good, and a checkbox in Settings ▸ Engine turns it back on. A copy where you configured a path yourself is never prompted — that is an answer you already gave. Nothing else changes: the per-feature notices still name the prerequisite where it is needed.
-
-### Under the hood
-
-- Committing a signed document twice from the same input now produces the same bytes: the document's own creation and modification dates travel into the output instead of the clock at the moment of the run.
-- Engine refusal messages are translated in every shipped language.
-- The README's screenshots were re-shot from the current interface, with new images for the workbench pane, a second window, unified search, Read Out Loud, Batch OCR, Create PDF, web capture and the object inspector.
+### Under the Hood
+- **Deterministic signed commits** — committing a signed document twice from the same input produces identical bytes; document creation/modification dates travel instead of the run clock
+- **Engine refusal messages** — translated in every shipped language
+- **README screenshots** — re-shot from the current interface (workbench pane, second window, unified search, Read Out Loud, Batch OCR, Create PDF, web capture, object inspector)
 
 ## 1.1.17
 
 *Released 2026-08-28*
 
-### Honest failures
+### Error Reporting
+- **Failed opens surfaced** — one message naming the file and reason, aggregated across multi-file drops; previously a failed open did nothing
+- **Undisplayable documents surfaced** — message in the canvas instead of a healthy-looking tab over blank pages; panels that can still read the document keep working; clears if display later succeeds
 
-- A file that cannot be opened now says so: one message naming your file and the reason, aggregated across multi-file drops. Previously a failed open did nothing at all.
-- A document that opens but cannot be displayed now says so in the canvas instead of presenting a healthy-looking tab over blank pages; panels that can still read the document keep working, and the message clears if display later succeeds.
-
-### Scanner tester checklist, round two
-
-- Two new guided steps verify page ORDER through a feeder: three hand-numbered sheets (duplex and simplex variants, one back deliberately blank) are read back page by page, and the report names the fault class — reversed backs, dropped blanks, one side per sheet, reversed batch, or dropped pages.
-- A paper jam mid-batch now keeps the sheets that scanned cleanly and offers them as a partial document, naming the jam; a page torn by the jam is discarded, never assembled. A scanner that disappears entirely still discards everything, unchanged.
+### Scanner Tester
+- **Page-order steps** — two guided steps verify feeder page order using three hand-numbered sheets (duplex and simplex variants, one back deliberately blank), read back page by page; report names the fault class: reversed backs, dropped blanks, one side per sheet, reversed batch, or dropped pages
+- **Paper jam handling** — cleanly scanned sheets kept and offered as a partial document with the jam named; a torn page is discarded, never assembled; a scanner that disappears entirely still discards everything
 
 ## 1.1.16
 
 *Released 2026-08-27*
 
-### Search everywhere, faster
+### Search
+- **Ctrl+L universal search** — focuses the search box from anywhere; finds document text and tools; Escape returns to previous focus
+- **Usage-weighted ranking** — recently and frequently used tools rank higher within equally good matches
 
-- Ctrl+L focuses the universal search box from anywhere — it finds document text and tools in one place, and Escape returns you to where you were.
-- Search results you pick often now rank higher: recently and frequently used tools float to the top within equally good matches.
+### Scanner Tester
+- **`spectrapdf scan-test`** — guided hardware checklist covering feeder, duplex, network and failure-mode scenarios; writes a report of device details, settings and page measurements only — scans and document content never leave the machine unless explicitly attached. Tester guide at `docs/TESTER-GUIDE-SCANNING.md`
+- **Non-interactive runs** — unanswerable prompts recorded as skipped with the reason instead of blocking
 
-### Scanner tester program
-
-- A guided hardware checklist ships as `spectrapdf scan-test`: it walks a tester through feeder, duplex, network, and failure-mode scenarios against their own scanner and writes a report file — device details, settings, and page measurements only; scans and document content never leave the machine unless explicitly attached. The accompanying tester guide is in the repository (`docs/TESTER-GUIDE-SCANNING.md`).
-- Run non-interactively, prompts that cannot be answered are recorded as skipped with the reason instead of waiting forever.
-
-### Under the hood
-
-- Scanner support now sits behind a backend seam with namespaced device identifiers, preparing for additional acquisition stacks; a previously saved scanner selection keeps working unchanged.
+### Under the Hood
+- **Scanner backend seam** — namespaced device identifiers, preparing for additional acquisition stacks; saved scanner selections keep working
 
 ## 1.1.15
 
 *Released 2026-08-26*
 
-### Scan from a scanner
+### Scanning
+- **Create PDF from Scanner (flatbed)** — pick a device; resolution, color mode and paper size offered from the device's own capabilities; scan into a new or open document; enhance and OCR through existing scan tools. Available from the Scan dialog and the command line
+- **Failure modes verified on hardware** — mid-scan device failure reported by name with nothing partial kept; working files clean up even after a crash; recovery after a power cycle needs no restart
 
-- Create PDF from Scanner is live for flatbed scanning: pick a device, choose resolution, color mode and paper size from what the device actually offers, and scan straight into a new document or an open one — then enhance and OCR through the existing scan tools. Available from the Scan dialog and the command line.
-- Verified against real hardware, failure modes included: a scanner that stops responding mid-scan is reported by name with nothing partial kept, scan working files clean themselves up even after a crash, and recovery after a power cycle needs no restart.
-- Feeder (ADF), duplex, and network-discovery scanning are not yet enabled pending verification on hardware that has them; the controls appear only for capabilities a device reports.
+### Not Yet Supported
+- **Feeder (ADF), duplex, network discovery** — pending verification on hardware that has them; controls appear only for capabilities a device reports
 
 ### Organize
-
-- Page reordering now animates: pages visibly travel to their destination when dragged or rearranged, respecting the system's reduced-motion setting and staying instant for large rearrangements.
-- Drops are refused, with the reason shown on the drag ghost, when the target is rendered too small at the current zoom to be deliberate — no more pages landing in a sliver you couldn't see. Space before the first and after the last document always stays available.
+- **Animated page reordering** — pages travel visibly when dragged or rearranged; respects reduced-motion; instant for large rearrangements
+- **Small-target drop refusal** — drops refused (reason shown on the drag ghost) when the target renders too small at current zoom to be deliberate; space before first and after last document always available
 
 ### Fixes
-
-- A scan could corrupt the application's memory on every acquisition due to an ownership error in the device property handshake; scanning is now stable.
-- Imported files dropped while zoomed far out no longer report an outcome that didn't happen; the message now states what was actually done.
+- **Scan memory corruption** — ownership error in the device property handshake corrupted memory on every acquisition; now stable
+- **Zoomed-out import message** — states what was actually done instead of an outcome that didn't happen
 
 ## 1.1.14
 
 *Released 2026-08-26*
 
-### Highlighting on scanned pages
-
-- A freehand highlighter joins the annotation tools: drag to mark any part of a page — including scans and images with no text layer — with a translucent marker stroke that blends with the page like a real highlighter, in every viewer. Strokes are ordinary annotations: erasable, movable, undoable, and preserved on save.
-- Text in scanned pages can now be selected and highlighted as text. When a page has images but no text layer, the first selection gesture recognizes the words on that page locally and in memory — the document is never modified, nothing leaves the machine, and the resulting highlight is a standard text highlight. A preference (on by default) turns this off; writing a searchable text layer into the file remains the explicit Scan & OCR feature. Pages that recognize poorly fall back to the freehand marker rather than snapping badly.
-- Annotation tools now carry a lock control: locked, the tool stays armed after each placement, so marking hundreds of places costs one arming click; unlocked, a tool places once and disarms.
+### Annotation
+- **Freehand highlighter** — drag to mark any part of a page, including scans with no text layer; translucent marker stroke blends with the page, renders in every viewer; strokes are ordinary annotations (erasable, movable, undoable, preserved on save)
+- **Text selection on scans** — first selection gesture recognizes the page's words locally, in memory; document never modified, nothing leaves the machine; result is a standard text highlight. Preference (on by default) disables it; writing a text layer into the file remains the explicit Scan & OCR feature. Poorly recognizing pages fall back to the freehand marker
+- **Tool lock** — locked, a tool stays armed after each placement; unlocked, it places once and disarms
 
 ### Signing
+- **Remote signing (Cloud Signature Consortium API)** — configure a provider, sign in via browser, pick a credential, sign; private key never leaves the service, app never sees a PIN or password. Works with visible stamps, field fill, certification, timestamping, long-term validation; returned signatures verified against the credential's certificate before writing
+- **Platform root-trust snapshot** — additional offline trust source; withdrawn/restricted authorities excluded, per-purpose restrictions enforced (a timestamp-only authority cannot vouch for a signer). Off by default, additive, verified against the program's signed list
 
-- Remote signing through a signing service (Cloud Signature Consortium API) joins the existing certificate sources: configure a provider, sign in through your browser, pick a credential, and sign — the private key never leaves the service, and the app never sees a PIN or password. Every existing placement and profile works: visible stamps, field fill, certification, timestamping, long-term validation. Signatures returned by the service are verified against the credential's own certificate before anything is written.
-- Signature trust verification gains another source: an offline snapshot of a platform root-trust program, honestly filtered — authorities the program has withdrawn or restricted are excluded, and per-purpose restrictions are enforced, so a timestamp-only authority can never vouch for a signer. Off by default, additive to the existing sources, verified against the program's own signed list.
+### Recognition
+- **Recognition language** — text recognition for selection follows the document's declared language or a Settings choice instead of assuming English; Chinese region codes resolve to the correct script; ambiguous declarations fall back rather than guess
 
-### Recognition language
-
-- Text recognition for selecting on scanned pages now follows the document's own declared language, or a language you pick in Settings, instead of always assuming English. Chinese region codes resolve to the correct script; a genuinely ambiguous declaration falls back rather than guessing.
-
-### Conformance honesty
-
-- Conversion and preflight results now state exactly what the saved file declares, read back from the file itself, instead of restating what was requested. Where a report does not verify a standard's full requirements, it now says so by name.
-- Signature trust verdicts now enforce per-authority issuance-date restrictions published by the root-trust program: a certificate issued after its authority's cutoff is refused with the cutoff and issuance dates stated, on both the signer's and the timestamp's chain.
+### Conformance
+- **Results read from the file** — conversion and preflight results state what the saved file declares, read back from it, not what was requested; reports that do not verify a standard's full requirements say so by name
+- **Issuance-date restrictions enforced** — a certificate issued after its authority's published cutoff is refused with both dates stated, on signer and timestamp chains
 
 ### Fixes
-
-- Wide ink strokes imported from other applications are no longer thinned to a 2-point line when the document is saved; stroke width and translucency now survive import and save.
-- Ink annotation appearances no longer clip wide nibs: the drawn stroke now fits fully inside its appearance bounds in the saved file.
-- Trust-bundle files are now exempt from line-ending translation on checkout, so a fresh installation's bundle verifies byte-for-byte against its manifest.
-- Windows no longer flash unstyled or transparent at launch: every window appears only after its content has painted, over a solid theme ground, and window sizing driven by automation can no longer leave the content misplaced.
-- The paragraph editor's inline toolbar now sits on an opaque ground (document text no longer bleeds through its controls), and its controls wrap on narrow paragraphs instead of running off the page.
+- **Imported ink strokes** — no longer thinned to 2-point on save; width and translucency survive import and save
+- **Wide-nib clipping** — ink appearances fit fully inside their bounds in the saved file
+- **Trust-bundle line endings** — exempt from checkout translation; fresh installs verify byte-for-byte against the manifest
+- **Launch flash** — windows appear only after content paints, over a solid theme ground; automation-driven sizing can no longer misplace content
+- **Paragraph editor toolbar** — opaque ground (text no longer bleeds through); controls wrap on narrow paragraphs
 
 ## 1.1.13
 
 *Released 2026-08-26*
 
-### XML forms (XFA)
-
-- Static XML forms — the common kind, carrying both an XML form layer and standard form fields — now fill and save correctly. Values are written into both the standard fields and the form's XML data, as the PDF standard requires, so the saved document reads the same in every viewer.
-- Values stored only in a form's XML data (previously shown blank) now display and print. This fixes forms filled by other applications that wrote only the XML side.
-- Filling no longer strips the XML form layer from the document: all form packets are preserved byte-for-byte apart from the values actually changed, and signed documents keep their signatures valid through an incremental save.
-- Dynamic XML forms — those that build their own pages — are clearly indicated and open read-only, with filling and field editing refused by name rather than producing a wrong result. The Forms panel states whether an XML form is static or dynamic, and reports form-authored calculations that are not executed.
-- Adding form fields to an XML form document is refused by name; previously the editing tool silently discarded the XML form layer.
+### XML Forms (XFA)
+- **Static XFA fill and save** — values written into both the standard fields and the form's XML data, as the standard requires; saved documents read the same in every viewer
+- **XML-only values display and print** — fixes forms filled by applications that wrote only the XML side (previously shown blank)
+- **XFA layer preserved** — filling no longer strips it; all form packets byte-for-byte apart from changed values; signed documents keep valid signatures via incremental save
+- **Dynamic XFA** — indicated and opened read-only; filling and field editing refused by name rather than producing a wrong result. Forms panel states static vs dynamic and reports unexecuted form-authored calculations
+- **Field authoring refused on XFA** — refused by name; previously the editing tool silently discarded the XML form layer
 
 ## 1.1.12
 
 *Released 2026-08-25*
 
-### Form field scripts
-
-- Forms whose fields carry their own JavaScript — custom calculations, validations, and formatting written by the form's author — can now run them. A new preference, "Run field scripts" (off by default), enables execution; with it off, nothing changes and the Forms panel keeps listing such scripts read-only, exactly as before.
-- Scripts run inside an isolated interpreter with no access to the network, the file system, or anything outside the form: they can read and write field values, react to typing and focus, format and validate entries, show the form's own alert messages, and call the document's own helper functions. Capabilities outside that surface do nothing and are reported by name in the Forms panel.
-- A script that hangs is stopped after a short deadline and reported by name; the app stays responsive and the rest of the form keeps working. Script errors are listed per field and trigger.
-- Values a script computes are shown live and saved through the ordinary form-fill path, with all existing protections intact — signed-document rules, locked fields, and undo behave exactly as for hand-typed values.
-- An enterprise policy key can disable field scripts machine-wide; the policy outranks the preference and the settings control says so.
-- Command-line and automated runs never execute scripts.
+### Form Field Scripts
+- **Script execution** — form-authored JavaScript (calculations, validations, formatting) can now run. New preference "Run field scripts" (off by default); with it off the Forms panel keeps listing scripts read-only, unchanged
+- **Sandbox** — isolated interpreter with no network, no file system, nothing outside the form: read/write field values, react to typing and focus, format and validate, show the form's own alerts, call the document's helper functions; anything else does nothing and is reported by name in the Forms panel
+- **Hang and error handling** — a hung script is stopped after a short deadline and reported by name; the app stays responsive and the rest of the form works; errors listed per field and trigger
+- **Ordinary fill path** — script-computed values shown live and saved with existing protections intact: signed-document rules, locked fields, undo behave as for typed values
+- **Enterprise policy** — a policy key disables field scripts machine-wide, outranking the preference; the settings control says so
+- **Automation** — command-line and automated runs never execute scripts
 
 ### Fixes
-
-- Field calculations that assign a fixed text (such as a literal amount or "N/A") are no longer lost: bodies that merely resemble field-name arithmetic are routed to the script interpreter unless every name they reference is a real field.
+- **Fixed-text calculations** — assignments of literal text (an amount, "N/A") no longer lost; bodies resembling field-name arithmetic route to the interpreter unless every referenced name is a real field
 
 ## 1.1.11
 
 *Released 2026-08-25*
 
-### Form submission
+### Form Submission
+- **Submit buttons transmit** — consent dialog shows the full destination address and exact data before anything sends; one explicit click sends, Cancel sends nothing; only the field values the form's submit action selects are transmitted
+- **Reply handling** — returned form data offered as an import, a returned PDF opens as a document, anything else offered as a saved file; nothing received is executed
+- **Transport safety** — unencrypted destinations called out; cross-site redirects abort with both addresses named; no cookies, sign-in or stored credentials sent; no answer remembered
+- **Non-web destinations** (e.g. mailto:) — refused by name, submission file offered for manual sending
+- **Automation** — command-line and automated runs never transmit; they build the file and state the destination
 
-- Clicking a form's Submit button can now actually send the submission. Before anything transmits, a consent dialog shows the full destination address and the exact data that will be sent — one explicit click sends, Cancel sends nothing. Only the field values the form's own submit action selects are ever transmitted.
-- Replies are handled safely: returned form data is offered as an import, a returned PDF opens as a document, and anything else is offered as a saved file — nothing received is ever executed.
-- Plain, unencrypted destinations are called out in the dialog; redirects to a different site abort with both addresses named. The app sends no cookies, no sign-in, and no stored credentials, and never remembers an answer.
-- Non-web destinations (such as mailto:) are refused by name, with the built submission file offered for sending yourself.
-- Command-line and automated runs still never transmit — they build the file and state the destination.
-
-### Open from web address
-
-- File ▸ Open from web address downloads a document from a URL you type or paste and opens it like any file. Saving a downloaded document always asks where to save — it never silently overwrites anything.
-- Recent entries from the web reopen the dialog pre-filled rather than silently re-downloading; URLs dragged from a browser do the same.
-- Nothing inside a document triggers a download by itself: links in documents keep opening in your browser, and remote content referenced by a document is never fetched automatically.
+### Open from Web Address
+- **File ▸ Open from web address** — downloads a typed/pasted URL and opens it like any file; saving always asks where, never silently overwrites
+- **Recents and drags** — web recents reopen the dialog pre-filled rather than re-downloading; browser-dragged URLs likewise
+- **No document-triggered fetches** — document links open in the browser; remote content referenced by a document is never fetched automatically
 
 ## 1.1.10
 
 *Released 2026-08-25*
 
-### Processing steps for packaging and labels
+### Print Production
+- **Processing steps** — layers declared as processing steps (cutting, creasing, varnish, white, etc.) recognized and labeled in the Layers panel; unrecognized or malformed declarations called out
+- **Output Preview exclusion** — processing-steps content excluded by default from composite, plates and total ink, with excluded inks named; toggle to show
+- **Preflight check** — declared steps reported; profiles can require declarations or flag steps set to print
+- **Corpus verification** — behavior verified against an industry-published processing-steps test suite
 
-- Layers declared as processing steps (cutting, creasing, varnish, white, and similar) are now recognized and labeled in the Layers panel, with unrecognized or malformed declarations called out.
-- Output Preview excludes processing-steps content from the composite, the plates, and total ink by default, naming the excluded inks; a toggle shows them when wanted.
-- Preflight gains a processing-steps check: declared steps are reported, and profiles can require declarations or flag steps set to print.
-- An internal conformance corpus verifies this behavior against an industry-published processing-steps test suite.
-
-### Accessibility checker coverage
-
-- The checker grows from 33 to 56 checks, each sourced to the accessibility standard's own clauses: role mapping, Unicode mapping verified against the embedded font's own tables, list numbering and structure, heading conventions, font embedding and encoding rules, optional-content configuration, embedded-file names, media clips, reference XObjects, TrapNet, and dynamic XFA detection.
-- Where a judgement genuinely cannot be decided from the file alone (artifact-vs-content, semantic appropriateness, reading order), the checker now reports it for review with the evidence, instead of guessing either way.
-- New automatic fixes: clearing a stale Suspects flag and completing embedded-file names.
+### Accessibility Checker
+- **33 → 56 checks** — each sourced to the accessibility standard's clauses: role mapping, Unicode mapping verified against embedded fonts' own tables, list numbering/structure, heading conventions, font embedding and encoding, optional-content configuration, embedded-file names, media clips, reference XObjects, TrapNet, dynamic XFA detection
+- **Undecidable judgements** — artifact-vs-content, semantic appropriateness, reading order reported for review with evidence instead of guessed
+- **New automatic fixes** — clearing a stale Suspects flag; completing embedded-file names
 
 ### Fixes
-
-- Soft proofing and print-production staging no longer silently un-hide hidden layers: layer visibility now survives page extraction.
+- **Layer visibility through page extraction** — soft proofing and print-production staging no longer un-hide hidden layers
 
 ## 1.1.9
 
 *Released 2026-08-24*
 
-### Editing signed documents
+### Signed Documents
+- **Rotate / page boxes** — keep approval signatures intact, annotations proven to stay in place
+- **Remove/reorder/insert pages** — also preserve approval signatures; certified documents still refuse forbidden changes, with a clear choice before anything is written
 
-- Rotating pages or changing page boxes on a document with approval signatures keeps the signatures intact, with annotations proven to stay exactly where they were.
-- Removing, reordering, or inserting pages on an approval-signed document also preserves its signatures; certified documents still refuse changes their certification forbids, with a clear choice before anything is written.
+### Print Production
+- **Conformance corpus** — rendering, separations, spot plates, overprint and output intents verified against an industry-published test suite with documented expected results
+- **Separations cache self-verifies** — a cached set missing a plate file was served as complete (Output Preview could show a spot page without its plates and understate total ink); now re-renders
+- **Overprint toggle** — flipping overprint simulation never updated the screen; stale preview after any overprint/resolution/proofing change fixed
 
-### Print production verification
+### Accessibility Checker
+- **Clause-sourced checks** — every check sourced to the standard; nine corrected against its text. Notable: title-not-set-to-display now fails rather than warns; a title only in the document information dictionary no longer counts; links need a real alternate description (visible link text alone no longer passes)
+- **Form structure** — fields must be inside a Form structure element, not merely in the structure tree
+- **Fixed** — table header Scope check could never fail; undecodable text was wrongly reported not applicable
+- **Corpus-verified** — against a published accessible-PDF technique corpus: every conforming example passes clean, covered failure examples correctly reported
 
-- An internal conformance corpus now verifies rendering, separations, spot plates, overprint, and output intents against an industry-published test suite with its own documented expected results.
-- Fixed: a cached separations set that had lost a plate file on disk was served as complete — Output Preview could show a spot page without its spot plates and understate total ink. The cache now verifies itself and re-renders instead.
-- Fixed: flipping overprint simulation in Output Preview never updated the screen — a stale preview was served after any overprint, resolution, or proofing-settings change.
-
-### Accessibility checker accuracy
-
-- Every check is now sourced to the accessibility standard's own clauses, and nine checks were corrected against the standard's text. The most visible changes: a document whose title is not set to display now fails rather than warns; a title stored only in the document information dictionary no longer counts; links need a real alternate description — visible link text alone no longer passes.
-- Form fields must now be inside a Form structure element, not merely somewhere in the structure tree.
-- Fixed: the table header Scope check could never report a failure; text the reader could not decode was wrongly reported as not applicable.
-- The checker is now verified against a published corpus of accessible-PDF technique examples: every conforming example passes clean, and covered failure examples are correctly reported.
-
-### Conversion honesty
-
-- Converting to PDF/A now reports when a document's declared conformance with another standard (such as PDF/UA) does not survive the conversion, instead of dropping the declaration silently.
+### Conversion
+- **PDF/A conversion reports lost conformance** — a declared conformance with another standard (e.g. PDF/UA) that does not survive is reported instead of silently dropped
 
 ## 1.1.8
 
 *Released 2026-08-24*
 
-### Signing with the Windows certificate store
+### Windows Certificate Store Signing
+- **Store-based signing** — no PFX export; private key never leaves Windows; hardware-backed keys prompt through Windows' own PIN dialog
+- **Certificate picker** — eligible personal and machine-store certificates with subject, issuer, expiry and hardware-key labeling; remembers the last-used certificate
+- **Full feature parity** — visible stamps, signature-field fill, PAdES, timestamping, long-term validation, certification, field locks
+- **CLI** — `sign --store-cert`, `--store-machine`, `--list-store-certs`
 
-- Documents can now be signed with certificates from the Windows certificate store — no exporting to a PFX file. The private key never leaves Windows; hardware-backed keys prompt through Windows' own PIN dialog.
-- The certificate picker lists eligible personal and machine-store certificates with subject, issuer, expiry, and hardware-key labeling, and remembers the last-used certificate.
-- Store-based signing works with every existing signing feature: visible stamps, filling signature fields, PAdES, timestamping, long-term validation, certification, and field locks.
-- The command line gains `sign --store-cert`, `--store-machine`, and `--list-store-certs`.
+### Signature Stamps
+- **Appearance options** — logo or background image; text lines (name, date, reason, location, custom); text-beside or text-over layouts
+- **Personal signature as stamp face** — drawn as vector artwork
+- **Live preview** — rendered by the same code that draws the real stamp
+- **CLI** — `--stamp-image`, `--stamp-fields`, `--stamp-layout`, `--stamp-label`
 
-### Signature stamp appearances
+### Personal Signatures
+- **Signature manager** — create by drawing, typing (three bundled handwriting styles), or importing a photo with optional white-background removal
+- **Placement** — drawn signatures land as vector ink, typed signatures embed their font; integrate with undo and signed-document handling
+- **Local only** — stored on this computer, written into a document only when explicitly placed
 
-- Visible signature stamps can now carry a logo or background image, a choice of text lines (name, date, reason, location, or a custom line), and text-beside or text-over layouts.
-- A saved personal signature can be the stamp's face, drawn as vector artwork.
-- A live preview shows exactly what will be written, rendered by the same code that draws the real stamp.
-- Matching command-line options: `--stamp-image`, `--stamp-fields`, `--stamp-layout`, `--stamp-label`.
-
-### Personal signatures
-
-- A new Personal Signatures manager creates reusable signatures three ways: draw with the pointer, type a name in one of three bundled handwriting styles, or import a photographed signature with optional white-background removal.
-- Saved signatures place onto any page — drawn signatures land as vector ink, typed signatures embed their font — and integrate with undo and signed-document handling like every other edit.
-- Signatures are stored on this computer only and are written into a document only when explicitly placed.
-
-### Portable version
-
-- The release now includes a portable zip alongside the installer: extract and run, no installation. Settings, dictionaries, session state, and logs live beside the app instead of in the user profile.
-- The portable first run presents the bundled color-profile license for acceptance; declining leaves the app fully working with only the profile-dependent features disabled by name.
-- A missing WebView2 runtime is reported with a link to the official download instead of failing silently.
-- "Start with Windows" now repairs its own registry entry when the app has been moved.
+### Portable Version
+- **Portable zip** — alongside the installer; extract and run, no installation; settings, dictionaries, session state and logs live beside the app
+- **First run** — presents the bundled color-profile license; declining leaves the app working with profile-dependent features disabled by name
+- **Missing WebView2** — reported with a link to the official download instead of failing silently
+- **"Start with Windows"** — repairs its registry entry when the app has been moved
 
 ### Fixes
-
-- Bundled handwriting fonts and imported signature images now load correctly in the packaged app.
-- Image previews and thumbnails produced by the app itself render again in the packaged app.
-- The stamp-appearance live preview no longer reports an internal error.
-- Custom image stamps import correctly from any folder.
-- The signing panel no longer asks for a password when signing with a store certificate.
+- **Packaged-app assets** — bundled handwriting fonts and imported signature images load; app-produced previews and thumbnails render
+- **Stamp preview** — no longer reports an internal error
+- **Custom image stamps** — import from any folder
+- **Store-certificate signing** — no spurious password prompt
 
 ## 1.1.7
 
 *Released 2026-08-19*
 
-### Ghostscript integration
+### Ghostscript
+- **Optional, separately installed** — no copy ships in the installer; discovered via Windows, `PATH`, or a path chosen in Settings
+- **Version gate** — 10.0 or newer accepted after a real capability check; newer maintenance releases not pinned out
+- **Installer** — interactive install can open the official download page; silent and passive installs never download or install it
+- **Feature gating** — Ghostscript-requiring features name what is missing and stay disabled until a usable copy is configured; features with a non-Ghostscript path stay available
 
-- Ghostscript is now an optional program you install separately; no copy ships in the installer.
-- Spectra PDF discovers installed copies through Windows, `PATH`, or the path chosen in Settings.
-- Ghostscript 10.0 or newer is accepted after a real capability check; newer maintenance releases are not pinned out.
-- The interactive installer can open the official Ghostscript download page; silent and passive installs never download or install it.
-- Features that require Ghostscript now name what is missing and remain disabled until a usable copy is configured.
-- Features with a non-Ghostscript path remain available when Ghostscript is absent.
-
-### Colour and image support
-
-- Print-production features now use 22 bundled ICC profiles for CMYK conversion, PDF/X output, and soft proofing.
-- HEIF images use a decode-only runtime while preserving existing image output.
-- The OCR runtime no longer carries the unused JBIG codec.
+### Colour and Images
+- **22 bundled ICC profiles** — for CMYK conversion, PDF/X output, soft proofing
+- **HEIF** — decode-only runtime, existing image output preserved
+- **OCR runtime** — unused JBIG codec removed
 
 ### Distribution
-
-- Interactive installation now obtains acceptance of the bundled Adobe color-profile EULA; silent and passive deployment require `/acceptEULA`.
-- Third-party notices now match the components in the installer and remain available offline.
-- Exact source archives for the bundled HEIF decoder libraries accompany the release and appear in its checksum file.
-- Clean GitHub builds no longer depend on a developer's ignored Ghostscript resource folder.
-- Clean GitHub verification now stages every shipped engine resource and fails if any engine test is skipped.
-- Release builds always assemble the pinned LibreOffice 26.2.5 runtime, even when the build machine has another version installed.
-- Office conversion uses the bundled app fonts on clean machines instead of depending on fonts installed in Windows.
-- OpenDocument conversion no longer reports unused CJK or complex-script style defaults as missing fonts.
-- Clean verification now exercises PKCS#11 token signing through a pinned test-only software token instead of skipping it.
+- **Color-profile EULA** — interactive install obtains acceptance; silent/passive deployment requires `/acceptEULA`
+- **Third-party notices** — match installer contents, available offline
+- **HEIF source archives** — exact source for bundled decoder libraries ships with the release, listed in its checksum file
+- **Clean-build hardening** — GitHub builds no longer depend on a developer's ignored Ghostscript resource folder; clean verification stages every shipped engine resource and fails if any engine test is skipped
+- **LibreOffice runtime** — release builds always assemble the pinned 26.2.5 runtime regardless of what the build machine has installed
+- **Office conversion fonts** — uses bundled app fonts on clean machines instead of Windows-installed fonts; OpenDocument conversion no longer reports unused CJK/complex-script style defaults as missing fonts
+- **PKCS#11 verification** — clean verification exercises token signing through a pinned test-only software token instead of skipping
 
 ## 1.1.6
 
 *Released 2026-08-18*
 
-### Editing signed documents
+### Signed Documents
+- **Rotate/crop** — keeps signatures intact
+- **Add/remove/reorder pages** — keeps approval signatures
+- **Certification-forbidden edits** — refused before anything is written
+- **Rewrite consent** — every operation that rewrites a signed document asks first; when signatures cannot be kept, the commit says so instead of proceeding silently
+- **Form removal** — can no longer slip through a signature-preserving save
 
-- Rotating or cropping pages of a signed document now keeps its signatures intact.
-- Adding, removing or reordering pages keeps an approval-signed document's signatures.
-- An edit a certification forbids is refused before anything is written.
-- Every operation that rewrites a signed document now asks first.
-- When signatures cannot be kept, the commit says so instead of proceeding silently.
-- Removing a document's form can no longer slip through a signature-preserving save.
+### Windows and Exit
+- **Exit recording** — every window recorded only after each has answered; a window that cannot answer stops the exit rather than being closed over; a failed session write leaves windows open
+- **Tab state** — reorders made in any window survive an exit from another; a tab moved between windows arrives with its latest edits
 
-### Windows and exit
-
-- Exiting records every window only after each one has answered.
-- A window that cannot answer stops the exit instead of being closed over.
-- A failed session write leaves windows open rather than losing the record.
-- Tab reorders made in any window survive an exit from another window.
-- A tab moved between windows always arrives with its latest edits.
-
-### Converting documents
-
-- Form fields keep a single, converted appearance through colour and grayscale conversion.
-- Fields without a stored appearance no longer leave old values printed on the page.
-- Gradients inside stamps and annotations survive conversion to CMYK.
-- Filling a field no longer erases its background and border.
-- Non-Latin field values convert correctly instead of producing unreadable text.
+### Conversion
+- **Form field appearances** — single converted appearance through colour and grayscale conversion; fields without a stored appearance no longer leave old values printed on the page
+- **Gradients** — inside stamps and annotations survive CMYK conversion
+- **Field fill** — no longer erases background and border; non-Latin values convert correctly
 
 ### Reliability
-
-- In-place saves recognize two names for the same file in every case.
-- An interrupted save never leaves a stray copy beside the document.
+- **In-place saves** — recognize two names for the same file in every case
+- **Interrupted saves** — never leave a stray copy beside the document
 
 ## 1.1.5
 
 *Released 2026-08-18*
 
-### Spell checking
-
-- Pointed Hebrew now checks against the word's letters, matching how the dictionary is written.
-- Suggestions now work for pointed Arabic and Hebrew misspellings instead of returning nothing.
+### Spell Checking
+- **Pointed Hebrew** — checks against the word's letters, matching the dictionary
+- **Pointed Arabic/Hebrew suggestions** — work instead of returning nothing
 
 ### Tabs
+- **Reordering** — drag within a window; a tab dropped into another window lands where the caret shows; session restore reopens tabs in arranged order
 
-- Document tabs can be reordered by dragging within a window.
-- A tab dropped into another window lands where the caret shows, not at the end.
-- Restoring a session reopens tabs in their arranged order.
-
-### Print production
-
-- Spot-colour gradients now survive conversion to CMYK instead of flattening to process plates.
-- A PDF/X conversion now names any printing plates its target level cannot carry.
-- A destination profile that does not describe CMYK output is refused by name.
-- Choosing the bundled profile no longer deletes a matching file beside the output.
-- Converting a spot ink reports any gradients that still print it.
-- The transparency flattener no longer reports an error after a successful flatten.
-- Preflight fixes that landed partly now say exactly what they left.
-- The fix for too many spot inks now works instead of failing.
+### Print Production
+- **Spot-colour gradients** — survive CMYK conversion instead of flattening to process plates
+- **PDF/X refusals** — conversion names plates its target level cannot carry; a destination profile not describing CMYK output refused by name
+- **Bundled profile** — choosing it no longer deletes a matching file beside the output
+- **Spot-ink conversion** — reports gradients that still print the ink
+- **Flattener** — no longer errors after a successful flatten
+- **Preflight fixes** — partial fixes say exactly what they left; the too-many-spot-inks fix works instead of failing
 
 ### Reliability
-
-- A crash during an in-place save can no longer destroy the document.
-- Combining PDFs into a portfolio works again.
-- Promoting a table's header row no longer fails.
-- Saved documents embed fonts identically on every run.
+- **In-place save crash** — can no longer destroy the document
+- **Portfolios** — combining PDFs into a portfolio works again
+- **Table headers** — promoting a header row no longer fails
+- **Deterministic font embedding** — identical on every run
 
 ## 1.1.4
 
 *Released 2026-08-17*
 
-### Windows and session restore
+### Windows and Session Restore
+- **Exit records every window** — not one; cancelling an exit returns session tracking to live
+- **Tab drag safety** — no transfer into a just-closed window; a drop back on its own strip no longer saves or clears undo; drags respond only to the originating pointer; a moved window no longer offsets drop targets
 
-- Exiting the app now records every open window for session restore, not one.
-- Cancelling an exit returns session tracking to live instead of freezing it.
-- A tab can no longer be transferred into a window that just closed.
-- A drag dropped back on its own tab strip no longer saves or clears undo.
-- Tab drags respond only to the pointer that started them.
-- A moved window can no longer offset where dropped tabs land.
-
-### Form fields
-
-- Clearing a vertical field or dropdown no longer fails to redraw.
-- Rotated text fields, dropdowns and option lists now draw their content rotated.
-- Each option label in a list resolves its own text direction.
-- Flattening a rotated field stamps it rotated instead of upright.
+### Form Fields
+- **Vertical/rotated fields** — clearing a vertical field or dropdown redraws; rotated text fields, dropdowns and option lists draw rotated; each option label resolves its own text direction; flattening a rotated field stamps it rotated
 
 ### Spelling
+- **Decomposed accents** — no longer split into fragments; pointed Arabic checks as whole words
 
-- Accented words in decomposed form are no longer split into fragments.
-- Pointed Arabic text now checks as whole words instead of fragments.
-
-### Accessibility checking
-
-- Ruby and Warichu tags are checked for order and completeness, not membership alone.
+### Accessibility Checker
+- **Ruby/Warichu** — checked for order and completeness, not membership alone
 
 ## 1.1.3
 
 *Released 2026-08-17*
 
-### Tabs that move between windows
+### Tabs Across Windows
+- **Cross-window drag** — a tab drags into another window's strip; dropping on empty screen tears off into a new window; unsaved edits saved on move, never silently reverted; Escape cancels; menu-based moves are atomic
 
-- A document tab can be dragged from one window into another window's tab strip.
-- Dropping a tab on empty screen space tears it off into a new window.
-- A document with unsaved edits is saved as it moves, never silently reverted.
-- Escape cancels a drag, and moving a tab through the menu is now atomic.
+### Window Memory
+- **Size/position restore** — every window restored on next launch; optional preference (off by default) reopens last session's windows and documents; a window from a missing monitor reopens centered on the primary
 
-### Windows that remember themselves
+### Spell Checking
+- **Korean** — ships (a reader defect had rejected the dictionary's own words); suggestions correct composed syllables
+- **Finnish** — ships on a bundled morphology engine covering inflected and compound forms
 
-- Every window's size and position are remembered and restored on the next launch.
-- An optional preference reopens last session's windows and documents at launch, off by default.
-- A window saved on a monitor that is gone reopens centered on the primary.
+### Accessibility Checker
+- **Structure nesting check** — validates structure types nest where the standard allows; a list item wrapped in a grouping element no longer reported misplaced
 
-### Spell checking in two more languages
-
-- Korean spell checking now ships; a reader defect had rejected the dictionary's own words.
-- Korean suggestions now correct composed syllables instead of returning nothing.
-- Finnish spell checking ships on a bundled morphology engine covering inflected and compound forms.
-
-### Accessibility checking
-
-- A new check validates that structure types are nested where the standard allows.
-- A list item wrapped in a grouping element is no longer reported as misplaced.
-
-### Form fields
-
-- A text, dropdown or option-list field can be created writing vertically in four scripts.
-- An option list whose labels the built-in font cannot draw is refused by name.
+### Form Fields
+- **Vertical writing** — text, dropdown and option-list fields can be created vertical in four scripts; an option list the built-in font cannot draw is refused by name
 
 ### Fixes
-
-- A startup preference no longer erases its sibling flags when toggled.
+- **Startup preference** — no longer erases sibling flags when toggled
 
 ## 1.1.2
 
 *Released 2026-08-17*
 
-### A public conformance corpus now measures the checkers
+### Conformance Corpus
+- **Public corpus** — pinned fetch script assembles 2,940 conformance PDFs from two public archival test suites; a clause index binds 2,838 files to 203 clauses across eleven standard parts; a scoreboard records the product's per-file verdict for review
 
-- A pinned fetch script assembles 2,940 conformance PDFs from two public archival test suites.
-- A clause index binds 2,838 corpus files to 203 clauses across eleven standard parts.
-- A scoreboard records the product's verdict per corpus file for human review.
+### Accessibility Checker
+- **Over-firing fixed** — runs of spaces no longer reported as unmapped fonts; embedded character maps named instead of printing their contents; language checking honors structure-element and ancestor declarations, not only the document default; pages with readable text no longer reported image-only; uninterpretable encodings flagged for review instead of failed; empty text replacements honored as deliberate; hidden and zero-size annotations no longer require an accessible name; a form element's alternate text counts as its field's description; a label outside a list no longer reported as a misplaced list label
 
-### Accessibility checks that over-fired
-
-- Runs of spaces between words are no longer reported as fonts without character mappings.
-- An embedded character map is named as such instead of printing its own contents.
-- Language checking now honors declarations on structure elements and ancestors, not only the document default.
-- A document whose pages carry readable text is no longer reported as image-only.
-- An encoding this reader cannot interpret is flagged for review instead of failed.
-- An empty text replacement is honored as deliberate rather than treated as missing.
-- Hidden and zero-size annotations are no longer required to carry an accessible name.
-- A form element's alternate text now counts as its field's accessible description.
-- A label outside a list is no longer reported as a misplaced list label.
-
-### Vertical text in watermarks and form fields
-
-- A text watermark can be written vertically, from the panel or a guided action.
-- A form field declaring a vertical font now fills down its column instead of across it.
-- Vertical field values draw through the declared font instead of producing unreadable characters.
+### Vertical Text
+- **Watermarks** — text watermarks can be written vertically, from the panel or a guided action
+- **Form fields** — a field declaring a vertical font fills down its column; values draw through the declared font instead of producing unreadable characters
 
 ## 1.1.1
 
 *Released 2026-08-17*
 
-### Checks that could not read something now say so
+### Checker Honesty
+- **Unreadable inputs reported** — unreadable annotations no longer yield a clean accessibility result; the scripts check no longer reports script-free after a partial read; an empty structure tree reports as untagged; a table cell with an unreadable span is named instead of compared against a default
 
-- A document whose annotations cannot be read no longer produces a clean accessibility result.
-- The scripts check no longer reports a document free of scripts after a partial read.
-- A structure tree holding no elements is reported as untagged rather than as tagged.
-- A table cell declaring an unreadable span is named instead of compared against a default.
+### Font Embedding
+- **One embedding answer** — Preflight, the document checker and Properties share it; undeterminable embedding says so instead of reading as not embedded; Type 3 fonts judged by the glyph programs in their own dictionary; embedding rewrites only fonts proven to carry no program, never unreadable ones
 
-### One answer to whether a font is embedded
-
-- Preflight, the document checker and the Properties dialog now share one embedding answer.
-- A font whose embedding cannot be determined says so instead of reading as not embedded.
-- A Type 3 font is judged by the glyph programs it carries in its own dictionary.
-- Embedding rewrites only a font proven to carry no program, never one that will not read.
-
-### Fonts the document survey used to miss
-
-- The font survey now follows form XObjects, glyph procedures, appearance streams and form resources.
-- A document's font total is no longer an undercount presented as a complete figure.
+### Font Survey
+- **Coverage** — follows form XObjects, glyph procedures, appearance streams and form resources; font totals no longer undercount
 
 ### Fixes
-
-- Form fields in a converted PostScript file are registered instead of left rendered and dead.
+- **Converted PostScript forms** — fields registered instead of left rendered and dead
 
 ## 1.1.0
 
 *Released 2026-08-16*
 
-### Seeing a page the way a press will print it
+### Output Preview
+- **Press-profile proofing** — render through a named press profile: the document's own output intent when declared, a bundled press profile, or your own ICC file
+- **Simulate Paper White / Black Ink** — paper tint instead of screen white; the press's actual black density; enabling paper white enables black ink (alone it changes nothing)
+- **Honest read-back** — every control reads back what the engine used; a refused request cannot look applied; an unusable profile is named and the page stays unproofed
+- **Compatibility** — plate toggles, ink density and the ink limit alarm keep working under a proof
 
-- Output Preview can now render a page through a named press profile.
-- The profile comes from the document's own output intent when it declares one.
-- You can choose a bundled press profile, or point at your own ICC file.
-- Simulate Paper White shows the tint of the paper instead of screen white.
-- Simulate Black Ink shows how dark that press can actually print black.
-- Turning on paper white turns on black ink, because the setting alone changes nothing.
-- Every control reads back what the engine used, so a refused request cannot look applied.
-- A profile the preview cannot use is named, and the page stays unproofed.
-- Plate toggles, ink density and the ink limit alarm all keep working under a proof.
+### Point Inspection
+- **Click-to-inspect** — click any point in Output Preview: object, colour space and ink values; ink values come from the plates, so overlapping objects report what actually prints
+- **Details** — placed images report effective resolution at displayed size; stacked objects listed topmost first; bare paper says so, ink reading intact
 
-### Asking a page what is under the cursor
+### Comment Summaries
+- **Export comments as a document** — comments alone, or pages with comments beside them; comment column beside, beneath, or on its own sheets; optional connector lines to marked locations
+- **Filter and sort** — by author, type, state, page range or text; panel and document always agree on order
+- **Threads and counts** — reply threads kept together, orphaned replies still listed; every summary ends with a count of included and excluded
 
-- Click any point in Output Preview to see what is printed there.
-- The readout names the object, its colour space and its ink values.
-- Ink values come from the plates, so overlapping objects report what actually prints.
-- A placed image also reports its effective resolution at the size it appears.
-- Several objects stacked at one point are listed, topmost first.
-- A point over bare paper says so, with its ink reading intact.
+### Multiple Windows
+- **Second window** — a document moves to a new window with its tabs; a document open in one window is refused in another by name, with an offer to front the holding window
+- **Isolation** — each window has its own tabs, undo history and view; closing a window closes only its documents; status bar shows when another window is using the engine
 
-### A summary of a document's comments
-
-- Comments can now be written out as a document you can read and circulate.
-- Choose comments on their own, or the pages with their comments beside them.
-- The comment column can sit beside the page, beneath it, or on its own sheets.
-- Lines can join each comment to the place on the page it marks.
-- Comments can be filtered by author, type, state, page range or text.
-- Comments can be sorted, and the panel and the document always agree on the order.
-- Reply threads are kept together, and a reply whose parent is gone is still listed.
-- Every summary ends with a count of what was included and what was left out.
-
-### More than one window
-
-- The app can now open a second window, for a second screen.
-- A document can be moved to a new window, taking its tabs with it.
-- A document open in one window is refused in another, by name.
-- The refusal offers to bring the window already holding that document to the front.
-- Each window keeps its own tabs, its own undo history and its own view.
-- Closing a window closes only that window's documents, never the whole app.
-- The status bar says when another window is using the engine.
-
-### Comments that survive a round trip
-
-- Exported comments now record whether they are a reply or a group.
-- A grouped comment no longer comes back as a reply to something else.
-- A reply is matched to its parent on the same page first, as the format intends.
-- A comment the interchange format cannot carry is reported instead of silently dropped.
-- One unreadable comment now costs that comment, not the whole export.
-- The panel says when an export carried fewer comments than the document holds.
+### Comment Interchange
+- **Reply/group fidelity** — exports record reply vs group; a grouped comment no longer returns as a reply; replies match parents on the same page first, as the format intends
+- **Loss reporting** — an uncarryable comment is reported, not silently dropped; one unreadable comment costs that comment, not the export; the panel says when an export carried fewer comments than the document holds
 
 ### Fixes
-
-- Output Preview measured the wrong area of a cropped page, and now measures the visible one.
-- Ink coverage figures and the ink limit alarm were measured over that same wrong area.
-- Choosing your own ICC profile for a colour conversion failed for every file chosen.
-- OCR placed its text layer at the wrong origin and size on a cropped page.
-- Scanned pages could have text recognised from an area the page does not show.
-- Visual comparison highlighted changes in the wrong place on a cropped page.
-- Slide export and image export both exported the wrong area of a cropped page.
-- PDF/A conversion removed content to meet the standard without saying what it removed.
-- PDF/A and PDF/X conversion now list exactly what changed to meet the standard.
-- A PDF/X conversion could claim a standard the converter had already abandoned.
-- A conversion that cannot produce the standard you asked for now refuses and writes nothing.
-- Accessibility checks reported passes for documents whose structure could not be read.
-- Twenty-one accessibility checks now say when they could not see the whole document.
-- A document whose permissions cannot be read is no longer reported as allowing screen readers.
-- The document checker counted fonts it could not read as embedded, and stopped at a hundred.
-- Closing the web capture window mid-capture did nothing, and now cancels the capture.
-- A web capture no longer holds up work in another window while it runs.
-- Text drawn with a joining script over several lines no longer refuses to typeset.
-- An outline with no bookmarks in it is no longer reported as having bookmarks.
+- **Cropped-page area bugs** — Output Preview measured the wrong area (ink coverage and the ink limit alarm with it); OCR placed its text layer at the wrong origin and size; recognition could cover hidden areas; visual comparison highlighted the wrong place; slide and image export exported the wrong area
+- **Custom ICC profile selection** — failed for every file chosen
+- **Standards conversion reporting** — PDF/A conversion now lists what it removed to meet the standard; PDF/A and PDF/X list exactly what changed; a PDF/X conversion can no longer claim a standard the converter abandoned; an unproducible conversion refuses and writes nothing
+- **Accessibility checks on unreadable documents** — no passes for structure that could not be read; twenty-one checks say when they could not see the whole document; unreadable permissions no longer read as allowing screen readers
+- **Document checker fonts** — unreadable fonts no longer counted as embedded; the hundred-font cap removed
+- **Web capture** — closing the window mid-capture now cancels it; a capture no longer blocks work in another window
+- **Joining scripts** — multi-line text no longer refuses to typeset
+- **Bookmarks** — an empty outline no longer reports as having bookmarks
 
 ## 1.0.31
 
 *Released 2026-08-15*
 
-### Links you draw
-- Pick Links and drag a rectangle anywhere on a page, not only over words you selected.
-- The rectangle waits in the panel until you say where it goes, so a mis-drag costs only a redraw.
-- A link can go to a page in this document, at the view you choose.
-- The views are the whole page, its width, its height, a rectangle you name, or the reader's current zoom.
-- A link can go to a named destination the document declares, picked from the ones it actually has.
-- A link can go to another file, and to a page inside that file.
-- A link can go to a web address, as before.
-- A PDF a link names opens in this app once you confirm it.
-- Any other file a link names is named for you and never run.
-- A link to a program is read and reported by name; this app never writes one.
+### Links
+- **Draw-anywhere link creation** — drag a rectangle with the Links tool anywhere on a page (not only over selected text); the rectangle stays pending in the panel until a target is assigned, so a mis-drag costs only a redraw
+- **Link targets** — page in this document (with view: full page, fit width, fit height, named rectangle, or current zoom), named destination declared by the document (picked from those it actually has), another file (with page number), or a URL
+- **File-target handling** — a linked PDF opens in-app after confirmation; any other file type is named, never run; a link to a program is read and reported by name, and the app never writes one
+- **Link appearance** — border width, style (solid/dashed/underline), and color; click effect (none/invert/outline/inset); default remains invisible
+- **Editing existing links** — with the Links tool open, every link in the document is drawn on the page; click to open, retarget, restyle, or delete; the panel lists all links with targets and a Go To
+- **Signed-document guard** — create/retarget/restyle/delete all share one signed-document confirmation
+- **Unsupported borders** — a border style this app does not write is named rather than relabelled
+- **URL auto-linking** — creating links from web addresses in text unchanged
 
-### Links you can see and change
-- A link's border is yours: a width, a solid, dashed or underlined line, and a colour.
-- Links stay invisible by default, which is what a finished document wants.
-- The click effect a reader sees — none, invert, outline or inset — is yours too.
-- With the Links tool open, every link the document already carries is drawn on the page.
-- Click one to open it, change where it goes or how it looks, or delete it.
-- The panel lists every link with its target, and a Go to that brings its page into view.
-- Creating, retargeting, restyling and deleting a link all ask the same question about a signed document, once, in one place.
-- A border a document carries that this app does not write is named rather than quietly relabelled.
-- Creating links from the web addresses in the text still works exactly as it did.
+### Signature Trust — EU Trusted Lists
+- **Third trust source** — certificate authorities from the EU trusted lists; off by default like the other trust sources
+- **Fully offline** — the list ships bundled in the app; nothing is downloaded, ever; verification works with no network
+- **Panel disclosure** — shows the list's bundle date and European coverage; a list-vouched signature is identified by name, not just "trusted"
+- **Status filtering** — only authorities currently recorded as granted count; withdrawn authorities anchor nothing; timestamp and signature authorities are kept separate
+- **CLI** — the same option added for checking and signing
 
-### Signatures a European authority vouches for
-- Signature checking gains a third trust source: the certificate authorities the EU trusted lists publish.
-- It is off until you turn it on, like every other trust source, and it changes nothing until you do.
-- The list ships inside the app, and nothing is downloaded, then or ever.
-- Checking a signature still works with no network at all.
-- The panel says when the list was bundled and how much of Europe it covers.
-- A signature the lists vouch for says so by name, rather than only saying it is trusted.
-- Only authorities the lists record as currently granted count; a withdrawn one anchors nothing.
-- Authorities for timestamps and authorities for signatures are kept apart, so each vouches only for what it is entitled to.
-- The command line gains the same option for checking and for signing.
+### Create PDF from Clipboard
+- **File ▸ Create ▸ From Clipboard** — converts a copied picture, formatted text (tables/colors preserved), or plain text into a PDF
+- **Image fidelity** — a copied picture keeps its own resolution (a screenshot becomes a page at its actual pixel size)
+- **No network** — formatted text never fetches referenced images; only pictures carried in the copy are drawn
+- **Combinable** — the pasted content joins the Create PDF list as an ordinary item; reorder, remove, combine with disk files
 
-### PDFs from what you copied
-- File ▸ Create ▸ From Clipboard turns whatever you copied into a PDF.
-- A picture, formatted text with its tables and colours, or plain text all work.
-- A copied picture keeps its own resolution, so a screenshot becomes a page the size the screenshot actually is.
-- Copied text and formatted text produce the same document a saved file of that content would.
-- Formatted text never reaches out for the images it mentions; only pictures the copy carried are drawn.
-- What you pasted joins the Create PDF list as an ordinary item, beside files from disk.
-- You can reorder it, remove it, and combine it with the rest.
+### Create PDF from Web Page
+- **File ▸ Create ▸ From Web Page** — renders an address with the same engine a browser uses, in a visible capture window; nothing fetched in the background
+- **Pre-load disclosure** — the dialog states the site to be contacted and the maximum pages before loading anything
+- **Crawl depth** — capture one page or follow links one or two levels deep with a user-set page limit; a capture never leaves the starting site; hitting the limit is reported rather than looking complete
+- **Layout options** — paper size, orientation, margin, page headers/footers, background graphics
+- **Bookmarks** — each captured page becomes a bookmark named after its title
+- **Scheme restriction** — only web and local addresses; anything else refused by name
 
-### PDFs from a web page
-- File ▸ Create ▸ From Web Page turns an address into a PDF.
-- The page is rendered by the same engine a browser uses.
-- A capture window opens where you can see it and loads the page in front of you.
-- Nothing is fetched in the background, and the window closes when the capture finishes.
-- The dialog states the site it will contact and how many pages it may load, before loading any.
-- Capture just the page, or follow its links one or two levels deep, with a page limit you set.
-- A capture that reaches your page limit says so, rather than looking complete.
-- A capture never leaves the site you started on.
-- Choose the paper, the orientation, the margin, whether page headers and footers print, and whether background graphics print.
-- Each captured page becomes a bookmark named after the page's own title.
-- Only web and local addresses can be captured; anything else is refused by name.
-
-### Text you add can run down the page
-- Add Text has a direction: horizontal, or vertical for the scripts written in columns.
-- A vertical box reads down the height of the box you drew, and its columns fill across its width.
-- Which way the columns run comes from the text itself, not from a setting you pick.
-- Japanese and Chinese run right to left; Mongolian runs left to right.
-- A column you write is a column the editor reads back the same way.
-- The card tells you which direction your text chose, as you type.
-- Vertical text is added in the bundled vertical typeface.
-- Controls that cannot apply to a column say so instead of quietly doing nothing.
-- A vertical box already turns the reading direction, so it is not also rotated.
-- Text in a column can carry a horizontal block, such as a year or a page number.
-- The block is set upright and fitted to one column width, the way vertical Japanese sets numbers.
-- Everything you add this way is ordinary text afterwards: searchable, restyleable, and it reflows in the paragraph editor.
+### Vertical Text
+- **Add Text direction** — horizontal or vertical (for column-written scripts); a vertical box reads down its height, columns fill across its width
+- **Column direction from the script** — Japanese/Chinese run right-to-left, Mongolian left-to-right; not a setting; the card reports the chosen direction as you type
+- **Round-trip** — a written column is read back the same way by the editor; vertical text uses the bundled vertical typeface; the box turns reading direction itself and is not additionally rotated
+- **Inapplicable controls** — controls that cannot apply to a column say so instead of silently doing nothing
+- **Horizontal-in-vertical** — a column can carry an upright horizontal block (year, page number) fitted to one column width, as vertical Japanese sets numbers
+- **Ordinary text after** — searchable, restyleable, reflows in the paragraph editor
 
 ### Fixes
-- Text with no spaces, such as Japanese, now wraps instead of running past its box.
+- **Space-free text wrapping** — text with no spaces (e.g. Japanese) wraps instead of running past its box
 
 ## 1.0.30
 
 *Released 2026-08-15*
 
-### Form fields that calculate
-- A form whose fields carry calculations now calculates them: fill a line item and the Total appears.
-- The Total updates on the page as you type, before anything is saved.
-- A field with a display format shows the formatted value on the page.
-- Thousands separators, currency, percentages and dates are formats a field can display.
-- The file still stores the plain value a spreadsheet or another program can read.
-- A value outside the range a field declares is refused by name, with the range it had to be inside.
-- A field the form computes is marked as calculated and cannot be typed into.
-- A calculated field is still filled in for you when the form locks it against typing.
-- A form carrying calculations but no order to run them in reports that, rather than leaving totals empty.
-- A field carrying a script this app does not run is reported by name.
-- Its own contents are left exactly as they were, and every other field still calculates.
-- No script embedded in a document is ever executed.
-- Filling a field that recalculates one a signature locks now says so before anything changes.
-- The warning names what you typed and what it would have changed.
-- The command line's `forms --set` calculates the same way.
+### Form Calculation
+- **Calculations run** — fields with calculations compute live on the page as you type, before saving; a field with a display format shows the formatted value (thousands separators, currency, percentage, date) while the file stores the plain value other programs can read
+- **Range validation** — a value outside a field's declared range is refused by name, with the required range
+- **Calculated fields locked** — marked as calculated, not typeable, but still auto-filled
+- **Missing calculation order** — a form with calculations but no run order reports that rather than leaving totals empty
+- **Unsupported scripts** — a field carrying a script this app does not run is reported by name; its contents untouched, all other fields still calculate; no embedded script is ever executed
+- **Signature-locked recalculation** — filling a field that would recalculate a signature-locked one warns first, naming the input and what it would change
+- **CLI** — `forms --set` calculates identically
 
-### Building a form that calculates
-- The field you place on a page now carries a display format.
-- A number format takes the separators and currency symbol you choose.
-- A percentage, a date or a time takes a mask you pick.
-- A postcode, a telephone number, or a pattern of your own are formats too.
-- The format picker shows a live sample of what the page will read.
-- So a choice of separators reads as `1,234.56` against `1.234,56` rather than as two numbers.
-- A field can accept only values inside a range you set.
-- A field can start out holding a default value that a form reset returns it to.
-- A field can be calculated: the sum, product, average, smallest or largest of the fields you tick.
-- Or by any arithmetic expression written over the field names.
-- An expression is checked as you type, so an unreadable one is refused before the field exists.
-- Fields are put in an order that runs every calculation after the fields it reads.
-- The order you created them in does not matter, so a total is never one edit behind.
-- A calculation that would depend on itself is refused, naming the chain that proves it.
-- A calculation naming a field the document does not have is refused too.
-- Everything written is the same form scripting the rest of the PDF world writes.
-- A form built here calculates identically in other viewers.
-- **Prepare Form** gains a Field properties section for existing text and dropdown fields.
-- The format, accepted range and calculation can be changed there without recreating the field.
-- A detected date field is now created with a date format, which detection noted but never applied.
-- The placement card also offers the character limit and the one-box-per-character comb layout.
-- Both were always accepted and never shown.
+### Form Authoring
+- **Display formats on placed fields** — number (chosen separators and currency symbol), percentage, date, time, postcode, telephone, or custom pattern; live sample in the picker (so `1,234.56` vs `1.234,56` reads as a choice, not two numbers)
+- **Validation and defaults** — accepted-range constraint; default value restored by form reset
+- **Calculations** — sum/product/average/min/max over ticked fields, or any arithmetic expression over field names; expressions checked as typed, unreadable ones refused before the field exists
+- **Calculation order** — fields ordered so every calculation runs after the fields it reads, regardless of creation order; self-dependent calculations refused with the proving chain; references to nonexistent fields refused
+- **Interoperable output** — standard form scripting; forms calculate identically in other viewers
+- **Prepare Form ▸ Field properties** — format, range, and calculation editable on existing text and dropdown fields without recreating them
+- **Detection fixes** — detected date fields now get a date format; placement card now offers the character limit and comb layout (both always accepted, never previously shown)
 
-### What a form field does when you use it
-- A button that goes to a page now goes there.
-- The page may be named directly or by a name the document keeps in its own list.
-- A button that resets the form resets it, honouring the fields it says it covers.
-- Or every field except those, when that is what the button says.
-- A button that shows or hides fields does so.
-- The change is part of the document, so it is still there when the file is reopened.
-- Such a change can be undone like any other edit.
-- A button that imports form data imports it, from a file you pick.
-- The path is never one the document names for you.
-- FDF and XFDF are both read, told apart by what the file contains rather than its name.
-- A field name in the data file that the form does not have is reported.
-- Every value that does fit is still filled in.
-- A button that submits the form now builds the whole submission and saves it.
-- The submission is FDF, XFDF, web form data or the document itself, whichever the button asks for.
-- You choose the file the submission is saved to.
-- Where it was meant to go is shown and can be copied.
-- This app sends nothing over the network itself.
-- Actions run on the other gestures a field can carry, not only a click.
-- Pointer in, pointer out, mouse down, mouse up, focus and focus lost all run.
-- An action this app does not perform is named rather than half-simulated.
-- Scripts, jumps into another document, and unrecognised actions are named this way.
-- Nothing in the document is changed by an action that is only named.
-- **Prepare Form** ▸ Field properties now lists buttons and gives any field an action.
-- The actions are go to a page, open a link, reset or submit the form.
-- Show or hide fields, and import data, are actions too.
-- Each action runs on the gesture you choose.
-- Command line: `forms --reset`, `forms --import-data`, and `forms --export-data` with `--data-format fdf|xfdf|html|pdf`.
-- Those commands are scoped by `--field` and `--exclude-fields`.
+### Field Actions
+- **Buttons act** — go to page (direct or named destination), reset form (honoring included/excluded field lists), show/hide fields (persisted in the document, undoable), import form data (FDF/XFDF detected by content, from a user-picked path — never one the document names; unknown field names reported, matching values still filled)
+- **Submit** — builds the full submission (FDF, XFDF, web form data, or the document itself, as the button asks) and saves it to a file you choose; the intended destination is shown and copyable; the app sends nothing over the network
+- **All gestures** — actions run on pointer in/out, mouse down/up, focus, and focus lost, not only click
+- **Unperformed actions** — scripts, jumps into another document, and unrecognized actions are named rather than half-simulated; nothing changed by a named-only action
+- **Authoring** — Prepare Form ▸ Field properties lists buttons and assigns any field an action (go to page, open link, reset, submit, show/hide fields, import data) on a chosen gesture
+- **CLI** — `forms --reset`, `forms --import-data`, `forms --export-data` with `--data-format fdf|xfdf|html|pdf`; scoped by `--field` and `--exclude-fields`
 
-### Scripts this app does not run
-- The forms panel now lists every script the document carries that this app declines to run.
-- Each entry names the field, the moment it would have run at, and the readable script.
-- The standard formatting, checking and calculation calls are declarative, carry no code, and run.
-- Anything else stays in the document exactly as it was and is reported rather than executed.
-- This standing position is stated where the list is.
+### Script Disclosure
+- **Declined-script list** — the forms panel lists every script the document carries that this app declines to run: field, trigger moment, readable script; the standing no-execution position is stated on the list
+- **Declarative calls run** — standard formatting, checking, and calculation calls carry no code and do run
 
-### The accessibility check now looks at the page, not just the file
-- The accessibility check grew from six document-wide questions to **32 checks across seven areas**.
-- The areas are Document, Page Content, Forms, Alternate Text, Tables, Lists and Headings.
-- A document whose every figure is undescribed and every table headerless used to pass, and no longer does.
-- New in Alternate Text: figures with no description, and a description nested inside another one.
-- Also a description attached to nothing, and one that hides an annotation's own words.
-- New for tables: rows outside a table, cells outside a row, and rows of uneven width.
-- Also a table with no header cells, a header cell with no scope, and a missing summary.
-- New for lists and headings: items outside a list, labels outside an item, and a skipped heading level.
-- New for page content: text no tag covers that is not declared decoration.
-- Also untagged annotations, untagged form fields and untagged multimedia.
-- Also a page with annotations and no tab order, and form fields with no description.
-- Also a font whose characters map to nothing readable.
-- **Colour contrast is measured** against what is actually painted under each drawn line of text.
-- The published contrast ratio is used, with the easier threshold for large and bold text.
-- Where the backdrop is a photograph, a gradient or an irregular shape, the check says it cannot tell.
-- **A check with nothing to check now says so**, as not applicable rather than as a pass.
-- A document with no tables reports its table checks that way, and they leave the passed count.
-- The summary states how many checks actually applied.
-- **A check that cannot be certain says "needs review" instead of failing.**
-- Reading order, scripts, timed responses, repetitive links and unmeasurable contrast come with things to look at.
-- Every failure now names where it is: a tag, a place on a page, an annotation or a field.
-- A page whose contents cannot be read is named, and every check that needed it says so.
-- Such a page is never counted as clean.
-- Automatic tagging picks the body text size by how much text is set in it.
-- A page whose title, body and page number differ in size no longer turns body copy into a heading.
-- A page number or running head smaller than the body text, in the margin, is now marked decoration.
+### Accessibility Checker
+- **32 checks across seven areas** (up from six document-wide questions): Document, Page Content, Forms, Alternate Text, Tables, Lists, Headings — a document with undescribed figures and headerless tables no longer passes
+- **Alternate Text checks** — missing figure descriptions, nested descriptions, descriptions attached to nothing, descriptions hiding an annotation's own words
+- **Table checks** — rows outside a table, cells outside a row, uneven row widths, no header cells, headers without scope, missing summary
+- **List/heading checks** — items outside a list, labels outside an item, skipped heading levels
+- **Page content checks** — untagged text not declared decoration; untagged annotations, form fields, multimedia; pages with annotations but no tab order; fields with no description; fonts whose characters map to nothing readable
+- **Color contrast measured** — against what is actually painted under each drawn line, using the published ratio with the large/bold-text threshold; photographic, gradient, or irregular backdrops report "cannot tell"
+- **Not-applicable verdict** — a check with nothing to check reports not-applicable, leaves the passed count, and the summary states how many checks applied
+- **Needs-review verdict** — reading order, scripts, timed responses, repetitive links, and unmeasurable contrast report "needs review" with items to look at instead of failing
+- **Located findings** — every failure names its tag, page position, annotation, or field; an unreadable page is named, its dependent checks say so, and it is never counted clean
+- **Auto-tagging body-text heuristic** — body size picked by volume of text set in it, so mixed title/body/page-number pages no longer promote body copy to headings; margin page numbers and running heads smaller than body text are marked decoration
 
-### Reading the accessibility check, and saving it
-- The check is now a grouped list of seven areas rather than a flat one.
-- Each area shows how many of its checks passed out of the ones that applied.
-- The areas with something to answer for are open when the report appears.
-- Opening a check shows what it is for in one line, and lists every item it found.
-- Each item carries its own text, so a false alarm is recognizable at a glance.
-- **Clicking a finding takes you to it.**
-- A tagged element opens the Tags panel with that tag selected.
-- A place on a page draws a box on the page and scrolls to it.
-- A field, a link or an annotation opens the panel that edits it.
-- **Show** draws every one of a check's page findings at once, as a set.
-- They come off again with the same button, and clear themselves whenever the document changes.
-- **Export…** saves the report as a web page or as a plain text file.
-- Both carry the same verdicts, the same counts and the same findings.
-- Each row carries the check's short name beside its wording, so two languages name one row.
-- The saved web page is self-contained and opens on a machine that has never seen this app.
-- The report says which of the 32 checks a document passes.
-- It does not claim conformance, because two of the checks cannot be settled by a machine.
-- Every word of the report is in your own language, in all 28 of them.
-- Names, explanations, findings and the saved file itself are all translated.
+### Accessibility Report
+- **Grouped by area** — seven areas with passed/applicable counts; areas with findings open by default; each check shows a one-line purpose and its items with their own text
+- **Click-through** — a finding navigates to it: tags open the Tags panel selected, page positions draw a box and scroll, fields/links/annotations open their editing panel
+- **Show** — draws all of a check's page findings at once; toggles off with the same button; clears on document change
+- **Export** — HTML or plain text, same verdicts/counts/findings; the HTML is self-contained; each row carries the check's short name beside its wording
+- **No conformance claim** — the report states which of the 32 checks pass; it does not claim conformance because two checks cannot be machine-settled
+- **Fully localized** — names, explanations, findings, and exports in all 28 languages
 
-### Repairing what the accessibility check finds
-- **Seventeen of the checks can now be repaired from the report itself.**
-- A row that can be fixed carries the control that fixes it.
-- The other fifteen take you to the panel that owns the edit instead.
-- A fix this app cannot actually perform is worse than a signpost to one a person can.
-- **Twelve of the repairs need nothing from you**, because the document decides the answer.
-- They allow assistive technology to read an otherwise restricted file, and tag an untagged one.
-- They show a title the document already has, and derive bookmarks from its headings.
-- They declare the tab order on pages that carry fields or links.
-- They close a skipped heading level and promote a table's first row to header cells with a column scope.
-- They clear a description that sits inside another one, or that hides an annotation's own words.
-- They put untagged annotations, form fields and multimedia into the structure tree.
-- **Five repairs take one value only you can supply**, typed on the finding with the page still in view.
-- Those values are the document's language and title, a field's description, a figure's alternate text, a table's summary.
-- The language is picked from the 28 languages this app speaks, by their own names.
-- Or typed as any language tag; a malformed tag is refused with what is wrong with it.
-- A refused language tag leaves the document unchanged.
-- **Nothing is ever invented for you** by any of the repairs.
-- A field's own internal name is offered as a starting suggestion and never written as its description.
-- A figure never gains placeholder alternate text, and a language is never guessed.
-- A check that needs a value it does not have stays a finding.
-- **Every fix is one undoable step, and the report re-checks itself the moment it lands.**
-- A row you have repaired turns green in front of you, and Undo turns it back.
-- Repairing a signed document asks first, in the same words every other edit of one uses.
-- A document certified to allow no changes is refused rather than quietly altered.
-- Command line: `accessibility --category <area>` runs one area.
-- The new `accessibility-fix` applies the repairs that need no authored value.
-- The repairs that need a value have no headless form on purpose.
-- A command line cannot describe a picture it cannot see, and a placeholder description is worse than none.
+### Accessibility Repair
+- **17 checks repairable from the report** — the fix control sits on the row; the other 15 route to the owning panel
+- **12 zero-input repairs** — allow assistive-technology access on restricted files, tag untagged documents, show an existing title, derive bookmarks from headings, declare tab order, close skipped heading levels, promote a table's first row to column-scoped headers, clear nested/annotation-hiding descriptions, bind untagged annotations/fields/multimedia into the structure tree
+- **5 single-value repairs** — document language and title, field description, figure alternate text, table summary; typed on the finding with the page in view; language picked from the 28 supported (by their own names) or typed as any language tag, with malformed tags refused and the reason given, leaving the document unchanged
+- **Nothing invented** — no placeholder alternate text, no guessed language; a field's internal name is offered only as a suggestion; a check missing its value stays a finding
+- **One undo step per fix; live re-check** — the report re-runs on landing, a repaired row turns green, Undo turns it back
+- **Signed/certified documents** — repairing a signed document asks first; a no-changes certification is refused
+- **CLI** — `accessibility --category <area>` runs one area; new `accessibility-fix` applies the zero-input repairs; value-requiring repairs deliberately have no headless form (a placeholder description is worse than none)
 
-### Text and annotations that no tag covers
-- **Untagged text on a page can now be bound into the document's structure from the report.**
-- You choose what untagged text is: a paragraph to hear or page furniture to skip, never the app.
-- Running heads and page numbers are the usual reason a page has untagged text.
-- So one action declares all of a page's remaining untagged text decoration at once.
-- A newly tagged paragraph is placed where it is drawn, not at the end of the document.
-- So the reading order stays the order of the page.
-- Untagged annotations, form fields and multimedia are bound in both directions.
-- The structure points at the annotation and the annotation points back.
-- Text drawn inside a reused graphic is refused by name rather than mis-tagged.
-- Such text is numbered inside that graphic and not on the page.
+### Untagged Content Binding
+- **Bind untagged text from the report** — you choose whether it is a paragraph or decoration, never the app; one action declares all of a page's remaining untagged text decoration (the usual case: running heads and page numbers)
+- **Reading order preserved** — a newly tagged paragraph is placed where it is drawn, not appended
+- **Two-way annotation binding** — structure points at the annotation and the annotation points back, for annotations, form fields, and multimedia
+- **Reused graphics** — text drawn inside a reused graphic is refused by name (numbered inside that graphic, not on the page) rather than mis-tagged
 
-### Print checks that say what they could not read
-- **Print preflight gains a fourth answer: "could not be checked."**
-- A check that could not read part of the document no longer reports a pass it did not earn.
-- It names what it could not read, and the summary counts it separately from what passed.
-- A finding is still a finding: RGB colour found is reported as found.
-- A font that is not embedded still fails, whatever else on the page was unreadable.
-- A page whose strokes cannot be measured no longer reports "no hairline strokes".
-- The transparency flattener now says when it cannot judge an object rather than treating it as opaque.
-- A form whose contents cannot be read, and one that declares no bounds, are each named.
-- So are one nested past the depth the analysis reaches, and a graphics state that will not read.
-- Each is named on the page it is on.
-- Such a document is refused by name instead of being written.
-- A flatten that reported success while live transparency survived it is the one result this tool must never produce.
-- The preview lists the same objects and the same reasons before you press anything.
-- The preview also highlights them on the page.
-- **Output Preview says when a page may use inks it could not find.**
-- The plate list and the total-ink figures are marked as covering only the plates it did find.
-- A colour bar is refused outright instead of being printed one patch short.
-- A printed sheet cannot carry that caveat.
+### Preflight — Unreadable Content
+- **"Could not be checked" verdict** — a check that could not read part of the document no longer reports an unearned pass; it names what it could not read, counted separately in the summary
+- **Findings still findings** — RGB color found is reported found; a non-embedded font still fails regardless of what else was unreadable; unmeasurable strokes no longer report "no hairline strokes"
+- **Flattener honesty** — the transparency flattener reports objects it cannot judge instead of treating them opaque; unreadable forms, forms declaring no bounds, forms nested past analysis depth, and unreadable graphics states are each named per page; such a document is refused rather than written — a flatten reporting success while live transparency survived is the one forbidden result
+- **Preview parity** — the preview lists and highlights the same objects and reasons before anything runs
+- **Output Preview caveats** — flags pages that may use inks it could not find; plate list and total-ink figures marked as covering only found plates; a color bar is refused outright rather than printed a patch short
 
-### Print preflight against a profile you choose
-- **Print preflight is now 37 checks across seven categories, measured against a profile.**
-- It was five, and a file no press would accept came back with a clean sweep.
-- That file had 360 % total ink, a 7 dpi photograph and five spot inks.
-- It also had an overprinting white headline, no trim box and a printing sticky note.
-- **Nine profiles ship**: sheetfed offset, heatset web, newsprint, digital printing and large format.
-- Also PDF/X-1a, PDF/X-3, PDF/X-4, and an office one for the machine down the hall.
-- Every number in the shipped profiles is a press figure, not a guess.
-- **The same document under two profiles gives two answers**, and that is the point.
-- A check decides whether the document is clean or dirty.
-- The profile decides whether dirty is a failure or a note.
-- **Every check row states the rule it was measured against**: the ink limit, resolution, hairline width.
-- So a saved report is readable a year later by someone who does not have the profile.
-- **A fifth answer joins the four**: "does not apply".
-- A document with no images has nothing to say about image resolution.
-- A check the profile switched off says so rather than counting as a pass.
-- Neither is included in the passed tally.
-- **Total area coverage is measured, not estimated**, as the true per-pixel maximum.
-- Where a document is longer than the profile's page budget, the remaining pages are named as unmeasured.
-- They are never guessed at from the pages that were measured.
-- A missing measurement tool is reported by the check instead of sinking the report.
-- **Overprinting white is now found**: ink set to overprint that lays down nothing.
-- Such a headline disappears on the printed sheet.
-- Overprinting black, which is correct practice, is not reported.
-- Nor is an overprint over ink the reader could not resolve, which is reported for review.
-- New checks include the PDF version and the actual printing permission, rather than merely "is it encrypted".
-- Also the output intent, the PDF/X claim, the trapping declaration and embedded files.
-- Also page size, page count, and the trim and bleed boxes.
-- Also spot ink names and count, and device-independent colour.
-- Also minimum and maximum image resolution, image compression and image colour space.
-- Also small type, and small black type built from more than one ink.
-- Also optional content, printing annotations, interactive form fields and the title.
-- Also document JavaScript and the XMP packet.
-- The command line gains `preflight --profile` and `preflight-profiles`.
+### Preflight Profiles
+- **37 checks across seven categories, measured against a profile** (up from five; a file with 360% total ink, a 7 dpi photograph, five spot inks, an overprinting white headline, no trim box, and a printing sticky note previously passed clean)
+- **Nine shipped profiles** — sheetfed offset, heatset web, newsprint, digital printing, large format, PDF/X-1a, PDF/X-3, PDF/X-4, office; all thresholds are press figures
+- **Check vs. profile** — the check decides clean/dirty; the profile decides failure vs. note, so the same document under two profiles gives two answers by design
+- **Rule stated per row** — each check row states its measured rule (ink limit, resolution, hairline width), so a saved report stays readable without the profile
+- **"Does not apply" verdict** — no-image documents skip image checks; profile-disabled checks say so; neither counts toward the passed tally
+- **Total area coverage measured** — true per-pixel maximum, not estimated; pages beyond the profile's page budget are named unmeasured, never extrapolated; a missing measurement tool is reported by the check, not fatal to the report
+- **Overprinting white detected** — overprint ink laying down nothing (a headline that vanishes on press); overprinting black (correct practice) not reported; overprint over unresolvable ink flagged for review
+- **New checks** — PDF version, actual printing permission (not just "is it encrypted"), output intent, PDF/X claim, trapping declaration, embedded files, page size/count, trim/bleed boxes, spot ink names and count, device-independent color, min/max image resolution, image compression and color space, small type, multi-ink small black type, optional content, printing annotations, interactive form fields, title, document JavaScript, XMP packet
+- **CLI** — `preflight --profile` and `preflight-profiles`
 
-### Reading the preflight report, and writing your own profile
-- **The report is a tree by category**: Document, Pages, Colour, Fonts, Images, Content, Metadata.
-- Each heading carries how many of the checks that apply to this file it passes.
-- So a long report is skimmable before it is read.
-- **A finding takes you to the thing it names.**
-- One that has a place on the page is drawn on it.
-- One that names an ink, a font or a setting opens the panel that owns it.
-- One that has neither says so rather than doing nothing when clicked.
-- **Parts the reader could not get through are listed separately.**
-- So a check that could not finish is never mistaken for a check that passed.
-- **The report exports as text or as a web page**, naming the document and the profile.
-- The export also names when the document was checked.
-- It carries every finding, including the ones the panel summarised as a count of further items.
-- The export states in its own footer that it is not a certificate of conformance.
-- **Any shipped profile can be made your own.**
-- Duplicate it, change the numbers a check measures against, or switch a check between failure and note.
-- A check can be turned off entirely.
-- Editing a shipped profile saves a copy instead of overwriting it.
-- So the press figures it came with are always there to return to.
-- **A profile is a file you can hand to someone.**
-- Export it, import one you were sent, and delete the ones you made.
-- An import that is not JSON, is not a profile, or carries no id is refused with the reason.
-- So is one holding something else, or written to a schema this version does not read.
-- One that would replace a profile the app ships is refused, and says to rename it first.
-- Ink names and font names reach the report exactly as the document spells them, in every language.
+### Preflight Report and Custom Profiles
+- **Category tree** — Document, Pages, Colour, Fonts, Images, Content, Metadata, each heading with passed/applicable counts
+- **Click-through** — page findings drawn on the page; ink/font/setting findings open their panel; findings with neither say so instead of doing nothing
+- **Unreadable parts listed separately** — never mistaken for passes
+- **Export** — text or HTML, naming document, profile, and check time; includes every finding (including those the panel summarized as counts); footer states it is not a conformance certificate
+- **Custom profiles** — duplicate any shipped profile, change thresholds, switch checks between failure and note, disable checks; editing a shipped profile saves a copy, preserving the press figures
+- **Profile exchange** — export, import, delete; imports refused with the reason if not JSON, not a profile, missing an id, holding something else, or on an unreadable schema; an import that would replace a shipped profile is refused with instruction to rename
+- **Verbatim names** — ink and font names reach the report exactly as the document spells them, in every language
 
-### Repairing what the preflight check finds
-- **Twenty repairs, and they are on the rows that need them.**
-- A failing check now offers the repair its profile carries.
-- The repairs remove document JavaScript, embedded files, and annotations that print.
-- They embed the fonts the file is missing, and convert to CMYK or to grayscale.
-- They convert spot inks to process, or move one onto another plate.
-- They downsample over-resolution images, thicken hairlines and flatten transparency.
-- They write a trim box or grow a bleed box, and set the title.
-- They declare the trapping state, write the XMP packet and set the PDF version.
-- They convert to PDF/X or PDF/A, and add printer marks.
-- **"Fix what this profile can" repairs every row at once**, in the one order that makes it right.
-- Hairlines go before flattening, because a hairline inside a flattened region becomes pixels nothing can reach.
-- Printer marks go after a standard conversion, because a conversion regenerates every object.
-- Marks added before a conversion could never be removed again.
-- A profile lists the repairs it wants; the order is not up to it.
-- **A repair is one undo away**, whether it was one row or all of them.
-- **The check re-runs itself after a repair**, so a row's verdict is what the file now says.
-- **A missing font is embedded from the face the document actually names, or not at all.**
-- A face installed under a different name is refused by name.
-- So is one whose letter widths disagree with the widths the document declares, with both figures.
-- Embedding such a face would reflow every line it sets.
-- A font whose licence forbids embedding is refused with the foundry's own reason.
-- Four missing fonts of which three are installed embeds three and names the fourth.
-- **A repair that needs a decision asks for it**, rather than inventing one.
-- The document title, the trapping state, the bleed margin and a spot ink's target plate are typed in.
-- An invented title is the same fault under a different name.
-- Whether a file is already trapped is a claim only a person may make.
-- **Nothing is offered that cannot actually run.**
-- A check with no repair in the chosen profile routes to the panel that owns the edit.
-- No button is shown whose only outcome is a refusal.
-- Setting the PDF version now actually lowers it.
-- Asking a PDF 2.0 file for 1.7 previously reported success and left the file at 2.0.
-- Converting a spot ink to process now removes the plate as well as the marks on it.
-- The colorant stayed declared, so every plate list went on reporting an ink nothing prints.
-- Removing annotations can now be narrowed to the ones flagged to print, and to particular kinds.
-- So a repair takes exactly what the check reported and leaves the rest.
-- The command line gains `preflight-fix` for these repairs.
+### Preflight Repair
+- **Twenty repairs, offered on the failing rows** — remove document JavaScript, embedded files, printing annotations; embed missing fonts; convert to CMYK or grayscale; convert spot inks to process or remap plates; downsample over-resolution images; thicken hairlines; flatten transparency; write a trim box; grow a bleed box; set the title; declare trapping; write the XMP packet; set the PDF version; convert to PDF/X or PDF/A; add printer marks
+- **"Fix what this profile can"** — repairs every row at once in the one correct order (hairlines before flattening — a hairline inside a flattened region becomes unreachable pixels; printer marks after standard conversion — a conversion regenerates every object and pre-conversion marks could never be removed); the profile lists its repairs, the order is not up to it
+- **One undo** — whether one row or all; the check re-runs after every repair so verdicts reflect the file as it now is
+- **Font embedding refusals** — embeds only the face the document actually names; a face installed under a different name is refused by name; a face whose letter widths disagree with the document's declared widths is refused with both figures (embedding would reflow every line); embedding-forbidden licenses refused with the foundry's reason; partial success is partial (three of four installed embeds three, names the fourth)
+- **Decisions are asked, never invented** — title, trapping state, bleed margin, and a spot ink's target plate are typed in; whether a file is trapped is a claim only a person may make
+- **No dead buttons** — checks without a repair in the chosen profile route to the owning panel; no button whose only outcome is refusal
+- **Fixed** — setting the PDF version now actually lowers it (asking a PDF 2.0 file for 1.7 previously reported success and left it at 2.0); converting a spot ink to process now removes the plate as well as its marks (the declared colorant previously kept appearing in plate lists); annotation removal can be narrowed to print-flagged annotations and to particular kinds
+- **CLI** — `preflight-fix`
 
-### Preflighting a whole folder
-- **Tools ▸ Preflight a Folder** measures every PDF in a folder against one profile.
-- A check writes nothing at all to the folder it reads.
-- **Or it repairs them**: each document is copied, repaired with the profile's fixups, and checked again.
-- So the report states what the file is now, not what it was when the run started.
-- The originals are untouched unless you ask for them to be replaced.
-- **A report lands beside every document** in the destination, as text and as a web page.
-- A third report lands as data another program can read.
-- Processed originals can be moved out of the intake folder, so the next run skips them.
-- A document that cannot be read is reported by name and the run carries on.
-- A repair that fails leaves no half-processed file behind.
-- Settings can be saved under a name, so a folder swept every week is not set up weekly.
-- A print profile can now be a step inside a guided action.
-- So a folder of Office files can be converted, brought up to the house press rule, and stamped unattended.
-- The command line gains `preflight-sweep` for the folder run.
+### Folder Preflight
+- **Tools ▸ Preflight a Folder** — checks every PDF in a folder against one profile; check mode writes nothing to the source folder
+- **Repair mode** — each document is copied, repaired with the profile's fixups, re-checked; reports state what the file is now; originals untouched unless replacement is requested
+- **Reports per document** — text and HTML beside each output, plus a machine-readable data report
+- **Intake management** — processed originals can be moved out so the next run skips them; unreadable documents reported by name without stopping the run; a failed repair leaves no half-processed file
+- **Named settings** — save the whole configuration under a name for recurring sweeps
+- **Guided actions** — a print profile can be a guided-action step (convert a folder of Office files, apply the house press rule, stamp — unattended)
+- **CLI** — `preflight-sweep`
 
 ### Fixes
-- Exporting or importing a guided action to a folder of your own now works.
-- It only ever succeeded inside the app's own temporary folder, and refused everywhere else.
-- Updated bundled and build-time dependencies, clearing GHSA-jmr9-qjv8-65gv in a test-only archive extractor.
+- **Guided-action export/import** — now works to any folder (previously only succeeded inside the app's own temporary folder)
+- **Dependencies** — bundled and build-time dependencies updated, clearing GHSA-jmr9-qjv8-65gv in a test-only archive extractor
 
 ## 1.0.29
 
 *Released 2026-08-10*
 
-### One PDF per folder
-- **Tools ▸ One PDF per Folder** turns a tree of scan folders into one PDF per folder.
-- Pages are assembled in page-number order, so `page2` comes before `page10`.
-- A folder at `a/b` becomes `a/b.pdf` in the destination; the originals are never modified.
-- A folder holding nothing to assemble is skipped rather than reported as a failure.
-- A picture that cannot be read is named in the report, and the rest of the folder is still assembled.
-- The same run is available as a guided-action step, so it can be followed by other steps and scheduled.
-- The command line gains `create-pdf-folders` for the same job.
+### One PDF per Folder
+- **Tools ▸ One PDF per Folder** — turns a tree of scan folders into one PDF per folder; pages assembled in page-number order (`page2` before `page10`); folder `a/b` becomes `a/b.pdf` in the destination; originals never modified
+- **Resilience** — an empty folder is skipped, not failed; an unreadable picture is named in the report and the rest of the folder still assembles
+- **Automation** — available as a guided-action step (chainable, schedulable); CLI `create-pdf-folders`
 
-### Saved Batch OCR settings
-- **Batch OCR Folder** saves every setting in the dialog under a name, folders included.
-- A saved set can be recalled, renamed and deleted from the same place.
-- **Scheduled Batch Runs** can start from a saved set, which fills in the form.
-- A schedule keeps those values as its own; editing the saved set later leaves the schedule alone.
-- A schedule can now replace the originals in place, compress scans, and straighten them before recognition.
-- The command line's `batch-ocr` gains `--enhance` and `--no-enhance-orientation`.
+### Batch OCR
+- **Saved settings** — Batch OCR Folder saves every dialog setting (folders included) under a name; recall, rename, delete in place
+- **Scheduled runs from saved sets** — a schedule seeded from a saved set keeps its own copy; later edits to the set leave the schedule alone
+- **Schedule capabilities** — replace originals in place, compress scans, straighten before recognition
+- **CLI** — `batch-ocr` gains `--enhance` and `--no-enhance-orientation`
 
-### Guided actions
-- **Enhance Scans** is available as a guided-action step, with all twelve of its settings.
-- An action file naming that step imports instead of being refused as an unknown operation.
+### Guided Actions
+- **Enhance Scans step** — all twelve settings; action files naming it now import instead of being refused as unknown
 
 ### Scanning
-- **File ▸ Create PDF from Scanner…** scans pages from a connected scanner into a new document.
-- **Document ▸ Insert Pages ▸ From Scanner…** scans straight into the document you have open, as ordinary undoable page work.
-- The **Scan & OCR** tool starts at the scanner: it opens the scan dialog when nothing is open, and offers scanning from its own pane when something is.
-- Every control comes from what the scanner reports it can do: resolutions are the ones it offers, colour modes are the ones it lists, and a control it has no setting for is simply not shown.
-- Feeder, flatbed and both-sides scanning are offered only where the device has them, with a page count or "every page in the feeder".
-- Scanning shows progress per page and can be stopped part way; the pages that finished are kept and offered.
-- Scanned pages can be reviewed and removed one at a time before the document is built.
-- Straightening, clean-up and searchable text can be applied to the scan as it is saved.
-- A setting the scanner did not take is reported rather than silently ignored.
-- Network scanners reachable from this computer appear alongside connected ones, and a device the list misses can be picked from the system chooser.
-- The command line gains `scan`, alongside `scanners`.
+- **File ▸ Create PDF from Scanner…** — scan into a new document
+- **Document ▸ Insert Pages ▸ From Scanner…** — scan into the open document as ordinary undoable page work
+- **Scan & OCR entry point** — opens the scan dialog when nothing is open; offers scanning from its pane when something is
+- **Device-driven controls** — resolutions, color modes, feeder/flatbed/duplex offered only as the scanner reports them; a control the device lacks is not shown; page count or "every page in the feeder"
+- **Progress and review** — per-page progress; stoppable mid-run with finished pages kept; pages reviewable and removable before the document is built
+- **Processing on save** — straightening, clean-up, searchable text
+- **Honesty** — a setting the scanner did not take is reported, not silently ignored
+- **Device discovery** — network scanners appear alongside connected ones; the system chooser covers devices the list misses
+- **CLI** — `scan`, alongside `scanners`
 
 ## 1.0.28
 
 *Released 2026-08-09*
 
-### Pages panel
-- The pages panel lays its thumbnails out in a grid: widening the panel adds columns instead of one larger thumbnail.
-- The panel can be dragged much wider than before, and always leaves room for the document beside it.
-- Dragging a page to reorder shows the insertion point between the two thumbnails it falls between.
+### Pages Panel
+- **Grid thumbnails** — widening the panel adds columns instead of enlarging one thumbnail; the panel drags much wider and always leaves room for the document
+- **Reorder insertion point** — dragging shows the insertion point between the two thumbnails it falls between
 
-### Page ranges
-- **Crop**, **Rotate** and **Delete Pages** read a page range written with a hyphen: `1,3,5-9`.
-- Each of those fields has a **Use selection** button that fills it from the pages selected in the page list.
-- A range that names no page is refused with a message instead of acting on nothing and reporting success.
+### Page Ranges
+- **Hyphen ranges** — Crop, Rotate, and Delete Pages read `1,3,5-9`
+- **Use selection** — fills the range field from the pages selected in the page list
+- **Empty ranges refused** — a range naming no page errors instead of acting on nothing and reporting success
 
-### Saving a result
-- Compressing, optimizing, converting or repairing a document suggests a name built from its own: `report_compressed.pdf`, not `compressed.pdf`.
-- **Compress**, **Optimize**, **Grayscale**, **PDF/A**, **Encrypt**, **Decrypt**, **Repair**, **Rebuild**, **Recover**, prepress conversion and the metadata tools all do this.
-- It is only a suggestion — the save dialog still accepts any name you type.
+### Save Naming
+- **Derived filenames** — Compress, Optimize, Grayscale, PDF/A, Encrypt, Decrypt, Repair, Rebuild, Recover, prepress conversion, and the metadata tools suggest a name built from the source (`report_compressed.pdf`, not `compressed.pdf`); the save dialog still accepts any name
 
 ### Elsewhere
-- Right-clicking a file under **Recent files** offers Open, **Show in folder**, and Copy full path.
-- The Compress panel says when a document reads as a scan, and offers the scanned-document setting in one click.
-- **Optimize** is available as a guided-action step, so compress-then-optimize runs over a whole folder, a watched folder, or a schedule.
-- The Compress and Optimize panels point at guided actions for running the same steps over a folder.
-- Each release heading in this file carries the date it was published.
+- **Recent files context menu** — Open, Show in folder, Copy full path
+- **Scan detection in Compress** — the panel says when a document reads as a scan and offers the scanned-document setting in one click
+- **Optimize as a guided-action step** — compress-then-optimize runs over a folder, watched folder, or schedule; the Compress and Optimize panels link to guided actions for folder runs
+- **Changelog dates** — each release heading in this file carries its publication date
 
 ### Fixes
-- **Crop**, **Rotate** and **Delete Pages** read `5-9` as page 5 alone, then reported success over pages they never touched.
-- Every operation used to propose one fixed file name, so a second run offered to overwrite the first result.
-- Choosing a different shape part-way through drawing one now abandons the half-drawn shape.
-- Choosing **Cloud** part-way through a polygon used to commit a polygon; you now get the figure you picked.
-- A half-drawn shape is also dropped when you leave the tool, so a stray click cannot join the next shape.
-- The snap options popover, the stamp symbol palette and the document view's rulers follow the interface theme.
-- Under the light theme each kept a dark fill behind dark text and read as solid black.
-- Ruler numbers and the symbol palette's buttons meet the AA contrast minimum in every theme.
-- A stamp preset's name is drawn in the interface text colour, with the stamp's own colour on its outline.
-- A pale stamp's name was previously unreadable against the panel behind it.
+- **Range parsing** — Crop, Rotate, and Delete Pages read `5-9` as page 5 alone, then reported success over pages they never touched
+- **Overwrite-prone filenames** — every operation proposed one fixed name, so a second run offered to overwrite the first result
+- **Half-drawn shapes** — switching shape mid-draw abandons the half-drawn shape (choosing Cloud mid-polygon used to commit a polygon); leaving the tool also drops it, so a stray click cannot join the next shape
+- **Theme compliance** — the snap options popover, stamp symbol palette, and document rulers follow the interface theme (each kept a dark fill behind dark text under the light theme); ruler numbers and palette buttons meet AA contrast in every theme
+- **Stamp preset names** — drawn in the interface text color with the stamp's color on the outline (pale stamps were unreadable against the panel)
 
 ## 1.0.27
 
 *Released 2026-08-09*
 
-### Spell check
-- The paragraph editor underlines words it does not recognise while you type.
-- Form field values and note text are checked as you type, in the dictionary you chose.
-- A new **Spelling** panel, under the Edit tool, checks page text, comments and form field values.
-- Misspellings are grouped by word, with a count, and selecting one offers suggestions.
-- **Change** corrects one occurrence; **Change all** corrects every occurrence of that word, and says per occurrence what happened.
-- A correction keeps the styling of the word it replaces and leaves the rest of the page untouched.
-- Every correction is one ordinary undo step.
-- Words can be ignored for the session, or added to your own dictionary, honoured by every later check.
-- **34 dictionaries ship with the app** and work with no connection: Arabic, Catalan (and Valencian), Czech, Danish, German (Germany, Austria, Switzerland), Greek, English (US, UK, Australia, Canada, South Africa), Spanish (Spain, Mexico), French, Hebrew, Hungarian, Italian, Norwegian (Bokmål and Nynorsk), Dutch, Polish, Portuguese (Brazil and Portugal), Romanian, Russian, Slovak, Slovenian, Swedish (Sweden and Finland), Turkish and Ukrainian.
-- Which dictionary is used follows the document's own stated language, then the interface language — or you can pick one.
-- **Add a dictionary…** brings in any Hunspell `.aff` and `.dic` pair from disk, for a language not listed.
-- Words in capitals and words containing numbers are skipped by default, and both are switchable.
-- Web addresses, email addresses, file names and version numbers are never offered as misspellings.
-- A paragraph the editor cannot open is reported as unchecked rather than listed with corrections that could not be applied.
+### Spell Check
+- **As-you-type underlining** — paragraph editor, form field values, and note text, in the chosen dictionary
+- **Spelling panel** (under the Edit tool) — checks page text, comments, and form field values; misspellings grouped by word with counts; suggestions on selection
+- **Corrections** — Change fixes one occurrence; Change all fixes every occurrence and reports per occurrence; corrections keep the replaced word's styling, leave the rest of the page untouched, and are each one undo step
+- **Ignore and custom dictionary** — ignore for the session or add to your own dictionary, honored by every later check
+- **34 offline dictionaries ship** — Arabic, Catalan (and Valencian), Czech, Danish, German (Germany, Austria, Switzerland), Greek, English (US, UK, Australia, Canada, South Africa), Spanish (Spain, Mexico), French, Hebrew, Hungarian, Italian, Norwegian (Bokmål and Nynorsk), Dutch, Polish, Portuguese (Brazil and Portugal), Romanian, Russian, Slovak, Slovenian, Swedish (Sweden and Finland), Turkish, Ukrainian
+- **Dictionary selection** — document's stated language, then interface language, or an explicit pick; **Add a dictionary…** loads any Hunspell `.aff`/`.dic` pair from disk
+- **Skip rules** — all-caps words and words with numbers skipped by default (both switchable); URLs, email addresses, file names, and version numbers never flagged
+- **Unopenable paragraphs** — reported as unchecked rather than listed with inapplicable corrections
 
-### Reading a document out loud
-- **View ▸ Read Out Loud** speaks the current page, or reads from it to the document's end.
-- A transport bar appears while it reads: play, pause, stop, and step back or forward a sentence.
-- The voice and the reading speed are chosen in the bar itself, and both are remembered.
-- Voices are the ones installed on your computer, so a voice you already use elsewhere is available here.
-- The paragraph, the sentence and the word being spoken are each highlighted on the page.
-- The view follows the reading, turning to the next page on its own.
-- A tagged document is read in the order its author declared, not the order text sits on the page.
-- The bar says which of the two orders is in use.
-- Page headers, footers and other page furniture marked as such by the document are not read out.
-- Sentences are found using the document's own stated language where it has one.
-- Ctrl+Shift+V reads the page, Ctrl+Shift+B reads to the end of the document.
-- Ctrl+Shift+C pauses and resumes, Ctrl+Shift+E stops, and Esc closes the bar.
-- A page with no readable text says so and points at Scan & OCR instead of reading nothing.
+### Read Out Loud
+- **View ▸ Read Out Loud** — speaks the current page or reads from it to document end; transport bar with play, pause, stop, sentence step back/forward
+- **Voice and speed** — chosen in the bar, both remembered; voices are the system-installed ones
+- **Highlighting and follow** — paragraph, sentence, and word each highlighted; the view turns pages on its own
+- **Tagged reading order** — tagged documents read in the author's declared order, not page layout order; the bar states which order is in use; page furniture marked as such is not read
+- **Language-aware sentences** — sentence boundaries use the document's stated language where present
+- **Shortcuts** — Ctrl+Shift+V reads the page, Ctrl+Shift+B reads to end, Ctrl+Shift+C pauses/resumes, Ctrl+Shift+E stops, Esc closes the bar
+- **No-text pages** — say so and point at Scan & OCR instead of reading nothing
 
-### Copying a region of a page as a picture
-- A **Snapshot** tool: drag a rectangle over a page and that region goes to the clipboard as an image.
-- Paste it straight into a document, a message or a presentation.
-- The capture is taken at a fixed resolution, not at whatever zoom the page happens to be shown at.
-- That resolution is a preference, under General, and starts at 150 pixels per inch.
-- The captured rectangle stays on the page with its pixel size.
-- **Save image…** writes the same picture to a PNG file.
-- The clipboard receives the picture in two forms, so applications that prefer either one can paste it.
-- The document is never changed by a snapshot.
+### Snapshot
+- **Snapshot tool** — drag a rectangle over a page; the region goes to the clipboard as an image, pasteable anywhere
+- **Fixed resolution** — captured at a preference-set resolution (General, default 150 ppi), not the current zoom; the captured rectangle stays on the page with its pixel size
+- **Save image…** — writes the same picture to PNG
+- **Dual clipboard formats** — two forms so applications that prefer either can paste; the document is never changed
 
-### Cropping to what a page actually draws
-- The Crop & Page Boxes panel gains **Remove white margins**: the page box is set around the page's own content.
-- **Find content** reports how many pages would crop, the widest edge removed, and how many are already tight.
-- **Crop to content** then applies exactly what was measured.
-- A margin to keep around the content can be set in points.
-- A scanned page is measured from its ink, so a photocopy with wide borders crops like a typeset page.
-- A speck of dust in a corner of a scan no longer holds the margin open.
-- Text, drawings, images and visible annotations all count as content; an invisible link or a hidden annotation does not.
-- A blank page is reported and left whole rather than cropped to nothing.
-- Content already outside the visible box is not revealed by cropping.
-- Nothing is deleted: resetting the box brings the margin back.
-- The command line gains `page-box --auto`, with `--margin` and `--preview`.
+### Crop to Content
+- **Remove white margins** (Crop & Page Boxes) — sets the page box around actual content; **Find content** reports how many pages would crop, the widest edge removed, and how many are already tight; **Crop to content** applies exactly what was measured
+- **Keep margin** — settable in points
+- **Scan-aware** — scanned pages measured from their ink, so wide-bordered photocopies crop like typeset pages; corner dust specks no longer hold the margin open
+- **What counts** — text, drawings, images, visible annotations; invisible links and hidden annotations do not
+- **Safety** — blank pages reported and left whole; content already outside the visible box is not revealed; nothing deleted — resetting the box restores the margin
+- **CLI** — `page-box --auto` with `--margin` and `--preview`
 
 ## 1.0.26
 
 *Released 2026-08-08*
 
-### Knowing what resolution a document's images are
-- Document Properties ▸ Advanced gains an **Images** row: how many images the document draws, and at what effective resolution.
-- The figure is measured: an image's resolution is its pixels over the space it is placed in.
-- The same picture drawn twice at different sizes therefore reports two resolutions, not one.
-- A document whose images share one resolution says so; a spread reports its lowest, its highest and its middle value.
-- A tilted image is measured by the edges it is drawn at, so its resolution is not understated.
-- An image whose placement collapses to nothing is counted apart rather than folded into the figures.
-- A document read from paper says so, with how many of its pages are scans.
-- The Compress panel shows the same summary above its resolution control.
-- A downsample target is then chosen against the resolution the document actually has.
-- A document that draws no images says that, instead of reporting a resolution it has none of.
+### Image Resolution Reporting
+- **Document Properties ▸ Advanced ▸ Images** — image count and effective resolution, measured as pixels over placed space; the same picture drawn twice at different sizes reports two resolutions
+- **Statistics** — uniform-resolution documents say so; a spread reports lowest, highest, and middle values; tilted images measured by their drawn edges so resolution is not understated; zero-area placements counted apart
+- **Scan detection** — a document read from paper says so, with the scanned page count
+- **Compress integration** — the same summary appears above the Compress panel's resolution control, so downsample targets are chosen against the actual resolution; no-image documents say so instead of reporting a resolution they lack
 
-### Compressing and optimizing in one pass
-- The Compress panel gains **Then optimize the result**: compression, then the optimize pass over what it produced.
-- The two run as separate operations, each with its own line in the operation queue.
-- The result reports both halves: the compression figures, then the size after optimizing and the total reduction.
-- If optimizing fails, the message says the compressed file was still written, and why the second step did not finish.
+### Compress Then Optimize
+- **Then optimize the result** (Compress panel) — compression followed by the optimize pass, as two separate queue operations; the result reports both halves (compression figures, post-optimize size, total reduction)
+- **Partial failure** — if optimizing fails, the message states the compressed file was still written and why the second step did not finish
 
 ### Fixes
-- Cropping by dragging a rectangle on the page now works in the document view, where the drag committed nothing.
-- The drawn rectangle stays on the page as a dashed mark of the region to keep.
-- The Top/Bottom/Left/Right margins in the Crop & Page Boxes panel fill in from it.
-- Drawing an article box on the page adds it to the selected article, the same way.
-- Large photographic scans now finish compressing, instead of running for hours and ending with nothing.
-- Pages that are more picture than type no longer go to the stencil compressor they made grow without limit.
-- Such pages are compressed on their own, which is faster and, on those pages, smaller.
-- Compression never abandons a run over a slow page.
-- A part of the stencil compression that runs long falls back to a simpler, faster method.
-- The result says how many pages that happened to.
-- The Optimize operation now reads as **Optimize** in the operation queue rather than a raw internal name.
-- Running the same operation on the same document twice now writes the same file, byte for byte.
+- **Crop-by-drag in the document view** — the drag now commits (it previously did nothing); the rectangle stays as a dashed keep-region mark and fills the Crop & Page Boxes margin fields; drawing an article box adds it to the selected article the same way
+- **Large photographic scan compression** — finishes instead of running for hours and producing nothing; picture-heavy pages no longer go to the stencil compressor they made grow without limit, and are compressed on their own path (faster, and smaller on those pages); long-running stencil work falls back to a simpler, faster method, with the result reporting how many pages that happened to; compression never abandons a run over a slow page
+- **Operation queue label** — the Optimize operation reads as **Optimize**, not a raw internal name
+- **Deterministic output** — running the same operation on the same document twice writes the same file, byte for byte
 
 ## 1.0.25
 
 *Released 2026-08-08*
 
-### Navigation the document already implies
-- The Bookmarks pane gains **From structure…**, which builds an outline from a tagged document's own headings.
-- It counts the headings first and writes the outline only on your word.
-- Each bookmark takes the heading's own text and lands on the heading itself, not merely on the page it starts.
-- Headings nest as written: a sub-heading becomes a child of the heading above it.
-- A document that starts at a lower heading level grows no empty parents.
-- A document with no tags is offered the whole chain: detect its headings, then build.
-- The result says which of the two steps it ran.
-- A document that already has bookmarks is asked whether to replace them or add after; nothing is discarded silently.
-- A heading with no readable text is reported rather than written as an untitled bookmark.
-- **Create links from web addresses** puts a link over every web and email address in the text.
-- Run it over the whole document or a page range.
-- The link covers the address exactly, never a box larger than the text.
-- An address that wraps a line gets a link on each line, not one box across the gap.
-- Text an existing link already covers is left alone and counted, so running it twice changes nothing.
-- Web addresses join the built-in patterns Search & Redact offers.
-- A new **Articles** pane defines a run of boxes across pages and walks them forwards and backwards.
-- The run is saved into the document as a real article thread.
-- The pane says plainly that this viewer follows threads and many other readers ignore them.
-- Command line: `outline-from-structure`, `link-from-urls` (with `--preview` to report and write nothing) and `articles`.
-- Guided actions gain links-from-addresses and bookmarks-from-structure steps, so a whole folder gains its navigation in one run.
+### Navigation
+- **Bookmarks from structure** — Bookmarks pane gains From structure…: builds an outline from a tagged document's headings; counts headings first, writes only on confirmation; each bookmark uses the heading's text and targets the heading itself, not just its page
+- **Heading nesting** — sub-headings become children of the heading above; a document starting at a lower heading level grows no empty parents
+- **Untagged documents** — offered the full chain: detect headings, then build; result reports which steps ran
+- **Existing bookmarks** — replace-or-append prompt; nothing discarded silently; a heading with no readable text is reported, not written as an untitled bookmark
+- **Create links from web addresses** — links every web and email address in the text, whole document or page range; link covers the address exactly, one link per line when an address wraps; text already covered by a link is skipped and counted, so re-runs change nothing
+- **Search & Redact patterns** — web addresses join the built-in patterns
+- **Articles pane** — defines a run of boxes across pages, walks it forwards and backwards, saved as a real article thread; pane states that many other readers ignore threads
+- **CLI** — `outline-from-structure`, `link-from-urls` (`--preview` reports without writing), `articles`
+- **Guided actions** — links-from-addresses and bookmarks-from-structure steps for whole-folder runs
 
-### Straightening, cleaning and righting scanned pages
-- Scan & OCR gains a Scan Enhancement pane: straighten, remove specks, whiten the background and turn sideways pages upright.
-- Every correction is measured on the page and reported before anything is rewritten.
-- The pane states how far the page leans and how many specks it carries.
-- Straightening measures the page's own lean to a hundredth of a degree and turns it back.
-- The page is resampled once however often the tool runs.
-- Speck removal takes only marks that are small, isolated and not part of a picture.
-- A full stop, the dot of an i and a halftone all survive it.
-- Whitening divides the page by the paper it measured, lifting a gutter shadow or an uneven lamp.
-- The ink comes out further from the paper, not merely brightened along with it.
-- Orientation is read by the recognition engine and lands as the page's own rotation, so no pixel moves.
-- A reading the engine is not confident about is reported and not acted on.
-- Only scanned pages are touched; a page set from text is refused by name, never silently skipped.
-- Apply to the whole document or just the page you are on, as one undoable change.
-- A page that is already square, clean and upright is left exactly as it is, bytes and all.
-- Batch OCR can straighten and clean each file before reading it.
-- That is what makes a crooked or sideways scan readable at all.
-- Guided actions gain an enhancement step, so a whole folder can be straightened in one run.
-- An order that enhances a page after something else has read or replaced it is refused.
-- Command line: `enhance-scan`, with `--analyze` to report what a run would do and change nothing, and `ocr-file --enhance`.
+### Scan Enhancement
+- **Scan Enhancement pane** (Scan & OCR) — straighten, despeckle, whiten background, upright sideways pages; every correction measured and reported before rewriting (lean stated to a hundredth of a degree, speck count shown)
+- **Straightening** — measures the page's own lean and turns it back; resampled once regardless of how often the tool runs
+- **Speck removal** — only small, isolated marks not part of a picture; full stops, i-dots and halftones survive
+- **Background whitening** — divides the page by the measured paper, lifting gutter shadows and uneven lighting; increases ink/paper separation rather than brightening both
+- **Orientation** — read by the recognition engine, applied as page rotation so no pixel moves; low-confidence readings reported and not acted on
+- **Scope** — scanned pages only; text-set pages refused by name, never silently skipped; whole document or current page, one undoable change; an already-clean page is left byte-identical
+- **Batch OCR** — can straighten and clean each file before reading; guided actions gain an enhancement step; an enhancement step ordered after a read/replace step is refused
+- **CLI** — `enhance-scan` (`--analyze` reports without changing), `ocr-file --enhance`
 
-### Document Properties: Initial View, Fonts and Advanced
-- Document Properties gains three tabs beside Description and Security.
-- **Initial View** sets how a document opens: page layout, navigation pane, opening page, magnification, reading direction and window options.
-- Page layout offers single page, single page continuous, two-up and two-up with a cover page, continuous or not.
-- The navigation pane can open on bookmarks, page thumbnails, layers or attachments, or not at all.
-- A document can also open full screen.
-- Magnification takes a percentage or fit page, width, height or visible area, and applies to the opening page.
-- The app honours a document's initial view on open: layout, navigation pane, full screen, opening page, percentage magnification and fit-width.
-- A right-to-left reading direction is honoured too, reversing which side of a spread the leading page takes.
-- The window options are hide the toolbar, menu bar or window controls, resize or centre the window, and title-bar text.
-- They are written for other readers, and the panel says so rather than implying an effect.
-- A document that opens by running a script keeps it: setting an opening page is refused by name.
-- A window option turned off removes the setting rather than writing a negative one.
-- A document only ever carries what departs from the default.
-- **Fonts** lists every font the document uses, grouped by type, with its encoding, page count and whether it is embedded.
-- Fonts are found wherever they hide: nested artwork, comment appearances, glyph procedures and a form's default appearance.
-- A font that is not in the file names the face this app actually substitutes for it.
-- **Advanced** reports PDF version, fast web view, whether the document is tagged, its page count and where the file lives.
-- It also reports page sizes with their standard paper names, and whether an open action and search index are recorded.
-- Advanced also sets the trapped flag and the base URL that relative links in the document resolve against.
-- Changes on both tabs are ordinary undoable edits to the open document.
-- A document with live signatures warns or refuses first, as every other structural edit does.
+### Document Properties
+- **Initial View tab** — page layout (single, single continuous, two-up, two-up with cover, continuous or not), navigation pane (bookmarks, thumbnails, layers, attachments, none), opening page, magnification (percentage or fit page/width/height/visible), reading direction, full screen, window options
+- **Honoured on open** — layout, navigation pane, full screen, opening page, percentage magnification, fit-width; right-to-left reading direction reverses the leading page of a spread
+- **Window options** — hide toolbar/menu bar/window controls, resize/centre window, title-bar text; written for other readers, and the panel says so; turning an option off removes the setting rather than writing a negative; only departures from defaults are stored
+- **Script-opened documents** — setting an opening page on a document that opens by running a script is refused by name
+- **Fonts tab** — every font used, grouped by type, with encoding, page count and embedded status; found in nested artwork, comment appearances, glyph procedures and a form's default appearance; a non-embedded font names the actual substitute face
+- **Advanced tab** — PDF version, fast web view, tagged status, page count, file location, page sizes with standard paper names, open action and search index presence; sets the trapped flag and base URL for relative links
+- **Edit semantics** — changes on both tabs are ordinary undoable edits; live signatures warn or refuse first
 
-### Watermarking with a page of another PDF
-- A watermark is now text, a picture, or a page of another PDF, and the panel offers all three.
-- A letterhead, a pre-drawn stamp or a vector logo can be stamped straight from the PDF it lives in.
-- The page is placed as artwork, not as a picture: its lines and its type stay sharp at any size.
-- Pick which page of the source to use; the first is the default.
-- The source page is stored once in the document, however many pages carry it.
-- The source page's own rotation is honoured, so it lands the way its own reader sees it.
-- Anything the source page shows as a comment or a filled field is stamped along with it.
-- Opacity applies to the whole artwork at once, so overlapping shapes in it do not darken where they cross.
-- Scale, position, margin, tiling, angle, over-or-behind and the page selection all work as they do for the other two sources.
-- Choosing a PDF in the picture picker says so, and points at the PDF source.
-- A document cannot be its own watermark source, and the source cannot be the file being written.
-- A missing, empty, password-protected, page-less or unreadable source is refused by name, as is a page number past the end.
-- Command line: the `watermark` command takes `--pdf-source` with `--pdf-page`.
-- Guided actions can stamp a page of another PDF, and refuse a step that names more than one source.
+### Watermarks
+- **PDF-page watermark** — a watermark is now text, a picture, or a page of another PDF; the page is placed as artwork, not rasterized, so lines and type stay sharp at any size
+- **Source page** — pick any page (first is default), stored once regardless of how many pages carry it; source rotation honoured; comments and filled fields on the source are stamped with it
+- **Opacity** — applies to the whole artwork at once, so overlapping shapes do not darken where they cross
+- **Options** — scale, position, margin, tiling, angle, over/behind, page selection all work as for the other sources
+- **Refusals** — a document cannot watermark itself, the source cannot be the output file; missing, empty, password-protected, page-less or unreadable sources and out-of-range page numbers refused by name
+- **CLI** — `watermark --pdf-source` with `--pdf-page`; guided actions can stamp a PDF page and refuse a step naming more than one source
 
 ### Fixes
-- Editing the outline no longer flattens every positioned bookmark in the document to a whole page.
-- A bookmark's stored position and zoom now survive the edit.
+- **Outline editing** — no longer flattens positioned bookmarks to whole pages; stored position and zoom survive the edit
 
 ## 1.0.24
 
 *Released 2026-08-07*
 
-### Watermarking with a picture
-- A watermark is now text or a picture, and the panel offers both.
-- Any picture Create PDF accepts can be stamped, chosen through a file picker.
-- The picture is stored once in the document, however many pages carry it.
-- Scale sets how large it goes; 1 fills the page without crowding it, and it sizes a text watermark too.
-- Position places it in the middle or against any edge or corner, with a margin.
-- Tiling repeats the stamp across the whole page, with a gap you set.
-- Position and tiling apply to text watermarks too, and the old placement is still the default.
-- Opacity, angle, over-or-behind and the page selection work as they did.
-- A picture with several frames stamps the first, and says how many it held.
-- A watermark now reads level on a rotated page instead of lying on its side.
-- A watermark on a rotated page no longer shrinks to fit the page's other dimension.
-- Command line: `watermark --image`, with `--scale`, `--position`, `--margin`, `--tile` and `--tile-gap`.
-- Guided actions can stamp a picture, and refuse a step that names both a text and a picture.
+### Image Watermarks
+- **Picture watermarks** — any picture Create PDF accepts, via file picker; stored once in the document regardless of page count
+- **Scale** — 1 fills the page without crowding; also sizes text watermarks
+- **Position and tiling** — centre, any edge or corner with margin; tiling repeats across the page with a set gap; both apply to text watermarks too, old placement remains the default
+- **Multi-frame images** — first frame stamped, frame count reported
+- **Rotated pages** — watermark now reads level instead of sideways, and no longer shrinks to the page's other dimension
+- **CLI** — `watermark --image` with `--scale`, `--position`, `--margin`, `--tile`, `--tile-gap`; guided actions can stamp a picture and refuse a step naming both text and picture
 
-### Splitting a document four ways
-- Split still takes page ranges, and now also a page count, a maximum file size, or top-level bookmarks.
-- Every N pages writes as many files as it takes, the last one holding the remainder.
-- Splitting by size measures each file as it is really written, so the limit is the size on disk.
-- A page larger than the limit on its own gets a file of its own, and is reported.
-- Splitting at bookmarks writes one file per top-level bookmark, from that bookmark to the next.
-- Each file is named after the bookmark it starts at, with a name the filesystem accepts.
-- Pages ahead of the first bookmark are kept, in a file named after the document.
-- A document with no top-level bookmarks says so before you run it, and refuses by name if you do.
-- Form fields survive every mode: each output carries the fields its own pages own, and no others.
-- Command line: `split --mode every-n|size|bookmarks`, with the option each mode needs and a refusal for the ones it does not.
+### Split
+- **Four modes** — page ranges, every N pages, maximum file size, top-level bookmarks
+- **By size** — measured as actually written, so the limit is size on disk; a single page over the limit gets its own file and is reported
+- **By bookmarks** — one file per top-level bookmark, named after the bookmark (filesystem-safe); pages ahead of the first bookmark kept in a file named after the document; a document with no top-level bookmarks says so up front and refuses by name
+- **Form fields** — survive every mode; each output carries only the fields its own pages own
+- **CLI** — `split --mode every-n|size|bookmarks`, with each mode's option and refusals for the others
 
-### Converting text and strokes to outlines
-- The flattener converts all text to outlines, replacing each glyph with the font's own shape at the same place.
-- It converts all strokes to outlines, replacing each line with the shape the pen covered.
-- Either conversion runs on its own, on a document with no transparency at all.
-- The panel says, before anything is written, how many text runs and stroked paths would convert.
-- It states plainly that converted text can no longer be selected, searched or extracted.
-- Text whose font the document does not embed takes its shapes from a bundled face the panel names.
-- A font whose glyphs are program code rather than shapes is refused by name, never skipped in silence.
-- A line with no width is refused by name, and Fix Hairlines is the tool that gives it one.
-- Dashes are preserved by cutting the line into its dashes before each one is outlined.
-- Line joins, caps, the miter limit and dotted patterns all come through as drawn.
-- Text used as a clipping shape still clips, and invisible text is removed rather than left behind.
-- Text inside reused page pieces converts without touching the other pages that share them.
-- Command line: `outlines-list` reports what would convert, and `flatten` takes both conversions.
+### Text and Stroke Outlining
+- **Text to outlines** — replaces each glyph with the font's own shape in place; **strokes to outlines** replaces each line with the shape the pen covered; either runs alone, even on a document with no transparency
+- **Preview** — counts of text runs and stroked paths reported before writing; panel states converted text can no longer be selected, searched or extracted
+- **Non-embedded fonts** — shapes taken from a named bundled face; a font whose glyphs are program code is refused by name; a zero-width line is refused by name (Fix Hairlines gives it one)
+- **Fidelity** — dashes cut into segments before outlining; joins, caps, miter limit and dot patterns preserved; clipping text still clips; invisible text removed; text in reused page pieces converts without touching sharing pages
+- **CLI** — `outlines-list` reports, `flatten` takes both conversions
 
-### Reviewing tables before a spreadsheet
-- Find the tables on a page and see each one drawn on the document itself.
-- Every table is shown with its column boundaries and its rows.
-- A table is included or left out one by one, and nothing is included by default.
-- Drag a table's frame to change what it covers.
-- Drag a column rule to move a boundary, and the cells follow it.
-- Double-click inside a table to add a boundary, or on a rule to remove it.
-- The spreadsheet is written from the tables you kept, at the geometry you left them.
-- Text no table claimed can still be carried to its own sheet.
-- Lines outside every table and text written down the page are counted before you export.
-- The review writes nothing to the document, whatever you change.
-- Export to Excel offers the review, and exporting without it works exactly as before.
+### Table Review Before Export
+- **On-page table review** — tables found on a page drawn on the document with column boundaries and rows; nothing included by default, each table opted in individually
+- **Editing** — drag the frame to change coverage, drag a column rule to move a boundary, double-click to add or remove one
+- **Export** — spreadsheet written from kept tables at the geometry left; unclaimed text can go to its own sheet; out-of-table lines and down-page text counted before export; the review never writes to the document
+- **Availability** — offered from Export to Excel; exporting without review unchanged
 
 ### Fixes
-- Extracting a portfolio member named after a reserved device name now writes a real file.
-- An over-long portfolio member name is shortened to one the filesystem accepts, rather than failing.
+- **Portfolio extraction** — a member named after a reserved device name now writes a real file; over-long member names shortened to filesystem-acceptable rather than failing
 
 ## 1.0.23
 
 *Released 2026-08-07*
 
-### Print production
-- A new Print Production tool holds preflight, colour conversion, and the two new ink tools.
-- Output Preview renders the pages you are reading as separations, on the document itself.
-- Overprint is simulated, which no screen rendering of a page can show.
-- Every ink switches off and on, and the page redraws without rendering again.
-- The heaviest pixel's total ink is reported, with an editable limit and an on-page highlight.
-- Per-ink page coverage is shown for what it is: an average over the whole page.
-- Ink Manager shows one spot colour as another, then rewrites the document so both print on one plate.
-- Aliasing two inks that describe different colours is refused until you accept the change.
-- A spot converts to process exactly, through its own tint transform, in fills, strokes, images, gradients and patterns.
-- Ink density and print sequence are offered as what they are: settings of the application, not of the file.
-- Add Printer Marks draws crop marks, registration targets, colour bars and page information outside the trim.
-- The page grows to hold them and the crop box grows with it, so no viewer clips the marks away.
-- The trim, bleed and art boxes never move, and removing the marks restores every box exactly as it was.
-- Marks print in registration colour, so they land on every plate rather than on the black one alone.
-- The colour bar carries process solids and tints, an overprint pair, and every spot in the document.
-- Page information is drawn with an embedded font, in the document's own conventions.
-- Western and Japanese mark styles, three stroke weights, and a stated growth before anything is written.
-- A document with no trim box is marked against its crop or media box, and the panel says which.
-- Fix Hairlines finds strokes too thin to survive printing and raises them to a width that does.
-- Thinness is measured as the width the device draws, so a wide stroke under a small scale is found too.
-- A zero-width stroke is always a hairline, and the correction lands on the device width whatever the transform.
-- Annotation and form-field borders are included, and a border width of zero is left alone because it means no border.
-- The count and the widths found are reported before anything is rewritten.
-- Preflight gains a hairline row, reading the same measurement the fix uses.
-- Preflight now finds fonts and colorants used only inside patterns, shadings, images or annotations.
-- Flattener Preview marks, on the page itself, which objects a transparency flatten would rasterize.
-- Transparent objects, what sits under them, and every object a region would take in are counted and highlighted per category.
-- Flattening rasterizes only those regions: text and vectors outside them stay live text and live vectors.
-- Region edges land on whole device pixels, so flattened and live content meet without a seam.
-- A raster/vector balance decides how far regions merge — fewer seams at one end, more live content at the other.
-- The regions rasterize at a resolution you choose, and a request too large to render is refused rather than attempted.
-- A page with no transparency is reported as such and left exactly as it was.
-- Trap Presets authors named presets over the standard in-RIP trapping parameters and assigns them to page ranges.
-- Every parameter carries its type, range and default; a value outside its range is refused.
-- Per-ink overrides are supported; a preset naming an unused ink warns rather than refuses.
-- Exporting to PostScript writes each range's parameters into that page's own setup, where a press that traps reads them.
-- The trapping declaration stays "unknown" until stated; assigning a preset never claims a document is trapped.
-- PDF/X masters no longer declare every document untrapped; the declaration is yours to make.
-- On the command line as `printer-marks`, `printer-marks-remove`, `printer-marks-list`, `hairlines-list`, `hairlines-fix`, `flatten-list`, `flatten`, `trap-fields`, `trap-list`, `trap-assign` and `export-postscript`.
+### Print Production
+- **Print Production tool** — houses preflight, colour conversion, and the new ink tools
+- **Output Preview** — renders open pages as separations on the document itself, with overprint simulation; each ink toggles without re-rendering; heaviest pixel's total ink reported with an editable limit and on-page highlight; per-ink coverage shown as the whole-page average it is
+- **Ink Manager** — aliases one spot colour to another so both print on one plate; aliasing inks describing different colours refused until accepted; spot-to-process conversion uses the ink's own tint transform in fills, strokes, images, gradients and patterns; density and print sequence presented as application settings, not file settings
+- **Add Printer Marks** — crop marks, registration targets, colour bars, page information outside the trim; page and crop box grow to hold them, trim/bleed/art boxes never move, removal restores every box exactly; marks in registration colour so they land on every plate; colour bar carries process solids and tints, an overprint pair, and every document spot; page information drawn with an embedded font; Western and Japanese styles, three stroke weights, growth stated before writing; no trim box → marked against crop or media box, and the panel says which
+- **Fix Hairlines** — finds strokes too thin to print and raises them to a surviving width; thinness measured as device-drawn width, so a wide stroke under a small scale is caught; zero-width is always a hairline; annotation and form-field borders included (zero border width means no border, left alone); count and widths reported before rewriting; preflight gains a hairline row using the same measurement
+- **Preflight** — now finds fonts and colorants used only inside patterns, shadings, images or annotations
+- **Flattener Preview** — marks on the page which objects a transparency flatten would rasterize; transparent objects, what sits under them, and objects a region would absorb counted and highlighted per category; only regions rasterize, content outside stays live; region edges land on whole device pixels so flattened and live content meet seamlessly; raster/vector balance controls region merging; rasterization resolution chosen, with over-large requests refused; a page with no transparency reported and left untouched
+- **Trap Presets** — named presets over standard in-RIP trapping parameters, assigned to page ranges; every parameter typed with range and default, out-of-range values refused; per-ink overrides supported, presets naming unused inks warn; PostScript export writes each range's parameters into that page's setup; trapping declaration stays "unknown" until stated — assigning a preset never claims a document is trapped; PDF/X masters no longer declare every document untrapped
+- **CLI** — `printer-marks`, `printer-marks-remove`, `printer-marks-list`, `hairlines-list`, `hairlines-fix`, `flatten-list`, `flatten`, `trap-fields`, `trap-list`, `trap-assign`, `export-postscript`
 
-### Preparing forms
-- A new signature field can carry the form fields it locks, chosen from the document's own list.
-- Whoever signs that field is bound by the lock without asking for one.
-- Prepare Form lists the document's signature fields and edits the lock on any unsigned one.
-- A signed field's lock is shown but cannot be changed.
-- Detected signature fields can lock the fields being created alongside them.
-- On the command line as `forms --sig-field NAME --lock` and `--clear-lock`.
+### Forms
+- **Signature field locks** — a new signature field can carry the form fields it locks, chosen from the document's list; whoever signs is bound without being asked; Prepare Form lists signature fields and edits the lock on any unsigned one (a signed field's lock is shown read-only); detected signature fields can lock fields created alongside them
+- **CLI** — `forms --sig-field NAME --lock` and `--clear-lock`
 
-### Exporting a folder
-- Export a Folder converts every PDF under a folder to a chosen format in one run.
-- All eleven export targets are offered: Word, rich text, OpenDocument, HTML, XHTML, plain text, spreadsheet, presentation, PNG, JPEG and TIFF.
-- Outputs land in a destination folder at the same place in the tree, with the target's extension.
-- Each target's own options are offered, and only the ones it accepts are sent.
-- A document the chosen format cannot be produced from is reported against its own row; the run continues.
-- The originals are never changed and never opened.
-- A run log records each file, what it produced, and why anything was skipped.
-- Guided actions gain export steps, so watched folders and scheduled runs can export too.
-- On the command line as `export-folder`.
+### Export a Folder
+- **Folder export** — converts every PDF under a folder to one of eleven targets: Word, rich text, OpenDocument, HTML, XHTML, plain text, spreadsheet, presentation, PNG, JPEG, TIFF
+- **Behaviour** — outputs mirror the tree in a destination folder with the target's extension; each target's own options offered, only accepted ones sent; a file the format cannot be produced from is reported on its row and the run continues; originals never changed or opened; run log records each file's outcome and skip reasons
+- **Automation** — guided-action export steps for watched folders and schedules; CLI `export-folder`
 
-### Windows contrast themes
-- The app now responds to the Windows contrast themes setting.
-- Documents are never recoloured: pages, annotations, their text and thumbnails keep their own colours.
-- That protection no longer depends on which app theme is picked; it applies at all times.
-- The window's own chrome follows the system palette, which is what the setting asks for.
-- Selected tools and pressed toolbar buttons show as selected in the system's own highlight colour.
-- Buttons, text fields and lists regain their outlines, so a control is visible as a control.
-- Toolbar and menu separators, and a panel's status box, keep their edges.
-- Colour swatches keep the colour they are offering, with an outline so they still read as buttons.
-- Translucent window bars turn solid, as a contrast theme expects.
-- Preferences says the system palette is in control, and remembers the theme you chose untouched.
+### Windows Contrast Themes
+- **Contrast theme support** — window chrome follows the system palette; documents never recoloured (pages, annotations, text, thumbnails keep their colours, regardless of app theme)
+- **Controls** — selected tools and pressed buttons use the system highlight; buttons, text fields and lists regain outlines; toolbar/menu separators and status boxes keep edges; colour swatches keep their colour with an outline; translucent bars turn solid
+- **Preferences** — states the system palette is in control; the chosen theme is remembered untouched
 
 ### Languages
-- The interface is available in English, Spanish, French, German, Italian, Brazilian Portuguese, Japanese, Simplified Chinese, Traditional Chinese, Korean, Dutch, Danish, Swedish, Norwegian Bokmål, Finnish, Russian, Ukrainian, Polish, Czech, Slovak, Turkish, Hungarian, Greek, Romanian, Slovenian, Catalan, Arabic and Hebrew.
-- Russian, Ukrainian, Polish, Czech and Slovak counts carry all four number forms, with matching agreement.
-- Spanish, French, Italian and Portuguese counts in the millions now read in that language, not English.
-- Symbol search matches an uppercase I whatever regional format the computer is set to.
-- Tool search results sort by the alphabet of the language on screen.
-- Traditional Chinese is written for Taiwan, not a character conversion of the Simplified translation.
-- Korean and Chinese counts take one form, as those languages do, rather than an invented singular and plural.
-- Turkish and Hungarian counts keep the noun in its plain form after a numeral, which is how those languages count.
-- Turkish and Hungarian never attach an ending to a file or field name, so endings always agree.
-- Korean never attaches a particle to a file or field name, for the same reason.
-- Romanian counts insert "de" above nineteen, the way Romanian is written.
-- Slovenian counts use the dual for exactly two, alongside its singular, few and plural forms.
-- Greek headings uppercase without their accents, as Greek is set in capitals.
-- A Traditional Chinese, Hong Kong or Macau system opens in Traditional Chinese.
-- In Arabic and Hebrew the whole interface reads right to left: panels, toolbars, lists and dialog buttons all change sides.
-- The page itself never flips, whatever language the interface is in.
-- Resize handles keep the corner you grabbed, and rulers still measure from the page origin.
-- Arabic counts carry all six number forms, including the dual and the three-to-ten plural.
-- Hebrew counts carry its singular, dual and plural forms.
-- Arabic page numbers use the same digits the document draws on its pages.
-- File paths, keyboard shortcuts and page ranges stay readable inside right-to-left sentences.
-- A system set to Hebrew under the older "iw" language code now opens in Hebrew.
-- A page range past the last page is refused fully in the language on screen.
+- **27 interface languages** — English, Spanish, French, German, Italian, Brazilian Portuguese, Japanese, Simplified Chinese, Traditional Chinese, Korean, Dutch, Danish, Swedish, Norwegian Bokmål, Finnish, Russian, Ukrainian, Polish, Czech, Slovak, Turkish, Hungarian, Greek, Romanian, Slovenian, Catalan, Arabic, Hebrew
+- **Plural systems** — Russian, Ukrainian, Polish, Czech, Slovak carry all four number forms with agreement; Arabic all six forms including dual and 3–10 plural; Hebrew singular, dual and plural; Slovenian dual for exactly two; Korean and Chinese take one form; Romanian inserts "de" above nineteen
+- **Grammar rules** — Turkish and Hungarian keep the noun in plain form after a numeral and never suffix file or field names; Korean never attaches a particle to file or field names; Greek headings uppercase without accents
+- **Romance-language counts** — Spanish, French, Italian, Portuguese millions read in that language, not English
+- **Traditional Chinese** — written for Taiwan, not converted from Simplified; Hong Kong and Macau systems open in Traditional Chinese
+- **Right-to-left interfaces** — Arabic and Hebrew mirror panels, toolbars, lists and dialog buttons; the page itself never flips; resize handles keep the grabbed corner, rulers measure from the page origin; file paths, shortcuts and page ranges stay readable inside RTL sentences; Arabic page numbers use the document's own digits
+- **Locale fixes** — symbol search matches an uppercase I regardless of regional format; tool search sorts by the on-screen language's alphabet; a system using the older "iw" Hebrew code opens in Hebrew; out-of-range page refusals are fully localized
 
 ### Security
-- The bundled PDF rendering library is updated past GHSA-hq66-cqwq-w95j, where opening a crafted document could run arbitrary code.
-- A build-time test dependency is updated past a reported denial-of-service vulnerability.
+- **Rendering library** — updated past GHSA-hq66-cqwq-w95j (crafted document could run arbitrary code)
+- **Build-time test dependency** — updated past a reported denial-of-service vulnerability
 
 ## 1.0.22
 
 *Released 2026-08-06*
 
 ### Signing
-- Lock form fields when you sign: every field, only the ones you choose, or everything except them.
-- Fields are picked from the document's own list, beside the certification options and as `--lock` with `--lock-field`.
-- A signature field prepared with its own locking rule keeps it, and the result says so.
-- Each signature reports what it locks, and separately when a locked field has changed since.
-- Filling a locked field is refused, naming the fields and pointing at saving a copy.
-- Signature verification can also anchor on the system certificate store, off until you turn it on.
-- The purposes each authority is trusted for are respected, and a verified signature names the source that vouched for it.
-- On the command line as `verify-signatures --system-trust` and `sign --system-trust`.
+- **Lock fields on sign** — every field, chosen fields, or everything except them; fields picked from the document's list, beside the certification options; CLI `--lock` with `--lock-field`
+- **Prepared lock rules** — a signature field prepared with its own locking rule keeps it, and the result says so; each signature reports what it locks and, separately, when a locked field changed since
+- **Locked-field fills** — refused, naming the fields and pointing at saving a copy
+- **System trust anchoring** — signature verification can anchor on the system certificate store, off by default; per-authority trust purposes respected; a verified signature names its vouching source; CLI `verify-signatures --system-trust`, `sign --system-trust`
 
-### Folder tools
-- Tools ▸ Prepare Forms in a Folder… works out and creates each form's fields across a folder and its subfolders.
-- Tools ▸ Search & Redact Folder… runs a term, word list or built-in pattern over every PDF in a folder.
-- Neither opens the files: they are read where they sit, and nothing has to be open.
-- Both show what they found before anything is written, as a checkable list with nothing checked for you.
-- Both write into a destination folder by default; redacting or preparing originals in place takes a separate confirmation.
-- Signed documents are decided per file, and a document certified against changes is refused and named.
-- Search & Redact Folder can write redaction marks for later review instead of removing anything.
-- Prepare Forms in a Folder can hand any file to the document view for a closer look.
-- Every run writes a log naming what was written, what was copied unchanged, and what was skipped and why.
-- Both run inside a guided action and on the command line as `prepare-forms` and `search-redact`.
+### Folder Tools
+- **Prepare Forms in a Folder** — detects and creates each form's fields across a folder and subfolders; **Search & Redact Folder** runs a term, word list or built-in pattern over every PDF in a folder
+- **Behaviour** — files read in place, never opened; findings shown as a checkable list with nothing pre-checked; destination folder by default, in-place changes take a separate confirmation; signed documents decided per file, certified-against-changes documents refused and named
+- **Options** — Search & Redact Folder can write redaction marks for later review instead of removing; Prepare Forms can hand any file to the document view; every run logs what was written, copied unchanged, or skipped and why
+- **Automation** — both run in guided actions and as CLI `prepare-forms` and `search-redact`
 
 ### Optimize
-- Optimize opens on a breakdown attributing every byte of a document to one of fourteen categories, largest first.
-- The rows add up to the file size exactly, and the table shows the total so it can be checked.
-- Each row names the setting that addresses it, and only settings that exist.
-- Every finding expands to name the individual objects, with the page each sits on.
-- The breakdown never alters the document, re-runs itself after a change, and is available as `audit-space`.
+- **Space breakdown** — attributes every byte to one of fourteen categories, largest first; rows sum to the file size exactly, with the total shown; each row names the setting that addresses it (only settings that exist); findings expand to individual objects with pages; never alters the document, re-runs after changes; CLI `audit-space`
 
 ### Fixes
-- Filling a form or commenting on a certified document no longer leaves its certification signature reporting incomplete coverage.
-- Updated bundled and build-time dependencies, fixing GHSA-52cp-r559-cp3m, GHSA-h67p-54hq-rp68 and GHSA-mh29-5h37-fv8m in js-yaml and GHSA-67mh-4wv8-2f99 in esbuild.
+- **Certification coverage** — filling a form or commenting on a certified document no longer leaves its certification signature reporting incomplete coverage
+- **Dependencies** — GHSA-52cp-r559-cp3m, GHSA-h67p-54hq-rp68, GHSA-mh29-5h37-fv8m (js-yaml), GHSA-67mh-4wv8-2f99 (esbuild)
 
 ## 1.0.21
 
 *Released 2026-08-06*
 
-### Certifying a document
-- A signature can certify, stating what may change afterwards: nothing, form filling, or form filling and commenting.
-- The choice is written into the document and cannot be changed later, so it is spelled out in full.
-- Certifying works with invisible signatures, visible stamps, signature files, hardware tokens and long-term validation.
-- The Signatures panel and side panel show who certified a document and what the certification allows.
-- An edit within what the certification permits goes through untouched; anything beyond it warns and names what is allowed.
-- A document certified against all changes is not edited here; saving a copy is offered instead.
-- A permission level this version does not recognise is reported as unchecked rather than as a pass or a failure.
-- Command line: `sign --certify --certify-level` (`none`, `form-fill`, `annotate`), and `verify-signatures` reports certification.
-- Fixed: adding a comment or filling a field on a certified or long-term-validated document destroyed the signature.
-- Fixed: filling a field whose on-page box is stored separately reported a valid signed document as tampered with.
-- Fixed: applying redactions to a signed document went ahead without asking, and is now refused on a certified one.
+### Certification
+- **Certifying signatures** — state what may change afterwards: nothing, form filling, or form filling and commenting; the choice is written into the document and cannot be changed later
+- **Compatibility** — works with invisible signatures, visible stamps, signature files, hardware tokens and long-term validation; Signatures panel and side panel show who certified and what is allowed
+- **Enforcement** — permitted edits pass untouched; anything beyond warns and names what is allowed; a document certified against all changes is not edited — saving a copy is offered; an unrecognised permission level reported as unchecked, never as pass or fail
+- **CLI** — `sign --certify --certify-level` (`none`, `form-fill`, `annotate`); `verify-signatures` reports certification
+- **Fixed** — commenting or filling on a certified or long-term-validated document destroyed the signature; filling a field with a separately stored on-page box reported a valid document as tampered; applying redactions to a signed document proceeded without asking (now refused on certified documents)
 
 ### Remove Hidden Information
-- Redact ▸ Remove Hidden Information lists fourteen kinds of content the file carries but does not show.
-- Every category shows a count and opens to name each finding; a category with nothing in it says so.
-- Nothing is removed until you tick it, and the three choices that cost you something are never pre-ticked.
-- Apply reads the document again and shows before and after, so an incomplete clean-up reports what is left.
-- One undo takes the whole pass back.
-- It finds attached files reached through an annotation, which the Attachments panel never saw.
-- It finds content an earlier revision of the file still holds, and removing revisions writes the file out whole.
-- It finds a hidden layer's words, which stay searchable while the layer is merely undrawn.
-- It finds invisible text, text matching its background and text covered by something opaque; partly covered text is kept.
-- A signed document warns first, naming how many signatures the clean-up will break; a certified one says so distinctly.
-- Command line: `audit` prints the report as JSON, and `sanitize --categories …` removes the named categories.
-- Also available as a step in a guided action.
+- **Fourteen categories** of content the file carries but does not show, each with a count and named findings; empty categories say so
+- **Consent model** — nothing removed until ticked; the three costly choices never pre-ticked; Apply re-reads the document and shows before/after, so an incomplete clean-up reports what remains; one undo takes back the whole pass
+- **Coverage** — attachments reached only through annotations; content held by earlier file revisions (removing revisions writes the file whole); hidden layers' searchable text; invisible text, background-matching text, and text covered by something opaque (partly covered text kept)
+- **Signed documents** — warn first, naming how many signatures break; certified documents flagged distinctly
+- **CLI and automation** — `audit` prints the report as JSON, `sanitize --categories …` removes named categories; guided-action step
 
 ### Prepare Form
-- Detect fields turns the rules, boxes, checkboxes and radio buttons on the page into suggestions.
-- Each suggestion is named from the label beside it and typed by its own shape, comb fields included.
-- Suggestions draw in a dashed outline and can be moved, resized, renamed, retyped or discarded first.
-- Nothing is written to the document until you say so, and one undo takes the whole set back out.
-- A page with nothing but an image on it is recognised automatically, within a point of the original.
-- A line with no label, and a region that already carries a field, are reported with a count rather than offered.
-- Command line: `detect-fields` prints what it found as JSON and writes nothing.
+- **Detect fields** — turns page rules, boxes, checkboxes and radio buttons into suggestions, comb fields included; each named from the adjacent label and typed by shape
+- **Review before write** — suggestions draw dashed and can be moved, resized, renamed, retyped or discarded; nothing written until confirmed; one undo removes the whole set
+- **Image-only pages** — recognised automatically, within a point of the original; unlabeled lines and already-fielded regions reported with a count rather than offered
+- **CLI** — `detect-fields` prints findings as JSON, writes nothing
 
 ### Export
-- Export to a spreadsheet finds the tables on the page and writes their cells as a workbook.
-- Tables are read whether fully ruled, ruled only between rows, or drawn with no rules at all.
-- Figures are written as figures, with matching cell formats for thousands, currency, percentages and unambiguous dates.
-- Separators follow the document's own conventions, whichever language the app is running in.
-- A spanning heading comes back as one merged cell, and two tables on a page produce two sheets.
-- Pages with no table, and the count of lines outside a table, are named and can be kept separately.
-- A document with no table anywhere is refused rather than saved as an empty workbook.
-- Export to a presentation writes one slide per page, with real text boxes over the rendered page.
-- Slides take the document's page size unless you pick widescreen or standard, and the export counts what it wrote.
-- Export to plain text writes the document's text in reading order or keeping the layout, optionally with page breaks.
-- Extract Text can save straight to a file instead of only copying to the clipboard.
-- All three have command-line arms, and `extract-text` writes the text directly.
-- Fixed: exporting to XHTML produced an empty file for every document.
+- **Spreadsheet export** — finds tables (fully ruled, row-ruled only, or unruled) and writes cells as a workbook; figures written as figures with cell formats for thousands, currency, percentages and unambiguous dates; separators follow the document's conventions; spanning headings become merged cells; two tables per page produce two sheets; table-less pages and out-of-table line counts named and keepable separately; a document with no tables anywhere refused rather than saved empty
+- **Presentation export** — one slide per page, real text boxes over the rendered page; slides take the document's page size or widescreen/standard; export counts what it wrote
+- **Plain text export** — reading order or layout-preserving, optional page breaks; Extract Text can save straight to a file
+- **CLI** — all three have command-line arms; `extract-text` writes directly
+- **Fixed** — XHTML export produced an empty file for every document
 
 ### Fixes
-- The rotation tooltip on the text toolbar carried a stray internal reference; it reads as a plain sentence now.
+- **Text toolbar** — rotation tooltip carried a stray internal reference; now a plain sentence
 
 ## 1.0.20
 
 *Released 2026-08-05*
 
 ### Redaction
-- Search & Redact marks every occurrence of a term, an imported word list or a built-in pattern in one pass.
-- Built-in patterns cover phone numbers, emails, card numbers, social security numbers, dates, IBANs, NHS and social insurance numbers.
-- Search this document, a range of its pages, or every document you have open.
-- Matching is the same as the find bar's, including match case, whole word and regular expressions.
-- Results group by document and page with nothing ticked to begin with, and clicking a match goes to its page.
-- Numbers carrying a check digit are verified, so the list is not padded with every long number on the page.
-- A match can be marked as found, grown to the whole word containing it, or grown to the whole line.
-- Pages with no searchable text are reported with Scan & OCR one click away.
-- A redaction mark takes a fill colour and drawn text — a FOIA or Privacy Act exemption code, or anything you type.
-- The text takes its own alignment, size and colour, and can repeat to fill the box.
-- Both exemption sets ship with their descriptions, and your own set of codes imports and exports as a file.
-- Marks are stored in the document in the format's own vocabulary, so other PDF programs read them.
-- Redaction now measures every line with the font that drew it, rather than estimating its width.
-- Measurement covers letter and word spacing, stretched text, and rotated, stamped and vertically-set text.
-- The checked area reaches below the baseline, so a mark drawn across descenders covers the line.
-- Where a document gives no usable measurements, redaction deliberately covers more than it needs to and says so.
-- **This affects every earlier release: files you have already redacted are worth re-checking.**
-- Redaction removes exactly the marked characters and leaves the rest of the line where it was.
-- Letters a font draws as one shape, and accents belonging to the letter under them, are kept together.
-- A saved mark that is damaged, or whose page is gone, is now reported by count and page instead of silently skipped.
+- **Search & Redact** — marks every occurrence of a term, imported word list, or built-in pattern in one pass; patterns cover phone numbers, emails, card numbers, social security numbers, dates, IBANs, NHS and social insurance numbers
+- **Scope and matching** — this document, a page range, or every open document; matching identical to the find bar, including case, whole word and regular expressions
+- **Results** — grouped by document and page, nothing pre-ticked; clicking a match navigates; check-digit numbers verified so long numbers do not pad the list; a match can be marked as found or grown to the whole word or line; pages with no searchable text reported with Scan & OCR one click away
+- **Mark appearance** — fill colour and drawn text (FOIA or Privacy Act exemption codes or free text) with its own alignment, size, colour, and repeat-to-fill; both exemption sets ship with descriptions; custom code sets import and export as files; marks stored as standard PDF redaction annotations, readable by other programs
+- **Measurement rewrite** — every line measured with the font that drew it, not estimated: covers letter/word spacing, stretched, rotated, stamped and vertically-set text; checked area reaches below the baseline so descenders are covered; where a document gives no usable measurements, redaction deliberately over-covers and says so
+- **This affects every earlier release: files already redacted are worth re-checking.**
+- **Precision** — exactly the marked characters removed, rest of the line left in place; single-shape ligatures and attached accents kept together; a damaged mark or one on a missing page reported by count and page instead of silently skipped
 
-### Headers, footers and Bates numbering
-- Japanese, Chinese, Korean, Arabic, Hebrew and Persian stamps at any of the six page positions.
-- Right-to-left text is shaped and laid out properly, with page and Bates numbers where the language puts them.
-- A header in one script and a footer in another are handled in a single pass.
+### Headers, Footers and Bates Numbering
+- **CJK and RTL stamps** — Japanese, Chinese, Korean, Arabic, Hebrew and Persian at all six page positions; right-to-left text shaped and laid out properly with numbers where the language puts them; mixed-script header and footer handled in one pass
 
-### Creating a PDF
-- File ▸ Create PDF takes Word, Excel, PowerPoint, OpenDocument, RTF, plain text, CSV, HTML, PostScript and EPS.
-- It also takes images from PNG to HEIC, PDFs you already have, and blank pages, in a list you order yourself.
-- Every row shows what it is and how it converts; a file nothing can convert is marked rather than dropped.
-- Pages keep each source's own geometry, or take a paper size, orientation and margin with nothing stretched.
-- Form fields, links and bookmarks survive the conversion.
-- A scanned image becomes a correctly sized page, because the image's own resolution is read and used.
-- Every page of a multi-page TIFF is kept, in Create PDF and in Batch OCR.
-- HEIC, WebP, JPEG 2000 and AVIF photos are read directly.
-- Conversion is sealed off from the network entirely, and macros are never run.
-- A missing font is named in the result, and a conversion that produced nothing now says so.
+### Create PDF
+- **Sources** — Word, Excel, PowerPoint, OpenDocument, RTF, plain text, CSV, HTML, PostScript, EPS, images from PNG to HEIC, existing PDFs, and blank pages, in a user-ordered list; unconvertible files marked rather than dropped
+- **Page geometry** — each source keeps its own, or takes a paper size, orientation and margin with nothing stretched; a scanned image becomes a correctly sized page from its own resolution
+- **Fidelity** — form fields, links and bookmarks survive; every page of a multi-page TIFF kept (also in Batch OCR); HEIC, WebP, JPEG 2000 and AVIF read directly
+- **Safety** — conversion sealed off from the network; macros never run; missing fonts named in the result; a conversion that produced nothing says so
 
-### Combining files
-- Combine Files takes everything Create PDF takes, converting non-PDF sources as they go in.
-- Every row shows what it is, how it converts and how many pages it will contribute.
-- Each PDF in the list takes a page range like `1-3,5`; fields, links and bookmarks on those pages survive.
-- Combine into a new PDF, or add the pages to the end of a document you already have open.
-- Combine is now available with nothing open.
+### Combine Files
+- **Sources** — everything Create PDF takes, converting non-PDFs on the way in; each row shows type, conversion and page contribution
+- **Page ranges** — each PDF takes a range like `1-3,5`; fields, links and bookmarks on those pages survive
+- **Targets** — a new PDF, or append to an open document; Combine now available with nothing open
 
-### Automating conversion
-- `create-pdf` writes one PDF from any list of sources, with the same page size, margin and resolution choices.
-- `merge` accepts non-PDF inputs, and `batch <folder> create-pdf` converts every convertible file in a folder.
-- "Create PDF from any file" is a guided-action step, valid only as the first step.
+### Automation
+- **CLI** — `create-pdf` writes one PDF from any source list with the same page size, margin and resolution choices; `merge` accepts non-PDF inputs; `batch <folder> create-pdf` converts every convertible file in a folder
+- **Guided actions** — "Create PDF from any file" step, valid only as the first step
 
 ## 1.0.19
 
 *Released 2026-08-04*
 
-### Vertical text
-- Mongolian columns advance left to right, and now list, read and reflow in that order.
-- The direction is read from the text itself, so documents in other vertical scripts are untouched.
-- Edited Mongolian is re-formed so it reads as joined words, using the document's own typeface where it can.
-- Edited text still extracts, searches and copies as the characters that were typed.
-- A number set upright inside a column is part of that column's text and stays exactly one column wide.
-- Commas, brackets and quotation marks take the upright forms the typeface provides for vertical setting.
+### Vertical Text
+- **Mongolian columns** — advance left to right, and now list, read and reflow in that order; direction read from the text itself, so other vertical scripts are untouched
+- **Editing** — edited Mongolian re-formed as joined words using the document's typeface where possible; still extracts, searches and copies as the typed characters
+- **Layout** — an upright number inside a column stays exactly one column wide; commas, brackets and quotation marks take the typeface's upright vertical forms
 
-### Scanned documents
-- Compress gains "Scanned document (MRC)": text, ink colour and paper are separated and stored separately.
-- The words keep the scan's own resolution while the paper compresses hard — roughly a sixteenth of the original.
-- Three settings — Archival, Balanced and Smallest — plus a PDF/A-safe option, each stating what it guarantees.
-- Only scanned pages are touched; every other page is left byte-for-byte alone.
-- A document with no scan in it says so instead of writing a pointless copy.
-- Form fields, comments, links, bookmarks and an existing searchable text layer come through untouched.
-- Optionally each page is read before and after, and a page whose text did not survive keeps its original scan.
-- Available in the Compress panel, Preferences, Batch OCR, the command line, guided actions, watched folders and schedules.
-- Pages using CCITT Group 4, JBIG2 or JPEG 2000 images rendered blank in the viewer and now draw.
-- The same fix restores CJK character encodings, the standard PDF typefaces and CMYK colour profiles.
-- The fixed five-minute limit on compressing, converting and repairing now scales with the document.
+### Scanned Documents
+- **MRC compression** — Compress gains "Scanned document (MRC)": text, ink colour and paper separated and stored separately; text keeps scan resolution while the paper compresses to roughly a sixteenth of the original
+- **Presets** — Archival, Balanced, Smallest, plus a PDF/A-safe option, each stating its guarantee
+- **Scope** — scanned pages only; other pages byte-identical; a document with no scan says so instead of writing a pointless copy; form fields, comments, links, bookmarks and existing text layers untouched
+- **Verification** — optional per-page read before and after; a page whose text did not survive keeps its original scan
+- **Availability** — Compress panel, Preferences, Batch OCR, CLI, guided actions, watched folders, schedules
+- **Rendering fixes** — pages using CCITT Group 4, JBIG2 or JPEG 2000 images rendered blank and now draw; same fix restores CJK character encodings, the standard PDF typefaces and CMYK colour profiles
+- **Timeouts** — the fixed five-minute limit on compressing, converting and repairing now scales with the document
 
-### Language
-- French, German, Italian, Brazilian Portuguese, Japanese and Simplified Chinese join Spanish.
-- Each covers the whole interface, and a language is offered only once its wording is complete.
-- Each language uses the terms its own design, print and PDF software uses, not a literal rendering of the English.
-- Counts inflect where the language inflects them, and punctuation and spacing follow each language's conventions.
-- A PC set to Portuguese or Chinese in any regional spelling opens in that language.
+### Languages
+- **Seven languages** — French, German, Italian, Brazilian Portuguese, Japanese and Simplified Chinese join Spanish; each covers the whole interface, offered only once complete
+- **Terminology** — each language uses its own design, print and PDF software terms, not literal English renderings; counts inflect where the language inflects; punctuation and spacing follow each language's conventions
+- **Detection** — a PC set to Portuguese or Chinese in any regional spelling opens in that language
 
 ## 1.0.17
 
 *Released 2026-08-04*
 
-### Drafting aids
-- The pointer snaps to endpoints, midpoints, centres, intersections and edges, and to markup already placed.
-- Each snap kind switches off on its own, Alt suspends snapping, and Tab steps through the candidates under the cursor.
-- Holding Shift holds a segment to the nearest angle increment, 15° by default and configurable.
-- Rulers along the top and left edges read in the drawing's own units and track the pointer.
-- Drag a guide off a ruler onto the page, move it, or drag it off; guides are never written into the document.
-- A grid spaced in paper units or in real-world units through the drawing scale, with showing and snapping separate.
-- Snapping applies wherever you place something, not only while measuring.
+### Drafting Aids
+- **Object snap** — pointer snaps to endpoints, midpoints, centres, intersections, edges, and existing markup; per-kind toggles, Alt suspends, Tab cycles candidates under the cursor
+- **Angle lock** — Shift holds a segment to the nearest angle increment; 15° default, configurable
+- **Rulers** — top and left edges, in the drawing's own units, tracking the pointer
+- **Guides** — drag off a ruler onto the page, movable, removable; never written into the document
+- **Grid** — spaced in paper units or real-world units via the drawing scale; show and snap are separate toggles
+- **Snap scope** — snapping applies to all placement, not only measuring
 
-### Count and takeoff
-- Count items into named groups: click each item for a numbered marker, and click it again to un-count.
-- Each group has its own colour and symbol, and Ctrl-dragging a box moves markers into the armed group.
-- Tallies are read from the marks themselves, per group and per page.
-- Stamp a legend table onto the page — symbol, group and count per row, with a total.
-- Export the takeoff as CSV, one row per group per page plus a totals row, from the app or the command line.
-- Markers save as ordinary annotations, so a counted drawing opens with its groups and numbering intact anywhere.
+### Count and Takeoff
+- **Count groups** — click to place a numbered marker into a named group, click again to un-count; per-group colour and symbol; Ctrl-drag box moves markers into the armed group
+- **Tallies** — read from the marks themselves, per group and per page
+- **Legend table** — stamp onto the page: symbol, group, count per row, plus total
+- **CSV export** — one row per group per page plus totals row; app and command line
+- **Persistence** — markers save as ordinary annotations; groups and numbering survive in any viewer
 
 ### Symbols
-- A searchable library of vector symbols, in the stamp picker and beside the count groups.
-- Twenty general AEC symbols ship with the app, alongside the counting markers.
-- Load a firm's symbols from a JSON file and export any set back out; an invalid file is refused by name.
-- A placed symbol carries its own artwork inside the document and prints crisply at any size.
-- Placed symbols snap, take the working colour, resize keeping their shape, and move, group and delete like any annotation.
+- **Symbol library** — searchable vector symbols in the stamp picker and beside count groups; 20 general AEC symbols ship with the app
+- **Import/export** — load a firm's symbols from JSON, export any set; invalid files refused by name
+- **Placed symbols** — carry their artwork in the document, print crisply at any size; snap, take the working colour, resize keeping shape, move/group/delete like any annotation
 
 ### Language
-- Spanish: the whole interface, offered only once its wording is complete.
-- Settings ▸ Language chooses System default or a language outright, and the choice is remembered.
-- The interface changes immediately with no restart, and the document you are working on is untouched.
-- Counts, sizes and timestamps are written the way the chosen language writes them.
-- The OCR language list is shown in your interface language, using the names Windows itself uses.
-- Assistive technology is told which language the interface is in.
+- **Spanish interface** — full translation, shipped only once complete
+- **Settings ▸ Language** — System default or explicit choice, remembered; applies immediately, no restart, open document untouched
+- **Locale formatting** — counts, sizes, timestamps follow the chosen language; OCR language list uses Windows's own localized names; assistive technology told the interface language
 
-### Long documents
-- Actual Size and Fit Width mean what they say however many pages a document has.
-- Jumping to a page deep in a long document lands there and holds, and the end reports the last page.
+### Long Documents
+- **Zoom accuracy** — Actual Size and Fit Width correct at any page count
+- **Deep navigation** — jumping to a distant page lands and holds; End reports the last page
 
-### Vertical text
-- A column of vertical text takes a font family, bold and italic, including an installed vertical face.
-- A face with no vertical metrics is refused by name, saying which of the two reasons applies.
-- Text turned a quarter turn belongs to its paragraph and reflows with it, and all four turns edit as paragraphs.
-- A horizontal block set inside a vertical column is not reflowed, and says so.
+### Vertical Text
+- **Vertical columns** — font family, bold, italic, including installed vertical faces; faces without vertical metrics refused by name with the specific reason
+- **Rotated text** — quarter-turned text belongs to its paragraph and reflows with it; all four rotations edit as paragraphs
+- **Limitation** — a horizontal block inside a vertical column is not reflowed, and says so
 
 ### Fixes
-- Deleting a group of images after an undo could silently do nothing; the selection now follows the document.
-- Switching themes applies the theme and its accent colour as one step, so a slower answer cannot overwrite a newer one.
-- Accent-coloured text and focus outlines meet the contrast standard in every theme, including high contrast.
-- Whether a scheduled run is enabled is read from the task itself, so the button is right in any Windows language.
+- **Image group delete after undo** — selection now follows the document instead of silently doing nothing
+- **Theme switching** — theme and accent colour apply as one step; a slower answer cannot overwrite a newer one
+- **Contrast** — accent-coloured text and focus outlines meet the contrast standard in every theme, including high contrast
+- **Scheduled-run toggle** — enabled state read from the task itself; correct in any Windows language
 
 ## 1.0.16 — Deeper image, vector, and paragraph editing
 
 *Released 2026-08-03*
 
 ### Images
-- Edge handles shear a placed image, and rotation and resize compose with it naturally.
-- Shift/Ctrl-click builds a group on a page — move, scale, rotate, align, distribute or delete as one step.
-- Replacing an image fits the new one inside the old frame, and a bare click places at natural size.
-- Each image takes any of the sixteen standard blend modes, plus a draggable linear or radial fade.
-- SVG artwork places as true vector content; files using unsupported features are refused with a stated reason.
+- **Shear** — edge handles shear a placed image; composes with rotation and resize
+- **Groups** — Shift/Ctrl-click builds a group; move, scale, rotate, align, distribute, delete as one step
+- **Replace/place** — replacement fits inside the old frame; a bare click places at natural size
+- **Blend and fade** — all 16 standard blend modes per image, plus draggable linear or radial fades
+- **SVG placement** — places as true vector content; unsupported features refused with a stated reason
 
-### Vector objects
-- A curve's selection box hugs the drawn shape rather than its control points, even under rotation.
-- Paths interleaving colour and transform changes mid-path now move and restyle exactly.
-- Vector objects inside forms within forms edit at any depth, leaving a form's other uses undisturbed.
-- Gradient fills list, move and delete like any other vector object, and deleting removes the definition from the file.
+### Vector Objects
+- **Selection box** — hugs the drawn curve rather than control points, including under rotation
+- **Mid-path styling** — paths interleaving colour and transform changes move and restyle exactly
+- **Nested forms** — vector objects inside forms within forms edit at any depth, leaving other uses undisturbed
+- **Gradient fills** — list, move, delete like any vector object; deleting removes the definition from the file
 
 ### Text
-- Fuller Japanese line-breaking rules for opening brackets, small kana, prolonged-sound marks and leader runs.
-- New text boxes take any rotation, not just quarter turns, turning about their own centre.
-- The paragraph editor checks each character against the font of the span it will actually land in.
-- A paragraph split between the page and an embedded drawing groups and edits as a single paragraph.
+- **Japanese line breaking** — fuller rules for opening brackets, small kana, prolonged-sound marks, leader runs
+- **Free rotation** — new text boxes take any rotation, about their own centre
+- **Font validation** — paragraph editor checks each character against the font of the span it will land in
+- **Split paragraphs** — a paragraph spanning the page and an embedded drawing groups and edits as one
 
 ## 1.0.15
 
 *Released 2026-08-03*
 
 ### Editing
-- Drag either edge of the paragraph editor and the text rewraps; a width no word fits is refused.
-- Splitting a paragraph takes an adjustable gap, dragged or typed, instead of a fixed distance.
-- Backspace at the start merges with the paragraph above and Delete at the end pulls the next one in.
-- An edit already made rides along in the same single undo step instead of being refused.
-- Size, colour and font choices made in the editor apply to the merged result.
-- Pasted text keeps its bold, italics, font class, size and colour; what cannot be represented arrives as plain text.
+- **Paragraph resize** — drag either edge and the text rewraps; a width no word fits is refused
+- **Adjustable split gap** — dragged or typed, replacing the fixed distance
+- **Merge** — Backspace at start merges upward, Delete at end pulls the next paragraph in; a prior edit rides in the same undo step; size/colour/font choices apply to the merged result
+- **Rich paste** — keeps bold, italics, font class, size, colour; unrepresentable content arrives as plain text
 
-### Accessibility and appearance
-- A WCAG 2.1 AA audit sweeps every tool panel, dialog, menu and preference page in all three themes on every test run.
-- A keyboard-operability suite runs alongside it: Tab reaches every region and no dialog traps you.
-- The Windows accent colours every active control, focus ring, link and slider in every theme.
-- Text on accent-coloured buttons picks black or white by measured contrast, hover included.
-- Status greens and ambers are softened in the dark theme, and disabled buttons drop their colour entirely.
-- The light and high-contrast themes are complete throughout, with a theme-consistency audit in the test battery.
+### Accessibility and Appearance
+- **WCAG 2.1 AA audit** — sweeps every panel, dialog, menu, preference page in all three themes on every test run; keyboard-operability suite alongside (Tab reaches every region, no dialog traps)
+- **Windows accent colour** — colours every active control, focus ring, link, slider in every theme; text on accent buttons picks black or white by measured contrast, hover included
+- **Dark theme tuning** — status greens and ambers softened; disabled buttons drop colour entirely
+- **Theme completeness** — light and high-contrast themes complete throughout, with a consistency audit in the test battery
 
-### Scheduling and building
-- Creating a schedule's task folder is guaranteed rather than assumed, proven by a live round-trip every build.
-- The stalled-printer fix is proven with real connections on every test run.
-- `npm run package:unsigned` produces the full installer with no signing key, and the README documents both build paths.
-- The plain-window fallback for remote desktop and transparency-off is exercised live by the test battery.
-- Documentation was corrected where it described retired components or overstated what publishing runs.
+### Scheduling and Building
+- **Schedule task folder** — creation guaranteed, proven by a live round-trip every build
+- **Stalled-printer fix** — proven with real connections every test run
+- **Unsigned build** — `npm run package:unsigned` produces the full installer with no signing key; README documents both build paths
+- **Plain-window fallback** — remote desktop / transparency-off path exercised live by the test battery
+- **Documentation** — corrected where it described retired components or overstated what publishing runs
 
 ## 1.0.14
 
 *Released 2026-08-02*
 
 ### Printing
-- Two documents printed in the same second no longer overwrite one another's work in progress.
-- A stalled print job gives up on its own instead of blocking every later print until a restart.
+- **Same-second collisions** — two documents printed in the same second no longer overwrite each other's work in progress
+- **Stalled jobs** — give up on their own instead of blocking all later prints until a restart
 
 ### Licensing
-- Complete third-party notices for the roughly fifty libraries the bundled recognition engine links ship beside it.
-- Each component is named with its licence and where its source lives.
-- The build refuses to produce an installer if anything shipped is missing its notice.
-- Notices are stored with the source, so building needs no network and produces the same notices every time.
-- The recognition engine's upstream author list ships alongside its licence.
+- **Recognition-engine notices** — complete third-party notices for the roughly fifty linked libraries ship beside it, each named with its licence and source location; upstream author list included
+- **Build gate** — installer refuses to build if anything shipped is missing its notice
+- **Offline notices** — stored with the source; builds need no network and produce identical notices every time
 
-### Building and releasing
-- Publishing runs the application, engine and Windows-layer test suites first and refuses to continue on a failure.
-- It also refuses when the version being published disagrees with the version inside the app.
-- The README setup steps list every component a build needs.
+### Building and Releasing
+- **Publish gates** — publishing runs the application, engine, and Windows-layer test suites first and refuses on failure; also refuses on a version mismatch between the publish and the app
+- **README** — setup steps list every component a build needs
 
-### Windows appearance
-- With transparency effects off, or over a remote desktop session, the app uses its plain window styling.
+### Windows Appearance
+- **Plain styling** — used with transparency effects off or over remote desktop
 
-### Automation and folders
-- A scheduled task's password is handed straight to Windows instead of passing on a command line.
-- A destination differing from the watched folder only by capitalisation is no longer treated as a separate folder.
+### Automation and Folders
+- **Scheduled-task password** — handed straight to Windows, never passed on a command line
+- **Case-insensitive paths** — a destination differing from the watched folder only by capitalisation is the same folder
 
-### Command line
-- `document-js-list` and `document-js-set` read and replace a document's JavaScript.
+### Command Line
+- **`document-js-list` / `document-js-set`** — read and replace a document's JavaScript
 
 ## 1.0.12
 
 *Released 2026-08-02*
 
 ### Text
-- Combining accent marks compose properly when editing, adding text, stamping a watermark or filling a field.
-- Ligatures form where the typeface has them, and the words still copy, search and extract as ordinary letters.
-- Arabic and Hebrew edits are drawn in the document's own font where it can carry them.
-- Size, colour and weight apply to vertical Chinese, Japanese and Korean text.
+- **Combining accents** — compose properly when editing, adding text, stamping a watermark, or filling a field
+- **Ligatures** — form where the typeface has them; words still copy, search, and extract as ordinary letters
+- **Arabic and Hebrew** — edits drawn in the document's own font where it can carry them
+- **Vertical CJK** — size, colour, and weight apply
 
 ### Pages
-- Drag a rectangle in Crop & Page Boxes to mark what to keep; the margins fill in and Apply crops as before.
+- **Crop by rectangle** — drag in Crop & Page Boxes to mark what to keep; margins fill in, Apply crops as before
 
 ## 1.0.11 — Every font, every encoding
 
 *Released 2026-08-02*
 
 ### Text
-- The Add Text card and the paragraph editor list every font installed on this machine.
-- Fonts whose licence forbids embedding are not offered, and the picker says how many were left out.
-- Documents using Shift-JIS, EUC, Big5, GBK, UTF-8, UTF-16 or UTF-32 text open for editing.
+- **Full system font list** — Add Text card and paragraph editor list every installed font; embedding-forbidden fonts excluded, with a count of how many were left out
+- **Legacy encodings** — documents using Shift-JIS, EUC, Big5, GBK, UTF-8, UTF-16, or UTF-32 open for editing
 
 ### Scan & OCR
-- A batch run takes PNG, JPEG, TIFF and BMP files alongside the PDFs, turning each into a searchable PDF.
-- Supply a password with the run and an encrypted file is processed like any other.
+- **Image inputs in batch** — PNG, JPEG, TIFF, BMP alongside PDFs, each becoming a searchable PDF
+- **Encrypted batch input** — supply a password with the run
 
 ## 1.0.10 — Write it in any direction
 
 *Released 2026-08-01*
 
 ### Text
-- Arabic or Hebrew typed into a new text box lays out in reading order, wraps, and joins cursively.
-- Mixed text keeps embedded Latin words and numbers the right way round.
-- Size, colour, bold and italic apply to a selected word or phrase in right-to-left text.
-- A style change in the middle of a joined word is declined with a note rather than drawn.
+- **RTL text boxes** — Arabic or Hebrew lays out in reading order, wraps, joins cursively; embedded Latin words and numbers stay the right way round
+- **RTL styling** — size, colour, bold, italic on a selected word or phrase; a style change mid-joined-word is declined with a note rather than drawn
 
 ### Watermarks
-- Right-to-left watermarks, shaped and laid out correctly.
-- Chinese, Japanese and Korean watermarks, which were previously declined.
+- **RTL watermarks** — shaped and laid out correctly
+- **CJK watermarks** — previously declined, now supported
 
 ### Forms
-- Filling a field with Arabic or Hebrew produces a properly shaped, correctly ordered appearance, wrapped or not.
+- **RTL field fill** — properly shaped, correctly ordered appearance, wrapped or not
 
-### Under the hood
-- Fully vocalised Arabic round-trips: text carrying harakat is written, read back and re-edited exactly as typed.
+### Under the Hood
+- **Vocalised Arabic round-trip** — text carrying harakat is written, read back, and re-edited exactly as typed
 
 ## 1.0.9
 
 *Released 2026-08-01*
 
 ### Text
-- Arabic, Hebrew, Persian, Urdu and the other right-to-left scripts reflow: type and the paragraph re-wraps.
-- Embedded Latin words and numbers stay the right way round, and the editor works in reading order.
-- Edited Arabic is re-shaped rather than re-typed letter by letter, using a shaping-capable bundled font.
-- Ligatures and letter marks survive the round trip, so an edited paragraph can be edited again.
-- A paragraph is offered only when it can be read back; otherwise the individual text runs stay editable.
+- **RTL reflow** — Arabic, Hebrew, Persian, Urdu, and other right-to-left scripts rewrap as you type; editor works in reading order; embedded Latin stays the right way round
+- **Re-shaping** — edited Arabic is re-shaped via a shaping-capable bundled font; ligatures and letter marks survive the round trip, so an edited paragraph edits again
+- **Safety gate** — a paragraph is offered only when it can be read back; otherwise individual text runs stay editable
 
 ### Pages
-- A document that labels its pages shows that label in the page box, with the sheet position beside it.
-- Type either a label or a sheet number; both work.
+- **Page labels** — the page box shows the document's label with the sheet position beside it; typing either works
 
 ### Images
-- Repeated moves, re-scales and opacity changes on one image collapse instead of leaving a layer behind each time.
+- **Edit collapsing** — repeated moves, re-scales, and opacity changes on one image collapse instead of leaving a layer each time
 
 ### Reliability
-- Two operations that rewrite the same file can no longer overlap; the second waits for the first.
+- **File-write serialization** — two operations rewriting the same file cannot overlap; the second waits
 
 ## 1.0.8
 
 *Released 2026-08-01*
 
 ### Text
-- Style any part of the text in the Add Text card with its own size, colour, bold or italic.
-- Mixed sizes lay out with correct line heights, and the fit indicator measures exactly what will be drawn.
-- Chinese, Japanese and Korean text can be added, edited and filled into forms.
-- A CJK-capable font ships with the app and steps in only when the standard fonts cannot express the text.
+- **Inline styling in Add Text** — per-range size, colour, bold, italic; mixed sizes lay out with correct line heights and the fit indicator measures exactly what will be drawn
+- **CJK text** — add, edit, and fill into forms; a CJK-capable bundled font steps in only when the standard fonts cannot express the text
 
 ### Accessibility
-- A high-contrast theme: black backgrounds, white text, bright accents and gold focus outlines, applied from the first frame.
+- **High-contrast theme** — black backgrounds, white text, bright accents, gold focus outlines, applied from the first frame
 
 ## 1.0.7
 
 *Released 2026-08-01*
 
 ### Text
-- Documents using Type 3 glyph-procedure fonts, common in TeX output, now edit like any other text.
-- The text-run editor gains size and colour, with neighbouring text staying exactly where it was.
+- **Type 3 fonts** — glyph-procedure fonts (common in TeX output) now edit like any other text
+- **Text-run editor** — gains size and colour; neighbouring text stays exactly where it was
 
 ### Images
-- Images embedded directly in page content streams can now be replaced and extracted like any other image.
+- **Inline images** — images embedded directly in page content streams can be replaced and extracted
 
-### Under the hood
-- The test build measures page rendering, so future releases can prove they got faster or catch a slowdown.
+### Under the Hood
+- **Render benchmarking** — test build measures page rendering to prove speedups and catch slowdowns
 
 ## 1.0.6
 
 *Released 2026-08-01*
 
-- Sign with a PKCS#11 smart card, USB token or HSM: choose the module, name the token and certificate, enter the PIN.
-- Every signing feature works as with a file-based identity, including visible stamps, in-place signing and the PAdES range.
-- PostScript files carrying form annotations now produce PDFs whose fields are readable, fillable and keep their values.
-- Composite fonts lacking a text-mapping table recover it, from the named character collection or the embedded font itself.
-- Text set in bare CFF or original Type 1 fonts is now editable, using the font's own encoding and widths.
+- **PKCS#11 signing** — smart card, USB token, or HSM: choose module, name token and certificate, enter PIN; full parity with file-based identities, including visible stamps, in-place signing, and the PAdES range
+- **PostScript form annotations** — converted PDFs keep readable, fillable fields with their values
+- **Composite fonts** — a missing text-mapping table is recovered from the named character collection or the embedded font
+- **CFF and Type 1 fonts** — text in bare CFF or original Type 1 fonts is editable, using the font's own encoding and widths
 
 ## 1.0.5
 
 *Released 2026-08-01*
 
-### Certificate encryption
-- Lock a document to one or more recipient certificates; anyone holding a matching private key opens it.
-- The same permission controls apply, and screen-reader access is never blocked.
-- Certificate-encrypted files, including ones other tools produced, now open by asking for your .pfx or .p12 key file.
-- Both directions are on the command line.
+### Certificate Encryption
+- **Encrypt to certificates** — lock a document to one or more recipient certificates; matching private key opens it; same permission controls; screen-reader access never blocked
+- **Open certificate-encrypted files** — including ones other tools produced, via your `.pfx`/`.p12` key file
+- **Command line** — both directions supported
 
 ### Forms
-- Field calculation order survives page inserts, merges, splits, deletions and every other page operation.
-- Scripts that run on save, print or close stay with the document through page operations and compression.
-- Page operations on an XFA form refuse with a clear message instead of silently destroying the form data.
+- **Calculation order** — survives page inserts, merges, splits, deletions, and every other page operation
+- **Document scripts** — save/print/close scripts stay with the document through page operations and compression
+- **XFA guard** — page operations on an XFA form refuse with a clear message instead of silently destroying form data
 
 ### Prepress
-- Convert to CMYK through your own ICC profile, the bundled one, or the built-in default.
-- Produce PDF/X-1a, X-3 or X-4 files carrying a real output intent; the conversion verifies its own output.
+- **CMYK conversion** — through your own ICC profile, the bundled one, or the built-in default
+- **PDF/X** — X-1a, X-3, X-4 output with a real output intent; conversion verifies its own output
 
-### Sharper and handier
-- Zooming into a page whose rotation is not yet applied renders at full detail instead of scaling a coarse preview.
-- Actual Size and Fit Width work in the page-organizing view, zooming to the selected page.
+### Rendering
+- **Rotation-pending zoom** — renders at full detail instead of scaling a coarse preview
+- **Organize view zoom** — Actual Size and Fit Width zoom to the selected page
 
 ## 1.0.4
 
 *Released 2026-08-01*
 
 ### Redaction
-- "Save marks" stores redaction marks in the document as standard redaction annotations, so they survive closing it.
-- Other PDF tools read them, marks never print, and saving them keeps existing signatures valid.
+- **Save marks** — stores redaction marks as standard redaction annotations; other tools read them, marks never print, existing signatures stay valid
 
 ### Forms
-- Reset buttons clear the form back to its designed defaults, re-rendering every field and keeping signatures intact.
-- Link buttons show the address and offer to copy it; the app never opens the web on its own.
-- Buttons wired to scripts or submissions say so instead of doing nothing.
+- **Reset buttons** — clear the form to designed defaults, re-rendering every field, keeping signatures intact
+- **Link buttons** — show the address and offer to copy it; the app never opens the web on its own
+- **Script/submit buttons** — say so instead of doing nothing
 
-### Drawing and shapes
-- An Eraser removes exactly what it touches; cutting a stroke in the middle leaves both ends trimmed at the edge.
-- Lines, arrows, polygons, clouds, drawings and measurements rotate in quarter turns and mirror either way.
-- Arrowheads on either end of lines and polylines, and cloud bumpiness, are editable in the properties bar.
+### Drawing and Shapes
+- **Eraser** — removes exactly what it touches; cutting a stroke mid-way leaves both ends trimmed at the edge
+- **Rotate and mirror** — lines, arrows, polygons, clouds, drawings, measurements rotate in quarter turns and mirror either way
+- **Properties** — arrowheads on either end of lines and polylines, and cloud bumpiness, editable in the properties bar
 
 ### Signing
-- The Signatures panel's sign form hands off to on-page placement with your certificate details carried over.
+- **Panel handoff** — the Signatures panel's sign form hands off to on-page placement with certificate details carried over
 
 ## 1.0.3 — Signed documents stay signed
 
 *Released 2026-08-01*
 
 ### Signatures
-- Comments, form filling, XFDF import, added links and added pages append to the file, so existing signatures keep verifying.
-- Edits a signed file cannot carry — removing or reordering pages, editing page content, flattening — behave as before.
-- `incremental-save` applies an edited copy's changes onto a signed original as one appended revision.
-- Signature cards name the page carrying the signature; click to go there.
+- **Incremental append** — comments, form filling, XFDF import, added links, and added pages append to the file; existing signatures keep verifying
+- **Out-of-scope edits** — removing/reordering pages, editing content, flattening behave as before
+- **`incremental-save`** — applies an edited copy's changes onto a signed original as one appended revision
+- **Signature cards** — name the page carrying the signature; click to go there
 
 ### Printing
-- The Print dialog previews every option — subsets, booklet order, poster tiles, pages per sheet, grayscale, scale — sheet by sheet.
+- **Print preview** — every option previewed sheet by sheet: subsets, booklet order, poster tiles, pages per sheet, grayscale, scale
 
 ### Drawing
-- Pen strokes drawn in quick succession join into one drawing, and multi-stroke drawings from other tools import whole.
+- **Stroke joining** — pen strokes drawn in quick succession join into one drawing; multi-stroke drawings from other tools import whole
 
 ### Keyboard
-- With single-key accelerators on: S places a sticky note, Z is marquee zoom, and E opens the content editor.
+- **Single-key accelerators** — S sticky note, Z marquee zoom, E content editor (when enabled)
 
 ## 1.0.2
 
 *Released 2026-07-31*
 
-### Print options
-- Two-sided printing: one side only, flip on the long edge, or flip on the short edge, where the printer has a duplexer.
-- Pick any paper the driver offers, force portrait or landscape, and print in colour or grayscale.
-- Print the odd or even pages, in reverse order, with collated or uncollated copies.
-- Up to 999 copies, replacing the old 99-copy cap.
+### Print Options
+- **Duplex** — one side only, flip on long edge, or flip on short edge, where the printer has a duplexer
+- **Driver options** — any paper the driver offers, forced portrait/landscape, colour or grayscale
+- **Subsets** — odd or even pages, reverse order, collated or uncollated copies
+- **Copies** — up to 999, replacing the 99-copy cap
 
-### Sheet layout
-- Up to 4×4 pages per sheet, in any reading order, with optional borders and automatic rotation into each cell.
-- Booklet printing: saddle-stitched order, left or right binding, and front-only and back-only passes.
-- Poster tiling across multiple sheets at any scale, with overlap, hairline cut marks and assembly labels.
-- Type an exact custom scale percentage.
+### Sheet Layout
+- **Pages per sheet** — up to 4×4, any reading order, optional borders, automatic rotation into each cell
+- **Booklet** — saddle-stitched order, left or right binding, front-only and back-only passes
+- **Poster tiling** — multiple sheets at any scale, with overlap, hairline cut marks, assembly labels
+- **Custom scale** — type an exact percentage
 
-### Control what prints
-- Print the document with its markups, the document alone, or the document plus stamps.
-- Print as image rasterizes pages at 150, 300 or 600 dpi before spooling, for drivers that mangle vector content.
-- A cropped document prints its visible area, exactly as displayed on screen.
-- `print` gained the same option set, and `printers --capabilities` reports a printer's papers, duplexer and colour support.
+### Print Content
+- **Content selection** — document with markups, document alone, or document plus stamps
+- **Print as image** — rasterizes at 150, 300, or 600 dpi before spooling, for drivers that mangle vector content
+- **Cropped documents** — print the visible area exactly as displayed
+- **Command line** — `print` gains the same option set; `printers --capabilities` reports papers, duplexer, and colour support
 
 ## 1.0.1
 
 *Released 2026-07-31*
 
-### Arrange your comments
-- Drag a comment to move it and grab a corner to resize, with the opposite corner anchored and Shift locking the aspect.
-- Ctrl-click adds to the selection and Ctrl-drag sweeps a rubber band; arrow keys nudge by a point, ten with Shift.
-- Align, distribute and match sizes from the properties bar.
-- Bring a comment forward or send it behind its neighbours; the order carries into the saved file.
+### Comment Arrangement
+- **Move and resize** — drag to move, corner-grab to resize with the opposite corner anchored, Shift locks aspect
+- **Selection** — Ctrl-click adds, Ctrl-drag rubber-bands; arrow keys nudge by a point, ten with Shift
+- **Align/distribute/match sizes** — from the properties bar
+- **Z-order** — bring forward or send behind; order carries into the saved file
 
 ### Drawing
-- Seven shapes — rectangle, ellipse, line, arrow, polygon, polyline and review cloud — saved as real PDF shapes.
-- Callouts: a text box with an arrowed leader, which opens for typing the moment you draw it.
-- Stroke width, fill colour and opacity, for one shape or a whole selection, and pen strokes take width and opacity.
-- Lines, arrows, polygons and callout leaders show draggable vertex handles when selected.
-- Shapes drawn in other tools open as editable shapes; what cannot be represented faithfully is left exactly as it was.
+- **Seven shapes** — rectangle, ellipse, line, arrow, polygon, polyline, review cloud, saved as real PDF shapes
+- **Callouts** — text box with arrowed leader, opens for typing the moment drawn
+- **Styling** — stroke width, fill colour, opacity for one shape or a whole selection; pen strokes take width and opacity
+- **Vertex handles** — draggable on lines, arrows, polygons, callout leaders
+- **Interop** — shapes drawn in other tools open as editable shapes; what cannot be represented faithfully is left untouched
 
 ### Measure
-- Calibrate against a known length and every measurement that follows uses the ratio.
-- Right-click a placed measurement to set the document scale from it, or to correct its recorded value.
+- **Calibration** — calibrate against a known length; every measurement that follows uses the ratio
+- **Correction** — right-click a placed measurement to set the document scale from it, or to correct its recorded value
 
-### Comments that travel
-- XFDF import and export carries geometry, colours, authors, dates, replies and Accepted/Rejected/Completed statuses.
-- In the Comments panel, and on the command line as `xfdf-export` and `xfdf-import`.
+### Comment Interchange
+- **XFDF import/export** — geometry, colours, authors, dates, replies, Accepted/Rejected/Completed statuses; Comments panel and `xfdf-export` / `xfdf-import` on the command line
 
 ## 1.0.0 — A new name: Spectra PDF
 
 *Released 2026-07-31*
 
-The product formerly released as "Open PDF Studio" continues here as Spectra PDF and restarts its numbering at 1.0.0 — same application, same code line.
+The product formerly released as "Open PDF Studio" continues as Spectra PDF, restarting numbering at 1.0.0 — same application, same code line.
 
 ### Moving from Open PDF Studio
-- Spectra PDF is a fresh install, not an update; an existing install keeps working but receives no updates.
-- Preferences, recents, custom stamps and saved actions start fresh.
-- Guided actions survive the move as files: export them from the old app and import them here.
-- The command line is `spectrapdf.exe`, and the virtual printer appears as "Spectra PDF".
-- Scheduled runs live under the `\Spectra PDF\` Task Scheduler folder, and policies read from `HKLM\SOFTWARE\Spectra PDF`.
-- Printers and schedules created by the old app belong to the old install; recreate them here.
+- **Fresh install** — not an update; the old install keeps working but receives no updates
+- **State starts fresh** — preferences, recents, custom stamps, saved actions do not carry over; guided actions survive as files (export from the old app, import here)
+- **New names** — command line `spectrapdf.exe`; virtual printer "Spectra PDF"; scheduled runs under the `\Spectra PDF\` Task Scheduler folder; policies read from `HKLM\SOFTWARE\Spectra PDF`
+- **Old printers and schedules** — belong to the old install; recreate here
 
 ### New since 2.8.7
-- Attachments, Layers and Tags join the navigation pane, open beside the document alongside a tool panel.
-- Send To ▸ Email hands the current document to your default mail client as a ready-to-send attachment.
-- A tagged document's structure tree survives page moves, rotations, deletions and annotation commits.
-- Automatic tagging gives an untagged document a usable structure tree in one step from the Tags panel.
-- Batch OCR can update files in place, with the same per-file isolation and reporting as mirror runs.
-- Watched folders process arriving PDFs through a guided action while the app is open, tray included.
-- Install "Spectra PDF" as a printer and anything any application prints arrives in the app as a PDF.
-- A non-PDF file inside a portfolio opens with the application that owns its type.
-- Measurements save as true PDF measurement annotations, scale included, that other viewers understand.
-- Four-pane split view with linked scrolling and zoom, for wide, spreadsheet-like documents.
+- **Navigation pane** — Attachments, Layers, and Tags panels, open beside the document alongside a tool panel
+- **Send To ▸ Email** — hands the current document to the default mail client as a ready-to-send attachment
+- **Tag durability** — a tagged document's structure tree survives page moves, rotations, deletions, annotation commits
+- **Automatic tagging** — gives an untagged document a usable structure tree in one step from the Tags panel
+- **Batch OCR in place** — updates files in place with the same per-file isolation and reporting as mirror runs
+- **Watched folders** — arriving PDFs processed through a guided action while the app is open, tray included
+- **Virtual printer** — install "Spectra PDF" as a printer; anything any application prints arrives as a PDF
+- **Portfolio files** — a non-PDF file inside a portfolio opens with the application owning its type
+- **Measurement annotations** — save as true PDF measurement annotations, scale included, readable by other viewers
+- **Four-pane split view** — linked scrolling and zoom, for wide spreadsheet-like documents
 
 ## 2.8.7
 
 *Released 2026-07-31*
 
-### Guided actions
-- Run an action over a folder of PDFs, subfolders included, into a mirror of the tree with originals untouched.
-- One file's failure never stops the rest, and a run log lands beside the batch OCR logs.
-- Export any action as a small JSON file, and import one with full checking.
-- An unknown step or setting is refused by name, an import never overwrites an existing action, and no export carries a password.
-- Schedule an action through Windows Task Scheduler, running even while the app is closed.
-- A schedule keeps its own frozen copy of the action, and an action that asks for values at run time is refused.
+### Guided Actions
+- **Folder runs** — run an action over a folder of PDFs, subfolders included, into a mirror tree with originals untouched; one file's failure never stops the rest; run log lands beside the batch OCR logs
+- **Import/export** — actions export as small JSON files, import with full checking; unknown steps refused by name, imports never overwrite an existing action, exports never carry a password
+- **Scheduling** — via Windows Task Scheduler, running with the app closed; a schedule keeps a frozen copy of the action; run-time-prompt actions refused
 
-### Command line
-- `run-action <source> --dest <folder> --action action.json` runs a saved action file over a folder.
+### Command Line
+- **`run-action <source> --dest <folder> --action action.json`** — runs a saved action file over a folder
 
 ### Fixes
-- In-place `encrypt` and `decrypt` now stage safely and replace the file atomically instead of silently failing.
+- **In-place `encrypt`/`decrypt`** — stage safely and replace the file atomically instead of silently failing
 
 ## 2.8.6
 
 *Released 2026-07-30*
 
-### PDF portfolios
-- A portfolio opens on its cover sheet with the file list alongside; open, save out, replace, add and remove files.
-- Create portfolios from any files on disk, or convert the open document into one.
+### PDF Portfolios
+- **Open and manage** — cover sheet with file list alongside; open, save out, replace, add, remove files
+- **Create** — from any files on disk, or convert the open document into one
 
 ### Measure
-- Distance, perimeter and area on the page, read as you go.
-- Set a real-world scale and every readout follows; a finished measurement stays as a markup you can delete.
+- **Distance, perimeter, area** — read as you go; real-world scale applies to every readout; finished measurements stay as deletable markups
 
 ### Stamps
-- Make your own text stamps: any label, any colour, saved for reuse.
-- Dynamic stamps fill in `{date}`, `{time}` or `{name}` when you place them.
-- Turn any picture into an image stamp; it lands undistorted and travels with the document.
+- **Custom text stamps** — any label, any colour, saved for reuse
+- **Dynamic stamps** — `{date}`, `{time}`, `{name}` filled at placement
+- **Image stamps** — any picture, undistorted, travels with the document
 
-### Guided actions
-- Save a sequence of steps — compress, watermark, page numbers, OCR, strip metadata — and run it in one click.
-- Steps run in order, each one undoable, and a failed step stops the run with its reason.
-- Mark any setting to be asked for each run; passwords are never saved, and an encrypt step always asks.
+### Guided Actions
+- **Saved sequences** — compress, watermark, page numbers, OCR, strip metadata; one click; steps run in order, each undoable; a failed step stops the run with its reason
+- **Per-run prompts** — any setting can ask each run; passwords never saved; an encrypt step always asks
 
-### Split view
-- Window ▸ Split shows two independently scrolling and zooming views of the same document.
+### Split View
+- **Window ▸ Split** — two independently scrolling and zooming views of the same document
 
 ### Fixes
-- Applying a page change silently dropped every attached file a document carried; attachments now survive every page edit.
-- In-place `compress`, `grayscale`, `pdf-a` and the metadata commands now stage safely and replace the file atomically.
+- **Attachments survive page edits** — applying a page change silently dropped every attached file
+- **Atomic in-place operations** — `compress`, `grayscale`, `pdf-a`, and the metadata commands stage safely and replace the file atomically
 
-### Command line
-- New arms: `portfolio-info`, `portfolio-create`, `portfolio-make`, `portfolio-update`, and `ocr-file`.
+### Command Line
+- **New arms** — `portfolio-info`, `portfolio-create`, `portfolio-make`, `portfolio-update`, `ocr-file`
 
 ## 2.8.5 — Batch OCR grows up
 
 *Released 2026-07-29*
 
-- 47 recognition languages in the app and in batch runs, including Japanese, Chinese, Korean, Arabic, Hebrew and Russian.
-- A log for every batch run, with a retention you control, in a folder you can choose.
-- Processed originals can file themselves into moved and error folders, with verify-before-move.
-- Unreadable files can be repaired automatically and retried.
-- Create, list, run-now, enable, disable and delete schedules from Tools ▸ Scheduled Batch Runs.
-- Scheduled runs fire with the app closed, under alternate credentials or a managed service account.
-- Recognition runs natively for speed and works under service accounts; the in-browser recognizer is gone.
+- **47 recognition languages** — app and batch runs, including Japanese, Chinese, Korean, Arabic, Hebrew, Russian
+- **Run logs** — per batch run, with configurable retention and folder
+- **File management** — processed originals file into moved and error folders with verify-before-move; unreadable files repaired automatically and retried
+- **Schedules** — create, list, run-now, enable, disable, delete from Tools ▸ Scheduled Batch Runs; fire with the app closed, under alternate credentials or a managed service account
+- **Native recognition** — runs natively for speed and under service accounts; the in-browser recognizer is gone
 
 ## 2.8.4 — Tools you can find
 
 *Released 2026-07-25*
 
-### The tool pane
-- A tool's name is now the biggest thing on its button, icons are smaller, and descriptions moved into tooltips.
-- The pane narrows to a compact index when you browse all tools and widens back to your chosen width.
-- Inside a tool the pane header says "‹ All tools" instead of an unlabelled grid icon.
+### Tool Pane
+- **Button redesign** — tool name is the biggest element, icons smaller, descriptions in tooltips
+- **Compact index** — pane narrows when browsing all tools, widens back to the chosen width; in-tool header reads "‹ All tools" instead of an unlabelled grid icon
 
 ### Search
-- One toolbar box answers with both tools and document text; arrow keys and Enter work throughout.
+- **Unified toolbar search** — answers with both tools and document text; arrow keys and Enter throughout
 
 ### Comments
-- One comments list: every comment in the document, with jump-to-page, note editing, recolouring, delete and delete-all.
-- Comment and Comments became one tool, which arms markup on the page and lists what is there.
+- **One comments list** — every comment, with jump-to-page, note editing, recolouring, delete, delete-all
+- **Merged tool** — Comment and Comments became one tool: arms markup and lists what is there
 
 ### Fixes
-- Clicking a comment now always jumps to its page, including in the document you were already reading.
+- **Comment jump** — clicking a comment always jumps to its page, including in the current document
 
 ## 2.8.3 — License notices in the box
 
 *Released 2026-07-25*
 
-### The tool pane
-- A Tools button in the toolbar shows and hides the right-hand tool pane from the top row.
+### Tool Pane
+- **Tools button** — toolbar toggle for the right-hand tool pane
 
 ### Licensing
-- The full third-party notices ship with the app and are available offline: the aggregate list and a per-component listing.
-- The SIL Open Font License text is installed alongside the bundled Liberation and Libertinus font files.
-- Every bundled Python component keeps its own licence text inside the embedded runtime.
-- Settings ▸ Updates & Licenses lists the complete set of bundled components and opens either notices file directly.
-- The notices were audited and corrected against what actually ships.
+- **Offline third-party notices** — the aggregate list and a per-component listing ship with the app
+- **Font licences** — SIL Open Font License text installed alongside the bundled Liberation and Libertinus fonts; every bundled Python component keeps its licence inside the embedded runtime
+- **Settings ▸ Updates & Licenses** — lists the complete bundled-component set and opens either notices file
+- **Audit** — notices corrected against what actually ships
 
 ## 2.8.2 — The workbench
 
 *Released 2026-07-25*
 
-### The new layout
-- Every tool panel lives in a resizable pane on the right, with the document still in front of you.
-- A status bar carries the page number, zoom and Fit, the Read⇄Organize switch, comments, and pending work.
-- Every open file is a tab and that is all tabs are; `Shift+F4` toggles the tool pane and `Ctrl+Tab` cycles files.
-- A Home page with quick actions, recent files with folder and last-opened details, and the full tool grid.
-- Choosing a tool with nothing open asks for a file, then opens with that document loaded.
-- Show or hide any toolbar button, and add optional buttons for the Pages, Bookmarks and Signatures panes.
-- A Properties Bar (`Ctrl+E`) shows a comment's kind, page, size and note, with one-click recolour and delete.
+### Layout
+- **Right pane** — every tool panel in a resizable pane, document in front
+- **Status bar** — page number, zoom and Fit, Read⇄Organize switch, comments, pending work
+- **Tabs** — every open file is a tab; `Shift+F4` toggles the tool pane, `Ctrl+Tab` cycles files
+- **Home page** — quick actions, recent files with folder and last-opened details, full tool grid; choosing a tool with nothing open asks for a file first
+- **Toolbar customization** — show/hide any button; optional buttons for Pages, Bookmarks, Signatures panes
+- **Properties Bar** — `Ctrl+E`: comment kind, page, size, note, one-click recolour and delete
 
-### Reading and presenting
-- Two-page spreads, with a "cover page separate" option so spreads pair the way a bound book does.
-- Reading Mode (`Ctrl+H`) collapses the app chrome, and Presentation (`F5`) goes full-screen one page at a time.
+### Reading and Presenting
+- **Two-page spreads** — with a "cover page separate" option so spreads pair like a bound book
+- **Reading Mode** — `Ctrl+H` collapses the chrome; Presentation (`F5`) goes full-screen one page at a time
 
 ### Accessibility
-- A structure tags editor: retag headings and figures, set alternative text, titles and language, and restructure the tree.
-- A reading order panel shows the exact order assistive technology reads a page, fixable in one click.
+- **Structure tags editor** — retag headings and figures, set alternative text, titles, language, restructure the tree
+- **Reading order panel** — shows the exact order assistive technology reads a page, fixable in one click
 
 ### Signing
-- PAdES signatures to the B-B, B-T, B-LT and B-LTA profiles, with RFC 3161 timestamping and embedded revocation data.
-- Verification can validate the signer's chain against certificate authorities you choose, managed in the app.
+- **PAdES profiles** — B-B, B-T, B-LT, B-LTA, with RFC 3161 timestamping and embedded revocation data
+- **Chain validation** — against certificate authorities you choose, managed in the app
 
 ### Export and OCR
-- Export to Word, RTF, ODT and HTML as real editable text, via a bundled converter with nothing to install.
-- Export pages as PNG or JPEG per page, or a multi-page TIFF, at the resolution you choose.
-- 47 OCR languages, up from four, every one shipping offline in the installer.
+- **Document export** — Word, RTF, ODT, HTML as real editable text via a bundled converter, nothing to install
+- **Image export** — PNG or JPEG per page, or multi-page TIFF, at chosen resolution
+- **47 OCR languages** — up from four, all shipping offline in the installer
 
 ## 2.8.1
 
 *Released 2026-07-23*
 
 ### Search
-- The Find bar and Search panel gain match case, whole word and regular expression modes.
-- Search every PDF in a folder without opening them; results list each file and page, and a click opens the match.
+- **Match modes** — match case, whole word, regular expression in the Find bar and Search panel
+- **Folder search** — search every PDF in a folder without opening them; results list file and page, click opens the match
 
-### Pages and pagination
-- Headers, footers and Bates numbering at any of six positions, across a page range, correct on rotated pages.
-- Crop and page boxes: trim the crop, bleed, trim or art box by page.
-- Page number labels number pages independently of their order.
+### Pages and Pagination
+- **Headers, footers, Bates numbering** — six positions, page ranges, correct on rotated pages
+- **Crop and page boxes** — trim the crop, bleed, trim, or art box by page
+- **Page labels** — number pages independently of their order
 
-### Documents and security
-- Attachments: embed, extract and remove attached files.
-- Encryption permissions restrict printing, copying, changing and commenting; screen-reader access is always preserved.
+### Documents and Security
+- **Attachments** — embed, extract, remove attached files
+- **Encryption permissions** — restrict printing, copying, changing, commenting; screen-reader access always preserved
 
-### Under the hood
-- Vector fill and stroke colours read correctly for ICC, Indexed, Separation and DeviceN colour spaces.
-- Form fields read through the same engine as filling, so nested fields that were invisible now appear.
+### Under the Hood
+- **Colour spaces** — vector fill and stroke colours read correctly for ICC, Indexed, Separation, DeviceN
+- **Nested form fields** — read through the same engine as filling; previously invisible fields now appear
 
 ## 2.8.0
 
 *Released 2026-07-22*
 
 ### Typography
-- Text you add or edit is properly kerned, from the document's own font metrics or a metric-compatible stand-in.
-- Editing text no longer un-kerns it.
-- Apply real OpenType small caps and stylistic alternates to a whole box, a paragraph or a selected range.
-- Where the document's font lacks the feature the text switches to a bundled serif, and stays searchable either way.
+- **Kerning** — added or edited text is properly kerned from the document's own metrics or a metric-compatible stand-in; editing no longer un-kerns
+- **OpenType features** — real small caps and stylistic alternates on a box, paragraph, or range; where the font lacks the feature the text switches to a bundled serif, staying searchable either way
 
 ### Signing
-- A signature can become part of the open document, undoably, instead of only producing a separate signed file.
-- "Sign & save a copy" remains, and the file on disk is written only when you save.
-- Signing an already-signed document adds a new revision and leaves existing signatures intact and valid.
+- **In-document signing** — a signature can become part of the open document, undoably; "Sign & save a copy" remains; the file is written only on save
+- **Multiple signatures** — signing an already-signed document adds a new revision; existing signatures stay intact and valid
 
 ### Document JavaScript
-- View, add, rename, edit and remove a document's JavaScript in a dedicated editor; it never runs the scripts.
+- **Script editor** — view, add, rename, edit, remove a document's JavaScript; never runs the scripts
 
 ### Prepress
-- Convert to CMYK honouring embedded colour profiles and preserving spot colours, with a choice of rendering intent.
+- **CMYK conversion** — honours embedded colour profiles, preserves spot colours, with a choice of rendering intent
 
-### Editing polish
-- Bold, italic, family and size on a selected range render exactly as they will commit, each part keeping its own style.
+### Editing
+- **Style preview** — bold, italic, family, size on a selected range render exactly as they will commit, each part keeping its own style
 
 ## 2.7.1 — Redaction fix (recommended update)
 
@@ -2137,193 +1451,167 @@ The product formerly released as "Open PDF Studio" continues here as Spectra PDF
 
 Three kinds of content could survive underneath a redaction mark and remain extractable from the saved file.
 
-- Inline images stored directly in the page's content stream were left in place with the black box drawn over them.
-- Shading and gradient fills covering a marked area were left in place.
-- An annotation whose rectangle could not be read was treated as not overlapping and kept; unreadable position data now counts as overlapping.
+- **Inline images** — stored directly in the page's content stream, were left in place under the black box
+- **Shading and gradient fills** — covering a marked area, were left in place
+- **Unreadable annotation rectangles** — were treated as not overlapping and kept; unreadable position data now counts as overlapping
 - **If you redacted documents with an earlier version, re-check those files.**
 
 ## 2.7.0
 
 *Released 2026-07-20*
 
-- Colour, bold, italic, font family and size apply to a selected range inside a paragraph.
-- The whole-paragraph controls remain when nothing is selected.
-- Select a drawn line, rectangle or shape in the Edit tool and move, resize or rotate it with handles.
-- Recolour its fill and stroke, set its line width, or delete it — every change undoable.
-- Shapes inside a form or group are selectable and editable too, leaving the group's other uses untouched.
+- **Range styling** — colour, bold, italic, family, size on a selected range inside a paragraph; whole-paragraph controls remain when nothing is selected
+- **Shape editing** — select a drawn line, rectangle, or shape in the Edit tool; move, resize, rotate with handles; recolour fill and stroke, set line width, delete — all undoable
+- **Nested shapes** — shapes inside a form or group are editable, leaving the group's other uses untouched
 
 ## 2.6.0
 
 *Released 2026-07-19*
 
 ### Authoring
-- Add Text: draw a box, type, pick size, colour and font family, and the text lands as real searchable text.
-- Add Image: draw a box and place a picture; JPEG passes through losslessly and everything else embeds pixel-perfect.
+- **Add Text** — draw a box, type, pick size/colour/family; lands as real searchable text
+- **Add Image** — draw a box, place a picture; JPEG passes through losslessly, everything else embeds pixel-perfect
 
 ### Editing
-- Images drag to move, resize from corner handles, and rotate freely or in one-click quarter turns.
-- Crop an image to a region non-destructively, keeping the picture data, and dim it with a live opacity slider.
-- Enter splits a paragraph in two, and Backspace at the start joins it to the paragraph above.
+- **Image handling** — drag to move, corner-handle resize, free or quarter-turn rotation; non-destructive crop keeping the picture data; live opacity slider
+- **Paragraph split/join** — Enter splits, Backspace at the start joins upward
 
 ### Restyling
-- The paragraph editor's font family menu substitutes a whole paragraph into bundled Liberation Sans, Serif or Mono.
-- Bold and italic substitute the matching bundled variant; twelve metric-compatible faces now ship.
+- **Font substitution** — paragraph editor substitutes a whole paragraph into bundled Liberation Sans, Serif, or Mono; bold and italic substitute the matching variant; 12 metric-compatible faces ship
 
-### Edit more documents
-- Symbolic fonts with an embedded font program are editable where the program provides a usable character map.
+### Compatibility
+- **Symbolic fonts** — editable where the embedded font program provides a usable character map
 
-### Reliability
-- A form field created on canvas could silently fail to appear under heavy load; it now succeeds visibly or says why.
-- Image edits on pages sharing resources no longer leak entries into sibling pages.
+### Fixes
+- **Canvas field creation** — could silently fail under heavy load; now succeeds visibly or says why
+- **Shared page resources** — image edits no longer leak entries into sibling pages
 
 ## 2.5.0
 
 *Released 2026-07-18*
 
-### More documents
-- Chinese, Japanese and Korean documents using the standard Unicode CJK encodings open for editing.
-- A substitute font matches the original's style — serif for serif, monospaced for monospaced.
+### Compatibility
+- **CJK documents** — standard Unicode CJK encodings open for editing; substitute fonts match the original's style (serif for serif, monospaced for monospaced)
 
 ### Restyling
-- The paragraph editor gained size and colour controls; changing size rewraps and re-spaces the paragraph.
-- Outline (stroked) text recolours correctly, and an out-of-range size is clamped so text cannot fly off the page.
+- **Size and colour in the paragraph editor** — changing size rewraps and re-spaces; outline (stroked) text recolours correctly; out-of-range sizes are clamped
 
 ## 2.4.0 — Create PDF from PostScript
 
 *Released 2026-07-18*
 
-- File ▸ Create PDF from PostScript… converts `.ps` and `.eps` files with the classic quality presets.
-- The result opens in one click, powered by the Ghostscript already bundled for compression and PDF/A.
-- EPS files convert with their bounding box as the page, so figures stay figures.
-- A non-PostScript file is refused with the reason named, and feeding a PDF points you at Repair's rebuild tier.
-- Full command-line parity via `distill`.
-- The README carries a feature sourcing table mapping every capability to the component that powers it.
+- **File ▸ Create PDF from PostScript…** — converts `.ps` and `.eps` with the classic quality presets, powered by the bundled Ghostscript; result opens in one click
+- **EPS handling** — bounding box becomes the page, so figures stay figures
+- **Refusals** — non-PostScript files refused with the reason named; a PDF input points at Repair's rebuild tier
+- **`distill`** — full command-line parity
+- **README** — feature sourcing table mapping every capability to the component powering it
 
 ## 2.3.0
 
 *Released 2026-07-18*
 
-### Find the features
-- Document ▸ Combine Files… gives merging a named menu path; pages append to the current document, undoably.
-- Tool tiles say what they do: Organize Pages names merge and delete, and Edit names text, paragraphs and images.
-- Nothing moved and nothing changed behavior — the same features, now discoverable.
+### Discoverability
+- **Document ▸ Combine Files…** — named menu path for merging; pages append to the current document, undoably
+- **Tool tiles** — say what they do: Organize Pages names merge and delete, Edit names text, paragraphs, images; no behaviour changed
 
-### Position and selection
-- Selection, reading position and document focus survive page-edit commits, including edits saved in another open file.
-- Moved pages keep their thumbnails steady across a save, with no flicker as they re-render.
-- Cross-commit page identity means a stale reference can never point at the wrong page.
-- Positions still reset when a file's content is rebuilt outside the editor, where holding a position would be a guess.
+### Position and Selection
+- **Commit stability** — selection, reading position, and document focus survive page-edit commits, including edits saved in another open file; moved pages keep thumbnails steady across a save
+- **Page identity** — cross-commit identity means a stale reference can never point at the wrong page
+- **Limitation** — positions reset when a file's content is rebuilt outside the editor, where holding a position would be a guess
 
 ## 2.2.0 — Edit Text & Paragraph Reflow
 
 *Released 2026-07-18*
 
 ### Edit Paragraphs
-- Text that reads as a paragraph selects as one box and edits in a multi-line editor.
-- Words rewrap inside the paragraph's own box, keeping its alignment, line spacing and first-line indent.
-- Mixed fonts and sizes, coloured spans, superscripts, condensed text and OCR's invisible layer keep their look.
-- Everything outside the box stays exactly put — neighbouring columns, text below, graphics.
-- Wraps no-space scripts correctly; hyphens are treated as document text, never invented or removed.
-- Right-to-left passages and rotated text stay on the single-line editor, with the reason stated.
-- Text that does not group cleanly remains individually editable line by line.
+- **Paragraph editing** — text that reads as a paragraph selects as one box and edits in a multi-line editor; words rewrap inside the paragraph's own box, keeping alignment, line spacing, first-line indent
+- **Style preservation** — mixed fonts and sizes, coloured spans, superscripts, condensed text, and OCR's invisible layer keep their look; everything outside the box stays exactly put
+- **Scripts and hyphens** — wraps no-space scripts correctly; hyphens are document text, never invented or removed
+- **Limitations** — right-to-left passages and rotated text stay on the single-line editor with the reason stated; text that does not group cleanly remains individually editable line by line
 
 ### Edit Text
-- Double-click a run of text and rewrite it in place, in the document's own font, undoably.
-- Every keystroke is validated against what the embedded font can express, naming the character it cannot.
-- Fonts that cannot round-trip say why instead of failing.
-- Replacement text keeps the original position, and later words on the line slide over by exactly the width difference.
-- Editing a signed document warns first, and cancelling leaves the file byte-untouched.
-- One click re-renders an unwritable edit in a bundled compatible font, subsetted, embedded and still searchable.
+- **In-place rewrite** — double-click a run and rewrite in the document's own font, undoably; every keystroke validated against what the embedded font can express, naming the character it cannot
+- **Positioning** — replacement keeps the original position; later words slide by exactly the width difference
+- **Signed documents** — editing warns first; cancelling leaves the file byte-untouched
+- **Fallback font** — one click re-renders an unwritable edit in a bundled compatible font, subsetted, embedded, still searchable
 
 ## 2.1.0 — Edit Images & Batch OCR
 
 *Released 2026-07-17*
 
 ### Edit Images
-- Click any image on the page to replace, extract or delete it, undoably.
-- An image used in several places changes only where you clicked, including inside reused form graphics.
-- Replacing keeps JPEG bytes untouched; other formats convert losslessly with transparency preserved.
-- Editing a digitally-signed document warns first.
+- **Replace/extract/delete** — click any image on the page, undoably; an image used in several places changes only where clicked, including inside reused form graphics
+- **Lossless replace** — JPEG bytes untouched; other formats convert losslessly with transparency preserved
+- **Signed documents** — editing warns first
 
 ### Batch OCR
-- Tools ▸ Batch OCR Folder… mirrors a source folder into a destination with scanned pages made searchable.
-- Already-searchable files copy through byte-identical, and the source tree is never modified.
-- Encrypted or damaged files are skipped and reported, and unreadable subfolders are listed rather than missing.
-- The run shows per-file, per-page progress, can be stopped, and reports pages with no recognizable text.
-- Works with no document open, with a selectable recognition language.
-- A destination inside the source is refused, including when reached by two different path spellings.
+- **Tools ▸ Batch OCR Folder…** — mirrors a source folder into a destination with scanned pages made searchable; already-searchable files copy through byte-identical; source tree never modified
+- **Error handling** — encrypted or damaged files skipped and reported; unreadable subfolders listed rather than missing; pages with no recognizable text reported
+- **Progress** — per-file, per-page, stoppable; works with no document open; selectable recognition language
+- **Safety** — a destination inside the source is refused, including via two different path spellings
 
 ## 2.0.0 — The Workbench
 
 *Released 2026-07-16*
 
-### The frame
-- A menu bar, main toolbar and tab strip: Home, Tools, and one tab per open document.
-- A Home tab with recent files and an opened-when column replaces the welcome screen.
-- Windows 11 Mica translucency on the chrome where the OS supports it, with a byte-identical solid fallback.
+### Frame
+- **Menu bar, toolbar, tab strip** — Home, Tools, one tab per open document; Home tab with recent files and an opened-when column replaces the welcome screen
+- **Mica** — Windows 11 translucency on the chrome where supported, with a byte-identical solid fallback
 
-### Reading view
-- A continuous, virtualized reading view is the default, smooth with 1,000-page files.
-- Real text selection and copy, zoom presets, a page box, and cross-document Find and Search.
-- Rotate View turns the page in quarter turns without touching the file, and every tool keeps working.
-- Hand and Select modes, with Space as a temporary hand.
-- The Organize page-strip board remains one click away for rearranging pages across files.
+### Reading View
+- **Continuous virtualized view** — default, smooth with 1,000-page files
+- **Text and navigation** — real selection and copy, zoom presets, page box, cross-document Find and Search
+- **Rotate View** — quarter turns without touching the file; every tool keeps working
+- **Hand and Select modes** — Space as a temporary hand; the Organize page-strip board one click away
 
-### Navigation pane
-- Pages with drag-reorder, Bookmarks with editing, Search and Signatures panels; F4 toggles the pane.
+### Navigation Pane
+- **Panels** — Pages with drag-reorder, Bookmarks with editing, Search, Signatures; F4 toggles
 
-### Tools, dialogs, print
-- Twelve task-oriented tools: Organize, Comment, Fill & Sign, Prepare Form, Redact, Scan & OCR, Compare, Protect, Optimize, Repair, Watermark, Export.
-- Document Properties on Ctrl+D and Preferences on Ctrl+K; every dialog closes on Escape and traps focus properly.
-- Print (Ctrl+P) with a printer picker, page range, copies and fit/actual, plus `print` and `printers` command-line arms.
-- Insert blank pages sized to their neighbour, undoable like every page edit.
+### Tools, Dialogs, Print
+- **Twelve tools** — Organize, Comment, Fill & Sign, Prepare Form, Redact, Scan & OCR, Compare, Protect, Optimize, Repair, Watermark, Export
+- **Dialogs** — Document Properties `Ctrl+D`, Preferences `Ctrl+K`; every dialog closes on Escape and traps focus
+- **Print** — `Ctrl+P` with printer picker, page range, copies, fit/actual; `print` and `printers` command-line arms
+- **Insert blank pages** — sized to their neighbour, undoable
 
 ### Keyboard
-- A frozen keymap: standard chords, the document-op set, find stepping, and optional single-key tool accelerators, off by default.
-- The webview's own keys can never fire, so a disabled shortcut does nothing rather than something surprising.
+- **Frozen keymap** — standard chords, document-op set, find stepping, optional single-key tool accelerators (off by default); the webview's own keys can never fire
 
 ### Correctness
-- One file is one document no matter how its path is spelled; paths canonicalize at the OS boundary.
-- Printing, properties and every whole-file operation see pending page edits.
+- **Path canonicalization** — one file is one document however its path is spelled; canonicalized at the OS boundary
+- **Pending edits** — printing, properties, and every whole-file operation see pending page edits
 
 ## 1.0.0 — The Canvas Workspace
 
-### The canvas
-- Every open PDF is a strip of live page thumbnails; drag pages within a document, between documents, or out into a new one.
-- Single pages or multi-selections move as one undo step.
-- One click appends a document's pages to the one above, and dropping files onto a document imports their pages there.
-- Rotations, deletions, moves, imports and annotations stay in memory until Apply changes commits every touched file atomically.
-- Multi-level undo and redo spans staged edits and applied operations.
-- The `.pdfx` [open format](https://github.com/AlexandrosGounis/pdfx) saves several documents as one ordinary PDF that reopens as separate strips.
-- Keyboard shortcuts throughout for undo, select all, delete, rotate, find and zoom.
+### Canvas
+- **Page strips** — every open PDF is a strip of live thumbnails; drag pages within a document, between documents, or out into a new one; single pages or multi-selections move as one undo step
+- **Append and import** — one click appends a document's pages to the one above; dropping files onto a document imports their pages
+- **Staged commits** — rotations, deletions, moves, imports, and annotations stay in memory until Apply changes commits every touched file atomically; multi-level undo/redo spans staged edits and applied operations
+- **`.pdfx` format** — [open format](https://github.com/AlexandrosGounis/pdfx) saving several documents as one ordinary PDF that reopens as separate strips
+- **Keyboard** — undo, select all, delete, rotate, find, zoom
 
-### Annotate, redact, sign
-- Highlights, text boxes, freehand ink and preset stamps with notes, recolouring and a comments sidebar.
-- Existing PDF annotations import as editable objects.
-- True redaction removes marked regions from the file's content — text, images, nested form XObjects and overlapping annotations.
-- Verify embedded signatures for cryptographic validity and document integrity, with an honest trust caveat.
-- Sign with a .pfx or a PEM key and certificate, place a visible stamp, or generate a self-signed identity in the app.
-- Click an empty signature field to sign directly into it.
-- Watermarks at any angle with auto-fit, and a PDF compare with a word-level text diff and a pixel-level visual diff.
+### Annotate, Redact, Sign
+- **Annotations** — highlights, text boxes, freehand ink, preset stamps with notes, recolouring, comments sidebar; existing PDF annotations import as editable objects
+- **True redaction** — removes marked regions from file content: text, images, nested form XObjects, overlapping annotations
+- **Signatures** — verify embedded signatures for cryptographic validity and document integrity, with an honest trust caveat; sign with a .pfx or PEM key and certificate, place a visible stamp, or generate a self-signed identity; click an empty signature field to sign into it
+- **Watermarks and compare** — watermarks at any angle with auto-fit; PDF compare with word-level text diff and pixel-level visual diff
 
 ### Forms
-- Fill AcroForm text, checkbox, radio, dropdown and list fields on the page, then bake them in one click.
-- Pending values survive page edits, and the classic panel is still there.
-- Create fields by drawing them: text, checkbox, radio group, dropdown, option list and empty signature fields.
-- Form fields survive page moves and rotations, merges, splits, deletion, compression and grayscale conversion.
+- **Fill** — AcroForm text, checkbox, radio, dropdown, list fields on the page, baked in one click; pending values survive page edits; classic panel remains
+- **Create** — draw text, checkbox, radio group, dropdown, option list, and empty signature fields
+- **Durability** — form fields survive page moves, rotations, merges, splits, deletion, compression, grayscale conversion
 
 ### Find & OCR
-- In-viewer Find across every open file, with match navigation and per-word highlights.
-- Scanned pages OCR offline, and "Make searchable" persists an invisible text layer, leaving the page pixel-identical.
-- A click-to-jump bookmark outline with drag-reorder and a full tree editor; bookmark links and actions survive editing.
+- **Find** — in-viewer across every open file, with match navigation and per-word highlights
+- **OCR** — scanned pages OCR offline; "Make searchable" persists an invisible text layer, leaving the page pixel-identical
+- **Bookmarks** — click-to-jump outline with drag-reorder and a full tree editor; links and actions survive editing
 
-### Command line
-- New subcommands: `forms`, `outline`, `redact`, `watermark`, `compare`, `verify-signatures`, `sign` and `generate-signer`.
+### Command Line
+- **New subcommands** — `forms`, `outline`, `redact`, `watermark`, `compare`, `verify-signatures`, `sign`, `generate-signer`
 
-### Fixed
-- Merging, splitting, deleting pages, compressing or converting a form PDF no longer destroys its form fields.
-- Engine I/O is UTF-8 end to end, so non-ASCII names, bookmarks and form values round-trip correctly.
-- Reopening an already-open file can no longer briefly serve its previous in-memory state.
+### Fixes
+- **Form preservation** — merging, splitting, deleting pages, compressing, or converting a form PDF no longer destroys its fields
+- **UTF-8 I/O** — engine I/O is UTF-8 end to end; non-ASCII names, bookmarks, form values round-trip
+- **Reopen staleness** — reopening an already-open file can no longer briefly serve its previous in-memory state
 
 ## 0.9.0 — Initial Release
 
@@ -2332,17 +1620,17 @@ Three kinds of content could survive underneath a redaction mark and remain extr
 First public release of Open PDF Studio.
 
 ### Features
-- Pages: merge, split by range, rotate, delete.
-- Transform: compress with presets or custom DPI, grayscale, optimize, PDF/A, PDF version control.
-- Security: encrypt and decrypt with AES-256.
-- Content: extract text, and view, edit or strip metadata.
-- Repair: three tiers of repair, rebuild and recovery for damaged PDFs.
-- Preview: thumbnail grid, page inspector, drag-to-reorder merge workspace.
-- Command line: every operation scriptable, plus batch processing over a directory.
-- Windows integration: installer, silent install, file associations, context menu, tray, start-with-Windows, auto-update.
-- Light, dark and system themes, WCAG 2.1 AA.
+- **Pages** — merge, split by range, rotate, delete
+- **Transform** — compress with presets or custom DPI, grayscale, optimize, PDF/A, PDF version control
+- **Security** — encrypt and decrypt with AES-256
+- **Content** — extract text; view, edit, or strip metadata
+- **Repair** — three tiers of repair, rebuild, and recovery for damaged PDFs
+- **Preview** — thumbnail grid, page inspector, drag-to-reorder merge workspace
+- **Command line** — every operation scriptable, plus batch processing over a directory
+- **Windows integration** — installer, silent install, file associations, context menu, tray, start-with-Windows, auto-update
+- **Themes** — light, dark, system; WCAG 2.1 AA
 
-### Built with
-- Tauri v2 (Rust + WebView2) and React 19.
-- Embedded Python 3.14 (pikepdf, pdfminer.six).
-- Vendored upstream Ghostscript 10.07.1 (AGPL-3.0).
+### Built With
+- **Tauri v2** — Rust + WebView2, React 19
+- **Embedded Python 3.14** — pikepdf, pdfminer.six
+- **Ghostscript 10.07.1** — vendored upstream, AGPL-3.0
