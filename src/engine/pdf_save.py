@@ -1,6 +1,7 @@
 """The one document write, with a content-derived file identifier."""
 
 import re
+from typing import NamedTuple
 from xml.etree import ElementTree
 
 import pikepdf
@@ -229,6 +230,147 @@ def _refuse_unreproducible_encryption(certificate: bool, owner_gated: bool) -> N
         )
 
 
+_PERMISSION_NAMES = (
+    "accessibility",
+    "extract",
+    "modify_annotation",
+    "modify_assembly",
+    "modify_form",
+    "modify_other",
+    "print_lowres",
+    "print_highres",
+)
+
+_AES_METHODS = ("aes", "aesv3")
+
+
+class EncryptionDescriptor(NamedTuple):
+    """Everything about a document's protection that a rewrite must reproduce.
+
+    One derivation, consumed by both the re-encryption and the compatibility
+    comparison. A characteristic derived twice drifts: a comparison that read
+    only the stream cipher once let a document whose strings use a different
+    cipher merge with one whose strings do not, and the output took whichever
+    source came first.
+    """
+
+    revision: int
+    version: int
+    bits: int
+    stream_method: str
+    string_method: str
+    file_method: str
+    encrypt_metadata: bool
+    permissions: tuple
+
+
+def _method_name(method) -> str:
+    return str(method).rsplit(".", 1)[-1]
+
+
+def _descriptor(pdf):
+    """`pdf`'s `EncryptionDescriptor`, or None when it is not encrypted.
+
+    ISO 32000-2 Table 20: `/CF`, `/StmF`, `/StrF` and `/EFF` are meaningful
+    only when `/V` is 4 or 5, so below that there are no crypt filters to read
+    and the document is RC4 by construction (7.6.3.1). qpdf reports "none" for
+    all three there, which is the same word it reports for a `/V` 4 document
+    whose default filter is `/Identity` — two very different documents. The
+    sub-4 case is canonicalized to "rc4" so the word "none" always means
+    "passed through unencrypted".
+
+    `/EFF` absent means embedded file streams follow `/StmF`; qpdf resolves
+    that default before reporting `file_method`.
+    """
+    enc = _standard_encrypt_dict(pdf)
+    if enc is None:
+        return None
+    info = pdf.encryption
+    revision = int(info.R)
+    version = int(info.V)
+    methods = (
+        _method_name(info.stream_method),
+        _method_name(info.string_method),
+        _method_name(info.file_method),
+    )
+    if version < 4:
+        methods = ("rc4", "rc4", "rc4")
+    return EncryptionDescriptor(
+        revision=revision,
+        version=version,
+        bits=int(info.bits),
+        stream_method=methods[0],
+        string_method=methods[1],
+        file_method=methods[2],
+        encrypt_metadata=_effective_encrypt_metadata(enc, revision),
+        permissions=tuple(bool(getattr(pdf.allow, name)) for name in _PERMISSION_NAMES),
+    )
+
+
+def _reproducible_shape(revision: int, aes: bool):
+    """The `(version, bits, method)` `pikepdf.Encryption(R=…, aes=…)` writes.
+
+    None where that combination is not one pikepdf will write at all. The
+    table is the whole expressive range of the writer: one cipher for streams,
+    strings and embedded files, at the key length its revision fixes.
+
+    R5 is an extension ISO 32000-2 never adopted and pikepdf warns about
+    writing, but it writes it faithfully; refusing a document whose protection
+    is reproducible exactly would cost the user their permissions for nothing.
+    """
+    if revision == 2:
+        return None if aes else (1, 40, "rc4")
+    if revision == 3:
+        return None if aes else (2, 128, "rc4")
+    if revision == 4:
+        return (4, 128, "aes" if aes else "rc4")
+    if revision in (5, 6):
+        return (5, 256, "aesv3") if aes else None
+    return None
+
+
+def _refuse_unrepresentable_encryption(descriptor: EncryptionDescriptor) -> bool:
+    """The `aes` flag that reproduces `descriptor`, or a refusal by name.
+
+    The writer takes one cipher and one revision; a document is free to be
+    more specific than that. Every way it can be — a different crypt filter
+    per data class, a key length its revision does not fix, a revision the
+    writer will not emit, an encrypted-metadata policy the cipher cannot
+    carry — is checked here, BEFORE the output is opened, so a document whose
+    protection cannot be written back leaves no file behind at all.
+    """
+    if not (
+        descriptor.stream_method
+        == descriptor.string_method
+        == descriptor.file_method
+    ):
+        raise ValueError(
+            "This document's encryption cannot be kept through this operation: it "
+            "protects its streams, strings and embedded files with different "
+            "ciphers, and a rewritten copy can carry only one cipher for all "
+            "three. Decrypt the document first if you want an unprotected copy."
+        )
+    aes = descriptor.stream_method in _AES_METHODS
+    shape = _reproducible_shape(descriptor.revision, aes)
+    if shape != (descriptor.version, descriptor.bits, descriptor.stream_method):
+        raise ValueError(
+            "This document's encryption cannot be kept through this operation: its "
+            "encryption version, cipher and key length are a combination that "
+            "cannot be written back exactly, and a rewritten copy would change "
+            "the strength of its protection. Decrypt the document first if you "
+            "want an unprotected copy."
+        )
+    if descriptor.encrypt_metadata and not aes:
+        raise ValueError(
+            "This document's encryption cannot be kept through this operation: it "
+            "encrypts its metadata under a cipher that cannot be written back "
+            "with that setting, and a rewritten copy would expose metadata this "
+            "document keeps encrypted. Decrypt the document first if you want an "
+            "unprotected copy."
+        )
+    return aes
+
+
 def source_encryption(pdf):
     """The `pikepdf.Encryption` that re-applies `pdf`'s own protection.
 
@@ -247,61 +389,36 @@ def source_encryption(pdf):
     message as an English fragment interpolated into a translated sentence,
     and the caller is what the user just asked for anyway.
     """
-    enc = _standard_encrypt_dict(pdf)
-    if enc is None:
+    descriptor = _descriptor(pdf)
+    if descriptor is None:
         return None
 
     _refuse_unreproducible_encryption(*_encryption_reproducibility(pdf))
+    aes = _refuse_unrepresentable_encryption(descriptor)
 
-    info = pdf.encryption
-    revision = int(info.R)
-    allow = pikepdf.Permissions(
-        accessibility=bool(pdf.allow.accessibility),
-        extract=bool(pdf.allow.extract),
-        modify_annotation=bool(pdf.allow.modify_annotation),
-        modify_assembly=bool(pdf.allow.modify_assembly),
-        modify_form=bool(pdf.allow.modify_form),
-        modify_other=bool(pdf.allow.modify_other),
-        print_lowres=bool(pdf.allow.print_lowres),
-        print_highres=bool(pdf.allow.print_highres),
-    )
     return pikepdf.Encryption(
         owner="",
         user="",
-        R=revision,
-        aes=revision >= 5 or str(info.stream_method).endswith("aes"),
-        allow=allow,
-        metadata=_effective_encrypt_metadata(enc, revision),
+        R=descriptor.revision,
+        aes=aes,
+        allow=pikepdf.Permissions(
+            **dict(zip(_PERMISSION_NAMES, descriptor.permissions))
+        ),
+        metadata=descriptor.encrypt_metadata,
     )
 
 
 def encryption_profile(pdf):
     """A hashable summary of `pdf`'s protection, for comparing two sources.
 
-    Every characteristic `source_encryption` recreates appears here. Two
-    sources that compare equal are ones whose protection the same
-    `pikepdf.Encryption` reproduces, so an operation that can carry only one
-    protection may adopt either; a characteristic recreated but not compared
-    would be silently taken from whichever source is reached first.
+    The descriptor IS the summary: it is exactly the set of characteristics
+    `source_encryption` reproduces, so two sources that compare equal are ones
+    the same `pikepdf.Encryption` reproduces and an operation that can carry
+    only one protection may adopt either. Deriving a second, narrower summary
+    here is what once let a difference the rewrite recreates be taken from
+    whichever source was reached first.
     """
-    enc = _standard_encrypt_dict(pdf)
-    if enc is None:
-        return None
-    info = pdf.encryption
-    revision = int(info.R)
-    return (
-        revision,
-        str(info.stream_method),
-        _effective_encrypt_metadata(enc, revision),
-        bool(pdf.allow.accessibility),
-        bool(pdf.allow.extract),
-        bool(pdf.allow.modify_annotation),
-        bool(pdf.allow.modify_assembly),
-        bool(pdf.allow.modify_form),
-        bool(pdf.allow.modify_other),
-        bool(pdf.allow.print_lowres),
-        bool(pdf.allow.print_highres),
-    )
+    return _descriptor(pdf)
 
 
 def refuse_encrypted_source(file, *, drop_encryption: bool = False) -> bool:
