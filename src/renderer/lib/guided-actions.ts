@@ -90,6 +90,11 @@ export interface StepParamDef {
 export interface StepDef {
   op: GuidedStepOp;
   title: string;
+  /** The registered JSON-RPC method the single-document runner calls, where
+   * it differs from the step id. The folder tier never reads this: it sends
+   * step ids to `run_action`, whose `_STEPS` table binds the callables
+   * itself. Absent means the step id IS the method name. */
+  engineMethod?: string;
   /** The step's engine call takes gs_path (the panel resolves it once per run). */
   needsGs?: boolean;
   /** The step's engine call takes font_dir (Unicode text faces). */
@@ -230,6 +235,8 @@ export const STEP_CATALOG: readonly StepDef[] = [
     // a Folder is where a check over a folder lives.
     op: 'preflight',
     title: 'Bring Up to a Print Profile',
+    // `preflight` as a method is the CHECK, which takes no `output`.
+    engineMethod: 'apply_preflight_fixups',
     needsGs: true,
     needsFontDir: true,
     needsTesseract: true,
@@ -250,6 +257,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
     // addresses should be clickable is exactly the job nobody does by hand.
     op: 'links_from_urls',
     title: 'Create Links from Web Addresses',
+    engineMethod: 'create_links_from_urls',
     params: [
       {
         key: 'pages',
@@ -334,6 +342,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
     // removes has to be written down in the action itself.
     op: 'sanitize',
     title: 'Remove Hidden Information',
+    engineMethod: 'sanitize_pdf',
     params: [
       {
         key: 'categories',
@@ -368,6 +377,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
     // removes nothing.
     op: 'search_redact',
     title: 'Search & Redact',
+    engineMethod: 'search_and_redact',
     needsFontDir: true,
     params: [
       { key: 'query', label: 'Search for', kind: 'text', defaultValue: '' },
@@ -451,6 +461,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
     // a reviewer.
     op: 'prepare_forms',
     title: 'Prepare Forms (detect fields)',
+    engineMethod: 'prepare_form_fields',
     needsGs: true,
     needsTesseract: true,
     needsFontDir: true,
@@ -1112,6 +1123,13 @@ export function stepDefFor(op: GuidedStepOp): StepDef {
   const def = STEP_CATALOG.find((d) => d.op === op);
   if (!def) throw new Error(`unknown guided step: ${op}`);
   return def;
+}
+
+/** The JSON-RPC method the single-document runner sends for a step. Pinned
+ * against the engine's registrations in `tests/guided-actions.test.ts`. */
+export function engineMethodFor(op: GuidedStepOp): string {
+  const def = stepDefFor(op);
+  return def.engineMethod ?? def.op;
 }
 
 /** A fresh step with the catalog's defaults. */

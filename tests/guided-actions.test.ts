@@ -10,6 +10,7 @@ import {
   buildStepParams,
   createsItsOwnSource,
   editorParams,
+  engineMethodFor,
   inPlaceBlocker,
   openDocumentBlocker,
   isGuidedAction,
@@ -595,10 +596,29 @@ describe('the create_pdf source step', () => {
 describe('the two step catalogs are pinned against each other', () => {
   const fixture = JSON.parse(
     readFileSync(resolve(__dirname, 'fixtures/guided-step-catalog.json'), 'utf8'),
-  ) as { steps: Record<string, { params: string[]; tools: string[] }> };
+  ) as { steps: Record<string, { method: string; params: string[]; tools: string[] }> };
 
   it('offers exactly the ops the engine dispatches, in both directions', () => {
     expect([...STEP_CATALOG].map((d) => d.op).sort()).toEqual(Object.keys(fixture.steps).sort());
+  });
+
+  it('every step resolves to a registered engine method — the one the folder tier binds', () => {
+    // The single-document runner sends `engineMethodFor(op)` as the JSON-RPC
+    // method. Four step ids were not registered names (links_from_urls,
+    // sanitize, search_redact, prepare_forms → "Method not found") and
+    // `preflight` named the check rather than the fixups. The fixture's
+    // `method` is derived from `_STEPS`, so agreeing with it is agreeing with
+    // what a folder run does.
+    const mainPy = readFileSync(resolve(__dirname, '../src/engine/__main__.py'), 'utf8');
+    const registered = new Set(
+      [...mainPy.matchAll(/server\.register\("(\w+)", \w+\)/g)].map((m) => m[1]),
+    );
+    expect(registered.size).toBeGreaterThan(100);
+    for (const def of STEP_CATALOG) {
+      const method = engineMethodFor(def.op);
+      expect(registered.has(method), `${def.op} → ${method}`).toBe(true);
+      expect(method, def.op).toBe(fixture.steps[def.op].method);
+    }
   });
 
   it('flags exactly the tool paths its engine op is handed', () => {

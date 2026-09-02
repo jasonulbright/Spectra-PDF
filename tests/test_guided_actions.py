@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 import pathlib
+import re
 from pathlib import Path
 
 import pikepdf
@@ -684,6 +685,27 @@ class TestCatalogPin:
     def test_the_tool_paths_match_the_fixture_in_both_directions(self):
         for op, entry in self.FIXTURE["steps"].items():
             assert sorted(_STEPS[op][2]) == entry["tools"], op
+
+    def test_every_step_method_is_registered_and_binds_the_same_callable(self):
+        # The single-document runner sends the fixture's `method` as a JSON-RPC
+        # name, so a step whose id is not itself a registered name (four
+        # were: links_from_urls, sanitize, search_redact, prepare_forms) came
+        # back "Method not found", and `preflight` reached the CHECK handler,
+        # which refuses the `output` keyword. Read from the server's own
+        # register() calls rather than importing __main__, whose module body
+        # reconfigures stdio and starts the loop.
+        main_py = (
+            pathlib.Path(__file__).parent.parent / "src" / "engine" / "__main__.py"
+        ).read_text(encoding="utf-8")
+        registered = dict(re.findall(r'server\.register\("(\w+)", (\w+)\)', main_py))
+        for op, entry in self.FIXTURE["steps"].items():
+            method = entry["method"]
+            assert method in registered, f"{op}: {method} is not a registered method"
+            fn = _STEPS[op][0]
+            assert registered[method] == fn.__name__, op
+            # The symbol comparison is only sound while the handler is imported
+            # under its own name.
+            assert f" as {registered[method]}" not in main_py, op
 
 
 class TestFolderGroupingSource:

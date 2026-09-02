@@ -16,6 +16,7 @@ import {
   askedParamKeys,
   buildStepParams,
   editorParams,
+  engineMethodFor,
   gsBlocker,
   inPlaceBlocker,
   loadGuidedActions,
@@ -159,7 +160,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             if (def.terminalOutput) {
               // Writes the picked file; the open document is untouched, so
               // there is nothing to snapshot or reload.
-              await call(step.op, {
+              await call(engineMethodFor(step.op), {
                 file: workingPath,
                 output: terminalOutput!,
                 ...buildStepParams(step, values[i]),
@@ -167,7 +168,7 @@ export function GuidedActionsPanel(): React.ReactElement {
               });
             } else {
               const snapshotPath = await file.snapshot(workingPath);
-              await call(step.op, {
+              await call(engineMethodFor(step.op), {
                 file: workingPath,
                 output: workingPath,
                 ...buildStepParams(step, values[i]),
