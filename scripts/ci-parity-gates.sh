@@ -83,7 +83,9 @@ done
 # --- Workflow-contract tests: the only local reader of .github/workflows/*.
 #     A workflow edit that breaks the contract otherwise surfaces on the runner
 #     (CI #144: the Ghostscript step moved into a script and the contract test's
-#     substring lookup raised). Cheap enough to run on every push. ---
+#     substring lookup raised). Also carries the publish-order contract: both
+#     release publishers upload to a draft, gate the uploaded assets, and
+#     undraft as the LAST step. Cheap enough to run on every push. ---
 gate workflow-contract "$R/.venv/Scripts/python.exe" -m pytest \
   tests/test_ci_capability_setup.py -q
 
