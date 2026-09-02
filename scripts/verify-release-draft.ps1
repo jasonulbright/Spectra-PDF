@@ -23,7 +23,7 @@
 # to the asset store (curl's default), which that store requires.
 #
 # The manifest's last check is the updater plugin's own deserializer: the
-# downloaded latest.json is parsed by `cargo test --test verifier_updater_manifest`
+# downloaded latest.json is parsed by `cargo test --test verifier_<hex>_updater_manifest`
 # in -CargoPackage with the RemoteRelease type the installed copies read it with
 # (its `time` RFC 3339 parse of `pub_date`, its unknown-field policy), then
 # compared against the tag version, the release body, and the installer. A
@@ -35,15 +35,36 @@
 #
 # The verifier LOGIC never comes from -CargoPackage. The Rust source beside
 # this script (src-tauri/tests/updater_manifest.rs at this script's revision)
-# is copied on every run, overwriting whatever is there, to a target name
-# reserved to this script -- src-tauri/tests/verifier_updater_manifest.rs, a
-# name no product revision commits (tests/test_ci_capability_setup.py refuses
-# it in the index, .gitignore refuses it in the working tree) -- and exactly
-# that target is run. Selecting logic by whether the package already holds a
-# conventionally named test would let a tag's own stale or accepting copy
-# stand in for the current verifier while reporting the current verdict.
-# The staged bytes are hashed against the source after the copy and removed
-# after the run; the package's own updater_manifest.rs is never read.
+# is copied on every run to a target name under the prefix reserved to this
+# script -- src-tauri/tests/verifier_<16 random hex>_updater_manifest.rs. No
+# product revision commits a file under `tests/verifier_`
+# (tests/test_ci_capability_setup.py refuses the prefix in the index,
+# .gitignore refuses it in the working tree). Selecting logic by whether the
+# package already holds a conventionally named test would let a tag's own
+# stale or accepting copy stand in for the current verifier while reporting
+# the current verdict.
+#
+# A hashed file is not yet an executed target: cargo resolves `--test <name>`
+# through the verified package's Cargo.toml, so a fixed reserved name could be
+# claimed there by an explicit `[[test]] name = "<reserved>" path = "..."`
+# (explicit targets outrank the inferred tests/<name>.rs of the same name) and
+# `autotests = false` can suppress inference entirely. The invariant enforced
+# instead: the executed test target IS the staged file, proven by cargo's own
+# resolution. The target name is fresh per run, so no manifest can name it in
+# advance; after staging, `cargo metadata --no-deps` for the package must list
+# EXACTLY one `test` target of that name whose src_path, canonicalized (real
+# on-disk case, compared ordinally), is the staged file; the package manifest
+# must not set `autotests = false` and no `[[test]]` in it may name or path
+# anything under the reserved prefix; and the `Running <path>` line cargo
+# prints for the executed binary must resolve to the staged file. The staged
+# bytes are hashed against the source after the copy and removed after the
+# run; the package's own updater_manifest.rs is never read.
+#
+# Residual, by design: the verification runs INSIDE the package under test --
+# its pinned updater plugin, its build.rs, its Cargo.lock. The verifier CODE is
+# this revision's; the CRATE the code exercises is the tag's, because the
+# question being answered is whether the manifest parses with the updater
+# version THAT tag's binaries carry.
 #
 # -Offline <dir> skips the API and reads <dir>/release.json, <dir>/assets.json
 # and the "downloaded" asset files from <dir>; the comparison is otherwise the
@@ -229,16 +250,34 @@ foreach ($name in $expectedPlatforms) {
     }
 }
 
+# The real on-disk path: full, and with each segment's case as the file system
+# holds it. .NET's own resolution keeps the caller's casing, and cargo reports
+# src_path from the manifest directory it was given, so both sides are
+# canonicalized here before the ordinal comparison.
+function Get-CanonicalPath([string]$path) {
+    $full = [System.IO.Path]::GetFullPath($path)
+    $root = [System.IO.Path]::GetPathRoot($full)
+    $canonical = $root.ToUpperInvariant()
+    foreach ($segment in $full.Substring($root.Length).Split([System.IO.Path]::DirectorySeparatorChar, [System.StringSplitOptions]::RemoveEmptyEntries)) {
+        $entries = @([System.IO.Directory]::GetFileSystemEntries($canonical, $segment))
+        if ($entries.Count -ne 1) { throw "cannot canonicalize '$path': '$segment' under '$canonical' resolves to $($entries.Count) entries" }
+        $canonical = $entries[0]
+    }
+    return $canonical
+}
+
 # The consumer's parse (header). The release body is handed over as a file:
 # an environment value would go through the console encoding.
-# The verifier's own copy of the test source is staged under the reserved
-# target name unconditionally (header): the package's tests/ directory is
-# never consulted for logic, only for the dependency graph its Cargo.toml and
-# Cargo.lock pin. Cargo discovers every tests/*.rs as an integration test, so
-# the staged file IS the `--test verifier_updater_manifest` target.
-$verifierTest = "verifier_updater_manifest"
+# The verifier's own copy of the test source is staged under a fresh name in
+# the reserved prefix unconditionally (header): the package's tests/ directory
+# is never consulted for logic, only for the dependency graph its Cargo.toml
+# and Cargo.lock pin.
+$verifierPrefix = "verifier_"
+$nonce = ([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(8) | ForEach-Object { $_.ToString("x2") }) -join ""
+$verifierTest = "${verifierPrefix}${nonce}_updater_manifest"
 $testSource = Join-Path $PSScriptRoot "..\src-tauri\tests\updater_manifest.rs"
 if (-not (Test-Path -LiteralPath $testSource)) { throw "no updater manifest test at $testSource" }
+$packageManifest = Join-Path $CargoPackage "Cargo.toml"
 $testTarget = Join-Path (Join-Path $CargoPackage "tests") "$verifierTest.rs"
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $testTarget) | Out-Null
 Copy-Item -LiteralPath $testSource -Destination $testTarget -Force
@@ -249,6 +288,59 @@ if (-not (Test-OrdinalEqual $sourceSha $stagedSha)) {
 }
 Write-Host "staged $testSource as $testTarget (sha256 $stagedSha)"
 try {
+    $stagedPath = Get-CanonicalPath $testTarget
+    $manifestPath = Get-CanonicalPath $packageManifest
+
+    # The package manifest, as text: cargo metadata does not report
+    # `autotests`, and a `[[test]]` under the reserved prefix is refused
+    # whether or not cargo would let it shadow anything.
+    $manifestText = Get-Content -LiteralPath $packageManifest -Raw
+    if ($manifestText -cmatch '(?m)^\s*autotests\s*=\s*false\b') {
+        throw "$packageManifest sets autotests = false: the staged verifier target cannot be inferred"
+    }
+    foreach ($section in [regex]::Split($manifestText, '(?m)^\s*\[\[test\]\]\s*$') | Select-Object -Skip 1) {
+        $body = [regex]::Split($section, '(?m)^\s*\[')[0]
+        foreach ($key in "name", "path") {
+            $m = [regex]::Match($body, "(?m)^\s*$key\s*=\s*[`"']([^`"']*)[`"']")
+            if (-not $m.Success) { continue }
+            $value = $m.Groups[1].Value -replace '\\', '/'
+            if ($value -cmatch "^(tests/)?$verifierPrefix") {
+                throw "$packageManifest declares a [[test]] with $key '$($m.Groups[1].Value)' under the reserved '$verifierPrefix' prefix"
+            }
+        }
+    }
+
+    # Cargo's own resolution of the package's targets. Exactly one package at
+    # this manifest, exactly one test target of the fresh name, and its source
+    # is the staged file. Any other target under the reserved prefix, explicit
+    # or inferred, is refused: the prefix is the verifier's alone.
+    $metadataJson = & cargo metadata --no-deps --format-version 1 --manifest-path $packageManifest
+    if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed for $packageManifest" }
+    $metadata = ($metadataJson -join "`n") | ConvertFrom-Json
+    $packages = @($metadata.packages | Where-Object {
+        Test-OrdinalEqual (Get-CanonicalPath ([string]$_.manifest_path)) $manifestPath
+    })
+    if ($packages.Count -ne 1) { throw "cargo metadata lists $($packages.Count) packages at $manifestPath, expected 1" }
+    $testTargets = @($packages[0].targets | Where-Object { @($_.kind) -ccontains "test" })
+    $named = @($testTargets | Where-Object { Test-OrdinalEqual ([string]$_.name) $verifierTest })
+    if ($named.Count -ne 1) {
+        throw "cargo resolves $($named.Count) test targets named '$verifierTest' in $manifestPath, expected exactly 1"
+    }
+    $resolvedPath = Get-CanonicalPath ([string]$named[0].src_path)
+    if (-not (Test-OrdinalEqual $resolvedPath $stagedPath)) {
+        throw "cargo resolves test target '$verifierTest' to $resolvedPath, not the staged $stagedPath"
+    }
+    foreach ($t in $testTargets) {
+        $name = [string]$t.name
+        $leaf = [System.IO.Path]::GetFileName([string]$t.src_path)
+        if (Test-OrdinalEqual $name $verifierTest) { continue }
+        if ($name.StartsWith($verifierPrefix, [System.StringComparison]::Ordinal) -or
+            $leaf.StartsWith($verifierPrefix, [System.StringComparison]::Ordinal)) {
+            throw "the package carries a test target '$name' ($($t.src_path)) under the reserved '$verifierPrefix' prefix"
+        }
+    }
+    Write-Host "cargo resolves --test $verifierTest to $resolvedPath"
+
     $bodyFile = Join-Path $Downloads "release-body.local.txt"
     [System.IO.File]::WriteAllText($bodyFile, [string]$release.body, [System.Text.UTF8Encoding]::new($false))
     $env:SPECTRAPDF_UPDATER_MANIFEST = (Resolve-Path -LiteralPath (Get-Downloaded "latest.json").path).Path
@@ -257,9 +349,28 @@ try {
     $env:SPECTRAPDF_UPDATER_PLATFORMS = $expectedPlatforms -join ","
     $env:SPECTRAPDF_UPDATER_URL = $installerUrl
     $env:SPECTRAPDF_UPDATER_SIGNATURE_FILE = (Resolve-Path -LiteralPath (Get-Downloaded $signature.Name).path).Path
-    & cargo test --manifest-path (Join-Path $CargoPackage "Cargo.toml") --test $verifierTest -- verifies_the_manifest_named_by_the_environment
-    if ($LASTEXITCODE -ne 0) {
+    # Output is captured so cargo's `Running <path>` line can be checked, and
+    # is echoed in full: the test's own diagnostics are the refusal's reason.
+    $cargoOutput = @(& cargo test --manifest-path $packageManifest --test $verifierTest -- verifies_the_manifest_named_by_the_environment 2>&1 |
+        ForEach-Object { [string]$_ })
+    $cargoExit = $LASTEXITCODE
+    $cargoOutput | ForEach-Object { Write-Host $_ }
+    if ($cargoExit -ne 0) {
         throw "latest.json is refused by the updater's own deserializer or differs from the release (cargo output above)"
+    }
+    # Belt and braces on the resolution above: the binary cargo reports having
+    # run was built from the staged file. Cargo prints the source path
+    # relative to the workspace root it reported in the metadata.
+    $running = @($cargoOutput | ForEach-Object {
+        $m = [regex]::Match($_, '^\s*Running (.+?\.rs) \(')
+        if ($m.Success) { $m.Groups[1].Value }
+    })
+    if ($running.Count -ne 1) { throw "cargo reported $($running.Count) 'Running' test binaries, expected exactly 1" }
+    $ran = $running[0]
+    if (-not [System.IO.Path]::IsPathRooted($ran)) { $ran = Join-Path ([string]$metadata.workspace_root) $ran }
+    $ranPath = Get-CanonicalPath $ran
+    if (-not (Test-OrdinalEqual $ranPath $stagedPath)) {
+        throw "cargo ran $ranPath, not the staged verifier $stagedPath"
     }
 } finally {
     Remove-Item -LiteralPath $testTarget -Force -ErrorAction SilentlyContinue
