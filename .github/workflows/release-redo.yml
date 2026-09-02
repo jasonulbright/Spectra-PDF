@@ -68,8 +68,10 @@ jobs:
 
       # Verifier-only tooling, from the revision this workflow runs at. Read
       # by the gates below; never a bundle input (see the header). The Rust
-      # test sources ride along for the draft verifier, which compiles the
-      # updater manifest check against the TAG's package when the tag lacks it.
+      # test sources ride along for the draft verifier, which stages ITS copy
+      # of the updater manifest check into the TAG's package under a name
+      # reserved to the verifier and runs that target, every time: the tag's
+      # dependency graph parses the manifest, the tag's own tests never do.
       - name: Check out the verifier tooling from the workflow's revision
         uses: actions/checkout@v7
         with:
@@ -79,6 +81,10 @@ jobs:
             scripts
             src-tauri/tests
 
+      # The one selection made from the tag's tree. It picks a verification
+      # REGIME (which expectation the built engine is held to), and both
+      # regimes run the verifier's own code from `verifier/`. Nothing in this
+      # workflow selects verifier CODE by what the tag carries.
       - name: Select the engine payload verification regime from the tag's tree
         id: engine-regime
         shell: bash

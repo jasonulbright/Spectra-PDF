@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -381,6 +382,12 @@ def test_the_draft_verifier_hashes_the_bytes_github_holds() -> None:
 
 
 UPDATER_MANIFEST_TEST = "src-tauri/tests/updater_manifest.rs"
+#: The integration-test target the draft verifier stages its own copy of
+#: UPDATER_MANIFEST_TEST under, in whichever package it verifies. Reserved to
+#: the verifier: a product revision never commits a file of this name, so a
+#: tag can never supply the logic that judges its manifest.
+VERIFIER_TEST_TARGET = "verifier_updater_manifest"
+VERIFIER_TEST_FILE = f"src-tauri/tests/{VERIFIER_TEST_TARGET}.rs"
 
 
 def test_the_draft_verifier_parses_the_manifest_with_the_updaters_deserializer() -> None:
@@ -392,7 +399,8 @@ def test_the_draft_verifier_parses_the_manifest_with_the_updaters_deserializer()
     """
     text = (ROOT / DRAFT_VERIFIER).read_text()
     assert "cargo test --manifest-path" in text
-    assert "--test updater_manifest -- verifies_the_manifest_named_by_the_environment" in text
+    assert f'$verifierTest = "{VERIFIER_TEST_TARGET}"' in text
+    assert "--test $verifierTest -- verifies_the_manifest_named_by_the_environment" in text
     rust = (ROOT / UPDATER_MANIFEST_TEST).read_text()
     assert "use tauri_plugin_updater::{RemoteRelease, RemoteReleaseInner};" in rust
     assert "serde_json::from_str(manifest)" in rust
@@ -403,6 +411,73 @@ def test_the_draft_verifier_parses_the_manifest_with_the_updaters_deserializer()
     ):
         assert f'"{env_var}"' in rust, env_var
         assert f"$env:{env_var} = " in text, env_var
+
+
+def test_the_draft_verifier_never_selects_its_logic_from_the_verified_package() -> None:
+    """Verifier code is staged from the verifier's revision on every run.
+
+    The redo runs the script from `verifier/` against a TAG's package. An
+    existence check on the package's tests/ would let a tag's own stale or
+    accepting `updater_manifest.rs` stand in for the current verifier. The
+    script therefore copies its sibling source under the reserved target
+    name unconditionally (overwriting), hashes the staged bytes against the
+    source, runs exactly that target, and removes it after.
+    """
+    text = (ROOT / DRAFT_VERIFIER).read_text()
+    staging = text[text.index('$verifierTest = "'):]
+    assert "Copy-Item -LiteralPath $testSource -Destination $testTarget -Force" in staging
+    # No presence test guards the copy: the only Test-Path in the staging
+    # block is the one that requires the verifier's own source to exist.
+    assert staging.count("Test-Path") == 1
+    assert "if (-not (Test-Path -LiteralPath $testSource))" in staging
+    copy = staging.index("Copy-Item")
+    assert "$stagedSha = Get-Sha256 $testTarget" in staging[copy:]
+    assert "is not the verifier's source" in staging[copy:]
+    assert "Remove-Item -LiteralPath $testTarget" in staging[copy:]
+    # The package's conventionally named test is never named as a target.
+    assert "--test updater_manifest" not in text
+
+
+def test_the_verifier_test_target_name_is_reserved() -> None:
+    """No product revision may commit the verifier's staging target.
+
+    The verifier overwrites the file on every run, so a committed copy could
+    never be RUN in its place; the reservation exists so the name stays the
+    verifier's alone and a tracked file of that name is a contract breach,
+    not a product test. The working tree is excluded by .gitignore for the
+    same reason.
+    """
+    tracked = _git("ls-files", "--", "src-tauri/tests").split()
+    assert VERIFIER_TEST_FILE not in tracked
+    assert VERIFIER_TEST_FILE in (ROOT / ".gitignore").read_text().splitlines()
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", VERIFIER_TEST_FILE], cwd=ROOT, capture_output=True,
+    )
+    assert ignored.returncode == 0
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_every_publisher_runs_the_verifier_target(workflow: str, job: str) -> None:
+    """Both publishers run the draft verifier, which runs the reserved target.
+
+    The ordinary release runs the checkout's own script; the redo runs the
+    workflow revision's from `verifier/`. Either way the manifest is judged
+    by the staged verifier target, after every upload and before the publish
+    (test_the_publish_step_is_last_and_every_verification_precedes_it holds
+    the order).
+    """
+    steps = dict(_job_steps(workflow, job))
+    verify = steps[RELEASE_VERIFY_DRAFT_STEP]
+    expected = "verifier/" + DRAFT_VERIFIER if workflow == "release-redo.yml" else DRAFT_VERIFIER
+    assert f"-File {expected} " in verify, (workflow, verify)
+    # The redo's sparse checkout must deliver the verifier's Rust source.
+    if workflow == "release-redo.yml":
+        checkout = steps[REDO_VERIFIER_STEP]
+        assert "src-tauri/tests" in checkout
+    # No workflow step runs the target directly: the script is the only
+    # caller, so the staging and hash check cannot be bypassed.
+    for name, text in steps.items():
+        assert f"--test {VERIFIER_TEST_TARGET}" not in text, (workflow, name)
 
 
 @pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
@@ -1008,6 +1083,64 @@ def test_the_draft_verifier_refuses_a_manifest_without_pub_date(tmp_path: Path) 
     run = _run_verifier(args)
     assert run.returncode != 0
     assert "latest.json carries no `pub_date`" in run.stdout + run.stderr
+
+
+ACCEPTING_UPDATER_TEST = """\
+#[test]
+fn verifies_the_manifest_named_by_the_environment() {}
+"""
+
+
+def test_the_draft_verifier_ignores_an_accepting_test_the_verified_package_carries(
+    tmp_path: Path,
+) -> None:
+    """A tag whose tests/ already holds an accepting `updater_manifest.rs`
+    (and, planted, an accepting copy under the reserved name) is still judged
+    by the verifier's own source: the malformed pub_date is refused, and the
+    faithful control passes against the package's pinned updater. Only the
+    package under verification differs from the ordinary fixture run.
+
+    The scratch package is a worktree at HEAD sharing the checkout's cargo
+    target directory, so the dependency graph is not rebuilt. The build
+    script requires every `resources/` entry of tauri.conf.json to exist;
+    empty stubs satisfy it the way the CI jobs' stubs do.
+    """
+    worktree = tmp_path / "tag"
+    _git("worktree", "add", "--detach", str(worktree), "HEAD")
+    try:
+        package = worktree / "src-tauri"
+        conf = json.loads((package / "tauri.conf.json").read_text())
+        for entry in conf["bundle"]["resources"]:
+            if entry.startswith("../resources/"):
+                (worktree / entry.removeprefix("../")).mkdir(parents=True)
+        (package / "tests" / "updater_manifest.rs").write_text(ACCEPTING_UPDATER_TEST)
+        (package / "tests" / f"{VERIFIER_TEST_TARGET}.rs").write_text(ACCEPTING_UPDATER_TEST)
+        args, downloaded = _draft_fixture(tmp_path)
+        args[args.index("-CargoPackage") + 1] = str(package)
+        env = {**os.environ, "CARGO_TARGET_DIR": str(ROOT / "src-tauri" / "target")}
+        staged = package / "tests" / f"{VERIFIER_TEST_TARGET}.rs"
+        source = (ROOT / UPDATER_MANIFEST_TEST).read_bytes()
+
+        _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="not-rfc3339"))
+        run = subprocess.run(args, capture_output=True, text=True, env=env)
+        assert run.returncode != 0, run.stdout + run.stderr
+        assert "invalid value for `pub_date`" in run.stdout + run.stderr
+        assert _verifier_says(run, UPDATER_REFUSAL)
+        # The staging line names the verifier's source and its exact digest.
+        assert f"staged " in run.stdout and str(package / "tests") in run.stdout
+        assert hashlib.sha256(source).hexdigest() in run.stdout
+        # The staged target is removed after the run, and the package's own
+        # accepting test is left exactly as planted: never read, never touched.
+        assert not staged.exists()
+        assert (package / "tests" / "updater_manifest.rs").read_text() == ACCEPTING_UPDATER_TEST
+
+        _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="2026-09-02T15:00:00.000Z"))
+        run = subprocess.run(args, capture_output=True, text=True, env=env)
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert "verified from downloaded bytes: 6 assets hashed" in run.stdout
+        assert not staged.exists()
+    finally:
+        _git("worktree", "remove", "--force", str(worktree))
 
 
 def test_ci_scans_the_renderer_it_just_built_for_the_test_harness() -> None:
