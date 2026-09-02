@@ -449,6 +449,13 @@ jobs:
         run: python scripts/check-engine-payload.py
         shell: bash
 
+      # The renderer tree the binary embedded: the e2e harness is compiled out
+      # by VITE_E2E, and a leaked variable would ship a raw dispatcher that
+      # bypasses the commit gate. Mirrored in scripts/ci-parity-gates.sh.
+      - name: Shipped renderer carries no test harness
+        run: python scripts/check-release-bundle.py
+        shell: bash
+
       # Uploads address the draft by its id: a draft has no tag ref, so a
       # tag-addressed upload could resolve to a different (public) release.
       - name: Upload the portable zip to the draft

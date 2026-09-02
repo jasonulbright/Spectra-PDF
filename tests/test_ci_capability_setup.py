@@ -219,6 +219,7 @@ RELEASE_VERIFICATION_STEPS = (
     "Portable payload notice map covers every declared resource",
     "Engine payload manifest is current",
     "Engine payload matches its manifest",
+    "Shipped renderer carries no test harness",
     "Verify the draft's assets and updater manifest",
 )
 
@@ -228,6 +229,8 @@ RELEASE_PAYLOAD_GATES = (
     ("Engine payload manifest is current",
      "python scripts/gen-engine-payload-manifest.py --check"),
     ("Engine payload matches its manifest", "python scripts/check-engine-payload.py"),
+    ("Shipped renderer carries no test harness",
+     "python scripts/check-release-bundle.py"),
 )
 
 RELEASE_DRAFT_STEP = "Build, sign, and upload to a draft release"
@@ -333,6 +336,14 @@ def test_the_payload_gates_are_mirrored_locally() -> None:
         assert command.removeprefix("python ") in text
     assert "build-portable-zip.ps1 -CheckMap" in text
     assert "tests/test_ci_capability_setup.py" in text
+
+
+def test_ci_scans_the_renderer_it_just_built_for_the_test_harness() -> None:
+    steps = _job_steps("ci.yml", "lint-and-build")
+    names = [name for name, _ in steps]
+    gate = "Shipped renderer carries no test harness"
+    assert names.index("Build renderer (Vite)") + 1 == names.index(gate)
+    assert "run: python scripts/check-release-bundle.py" in dict(steps)[gate]
 
 
 def test_scan_fixture_uses_the_ghostscript_authority() -> None:
