@@ -44,16 +44,16 @@ jobs:
       - name: Tag matches every version surface
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}" -replace '^v',''
+          $tag = "${{ github.ref_name }}" -creplace '^v',''
           $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $conf = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           $cargo = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' |
                     Select-Object -First 1).Matches.Groups[1].Value
           Write-Host "tag=$tag package.json=$pkg tauri.conf.json=$conf Cargo.toml=$cargo"
           $bad = @()
-          if ($pkg   -ne $tag) { $bad += "package.json ($pkg)" }
-          if ($conf  -ne $tag) { $bad += "tauri.conf.json ($conf)" }
-          if ($cargo -ne $tag) { $bad += "Cargo.toml ($cargo)" }
+          if ($pkg   -cne $tag) { $bad += "package.json ($pkg)" }
+          if ($conf  -cne $tag) { $bad += "tauri.conf.json ($conf)" }
+          if ($cargo -cne $tag) { $bad += "Cargo.toml ($cargo)" }
           if ($bad) { throw "Tag $tag disagrees with: $($bad -join ', ')" }
 
       - name: Install Node dependencies
@@ -480,7 +480,7 @@ jobs:
           $repo = "${{ github.repository }}"
           $assets = @(gh api "repos/$repo/releases/$env:RELEASE_ID/assets?per_page=100" | ConvertFrom-Json)
           foreach ($file in $zips) {
-            foreach ($stale in @($assets | Where-Object name -eq $file.Name)) {
+            foreach ($stale in @($assets | Where-Object name -ceq $file.Name)) {
               gh api --method DELETE "repos/$repo/releases/assets/$($stale.id)"
               if ($LASTEXITCODE -ne 0) { throw "failed to replace $($file.Name)" }
             }
@@ -500,7 +500,7 @@ jobs:
           $repo = "${{ github.repository }}"
           $assets = @(gh api "repos/$repo/releases/$env:RELEASE_ID/assets?per_page=100" | ConvertFrom-Json)
           foreach ($file in $files) {
-            foreach ($stale in @($assets | Where-Object name -eq $file.Name)) {
+            foreach ($stale in @($assets | Where-Object name -ceq $file.Name)) {
               gh api --method DELETE "repos/$repo/releases/assets/$($stale.id)"
               if ($LASTEXITCODE -ne 0) { throw "failed to replace $($file.Name)" }
             }
@@ -539,7 +539,7 @@ jobs:
           Get-Content $out
           $repo = "${{ github.repository }}"
           $assets = @(gh api "repos/$repo/releases/$env:RELEASE_ID/assets?per_page=100" | ConvertFrom-Json)
-          foreach ($stale in @($assets | Where-Object name -eq "SHA256SUMS.txt")) {
+          foreach ($stale in @($assets | Where-Object name -ceq "SHA256SUMS.txt")) {
             gh api --method DELETE "repos/$repo/releases/assets/$($stale.id)"
             if ($LASTEXITCODE -ne 0) { throw "failed to replace SHA256SUMS.txt" }
           }

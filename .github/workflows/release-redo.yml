@@ -222,7 +222,7 @@ jobs:
           $repo = "${{ github.repository }}"
           $assets = @(gh api "repos/$repo/releases/$env:RELEASE_ID/assets?per_page=100" | ConvertFrom-Json)
           foreach ($file in $zips) {
-            foreach ($stale in @($assets | Where-Object name -eq $file.Name)) {
+            foreach ($stale in @($assets | Where-Object name -ceq $file.Name)) {
               gh api --method DELETE "repos/$repo/releases/assets/$($stale.id)"
               if ($LASTEXITCODE -ne 0) { throw "failed to replace $($file.Name)" }
             }
@@ -242,7 +242,7 @@ jobs:
           $repo = "${{ github.repository }}"
           $assets = @(gh api "repos/$repo/releases/$env:RELEASE_ID/assets?per_page=100" | ConvertFrom-Json)
           foreach ($file in $files) {
-            foreach ($stale in @($assets | Where-Object name -eq $file.Name)) {
+            foreach ($stale in @($assets | Where-Object name -ceq $file.Name)) {
               gh api --method DELETE "repos/$repo/releases/assets/$($stale.id)"
               if ($LASTEXITCODE -ne 0) { throw "failed to replace $($file.Name)" }
             }
@@ -275,7 +275,7 @@ jobs:
           Get-Content $out
           $repo = "${{ github.repository }}"
           $assets = @(gh api "repos/$repo/releases/$env:RELEASE_ID/assets?per_page=100" | ConvertFrom-Json)
-          foreach ($stale in @($assets | Where-Object name -eq "SHA256SUMS.txt")) {
+          foreach ($stale in @($assets | Where-Object name -ceq "SHA256SUMS.txt")) {
             gh api --method DELETE "repos/$repo/releases/assets/$($stale.id)"
             if ($LASTEXITCODE -ne 0) { throw "failed to replace SHA256SUMS.txt" }
           }
