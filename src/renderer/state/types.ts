@@ -1,8 +1,8 @@
 import type { ToolbarOverrides } from '../lib/toolbar-layout';
 
-// Bytes read over Tauri IPC arrive as a JSON number[] (read_file_buffer),
-// but may also be an ArrayBuffer/Uint8Array depending on the source. pdf.js
-// accepts any of these; this union avoids unsafe ArrayBuffer casts.
+// Bytes arrive as an ArrayBuffer, a Uint8Array, or a JSON number[] depending
+// on the source. pdf.js accepts any of these; this union avoids unsafe
+// ArrayBuffer casts.
 export type PdfBuffer = ArrayBuffer | Uint8Array | number[];
 
 export interface OpenFile {

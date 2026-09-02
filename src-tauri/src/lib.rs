@@ -179,7 +179,6 @@ pub fn run() {
             commands::write_profile_file,
             commands::write_action_file,
 
-            commands::read_file_buffer,
             commands::create_working_copy,
             commands::snapshot,
             commands::restore_snapshot,
