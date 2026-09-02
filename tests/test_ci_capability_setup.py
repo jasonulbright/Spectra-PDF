@@ -208,6 +208,133 @@ def test_the_redo_publisher_takes_product_bytes_from_the_tag() -> None:
     assert "github.ref_name" not in text
 
 
+#: The publishers: (workflow, job) pairs whose last step is the only one that
+#: makes a release public. Both must carry the same gates in the same order.
+PUBLISHER_JOBS = (("release.yml", "release"), ("release-redo.yml", "release"))
+
+#: Every gate that runs against the built and uploaded assets, in the order
+#: the job runs them. All of them precede the publish step.
+RELEASE_VERIFICATION_STEPS = (
+    "Verify the portable tree against the installer's staging",
+    "Portable payload notice map covers every declared resource",
+    "Engine payload manifest is current",
+    "Engine payload matches its manifest",
+    "Verify the draft's assets and updater manifest",
+)
+
+#: The two payload gates mirrored in scripts/ci-parity-gates.sh: step name
+#: and the exact command, so a workflow cannot keep the name and drop the run.
+RELEASE_PAYLOAD_GATES = (
+    ("Engine payload manifest is current",
+     "python scripts/gen-engine-payload-manifest.py --check"),
+    ("Engine payload matches its manifest", "python scripts/check-engine-payload.py"),
+)
+
+RELEASE_DRAFT_STEP = "Build, sign, and upload to a draft release"
+RELEASE_PUBLISH_STEP = "Publish the release"
+
+
+def _job_steps(workflow: str, job: str) -> list[tuple[str, str]]:
+    """(name, text) of each step of `job`, in file order.
+
+    The workflows are read as text, not YAML: the release verifier installs
+    only pytest beside the shipped requirement set, which carries no YAML
+    parser, and the step layout is the two-space convention every workflow
+    in this repository follows.
+    """
+    lines = (ROOT / ".github" / "workflows" / workflow).read_text().splitlines()
+    start = lines.index(f"  {job}:")
+    body: list[str] = []
+    for line in lines[start + 1:]:
+        if line and not line.startswith(" "):
+            break
+        if line.startswith("  ") and not line.startswith("   "):
+            break
+        body.append(line)
+    steps_at = body.index("    steps:")
+    steps: list[list[str]] = []
+    for line in body[steps_at + 1:]:
+        if line.startswith("      - "):
+            steps.append([line])
+        elif steps:
+            steps[-1].append(line)
+    named: list[tuple[str, str]] = []
+    for step in steps:
+        text = "\n".join(step)
+        names = [
+            line.split("name:", 1)[1].strip()
+            for line in step
+            if line.startswith("      - name:") or line.startswith("        name:")
+        ]
+        named.append((names[0] if names else "", text))
+    return named
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_the_publish_step_is_last_and_every_verification_precedes_it(
+    workflow: str, job: str
+) -> None:
+    """Assets are built and uploaded to a DRAFT; undrafting is the final step.
+
+    A non-draft publish followed by verification leaves a public installer
+    when a gate fails. With this order a failing gate leaves a draft nobody
+    can download, and the remedy is forward-only from there.
+    """
+    steps = _job_steps(workflow, job)
+    names = [name for name, _ in steps]
+    assert names[-1] == RELEASE_PUBLISH_STEP
+    publish = len(names) - 1
+    draft = names.index(RELEASE_DRAFT_STEP)
+    for gate in RELEASE_VERIFICATION_STEPS:
+        assert draft < names.index(gate) < publish, (workflow, gate)
+    uploads = [i for i, name in enumerate(names) if name.startswith("Upload ")]
+    assert uploads, workflow
+    # Every upload lands before the read-back verification of the draft.
+    assert max(uploads) < names.index("Verify the draft's assets and updater manifest")
+    assert all(draft < i for i in uploads)
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_the_release_is_a_draft_until_the_publish_step(workflow: str, job: str) -> None:
+    steps = dict(_job_steps(workflow, job))
+    draft = steps[RELEASE_DRAFT_STEP]
+    assert "uses: tauri-apps/tauri-action@v1" in draft
+    assert "releaseDraft: true" in draft
+    assert "id: draft" in draft
+    publish = steps[RELEASE_PUBLISH_STEP]
+    assert "-F draft=false" in publish
+    # No other step undrafts, and no upload addresses a release by tag: a
+    # draft has no tag ref, so a tag-addressed upload could land on a public
+    # release for the same tag.
+    for name, text in steps.items():
+        if name != RELEASE_PUBLISH_STEP:
+            assert "draft=false" not in text, (workflow, name)
+        if name.startswith("Upload "):
+            assert "steps.draft.outputs.releaseId" in text, (workflow, name)
+            assert "gh release upload" not in text, (workflow, name)
+    verify = steps["Verify the draft's assets and updater manifest"]
+    assert "is already public before verification" in verify
+    assert "steps.draft.outputs.releaseId" in verify
+    assert "steps.draft.outputs.releaseId" in publish
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+@pytest.mark.parametrize("name,command", RELEASE_PAYLOAD_GATES)
+def test_both_payload_gates_run_in_every_publisher(
+    workflow: str, job: str, name: str, command: str
+) -> None:
+    steps = dict(_job_steps(workflow, job))
+    assert f"run: {command}" in steps[name], (workflow, name)
+
+
+def test_the_payload_gates_are_mirrored_locally() -> None:
+    text = (ROOT / "scripts" / "ci-parity-gates.sh").read_text()
+    for _name, command in RELEASE_PAYLOAD_GATES:
+        assert command.removeprefix("python ") in text
+    assert "build-portable-zip.ps1 -CheckMap" in text
+    assert "tests/test_ci_capability_setup.py" in text
+
+
 def test_scan_fixture_uses_the_ghostscript_authority() -> None:
     text = (ROOT / "tests" / "fixtures" / "make_scans.py").read_text()
     assert "from engine.gs_capability import require" in text
