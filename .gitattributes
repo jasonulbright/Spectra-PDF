@@ -59,3 +59,12 @@ src/engine/trust/** -text
 # while keeping the textual diff a pinned artifact's review depends on.
 
 tests/fixtures/xmp-extension-schemas/*.xml -text
+
+# The engine payload is pinned by size and SHA-256 in
+# src/engine/PAYLOAD-MANIFEST.tsv, and src-tauri/build.rs refuses to stage a
+# file whose working-tree bytes miss that pin. With EOL translation the bytes
+# a checkout holds depend on core.autocrlf, so the same commit yields a
+# different digest per machine and every pin is wrong somewhere. `-text` makes
+# the payload byte-identical to the committed blob on every platform.
+
+src/engine/** -text

@@ -429,7 +429,11 @@ jobs:
       # `resources` directory entry is copied whole, so an engine source tree
       # carrying ignored __pycache__ would put cached bytecode in the installer
       # and the zip alike. Mirrored in scripts/ci-parity-gates.sh.
-      - name: Engine payload carries no cached bytecode
+      - name: Engine payload manifest is current
+        run: python scripts/gen-engine-payload-manifest.py --check
+        shell: bash
+
+      - name: Engine payload matches its manifest
         run: python scripts/check-engine-payload.py
         shell: bash
 

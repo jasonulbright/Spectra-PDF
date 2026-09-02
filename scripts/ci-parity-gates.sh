@@ -63,9 +63,12 @@ if command -v powershell >/dev/null 2>&1; then
   gate portable-checkmap powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -CheckMap
 fi
 
-# --- CI gate: the engine payload carries no cached bytecode. A `resources`
-#     directory entry is copied whole, so a checkout's ignored __pycache__
-#     rides into the installer and the portable zip. ---
+# --- CI gate: the engine payload is exactly the manifested tree. A `resources`
+#     directory entry is copied whole, so a checkout's ignored __pycache__ or
+#     untracked scratch rides into the installer and the portable zip. The
+#     manifest is the contract build.rs stages from; --check refuses a source
+#     change that did not regenerate it. ---
+gate engine-manifest "$R/.venv/Scripts/python.exe" scripts/gen-engine-payload-manifest.py --check
 gate engine-payload "$R/.venv/Scripts/python.exe" scripts/check-engine-payload.py
 
 # --- Corpus provisioning contract: a test axis with no CI provisioning is the
