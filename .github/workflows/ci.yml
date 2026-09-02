@@ -88,10 +88,15 @@ jobs:
       # A `resources` directory entry is copied whole -- the bundler has no
       # exclusion form -- so an engine source tree carrying ignored
       # __pycache__ ships cached bytecode in the installer and the portable
-      # zip. build.rs (which the step above ran) stages a filtered tree; this
-      # asserts the declaration points at that staging and the staged tree is
-      # clean. Mirrored in scripts/ci-parity-gates.sh.
-      - name: Engine payload carries no cached bytecode
+      # zip. build.rs (which the step above ran) stages exactly the rows of
+      # src/engine/PAYLOAD-MANIFEST.tsv; these assert the manifest still
+      # describes the tracked source and that every built engine tree matches
+      # it by path and SHA-256. Mirrored in scripts/ci-parity-gates.sh.
+      - name: Engine payload manifest is current
+        run: python scripts/gen-engine-payload-manifest.py --check
+        shell: bash
+
+      - name: Engine payload matches its manifest
         run: python scripts/check-engine-payload.py
         shell: bash
 

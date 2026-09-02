@@ -13,6 +13,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Already in the lock as a transitive dependency; the build script verifies
+# every staged engine file against the manifest's recorded digest.
+sha2 = "0.10"
 
 [features]
 # Optional in-app W3C WebDriver server, so e2e needs no
