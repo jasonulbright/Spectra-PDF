@@ -382,12 +382,15 @@ def test_the_draft_verifier_hashes_the_bytes_github_holds() -> None:
 
 
 UPDATER_MANIFEST_TEST = "src-tauri/tests/updater_manifest.rs"
-#: The integration-test target the draft verifier stages its own copy of
-#: UPDATER_MANIFEST_TEST under, in whichever package it verifies. Reserved to
-#: the verifier: a product revision never commits a file of this name, so a
-#: tag can never supply the logic that judges its manifest.
-VERIFIER_TEST_TARGET = "verifier_updater_manifest"
-VERIFIER_TEST_FILE = f"src-tauri/tests/{VERIFIER_TEST_TARGET}.rs"
+#: The prefix of the integration-test target the draft verifier stages its
+#: own copy of UPDATER_MANIFEST_TEST under (`verifier_<16 hex>_updater_manifest`,
+#: fresh per run), in whichever package it verifies. Reserved to the verifier:
+#: a product revision never commits a file under this prefix, and the verifier
+#: refuses a package whose manifest names one, so a tag can never supply the
+#: logic that judges its manifest -- and, the name being unpredictable, can
+#: never declare a `[[test]]` that claims it.
+VERIFIER_TEST_PREFIX = "verifier_"
+VERIFIER_TEST_IGNORE = f"src-tauri/tests/{VERIFIER_TEST_PREFIX}*"
 
 
 def test_the_draft_verifier_parses_the_manifest_with_the_updaters_deserializer() -> None:
@@ -399,7 +402,8 @@ def test_the_draft_verifier_parses_the_manifest_with_the_updaters_deserializer()
     """
     text = (ROOT / DRAFT_VERIFIER).read_text()
     assert "cargo test --manifest-path" in text
-    assert f'$verifierTest = "{VERIFIER_TEST_TARGET}"' in text
+    assert f'$verifierPrefix = "{VERIFIER_TEST_PREFIX}"' in text
+    assert '$verifierTest = "${verifierPrefix}${nonce}_updater_manifest"' in text
     assert "--test $verifierTest -- verifies_the_manifest_named_by_the_environment" in text
     rust = (ROOT / UPDATER_MANIFEST_TEST).read_text()
     assert "use tauri_plugin_updater::{RemoteRelease, RemoteReleaseInner};" in rust
@@ -419,12 +423,15 @@ def test_the_draft_verifier_never_selects_its_logic_from_the_verified_package() 
     The redo runs the script from `verifier/` against a TAG's package. An
     existence check on the package's tests/ would let a tag's own stale or
     accepting `updater_manifest.rs` stand in for the current verifier. The
-    script therefore copies its sibling source under the reserved target
-    name unconditionally (overwriting), hashes the staged bytes against the
-    source, runs exactly that target, and removes it after.
+    script therefore copies its sibling source under a fresh name in the
+    reserved prefix unconditionally, hashes the staged bytes against the
+    source, proves through cargo's own resolution that the target of that
+    name IS the staged file, runs exactly that target, checks the path cargo
+    reports having run, and removes the file after.
     """
     text = (ROOT / DRAFT_VERIFIER).read_text()
-    staging = text[text.index('$verifierTest = "'):]
+    staging = text[text.index('$verifierPrefix = "'):]
+    assert "RandomNumberGenerator]::GetBytes(8)" in staging
     assert "Copy-Item -LiteralPath $testSource -Destination $testTarget -Force" in staging
     # No presence test guards the copy: the only Test-Path in the staging
     # block is the one that requires the verifier's own source to exist.
@@ -433,27 +440,43 @@ def test_the_draft_verifier_never_selects_its_logic_from_the_verified_package() 
     copy = staging.index("Copy-Item")
     assert "$stagedSha = Get-Sha256 $testTarget" in staging[copy:]
     assert "is not the verifier's source" in staging[copy:]
-    assert "Remove-Item -LiteralPath $testTarget" in staging[copy:]
+    # The resolution proof sits between the hash and the run.
+    metadata = staging.index("cargo metadata --no-deps --format-version 1 --manifest-path $packageManifest", copy)
+    run = staging.index("cargo test --manifest-path $packageManifest --test $verifierTest", metadata)
+    proof = staging[metadata:run]
+    assert "Test-OrdinalEqual ([string]$_.name) $verifierTest" in proof
+    assert "not the staged $stagedPath" in proof
+    assert "autotests\\s*=\\s*false" in staging[copy:metadata]
+    assert "under the reserved '$verifierPrefix' prefix" in staging[copy:run]
+    assert "'^\\s*Running (.+?\\.rs) \\('" in staging[run:]
+    assert "not the staged verifier $stagedPath" in staging[run:]
+    assert "Remove-Item -LiteralPath $testTarget" in staging[run:]
     # The package's conventionally named test is never named as a target.
     assert "--test updater_manifest" not in text
 
 
-def test_the_verifier_test_target_name_is_reserved() -> None:
-    """No product revision may commit the verifier's staging target.
+def test_the_verifier_test_target_prefix_is_reserved() -> None:
+    """No product revision may commit a file under the verifier's prefix.
 
-    The verifier overwrites the file on every run, so a committed copy could
-    never be RUN in its place; the reservation exists so the name stays the
-    verifier's alone and a tracked file of that name is a contract breach,
-    not a product test. The working tree is excluded by .gitignore for the
-    same reason.
+    The verifier refuses a package whose manifest or tests/ carries any
+    target under the prefix, so a tracked file there is a contract breach
+    that would fail every release, not a product test. The working tree is
+    excluded by .gitignore for the same reason.
     """
     tracked = _git("ls-files", "--", "src-tauri/tests").split()
-    assert VERIFIER_TEST_FILE not in tracked
-    assert VERIFIER_TEST_FILE in (ROOT / ".gitignore").read_text().splitlines()
-    ignored = subprocess.run(
-        ["git", "check-ignore", "-q", VERIFIER_TEST_FILE], cwd=ROOT, capture_output=True,
-    )
-    assert ignored.returncode == 0
+    assert not [
+        path for path in tracked
+        if path.removeprefix("src-tauri/tests/").startswith(VERIFIER_TEST_PREFIX)
+    ]
+    assert VERIFIER_TEST_IGNORE in (ROOT / ".gitignore").read_text().splitlines()
+    for staged in (
+        f"src-tauri/tests/{VERIFIER_TEST_PREFIX}0123456789abcdef_updater_manifest.rs",
+        f"src-tauri/tests/{VERIFIER_TEST_PREFIX}updater_manifest.rs",
+    ):
+        ignored = subprocess.run(
+            ["git", "check-ignore", "-q", staged], cwd=ROOT, capture_output=True,
+        )
+        assert ignored.returncode == 0, staged
 
 
 @pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
@@ -477,7 +500,7 @@ def test_every_publisher_runs_the_verifier_target(workflow: str, job: str) -> No
     # No workflow step runs the target directly: the script is the only
     # caller, so the staging and hash check cannot be bypassed.
     for name, text in steps.items():
-        assert f"--test {VERIFIER_TEST_TARGET}" not in text, (workflow, name)
+        assert f"--test {VERIFIER_TEST_PREFIX}" not in text, (workflow, name)
 
 
 @pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
@@ -1091,19 +1114,26 @@ fn verifies_the_manifest_named_by_the_environment() {}
 """
 
 
-def test_the_draft_verifier_ignores_an_accepting_test_the_verified_package_carries(
-    tmp_path: Path,
-) -> None:
-    """A tag whose tests/ already holds an accepting `updater_manifest.rs`
-    (and, planted, an accepting copy under the reserved name) is still judged
-    by the verifier's own source: the malformed pub_date is refused, and the
-    faithful control passes against the package's pinned updater. Only the
-    package under verification differs from the ordinary fixture run.
+#: The reviewer's probe, verbatim in shape: an explicit `[[test]]` claiming
+#: the name the verifier once staged under, pathed at a tag-local accepting
+#: source. Cargo runs the explicit target over the inferred `tests/<name>.rs`.
+EXPLICIT_TEST_REDIRECT = """
+[[test]]
+name = "verifier_updater_manifest"
+path = "tests/accepting_verifier.local.rs"
+"""
 
-    The scratch package is a worktree at HEAD sharing the checkout's cargo
-    target directory, so the dependency graph is not rebuilt. The build
-    script requires every `resources/` entry of tauri.conf.json to exist;
-    empty stubs satisfy it the way the CI jobs' stubs do.
+
+@pytest.fixture
+def tag_package(tmp_path: Path):
+    """A scratch package standing in for a TAG's `src-tauri`, with the
+    conventionally named test replaced by an accepting one.
+
+    A worktree at HEAD sharing the checkout's cargo target directory, so the
+    dependency graph is not rebuilt. The build script requires every
+    `resources/` entry of tauri.conf.json to exist; empty stubs satisfy it
+    the way the CI jobs' stubs do. Yields (verifier args, downloaded dir,
+    package dir, env).
     """
     worktree = tmp_path / "tag"
     _git("worktree", "add", "--detach", str(worktree), "HEAD")
@@ -1114,33 +1144,170 @@ def test_the_draft_verifier_ignores_an_accepting_test_the_verified_package_carri
             if entry.startswith("../resources/"):
                 (worktree / entry.removeprefix("../")).mkdir(parents=True)
         (package / "tests" / "updater_manifest.rs").write_text(ACCEPTING_UPDATER_TEST)
-        (package / "tests" / f"{VERIFIER_TEST_TARGET}.rs").write_text(ACCEPTING_UPDATER_TEST)
         args, downloaded = _draft_fixture(tmp_path)
         args[args.index("-CargoPackage") + 1] = str(package)
         env = {**os.environ, "CARGO_TARGET_DIR": str(ROOT / "src-tauri" / "target")}
-        staged = package / "tests" / f"{VERIFIER_TEST_TARGET}.rs"
-        source = (ROOT / UPDATER_MANIFEST_TEST).read_bytes()
-
-        _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="not-rfc3339"))
-        run = subprocess.run(args, capture_output=True, text=True, env=env)
-        assert run.returncode != 0, run.stdout + run.stderr
-        assert "invalid value for `pub_date`" in run.stdout + run.stderr
-        assert _verifier_says(run, UPDATER_REFUSAL)
-        # The staging line names the verifier's source and its exact digest.
-        assert f"staged " in run.stdout and str(package / "tests") in run.stdout
-        assert hashlib.sha256(source).hexdigest() in run.stdout
-        # The staged target is removed after the run, and the package's own
-        # accepting test is left exactly as planted: never read, never touched.
-        assert not staged.exists()
-        assert (package / "tests" / "updater_manifest.rs").read_text() == ACCEPTING_UPDATER_TEST
-
-        _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="2026-09-02T15:00:00.000Z"))
-        run = subprocess.run(args, capture_output=True, text=True, env=env)
-        assert run.returncode == 0, run.stdout + run.stderr
-        assert "verified from downloaded bytes: 6 assets hashed" in run.stdout
-        assert not staged.exists()
+        yield args, downloaded, package, env
     finally:
         _git("worktree", "remove", "--force", str(worktree))
+
+
+def _staged_leftovers(package: Path) -> list[Path]:
+    """Staged verifier files the script failed to remove; a planted file
+    under the prefix is the test's own and is not one."""
+    return sorted(
+        p for p in (package / "tests").glob(f"{VERIFIER_TEST_PREFIX}*")
+        if re.fullmatch(rf"{VERIFIER_TEST_PREFIX}[0-9a-f]{{16}}_updater_manifest\.rs", p.name)
+    )
+
+
+def test_the_draft_verifier_ignores_an_accepting_test_the_verified_package_carries(
+    tag_package,
+) -> None:
+    """A tag whose tests/ already holds an accepting `updater_manifest.rs` is
+    still judged by the verifier's own source: the malformed pub_date is
+    refused, and the faithful control passes against the package's pinned
+    updater. Only the package under verification differs from the ordinary
+    fixture run.
+    """
+    args, downloaded, package, env = tag_package
+    source = (ROOT / UPDATER_MANIFEST_TEST).read_bytes()
+
+    _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="not-rfc3339"))
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode != 0, run.stdout + run.stderr
+    assert "invalid value for `pub_date`" in run.stdout + run.stderr
+    assert _verifier_says(run, UPDATER_REFUSAL)
+    # The staging line names the verifier's source and its exact digest, and
+    # the resolution line names the same staged file cargo will run.
+    staged = re.search(
+        rf"staged .* as (.*[\\/]tests[\\/]{VERIFIER_TEST_PREFIX}[0-9a-f]{{16}}_updater_manifest\.rs) \(sha256 ([0-9a-f]{{64}})\)",
+        run.stdout,
+    )
+    assert staged, run.stdout
+    assert Path(staged.group(1)).parent == package / "tests"
+    assert staged.group(2) == hashlib.sha256(source).hexdigest()
+    assert f"cargo resolves --test {Path(staged.group(1)).stem} to " in run.stdout
+    # The staged target is removed after the run, and the package's own
+    # accepting test is left exactly as planted: never read, never touched.
+    assert _staged_leftovers(package) == []
+    assert (package / "tests" / "updater_manifest.rs").read_text() == ACCEPTING_UPDATER_TEST
+
+    _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="2026-09-02T15:00:00.000Z"))
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "verified from downloaded bytes: 6 assets hashed" in run.stdout
+    # A fresh name each run: the two staged targets never coincide.
+    second = re.search(rf"as .*({VERIFIER_TEST_PREFIX}[0-9a-f]{{16}}_updater_manifest)\.rs", run.stdout)
+    assert second and second.group(1) != Path(staged.group(1)).stem
+    assert _staged_leftovers(package) == []
+
+
+def test_the_draft_verifier_refuses_a_manifest_that_redirects_the_verifier_target(
+    tag_package,
+) -> None:
+    """The explicit-target substitution: the tag's Cargo.toml declares a
+    `[[test]]` under the reserved name pointing at its own accepting source.
+    Refused on the manifest text before any build, with a malformed manifest
+    AND with a faithful one -- the breach is the package's, not the release's.
+    """
+    args, downloaded, package, env = tag_package
+    (package / "tests" / "accepting_verifier.local.rs").write_text(ACCEPTING_UPDATER_TEST)
+    manifest = package / "Cargo.toml"
+    manifest.write_text(manifest.read_text() + EXPLICIT_TEST_REDIRECT)
+
+    _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="not-rfc3339"))
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode != 0, run.stdout + run.stderr
+    assert _verifier_says(
+        run, "declares a [[test]] with name 'verifier_updater_manifest' under the reserved 'verifier_' prefix")
+    assert "Running" not in run.stdout + run.stderr
+    assert _staged_leftovers(package) == []
+
+    _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="2026-09-02T15:00:00.000Z"))
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode != 0, run.stdout + run.stderr
+    assert _verifier_says(run, "under the reserved 'verifier_' prefix")
+    assert "verified from downloaded bytes" not in run.stdout
+
+
+def test_the_draft_verifier_refuses_a_package_that_disables_test_inference(
+    tag_package,
+) -> None:
+    """With `autotests = false` the staged file is never a target; cargo
+    would report no such test. Refused by name before cargo is asked."""
+    args, _downloaded, package, env = tag_package
+    manifest = package / "Cargo.toml"
+    text = manifest.read_text()
+    manifest.write_text(text.replace("[package]\n", "[package]\nautotests = false\n", 1))
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode != 0, run.stdout + run.stderr
+    assert _verifier_says(run, "sets autotests = false")
+    assert _staged_leftovers(package) == []
+
+
+def test_the_draft_verifier_refuses_duplicate_explicit_targets_under_the_reserved_name(
+    tag_package,
+) -> None:
+    args, _downloaded, package, env = tag_package
+    (package / "tests" / "accepting_verifier.local.rs").write_text(ACCEPTING_UPDATER_TEST)
+    manifest = package / "Cargo.toml"
+    manifest.write_text(manifest.read_text() + EXPLICIT_TEST_REDIRECT + EXPLICIT_TEST_REDIRECT)
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode != 0, run.stdout + run.stderr
+    assert _verifier_says(run, "under the reserved 'verifier_' prefix")
+    assert _staged_leftovers(package) == []
+
+
+def test_the_draft_verifier_refuses_an_explicit_target_pathed_under_the_reserved_prefix(
+    tag_package,
+) -> None:
+    """A `[[test]]` of an innocuous name whose source sits under
+    `tests/verifier_*`: the path, not only the name, is reserved."""
+    args, _downloaded, package, env = tag_package
+    (package / "tests" / "verifier_planted.rs").write_text(ACCEPTING_UPDATER_TEST)
+    manifest = package / "Cargo.toml"
+    manifest.write_text(
+        manifest.read_text()
+        + '\n[[test]]\nname = "manifest_check"\npath = "tests/verifier_planted.rs"\n'
+    )
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode != 0, run.stdout + run.stderr
+    assert _verifier_says(
+        run, "declares a [[test]] with path 'tests/verifier_planted.rs' under the reserved 'verifier_' prefix")
+    assert _staged_leftovers(package) == []
+
+
+def test_the_draft_verifier_refuses_an_inferred_test_under_the_reserved_prefix(
+    tag_package,
+) -> None:
+    """No `[[test]]` at all: a planted `tests/verifier_planted.rs` is inferred
+    by cargo, and cargo's own target list is what refuses it."""
+    args, _downloaded, package, env = tag_package
+    (package / "tests" / "verifier_planted.rs").write_text(ACCEPTING_UPDATER_TEST)
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode != 0, run.stdout + run.stderr
+    assert _verifier_says(
+        run, "carries a test target 'verifier_planted'")
+    assert _staged_leftovers(package) == []
+
+
+def test_the_draft_verifier_tolerates_an_explicit_target_outside_the_reserved_prefix(
+    tag_package,
+) -> None:
+    """The invariant is about the verifier's target, not the tag's right to
+    declare its own: an ordinary explicit `[[test]]` is left alone and the
+    faithful manifest passes."""
+    args, _downloaded, package, env = tag_package
+    (package / "tests" / "product_check.rs").write_text("#[test]\nfn product() {}\n")
+    manifest = package / "Cargo.toml"
+    manifest.write_text(
+        manifest.read_text() + '\n[[test]]\nname = "product_check"\npath = "tests/product_check.rs"\n'
+    )
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "verified from downloaded bytes: 6 assets hashed" in run.stdout
+    assert _staged_leftovers(package) == []
 
 
 def test_ci_scans_the_renderer_it_just_built_for_the_test_harness() -> None:

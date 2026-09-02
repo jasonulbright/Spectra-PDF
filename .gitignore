@@ -17,8 +17,8 @@ src-tauri/gen/schemas/
 # *.pyc and *.local.* — the tree the bundler is pointed at, a build output.
 src-tauri/engine-payload/
 # Staged by scripts/verify-release-draft.ps1 for one cargo run and removed
-# after; the name is reserved to the verifier and is never a product test.
-src-tauri/tests/verifier_updater_manifest.rs
+# after; the prefix is reserved to the verifier and is never a product test.
+src-tauri/tests/verifier_*
 
 # Environment
 .env
