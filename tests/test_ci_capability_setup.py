@@ -231,7 +231,10 @@ def test_the_redo_publisher_takes_product_bytes_from_the_tag() -> None:
     verifier = dict(_job_steps("release-redo.yml", "release"))[REDO_VERIFIER_STEP]
     assert "ref: ${{ github.sha }}" in verifier
     assert "path: verifier" in verifier
-    assert "sparse-checkout: scripts" in verifier
+    # Scripts and the Rust test sources only: the draft verifier compiles the
+    # updater manifest check into the TAG's package, so the plugin version the
+    # tag's binary pins is the one that parses the manifest.
+    assert "sparse-checkout: |\n            scripts\n            src-tauri/tests\n" in verifier
     assert "verifier" not in (ROOT / "src-tauri" / "tauri.conf.json").read_text()
 
 
@@ -377,6 +380,39 @@ def test_the_draft_verifier_hashes_the_bytes_github_holds() -> None:
     assert re.search(r"gh api[^\n]*>\s*\$", text) is None
 
 
+UPDATER_MANIFEST_TEST = "src-tauri/tests/updater_manifest.rs"
+
+
+def test_the_draft_verifier_parses_the_manifest_with_the_updaters_deserializer() -> None:
+    """The manifest's final reader is the pinned plugin's `RemoteRelease`.
+
+    The script's own checks are re-implementations and can only ever agree
+    with the plugin by accident; the parse that decides whether every
+    installed copy can read the release is the plugin's, so the gate runs it.
+    """
+    text = (ROOT / DRAFT_VERIFIER).read_text()
+    assert "cargo test --manifest-path" in text
+    assert "--test updater_manifest -- verifies_the_manifest_named_by_the_environment" in text
+    rust = (ROOT / UPDATER_MANIFEST_TEST).read_text()
+    assert "use tauri_plugin_updater::{RemoteRelease, RemoteReleaseInner};" in rust
+    assert "serde_json::from_str(manifest)" in rust
+    for env_var in (
+        "SPECTRAPDF_UPDATER_MANIFEST", "SPECTRAPDF_UPDATER_VERSION",
+        "SPECTRAPDF_UPDATER_NOTES_FILE", "SPECTRAPDF_UPDATER_PLATFORMS",
+        "SPECTRAPDF_UPDATER_URL", "SPECTRAPDF_UPDATER_SIGNATURE_FILE",
+    ):
+        assert f'"{env_var}"' in rust, env_var
+        assert f"$env:{env_var} = " in text, env_var
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_the_rust_toolchain_precedes_the_draft_verifier(workflow: str, job: str) -> None:
+    steps = _job_steps(workflow, job)
+    names = [name for name, _ in steps]
+    toolchain = [i for i, (_n, t) in enumerate(steps) if "dtolnay/rust-toolchain@stable" in t]
+    assert toolchain and max(toolchain) < names.index(RELEASE_VERIFY_DRAFT_STEP), (workflow, job)
+
+
 @pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
 def test_the_release_is_a_draft_until_the_publish_step(workflow: str, job: str) -> None:
     steps = dict(_job_steps(workflow, job))
@@ -418,6 +454,10 @@ def test_the_payload_gates_are_mirrored_locally() -> None:
     assert "build-portable-zip.ps1 -CheckMap" in text
     assert "tests/test_ci_capability_setup.py" in text
     assert f"{LIVE_CLI_ENV}=1 cargo test --test cli_bytecode" in text
+    # The updater manifest parse runs locally against the tracked fixture, in
+    # the env-driven mode the draft verifier uses.
+    assert "SPECTRAPDF_UPDATER_MANIFEST=tests/fixtures/updater-manifest/latest.json" in text
+    assert "cargo test --test updater_manifest" in text
 
 
 LIVE_CLI_ENV = "SPECTRAPDF_REQUIRE_LIVE_CLI"
@@ -614,18 +654,40 @@ def _draft_fixture(root: Path) -> tuple[list[str], Path]:
         "signature": files[bundle / f"{installer}.sig"].decode().strip(),
         "url": "https://api.github.com/repos/o/r/releases/assets/100",
     }
+    # The complete manifest Tauri publishes: `notes` is the release body and
+    # `pub_date` is the draft's timestamp; both are shown by the update notice.
     manifest = {
         "version": "1.2.3",
+        "notes": RELEASE_BODY,
+        "pub_date": "2026-09-02T15:00:00.000Z",
         "platforms": {"windows-x86_64": dict(entry), "windows-x86_64-nsis": dict(entry)},
     }
     _write_manifest(downloaded, manifest, assets)
-    (downloaded / "release.json").write_text(json.dumps({"draft": True, "tag_name": "v1.2.3"}))
+    _write_release(downloaded, {"draft": True, "tag_name": "v1.2.3", "body": RELEASE_BODY})
     args = [
         "pwsh", "-NoProfile", "-File", str(ROOT / DRAFT_VERIFIER),
         "-Repo", "o/r", "-Tag", "v1.2.3", "-Bundle", str(bundle), "-Portable", str(portable),
         "-Sources", str(sources), "-Offline", str(downloaded),
+        "-CargoPackage", str(ROOT / "src-tauri"),
     ]
     return args, downloaded
+
+
+RELEASE_BODY = (
+    "See CHANGELOG.md for details. The installer is unsigned (no code-signing "
+    "certificate); SmartScreen may warn on first run -- verify your download against "
+    "SHA256SUMS.txt, published with this release."
+)
+
+
+def _write_release(downloaded: Path, release: dict) -> None:
+    (downloaded / "release.json").write_text(json.dumps(release))
+
+
+def _mutate_manifest_top(downloaded: Path, mutate) -> None:
+    manifest = json.loads((downloaded / "latest.json").read_text())
+    mutate(manifest)
+    _write_manifest(downloaded, manifest)
 
 
 def _write_manifest(downloaded: Path, manifest: dict, assets: list[dict] | None = None) -> None:
@@ -831,7 +893,7 @@ def test_the_draft_verifier_refuses_a_tag_differing_only_by_case(tmp_path: Path)
     run = _run_verifier(args)
     assert run.returncode != 0
     assert "-Tag must be a lowercase 'v' tag" in run.stdout + run.stderr
-    (_downloaded / "release.json").write_text(json.dumps({"draft": True, "tag_name": "V1.2.3"}))
+    _write_release(_downloaded, {"draft": True, "tag_name": "V1.2.3", "body": RELEASE_BODY})
     args[args.index("-Tag") + 1] = "v1.2.3"
     run = _run_verifier(args)
     assert run.returncode != 0
@@ -874,10 +936,78 @@ def test_the_draft_verifier_refuses_platform_keys_duplicated_under_case(tmp_path
 
 def test_the_draft_verifier_refuses_an_already_public_release(tmp_path: Path) -> None:
     args, downloaded = _draft_fixture(tmp_path)
-    (downloaded / "release.json").write_text(json.dumps({"draft": False, "tag_name": "v1.2.3"}))
+    _write_release(downloaded, {"draft": False, "tag_name": "v1.2.3", "body": RELEASE_BODY})
     run = _run_verifier(args)
     assert run.returncode != 0
     assert "is already public before verification" in run.stdout + run.stderr
+
+
+# The manifest's final parse is the updater plugin's own deserializer (see
+# src-tauri/tests/updater_manifest.rs). These drive it through the script.
+UPDATER_REFUSAL = "refused by the updater's own deserializer or differs from the release"
+
+
+def test_the_draft_verifier_accepts_a_manifest_with_an_unknown_top_level_field(
+    tmp_path: Path,
+) -> None:
+    """The plugin ignores fields it does not model; so does the gate."""
+    args, downloaded = _draft_fixture(tmp_path)
+    _mutate_manifest_top(downloaded, lambda m: m.update(unmodelled="ignored"))
+    run = _run_verifier(args)
+    assert run.returncode == 0, run.stdout + run.stderr
+
+
+def test_the_draft_verifier_refuses_notes_that_are_not_a_string(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    _mutate_manifest_top(downloaded, lambda m: m.update(notes={"not": "a string"}))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert "the updater's deserializer refuses latest.json" in run.stdout + run.stderr
+    assert _verifier_says(run, UPDATER_REFUSAL)
+
+
+def test_the_draft_verifier_refuses_notes_that_differ_from_the_release_body(
+    tmp_path: Path,
+) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    _mutate_manifest_top(downloaded, lambda m: m.update(notes=RELEASE_BODY.replace("See", "SEE", 1)))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert "notes differ from the release body" in run.stdout + run.stderr
+    assert _verifier_says(run, UPDATER_REFUSAL)
+
+
+def test_the_draft_verifier_refuses_a_manifest_without_notes(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    _mutate_manifest_top(downloaded, lambda m: m.pop("notes"))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert "latest.json carries no `notes`" in run.stdout + run.stderr
+
+
+@pytest.mark.parametrize(
+    "pub_date", ["not-rfc3339", "2026-09-02", "2026-09-02T15:00:00"]
+)
+def test_the_draft_verifier_refuses_a_pub_date_the_updater_cannot_parse(
+    tmp_path: Path, pub_date: str
+) -> None:
+    """A date PowerShell would coerce is still refused: the parse is the
+    plugin's `time` RFC 3339 parse, and an offset-less or date-only value
+    fails it."""
+    args, downloaded = _draft_fixture(tmp_path)
+    _mutate_manifest_top(downloaded, lambda m: m.update(pub_date=pub_date))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert "invalid value for `pub_date`" in run.stdout + run.stderr
+    assert _verifier_says(run, UPDATER_REFUSAL)
+
+
+def test_the_draft_verifier_refuses_a_manifest_without_pub_date(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    _mutate_manifest_top(downloaded, lambda m: m.pop("pub_date"))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert "latest.json carries no `pub_date`" in run.stdout + run.stderr
 
 
 def test_ci_scans_the_renderer_it_just_built_for_the_test_harness() -> None:

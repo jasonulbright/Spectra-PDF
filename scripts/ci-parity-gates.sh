@@ -114,6 +114,20 @@ gate cargo-test sh -c 'cd src-tauri && cargo test'
 #     the way the provisioned CI and release runs refuse it. ---
 gate cli-bytecode sh -c 'cd src-tauri && SPECTRAPDF_REQUIRE_LIVE_CLI=1 cargo test --test cli_bytecode'
 
+# --- Release gate: latest.json is parsed by the updater plugin's own
+#     deserializer (scripts/verify-release-draft.ps1 runs this against the
+#     downloaded draft manifest). Here it runs against the tracked fixture,
+#     in the env-driven mode the verifier uses, so a change to the test, the
+#     fixture, or the pinned plugin fails before the release job does. ---
+gate updater-manifest sh -c 'cd src-tauri && \
+  SPECTRAPDF_UPDATER_MANIFEST=tests/fixtures/updater-manifest/latest.json \
+  SPECTRAPDF_UPDATER_VERSION=1.1.20 \
+  SPECTRAPDF_UPDATER_NOTES_FILE=tests/fixtures/updater-manifest/notes.txt \
+  SPECTRAPDF_UPDATER_PLATFORMS=windows-x86_64-nsis,windows-x86_64 \
+  SPECTRAPDF_UPDATER_URL=https://api.github.com/repos/jasonulbright/Spectra-PDF/releases/assets/538527808 \
+  SPECTRAPDF_UPDATER_SIGNATURE_FILE=tests/fixtures/updater-manifest/installer.sig \
+  cargo test --test updater_manifest'
+
 echo "CI-PARITY DONE" >> "$OUT"
 if [ "$fail" -ne 0 ]; then
   echo "CI-PARITY: FAILURES — read ci-parity.*.local.log before pushing." >> "$OUT"
