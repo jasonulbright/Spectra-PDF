@@ -20,9 +20,11 @@ describe('pageDigits', () => {
     expect(pageDigits(Number.POSITIVE_INFINITY)).toBe(1);
   });
 
-  it('stops growing past seven digits', () => {
-    expect(pageDigits(10_000_000)).toBe(7);
-    expect(pageDigits(1_000_000_000)).toBe(7);
+  it('keeps growing past seven digits so the widest page number renders whole', () => {
+    expect(pageDigits(9_999_999)).toBe(7);
+    expect(pageDigits(10_000_000)).toBe(8);
+    expect(pageDigits(123_456_789)).toBe(9);
+    expect(pageDigits(1_000_000_000)).toBe(10);
   });
 
   it('ignores a fractional count', () => {
@@ -49,7 +51,7 @@ describe('pageFieldWidth', () => {
   it('leaves room for the widest page number the document can hold', () => {
     // The regression: a fixed 40px field clipped the third digit at 575 pages
     // and hid digits four and five entirely.
-    for (const count of [575, 1234, 57_500]) {
+    for (const count of [575, 1234, 57_500, 10_000_000, 1_000_000_000]) {
       expect(pageFieldWidth(count)).toContain(`${String(count).length}ch`);
     }
   });
