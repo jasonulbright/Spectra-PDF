@@ -959,10 +959,9 @@ pub async fn delete_batch_scratch(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Arbitrary-path binary read for the batch driver. The serde `Vec<u8>` form
-/// (`read_file_buffer`) JSON-encodes every byte as a number — fine for one
-/// open, hostile to a long unattended run over large scanned PDFs. A raw
-/// `Response` body crosses the IPC as binary.
+/// Arbitrary-path binary read for the batch driver. A serde `Vec<u8>` return
+/// JSON-encodes every byte as a number — hostile to a long unattended run
+/// over large scanned PDFs. A raw `Response` body crosses the IPC as binary.
 #[tauri::command]
 pub async fn read_file_binary(file_path: String) -> Result<tauri::ipc::Response, String> {
     let bytes =
@@ -983,11 +982,6 @@ pub async fn ensure_parent_dirs(path: String) -> Result<(), String> {
 }
 
 // ── File operations ───────────────────────────────────────────────────────
-
-#[tauri::command]
-pub async fn read_file_buffer(file_path: String) -> Result<Vec<u8>, String> {
-    fs::read(&file_path).map_err(|e| format!("Failed to read {}: {}", file_path, e))
-}
 
 #[tauri::command]
 pub async fn create_working_copy(file_path: String) -> Result<String, String> {
