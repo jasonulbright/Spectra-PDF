@@ -122,6 +122,21 @@ fn stage_row(source_root: &Path, staging: &Path, row: &Row) {
     fs::write(&target, &bytes).unwrap_or_else(|e| panic!("write {}: {e}", target.display()));
 }
 
+/// Any reparse point, not only a symlink: a junction or mount point under the
+/// payload redirects the walk (and the bundler's copy) outside the tree.
+fn is_reparse_point(meta: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    {
+        meta.file_type().is_symlink()
+    }
+}
+
 fn collect_staged(dir: &Path, prefix: &str, found: &mut BTreeSet<String>) {
     for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display())) {
         let entry = entry.expect("read staged entry");
@@ -131,16 +146,45 @@ fn collect_staged(dir: &Path, prefix: &str, found: &mut BTreeSet<String>) {
         } else {
             format!("{prefix}/{name}")
         };
-        let file_type = entry.file_type().expect("stat staged entry");
-        if file_type.is_symlink() {
-            panic!("staged engine payload carries a symlink: {rel}");
+        let path = entry.path();
+        let meta = fs::symlink_metadata(&path)
+            .unwrap_or_else(|e| panic!("stat {}: {e}", path.display()));
+        if is_reparse_point(&meta) {
+            panic!("engine payload tree carries a reparse point: {}", path.display());
         }
-        if file_type.is_dir() {
-            collect_staged(&entry.path(), &rel, found);
+        if meta.is_dir() {
+            collect_staged(&path, &rel, found);
         } else {
             found.insert(rel);
         }
     }
+}
+
+/// Removes every directory under `dir` that holds no file, deepest first.
+/// Returns whether `dir` itself is empty afterwards; the root is left to the
+/// caller.
+fn remove_empty_dirs(dir: &Path) -> bool {
+    let mut empty = true;
+    for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display())) {
+        let entry = entry.expect("read copied entry");
+        let path = entry.path();
+        let meta = fs::symlink_metadata(&path)
+            .unwrap_or_else(|e| panic!("stat {}: {e}", path.display()));
+        if is_reparse_point(&meta) {
+            panic!("engine payload tree carries a reparse point: {}", path.display());
+        }
+        if meta.is_dir() {
+            if remove_empty_dirs(&path) {
+                fs::remove_dir(&path)
+                    .unwrap_or_else(|e| panic!("remove stale directory {}: {e}", path.display()));
+            } else {
+                empty = false;
+            }
+        } else {
+            empty = false;
+        }
+    }
+    empty
 }
 
 /// Refuses the build rather than letting cached bytecode reach a bundle.
@@ -153,33 +197,71 @@ fn assert_no_bytecode(staged: &BTreeSet<String>) {
     }
 }
 
+/// `target/<profile>/engine`: where `tauri_build::build()` copies the staged
+/// payload for a dev run, and the tree the portable bundle is cut from.
+fn copied_resources_dir() -> Option<PathBuf> {
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").ok()?);
+    // target/<profile>/build/<crate>-<hash>/out
+    let profile_dir = out_dir.ancestors().nth(3)?;
+    let copied = profile_dir.join("engine");
+    copied.is_dir().then_some(copied)
+}
+
 /// The resource copy into `target/<profile>/engine` is additive: a file the
 /// manifest no longer lists survives there from an earlier build and rides
 /// into the portable staging, which is cut from that tree. Pruning runs before
-/// the copy, so the tree ends up as exactly the manifest set.
+/// the copy, so the tree ends up as exactly the manifest set. A deletion that
+/// fails is fatal: a stale file left in place is exactly the leak this
+/// prevents, and an empty `__pycache__` left behind is still a rejected path.
 fn prune_copied_resources(expected: &BTreeSet<String>) {
-    let out_dir = match std::env::var("OUT_DIR") {
-        Ok(value) => PathBuf::from(value),
-        Err(_) => return,
-    };
-    // target/<profile>/build/<crate>-<hash>/out
-    let profile_dir = match out_dir.ancestors().nth(3) {
-        Some(dir) => dir.to_path_buf(),
-        None => return,
-    };
-    let copied = profile_dir.join("engine");
-    if !copied.is_dir() {
+    let Some(copied) = copied_resources_dir() else {
         return;
-    }
+    };
     let mut present = BTreeSet::new();
     collect_staged(&copied, "", &mut present);
     for stale in present.difference(expected) {
         let path = copied.join(stale);
-        let _ = fs::remove_file(&path);
+        fs::remove_file(&path)
+            .unwrap_or_else(|e| panic!("remove stale payload file {}: {e}", path.display()));
+    }
+    remove_empty_dirs(&copied);
+}
+
+/// The copied tree after `tauri_build::build()` is exactly the manifest, by
+/// path set and by bytes. The prune and the copy each assume the other did
+/// its half; this is the check that neither assumption went unmet.
+fn verify_copied_resources(rows: &[Row]) {
+    let Some(copied) = copied_resources_dir() else {
+        return;
+    };
+    let mut present = BTreeSet::new();
+    collect_staged(&copied, "", &mut present);
+    let expected: BTreeSet<String> = rows.iter().map(|r| r.path.clone()).collect();
+    for extra in present.difference(&expected) {
+        panic!("copied engine payload carries an unmanifested file: {extra}");
+    }
+    for missing in expected.difference(&present) {
+        panic!("copied engine payload is missing a manifest row: {missing}");
+    }
+    assert_no_bytecode(&present);
+    for row in rows {
+        let path = copied.join(&row.path);
+        let bytes = fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let digest = format!("{:x}", Sha256::digest(&bytes));
+        if bytes.len() as u64 != row.size || digest != row.sha256 {
+            panic!(
+                "copied engine payload bytes differ from the manifest for {}: manifest {} bytes {}, copied {} bytes {}",
+                row.path,
+                row.size,
+                row.sha256,
+                bytes.len(),
+                digest
+            );
+        }
     }
 }
 
-fn stage_engine_payload() {
+fn stage_engine_payload() -> Vec<Row> {
     let source = PathBuf::from(ENGINE_SOURCE);
     let staging = PathBuf::from(ENGINE_STAGING);
     let manifest = PathBuf::from(MANIFEST);
@@ -209,9 +291,11 @@ fn stage_engine_payload() {
     }
     assert_no_bytecode(&staged);
     prune_copied_resources(&expected);
+    rows
 }
 
 fn main() {
-    stage_engine_payload();
-    tauri_build::build()
+    let rows = stage_engine_payload();
+    tauri_build::build();
+    verify_copied_resources(&rows);
 }

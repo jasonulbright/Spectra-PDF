@@ -303,6 +303,37 @@ pub fn get_soffice_path(app: &AppHandle) -> String {
     crate::cli::soffice_system_fallback()
 }
 
+/// The environment every Python spawn carries, whichever launcher spawns it.
+///
+/// One table, not per-site `.env` calls: the windowed engine and the headless
+/// CLI (which scheduled and watched-folder runs re-enter through) spawn the
+/// same interpreter, and a variable set on one spawn site and not the other
+/// is a divergence no test of either site sees.
+///
+/// - `PYTHONUTF8`: the JSON-RPC channel is UTF-8 by contract; without it an
+///   embedded Python on Windows decodes stdin as cp1252 and mojibakes every
+///   non-ASCII value (the engine also reconfigures its own stdio).
+/// - `PYTHONDONTWRITEBYTECODE`: the installed tree is a payload, not a cache;
+///   without it the interpreter writes `__pycache__` beside every engine
+///   module it imports, so the install directory grows files no uninstall
+///   removes. `__startup__.py` also sets `sys.dont_write_bytecode` so a
+///   launcher that misses this table is still covered.
+/// - The colour-profile assent, told to the engine rather than looked up by
+///   it: the installed and portable containers keep the record in different
+///   places, and this binary is the one authority on which container it is.
+///   `icc_profiles` refuses to open a profile when this says "0". See
+///   `portable::assent_env_value`.
+pub fn python_env() -> Vec<(String, String)> {
+    vec![
+        ("PYTHONUTF8".to_string(), "1".to_string()),
+        ("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string()),
+        (
+            crate::portable::ICC_ASSENT_ENV.to_string(),
+            crate::portable::assent_env_value(crate::portable::icc_assent()).to_string(),
+        ),
+    ]
+}
+
 /// Starts the Python engine sidecar and wires stdout to the webview.
 /// Idempotent — if the engine is already running, returns immediately.
 pub async fn start(app: &AppHandle) -> Result<(), String> {
@@ -323,24 +354,7 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
     let (mut rx, child) = shell
         .command(&python_path)
         .args([&script_path])
-        // The JSON-RPC channel is UTF-8 by contract; without this an embedded
-        // Python on Windows decodes stdin as cp1252 and mojibakes every
-        // non-ASCII value (the engine also reconfigures its own stdio — this
-        // is the spawner half of the fix).
-        .env("PYTHONUTF8", "1")
-        // The installed tree is a payload, not a cache: without this the
-        // interpreter writes __pycache__ beside every engine module it
-        // imports, so the install directory grows files no uninstall removes.
-        .env("PYTHONDONTWRITEBYTECODE", "1")
-        // The colour-profile assent, told to the engine rather than looked up
-        // by it: the installed and portable containers keep the record in
-        // different places, and this binary is the one authority on which
-        // container it is. `icc_profiles` refuses to open a profile when this
-        // says "0". See `portable::assent_env_value`.
-        .env(
-            crate::portable::ICC_ASSENT_ENV,
-            crate::portable::assent_env_value(crate::portable::icc_assent()),
-        )
+        .envs(python_env().into_iter().collect::<HashMap<String, String>>())
         .spawn()
         .map_err(|e| format!("Failed to start engine: {}", e))?;
 

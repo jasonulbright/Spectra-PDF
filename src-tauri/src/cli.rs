@@ -2833,16 +2833,7 @@ impl CliEngine {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            // UTF-8 by contract on the JSON-RPC channel (see engine.rs — the
-            // engine reconfigures its own stdio too; both halves shipped
-            // together after a live mojibake repro on non-ASCII form values).
-            .env("PYTHONUTF8", "1")
-            // Same authority as the windowed spawn (engine.rs): this binary
-            // decides the container and the assent, and the engine is told.
-            .env(
-                crate::portable::ICC_ASSENT_ENV,
-                crate::portable::assent_env_value(crate::portable::icc_assent()),
-            )
+            .envs(crate::engine::python_env())
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("Failed to start engine: {}", e))?;
