@@ -770,6 +770,108 @@ def test_the_draft_verifier_refuses_swapped_signatures_between_entries(tmp_path:
     assert _verifier_says(run, "(platform windows-x86_64-nsis)")
 
 
+def _rename_asset(downloaded: Path, old: str, new: str) -> None:
+    """Rename a draft asset in the API listing only. The Windows filesystem
+    still serves the old file under the new name, so only an exact-name
+    comparison can tell the two apart."""
+    assets = json.loads((downloaded / "assets.json").read_text())
+    for asset in assets:
+        if asset["name"] == old:
+            asset["name"] = new
+    (downloaded / "assets.json").write_text(json.dumps(assets))
+
+
+# Case-only forgeries. Every consumer of these identities is case-sensitive
+# (the updater's platform lookup and `latest.json` request, GitHub asset
+# names, base64 signatures, `sha256sum -c`), while PowerShell's default
+# comparisons, hashtables and property lookups are not.
+def test_the_draft_verifier_refuses_a_platform_key_differing_only_by_case(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    _mutate_manifest(downloaded, lambda p: p.update({"Windows-x86_64-NSIS": p.pop("windows-x86_64-nsis")}))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(run, "latest.json platforms [")
+
+
+def test_the_draft_verifier_refuses_a_signature_differing_only_by_case(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+
+    def recase(p: dict) -> None:
+        sig = p["windows-x86_64-nsis"]["signature"]
+        assert sig.startswith("dW50")
+        p["windows-x86_64-nsis"]["signature"] = "DW50" + sig[4:]
+
+    _mutate_manifest(downloaded, recase)
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(run, "latest.json signature is not the uploaded installer's .sig (platform windows-x86_64-nsis)")
+
+
+def test_the_draft_verifier_refuses_a_manifest_asset_named_in_upper_case(tmp_path: Path) -> None:
+    """The compiled updater endpoint requests `latest.json`; `LATEST.JSON` is
+    an asset nobody downloads."""
+    args, downloaded = _draft_fixture(tmp_path)
+    _rename_asset(downloaded, "latest.json", "LATEST.JSON")
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert "draft assets differ from the built set" in run.stdout + run.stderr
+
+
+def test_the_draft_verifier_refuses_an_installer_asset_differing_only_by_case(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    _rename_asset(downloaded, "Spectra PDF_1.2.3_x64-setup.exe", "spectra pdf_1.2.3_x64-setup.exe")
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert "draft assets differ from the built set" in run.stdout + run.stderr
+
+
+def test_the_draft_verifier_refuses_a_tag_differing_only_by_case(tmp_path: Path) -> None:
+    args, _downloaded = _draft_fixture(tmp_path)
+    args[args.index("-Tag") + 1] = "V1.2.3"
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert "-Tag must be a lowercase 'v' tag" in run.stdout + run.stderr
+    (_downloaded / "release.json").write_text(json.dumps({"draft": True, "tag_name": "V1.2.3"}))
+    args[args.index("-Tag") + 1] = "v1.2.3"
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(run, "draft is for tag 'V1.2.3', expected 'v1.2.3'")
+
+
+def test_the_draft_verifier_refuses_upper_case_hex_in_the_checksum_file(tmp_path: Path) -> None:
+    """`sha256sum -c` accepts either case, but the workflow writes lowercase;
+    an uppercase digest is a rewritten file, not this build's output."""
+    args, downloaded = _draft_fixture(tmp_path)
+    sums = downloaded / "SHA256SUMS.txt"
+    lines = sums.read_text().splitlines()
+    digest, name = lines[0].split("  ", 1)
+    lines[0] = f"{digest.upper()}  {name}"
+    body = ("\n".join(lines) + "\n").encode("ascii")
+    sums.write_bytes(body)
+    (tmp_path / "nsis" / "SHA256SUMS.txt").write_bytes(body)
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(run, "not lowercase sha256 hex")
+
+
+def test_the_draft_verifier_refuses_platform_keys_duplicated_under_case(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    manifest = json.loads((downloaded / "latest.json").read_text())
+    entry = manifest["platforms"]["windows-x86_64-nsis"]
+    # json.dumps keeps both keys: they differ ordinally.
+    manifest["platforms"] = {
+        "windows-x86_64": dict(entry),
+        "windows-x86_64-nsis": dict(entry),
+        "WINDOWS-X86_64-NSIS": dict(entry),
+    }
+    _write_manifest(downloaded, manifest)
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    # ConvertFrom-Json refuses case-duplicated keys before the verifier's own
+    # ordinal re-keying can; either refusal names the offending key.
+    assert _verifier_says(run, "WINDOWS-X86_64-NSIS")
+
+
 def test_the_draft_verifier_refuses_an_already_public_release(tmp_path: Path) -> None:
     args, downloaded = _draft_fixture(tmp_path)
     (downloaded / "release.json").write_text(json.dumps({"draft": False, "tag_name": "v1.2.3"}))
