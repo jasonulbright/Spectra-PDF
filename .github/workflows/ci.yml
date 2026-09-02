@@ -45,6 +45,13 @@ jobs:
       - name: Build renderer (Vite)
         run: npm run build:renderer
 
+      # The e2e harness is compiled out by VITE_E2E; this job builds without
+      # it, so the built tree must carry no marker. Mirrored in
+      # scripts/ci-parity-gates.sh.
+      - name: Shipped renderer carries no test harness
+        run: python scripts/check-release-bundle.py
+        shell: bash
+
       # The portable zip's payload is the installer's payload, read out of the
       # installer's own generated manifest -- so the two containers cannot list
       # different files. What they CAN drift on is the notice map: a resource

@@ -71,6 +71,12 @@ fi
 gate engine-manifest "$R/.venv/Scripts/python.exe" scripts/gen-engine-payload-manifest.py --check
 gate engine-payload "$R/.venv/Scripts/python.exe" scripts/check-engine-payload.py
 
+# --- CI/Release gate: the shipped renderer carries no e2e test harness. The
+#     harness is compiled out by VITE_E2E; dist/renderer on this machine may be
+#     an e2e build, so the mirror scans a fresh plain build in a scratch tree
+#     (a renderer build is ~10 s), exactly what the release job embeds. ---
+gate release-bundle sh -c 'env -u VITE_E2E npx vite build --config vite.config.mts --outDir "$0/release-bundle-check.local.out" && "$0/.venv/Scripts/python.exe" scripts/check-release-bundle.py release-bundle-check.local.out' "$R"
+
 # --- Corpus provisioning contract: a test axis with no CI provisioning is the
 #     "added tests, forgot the workflow" failure class. This asserts the fetch
 #     scripts still --check clean if the corpora are present (skips if absent). ---
