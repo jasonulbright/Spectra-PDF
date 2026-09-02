@@ -14,7 +14,9 @@
 #
 # -Offline <dir> skips the API and reads <dir>/release.json, <dir>/assets.json
 # and the "downloaded" asset files from <dir>; the comparison is otherwise the
-# same, which is what tests/test_ci_capability_setup.py drives.
+# same, which is what tests/test_ci_capability_setup.py drives. -Repo is still
+# required: the manifest urls are compared against the exact asset url built
+# from it.
 [CmdletBinding()]
 param(
     [string]$Repo,
@@ -35,13 +37,22 @@ function Get-Sha256([string]$path) {
 }
 
 $version = $Tag -replace '^v', ''
+# The manifest url is rebuilt from the repository, never pattern-matched.
+if ($Repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "-Repo must be <owner>/<name>, got '$Repo'" }
+
+# The platform set the updater manifest must carry for this build. Tauri emits
+# one `windows-x86_64-<target>` entry per bundle target in tauri.conf.json
+# (`bundle.targets` is `["nsis"]`) plus the bare `windows-x86_64` fallback, and
+# the updater resolves the target-specific entry before the fallback; a
+# manifest that validates only the fallback validates the entry nobody reads.
+$expectedPlatforms = @("windows-x86_64-nsis", "windows-x86_64")
 
 if ($Offline) {
     $Downloads = $Offline
     $release = Get-Content (Join-Path $Offline "release.json") -Raw | ConvertFrom-Json
     $assets = @(Get-Content (Join-Path $Offline "assets.json") -Raw | ConvertFrom-Json)
 } else {
-    if (-not $Repo -or -not $ReleaseId) { throw "-Repo and -ReleaseId are required unless -Offline is given" }
+    if (-not $ReleaseId) { throw "-ReleaseId is required unless -Offline is given" }
     if (-not $env:GH_TOKEN) { throw "GH_TOKEN is not set" }
     if (-not $Downloads) { $Downloads = Join-Path $Bundle "draft-downloads" }
     if (Test-Path -LiteralPath $Downloads) { Remove-Item -LiteralPath $Downloads -Recurse -Force }
@@ -118,15 +129,24 @@ if (($named -join "`n") -ne ($checksummed -join "`n")) {
 
 $manifest = Get-Content -LiteralPath $downloaded["latest.json"].path -Raw | ConvertFrom-Json
 if ($manifest.version -ne $version) { throw "latest.json version '$($manifest.version)' != tag version '$version'" }
-$platform = $manifest.platforms.'windows-x86_64'
-if (-not $platform) { throw "latest.json has no windows-x86_64 platform" }
 $uploadedSig = (Get-Content -LiteralPath $downloaded[$signature.Name].path -Raw).Trim()
 $localSig = (Get-Content -LiteralPath $signature.FullName -Raw).Trim()
 if ($uploadedSig -ne $localSig) { throw "uploaded $($signature.Name) is not the built signature" }
-if ($platform.signature.Trim() -ne $uploadedSig) { throw "latest.json signature is not the uploaded installer's .sig" }
 $installerId = $downloaded[$installer[0].Name].id
-if (-not $platform.url.EndsWith("/releases/assets/$installerId")) {
-    throw "latest.json url '$($platform.url)' does not name the uploaded installer asset $installerId"
+$installerUrl = "https://api.github.com/repos/$Repo/releases/assets/$installerId"
+$present = @($manifest.platforms.PSObject.Properties | ForEach-Object { $_.Name } | Sort-Object)
+$wanted = @($expectedPlatforms | Sort-Object)
+if (($present -join "`n") -ne ($wanted -join "`n")) {
+    throw "latest.json platforms [$($present -join ', ')] != [$($wanted -join ', ')]"
+}
+foreach ($name in $expectedPlatforms) {
+    $platform = $manifest.platforms.$name
+    if (-not $platform.signature -or ([string]$platform.signature).Trim() -ne $uploadedSig) {
+        throw "latest.json signature is not the uploaded installer's .sig (platform $name)"
+    }
+    if ([string]$platform.url -cne $installerUrl) {
+        throw "latest.json url mismatch (platform $name): '$($platform.url)' != '$installerUrl'"
+    }
 }
 
 Write-Host "draft $ReleaseId verified from downloaded bytes: $($actual.Count) assets hashed, latest.json at $version"
