@@ -23,16 +23,27 @@
 # to the asset store (curl's default), which that store requires.
 #
 # The manifest's last check is the updater plugin's own deserializer: the
-# downloaded latest.json is parsed by `cargo test --test updater_manifest` in
-# -CargoPackage with the RemoteRelease type the installed copies read it with
+# downloaded latest.json is parsed by `cargo test --test verifier_updater_manifest`
+# in -CargoPackage with the RemoteRelease type the installed copies read it with
 # (its `time` RFC 3339 parse of `pub_date`, its unknown-field policy), then
 # compared against the tag version, the release body, and the installer. A
 # manifest this script re-implemented the shape of could pass here and still
 # refuse to parse in every installed copy, which is the launch update check
 # failing everywhere at once. -CargoPackage defaults to the checkout's own
-# `src-tauri`; when that package lacks the test source (a tag that predates
-# it), the copy beside this script is placed into its `tests/` first, so the
-# parse always runs against the updater version THAT package pins.
+# `src-tauri`; the redo passes a TAG's package so the parse runs against the
+# updater version THAT package pins.
+#
+# The verifier LOGIC never comes from -CargoPackage. The Rust source beside
+# this script (src-tauri/tests/updater_manifest.rs at this script's revision)
+# is copied on every run, overwriting whatever is there, to a target name
+# reserved to this script -- src-tauri/tests/verifier_updater_manifest.rs, a
+# name no product revision commits (tests/test_ci_capability_setup.py refuses
+# it in the index, .gitignore refuses it in the working tree) -- and exactly
+# that target is run. Selecting logic by whether the package already holds a
+# conventionally named test would let a tag's own stale or accepting copy
+# stand in for the current verifier while reporting the current verdict.
+# The staged bytes are hashed against the source after the copy and removed
+# after the run; the package's own updater_manifest.rs is never read.
 #
 # -Offline <dir> skips the API and reads <dir>/release.json, <dir>/assets.json
 # and the "downloaded" asset files from <dir>; the comparison is otherwise the
@@ -220,26 +231,38 @@ foreach ($name in $expectedPlatforms) {
 
 # The consumer's parse (header). The release body is handed over as a file:
 # an environment value would go through the console encoding.
-$testName = "updater_manifest.rs"
-$testSource = Join-Path $PSScriptRoot "..\src-tauri\tests\$testName"
-$testTarget = Join-Path (Join-Path $CargoPackage "tests") $testName
-if (-not (Test-Path -LiteralPath $testTarget)) {
-    if (-not (Test-Path -LiteralPath $testSource)) { throw "no updater manifest test at $testSource" }
-    Write-Host "placing $testName into $CargoPackage/tests (the package predates it)"
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $testTarget) | Out-Null
-    Copy-Item -LiteralPath $testSource -Destination $testTarget
+# The verifier's own copy of the test source is staged under the reserved
+# target name unconditionally (header): the package's tests/ directory is
+# never consulted for logic, only for the dependency graph its Cargo.toml and
+# Cargo.lock pin. Cargo discovers every tests/*.rs as an integration test, so
+# the staged file IS the `--test verifier_updater_manifest` target.
+$verifierTest = "verifier_updater_manifest"
+$testSource = Join-Path $PSScriptRoot "..\src-tauri\tests\updater_manifest.rs"
+if (-not (Test-Path -LiteralPath $testSource)) { throw "no updater manifest test at $testSource" }
+$testTarget = Join-Path (Join-Path $CargoPackage "tests") "$verifierTest.rs"
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $testTarget) | Out-Null
+Copy-Item -LiteralPath $testSource -Destination $testTarget -Force
+$sourceSha = Get-Sha256 $testSource
+$stagedSha = Get-Sha256 $testTarget
+if (-not (Test-OrdinalEqual $sourceSha $stagedSha)) {
+    throw "staged verifier test $testTarget (sha256 $stagedSha) is not the verifier's source $testSource (sha256 $sourceSha)"
 }
-$bodyFile = Join-Path $Downloads "release-body.local.txt"
-[System.IO.File]::WriteAllText($bodyFile, [string]$release.body, [System.Text.UTF8Encoding]::new($false))
-$env:SPECTRAPDF_UPDATER_MANIFEST = (Resolve-Path -LiteralPath (Get-Downloaded "latest.json").path).Path
-$env:SPECTRAPDF_UPDATER_VERSION = $version
-$env:SPECTRAPDF_UPDATER_NOTES_FILE = (Resolve-Path -LiteralPath $bodyFile).Path
-$env:SPECTRAPDF_UPDATER_PLATFORMS = $expectedPlatforms -join ","
-$env:SPECTRAPDF_UPDATER_URL = $installerUrl
-$env:SPECTRAPDF_UPDATER_SIGNATURE_FILE = (Resolve-Path -LiteralPath (Get-Downloaded $signature.Name).path).Path
-& cargo test --manifest-path (Join-Path $CargoPackage "Cargo.toml") --test updater_manifest -- verifies_the_manifest_named_by_the_environment
-if ($LASTEXITCODE -ne 0) {
-    throw "latest.json is refused by the updater's own deserializer or differs from the release (cargo output above)"
+Write-Host "staged $testSource as $testTarget (sha256 $stagedSha)"
+try {
+    $bodyFile = Join-Path $Downloads "release-body.local.txt"
+    [System.IO.File]::WriteAllText($bodyFile, [string]$release.body, [System.Text.UTF8Encoding]::new($false))
+    $env:SPECTRAPDF_UPDATER_MANIFEST = (Resolve-Path -LiteralPath (Get-Downloaded "latest.json").path).Path
+    $env:SPECTRAPDF_UPDATER_VERSION = $version
+    $env:SPECTRAPDF_UPDATER_NOTES_FILE = (Resolve-Path -LiteralPath $bodyFile).Path
+    $env:SPECTRAPDF_UPDATER_PLATFORMS = $expectedPlatforms -join ","
+    $env:SPECTRAPDF_UPDATER_URL = $installerUrl
+    $env:SPECTRAPDF_UPDATER_SIGNATURE_FILE = (Resolve-Path -LiteralPath (Get-Downloaded $signature.Name).path).Path
+    & cargo test --manifest-path (Join-Path $CargoPackage "Cargo.toml") --test $verifierTest -- verifies_the_manifest_named_by_the_environment
+    if ($LASTEXITCODE -ne 0) {
+        throw "latest.json is refused by the updater's own deserializer or differs from the release (cargo output above)"
+    }
+} finally {
+    Remove-Item -LiteralPath $testTarget -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host "draft $ReleaseId verified from downloaded bytes: $($actual.Count) assets hashed, latest.json at $version"
