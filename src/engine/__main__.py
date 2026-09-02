@@ -192,7 +192,7 @@ from engine.text_paragraphs import (
     merge_paragraph_with_previous,
     replace_paragraph_text,
 )
-from engine.text_runs import convert_text_run, list_text_runs, replace_text_run, restyle_text_run
+from engine.text_runs import convert_text_run, replace_text_run, restyle_text_run
 from engine.spelling import (
     add_user_dictionary,
     check_spelling,
@@ -395,7 +395,6 @@ def main() -> None:
     server.register("transform_page_vector", transform_page_vector)
     server.register("restyle_page_vector", restyle_page_vector)
     server.register("set_image_opacity", set_image_opacity)
-    server.register("list_text_runs", list_text_runs)
     server.register("replace_text_run", replace_text_run)
     server.register("restyle_text_run", restyle_text_run)
     server.register("convert_text_run", convert_text_run)

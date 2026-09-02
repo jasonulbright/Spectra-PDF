@@ -1,10 +1,8 @@
-// Edit-mode text runs: the engine's per-page run listing
-// projected into display space, plus the LOCAL keystroke validation the
-// inline edit box runs against each run's finite encodable inventory —
-// live refusal ("this document's font does not contain 'X'"), never a
-// save-time surprise.
-import { pdfRectToDisplay } from './pdfx-build';
-import type { PageGeometry } from './redaction';
+// Edit-mode text runs: the display-space run shape (populated by
+// `edit-paragraphs.ts` from the paragraph listing, which carries the runs
+// too), plus the LOCAL keystroke validation the inline edit box runs against
+// each run's finite encodable inventory — live refusal ("this document's font
+// does not contain 'X'"), never a save-time surprise.
 
 /** Sentinel returned by the App edit handlers when the user DECLINED the
  * signed-document warning — distinct from success (void) and from failure
@@ -33,51 +31,6 @@ export interface EditTextRun {
   /** The run's font size (points) — an e2e observes a per-span
    * size bump as a run listing back at the larger size. */
   fontSize: number;
-}
-
-interface EngineRunListing {
-  runs: {
-    index: number;
-    text: string;
-    rect: [number, number, number, number];
-    nested: boolean;
-    editable: boolean;
-    reason: string | null;
-    encodable: string;
-    sequences?: string[];
-    vertical?: boolean;
-    font_size?: number;
-    /** The run is wholly outside the active clip (invisible).
-     * Filtered out below so clipped-away text is never offered as editable;
-     * surviving runs keep their engine `index` (mutator targets unaffected). */
-    clipped?: boolean;
-  }[];
-}
-
-export async function fetchTextRuns(
-  call: (method: string, params: Record<string, unknown>) => Promise<unknown>,
-  workingPath: string,
-  pageNumber: number,
-  geometry: PageGeometry,
-): Promise<EditTextRun[]> {
-  const listing = (await call('list_text_runs', {
-    file: workingPath,
-    page: pageNumber,
-  })) as unknown as EngineRunListing;
-  // Drop clipped-away (invisible) runs — never offered as editable.
-  const visible = (listing.runs ?? []).filter((run) => !run.clipped);
-  return visible.map((run) => ({
-    index: run.index,
-    text: run.text,
-    nested: Boolean(run.nested),
-    editable: Boolean(run.editable),
-    reason: run.reason ?? null,
-    encodable: run.encodable ?? '',
-    sequences: Array.isArray(run.sequences) ? run.sequences : [],
-    vertical: Boolean(run.vertical),
-    fontSize: typeof run.font_size === 'number' ? run.font_size : 0,
-    rect: pdfRectToDisplay(run.rect, geometry.box, geometry.bakedRotate),
-  }));
 }
 
 /** Characters of `value` the font cannot encode, deduplicated in order —
