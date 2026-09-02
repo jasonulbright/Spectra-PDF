@@ -1,10 +1,9 @@
 // Sizing for the inline page-number fields (bookmark rows and any other
 // per-row page target editor). The width follows the document's page count so
 // a 5-digit total is not clipped; it is never a constant derived from one
-// document.
-
-/** Widest page count that gets its own width; beyond this the field stops growing. */
-const MAX_DIGITS = 7;
+// document. The digit count is uncapped: the renderer opens any page count
+// pdf.js can index (the engine's 50 000-page validate guard gates engine ops
+// only), so a cap would clip the widest page number of a larger document.
 
 /**
  * Non-glyph width of the editable field: horizontal padding (4px + 4px) plus
@@ -21,7 +20,7 @@ export function pageDigits(pageCount: number): number {
   if (!Number.isFinite(pageCount)) return 1;
   const n = Math.floor(pageCount);
   if (n <= 1) return 1;
-  return Math.min(MAX_DIGITS, String(n).length);
+  return String(n).length;
 }
 
 /**
