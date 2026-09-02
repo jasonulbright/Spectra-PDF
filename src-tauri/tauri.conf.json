@@ -32,7 +32,7 @@
       "../resources/jbig2enc": "jbig2enc",
       "../resources/dictionaries": "dictionaries",
       "../resources/icc": "icc",
-      "../src/engine": "engine",
+      "engine-payload": "engine",
       "../THIRD-PARTY-LICENSES.md": "THIRD-PARTY-LICENSES.md",
       "THIRD-PARTY-LICENSES-RUST.html": "THIRD-PARTY-LICENSES-RUST.html"
     },

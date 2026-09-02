@@ -63,6 +63,11 @@ if command -v powershell >/dev/null 2>&1; then
   gate portable-checkmap powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -CheckMap
 fi
 
+# --- CI gate: the engine payload carries no cached bytecode. A `resources`
+#     directory entry is copied whole, so a checkout's ignored __pycache__
+#     rides into the installer and the portable zip. ---
+gate engine-payload "$R/.venv/Scripts/python.exe" scripts/check-engine-payload.py
+
 # --- Corpus provisioning contract: a test axis with no CI provisioning is the
 #     "added tests, forgot the workflow" failure class. This asserts the fetch
 #     scripts still --check clean if the corpora are present (skips if absent). ---

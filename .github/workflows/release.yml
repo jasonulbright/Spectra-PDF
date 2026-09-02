@@ -425,6 +425,14 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -Verify src-tauri/target/release/bundle/portable/tree.staging
         shell: pwsh
 
+      # The shipped tree itself, after both containers are assembled: a
+      # `resources` directory entry is copied whole, so an engine source tree
+      # carrying ignored __pycache__ would put cached bytecode in the installer
+      # and the zip alike. Mirrored in scripts/ci-parity-gates.sh.
+      - name: Engine payload carries no cached bytecode
+        run: python scripts/check-engine-payload.py
+        shell: bash
+
       - name: Publish the portable zip
         shell: pwsh
         env:
