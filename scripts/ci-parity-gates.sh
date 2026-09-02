@@ -108,6 +108,12 @@ gate corpus-pin "$R/.venv/Scripts/python.exe" -m pytest \
 #     on CI. Cheap enough to belong here. ---
 gate cargo-test sh -c 'cd src-tauri && cargo test'
 
+# --- CI/Release gate: the live CLI leaves no bytecode in the engine payload.
+#     `cargo test` above lets the test skip when no runtime sits beside the
+#     exe; this machine has the vendored runtime, so the skip is refused here
+#     the way the provisioned CI and release runs refuse it. ---
+gate cli-bytecode sh -c 'cd src-tauri && SPECTRAPDF_REQUIRE_LIVE_CLI=1 cargo test --test cli_bytecode'
+
 echo "CI-PARITY DONE" >> "$OUT"
 if [ "$fail" -ne 0 ]; then
   echo "CI-PARITY: FAILURES — read ci-parity.*.local.log before pushing." >> "$OUT"

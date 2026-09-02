@@ -12,6 +12,23 @@ name: Release (redo)
 # checksum-verified either way. Do not widen the overlay: any other file from
 # main would publish, under the tag's version, code the tag does not contain.
 #
+# VERIFIER TOOLING is the second, separate source: the gates that READ the
+# build (the engine payload check, the renderer harness scan, the draft
+# verification) run from the workflow's own revision, checked out into
+# `verifier/`, never from the tag. Nothing under `verifier/` is a bundle input,
+# so a verifier fixed on main can re-check an old tag without touching its
+# product bytes -- and an old tag that predates a verifier can still be redone.
+#
+# Two engine-payload regimes, chosen from the TAG's tree:
+#   manifest -- the tag carries src/engine/PAYLOAD-MANIFEST.tsv; the built
+#               engine tree is compared against that manifest.
+#   legacy   -- the tag predates the manifest and bundled src/engine directly;
+#               the built engine tree is compared against the tag's tracked
+#               src/engine as checked out, minus *.local.* scratch, with cached
+#               bytecode refused. No manifest is invented for such a tag.
+# tests/test_ci_capability_setup.py runs the selection against the last
+# released tags and the legacy verifier against their real trees.
+#
 # The build/sign/publish steps below are a copy of release.yml's `release` job.
 # They are kept in step with it by hand; a change to that job that matters to a
 # republish belongs here too.
@@ -48,6 +65,27 @@ jobs:
           git fetch origin main --depth=1
           git checkout origin/main -- scripts/bundle-libreoffice.ps1
           git --no-pager diff --stat HEAD -- scripts/bundle-libreoffice.ps1
+
+      # Verifier-only tooling, from the revision this workflow runs at. Read
+      # by the gates below; never a bundle input (see the header).
+      - name: Check out the verifier tooling from the workflow's revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: verifier
+          sparse-checkout: scripts
+
+      - name: Select the engine payload verification regime from the tag's tree
+        id: engine-regime
+        shell: bash
+        run: |
+          if git cat-file -e HEAD:src/engine/PAYLOAD-MANIFEST.tsv 2>/dev/null; then
+            regime=manifest
+          else
+            regime=legacy
+          fi
+          echo "regime=$regime" >> "$GITHUB_OUTPUT"
+          echo "engine payload regime for ${{ inputs.tag }}: $regime"
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -155,15 +193,22 @@ jobs:
         shell: pwsh
 
       - name: Engine payload manifest is current
-        run: python scripts/gen-engine-payload-manifest.py --check
+        if: steps.engine-regime.outputs.regime == 'manifest'
+        run: python verifier/scripts/gen-engine-payload-manifest.py --root . --check
         shell: bash
 
       - name: Engine payload matches its manifest
-        run: python scripts/check-engine-payload.py
+        if: steps.engine-regime.outputs.regime == 'manifest'
+        run: python verifier/scripts/check-engine-payload.py --root .
+        shell: bash
+
+      - name: Engine payload matches the tag's engine tree (legacy, pre-manifest tag)
+        if: steps.engine-regime.outputs.regime == 'legacy'
+        run: python verifier/scripts/check-engine-payload.py --root . --legacy-rev HEAD
         shell: bash
 
       - name: Shipped renderer carries no test harness
-        run: python scripts/check-release-bundle.py
+        run: python verifier/scripts/check-release-bundle.py "$GITHUB_WORKSPACE/dist/renderer"
         shell: bash
 
       - name: Upload the portable zip to the draft
@@ -237,58 +282,15 @@ jobs:
           gh api --method POST -H "Content-Type: application/octet-stream" "https://uploads.github.com/repos/$repo/releases/$env:RELEASE_ID/assets?name=SHA256SUMS.txt" --input $out > $null
           if ($LASTEXITCODE -ne 0) { throw "failed to upload SHA256SUMS.txt" }
 
+      # Every draft asset is downloaded by id and hashed; the uploaded bytes
+      # must equal the built bytes, the uploaded SHA256SUMS.txt, and the
+      # uploaded signature (script header for the full contract).
       - name: Verify the draft's assets and updater manifest
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
-        run: |
-          $repo = "${{ github.repository }}"
-          $tag = "${{ inputs.tag }}"
-          $version = $tag -replace '^v',''
-          $release = gh api "repos/$repo/releases/$env:RELEASE_ID" | ConvertFrom-Json
-          if (-not $release.draft) { throw "release $env:RELEASE_ID is already public before verification" }
-          if ($release.tag_name -ne $tag) { throw "draft is for tag '$($release.tag_name)', expected '$tag'" }
-          $bundle = "src-tauri/target/release/bundle/nsis"
-          $installer = @(Get-ChildItem $bundle -Filter "*-setup.exe" -ErrorAction Stop)
-          if ($installer.Count -ne 1) { throw "expected one installer, found $($installer.Count)" }
-          $signature = Get-Item (Join-Path $bundle "$($installer[0].Name).sig") -ErrorAction Stop
-          $portable = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -ErrorAction Stop)
-          $sources = @(Get-ChildItem release-sources -File -ErrorAction Stop)
-          $sums = Get-Item (Join-Path $bundle "SHA256SUMS.txt") -ErrorAction Stop
-          $local = @($installer) + @($signature) + @($portable) + @($sources) + @($sums)
-          $assets = @(gh api "repos/$repo/releases/$env:RELEASE_ID/assets?per_page=100" | ConvertFrom-Json)
-          $expected = @($local.Name) + @("latest.json") | Sort-Object
-          $actual = @($assets.name) | Sort-Object
-          if (($expected -join "`n") -ne ($actual -join "`n")) {
-            throw "draft assets differ from the built set.`nexpected:`n$($expected -join "`n")`nactual:`n$($actual -join "`n")"
-          }
-          foreach ($file in $local) {
-            $asset = $assets | Where-Object name -eq $file.Name
-            if ($asset.size -ne $file.Length) { throw "$($file.Name): uploaded $($asset.size) bytes, built $($file.Length)" }
-          }
-          foreach ($line in Get-Content $sums.FullName) {
-            $hash, $name = $line -split '  ', 2
-            $file = $local | Where-Object Name -eq $name
-            if (-not $file) { throw "SHA256SUMS.txt names '$name', which is not an uploaded asset" }
-            $actualHash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
-            if ($actualHash -ne $hash) { throw "SHA256SUMS.txt is stale for $name" }
-          }
-          $manifestAsset = $assets | Where-Object name -eq "latest.json"
-          $manifestPath = Join-Path $bundle "latest.draft.json"
-          gh api -H "Accept: application/octet-stream" "repos/$repo/releases/assets/$($manifestAsset.id)" > $manifestPath
-          if ($LASTEXITCODE -ne 0) { throw "failed to download latest.json from the draft" }
-          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-          if ($manifest.version -ne $version) { throw "latest.json version '$($manifest.version)' != tag version '$version'" }
-          $platform = $manifest.platforms.'windows-x86_64'
-          if (-not $platform) { throw "latest.json has no windows-x86_64 platform" }
-          $expectedSig = (Get-Content $signature.FullName -Raw).Trim()
-          if ($platform.signature.Trim() -ne $expectedSig) { throw "latest.json signature is not the installer's .sig" }
-          $installerAsset = $assets | Where-Object name -eq $installer[0].Name
-          if (-not $platform.url.EndsWith("/releases/assets/$($installerAsset.id)")) {
-            throw "latest.json url '$($platform.url)' does not name the uploaded installer asset $($installerAsset.id)"
-          }
-          Write-Host "draft $env:RELEASE_ID verified: $($actual.Count) assets, latest.json at $version"
+        run: pwsh -NoProfile -File verifier/scripts/verify-release-draft.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ inputs.tag }}"
 
       # The ONLY step that makes anything public. Must stay last.
       - name: Publish the release

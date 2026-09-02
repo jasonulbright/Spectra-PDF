@@ -10,12 +10,21 @@
 //! made against a copy: the exe and a fresh copy of the engine tree in a
 //! scratch directory, with `python/` reached through a directory junction
 //! (the runtime is hundreds of megabytes and this test never writes into it).
+//!
+//! An unprovisioned checkout (no `python/` beside the exe) skips; that skip is
+//! for developer machines only. With `SPECTRAPDF_REQUIRE_LIVE_CLI=1` the
+//! absence is a failure, so a runner that vendored the runtime cannot report
+//! green without having launched the product. The stub-only Rust runs (CI's
+//! lint-and-build job, the release verify job) do not set it; the provisioned
+//! runs (CI's engine job after vendoring, the release build job after
+//! vendoring, the local ci-parity gate) do.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const EXE: &str = env!("CARGO_BIN_EXE_spectrapdf");
+const REQUIRE_LIVE: &str = "SPECTRAPDF_REQUIRE_LIVE_CLI";
 
 fn copy_tree(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap_or_else(|e| panic!("create {}: {e}", to.display()));
@@ -63,6 +72,13 @@ fn check_writes_no_bytecode_into_the_engine_payload() {
     let python = exe_dir.join("python").join("python.exe");
     let engine = exe_dir.join("engine");
     if !python.is_file() || !engine.join("__startup__.py").is_file() {
+        assert!(
+            std::env::var_os(REQUIRE_LIVE).map_or(true, |v| v != "1"),
+            "{REQUIRE_LIVE}=1 but no provisioned python/engine beside {} (python: {}, engine: {})",
+            exe.display(),
+            python.is_file(),
+            engine.join("__startup__.py").is_file()
+        );
         eprintln!(
             "skipped: no provisioned python/engine beside {} (see punchlist § Dev environment notes)",
             exe.display()
