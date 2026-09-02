@@ -977,6 +977,7 @@ input:not([type]) {
   padding: 1px 0;
 }
 .bookmark-row.dragging { opacity: 0.4; }
+.bookmark-indent { flex: 0 10 auto; min-width: 0; }
 .bookmark-handle {
   display: flex;
   align-items: center;
@@ -989,7 +990,7 @@ input:not([type]) {
 }
 .bookmark-handle:active { cursor: grabbing; }
 .bookmark-title-input {
-  flex: 1;
+  flex: 1 1 40px;
   min-width: 0;
   padding: 2px 6px;
   background: transparent;
@@ -1002,16 +1003,18 @@ input:not([type]) {
 .bookmark-title-input:hover { background: #262626; }
 .bookmark-title-input:focus { background: #262626; border-color: #404040; }
 .bookmark-jump {
-  min-width: 22px;
   text-align: end;
   font-size: 11px;
   color: #6b7280;
   padding: 0 2px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 .bookmark-jump:hover:not(:disabled) { color: var(--accent-text, #4cc2ff); text-decoration: underline; }
 [data-theme="light"] .bookmark-jump:hover:not(:disabled) { color: #0067b8; }
+/* Width is set inline from the document's page count (lib/page-field-width).
+   `ch` sizing is only exact while the digits are tabular. */
 .bookmark-page-input {
-  width: 40px;
   padding: 2px 4px;
   text-align: end;
   background: #262626;
@@ -1020,6 +1023,18 @@ input:not([type]) {
   color: inherit;
   font-size: 11px;
   outline: none;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+/* The native spinner is painted INSIDE the field and would cover the last
+   digit at hover/focus. Arrow keys still step the value. */
+.bookmark-page-input::-webkit-outer-spin-button,
+.bookmark-page-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
 }
 .bookmark-btn {
   width: 18px;

@@ -15,6 +15,7 @@ import {
 } from '../../lib/outline-reorder';
 import type { OutlineNode, FlatNode } from '../../lib/outline-reorder';
 import { inlineDelta } from '../../lib/inline-direction';
+import { pageFieldWidth, pageLabelWidth } from '../../lib/page-field-width';
 import { ChromeIcon } from '../chrome-icons';
 import { TEST_HARNESS_ENABLED, registerCanvasOutline } from '../../testHarness';
 import type { OpenFile, PdfBuffer } from '../../state/types';
@@ -557,6 +558,10 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   );
 
   const flat = useMemo(() => flattenOutline(nodes), [nodes]);
+  // Both page columns are sized to the document, so the widest page number in
+  // THIS file renders whole.
+  const pageInputWidth = pageFieldWidth(activeFile?.pageCount ?? 1);
+  const pageLabelMinWidth = pageLabelWidth(activeFile?.pageCount ?? 1);
   const draggedPath = drag?.started ? drag.path : null;
   const rest = draggedPath ? restRows(flat, draggedPath) : [];
   const indicatorPath = draggedPath ? rest[drag!.overIndex]?.path ?? null : null;
@@ -606,8 +611,13 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
                 data-outline-row={key}
                 data-testid="bookmark-row"
                 className={'bookmark-row group' + (isDragged ? ' dragging' : '')}
-                style={{ marginInlineStart: f.depth * INDENT_PX }}
               >
+                {/* The nesting indent is a shrinkable spacer, not a row margin:
+                    it gives up width before the fixed page columns can be
+                    pushed past the panel's edge. */}
+                {f.depth > 0 && (
+                  <span className="bookmark-indent" style={{ width: f.depth * INDENT_PX }} />
+                )}
                 <span
                   className="bookmark-handle"
                   data-testid="bookmark-handle"
@@ -636,6 +646,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
                   }
                   disabled={f.node.page == null}
                   onClick={() => jumpTo(f.node.page)}
+                  style={{ minWidth: pageLabelMinWidth }}
                 >
                   {f.node.page ?? '—'}
                 </button>
@@ -668,6 +679,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
                     if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                   }}
                   className="bookmark-page-input"
+                  style={{ width: pageInputWidth }}
                 />
                 <button
                   title={tChrome('nav.bookmarks.addChild')}
