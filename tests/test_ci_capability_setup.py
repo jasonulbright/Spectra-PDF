@@ -608,28 +608,59 @@ def _draft_fixture(root: Path) -> tuple[list[str], Path]:
     for i, path in enumerate(list(files) + [bundle / "SHA256SUMS.txt"], start=100):
         shutil.copyfile(path, downloaded / path.name)
         assets.append({"name": path.name, "id": i, "size": path.stat().st_size})
+    # The shape Tauri generates for a `["nsis"]` bundle: the target-specific
+    # entry the updater reads first, plus the bare fallback.
+    entry = {
+        "signature": files[bundle / f"{installer}.sig"].decode().strip(),
+        "url": "https://api.github.com/repos/o/r/releases/assets/100",
+    }
     manifest = {
         "version": "1.2.3",
-        "platforms": {"windows-x86_64": {
-            "signature": files[bundle / f"{installer}.sig"].decode().strip(),
-            "url": "https://api.github.com/repos/o/r/releases/assets/100",
-        }},
+        "platforms": {"windows-x86_64": dict(entry), "windows-x86_64-nsis": dict(entry)},
     }
-    (downloaded / "latest.json").write_text(json.dumps(manifest))
-    assets.append({"name": "latest.json", "id": 200,
-                   "size": (downloaded / "latest.json").stat().st_size})
-    (downloaded / "assets.json").write_text(json.dumps(assets))
+    _write_manifest(downloaded, manifest, assets)
     (downloaded / "release.json").write_text(json.dumps({"draft": True, "tag_name": "v1.2.3"}))
     args = [
         "pwsh", "-NoProfile", "-File", str(ROOT / DRAFT_VERIFIER),
-        "-Tag", "v1.2.3", "-Bundle", str(bundle), "-Portable", str(portable),
+        "-Repo", "o/r", "-Tag", "v1.2.3", "-Bundle", str(bundle), "-Portable", str(portable),
         "-Sources", str(sources), "-Offline", str(downloaded),
     ]
     return args, downloaded
 
 
+def _write_manifest(downloaded: Path, manifest: dict, assets: list[dict] | None = None) -> None:
+    """Write latest.json and keep the API-reported size honest, so only the
+    manifest check can fail."""
+    text = json.dumps(manifest)
+    (downloaded / "latest.json").write_text(text)
+    if assets is None:
+        assets = json.loads((downloaded / "assets.json").read_text())
+        for asset in assets:
+            if asset["name"] == "latest.json":
+                asset["size"] = len(text.encode())
+    else:
+        assets.append({"name": "latest.json", "id": 200, "size": len(text.encode())})
+    (downloaded / "assets.json").write_text(json.dumps(assets))
+
+
+def _mutate_manifest(downloaded: Path, mutate) -> None:
+    manifest = json.loads((downloaded / "latest.json").read_text())
+    mutate(manifest["platforms"])
+    _write_manifest(downloaded, manifest)
+
+
 def _run_verifier(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(args, capture_output=True, text=True)
+
+
+def _verifier_says(run: subprocess.CompletedProcess, message: str) -> bool:
+    """pwsh colours its error rendering and soft-wraps long messages onto
+    ` | ` continuation lines, dropping the space at the wrap; the comparison
+    ignores colour and whitespace so it matches the message, not the wrap."""
+    text = re.sub(r"\x1b\[[0-9;]*m", "", run.stdout + run.stderr)
+    text = re.sub(r"\n\s*\|", "", text)
+    squash = lambda s: re.sub(r"\s+", "", s)  # noqa: E731
+    return squash(message) in squash(text)
 
 
 def test_the_draft_verifier_accepts_a_faithful_upload(tmp_path: Path) -> None:
@@ -668,18 +699,75 @@ def test_the_draft_verifier_refuses_a_checksum_file_that_lies(tmp_path: Path) ->
 
 def test_the_draft_verifier_refuses_a_manifest_with_a_foreign_signature(tmp_path: Path) -> None:
     args, downloaded = _draft_fixture(tmp_path)
-    manifest = json.loads((downloaded / "latest.json").read_text())
-    manifest["platforms"]["windows-x86_64"]["signature"] = "c29tZW9uZSBlbHNl"
-    text = json.dumps(manifest)
-    (downloaded / "latest.json").write_text(text)
-    assets = json.loads((downloaded / "assets.json").read_text())
-    for asset in assets:
-        if asset["name"] == "latest.json":
-            asset["size"] = len(text.encode())
-    (downloaded / "assets.json").write_text(json.dumps(assets))
+    _mutate_manifest(downloaded, lambda p: p["windows-x86_64"].update(signature="c29tZW9uZSBlbHNl"))
     run = _run_verifier(args)
     assert run.returncode != 0
     assert "latest.json signature is not the uploaded installer's .sig" in run.stdout + run.stderr
+
+
+def test_the_draft_verifier_refuses_a_foreign_nsis_entry(tmp_path: Path) -> None:
+    """The updater reads windows-x86_64-nsis first; a clean fallback beside a
+    corrupt preferred entry must not pass."""
+    args, downloaded = _draft_fixture(tmp_path)
+    _mutate_manifest(downloaded, lambda p: p["windows-x86_64-nsis"].update(
+        signature="not-the-installer-signature", url="not a URL"))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(run, "(platform windows-x86_64-nsis)")
+
+
+def test_the_draft_verifier_refuses_a_missing_nsis_entry(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    _mutate_manifest(downloaded, lambda p: p.pop("windows-x86_64-nsis"))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(
+        run, "latest.json platforms [windows-x86_64] != [windows-x86_64, windows-x86_64-nsis]")
+
+
+def test_the_draft_verifier_refuses_an_extra_platform(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    _mutate_manifest(downloaded, lambda p: p.update({"linux-x86_64": dict(p["windows-x86_64"])}))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(
+        run, "[linux-x86_64, windows-x86_64, windows-x86_64-nsis] != [windows-x86_64, windows-x86_64-nsis]")
+
+
+def test_the_draft_verifier_refuses_a_same_suffix_foreign_host(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    _mutate_manifest(downloaded, lambda p: p["windows-x86_64-nsis"].update(
+        url="https://evil.example/releases/assets/100"))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(
+        run, "url mismatch (platform windows-x86_64-nsis): 'https://evil.example/releases/assets/100'")
+
+
+def test_the_draft_verifier_refuses_a_wrong_asset_id_under_the_right_host(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    _mutate_manifest(downloaded, lambda p: p["windows-x86_64"].update(
+        url="https://api.github.com/repos/o/r/releases/assets/101"))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(
+        run, "url mismatch (platform windows-x86_64): 'https://api.github.com/repos/o/r/releases/assets/101'")
+
+
+def test_the_draft_verifier_refuses_swapped_signatures_between_entries(tmp_path: Path) -> None:
+    """Both entries must carry the installer's signature; a foreign signature
+    landing in either one is refused whichever entry the updater reads."""
+    args, downloaded = _draft_fixture(tmp_path)
+
+    def swap(p: dict) -> None:
+        p["windows-x86_64"]["signature"] = "c29tZW9uZSBlbHNl"
+        p["windows-x86_64-nsis"]["signature"], p["windows-x86_64"]["signature"] = (
+            p["windows-x86_64"]["signature"], p["windows-x86_64-nsis"]["signature"])
+
+    _mutate_manifest(downloaded, swap)
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(run, "(platform windows-x86_64-nsis)")
 
 
 def test_the_draft_verifier_refuses_an_already_public_release(tmp_path: Path) -> None:
