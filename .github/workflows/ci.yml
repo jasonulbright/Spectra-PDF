@@ -89,6 +89,9 @@ jobs:
       # `cargo test` rather than `cargo check`: check compiles without running
       # the tests, so the printer, watched-folder and scheduler assertions never
       # execute here. `cargo test` compiles too, so it supersedes the check.
+      # This is the STUB-ONLY Rust run: the stubs above are empty directories,
+      # so tests/cli_bytecode.rs skips here. Its provisioned run is in the
+      # test-engine job, after the embedded runtime is vendored.
       - name: Rust tests
         run: cd src-tauri && cargo test
 
@@ -212,6 +215,33 @@ jobs:
       - name: Stage the shipped OCR language models
         run: node scripts/sync-ocr-assets.mjs
         shell: pwsh
+
+      # The live CLI against the SHIPPED runtime. This job is the one that
+      # assembles every resource the bundle declares; with the embedded Python
+      # vendored beside them, `cargo test` stages the engine payload and lays
+      # the runtime next to the test binary, and tests/cli_bytecode.rs launches
+      # the product's CLI for real. The skip that lint-and-build's stub-only
+      # run takes is refused here.
+      - name: Provision embedded Python (vendored, for the live CLI test)
+        run: powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1
+        shell: pwsh
+
+      - name: Setup Rust (for the live CLI test)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo (for the live CLI test)
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-live-cli-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Live CLI leaves no bytecode in the engine payload (provisioned runtime)
+        run: cd src-tauri && cargo test --test cli_bytecode
+        env:
+          SPECTRAPDF_REQUIRE_LIVE_CLI: "1"
 
       - name: Stage test-only SoftHSM (PKCS#11 capability axis)
         # Not an application dependency: this pinned software token gives the

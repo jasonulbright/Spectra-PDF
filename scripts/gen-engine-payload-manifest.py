@@ -21,17 +21,14 @@ import pathlib
 import subprocess
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
-ENGINE = ROOT / "src/engine"
-MANIFEST = ENGINE / "PAYLOAD-MANIFEST.tsv"
 MANIFEST_NAME = "PAYLOAD-MANIFEST.tsv"
 HEADER = "path\tsize\tsha256"
 
 
-def tracked_engine_files() -> list[str]:
+def tracked_engine_files(root: pathlib.Path) -> list[str]:
     out = subprocess.run(
         ["git", "ls-files", "-z", "--", "src/engine"],
-        cwd=ROOT,
+        cwd=root,
         capture_output=True,
         text=True,
         check=True,
@@ -49,10 +46,11 @@ def tracked_engine_files() -> list[str]:
     return sorted(rels)
 
 
-def render() -> str:
+def render(root: pathlib.Path) -> str:
     lines = [HEADER]
-    for rel in tracked_engine_files():
-        data = (ENGINE / rel).read_bytes()
+    engine = root / "src/engine"
+    for rel in tracked_engine_files(root):
+        data = (engine / rel).read_bytes()
         lines.append(f"{rel}\t{len(data)}\t{hashlib.sha256(data).hexdigest()}")
     return "\n".join(lines) + "\n"
 
@@ -64,16 +62,24 @@ def main() -> int:
         action="store_true",
         help="regenerate and diff; exit non-zero when the manifest is stale",
     )
+    parser.add_argument(
+        "--root",
+        default=pathlib.Path(__file__).resolve().parent.parent,
+        type=pathlib.Path,
+        help="checkout whose src/engine is manifested (default: this repository)",
+    )
     args = parser.parse_args()
+    root = args.root.resolve()
+    manifest = root / "src/engine" / MANIFEST_NAME
 
-    expected = render()
+    expected = render(root)
     if not args.check:
-        MANIFEST.write_text(expected, encoding="utf-8", newline="")
+        manifest.write_text(expected, encoding="utf-8", newline="")
         rows = expected.count("\n") - 1
-        print(f"wrote {MANIFEST.relative_to(ROOT).as_posix()}: {rows} row(s)")
+        print(f"wrote {manifest.relative_to(root).as_posix()}: {rows} row(s)")
         return 0
 
-    actual = MANIFEST.read_text(encoding="utf-8") if MANIFEST.exists() else ""
+    actual = manifest.read_text(encoding="utf-8") if manifest.exists() else ""
     if actual == expected:
         rows = expected.count("\n") - 1
         print(f"engine payload manifest OK: {rows} row(s)")

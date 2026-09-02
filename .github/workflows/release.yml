@@ -96,7 +96,9 @@ jobs:
 
       # `cargo check` never RUNS anything. The Rust tests cover the virtual
       # printer's job naming, the watched-folder validation and the scheduler --
-      # all of which decide what lands on a user's disk.
+      # all of which decide what lands on a user's disk. This is the STUB-ONLY
+      # Rust run: the resource stubs above are empty, so tests/cli_bytecode.rs
+      # skips here; its provisioned run is in the `release` job after vendoring.
       - name: Rust tests
         run: cd src-tauri && cargo test
 
@@ -381,6 +383,15 @@ jobs:
         run: node scripts/sync-ocr-assets.mjs
         shell: pwsh
 
+      # The live CLI against the runtime this job just vendored. The verify
+      # job's Rust run sees empty stubs and this test skips there; here the
+      # skip is refused, so a release cannot go out without having launched
+      # the product's CLI and read the payload tree it left behind.
+      - name: Live CLI leaves no bytecode in the engine payload (provisioned runtime)
+        run: cd src-tauri && cargo test --test cli_bytecode
+        env:
+          SPECTRAPDF_REQUIRE_LIVE_CLI: "1"
+
       - name: Stage corresponding source archives
         # The HEIF binding ships two LGPL libraries. Every released installer
         # is accompanied by their exact source and the binding's own sdist;
@@ -536,62 +547,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "failed to upload SHA256SUMS.txt" }
 
       # Read back what the draft actually holds, not what this runner built:
-      # the asset set is exact (no missing, no stray), every asset's size is
-      # the local file's, and latest.json names the tag's version and the
-      # installer's own signature. A draft that is already public here means
-      # some earlier step published; that is refused, never repaired.
+      # every asset is downloaded by id and hashed, and the uploaded bytes must
+      # equal the built bytes, the uploaded SHA256SUMS.txt, and the uploaded
+      # signature that latest.json carries. A size match is not a check. A
+      # draft that is already public here means some earlier step published;
+      # that is refused, never repaired. Contract in the script's header.
       - name: Verify the draft's assets and updater manifest
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
-        run: |
-          $repo = "${{ github.repository }}"
-          $tag = "${{ github.ref_name }}"
-          $version = $tag -replace '^v',''
-          $release = gh api "repos/$repo/releases/$env:RELEASE_ID" | ConvertFrom-Json
-          if (-not $release.draft) { throw "release $env:RELEASE_ID is already public before verification" }
-          if ($release.tag_name -ne $tag) { throw "draft is for tag '$($release.tag_name)', expected '$tag'" }
-          $bundle = "src-tauri/target/release/bundle/nsis"
-          $installer = @(Get-ChildItem $bundle -Filter "*-setup.exe" -ErrorAction Stop)
-          if ($installer.Count -ne 1) { throw "expected one installer, found $($installer.Count)" }
-          $signature = Get-Item (Join-Path $bundle "$($installer[0].Name).sig") -ErrorAction Stop
-          $portable = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -ErrorAction Stop)
-          $sources = @(Get-ChildItem release-sources -File -ErrorAction Stop)
-          $sums = Get-Item (Join-Path $bundle "SHA256SUMS.txt") -ErrorAction Stop
-          $local = @($installer) + @($signature) + @($portable) + @($sources) + @($sums)
-          $assets = @(gh api "repos/$repo/releases/$env:RELEASE_ID/assets?per_page=100" | ConvertFrom-Json)
-          $expected = @($local.Name) + @("latest.json") | Sort-Object
-          $actual = @($assets.name) | Sort-Object
-          if (($expected -join "`n") -ne ($actual -join "`n")) {
-            throw "draft assets differ from the built set.`nexpected:`n$($expected -join "`n")`nactual:`n$($actual -join "`n")"
-          }
-          foreach ($file in $local) {
-            $asset = $assets | Where-Object name -eq $file.Name
-            if ($asset.size -ne $file.Length) { throw "$($file.Name): uploaded $($asset.size) bytes, built $($file.Length)" }
-          }
-          foreach ($line in Get-Content $sums.FullName) {
-            $hash, $name = $line -split '  ', 2
-            $file = $local | Where-Object Name -eq $name
-            if (-not $file) { throw "SHA256SUMS.txt names '$name', which is not an uploaded asset" }
-            $actualHash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
-            if ($actualHash -ne $hash) { throw "SHA256SUMS.txt is stale for $name" }
-          }
-          $manifestAsset = $assets | Where-Object name -eq "latest.json"
-          $manifestPath = Join-Path $bundle "latest.draft.json"
-          gh api -H "Accept: application/octet-stream" "repos/$repo/releases/assets/$($manifestAsset.id)" > $manifestPath
-          if ($LASTEXITCODE -ne 0) { throw "failed to download latest.json from the draft" }
-          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-          if ($manifest.version -ne $version) { throw "latest.json version '$($manifest.version)' != tag version '$version'" }
-          $platform = $manifest.platforms.'windows-x86_64'
-          if (-not $platform) { throw "latest.json has no windows-x86_64 platform" }
-          $expectedSig = (Get-Content $signature.FullName -Raw).Trim()
-          if ($platform.signature.Trim() -ne $expectedSig) { throw "latest.json signature is not the installer's .sig" }
-          $installerAsset = $assets | Where-Object name -eq $installer[0].Name
-          if (-not $platform.url.EndsWith("/releases/assets/$($installerAsset.id)")) {
-            throw "latest.json url '$($platform.url)' does not name the uploaded installer asset $($installerAsset.id)"
-          }
-          Write-Host "draft $env:RELEASE_ID verified: $($actual.Count) assets, latest.json at $version"
+        run: pwsh -NoProfile -File scripts/verify-release-draft.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ github.ref_name }}"
 
       # The ONLY step that makes anything public. Must stay last.
       - name: Publish the release

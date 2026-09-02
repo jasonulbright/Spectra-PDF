@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
+import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +19,12 @@ import conftest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ("ci.yml", "release.yml")
+
+
+def _git(*args: str, cwd: Path = ROOT) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+    ).stdout
 
 #: Every capability axis a test may skip on, mapped to the command that stages
 #: it on a clean runner. An axis is declared by a module-level `*_AXIS_SKIP`
@@ -186,6 +198,14 @@ def test_the_libreoffice_download_falls_back_across_tdf_hosts() -> None:
     assert text.index("Test-PinnedMsi $Msi") < text.index("msiexec.exe")
 
 
+REDO_VERIFIER_STEP = "Check out the verifier tooling from the workflow's revision"
+REDO_REGIME_STEP = "Select the engine payload verification regime from the tag's tree"
+REDO_LEGACY_ENGINE_STEP = (
+    "Engine payload matches the tag's engine tree (legacy, pre-manifest tag)"
+)
+ENGINE_MANIFEST = "src/engine/PAYLOAD-MANIFEST.tsv"
+
+
 def test_the_redo_publisher_takes_product_bytes_from_the_tag() -> None:
     """The redo workflow may overlay download tooling and nothing else.
 
@@ -206,6 +226,13 @@ def test_the_redo_publisher_takes_product_bytes_from_the_tag() -> None:
     assert "permissions:\n  contents: write" in text
     # The publish steps address the dispatched tag, never a ref the run is on.
     assert "github.ref_name" not in text
+    # Verifier tooling is the one other source, checked out beside the tag
+    # from the revision the workflow runs at, and it is read, never bundled.
+    verifier = dict(_job_steps("release-redo.yml", "release"))[REDO_VERIFIER_STEP]
+    assert "ref: ${{ github.sha }}" in verifier
+    assert "path: verifier" in verifier
+    assert "sparse-checkout: scripts" in verifier
+    assert "verifier" not in (ROOT / "src-tauri" / "tauri.conf.json").read_text()
 
 
 #: The publishers: (workflow, job) pairs whose last step is the only one that
@@ -213,28 +240,57 @@ def test_the_redo_publisher_takes_product_bytes_from_the_tag() -> None:
 PUBLISHER_JOBS = (("release.yml", "release"), ("release-redo.yml", "release"))
 
 #: Every gate that runs against the built and uploaded assets, in the order
-#: the job runs them. All of them precede the publish step.
-RELEASE_VERIFICATION_STEPS = (
-    "Verify the portable tree against the installer's staging",
-    "Portable payload notice map covers every declared resource",
-    "Engine payload manifest is current",
-    "Engine payload matches its manifest",
-    "Shipped renderer carries no test harness",
-    "Verify the draft's assets and updater manifest",
-)
+#: the job runs them. All of them precede the publish step. The redo carries
+#: one more: the legacy engine gate for a tag that predates the manifest.
+RELEASE_VERIFICATION_STEPS = {
+    "release.yml": (
+        "Verify the portable tree against the installer's staging",
+        "Portable payload notice map covers every declared resource",
+        "Engine payload manifest is current",
+        "Engine payload matches its manifest",
+        "Shipped renderer carries no test harness",
+        "Verify the draft's assets and updater manifest",
+    ),
+    "release-redo.yml": (
+        "Verify the portable tree against the installer's staging",
+        "Portable payload notice map covers every declared resource",
+        "Engine payload manifest is current",
+        "Engine payload matches its manifest",
+        REDO_LEGACY_ENGINE_STEP,
+        "Shipped renderer carries no test harness",
+        "Verify the draft's assets and updater manifest",
+    ),
+}
 
-#: The two payload gates mirrored in scripts/ci-parity-gates.sh: step name
-#: and the exact command, so a workflow cannot keep the name and drop the run.
-RELEASE_PAYLOAD_GATES = (
-    ("Engine payload manifest is current",
-     "python scripts/gen-engine-payload-manifest.py --check"),
-    ("Engine payload matches its manifest", "python scripts/check-engine-payload.py"),
-    ("Shipped renderer carries no test harness",
-     "python scripts/check-release-bundle.py"),
-)
+#: The payload gates: step name and the exact command, so a workflow cannot
+#: keep the name and drop the run. release.yml runs the checkout's own copy
+#: (mirrored in scripts/ci-parity-gates.sh); the redo runs the WORKFLOW's copy
+#: from `verifier/` against the tag checkout, because the tag may predate the
+#: script.
+RELEASE_PAYLOAD_GATES = {
+    "release.yml": (
+        ("Engine payload manifest is current",
+         "python scripts/gen-engine-payload-manifest.py --check"),
+        ("Engine payload matches its manifest", "python scripts/check-engine-payload.py"),
+        ("Shipped renderer carries no test harness",
+         "python scripts/check-release-bundle.py"),
+    ),
+    "release-redo.yml": (
+        ("Engine payload manifest is current",
+         "python verifier/scripts/gen-engine-payload-manifest.py --root . --check"),
+        ("Engine payload matches its manifest",
+         "python verifier/scripts/check-engine-payload.py --root ."),
+        (REDO_LEGACY_ENGINE_STEP,
+         "python verifier/scripts/check-engine-payload.py --root . --legacy-rev HEAD"),
+        ("Shipped renderer carries no test harness",
+         'python verifier/scripts/check-release-bundle.py "$GITHUB_WORKSPACE/dist/renderer"'),
+    ),
+}
 
 RELEASE_DRAFT_STEP = "Build, sign, and upload to a draft release"
 RELEASE_PUBLISH_STEP = "Publish the release"
+RELEASE_VERIFY_DRAFT_STEP = "Verify the draft's assets and updater manifest"
+DRAFT_VERIFIER = "scripts/verify-release-draft.ps1"
 
 
 def _job_steps(workflow: str, job: str) -> list[tuple[str, str]]:
@@ -288,13 +344,37 @@ def test_the_publish_step_is_last_and_every_verification_precedes_it(
     assert names[-1] == RELEASE_PUBLISH_STEP
     publish = len(names) - 1
     draft = names.index(RELEASE_DRAFT_STEP)
-    for gate in RELEASE_VERIFICATION_STEPS:
+    for gate in RELEASE_VERIFICATION_STEPS[workflow]:
         assert draft < names.index(gate) < publish, (workflow, gate)
     uploads = [i for i, name in enumerate(names) if name.startswith("Upload ")]
     assert uploads, workflow
     # Every upload lands before the read-back verification of the draft.
-    assert max(uploads) < names.index("Verify the draft's assets and updater manifest")
+    verify = names.index(RELEASE_VERIFY_DRAFT_STEP)
+    assert max(uploads) < verify
     assert all(draft < i for i in uploads)
+    # The read-back is a download-and-hash of every uploaded asset, and it is
+    # the last gate before the publish: a same-length wrong upload must fail
+    # here or it ships.
+    assert verify == publish - 1
+    text = dict(steps)[RELEASE_VERIFY_DRAFT_STEP]
+    assert DRAFT_VERIFIER in text and "-ReleaseId $env:RELEASE_ID" in text
+
+
+def test_the_draft_verifier_hashes_the_bytes_github_holds() -> None:
+    text = (ROOT / DRAFT_VERIFIER).read_text()
+    assert "is already public before verification" in text
+    download = text.index('"https://api.github.com/repos/$Repo/releases/assets/$($asset.id)"')
+    assert "curl.exe --fail" in text[download:download + 400]
+    assert '-H "Accept: application/octet-stream"' in text
+    # The hash under comparison is the DOWNLOADED file's, and it is compared
+    # against the local build, the downloaded checksum file, and the manifest.
+    hashed = text.index("(Get-Sha256 $target)")
+    assert download < hashed
+    assert "uploaded bytes differ from the built file" in text[hashed:]
+    assert "SHA256SUMS.txt is wrong for" in text[hashed:]
+    assert "latest.json signature is not the uploaded installer's .sig" in text[hashed:]
+    # Never a PowerShell redirection of a native command: it re-encodes bytes.
+    assert re.search(r"gh api[^\n]*>\s*\$", text) is None
 
 
 @pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
@@ -315,14 +395,15 @@ def test_the_release_is_a_draft_until_the_publish_step(workflow: str, job: str) 
         if name.startswith("Upload "):
             assert "steps.draft.outputs.releaseId" in text, (workflow, name)
             assert "gh release upload" not in text, (workflow, name)
-    verify = steps["Verify the draft's assets and updater manifest"]
-    assert "is already public before verification" in verify
+    verify = steps[RELEASE_VERIFY_DRAFT_STEP]
     assert "steps.draft.outputs.releaseId" in verify
     assert "steps.draft.outputs.releaseId" in publish
 
 
-@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
-@pytest.mark.parametrize("name,command", RELEASE_PAYLOAD_GATES)
+@pytest.mark.parametrize(
+    "workflow,job,name,command",
+    [(w, j, n, c) for w, j in PUBLISHER_JOBS for n, c in RELEASE_PAYLOAD_GATES[w]],
+)
 def test_both_payload_gates_run_in_every_publisher(
     workflow: str, job: str, name: str, command: str
 ) -> None:
@@ -332,10 +413,281 @@ def test_both_payload_gates_run_in_every_publisher(
 
 def test_the_payload_gates_are_mirrored_locally() -> None:
     text = (ROOT / "scripts" / "ci-parity-gates.sh").read_text()
-    for _name, command in RELEASE_PAYLOAD_GATES:
+    for _name, command in RELEASE_PAYLOAD_GATES["release.yml"]:
         assert command.removeprefix("python ") in text
     assert "build-portable-zip.ps1 -CheckMap" in text
     assert "tests/test_ci_capability_setup.py" in text
+    assert f"{LIVE_CLI_ENV}=1 cargo test --test cli_bytecode" in text
+
+
+LIVE_CLI_ENV = "SPECTRAPDF_REQUIRE_LIVE_CLI"
+LIVE_CLI_STEP = "Live CLI leaves no bytecode in the engine payload (provisioned runtime)"
+
+
+@pytest.mark.parametrize(
+    "workflow,job,provisioner",
+    [
+        ("ci.yml", "test-engine", "scripts/setup-python-embed.ps1"),
+        ("release.yml", "release", "scripts/setup-python-embed.ps1"),
+    ],
+)
+def test_the_live_cli_test_runs_against_a_provisioned_runtime(
+    workflow: str, job: str, provisioner: str
+) -> None:
+    """The bytecode regression test may skip on a developer checkout only.
+
+    Every automatic gate that has the embedded runtime sets the env that
+    turns absence into a failure, after the step that vendors the runtime,
+    so a removal of the interpreter's no-bytecode setup cannot stay green.
+    """
+    steps = _job_steps(workflow, job)
+    names = [name for name, _ in steps]
+    live = names.index(LIVE_CLI_STEP)
+    provisioned = [i for i, (_n, t) in enumerate(steps) if provisioner in t]
+    assert provisioned and max(provisioned) < live, (workflow, job)
+    text = dict(steps)[LIVE_CLI_STEP]
+    assert "cargo test --test cli_bytecode" in text
+    assert f'{LIVE_CLI_ENV}: "1"' in text
+    rust = (ROOT / "src-tauri" / "tests" / "cli_bytecode.rs").read_text()
+    assert f'const REQUIRE_LIVE: &str = "{LIVE_CLI_ENV}";' in rust
+    assert "std::env::var_os(REQUIRE_LIVE)" in rust
+
+
+@pytest.mark.parametrize(
+    "workflow,job",
+    [("ci.yml", "lint-and-build"), ("release.yml", "verify")],
+)
+def test_the_stub_only_rust_runs_do_not_claim_a_live_cli(workflow: str, job: str) -> None:
+    steps = _job_steps(workflow, job)
+    names = [name for name, _ in steps]
+    stubs = names.index("Create resource stubs for Tauri build script")
+    assert stubs < names.index("Rust tests")
+    assert LIVE_CLI_ENV not in "\n".join(t for _n, t in steps)
+
+
+def _released_tags(count: int) -> list[str]:
+    tags = [
+        t for t in _git("tag", "--sort=-v:refname").split()
+        if re.fullmatch(r"v\d+\.\d+\.\d+", t)
+    ]
+    assert len(tags) >= count, "the repository carries fewer released tags than expected"
+    return tags[:count]
+
+
+def _tag_has(tag: str, path: str) -> bool:
+    return subprocess.run(
+        ["git", "cat-file", "-e", f"{tag}:{path}"], cwd=ROOT, capture_output=True
+    ).returncode == 0
+
+
+def _redo_regime(tag: str) -> str:
+    """The selection the redo's regime step makes, from the tag's tree."""
+    return "manifest" if _tag_has(tag, ENGINE_MANIFEST) else "legacy"
+
+
+def _redo_script_references() -> list[tuple[str, str, str]]:
+    """(step name, condition, script path) for every script a redo step runs."""
+    refs = []
+    for name, text in _job_steps("release-redo.yml", "release"):
+        cond = ""
+        for line in text.splitlines():
+            if line.strip().startswith("if: "):
+                cond = line.split("if:", 1)[1].strip()
+        for match in re.finditer(r"(?<![\w/])((?:verifier/)?scripts/[\w.-]+)", text):
+            refs.append((name, cond, match.group(1)))
+    return refs
+
+
+@pytest.mark.parametrize("tag", _released_tags(3))
+def test_the_redo_selects_a_regime_every_released_tag_can_run(tag: str) -> None:
+    """Every script the redo runs exists where the redo will look for it.
+
+    The redo checks out the TAG, so a tag-side `scripts/x` must exist in the
+    tag; a `verifier/scripts/x` must exist at the workflow's own revision. A
+    gate conditioned on a regime is only required to resolve when that regime
+    is the one the tag selects. The verifier copies are also required in the
+    working tree, which is what the sparse checkout will provide.
+    """
+    text = (ROOT / ".github" / "workflows" / "release-redo.yml").read_text()
+    assert f"git cat-file -e HEAD:{ENGINE_MANIFEST}" in text
+    regime = _redo_regime(tag)
+    steps = dict(_job_steps("release-redo.yml", "release"))
+    for step in ("Engine payload manifest is current", "Engine payload matches its manifest"):
+        assert "if: steps.engine-regime.outputs.regime == 'manifest'" in steps[step]
+    assert "if: steps.engine-regime.outputs.regime == 'legacy'" in steps[REDO_LEGACY_ENGINE_STEP]
+
+    # Tracked, or untracked and not ignored: an ignored file (scratch) never
+    # reaches the sparse checkout, whatever the working tree holds.
+    head_tracked = set(
+        _git("ls-files", "--cached", "--others", "--exclude-standard", "--", "scripts").split()
+    )
+    checked = 0
+    for step, cond, ref in _redo_script_references():
+        if "outputs.regime ==" in cond and f"'{regime}'" not in cond:
+            continue
+        if ref.startswith("verifier/"):
+            rel = ref.removeprefix("verifier/")
+            assert rel in head_tracked, (tag, step, ref)
+            assert (ROOT / rel).is_file(), (tag, step, ref)
+        elif ref == "scripts/bundle-libreoffice.ps1":
+            assert "scripts/bundle-libreoffice.ps1" in head_tracked
+        else:
+            assert _tag_has(tag, ref), f"{tag} lacks {ref}, run by the redo step {step!r}"
+        checked += 1
+    assert checked >= 20, "the redo's script references were not found"
+
+
+@pytest.mark.parametrize("tag", _released_tags(3))
+def test_the_legacy_engine_verifier_runs_against_the_released_tag(
+    tag: str, tmp_path: Path
+) -> None:
+    """The regime the redo picks for the tag verifies the tag's real tree.
+
+    A scratch worktree at the tag stands in for the redo's checkout; the
+    built engine tree is a copy of the checked-out `src/engine`, which is what
+    the pre-manifest bundler shipped. The verifier accepts that tree, refuses
+    planted bytecode, and refuses a byte change -- all from the workflow's
+    copy of the script, with the tag never having carried it.
+    """
+    regime = _redo_regime(tag)
+    worktree = tmp_path / "tag"
+    _git("worktree", "add", "--detach", str(worktree), tag)
+    try:
+        built = worktree / "src-tauri" / "target" / "release" / "engine"
+        shutil.copytree(worktree / "src" / "engine", built)
+        verifier = ROOT / "scripts" / "check-engine-payload.py"
+        args = [sys.executable, str(verifier), "--root", str(worktree)]
+        if regime == "legacy":
+            args += ["--legacy-rev", "HEAD"]
+            assert not (worktree / ENGINE_MANIFEST).exists()
+        run = subprocess.run(args, capture_output=True, text=True)
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert f"engine payload OK ({regime}" in run.stdout
+
+        cache = built / "__pycache__"
+        cache.mkdir()
+        (cache / "check.cpython-314.pyc").write_bytes(b"\x00")
+        run = subprocess.run(args, capture_output=True, text=True)
+        assert run.returncode == 1
+        assert "cached bytecode in the engine payload" in run.stdout
+        shutil.rmtree(cache)
+
+        target = built / "__startup__.py"
+        target.write_bytes(target.read_bytes() + b"#")
+        run = subprocess.run(args, capture_output=True, text=True)
+        assert run.returncode == 1
+        assert "payload bytes differ" in run.stdout
+    finally:
+        _git("worktree", "remove", "--force", str(worktree))
+
+
+def _draft_fixture(root: Path) -> tuple[list[str], Path]:
+    """A built release beside a byte-identical 'downloaded' draft."""
+    bundle = root / "nsis"
+    portable = root / "portable"
+    sources = root / "sources"
+    downloaded = root / "downloaded"
+    for d in (bundle, portable, sources, downloaded):
+        d.mkdir()
+    installer = "Spectra PDF_1.2.3_x64-setup.exe"
+    files = {
+        bundle / installer: b"MZ" + bytes(range(256)) * 4,
+        bundle / f"{installer}.sig": b"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZw==\n",
+        portable / "Spectra PDF_1.2.3_x64-portable.zip": b"PK" + bytes(range(256)),
+        sources / "libheif-1.0.tar.gz": b"\x1f\x8b" + b"src" * 50,
+    }
+    for path, data in files.items():
+        path.write_bytes(data)
+    checksummed = [bundle / installer, portable / "Spectra PDF_1.2.3_x64-portable.zip",
+                   sources / "libheif-1.0.tar.gz"]
+    sums = "".join(
+        f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in checksummed
+    )
+    (bundle / "SHA256SUMS.txt").write_bytes(sums.encode("ascii"))
+    assets = []
+    for i, path in enumerate(list(files) + [bundle / "SHA256SUMS.txt"], start=100):
+        shutil.copyfile(path, downloaded / path.name)
+        assets.append({"name": path.name, "id": i, "size": path.stat().st_size})
+    manifest = {
+        "version": "1.2.3",
+        "platforms": {"windows-x86_64": {
+            "signature": files[bundle / f"{installer}.sig"].decode().strip(),
+            "url": "https://api.github.com/repos/o/r/releases/assets/100",
+        }},
+    }
+    (downloaded / "latest.json").write_text(json.dumps(manifest))
+    assets.append({"name": "latest.json", "id": 200,
+                   "size": (downloaded / "latest.json").stat().st_size})
+    (downloaded / "assets.json").write_text(json.dumps(assets))
+    (downloaded / "release.json").write_text(json.dumps({"draft": True, "tag_name": "v1.2.3"}))
+    args = [
+        "pwsh", "-NoProfile", "-File", str(ROOT / DRAFT_VERIFIER),
+        "-Tag", "v1.2.3", "-Bundle", str(bundle), "-Portable", str(portable),
+        "-Sources", str(sources), "-Offline", str(downloaded),
+    ]
+    return args, downloaded
+
+
+def _run_verifier(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(args, capture_output=True, text=True)
+
+
+def test_the_draft_verifier_accepts_a_faithful_upload(tmp_path: Path) -> None:
+    args, _downloaded = _draft_fixture(tmp_path)
+    run = _run_verifier(args)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "verified from downloaded bytes: 6 assets hashed" in run.stdout
+
+
+def test_the_draft_verifier_refuses_a_same_length_wrong_installer(tmp_path: Path) -> None:
+    """The size check the old step relied on passes this fixture; the hash fails it."""
+    args, downloaded = _draft_fixture(tmp_path)
+    target = downloaded / "Spectra PDF_1.2.3_x64-setup.exe"
+    data = bytearray(target.read_bytes())
+    data[-1] ^= 0xFF
+    target.write_bytes(bytes(data))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert "uploaded bytes differ from the built file" in run.stdout + run.stderr
+
+
+def test_the_draft_verifier_refuses_a_checksum_file_that_lies(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    sums = downloaded / "SHA256SUMS.txt"
+    lines = sums.read_text().splitlines()
+    digest, name = lines[0].split("  ", 1)
+    swapped = ("0" if digest[0] != "0" else "1") + digest[1:]
+    lines[0] = f"{swapped}  {name}"
+    body = ("\n".join(lines) + "\n").encode("ascii")
+    sums.write_bytes(body)
+    (tmp_path / "nsis" / "SHA256SUMS.txt").write_bytes(body)
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert f"SHA256SUMS.txt is wrong for {name}" in run.stdout + run.stderr
+
+
+def test_the_draft_verifier_refuses_a_manifest_with_a_foreign_signature(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    manifest = json.loads((downloaded / "latest.json").read_text())
+    manifest["platforms"]["windows-x86_64"]["signature"] = "c29tZW9uZSBlbHNl"
+    text = json.dumps(manifest)
+    (downloaded / "latest.json").write_text(text)
+    assets = json.loads((downloaded / "assets.json").read_text())
+    for asset in assets:
+        if asset["name"] == "latest.json":
+            asset["size"] = len(text.encode())
+    (downloaded / "assets.json").write_text(json.dumps(assets))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert "latest.json signature is not the uploaded installer's .sig" in run.stdout + run.stderr
+
+
+def test_the_draft_verifier_refuses_an_already_public_release(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path)
+    (downloaded / "release.json").write_text(json.dumps({"draft": False, "tag_name": "v1.2.3"}))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert "is already public before verification" in run.stdout + run.stderr
 
 
 def test_ci_scans_the_renderer_it_just_built_for_the_test_harness() -> None:
