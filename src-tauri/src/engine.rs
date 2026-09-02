@@ -328,6 +328,10 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
         // non-ASCII value (the engine also reconfigures its own stdio — this
         // is the spawner half of the fix).
         .env("PYTHONUTF8", "1")
+        // The installed tree is a payload, not a cache: without this the
+        // interpreter writes __pycache__ beside every engine module it
+        // imports, so the install directory grows files no uninstall removes.
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         // The colour-profile assent, told to the engine rather than looked up
         // by it: the installed and portable containers keep the record in
         // different places, and this binary is the one authority on which

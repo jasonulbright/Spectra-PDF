@@ -85,6 +85,16 @@ jobs:
       - name: Rust tests
         run: cd src-tauri && cargo test
 
+      # A `resources` directory entry is copied whole -- the bundler has no
+      # exclusion form -- so an engine source tree carrying ignored
+      # __pycache__ ships cached bytecode in the installer and the portable
+      # zip. build.rs (which the step above ran) stages a filtered tree; this
+      # asserts the declaration points at that staging and the staged tree is
+      # clean. Mirrored in scripts/ci-parity-gates.sh.
+      - name: Engine payload carries no cached bytecode
+        run: python scripts/check-engine-payload.py
+        shell: bash
+
       # The COM scheduler tests are #[ignore]d locally because they write to
       # the machine's real task store. The hosted runner IS the fresh machine
       # — no `\Spectra PDF\` folder exists — so this run is the standing
