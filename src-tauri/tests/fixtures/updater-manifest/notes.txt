@@ -1,0 +1,1 @@
+See CHANGELOG.md for details. The installer is unsigned (no code-signing certificate); SmartScreen may warn on first run -- verify your download against SHA256SUMS.txt, published with this release. Exact corresponding-source archives for the bundled HEIF decoder libraries are attached to this release.

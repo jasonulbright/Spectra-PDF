@@ -22,6 +22,18 @@
 # binary assets. The Authorization header is dropped on the cross-host redirect
 # to the asset store (curl's default), which that store requires.
 #
+# The manifest's last check is the updater plugin's own deserializer: the
+# downloaded latest.json is parsed by `cargo test --test updater_manifest` in
+# -CargoPackage with the RemoteRelease type the installed copies read it with
+# (its `time` RFC 3339 parse of `pub_date`, its unknown-field policy), then
+# compared against the tag version, the release body, and the installer. A
+# manifest this script re-implemented the shape of could pass here and still
+# refuse to parse in every installed copy, which is the launch update check
+# failing everywhere at once. -CargoPackage defaults to the checkout's own
+# `src-tauri`; when that package lacks the test source (a tag that predates
+# it), the copy beside this script is placed into its `tests/` first, so the
+# parse always runs against the updater version THAT package pins.
+#
 # -Offline <dir> skips the API and reads <dir>/release.json, <dir>/assets.json
 # and the "downloaded" asset files from <dir>; the comparison is otherwise the
 # same, which is what tests/test_ci_capability_setup.py drives. -Repo is still
@@ -36,7 +48,8 @@ param(
     [string]$Portable = "src-tauri/target/release/bundle/portable",
     [string]$Sources = "release-sources",
     [string]$Downloads = "",
-    [string]$Offline = ""
+    [string]$Offline = "",
+    [string]$CargoPackage = "src-tauri"
 )
 
 $ErrorActionPreference = "Stop"
@@ -203,6 +216,30 @@ foreach ($name in $expectedPlatforms) {
     if ([string]$platform.url -cne $installerUrl) {
         throw "latest.json url mismatch (platform $name): '$($platform.url)' != '$installerUrl'"
     }
+}
+
+# The consumer's parse (header). The release body is handed over as a file:
+# an environment value would go through the console encoding.
+$testName = "updater_manifest.rs"
+$testSource = Join-Path $PSScriptRoot "..\src-tauri\tests\$testName"
+$testTarget = Join-Path (Join-Path $CargoPackage "tests") $testName
+if (-not (Test-Path -LiteralPath $testTarget)) {
+    if (-not (Test-Path -LiteralPath $testSource)) { throw "no updater manifest test at $testSource" }
+    Write-Host "placing $testName into $CargoPackage/tests (the package predates it)"
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $testTarget) | Out-Null
+    Copy-Item -LiteralPath $testSource -Destination $testTarget
+}
+$bodyFile = Join-Path $Downloads "release-body.local.txt"
+[System.IO.File]::WriteAllText($bodyFile, [string]$release.body, [System.Text.UTF8Encoding]::new($false))
+$env:SPECTRAPDF_UPDATER_MANIFEST = (Resolve-Path -LiteralPath (Get-Downloaded "latest.json").path).Path
+$env:SPECTRAPDF_UPDATER_VERSION = $version
+$env:SPECTRAPDF_UPDATER_NOTES_FILE = (Resolve-Path -LiteralPath $bodyFile).Path
+$env:SPECTRAPDF_UPDATER_PLATFORMS = $expectedPlatforms -join ","
+$env:SPECTRAPDF_UPDATER_URL = $installerUrl
+$env:SPECTRAPDF_UPDATER_SIGNATURE_FILE = (Resolve-Path -LiteralPath (Get-Downloaded $signature.Name).path).Path
+& cargo test --manifest-path (Join-Path $CargoPackage "Cargo.toml") --test updater_manifest -- verifies_the_manifest_named_by_the_environment
+if ($LASTEXITCODE -ne 0) {
+    throw "latest.json is refused by the updater's own deserializer or differs from the release (cargo output above)"
 }
 
 Write-Host "draft $ReleaseId verified from downloaded bytes: $($actual.Count) assets hashed, latest.json at $version"

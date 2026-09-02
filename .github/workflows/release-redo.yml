@@ -67,13 +67,17 @@ jobs:
           git --no-pager diff --stat HEAD -- scripts/bundle-libreoffice.ps1
 
       # Verifier-only tooling, from the revision this workflow runs at. Read
-      # by the gates below; never a bundle input (see the header).
+      # by the gates below; never a bundle input (see the header). The Rust
+      # test sources ride along for the draft verifier, which compiles the
+      # updater manifest check against the TAG's package when the tag lacks it.
       - name: Check out the verifier tooling from the workflow's revision
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           path: verifier
-          sparse-checkout: scripts
+          sparse-checkout: |
+            scripts
+            src-tauri/tests
 
       - name: Select the engine payload verification regime from the tag's tree
         id: engine-regime
