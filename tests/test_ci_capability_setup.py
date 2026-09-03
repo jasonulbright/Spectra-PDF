@@ -401,10 +401,11 @@ def test_the_draft_verifier_parses_the_manifest_with_the_updaters_deserializer()
     installed copy can read the release is the plugin's, so the gate runs it.
     """
     text = (ROOT / DRAFT_VERIFIER).read_text()
-    assert "cargo test --manifest-path" in text
+    assert '"test", "--manifest-path", $packageManifest, "--test", $verifierTest' in text
     assert f'$verifierPrefix = "{VERIFIER_TEST_PREFIX}"' in text
     assert '$verifierTest = "${verifierPrefix}${nonce}_updater_manifest"' in text
-    assert "--test $verifierTest -- verifies_the_manifest_named_by_the_environment" in text
+    assert '$verifierFunction = "verifies_the_manifest_named_by_the_environment"' in text
+    assert '"--test", $verifierTest, "--",\n        "--exact", $verifierFunction, "--test-threads=1"' in text
     rust = (ROOT / UPDATER_MANIFEST_TEST).read_text()
     assert "use tauri_plugin_updater::{RemoteRelease, RemoteReleaseInner};" in rust
     assert "serde_json::from_str(manifest)" in rust
@@ -442,14 +443,15 @@ def test_the_draft_verifier_never_selects_its_logic_from_the_verified_package() 
     assert "is not the verifier's source" in staging[copy:]
     # The resolution proof sits between the hash and the run.
     metadata = staging.index("cargo metadata --no-deps --format-version 1 --manifest-path $packageManifest", copy)
-    run = staging.index("cargo test --manifest-path $packageManifest --test $verifierTest", metadata)
+    run = staging.index('Invoke-CargoTest (Join-Path $Downloads "cargo-test.local")', metadata)
     proof = staging[metadata:run]
     assert "Test-OrdinalEqual ([string]$_.name) $verifierTest" in proof
     assert "not the staged $stagedPath" in proof
     assert "autotests\\s*=\\s*false" in staging[copy:metadata]
     assert "under the reserved '$verifierPrefix' prefix" in staging[copy:run]
-    assert "'^\\s*Running (.+?\\.rs) \\('" in staging[run:]
-    assert "not the staged verifier $stagedPath" in staging[run:]
+    assert "'^\\s*Running (.+?\\.rs) \\('" in text
+    assert "not the staged verifier $stagedPath" in text
+    assert "Test-CargoRanTheStagedVerifier $run.StdErr" in staging[run:]
     assert "Remove-Item -LiteralPath $testTarget" in staging[run:]
     # The package's conventionally named test is never named as a target.
     assert "--test updater_manifest" not in text
@@ -1308,6 +1310,124 @@ def test_the_draft_verifier_tolerates_an_explicit_target_outside_the_reserved_pr
     assert run.returncode == 0, run.stdout + run.stderr
     assert "verified from downloaded bytes: 6 assets hashed" in run.stdout
     assert _staged_leftovers(package) == []
+
+
+VERIFIER_FUNCTION = "verifies_the_manifest_named_by_the_environment"
+VERIFIER_TALLY = "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured;"
+
+
+@pytest.fixture
+def verifier_revision(tmp_path: Path):
+    """A scratch copy of the VERIFIER's revision, whose sibling Rust source
+    the mutation tests edit: the script under test is the working tree's,
+    copied over the worktree's, and its `updater_manifest.rs` sibling is the
+    worktree's. The package verified is the checkout's own, so the staged
+    target builds against the graph already compiled. Yields (verifier args,
+    downloaded dir, the sibling source path, env).
+    """
+    worktree = tmp_path / "verifier"
+    _git("worktree", "add", "--detach", str(worktree), "HEAD")
+    try:
+        shutil.copyfile(ROOT / DRAFT_VERIFIER, worktree / DRAFT_VERIFIER)
+        args, downloaded = _draft_fixture(tmp_path)
+        args[args.index("-File") + 1] = str(worktree / DRAFT_VERIFIER)
+        env = {**os.environ, "CARGO_TARGET_DIR": str(ROOT / "src-tauri" / "target")}
+        yield args, downloaded, worktree / UPDATER_MANIFEST_TEST, env
+    finally:
+        _git("worktree", "remove", "--force", str(worktree))
+
+
+def _mutate_verifier_source(source: Path, old: str, new: str) -> None:
+    text = source.read_text()
+    assert text.count(old) == 1, old
+    source.write_text(text.replace(old, new))
+
+
+def _harness_lines(run: subprocess.CompletedProcess) -> list[str]:
+    return [
+        line for line in (run.stdout + run.stderr).splitlines()
+        if line.startswith(("running ", "test result: "))
+    ]
+
+
+def test_the_draft_verifier_proves_exactly_one_verifier_test_ran(verifier_revision) -> None:
+    """The faithful source: exactly one harness run of one test, its tally
+    quoted, against a faithful manifest; the malformed control is refused by
+    the test's own message. The proof is in the run's stdout, not only its
+    exit code."""
+    args, downloaded, _source, env = verifier_revision
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "verified from downloaded bytes: 6 assets hashed" in run.stdout
+    assert f"verifier test '{VERIFIER_FUNCTION}' executed: {VERIFIER_TALLY}" in run.stdout
+    assert f"test {VERIFIER_FUNCTION} ... ok" in run.stdout
+    assert [line for line in _harness_lines(run) if line.startswith("running ")] == ["running 1 test"]
+    assert "cargo-test.local.stdout.log" in {p.name for p in downloaded.iterdir()}
+
+    _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="not-rfc3339"))
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode != 0, run.stdout + run.stderr
+    assert "invalid value for `pub_date`" in run.stdout + run.stderr
+    assert _verifier_says(run, UPDATER_REFUSAL)
+
+
+@pytest.mark.parametrize(
+    "old,new,refusal",
+    [
+        pytest.param(
+            f"fn {VERIFIER_FUNCTION}()", "fn renamed_environment_verifier()",
+            f"lists 0 tests named '{VERIFIER_FUNCTION}'", id="renamed",
+        ),
+        pytest.param(
+            f"#[test]\nfn {VERIFIER_FUNCTION}()", f"fn {VERIFIER_FUNCTION}()",
+            f"lists 0 tests named '{VERIFIER_FUNCTION}'", id="removed",
+        ),
+        pytest.param(
+            f"#[test]\nfn {VERIFIER_FUNCTION}()", f"#[test]\n#[ignore]\nfn {VERIFIER_FUNCTION}()",
+            "did not report exactly", id="ignored",
+        ),
+        pytest.param(
+            f"#[test]\nfn {VERIFIER_FUNCTION}()",
+            f"#[test]\nfn {VERIFIER_FUNCTION}_twice() {{}}\n\n#[test]\nfn {VERIFIER_FUNCTION}()",
+            f"lists tests the '{VERIFIER_FUNCTION}' filter would also select: {VERIFIER_FUNCTION}_twice",
+            id="prefix-sibling",
+        ),
+    ],
+)
+def test_the_draft_verifier_refuses_a_verifier_source_whose_test_does_not_run(
+    verifier_revision, old: str, new: str, refusal: str,
+) -> None:
+    """The zero-match probe and its neighbours. A harness filter selects by
+    substring and a run that selects nothing passes, so a verifier source
+    whose environment test is renamed, removed, ignored, or shadowed by a
+    same-prefix sibling must be refused for that reason, with a malformed
+    manifest that would otherwise never be read."""
+    args, downloaded, source, env = verifier_revision
+    _mutate_verifier_source(source, old, new)
+    _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="not-rfc3339"))
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode != 0, run.stdout + run.stderr
+    assert _verifier_says(run, refusal), run.stdout + run.stderr
+    assert "verified from downloaded bytes" not in run.stdout
+    assert f"test {VERIFIER_FUNCTION} ... ok" not in run.stdout
+    assert _staged_leftovers(ROOT / "src-tauri") == []
+
+
+def test_the_draft_verifier_refuses_a_verifier_test_that_panics(verifier_revision) -> None:
+    """A panic in the verifier function is the harness's failure, and the
+    tally names it: 0 passed, 1 failed, exit non-zero, faithful manifest."""
+    args, _downloaded, source, env = verifier_revision
+    _mutate_verifier_source(
+        source,
+        f"fn {VERIFIER_FUNCTION}() {{\n",
+        f'fn {VERIFIER_FUNCTION}() {{\n    panic!("verifier mutation");\n',
+    )
+    run = subprocess.run(args, capture_output=True, text=True, env=env)
+    assert run.returncode != 0, run.stdout + run.stderr
+    assert "verifier mutation" in run.stdout + run.stderr
+    assert "test result: FAILED. 0 passed; 1 failed;" in run.stdout
+    assert _verifier_says(run, UPDATER_REFUSAL)
+    assert "verified from downloaded bytes" not in run.stdout
 
 
 def test_ci_scans_the_renderer_it_just_built_for_the_test_harness() -> None:

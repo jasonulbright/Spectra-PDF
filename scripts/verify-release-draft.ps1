@@ -60,6 +60,16 @@
 # bytes are hashed against the source after the copy and removed after the
 # run; the package's own updater_manifest.rs is never read.
 #
+# An executed target is not yet an executed test: the harness takes a test
+# name as a substring filter and a run that matches nothing passes with
+# `running 0 tests`. The staged target is therefore listed first (exactly
+# one test of the verifier's name, none sharing its prefix), then run with
+# `--exact` on one thread, and the harness output must carry `running 1
+# test`, `test <name> ... ok`, and a tally of 1 passed / 0 failed / 0
+# ignored. cargo is never invoked through a pipeline: the exit code and
+# both streams come from the child process and are retained beside the
+# downloads.
+#
 # Residual, by design: the verification runs INSIDE the package under test --
 # its pinned updater plugin, its build.rs, its Cargo.lock. The verifier CODE is
 # this revision's; the CRATE the code exercises is the tag's, because the
@@ -140,10 +150,12 @@ if ($Offline) {
     if (-not $Downloads) { $Downloads = Join-Path $Bundle "draft-downloads" }
     if (Test-Path -LiteralPath $Downloads) { Remove-Item -LiteralPath $Downloads -Recurse -Force }
     New-Item -ItemType Directory -Path $Downloads | Out-Null
-    $release = gh api "repos/$Repo/releases/$ReleaseId" | ConvertFrom-Json
+    $releaseJson = @(& gh api "repos/$Repo/releases/$ReleaseId")
     if ($LASTEXITCODE -ne 0) { throw "failed to read release $ReleaseId" }
-    $assets = @(gh api "repos/$Repo/releases/$ReleaseId/assets?per_page=100" | ConvertFrom-Json)
+    $release = ($releaseJson -join "`n") | ConvertFrom-Json
+    $assetsJson = @(& gh api "repos/$Repo/releases/$ReleaseId/assets?per_page=100")
     if ($LASTEXITCODE -ne 0) { throw "failed to list the assets of release $ReleaseId" }
+    $assets = @(($assetsJson -join "`n") | ConvertFrom-Json)
 }
 
 if (-not $release.draft) { throw "release $ReleaseId is already public before verification" }
@@ -266,6 +278,61 @@ function Get-CanonicalPath([string]$path) {
     return $canonical
 }
 
+# cargo, run as a child process with both streams captured to retained
+# `<stem>.stdout.log` / `<stem>.stderr.log` files and echoed. Never a
+# pipeline and never a PowerShell redirection: a pipeline reports the last
+# stage's status, and a redirected native stderr is re-rendered as error
+# records. The exit code is the process's own.
+function Invoke-CargoTest([string]$logStem, [string[]]$arguments) {
+    $cargo = @(Get-Command cargo -CommandType Application)[0].Source
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $cargo
+    foreach ($argument in $arguments) { $startInfo.ArgumentList.Add($argument) }
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $startInfo.StandardErrorEncoding = [System.Text.UTF8Encoding]::new($false)
+    $startInfo.WorkingDirectory = (Get-Location).Path
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    # Both streams drain concurrently: a full pipe on the unread one would
+    # block the child before it exits.
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdoutText = $stdoutTask.GetAwaiter().GetResult()
+    $stderrText = $stderrTask.GetAwaiter().GetResult()
+    $exitCode = $process.ExitCode
+    $process.Dispose()
+    [System.IO.File]::WriteAllText("$logStem.stdout.log", $stdoutText, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText("$logStem.stderr.log", $stderrText, [System.Text.UTF8Encoding]::new($false))
+    $newlines = [string[]]@("`r`n", "`n")
+    $split = [System.StringSplitOptions]::RemoveEmptyEntries
+    $stdout = @($stdoutText.Split($newlines, $split))
+    $stderr = @($stderrText.Split($newlines, $split))
+    Write-Host "cargo $($arguments -join ' ') (exit $exitCode)"
+    foreach ($line in $stderr) { Write-Host $line }
+    foreach ($line in $stdout) { Write-Host $line }
+    return [pscustomobject]@{ ExitCode = $exitCode; StdOut = $stdout; StdErr = $stderr }
+}
+
+# Belt and braces on the metadata resolution: the binary cargo reports
+# having run was built from the staged file. Cargo prints the source path
+# relative to the workspace root it reported in the metadata.
+function Test-CargoRanTheStagedVerifier([string[]]$stderr, [string]$phase) {
+    $running = @($stderr | ForEach-Object {
+        $m = [regex]::Match($_, '^\s*Running (.+?\.rs) \(')
+        if ($m.Success) { $m.Groups[1].Value }
+    })
+    if ($running.Count -ne 1) { throw "cargo reported $($running.Count) 'Running' test binaries in the $phase, expected exactly 1" }
+    $ran = $running[0]
+    if (-not [System.IO.Path]::IsPathRooted($ran)) { $ran = Join-Path ([string]$metadata.workspace_root) $ran }
+    $ranPath = Get-CanonicalPath $ran
+    if (-not (Test-OrdinalEqual $ranPath $stagedPath)) {
+        throw "cargo ran $ranPath in the $phase, not the staged verifier $stagedPath"
+    }
+}
+
 # The consumer's parse (header). The release body is handed over as a file:
 # an environment value would go through the console encoding.
 # The verifier's own copy of the test source is staged under a fresh name in
@@ -275,6 +342,7 @@ function Get-CanonicalPath([string]$path) {
 $verifierPrefix = "verifier_"
 $nonce = ([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(8) | ForEach-Object { $_.ToString("x2") }) -join ""
 $verifierTest = "${verifierPrefix}${nonce}_updater_manifest"
+$verifierFunction = "verifies_the_manifest_named_by_the_environment"
 $testSource = Join-Path $PSScriptRoot "..\src-tauri\tests\updater_manifest.rs"
 if (-not (Test-Path -LiteralPath $testSource)) { throw "no updater manifest test at $testSource" }
 $packageManifest = Join-Path $CargoPackage "Cargo.toml"
@@ -349,29 +417,62 @@ try {
     $env:SPECTRAPDF_UPDATER_PLATFORMS = $expectedPlatforms -join ","
     $env:SPECTRAPDF_UPDATER_URL = $installerUrl
     $env:SPECTRAPDF_UPDATER_SIGNATURE_FILE = (Resolve-Path -LiteralPath (Get-Downloaded $signature.Name).path).Path
-    # Output is captured so cargo's `Running <path>` line can be checked, and
-    # is echoed in full: the test's own diagnostics are the refusal's reason.
-    $cargoOutput = @(& cargo test --manifest-path $packageManifest --test $verifierTest -- verifies_the_manifest_named_by_the_environment 2>&1 |
-        ForEach-Object { [string]$_ })
-    $cargoExit = $LASTEXITCODE
-    $cargoOutput | ForEach-Object { Write-Host $_ }
-    if ($cargoExit -ne 0) {
-        throw "latest.json is refused by the updater's own deserializer or differs from the release (cargo output above)"
-    }
-    # Belt and braces on the resolution above: the binary cargo reports having
-    # run was built from the staged file. Cargo prints the source path
-    # relative to the workspace root it reported in the metadata.
-    $running = @($cargoOutput | ForEach-Object {
-        $m = [regex]::Match($_, '^\s*Running (.+?\.rs) \(')
+    # A test-name argument is a substring FILTER to the harness, and a filter
+    # that selects nothing is a passing run (`running 0 tests`, exit 0). A
+    # staged file that executed is therefore not yet a manifest that was
+    # read: the run must prove that exactly the verifier function ran and
+    # passed. The listing is taken first so a filter drift in either
+    # direction is visible -- the function absent from the staged file, or a
+    # second function the substring filter would also select -- and the run
+    # is then keyed by exact name on one thread, and its tally must read
+    # exactly one test run, that test `ok`, 1 passed, 0 failed, 0 ignored.
+    # Neither invocation goes through a pipeline: the harness's exit code
+    # and streams are taken from the process itself and retained on disk.
+    $listing = Invoke-CargoTest (Join-Path $Downloads "cargo-list.local") @(
+        "test", "--manifest-path", $packageManifest, "--test", $verifierTest, "--", "--list"
+    )
+    Test-CargoRanTheStagedVerifier $listing.StdErr "listing"
+    if ($listing.ExitCode -ne 0) { throw "cargo test --list of the staged verifier failed (exit $($listing.ExitCode), output above)" }
+    $listed = @($listing.StdOut | ForEach-Object {
+        $m = [regex]::Match($_, '^(\S+): test$')
         if ($m.Success) { $m.Groups[1].Value }
     })
-    if ($running.Count -ne 1) { throw "cargo reported $($running.Count) 'Running' test binaries, expected exactly 1" }
-    $ran = $running[0]
-    if (-not [System.IO.Path]::IsPathRooted($ran)) { $ran = Join-Path ([string]$metadata.workspace_root) $ran }
-    $ranPath = Get-CanonicalPath $ran
-    if (-not (Test-OrdinalEqual $ranPath $stagedPath)) {
-        throw "cargo ran $ranPath, not the staged verifier $stagedPath"
+    $exact = @($listed | Where-Object { Test-OrdinalEqual $_ $verifierFunction })
+    if ($exact.Count -ne 1) {
+        throw "the staged verifier lists $($exact.Count) tests named '$verifierFunction', expected exactly 1 (listed: $($listed -join ', '))"
     }
+    $siblings = @($listed | Where-Object {
+        -not (Test-OrdinalEqual $_ $verifierFunction) -and $_.StartsWith($verifierFunction, [System.StringComparison]::Ordinal)
+    })
+    if ($siblings.Count -ne 0) {
+        throw "the staged verifier lists tests the '$verifierFunction' filter would also select: $($siblings -join ', ')"
+    }
+
+    $run = Invoke-CargoTest (Join-Path $Downloads "cargo-test.local") @(
+        "test", "--manifest-path", $packageManifest, "--test", $verifierTest, "--",
+        "--exact", $verifierFunction, "--test-threads=1"
+    )
+    # The test's own diagnostics are the refusal's reason.
+    if ($run.ExitCode -ne 0) {
+        throw "latest.json is refused by the updater's own deserializer or differs from the release (cargo output above)"
+    }
+    Test-CargoRanTheStagedVerifier $run.StdErr "run"
+    $headers = @($run.StdOut | Where-Object { $_ -cmatch '^running \d+ tests?$' })
+    if ($headers.Count -ne 1 -or -not (Test-OrdinalEqual $headers[0] "running 1 test")) {
+        throw "the verifier run did not execute exactly one test (harness reported: $($headers -join ' / '))"
+    }
+    $outcomes = @($run.StdOut | Where-Object { $_ -cmatch '^test \S+ \.\.\. ' })
+    if ($outcomes.Count -ne 1 -or -not (Test-OrdinalEqual $outcomes[0] "test $verifierFunction ... ok")) {
+        throw "the verifier run did not report exactly 'test $verifierFunction ... ok' (harness reported: $($outcomes -join ' / '))"
+    }
+    $tallies = @($run.StdOut | Where-Object { $_ -cmatch '^test result: ' })
+    if ($tallies.Count -ne 1) { throw "the verifier run printed $($tallies.Count) tallies, expected exactly 1" }
+    $tally = [regex]::Match($tallies[0], '^test result: (\w+)\. (\d+) passed; (\d+) failed; (\d+) ignored; (\d+) measured; (\d+) filtered out')
+    if (-not $tally.Success -or -not (Test-OrdinalEqual $tally.Groups[1].Value "ok") -or
+        $tally.Groups[2].Value -ne "1" -or $tally.Groups[3].Value -ne "0" -or $tally.Groups[4].Value -ne "0") {
+        throw "the verifier run's tally is not exactly one passed test: '$($tallies[0])'"
+    }
+    Write-Host "verifier test '$verifierFunction' executed: $($tallies[0])"
 } finally {
     Remove-Item -LiteralPath $testTarget -Force -ErrorAction SilentlyContinue
 }
