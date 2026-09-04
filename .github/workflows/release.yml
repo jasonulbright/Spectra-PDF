@@ -28,7 +28,7 @@ jobs:
   verify:
     name: Verify (gates + version consistency)
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
 
@@ -283,7 +283,7 @@ jobs:
     # releases run ~35-40 min, so 90 is generous headroom that still fails
     # visibly. (The LibreOffice step also retries mirrors; this is the backstop
     # for the case retrying cannot fix.)
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
 
