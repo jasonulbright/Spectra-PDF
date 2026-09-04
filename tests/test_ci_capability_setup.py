@@ -1671,3 +1671,156 @@ def test_ci_stages_both_engine_capabilities() -> None:
 
 def test_release_verification_stages_both_engine_capabilities() -> None:
     _assert_capabilities_precede_engine_tests("release.yml")
+
+
+# --- Release notes come from the changelog, not from a workflow literal ---
+
+RELEASE_NOTES_SCRIPT = "scripts/release-notes-from-changelog.py"
+RELEASE_NOTES_STEP = "Release notes from the changelog"
+NOTES_OUTPUT = "${{ steps.notes.outputs.body }}"
+
+
+def _release_notes_module():
+    """The extractor, loaded from its script path (it is not a package)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "release_notes_from_changelog", ROOT / RELEASE_NOTES_SCRIPT
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_the_release_body_is_the_changelog_section(workflow: str, job: str) -> None:
+    """Neither publisher carries a literal body.
+
+    A static body is prose on every release page and in every `latest.json`
+    `notes`; the changelog section for the version is the one source.
+    """
+    steps = _job_steps(workflow, job)
+    names = [name for name, _ in steps]
+    text = dict(steps)
+    assert RELEASE_NOTES_STEP in names, (workflow, names)
+    assert names.index(RELEASE_NOTES_STEP) < names.index(RELEASE_DRAFT_STEP), workflow
+    notes = text[RELEASE_NOTES_STEP]
+    assert RELEASE_NOTES_SCRIPT in notes, (workflow, notes)
+    assert "id: notes" in notes
+    assert "$GITHUB_OUTPUT" in notes
+    draft = text[RELEASE_DRAFT_STEP]
+    assert f"releaseBody: {NOTES_OUTPUT}" in draft, (workflow, draft)
+
+
+@pytest.mark.parametrize(
+    "workflow,job,tag",
+    (
+        ("release.yml", "release", "${{ github.ref_name }}"),
+        ("release-redo.yml", "release", "${{ inputs.tag }}"),
+    ),
+)
+def test_the_release_title_is_the_tag(workflow: str, job: str, tag: str) -> None:
+    """The release TITLE is the version tag and nothing else."""
+    draft = dict(_job_steps(workflow, job))[RELEASE_DRAFT_STEP]
+    assert f"releaseName: {tag}\n" in draft, (workflow, draft)
+    assert f"tagName: {tag}\n" in draft, (workflow, draft)
+
+
+CHANGELOG_FOOTER = "Full changelog: CHANGELOG.md"
+
+
+def test_the_extractor_returns_the_current_changelog_section() -> None:
+    extract = _release_notes_module().extract
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert extract(text, "1.2.0") == (
+        "Maintenance Release: Various Bug Fixes\n\n" + CHANGELOG_FOOTER
+    )
+
+
+def test_the_extractor_keeps_the_sections_own_structure() -> None:
+    extract = _release_notes_module().extract
+    text = (
+        "# Changelog\n\n## 9.9.9\n\n*Released 2026-01-01*\n\n"
+        "### Fixes\n- **Thing** — does the thing\n\n## 9.9.8\n\n*Released 2025-01-01*\n\nold\n"
+    )
+    assert extract(text, "9.9.9") == (
+        "### Fixes\n- **Thing** — does the thing\n\n" + CHANGELOG_FOOTER
+    )
+
+
+@pytest.mark.parametrize(
+    "text,version,message",
+    (
+        ("# Changelog\n\n## 1.0.0\n\n*Released 2026-01-01*\n\nnotes\n", "2.0.0", "no `## 2.0.0`"),
+        ("# Changelog\n\n## 1.0.0\n\n*Released 2026-01-01*\n\n", "1.0.0", "is empty"),
+        (
+            "# Changelog\n\n## 1.0.0\n\n*Released 2026-01-01*\n\nThe installer is unsigned.\n",
+            "1.0.0",
+            "banned term",
+        ),
+        (
+            "# Changelog\n\n## 1.0.0\n\n*Released 2026-01-01*\n\nSmartScreen may warn.\n",
+            "1.0.0",
+            "banned term",
+        ),
+        (
+            "# Changelog\n\n## 1.0.0\n\n*Released 2026-01-01*\n\nNo code-signing certificate.\n",
+            "1.0.0",
+            "banned term",
+        ),
+        (
+            "# Changelog\n\n## 1.0.0\n\n*Released 2026-01-01*\n\nAn amazing release.\n",
+            "1.0.0",
+            "banned term",
+        ),
+        (
+            "# Changelog\n\n## 1.0.0\n\n*Released 2026-01-01*\n\n### Fixes\n- one\n\n### Remaining\n- two\n",
+            "1.0.0",
+            "Remaining",
+        ),
+    ),
+)
+def test_the_extractor_refuses(text: str, version: str, message: str) -> None:
+    extract = _release_notes_module().extract
+    with pytest.raises(ValueError) as excinfo:
+        extract(text, version)
+    assert message in str(excinfo.value)
+
+
+def test_the_extractor_does_not_ban_document_signature_features() -> None:
+    """`signed`/`signature` are product vocabulary; only the code-signing
+    topic is banned."""
+    extract = _release_notes_module().extract
+    text = (
+        "# Changelog\n\n## 1.0.0\n\n*Released 2026-01-01*\n\n"
+        "- **Signed documents** — a signature field round-trips\n"
+    )
+    assert extract(text, "1.0.0").startswith("- **Signed documents**")
+
+
+def test_the_extractor_emits_lf_only(tmp_path: Path) -> None:
+    """The draft verifier compares `latest.json` notes to the release body;
+    a CRLF from a Windows runner's text-mode stdout would break it."""
+    run = subprocess.run(
+        [sys.executable, str(ROOT / RELEASE_NOTES_SCRIPT), "1.2.0"],
+        capture_output=True,
+        cwd=ROOT,
+    )
+    assert run.returncode == 0, run.stderr
+    assert b"\r" not in run.stdout, run.stdout
+
+
+def test_the_extractor_exits_non_zero_on_a_missing_section() -> None:
+    run = subprocess.run(
+        [sys.executable, str(ROOT / RELEASE_NOTES_SCRIPT), "0.0.0"],
+        capture_output=True,
+        cwd=ROOT,
+    )
+    assert run.returncode != 0
+    assert b"no `## 0.0.0`" in run.stderr
+
+
+def test_the_release_notes_gate_is_mirrored_locally() -> None:
+    parity = (ROOT / "scripts" / "ci-parity-gates.sh").read_text(encoding="utf-8")
+    assert RELEASE_NOTES_SCRIPT in parity

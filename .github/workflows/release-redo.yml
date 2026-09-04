@@ -172,6 +172,27 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/stage-corresponding-source.ps1 -OutputDirectory release-sources
         shell: pwsh
 
+      # The release body and the updater manifest's `notes` are one string,
+      # taken from the changelog section for this version. The extractor
+      # refuses a missing or empty section, a `Remaining` heading, and the
+      # terms that never appear in release notes; it writes LF only, because
+      # the draft verifier compares the manifest's `notes` to the release
+      # body byte for byte. The local CI-parity battery runs the same
+      # extraction for the version the four surfaces carry.
+      - name: Release notes from the changelog
+        id: notes
+        shell: bash
+        run: |
+          version="${TAG#v}"
+          body="$(python verifier/scripts/release-notes-from-changelog.py "$version" --changelog CHANGELOG.md)"
+          {
+            echo "body<<SPECTRA_NOTES_EOF"
+            echo "$body"
+            echo "SPECTRA_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ inputs.tag }}
+
       # DRAFT FIRST, same order as release.yml: assets land on a draft, every
       # gate runs against the uploaded assets, the last step undrafts. A
       # release for this tag that is already public is refused by the
@@ -185,8 +206,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tagName: ${{ inputs.tag }}
-          releaseName: "Spectra PDF ${{ inputs.tag }}"
-          releaseBody: "See CHANGELOG.md for details. The installer is unsigned (no code-signing certificate); SmartScreen may warn on first run -- verify your download against SHA256SUMS.txt, published with this release. Exact corresponding-source archives for the bundled HEIF decoder libraries are attached to this release."
+          releaseName: ${{ inputs.tag }}
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
 

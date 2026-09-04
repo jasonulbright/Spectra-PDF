@@ -86,6 +86,21 @@ for suite in fetch-ghent-suite fetch-processing-steps-suite fetch-pdfa-corpus; d
   fi
 done
 
+# --- Release job: the release body is the changelog section for the version
+#     the four surfaces carry. A missing, empty, or banned-term section fails
+#     the release run AFTER a full build; here it is a millisecond. ---
+gate release-notes "$R/.venv/Scripts/python.exe" - <<'PY'
+import json, pathlib, subprocess, sys
+version = json.loads(pathlib.Path("package.json").read_text())["version"]
+run = subprocess.run(
+    [sys.executable, "scripts/release-notes-from-changelog.py", version],
+    capture_output=True,
+)
+sys.stderr.write(run.stderr.decode())
+sys.stdout.write(run.stdout.decode())
+sys.exit(run.returncode)
+PY
+
 # --- Workflow-contract tests: the only local reader of .github/workflows/*.
 #     A workflow edit that breaks the contract otherwise surfaces on the runner
 #     (CI #144: the Ghostscript step moved into a script and the contract test's
