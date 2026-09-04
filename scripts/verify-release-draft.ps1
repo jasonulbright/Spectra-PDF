@@ -423,7 +423,13 @@ try {
     Write-Host "cargo resolves --test $verifierTest to $resolvedPath"
 
     $bodyFile = Join-Path $Downloads "release-body.local.txt"
-    [System.IO.File]::WriteAllText($bodyFile, [string]$release.body, [System.Text.UTF8Encoding]::new($false))
+    # The release body is multi-line (it is the changelog section for this
+    # version). GitHub stores and returns a release body with CRLF line
+    # endings, while `latest.json` carries the LF bytes the publisher wrote;
+    # the comparison is over the notes' TEXT, so both sides are normalized to
+    # LF here. Every other difference still fails.
+    $bodyText = ([string]$release.body) -replace "`r`n", "`n" -replace "`r", "`n"
+    [System.IO.File]::WriteAllText($bodyFile, $bodyText, [System.Text.UTF8Encoding]::new($false))
     $env:SPECTRAPDF_UPDATER_MANIFEST = (Resolve-Path -LiteralPath (Get-Downloaded "latest.json").path).Path
     $env:SPECTRAPDF_UPDATER_VERSION = $version
     $env:SPECTRAPDF_UPDATER_NOTES_FILE = (Resolve-Path -LiteralPath $bodyFile).Path
