@@ -449,7 +449,13 @@ def test_the_draft_verifier_never_selects_its_logic_from_the_verified_package() 
     assert "not the staged $stagedPath" in proof
     assert "autotests\\s*=\\s*false" in staging[copy:metadata]
     assert "under the reserved '$verifierPrefix' prefix" in staging[copy:run]
-    assert "'^\\s*Running (.+?\\.rs) \\('" in text
+    assert r"'^\s*Running\s+(\S.*?\.rs)\s*\('" in text
+    # The parse never sees terminal styling: colour is off in the child's
+    # environment and on its command line, and both streams are stripped.
+    assert '$startInfo.Environment["CARGO_TERM_COLOR"] = "never"' in text
+    assert '$startInfo.ArgumentList.Add("--color")' in text
+    assert "$stdoutText = Remove-AnsiEscapes" in text
+    assert "$stderrText = Remove-AnsiEscapes" in text
     assert "not the staged verifier $stagedPath" in text
     assert "Test-CargoRanTheStagedVerifier $run.StdErr" in staging[run:]
     assert "Remove-Item -LiteralPath $testTarget" in staging[run:]
@@ -880,8 +886,18 @@ def _mutate_manifest(downloaded: Path, mutate) -> None:
     _write_manifest(downloaded, manifest)
 
 
+#: The hosted runners export this, so cargo colours even a redirected
+#: stream. Every local verifier run carries it too: the parse is exercised
+#: under the runner's condition or the gap between them is invisible here.
+COLOURING_ENV = {"CARGO_TERM_COLOR": "always"}
+
+
+def _verifier_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    return {**os.environ, **COLOURING_ENV, **(extra or {})}
+
+
 def _run_verifier(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(args, capture_output=True, text=True)
+    return subprocess.run(args, capture_output=True, text=True, env=_verifier_env())
 
 
 def _verifier_says(run: subprocess.CompletedProcess, message: str) -> bool:
@@ -892,6 +908,51 @@ def _verifier_says(run: subprocess.CompletedProcess, message: str) -> bool:
     text = re.sub(r"\n\s*\|", "", text)
     squash = lambda s: re.sub(r"\s+", "", s)  # noqa: E731
     return squash(message) in squash(text)
+
+
+#: What a hosted runner's cargo writes to stderr with CARGO_TERM_COLOR set:
+#: the status word is styled and the path is workspace-relative with
+#: backslashes.
+COLOURED_CARGO_STDERR = "".join(
+    line + "\n"
+    for line in (
+        "\x1b[1m\x1b[92m    Blocking\x1b[0m waiting for file lock on build directory",
+        "\x1b[1m\x1b[92m   Compiling\x1b[0m spectrapdf v1.1.19 (D:/a/r/r/src-tauri)",
+        "\x1b[1m\x1b[92m    Finished\x1b[0m test profile [unoptimized] target(s) in 1.23s",
+        "\x1b[1m\x1b[92m     Running\x1b[0m tests\\verifier_0123456789abcdef_updater_manifest.rs"
+        " (src-tauri/target/debug/deps/verifier_0123456789abcdef-ab12.exe)",
+    )
+)
+
+
+def test_the_draft_verifiers_cargo_parse_ignores_terminal_styling() -> None:
+    """The `Running` parse is fed a coloured transcript directly: the escape
+    strip and the path tolerance are exercised without a cargo run."""
+    text = (ROOT / DRAFT_VERIFIER).read_text(encoding="utf-8")
+    strip = re.search(r"^function Remove-AnsiEscapes.*?^\}", text, re.S | re.M)
+    assert strip, "Remove-AnsiEscapes is gone from the verifier"
+    pattern = re.search(r"\[regex\]::Match\(\$_, '(\^[^']*Running[^']*)'\)", text)
+    assert pattern, "the 'Running' parse is gone from the verifier"
+    transcript = COLOURED_CARGO_STDERR.replace("`", "``").replace("\x1b", "`e")
+    script = "\n".join(
+        [
+            strip.group(0),
+            '$raw = "' + transcript.replace("\n", "`n") + '"',
+            '$lines = (Remove-AnsiEscapes $raw).Split("`n", '
+            "[StringSplitOptions]::RemoveEmptyEntries)",
+            "$running = @($lines | ForEach-Object {",
+            "    $m = [regex]::Match($_, '" + pattern.group(1) + "')",
+            "    if ($m.Success) { $m.Groups[1].Value }",
+            "})",
+            '"[$($running.Count)] $($running -join \'|\')"',
+        ]
+    )
+    run = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", script], capture_output=True, text=True
+    )
+    assert run.returncode == 0, run.stdout + run.stderr
+    expected = "[1] tests\\verifier_0123456789abcdef_updater_manifest.rs"
+    assert run.stdout.strip() == expected, run.stdout + run.stderr
 
 
 def test_the_draft_verifier_accepts_a_faithful_upload(tmp_path: Path) -> None:
@@ -1217,7 +1278,7 @@ def tag_package(tmp_path: Path):
         (package / "tests" / "updater_manifest.rs").write_text(ACCEPTING_UPDATER_TEST)
         args, downloaded = _draft_fixture(tmp_path)
         args[args.index("-CargoPackage") + 1] = str(package)
-        env = {**os.environ, "CARGO_TARGET_DIR": str(ROOT / "src-tauri" / "target")}
+        env = _verifier_env({"CARGO_TARGET_DIR": str(ROOT / "src-tauri" / "target")})
         yield args, downloaded, package, env
     finally:
         _git("worktree", "remove", "--force", str(worktree))
