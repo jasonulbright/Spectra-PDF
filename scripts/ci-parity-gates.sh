@@ -92,6 +92,10 @@ done
 #     substring lookup raised). Also carries the publish-order contract: both
 #     release publishers upload to a draft, gate the uploaded assets, and
 #     undraft as the LAST step. Cheap enough to run on every push. ---
+#     This run cannot detect a tagless checkout: a developer clone carries the
+#     released tags by construction, so the runner's shallow, tagless checkout
+#     is guarded by the workflow contract inside this file's test instead
+#     (test_every_job_running_the_suite_checks_out_with_tags). ---
 gate workflow-contract "$R/.venv/Scripts/python.exe" -m pytest \
   tests/test_ci_capability_setup.py -q
 

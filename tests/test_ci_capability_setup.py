@@ -605,13 +605,31 @@ def test_the_stub_only_rust_runs_do_not_claim_a_live_cli(workflow: str, job: str
     assert LIVE_CLI_ENV not in "\n".join(t for _n, t in steps)
 
 
+#: How many of the newest released tags the redo-regime tests cover. The tags
+#: are resolved inside each test, never at collection: a checkout without tags
+#: (the default shallow actions/checkout) would otherwise raise during import
+#: and abort collection of the entire suite instead of failing these tests.
+RELEASED_TAG_COUNT = 3
+
+
 def _released_tags(count: int) -> list[str]:
     tags = [
         t for t in _git("tag", "--sort=-v:refname").split()
         if re.fullmatch(r"v\d+\.\d+\.\d+", t)
     ]
-    assert len(tags) >= count, "the repository carries fewer released tags than expected"
+    # Never a skip: the zero-skip gate aside, a runner that cannot see the tags
+    # cannot prove which regime the redo selects for a released tag, and an
+    # unprovable contract is a failure.
+    assert len(tags) >= count, (
+        f"this checkout carries {len(tags)} released tags, expected at least "
+        f"{count}; a shallow actions/checkout fetches none, so the checkout step "
+        "of any job running pytest needs `fetch-tags: true`"
+    )
     return tags[:count]
+
+
+def _released_tag(index: int) -> str:
+    return _released_tags(RELEASED_TAG_COUNT)[index]
 
 
 def _tag_has(tag: str, path: str) -> bool:
@@ -638,8 +656,57 @@ def _redo_script_references() -> list[tuple[str, str, str]]:
     return refs
 
 
-@pytest.mark.parametrize("tag", _released_tags(3))
-def test_the_redo_selects_a_regime_every_released_tag_can_run(tag: str) -> None:
+PYTEST_SUITE_RUN = "python -m pytest tests/"
+
+
+def _workflow_jobs(workflow: str) -> list[str]:
+    lines = (ROOT / ".github" / "workflows" / workflow).read_text().splitlines()
+    jobs: list[str] = []
+    in_jobs = False
+    for line in lines:
+        if line == "jobs:":
+            in_jobs = True
+            continue
+        if in_jobs and line and not line.startswith(" "):
+            break
+        match = re.fullmatch(r"  ([\w-]+):", line) if in_jobs else None
+        if match:
+            jobs.append(match.group(1))
+    return jobs
+
+
+def _jobs_running_the_suite() -> list[tuple[str, str]]:
+    found = []
+    for workflow in sorted(p.name for p in (ROOT / ".github" / "workflows").glob("*.yml")):
+        for job in _workflow_jobs(workflow):
+            if any(PYTEST_SUITE_RUN in text for _name, text in _job_steps(workflow, job)):
+                found.append((workflow, job))
+    return found
+
+
+def test_every_job_running_the_suite_checks_out_with_tags() -> None:
+    """The suite reads released tags; a default checkout has none.
+
+    actions/checkout fetches no tags by default, so the redo-regime tests saw
+    an empty tag list on the runner while passing locally, where the clone
+    carries every tag. `fetch-tags: true` on the checkout of any job that runs
+    the suite is what closes that gap; scripts/ci-parity-gates.sh cannot, since
+    a developer checkout always has the tags.
+    """
+    jobs = _jobs_running_the_suite()
+    assert jobs, "no workflow job runs the engine suite"
+    for workflow, job in jobs:
+        checkouts = [
+            text for _name, text in _job_steps(workflow, job)
+            if "actions/checkout@" in text
+        ]
+        assert checkouts, (workflow, job)
+        for text in checkouts:
+            assert "fetch-tags: true" in text, (workflow, job)
+
+
+@pytest.mark.parametrize("index", range(RELEASED_TAG_COUNT))
+def test_the_redo_selects_a_regime_every_released_tag_can_run(index: int) -> None:
     """Every script the redo runs exists where the redo will look for it.
 
     The redo checks out the TAG, so a tag-side `scripts/x` must exist in the
@@ -648,6 +715,7 @@ def test_the_redo_selects_a_regime_every_released_tag_can_run(tag: str) -> None:
     is the one the tag selects. The verifier copies are also required in the
     working tree, which is what the sparse checkout will provide.
     """
+    tag = _released_tag(index)
     text = (ROOT / ".github" / "workflows" / "release-redo.yml").read_text()
     assert f"git cat-file -e HEAD:{ENGINE_MANIFEST}" in text
     regime = _redo_regime(tag)
@@ -677,9 +745,9 @@ def test_the_redo_selects_a_regime_every_released_tag_can_run(tag: str) -> None:
     assert checked >= 20, "the redo's script references were not found"
 
 
-@pytest.mark.parametrize("tag", _released_tags(3))
+@pytest.mark.parametrize("index", range(RELEASED_TAG_COUNT))
 def test_the_legacy_engine_verifier_runs_against_the_released_tag(
-    tag: str, tmp_path: Path
+    index: int, tmp_path: Path
 ) -> None:
     """The regime the redo picks for the tag verifies the tag's real tree.
 
@@ -689,6 +757,7 @@ def test_the_legacy_engine_verifier_runs_against_the_released_tag(
     planted bytecode, and refuses a byte change -- all from the workflow's
     copy of the script, with the tag never having carried it.
     """
+    tag = _released_tag(index)
     regime = _redo_regime(tag)
     worktree = tmp_path / "tag"
     _git("worktree", "add", "--detach", str(worktree), tag)

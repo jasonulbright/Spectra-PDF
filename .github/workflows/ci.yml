@@ -125,7 +125,12 @@ jobs:
     name: Python Engine Tests
     runs-on: windows-latest
     steps:
+      # The suite's redo-regime tests enumerate released tags. The default
+      # checkout is shallow and tagless, which made those tests unrunnable on
+      # the runner; fetch-tags brings the tag objects and their trees.
       - uses: actions/checkout@v7
+        with:
+          fetch-tags: true
 
       - name: Setup Python
         uses: actions/setup-python@v7
