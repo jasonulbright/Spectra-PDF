@@ -208,3 +208,125 @@ class TestDistillForms:
         assert "form_fields_adopted" not in r
         with pikepdf.open(out) as pdf:
             assert pdf.Root.get("/AcroForm") is None
+
+
+# The Windows spooler wraps a job in a PJL envelope: UEL, control lines, a
+# language declaration, then the payload. The reporter's capture (issue #27)
+# is this exact shape, CRLF-terminated.
+UEL = b"\x1b%-12345X"
+SPOOL_PROLOGUE = UEL + b"@PJL COMMENT MSxpsPS\r\n@PJL ENTER LANGUAGE=POSTSCRIPT\r\n"
+SPOOL_TRAILER = UEL + b"@PJL EOJ\r\n" + UEL
+
+
+class TestPjlEnvelope:
+    def test_spooled_job_with_the_reporter_header_distills(self, tmp_dir, gs_path):
+        src = _write(tmp_dir, "spool.ps", SPOOL_PROLOGUE + PS_FIXTURE)
+        out = os.path.join(tmp_dir, "spool.pdf")
+        r = distill(src, out, gs_path=gs_path)
+        assert r["pages"] == 1
+        with pikepdf.open(out) as pdf:
+            assert len(pdf.pages) == 1
+
+    def test_trailing_uel_and_eoj_are_stripped(self, tmp_dir, gs_path):
+        src = _write(tmp_dir, "job.ps", SPOOL_PROLOGUE + PS_FIXTURE + SPOOL_TRAILER)
+        out = os.path.join(tmp_dir, "job.pdf")
+        assert distill(src, out, gs_path=gs_path)["pages"] == 1
+
+    def test_lf_line_endings_in_the_envelope_distill(self, tmp_dir, gs_path):
+        prologue = UEL + b"@PJL SET RESOLUTION=600\n@PJL ENTER LANGUAGE = POSTSCRIPT\n"
+        src = _write(tmp_dir, "lf.ps", prologue + PS_FIXTURE)
+        out = os.path.join(tmp_dir, "lf.pdf")
+        assert distill(src, out, gs_path=gs_path)["pages"] == 1
+
+    def test_repeated_uel_before_the_payload_distills(self, tmp_dir, gs_path):
+        prologue = UEL + b"\r\n" + UEL + b"@PJL ENTER LANGUAGE=POSTSCRIPT\r\n"
+        src = _write(tmp_dir, "twice.ps", prologue + PS_FIXTURE)
+        out = os.path.join(tmp_dir, "twice.pdf")
+        assert distill(src, out, gs_path=gs_path)["pages"] == 1
+
+    def test_input_size_reports_the_whole_job(self, tmp_dir, gs_path):
+        data = SPOOL_PROLOGUE + PS_FIXTURE + SPOOL_TRAILER
+        src = _write(tmp_dir, "sized.ps", data)
+        out = os.path.join(tmp_dir, "sized.pdf")
+        assert distill(src, out, gs_path=gs_path)["input_size"] == len(data)
+
+    def test_pjl_wrapped_pcl_refuses_naming_pcl(self, tmp_dir, gs_path):
+        job = UEL + b"@PJL ENTER LANGUAGE=PCL\r\n" + b"\x1bE\x1b&l0O printer bytes"
+        src = _write(tmp_dir, "pcl.ps", job)
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match=r"LANGUAGE=PCL"):
+            distill(src, out, gs_path=gs_path)
+
+    def test_pjl_wrapped_xps_package_refuses_by_name(self, tmp_dir, gs_path):
+        job = UEL + b"@PJL ENTER LANGUAGE=XPS\r\n" + b"PK\x03\x04rest of the zip"
+        src = _write(tmp_dir, "xps.ps", job)
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match=r"LANGUAGE=XPS"):
+            distill(src, out, gs_path=gs_path)
+
+    def test_zip_payload_under_a_postscript_declaration_refuses_as_a_package(
+        self, tmp_dir, gs_path
+    ):
+        job = SPOOL_PROLOGUE + b"PK\x03\x04rest of the zip"
+        src = _write(tmp_dir, "mislabelled.ps", job)
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match=r"ZIP/XPS package"):
+            distill(src, out, gs_path=gs_path)
+
+    def test_envelope_with_no_payload_refuses(self, tmp_dir, gs_path):
+        src = _write(tmp_dir, "hollow.ps", SPOOL_PROLOGUE)
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match=r"no payload"):
+            distill(src, out, gs_path=gs_path)
+
+    def test_empty_file_refuses_as_empty(self, tmp_dir, gs_path):
+        src = _write(tmp_dir, "empty.ps", b"")
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match=r"the file is empty"):
+            distill(src, out, gs_path=gs_path)
+
+    def test_wrapped_pdf_still_points_at_repair(self, tmp_dir, gs_path):
+        src = _write(tmp_dir, "wrapped.ps", SPOOL_PROLOGUE + b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match="already a PDF"):
+            distill(src, out, gs_path=gs_path)
+
+
+class TestPjlParsing:
+    """The envelope grammar, exercised without Ghostscript."""
+
+    def test_no_envelope_leaves_the_payload_at_byte_zero(self):
+        from engine.distill import _parse_pjl_prologue
+
+        assert _parse_pjl_prologue(PS_FIXTURE) == (0, None)
+
+    def test_language_is_captured_across_spacing_and_case(self):
+        from engine.distill import _parse_pjl_prologue
+
+        offset, lang = _parse_pjl_prologue(
+            UEL + b"@PJL enter language = PostScript\r\n%!PS"
+        )
+        assert lang == "PostScript"
+        assert offset == len(UEL) + len(b"@PJL enter language = PostScript\r\n")
+
+    def test_an_unterminated_envelope_reports_no_payload(self):
+        from engine.distill import _parse_pjl_prologue
+
+        assert _parse_pjl_prologue(UEL + b"@PJL ENTER LANGUAGE=POSTSCRIPT")[0] == 0
+
+    def test_trailer_start_cuts_only_a_pure_control_tail(self):
+        from engine.distill import _pjl_trailer_start
+
+        body = b"%!PS\nshowpage\n"
+        assert _pjl_trailer_start(body + SPOOL_TRAILER, 0) == len(body)
+
+    def test_a_uel_followed_by_job_bytes_is_not_a_trailer(self):
+        from engine.distill import _pjl_trailer_start
+
+        data = b"%!PS\n" + UEL + b"more postscript\n"
+        assert _pjl_trailer_start(data, 0) == len(data)
+
+    def test_no_trailer_leaves_the_file_whole(self):
+        from engine.distill import _pjl_trailer_start
+
+        assert _pjl_trailer_start(PS_FIXTURE, 0) == len(PS_FIXTURE)

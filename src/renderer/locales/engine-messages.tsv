@@ -134,7 +134,11 @@ distill.ghostscriptProducedPdfPages	exact	distill	Ghostscript produced a PDF wit
 distill.ghostscriptProducedUnreadablePdf	pattern	distill	Ghostscript produced an unreadable PDF: {{exc}}
 distill.inputFileFound	pattern	create_pdf,distill,office_export,soffice,trapping	input file not found: {{file}}
 distill.outputMustDifferentFile	exact	distill	output must be a different file from the input
+distill.postscriptFileFileEmpty	exact	distill	not a PostScript file (the file is empty)
 distill.postscriptFileMissingHeader	exact	distill	not a PostScript file (missing the '%!' header)
+distill.postscriptJobDeclaresPjl	pattern	distill	not a PostScript job (it declares @PJL ENTER LANGUAGE={{declared_language}})
+distill.postscriptJobPayloadZip	exact	distill	not a PostScript job (the payload is a ZIP/XPS package)
+distill.postscriptJobPjlEnvelope	exact	distill	not a PostScript job (the PJL envelope carries no payload)
 distill.unknownPresetScreenEbook	pattern	distill	unknown preset {{preset}} (screen, ebook, printer, prepress, default)
 doc_properties.directionMustLR	pattern	doc_properties	direction must be 'L2R' or 'R2L', got {{direction}}
 doc_properties.documentCertifiedAllowChanges	exact	doc_properties	this document is certified to allow no changes, so setting the document language would produce a file that reports as illegally modified
