@@ -1,6 +1,6 @@
 {
   "name": "spectrapdf",
-  "version": "1.1.20",
+  "version": "1.2.0",
   "description": "Modern open-source PDF manipulation studio with optional Ghostscript integration",
   "scripts": {
     "dev": "cargo tauri dev",
