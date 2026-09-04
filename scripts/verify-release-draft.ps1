@@ -283,12 +283,24 @@ function Get-CanonicalPath([string]$path) {
 # pipeline and never a PowerShell redirection: a pipeline reports the last
 # stage's status, and a redirected native stderr is re-rendered as error
 # records. The exit code is the process's own.
+function Remove-AnsiEscapes([string]$text) {
+    return [regex]::Replace($text, "`e\[[0-?]*[ -/]*[@-~]", "")
+}
+
 function Invoke-CargoTest([string]$logStem, [string[]]$arguments) {
     $cargo = @(Get-Command cargo -CommandType Application)[0].Source
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $cargo
+    $startInfo.ArgumentList.Add("--color")
+    $startInfo.ArgumentList.Add("never")
     foreach ($argument in $arguments) { $startInfo.ArgumentList.Add($argument) }
     $startInfo.UseShellExecute = $false
+    # The child's environment is the authoritative switch: a caller that
+    # exports CARGO_TERM_COLOR=always (the hosted runners do) makes cargo
+    # colour a redirected stream, and styled text is not parseable.
+    $startInfo.Environment["CARGO_TERM_COLOR"] = "never"
+    $startInfo.Environment["NO_COLOR"] = "1"
+    $startInfo.Environment["TERM"] = "dumb"
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
     $startInfo.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -300,8 +312,9 @@ function Invoke-CargoTest([string]$logStem, [string[]]$arguments) {
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
     $process.WaitForExit()
-    $stdoutText = $stdoutTask.GetAwaiter().GetResult()
-    $stderrText = $stderrTask.GetAwaiter().GetResult()
+    # Every consumer parses these; nothing downstream sees terminal styling.
+    $stdoutText = Remove-AnsiEscapes $stdoutTask.GetAwaiter().GetResult()
+    $stderrText = Remove-AnsiEscapes $stderrTask.GetAwaiter().GetResult()
     $exitCode = $process.ExitCode
     $process.Dispose()
     [System.IO.File]::WriteAllText("$logStem.stdout.log", $stdoutText, [System.Text.UTF8Encoding]::new($false))
@@ -321,7 +334,7 @@ function Invoke-CargoTest([string]$logStem, [string[]]$arguments) {
 # relative to the workspace root it reported in the metadata.
 function Test-CargoRanTheStagedVerifier([string[]]$stderr, [string]$phase) {
     $running = @($stderr | ForEach-Object {
-        $m = [regex]::Match($_, '^\s*Running (.+?\.rs) \(')
+        $m = [regex]::Match($_, '^\s*Running\s+(\S.*?\.rs)\s*\(')
         if ($m.Success) { $m.Groups[1].Value }
     })
     if ($running.Count -ne 1) { throw "cargo reported $($running.Count) 'Running' test binaries in the $phase, expected exactly 1" }
