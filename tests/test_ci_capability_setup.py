@@ -623,13 +623,21 @@ def _released_tags(count: int) -> list[str]:
         t for t in _git("tag", "--sort=-v:refname").split()
         if re.fullmatch(r"v\d+\.\d+\.\d+", t)
     ]
+    # A release run verifies its own tag: HEAD is that tag, and that tag is not
+    # released history. It stays in the parametrised set -- the newest tree is
+    # exactly the one whose regime is least exercised -- but it does not count
+    # toward the precondition, which asks whether the checkout can see released
+    # history at all.
+    head = _git("rev-parse", "HEAD^{commit}")
+    history = [t for t in tags if _git("rev-parse", t + "^{commit}") != head]
     # Never a skip: the zero-skip gate aside, a runner that cannot see the tags
     # cannot prove which regime the redo selects for a released tag, and an
     # unprovable contract is a failure.
-    assert len(tags) >= count, (
-        f"this checkout carries {len(tags)} released tags, expected at least "
-        f"{count}; a shallow actions/checkout fetches none, so the checkout step "
-        "of any job running pytest needs `fetch-tags: true`"
+    assert len(history) >= count, (
+        f"this checkout carries {len(history)} released tags that are not HEAD's "
+        f"own tag, expected at least {count}; a shallow actions/checkout fetches "
+        "none, so the checkout step of any job running pytest needs "
+        "`fetch-tags: true`"
     )
     return tags[:count]
 
@@ -757,11 +765,16 @@ def test_the_legacy_engine_verifier_runs_against_the_released_tag(
 ) -> None:
     """The regime the redo picks for the tag verifies the tag's real tree.
 
-    A scratch worktree at the tag stands in for the redo's checkout; the
-    built engine tree is a copy of the checked-out `src/engine`, which is what
-    the pre-manifest bundler shipped. The verifier accepts that tree, refuses
-    planted bytecode, and refuses a byte change -- all from the workflow's
-    copy of the script, with the tag never having carried it.
+    A scratch worktree at the tag stands in for the redo's checkout, and the
+    regime is selected from that tag's tree exactly as release-redo.yml selects
+    it -- a manifest-era tag is never driven through the legacy verifier, which
+    would expect rows the staging never carries. The built engine tree is
+    whatever that regime's bundler produced: under the manifest, the rows
+    `src-tauri/build.rs` stages (the manifest excludes itself, so the staged
+    tree does not carry it); before it, a copy of the whole checked-out
+    `src/engine`. The verifier accepts that tree, refuses planted bytecode, and
+    refuses a byte change -- all from the workflow's copy of the script, with
+    the tag never having carried it.
     """
     tag = _released_tag(index)
     regime = _redo_regime(tag)
@@ -769,10 +782,28 @@ def test_the_legacy_engine_verifier_runs_against_the_released_tag(
     _git("worktree", "add", "--detach", str(worktree), tag)
     try:
         built = worktree / "src-tauri" / "target" / "release" / "engine"
-        shutil.copytree(worktree / "src" / "engine", built)
         verifier = ROOT / "scripts" / "check-engine-payload.py"
         args = [sys.executable, str(verifier), "--root", str(worktree)]
-        if regime == "legacy":
+        if regime == "manifest":
+            manifest = worktree / ENGINE_MANIFEST
+            assert manifest.is_file()
+            current = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "gen-engine-payload-manifest.py"),
+                 "--check", "--root", str(worktree)],
+                capture_output=True, text=True,
+            )
+            assert current.returncode == 0, current.stdout + current.stderr
+            built.mkdir(parents=True)
+            for line in manifest.read_text(encoding="utf-8").splitlines()[1:]:
+                if not line:
+                    continue
+                rel = line.split("	", 1)[0]
+                dest = built / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(worktree / "src" / "engine" / rel, dest)
+            assert not (built / "PAYLOAD-MANIFEST.tsv").exists()
+        else:
+            shutil.copytree(worktree / "src" / "engine", built)
             args += ["--legacy-rev", "HEAD"]
             assert not (worktree / ENGINE_MANIFEST).exists()
         run = subprocess.run(args, capture_output=True, text=True)
