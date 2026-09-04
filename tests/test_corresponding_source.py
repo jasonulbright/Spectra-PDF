@@ -54,9 +54,32 @@ class TestReleaseContract:
     def test_the_release_stages_uploads_and_checksums_the_archives(self):
         text = open(WORKFLOW, encoding="utf-8").read()
         assert "scripts/stage-corresponding-source.ps1" in text
-        assert "gh release upload ${{ github.ref_name }} $file.FullName" in text
-        assert "$sources = @(Get-ChildItem release-sources" in text
-        assert "$files = @($installers) + @($portable) + @($sources)" in text
+
+        stage = text.index("- name: Stage corresponding source archives")
+        upload = text.index("- name: Upload corresponding source archives to the draft")
+        checksum = text.index("- name: Upload SHA-256 checksums to the draft")
+        publish = text.index("- name: Publish the release")
+        # Staged, then uploaded to the draft, then checksummed -- all before the
+        # single step that makes the release public.
+        assert stage < upload < checksum < publish
+
+        step = text[upload:checksum]
+        # Addressed by release id, never by tag: a draft has no tag ref, so a
+        # tag-addressed upload can resolve to a different, already-public release.
+        assert "RELEASE_ID: ${{ steps.draft.outputs.releaseId }}" in step
+        assert "$files = @(Get-ChildItem release-sources -File -ErrorAction Stop)" in step
+        assert (
+            'gh api --method POST -H "Content-Type: application/octet-stream" '
+            '"https://uploads.github.com/repos/$repo/releases/$env:RELEASE_ID'
+            '/assets?name=$name" --input $file.FullName' in step
+        )
+        assert "gh release upload" not in step
+        assert "github.ref_name" not in step
+
+        sums = text[checksum:publish]
+        assert "$sources = @(Get-ChildItem release-sources" in sums
+        assert "$files = @($installers) + @($portable) + @($sources)" in sums
+        assert "SHA256SUMS.txt" in sums
 
     def test_the_public_notice_states_the_as_built_mechanism(self):
         text = open(NOTICE, encoding="utf-8").read()
