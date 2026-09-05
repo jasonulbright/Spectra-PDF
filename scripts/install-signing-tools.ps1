@@ -17,7 +17,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot "windows-signing.ps1")
 
@@ -31,32 +30,39 @@ function Test-ToolsPresent {
     }
 }
 
-if (-not $SkipWinget -and (Test-ToolsPresent)) {
-    Write-Host "install-signing-tools: the client tools are already present"
-    exit 0
-}
-
-$winget = if ($SkipWinget) { $null } else { Get-Command winget.exe -ErrorAction SilentlyContinue }
-if ($winget) {
-    Write-Host "install-signing-tools: trying winget"
-    & $winget.Source install -e --id Microsoft.Azure.ArtifactSigningClientTools `
-        --accept-package-agreements --accept-source-agreements --disable-interactivity
-    Write-Host "install-signing-tools: winget exited $LASTEXITCODE"
-    if (Test-ToolsPresent) { exit 0 }
-    # A winget install that reports success but leaves nothing the resolver can
-    # find is only diagnosable from the uninstall entries it did write.
-    $registered = @(Get-ArtifactSigningInstallHits)
-    if ($registered.Count -eq 0) {
-        Write-Host "install-signing-tools: no signing-client uninstall entry is registered"
-    } else {
-        foreach ($hit in $registered) {
-            Write-Host "install-signing-tools: registered '$($hit.DisplayName)' at '$($hit.InstallLocation)'"
-        }
+# Everything ahead of the NuGet fetch is opportunistic: a probe or a diagnostic
+# that throws must not cost the release the fallback, which is the only branch
+# that is verified to produce the dlib. The fetch itself is the sole fatal path.
+try {
+    if (-not $SkipWinget -and (Test-ToolsPresent)) {
+        Write-Host "install-signing-tools: the client tools are already present"
+        exit 0
     }
-} elseif ($SkipWinget) {
-    Write-Host "install-signing-tools: skipping winget"
-} else {
-    Write-Host "install-signing-tools: winget is not on PATH"
+
+    $winget = if ($SkipWinget) { $null } else { Get-Command winget.exe -ErrorAction SilentlyContinue }
+    if ($winget) {
+        Write-Host "install-signing-tools: trying winget"
+        & $winget.Source install -e --id Microsoft.Azure.ArtifactSigningClientTools `
+            --accept-package-agreements --accept-source-agreements --disable-interactivity
+        Write-Host "install-signing-tools: winget exited $LASTEXITCODE"
+        if (Test-ToolsPresent) { exit 0 }
+        # A winget install that reports success but leaves nothing the resolver
+        # can find is only diagnosable from the uninstall entries it did write.
+        $registered = @(Get-ArtifactSigningInstallHits)
+        if ($registered.Count -eq 0) {
+            Write-Host "install-signing-tools: no signing-client uninstall entry is registered"
+        } else {
+            foreach ($hit in $registered) {
+                Write-Host "install-signing-tools: registered '$($hit.DisplayName)' at '$($hit.InstallLocation)'"
+            }
+        }
+    } elseif ($SkipWinget) {
+        Write-Host "install-signing-tools: skipping winget"
+    } else {
+        Write-Host "install-signing-tools: winget is not on PATH"
+    }
+} catch {
+    Write-Host "install-signing-tools: pre-fallback step failed, continuing to the NuGet payload: $($_.Exception.Message)"
 }
 
 # NuGet fallback: a .nupkg is a zip, so no NuGet client is required.

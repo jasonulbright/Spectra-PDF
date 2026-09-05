@@ -9,8 +9,6 @@
 # resolvers take an explicit override from the environment for the case where
 # discovery is wrong.
 
-Set-StrictMode -Version Latest
-
 function Get-NewestByVersionThenTime([object[]]$files) {
     # Windows SDK bin directories sort wrong as strings (10.0.22621 vs
     # 10.0.9). Version-sort the containing directory where it parses; fall
@@ -49,25 +47,32 @@ function Get-SignToolPath {
 # The client tools MSI writes its payload under a location that is not
 # derivable from the package id, so the uninstall entry's InstallLocation is the
 # only authoritative source; the fixed roots below are a fallback for payloads
-# that register no location.
+# that register no location. Uninstall entries carry arbitrary value sets, so a
+# missing DisplayName or InstallLocation is normal and reads as an empty string.
 function Get-ArtifactSigningInstallHits {
-    $keys = @(
-        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
-        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
-        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
-    )
-    $hits = @()
-    foreach ($key in $keys) {
-        $entries = @(Get-ItemProperty -Path $key -ErrorAction SilentlyContinue)
-        foreach ($entry in $entries) {
-            $name = [string]($entry.PSObject.Properties['DisplayName'] | ForEach-Object { $_.Value })
-            if (-not $name) { continue }
-            if ($name -notlike "*Artifact Signing*" -and $name -notlike "*Trusted Signing*") { continue }
-            $location = [string]($entry.PSObject.Properties['InstallLocation'] | ForEach-Object { $_.Value })
-            $hits += [pscustomobject]@{ DisplayName = $name; InstallLocation = $location }
+    # Discovery only: any failure reading the registry yields no hits rather
+    # than aborting a caller that has fixed roots to fall back on.
+    try {
+        $keys = @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+        )
+        $hits = @()
+        foreach ($key in $keys) {
+            $entries = @(Get-ItemProperty -Path $key -ErrorAction SilentlyContinue)
+            foreach ($entry in $entries) {
+                $name = [string]$entry.DisplayName
+                if (-not $name) { continue }
+                if ($name -notlike "*Artifact Signing*" -and $name -notlike "*Trusted Signing*") { continue }
+                $location = [string]$entry.InstallLocation
+                $hits += [pscustomobject]@{ DisplayName = $name; InstallLocation = $location }
+            }
         }
+        return @($hits)
+    } catch {
+        return @()
     }
-    return @($hits)
 }
 
 function Get-ArtifactSigningDlibPath {
@@ -77,7 +82,9 @@ function Get-ArtifactSigningDlibPath {
         }
         return (Resolve-Path -LiteralPath $env:SPECTRAPDF_SIGN_DLIB).Path
     }
-    $registered = @(Get-ArtifactSigningInstallHits | ForEach-Object { $_.InstallLocation })
+    # An optional prefix: registered locations are searched first where they
+    # exist, and their absence leaves the fixed roots as the whole list.
+    $registered = @(Get-ArtifactSigningInstallHits | ForEach-Object { [string]$_.InstallLocation })
     $roots = @(
         $registered +
         @(

@@ -2169,5 +2169,16 @@ def test_the_dlib_search_reads_the_registered_install_location() -> None:
     ), "the uninstall keys are not enumerated"
     assert "WOW6432Node" in text
     assert "HKCU:" in text
-    assert re.search(r"\$\w*[Ee]ntry\.PSObject\.Properties\['InstallLocation'\]", text)
-    assert re.search(r"DisplayName", text)
+    assert re.search(r"\$\w*[Ee]ntry\.InstallLocation\b", text)
+    assert re.search(r"\$\w*[Ee]ntry\.DisplayName\b", text)
+
+
+def test_the_nuget_fallback_survives_a_failed_presence_probe() -> None:
+    """The NuGet branch is the verified source; nothing before it may be fatal."""
+    lines = (ROOT / SIGN_TOOLS_SCRIPT).read_text(encoding="utf-8").splitlines()
+    fetch = next(
+        i for i, line in enumerate(lines) if "api.nuget.org" in line
+    )
+    assert any(
+        re.search(r"^\s*\}?\s*catch\b", line) for line in lines[:fetch]
+    ), "the NuGet fetch is not reached from a caught failure path"
