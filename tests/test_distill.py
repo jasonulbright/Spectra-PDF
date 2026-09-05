@@ -227,7 +227,8 @@ class TestPjlEnvelope:
         with pikepdf.open(out) as pdf:
             assert len(pdf.pages) == 1
 
-    def test_trailing_uel_and_eoj_are_stripped(self, tmp_dir, gs_path):
+    def test_trailing_uel_and_eoj_still_convert(self, tmp_dir, gs_path):
+        # The trailer is NOT cut: Ghostscript consumes a real one itself.
         src = _write(tmp_dir, "job.ps", SPOOL_PROLOGUE + PS_FIXTURE + SPOOL_TRAILER)
         out = os.path.join(tmp_dir, "job.pdf")
         assert distill(src, out, gs_path=gs_path)["pages"] == 1
@@ -314,19 +315,51 @@ class TestPjlParsing:
 
         assert _parse_pjl_prologue(UEL + b"@PJL ENTER LANGUAGE=POSTSCRIPT")[0] == 0
 
-    def test_trailer_start_cuts_only_a_pure_control_tail(self):
-        from engine.distill import _pjl_trailer_start
+# A one-page program whose LAST NINE BYTES are raw image samples read through
+# `currentfile`. When those samples spell UEL, a suffix scan cannot tell them
+# from a job trailer: a control-looking suffix is not proof of a language
+# boundary, so no suffix is cut and the image survives.
+IMAGE_PS_FIXTURE = b"""%!PS-Adobe-3.0
+<< /PageSize [90 10] >> setpagedevice
+/go {
+  90 10 scale
+  9 1 8 [9 0 0 -1 0 1] { currentfile 9 string readstring pop } image
+  showpage
+} def
+go
+"""
 
-        body = b"%!PS\nshowpage\n"
-        assert _pjl_trailer_start(body + SPOOL_TRAILER, 0) == len(body)
 
-    def test_a_uel_followed_by_job_bytes_is_not_a_trailer(self):
-        from engine.distill import _pjl_trailer_start
+def _page_carries_the_samples(pdf_path, samples):
+    """True when the first page draws an image whose data is `samples`."""
+    with pikepdf.open(pdf_path) as pdf:
+        page = pdf.pages[0]
+        for image in page.get_images().values():
+            if image.read_bytes() == samples:
+                return True
+        content = bytes(page.Contents.read_bytes())
+        return b"\nBI\n" in content and samples in content
 
-        data = b"%!PS\n" + UEL + b"more postscript\n"
-        assert _pjl_trailer_start(data, 0) == len(data)
 
-    def test_no_trailer_leaves_the_file_whole(self):
-        from engine.distill import _pjl_trailer_start
+class TestPjlTrailerNeverCutsJobData:
+    """PRR-06-01: image samples that spell UEL are job data, not a trailer."""
 
-        assert _pjl_trailer_start(PS_FIXTURE, 0) == len(PS_FIXTURE)
+    def test_bare_ps_keeps_uel_valued_image_samples(self, tmp_dir, gs_path):
+        src = _write(tmp_dir, "bare.ps", IMAGE_PS_FIXTURE + UEL)
+        out = os.path.join(tmp_dir, "bare.pdf")
+        assert distill(src, out, preset="default", gs_path=gs_path)["pages"] == 1
+        assert _page_carries_the_samples(out, UEL)
+
+    def test_wrapped_ps_keeps_uel_valued_image_samples(self, tmp_dir, gs_path):
+        job = SPOOL_PROLOGUE + IMAGE_PS_FIXTURE + UEL + SPOOL_TRAILER
+        src = _write(tmp_dir, "wrapped.ps", job)
+        out = os.path.join(tmp_dir, "wrapped.pdf")
+        assert distill(src, out, preset="default", gs_path=gs_path)["pages"] == 1
+        assert _page_carries_the_samples(out, UEL)
+
+    def test_ordinary_image_samples_survive_a_real_trailer(self, tmp_dir, gs_path):
+        job = SPOOL_PROLOGUE + IMAGE_PS_FIXTURE + b"123456789" + SPOOL_TRAILER
+        src = _write(tmp_dir, "ordinary.ps", job)
+        out = os.path.join(tmp_dir, "ordinary.pdf")
+        assert distill(src, out, preset="default", gs_path=gs_path)["pages"] == 1
+        assert _page_carries_the_samples(out, b"123456789")
