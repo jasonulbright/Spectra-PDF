@@ -272,8 +272,10 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTRAPDF_GS_PATH=$($selected.FullName)" -Encoding utf8
         shell: pwsh
 
+      # --durations names the slowest tests in the log: a stall in this
+      # suite is otherwise a silent 30 minutes with no test named.
       - name: Engine tests (full suite)
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/ -q --durations=25
         env:
           SPECTRAPDF_REQUIRE_ZERO_SKIPS: "1"
 
@@ -555,9 +557,14 @@ jobs:
           $portable = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -ErrorAction Stop)
           if ($portable.Count -ne 1) { throw "expected one portable zip to checksum, found $($portable.Count)" }
           $files = @($installers) + @($portable) + @($sources)
+          # The name column is the name GitHub serves the asset under, not the
+          # build directory's: this file is verified with `sha256sum -c` beside
+          # downloaded files, and GitHub rewrites a space in an uploaded asset
+          # name. One rule, shared with the draft verifier.
+          . ./scripts/github-asset-name.ps1
           $lines = foreach ($f in $files) {
             $h = (Get-FileHash -Algorithm SHA256 $f.FullName).Hash.ToLowerInvariant()
-            "$h  $($f.Name)"
+            "$h  $(Get-GitHubAssetName $f.Name)"
           }
           $out = Join-Path $bundle "SHA256SUMS.txt"
           # ASCII + LF: this file is consumed by `sha256sum -c` as often as by eye.
