@@ -2150,3 +2150,24 @@ def test_the_client_tools_install_has_a_second_source() -> None:
     )
     assert "SPECTRAPDF_SIGN_DLIB" in text
     assert "GITHUB_ENV" in text
+
+
+def test_the_nuget_payload_is_opened_by_the_zip_reader() -> None:
+    """Expand-Archive rejects a .nupkg extension on Windows PowerShell 5.1."""
+    text = (ROOT / SIGN_TOOLS_SCRIPT).read_text(encoding="utf-8")
+    assert re.search(
+        r"\[System\.IO\.Compression\.ZipFile\]::ExtractToDirectory\(", text
+    )
+    assert not re.search(r"^\s*Expand-Archive\b", text, re.MULTILINE)
+
+
+def test_the_dlib_search_reads_the_registered_install_location() -> None:
+    """The MSI payload root is not derivable from the package id."""
+    text = (ROOT / SIGNING_HELPERS).read_text(encoding="utf-8")
+    assert (
+        r"CurrentVersion\Uninstall\*" in text
+    ), "the uninstall keys are not enumerated"
+    assert "WOW6432Node" in text
+    assert "HKCU:" in text
+    assert re.search(r"\$\w*[Ee]ntry\.PSObject\.Properties\['InstallLocation'\]", text)
+    assert re.search(r"DisplayName", text)

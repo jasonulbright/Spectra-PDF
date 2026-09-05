@@ -11,7 +11,9 @@
 
 param(
     [string]$NuGetPackage = "Microsoft.ArtifactSigning.Client",
-    [string]$ExtractRoot = "$env:RUNNER_TEMP\artifact-signing-client"
+    [string]$ExtractRoot = "$env:RUNNER_TEMP\artifact-signing-client",
+    # Exercises the NuGet branch on a machine that already carries an install.
+    [switch]$SkipWinget
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,18 +31,30 @@ function Test-ToolsPresent {
     }
 }
 
-if (Test-ToolsPresent) {
+if (-not $SkipWinget -and (Test-ToolsPresent)) {
     Write-Host "install-signing-tools: the client tools are already present"
     exit 0
 }
 
-$winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+$winget = if ($SkipWinget) { $null } else { Get-Command winget.exe -ErrorAction SilentlyContinue }
 if ($winget) {
     Write-Host "install-signing-tools: trying winget"
     & $winget.Source install -e --id Microsoft.Azure.ArtifactSigningClientTools `
         --accept-package-agreements --accept-source-agreements --disable-interactivity
     Write-Host "install-signing-tools: winget exited $LASTEXITCODE"
     if (Test-ToolsPresent) { exit 0 }
+    # A winget install that reports success but leaves nothing the resolver can
+    # find is only diagnosable from the uninstall entries it did write.
+    $registered = @(Get-ArtifactSigningInstallHits)
+    if ($registered.Count -eq 0) {
+        Write-Host "install-signing-tools: no signing-client uninstall entry is registered"
+    } else {
+        foreach ($hit in $registered) {
+            Write-Host "install-signing-tools: registered '$($hit.DisplayName)' at '$($hit.InstallLocation)'"
+        }
+    }
+} elseif ($SkipWinget) {
+    Write-Host "install-signing-tools: skipping winget"
 } else {
     Write-Host "install-signing-tools: winget is not on PATH"
 }
@@ -59,7 +73,9 @@ Write-Host "install-signing-tools: fetching $NuGetPackage $version from nuget.or
 if ($LASTEXITCODE -ne 0) { throw "install-signing-tools: could not download $NuGetPackage $version" }
 
 $extracted = Join-Path $ExtractRoot "package"
-Expand-Archive -LiteralPath $nupkg -DestinationPath $extracted
+# Expand-Archive refuses any extension but .zip; the zip reader does not care.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::ExtractToDirectory($nupkg, $extracted)
 $dlibs = @(Get-ChildItem -LiteralPath $extracted -Recurse -Filter "Azure.CodeSigning.Dlib.dll" -File)
 $x64 = @($dlibs | Where-Object { $_.FullName -like "*\x64\*" })
 if ($x64.Count -gt 0) { $dlibs = $x64 }

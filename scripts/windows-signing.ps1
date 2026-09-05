@@ -46,6 +46,30 @@ function Get-SignToolPath {
     throw "signtool.exe (x64) was not found. Searched: $($roots -join '; ')"
 }
 
+# The client tools MSI writes its payload under a location that is not
+# derivable from the package id, so the uninstall entry's InstallLocation is the
+# only authoritative source; the fixed roots below are a fallback for payloads
+# that register no location.
+function Get-ArtifactSigningInstallHits {
+    $keys = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )
+    $hits = @()
+    foreach ($key in $keys) {
+        $entries = @(Get-ItemProperty -Path $key -ErrorAction SilentlyContinue)
+        foreach ($entry in $entries) {
+            $name = [string]($entry.PSObject.Properties['DisplayName'] | ForEach-Object { $_.Value })
+            if (-not $name) { continue }
+            if ($name -notlike "*Artifact Signing*" -and $name -notlike "*Trusted Signing*") { continue }
+            $location = [string]($entry.PSObject.Properties['InstallLocation'] | ForEach-Object { $_.Value })
+            $hits += [pscustomobject]@{ DisplayName = $name; InstallLocation = $location }
+        }
+    }
+    return @($hits)
+}
+
 function Get-ArtifactSigningDlibPath {
     if ($env:SPECTRAPDF_SIGN_DLIB) {
         if (-not (Test-Path -LiteralPath $env:SPECTRAPDF_SIGN_DLIB)) {
@@ -53,12 +77,18 @@ function Get-ArtifactSigningDlibPath {
         }
         return (Resolve-Path -LiteralPath $env:SPECTRAPDF_SIGN_DLIB).Path
     }
+    $registered = @(Get-ArtifactSigningInstallHits | ForEach-Object { $_.InstallLocation })
     $roots = @(
-        "${env:LOCALAPPDATA}\Microsoft\MicrosoftTrustedSigningClientTools",
-        "${env:LOCALAPPDATA}\Microsoft\AzureArtifactSigningClientTools",
-        "${env:ProgramFiles}\Microsoft\Azure Artifact Signing Client Tools",
-        "${env:ProgramFiles}\Microsoft",
-        "${env:LOCALAPPDATA}\Microsoft\WinGet\Packages"
+        $registered +
+        @(
+            "${env:LOCALAPPDATA}\Microsoft\MicrosoftTrustedSigningClientTools",
+            "${env:LOCALAPPDATA}\Microsoft\AzureArtifactSigningClientTools",
+            "${env:ProgramFiles}\Microsoft\Azure Artifact Signing Client Tools",
+            "${env:ProgramFiles}\Microsoft",
+            "${env:ProgramFiles}\Microsoft SDKs",
+            "${env:ProgramFiles(x86)}\Microsoft",
+            "${env:LOCALAPPDATA}\Microsoft\WinGet\Packages"
+        )
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
     foreach ($root in $roots) {
         $hits = @(Get-ChildItem -LiteralPath $root -Recurse -Filter "Azure.CodeSigning.Dlib.dll" -File -ErrorAction SilentlyContinue)
