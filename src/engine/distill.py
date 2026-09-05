@@ -9,9 +9,12 @@ the op exists for), stderr surfaced on failure. Input honesty is a HEADER check
 Repair Tier 2's job), and arbitrary bytes refuse with the reason named.
 A Windows spool stream arrives wrapped in a PJL envelope (UEL, `@PJL`
 control lines, `@PJL ENTER LANGUAGE=POSTSCRIPT`) and may carry a UEL/@PJL
-trailer; the envelope is parsed off before the header check and a stripped
-copy is what reaches Ghostscript, so the distilled input is PostScript
-rather than something gs merely tolerates. An envelope declaring another
+trailer; only the LEADING prologue is parsed off before the header check,
+and a copy stripped of just that prologue is what reaches Ghostscript, so
+the distilled input is PostScript rather than something gs merely
+tolerates. Any trailer stays in the payload: Ghostscript consumes it, and
+no suffix scan can distinguish trailing control text from image samples
+that happen to spell the same bytes. An envelope declaring another
 language refuses by that name.
 The output is post-validated by opening it with pikepdf — a zero exit
 from gs is not proof of a well-formed PDF.
@@ -41,23 +44,14 @@ PRESETS = {
 # envelope around a spooled job.
 UEL = b"\x1b%-12345X"
 
-# The envelope is control text at both ends of the job; a scan window bounds
-# the read so a multi-hundred-megabyte spool is never loaded to find a header.
+# A scan window bounds the prologue read so a multi-hundred-megabyte spool is
+# never loaded to find a header.
 _ENVELOPE_SCAN = 65536
 
 
 def _read_prefix(path: Path) -> bytes:
     with open(path, "rb") as f:
         return f.read(_ENVELOPE_SCAN)
-
-
-def _read_tail(path: Path) -> tuple[bytes, int]:
-    """Return the last scan window of the file and the offset it starts at."""
-    size = path.stat().st_size
-    start = max(0, size - _ENVELOPE_SCAN)
-    with open(path, "rb") as f:
-        f.seek(start)
-        return f.read(), start
 
 
 def _parse_pjl_prologue(prefix: bytes) -> tuple[int, str | None]:
@@ -98,39 +92,6 @@ def _parse_pjl_prologue(prefix: bytes) -> tuple[int, str | None]:
             continue
         break
     return (pos if seen else 0), language
-
-
-def _pjl_trailer_start(data: bytes, payload_start: int) -> int:
-    """Return the offset at which a trailing UEL/`@PJL` trailer begins.
-
-    Everything from that UEL to end of file must be UEL, `@PJL` lines, or
-    whitespace; otherwise the UEL is job content and nothing is cut.
-    """
-    floor = max(payload_start, len(data) - _ENVELOPE_SCAN)
-    start = len(data)
-    at = data.rfind(UEL, floor)
-    while at != -1:
-        rest = data[at:]
-        pos = 0
-        while pos < len(rest):
-            if rest.startswith(UEL, pos):
-                pos += len(UEL)
-                continue
-            if rest.startswith(b"@PJL", pos):
-                end = rest.find(b"\n", pos)
-                pos = len(rest) if end == -1 else end + 1
-                continue
-            if rest[pos : pos + 1] in (b"\r", b"\n", b" ", b"\t", b"\x00"):
-                pos += 1
-                continue
-            break
-        if pos >= len(rest):
-            # An earlier UEL may open the same trailer (`UEL @PJL EOJ UEL`);
-            # the cut belongs at the first one, or a control line survives
-            # into the payload.
-            start = at
-        at = data.rfind(UEL, floor, at)
-    return start
 
 
 def distill(file: str, output: str, preset: str = "printer", gs_path: str = "") -> dict:
@@ -199,26 +160,25 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "") 
         cmd.append(f"-dPDFSETTINGS={PRESETS[preset]}")
     if is_eps:
         cmd.append("-dEPSCrop")
-    # The bytes gs reads are the payload, never the envelope: a job is
-    # distilled from the PostScript that was parsed, not from a wrapper an
-    # interpreter might happen to tolerate. Only a job that actually carries
-    # an envelope is rewritten, and the copy is chunked — a spool stream has
-    # no size bound worth holding in memory.
-    tail, tail_offset = _read_tail(input_path)
-    payload_end = tail_offset + _pjl_trailer_start(tail, max(0, payload_start - tail_offset))
+    # The bytes gs reads are the payload minus the VALIDATED LEADING
+    # prologue, and nothing else: every byte after that offset is retained.
+    # A control-looking suffix is not proof of a language boundary — a
+    # PostScript program consuming raw samples through `currentfile` can end
+    # in bytes that spell UEL, and Ghostscript consumes a genuine trailing
+    # UEL/`@PJL EOJ` itself. Only a job that actually carries a prologue is
+    # rewritten, and the copy is chunked — a spool stream has no size bound
+    # worth holding in memory.
     gs_input = input_path
     stripped_tmp: str | None = None
-    if payload_start or payload_end < tail_offset + len(tail):
+    if payload_start:
         fd, stripped_tmp = tempfile.mkstemp(suffix=".ps", dir=str(output_path.parent))
         with os.fdopen(fd, "wb") as dst, open(input_path, "rb") as src:
             src.seek(payload_start)
-            remaining = payload_end - payload_start
-            while remaining > 0:
-                chunk = src.read(min(remaining, 1 << 20))
+            while True:
+                chunk = src.read(1 << 20)
                 if not chunk:
                     break
                 dst.write(chunk)
-                remaining -= len(chunk)
         gs_input = Path(stripped_tmp)
     # '%' is a TEMPLATE character in -sOutputFile (%d splits per page into
     # renamed files while the literal name never appears — review-
