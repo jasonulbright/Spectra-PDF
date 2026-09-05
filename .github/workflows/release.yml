@@ -14,6 +14,14 @@ on:
 permissions:
   contents: write
 
+env:
+  # Non-secret signing coordinates. The account and profile name what signs;
+  # the subject is what the publish gate requires to have signed.
+  SPECTRAPDF_SIGN_ENDPOINT: https://eus.codesigning.azure.net
+  SPECTRAPDF_SIGN_ACCOUNT: signalridgelabs
+  SPECTRAPDF_SIGN_PROFILE: SRL-Public
+  SPECTRAPDF_SIGN_SUBJECT_CN: Jason Ulbright
+
 jobs:
   # The gate for `release`. A tag can be pushed at any commit, so CI running on
   # push/PR does not establish that the tagged commit passed anything.
@@ -283,6 +291,12 @@ jobs:
     name: Build & publish (Windows)
     needs: verify
     runs-on: windows-latest
+    # Gates the OIDC federated credential: the app registration trusts this
+    # repository only through this environment.
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
     # Without this the job inherits GitHub's 6-hour default. The vendoring
     # steps download large artifacts from volunteer mirrors, and a mirror that
     # accepts the connection but never sends data would hang rather than fail
@@ -293,6 +307,26 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
+
+      # Authenticode signing runs inside the bundler: `signCommand` in
+      # tauri.conf.json invokes scripts/sign-windows.ps1 for the app executable
+      # before NSIS packs it and for the installer afterwards, so the portable
+      # zip -- which copies the executable the installer stages -- carries the
+      # same signature. The client tools supply the signtool build that loads
+      # the signing dlib; the dlib takes its token from the Azure login below.
+      - name: Install the Artifact Signing client tools
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts/install-signing-tools.ps1
+
+      # OIDC: the job's id-token is exchanged for an Azure token through the
+      # app registration's federated credential, which is scoped to this
+      # environment. No client secret exists to leak or rotate.
+      - name: Azure login (federated, no secret)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -446,6 +480,10 @@ jobs:
           # The key has no password, so the password is an empty string (no secret needed).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          SPECTRAPDF_SIGN: "1"
+          SPECTRAPDF_SIGN_ENDPOINT: ${{ env.SPECTRAPDF_SIGN_ENDPOINT }}
+          SPECTRAPDF_SIGN_ACCOUNT: ${{ env.SPECTRAPDF_SIGN_ACCOUNT }}
+          SPECTRAPDF_SIGN_PROFILE: ${{ env.SPECTRAPDF_SIGN_PROFILE }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
@@ -475,6 +513,25 @@ jobs:
       - name: Portable payload notice map covers every declared resource
         run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -CheckMap
         shell: pwsh
+
+      # The publish gate for signing: the installer and the executable the
+      # portable zip carries must both be chain-valid, signed by the expected
+      # subject, and timestamped. A failure here leaves the draft unpublished.
+      - name: Verify the Authenticode signatures on the built artifacts
+        shell: pwsh
+        run: |
+          . ./scripts/windows-signing.ps1
+          $installer = @(Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*-setup.exe" -File)
+          if ($installer.Count -ne 1) { throw "expected one installer to verify, found $($installer.Count)" }
+          Assert-AuthenticodeSigned -Path $installer[0].FullName -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
+          $zips = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -File)
+          if ($zips.Count -ne 1) { throw "expected one portable zip to verify, found $($zips.Count)" }
+          $extracted = Join-Path ([System.IO.Path]::GetTempPath()) "portable-signature-check"
+          if (Test-Path -LiteralPath $extracted) { Remove-Item -LiteralPath $extracted -Recurse -Force }
+          Expand-Archive -LiteralPath $zips[0].FullName -DestinationPath $extracted
+          $exes = @(Get-ChildItem -LiteralPath $extracted -Recurse -Filter "spectrapdf.exe" -File)
+          if ($exes.Count -ne 1) { throw "expected one spectrapdf.exe in the portable zip, found $($exes.Count)" }
+          Assert-AuthenticodeSigned -Path $exes[0].FullName -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
 
       # The shipped tree itself, after both containers are assembled: a
       # `resources` directory entry is copied whole, so an engine source tree
@@ -590,7 +647,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
-        run: pwsh -NoProfile -File scripts/verify-release-draft.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ github.ref_name }}"
+        run: pwsh -NoProfile -File scripts/verify-release-draft.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ github.ref_name }}" -ExpectSigned
 
       # The ONLY step that makes anything public. Must stay last.
       - name: Publish the release

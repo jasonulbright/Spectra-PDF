@@ -44,10 +44,23 @@ on:
 permissions:
   contents: write
 
+env:
+  # Non-secret signing coordinates, kept in step with release.yml.
+  SPECTRAPDF_SIGN_ENDPOINT: https://eus.codesigning.azure.net
+  SPECTRAPDF_SIGN_ACCOUNT: signalridgelabs
+  SPECTRAPDF_SIGN_PROFILE: SRL-Public
+  SPECTRAPDF_SIGN_SUBJECT_CN: Jason Ulbright
+
 jobs:
   release:
     name: Rebuild & publish from tag (Windows)
     runs-on: windows-latest
+    # Gates the OIDC federated credential: the app registration trusts this
+    # repository only through this environment.
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
     timeout-minutes: 150
     steps:
       - name: Check out the tag in full
@@ -96,6 +109,39 @@ jobs:
           fi
           echo "regime=$regime" >> "$GITHUB_OUTPUT"
           echo "engine payload regime for ${{ inputs.tag }}: $regime"
+
+      # The second selection made from the tag's tree, and for the same reason:
+      # signing is configured in tauri.conf.json, which lives in the tag. A tag
+      # cut before signing existed cannot produce signed binaries, and holding
+      # its rebuild to a signature gate would make it unredoable. A tag that
+      # carries signCommand is held to the full gate.
+      - name: Select the signing regime from the tag's tree
+        id: signing-regime
+        shell: bash
+        run: |
+          if git grep -q "signCommand" HEAD -- src-tauri/tauri.conf.json 2>/dev/null; then
+            signed=true
+          else
+            signed=false
+          fi
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
+          echo "signing regime for ${{ inputs.tag }}: signed=$signed"
+
+      # Authenticode signing runs inside the bundler (see release.yml). Both
+      # steps are no-ops for a tag that predates signing: the bundler never
+      # invokes a sign command it has no configuration for.
+      - name: Install the Artifact Signing client tools
+        if: steps.signing-regime.outputs.signed == 'true'
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts/install-signing-tools.ps1
+
+      - name: Azure login (federated, no secret)
+        if: steps.signing-regime.outputs.signed == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -204,6 +250,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          SPECTRAPDF_SIGN: ${{ steps.signing-regime.outputs.signed == 'true' && '1' || '0' }}
+          SPECTRAPDF_SIGN_ENDPOINT: ${{ env.SPECTRAPDF_SIGN_ENDPOINT }}
+          SPECTRAPDF_SIGN_ACCOUNT: ${{ env.SPECTRAPDF_SIGN_ACCOUNT }}
+          SPECTRAPDF_SIGN_PROFILE: ${{ env.SPECTRAPDF_SIGN_PROFILE }}
         with:
           tagName: ${{ inputs.tag }}
           releaseName: ${{ inputs.tag }}
@@ -222,6 +272,24 @@ jobs:
       - name: Portable payload notice map covers every declared resource
         run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -CheckMap
         shell: pwsh
+
+      # The publish gate for signing, from the verifier's own revision.
+      - name: Verify the Authenticode signatures on the built artifacts
+        if: steps.signing-regime.outputs.signed == 'true'
+        shell: pwsh
+        run: |
+          . ./verifier/scripts/windows-signing.ps1
+          $installer = @(Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*-setup.exe" -File)
+          if ($installer.Count -ne 1) { throw "expected one installer to verify, found $($installer.Count)" }
+          Assert-AuthenticodeSigned -Path $installer[0].FullName -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
+          $zips = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -File)
+          if ($zips.Count -ne 1) { throw "expected one portable zip to verify, found $($zips.Count)" }
+          $extracted = Join-Path ([System.IO.Path]::GetTempPath()) "portable-signature-check"
+          if (Test-Path -LiteralPath $extracted) { Remove-Item -LiteralPath $extracted -Recurse -Force }
+          Expand-Archive -LiteralPath $zips[0].FullName -DestinationPath $extracted
+          $exes = @(Get-ChildItem -LiteralPath $extracted -Recurse -Filter "spectrapdf.exe" -File)
+          if ($exes.Count -ne 1) { throw "expected one spectrapdf.exe in the portable zip, found $($exes.Count)" }
+          Assert-AuthenticodeSigned -Path $exes[0].FullName -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
 
       - name: Engine payload manifest is current
         if: steps.engine-regime.outputs.regime == 'manifest'
@@ -326,7 +394,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
-        run: pwsh -NoProfile -File verifier/scripts/verify-release-draft.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ inputs.tag }}"
+        run: pwsh -NoProfile -File verifier/scripts/verify-release-draft.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ inputs.tag }}" ${{ steps.signing-regime.outputs.signed == 'true' && '-ExpectSigned' || '' }}
 
       # The ONLY step that makes anything public. Must stay last.
       - name: Publish the release

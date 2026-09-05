@@ -102,13 +102,16 @@ param(
     [string]$Sources = "release-sources",
     [string]$Downloads = "",
     [string]$Offline = "",
-    [string]$CargoPackage = "src-tauri"
+    [string]$CargoPackage = "src-tauri",
+    [switch]$ExpectSigned,
+    [string]$SignerCommonName = "Jason Ulbright"
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot "github-asset-name.ps1")
+. (Join-Path $PSScriptRoot "windows-signing.ps1")
 
 function Get-Sha256([string]$path) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
@@ -238,6 +241,15 @@ foreach ($file in $local) {
     if (-not (Test-OrdinalEqual $got.sha256 $want)) {
         throw "${assetName}: uploaded bytes differ from the built file (uploaded sha256 $($got.sha256), built $want)"
     }
+}
+
+# The signature, re-read from the bytes GitHub holds rather than from the build
+# directory. The build-time gate proves what was produced; this proves what the
+# public will download. -ExpectSigned is off by default so the offline fixture
+# runs, whose assets are not real binaries, still pass.
+if ($ExpectSigned) {
+    Assert-AuthenticodeSigned -Path (Get-Downloaded $assetNameOf[$installer[0].Name]).path `
+        -ExpectedSubjectCommonName $SignerCommonName
 }
 
 # The checksum file the public will verify against, read from the draft, must
