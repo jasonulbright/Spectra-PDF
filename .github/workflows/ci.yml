@@ -338,8 +338,10 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTRAPDF_GS_PATH=$($selected.FullName)" -Encoding utf8
         shell: pwsh
 
+      # --durations names the slowest tests in the log: a stall in this
+      # suite is otherwise a silent 30 minutes with no test named.
       - name: Run engine tests (full suite)
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/ -q --durations=25
         env:
           SPECTRAPDF_REQUIRE_ZERO_SKIPS: "1"
 

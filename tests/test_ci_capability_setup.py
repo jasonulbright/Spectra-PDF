@@ -827,8 +827,22 @@ def test_the_legacy_engine_verifier_runs_against_the_released_tag(
         _git("worktree", "remove", "--force", str(worktree))
 
 
+#: GitHub's asset rename, in Python, for the fixtures: characters outside
+#: [A-Za-z0-9._-] become '.', leading and trailing '.' are dropped. The rule
+#: itself ships as scripts/github-asset-name.ps1 and is shared by the release
+#: workflows' checksum step and the draft verifier; this is the fixture's
+#: model of what GitHub actually serves, checked against it below.
+def _github_asset_name(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]", ".", name).strip(".")
+
+
 def _draft_fixture(root: Path) -> tuple[list[str], Path]:
-    """A built release beside a byte-identical 'downloaded' draft."""
+    """A built release beside the 'downloaded' draft GitHub would serve.
+
+    The build's installer and portable names carry a space; GitHub serves them
+    dotted, so the draft's assets, the checksum file and the downloaded files
+    all use the dotted names, as the real drafts do.
+    """
     bundle = root / "nsis"
     portable = root / "portable"
     sources = root / "sources"
@@ -847,13 +861,15 @@ def _draft_fixture(root: Path) -> tuple[list[str], Path]:
     checksummed = [bundle / installer, portable / "Spectra PDF_1.2.3_x64-portable.zip",
                    sources / "libheif-1.0.tar.gz"]
     sums = "".join(
-        f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in checksummed
+        f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {_github_asset_name(p.name)}\n"
+        for p in checksummed
     )
     (bundle / "SHA256SUMS.txt").write_bytes(sums.encode("ascii"))
     assets = []
     for i, path in enumerate(list(files) + [bundle / "SHA256SUMS.txt"], start=100):
-        shutil.copyfile(path, downloaded / path.name)
-        assets.append({"name": path.name, "id": i, "size": path.stat().st_size})
+        asset_name = _github_asset_name(path.name)
+        shutil.copyfile(path, downloaded / asset_name)
+        assets.append({"name": asset_name, "id": i, "size": path.stat().st_size})
     # The shape Tauri generates for a `["nsis"]` bundle: the target-specific
     # entry the updater reads first, plus the bare fallback.
     entry = {
@@ -996,7 +1012,7 @@ def test_the_draft_verifier_accepts_a_faithful_upload(tmp_path: Path) -> None:
 def test_the_draft_verifier_refuses_a_same_length_wrong_installer(tmp_path: Path) -> None:
     """The size check the old step relied on passes this fixture; the hash fails it."""
     args, downloaded = _draft_fixture(tmp_path)
-    target = downloaded / "Spectra PDF_1.2.3_x64-setup.exe"
+    target = downloaded / "Spectra.PDF_1.2.3_x64-setup.exe"
     data = bytearray(target.read_bytes())
     data[-1] ^= 0xFF
     target.write_bytes(bytes(data))
@@ -1142,7 +1158,7 @@ def test_the_draft_verifier_refuses_a_manifest_asset_named_in_upper_case(tmp_pat
 
 def test_the_draft_verifier_refuses_an_installer_asset_differing_only_by_case(tmp_path: Path) -> None:
     args, downloaded = _draft_fixture(tmp_path)
-    _rename_asset(downloaded, "Spectra PDF_1.2.3_x64-setup.exe", "spectra pdf_1.2.3_x64-setup.exe")
+    _rename_asset(downloaded, "Spectra.PDF_1.2.3_x64-setup.exe", "spectra.pdf_1.2.3_x64-setup.exe")
     run = _run_verifier(args)
     assert run.returncode != 0
     assert "draft assets differ from the built set" in run.stdout + run.stderr
@@ -1201,6 +1217,102 @@ def test_the_draft_verifier_refuses_an_already_public_release(tmp_path: Path) ->
     run = _run_verifier(args)
     assert run.returncode != 0
     assert "is already public before verification" in run.stdout + run.stderr
+
+
+ASSET_NAME_RULE = "scripts/github-asset-name.ps1"
+
+
+def test_the_github_asset_name_rule_is_one_shared_function() -> None:
+    """One rule, dot-sourced by the draft verifier and by both release
+    workflows' checksum step. A second copy is a second rule, and the two
+    drift the moment a character is added to either."""
+    rule = (ROOT / ASSET_NAME_RULE).read_text()
+    assert "function Get-GitHubAssetName" in rule
+    assert "[^A-Za-z0-9._-]" in rule
+    verifier = (ROOT / DRAFT_VERIFIER).read_text()
+    assert '. (Join-Path $PSScriptRoot "github-asset-name.ps1")' in verifier
+    # The verifier never looks a draft asset up by a raw local file name.
+    assert "Get-Downloaded $file.Name" not in verifier
+    assert "Get-Downloaded $signature.Name" not in verifier
+    assert "Get-Downloaded $installer[0].Name" not in verifier
+
+
+@pytest.mark.parametrize(
+    "workflow,dot_source",
+    (
+        ("release.yml", ". ./scripts/github-asset-name.ps1"),
+        ("release-redo.yml", ". ./verifier/scripts/github-asset-name.ps1"),
+    ),
+)
+def test_the_checksum_step_writes_the_names_github_serves(
+    workflow: str, dot_source: str
+) -> None:
+    """`sha256sum -c SHA256SUMS.txt` is run beside DOWNLOADED files. A name
+    column carrying the build directory's spaced names fails for every user
+    who verifies a download, which is the whole point of publishing it."""
+    text = (ROOT / ".github" / "workflows" / workflow).read_text()
+    step = text.index("Upload SHA-256 checksums to the draft")
+    body = text[step:step + 2000]
+    assert dot_source in body
+    assert '"$h  $(Get-GitHubAssetName $f.Name)"' in body
+    assert '"$h  $($f.Name)"' not in body
+
+
+def test_the_python_model_matches_the_shipped_asset_name_rule() -> None:
+    """The fixtures' model of GitHub's rename is the shipped rule's output,
+    not a second guess at it."""
+    names = [
+        "Spectra PDF_1.2.3_x64-setup.exe",
+        "Spectra.PDF_1.2.3_x64-setup.exe",
+        "libheif-1.0.tar.gz",
+        "a+b (1).zip",
+        ".leading.and.trailing.",
+    ]
+    rule = str(ROOT / ASSET_NAME_RULE).replace("\\", "/")
+    script = "\n".join(
+        ['. "' + rule + '"'] + [f'Get-GitHubAssetName "{n}"' for n in names]
+    )
+    run = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", script], capture_output=True, text=True
+    )
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout.split() == [_github_asset_name(n) for n in names]
+
+
+def test_the_draft_verifier_refuses_a_draft_carrying_the_local_spaced_name(
+    tmp_path: Path,
+) -> None:
+    """GitHub cannot serve the spaced name, so a draft that lists one is not
+    this build's upload. The old gate expected exactly this name and failed a
+    correct draft on it."""
+    args, downloaded = _draft_fixture(tmp_path)
+    _rename_asset(
+        downloaded, "Spectra.PDF_1.2.3_x64-setup.exe", "Spectra PDF_1.2.3_x64-setup.exe"
+    )
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert "draft assets differ from the built set" in run.stdout + run.stderr
+
+
+def test_the_draft_verifier_refuses_a_checksum_file_naming_the_local_form(
+    tmp_path: Path,
+) -> None:
+    """No mapping is applied to the checksum file's names: it is read by
+    `sha256sum -c` beside files named as GitHub named them."""
+    args, downloaded = _draft_fixture(tmp_path)
+    sums = downloaded / "SHA256SUMS.txt"
+    body = sums.read_text().replace(
+        "Spectra.PDF_1.2.3_x64-setup.exe", "Spectra PDF_1.2.3_x64-setup.exe"
+    ).encode("ascii")
+    sums.write_bytes(body)
+    (tmp_path / "nsis" / "SHA256SUMS.txt").write_bytes(body)
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(
+        run,
+        "SHA256SUMS.txt names 'Spectra PDF_1.2.3_x64-setup.exe', "
+        "which is not an uploaded asset",
+    )
 
 
 # The manifest's final parse is the updater plugin's own deserializer (see
@@ -1490,6 +1602,9 @@ def verifier_revision(tmp_path: Path):
     _git("worktree", "add", "--detach", str(worktree), "HEAD")
     try:
         shutil.copyfile(ROOT / DRAFT_VERIFIER, worktree / DRAFT_VERIFIER)
+        # The verifier dot-sources its asset-name rule from beside itself, so
+        # the sibling travels with it wherever the script is placed.
+        shutil.copyfile(ROOT / ASSET_NAME_RULE, worktree / ASSET_NAME_RULE)
         args, downloaded = _draft_fixture(tmp_path)
         args[args.index("-File") + 1] = str(worktree / DRAFT_VERIFIER)
         env = {**os.environ, "CARGO_TARGET_DIR": str(ROOT / "src-tauri" / "target")}

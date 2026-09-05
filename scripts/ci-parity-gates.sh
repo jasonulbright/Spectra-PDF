@@ -11,6 +11,11 @@
 # This is NOT the full battery (tsc/lint/vitest/pytest — run those too). This
 # is the set of CI gates the battery historically OMITTED. Run BOTH.
 #
+# The full engine suite runs here only as the workflow-contract gate's single
+# file. `--durations=25` therefore lives on the runners' full-suite invocations
+# (.github/workflows/ci.yml "Run engine tests (full suite)" and release.yml
+# "Engine tests (full suite)"), which is where a stall has no other name.
+#
 # Exit non-zero on any gate failure. Each gate logs to its own *.local.log.
 R="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$R/ci-parity.results.local.txt"

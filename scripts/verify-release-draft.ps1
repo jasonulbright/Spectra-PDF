@@ -76,6 +76,17 @@
 # question being answered is whether the manifest parses with the updater
 # version THAT tag's binaries carry.
 #
+# GitHub RENAMES an uploaded asset (scripts/github-asset-name.ps1): characters
+# outside [A-Za-z0-9._-] become '.', so the local `Spectra PDF_<v>_x64-setup.exe`
+# is served as `Spectra.PDF_<v>_x64-setup.exe`. Every name comparison here is
+# therefore between GitHub's names: the local build's names are mapped through
+# Get-GitHubAssetName once and looked up by the mapped name, and the mapping is
+# what carries a downloaded file back to the local file it must hash-equal. A
+# draft carrying the un-renamed local name is refused -- GitHub cannot produce
+# one, so it is not this build's upload. The SHA256SUMS.txt name column and the
+# manifest's asset url go through the same mapping, because the public verifies
+# the downloaded file under the name GitHub gave it.
+#
 # -Offline <dir> skips the API and reads <dir>/release.json, <dir>/assets.json
 # and the "downloaded" asset files from <dir>; the comparison is otherwise the
 # same, which is what tests/test_ci_capability_setup.py drives. -Repo is still
@@ -96,6 +107,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+. (Join-Path $PSScriptRoot "github-asset-name.ps1")
 
 function Get-Sha256([string]$path) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
@@ -171,7 +184,22 @@ if (-not $sourceFiles) { throw "no corresponding-source archives in $Sources" }
 $sums = Get-Item -LiteralPath (Join-Path $Bundle "SHA256SUMS.txt")
 $local = @($installer) + @($signature) + @($portableZip) + @($sourceFiles) + @($sums)
 
-$expected = Sort-Ordinal (@($local.Name) + @("latest.json"))
+# Local file -> the name GitHub serves it under. Every later lookup of a
+# downloaded asset goes through this map, and it is one-to-one: two local
+# files that would land on one asset name is an upload that silently loses
+# one of them.
+$assetNameOf = New-OrdinalMap
+$localOf = New-OrdinalMap
+foreach ($file in $local) {
+    $assetName = Get-GitHubAssetName $file.Name
+    if ($localOf.ContainsKey($assetName)) {
+        throw "'$($file.Name)' and '$($localOf[$assetName].Name)' both upload as '$assetName'"
+    }
+    $assetNameOf[$file.Name] = $assetName
+    $localOf[$assetName] = $file
+}
+
+$expected = Sort-Ordinal (@($local | ForEach-Object { $assetNameOf[$_.Name] }) + @("latest.json"))
 $actual = Sort-Ordinal @($assets | ForEach-Object { [string]$_.name })
 Assert-SameOrdinalSet $expected $actual {
     "draft assets differ from the built set.`nexpected:`n$($expected -join "`n")`nactual:`n$($actual -join "`n")"
@@ -204,10 +232,11 @@ function Get-Downloaded([string]$name) {
 }
 
 foreach ($file in $local) {
-    $got = Get-Downloaded $file.Name
+    $assetName = $assetNameOf[$file.Name]
+    $got = Get-Downloaded $assetName
     $want = Get-Sha256 $file.FullName
     if (-not (Test-OrdinalEqual $got.sha256 $want)) {
-        throw "$($file.Name): uploaded bytes differ from the built file (uploaded sha256 $($got.sha256), built $want)"
+        throw "${assetName}: uploaded bytes differ from the built file (uploaded sha256 $($got.sha256), built $want)"
     }
 }
 
@@ -215,7 +244,9 @@ foreach ($file in $local) {
 # name exactly the checksummed assets and carry the hash of the uploaded bytes.
 # Entries are lowercase hex by construction (the workflow writes them so) and
 # are compared as written: an uppercase digest is not this workflow's output.
-$checksummed = Sort-Ordinal @(@($installer) + @($portableZip) + @($sourceFiles) | ForEach-Object { $_.Name })
+# The names are GitHub's, not the build directory's: `sha256sum -c` is run
+# against downloaded files, and no mapping is applied at that point.
+$checksummed = Sort-Ordinal @(@($installer) + @($portableZip) + @($sourceFiles) | ForEach-Object { Get-GitHubAssetName $_.Name })
 $named = @()
 foreach ($line in Get-Content -LiteralPath (Get-Downloaded "SHA256SUMS.txt").path) {
     if (-not $line.Trim()) { continue }
@@ -234,10 +265,10 @@ Assert-SameOrdinalSet $checksummed $named {
 
 $manifest = Get-Content -LiteralPath (Get-Downloaded "latest.json").path -Raw | ConvertFrom-Json
 if ([string]$manifest.version -cne $version) { throw "latest.json version '$($manifest.version)' != tag version '$version'" }
-$uploadedSig = (Get-Content -LiteralPath (Get-Downloaded $signature.Name).path -Raw).Trim()
+$uploadedSig = (Get-Content -LiteralPath (Get-Downloaded $assetNameOf[$signature.Name]).path -Raw).Trim()
 $localSig = (Get-Content -LiteralPath $signature.FullName -Raw).Trim()
-if ($uploadedSig -cne $localSig) { throw "uploaded $($signature.Name) is not the built signature" }
-$installerId = (Get-Downloaded $installer[0].Name).id
+if ($uploadedSig -cne $localSig) { throw "uploaded $($assetNameOf[$signature.Name]) is not the built signature" }
+$installerId = (Get-Downloaded $assetNameOf[$installer[0].Name]).id
 $installerUrl = "https://api.github.com/repos/$Repo/releases/assets/$installerId"
 # Platform entries are re-keyed into an ordinal map: `$manifest.platforms.$name`
 # resolves a property case-insensitively, which would let `Windows-x86_64-NSIS`
@@ -435,7 +466,7 @@ try {
     $env:SPECTRAPDF_UPDATER_NOTES_FILE = (Resolve-Path -LiteralPath $bodyFile).Path
     $env:SPECTRAPDF_UPDATER_PLATFORMS = $expectedPlatforms -join ","
     $env:SPECTRAPDF_UPDATER_URL = $installerUrl
-    $env:SPECTRAPDF_UPDATER_SIGNATURE_FILE = (Resolve-Path -LiteralPath (Get-Downloaded $signature.Name).path).Path
+    $env:SPECTRAPDF_UPDATER_SIGNATURE_FILE = (Resolve-Path -LiteralPath (Get-Downloaded $assetNameOf[$signature.Name]).path).Path
     # A test-name argument is a substring FILTER to the harness, and a filter
     # that selects nothing is a passing run (`running 0 tests`, exit 0). A
     # staged file that executed is therefore not yet a manifest that was
