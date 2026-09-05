@@ -2176,9 +2176,14 @@ def test_the_dlib_search_reads_the_registered_install_location() -> None:
 def test_the_nuget_fallback_survives_a_failed_presence_probe() -> None:
     """The NuGet branch is the verified source; nothing before it may be fatal."""
     lines = (ROOT / SIGN_TOOLS_SCRIPT).read_text(encoding="utf-8").splitlines()
-    fetch = next(
-        i for i, line in enumerate(lines) if "api.nuget.org" in line
-    )
+
+    def _targets_nuget(line: str) -> bool:
+        return any(
+            urlsplit(url).netloc == "api.nuget.org"
+            for url in re.findall(r"""https://[^\s"'$)]+""", line)
+        )
+
+    fetch = next(i for i, line in enumerate(lines) if _targets_nuget(line))
     assert any(
         re.search(r"^\s*\}?\s*catch\b", line) for line in lines[:fetch]
     ), "the NuGet fetch is not reached from a caught failure path"
