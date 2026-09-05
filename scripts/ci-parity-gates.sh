@@ -106,6 +106,11 @@ sys.stdout.write(run.stdout.decode())
 sys.exit(run.returncode)
 PY
 
+# --- Release gate: the signing script must no-op outside CI. A dev build that
+#     signs (or fails trying) is unbuildable off a runner, and the no-op is the
+#     only half of the signing pipeline that can be proven locally. ---
+gate sign-script-noop "$R/.venv/Scripts/python.exe" -m pytest   "tests/test_ci_capability_setup.py::test_the_sign_script_does_nothing_outside_ci" -q
+
 # --- Workflow-contract tests: the only local reader of .github/workflows/*.
 #     A workflow edit that breaks the contract otherwise surfaces on the runner
 #     (CI #144: the Ghostscript step moved into a script and the contract test's

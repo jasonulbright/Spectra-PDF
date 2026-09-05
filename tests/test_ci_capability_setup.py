@@ -243,6 +243,17 @@ def test_the_redo_publisher_takes_product_bytes_from_the_tag() -> None:
 #: makes a release public. Both must carry the same gates in the same order.
 PUBLISHER_JOBS = (("release.yml", "release"), ("release-redo.yml", "release"))
 
+#: Authenticode signing. The bundler invokes the sign script for every binary
+#: it produces, so the app executable is signed before NSIS packs it, the
+#: installer after, and the portable zip carries the executable the installer
+#: staged. Everything below holds the pipeline that makes that true.
+SIGN_SCRIPT = "scripts/sign-windows.ps1"
+SIGN_TOOLS_SCRIPT = "scripts/install-signing-tools.ps1"
+SIGNATURE_GATE_STEP = "Verify the Authenticode signatures on the built artifacts"
+SIGNING_TOOLS_STEP = "Install the Artifact Signing client tools"
+AZURE_LOGIN_STEP = "Azure login (federated, no secret)"
+SIGNING_ENVIRONMENT = "release"
+
 #: Every gate that runs against the built and uploaded assets, in the order
 #: the job runs them. All of them precede the publish step. The redo carries
 #: one more: the legacy engine gate for a tag that predates the manifest.
@@ -250,6 +261,7 @@ RELEASE_VERIFICATION_STEPS = {
     "release.yml": (
         "Verify the portable tree against the installer's staging",
         "Portable payload notice map covers every declared resource",
+        SIGNATURE_GATE_STEP,
         "Engine payload manifest is current",
         "Engine payload matches its manifest",
         "Shipped renderer carries no test harness",
@@ -258,6 +270,7 @@ RELEASE_VERIFICATION_STEPS = {
     "release-redo.yml": (
         "Verify the portable tree against the installer's staging",
         "Portable payload notice map covers every declared resource",
+        SIGNATURE_GATE_STEP,
         "Engine payload manifest is current",
         "Engine payload matches its manifest",
         REDO_LEGACY_ENGINE_STEP,
@@ -657,6 +670,20 @@ def _redo_regime(tag: str) -> str:
     return "manifest" if _tag_has(tag, ENGINE_MANIFEST) else "legacy"
 
 
+def _redo_signs(tag: str) -> bool:
+    """The selection the redo's signing-regime step makes, from the tag's tree.
+
+    A tag cut before signing existed configures no sign command, so the redo
+    skips the signing steps for it and their scripts need not be in that tag.
+    """
+    if not _tag_has(tag, "src-tauri/tauri.conf.json"):
+        return False
+    blob = subprocess.run(
+        ["git", "show", f"{tag}:src-tauri/tauri.conf.json"], cwd=ROOT, capture_output=True, text=True
+    )
+    return blob.returncode == 0 and "signCommand" in blob.stdout
+
+
 def _redo_script_references() -> list[tuple[str, str, str]]:
     """(step name, condition, script path) for every script a redo step runs."""
     refs = []
@@ -746,6 +773,8 @@ def test_the_redo_selects_a_regime_every_released_tag_can_run(index: int) -> Non
     checked = 0
     for step, cond, ref in _redo_script_references():
         if "outputs.regime ==" in cond and f"'{regime}'" not in cond:
+            continue
+        if "signing-regime.outputs.signed" in cond and not _redo_signs(tag):
             continue
         if ref.startswith("verifier/"):
             rel = ref.removeprefix("verifier/")
@@ -1220,6 +1249,7 @@ def test_the_draft_verifier_refuses_an_already_public_release(tmp_path: Path) ->
 
 
 ASSET_NAME_RULE = "scripts/github-asset-name.ps1"
+SIGNING_HELPERS = "scripts/windows-signing.ps1"
 
 
 def test_the_github_asset_name_rule_is_one_shared_function() -> None:
@@ -1605,6 +1635,7 @@ def verifier_revision(tmp_path: Path):
         # The verifier dot-sources its asset-name rule from beside itself, so
         # the sibling travels with it wherever the script is placed.
         shutil.copyfile(ROOT / ASSET_NAME_RULE, worktree / ASSET_NAME_RULE)
+        shutil.copyfile(ROOT / SIGNING_HELPERS, worktree / SIGNING_HELPERS)
         args, downloaded = _draft_fixture(tmp_path)
         args[args.index("-File") + 1] = str(worktree / DRAFT_VERIFIER)
         env = {**os.environ, "CARGO_TARGET_DIR": str(ROOT / "src-tauri" / "target")}
@@ -1939,3 +1970,178 @@ def test_the_extractor_exits_non_zero_on_a_missing_section() -> None:
 def test_the_release_notes_gate_is_mirrored_locally() -> None:
     parity = (ROOT / "scripts" / "ci-parity-gates.sh").read_text(encoding="utf-8")
     assert RELEASE_NOTES_SCRIPT in parity
+
+
+# --- Authenticode signing ---
+
+
+def _job_header(workflow: str, job: str) -> str:
+    """The job's keys above `steps:`, as text."""
+    lines = (ROOT / ".github" / "workflows" / workflow).read_text().splitlines()
+    start = lines.index(f"  {job}:")
+    out: list[str] = []
+    for line in lines[start + 1:]:
+        if line == "    steps:":
+            break
+        out.append(line)
+    return "\n".join(out)
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_every_publisher_builds_in_the_signing_environment(workflow: str, job: str) -> None:
+    """The federated credential is scoped to this environment.
+
+    A build job outside it cannot mint an Azure token at all, so the
+    environment is not decoration: it is the other half of the trust
+    relationship the app registration declares.
+    """
+    header = _job_header(workflow, job)
+    assert f"environment: {SIGNING_ENVIRONMENT}" in header, (workflow, header)
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_every_publisher_can_mint_an_id_token(workflow: str, job: str) -> None:
+    """`id-token: write` without losing `contents: write`.
+
+    Declaring job-level permissions REPLACES the workflow-level set, so the
+    release permission has to be restated beside the OIDC one.
+    """
+    header = _job_header(workflow, job)
+    assert "id-token: write" in header, (workflow, header)
+    assert "contents: write" in header, (workflow, header)
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_the_azure_login_precedes_the_build(workflow: str, job: str) -> None:
+    """The dlib resolves its token from the login the job already performed.
+
+    A login after the build signs nothing; the bundler runs the sign command
+    during the build step.
+    """
+    steps = _job_steps(workflow, job)
+    names = [name for name, _ in steps]
+    assert names.index(SIGNING_TOOLS_STEP) < names.index(AZURE_LOGIN_STEP), workflow
+    assert names.index(AZURE_LOGIN_STEP) < names.index(RELEASE_DRAFT_STEP), workflow
+    login = dict(steps)[AZURE_LOGIN_STEP]
+    assert "uses: azure/login@v3" in login, (workflow, login)
+    for secret in ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID"):
+        assert f"secrets.{secret}" in login, (workflow, secret)
+    tools = dict(steps)[SIGNING_TOOLS_STEP]
+    assert SIGN_TOOLS_SCRIPT in tools, (workflow, tools)
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_the_build_step_turns_signing_on(workflow: str, job: str) -> None:
+    """The sign script no-ops unless the build step says otherwise."""
+    draft = dict(_job_steps(workflow, job))[RELEASE_DRAFT_STEP]
+    assert "SPECTRAPDF_SIGN:" in draft, (workflow, draft)
+    for name in ("SPECTRAPDF_SIGN_ENDPOINT", "SPECTRAPDF_SIGN_ACCOUNT",
+                 "SPECTRAPDF_SIGN_PROFILE"):
+        assert name in draft, (workflow, name)
+
+
+def test_the_bundler_signs_through_the_tracked_script() -> None:
+    """`signCommand` names the script, and `%1` survives as its own argument.
+
+    The bundler substitutes an argument that IS `%1`; it does not rewrite
+    `%1` inside a longer string, so a path folded into another argument
+    would hand the script the literal placeholder.
+    """
+    conf = json.loads((ROOT / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+    command = conf["bundle"]["windows"]["signCommand"]
+    args = command["args"]
+    assert "%1" in args, args
+    scripts = [a for a in args if a.endswith("sign-windows.ps1")]
+    assert len(scripts) == 1, args
+    # The bundler runs with the Tauri directory as its working directory.
+    assert (ROOT / "src-tauri" / scripts[0]).resolve().is_file(), scripts
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_the_signature_gate_precedes_the_publish(workflow: str, job: str) -> None:
+    """A build that produced unsigned bytes leaves the draft unpublished."""
+    steps = _job_steps(workflow, job)
+    names = [name for name, _ in steps]
+    assert names.index(SIGNATURE_GATE_STEP) < names.index(RELEASE_PUBLISH_STEP), workflow
+    gate = dict(steps)[SIGNATURE_GATE_STEP]
+    assert "Assert-AuthenticodeSigned" in gate, (workflow, gate)
+    assert "-setup.exe" in gate, (workflow, gate)
+    assert "-portable.zip" in gate, (workflow, gate)
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_the_draft_verifier_is_asked_for_the_signature(workflow: str, job: str) -> None:
+    """Belt and braces: the downloaded bytes are checked too."""
+    verify = dict(_job_steps(workflow, job))[RELEASE_VERIFY_DRAFT_STEP]
+    assert "-ExpectSigned" in verify, (workflow, verify)
+
+
+def test_the_draft_verifier_defaults_to_not_expecting_a_signature() -> None:
+    """The offline fixture runs carry no real binaries.
+
+    A default-on switch would make every fixture-driven verification of this
+    script fail on a file that was never meant to be signed.
+    """
+    text = (ROOT / "scripts" / "verify-release-draft.ps1").read_text(encoding="utf-8")
+    assert "[switch]$ExpectSigned" in text
+    assert "if ($ExpectSigned) {" in text
+
+
+def test_the_sign_script_does_nothing_outside_ci(tmp_path: Path) -> None:
+    """A developer build has no credential and no client tools.
+
+    Run against a scratch file with the CI markers absent: exit 0, nothing
+    written to the file. Mirrored in scripts/ci-parity-gates.sh.
+    """
+    target = tmp_path / "scratch.exe"
+    target.write_bytes(b"MZ" + b"\0" * 64)
+    before = target.read_bytes()
+    env = dict(os.environ)
+    env.pop("GITHUB_ACTIONS", None)
+    env.pop("SPECTRAPDF_SIGN", None)
+    run = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+         "-File", str(ROOT / SIGN_SCRIPT), str(target)],
+        capture_output=True, text=True, env=env, cwd=ROOT,
+    )
+    assert run.returncode == 0, run.stderr
+    assert "not signing" in run.stdout
+    assert target.read_bytes() == before
+
+
+def test_the_sign_script_refuses_a_signing_run_with_no_coordinates(tmp_path: Path) -> None:
+    """In CI the script never silently skips: missing coordinates are fatal."""
+    target = tmp_path / "scratch.exe"
+    target.write_bytes(b"MZ")
+    env = dict(os.environ)
+    env["GITHUB_ACTIONS"] = "true"
+    env["SPECTRAPDF_SIGN"] = "1"
+    for name in ("SPECTRAPDF_SIGN_ENDPOINT", "SPECTRAPDF_SIGN_ACCOUNT",
+                 "SPECTRAPDF_SIGN_PROFILE"):
+        env.pop(name, None)
+    run = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+         "-File", str(ROOT / SIGN_SCRIPT), str(target)],
+        capture_output=True, text=True, env=env, cwd=ROOT,
+    )
+    assert run.returncode != 0
+    assert "SPECTRAPDF_SIGN_ENDPOINT" in run.stderr
+
+
+def test_the_local_battery_runs_the_sign_script_no_op() -> None:
+    """The one signing check that can run off a runner runs before every push."""
+    parity = (ROOT / "scripts" / "ci-parity-gates.sh").read_text(encoding="utf-8")
+    assert "sign-script-noop" in parity
+
+
+def test_the_client_tools_install_has_a_second_source() -> None:
+    """winget is not reachable from every unattended runner account.
+
+    The NuGet payload carries the same dlib, so the install falls back to it
+    and exports the path the resolver reads rather than failing the release.
+    """
+    text = (ROOT / SIGN_TOOLS_SCRIPT).read_text(encoding="utf-8")
+    assert "Microsoft.Azure.ArtifactSigningClientTools" in text
+    assert "api.nuget.org" in text
+    assert "SPECTRAPDF_SIGN_DLIB" in text
+    assert "GITHUB_ENV" in text
