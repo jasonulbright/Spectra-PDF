@@ -1,0 +1,72 @@
+name: Signing smoke
+
+# Runs the release job's signing chain -- the same client-tools install, the
+# same federated Azure login, the same scripts/sign-windows.ps1 invocation the
+# bundler makes, and the same Assert-AuthenticodeSigned gate the release is
+# published against -- over a probe file instead of a build. A broken signing
+# chain therefore surfaces in minutes rather than after the ~35-minute release
+# build has run.
+on:
+  workflow_dispatch:
+
+jobs:
+  sign-smoke:
+    name: Sign a probe executable
+    runs-on: windows-latest
+    # Gates the OIDC federated credential: the app registration trusts this
+    # repository only through this environment.
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 20
+    env:
+      # Non-secret signing coordinates, identical to release.yml: the account
+      # and profile name what signs; the subject is what the gate requires to
+      # have signed. SPECTRAPDF_SIGN is the flag scripts/sign-windows.ps1
+      # requires before it signs anything.
+      SPECTRAPDF_SIGN: "1"
+      SPECTRAPDF_SIGN_ENDPOINT: https://eus.codesigning.azure.net
+      SPECTRAPDF_SIGN_ACCOUNT: signalridgelabs
+      SPECTRAPDF_SIGN_PROFILE: SRL-Public
+      SPECTRAPDF_SIGN_SUBJECT_CN: Jason Ulbright
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the Artifact Signing client tools
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts/install-signing-tools.ps1
+
+      # OIDC: the job's id-token is exchanged for an Azure token through the
+      # app registration's federated credential, which is scoped to this
+      # environment. No client secret exists to leak or rotate.
+      - name: Azure login (federated, no secret)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # A signed Microsoft-shipped executable copied out of System32: signing
+      # replaces its signature on the copy, so the probe carries this run's
+      # signature and nothing else. The script is invoked exactly as the
+      # bundler's `signCommand` invokes it -- one positional path argument.
+      - name: Sign a probe executable
+        shell: pwsh
+        run: |
+          $probe = Join-Path $env:RUNNER_TEMP "probe"
+          New-Item -ItemType Directory -Force -Path $probe | Out-Null
+          $target = Join-Path $probe "spectrapdf-sign-probe.exe"
+          Copy-Item -LiteralPath (Join-Path $env:SystemRoot "System32\where.exe") -Destination $target -Force
+          powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 $target
+
+      - name: Verify the Authenticode signature on the probe
+        shell: pwsh
+        run: |
+          . ./scripts/windows-signing.ps1
+          $target = Join-Path $env:RUNNER_TEMP "probe\spectrapdf-sign-probe.exe"
+          Assert-AuthenticodeSigned -Path $target -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
+          $signature = Get-AuthenticodeSignature -LiteralPath $target
+          Write-Host "signer:    $($signature.SignerCertificate.Subject)"
+          Write-Host "timestamp: $($signature.TimeStamperCertificate.Subject)"
+          Write-Host "status:    $($signature.Status)"

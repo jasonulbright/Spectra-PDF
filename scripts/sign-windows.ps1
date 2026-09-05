@@ -9,8 +9,12 @@
 # tools, and a signing step that failed there would make `npm run tauri build`
 # unusable without changing anything about what ships.
 #
-# The credential comes from the Azure login the job performs before the build;
-# the dlib resolves it through DefaultAzureCredential.
+# The credential comes from the Azure login the job performs before the build.
+# The dlib resolves it through DefaultAzureCredential, whose other sources do not
+# fail fast on an Azure-hosted runner -- a managed-identity probe there blocks
+# rather than erroring -- so only the CLI credential is allowed to be tried.
+# signtool runs under a hard timeout: a credential that never returns would
+# otherwise hold the job open for its entire limit.
 
 param(
     [Parameter(Mandatory = $true, Position = 0)][string]$Path
@@ -38,6 +42,17 @@ $metadata = [ordered]@{
     Endpoint               = $env:SPECTRAPDF_SIGN_ENDPOINT
     CodeSigningAccountName = $env:SPECTRAPDF_SIGN_ACCOUNT
     CertificateProfileName = $env:SPECTRAPDF_SIGN_PROFILE
+    ExcludeCredentials     = @(
+        "EnvironmentCredential",
+        "WorkloadIdentityCredential",
+        "ManagedIdentityCredential",
+        "SharedTokenCacheCredential",
+        "VisualStudioCredential",
+        "VisualStudioCodeCredential",
+        "AzurePowerShellCredential",
+        "AzureDeveloperCliCredential",
+        "InteractiveBrowserCredential"
+    )
 }
 $metadataPath = Join-Path ([System.IO.Path]::GetTempPath()) "spectrapdf-signing-metadata.json"
 [System.IO.File]::WriteAllText($metadataPath, ($metadata | ConvertTo-Json -Depth 3), [System.Text.UTF8Encoding]::new($false))
@@ -46,6 +61,29 @@ $signtool = Get-SignToolPath
 $dlib = Get-ArtifactSigningDlibPath
 Write-Host "sign-windows: signtool=$signtool dlib=$dlib target=$Path"
 
-& $signtool sign /v /fd SHA256 /tr "http://timestamp.acs.microsoft.com" /td SHA256 `
-    /dlib $dlib /dmdf $metadataPath $Path
+$signArgs = @(
+    "sign", "/v", "/debug", "/fd", "SHA256",
+    "/tr", "http://timestamp.acs.microsoft.com", "/td", "SHA256",
+    "/dlib", "`"$dlib`"", "/dmdf", "`"$metadataPath`"", "`"$Path`""
+)
+$stdoutPath = Join-Path ([System.IO.Path]::GetTempPath()) "spectrapdf-signtool-out.log"
+$stderrPath = Join-Path ([System.IO.Path]::GetTempPath()) "spectrapdf-signtool-err.log"
+
+$proc = Start-Process -FilePath $signtool -ArgumentList $signArgs -PassThru -NoNewWindow `
+    -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -Wait:$false
+
+function Write-SignToolLogs {
+    foreach ($log in @($stdoutPath, $stderrPath)) {
+        if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log | Write-Host }
+    }
+}
+
+if (-not $proc.WaitForExit(600000)) {
+    & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Null
+    Write-SignToolLogs
+    throw "sign-windows: signtool did not finish within 10 minutes for '$Path'"
+}
+Write-SignToolLogs
+
+$LASTEXITCODE = $proc.ExitCode
 if ($LASTEXITCODE -ne 0) { throw "sign-windows: signtool sign failed for '$Path' (exit $LASTEXITCODE)" }

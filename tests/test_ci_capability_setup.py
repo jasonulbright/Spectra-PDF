@@ -2110,6 +2110,27 @@ def test_the_sign_script_does_nothing_outside_ci(tmp_path: Path) -> None:
     assert target.read_bytes() == before
 
 
+def test_the_sign_script_allows_only_the_cli_credential() -> None:
+    """DefaultAzureCredential's other sources do not fail fast on a hosted runner.
+
+    A managed-identity probe on an Azure-hosted runner blocks rather than
+    erroring, so the signing metadata excludes every credential but the CLI
+    one the job's federated login actually created.
+    """
+    text = (ROOT / SIGN_SCRIPT).read_text(encoding="utf-8")
+    assert "ExcludeCredentials" in text
+    excluded = text.split("ExcludeCredentials", 1)[1].split(")", 1)[0]
+    assert "ManagedIdentityCredential" in excluded, excluded
+    assert "AzureCliCredential" not in excluded, excluded
+
+
+def test_the_sign_script_bounds_and_traces_the_signtool_run() -> None:
+    """A credential that never returns must end the step, not the job's limit."""
+    text = (ROOT / SIGN_SCRIPT).read_text(encoding="utf-8")
+    assert "/debug" in text
+    assert "WaitForExit(" in text
+
+
 def test_the_sign_script_refuses_a_signing_run_with_no_coordinates(tmp_path: Path) -> None:
     """In CI the script never silently skips: missing coordinates are fatal."""
     target = tmp_path / "scratch.exe"
@@ -2187,3 +2208,104 @@ def test_the_nuget_fallback_survives_a_failed_presence_probe() -> None:
     assert any(
         re.search(r"^\s*\}?\s*catch\b", line) for line in lines[:fetch]
     ), "the NuGet fetch is not reached from a caught failure path"
+
+
+SMOKE_WORKFLOW = "signing-smoke.yml"
+SMOKE_JOB = "sign-smoke"
+SMOKE_SIGN_STEP = "Sign a probe executable"
+SMOKE_GATE_STEP = "Verify the Authenticode signature on the probe"
+
+#: The signing coordinates the smoke job must carry unchanged. A smoke run
+#: against a different account, profile, endpoint or subject proves the chain
+#: for coordinates the release does not use.
+SIGNING_COORDINATES = (
+    "SPECTRAPDF_SIGN_ENDPOINT",
+    "SPECTRAPDF_SIGN_ACCOUNT",
+    "SPECTRAPDF_SIGN_PROFILE",
+    "SPECTRAPDF_SIGN_SUBJECT_CN",
+)
+
+
+def _workflow_text(workflow: str) -> str:
+    return (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+
+
+def _env_block(text: str, indent: str) -> dict[str, str]:
+    """`name: value` pairs of the first `env:` mapping at `indent`."""
+    lines = text.splitlines()
+    start = lines.index(f"{indent}env:")
+    values: dict[str, str] = {}
+    for line in lines[start + 1:]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(indent + "  "):
+            break
+        name, _, value = line.strip().partition(":")
+        values[name] = value.strip().strip('"')
+    return values
+
+
+def test_the_signing_smoke_workflow_is_dispatch_only() -> None:
+    """A signing probe costs a certificate operation; nothing triggers it but a
+    person asking for it."""
+    text = _workflow_text(SMOKE_WORKFLOW)
+    assert "name: Signing smoke" in text
+    triggers = text.split("\non:", 1)[1].split("\njobs:", 1)[0]
+    assert "workflow_dispatch:" in triggers, triggers
+    for trigger in ("push:", "pull_request:", "schedule:", "release:"):
+        assert trigger not in triggers, (trigger, triggers)
+    assert _workflow_jobs(SMOKE_WORKFLOW) == [SMOKE_JOB]
+
+
+def test_the_signing_smoke_job_can_mint_the_azure_token() -> None:
+    """Without the environment and the id-token permission the job cannot reach
+    the federated credential at all, and the smoke run would fail for a reason
+    the release never hits."""
+    header = _job_header(SMOKE_WORKFLOW, SMOKE_JOB)
+    assert f"environment: {SIGNING_ENVIRONMENT}" in header, header
+    assert "id-token: write" in header, header
+    assert "runs-on: windows-latest" in header, header
+    assert "timeout-minutes: 20" in header, header
+
+
+def test_the_signing_smoke_job_uses_the_release_coordinates() -> None:
+    """The probe is signed by the same account and profile the release is, and
+    gated on the same subject; drift makes the smoke run prove nothing."""
+    release_env = _env_block(_workflow_text("release.yml"), "")
+    smoke_env = _env_block(_job_header(SMOKE_WORKFLOW, SMOKE_JOB), "    ")
+    for name in SIGNING_COORDINATES:
+        assert name in release_env, name
+        assert smoke_env.get(name) == release_env[name], (name, smoke_env, release_env)
+    # scripts/sign-windows.ps1 no-ops unless this is exactly "1".
+    assert smoke_env.get("SPECTRAPDF_SIGN") == "1", smoke_env
+
+
+def test_the_signing_smoke_job_runs_the_release_signing_chain() -> None:
+    """Same install, same login, same script, same gate -- in that order."""
+    steps = _job_steps(SMOKE_WORKFLOW, SMOKE_JOB)
+    names = [name for name, _ in steps]
+    for step in (SIGNING_TOOLS_STEP, AZURE_LOGIN_STEP, SMOKE_SIGN_STEP, SMOKE_GATE_STEP):
+        assert step in names, (step, names)
+    assert (
+        names.index(SIGNING_TOOLS_STEP)
+        < names.index(AZURE_LOGIN_STEP)
+        < names.index(SMOKE_SIGN_STEP)
+        < names.index(SMOKE_GATE_STEP)
+    ), names
+    body = dict(steps)
+    assert SIGN_TOOLS_SCRIPT in body[SIGNING_TOOLS_STEP]
+    assert "scripts/sign-windows.ps1" in body[SMOKE_SIGN_STEP]
+    gate = body[SMOKE_GATE_STEP]
+    assert "scripts/windows-signing.ps1" in gate, gate
+    assert "Assert-AuthenticodeSigned" in gate, gate
+    assert "SPECTRAPDF_SIGN_SUBJECT_CN" in gate, gate
+    assert "Get-AuthenticodeSignature" in gate, gate
+
+
+def test_the_signing_smoke_login_uses_the_release_secrets() -> None:
+    """The same three federated-credential inputs; a smoke run authenticating
+    some other way tests a path the release does not take."""
+    login = dict(_job_steps(SMOKE_WORKFLOW, SMOKE_JOB))[AZURE_LOGIN_STEP]
+    assert "uses: azure/login@v3" in login, login
+    for secret in ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID"):
+        assert f"secrets.{secret}" in login, (secret, login)
