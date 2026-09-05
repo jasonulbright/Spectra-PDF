@@ -71,6 +71,8 @@ $stderrPath = Join-Path ([System.IO.Path]::GetTempPath()) "spectrapdf-signtool-e
 
 $proc = Start-Process -FilePath $signtool -ArgumentList $signArgs -PassThru -NoNewWindow `
     -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -Wait:$false
+# ExitCode is unavailable unless the process handle is cached before the process exits.
+$null = $proc.Handle
 
 function Write-SignToolLogs {
     foreach ($log in @($stdoutPath, $stderrPath)) {
@@ -85,5 +87,7 @@ if (-not $proc.WaitForExit(600000)) {
 }
 Write-SignToolLogs
 
-$LASTEXITCODE = $proc.ExitCode
+$exitCode = $proc.ExitCode
+if ($null -eq $exitCode) { throw "sign-windows: signtool exit code unavailable" }
+$LASTEXITCODE = $exitCode
 if ($LASTEXITCODE -ne 0) { throw "sign-windows: signtool sign failed for '$Path' (exit $LASTEXITCODE)" }
