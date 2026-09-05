@@ -12,6 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -2142,6 +2143,10 @@ def test_the_client_tools_install_has_a_second_source() -> None:
     """
     text = (ROOT / SIGN_TOOLS_SCRIPT).read_text(encoding="utf-8")
     assert "Microsoft.Azure.ArtifactSigningClientTools" in text
-    assert "api.nuget.org" in text
+    urls = [urlsplit(u) for u in re.findall(r"https://[^\s\"'$)]+", text)]
+    assert any(
+        u.netloc == "api.nuget.org" and u.path.startswith("/v3-flatcontainer/")
+        for u in urls
+    )
     assert "SPECTRAPDF_SIGN_DLIB" in text
     assert "GITHUB_ENV" in text
