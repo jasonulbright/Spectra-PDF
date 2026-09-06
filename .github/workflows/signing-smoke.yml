@@ -17,6 +17,13 @@ name: Signing smoke
 # pass on a signature this run never produced.
 on:
   workflow_dispatch:
+    inputs:
+      delay_minutes:
+        description: >-
+          Minutes to idle between caching the signing-service token and signing.
+          Reproduces a release build's elapsed time so token expiry surfaces here.
+        type: number
+        default: 0
 
 jobs:
   sign-smoke:
@@ -28,7 +35,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    timeout-minutes: 20
+    # Headroom for delay_minutes: reproducing a release build's ~85-minute
+    # gap between login and the first signature must not hit the job timeout.
+    timeout-minutes: 150
     env:
       # Non-secret signing coordinates, identical to release.yml: the account
       # and profile name what signs; the subject is what the gate requires to
@@ -55,6 +64,33 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The federated assertion expires MINUTES after login and the token cached
+      # here is valid for at most 60 minutes. The signing dlib asks the CLI for
+      # a token in the signing-service scope, which the login itself does not
+      # cache, so every signature must happen inside that window measured from
+      # this step. This mirrors release.yml, where the same two steps sit
+      # immediately before the build.
+      - name: Cache a signing-service token
+        shell: pwsh
+        run: |
+          $raw = az account get-access-token --scope https://codesigning.azure.net/.default --output json
+          if ($LASTEXITCODE -ne 0) { throw "az account get-access-token failed (exit $LASTEXITCODE)" }
+          $token = $raw | ConvertFrom-Json
+          Write-Host "signing-service token cached, expires_on: $($token.expires_on)"
+
+      # A smoke that signs seconds after login proves nothing about a release
+      # build, which signs an hour later. The delay makes that elapsed time a
+      # dial the smoke can reproduce on demand.
+      - name: Idle before signing
+        shell: pwsh
+        run: |
+          $requested = "${{ inputs.delay_minutes }}"
+          $minutes = if ($requested) { [int]$requested } else { 0 }
+          if ($minutes -le 0) { Write-Host "no delay requested"; return }
+          Write-Host "idle start: $([DateTimeOffset]::UtcNow.ToString('o')) ($minutes min)"
+          Start-Sleep -Seconds ($minutes * 60)
+          Write-Host "idle end:   $([DateTimeOffset]::UtcNow.ToString('o'))"
 
       # The probe is compiled here rather than copied from a system binary: a
       # compiled PE carries no signature and matches no catalog, and its
