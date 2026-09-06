@@ -14,7 +14,9 @@ Three layers, each with its own failure mode:
 import hashlib
 import json
 import os
+import pathlib
 import shutil
+import sys
 import unicodedata
 
 import pikepdf
@@ -22,6 +24,7 @@ import pytest
 from pikepdf import Dictionary, Name
 
 from engine.spelling import (
+    _open_voikko,
     VoikkoDictionary,
     add_user_dictionary,
     check_spelling,
@@ -510,6 +513,23 @@ class TestFinnishMorphology:
         assert resolved_tag("fi", DICT_DIR) == VOIKKO_TAG
         assert resolved_tag("fi-FI", DICT_DIR) == VOIKKO_TAG
         assert isinstance(load_dictionary("fi", DICT_DIR), VoikkoDictionary)
+
+    def test_loading_the_binding_leaves_no_bytecode_in_the_resource_tree(self):
+        # The vendored binding is exec'd from its own file inside a shipped
+        # tree. With bytecode writing left on -- every host but the engine
+        # launcher -- the import machinery caches a .pyc beside it, and the
+        # provisioning manifest, which declares no such file, fails.
+        _require(VOIKKO_TAG)
+        tree = pathlib.Path(DICT_DIR) / VOIKKO_TAG
+        cache = tree / "__pycache__"
+        shutil.rmtree(cache, ignore_errors=True)
+        written = sys.dont_write_bytecode
+        sys.dont_write_bytecode = False
+        try:
+            _open_voikko(tree)
+        finally:
+            sys.dont_write_bytecode = written
+        assert not cache.exists()
 
     def test_a_generated_form_no_word_list_could_hold_is_accepted(self):
         # Both shapes the analyser exists for: an inflection nine morphemes

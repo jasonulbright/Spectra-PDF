@@ -195,6 +195,7 @@ def _open_voikko(tree: Path) -> Any:
     """
     import ctypes
     import importlib.util
+    import sys
 
     module_path = tree / "libvoikko.py"
     dll_path = tree / "libvoikko-1.dll"
@@ -210,7 +211,16 @@ def _open_voikko(tree: Path) -> Any:
     if spec is None or spec.loader is None:
         raise ValueError("The Finnish spelling engine could not be loaded: its binding is unreadable.")
     binding = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(binding)
+    # The dictionary tree is a shipped payload, not an import cache. A host that
+    # leaves bytecode writing on -- pytest, a script, any embedder without the
+    # engine launcher's guard -- would otherwise have this exec_module drop a
+    # __pycache__ into the tree, which no provisioning manifest declares.
+    written = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec.loader.exec_module(binding)
+    finally:
+        sys.dont_write_bytecode = written
 
     binding.Voikko.setLibrarySearchPath(str(tree))
     try:
