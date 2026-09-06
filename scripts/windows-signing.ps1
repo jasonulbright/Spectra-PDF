@@ -138,3 +138,48 @@ function Assert-AuthenticodeSigned {
     }
     Write-Host "signature ok: $Path (CN=$cn, timestamped by $($signature.TimeStamperCertificate.Subject))"
 }
+
+# The signed set. The bundler runs the sign command for every binary it
+# produces or stages -- NSIS plugin DLLs and every unsigned exe/dll among the
+# vendored resources included -- and only three of those are ours to sign: the
+# app executable, the installer, and the uninstaller. Signing a third party's
+# binary re-attributes it; signing an NSIS plugin changes bytes the toolchain
+# ships.
+#
+# The decision is path-based so it holds for a file that does not exist yet.
+# Paths arrive with mixed separators and unresolved `..` segments, so they are
+# normalized before matching. The uninstaller has no stable name: makensis
+# generates it as a temp file and substitutes that path for `%1` at compile
+# time, so it is matched by makensis's own temp-file shape.
+function Test-SignedArtifact {
+    param(
+        [Parameter(Mandatory = $true, Position = 0)][string]$Path
+    )
+    $full = [System.IO.Path]::GetFullPath(($Path -replace '/', '\'))
+    $leaf = [System.IO.Path]::GetFileName($full)
+    $segments = @($full.Split('\') | Where-Object { $_ })
+    $parents = @($segments | Select-Object -SkipLast 1)
+
+    # Staged third-party payloads: the vendored resource tree and the NSIS
+    # plugin copy. Nothing under either is ever ours.
+    foreach ($segment in $parents) {
+        if ($segment -ieq "resources" -or $segment -ieq "Plugins") { return $false }
+    }
+
+    $parent = if ($segments.Count -ge 2) { $segments[-2] } else { "" }
+    $grandparent = if ($segments.Count -ge 3) { $segments[-3] } else { "" }
+
+    # The app executable, as cargo built it, before NSIS packs it.
+    if ($leaf -ieq "spectrapdf.exe" -and ($parent -ieq "release" -or $parent -ieq "debug")) {
+        return $true
+    }
+    # The installer, under the bundle output for either NSIS target.
+    if ($leaf -like "*-setup.exe" -and $grandparent -ieq "bundle" -and
+        ($parent -ieq "nsis" -or $parent -ieq "nsis-updater")) {
+        return $true
+    }
+    # The uninstaller makensis hands to `!uninstfinalize`.
+    if ($leaf -imatch '^ns[0-9A-Za-z]{1,10}\.tmp$') { return $true }
+
+    return $false
+}

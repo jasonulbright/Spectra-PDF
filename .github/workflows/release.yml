@@ -491,6 +491,29 @@ jobs:
           releaseDraft: true
           prerelease: false
 
+      # The bundler discards the sign command's stdout and stderr and reports
+      # only "failed to run powershell", so the script's own log is the only
+      # record of why a signing invocation failed. Printed whatever the build
+      # did: a build that succeeded still shows which files were signed.
+      - name: Print the signing logs
+        if: always()
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "sign-windows"
+          if (-not (Test-Path -LiteralPath $dir)) {
+            Write-Host "no sign-windows logs"
+            return
+          }
+          $logs = @(Get-ChildItem -LiteralPath $dir -File | Sort-Object Name)
+          if ($logs.Count -eq 0) {
+            Write-Host "no sign-windows logs"
+            return
+          }
+          foreach ($log in $logs) {
+            Write-Host "===== $($log.Name) ====="
+            Get-Content -LiteralPath $log.FullName | Write-Host
+          }
+
       # The portable distribution: the SAME payload the installer lays down,
       # in a zip instead of an installer. Its tree is read out of the
       # installer's own generated manifest (installer.nsi) rather than from a

@@ -250,6 +250,10 @@ PUBLISHER_JOBS = (("release.yml", "release"), ("release-redo.yml", "release"))
 #: staged. Everything below holds the pipeline that makes that true.
 SIGN_SCRIPT = "scripts/sign-windows.ps1"
 SIGN_TOOLS_SCRIPT = "scripts/install-signing-tools.ps1"
+#: The directory the sign script writes its own log to, under RUNNER_TEMP.
+#: Fixed, because the workflows print its contents after the build step.
+SIGN_LOG_DIR = "sign-windows"
+SIGN_LOG_STEP = "Print the signing logs"
 SIGNATURE_GATE_STEP = "Verify the Authenticode signatures on the built artifacts"
 SIGNING_TOOLS_STEP = "Install the Artifact Signing client tools"
 AZURE_LOGIN_STEP = "Azure login (federated, no secret)"
@@ -2132,8 +2136,13 @@ def test_the_sign_script_bounds_and_traces_the_signtool_run() -> None:
 
 
 def test_the_sign_script_refuses_a_signing_run_with_no_coordinates(tmp_path: Path) -> None:
-    """In CI the script never silently skips: missing coordinates are fatal."""
-    target = tmp_path / "scratch.exe"
+    """In CI the script never silently skips: missing coordinates are fatal.
+
+    The target is inside the signed set: outside it the script refuses before
+    it reads any coordinate, and the run would prove nothing.
+    """
+    target = tmp_path / "release" / "spectrapdf.exe"
+    target.parent.mkdir()
     target.write_bytes(b"MZ")
     env = dict(os.environ)
     env["GITHUB_ACTIONS"] = "true"
@@ -2154,6 +2163,126 @@ def test_the_local_battery_runs_the_sign_script_no_op() -> None:
     """The one signing check that can run off a runner runs before every push."""
     parity = (ROOT / "scripts" / "ci-parity-gates.sh").read_text(encoding="utf-8")
     assert "sign-script-noop" in parity
+
+
+#: Every path the bundler passed to the sign command in a real local bundle,
+#: one per category it produces. The app executable, the installer and the
+#: uninstaller are the whole signed set; NSIS plugin DLLs and the vendored
+#: resource trees are third-party bytes this project must not re-attribute.
+#: Paths are recorded exactly as the bundler emitted them -- mixed separators
+#: and unresolved `..` segments included -- because the rule reads them raw.
+_BUNDLED = r"C:\projects\spectra-studio\src-tauri"
+SIGNED_SET_FIXTURES = {
+    _BUNDLED + r"\target\release\spectrapdf.exe": True,
+    _BUNDLED + r"\target\release\bundle/nsis/Spectra PDF_1.2.1_x64-setup.exe": True,
+    _BUNDLED + r"\target\release\bundle\nsis-updater\Spectra PDF_1.2.1_x64-setup.exe": True,
+    r"C:\Users\jason\AppData\Local\Temp\nst2AE2.tmp": True,
+    # NSIS plugins, copied into the bundle output so the toolchain cache keeps
+    # its hashes.
+    _BUNDLED + r"\target\release\nsis\x64\Plugins\x86-unicode\System.dll": False,
+    _BUNDLED + r"\target\release\nsis\x64\Plugins\x86-unicode\NSISdl.dll": False,
+    _BUNDLED + r"\target\release\nsis\x64\Plugins\x86-unicode\StartMenu.dll": False,
+    _BUNDLED + r"\target\release\nsis\x64\Plugins\x86-unicode\nsDialogs.dll": False,
+    _BUNDLED + r"\target\release\nsis\x64\Plugins\x86-unicode\additional/nsis_tauri_utils.dll": False,
+    # Vendored resources: one per tree the bundler walked.
+    _BUNDLED + r"\..\resources\tesseract\tesseract.exe": False,
+    _BUNDLED + r"\..\resources\tesseract\libtesseract-5.dll": False,
+    _BUNDLED + r"\..\resources\jbig2enc\jbig2.exe": False,
+    _BUNDLED + r"\..\resources\dictionaries\fi\libvoikko-1.dll": False,
+    _BUNDLED + r"\..\resources\libreoffice\program\intl\fbintl.dll": False,
+    _BUNDLED + r"\..\resources\libreoffice\program\python-core-3.12.13\lib\setuptools\cli.exe": False,
+    _BUNDLED + r"\..\resources\python\Lib\site-packages\pikepdf.libs\qpdf30-eca0.dll": False,
+    # A resource carrying the app executable's name is still a resource.
+    _BUNDLED + r"\..\resources\python\spectrapdf.exe": False,
+    # Shapes the rule must not widen into.
+    _BUNDLED + r"\target\release\openpdfstudio.exe": False,
+    _BUNDLED + r"\target\release\bundle\nsis\Spectra PDF_1.2.1_x64.exe": False,
+    _BUNDLED + r"\target\release\build\spectrapdf.exe": False,
+}
+
+
+def test_the_signed_set_is_exactly_three_artifacts() -> None:
+    """The bundler's sign command runs for far more than this project signs.
+
+    Every path a real bundle passed to the script is classified here: the app
+    executable, the installer and the uninstaller are signed and nothing else
+    is. Signing a vendored binary re-attributes someone else's code, and
+    signing an NSIS plugin changes bytes the toolchain ships.
+    """
+    paths = list(SIGNED_SET_FIXTURES)
+    script = (
+        f". '{ROOT / SIGNING_HELPERS}'\n"
+        "foreach ($line in $input) {\n"
+        "  if ($line) { Write-Output ('{0} {1}' -f (Test-SignedArtifact $line), $line) }\n"
+        "}\n"
+    )
+    run = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        input="\n".join(paths), capture_output=True, text=True, cwd=ROOT,
+    )
+    assert run.returncode == 0, run.stderr
+    verdicts = {}
+    for line in run.stdout.splitlines():
+        verdict, _, path = line.partition(" ")
+        if verdict in ("True", "False"):
+            verdicts[path] = verdict == "True"
+    assert verdicts == SIGNED_SET_FIXTURES, run.stdout
+
+
+def test_the_sign_script_refuses_a_file_outside_the_signed_set() -> None:
+    """The decision precedes every credential operation, so a plugin DLL or a
+    vendored binary costs no certificate call."""
+    text = (ROOT / SIGN_SCRIPT).read_text(encoding="utf-8")
+    assert "Test-SignedArtifact" in text
+    assert text.index("Test-SignedArtifact") < text.index("SPECTRAPDF_SIGN_ENDPOINT")
+    assert "outside the signed set" in text
+
+
+def test_the_sign_script_never_replaces_an_existing_signature() -> None:
+    """A file that already verifies carries an attribution; re-signing it
+    would replace that attribution with this project's."""
+    text = (ROOT / SIGN_SCRIPT).read_text(encoding="utf-8")
+    assert "already carries a valid signature" in text
+    guard = text.split("already carries a valid signature", 1)[0]
+    assert "verify /pa /q $Path" in guard, guard
+    assert "$verifyCode -eq 0" in guard, guard
+
+
+def test_the_sign_script_needs_no_module_autoload() -> None:
+    """The bundler's parent process can hand down a PSModulePath that leaves
+    Microsoft.PowerShell.Security unloadable, which turns a cmdlet call into a
+    terminating error before anything is signed. Signature state is read
+    through signtool, a process, so the script survives that environment."""
+    text = (ROOT / SIGN_SCRIPT).read_text(encoding="utf-8")
+    assert "Get-AuthenticodeSignature" not in text, text
+
+
+def test_the_sign_script_logs_every_line_to_a_file() -> None:
+    """The bundler pipes the sign command's streams and discards them, so a
+    failed invocation is reported only as `failed to run powershell`. The
+    script's own log is the record, and a terminating error reaches it with
+    its stack."""
+    text = (ROOT / SIGN_SCRIPT).read_text(encoding="utf-8")
+    assert SIGN_LOG_DIR in text, text
+    assert "$env:RUNNER_TEMP" in text
+    assert "GetTempPath()" in text
+    assert "function Write-SignLog" in text
+    assert "AppendAllText" in text
+    assert "ScriptStackTrace" in text
+    catch = text.split("} catch {", 1)[-1]
+    assert "exit 1" in catch, catch
+
+
+def test_the_sign_script_logs_the_environment_it_ran_in() -> None:
+    """The failure this log exists for is environmental: the module path and
+    the console state the bundler's spawn hands down differ from a step
+    shell's, and the resolved tool paths say which client tools answered."""
+    text = (ROOT / SIGN_SCRIPT).read_text(encoding="utf-8")
+    header = text.split("if (-not (Test-SignedArtifact", 1)[0]
+    for probe in ("Get-Location", "PSVersionTable.PSVersion",
+                  "env:PSModulePath", "UserInteractive", "IsOutputRedirected"):
+        assert probe in header, (probe, header)
+    assert "signtool=$signtool dlib=$dlib" in text, text
 
 
 def test_the_client_tools_install_has_a_second_source() -> None:
@@ -2213,6 +2342,7 @@ def test_the_nuget_fallback_survives_a_failed_presence_probe() -> None:
 SMOKE_WORKFLOW = "signing-smoke.yml"
 SMOKE_JOB = "sign-smoke"
 SMOKE_SIGN_STEP = "Sign a probe executable"
+SMOKE_REFUSE_STEP = "Refuse a probe outside the signed set"
 SMOKE_GATE_STEP = "Verify the Authenticode signature on the probe"
 
 #: The signing coordinates the smoke job must carry unchanged. A smoke run
@@ -2323,3 +2453,52 @@ def test_the_signing_smoke_probe_starts_unsigned() -> None:
     assert_unsigned = next(i for i, line in enumerate(lines) if "NotSigned" in line)
     signs = next(i for i, line in enumerate(lines) if "sign-windows.ps1" in line)
     assert compiles < assert_unsigned < signs, lines
+
+
+def _spawned_sign_args(text: str) -> list[str]:
+    """The argument list the smoke's Node spawn passes ahead of the target."""
+    listed = text.split("const args = ", 1)[1].split("process.argv[2]", 1)[0]
+    return re.findall(r"'([^']+)'", listed)
+
+
+def test_the_smoke_invokes_the_script_the_way_the_bundler_does() -> None:
+    """A step shell has a console and its own environment; the bundler spawns
+    the script from Node with piped stdio, from src-tauri, through the relative
+    path and argument list `signCommand` carries. An invocation only a step
+    shell makes cannot fail the way the bundler's does.
+    """
+    text = dict(_job_steps(SMOKE_WORKFLOW, SMOKE_JOB))[SMOKE_SIGN_STEP]
+    assert "spawnSync('powershell'" in text, text
+    assert "cwd: 'src-tauri'" in text, text
+    assert "stdio: 'pipe'" in text, text
+    assert "node $spawn $target" in text, text
+    conf = json.loads((ROOT / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+    args = conf["bundle"]["windows"]["signCommand"]["args"]
+    assert _spawned_sign_args(text) == [a for a in args if a != "%1"], text
+
+
+def test_the_smoke_refuses_through_the_same_spawn() -> None:
+    """The refusal path is proven for the invocation the bundler makes, not for
+    a step shell's."""
+    text = dict(_job_steps(SMOKE_WORKFLOW, SMOKE_JOB))[SMOKE_REFUSE_STEP]
+    assert "spawn-sign.js" in text, text
+    assert "node " in text, text
+    assert "outside the signed set" in text, text
+
+
+@pytest.mark.parametrize("workflow,job", (
+    ("release.yml", "release"),
+    (SMOKE_WORKFLOW, SMOKE_JOB),
+))
+def test_the_signing_logs_are_printed_whatever_the_build_did(
+    workflow: str, job: str
+) -> None:
+    """A log written on a runner and never printed explains nothing. The step
+    runs on failure, which is the case it exists for."""
+    steps = dict(_job_steps(workflow, job))
+    assert SIGN_LOG_STEP in steps, list(steps)
+    text = steps[SIGN_LOG_STEP]
+    assert "if: always()" in text, text
+    assert SIGN_LOG_DIR in text, text
+    assert "no sign-windows logs" in text, text
+    assert "Get-Content" in text, text

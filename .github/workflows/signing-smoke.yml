@@ -9,8 +9,10 @@ name: Signing smoke
 #
 # Fixture invariant: the probe is compiled in the job, so it carries no
 # signature and matches no Windows catalog, and it is asserted NotSigned
-# before this job signs it. A probe copied from a system binary fails both
-# ways: the Authenticode PE hash excludes the signature block, so catalog
+# before this job signs it. It is compiled under the app executable's own
+# path shape, because the script signs only the three artifacts the release
+# publishes and refuses anything else by path. A probe copied from a system
+# binary fails both ways: the Authenticode PE hash excludes the signature block, so catalog
 # membership survives both the copy and a signature strip, and the gate could
 # pass on a signature this run never produced.
 on:
@@ -57,16 +59,21 @@ jobs:
       # The probe is compiled here rather than copied from a system binary: a
       # compiled PE carries no signature and matches no catalog, and its
       # unsigned state is asserted before signing, so the signature the gate
-      # verifies can only be the one this job made. The script is invoked
-      # exactly as the bundler's `signCommand` does -- one positional path.
+      # verifies can only be the one this job made.
+      #
+      # The invocation reproduces the bundler's: spawned by Node with piped
+      # stdio, from src-tauri, through the relative script path and argument
+      # list `signCommand` carries. A step shell has a console and a different
+      # environment, and an invocation that only a step shell makes cannot fail
+      # the way the bundler's does.
       - name: Sign a probe executable
         shell: pwsh
         run: |
           . ./scripts/windows-signing.ps1
-          $probe = Join-Path $env:RUNNER_TEMP "probe"
+          $probe = Join-Path $env:RUNNER_TEMP "target\release"
           New-Item -ItemType Directory -Force -Path $probe | Out-Null
-          $target = Join-Path $probe "spectrapdf-sign-probe.exe"
-          $source = Join-Path $probe "probe.cs"
+          $target = Join-Path $probe "spectrapdf.exe"
+          $source = Join-Path $env:RUNNER_TEMP "probe.cs"
           Set-Content -LiteralPath $source -Encoding ascii -Value 'class P { static int Main() { return 0; } }'
           $csc = Join-Path $env:SystemRoot "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
           & $csc /nologo /target:exe /out:$target $source
@@ -77,17 +84,76 @@ jobs:
           if ($before.Status -ne "NotSigned") {
             throw "the probe is still signed before this job signs it (status $($before.Status))"
           }
-          powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 $target
+          $spawn = Join-Path $env:RUNNER_TEMP "spawn-sign.js"
+          Set-Content -LiteralPath $spawn -Encoding ascii -Value @'
+          const cp = require('child_process');
+          const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            '../scripts/sign-windows.ps1', process.argv[2]];
+          const run = cp.spawnSync('powershell', args,
+            { cwd: 'src-tauri', stdio: 'pipe', encoding: 'utf8' });
+          console.log('spawn status: ' + run.status);
+          console.log('spawn error: ' + (run.error ? run.error.message : 'none'));
+          console.log('--- stdout ---');
+          console.log(run.stdout || '');
+          console.log('--- stderr ---');
+          console.log(run.stderr || '');
+          process.exit(run.status === 0 ? 0 : 1);
+          '@
+          node $spawn $target
+          if ($LASTEXITCODE -ne 0) { throw "the bundler-shaped sign invocation failed (exit $LASTEXITCODE)" }
           $signed = Get-AuthenticodeSignature -LiteralPath $target
           Write-Host "signer:    $($signed.SignerCertificate.Subject)"
           Write-Host "timestamp: $($signed.TimeStamperCertificate.Subject)"
           Write-Host "status:    $($signed.Status)"
 
+      # The bundler hands the sign command every binary it stages, vendored
+      # third-party payloads included. A probe under a resources tree proves
+      # the script refuses those before it reaches the certificate.
+      - name: Refuse a probe outside the signed set
+        shell: pwsh
+        run: |
+          $staged = Join-Path $env:RUNNER_TEMP "resources\tesseract"
+          New-Item -ItemType Directory -Force -Path $staged | Out-Null
+          $target = Join-Path $staged "probe.dll"
+          Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP "target\release\spectrapdf.exe") -Destination $target -Force
+          $output = node (Join-Path $env:RUNNER_TEMP "spawn-sign.js") $target
+          $code = $LASTEXITCODE
+          $output | Write-Host
+          if ($code -ne 0) { throw "the sign script failed on a file outside the signed set (exit $code)" }
+          if (-not ($output -match "outside the signed set")) {
+            throw "the sign script did not refuse '$target'"
+          }
+          $status = (Get-AuthenticodeSignature -LiteralPath $target).Status
+          Write-Host "staged probe status: $status"
+          if ($status -ne "NotSigned") { throw "a file outside the signed set was signed (status $status)" }
+
+      # The bundler discards both of the sign command's streams, so the
+      # script's own log is the only record of a failed invocation. Printed
+      # whatever the invocations above did.
+      - name: Print the signing logs
+        if: always()
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "sign-windows"
+          if (-not (Test-Path -LiteralPath $dir)) {
+            Write-Host "no sign-windows logs"
+            return
+          }
+          $logs = @(Get-ChildItem -LiteralPath $dir -File | Sort-Object Name)
+          if ($logs.Count -eq 0) {
+            Write-Host "no sign-windows logs"
+            return
+          }
+          foreach ($log in $logs) {
+            Write-Host "===== $($log.Name) ====="
+            Get-Content -LiteralPath $log.FullName | Write-Host
+          }
+
       - name: Verify the Authenticode signature on the probe
         shell: pwsh
         run: |
           . ./scripts/windows-signing.ps1
-          $target = Join-Path $env:RUNNER_TEMP "probe\spectrapdf-sign-probe.exe"
+          $target = Join-Path $env:RUNNER_TEMP "target\release\spectrapdf.exe"
           Assert-AuthenticodeSigned -Path $target -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
           $signature = Get-AuthenticodeSignature -LiteralPath $target
           Write-Host "signer:    $($signature.SignerCertificate.Subject)"
