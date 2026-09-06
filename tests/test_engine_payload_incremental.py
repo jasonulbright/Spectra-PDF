@@ -34,7 +34,7 @@ def _mtimes() -> dict[str, int]:
     }
 
 
-def test_payload_build_stabilizes_and_still_repairs_drift(tmp_path: Path):
+def test_payload_build_stabilizes_and_still_repairs_drift():
     # Historical-package verifier fixtures share this target directory. With
     # uncommitted build.rs edits, their newer compiled build-script can mask
     # this checkout's older-mtime source. Start from this package's artifacts
@@ -58,16 +58,24 @@ def test_payload_build_stabilizes_and_still_repairs_drift(tmp_path: Path):
     damaged, missing = [STAGING / p for p in sorted(before)[:2]]
     damaged_bytes, missing_bytes = damaged.read_bytes(), missing.read_bytes()
     assert damaged_bytes
-    with tempfile.TemporaryDirectory(prefix="incremental-probe.local.", dir=STAGING) as scratch:
+    # Hard links cannot cross volumes: the hosted runner's pytest temp is on
+    # C: while its checkout is on D:. Keep the other link outside the pruned
+    # staging tree, but alongside it on the same filesystem.
+    with (
+        tempfile.TemporaryDirectory(prefix="hardlink-probe.local.", dir=STAGING.parent) as external_dir,
+        tempfile.TemporaryDirectory(prefix="incremental-probe.local.", dir=STAGING) as scratch,
+    ):
         stale = Path(scratch) / "__pycache__" / "obsolete.pyc"
         stale.parent.mkdir()
         stale.write_bytes(b"obsolete bytecode")
         try:
             corrupt = bytes([damaged_bytes[0] ^ 1]) + damaged_bytes[1:]
-            external = tmp_path / "hardlink-source.local.bin"
+            external = Path(external_dir) / "hardlink-source.local.bin"
             external.write_bytes(corrupt)
+            assert external.stat().st_dev == damaged.stat().st_dev
             damaged.unlink()
             os.link(external, damaged)
+            assert os.path.samefile(external, damaged), "fixture did not create a real hard link"
             missing.unlink()
             _build()
             assert damaged.read_bytes() == damaged_bytes
