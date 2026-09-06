@@ -9,7 +9,9 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      # Version tags only: "v*" also matches non-release tags such as the
+      # vendor cache tag, which starts a release run for a tag with no version.
+      - "v[0-9]*"
 
 permissions:
   contents: write

@@ -25,11 +25,14 @@
 
 param(
     [string]$TessVersion = "5.4.0.20240606",
-    [string]$DestDir = "$PSScriptRoot\..\resources\tesseract"
+    [string]$DestDir = "$PSScriptRoot\..\resources\tesseract",
+    [switch]$DownloadOnly
 )
 
 # Pinned installer checksum -- update deliberately alongside $TessVersion.
 # Verified against the served 50,175,248-byte installer.
+# The mirrored bytes were fetched from the upstream origin
+# https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-$TessVersion.exe
 $ExpectedSha256 = "C885FFF6998E0608BA4BB8AB51436E1C6775C2BAFC2559A19B423E18678B60C9"
 
 # The checked-in JBIG-free libtiff, and the hash it must have. Update both
@@ -37,7 +40,14 @@ $ExpectedSha256 = "C885FFF6998E0608BA4BB8AB51436E1C6775C2BAFC2559A19B423E18678B6
 $LibTiffSrc = Join-Path $PSScriptRoot "tesseract-libtiff\libtiff-6.dll"
 $ExpectedLibTiffSha256 = "AA79B1C2EC7FD815325C94A5E97BC904A962D9A40E55C74EB06A804AD7D756D8"
 
-$Url = "https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-$TessVersion.exe"
+# Ordered installer sources, tried in turn. The project-hosted mirror carries the
+# same bytes as the upstream build and is the only source: the upstream host is
+# geo-blocked for GitHub-hosted runners, so it cannot serve a workflow. The list
+# shape stays so a second mirror can be added. Whichever source answers, the
+# SHA-256 pin above decides the bytes.
+$InstallerSources = @(
+    "https://github.com/jasonulbright/Spectra-PDF/releases/download/vendor-cache/tesseract-ocr-w64-setup-$TessVersion.exe"
+)
 
 Write-Host "Vendoring Tesseract $TessVersion (UB Mannheim build, Apache-2.0)..."
 
@@ -117,7 +127,7 @@ function Get-JbigProblems {
 }
 
 $tessExe = Join-Path $DestDir "tesseract.exe"
-if (Test-Path $tessExe) {
+if ((-not $DownloadOnly) -and (Test-Path $tessExe)) {
     $current = (& $tessExe --version 2>$null | Select-Object -First 1)
     $hasTsv = Test-Path (Join-Path $DestDir "tessdata\configs\tsv")
     $hasModel = @(Get-ChildItem (Join-Path $DestDir "tessdata\*.traineddata") -File -ErrorAction SilentlyContinue).Count -gt 0
@@ -149,7 +159,7 @@ $SevenZip = @(
 if (-not $SevenZip) {
     $SevenZip = (Get-Command 7z -ErrorAction SilentlyContinue).Source
 }
-if (-not $SevenZip) {
+if (-not $SevenZip -and -not $DownloadOnly) {
     Write-Error "7-Zip not found. Install it (e.g. 'choco install 7zip') and retry."
     exit 1
 }
@@ -160,20 +170,40 @@ $Extracted = Join-Path $Work "extracted"
 Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $Work | Out-Null
 
-Write-Host "Downloading $Url..."
-# A User-Agent is REQUIRED: this host answers PowerShell's default UA with
-# 403 Forbidden while the same URL serves successfully to curl. Do
-# not "simplify" this away; the failure is a Forbidden that reads like the file
-# having moved.
-try {
-    Invoke-WebRequest -Uri $Url -OutFile $Installer -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -MaximumRedirection 5
-} catch {
-    Write-Error "Download failed: $($_.Exception.Message)"
-    exit 1
-}
-if (-not (Test-Path $Installer)) {
-    Write-Error "Download produced no file at $Installer"
-    exit 1
+# A local installer supplied by the environment replaces the download entirely.
+# It is hash-checked below like any downloaded copy -- the override selects the
+# source, never the acceptance criterion.
+$Override = $env:SPECTRAPDF_TESSERACT_INSTALLER
+if ($Override -and (Test-Path $Override)) {
+    Copy-Item $Override -Destination $Installer -Force
+    Write-Host "Using local installer from SPECTRAPDF_TESSERACT_INSTALLER: $Override"
+} else {
+    # A User-Agent is REQUIRED: some hosts answer PowerShell's default UA with
+    # 403 Forbidden while the same URL serves successfully to curl. Do not
+    # "simplify" this away; the failure is a Forbidden that reads like the file
+    # having moved.
+    $downloaded = $false
+    foreach ($src in $InstallerSources) {
+        Write-Host "Downloading $src..."
+        try {
+            Invoke-WebRequest -Uri $src -OutFile $Installer -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -MaximumRedirection 5
+        } catch {
+            Write-Host "  Source failed: $src -- $($_.Exception.Message)"
+            Remove-Item $Installer -Force -ErrorAction SilentlyContinue
+            continue
+        }
+        if (-not (Test-Path $Installer)) {
+            Write-Host "  Source produced no file: $src"
+            continue
+        }
+        $downloaded = $true
+        break
+    }
+    if (-not $downloaded) {
+        Write-Error ("Download failed from every source:`n" +
+                     (($InstallerSources | ForEach-Object { "  $_" }) -join "`n"))
+        exit 1
+    }
 }
 
 $actual = (Get-FileHash $Installer -Algorithm SHA256).Hash
@@ -182,6 +212,11 @@ if ($actual -ne $ExpectedSha256) {
     exit 1
 }
 Write-Host "Checksum verified ($ExpectedSha256)."
+
+if ($DownloadOnly) {
+    Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
+    exit 0
+}
 
 & $SevenZip x $Installer "-o$Extracted" -y | Out-Null
 

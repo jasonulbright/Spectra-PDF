@@ -88,6 +88,20 @@ def _axis_constants() -> set[tuple[str, str]]:
     return found
 
 
+def test_the_release_trigger_ignores_non_version_tags() -> None:
+    """A tag filter of "v*" also matches non-release tags (the vendor cache
+    tag), which starts a release run against a tag carrying no version."""
+    text = (ROOT / ".github" / "workflows" / "release.yml").read_text()
+    tags = text.index("    tags:\n")
+    block = text[tags : text.index("\npermissions:", tags)]
+    patterns = [
+        line.split("- ", 1)[1].strip().strip('"\'')
+        for line in block.splitlines()
+        if line.strip().startswith("- ")
+    ]
+    assert patterns == ["v[0-9]*"]
+
+
 def _assert_capabilities_precede_engine_tests(workflow: str) -> None:
     text = (ROOT / ".github" / "workflows" / workflow).read_text()
     engine_test = text.index("python -m pytest tests/ -q")
