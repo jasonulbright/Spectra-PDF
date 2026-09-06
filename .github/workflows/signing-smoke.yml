@@ -84,6 +84,8 @@ jobs:
           if ($before.Status -ne "NotSigned") {
             throw "the probe is still signed before this job signs it (status $($before.Status))"
           }
+          $unsigned = Join-Path $env:RUNNER_TEMP "probe-unsigned.exe"
+          Copy-Item -LiteralPath $target -Destination $unsigned -Force
           $spawn = Join-Path $env:RUNNER_TEMP "spawn-sign.js"
           Set-Content -LiteralPath $spawn -Encoding ascii -Value @'
           const cp = require('child_process');
@@ -115,7 +117,7 @@ jobs:
           $staged = Join-Path $env:RUNNER_TEMP "resources\tesseract"
           New-Item -ItemType Directory -Force -Path $staged | Out-Null
           $target = Join-Path $staged "probe.dll"
-          Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP "target\release\spectrapdf.exe") -Destination $target -Force
+          Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP "probe-unsigned.exe") -Destination $target -Force
           $output = node (Join-Path $env:RUNNER_TEMP "spawn-sign.js") $target
           $code = $LASTEXITCODE
           $output | Write-Host
