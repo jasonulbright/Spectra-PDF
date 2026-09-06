@@ -6,6 +6,12 @@ name: Signing smoke
 # published against -- over a probe file instead of a build. A broken signing
 # chain therefore surfaces in minutes rather than after the ~35-minute release
 # build has run.
+#
+# Fixture invariant: the probe is stripped to NotSigned and asserted unsigned
+# before this job signs it, so the signature the gate verifies can only be the
+# one this run produced. The probe is copied from a Microsoft-signed system
+# binary, and that inherited signature would otherwise satisfy a gate that
+# merely finds a valid signature.
 on:
   workflow_dispatch:
 
@@ -47,18 +53,32 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # A signed Microsoft-shipped executable copied out of System32: signing
-      # replaces its signature on the copy, so the probe carries this run's
-      # signature and nothing else. The script is invoked exactly as the
-      # bundler's `signCommand` invokes it -- one positional path argument.
+      # The probe is a copy of a Microsoft-signed System32 binary, so its
+      # inherited signature is removed and its absence asserted before signing:
+      # a probe reaching sign-windows.ps1 still signed would let the gate pass
+      # on a signature this job did not make. The script is invoked exactly as
+      # the bundler's `signCommand` invokes it -- one positional path argument.
       - name: Sign a probe executable
         shell: pwsh
         run: |
+          . ./scripts/windows-signing.ps1
           $probe = Join-Path $env:RUNNER_TEMP "probe"
           New-Item -ItemType Directory -Force -Path $probe | Out-Null
           $target = Join-Path $probe "spectrapdf-sign-probe.exe"
           Copy-Item -LiteralPath (Join-Path $env:SystemRoot "System32\where.exe") -Destination $target -Force
+          $signtool = Get-SignToolPath
+          & $signtool remove /s $target
+          if ($LASTEXITCODE -ne 0) { throw "signtool remove /s failed with exit code $LASTEXITCODE" }
+          $before = Get-AuthenticodeSignature -LiteralPath $target
+          Write-Host "probe status before signing: $($before.Status)"
+          if ($before.Status -ne "NotSigned") {
+            throw "the probe is still signed before this job signs it (status $($before.Status))"
+          }
           powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 $target
+          $signed = Get-AuthenticodeSignature -LiteralPath $target
+          Write-Host "signer:    $($signed.SignerCertificate.Subject)"
+          Write-Host "timestamp: $($signed.TimeStamperCertificate.Subject)"
+          Write-Host "status:    $($signed.Status)"
 
       - name: Verify the Authenticode signature on the probe
         shell: pwsh
