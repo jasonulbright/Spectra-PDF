@@ -7,11 +7,12 @@ name: Signing smoke
 # chain therefore surfaces in minutes rather than after the ~35-minute release
 # build has run.
 #
-# Fixture invariant: the probe is stripped to NotSigned and asserted unsigned
-# before this job signs it, so the signature the gate verifies can only be the
-# one this run produced. The probe is copied from a Microsoft-signed system
-# binary, and that inherited signature would otherwise satisfy a gate that
-# merely finds a valid signature.
+# Fixture invariant: the probe is compiled in the job, so it carries no
+# signature and matches no Windows catalog, and it is asserted NotSigned
+# before this job signs it. A probe copied from a system binary fails both
+# ways: the Authenticode PE hash excludes the signature block, so catalog
+# membership survives both the copy and a signature strip, and the gate could
+# pass on a signature this run never produced.
 on:
   workflow_dispatch:
 
@@ -53,11 +54,11 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # The probe is a copy of a Microsoft-signed System32 binary, so its
-      # inherited signature is removed and its absence asserted before signing:
-      # a probe reaching sign-windows.ps1 still signed would let the gate pass
-      # on a signature this job did not make. The script is invoked exactly as
-      # the bundler's `signCommand` invokes it -- one positional path argument.
+      # The probe is compiled here rather than copied from a system binary: a
+      # compiled PE carries no signature and matches no catalog, and its
+      # unsigned state is asserted before signing, so the signature the gate
+      # verifies can only be the one this job made. The script is invoked
+      # exactly as the bundler's `signCommand` does -- one positional path.
       - name: Sign a probe executable
         shell: pwsh
         run: |
@@ -65,10 +66,12 @@ jobs:
           $probe = Join-Path $env:RUNNER_TEMP "probe"
           New-Item -ItemType Directory -Force -Path $probe | Out-Null
           $target = Join-Path $probe "spectrapdf-sign-probe.exe"
-          Copy-Item -LiteralPath (Join-Path $env:SystemRoot "System32\where.exe") -Destination $target -Force
-          $signtool = Get-SignToolPath
-          & $signtool remove /s $target
-          if ($LASTEXITCODE -ne 0) { throw "signtool remove /s failed with exit code $LASTEXITCODE" }
+          $source = Join-Path $probe "probe.cs"
+          Set-Content -LiteralPath $source -Encoding ascii -Value 'class P { static int Main() { return 0; } }'
+          $csc = Join-Path $env:SystemRoot "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          & $csc /nologo /target:exe /out:$target $source
+          if ($LASTEXITCODE -ne 0) { throw "csc.exe failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path -LiteralPath $target)) { throw "csc.exe produced no probe at $target" }
           $before = Get-AuthenticodeSignature -LiteralPath $target
           Write-Host "probe status before signing: $($before.Status)"
           if ($before.Status -ne "NotSigned") {

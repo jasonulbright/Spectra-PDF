@@ -2312,15 +2312,14 @@ def test_the_signing_smoke_login_uses_the_release_secrets() -> None:
 
 
 def test_the_signing_smoke_probe_starts_unsigned() -> None:
-    """The probe is copied from a Microsoft-signed system binary. Unless that
-    signature is removed and its absence asserted, the gate can pass on a
-    signature this job never made."""
+    """The probe is compiled in the job, so it carries no signature and matches
+    no Windows catalog. Unless it is compiled and asserted unsigned before
+    signing, the gate can pass on a signature this job never made."""
     sign = dict(_job_steps(SMOKE_WORKFLOW, SMOKE_JOB))[SMOKE_SIGN_STEP]
-    assert "Get-SignToolPath" in sign, sign
-    assert "remove /s" in sign, sign
+    assert "csc.exe" in sign, sign
     assert "$LASTEXITCODE" in sign, sign
     lines = sign.splitlines()
-    strip = next(i for i, line in enumerate(lines) if "remove /s" in line)
+    compiles = next(i for i, line in enumerate(lines) if "$csc /nologo" in line)
     assert_unsigned = next(i for i, line in enumerate(lines) if "NotSigned" in line)
     signs = next(i for i, line in enumerate(lines) if "sign-windows.ps1" in line)
-    assert strip < assert_unsigned < signs, lines
+    assert compiles < assert_unsigned < signs, lines
