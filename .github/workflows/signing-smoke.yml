@@ -55,6 +55,16 @@ jobs:
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File scripts/install-signing-tools.ps1
 
+      - name: Install NSIS for the packaging smoke
+        shell: pwsh
+        run: |
+          choco install nsis --version=3.11 --yes --no-progress --execution-timeout=300
+          if ($LASTEXITCODE -ne 0) { throw "NSIS install failed (exit $LASTEXITCODE)" }
+
+      - name: Exercise portable packaging before signing
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-portable-packaging.ps1
+
       # OIDC: the job's id-token is exchanged for an Azure token through the
       # app registration's federated credential, which is scoped to this
       # environment. No client secret exists to leak or rotate.
@@ -165,9 +175,28 @@ jobs:
           Write-Host "staged probe status: $status"
           if ($status -ne "NotSigned") { throw "a file outside the signed set was signed (status $status)" }
 
-      # The bundler discards both of the sign command's streams, so the
-      # script's own log is the only record of a failed invocation. Printed
-      # whatever the invocations above did.
+      - name: Verify the Authenticode signature on the probe
+        shell: pwsh
+        run: |
+          . ./scripts/windows-signing.ps1
+          $target = Join-Path $env:RUNNER_TEMP "target\release\spectrapdf.exe"
+          Assert-AuthenticodeSigned -Path $target -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
+          $signature = Get-AuthenticodeSignature -LiteralPath $target
+          Write-Host "signer:    $($signature.SignerCertificate.Subject)"
+          Write-Host "timestamp: $($signature.TimeStamperCertificate.Subject)"
+          Write-Host "status:    $($signature.Status)"
+
+      # Build a tiny actual NSIS installer with the signed probe, then restore
+      # the unsigned probe exactly as Tauri does. The production portable
+      # builder must recover the signed bytes from the installer and preserve
+      # them through ZIP compression. No Rust build or full application suite.
+      - name: Verify signed installer to portable handoff
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-portable-packaging.ps1 -ExpectSigned -SignedProbe "$env:RUNNER_TEMP/target/release/spectrapdf.exe" -UnsignedProbe "$env:RUNNER_TEMP/probe-unsigned.exe"
+          if ($LASTEXITCODE -ne 0) { throw "signed portable packaging smoke failed (exit $LASTEXITCODE)" }
+
+      # Include all three signing operations, even when the handoff fails.
       - name: Print the signing logs
         if: always()
         shell: pwsh
@@ -186,14 +215,3 @@ jobs:
             Write-Host "===== $($log.Name) ====="
             Get-Content -LiteralPath $log.FullName | Write-Host
           }
-
-      - name: Verify the Authenticode signature on the probe
-        shell: pwsh
-        run: |
-          . ./scripts/windows-signing.ps1
-          $target = Join-Path $env:RUNNER_TEMP "target\release\spectrapdf.exe"
-          Assert-AuthenticodeSigned -Path $target -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
-          $signature = Get-AuthenticodeSignature -LiteralPath $target
-          Write-Host "signer:    $($signature.SignerCertificate.Subject)"
-          Write-Host "timestamp: $($signature.TimeStamperCertificate.Subject)"
-          Write-Host "status:    $($signature.Status)"

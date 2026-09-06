@@ -539,7 +539,10 @@ jobs:
       # writes that manifest. The bundled-binary notice gate applies here
       # exactly as it does to the installer, and refuses with exit 1.
       - name: Build the portable zip
-        run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1
+        # Tauri restores its unsigned build output after NSIS; read the signed
+        # app from the completed installer. All three signatures gate BEFORE
+        # portable compression, with no fourth signing-service call.
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -ExpectSigned
         shell: pwsh
 
       # The gate the design calls for: the zip's tree, compared entry by entry
@@ -547,7 +550,7 @@ jobs:
       # construction, and this proves the construction on every release rather
       # than assuming it.
       - name: Verify the portable tree against the installer's staging
-        run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -Verify src-tauri/target/release/bundle/portable/tree.staging
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -ExpectSigned -Verify src-tauri/target/release/bundle/portable/tree.staging
         shell: pwsh
 
       - name: Portable payload notice map covers every declared resource

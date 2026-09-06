@@ -18,6 +18,10 @@ name: Release (redo)
 # `verifier/`, never from the tag. Nothing under `verifier/` is a bundle input,
 # so a verifier fixed on main can re-check an old tag without touching its
 # product bytes -- and an old tag that predates a verifier can still be redone.
+# Portable assembly also runs from verifier/: its inputs remain the tag's
+# generated manifest, resource staging, and completed installer. In particular
+# the app is extracted from that installer, not the unsigned build output
+# Tauri restores after bundling. No product bytes come from verifier/.
 #
 # Two engine-payload regimes, chosen from the TAG's tree:
 #   manifest -- the tag carries src/engine/PAYLOAD-MANIFEST.tsv; the built
@@ -278,15 +282,23 @@ jobs:
           prerelease: false
 
       - name: Build the portable zip
-        run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1
+        run: |
+          $signing = @{}
+          if ('${{ steps.signing-regime.outputs.signed }}' -ceq 'true') { $signing.ExpectSigned = $true }
+          & ./verifier/scripts/build-portable-zip.ps1 -ProjectRoot . @signing
+          if ($LASTEXITCODE -ne 0) { throw "portable build failed (exit $LASTEXITCODE)" }
         shell: pwsh
 
       - name: Verify the portable tree against the installer's staging
-        run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -Verify src-tauri/target/release/bundle/portable/tree.staging
+        run: |
+          $signing = @{}
+          if ('${{ steps.signing-regime.outputs.signed }}' -ceq 'true') { $signing.ExpectSigned = $true }
+          & ./verifier/scripts/build-portable-zip.ps1 -ProjectRoot . @signing -Verify src-tauri/target/release/bundle/portable/tree.staging
+          if ($LASTEXITCODE -ne 0) { throw "portable verification failed (exit $LASTEXITCODE)" }
         shell: pwsh
 
       - name: Portable payload notice map covers every declared resource
-        run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -CheckMap
+        run: powershell -ExecutionPolicy Bypass -File verifier/scripts/build-portable-zip.ps1 -ProjectRoot . -CheckMap
         shell: pwsh
 
       # The publish gate for signing, from the verifier's own revision.

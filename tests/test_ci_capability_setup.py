@@ -715,7 +715,7 @@ def _redo_script_references() -> list[tuple[str, str, str]]:
         for line in text.splitlines():
             if line.strip().startswith("if: "):
                 cond = line.split("if:", 1)[1].strip()
-        for match in re.finditer(r"(?<![\w/])((?:verifier/)?scripts/[\w.-]+)", text):
+        for match in re.finditer(r"(?<![\w/])(?:\./)?((?:verifier/)?scripts/[\w.-]+)", text):
             refs.append((name, cond, match.group(1)))
     return refs
 
@@ -2115,6 +2115,52 @@ def test_the_signature_gate_precedes_the_publish(workflow: str, job: str) -> Non
     assert "Assert-AuthenticodeSigned" in gate, (workflow, gate)
     assert "-setup.exe" in gate, (workflow, gate)
     assert "-portable.zip" in gate, (workflow, gate)
+
+
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_portable_assembly_checks_signatures_before_compression(workflow: str, job: str) -> None:
+    """Tauri restores unsigned MAINBINARYSRCPATH after NSIS packs the signed app.
+
+    Both publishers must use the extracting builder and request its early
+    signature gate. Redo uses current tooling but only the tag's payload.
+    The executable fixture is scripts/smoke-portable-packaging.ps1.
+    """
+    steps = dict(_job_steps(workflow, job))
+    for step in ("Build the portable zip", "Verify the portable tree against the installer's staging"):
+        body = steps[step]
+        assert "build-portable-zip.ps1" in body
+        if workflow == "release-redo.yml":
+            assert "verifier/scripts/build-portable-zip.ps1 -ProjectRoot . @signing" in body
+            assert "signing-regime.outputs.signed" in body
+            assert "$signing.ExpectSigned = $true" in body
+            assert "$LASTEXITCODE -ne 0" in body
+        else:
+            assert "build-portable-zip.ps1 -ExpectSigned" in body
+
+
+def test_portable_smoke_covers_the_installer_to_zip_boundary() -> None:
+    steps = dict(_job_steps("signing-smoke.yml", "sign-smoke"))
+    names = list(steps)
+    assert names.index("Install NSIS for the packaging smoke") < names.index(AZURE_LOGIN_STEP)
+    assert names.index("Exercise portable packaging before signing") < names.index(AZURE_LOGIN_STEP)
+    handoff = "Verify signed installer to portable handoff"
+    assert names.index(handoff) > names.index("Verify the Authenticode signature on the probe")
+    assert names.index(SIGN_LOG_STEP) > names.index(handoff)
+    body = steps[handoff]
+    assert "smoke-portable-packaging.ps1 -ExpectSigned" in body
+    assert "-SignedProbe" in body and "-UnsignedProbe" in body
+    assert "$LASTEXITCODE -ne 0" in body
+    fixture = (ROOT / "scripts/smoke-portable-packaging.ps1").read_text(encoding="utf-8")
+    for obligation in ("$makensis /V2", "!uninstfinalize", "Copy-Item -LiteralPath $UnsignedProbe",
+                       "old-unsigned-copy", "changed-resource", "unsigned-installer-refused",
+                       "ExtractToFile", "faithful-tree-pwsh"):
+        assert obligation in fixture
+
+
+def test_redo_script_inventory_resolves_dot_slash_invocations() -> None:
+    refs = _redo_script_references()
+    for step in ("Build the portable zip", "Verify the portable tree against the installer's staging"):
+        assert (step, "", "verifier/scripts/build-portable-zip.ps1") in refs
 
 
 @pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)

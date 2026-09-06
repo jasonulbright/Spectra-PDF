@@ -7,8 +7,10 @@
 #
 #     File /a "/oname=<relative path>" "<absolute source>"
 #
-# plus the main executable as ${MAINBINARYSRCPATH}. This script copies exactly
-# those, to exactly those relative paths. A resource added to
+# plus the main executable. Tauri restores MAINBINARYSRCPATH to its UNSIGNED,
+# unpatched bytes after bundling: the executable must be extracted from the
+# completed installer, never copied from that restored build output. Resources
+# still come from the manifest's staging paths. A resource added to
 # `tauri.conf.json` therefore reaches both containers or neither; there is no
 # hand-maintained inventory here to fall out of step, which is the whole reason
 # the manifest is parsed rather than the resource tree walked.
@@ -36,17 +38,20 @@
 # Run:
 #   powershell -ExecutionPolicy Bypass -File scripts\build-portable-zip.ps1
 #
-# -Verify compares the tree that WOULD be built against a directory (the
-# installer's own staging), reports any difference and writes nothing. That is
-# the clean-runner CI gate.
+# -Verify compares paths and SHA-256 against a directory. It freshly extracts
+# the installer's executable into temporary storage, never changes the tree
+# being checked, and writes no ZIP.
 
 param(
-    [string]$Manifest = "$PSScriptRoot\..\src-tauri\target\release\nsis\x64\installer.nsi",
-    [string]$OutputDirectory = "$PSScriptRoot\..\src-tauri\target\release\bundle\portable",
-    [string]$Notices = "$PSScriptRoot\..\THIRD-PARTY-LICENSES.md",
+    [string]$ProjectRoot = "$PSScriptRoot\..",
+    [string]$Manifest = "$ProjectRoot\src-tauri\target\release\nsis\x64\installer.nsi",
+    [string]$OutputDirectory = "$ProjectRoot\src-tauri\target\release\bundle\portable",
+    [string]$Notices = "$ProjectRoot\THIRD-PARTY-LICENSES.md",
+    [string]$Installer = "",
+    [switch]$ExpectSigned,
     [string]$Verify = "",
     [switch]$CheckMap,
-    [string]$TauriConfig = "$PSScriptRoot\..\src-tauri\tauri.conf.json"
+    [string]$TauriConfig = "$ProjectRoot\src-tauri\tauri.conf.json"
 )
 
 $ErrorActionPreference = "Stop"
@@ -117,8 +122,10 @@ $binaryMatch = [regex]::Match($manifestText, '(?m)^\s*!define\s+MAINBINARYSRCPAT
 if (-not $binaryMatch.Success) { throw "the manifest names no MAINBINARYSRCPATH: $Manifest" }
 $binaryNameMatch = [regex]::Match($manifestText, '(?m)^\s*!define\s+MAINBINARYNAME\s+"([^"]+)"')
 if (-not $binaryNameMatch.Success) { throw "the manifest names no MAINBINARYNAME: $Manifest" }
+$binaryName = "$($binaryNameMatch.Groups[1].Value).exe"
+if ($binaryName -cne 'spectrapdf.exe') { throw "unexpected main executable: $binaryName" }
 $entries += [pscustomobject]@{
-    relative = "$($binaryNameMatch.Groups[1].Value).exe"
+    relative = $binaryName
     source   = $binaryMatch.Groups[1].Value
 }
 
@@ -136,12 +143,21 @@ if ($entries.Count -lt 2) {
 $versionMatch = [regex]::Match($manifestText, '(?m)^\s*!define\s+VERSION\s+"([^"]+)"')
 if (-not $versionMatch.Success) { throw "the manifest names no VERSION: $Manifest" }
 $version = $versionMatch.Groups[1].Value
+if ($version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+    throw "unsafe portable version: $version"
+}
 
 # A duplicate relative path would mean two sources racing for one destination,
 # and whichever copied last would win silently.
 $dupes = $entries | Group-Object relative | Where-Object { $_.Count -gt 1 }
 if ($dupes) {
     throw "the manifest maps one destination twice:`n  " + (($dupes | ForEach-Object { $_.Name }) -join "`n  ")
+}
+foreach ($e in $entries) {
+    # No manifest entry may escape staging or address an alternate data stream.
+    if ([IO.Path]::IsPathRooted($e.relative) -or $e.relative -match '(^|[\\/])\.\.?([\\/]|$)|:') {
+        throw "unsafe payload destination: $($e.relative)"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -198,7 +214,7 @@ foreach ($dir in $topLevel) {
 # The colour profiles are named individually by their ICC description string,
 # the condition bundle-icc.ps1 enforces for the installer. The zip ships the
 # same bytes and inherits the same condition.
-$iccManifest = Join-Path $PSScriptRoot "icc-profiles.tsv"
+$iccManifest = Join-Path $ProjectRoot "scripts\icc-profiles.tsv"
 if (Test-Path $iccManifest) {
     $seenHeader = $false
     foreach ($line in (Get-Content $iccManifest -Encoding UTF8)) {
@@ -221,6 +237,46 @@ if ($bad) {
     exit 1
 }
 
+# MAINBINARYSRCPATH is no longer the file NSIS packed. Read that file from the
+# installer itself, with no installation, registry writes, or extra signing.
+# 7-Zip is supplied by the Windows runner image; discover it locally too.
+if (-not $Installer) {
+    $bundle = [IO.Path]::GetFullPath((Join-Path (Split-Path $Manifest -Parent) '..\..\bundle\nsis'))
+    $installers = @(Get-ChildItem -LiteralPath $bundle -Filter '*-setup.exe' -File)
+    if ($installers.Count -ne 1) { throw "expected one installer in $bundle, found $($installers.Count)" }
+    $Installer = $installers[0].FullName
+}
+$Installer = (Resolve-Path -LiteralPath $Installer).Path
+$sevenZipCommand = Get-Command 7z.exe -ErrorAction SilentlyContinue
+$sevenZip = if ($sevenZipCommand) { $sevenZipCommand.Source } else { "$env:ProgramFiles\7-Zip\7z.exe" }
+if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) { throw '7-Zip is required to read the installer payload (7z.exe not found)' }
+if ($ExpectSigned) {
+    . "$PSScriptRoot\windows-signing.ps1"
+    Assert-AuthenticodeSigned -Path $Installer -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
+}
+# Fresh directory on EVERY invocation, including -Verify: never trust an old
+# extraction as evidence for a new installer. A script-managed temporary tree
+# is removed in finally, including after a failed signature/hash gate.
+$installerTree = Join-Path ([IO.Path]::GetTempPath()) ("portable-installer-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $installerTree | Out-Null
+try {
+    $listing = & $sevenZip l -slt -tNsis $Installer $binaryName uninstall.exe 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "cannot list installer payload: $($listing -join "`n")" }
+    foreach ($name in @($binaryName, 'uninstall.exe')) {
+        $hits = @($listing | Where-Object { $_ -ceq "Path = $name" })
+        if ($hits.Count -ne 1) { throw "expected one $name in installer, found $($hits.Count)" }
+    }
+    $extraction = & $sevenZip x -y -bd -tNsis "-o$installerTree" $Installer $binaryName uninstall.exe 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "cannot extract installer payload: $($extraction -join "`n")" }
+    $entries[0].source = Join-Path $installerTree $binaryName
+    foreach ($name in @($binaryName, 'uninstall.exe')) {
+        $path = Join-Path $installerTree $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "installer extraction produced no $name" }
+        if ($ExpectSigned) {
+            Assert-AuthenticodeSigned -Path $path -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
+        }
+    }
+
 # ---------------------------------------------------------------------------
 # -Verify: compare the manifest's tree against a directory, write nothing.
 # ---------------------------------------------------------------------------
@@ -228,7 +284,7 @@ if ($Verify) {
     if (-not (Test-Path $Verify)) { throw "nothing to verify against: $Verify" }
     $root = (Resolve-Path $Verify).Path
     $actual = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($f in (Get-ChildItem $root -Recurse -File)) {
+    foreach ($f in (Get-ChildItem -LiteralPath $root -Recurse -File -Force)) {
         [void]$actual.Add($f.FullName.Substring($root.Length).TrimStart('\', '/'))
     }
     # install-record.json is the installer's own marker and is expected to be
@@ -242,7 +298,14 @@ if ($Verify) {
         Write-Error ("the portable tree does not match the installer's staging:`n  " + ($report -join "`n  "))
         exit 1
     }
-    Write-Host "Verified: $($relatives.Count) payload entries, identical to the installer's staging."
+    foreach ($e in $entries) {
+        $dest = Join-Path $root $e.relative
+        if ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash -cne
+            (Get-FileHash -LiteralPath $e.source -Algorithm SHA256).Hash) {
+            throw "portable bytes differ from installer payload source: $($e.relative)"
+        }
+    }
+    Write-Host "Verified: $($relatives.Count) payload entries match by path and SHA-256; app bytes came from the installer."
     exit 0
 }
 
@@ -260,8 +323,20 @@ if ($missingSources) {
     throw "payload sources missing:`n  " + ($missingSources -join "`n  ")
 }
 
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $staging = Join-Path $OutputDirectory "tree.staging"
-Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
+# Refuse redirected ancestors before either writing or recursively removing
+# the exact generated child tree, including when that child does not yet exist.
+$existing = $staging
+while (-not (Test-Path -LiteralPath $existing)) { $existing = Split-Path $existing -Parent }
+$ancestor = Get-Item -LiteralPath $existing -Force
+while ($ancestor) {
+    if ($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "redirected portable staging path: $($ancestor.FullName)" }
+    $ancestor = $ancestor.Parent
+}
+if (Test-Path -LiteralPath $staging) {
+    Remove-Item -LiteralPath $staging -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
 foreach ($e in $entries) {
@@ -269,11 +344,15 @@ foreach ($e in $entries) {
     $parent = Split-Path $dest -Parent
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
     Copy-Item -LiteralPath $e.source -Destination $dest -Force
+    if ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash -cne
+        (Get-FileHash -LiteralPath $e.source -Algorithm SHA256).Hash) {
+        throw "portable copy differs from installer payload source: $($e.relative)"
+    }
 }
 
 $zipName = "spectrapdf-$version-portable.zip"
 $zipPath = Join-Path $OutputDirectory $zipName
-Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 
 # `-CompressionLevel Optimal` over the tree ROOT's children, so the archive
 # opens onto the executable rather than onto one wrapper directory the user has
@@ -285,3 +364,6 @@ Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zipPath -Compr
 $sizeMB = [math]::Round(((Get-Item $zipPath).Length / 1MB), 1)
 Write-Host "Wrote $zipPath ($($entries.Count) payload entries, ${sizeMB}MB)"
 Write-Host "Tree staged at $staging"
+} finally {
+    Remove-Item -LiteralPath $installerTree -Recurse -Force
+}
