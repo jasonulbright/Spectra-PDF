@@ -2044,7 +2044,8 @@ def test_the_azure_login_precedes_the_build(workflow: str, job: str) -> None:
 PROVISIONING_PREFIXES = ("Setup ", "Cache ", "Install ", "Provision ", "Vendor ", "Stage ")
 
 
-def test_the_azure_login_is_the_last_step_before_the_build() -> None:
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_the_azure_login_is_the_last_step_before_the_build(workflow: str, job: str) -> None:
     """The federated assertion lives minutes and the cached token 60.
 
     Provisioning between the login and the build spends that budget, and the
@@ -2052,15 +2053,15 @@ def test_the_azure_login_is_the_last_step_before_the_build() -> None:
     token it caches sit immediately before the build; everything slow is
     above them.
     """
-    names = [name for name, _ in _job_steps("release.yml", "release")]
+    names = [name for name, _ in _job_steps(workflow, job)]
     build = names.index(RELEASE_DRAFT_STEP)
-    assert names.index(TOKEN_CACHE_STEP) == build - 1, names
-    assert names.index(AZURE_LOGIN_STEP) == build - 2, names
+    assert names.index(TOKEN_CACHE_STEP) == build - 1, (workflow, names)
+    assert names.index(AZURE_LOGIN_STEP) == build - 2, (workflow, names)
     for index, name in enumerate(names[:build]):
         if name in (SIGNING_TOOLS_STEP, TOKEN_CACHE_STEP):
             continue
         if name.startswith(PROVISIONING_PREFIXES):
-            assert index < names.index(AZURE_LOGIN_STEP), name
+            assert index < names.index(AZURE_LOGIN_STEP), (workflow, name)
 
 
 @pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
@@ -2549,14 +2550,14 @@ def test_the_signing_smoke_can_idle_between_the_token_and_the_signature() -> Non
     assert "Start-Sleep -Seconds ($minutes * 60)" in delay, delay
 
 
-@pytest.mark.parametrize("workflow", ["release.yml", SMOKE_WORKFLOW])
+@pytest.mark.parametrize("workflow", ["release.yml", "release-redo.yml", SMOKE_WORKFLOW])
 def test_the_signing_token_is_cached_without_printing_it(workflow: str) -> None:
     """The dlib asks the CLI for the signing scope, which the login does not
     cache; minting it here starts a 60-minute window the signatures fit in.
 
     The token itself never reaches the log -- only its expiry.
     """
-    job = "release" if workflow == "release.yml" else SMOKE_JOB
+    job = SMOKE_JOB if workflow == SMOKE_WORKFLOW else "release"
     step = dict(_job_steps(workflow, job))[TOKEN_CACHE_STEP]
     assert "az account get-access-token" in step, step
     assert SIGNING_TOKEN_SCOPE in step, step

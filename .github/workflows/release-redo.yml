@@ -127,21 +127,13 @@ jobs:
           echo "signed=$signed" >> "$GITHUB_OUTPUT"
           echo "signing regime for ${{ inputs.tag }}: signed=$signed"
 
-      # Authenticode signing runs inside the bundler (see release.yml). Both
-      # steps are no-ops for a tag that predates signing: the bundler never
-      # invokes a sign command it has no configuration for.
+      # Authenticode signing runs inside the bundler (see release.yml). Every
+      # signing step is skipped for a tag that predates signing: the bundler
+      # never invokes a sign command it has no configuration for.
       - name: Install the Artifact Signing client tools
         if: steps.signing-regime.outputs.signed == 'true'
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File scripts/install-signing-tools.ps1
-
-      - name: Azure login (federated, no secret)
-        if: steps.signing-regime.outputs.signed == 'true'
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -238,6 +230,30 @@ jobs:
           } >> "$GITHUB_OUTPUT"
         env:
           TAG: ${{ inputs.tag }}
+
+      - name: Azure login (federated, no secret)
+        if: steps.signing-regime.outputs.signed == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The federated assertion azure/login redeems expires MINUTES after the
+      # job's id-token is minted, and the access token cached here is valid for
+      # at most 60 minutes. The signing dlib asks the CLI for a token in the
+      # signing-service scope, which the login itself does not cache, so every
+      # signature the build produces must happen inside that 60-minute window
+      # measured from this step. Nothing slow may sit between these two steps
+      # and the build below; provisioning belongs above the login.
+      - name: Cache a signing-service token
+        if: steps.signing-regime.outputs.signed == 'true'
+        shell: pwsh
+        run: |
+          $raw = az account get-access-token --scope https://codesigning.azure.net/.default --output json
+          if ($LASTEXITCODE -ne 0) { throw "az account get-access-token failed (exit $LASTEXITCODE)" }
+          $token = $raw | ConvertFrom-Json
+          Write-Host "signing-service token cached, expires_on: $($token.expires_on)"
 
       # DRAFT FIRST, same order as release.yml: assets land on a draft, every
       # gate runs against the uploaded assets, the last step undrafts. A
