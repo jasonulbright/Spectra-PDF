@@ -627,10 +627,11 @@ def test_a_hard_break_inside_a_bidi_mixed_run_keeps_every_character(tmp_path):
     assert abs(drawn[0][2] - drawn[1][2]) <= 0.5
     after = _paras(out)
     assert len(after) == 1
-    # The break reads back as a line join (a space); nothing is dropped and
-    # nothing is reordered -- the digits stay "20" then "26", in that order,
-    # inside the same right-to-left sentence.
-    assert after[0]["text"] == text.replace(chr(10), " ")
+    # The break reads back AS a break; nothing is dropped and nothing is
+    # reordered -- the digits stay "20" then "26", in that order, inside the
+    # same right-to-left sentence. This used to assert the break came back as
+    # a space, because the page kept no record of it.
+    assert after[0]["text"] == text
 
 
 def test_a_hard_break_inside_a_shaped_word_keeps_every_character(tmp_path):
@@ -653,6 +654,10 @@ def test_a_hard_break_inside_a_shaped_word_keeps_every_character(tmp_path):
         assert len(_drawn_lines(out)) == 2
         after = _paras(out)
         assert len(after) == 1
-        assert after[0]["text"] == text.replace(chr(10), " ")
+        # The break is durable across the reshape (it used to read back as a
+        # space -- the page carried no record of it).
+        assert after[0]["text"] == text
         # Every character of the word survives, in order.
-        assert after[0]["text"].replace(" ", "") == para["text"].replace(" ", "")
+        assert after[0]["text"].replace(" ", "").replace(chr(10), "") == (
+            para["text"].replace(" ", "")
+        )

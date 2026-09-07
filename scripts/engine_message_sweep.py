@@ -7,10 +7,19 @@ the message it received against a checked-in table of the engine's own
 refusals.
 
 This module is the sweep that keeps that table honest. It walks every
-`src/engine/*.py` with `ast` and enumerates each `raise` of a PUBLIC
-exception type carrying a literal message — the refusals that leave a
-registered JSON-RPC method and reach the renderer through `ipc.py`'s
-`str(exc)`. Two consumers share it:
+`src/engine/*.py` with `ast` and enumerates two kinds of refusal:
+
+  * each `raise` of a PUBLIC exception type carrying a literal message — the
+    refusals that leave a registered JSON-RPC method and reach the renderer
+    through `ipc.py`'s `str(exc)`.
+  * each LISTING-level refusal reason carrying a literal message: an
+    assignment to a `reason`/`blocking_reason` target, and the first argument
+    of a `_refuse*` capability factory. These never raise; they ride a
+    listing result's `reason` field and the renderer prints them, so an
+    unlisted one is a bare English string in a localized UI exactly as a
+    missing raise row would be.
+
+Two consumers share it:
 
   * `scripts/gen-engine-messages.py` — the MAINTENANCE tool. Run it when the
     engine's messages change; it rewrites the table, PRESERVING the key of
@@ -79,9 +88,20 @@ PUBLIC_EXCEPTIONS = frozenset(
     }
 )
 
+#: Attribute/variable names whose literal assignment is a listing-level
+#: refusal reason (`text_runs`' run rows, `text_paragraphs`' paragraph rows).
+REASON_TARGETS = frozenset({"reason", "blocking_reason"})
+
+#: Prefix of the capability factories whose FIRST positional argument is a
+#: refusal reason (`pdf_fonts._refused`, its composite wrapper).
+REASON_FACTORY_PREFIX = "_refuse"
+
 #: A pattern row must carry at least this many literal characters, so a
 #: template can never degrade into a match-everything wildcard.
 MIN_LITERAL_ANCHOR = 6
+
+#: `Refusal.exc` for a reason that is assigned rather than raised.
+REASON_SOURCE = "reason"
 
 
 @dataclass(frozen=True)
@@ -90,6 +110,7 @@ class Refusal:
 
     module: str
     line: int
+    #: The exception type, or REASON_SOURCE for a listing-level reason.
     exc: str
     #: The message with `{{name}}` where the source interpolated a value.
     template: str
@@ -173,6 +194,32 @@ def _caught_in_place(stack: list[ast.AST], exc: str) -> bool:
     return False
 
 
+def _reason_expression(node: ast.AST) -> ast.AST | None:
+    """The message expression of a listing-level refusal reason, or None.
+
+    Two shapes carry one: an assignment to a `reason`/`blocking_reason`
+    target, and the first positional argument of a `_refuse*` capability
+    factory. Neither raises, so neither reaches the table through the raise
+    walk above."""
+    if isinstance(node, (ast.Assign, ast.AnnAssign)):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        named = any(
+            (isinstance(t, ast.Name) and t.id in REASON_TARGETS)
+            or (isinstance(t, ast.Attribute) and t.attr in REASON_TARGETS)
+            for t in targets
+        )
+        return node.value if (named and node.value is not None) else None
+    if isinstance(node, ast.Call):
+        fn = node.func
+        if (
+            isinstance(fn, ast.Name)
+            and fn.id.startswith(REASON_FACTORY_PREFIX)
+            and node.args
+        ):
+            return node.args[0]
+    return None
+
+
 def sweep(engine_dir: pathlib.Path | None = None) -> list[Refusal]:
     """Every user-facing refusal in the engine, sorted by module then line."""
     directory = engine_dir or ENGINE_DIR
@@ -198,6 +245,20 @@ def sweep(engine_dir: pathlib.Path | None = None) -> list[Refusal]:
                         found.append(
                             Refusal(path.stem, node.lineno, func.id, template, variables)
                         )
+            reason_expr = _reason_expression(node)
+            if reason_expr is not None:
+                rendered = _template(reason_expr, src)
+                if rendered is not None:
+                    template, variables = rendered
+                    found.append(
+                        Refusal(
+                            path.stem,
+                            node.lineno,
+                            REASON_SOURCE,
+                            template,
+                            variables,
+                        )
+                    )
             for child in ast.iter_child_nodes(node):
                 visit(child)
             stack.pop()

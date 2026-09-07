@@ -19,8 +19,17 @@ from pikepdf import Array, Dictionary, Name
 from engine.content_walk import IDENTITY, color_equal
 from engine.extract_text import extract_text
 from engine.redact import _resolve_resources
-from engine.text_paragraphs import list_text_paragraphs, replace_paragraph_text
-from engine.text_runs import _FontCache, _walk_runs, list_text_runs
+from engine.text_paragraphs import (
+    list_text_paragraphs,
+    merge_paragraph_with_previous,
+    replace_paragraph_text,
+)
+from engine.text_runs import (
+    _FontCache,
+    _walk_runs,
+    break_marker_count,
+    list_text_runs,
+)
 
 FALLBACK_FONT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -4898,7 +4907,10 @@ class TestTateChuYoko:
         assert len(after) == 1
         assert after[0]["orientation"] == "vertical-rl"
         assert "26" in after[0]["text"]
-        assert after[0]["text"].replace(" ", "") == "\u3042\u304426\u3046"
+        # The break is DURABLE now (the page carries it as an empty
+        # replacement-text marker), so it reads back where it was made --
+        # after the block, never inside it.
+        assert after[0]["text"] == "\u3042\u304426" + chr(10) + "\u3046"
 
     def test_the_block_never_splits_across_a_column_break(self, tmp_dir):
         # It is one unit to the line breaker, the same way a shaped word is:
@@ -5018,6 +5030,20 @@ def _courier_show(x, y, text, target=None, size=10.0) -> bytes:
         size, x, y, b" ".join(parts))
 
 
+def _drawn(path):
+    """The lines a page actually draws, top down."""
+    from engine.text_paragraphs import _cluster_lines, _members_from
+
+    with pikepdf.open(path) as pdf:
+        page = pdf.pages[0]
+        runs, detail = [], []
+        _walk_runs(
+            pdf, pikepdf.parse_content_stream(page), _resolve_resources(page),
+            IDENTITY, 0, None, runs, False, _FontCache(), detail=detail,
+        )
+        return sorted(_cluster_lines(_members_from(runs, detail)), key=lambda l: -l.y)
+
+
 class TestJustifyEvidence:
     """Flush versus justified where the geometry alone cannot say, and what
     stretch evidence the listing actually holds."""
@@ -5118,6 +5144,85 @@ class TestJustifyEvidence:
         ]), name="two-tab.pdf")
         assert _paras(src)[0]["alignment"] == "left"
 
+    # --- line-level text-state evidence -------------------------------
+    #
+    # The gap channel needs TWO word gaps before it will speak. A justifier
+    # that had only one gap to open, or that set the line out with a
+    # line-local Tz or Tw, left the pair reading flush and the re-emission
+    # set a justified opener flush.
+
+    def test_a_two_line_pair_justified_through_one_gap_reads_justified(self, tmp_dir):
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            _courier_show(72.0, 700.0, "aa bb", 120.0),
+            _courier_show(72.0, 688.0, "cc dd"),
+        ]), name="one-gap-justify.pdf")
+        assert _paras(src)[0]["alignment"] == "justify"
+
+    def test_a_two_line_pair_stretched_by_tz_reads_justified(self, tmp_dir):
+        # Tz scales the gap and the space it is measured against equally, so
+        # the gap channel is blind to it by construction — the line's own
+        # drawn extent against its font's declared advances is not.
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            b"BT /F1 10 Tf 400 Tz 1 0 0 1 72 700 Tm (aa bb) Tj ET",
+            b"BT /F1 10 Tf 100 Tz 1 0 0 1 72 688 Tm (cc dd) Tj ET",
+        ]), name="tz-justify.pdf")
+        assert _paras(src)[0]["alignment"] == "justify"
+
+    def test_a_two_line_pair_stretched_by_tw_reads_justified(self, tmp_dir):
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            b"BT /F1 10 Tf 90 Tw 1 0 0 1 72 700 Tm (aa bb) Tj ET",
+            b"BT /F1 10 Tf 0 Tw 1 0 0 1 72 688 Tm (cc dd) Tj ET",
+        ]), name="tw-justify.pdf")
+        assert _paras(src)[0]["alignment"] == "justify"
+
+    def test_a_one_gap_pair_that_could_be_a_tab_stop_refuses(self, tmp_dir):
+        # The whole excess is ONE pen move between shows, with no Tz and no
+        # Tw beside it — the same bytes a tab stop is written with. Neither
+        # alignment can be asserted, so the paragraph is not editable and the
+        # runs stay individually editable on the surface.
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            b"BT /F1 10 Tf 1 0 0 1 72 700 Tm (aa) Tj 1 0 0 1 96 700 Tm (bbbb) Tj ET",
+            b"BT /F1 10 Tf 1 0 0 1 72 688 Tm (cc) Tj ET",
+        ]), name="tab-stop.pdf")
+        para = _paras(src)[0]
+        assert para["editable"] is False
+        assert para["reason"] == "this paragraph could be justified text or a tab stop"
+
+    def test_a_one_gap_justified_pair_re_emits_to_the_measure(self, tmp_dir):
+        # read -> edit -> read: the opener still reaches the measure the
+        # producer set it to, which reading it flush would have abandoned.
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            _courier_show(72.0, 700.0, "aa bb", 120.0),
+            _courier_show(72.0, 688.0, "cc dd"),
+        ]), name="one-gap-rt.pdf")
+        out = os.path.join(tmp_dir, "one-gap-rt-out.pdf")
+        para = _paras(src)[0]
+        assert para["alignment"] == "justify"
+        _apply(src, out, para, para["text"] + " eee fff ggg")
+        relisted = _paras(out)[0]
+        assert relisted["alignment"] == "justify"
+        lines = _drawn(out)
+        assert len(lines) == 2
+        # The opener is set OUT to the measure. Its natural width is 114:
+        # reading the source flush would have drawn it there.
+        assert abs(lines[0].x1 - lines[0].x0 - 120.0) < 0.5
+
+    def test_a_tz_stretched_pair_re_emits_to_the_measure(self, tmp_dir):
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            b"BT /F1 10 Tf 400 Tz 1 0 0 1 72 700 Tm (aa bb) Tj ET",
+            b"BT /F1 10 Tf 100 Tz 1 0 0 1 72 688 Tm (cc dd) Tj ET",
+        ]), name="tz-rt.pdf")
+        out = os.path.join(tmp_dir, "tz-rt-out.pdf")
+        para = _paras(src)[0]
+        assert para["alignment"] == "justify"
+        _apply(src, out, para, para["text"] + " ee ff gg hh ii jj")
+        relisted = _paras(out)[0]
+        assert relisted["alignment"] == "justify"
+        lines = _drawn(out)
+        assert len(lines) > 2
+        for line in lines[:-1]:
+            assert abs(line.x1 - line.x0 - 120.0) < 0.5
+
     def test_the_engine_own_justified_output_reads_back_as_justified(self, tmp_dir):
         # Idempotence, which is what sank the earlier attempt at this rule:
         # the engine encodes justification as a small kern beside a drawn
@@ -5196,8 +5301,108 @@ class TestHardBreaks:
         assert len(drawn) == 2
         # One blank line between: the gap is two line heights, not one.
         assert (drawn[0][0] - drawn[1][0]) == pytest.approx(28.8, abs=0.1)
-        # ...and a blank line IS a paragraph boundary to the re-listing.
-        assert [p["text"] for p in _paras(out)] == ["Alpha", "beta gamma"]
+        # ...and the two breaks read back AS two breaks. This used to assert
+        # a paragraph boundary ("Alpha", "beta gamma"): the blank line was the
+        # only trace left, so the re-listing had to infer a split from the
+        # leading. The page now carries the breaks themselves, and the
+        # author's one paragraph stays one paragraph.
+        assert [p["text"] for p in _paras(out)] == [
+            "Alpha" + chr(10) * 2 + "beta gamma"
+        ]
+
+    # --- durability ---------------------------------------------------
+    #
+    # The break used to exist only in the layout the emission threw away, so
+    # a re-listing rebuilt the paragraph as one wrapped run and the break was
+    # gone. The page now carries it as an EMPTY marked-content sequence whose
+    # replacement text is the break itself (ISO 32000-2 14.9.4, via a Span
+    # property list; 14.6.1 admits the pair inside the text object). It draws
+    # nothing and encloses no glyph, so a reader that honours replacement
+    # text reads a line break and one that does not reads nothing at all.
+
+    def test_a_break_survives_a_second_edit(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj ET",
+                     name="durable.pdf")
+        first = os.path.join(tmp_dir, "durable-1.pdf")
+        para = _paras(src)[0]
+        text, spans = self._with_break(para, para["text"].index("gamma"))
+        _apply(src, first, para, text, spans=spans)
+        assert _paras(first)[0]["text"] == "Alpha beta " + chr(10) + "gamma delta"
+        # A second edit that changes nothing else keeps the break, and adds
+        # no second one (the emission REPLACES the markers in its own span).
+        second = os.path.join(tmp_dir, "durable-2.pdf")
+        again = _paras(first)[0]
+        _apply(first, second, again, again["text"], spans=again["spans"])
+        assert _paras(second)[0]["text"] == "Alpha beta " + chr(10) + "gamma delta"
+
+    def test_removing_a_break_removes_it_from_the_page(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj ET",
+                     name="pruned.pdf")
+        broken = os.path.join(tmp_dir, "pruned-1.pdf")
+        para = _paras(src)[0]
+        text, spans = self._with_break(para, para["text"].index("gamma"))
+        _apply(src, broken, para, text, spans=spans)
+        flat = os.path.join(tmp_dir, "pruned-2.pdf")
+        again = _paras(broken)[0]
+        joined = again["text"].replace(chr(10), " ")
+        _apply(broken, flat, again, joined,
+               spans=[{"start": 0, "end": len(joined), "run": again["runs"][0]}])
+        assert _paras(flat)[0]["text"] == "Alpha beta gamma delta"
+        assert b"ActualText" not in _content_bytes(flat)
+
+    def test_a_break_marker_paints_nothing_and_extracts_as_a_break(self, tmp_dir):
+        from engine.extract_text import extract_text
+
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj ET",
+                     name="extract.pdf")
+        out = os.path.join(tmp_dir, "extract-1.pdf")
+        para = _paras(src)[0]
+        text, spans = self._with_break(para, para["text"].index("gamma"))
+        _apply(src, out, para, text, spans=spans)
+        assert len(self._drawn(out)) == 2
+        # No glyph, no artefact: the extraction is the two drawn lines and
+        # nothing else.
+        assert "Alpha beta" in extract_text(out)["text"]
+        assert "gamma delta" in extract_text(out)["text"]
+
+    # --- space adjacent to a break --------------------------------------
+    #
+    # A space immediately before or after a hard break sits on the LAST
+    # word of its line (before) or the first word of the next (after). The
+    # emission used to drop a trailing word's gap unconditionally — correct
+    # for ordinary wrap-generated line ends, wrong for an authored break,
+    # where that gap is the user's own typed space.
+
+    def test_a_space_before_a_break_round_trips_exactly(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        text, spans = self._with_break(para, para["text"].index("gamma"))
+        assert text == "Alpha beta " + chr(10) + "gamma delta"
+        _apply(src, out, para, text, spans=spans)
+        assert _paras(out)[0]["text"] == text
+
+    def test_a_space_after_a_break_round_trips_exactly(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        at = para["text"].index("gamma delta") + len("gamma")
+        text = para["text"][:at] + chr(10) + " " + para["text"][at:].lstrip(" ")
+        assert text == "Alpha beta gamma" + chr(10) + " delta"
+        _apply(src, out, para, text,
+               spans=[{"start": 0, "end": len(text), "run": para["runs"][0]}])
+        assert _paras(out)[0]["text"] == text
+
+    def test_a_break_between_two_spaces_round_trips_exactly(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        at = para["text"].index(" gamma")
+        text = para["text"][:at] + " " + chr(10) + para["text"][at:]
+        assert text == "Alpha beta " + chr(10) + " gamma delta"
+        _apply(src, out, para, text,
+               spans=[{"start": 0, "end": len(text), "run": para["runs"][0]}])
+        assert _paras(out)[0]["text"] == text
 
     def test_leading_and_trailing_breaks_draw_nothing_of_their_own(self, tmp_dir):
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma) Tj ET")
@@ -5210,8 +5415,181 @@ class TestHardBreaks:
                    spans=[{"start": 0, "end": len(text), "run": para["runs"][0]}])
             drawn = self._drawn(out)
             assert len(drawn) == 1
-            assert _paras(out)[0]["text"] == para["text"]
+            # Neither draws a glyph, and both survive the round trip. This
+            # used to assert the breaks were GONE from the re-listing --
+            # they had nowhere to live once the layout was discarded.
+            assert _paras(out)[0]["text"] == text
         # Two leading breaks push the text down by two line heights; two
         # trailing ones move nothing.
         assert self._drawn(trail)[0][0] == pytest.approx(700.0, abs=0.01)
         assert self._drawn(lead)[0][0] == pytest.approx(700.0 - 28.8, abs=0.1)
+
+
+def _break_markers(path: str) -> int:
+    """Authored hard-break markers the file's first page actually carries.
+
+    Counted off the CONTENT STREAM, not the listing: a marker the listing
+    still spells could have been rewritten into drawn glyphs, and a
+    round-trip that keeps the text while losing the marker is the failure
+    this pins."""
+    total = 0
+    with pikepdf.open(path) as pdf:
+        page = pdf.pages[0]
+        resources = page.obj.get("/Resources")
+        for instruction in pikepdf.parse_content_stream(page):
+            if str(instruction.operator) != "BDC":
+                continue
+            total += break_marker_count(list(instruction.operands), resources, None)
+    return total
+
+
+def _break_after(src: str, out: str, word: str) -> str:
+    """Author a hard break immediately before `word` in page 1's first
+    paragraph, through the same call the renderer makes."""
+    para = _paras(src)[0]
+    at = para["text"].index(word)
+    text = para["text"][:at] + chr(10) + para["text"][at:]
+    spans = []
+    for original in para["spans"]:
+        moved = dict(original)
+        for edge in ("start", "end"):
+            if moved[edge] >= at:
+                moved[edge] += 1
+        spans.append(moved)
+    _apply(src, out, para, text, spans=spans)
+    return text
+
+
+class TestNestedAndFullWidthLayouts:
+    """Column shapes a lane-role grouper can get wrong in both directions:
+    two sub-columns merged into one paragraph, or a full-width line torn
+    apart / swallowed by a neighbouring column."""
+
+    def test_sub_columns_under_a_sub_heading_stay_apart(self, tmp_dir):
+        lines = []
+        for i, y in enumerate((700.0, 686.0)):
+            lines.append(_courier_show(72.0, y, "parent body line %d here" % i))
+        lines.append(_courier_show(72.0, 660.0, "Sub heading spans across"))
+        for y in (640.0, 626.0, 612.0):
+            lines.append(_courier_show(72.0, y, "left sub col"))
+            lines.append(_courier_show(200.0, y, "right sub col"))
+        src = _courier_page(tmp_dir, b"\n".join(lines), name="nested.pdf")
+        texts = [p["text"] for p in _paras(src)]
+        assert len(texts) == 4
+        # Neither sub-column absorbs the other, nor the parent body, nor the
+        # sub-heading that spans both of them.
+        assert not [t for t in texts if "left sub col" in t and "right sub col" in t]
+        assert not [t for t in texts if "parent body" in t and "sub col" in t]
+        assert not [t for t in texts if "Sub heading" in t and "sub col" in t]
+        assert len([t for t in texts if t.count("left sub col") == 3]) == 1
+        assert len([t for t in texts if t.count("right sub col") == 3]) == 1
+
+    def test_a_poster_page_lists_one_paragraph_per_line(self, tmp_dir):
+        rows = (
+            (700.0, "ANNUAL REPORT"),
+            (640.0, "TWENTY TWENTY SIX"),
+            (580.0, "PREPARED FOR THE BOARD"),
+            (520.0, "VOLUME THREE"),
+        )
+        src = _courier_page(
+            tmp_dir,
+            b"\n".join(_courier_show(72.0, y, t, target=468.0) for y, t in rows),
+            name="poster.pdf",
+        )
+        got = _paras(src)
+        assert [p["text"] for p in got] == [t for _y, t in rows]
+        assert [p["line_count"] for p in got] == [1, 1, 1, 1]
+
+    def test_a_page_number_joins_neither_column(self, tmp_dir):
+        lines = []
+        for y in (700.0, 686.0, 672.0, 658.0):
+            lines.append(_courier_show(72.0, y, "left column body text"))
+            lines.append(_courier_show(320.0, y, "right column body text"))
+        lines.append(_courier_show(300.0, 560.0, "12"))
+        src = _courier_page(tmp_dir, b"\n".join(lines), name="pageno.pdf")
+        texts = [p["text"] for p in _paras(src)]
+        assert len(texts) == 3
+        assert not [t for t in texts if "12" in t and "column body" in t]
+        assert len([t for t in texts if t.strip() == "12"]) == 1
+
+
+class TestHardBreakDurability:
+    """The authored break is a marked-content marker in the page, so it
+    outlives anything that only rewrites layout."""
+
+    def test_five_edit_reopen_cycles_hold_the_break(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj ET")
+        current = os.path.join(tmp_dir, "break.pdf")
+        want = _break_after(src, current, "gamma")
+        counts, texts, boxes = [_break_markers(current)], [want], []
+        boxes.append(tuple(_paras(current)[0]["box"]))
+        for cycle in range(5):
+            para = _paras(current)[0]
+            out = os.path.join(tmp_dir, "cycle%d.pdf" % cycle)
+            _apply(out=out, src=current, para=para, new_text=para["text"],
+                   spans=para["spans"])
+            current = out
+            got = _paras(current)[0]
+            counts.append(_break_markers(current))
+            texts.append(got["text"])
+            boxes.append(tuple(got["box"]))
+        assert counts == [1] * 6
+        assert set(texts) == {want}
+        for box in boxes:
+            for edge, first in zip(box, boxes[0]):
+                assert edge == pytest.approx(first, abs=0.01)
+
+    def test_a_merge_keeps_the_break_on_its_own_half(self, tmp_dir):
+        src = _build(tmp_dir, b"\n".join([
+            b"BT /F1 12 Tf 1 0 0 1 72 700 Tm (First para line one) Tj ET",
+            b"BT /F1 12 Tf 1 0 0 1 72 686 Tm (first para line two) Tj ET",
+            b"BT /F1 12 Tf 1 0 0 1 72 620 Tm (Second para alpha beta) Tj ET",
+            b"BT /F1 12 Tf 1 0 0 1 72 606 Tm (second para gamma delta) Tj ET",
+        ]))
+        listing = _paras(src)
+        assert len(listing) == 2
+        second = listing[1]
+        at = second["text"].index("gamma")
+        text = second["text"][:at] + chr(10) + second["text"][at:]
+        spans = []
+        for original in second["spans"]:
+            moved = dict(original)
+            for edge in ("start", "end"):
+                if moved[edge] >= at:
+                    moved[edge] += 1
+            spans.append(moved)
+        broken = os.path.join(tmp_dir, "broken.pdf")
+        replace_paragraph_text(
+            src, broken, 1, second["index"], text, spans,
+            second["runs"], second["text"],
+        )
+        first, second = _paras(broken)
+        assert chr(10) in second["text"] and chr(10) not in first["text"]
+        merged = os.path.join(tmp_dir, "merged.pdf")
+        _merge(broken, merged, _paras(broken), 1)
+        joined = _paras(merged)[0]["text"]
+        assert _break_markers(merged) == 1
+        assert joined.count(chr(10)) == 1
+        # The break was authored before "gamma" and must still sit there --
+        # a merge that re-anchored it would move it onto the joined seam.
+        assert joined.split(chr(10))[1].lstrip().startswith("gamma")
+
+    def test_pdfa_conversion_and_rebuild_carry_the_break(self, tmp_dir, gs_path):
+        from engine.pdfa import convert_pdfa
+        from engine.rebuild import rebuild
+
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj ET")
+        broken = os.path.join(tmp_dir, "break.pdf")
+        want = _break_after(src, broken, "gamma")
+        assert _break_markers(broken) == 1
+
+        archival = os.path.join(tmp_dir, "pdfa.pdf")
+        report = convert_pdfa(broken, archival, level="2b", gs_path=gs_path)
+        assert "2B" in str(report.get("declared_conformance", "")).upper()
+        assert _break_markers(archival) == 1
+        assert _paras(archival)[0]["text"] == want
+
+        rebuilt = os.path.join(tmp_dir, "rebuilt.pdf")
+        rebuild(broken, rebuilt, gs_path=gs_path)
+        assert _break_markers(rebuilt) == 1
+        assert _paras(rebuilt)[0]["text"] == want

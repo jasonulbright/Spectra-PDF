@@ -79,6 +79,8 @@ from engine.text_runs import (
     _register_font,
     _run_metrics,
     _walk_runs,
+    break_marker_count,
+    break_marker_instruction,
 )
 
 # ── grouping constants (pinned by the fixture matrix, not spec) ───────────
@@ -98,6 +100,9 @@ WORD_GAP_FRACTION = 0.5  # of the span font's space width → synthetic space
 JUSTIFY_STRETCH_MIN = 0.08
 JUSTIFY_STRETCH_GAPS = 2
 JUSTIFY_STRETCH_SPREAD = 0.6
+# How far a line's DRAWN extent must exceed its own fonts' declared
+# advances before the excess is stretch rather than rounding.
+JUSTIFY_STATE_EXCESS = 0.02
 SPACE_ADVANCE_MIN_1000 = 1.0  # below this a space code advances nothing
 FALLBACK_SPACE_1000 = 250.0  # space-less fonts: nominal space width
 DEFAULT_WORD_GAP_1000 = 250.0  # emission gap when a paragraph shows none
@@ -107,13 +112,13 @@ PARA_MIN_DELTA_EM = 0.25  # closer lines never join (shadow/overlap)
 PARA_OVERLAP_MIN = 0.5  # horizontal overlap ratio to join
 PARA_MARGIN_SUPPORT = 0.5  # fraction of a pool's lines that must share an edge
 LANE_MIN_LINES = 2  # lines a column lane needs before a span split is believed
-LANE_SPAN_FACTOR = 1.25  # of the median line width; wider may be a spanning block
 PARA_INDENT_MAX_FRACTION = 0.25  # of the measure; wider is a block, not an indent
 SIZE_JUMP_RATIO = 1.2  # dominant-size discontinuity breaks (heading/body)
 EDGE_TOL_PT = 0.75  # alignment-evidence tolerance floor (user units)
 EDGE_TOL_FRACTION = 0.015  # …or this fraction of the box width
 WRAP_TOL = 0.5  # user units of slack when refilling lines
 
+NEWLINE = chr(10)  # an AUTHORED hard break in a paragraph's text
 BULLET_CHARS = "•◦▪‣·∙–—*"
 _ENUM_RE = re.compile(r"^(\d{1,3}|[A-Za-z])[.)]([\s ]|$)")
 
@@ -191,6 +196,11 @@ class _Member:
         # Word gaps as stretch ratios against the font's own space advance
         # (see `_ptext_and_gaps`) — evidence of justification, never a width.
         "gap_stretch",
+        # Authored hard breaks the page carries as marked-content markers
+        # (`text_runs.break_marker_instruction`): how many sit immediately
+        # BEFORE this run in content order, and how many immediately after.
+        "brk_before",
+        "brk_after",
         "editable",
         "blocking_reason",
         "rise_user",
@@ -594,7 +604,7 @@ def _draw_order_direction(bucket: list[dict]) -> str:
     return COLUMNS_RTL
 
 
-def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
+def _members_from(runs: list[dict], detail: list[dict], breaks=()) -> list[_Member]:
     # TWO passes, because a down-reading member's frame depends on
     # evidence that spans the members. Pass one classifies and measures
     # everything that does not need the frame; `_column_directions` then
@@ -696,6 +706,8 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.gaps_1000 = item["gaps_1000"]
         mem.punits = item["punits"]
         mem.gap_stretch = item["gap_stretch"]
+        mem.brk_before = 0
+        mem.brk_after = 0
         mem.editable = bool(run["editable"])
         # The run's clip flag rides through so a paragraph whose
         # every member is clipped away lists as invisible (aggregated in
@@ -740,6 +752,14 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.resources = det.get("resources")
         mem.fallback = det.get("fallback")
         members.append(mem)
+    by_index = {m.index: m for m in members}
+    for brk in breaks:
+        target = by_index.get(brk["before"])
+        if target is not None:
+            target.brk_before += brk["count"]
+        target = by_index.get(brk["after"])
+        if target is not None:
+            target.brk_after += brk["count"]
     return members
 
 
@@ -1012,73 +1032,183 @@ def _spanned_lane_count(line: _Line, lines: list[_Line], lanes: list[list[int]])
     return n
 
 
-def _column_lanes(lines: list[_Line]) -> list[list[int]]:
-    """The page's column lanes. A SPANNING line belongs to none of
-    them and appears in no group.
+LANE_COLUMN = "column"  # a member of an established column lane
+LANE_SPANNING = "spanning"  # lies ACROSS a gutter two supported lanes made
+LANE_UNPOOLED = "unpooled"  # withdrawn, but no supported gutter proves it
+
+
+def _lane_spans(lines: list[_Line], lanes: list[list[int]]) -> list[tuple]:
+    return [
+        (
+            min(lines[i].x0 for i in lane),
+            max(lines[i].x1 for i in lane),
+            len(lane) >= LANE_MIN_LINES,
+        )
+        for lane in lanes
+    ]
+
+
+def _supported_gutters(lines: list[_Line], lanes: list[list[int]]) -> list[tuple]:
+    """The x-intervals between CONSECUTIVE lanes that BOTH carry support.
+
+    Two supported lanes either side ESTABLISH the gutter; a line lying
+    across one belongs to neither of them, which is what a spanning block
+    is. Derived from the topology the lanes themselves make, so a bridge
+    only a little wider than the body still reads as a bridge and a wide
+    body line with no gutter under it does not."""
+    spans = _lane_spans(lines, lanes)
+    out: list[tuple] = []
+    for (_lo0, hi0, s0), (lo1, _hi1, s1) in zip(spans, spans[1:]):
+        if s0 and s1 and lo1 > hi0:
+            out.append((hi0, lo1))
+    return out
+
+
+def _crosses_gutter(line: _Line, gutters) -> bool:
+    return any(line.x0 <= lo and line.x1 >= hi for lo, hi in gutters)
+
+
+def _try_span_split(lines: list[_Line], members: list[int]):
+    """`(lanes, withdrawn, gutters)` for ONE x-overlap component, or None.
 
     A lane cannot be the transitive closure of x-overlap alone: one
     full-width heading, footer or figure overlaps every column and welds
     them into a single component, which is the two-column pooling defect
     with an extra line in it. So a component that refuses to split is
-    retried with its widest lines withdrawn, widest first, and the split
-    is accepted only when it is a COLUMN split — at least two lanes, at
-    least one of them with real support, and every withdrawn line
-    straddling at least two of them. A lane below LANE_MIN_LINES is
-    accepted alongside a supported one (a genuine single-line sidebar or
-    caption column is still a real lane; its own margin pool comes back
-    empty, same as any other one-line paragraph, and that is not evidence
-    that the split itself was spurious). Otherwise nothing is withdrawn
-    and the single component stands, so a one-column page measures
-    exactly as it did before.
+    retried with its widest lines withdrawn, widest first, and the split is
+    accepted only when it is a COLUMN split — at least two lanes, at least
+    one of them with real support, and every withdrawn line straddling at
+    least two of them. A lane below LANE_MIN_LINES is accepted alongside a
+    supported one (a genuine single-line sidebar or caption column is still
+    a real lane). Otherwise nothing is withdrawn and the single component
+    stands, so a one-column page measures exactly as it did before.
 
-    Only lines meaningfully wider than the page's median are candidates:
-    a body line is never a spanning block, and the width filter is what
-    keeps a ragged single column from being taken apart line by line."""
-    members = list(range(len(lines)))
-    lanes = _overlap_lanes(lines, members)
-    if len(lanes) > 1 or len(lines) < 2 * LANE_MIN_LINES + 1:
-        return lanes
-    widths = sorted(l.x1 - l.x0 for l in lines)
+    The returned gutters are the split's own topology, and they decide the
+    withdrawn lines' ROLE, not the split: a line lying across a gutter that
+    two SUPPORTED lanes establish is a proven spanning block, and one
+    withdrawn beside a single-line sidebar is not.
+
+    Candidacy is width above the component's median line — a body line is
+    never a spanning block, and the width filter is what keeps a ragged
+    single column from being taken apart line by line. It is a FILTER and
+    not the evidence: the evidence is the gutter topology, so a bridge at
+    1.20x the median reads the same as one at 3x. A fixed width factor read
+    the second as a bridge and the first as a body line, and the first then
+    pooled two columns into one."""
+    if len(members) < 2 * LANE_MIN_LINES + 1:
+        return None
+    widths = sorted(lines[i].x1 - lines[i].x0 for i in members)
     median = widths[len(widths) // 2]
     if median <= 0.0:
-        return lanes
-    candidates = [
-        i for i in members
-        if (lines[i].x1 - lines[i].x0) > LANE_SPAN_FACTOR * median
-    ]
+        return None
+    candidates = [i for i in members if (lines[i].x1 - lines[i].x0) > median]
     candidates.sort(key=lambda i: -(lines[i].x1 - lines[i].x0))
-    spanning: set[int] = set()
+    withdrawn: list[int] = []
     for i in candidates:
-        spanning.add(i)
-        rest = [j for j in members if j not in spanning]
+        withdrawn.append(i)
+        taken = set(withdrawn)
+        rest = [j for j in members if j not in taken]
         if len(rest) < 2 * LANE_MIN_LINES:
-            break
+            return None
         cand = _overlap_lanes(lines, rest)
         if len(cand) < 2 or not any(len(lane) >= LANE_MIN_LINES for lane in cand):
             continue
-        if all(_spanned_lane_count(lines[s], lines, cand) >= 2 for s in spanning):
-            return cand
-    return lanes
+        if not all(_spanned_lane_count(lines[s], lines, cand) >= 2 for s in withdrawn):
+            continue
+        return cand, withdrawn, _supported_gutters(lines, cand)
+    return None
 
 
-def _lane_pools(lines: list[_Line]) -> list[dict]:
+def _assign_roles(lines: list[_Line], members: list[int], roles: list, next_id: int) -> int:
+    """Fill `roles` for `members`; returns the next free lane id.
+
+    Applied per COMPONENT and recursively, because a spanning block need
+    not cross the WHOLE page: a bridge over the first of three gutters
+    leaves the third column as its own top-level component, and a search
+    that only ran when the entire page was one component never looked at
+    the two columns the bridge had welded together."""
+    comps = _overlap_lanes(lines, members)
+    if len(comps) > 1:
+        for comp in comps:
+            next_id = _assign_roles(lines, comp, roles, next_id)
+        return next_id
+    split = _try_span_split(lines, members)
+    if split is None:
+        for i in members:
+            roles[i] = (LANE_COLUMN, next_id)
+        return next_id + 1
+    lanes, withdrawn, gutters = split
+    for i in withdrawn:
+        roles[i] = (
+            (LANE_SPANNING, None)
+            if _crosses_gutter(lines[i], gutters)
+            else (LANE_UNPOOLED, None)
+        )
+    for lane in lanes:
+        next_id = _assign_roles(lines, lane, roles, next_id)
+    return next_id
+
+
+def _lane_roles(lines: list[_Line]) -> list[tuple]:
+    """Each line's LANE ROLE, parallel to `lines`.
+
+    A role is `(LANE_COLUMN, lane_id)`, `(LANE_SPANNING, None)` or
+    `(LANE_UNPOOLED, None)`. The role is the identity the join rule and the
+    margin pools both ask for; an empty margin pool alone cannot carry it,
+    because "no established margin" and "not a column line at all" are
+    different facts and the join loop reads the first as permission."""
+    roles: list[tuple] = [(LANE_UNPOOLED, None)] * len(lines)
+    _assign_roles(lines, list(range(len(lines))), roles, 0)
+    return roles
+
+
+def _joinable_roles(a: tuple, b: tuple) -> bool:
+    """Whether two lines may belong to one block on LANE evidence.
+
+    A spanning line never joins a lane line: it lies across the gutter the
+    lanes established, so an overlap with either of them is the bridge
+    itself, not membership. Two lines of DIFFERENT lanes never join for the
+    same reason from the other side. UNPOOLED is the no-evidence role and
+    constrains nothing — the geometric tests decide it alone."""
+    if a[0] == LANE_UNPOOLED or b[0] == LANE_UNPOOLED:
+        return True
+    return a == b
+
+
+def _lane_pools(lines: list[_Line], roles: list[tuple]) -> list[dict]:
     """Each line's margin pool, one pool per column LANE. Returned
     parallel to `lines`, so the join loop asks about the lane the
-    candidate line sits in; a spanning line gets an EMPTY pool, which is
-    the "no established margin" case every pool rule already refuses.
+    candidate line sits in; a line that is not a lane member gets an EMPTY
+    pool, which is the "no established margin" case every pool rule
+    already refuses.
 
     Margin evidence must not cross a lane: a two-column page pools twice
     as many lines behind one modal edge, no cluster reaches the support
     fraction, and a rule that needs an established margin then never
     fires anywhere on the page. A single-column page has exactly one lane
     and measures identically to a whole-pool derivation."""
-    lanes = _column_lanes(lines)
+    by_lane: dict = defaultdict(list)
+    for i, role in enumerate(roles):
+        if role[0] == LANE_COLUMN:
+            by_lane[role[1]].append(i)
     pools: list[dict] = [{} for _ in lines]
-    for lane in lanes:
+    for lane in by_lane.values():
         pool = _margin_pool([lines[i] for i in lane])
         for i in lane:
             pools[i] = pool
     return pools
+
+
+def _authored_between(prev: _Line, line: _Line) -> bool:
+    """Whether an authored hard break sits between these two lines.
+
+    Content adjacency is required as well as the marker: the marker binds to
+    the run it precedes, and only when that run directly follows the
+    previous line's last one does it stand between THESE two lines."""
+    first = min(line.members, key=lambda m: m.index)
+    if not getattr(first, "brk_before", 0):
+        return False
+    return first.index == max(m.index for m in prev.members) + 1
 
 
 def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
@@ -1106,7 +1236,8 @@ def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
     # supply. Per lane and not per key, because two side-by-side columns
     # under one key hold each other's margins below the support threshold
     # and every indent-signalled break in both columns is then missed.
-    pools = _lane_pools(lines)
+    roles = _lane_roles(lines)
+    pools = _lane_pools(lines, roles)
     open_paras: list[dict] = []
     for line_no, line in enumerate(lines):
         bullet = _starts_with_bullet(line)
@@ -1120,18 +1251,34 @@ def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
                 delta = prev.y - line.y
                 if delta <= PARA_MIN_DELTA_EM * prev.eff:
                     continue  # same visual band (a column sibling), never stacks
-                leading = statistics.median(para["deltas"]) if para["deltas"] else None
-                if leading is None:
-                    if delta > PARA_JOIN_MAX_EM * max(prev.eff, line.eff):
+                # An AUTHORED hard break between two content-adjacent lines
+                # explains the extra space itself, so the leading evidence is
+                # not asked for. Without this a double break — one blank line
+                # — read as a leading discontinuity and split the author's
+                # paragraph in two, which then re-listed as a block ending in
+                # two breaks and a second block holding the rest.
+                authored = _authored_between(prev, line)
+                if not authored:
+                    leading = statistics.median(para["deltas"]) if para["deltas"] else None
+                    if leading is None:
+                        if delta > PARA_JOIN_MAX_EM * max(prev.eff, line.eff):
+                            continue
+                    elif abs(delta - leading) > PARA_LEADING_DRIFT * leading:
                         continue
-                elif abs(delta - leading) > PARA_LEADING_DRIFT * leading:
-                    continue
                 if max(prev.eff, line.eff) / max(min(prev.eff, line.eff), 0.01) > SIZE_JUMP_RATIO:
                     continue
                 box_x0 = min(l.x0 for l in para["lines"])
                 box_x1 = max(l.x1 for l in para["lines"])
                 ov = _overlap_ratio(box_x0, box_x1, line.x0, line.x1)
                 if ov < PARA_OVERLAP_MIN:
+                    continue
+                if not _joinable_roles(para["role"], roles[line_no]):
+                    # A spanning block never continues a column, and one
+                    # column never continues another. Withdrawing the
+                    # spanning line from the margin POOL only removed its
+                    # evidence; the join loop read the empty pool as "no
+                    # indent break" and welded a heading onto the column
+                    # under it whenever the two sat at ordinary leading.
                     continue
                 if line_stream not in para["streams"] and (
                     cross_ok is None or not cross_ok(para["idx"], line_idx)
@@ -1148,6 +1295,7 @@ def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
                     "deltas": [],
                     "streams": {line_stream},
                     "idx": set(line_idx),
+                    "role": roles[line_no],
                 }
             )
         else:
@@ -1182,8 +1330,8 @@ def _line_stretch(line: _Line) -> list[float]:
 
 
 def _is_stretched(line: _Line) -> bool:
-    """Whether this line was set stretched to a measure: several word gaps,
-    every one of them wider than the font's own space, and all of them
+    """Whether this line's WORD GAPS say it was set stretched to a measure:
+    several of them, every one wider than the font's own space, and all
     agreeing with each other."""
     ratios = _line_stretch(line)
     if len(ratios) < JUSTIFY_STRETCH_GAPS:
@@ -1191,6 +1339,146 @@ def _is_stretched(line: _Line) -> bool:
     if any(r < 1.0 + JUSTIFY_STRETCH_MIN for r in ratios):
         return False
     return (max(ratios) - min(ratios)) <= JUSTIFY_STRETCH_SPREAD
+
+
+def _member_natural(mem: _Member) -> float | None:
+    """One member's advance at its OWN font's metrics, in the paragraph's
+    frame: the declared glyph advances plus its letterspacing, with Tz, Tw
+    and every TJ displacement removed. None when the advances would be
+    guessed rather than declared — no evidence beats a wrong number."""
+    cap = mem.cap
+    if cap is None or mem.vertical:
+        return None
+    size = mem.style["size"]
+    width = 0.0
+    codes = 0
+    for seg in mem.segments:
+        if isinstance(seg, float):
+            continue
+        if not cap.measures(seg):
+            return None
+        width += cap.decoded_width(seg) / 1000.0 * size
+        codes += cap.code_count(seg)
+    return (width + mem.style["char_spacing"] * codes) * mem.adv
+
+
+def _stretch_split(line: _Line) -> tuple | None:
+    """`(in_run_excess, between_run_excess, between_run_gaps)` for one line,
+    or None when the line cannot be measured.
+
+    The two excesses answer different questions. IN-RUN excess is everything
+    a show operator did to its own advance beyond the glyphs' declared
+    widths — Tz, Tw and TJ displacements all land here, and none of them is
+    how a producer writes a tab. BETWEEN-RUN excess is the pen being MOVED
+    between shows, which a justifier and a tab stop write identically."""
+    in_run = 0.0
+    between = 0.0
+    gaps = 0
+    prev: _Member | None = None
+    for mem in line.members:
+        natural = _member_natural(mem)
+        if natural is None:
+            return None
+        in_run += (mem.x1 - mem.x0) - natural
+        if prev is not None and prev.space_w > 0 and mem.ptext:
+            gap = mem.x0 - prev.x1
+            if gap > 0 and gap >= WORD_GAP_FRACTION * prev.space_w:
+                # One font space is what the gap would have cost unstretched;
+                # the rest of it is the move.
+                h = prev.style["h_scale"]
+                between += gap - (prev.space_w / h if h > 1e-9 else prev.space_w)
+                gaps += 1
+        if mem.ptext:
+            prev = mem
+    return in_run, between, gaps
+
+
+def _state_stretch(line: _Line) -> str:
+    """This line's TEXT-STATE verdict: "stretched", "flush" or "ambiguous".
+
+    Geometry alone cannot separate a two-line justified paragraph from a
+    flush one, and the word-gap rule above needs two gaps before it will
+    speak — so a first line justified through a single stretched gap, or
+    through a line-local Tz, read flush and re-emitted flush. What the line
+    still carries is its own text state, and the one comparison that
+    collects all of it is the drawn extent against the drawing fonts' own
+    declared advances.
+
+    "ambiguous" is the honest third answer: the whole excess sits in ONE
+    between-run pen move with no Tz and no Tw beside it, which is the same
+    bytes a tab stop is written with. The caller refuses the paragraph
+    rather than guessing, because guessing flush re-sets a justified opener
+    and guessing justify re-flows a tabbed line into prose."""
+    ratios = _line_stretch(line)
+    if len(ratios) >= JUSTIFY_STRETCH_GAPS and not (
+        all(r >= 1.0 + JUSTIFY_STRETCH_MIN for r in ratios)
+        and (max(ratios) - min(ratios)) <= JUSTIFY_STRETCH_SPREAD
+    ):
+        # Two or more word breaks that DISAGREE settle it on their own: a
+        # justifier divides one deficit equally, so one gap opened wide
+        # beside a natural one is a tab or a column, never a stretched
+        # line. The state comparison below cannot see that — it only knows
+        # the line's total — so the gap channel answers first.
+        return "flush"
+    split = _stretch_split(line)
+    if split is None:
+        return "flush"
+    in_run, between, gaps = split
+    tol = max(EDGE_TOL_PT, JUSTIFY_STATE_EXCESS * max(line.x1 - line.x0, 1e-9))
+    if in_run > tol:
+        return "stretched"
+    if between <= tol:
+        return "flush"
+    if gaps == 1 and not any(
+        m.style["word_spacing"] > 0.0 for m in line.members
+    ):
+        return "ambiguous"
+    return "stretched"
+
+
+def _measure_edges(
+    lines: list[_Line], left: float, right: float, tol: float, base_rtl: bool
+) -> tuple[bool, bool]:
+    """(reaches, opposite) — the geometric half of the justification test.
+
+    Justification is a property of the edge the lines GROW toward: every
+    line but the last reaches the measure at the end of the reading
+    direction. The opposite edge carries the same evidence for every line
+    except the FIRST, which a first-line indent legitimately moves in — and
+    the indent sits at the reading START, so the exemption mirrors with the
+    base direction."""
+    non_last = lines[:-1]
+    if base_rtl:
+        return (
+            all((l.x0 - left) <= tol for l in non_last),
+            all((right - l.x1) <= tol for l in non_last[1:]),
+        )
+    return (
+        all((right - l.x1) <= tol for l in non_last),
+        all((l.x0 - left) <= tol for l in non_last[1:]),
+    )
+
+
+def _justify_ambiguous(
+    lines: list[_Line], left: float, right: float, base_rtl: bool = False
+) -> bool:
+    """True when this paragraph's opener could equally be justified text or
+    a line set to a TAB STOP, and nothing on the page separates the two.
+
+    Only the two-line case can reach here: three lines make the edges
+    themselves the evidence. The caller refuses the paragraph — a silent
+    choice either way re-emits the document wrong (a justified opener set
+    flush, or a tabbed line reflowed into prose)."""
+    if len(lines) != 2:
+        return False
+    tol = max(EDGE_TOL_PT, EDGE_TOL_FRACTION * (right - left))
+    reaches, opposite = _measure_edges(lines, left, right, tol, base_rtl)
+    if not (reaches and opposite):
+        return False
+    first = lines[0]
+    if _is_stretched(first):
+        return False
+    return _state_stretch(first) == "ambiguous"
 
 
 def _detect_alignment(
@@ -1214,20 +1502,18 @@ def _detect_alignment(
     # exemption mirrors with the base direction. Reading a justified
     # indented paragraph as flush left (or, right-to-left, flush right)
     # re-emitted it that way.
-    if base_rtl:
-        reaches = all((l.x0 - left) <= tol for l in non_last)
-        opposite = all((right - l.x1) <= tol for l in non_last[1:])
-    else:
-        reaches = all((right - l.x1) <= tol for l in non_last)
-        opposite = all((l.x0 - left) <= tol for l in non_last[1:])
+    reaches, opposite = _measure_edges(lines, left, right, tol, base_rtl)
     if reaches and opposite:
         # Three lines make the edges themselves the evidence: a body block
         # whose every line but the last ends at the measure was set to that
         # measure. Two lines cannot say that from geometry alone — one full
         # line above one short one is equally a flush block that happened to
-        # fill — so the pair is decided on how its gaps were DRAWN, and a
-        # two-line block with no stretch stays flush.
-        if len(lines) >= 3 or all(_is_stretched(l) for l in non_last):
+        # fill — so the pair is decided on how it was DRAWN: its word gaps
+        # first, and where those are too few to speak, the line's own text
+        # state (`_state_stretch`). A two-line block with neither stays flush.
+        if len(lines) >= 3 or all(
+            _is_stretched(l) or _state_stretch(l) == "stretched" for l in non_last
+        ):
             return "justify"
     lefts = [l.x0 for l in lines]
     rights = [l.x1 for l in lines]
@@ -1335,7 +1621,11 @@ def _to_logical(pieces: list[tuple[str, int]], base_level: int, cap_of):
 
 
 def _assemble_text(
-    lines: list[_Line], base_level: int | None = None
+    lines: list[_Line],
+    base_level: int | None = None,
+    line_breaks=None,
+    lead: int = 0,
+    trail: int = 0,
 ) -> tuple[str, list[dict], list[float]] | None:
     """(logical text, spans [{start,end,run}], observed word gaps 1000).
 
@@ -1361,6 +1651,10 @@ def _assemble_text(
         pos += len(text)
         last_char = text[-1]
 
+    if lead:
+        # A break the author put BEFORE the paragraph's first glyph. It has
+        # no line to sit between, so it opens the text.
+        emit(NEWLINE * lead, lines[0].members[0].index)
     for li, line in enumerate(lines):
         pieces = _line_pieces(line, gaps)
         if base_level is not None:
@@ -1369,7 +1663,13 @@ def _assemble_text(
             if pieces is None:
                 return None
         next_first = next((piece[0][0] for piece in pieces if piece[0]), "")
-        if (
+        hard = (line_breaks or {}).get(li, 0)
+        if li > 0 and hard:
+            # An AUTHORED break outranks every join rule below: the author
+            # ended the line, so no separator is inferred and none of the
+            # hyphen / CJK exemptions apply.
+            emit(NEWLINE * hard, spans[-1]["run"] if spans else line.members[0].index)
+        elif (
             li > 0
             and last_char not in ("-", " ", "")
             and not (_cjk(last_char) and next_first and _cjk(next_first))
@@ -1382,10 +1682,12 @@ def _assemble_text(
             emit(" ", spans[-1]["run"] if spans else line.members[0].index)
         for piece in pieces:
             emit(piece[0], piece[1])
+    if trail:
+        emit(NEWLINE * trail, spans[-1]["run"] if spans else lines[0].members[0].index)
     return "".join(parts), spans, gaps
 
 
-def _resolve_bidi_text(lines: list[_Line], visual):
+def _resolve_bidi_text(lines: list[_Line], visual, line_breaks=None, lead=0, trail=0):
     """(text, spans, gaps, base_level) in LOGICAL order, or None.
 
     Both base directions are tried because the page gives no direct evidence
@@ -1398,7 +1700,9 @@ def _resolve_bidi_text(lines: list[_Line], visual):
     used."""
     accepted = []
     for base in (1, 0):
-        got = _assemble_text(lines, base_level=base)
+        got = _assemble_text(
+            lines, base_level=base, line_breaks=line_breaks, lead=lead, trail=trail
+        )
         if got is not None:
             accepted.append((base, got))
     for base, got in accepted:
@@ -1448,11 +1752,44 @@ def _first_line_indent(lines: list[_Line], alignment: str, rtl: bool) -> float:
     return lines[0].x0 - min(l.x0 for l in body)
 
 
+def _paragraph_breaks(lines: list[_Line]) -> tuple[dict, int, int]:
+    """({line index: authored breaks before it}, leading, trailing).
+
+    A marker binds to the run it precedes, which for every break INSIDE a
+    paragraph is the first run of the line the author started. The two edge
+    cases are the same object seen from either side: a marker between two
+    paragraphs is equally the first one's trailing break and the second
+    one's leading break, and the page cannot say which. It is read as
+    TRAILING, because the paragraph that was edited is the one whose
+    emission wrote it. A leading break is therefore only ever read as one
+    when nothing precedes it on the page at all."""
+    per_line: dict = {}
+    idx = {m.index for line in lines for m in line.members}
+    lead = 0
+    trail = 0
+    for li, line in enumerate(lines):
+        first = min(line.members, key=lambda m: m.index)
+        if not first.brk_before:
+            continue
+        if li > 0:
+            per_line[li] = first.brk_before
+        elif first.index == 0:
+            lead = first.brk_before
+    last = max(idx)
+    tail_member = next(
+        (m for line in lines for m in line.members if m.index == last), None
+    )
+    if tail_member is not None and tail_member.brk_after and (last + 1) not in idx:
+        trail = tail_member.brk_after
+    return per_line, lead, trail
+
+
 def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
     out: list[_Paragraph] = []
     for lines in paras:
         p = _Paragraph()
         p.lines = lines
+        line_breaks, lead, trail = _paragraph_breaks(lines)
         # Distinct member streams in content order; the first is the
         # primary (the single-stream `stream` field, unchanged meaning).
         first_of: dict[tuple, int] = {}
@@ -1474,13 +1811,17 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
             else None
         )
         p.indent = _first_line_indent(lines, p.alignment, False)
-        p.text, p.spans, gaps = _assemble_text(lines)
+        p.text, p.spans, gaps = _assemble_text(
+            lines, line_breaks=line_breaks, lead=lead, trail=trail
+        )
         bidi_failed = False
         if bidi.has_strong_rtl(p.text):
             # Page order is VISUAL order. Normalize to logical so the
             # editor edits reading order, and re-detect alignment now that
             # the base direction is known.
-            resolved = _resolve_bidi_text(lines, p.text)
+            resolved = _resolve_bidi_text(
+                lines, p.text, line_breaks=line_breaks, lead=lead, trail=trail
+            )
             if resolved is None:
                 bidi_failed = True
             else:
@@ -1547,6 +1888,15 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
             # only a rise on an UPRIGHT VERTICAL member is inexpressible.
             p.editable = False
             p.reason = "vertical text with raised characters does not reflow"
+        elif _justify_ambiguous(lines, p.left, p.right, p.base_level == 1):
+            # A two-line block whose opener reaches the measure through ONE
+            # between-run pen move, with no Tz and no Tw beside it. A
+            # justifier and a tab stop write that identically, so neither
+            # alignment can be asserted; re-emitting under the wrong one
+            # either sets a justified opener flush or reflows a tabbed line
+            # into prose. The runs stay individually editable on the surface.
+            p.editable = False
+            p.reason = "this paragraph could be justified text or a tab stop"
         elif any(m.clipped for m in p.members) and not all(m.clipped for m in p.members):
             # A clip boundary cutting through a paragraph
             # leaves some members visible and some clipped away. The whole-para
@@ -1752,8 +2102,8 @@ def _reading_tiebreak(p: _Paragraph) -> float:
     return p.box[0]
 
 
-def _group(runs: list[dict], detail: list[dict]) -> list[_Paragraph]:
-    members = _members_from(runs, detail)
+def _group(runs: list[dict], detail: list[dict], breaks=()) -> list[_Paragraph]:
+    members = _members_from(runs, detail, breaks)
     paragraphs = _assemble(members, runs)
     # A tate-chu-yoko block is re-framed into its column and the
     # grouping RE-RUN, because the evidence that identifies one is exactly
@@ -1980,6 +2330,7 @@ def list_text_paragraphs(file: str, page: int) -> dict:
         resources = _resolve_resources(p)
         runs: list[dict] = []
         detail: list[dict] = []
+        breaks: list[dict] = []
         _walk_runs(
             pdf,
             pikepdf.parse_content_stream(p),
@@ -1991,8 +2342,9 @@ def list_text_paragraphs(file: str, page: int) -> dict:
             False,
             _FontCache(),
             detail=detail,
+            breaks=breaks,
         )
-        paragraphs = _group(runs, detail)
+        paragraphs = _group(runs, detail, breaks)
 
         # Seed the style toggles from each paragraph's dominant
         # member's OWN font (stream-scoped resources — the discipline).
@@ -3104,10 +3456,11 @@ def _visual_items(line: _LayoutLine, base_level: int) -> list:
     """The line's items in VISUAL order.
 
     An item is `("ch", text, style, width)` or `("gap", char, style, width)`;
-    the trailing word's gap is dropped exactly as the shipped `_segments`
+    the trailing word's gap is dropped exactly as `_Emission._segments`
     drops it (rule L1 resets a line-final space to the base level anyway, so
     dropping it BEFORE reordering and letting L1 handle nothing is the same
-    answer by two routes).
+    answer by two routes) — EXCEPT on a hard-break line, where that trailing
+    gap is the author's own space and both routes keep it instead.
 
     Reordering is by character, not by word: an RTL word's letters mirror
     within the word as well as the words mirroring within the line, and only
@@ -3119,8 +3472,21 @@ def _visual_items(line: _LayoutLine, base_level: int) -> list:
     for wi, word in enumerate(line.words):
         for (text, st), w in zip(word.chars, word.char_widths):
             items.append(["ch", text, st, w])
-        if wi != last:
+        # A trailing space typed immediately before a hard break is
+        # authored content, not wrap filler — kept only on the last word of
+        # a hard-break line; see the matching note in `_Emission._segments`.
+        if wi != last or line.hard_break:
             for ch, st, w in word.gap_styles:
+                if (
+                    wi == last
+                    and line.hard_break
+                    and ch == " "
+                    and st.fallback is None
+                    and not _draws_space(st.member.cap)
+                ):
+                    raise ValueError(
+                        "a hard line break cannot preserve a trailing space in this font"
+                    )
                 items.append(["gap", ch, st, w])
     ordered = bidi.reorder_to_visual(items, base_level, key=lambda it: it[1][:1] or " ")
     if len(ordered) != len(items):
@@ -3670,7 +4036,7 @@ class _Emission:
                 bbox[2] = max(bbox[2], x1)
                 bbox[3] = max(bbox[3], y1)
 
-        for line in lines:
+        for line_no, line in enumerate(lines):
             for seg in self._segments(line):
                 st: _StyleRef = seg["style"]
                 if stream is not None and st.member.stream != stream:
@@ -3773,6 +4139,21 @@ class _Emission:
                             ]
                         )
                         out.append(("show", _instruction([arr], "TJ"), raw, mem.vertical))
+            if line.hard_break and (
+                stream is None or self._break_owner(lines, line_no) == stream
+            ):
+                # The author's break, written into the page as an empty
+                # marked-content sequence whose replacement text IS the break
+                # (ISO 32000-2 14.9.4 via a Span property list; 14.6.1 admits
+                # the pair inside the text object). It draws nothing, and it
+                # is the only record of the break there is — the layout that
+                # produced it does not survive the save, so a re-listing
+                # rebuilt the paragraph as one wrapped run of text and the
+                # break was gone. It sits AFTER the line it ends, so the run
+                # it binds to on the way back in is the first of the NEXT
+                # line — the line the author started.
+                out.append(("op", break_marker_instruction(1), None))
+                out.append(("op", _instruction([], "EMC"), None))
         self.last_build_bbox = bbox
         return out
 
@@ -3832,6 +4213,21 @@ class _Emission:
         flush()
         return pieces or [(seg["dx"], 0.0, [b""], 0.0)]
 
+    def _break_owner(self, lines: list, line_no: int) -> tuple:
+        """Which stream a break marker belongs in — the stream of the text
+        it separates. A consecutive break has no text of its own, so it takes
+        the nearest line that does, looking backward first (the line the
+        author ended) and then forward."""
+        for probe in range(line_no, -1, -1):
+            segs = self._segments(lines[probe])
+            if segs:
+                return segs[-1]["style"].member.stream
+        for probe in range(line_no + 1, len(lines)):
+            segs = self._segments(lines[probe])
+            if segs:
+                return segs[0]["style"].member.stream
+        return self.para.stream
+
     def _segments(self, line: _LayoutLine) -> list[dict]:
         """Split a line's char stream into same-style segments; synthetic
         spaces and justify extras become in-segment kerns (or fold into
@@ -3852,13 +4248,31 @@ class _Emission:
                 ))
                 prev_ch_seg, prev_st_seg = (ch[-1] if ch else None), st
             is_last = wi == len(line.words) - 1
-            if not is_last:
+            # A trailing space the author typed immediately before a hard
+            # break is authored content, not wrap-generated line-end
+            # whitespace — dropping it (the pre-existing behaviour, correct
+            # for an ordinary wrapped line end) lost the user's own text on
+            # relist. It is emitted only on the LAST word of a hard-break
+            # line; every other line-final gap is still wrap filler and
+            # stays dropped, unchanged.
+            if not is_last or (line.hard_break and word.gap_styles):
                 for ch, st, w in word.gap_styles:
                     if ch == " " and st.fallback is None and not _draws_space(st.member.cap):
+                        if is_last:
+                            # A kern here has nothing after it on this line to
+                            # offset — it is a pure position move with no
+                            # glyph, and the mid-paragraph gap heuristic that
+                            # recovers a kerned space on relist only compares
+                            # two members on the SAME line. Silently emitting
+                            # it would silently drop the user's space; refuse
+                            # instead.
+                            raise ValueError(
+                                "a hard line break cannot preserve a trailing space in this font"
+                            )
                         stream.append(("kern", st, w))
                     else:
                         stream.append(("ch", ch, st, w))
-                if line.justify_extra:
+                if line.justify_extra and not is_last:
                     last_style = word.gap_styles[-1][1] if word.gap_styles else word.chars[-1][1]
                     stream.append(("kern", last_style, line.justify_extra))
         return self._split_segments(stream)
@@ -4250,6 +4664,7 @@ def _rewrite_paragraph_stream(
     form_ordinal = 0
     diverged = False
     in_bt = False
+    dropping_break = False
     # Consecutive state/positioning setters directly BEFORE the first
     # member styled/positioned that member — buffered, and DISCARDED when
     # the member arrives (they'd be dead weight; without this, every
@@ -4368,6 +4783,26 @@ def _rewrite_paragraph_stream(
             in_bt = True
         elif operator == "ET":
             in_bt = False
+
+        if tgt.first_ordinal <= show_ordinal <= tgt.last_ordinal + 1:
+            # A hard-break marker inside the paragraph's span records the
+            # PREVIOUS edit's breaks. The emission writes the current ones,
+            # so leaving these would compound a break per re-edit; dropping
+            # one the author removed is how a removal takes effect at all.
+            # Scoped to our own signature and to an EMPTY sequence, so a
+            # producer's /ActualText over real glyphs is never touched. The
+            # window runs one past the last member because a TRAILING break
+            # sits after that member's show, which is also where the marker
+            # for it is written back.
+            if operator == "BDC" and break_marker_count(
+                operands, resources, fallback_res
+            ):
+                dropping_break = True
+                continue
+            if operator == "EMC" and dropping_break:
+                dropping_break = False
+                continue
+            dropping_break = False
 
         if operator in SHOW_OPS:
             is_member = show_ordinal in tgt.member_ordinals
@@ -5289,6 +5724,7 @@ def replace_paragraph_text(
         fonts = _FontCache()
         runs: list[dict] = []
         detail: list[dict] = []
+        breaks: list[dict] = []
         _walk_runs(
             pdf,
             pikepdf.parse_content_stream(p),
@@ -5300,8 +5736,9 @@ def replace_paragraph_text(
             False,
             fonts,
             detail=detail,
+            breaks=breaks,
         )
-        paragraphs = _group(runs, detail)
+        paragraphs = _group(runs, detail, breaks)
         if not (0 <= int(paragraph_index) < len(paragraphs)):
             raise ValueError(
                 f"paragraph index {paragraph_index} is out of range (page has {len(paragraphs)})"
@@ -5500,6 +5937,7 @@ def merge_paragraph_with_previous(
         fonts = _FontCache()
         runs: list[dict] = []
         detail: list[dict] = []
+        breaks: list[dict] = []
         _walk_runs(
             pdf,
             pikepdf.parse_content_stream(p),
@@ -5511,8 +5949,9 @@ def merge_paragraph_with_previous(
             False,
             fonts,
             detail=detail,
+            breaks=breaks,
         )
-        paragraphs = _group(runs, detail)
+        paragraphs = _group(runs, detail, breaks)
         idx = int(paragraph_index)
         if with_next:
             if not (0 <= idx < len(paragraphs) - 1):

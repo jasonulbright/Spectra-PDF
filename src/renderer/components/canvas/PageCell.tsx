@@ -4494,7 +4494,11 @@ function PageCellImpl({
                 (selected ? ' selected' : '') +
                 (run.editable ? '' : ' locked')
               }
-              title={run.editable ? 'Text — double-click to edit' : run.reason ?? 'Not editable'}
+              title={
+                run.editable
+                  ? tChrome('canvas.editrun.hit')
+                  : (run.reason ?? tChrome('canvas.edit.textNotEditable'))
+              }
               aria-pressed={selected}
               style={{
                 left: `${r.x * 100}%`,

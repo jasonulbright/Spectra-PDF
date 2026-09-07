@@ -425,6 +425,7 @@ export const CANVAS_STRINGS = {
   'canvas.editimg.nested': 'Image (inside a form)',
   'canvas.editimg.image': 'Image',
   'canvas.editpara.hit': 'Paragraph — double-click to edit',
+  'canvas.editrun.hit': 'Text — double-click to edit',
 
   // ── The paragraph editor (9.A/9.K) ───────────────────────────────────
   'canvas.editpara.resizeGrip': 'Drag to resize the paragraph box',

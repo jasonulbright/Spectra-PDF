@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
+import i18next from '../src/renderer/i18n';
 import {
   applySpanColor,
   applySpanFace,
@@ -491,6 +492,39 @@ describe('fetchEditTextListing projection', () => {
     expect(out.paragraphs).toHaveLength(0);
     expect(out.runBoxes.map((r) => r.index)).toEqual([0, 1]);
   });
+
+  it('localizes a run box reason, and passes an unknown one through', async () => {
+    // A listing-level reason is never raised, so the boundary here is the
+    // only place it can be recognized.
+    const refusedRuns = {
+      ...listing,
+      runs: [
+        { ...listing.runs[0], editable: false, reason: 'no font is active for this text' },
+        { ...listing.runs[1], editable: false, reason: 'a refusal added since the last sweep' },
+      ],
+      paragraphs: [],
+    };
+    await i18next.changeLanguage('es');
+    try {
+      const out = await fetchEditTextListing(
+        async () => refusedRuns,
+        'C:\\w.pdf',
+        1,
+        { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
+      );
+      expect(out.runBoxes[0].reason).toBe(
+        localizeEngineMessage('no font is active for this text'),
+      );
+      expect(out.runBoxes[0].reason).not.toBe('no font is active for this text');
+      expect(out.runBoxes[1].reason).toBe('a refusal added since the last sweep');
+    } finally {
+      await i18next.changeLanguage('en');
+    }
+  });
+});
+
+afterAll(async () => {
+  await i18next.changeLanguage('en');
 });
 
 describe('utf16ToCodePointIndex (split caret domain)', () => {

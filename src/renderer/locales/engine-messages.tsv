@@ -343,12 +343,14 @@ links.webAddressesEmailAddresses	exact	links	No web addresses or email addresses
 merge.theseDocumentsCannotCombined	exact	merge	These documents cannot be combined without changing their protection: they do not all carry the same encryption and permissions, and one combined document can only have one. Give them matching protection, or decrypt them first.
 mrc.everyScannedPageFailed	exact	mrc	every scanned page failed mask verification — no MRC output was written
 mrc.everyScannedPageFailedText	exact	mrc	every scanned page failed text verification — no MRC output was written, because a page whose words did not survive is not an output worth having. Try the archival preset, which keeps thin strokes.
+mrc.firstDifference	pattern	mrc	{{reason}} (first difference — {{divergence}})
 mrc.ghostscriptCouldRenderPage	pattern	mrc	Ghostscript could not render the page image: {{detail}}
 mrc.mrcBackgroundDivisorMust	pattern	mrc	the MRC background divisor must be 1-12, got {{bg_divisor}}
 mrc.mrcForegroundDivisorMust	pattern	mrc	the MRC foreground divisor must be 1-12, got {{fg_divisor}}
 mrc.ocrEngineAvailableText	pattern	mrc	The OCR engine is not available at {{v0}}, so the text of an MRC page cannot be verified. Turn off text verification or run scripts/bundle-tesseract.ps1.
 mrc.pageDocumentScannedImage	exact	mrc	no page in this document is a scanned image — MRC compression has nothing to separate
 mrc.pdfJbigFilterMask	pattern	mrc	PDF/A-1 has no JBIG2 filter, so the mask codec {{mask_codec}} and the PDF/A-safe option cannot both apply — choose one.
+mrc.textVerificationFailedSource	pattern	mrc	text verification failed: {{similarity}} of the source page's words survived, below this preset's {{verify_threshold}} floor
 mrc.unknownMrcMaskCodec	pattern	mrc	unknown MRC mask codec: {{name}} (expected one of {{v1}})
 mrc.unknownMrcPresetExpected	pattern	mrc	unknown MRC preset: {{preset}} (expected one of {{v1}})
 mrc_codecs.ccittGMaskMust	pattern	mrc_codecs	a CCITT G4 mask must encode as ONE strip; libtiff wrote {{v0}} — the concatenated stream would decode progressively wrong.
@@ -364,6 +366,7 @@ mrc_codecs.maskVerificationFailedEmbedded	pattern	mrc_codecs	mask verification f
 mrc_codecs.oneMaskProfilePer	pattern	mrc_codecs	one mask profile per mask is required, got {{v0}} for {{v1}} mask(s)
 mrc_codecs.unknownJbigMode	pattern	mrc_codecs	unknown JBIG2 mode: {{mode}}
 mrc_codecs.unknownMaskCodecExpected	pattern	mrc_codecs	unknown mask codec: {{codec}} (expected one of {{v1}})
+object_inspector.deviceWroteRaster	exact	object_inspector	the device wrote no raster
 object_inspector.objectUnderPointCannot	exact	object_inspector	The object under that point cannot be isolated on its own.
 object_inspector.objectUnderPointCould	pattern	object_inspector	The object under that point could not be isolated for measurement: {{detail}}
 object_inspector.pageSContentWill	pattern	object_inspector	This page's content will not read, so nothing on it can be identified: {{exc}}
@@ -443,7 +446,16 @@ page_vectors.vectorIndexOutRange	pattern	page_vectors	vector index {{index}} is 
 page_vectors.vectorObjectBboxDegenerate	exact	page_vectors	vector object bbox is degenerate and cannot be transformed
 page_vectors.vectorObjectSTransform	exact	page_vectors	vector object's transform matrix is degenerate and cannot be transformed
 page_vectors.vectorObjectSpansUnbalanced	exact	page_vectors	vector object spans unbalanced q/Q graphics-state frames and cannot be edited as one unit
+pdf_fonts.emptyTounicodeMap	exact	pdf_fonts	empty ToUnicode map
 pdf_fonts.fontCannotEncode	pattern	pdf_fonts,text_paragraphs	font cannot encode {{ch}}
+pdf_fonts.resolvableEncodingSymbolicFont	exact	pdf_fonts	no resolvable encoding (symbolic font without ToUnicode)
+pdf_fonts.tounicodeMapRecoverableMapping	exact	pdf_fonts	no ToUnicode map and no recoverable mapping — this text cannot be re-entered
+pdf_fonts.tounicodeMapRecoverableMapping2	exact	pdf_fonts	no ToUnicode map and no recoverable mapping — vertical text cannot be re-entered
+pdf_fonts.typeFontDegenerateFontmatrix	exact	pdf_fonts	Type3 font with a degenerate /FontMatrix
+pdf_fonts.typeFontMalformedFontmatrix	exact	pdf_fonts	Type3 font with a malformed /FontMatrix
+pdf_fonts.typeFontResolvableEncoding	exact	pdf_fonts	Type3 font with no resolvable encoding
+pdf_fonts.unreadableTounicodeMap	exact	pdf_fonts	unreadable ToUnicode map
+pdf_fonts.unsupportedCompositeFontEncoding	pattern	pdf_fonts	unsupported composite-font encoding ({{enc}})
 pdf_save.documentSEncryptionCannot	exact	pdf_save	This document's encryption cannot be kept through this operation, which will not hand back an unprotected copy of a protected document. Decrypt it first if that is what you want.
 pdf_save.documentSEncryptionCannot2	exact	pdf_save	This document's encryption cannot be kept through this operation: it is encrypted to certificate recipients, whose list cannot be rewritten. Decrypt the document first if you want an unprotected copy.
 pdf_save.documentSEncryptionCannot3	exact	pdf_save	This document's encryption cannot be kept through this operation: its permissions are held by an owner password, which cannot be read back out of the file. Open it with that password, or decrypt the document first if you want an unprotected copy.
@@ -549,6 +561,9 @@ pubkey_crypt.couldReadCheckFile	pattern	pubkey_crypt	Could not read {{v0}} — c
 pubkey_crypt.keyDoesMatchAny	pattern	pubkey_crypt	The key in {{v0}} does not match any recipient of this document.
 pubkey_crypt.leastOneRecipientCertificate	exact	pubkey_crypt	At least one recipient certificate is required.
 pubkey_crypt.readableXCertificatePem	pattern	pubkey_crypt	{{v0}} is not a readable X.509 certificate (PEM or DER).
+read_aloud.nothingPageStructureTree	exact	read_aloud	nothing on this page is in the structure tree
+read_aloud.pageContentOutsideStructure	exact	read_aloud	page content outside the structure tree
+read_aloud.tagged	exact	read_aloud	not tagged
 rebuild.ghostscriptRebuildFailed	pattern	rebuild	Ghostscript rebuild failed: {{stderr}}
 recognize.couldRenderPageOcr	pattern	recognize	Could not render page {{page}} for OCR: {{detail}}
 recognize.invalidRecognitionLanguage	pattern	recognize	Invalid recognition language: {{lang}}
@@ -771,6 +786,7 @@ text_paragraphs.boxLeftRequiresBox	exact	text_paragraphs	box left requires a box
 text_paragraphs.boxWidthMustNumber	exact	text_paragraphs	box width must be a number
 text_paragraphs.boxWidthMustPositive	exact	text_paragraphs	box width must be a positive number
 text_paragraphs.cannotReLayOut	exact	text_paragraphs	cannot re-lay-out text under a degenerate transform
+text_paragraphs.containsTextCannotEdited	pattern	text_paragraphs	contains text that cannot be edited ({{v0}})
 text_paragraphs.directionalFormattingCharactersCannot	exact	text_paragraphs	directional formatting characters cannot be re-laid-out in a paragraph
 text_paragraphs.editCannotKeepDocument	exact	text_paragraphs	this edit cannot keep the document font — retry, or restyle to another face
 text_paragraphs.editDidApplyParagraph	exact	text_paragraphs	edit did not apply (paragraph not found)
@@ -785,14 +801,20 @@ text_paragraphs.fallbackFontPathRequired	exact	text_paragraphs	fallback font pat
 text_paragraphs.fallbackFontPathRequired2	exact	text_paragraphs	fallback font path is required to restyle
 text_paragraphs.fontVerticalFormsPick	exact	text_authoring,text_paragraphs	that font has no vertical forms — pick one that does
 text_paragraphs.hardLineBreakCannot	exact	text_paragraphs	a hard line break cannot split a tate-chu-yoko block
+text_paragraphs.hardLineBreakCannot2	exact	text_paragraphs	a hard line break cannot preserve a trailing space in this font
+text_paragraphs.horizontalBlockInsideColumn	exact	text_paragraphs	a horizontal block inside this column (tate-chu-yoko) does not reflow
 text_paragraphs.nextParagraphMerge	exact	text_paragraphs	no next paragraph to merge with
 text_paragraphs.pageSTextChanged	exact	text_paragraphs	the page's text changed underneath this edit — reopen the editor
 text_paragraphs.paragraphCannotSplitInside	exact	text_paragraphs	a paragraph cannot split inside a ligature
 text_paragraphs.paragraphCannotSplitTate	exact	text_paragraphs	a paragraph cannot split a tate-chu-yoko block
 text_paragraphs.paragraphCannotWrapWidth	exact	text_paragraphs	the paragraph cannot wrap to that width — a word is wider than the box
+text_paragraphs.paragraphCouldJustifiedText	exact	text_paragraphs	this paragraph could be justified text or a tab stop
+text_paragraphs.paragraphCrossesDrawingLayers	exact	text_paragraphs	this paragraph crosses drawing layers that disagree about its text direction
 text_paragraphs.paragraphIndexOutRange	pattern	text_paragraphs	paragraph index {{paragraph_index}} is out of range (page has {{v1}})
+text_paragraphs.paragraphSRightLeft	exact	text_paragraphs	this paragraph's right-to-left order could not be reconstructed
 text_paragraphs.paragraphsDifferentContentStreams	exact	text_paragraphs	the paragraphs are in different content streams and cannot merge
 text_paragraphs.paragraphsDifferentFormattingCannot	exact	text_paragraphs	the paragraphs have different formatting and cannot merge
+text_paragraphs.partParagraphClippedAway	exact	text_paragraphs	part of this paragraph is clipped away on the page
 text_paragraphs.previousParagraphMerge	exact	text_paragraphs	no previous paragraph to merge with
 text_paragraphs.requestedBoxNarrowerThan	exact	text_paragraphs	the requested box is narrower than the first-line indent
 text_paragraphs.restyleMergedParagraphAfter	exact	text_paragraphs	restyle the merged paragraph after merging — a face change cannot ride a merge of right-to-left text
@@ -808,8 +830,10 @@ text_paragraphs.splitGapRequiresSplit	exact	text_paragraphs	split gap requires a
 text_paragraphs.splitPositionMustInside	exact	text_paragraphs	split position must be inside the text
 text_paragraphs.splitPositionMustNumber	exact	text_paragraphs	split position must be a number
 text_paragraphs.verticalTextCannotConverted	exact	text_paragraphs,text_runs	vertical text cannot be converted to the fallback font
+text_paragraphs.verticalTextRaisedCharacters	exact	text_paragraphs	vertical text with raised characters does not reflow
 text_runs.colorMustRG	exact	text_runs	color must be [r, g, b] with components in 0..1
 text_runs.editDidApplyRun	exact	text_runs	edit did not apply (run not found)
+text_runs.fontActiveText	exact	text_runs	no font is active for this text
 text_runs.fontActiveTextRun	exact	text_runs	no font is active for this text run
 text_runs.newTextWouldExtend	exact	text_runs	the new text would extend off the page — shorten it or reduce the size
 text_runs.nothingRestyleGiveSize	exact	text_runs	nothing to restyle — give a size and/or a color

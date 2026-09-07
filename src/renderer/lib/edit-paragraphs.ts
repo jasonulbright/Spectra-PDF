@@ -304,7 +304,11 @@ export async function fetchEditTextListing(
     text: run.text,
     nested: Boolean(run.nested),
     editable: Boolean(run.editable),
-    reason: run.reason ?? null,
+    // The listing's `reason` is a REFUSAL the engine never raised, so it
+    // reaches the UI only through here — localized at the boundary, as an
+    // `EngineError.message` is, and passed through verbatim when the table
+    // carries no row for it.
+    reason: run.reason ? localizeEngineMessage(run.reason) : null,
     encodable: run.encodable ?? '',
     sequences: Array.isArray(run.sequences) ? run.sequences : [],
     vertical: Boolean(run.vertical),

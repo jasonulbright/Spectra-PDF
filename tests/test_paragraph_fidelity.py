@@ -851,3 +851,65 @@ def test_a_signed_rtl_indent_edit_refuses_the_append_and_keeps_its_geometry(tmp_
     assert abs(drawn[0][2] - (RTL_RIGHT - RTL_INDENT)) <= EDGE_TOL
     for line in drawn[1:]:
         assert abs(line[2] - RTL_RIGHT) <= EDGE_TOL
+
+
+# --- lane ROLES ---------------------------------------------------------
+#
+# Withdrawing a spanning line from the margin pool removed its evidence but
+# not its identity: the join loop read the resulting empty pool as "no indent
+# break" and welded the heading onto the column under it. The lane analysis
+# now answers with a per-line ROLE, and a spanning line can never continue a
+# column whatever the geometry says.
+
+
+def test_a_close_spanning_heading_never_joins_the_column_under_it():
+    # The heading sits at ORDINARY leading above the first body row, so every
+    # geometric test the join makes accepts it.
+    lines = _spanning(2, 0.0, 300.0, 110.0) + _columns(2)
+    paras = _join_paragraphs(lines)
+    assert len(paras) == 5
+    assert sorted(len(block) for block in paras) == [1, 2, 2, 2, 2]
+
+
+def test_a_bridge_barely_wider_than_the_body_still_reads_as_a_bridge():
+    # 1.20x the median line - under the fixed width factor the lane search
+    # used to require, and plainly a bridge by the gutter it lies across.
+    lines = [_synth_line(950, 120.0, 90.0, 210.0)] + _columns(2)
+    paras = _join_paragraphs(lines)
+    assert len(paras) == 5
+    assert sorted(len(block) for block in paras) == [1, 2, 2, 2, 2]
+
+
+def test_a_bridge_over_one_gutter_of_three_columns_splits_the_pair_it_welded():
+    # The third column is its own x-overlap component, so the page never
+    # looked like one component and the span search never ran on the two the
+    # bridge had joined.
+    body = []
+    for col in range(3):
+        base = col * 110.0
+        body.append(_synth_line(col, 100.0, base, base + 90.0))
+        body.append(_synth_line(3 + col, 90.0, base, base + 90.0))
+    lines = [_synth_line(960, 110.0, 0.0, 200.0)] + body
+    paras = _join_paragraphs(lines)
+    assert len(paras) == 4
+    assert sorted(len(block) for block in paras) == [1, 2, 2, 2]
+
+
+def test_a_figure_caption_between_the_rows_spans_without_bridging():
+    cols = _columns(2)
+    lines = cols[:4] + [_synth_line(970, 85.0, 0.0, 300.0)] + cols[4:]
+    paras = _join_paragraphs(lines)
+    assert len(paras) == 5
+    assert sorted(len(block) for block in paras) == [1, 2, 2, 2, 2]
+
+
+def test_a_ragged_single_column_is_never_taken_apart():
+    from engine.text_paragraphs import LANE_COLUMN, _lane_roles
+
+    lines = [
+        _synth_line(i, 100.0 - 10.0 * i, 0.0, 100.0 - 5.0 * (i % 4))
+        for i in range(6)
+    ]
+    assert all(role[0] == LANE_COLUMN for role in _lane_roles(lines))
+    assert all(role[1] == 0 for role in _lane_roles(lines))
+    assert len(_join_paragraphs(lines)) == 1

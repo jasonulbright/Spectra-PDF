@@ -155,7 +155,85 @@ def _bdc_mcid(operands: list, resources, fallback):
         return None
 
 
-def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nested, fonts, parent_state=None, detail=None, stream_path=(), base_clip=None):
+# An AUTHORED hard line break, carried in the page as an EMPTY marked-content
+# sequence whose replacement text is the line break itself:
+#
+#   /Span <</ActualText <FEFF000A>>> BDC EMC
+#
+# ISO 32000-2 14.9.4 gives replacement text for a marked-content sequence
+# through an /ActualText entry in a property list attached with a Span tag,
+# and 14.6.1 admits the pair inside a text object as long as it nests
+# separately from BT/ET. The sequence encloses no glyphs, so it paints
+# nothing; a consumer that honours replacement text reads the break, one that
+# does not reads nothing at all, and neither reads garbage. Consecutive
+# markers carry no word break between them (14.9.4), which is what makes two
+# of them spell two line breaks rather than a break and a space.
+BREAK_MARKER_TAG = "/Span"
+_BREAK_MARKER_BOM = bytes((0xFE, 0xFF))
+
+
+def break_marker_instruction(count: int):
+    """The BDC half of one authored-hard-break marker of `count` breaks."""
+    text = _BREAK_MARKER_BOM + bytes((0, 0x0A)) * max(int(count), 1)
+    return _instruction(
+        [
+            pikepdf.Name(BREAK_MARKER_TAG),
+            pikepdf.Dictionary(ActualText=pikepdf.String(text)),
+        ],
+        "BDC",
+    )
+
+
+def _text_string(value) -> str | None:
+    try:
+        raw = bytes(value)
+    except (TypeError, ValueError):
+        return None
+    if raw.startswith(_BREAK_MARKER_BOM):
+        try:
+            return raw[2:].decode("utf-16-be")
+        except UnicodeDecodeError:
+            return None
+    try:
+        return raw.decode("latin-1")
+    except UnicodeDecodeError:
+        return None
+
+
+def break_marker_count(operands: list, resources, fallback) -> int:
+    """How many authored line breaks this BDC's property list spells, or 0.
+
+    Only a replacement text that is NOTHING BUT line breaks counts. An
+    /ActualText carrying real replacement characters belongs to whoever wrote
+    it, and reading one as a break would rewrite their text."""
+    if len(operands) < 2 or str(operands[0]) != BREAK_MARKER_TAG:
+        return 0
+    props = operands[1]
+    if isinstance(props, pikepdf.Name):
+        for source in (resources, fallback):
+            if source is None:
+                continue
+            try:
+                table = source.get("/Properties")
+                found = None if table is None else table.get(str(props))
+            except (AttributeError, TypeError):
+                continue
+            if found is not None:
+                props = found
+                break
+    try:
+        value = props.get("/ActualText")
+    except (AttributeError, TypeError):
+        return 0
+    if value is None:
+        return 0
+    text = _text_string(value)
+    if not text or any(ch != chr(10) for ch in text):
+        return 0
+    return len(text)
+
+
+def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nested, fonts, parent_state=None, detail=None, stream_path=(), base_clip=None, breaks=None):
     state = _child_state(base_ctm, parent_state)
     # Clip tracking rides ADDITIVELY beside the state machine so a
     # run wholly outside the active clip lists as `clipped` (invisible) and the
@@ -181,6 +259,8 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
     # consumer reading the page aloud must not speak. The tag is scoped to
     # its own content stream exactly as the /MCID is.
     mark_tags: list = []
+    # (break count, run count at open) per open sequence, parallel to `marks`.
+    mark_breaks: list = []
     for instruction in instructions:
         operator = str(instruction.operator)
         operands = list(instruction.operands)
@@ -190,12 +270,31 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
         if operator in ("BDC", "BMC"):
             marks.append(_bdc_mcid(operands, resources, fallback) if operator == "BDC" else None)
             mark_tags.append(str(operands[0]) if operands else "")
+            # An authored hard break is an EMPTY sequence, so the count is
+            # held open and only recorded if no run lands inside it — an
+            # /ActualText over real glyphs is replacement text, not a break.
+            mark_breaks.append(
+                (break_marker_count(operands, resources, fallback), len(out))
+                if operator == "BDC"
+                else (0, len(out))
+            )
             continue
         if operator == "EMC":
             if marks:
                 marks.pop()
             if mark_tags:
                 mark_tags.pop()
+            if mark_breaks:
+                count, at = mark_breaks.pop()
+                if count and breaks is not None and len(out) == at:
+                    breaks.append(
+                        {
+                            "stream": stream_path,
+                            "before": at,
+                            "after": at - 1,
+                            "count": count,
+                        }
+                    )
             continue
         if state.feed(operator, operands):
             continue
@@ -321,6 +420,7 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     detail=detail,
                     stream_path=child_path,
                     base_clip=clips.clip,
+                    breaks=breaks,
                 )
     return out
 

@@ -29,6 +29,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts
 from engine_message_sweep import (  # noqa: E402
     MIN_LITERAL_ANCHOR,
     PUBLIC_EXCEPTIONS,
+    REASON_SOURCE,
     composed,
     inventory,
     literal_anchor,
@@ -207,4 +208,19 @@ def test_composed_exclusions_are_named(table):
 def test_internal_sentinels_are_not_swept():
     """A transplant refusal is a RESULT, never a message the user reads."""
     for refusal in sweep():
-        assert refusal.exc in PUBLIC_EXCEPTIONS
+        assert refusal.exc in PUBLIC_EXCEPTIONS or refusal.exc == REASON_SOURCE
+
+
+def test_listing_reasons_are_swept():
+    """A listing-level `reason` reaches the UI without ever being raised, so
+    the sweep covers it too — a refused paragraph's reason, a refused run's,
+    and a font capability's."""
+    reasons = {r.template for r in sweep() if r.exc == REASON_SOURCE}
+    for message in (
+        "this paragraph could be justified text or a tab stop",
+        "vertical text with raised characters does not reflow",
+        "part of this paragraph is clipped away on the page",
+        "no font is active for this text",
+        "unreadable ToUnicode map",
+    ):
+        assert message in reasons
