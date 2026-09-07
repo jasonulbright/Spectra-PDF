@@ -22,9 +22,11 @@ import pytest
 from engine.extract_text import extract_text
 from engine.text_paragraphs import (
     _detect_alignment,
+    _first_line_indent,
     _join_paragraphs,
     _Line,
     list_text_paragraphs,
+    merge_paragraph_with_previous,
     replace_paragraph_text,
 )
 
@@ -274,6 +276,72 @@ def test_three_columns_each_keep_their_own_indent_break():
     assert all(len(block) == 2 for block in paras)
 
 
+def _spanning(count: int, x0: float, x1: float, y: float) -> list:
+    """A full-width block over `count` columns - a heading, a footer or a
+    figure caption. It overlaps every column, so a lane rule built on
+    transitive x-overlap alone welds them into one pool."""
+    return [_synth_line(900 + int(y), y, x0, x1)]
+
+
+def test_a_spanning_heading_does_not_bridge_two_columns():
+    lines = _spanning(2, 0.0, 300.0, 120.0) + _columns(2)
+    paras = _join_paragraphs(lines)
+    assert len(paras) == 5
+    assert [len(block) for block in paras] == [1, 2, 2, 2, 2]
+
+
+def test_a_spanning_heading_does_not_bridge_three_columns():
+    lines = _spanning(3, 0.0, 500.0, 120.0) + _columns(3)
+    paras = _join_paragraphs(lines)
+    assert len(paras) == 7
+    assert sorted(len(block) for block in paras) == [1, 2, 2, 2, 2, 2, 2]
+
+
+def test_a_heading_and_a_footer_both_span_without_bridging():
+    lines = (
+        _spanning(2, 0.0, 300.0, 120.0)
+        + _columns(2)
+        + _spanning(2, 0.0, 300.0, 40.0)
+    )
+    paras = _join_paragraphs(lines)
+    assert len(paras) == 6
+    assert sorted(len(block) for block in paras) == [1, 1, 2, 2, 2, 2]
+
+
+def test_a_single_column_page_with_a_wide_line_keeps_one_lane():
+    # The withdrawal is accepted only when it exposes real COLUMNS. One
+    # column with an over-wide line has no gutter to expose, so nothing is
+    # withdrawn and the page measures as it always did.
+    lines = [_synth_line(0, 100.0, 0.0, 300.0)] + [
+        _synth_line(i + 1, 90.0 - i * 10.0, 0.0, 100.0 - (25.0 if i == 1 else 0.0))
+        for i in range(4)
+    ]
+    lines[3].x0 = 10.0
+    paras = _join_paragraphs(lines)
+    assert [len(block) for block in paras] == [3, 2]
+
+
+def test_a_spanning_heading_does_not_bridge_a_one_line_sidebar():
+    # A genuine one-line sidebar/caption column can never itself reach
+    # LANE_MIN_LINES, so a split that requires EVERY lane to have real
+    # support can never be accepted here -- and a rejected split leaves the
+    # heading, the main column and the sidebar in one merged pool, which
+    # dilutes the main column's margin evidence enough to silence a real
+    # indent break in it (regression: LANE_MIN_LINES rejected any split
+    # touching this one-line lane, even though the main column alone
+    # establishes both margins).
+    heading = _spanning(2, 0.0, 300.0, 120.0)
+    main_col = [
+        _synth_line(1, 100.0, 0.0, 100.0),
+        _synth_line(2, 90.0, 0.0, 60.0),
+        _synth_line(3, 80.0, 15.0, 100.0),
+        _synth_line(4, 70.0, 0.0, 55.0),
+    ]
+    sidebar = [_synth_line(5, 100.0, 200.0, 300.0)]
+    paras = _join_paragraphs(heading + main_col + sidebar)
+    assert sorted(len(block) for block in paras) == [1, 1, 2, 2]
+
+
 def test_a_single_column_page_is_unchanged_by_the_lane_split():
     # The lane rule must not be a second behaviour: one column has one lane.
     body = _body(LATEX)
@@ -298,6 +366,24 @@ def test_rtl_justification_survives_a_first_line_indent():
     # A LATER line inset from the right is ragged, not an indent.
     ragged = [L(0.0, 100.0), L(0.0, 90.0), L(0.0, 100.0), L(30.0, 100.0)]
     assert _detect_alignment(ragged, 0.0, 100.0, base_rtl=True) != "justify"
+
+
+def test_the_first_line_indent_is_measured_at_the_logical_start_edge():
+    class L:
+        def __init__(self, x0, x1):
+            self.x0, self.x1 = x0, x1
+
+    # Left to right: the opener's LEFT edge is in from the body's.
+    ltr = [L(15.0, 100.0), L(0.0, 100.0), L(0.0, 100.0), L(0.0, 60.0)]
+    assert _first_line_indent(ltr, "justify", False) == 15.0
+    assert _first_line_indent(ltr, "justify", True) == 0.0
+    # Right to left: the opener's RIGHT edge is in from the body's.
+    rtl = [L(0.0, 85.0), L(0.0, 100.0), L(0.0, 100.0), L(40.0, 100.0)]
+    assert _first_line_indent(rtl, "justify", True) == 15.0
+    assert _first_line_indent(rtl, "justify", False) == 0.0
+    # An alignment with no start edge to indent from has no indent.
+    assert _first_line_indent(rtl, "center", True) == 0.0
+    assert _first_line_indent(ltr, "right", False) == 0.0
 
 
 def test_ltr_justification_is_unchanged_by_the_mirror():
@@ -405,4 +491,363 @@ def test_a_justified_rtl_paragraph_reads_and_re_emits_as_justified(tmp_path):
     assert len(drawn) >= 3
     for line in drawn[1:-1]:
         assert abs(line[1] - RTL_LEFT) <= EDGE_TOL
+        assert abs(line[2] - RTL_RIGHT) <= EDGE_TOL
+    # The first line keeps its indent, which right to left insets the RIGHT
+    # edge: the opener justifies against the reduced limit while the body
+    # lines still reach both margins.
+    assert abs(drawn[0][2] - (RTL_RIGHT - RTL_INDENT)) <= EDGE_TOL
+    assert abs(drawn[0][1] - RTL_LEFT) <= EDGE_TOL
+    # The closing line hangs from the edge the reading starts at.
+    assert abs(drawn[-1][2] - RTL_RIGHT) <= EDGE_TOL
+
+
+# -- Column lanes carry through a split and a merge ----------------------
+
+COURIER_HEAD = "A Heading Spanning Both Of The Columns"
+COURIER_INDENT = 12.0
+#: Courier at 10pt advances 6pt per character, so a 30-character line is
+#: exactly the 180pt column measure and every edge below is exact.
+COL_ONE = [
+    ("Alpha beta gamma delta epsilon", 0.0),
+    ("zeta eta theta iota kappa xxxx", 0.0),
+    ("lambda mu nu", 0.0),
+    ("Xi omicron pi rho sigma taux", COURIER_INDENT),
+    ("upsilon phi chi psi omega jjjj", 0.0),
+    ("aa bb cc", 0.0),
+    ("Alef bet gimel dalet hey vav", COURIER_INDENT),
+    ("zayin het tet yod kaf lamedxx", 0.0),
+    ("mem nun", 0.0),
+]
+COL_TWO = [
+    ("Uno dos tres cuatro cinco seis", 0.0),
+    ("siete ocho nueve diez once dos", 0.0),
+    ("tres catorce", 0.0),
+    ("Quince dieciseis diecisietex", COURIER_INDENT),
+    ("dieciocho diecinueve veinte vv", 0.0),
+    ("uno dos", 0.0),
+]
+LANE_ONE = (72.0, 252.0)
+LANE_TWO = (320.0, 500.0)
+
+
+def _two_column_page(path: str) -> str:
+    """A spanning heading over two columns, each column's paragraphs
+    separated only by a first-line indent. Column two starts BELOW column
+    one so reading order lists each column's paragraphs adjacently."""
+    ops = [b"BT /F1 14 Tf 1 0 0 1 72 720 Tm (%s) Tj ET" % COURIER_HEAD.encode("ascii")]
+    for base, rows, ytop in ((72.0, COL_ONE, 690.0), (320.0, COL_TWO, 560.0)):
+        y = ytop
+        for text, indent in rows:
+            ops.append(
+                b"BT /F1 10 Tf 1 0 0 1 %g %g Tm (%s) Tj ET"
+                % (base + indent, y, text.encode("ascii"))
+            )
+            y -= 12.0
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    page.obj["/Resources"] = pikepdf.Dictionary(
+        Font=pikepdf.Dictionary(
+            F1=pdf.make_indirect(
+                pikepdf.Dictionary(
+                    Type=pikepdf.Name("/Font"), Subtype=pikepdf.Name("/Type1"),
+                    BaseFont=pikepdf.Name("/Courier"),
+                    Encoding=pikepdf.Name("/WinAnsiEncoding"),
+                )
+            )
+        )
+    )
+    page.Contents = pdf.make_stream((NL.encode("ascii")).join(ops))
+    pdf.save(path)
+    pdf.close()
+    return path
+
+
+def _in_lane(para: dict, lane: tuple) -> bool:
+    lo, hi = lane
+    return para["box"][0] >= lo - EDGE_TOL and para["box"][2] <= hi + EDGE_TOL
+
+
+def test_the_two_column_page_lists_its_lane_paragraphs(tmp_path):
+    src = _two_column_page(str(tmp_path / "cols.pdf"))
+    paras = list_text_paragraphs(src, 1)["paragraphs"]
+    assert [p["line_count"] for p in paras] == [1, 3, 3, 3, 3, 3]
+    assert paras[0]["text"] == COURIER_HEAD
+    assert all(_in_lane(p, LANE_ONE) for p in paras[1:4])
+    assert all(_in_lane(p, LANE_TWO) for p in paras[4:])
+
+
+def test_a_split_inside_a_column_keeps_both_halves_in_that_lane(tmp_path):
+    src = _two_column_page(str(tmp_path / "cols.pdf"))
+    out = str(tmp_path / "split.pdf")
+    paras = list_text_paragraphs(src, 1)["paragraphs"]
+    target = paras[3]
+    cut = target["text"].index("zayin")
+    replace_paragraph_text(
+        file=src, output=out, page=1, paragraph_index=target["index"],
+        new_text=target["text"],
+        spans=[{"start": 0, "end": len(target["text"]), "run": target["runs"][0]}],
+        expected_runs=target["runs"], expected_text=target["text"], split_at=cut,
+    )
+    after = list_text_paragraphs(out, 1)["paragraphs"]
+    assert len(after) == len(paras) + 1
+    halves = after[3:5]
+    assert [h["text"] for h in halves] == [
+        "Alef bet gimel dalet hey vav", "zayin het tet yod kaf lamedxx mem nun"
+    ]
+    # Both halves are still the first column's, and the first keeps the
+    # indent the break was signalled by.
+    assert all(_in_lane(h, LANE_ONE) for h in halves)
+    assert abs(halves[0]["box"][0] - (LANE_ONE[0] + COURIER_INDENT)) <= EDGE_TOL
+    # …and the OTHER column's indent break still fires, unchanged.
+    assert [p["text"][:6] for p in after[5:]] == ["Uno do", "Quince"]
+    assert all(_in_lane(p, LANE_TWO) for p in after[5:])
+
+
+def test_a_merge_across_a_column_indent_break_keeps_the_first_indent(tmp_path):
+    src = _two_column_page(str(tmp_path / "cols.pdf"))
+    out = str(tmp_path / "merged.pdf")
+    paras = list_text_paragraphs(src, 1)["paragraphs"]
+    merge_paragraph_with_previous(
+        src, out, 1, 3,
+        paras[2]["runs"], paras[2]["text"], paras[3]["runs"], paras[3]["text"],
+    )
+    after = list_text_paragraphs(out, 1)["paragraphs"]
+    assert len(after) == len(paras) - 1
+    merged = after[2]
+    assert merged["text"] == paras[2]["text"] + " " + paras[3]["text"]
+    assert merged["line_count"] == 5
+    assert _in_lane(merged, LANE_ONE)
+    # The first line carries the ANCHOR paragraph's own indent; the body
+    # lines start at the column's margin.
+    top, bottom = merged["box"][3], merged["box"][1]
+    own = [
+        line for line in _lines(out)
+        if line[1] < LANE_TWO[0] and bottom - EDGE_TOL <= line[0] <= top + EDGE_TOL
+    ]
+    assert len(own) == 5
+    assert abs(own[0][1] - (LANE_ONE[0] + COURIER_INDENT)) <= EDGE_TOL
+    assert all(abs(line[1] - LANE_ONE[0]) <= EDGE_TOL for line in own[1:])
+    # The second column is untouched and still breaks on its own indent.
+    assert [p["text"][:6] for p in after[3:]] == ["Uno do", "Quince"]
+
+
+# -- RTL: the first-line indent survives a split and a merge --------------
+
+_RTL_SKIP = pytest.mark.skipif(
+    not os.path.isfile(_AR_FACE),
+    reason="RTL faces not provisioned (scripts/sync-edit-fonts.ps1)",
+)
+FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "resources", "fonts")
+
+
+def _rtl_edit(src: str, out: str, para: dict, new_text: str, **kw) -> None:
+    replace_paragraph_text(
+        file=src, output=out, page=1, paragraph_index=para["index"],
+        new_text=new_text,
+        spans=[{"start": 0, "end": len(new_text), "run": para["runs"][0]}],
+        expected_runs=para["runs"], expected_text=para["text"],
+        convert=True, font_path=FONT_DIR, **kw,
+    )
+
+
+@_RTL_SKIP
+def test_an_rtl_split_gives_the_second_half_its_own_right_edge_indent(tmp_path):
+    src = _build_justified_rtl(str(tmp_path / "rtl.pdf"))
+    out = str(tmp_path / "rtl-split.pdf")
+    para = list_text_paragraphs(src, 1)["paragraphs"][0]
+    cut = para["text"].index("ونص")
+    _rtl_edit(src, out, para, para["text"], split_at=cut)
+    after = list_text_paragraphs(out, 1)["paragraphs"]
+    # The split really split — and each half is a paragraph in its own
+    # right, not the first half plus a stray closing line.
+    assert len(after) == 2
+    assert after[0]["text"] + " " + after[1]["text"] == para["text"]
+    assert all(p["rtl"] for p in after)
+    drawn = _lines(out)
+    firsts = [drawn[0], drawn[after[0]["line_count"]]]
+    for first in firsts:
+        assert abs(first[2] - (RTL_RIGHT - RTL_INDENT)) <= EDGE_TOL
+    # Every other line, both halves, reaches the right margin.
+    for line in drawn:
+        if line not in firsts:
+            assert abs(line[2] - RTL_RIGHT) <= EDGE_TOL
+
+
+@_RTL_SKIP
+def test_a_split_offset_inside_a_shaped_unit_refuses_by_name(tmp_path):
+    # The offset is a CODE POINT index and the styled stream is a list of
+    # UNITS; landing inside one names no boundary.
+    src = _build_justified_rtl(str(tmp_path / "rtl.pdf"))
+    para = list_text_paragraphs(src, 1)["paragraphs"][0]
+    out = str(tmp_path / "never.pdf")
+    refused = 0
+    for cut in range(1, len(para["text"])):
+        try:
+            _rtl_edit(src, out, para, para["text"], split_at=cut)
+        except ValueError as exc:
+            assert "ligature" in str(exc)
+            refused += 1
+    # Some offsets are boundaries and some are not; what must never happen
+    # is a split that silently lands somewhere else.
+    assert 0 < refused < len(para["text"]) - 1
+
+
+@_RTL_SKIP
+def test_an_rtl_merge_keeps_one_right_edge_indent_and_hangs_its_last_line(tmp_path):
+    src = _build_justified_rtl(str(tmp_path / "rtl.pdf"))
+    split = str(tmp_path / "rtl-split.pdf")
+    para = list_text_paragraphs(src, 1)["paragraphs"][0]
+    _rtl_edit(src, split, para, para["text"],
+              split_at=para["text"].index("ونص"))
+    halves = list_text_paragraphs(split, 1)["paragraphs"]
+    out = str(tmp_path / "rtl-merged.pdf")
+    merge_paragraph_with_previous(
+        split, out, 1, 1,
+        halves[0]["runs"], halves[0]["text"], halves[1]["runs"], halves[1]["text"],
+        font_path=FONT_DIR,
+    )
+    after = list_text_paragraphs(out, 1)["paragraphs"]
+    assert len(after) == 1
+    # The merge reorders on the way out: the text comes back in LOGICAL
+    # order, not mirrored.
+    assert after[0]["text"] == para["text"]
+    assert after[0]["rtl"] is True
+    drawn = _lines(out)
+    # ONE indent, on the first line, at the right edge.
+    assert abs(drawn[0][2] - (RTL_RIGHT - RTL_INDENT)) <= EDGE_TOL
+    for line in drawn[1:]:
+        assert abs(line[2] - RTL_RIGHT) <= EDGE_TOL
+    # The last line hangs from the edge the reading starts at.
+    assert abs(drawn[-1][2] - RTL_RIGHT) <= EDGE_TOL
+    assert drawn[-1][1] > RTL_LEFT + EDGE_TOL
+
+
+def _synth_rtl_line(index: int, y: float, x0: float, x1: float) -> "_Line":
+    """`_synth_line` with right-to-left text on it, so the lane resolves to
+    a right-to-left base direction."""
+    line = _synth_line(index, y, x0, x1)
+    line.members[0].ptext = "\u0645\u0631\u062d\u0628\u0627"
+    return line
+
+
+#: A justified block whose SECOND paragraph opens with a first-line indent
+#: and closes with a short line. Read at the left edge, the closing line's
+#: ragged left is a first-line indent and its predecessor's inset right is
+#: a short line -- the exact signature of a paragraph break, in a paragraph
+#: that has none.
+_MIRROR_ROWS = [(0.0, 85.0), (0.0, 100.0), (0.0, 100.0), (0.0, 85.0), (14.0, 100.0)]
+
+
+def test_a_closing_rtl_line_is_not_read_as_a_first_line_indent():
+    rtl = [_synth_rtl_line(i, 100.0 - 10.0 * i, x0, x1)
+           for i, (x0, x1) in enumerate(_MIRROR_ROWS)]
+    assert [len(block) for block in _join_paragraphs(rtl)] == [5]
+
+
+def test_the_same_geometry_read_left_to_right_still_breaks():
+    # The mirror is a mirror, not a loosening: left to right the identical
+    # edges are an indent after a short line, and still end a paragraph.
+    ltr = [_synth_line(i, 100.0 - 10.0 * i, x0, x1)
+           for i, (x0, x1) in enumerate(_MIRROR_ROWS)]
+    assert [len(block) for block in _join_paragraphs(ltr)] == [4, 1]
+
+
+@_RTL_SKIP
+def test_a_justified_rtl_paragraph_relists_whole_after_an_edit(tmp_path):
+    src = _build_justified_rtl(str(tmp_path / "rtl.pdf"))
+    out = str(tmp_path / "rtl-edited.pdf")
+    para = list_text_paragraphs(src, 1)["paragraphs"][0]
+    shorter = para["text"].replace("\u062c\u0645\u064a\u0644\u0629", "\u062c\u0645\u064a\u0644")
+    assert shorter != para["text"]
+    _rtl_edit(src, out, para, shorter)
+    after = list_text_paragraphs(out, 1)["paragraphs"]
+    assert len(after) == 1
+    assert after[0]["text"] == shorter
+
+
+# -- A paragraph edit on a SIGNED document -------------------------------
+
+def _sign_beside(src: str, out: str, tmp_path) -> str:
+    from engine import signatures
+    from test_engine import _make_test_pfx
+
+    pfx = _make_test_pfx(str(tmp_path / "signer.pfx"), "testpw")
+    signatures.sign_pdf(file=src, output=out, pfx_path=pfx, password="testpw")
+    return out
+
+
+def _signature_rows(path: str):
+    from engine import signatures
+
+    return sorted(
+        (row.get("field"), bool(row.get("valid")), bool(row.get("intact")))
+        for row in signatures.verify_signatures(path)["signatures"]
+    )
+
+
+def test_a_signed_column_edit_refuses_the_append_by_name_and_writes_nothing(tmp_path):
+    # A paragraph edit rewrites a page's CONTENT, which is not one of the
+    # append-safe delta classes: the page no longer matches its signed twin
+    # structurally, and a rewritten page cannot be told from a delete plus
+    # an insert. The transplant says so and lands no bytes; the ordinary
+    # rewrite is what the caller gets, and it reports the signature as no
+    # longer intact rather than claiming otherwise.
+    from engine.incremental import has_live_signatures, transplant_incremental
+
+    plain = _two_column_page(str(tmp_path / "cols.pdf"))
+    signed = _sign_beside(plain, str(tmp_path / "signed.pdf"), tmp_path)
+    assert has_live_signatures(signed)
+    assert _signature_rows(signed) == [("Signature1", True, True)]
+
+    paras = list_text_paragraphs(signed, 1)["paragraphs"]
+    target = next(p for p in paras if p["text"].startswith("Alef"))
+    new_text = target["text"].replace("Alef", "Alve")
+    edited = str(tmp_path / "edited.pdf")
+    replace_paragraph_text(
+        file=signed, output=edited, page=1, paragraph_index=target["index"],
+        new_text=new_text,
+        spans=[{"start": 0, "end": len(new_text), "run": target["runs"][0]}],
+        expected_runs=target["runs"], expected_text=target["text"],
+    )
+    landed = str(tmp_path / "transplanted.pdf")
+    result = transplant_incremental(signed, edited, landed)
+    assert result["applied"] is False
+    assert "structural match" in result["reason"]
+    assert not os.path.exists(landed)
+
+    assert _signature_rows(edited) == [("Signature1", True, False)]
+    # …and the edit itself is right: the lanes and the indent break survive.
+    after = list_text_paragraphs(edited, 1)["paragraphs"]
+    assert [p["line_count"] for p in after] == [1, 3, 3, 3, 3, 3]
+    assert after[3]["text"].startswith("Alve")
+    assert all(_in_lane(p, LANE_ONE) for p in after[1:4])
+    assert all(_in_lane(p, LANE_TWO) for p in after[4:])
+
+
+@_RTL_SKIP
+def test_a_signed_rtl_indent_edit_refuses_the_append_and_keeps_its_geometry(tmp_path):
+    from engine.incremental import transplant_incremental
+
+    plain = _build_justified_rtl(str(tmp_path / "rtl.pdf"))
+    signed = _sign_beside(plain, str(tmp_path / "signed.pdf"), tmp_path)
+    assert _signature_rows(signed) == [("Signature1", True, True)]
+
+    para = list_text_paragraphs(signed, 1)["paragraphs"][0]
+    shorter = para["text"].replace("جميلة", "جميل")
+    edited = str(tmp_path / "edited.pdf")
+    _rtl_edit(signed, edited, para, shorter)
+
+    landed = str(tmp_path / "transplanted.pdf")
+    result = transplant_incremental(signed, edited, landed)
+    assert result["applied"] is False
+    assert "structural match" in result["reason"]
+    assert not os.path.exists(landed)
+    assert _signature_rows(edited) == [("Signature1", True, False)]
+
+    after = list_text_paragraphs(edited, 1)["paragraphs"]
+    assert len(after) == 1
+    assert after[0]["rtl"] is True
+    drawn = _lines(edited)
+    assert abs(drawn[0][2] - (RTL_RIGHT - RTL_INDENT)) <= EDGE_TOL
+    for line in drawn[1:]:
         assert abs(line[2] - RTL_RIGHT) <= EDGE_TOL

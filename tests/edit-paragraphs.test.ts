@@ -17,6 +17,10 @@ import {
   remapRanges,
   cutsAtomicRange,
   hardBreakRefusal,
+  paragraphSplitRefusal,
+  splitCutsLigature,
+  SPLIT_ATOMIC_MESSAGE,
+  SPLIT_LIGATURE_MESSAGE,
   HARD_BREAK_ATOMIC_MESSAGE,
   sanitizeParagraphInput,
   seedSpanColors,
@@ -254,6 +258,42 @@ describe('hardBreakRefusal (the withheld break is named, never silent)', () => {
     expect(hardBreakRefusal(ranges, 2, 2)).toBeNull();
     expect(hardBreakRefusal(ranges, 2, 4)).toBeNull();
     expect(hardBreakRefusal([], 3, 3)).toBeNull();
+  });
+});
+
+describe('paragraphSplitRefusal (a split names a styled-entry boundary)', () => {
+  const spans = [{ start: 0, end: 6, run: 0 }];
+  const seqs = new Map([[0, ['ffi', 'fi']]]);
+  it('refuses a caret inside an atomic block', () => {
+    const message = paragraphSplitRefusal([{ start: 2, end: 4 }], 3, 'ab〇〇ef', spans, seqs);
+    expect(message).toBe(localizeEngineMessage(SPLIT_ATOMIC_MESSAGE));
+  });
+  it('refuses a caret inside a ligature the font draws as one glyph', () => {
+    expect(paragraphSplitRefusal([], 2, 'offife', spans, seqs)).toBe(
+      localizeEngineMessage(SPLIT_LIGATURE_MESSAGE),
+    );
+  });
+  it('allows a caret at a ligature edge', () => {
+    expect(paragraphSplitRefusal([], 1, 'offife', spans, seqs)).toBeNull();
+    expect(paragraphSplitRefusal([], 4, 'offife', spans, seqs)).toBeNull();
+  });
+  it('matches the longest sequence first, as the engine encodes', () => {
+    // 'ffi' wins over 'fi', so offset 3 is inside the three-char unit.
+    expect(splitCutsLigature('affix', spans, seqs, 3)).toBe(true);
+  });
+  it('forms no ligature across a per-span face boundary', () => {
+    expect(splitCutsLigature('offife', spans, seqs, 2, [2])).toBe(false);
+  });
+  it('is inert when no ligature can form', () => {
+    expect(paragraphSplitRefusal([], 2, 'offife', spans, undefined)).toBeNull();
+  });
+  it('carries messages the engine-message table recognizes', () => {
+    expect(matchEngineMessage(SPLIT_ATOMIC_MESSAGE)?.row.key).toBe(
+      'text_paragraphs.paragraphCannotSplitTate',
+    );
+    expect(matchEngineMessage(SPLIT_LIGATURE_MESSAGE)?.row.key).toBe(
+      'text_paragraphs.paragraphCannotSplitInside',
+    );
   });
 });
 

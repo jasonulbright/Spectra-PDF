@@ -46,6 +46,7 @@ import {
   relaxUnencodableSpans,
   remapRanges,
   hardBreakRefusal,
+  paragraphSplitRefusal,
   sanitizeParagraphInput,
   seedSpanColors,
   seedSpanFaces,
@@ -5844,6 +5845,24 @@ function ParagraphEditor({
             caret.start > 0 &&
             caret.start < cpLen
           ) {
+            // Refused BEFORE any state changes, exactly like the hard
+            // break: an offset inside a tate-chu-yoko block or inside a
+            // ligature names no styled-entry boundary, so the engine can
+            // only reject it. A substitution or a whole-paragraph feature
+            // re-renders every character through one face, where no
+            // ligature forms — the sequence walk is skipped there.
+            const splitRefused = paragraphSplitRefusal(
+              atomicRanges,
+              caret.start,
+              value,
+              spans0,
+              substituting || featuresChanged ? undefined : para.sequencesByRun,
+              shownFaces.flatMap((f) => [f.start, f.end]),
+            );
+            if (splitRefused !== null) {
+              setRefusal(splitRefused);
+              return;
+            }
             if (valid) {
               settle(() =>
                 onCommit(

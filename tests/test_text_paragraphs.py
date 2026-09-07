@@ -1751,6 +1751,34 @@ class TestSplitMerge:
         _apply(src, out, target, target["text"], split_at=cut)
         _assert_non_members_unmoved(src, out, target["runs"])
 
+    def test_split_lands_on_the_code_point_the_caller_named(self, tmp_dir):
+        # The offset is a CODE POINT index; the styled stream is a list of
+        # UNITS, and a ligature the font draws as one glyph spells two of
+        # them. Compared against the styled length directly, a valid split
+        # was dropped in silence and a shorter one landed on the wrong
+        # character.
+        lig = TestLigatureParagraphs()
+        src = lig._build_lig(tmp_dir, b"BT /F1 12 Tf 72 700 Td (aLbaLbaLb) Tj ET")
+        para = _paras(src)[0]
+        assert para["text"] == "afibafibafib"
+        for cut, halves in ((4, ["afib", "afibafib"]), (8, ["afibafib", "afib"])):
+            out = os.path.join(tmp_dir, "split-%d.pdf" % cut)
+            _apply(src, out, para, para["text"], split_at=cut)
+            assert [q["text"] for q in _paras(out)] == halves
+
+    def test_a_split_inside_a_ligature_refuses_by_name(self, tmp_dir):
+        # Between the 'f' and the 'i' of one drawn glyph is not a boundary:
+        # the halves become separate paragraphs and the glyph cannot be in
+        # both. ('i' has no single code in this font at all.)
+        lig = TestLigatureParagraphs()
+        src = lig._build_lig(tmp_dir, b"BT /F1 12 Tf 72 700 Td (aLbaLbaLb) Tj ET")
+        para = _paras(src)[0]
+        out = os.path.join(tmp_dir, "never.pdf")
+        for cut in (2, 6, 10):
+            with pytest.raises(ValueError, match="ligature"):
+                _apply(src, out, para, para["text"], split_at=cut)
+        assert not os.path.exists(out)
+
     def test_split_validation_fails_closed(self, tmp_dir):
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (No split here) Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
@@ -4834,6 +4862,44 @@ class TestTateChuYoko:
         _apply(src, out, p, text, spans=spans)
         assert b"(26) Tj" in _content_bytes(out)
 
+    def test_a_paragraph_split_inside_the_block_refuses_by_name(self, tmp_dir):
+        # A split at a code point INSIDE the block names no boundary: the
+        # two halves become separate paragraphs and one em cell cannot be
+        # in both. Beside it, either side, is a boundary and splits.
+        src = self._src(tmp_dir, name="tcy-split.pdf")
+        para = _paras(src)[0]
+        spans = [
+            {"start": sp["start"], "end": sp["end"], "run": sp["run"]}
+            for sp in para["spans"]
+        ]
+        at = para["text"].index("26")
+        with pytest.raises(ValueError, match="tate-chu-yoko"):
+            _apply(src, os.path.join(tmp_dir, "never.pdf"), para, para["text"],
+                   spans=spans, split_at=at + 1)
+        for cut, halves in ((at, ["あい", "26う"]),
+                            (at + 2, ["あい26", "う"])):
+            out = os.path.join(tmp_dir, "tcy-cut-%d.pdf" % cut)
+            _apply(src, out, para, para["text"], spans=spans, split_at=cut)
+            assert [q["text"] for q in _paras(out)] == halves
+
+    def test_a_hard_break_after_the_block_keeps_it_in_the_column(self, tmp_dir):
+        # The break ends the column with the block on it, so the block sits
+        # one em BEYOND the last glyph the column drew -- outside the box
+        # those glyphs make. Read as "not in the column" the year dropped
+        # out of the reading position and listed as its own paragraph, which
+        # is the silent case the absorption exists to prevent.
+        src = self._src(tmp_dir, name="after.pdf")
+        out = os.path.join(tmp_dir, "after-out.pdf")
+        p = _paras(src)[0]
+        text, spans = self._break_at(p, p["text"].index("26") + 2)
+        _apply(src, out, p, text, spans=spans)
+        assert _content_bytes(out).count(b"(26) Tj") == 1
+        after = _paras(out)
+        assert len(after) == 1
+        assert after[0]["orientation"] == "vertical-rl"
+        assert "26" in after[0]["text"]
+        assert after[0]["text"].replace(" ", "") == "\u3042\u304426\u3046"
+
     def test_the_block_never_splits_across_a_column_break(self, tmp_dir):
         # It is one unit to the line breaker, the same way a shaped word is:
         # a wrap may put it at the head of the next column, never half of it
@@ -4916,3 +4982,236 @@ class TestTateChuYoko:
         assert column["editable"] is True
         assert column["reason"] is None
         assert column["runs"] == [0]
+
+
+def _courier(pdf):
+    return pdf.make_indirect(Dictionary(
+        Type=Name("/Font"), Subtype=Name("/Type1"),
+        BaseFont=Name("/Courier"), Encoding=Name("/WinAnsiEncoding")))
+
+
+def _courier_page(tmp_dir, content: bytes, name="courier.pdf") -> str:
+    src = os.path.join(tmp_dir, name)
+    pdf = pikepdf.new()
+    _page(pdf, content, {"/F1": _courier(pdf)})
+    pdf.save(src)
+    pdf.close()
+    return src
+
+
+def _courier_show(x, y, text, target=None, size=10.0) -> bytes:
+    """One Courier line. With `target` the word gaps carry the TJ kerns a
+    justifier stretches a line to the measure with; without it the line is
+    drawn at its natural width."""
+    cw = 0.6 * size
+    if target is None:
+        return b"BT /F1 %g Tf 1 0 0 1 %g %g Tm (%s) Tj ET" % (
+            size, x, y, text.encode("ascii"))
+    words = text.split(" ")
+    kern = -((target - len(text) * cw) / (len(words) - 1)) / size * 1000.0
+    parts = []
+    for i, word in enumerate(words):
+        if i:
+            parts.append(b"( ) %g" % kern)
+        parts.append(b"(%s)" % word.encode("ascii"))
+    return b"BT /F1 %g Tf 1 0 0 1 %g %g Tm [%s] TJ ET" % (
+        size, x, y, b" ".join(parts))
+
+
+class TestJustifyEvidence:
+    """Flush versus justified where the geometry alone cannot say, and what
+    stretch evidence the listing actually holds."""
+
+    MEASURE = 120.0
+
+    def test_a_full_rectangle_with_no_stretch_reads_as_justified(self, tmp_dir):
+        # THE ambiguity, pinned as it stands: every line reaches both edges,
+        # including the last, so right-flush, left-flush, centred and
+        # justified all fit the geometry. No stretch is drawn here, but its
+        # ABSENCE is not evidence either -- a justifier that stretches with a
+        # kern beside a drawn space leaves a gap the listing records as the
+        # kern alone, well under the font's own space -- so the reading
+        # stands rather than being changed on a channel that under-reports.
+        rows = ["aaaa bbbb cccc dd", "eeee ffff gggg hh", "iiii jjjj kkkk ll"]
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            _courier_show(72.0, 700.0 - 12.0 * i, t) for i, t in enumerate(rows)
+        ]), name="rect.pdf")
+        para = _paras(src)[0]
+        assert para["line_count"] == 3
+        assert abs(para["box"][2] - para["box"][0] - 102.0) < 0.01
+        assert para["alignment"] == "justify"
+
+    def test_the_same_rectangle_stretched_reads_as_justified_too(self, tmp_dir):
+        # The other half of the tie: identical edges, stretched gaps. Both
+        # read the same, which is what makes the geometry a tie.
+        rows = ["aa bb cc dd", "ee ff gg hh", "ii jj kk ll"]
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            _courier_show(72.0, 700.0 - 12.0 * i, t, self.MEASURE)
+            for i, t in enumerate(rows)
+        ]), name="rect-just.pdf")
+        assert _paras(src)[0]["alignment"] == "justify"
+
+    def test_a_right_aligned_block_is_still_read_as_right(self, tmp_dir):
+        # The ordinary right-aligned block is NOT ambiguous: its left edges
+        # vary and its right edges do not.
+        rows = ["aaaa bbbb cccc dd", "eeee ffff gg", "iiii jjjj kkkk ll ee"]
+        widest = max(len(t) for t in rows) * 6.0
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            _courier_show(72.0 + widest - len(t) * 6.0, 700.0 - 12.0 * i, t)
+            for i, t in enumerate(rows)
+        ]), name="right.pdf")
+        assert _paras(src)[0]["alignment"] == "right"
+
+    def test_a_two_line_stretch_reads_as_justified(self, tmp_dir):
+        # A pair whose first line reaches the measure with every word gap
+        # stretched past the font's own space was set justified, and now
+        # reads that way. It once read `left`: the gap channel that feeds
+        # the median records the TJ kern alone, which a justifier writing a
+        # small kern beside a drawn space leaves under the word-break
+        # threshold, so the evidence never reached the classifier. The
+        # stretch channel carries the TOTAL gap, so it does.
+        from engine.text_paragraphs import (
+            _cluster_lines, _members_from, _space_advance_1000,
+        )
+
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            _courier_show(72.0, 700.0, "aaa bbb ccc ddd", self.MEASURE),
+            _courier_show(72.0, 688.0, "eee fff ggg"),
+        ]), name="two-just.pdf")
+        with pikepdf.open(src) as pdf:
+            page = pdf.pages[0]
+            runs, detail = [], []
+            _walk_runs(
+                pdf, pikepdf.parse_content_stream(page), _resolve_resources(page),
+                IDENTITY, 0, None, runs, False, _FontCache(), detail=detail,
+            )
+            members = _members_from(runs, detail)
+            lines = _cluster_lines(members)
+        first = min(members, key=lambda m: -m.y)
+        space = _space_advance_1000(first.cap)
+        # Both channels, side by side: the kern alone, and the whole gap.
+        assert first.gaps_1000 and all(g > space for g in first.gaps_1000)
+        assert len(first.gap_stretch) == 3
+        assert all(r > 1.0 for r in first.gap_stretch)
+        assert len(lines) == 2
+        assert abs(lines[0].x1 - lines[0].x0 - self.MEASURE) < 0.01
+        assert _paras(src)[0]["alignment"] == "justify"
+
+    def test_an_unstretched_two_line_pair_stays_flush(self, tmp_dir):
+        # The same shape with natural gaps: one full line over a short one
+        # is an ordinary flush-left block that happened to fill, and two
+        # lines of geometry cannot say otherwise.
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            _courier_show(72.0, 700.0, "aaaa bbbb cccc dd"),
+            _courier_show(72.0, 688.0, "eeee fff"),
+        ]), name="two-flush.pdf")
+        para = _paras(src)[0]
+        assert para["line_count"] == 2
+        assert para["alignment"] == "left"
+
+    def test_one_wide_gap_is_not_a_stretched_line(self, tmp_dir):
+        # A tabbed pair — one gap opened wide, the rest natural — is not a
+        # justified line, and the per-gap agreement test is what says so.
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            b"BT /F1 10 Tf 1 0 0 1 72 700 Tm [(aaa) -3000 ( bbb ccc)] TJ ET",
+            _courier_show(72.0, 688.0, "eee fff"),
+        ]), name="two-tab.pdf")
+        assert _paras(src)[0]["alignment"] == "left"
+
+    def test_the_engine_own_justified_output_reads_back_as_justified(self, tmp_dir):
+        # Idempotence, which is what sank the earlier attempt at this rule:
+        # the engine encodes justification as a small kern beside a drawn
+        # space, so its own output has to read back the way it was written —
+        # and keep reading that way after a second edit.
+        src = _courier_page(tmp_dir, (chr(10).encode()).join([
+            _courier_show(72.0, 700.0, "aaa bbb ccc ddd", self.MEASURE),
+            _courier_show(72.0, 688.0, "eee fff ggg"),
+        ]), name="two-just-rt.pdf")
+        para = _paras(src)[0]
+        assert para["alignment"] == "justify"
+        current = src
+        for i, word in enumerate(("hhh", "iii")):
+            out = os.path.join(tmp_dir, "rt%d.pdf" % i)
+            para = _paras(current)[0]
+            assert para["alignment"] == "justify"
+            _apply(current, out, para, para["text"] + " " + word)
+            current = out
+        relisted = _paras(current)[0]
+        assert relisted["alignment"] == "justify"
+        assert relisted["text"].endswith("hhh iii")
+
+
+class TestHardBreaks:
+    """A hard break in text the reflow has to reorder or reshape."""
+
+    def _with_break(self, para: dict, at: int) -> tuple:
+        text = para["text"][:at] + chr(10) + para["text"][at:]
+        spans = []
+        for sp in para["spans"]:
+            moved = dict(sp)
+            if moved["start"] >= at:
+                moved["start"] += 1
+            if moved["end"] >= at:
+                moved["end"] += 1
+            spans.append(moved)
+        return text, spans
+
+    def _drawn(self, path):
+        from engine.text_paragraphs import _cluster_lines, _members_from
+
+        with pikepdf.open(path) as pdf:
+            page = pdf.pages[0]
+            runs, detail = [], []
+            _walk_runs(
+                pdf, pikepdf.parse_content_stream(page), _resolve_resources(page),
+                IDENTITY, 0, None, runs, False, _FontCache(), detail=detail,
+            )
+            return sorted(
+                [(l.y, l.x0, l.x1) for l in _cluster_lines(_members_from(runs, detail))],
+                key=lambda t: -t[0],
+            )
+
+    def test_a_break_ends_the_line_and_no_character_is_lost(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        text, spans = self._with_break(para, para["text"].index("gamma"))
+        _apply(src, out, para, text, spans=spans)
+        assert len(self._drawn(out)) == 2
+        # A PDF carries no hard-break marker, so the re-listing joins the two
+        # drawn lines with the space every wrapped line join uses: the break
+        # reads back as a space. What must never happen is a LOST character.
+        relisted = _paras(out)
+        assert len(relisted) == 1
+        assert " ".join(relisted[0]["text"].split()) == " ".join(text.split())
+
+    def test_two_consecutive_breaks_leave_a_blank_line(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        text = "Alpha" + chr(10) * 2 + "beta gamma"
+        _apply(src, out, para, text,
+               spans=[{"start": 0, "end": len(text), "run": para["runs"][0]}])
+        drawn = self._drawn(out)
+        assert len(drawn) == 2
+        # One blank line between: the gap is two line heights, not one.
+        assert (drawn[0][0] - drawn[1][0]) == pytest.approx(28.8, abs=0.1)
+        # ...and a blank line IS a paragraph boundary to the re-listing.
+        assert [p["text"] for p in _paras(out)] == ["Alpha", "beta gamma"]
+
+    def test_leading_and_trailing_breaks_draw_nothing_of_their_own(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma) Tj ET")
+        para = _paras(src)[0]
+        lead = os.path.join(tmp_dir, "lead.pdf")
+        trail = os.path.join(tmp_dir, "trail.pdf")
+        for out, text in ((lead, chr(10) * 2 + para["text"]),
+                          (trail, para["text"] + chr(10) * 2)):
+            _apply(src, out, para, text,
+                   spans=[{"start": 0, "end": len(text), "run": para["runs"][0]}])
+            drawn = self._drawn(out)
+            assert len(drawn) == 1
+            assert _paras(out)[0]["text"] == para["text"]
+        # Two leading breaks push the text down by two line heights; two
+        # trailing ones move nothing.
+        assert self._drawn(trail)[0][0] == pytest.approx(700.0, abs=0.01)
+        assert self._drawn(lead)[0][0] == pytest.approx(700.0 - 28.8, abs=0.1)

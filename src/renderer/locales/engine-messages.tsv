@@ -787,6 +787,8 @@ text_paragraphs.fontVerticalFormsPick	exact	text_authoring,text_paragraphs	that 
 text_paragraphs.hardLineBreakCannot	exact	text_paragraphs	a hard line break cannot split a tate-chu-yoko block
 text_paragraphs.nextParagraphMerge	exact	text_paragraphs	no next paragraph to merge with
 text_paragraphs.pageSTextChanged	exact	text_paragraphs	the page's text changed underneath this edit — reopen the editor
+text_paragraphs.paragraphCannotSplitInside	exact	text_paragraphs	a paragraph cannot split inside a ligature
+text_paragraphs.paragraphCannotSplitTate	exact	text_paragraphs	a paragraph cannot split a tate-chu-yoko block
 text_paragraphs.paragraphCannotWrapWidth	exact	text_paragraphs	the paragraph cannot wrap to that width — a word is wider than the box
 text_paragraphs.paragraphIndexOutRange	pattern	text_paragraphs	paragraph index {{paragraph_index}} is out of range (page has {{v1}})
 text_paragraphs.paragraphsDifferentContentStreams	exact	text_paragraphs	the paragraphs are in different content streams and cannot merge

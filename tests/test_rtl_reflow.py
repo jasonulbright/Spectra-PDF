@@ -568,3 +568,91 @@ class TestShapeInPlace:
         _apply(src, out, _paras(src)[0], AR_HELLO, bold=True)
         names = self._fonts_of(out)
         assert any("ABCDEF+" in n for n in names.values()), names
+
+
+# -- Hard breaks in text that reorders or reshapes -----------------------
+
+def _with_break(para: dict, at: int) -> tuple:
+    text = para["text"][:at] + chr(10) + para["text"][at:]
+    spans = []
+    for sp in para["spans"]:
+        moved = dict(sp)
+        if moved["start"] >= at:
+            moved["start"] += 1
+        if moved["end"] >= at:
+            moved["end"] += 1
+        spans.append(moved)
+    return text, spans
+
+
+def _drawn_lines(path):
+    from engine.content_walk import IDENTITY
+    from engine.redact import _resolve_resources
+    from engine.text_paragraphs import _cluster_lines, _members_from
+    from engine.text_runs import _FontCache, _walk_runs
+
+    with pikepdf.open(path) as pdf:
+        page = pdf.pages[0]
+        runs, detail = [], []
+        _walk_runs(
+            pdf, pikepdf.parse_content_stream(page), _resolve_resources(page),
+            IDENTITY, 0, None, runs, False, _FontCache(), detail=detail,
+        )
+        return sorted(
+            [(l.y, l.x0, l.x1) for l in _cluster_lines(_members_from(runs, detail))],
+            key=lambda t: -t[0],
+        )
+
+
+MIXED_DIGITS = "\u0645\u0631\u062d\u0628\u0627 2026 \u0628\u0627\u0644\u0639\u0627\u0644\u0645"
+
+
+def test_a_hard_break_inside_a_bidi_mixed_run_keeps_every_character(tmp_path):
+    src = build_rtl_pdf(str(tmp_path / "mixed.pdf"), [MIXED_DIGITS])
+    para = _paras(src)[0]
+    assert para["text"] == MIXED_DIGITS
+    assert para["rtl"] is True
+    # Inside the Latin number, which sits at an embedding level of its own.
+    at = MIXED_DIGITS.index("2026") + 2
+    text, spans = _with_break(para, at)
+    out = str(tmp_path / "mixed-broken.pdf")
+    replace_paragraph_text(
+        file=src, output=out, page=1, paragraph_index=para["index"],
+        new_text=text, spans=spans, expected_runs=para["runs"],
+        expected_text=para["text"], convert=True, font_path=FONTS,
+    )
+    drawn = _drawn_lines(out)
+    assert len(drawn) == 2
+    # Right to left: both lines hang from the same right edge.
+    assert abs(drawn[0][2] - drawn[1][2]) <= 0.5
+    after = _paras(out)
+    assert len(after) == 1
+    # The break reads back as a line join (a space); nothing is dropped and
+    # nothing is reordered -- the digits stay "20" then "26", in that order,
+    # inside the same right-to-left sentence.
+    assert after[0]["text"] == text.replace(chr(10), " ")
+
+
+def test_a_hard_break_inside_a_shaped_word_keeps_every_character(tmp_path):
+    # The break separates two letters that JOIN, and at one offset the two
+    # that form the lam-alef ligature. A line boundary between them is a
+    # real one: they cannot ligate across it, and each side re-shapes for
+    # the position it now sits in.
+    word = "\u0627\u0644\u0627\u0633\u0644\u0627\u0645"
+    src = build_rtl_pdf(str(tmp_path / "word.pdf"), ["\u0645\u0631\u062d\u0628\u0627 " + word])
+    para = _paras(src)[0]
+    base = para["text"].index(word)
+    for cut in (2, 3):
+        text, spans = _with_break(para, base + cut)
+        out = str(tmp_path / ("word-%d.pdf" % cut))
+        replace_paragraph_text(
+            file=src, output=out, page=1, paragraph_index=para["index"],
+            new_text=text, spans=spans, expected_runs=para["runs"],
+            expected_text=para["text"], convert=True, font_path=FONTS,
+        )
+        assert len(_drawn_lines(out)) == 2
+        after = _paras(out)
+        assert len(after) == 1
+        assert after[0]["text"] == text.replace(chr(10), " ")
+        # Every character of the word survives, in order.
+        assert after[0]["text"].replace(" ", "") == para["text"].replace(" ", "")

@@ -89,6 +89,15 @@ RISE_ATTACH_EM = 0.5  # near-baseline offset attach window (× line size)
 RISE_SIZE_RATIO = 0.8  # …and the risen run must be smaller than the line
 COLUMN_GAP_EM = 1.5  # a larger same-baseline gap splits line pieces
 WORD_GAP_FRACTION = 0.5  # of the span font's space width → synthetic space
+# Justification evidence (see `_line_stretch`): how far past the font's own
+# space a word gap must sit to count as stretched, how many stretched gaps a
+# line must show before the stretch is a property of the LINE rather than one
+# wide gap, and how far the stretched gaps on one line may differ from each
+# other. A justifier divides one deficit equally, so its gaps agree closely;
+# a tabbed or column layout does not.
+JUSTIFY_STRETCH_MIN = 0.08
+JUSTIFY_STRETCH_GAPS = 2
+JUSTIFY_STRETCH_SPREAD = 0.6
 SPACE_ADVANCE_MIN_1000 = 1.0  # below this a space code advances nothing
 FALLBACK_SPACE_1000 = 250.0  # space-less fonts: nominal space width
 DEFAULT_WORD_GAP_1000 = 250.0  # emission gap when a paragraph shows none
@@ -97,6 +106,8 @@ PARA_LEADING_DRIFT = 0.25  # later deltas within ±25% of running leading
 PARA_MIN_DELTA_EM = 0.25  # closer lines never join (shadow/overlap)
 PARA_OVERLAP_MIN = 0.5  # horizontal overlap ratio to join
 PARA_MARGIN_SUPPORT = 0.5  # fraction of a pool's lines that must share an edge
+LANE_MIN_LINES = 2  # lines a column lane needs before a span split is believed
+LANE_SPAN_FACTOR = 1.25  # of the median line width; wider may be a spanning block
 PARA_INDENT_MAX_FRACTION = 0.25  # of the measure; wider is a block, not an indent
 SIZE_JUMP_RATIO = 1.2  # dominant-size discontinuity breaks (heading/body)
 EDGE_TOL_PT = 0.75  # alignment-evidence tolerance floor (user units)
@@ -177,6 +188,9 @@ class _Member:
         # reorder permutes what the font actually drew rather than a guess.
         "punits",
         "gaps_1000",
+        # Word gaps as stretch ratios against the font's own space advance
+        # (see `_ptext_and_gaps`) — evidence of justification, never a width.
+        "gap_stretch",
         "editable",
         "blocking_reason",
         "rise_user",
@@ -407,19 +421,49 @@ def _draws_space(cap) -> bool:
     return _space_advance_1000(cap) > 0.0
 
 
-def _ptext_and_gaps(det) -> tuple[str, list[float], list[str]]:
+def _ptext_and_gaps(det) -> tuple[str, list[float], list[str], list[float]]:
     """The run's paragraph-text (synthetic spaces at TJ word gaps), the
-    observed gap widths (1000ths of em) for the paragraph's median, and the
+    observed gap widths (1000ths of em) for the paragraph's median, the
     text as UNITS — one entry per drawn code, which is what the bidi
-    reorder permutes. A ligature the font drew as one glyph is one unit, so
-    its characters can never be reversed against each other."""
+    reorder permutes; a ligature the font drew as one glyph is one unit, so
+    its characters can never be reversed against each other — and the word
+    gaps as STRETCH RATIOS against the font's own space advance.
+
+    The two gap channels answer different questions and must not be merged.
+    `gaps_1000` is the TJ kern alone, and only where the kern by itself
+    clears the word-break threshold: it feeds the paragraph's median gap,
+    which the re-emission uses as a space width, so its values are pinned.
+    The stretch channel is the TOTAL advance a word gap consumes — the
+    drawn space glyph, the `Tw` that applies to that code, and every kern
+    adjacent to it — divided by the space the font would draw unstretched.
+    A justifier that stretches with a small kern beside a drawn space is
+    invisible to the first channel and plain in the second; the ratio is
+    also immune to `Tz`, which scales the gap and the space it is measured
+    against by the same factor.
+    """
     cap = det["cap"]
+    style = det["style"]
     parts: list[str] = []
     units: list[str] = []
     gaps: list[float] = []
+    stretch: list[float] = []
     space_1000 = _space_advance_1000(cap) or FALLBACK_SPACE_1000
+    size = style["size"]
+    # Tw displaces once per single-byte space code, in unscaled text units;
+    # 1000ths of em is this channel's unit, so it converts by the size.
+    tw_1000 = (style["word_spacing"] / size * 1000.0) if size > 1e-9 else 0.0
     threshold = WORD_GAP_FRACTION * space_1000
     segments = det["segments"]
+    pending = 0.0  # advance consumed by the word gap currently being formed
+    in_gap = False
+
+    def close_gap() -> None:
+        nonlocal pending, in_gap
+        if in_gap and space_1000 > 0.0:
+            stretch.append(pending / space_1000)
+        pending = 0.0
+        in_gap = False
+
     for i, seg in enumerate(segments):
         if isinstance(seg, float):
             gap = -seg  # negative TJ numbers push the pen RIGHT
@@ -445,13 +489,26 @@ def _ptext_and_gaps(det) -> tuple[str, list[float], list[str]]:
                     parts.append(" ")
                     units.append(" ")
                 gaps.append(gap)
+            if not spells_nothing and (in_gap or gap >= threshold):
+                # Whatever its size, a kern touching a drawn space is part
+                # of that space's gap — this is the half a justifier adds.
+                pending += gap
+                in_gap = True
             continue
         if cap is None:
             continue
-        chunk = cap.decode_units(seg)
-        parts.extend(chunk)
-        units.extend(u for u in chunk if u)
-    return "".join(parts), gaps, units
+        for unit in cap.decode_units(seg):
+            parts.append(unit)
+            if not unit:
+                continue  # a glyph spelling nothing neither opens nor closes a gap
+            units.append(unit)
+            if unit == " ":
+                pending += space_1000 + tw_1000
+                in_gap = True
+            else:
+                close_gap()
+    close_gap()
+    return "".join(parts), gaps, units, stretch
 
 
 def _column_direction_evidence(text: str) -> str | None:
@@ -562,7 +619,7 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         transposed0 = _transposed_linear(m, vertical, _ORIENTATIONS[kind])
         if transposed0 is None:
             continue  # not upright in its own frame: the run-box surface
-        ptext, gaps_1000, punits = _ptext_and_gaps(det)
+        ptext, gaps_1000, punits, gap_stretch = _ptext_and_gaps(det)
         pending.append({
             "run": run,
             "det": det,
@@ -576,6 +633,7 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
             "ptext": ptext,
             "gaps_1000": gaps_1000,
             "punits": punits,
+            "gap_stretch": gap_stretch,
             "pen": (m[4], m[5]),
             "em": max(det["style"]["size"] * abs(transposed0[3]), 0.01),
         })
@@ -637,6 +695,7 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.ptext = item["ptext"]
         mem.gaps_1000 = item["gaps_1000"]
         mem.punits = item["punits"]
+        mem.gap_stretch = item["gap_stretch"]
         mem.editable = bool(run["editable"])
         # The run's clip flag rides through so a paragraph whose
         # every member is clipped away lists as invisible (aggregated in
@@ -878,19 +937,38 @@ def _indent_break(pool: dict, prev: _Line, line: _Line) -> bool:
 
     Both halves of the typographic signature are required, because either
     alone has a live false positive: a short line alone is every
-    ragged-right line, and an indented line alone is every hanging or
-    quoted block. Together — the previous line stops short of the pool's
-    right margin AND this line starts in from its left margin — they are
-    what an indent-signalled paragraph break IS, and a block whose pool
-    has no established margins (centred text, a one-off line) never
-    reaches the test at all."""
+    ragged line, and an indented line alone is every hanging or quoted
+    block. Together — the previous line stops short of the pool's END
+    margin AND this line starts in from its START margin — they are what
+    an indent-signalled paragraph break IS, and a block whose pool has no
+    established margins (centred text, a one-off line) never reaches the
+    test at all.
+
+    Which margin is which mirrors with the lane's base direction. Read at
+    the left edge unconditionally, the geometry of a right-to-left
+    paragraph's own closing line — flush right, ragged left — is
+    indistinguishable from a left-to-right first-line indent, and a
+    justified right-to-left paragraph then re-listed as two."""
     left, right, tol = pool.get("left"), pool.get("right"), pool.get("tol")
     if left is None or right is None or tol is None:
         return False
-    indent = line.x0 - left
+    if pool.get("rtl"):
+        indent, short = right - line.x1, prev.x0 - left
+    else:
+        indent, short = line.x0 - left, right - prev.x1
     if indent <= tol or indent > PARA_INDENT_MAX_FRACTION * (right - left):
         return False
-    return (right - prev.x1) > tol
+    return short > tol
+
+
+def _lane_is_rtl(lines: list[_Line]) -> bool:
+    """The lane's base direction, by the rule the standard states: the
+    first strong character of its text. A lane carrying no strong
+    character at all reads left to right, which is the shipped edge."""
+    text = "".join(m.ptext for line in lines for m in line.members)
+    if not any(bidi.bidi_class(ch) in ("L", "R", "AL") for ch in text):
+        return False
+    return bidi.paragraph_level(text) == 1
 
 
 def _margin_pool(lines: list[_Line]) -> dict:
@@ -903,24 +981,17 @@ def _margin_pool(lines: list[_Line]) -> dict:
         "left": _modal_edge([l.x0 for l in lines], tol, support),
         "right": _modal_edge([l.x1 for l in lines], tol, support),
         "tol": tol,
+        "rtl": _lane_is_rtl(lines),
     }
 
 
-def _lane_pools(lines: list[_Line]) -> list[dict]:
-    """Each line's margin pool, one pool per horizontal LANE — the
-    transitive closure of x-overlap, which is what a column IS on a page
-    whose columns do not overlap. Returned parallel to `lines`, so the
-    join loop asks about the lane the candidate line sits in.
-
-    Margin evidence must not cross a lane: a two-column page pools twice
-    as many lines behind one modal edge, no cluster reaches the support
-    fraction, and a rule that needs an established margin then never
-    fires anywhere on the page. A single-column page has exactly one lane
-    and measures identically to a whole-pool derivation."""
-    order = sorted(range(len(lines)), key=lambda i: lines[i].x0)
+def _overlap_lanes(lines: list[_Line], members: list[int]) -> list[list[int]]:
+    """The transitive closure of x-overlap over `members`, as index
+    groups in left-to-right order. Two groups are separated by a real
+    horizontal gap that no member crosses."""
     lanes: list[list[int]] = []
     edge = 0.0
-    for i in order:
+    for i in sorted(members, key=lambda j: lines[j].x0):
         line = lines[i]
         if lanes and line.x0 < edge:
             lanes[-1].append(i)
@@ -928,6 +999,80 @@ def _lane_pools(lines: list[_Line]) -> list[dict]:
         else:
             lanes.append([i])
             edge = line.x1
+    return lanes
+
+
+def _spanned_lane_count(line: _Line, lines: list[_Line], lanes: list[list[int]]) -> int:
+    n = 0
+    for lane in lanes:
+        lo = min(lines[i].x0 for i in lane)
+        hi = max(lines[i].x1 for i in lane)
+        if line.x0 < hi and line.x1 > lo:
+            n += 1
+    return n
+
+
+def _column_lanes(lines: list[_Line]) -> list[list[int]]:
+    """The page's column lanes. A SPANNING line belongs to none of
+    them and appears in no group.
+
+    A lane cannot be the transitive closure of x-overlap alone: one
+    full-width heading, footer or figure overlaps every column and welds
+    them into a single component, which is the two-column pooling defect
+    with an extra line in it. So a component that refuses to split is
+    retried with its widest lines withdrawn, widest first, and the split
+    is accepted only when it is a COLUMN split — at least two lanes, at
+    least one of them with real support, and every withdrawn line
+    straddling at least two of them. A lane below LANE_MIN_LINES is
+    accepted alongside a supported one (a genuine single-line sidebar or
+    caption column is still a real lane; its own margin pool comes back
+    empty, same as any other one-line paragraph, and that is not evidence
+    that the split itself was spurious). Otherwise nothing is withdrawn
+    and the single component stands, so a one-column page measures
+    exactly as it did before.
+
+    Only lines meaningfully wider than the page's median are candidates:
+    a body line is never a spanning block, and the width filter is what
+    keeps a ragged single column from being taken apart line by line."""
+    members = list(range(len(lines)))
+    lanes = _overlap_lanes(lines, members)
+    if len(lanes) > 1 or len(lines) < 2 * LANE_MIN_LINES + 1:
+        return lanes
+    widths = sorted(l.x1 - l.x0 for l in lines)
+    median = widths[len(widths) // 2]
+    if median <= 0.0:
+        return lanes
+    candidates = [
+        i for i in members
+        if (lines[i].x1 - lines[i].x0) > LANE_SPAN_FACTOR * median
+    ]
+    candidates.sort(key=lambda i: -(lines[i].x1 - lines[i].x0))
+    spanning: set[int] = set()
+    for i in candidates:
+        spanning.add(i)
+        rest = [j for j in members if j not in spanning]
+        if len(rest) < 2 * LANE_MIN_LINES:
+            break
+        cand = _overlap_lanes(lines, rest)
+        if len(cand) < 2 or not any(len(lane) >= LANE_MIN_LINES for lane in cand):
+            continue
+        if all(_spanned_lane_count(lines[s], lines, cand) >= 2 for s in spanning):
+            return cand
+    return lanes
+
+
+def _lane_pools(lines: list[_Line]) -> list[dict]:
+    """Each line's margin pool, one pool per column LANE. Returned
+    parallel to `lines`, so the join loop asks about the lane the
+    candidate line sits in; a spanning line gets an EMPTY pool, which is
+    the "no established margin" case every pool rule already refuses.
+
+    Margin evidence must not cross a lane: a two-column page pools twice
+    as many lines behind one modal edge, no cluster reaches the support
+    fraction, and a rule that needs an established margin then never
+    fires anywhere on the page. A single-column page has exactly one lane
+    and measures identically to a whole-pool derivation."""
+    lanes = _column_lanes(lines)
     pools: list[dict] = [{} for _ in lines]
     for lane in lanes:
         pool = _margin_pool([lines[i] for i in lane])
@@ -1013,6 +1158,41 @@ def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
     return [p["lines"] for p in open_paras]
 
 
+def _line_stretch(line: _Line) -> list[float]:
+    """One line's word gaps as stretch ratios against the space the drawing
+    font would set unstretched. Members carry their in-run gaps; a gap that
+    falls BETWEEN two runs is measured from the geometry, on the same test
+    `_line_pieces` uses to call it a word break, and converts to a ratio
+    directly because `space_w` is that same space in the same user units."""
+    ratios: list[float] = []
+    prev: _Member | None = None
+    for mem in line.members:
+        if not mem.ptext:
+            # A run that draws no text is not one side of a word gap — the
+            # same exemption `_line_pieces` makes, and for the same reason.
+            ratios.extend(mem.gap_stretch)
+            continue
+        if prev is not None and prev.space_w > 0:
+            gap = mem.x0 - prev.x1
+            if gap > 0 and gap >= WORD_GAP_FRACTION * prev.space_w:
+                ratios.append(gap / prev.space_w)
+        ratios.extend(mem.gap_stretch)
+        prev = mem
+    return ratios
+
+
+def _is_stretched(line: _Line) -> bool:
+    """Whether this line was set stretched to a measure: several word gaps,
+    every one of them wider than the font's own space, and all of them
+    agreeing with each other."""
+    ratios = _line_stretch(line)
+    if len(ratios) < JUSTIFY_STRETCH_GAPS:
+        return False
+    if any(r < 1.0 + JUSTIFY_STRETCH_MIN for r in ratios):
+        return False
+    return (max(ratios) - min(ratios)) <= JUSTIFY_STRETCH_SPREAD
+
+
 def _detect_alignment(
     lines: list[_Line], left: float, right: float, base_rtl: bool = False
 ) -> str:
@@ -1034,14 +1214,20 @@ def _detect_alignment(
     # exemption mirrors with the base direction. Reading a justified
     # indented paragraph as flush left (or, right-to-left, flush right)
     # re-emitted it that way.
-    if len(lines) >= 3:
-        if base_rtl:
-            reaches = all((l.x0 - left) <= tol for l in non_last)
-            opposite = all((right - l.x1) <= tol for l in non_last[1:])
-        else:
-            reaches = all((right - l.x1) <= tol for l in non_last)
-            opposite = all((l.x0 - left) <= tol for l in non_last[1:])
-        if reaches and opposite:
+    if base_rtl:
+        reaches = all((l.x0 - left) <= tol for l in non_last)
+        opposite = all((right - l.x1) <= tol for l in non_last[1:])
+    else:
+        reaches = all((right - l.x1) <= tol for l in non_last)
+        opposite = all((l.x0 - left) <= tol for l in non_last[1:])
+    if reaches and opposite:
+        # Three lines make the edges themselves the evidence: a body block
+        # whose every line but the last ends at the measure was set to that
+        # measure. Two lines cannot say that from geometry alone — one full
+        # line above one short one is equally a flush block that happened to
+        # fill — so the pair is decided on how its gaps were DRAWN, and a
+        # two-line block with no stretch stays flush.
+        if len(lines) >= 3 or all(_is_stretched(l) for l in non_last):
             return "justify"
     lefts = [l.x0 for l in lines]
     rights = [l.x1 for l in lines]
@@ -1243,6 +1429,25 @@ def _stream_direction_conflict(lines: list[_Line]) -> bool:
     return len(levels) > 1
 
 
+def _first_line_indent(lines: list[_Line], alignment: str, rtl: bool) -> float:
+    """The first line's inset from the body block at the LOGICAL START
+    edge. That edge mirrors with the base direction: left to right the
+    indent moves the first line's left edge in, right to left it moves the
+    first line's RIGHT edge in. A left-edge-only derivation reported zero
+    for every right-to-left indent, and the re-emission then set the
+    opener flush to the measure."""
+    body = lines[1:]
+    if not body:
+        return 0.0
+    if rtl:
+        if alignment not in ("right", "justify"):
+            return 0.0
+        return max(l.x1 for l in body) - lines[0].x1
+    if alignment not in ("left", "justify"):
+        return 0.0
+    return lines[0].x0 - min(l.x0 for l in body)
+
+
 def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
     out: list[_Paragraph] = []
     for lines in paras:
@@ -1268,12 +1473,7 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
             if len(lines) > 1
             else None
         )
-        body_lefts = [l.x0 for l in lines[1:]]
-        p.indent = (
-            (lines[0].x0 - min(body_lefts))
-            if (body_lefts and p.alignment in ("left", "justify"))
-            else 0.0
-        )
+        p.indent = _first_line_indent(lines, p.alignment, False)
         p.text, p.spans, gaps = _assemble_text(lines)
         bidi_failed = False
         if bidi.has_strong_rtl(p.text):
@@ -1289,13 +1489,11 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
                 p.alignment = _detect_alignment(
                     lines, p.left, p.right, base_rtl=p.base_level == 1
                 )
-                # The first-line indent is a LEFT-edge measurement; a
-                # right-aligned paragraph has none, so re-derive it now that
-                # the alignment may have flipped.
-                p.indent = (
-                    (lines[0].x0 - min(body_lefts))
-                    if (body_lefts and p.alignment in ("left", "justify"))
-                    else 0.0
+                # The indent is measured at the logical START edge, which
+                # the base direction decides, so re-derive it now that both
+                # the direction and the alignment are known.
+                p.indent = _first_line_indent(
+                    lines, p.alignment, p.base_level == 1
                 )
         p.median_gap_1000 = statistics.median(gaps) if gaps else DEFAULT_WORD_GAP_1000
         rects = [m.rect for m in p.members]
@@ -1381,6 +1579,17 @@ TCY_EXTENT_EM = 1.5
 TCY_BASELINE_EM = 0.8
 
 
+def _frame_extent(frame: tuple, box) -> tuple[float, float, float, float]:
+    """An axis-aligned page box as an axis-aligned box of the frame. Every
+    frame is a signed permutation of the axes, so the four corners' extremes
+    ARE the transposed box."""
+    x0, y0, x1, y1 = (float(v) for v in box)
+    pts = [_t(frame, x, y) for x, y in ((x0, y0), (x1, y0), (x0, y1), (x1, y1))]
+    xs = [q[0] for q in pts]
+    ys = [q[1] for q in pts]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
 def _tcy_candidates(p: _Paragraph, members: list[_Member]) -> list[_Member]:
     """The members that LOOK like a tate-chu-yoko block of column `p`.
 
@@ -1388,10 +1597,18 @@ def _tcy_candidates(p: _Paragraph, members: list[_Member]) -> list[_Member]:
     (or now re-frames) an edit that works today: the block must sit INSIDE
     the column's own box, its advance must run along the column's block
     axis, and its inline extent must be within about one em of the column's
-    line size."""
+    line size.
+
+    Containment is measured in the COLUMN's frame, and along the reading
+    axis it allows one em past either end. A block at the head or the tail
+    of a column sits exactly there by construction — the column's box is
+    drawn from the glyphs the column DREW, and the block's own em is not
+    one of them — so a page-space box test declined a block a hard line
+    break had left closing a column, and the column then listed without
+    the year in it."""
     owned = {m.index for m in p.members}
-    bx0, by0, bx1, by1 = p.box
     eff = max(line.eff for line in p.lines)
+    fbx0, fby0, fbx1, fby1 = _frame_extent(p.frame, p.box)
     out: list[_Member] = []
     for m in members:
         if m.index in owned or m.vertical or not m.ptext.strip():
@@ -1403,9 +1620,10 @@ def _tcy_candidates(p: _Paragraph, members: list[_Member]) -> list[_Member]:
         if abs(ax) > MATRIX_TOL * max(abs(ay), 1e-9):
             continue
         r = m.rect
+        fx0, fy0, fx1, fy1 = _frame_extent(p.frame, r)
         if not (
-            r[0] >= bx0 - 0.5 and r[2] <= bx1 + 0.5
-            and r[1] >= by0 - 0.5 and r[3] <= by1 + 0.5
+            fx0 >= fbx0 - eff - 0.5 and fx1 <= fbx1 + eff + 0.5
+            and fy0 >= fby0 - 0.5 and fy1 <= fby1 + 0.5
         ):
             continue
         if max(r[2] - r[0], r[3] - r[1]) > TCY_EXTENT_EM * eff:
@@ -2986,6 +3204,8 @@ def _position_lines(
     base_ratio: float = 0.0,
     has_span_size: bool = False,
     box_edges: tuple[float, float] | None = None,
+    first_right_inset: float = 0.0,
+    base_rtl: bool = False,
 ) -> None:
     # resize: center/right/justify position against the paragraph's OWN
     # edges — an explicit box passes its edges here or those alignments
@@ -3031,20 +3251,36 @@ def _position_lines(
             line.y = y0
         else:
             line.y = lines[i - 1].y - max(effs[i - 1], effs[i]) * base_ratio
-        if para.alignment == "center":
-            # No clamp: an overflowing line centers symmetrically too.
-            line.x = left_edge + ((right_edge - left_edge) - line.width) / 2
-        elif para.alignment == "right":
-            line.x = right_edge - line.width
-        else:
-            line.x = first_left if i == 0 else body_left
-        if (
+        # A right-to-left first-line indent lives at the line's END edge,
+        # so the first line of a block measures against a reduced limit.
+        # Left to right the inset is 0.0 and this is the shipped edge.
+        line_right = (
+            right_edge - first_right_inset
+            if (i == 0 and first_right_inset)
+            else right_edge
+        )
+        stretched = (
             para.alignment == "justify"
             and i < len(lines) - 1
             and len(line.words) > 1
             and not line.hard_break
-        ):
-            deficit = (right_edge - line.x) - line.width
+        )
+        if para.alignment == "center":
+            # No clamp: an overflowing line centers symmetrically too.
+            line.x = left_edge + ((line_right - left_edge) - line.width) / 2
+        elif para.alignment == "right":
+            line.x = line_right - line.width
+        elif base_rtl and para.alignment == "justify" and not stretched:
+            # The line justification does not reach: a right-to-left
+            # paragraph's short line hangs from the edge its reading
+            # STARTS at, which is the right one. Anchoring it left put the
+            # closing line of every justified right-to-left paragraph on
+            # the wrong margin.
+            line.x = line_right - line.width
+        else:
+            line.x = first_left if i == 0 else body_left
+        if stretched:
+            deficit = (line_right - line.x) - line.width
             gaps = len(line.words) - 1
             if deficit > 0 and gaps > 0:
                 line.justify_extra = deficit / gaps
@@ -3113,6 +3349,30 @@ _MAX_EDIT_SIZE = 1638.0
 _MAX_EFF_EPS = 1e-6
 
 
+def _styled_split_index(styled: list, offset: int | None) -> int | None:
+    """A code-point offset into the new text as an index into `styled`.
+
+    The two are not interchangeable: a styled entry spells one or more
+    code points (a ligature the font draws as a single glyph, a
+    tate-chu-yoko block), so an offset compared against `len(styled)`
+    both drops a valid split silently and lands a shorter one on the
+    wrong character. An offset INSIDE such an entry names no boundary at
+    all and refuses — the halves become separate paragraphs, and the
+    glyph the entry stands for cannot be in both."""
+    if offset is None:
+        return None
+    pos = 0
+    for i, (text, st) in enumerate(styled):
+        if pos == offset:
+            return i
+        pos += len(text)
+        if pos > offset:
+            if st.member.atomic:
+                raise ValueError("a paragraph cannot split a tate-chu-yoko block")
+            raise ValueError("a paragraph cannot split inside a ligature")
+    return len(styled) if pos == offset else None
+
+
 class _Emission:
     """The paragraph's replacement ops, built once the rewriter reaches the
     first member (the ctm there anchors the user-space line targets)."""
@@ -3164,11 +3424,14 @@ class _Emission:
         # text doesn't waste space) — the ratio to the paragraph's
         # dominant original size.
         self.size_override = size_override
-        # A styled-index split point — the second block lays out as its
-        # own paragraph 2×leading below the first (a gap the re-listing
-        # grouping can never join across, so the output relists as TWO
-        # paragraphs through the shipped heuristics).
-        self.split_at = split_at
+        # The split point as a STYLED-ENTRY index — the second block lays
+        # out as its own paragraph 2×leading below the first (a gap the
+        # re-listing grouping can never join across, so the output relists
+        # as TWO paragraphs through the shipped heuristics). The caller's
+        # value is a code-point offset, which is not the same number: a
+        # ligature or a tate-chu-yoko block is ONE styled entry spelling
+        # several code points.
+        self.split_at = _styled_split_index(styled, split_at)
         # The split gap as a LEADING multiple (None = the shipped 2.0).
         # The 2×eff relist floor below is never scaled by it — a tighter
         # request stops at the tightest gap that still lists as two.
@@ -3221,7 +3484,18 @@ class _Emission:
         body_lefts = [l.x0 for l in para.lines[1:]]
         first_left = para.lines[0].x0
         body_left = min(body_lefts) if body_lefts else first_left
-        if para.alignment in ("center", "right"):
+        # A right-to-left first-line indent insets the first line's RIGHT
+        # edge, so it is carried as an inset from the measure's end rather
+        # than as a moved left edge: the lines still grow from the same left
+        # margin, the opener is just SHORTER and justifies against a
+        # reduced limit. Left to right the inset is zero and every number
+        # below is the shipped one.
+        rtl = self.base_level == 1
+        first_inset = 0.0
+        if rtl and para.alignment in ("right", "justify") and len(para.lines) > 1:
+            first_inset = max(l.x1 for l in para.lines[1:]) - para.lines[0].x1
+            first_left = body_left = para.left
+        elif para.alignment in ("center", "right"):
             first_left = body_left = para.left
         # Leading scale: new size / the dominant original size.
         dom_style_size = _widest(para.lines[0].members).style["size"] or 12.0
@@ -3259,7 +3533,7 @@ class _Emission:
                 # (unchanged text must not rewrap under its own edit).
                 margin = max(para.left - self.page_x0, 0.0)
                 right_limit = max(self.page_x1 - margin, para.right)
-        first_measure = right_limit - first_left
+        first_measure = right_limit - first_left - first_inset
         body_measure = right_limit - body_left
         # resize: an explicit width replaces the derived measures. The
         # first-line indent (its delta from the body edge) survives, so the
@@ -3268,10 +3542,10 @@ class _Emission:
         # dragged; width alone anchors the left edge and moves the right.
         box_edges = None
         if self.box_width is not None:
-            indent = first_left - body_left
+            indent = (first_left - body_left) + first_inset
             if self.box_left is not None:
                 body_left = float(self.box_left)
-                first_left = body_left + indent
+                first_left = body_left + (indent - first_inset)
             body_measure = float(self.box_width)
             first_measure = body_measure - indent
             if first_measure <= 0 or body_measure <= 0:
@@ -3348,7 +3622,8 @@ class _Emission:
             _position_lines(
                 block, para, first_left, body_left, leading, y0=y_next,
                 base_ratio=base_ratio, has_span_size=self.has_span_size,
-                box_edges=box_edges,
+                box_edges=box_edges, first_right_inset=first_inset,
+                base_rtl=rtl,
             )
             if block:
                 prev_last = block[-1]
@@ -5320,11 +5595,22 @@ def merge_paragraph_with_previous(
         # argument None this is byte-identical to the old bare
         # `_styled_chars(new_text, spans, members_by_index, False)` call
         # (allow_inplace/bidi_aware off = the shipped merge behaviour).
+        # The merged text is LOGICAL order and the page draws VISUAL
+        # order, so a merge of normalized text reorders on the way out
+        # exactly as replace does. Emitting it unreordered mirrored every
+        # right-to-left paragraph a merge produced. The base direction is
+        # the ANCHOR's when the anchor was normalized — the merged
+        # paragraph opens with the anchor's text, and the base level is a
+        # property of the first strong character.
+        merged_base_level = (
+            prev.base_level if prev.bidi
+            else (cur.base_level if cur.bidi else None)
+        )
         prep = _prepare_styled(
             pdf, prev, resources, new_text, spans,
             convert=False, font_path=font_path,
             size=size, color=color, family=family, bold=bold, italic=italic,
-            allow_inplace=False, bidi_aware=False,
+            allow_inplace=False, bidi_aware=merged_base_level is not None,
             members_override=members_by_index,
         )
         styled = prep.styled
@@ -5345,7 +5631,8 @@ def merge_paragraph_with_previous(
             ords_by_stream,
             _Emission(prev, styled, prep.fallbacks, page_x0, page_x1,
                       size_override=prep.size_override,
-                      kerns=_KernSource(resources, font_path, prep.fallbacks)),
+                      kerns=_KernSource(resources, font_path, prep.fallbacks),
+                      base_level=merged_base_level),
             prep.fallbacks,
         )
         kept, changed, new_forms = _rewrite_paragraph_stream(

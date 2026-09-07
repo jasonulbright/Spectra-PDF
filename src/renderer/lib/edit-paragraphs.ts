@@ -451,6 +451,82 @@ export function hardBreakRefusal(
     : null;
 }
 
+/** The engine's own English for the two refusals a PARAGRAPH SPLIT earns
+ * when the split offset names no styled-entry boundary. Byte-identical to
+ * what `text_paragraphs` raises, so each resolves through the
+ * engine-message table into the UI language. */
+export const SPLIT_ATOMIC_MESSAGE = 'a paragraph cannot split a tate-chu-yoko block';
+export const SPLIT_LIGATURE_MESSAGE = 'a paragraph cannot split inside a ligature';
+
+/** Whether a split at code-point `offset` lands strictly inside a ligature
+ * the font draws as ONE glyph. The walk MIRRORS the engine's encode order
+ * (per span, sequences longest-first, greedy, no backtracking) over the
+ * run's own round-tripping sequences, so a unit found here is a unit the
+ * engine forms. A sequence never crosses a per-span FACE boundary — the
+ * engine matches it only inside one face — so `faceBoundaries` (the
+ * override edges, in code points) cuts a candidate that spans one. */
+export function splitCutsLigature(
+  text: string,
+  spans: readonly { start: number; end: number; run: number }[],
+  sequencesByRun: ReadonlyMap<number, string[]> | undefined,
+  offset: number,
+  faceBoundaries: readonly number[] = [],
+): boolean {
+  if (!sequencesByRun) return false;
+  const chars = Array.from(text);
+  const cuts = new Set(faceBoundaries);
+  for (const sp of spans) {
+    if (offset <= sp.start || offset >= sp.end) continue;
+    const seqs = [...(sequencesByRun.get(sp.run) ?? [])]
+      .map((q) => Array.from(q))
+      .filter((q) => q.length > 1)
+      .sort((a, b) => b.length - a.length);
+    if (seqs.length === 0) continue;
+    let i = sp.start;
+    while (i < sp.end) {
+      let matched = 0;
+      for (const sa of seqs) {
+        if (i + sa.length > sp.end) continue;
+        if (!sa.every((c, k) => chars[i + k] === c)) continue;
+        let crosses = false;
+        for (let k = 1; k < sa.length; k++) if (cuts.has(i + k)) crosses = true;
+        if (crosses) continue;
+        matched = sa.length;
+        break;
+      }
+      if (matched === 0) {
+        i += 1;
+        continue;
+      }
+      if (offset > i && offset < i + matched) return true;
+      i += matched;
+    }
+  }
+  return false;
+}
+
+/** The localized refusal for a paragraph split at `offset`, or null when the
+ * offset names a real styled-entry boundary. Pre-empting the engine is never
+ * silent: the split is withheld and this sentence is what says so. Pass
+ * `sequencesByRun` as undefined where no ligature can form (a whole-paragraph
+ * substitution or feature re-renders every character through one face). */
+export function paragraphSplitRefusal(
+  atomicRanges: readonly { start: number; end: number }[],
+  offset: number,
+  text: string,
+  spans: readonly { start: number; end: number; run: number }[],
+  sequencesByRun: ReadonlyMap<number, string[]> | undefined,
+  faceBoundaries: readonly number[] = [],
+): string | null {
+  if (cutsAtomicRange(atomicRanges, offset, offset)) {
+    return localizeEngineMessage(SPLIT_ATOMIC_MESSAGE);
+  }
+  if (splitCutsLigature(text, spans, sequencesByRun, offset, faceBoundaries)) {
+    return localizeEngineMessage(SPLIT_LIGATURE_MESSAGE);
+  }
+  return null;
+}
+
 /** One per-span colour override — a CODE-POINT range painted a hex
  * colour. Disjoint + sorted once through `mergeSpanColors`. */
 export interface SpanColor {
