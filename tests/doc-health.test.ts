@@ -89,6 +89,26 @@ describe('health ledger verdicts', () => {
     expect(verdictFor(l, '/a.pdf', A)).toBe('undetermined');
   });
 
+  it('a pdf.js sweep that ended on a timeout is a FAILED run', () => {
+    // The sweep stops at the page that overran and reads no page after it, so
+    // the pages it never reached are unexamined rather than clean. Recording
+    // the run as `collected` would present that silence as an answer.
+    const timedOut = fact({
+      kind: 'undetermined',
+      boundary: 'pdfjs',
+      code: 'pdfjs.timeout',
+      page: 3,
+    });
+    const facts: HealthFact[] = [fact({ boundary: 'pdfjs', code: 'font.notEmbedded' }), timedOut];
+    const finished = !facts.some((f) => f.code === 'pdfjs.timeout');
+    expect(finished).toBe(false);
+    let l = beginCollection(EMPTY_HEALTH_LEDGER, '/a.pdf', A);
+    l = recordCollection(l, '/a.pdf', A, 'engine', 'collected', []);
+    l = recordCollection(l, '/a.pdf', A, 'pdfjs', finished ? 'collected' : 'failed', facts);
+    expect(l.byPath.get('/a.pdf')?.pdfjs).toBe('failed');
+    expect(verdictFor(l, '/a.pdf', A)).toBe('undetermined');
+  });
+
   it('an undetermined FACT is undetermined, never facts and never healthy', () => {
     const l = collected('/a.pdf', A, [fact({ kind: 'undetermined', code: 'font.unreadable' })]);
     expect(verdictFor(l, '/a.pdf', A)).toBe('undetermined');
@@ -404,5 +424,65 @@ describe('the codes this engine emits all carry a sentence', () => {
     ]) {
       expect(healthMessageKey(code)).not.toBe('panel.health.code.unknown');
     }
+  });
+});
+
+describe('retirement: buffer replaced or re-checked between begin and the runs landing', () => {
+  it('a late result for a retired buffer is dropped, and the new row starts clean', () => {
+    let l = beginCollection(EMPTY_HEALTH_LEDGER, '/a.pdf', A);
+    l = retireHealth(l, '/a.pdf');
+    l = beginCollection(l, '/a.pdf', B);
+    l = recordCollection(l, '/a.pdf', A, 'engine', 'collected', [fact()]);
+    expect(verdictFor(l, '/a.pdf', B)).toBe('no-evidence');
+    expect(verdictFor(l, '/a.pdf', A)).toBe('no-evidence');
+  });
+
+  it('re-check mid-sweep discards the old row; exactly one row exists after', () => {
+    let l = beginCollection(EMPTY_HEALTH_LEDGER, '/a.pdf', A);
+    l = recordCollection(l, '/a.pdf', A, 'pdfjs', 'collected', []);
+    l = retireHealth(l, '/a.pdf');
+    expect(l.byPath.has('/a.pdf')).toBe(false);
+    l = beginCollection(l, '/a.pdf', A);
+    expect([...l.byPath.keys()]).toEqual(['/a.pdf']);
+    expect(verdictFor(l, '/a.pdf', A)).toBe('no-evidence');
+  });
+
+  it('two re-checks in one tick still leave exactly one live row', () => {
+    let l = beginCollection(EMPTY_HEALTH_LEDGER, '/a.pdf', A);
+    l = retireHealth(l, '/a.pdf');
+    l = retireHealth(l, '/a.pdf');
+    l = beginCollection(l, '/a.pdf', A);
+    expect([...l.byPath.keys()]).toEqual(['/a.pdf']);
+  });
+
+  it('beginCollection over the same buffer does not accumulate a second row', () => {
+    let l = beginCollection(EMPTY_HEALTH_LEDGER, '/a.pdf', A);
+    const before = l.byPath.get('/a.pdf');
+    l = beginCollection(l, '/a.pdf', A);
+    expect(l.byPath.size).toBe(1);
+    expect(l.byPath.get('/a.pdf')).toEqual(before);
+  });
+});
+
+describe('inspectionBudget / traversalLimit facts never read as limited or healthy', () => {
+  function collectedBoth(facts: HealthFact[]) {
+    let l = beginCollection(EMPTY_HEALTH_LEDGER, '/a.pdf', A);
+    l = recordCollection(l, '/a.pdf', A, 'engine', 'collected', facts);
+    l = recordCollection(l, '/a.pdf', A, 'pdfjs', 'collected', []);
+    return l;
+  }
+
+  it('document.inspectionBudget forces undetermined', () => {
+    const l = collectedBoth([
+      fact({ kind: 'undetermined', code: 'document.inspectionBudget', page: null }),
+    ]);
+    expect(verdictFor(l, '/a.pdf', A)).toBe('undetermined');
+  });
+
+  it('page.traversalLimit forces undetermined', () => {
+    const l = collectedBoth([
+      fact({ kind: 'undetermined', code: 'page.traversalLimit', page: 3 }),
+    ]);
+    expect(verdictFor(l, '/a.pdf', A)).toBe('undetermined');
   });
 });

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 use tokio::sync::Mutex;
@@ -66,6 +66,22 @@ impl EngineRouter {
         self.by_outer.lock().ok()?.remove(&outer)
     }
 
+    /// Retire one routing, answering who asked and under which id.
+    pub fn take_route(&self, outer: u64) -> Option<(String, serde_json::Value)> {
+        self.take(outer).map(|route| (route.label, route.inner))
+    }
+
+    /// Retire EVERY routing. For a sidecar that has been killed: nothing is
+    /// coming back, so each caller is owed an answer from whoever killed it.
+    pub fn take_all(&self) -> Vec<(String, serde_json::Value)> {
+        let Ok(mut map) = self.by_outer.lock() else {
+            return Vec::new();
+        };
+        map.drain()
+            .map(|(_, route)| (route.label, route.inner))
+            .collect()
+    }
+
     /// Drop a destroyed window's outstanding requests. Their responses then
     /// land on no route and are discarded, which is the correct fate for a
     /// call whose caller is gone.
@@ -120,12 +136,24 @@ pub fn publish_activity(app: &AppHandle) {
 /// Rewrite an outbound request's id to a process-global number and remember
 /// who asked. Returns the outer id when one was allocated.
 pub fn route_request(app: &AppHandle, label: &str, request: &mut serde_json::Value) -> Option<u64> {
+    route_with(&app.state::<EngineRouter>(), label, request)
+}
+
+/// The same rewrite against a NAMED router. Each sidecar keeps its own table:
+/// two routers may hand out the same outer number and never confuse each
+/// other, because a response is only ever looked up in the table belonging to
+/// the process that emitted it.
+pub fn route_with(
+    router: &EngineRouter,
+    label: &str,
+    request: &mut serde_json::Value,
+) -> Option<u64> {
     let obj = request.as_object_mut()?;
     let inner = obj.get("id").cloned()?;
     if inner.is_null() {
         return None;
     }
-    let outer = app.state::<EngineRouter>().register(label, inner);
+    let outer = router.register(label, inner);
     obj.insert("id".to_string(), serde_json::Value::from(outer));
     Some(outer)
 }
@@ -154,7 +182,7 @@ fn route_response(app: &AppHandle, mut json: serde_json::Value) {
 }
 
 /// Resolves the path to the Python engine startup script.
-pub fn get_engine_script_path(app: &AppHandle) -> String {
+pub fn get_engine_script_path<R: Runtime>(app: &AppHandle<R>) -> String {
     let resource_dir = app
         .path()
         .resource_dir()
@@ -167,7 +195,7 @@ pub fn get_engine_script_path(app: &AppHandle) -> String {
 }
 
 /// Resolves the path to the embedded Python executable.
-pub fn get_python_path(app: &AppHandle) -> String {
+pub fn get_python_path<R: Runtime>(app: &AppHandle<R>) -> String {
     let resource_dir = app
         .path()
         .resource_dir()

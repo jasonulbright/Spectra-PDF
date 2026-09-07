@@ -211,6 +211,51 @@ class TestClassification:
             assert xfa.has_authored_logic(pdf) is True
 
 
+class TestIndirectXfaEntry:
+    """ISO 32000-2 Table 224 gives `/XFA` as "stream or array" with no bar on
+    an indirect reference to either. `Dictionary.get` resolves references
+    transparently, but the isinstance checks in `_checked_entry` only prove
+    that if a reference is actually exercised here."""
+
+    def _acroform(self, pdf, *, xfa_value, fields_value):
+        acro = pikepdf.Dictionary(Fields=fields_value, XFA=pdf.make_indirect(xfa_value))
+        pdf.Root["/AcroForm"] = acro
+        return pdf
+
+    def test_indirect_valid_stream_classifies_dynamic(self, tmp_path):
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(200, 200))
+        stream = pdf.make_stream(b"<xdp:xdp></xdp:xdp>")
+        self._acroform(pdf, xfa_value=stream, fields_value=pikepdf.Array([]))
+        insp = xfa.inspect(pdf)
+        assert insp.form_class == xfa.DYNAMIC
+        pdf.close()
+
+    def test_indirect_valid_array_classifies_dynamic_when_fields_is_empty(
+        self, tmp_path
+    ):
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(200, 200))
+        arr = pikepdf.Array(
+            [pikepdf.String("template"), pdf.make_stream(b"<xdp:xdp></xdp:xdp>")]
+        )
+        self._acroform(pdf, xfa_value=arr, fields_value=pikepdf.Array([]))
+        insp = xfa.inspect(pdf)
+        assert insp.form_class == xfa.DYNAMIC
+        pdf.close()
+
+    def test_indirect_unreadable_stream_is_undetermined(self, tmp_path):
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(200, 200))
+        bad = pdf.make_stream(b"junk")
+        bad["/Filter"] = pikepdf.Name("/NoSuchDecode")
+        self._acroform(pdf, xfa_value=bad, fields_value=pikepdf.Array([]))
+        insp = xfa.inspect(pdf)
+        assert insp.form_class == xfa.UNDETERMINED
+        assert insp.shape == xfa.SHAPE_PACKET_UNREADABLE
+        pdf.close()
+
+
 class TestSomPaths:
     """XFA 3.3 ch. 2 "Field Names", ch. 3 "Scripting Object Model"."""
 
@@ -729,3 +774,163 @@ class TestFlattenDoesNotNeedTheDatasetsPacket:
                 src, out, {"topmostSubform[0].Page1[0].name2[0]": "Hopper"}
             )
         assert not os.path.exists(out)
+
+
+class TestStrictInspection:
+    """`inspect` — the one STRICT reading, typed against the clauses.
+
+    `classify` stays lenient for the callers that act on packets or do
+    nothing. An observer asking what the document DECLARES gets a named
+    refusal instead of a class derived from a coercion.
+    """
+
+    def _pdf(self, *, xfa_value=None, fields=None, needs_rendering=None):
+        pdf = pikepdf.Pdf.new()
+        pdf.add_blank_page(page_size=(200, 200))
+        acro = Dictionary()
+        if fields is not None:
+            acro["/Fields"] = fields(pdf)
+        if xfa_value is not None:
+            acro["/XFA"] = xfa_value(pdf)
+        pdf.Root["/AcroForm"] = pdf.make_indirect(acro)
+        if needs_rendering is not None:
+            pdf.Root["/NeedsRendering"] = needs_rendering
+        return pdf
+
+    @staticmethod
+    def _one_field(pdf):
+        return pikepdf.Array([pdf.make_indirect(Dictionary(T=pikepdf.String("f")))])
+
+    @staticmethod
+    def _pairs(pdf, name):
+        return pikepdf.Array([name, pdf.make_stream(b"<template/>")])
+
+    def test_no_acroform_is_none(self):
+        pdf = pikepdf.Pdf.new()
+        pdf.add_blank_page()
+        assert xfa.inspect(pdf).form_class == xfa.NONE
+
+    def test_an_acroform_without_xfa_is_none(self):
+        pdf = self._pdf(fields=self._one_field)
+        assert xfa.inspect(pdf).form_class == xfa.NONE
+
+    def test_a_wrong_typed_acroform_is_named(self):
+        pdf = pikepdf.Pdf.new()
+        pdf.add_blank_page()
+        pdf.Root["/AcroForm"] = pikepdf.Integer(7)
+        found = xfa.inspect(pdf)
+        assert found.form_class == xfa.UNDETERMINED
+        assert found.shape == xfa.SHAPE_ACROFORM_TYPE
+
+    def test_a_wrong_typed_xfa_is_named(self):
+        pdf = self._pdf(xfa_value=lambda p: pikepdf.Integer(42),
+                        fields=self._one_field)
+        found = xfa.inspect(pdf)
+        assert found.form_class == xfa.UNDETERMINED
+        assert found.shape == xfa.SHAPE_XFA_TYPE
+
+    def test_an_odd_length_packet_array_is_named(self):
+        """Annex K.2: packets are PAIRS. An odd count is not a sequence of
+        them, whatever the individual slots hold."""
+        pdf = self._pdf(
+            xfa_value=lambda p: pikepdf.Array([pikepdf.String("template")]),
+            fields=self._one_field,
+        )
+        assert xfa.inspect(pdf).shape == xfa.SHAPE_XFA_ARRAY_LENGTH
+
+    def test_an_empty_packet_array_is_named(self):
+        pdf = self._pdf(xfa_value=lambda p: pikepdf.Array([]),
+                        fields=self._one_field)
+        assert xfa.inspect(pdf).shape == xfa.SHAPE_XFA_ARRAY_LENGTH
+
+    def test_a_packet_name_that_is_not_a_string_is_named(self):
+        """The slot is VALIDATED, not coerced: `str()` renders 42 as readily
+        as a name, so a coercing reading reports a packet called "42"."""
+        pdf = self._pdf(xfa_value=lambda p: self._pairs(p, pikepdf.Integer(42)),
+                        fields=self._one_field)
+        found = xfa.inspect(pdf)
+        assert found.form_class == xfa.UNDETERMINED
+        assert found.shape == xfa.SHAPE_PACKET_NAME_TYPE
+
+    def test_a_packet_slot_that_is_not_a_stream_is_named(self):
+        pdf = self._pdf(
+            xfa_value=lambda p: pikepdf.Array(
+                [pikepdf.String("template"), pikepdf.Integer(7)]
+            ),
+            fields=self._one_field,
+        )
+        assert xfa.inspect(pdf).shape == xfa.SHAPE_PACKET_STREAM_TYPE
+
+    def test_a_packet_stream_that_will_not_unfilter_is_named(self):
+        def value(pdf):
+            stream = pdf.make_stream(b"decodes under no filter")
+            stream["/Filter"] = Name("/NoSuchDecode")
+            return pikepdf.Array([pikepdf.String("template"), pdf.make_indirect(stream)])
+
+        pdf = self._pdf(xfa_value=value, fields=self._one_field)
+        assert xfa.inspect(pdf).shape == xfa.SHAPE_PACKET_UNREADABLE
+
+    def test_a_wrong_typed_fields_is_named_not_read_as_no_shadow(self):
+        """Table 224 gives `Fields` as an array. Read leniently, a number
+        answers "no field shadow", which classifies the form DYNAMIC — a
+        verdict about the document taken from a fact about its damage."""
+        pdf = self._pdf(
+            xfa_value=lambda p: self._pairs(p, pikepdf.String("template")),
+            fields=lambda p: pikepdf.Integer(42),
+        )
+        found = xfa.inspect(pdf)
+        assert found.form_class == xfa.UNDETERMINED
+        assert found.shape == xfa.SHAPE_FIELDS_TYPE
+        # The lenient reading is what it always was, for its own callers.
+        assert xfa.classify(pdf) == xfa.DYNAMIC
+
+    def test_a_wrong_typed_needs_rendering_is_named_never_coerced(self):
+        """Table 29 gives `NeedsRendering` as a boolean. `bool()` of the
+        string `(false)` is TRUE."""
+        pdf = self._pdf(
+            xfa_value=lambda p: self._pairs(p, pikepdf.String("template")),
+            fields=self._one_field,
+            needs_rendering=pikepdf.String("false"),
+        )
+        found = xfa.inspect(pdf)
+        assert found.form_class == xfa.UNDETERMINED
+        assert found.shape == xfa.SHAPE_NEEDS_RENDERING_TYPE
+        assert xfa.classify(pdf) == xfa.DYNAMIC
+
+    def test_an_absent_fields_is_a_dynamic_form_not_a_malformed_one(self):
+        """`Fields` absent is a legal shape here: it is exactly the form whose
+        fields live only in the XML."""
+        pdf = self._pdf(xfa_value=lambda p: self._pairs(p, pikepdf.String("template")))
+        assert xfa.inspect(pdf).form_class == xfa.DYNAMIC
+
+    def test_the_well_formed_shapes_classify_as_before(self):
+        static = self._pdf(
+            xfa_value=lambda p: self._pairs(p, pikepdf.String("template")),
+            fields=self._one_field,
+        )
+        assert xfa.inspect(static).form_class == xfa.STATIC
+        dynamic = self._pdf(
+            xfa_value=lambda p: self._pairs(p, pikepdf.String("template")),
+            fields=self._one_field,
+            needs_rendering=True,
+        )
+        assert xfa.inspect(dynamic).form_class == xfa.DYNAMIC
+        single = self._pdf(
+            xfa_value=lambda p: p.make_stream(b"<xdp:xdp/>"),
+            fields=self._one_field,
+        )
+        assert xfa.inspect(single).form_class == xfa.STATIC
+
+    def test_every_shape_name_is_a_constant_of_this_module(self):
+        """A shape crosses the IPC boundary as a digest. It must never be able
+        to carry a path, an offset, or anything the document supplied."""
+        names = [
+            xfa.SHAPE_ACROFORM_UNREADABLE, xfa.SHAPE_ACROFORM_TYPE,
+            xfa.SHAPE_XFA_UNREADABLE, xfa.SHAPE_XFA_TYPE,
+            xfa.SHAPE_XFA_ARRAY_LENGTH, xfa.SHAPE_PACKET_NAME_TYPE,
+            xfa.SHAPE_PACKET_STREAM_TYPE, xfa.SHAPE_PACKET_UNREADABLE,
+            xfa.SHAPE_FIELDS_TYPE, xfa.SHAPE_NEEDS_RENDERING_TYPE,
+        ]
+        assert len(set(names)) == len(names)
+        for name in names:
+            assert "/" not in name and "\\" not in name

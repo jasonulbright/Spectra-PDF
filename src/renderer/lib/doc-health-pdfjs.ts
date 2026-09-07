@@ -73,24 +73,72 @@ function fontIdsIn(opList: { fnArray: unknown[]; argsArray: unknown[] }): string
   return out;
 }
 
+/** A worker await that never settled. Distinct from a rejection: a rejection
+ * is a verdict about the document, this is the absence of one. */
+class WorkerTimeout extends Error {}
+
+// No await on the pdf.js worker has a bound of its own — every one of them is
+// one message on a single serial queue with no per-request timeout. A worker
+// wedged on an earlier request (or one that silently drops a message) leaves
+// the await pending forever, which holds the whole sweep at `no-evidence` with
+// no way out: the ledger reports "checking" for a document that finished
+// loading long ago. This race is the bound for all of them. The orphaned
+// promise cannot be cancelled (pdf.js exposes no cancel token) and is simply
+// never awaited again; its late settlement lands on handlers that have already
+// run, so it can neither write a fact nor go unhandled.
+const WORKER_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new WorkerTimeout('doc-health: worker timed out')), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
+  });
+}
+
+/** A page's facts, plus whether the worker stopped answering while they were
+ * taken. A timed-out page ends the sweep — the queue that did not answer is
+ * the same queue every later page would wait on, so continuing would spend one
+ * timeout per remaining page and still learn nothing. */
+interface PageResult {
+  facts: HealthFact[];
+  timedOut: boolean;
+}
+
 async function collectPage(
   doc: PDFDocumentProxy,
   index: number,
   substituted: Set<string>,
-): Promise<HealthFact[]> {
+): Promise<PageResult> {
   let page: PDFPageProxy;
   try {
-    page = await doc.getPage(index + 1);
-  } catch {
-    return [fact('undetermined', 'warning', 'page.unreadable', index)];
+    page = await withTimeout(doc.getPage(index + 1), WORKER_TIMEOUT_MS);
+  } catch (err) {
+    if (err instanceof WorkerTimeout) return { facts: [], timedOut: true };
+    return { facts: [fact('undetermined', 'warning', 'page.unreadable', index)], timedOut: false };
   }
   let opList: { fnArray: unknown[]; argsArray: unknown[] };
   try {
-    opList = await page.getOperatorList();
-  } catch {
+    opList = await withTimeout(page.getOperatorList(), WORKER_TIMEOUT_MS);
+  } catch (err) {
+    if (err instanceof WorkerTimeout) return { facts: [], timedOut: true };
     // The page's content stream will not parse. pdf.js draws nothing for it.
-    return [fact('skipped', 'warning', 'page.contentUnreadable', index)];
+    return {
+      facts: [fact('skipped', 'warning', 'page.contentUnreadable', index)],
+      timedOut: false,
+    };
   }
+  // `commonObjs` is read synchronously here: the fonts an operator list names
+  // are already resolved by the time that list resolves, so this asks the
+  // local map and never hands the worker another request to wedge on.
   const objs = page.commonObjs as unknown as CommonObjs;
   const out: HealthFact[] = [];
   for (const id of fontIdsIn(opList)) {
@@ -115,41 +163,13 @@ async function collectPage(
     substituted.add(name);
     out.push(fact('font', 'warning', 'font.substituted', index, { font: name }));
   }
-  return out;
-}
-
-// `getMetadata()` has no bound of its own — it is one promise from the pdf.js
-// worker, which is a single serial queue with no per-request timeout. A
-// worker wedged on an earlier request (or one that silently drops a message)
-// leaves this await pending forever, which would hold the whole sweep at
-// `no-evidence` with no way out: every later page never gets walked, and the
-// ledger reports "checking" for a document that finished loading long ago.
-// The race below is the bound: past it, the metadata question is answered
-// `undetermined` — the same fact a rejection produces — and the sweep moves
-// on. The orphaned `getMetadata()` promise itself cannot be cancelled (pdf.js
-// exposes no cancel token for it); it is simply never awaited again.
-const _METADATA_TIMEOUT_MS = 8000;
-
-function _withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('doc-health: metadata timed out')), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      },
-    );
-  });
+  return { facts: out, timedOut: false };
 }
 
 /**
  * Every fact the pdf.js boundary reports about one loaded document.
  *
- * EVERY page is walked. A bounded sweep would report a subset as a total, and
+ * EVERY page is walked, unless the worker stops answering. A bounded sweep would report a subset as a total, and
  * a document whose only substituted font is on page 400 would read as clean.
  * The cost is one operator-list build per page, which is the work rendering
  * that page would do anyway; the run is off the paint path and its result is
@@ -162,7 +182,7 @@ export async function collectPdfjsFacts(doc: PDFDocumentProxy): Promise<HealthFa
   const facts: HealthFact[] = [];
   if (doc.isPureXfa) facts.push(fact('skipped', 'info', 'document.xfa', null));
   try {
-    await _withTimeout(doc.getMetadata(), _METADATA_TIMEOUT_MS);
+    await withTimeout(doc.getMetadata(), WORKER_TIMEOUT_MS);
   } catch {
     facts.push(fact('undetermined', 'warning', 'document.metadataUnreadable', null));
   }
@@ -173,7 +193,12 @@ export async function collectPdfjsFacts(doc: PDFDocumentProxy): Promise<HealthFa
     // waiting for. Yielding does not shorten the sweep and does not reduce
     // what it covers; it decides who goes first.
     await idle();
-    facts.push(...(await collectPage(doc, i, substituted)));
+    const result = await collectPage(doc, i, substituted);
+    facts.push(...result.facts);
+    if (result.timedOut) {
+      facts.push(fact('undetermined', 'warning', 'pdfjs.timeout', i));
+      break;
+    }
   }
   return facts;
 }

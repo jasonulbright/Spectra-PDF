@@ -1557,6 +1557,24 @@ pub async fn send_to_engine(
     }
 }
 
+/// Hand a JSON-RPC request to the HEALTH worker on behalf of the calling
+/// window.
+///
+/// A separate command, not a flag on `send_to_engine`, because the two name
+/// different processes: health work must never be able to reach the
+/// interactive sidecar's FIFO, and a boolean argument is something a caller
+/// can get wrong. The worker is spawned on demand, so this is also the path a
+/// killed worker comes back through.
+#[tauri::command]
+pub async fn send_to_health_engine(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    request: serde_json::Value,
+) -> Result<(), String> {
+    let label = window.label().to_string();
+    crate::health_engine::send(&app, &label, request).await
+}
+
 // ── Window lifecycle ──────────────────────────────────────────────────────
 
 /// Close the calling window, quitting only when it was the last workspace

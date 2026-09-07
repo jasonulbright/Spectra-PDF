@@ -277,7 +277,8 @@ def _walk_annotation_fonts(annotations, page_number: int, seen_resources: set,
                 )
 
 
-def walk_document_fonts(pdf, on_font, on_unreadable=_noop) -> None:
+def walk_document_fonts(pdf, on_font, on_unreadable=_noop, *, pages=None,
+                       seen=None, include_dr=True) -> None:
     """Every font dictionary an open document reaches, once per page it is on.
 
     Page resources, nested forms, patterns, Type3 glyph procedures, annotation
@@ -287,9 +288,21 @@ def walk_document_fonts(pdf, on_font, on_unreadable=_noop) -> None:
     A count taken from anything narrower than this walk is a subset: a font
     reached only through one of those five indirections is still a font the
     document draws with.
+
+    ``pages`` selects the page INDICES to visit and ``seen`` supplies the
+    caller's own resource-dedup set, so a caller that must not read a whole
+    document in one call can drive this same walk a batch at a time and get
+    what one whole-document call would have produced. ``include_dr`` runs the
+    document-level ``/AcroForm /DR`` leg, which belongs to no page and is
+    therefore run once by such a caller rather than once per batch. The
+    defaults are the whole document, which is what every other caller asks
+    for.
     """
-    seen_resources: set = set()
+    seen_resources: set = seen if seen is not None else set()
+    selected = None if pages is None else set(pages)
     for index, page in enumerate(pdf.pages):
+        if selected is not None and index not in selected:
+            continue
         # Inheritance-aware: /Resources may sit on an ancestor page-tree node,
         # and pikepdf's Page.resources walks up for it.
         try:
@@ -309,6 +322,8 @@ def walk_document_fonts(pdf, on_font, on_unreadable=_noop) -> None:
             _walk_annotation_fonts(
                 annotations, index + 1, seen_resources, on_font, on_unreadable
             )
+    if not include_dr:
+        return
     try:
         acroform = pdf.Root.get("/AcroForm")
     except Exception as exc:

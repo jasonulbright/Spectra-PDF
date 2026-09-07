@@ -3254,6 +3254,8 @@ export const PANEL_STRINGS = {
     'This document is encrypted. It opened without a password.',
   'panel.health.code.documentUnreadable': 'This document could not be examined.',
   'panel.health.code.partUnreadable': 'Part of this document could not be read.',
+  'panel.health.code.pdfjsTimeout':
+    'The reader stopped responding, so this document was not examined in full.',
   'panel.health.code.unknown': 'A reader reported something this version does not recognize.',
 } as const;
 

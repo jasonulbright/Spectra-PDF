@@ -5,7 +5,9 @@ import globals from 'globals';
 
 // Flat config (ESLint 10). The renderer is browser-targeted TypeScript/React.
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**', 'src-tauri/**', '**/*.config.*'] },
+  // `*.local.*` is the gitignored scratch namespace: never committed, never
+  // seen by CI, so a lint failure from one is a red no pipeline can reproduce.
+  { ignores: ['dist/**', 'node_modules/**', 'src-tauri/**', '**/*.config.*', '**/*.local.*'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

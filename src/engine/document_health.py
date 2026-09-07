@@ -34,10 +34,24 @@ of the scrubbed sentence — enough to tell two different failures apart, never
 enough to reconstruct either.
 
 The op has two spellings of one traversal. ``document_health`` runs it whole;
-``document_health_begin`` / ``_step`` / ``_end`` run it a bounded batch at a
-time against a run token, so a caller can hand this process a user's request
-between batches. Both drive the same code, so they cannot report a document
+``document_health_begin`` / ``_step`` / ``_end`` run it against a run token, a
+bounded step at a time, so a caller that no longer wants a run can drop it at a
+step boundary. Both drive the same code, so they cannot report a document
 differently.
+
+A STEP is bounded by items, decoded bytes and time, and it suspends where it
+stands — mid-page if need be, because the traversal's position is data the run
+holds rather than an interpreter stack. Reaching a step's bound is not a
+finding; it is the next step's starting point. Reaching the RUN's bound IS a
+finding (``document.inspectionBudget``): the document cost more than this
+process spends on an observation nobody asked for, and what was not inspected
+is reported as not inspected.
+
+The bound of LAST resort is not here. One ``pikepdf.open`` of a damaged file,
+or one enormous stream's decode, can cost more than any check written inside
+this process can interrupt, so the op runs in a worker process the app can
+kill (``src-tauri/src/health_engine.rs``). These budgets keep an ordinary
+document's steps short; that deadline is what holds over a hostile one.
 """
 
 from __future__ import annotations
@@ -46,7 +60,8 @@ import hashlib
 import os
 import re
 import secrets
-from collections import OrderedDict
+import time
+from collections import OrderedDict, deque
 from pathlib import Path
 
 import pikepdf
@@ -72,14 +87,31 @@ _SPECIALIZED_FILTERS = frozenset(
 # and can nest arbitrarily. Indirect objects are deduplicated by objgen; the
 # depth cap bounds a chain built only from direct dictionaries, which carry no
 # objgen to deduplicate on. Reaching either bound is REPORTED — see
-# ``_note_limit``.
+# ``_note_limit``. The object cap is per PAGE and is tested before every item,
+# never on entering a branch: one dictionary can hold more entries than the
+# whole cap, and a check that only runs per recursive call never sees them.
 _MAX_RESOURCE_DEPTH = 32
 _MAX_RESOURCE_OBJECTS = 4096
 
-# Pages inspected per ``document_health_step`` call. The bound is what lets a
-# user's request reach this process between batches; it is small because the
-# guarantee it buys is "waits at most one batch".
+# Pages inspected per ``document_health_step`` call — the CEILING, not the
+# unit. The unit is one item, and the budgets below stop a step mid-page.
 _STEP_PAGES = 4
+
+# What ONE step may spend before it suspends where it stands. These bound the
+# request, not the document: exceeding one is not a finding, it is the next
+# step's starting point.
+_STEP_OBJECTS = 512
+_STEP_DECODED_BYTES = 32 * 1024 * 1024
+_STEP_SECONDS = 0.5
+
+# What one RUN may spend in total. Exceeding one of these IS a finding: the
+# document cost more than this process spends on a passive observation, and
+# what was not inspected is reported as not inspected
+# (``document.inspectionBudget``). Seconds are INSPECTION seconds — the sum of
+# the steps' own durations — because a run spans idle time that belongs to
+# whatever else the machine was doing.
+_RUN_DECODED_BYTES = 2 * 1024 * 1024 * 1024
+_RUN_SECONDS = 90.0
 
 # Run tokens held open at once. A caller that abandons a run without ending it
 # must not be able to keep this process's file handles open indefinitely, so
@@ -218,17 +250,104 @@ def _font_label(font_obj, resource_name) -> str:
     return str(resource_name)
 
 
-def _font_facts(pdf) -> list[dict]:
+def _budget_fact() -> dict:
+    """The run spent its inspection budget before it finished.
+
+    A traversal that stopped at a budget has not inspected what lies past it,
+    so the run is UNDETERMINED — the same verdict as any other traversal that
+    stopped part-way, and never a clean answer covering objects nothing read.
+    """
+    return _fact("undetermined", "warning", "engine", "document.inspectionBudget")
+
+
+class _RunSpent(BaseException):
+    """Raised out of any item once the RUN's budget is gone.
+
+    Not an ``Exception``: it is raised from inside traversals whose own
+    handlers catch ``Exception`` broadly to turn a damaged branch into a fact,
+    and one of those would swallow it and let the run continue past its budget.
+    ``document_health_step`` is the only handler, and it converts this to
+    ``document.inspectionBudget`` and ends the run."""
+
+
+def _now() -> float:
+    """The inspection clock. Module-level so a test can state time."""
+    return time.monotonic()
+
+
+class _Budget:
+    """What one run may spend, and what one step may spend before it yields.
+
+    Two bounds, and they mean different things. The STEP bound is a yield: the
+    traversal suspends where it stands and the next step resumes it, which is
+    what keeps one request short. The RUN bound is a verdict: the document
+    cost more than this process will spend on a passive observation, and what
+    was not inspected is reported as not inspected.
+
+    Time is charged as INSPECTION time — the sum of the steps' own durations —
+    never wall-clock across the whole run, because the gaps between steps
+    belong to whatever else the machine was doing.
+    """
+
+    __slots__ = ("run_seconds_left", "run_bytes_left", "step_started",
+                 "step_objects_left", "step_bytes_left")
+
+    def __init__(self) -> None:
+        self.run_seconds_left = _RUN_SECONDS
+        self.run_bytes_left = _RUN_DECODED_BYTES
+        self.step_started = 0.0
+        self.step_objects_left = 0
+        self.step_bytes_left = 0
+
+    def start_step(self) -> None:
+        self.step_started = _now()
+        self.step_objects_left = _STEP_OBJECTS
+        self.step_bytes_left = _STEP_DECODED_BYTES
+
+    def end_step(self) -> None:
+        self.run_seconds_left -= max(_now() - self.step_started, 0.0)
+
+    def step_spent(self) -> bool:
+        return (self.step_objects_left <= 0
+                or self.step_bytes_left <= 0
+                or _now() - self.step_started >= _STEP_SECONDS)
+
+    def take_item(self) -> None:
+        """Charge ONE inspected item. Called before the item is read."""
+        if self.run_seconds_left - (_now() - self.step_started) <= 0.0:
+            raise _RunSpent()
+        if self.run_bytes_left <= 0:
+            raise _RunSpent()
+        self.step_objects_left -= 1
+
+    def take_bytes(self, count: int) -> None:
+        self.run_bytes_left -= count
+        self.step_bytes_left -= count
+        if self.run_bytes_left <= 0:
+            raise _RunSpent()
+
+
+def _font_facts(pdf, run=None, pages=None, include_dr: bool = True) -> list[dict]:
     """Fonts the document draws with whose program is absent or unreadable.
 
     Counted once per indirect object, like ``check.py``'s survey: one font
     program referenced from forty pages is one substitution, not forty. The
     page it was first reached on is kept so the panel can link to it.
+
+    ``run`` carries the dedup sets and the budget across a stepped traversal,
+    so driving this one page-batch at a time reports what one whole-document
+    call reports. Without one it is the whole document at once, which is what
+    the CLI and the tests ask for.
     """
     out: list[dict] = []
-    seen: set = set()
+    seen: set = run.font_objects if run is not None else set()
+    notes: set = run.font_notes if run is not None else set()
+    resources: set = run.font_resources if run is not None else set()
+    budget = run.budget if run is not None else None
 
     def on_font(font_obj, page_number, resource_name) -> None:
+        if budget is not None:
+            budget.take_item()
         objgen = getattr(font_obj, "objgen", (0, 0))
         if objgen != (0, 0):
             if objgen in seen:
@@ -252,14 +371,21 @@ def _font_facts(pdf) -> list[dict]:
 
     def on_unreadable(page_number, resource_name, detail) -> None:
         page = page_number if page_number and page_number > 0 else None
+        params = {"font": str(resource_name or ""), "error": _PARSE_ERROR,
+                  "id": _digest(str(detail))}
+        # Deduped for the same reason a font is: a stepped run re-enters the
+        # page batch it suspended in, and one unreadable table must not read
+        # as two.
+        marker = (page, params["font"], params["id"])
+        if marker in notes:
+            return
+        notes.add(marker)
         out.append(_fact("undetermined", "warning", "engine", "font.unreadable",
-                         page=page,
-                         params={"font": str(resource_name or ""),
-                                 "error": _PARSE_ERROR,
-                                 "id": _digest(str(detail))}))
+                         page=page, params=params))
 
     try:
-        walk_document_fonts(pdf, on_font, on_unreadable)
+        walk_document_fonts(pdf, on_font, on_unreadable, pages=pages,
+                            seen=resources, include_dr=include_dr)
     except Exception as exc:
         out.append(_fact("undetermined", "warning", "engine", "fonts.unenumerable",
                          params=_error_params(exc)))
@@ -290,38 +416,70 @@ def _identity(obj):
     return objgen if objgen != (0, 0) else ("direct", id(obj))
 
 
+# The frames one page's traversal is made of. Each is ONE item the budget is
+# charged for before it is read, which is the property the object cap rests
+# on: a bound checked on entering a recursive call is not checked again for
+# the 4 097th entry of the dictionary that call is looping over.
+_RESOURCES = "resources"
+_ENTRY = "entry"
+_APPEARANCE = "appearance"
+
+
 class _Walk:
-    """The state one page's resource traversal carries.
+    """One page's traversal, suspendable between any two items.
+
+    ``frames`` is the work not yet done, so a step that runs out of budget
+    returns with it non-empty and the next step resumes exactly there. A
+    recursive traversal cannot do that: its position lives on the interpreter
+    stack, which does not survive returning.
 
     ``limited`` holds the page numbers that already reported an incomplete
     traversal, so a wide graph that hits the bound in forty branches reports it
     once.
     """
 
-    __slots__ = ("out", "visited", "not_decoded", "limited")
+    __slots__ = ("out", "page", "page_number", "frames", "visited",
+                 "not_decoded", "limited", "budget", "annotations_queued")
 
-    def __init__(self, out: list[dict], not_decoded: set, limited: set) -> None:
+    def __init__(self, out: list[dict], page_number: int, not_decoded: set,
+                 limited: set, budget) -> None:
         self.out = out
+        self.page = None
+        self.page_number = page_number
+        self.frames: deque = deque()
         self.visited: set = set()
         self.not_decoded = not_decoded
         self.limited = limited
+        self.budget = budget
+        self.annotations_queued = False
+
+    def push(self, frames) -> None:
+        self.frames.extendleft(reversed(frames))
 
 
-def _note_limit(walk: _Walk, page_number: int) -> None:
+def _note_limit(walk: _Walk) -> None:
     """The traversal stopped at its own bound.
 
     What lies beyond it was never inspected, so the branch is UNDETERMINED. A
     bound reached silently publishes a partial traversal as a complete one — a
     clean answer covering objects nothing read.
     """
-    if page_number in walk.limited:
+    if walk.page_number in walk.limited:
         return
-    walk.limited.add(page_number)
+    walk.limited.add(walk.page_number)
     walk.out.append(_fact("undetermined", "warning", "engine",
-                          "page.traversalLimit", page=page_number))
+                          "page.traversalLimit", page=walk.page_number))
 
 
-def _check_image(obj, name, page_number: int, walk: _Walk) -> None:
+def _read_stream(walk: _Walk, obj, level=None) -> bytes:
+    """Read one stream and charge the run for what it decoded to."""
+    data = obj.read_raw_bytes() if level is None else obj.read_bytes(level)
+    if walk.budget is not None:
+        walk.budget.take_bytes(len(data))
+    return data
+
+
+def _check_image(obj, name, walk: _Walk) -> None:
     """One image XObject: whether its stream reads, and whether it decoded."""
     specialized = [f for f in _filter_names(obj) if f in _SPECIALIZED_FILTERS]
     try:
@@ -329,12 +487,12 @@ def _check_image(obj, name, page_number: int, walk: _Walk) -> None:
             # A chain ending in a pixel codec is unfilterable at every decode
             # level qpdf offers, so the general layers under it cannot be
             # exercised either. Only the presence of the bytes is checked.
-            obj.read_raw_bytes()
+            _read_stream(walk, obj)
         else:
-            obj.read_bytes(pikepdf.StreamDecodeLevel.generalized)
+            _read_stream(walk, obj, pikepdf.StreamDecodeLevel.generalized)
     except Exception as exc:
         walk.out.append(_fact("skipped", "warning", "engine", "page.imageUnreadable",
-                              page=page_number,
+                              page=walk.page_number,
                               params={"name": str(name).lstrip("/"),
                                       **_error_params(exc)}))
         return
@@ -342,7 +500,7 @@ def _check_image(obj, name, page_number: int, walk: _Walk) -> None:
         walk.not_decoded.add(_identity(obj))
 
 
-def _check_content(obj, name, page_number: int, code: str, walk: _Walk) -> None:
+def _check_content(obj, name, code: str, walk: _Walk) -> None:
     """One content-bearing stream: whether it decodes AND whether it parses.
 
     Both halves are required and they fail differently. A Form XObject whose
@@ -352,18 +510,24 @@ def _check_content(obj, name, page_number: int, code: str, walk: _Walk) -> None:
     that executes such a Form as clean.
     """
     try:
-        obj.read_bytes(pikepdf.StreamDecodeLevel.generalized)
+        _read_stream(walk, obj, pikepdf.StreamDecodeLevel.generalized)
         pikepdf.parse_content_stream(obj)
     except Exception as exc:
         params = _error_params(exc)
         if name:
             params["name"] = str(name).lstrip("/")
         walk.out.append(_fact("skipped", "warning", "engine", code,
-                              page=page_number, params=params))
+                              page=walk.page_number, params=params))
 
 
-def _walk_resources(resources, page_number: int, walk: _Walk, depth: int) -> None:
-    """Content streams and images reachable from one resource dictionary.
+def _unreadable(walk: _Walk, exc: BaseException) -> None:
+    walk.out.append(_fact("undetermined", "warning", "engine",
+                          "page.resourcesUnreadable", page=walk.page_number,
+                          params=_error_params(exc)))
+
+
+def _expand_resources(resources, depth: int, walk: _Walk) -> None:
+    """Queue one resource dictionary's content-bearing entries.
 
     A page draws through its own resources, through the Form XObjects and
     patterns those name, and through the appearance streams of its annotations
@@ -373,51 +537,51 @@ def _walk_resources(resources, page_number: int, walk: _Walk, depth: int) -> Non
     """
     if resources is None:
         return
-    if depth > _MAX_RESOURCE_DEPTH or len(walk.visited) >= _MAX_RESOURCE_OBJECTS:
-        _note_limit(walk, page_number)
+    if depth > _MAX_RESOURCE_DEPTH:
+        _note_limit(walk)
         return
+    queued = []
     for category in ("/XObject", "/Pattern"):
         try:
             entries = resources.get(category)
             names = list(entries.keys()) if entries is not None else []
         except Exception as exc:
-            walk.out.append(_fact("undetermined", "warning", "engine",
-                                  "page.resourcesUnreadable", page=page_number,
-                                  params=_error_params(exc)))
+            _unreadable(walk, exc)
             continue
         for name in names:
-            try:
-                obj = entries[name]
-                key = _identity(obj)
-                if key in walk.visited:
-                    continue
-                walk.visited.add(key)
-                subtype = str(obj.get("/Subtype", ""))
-            except Exception as exc:
-                walk.out.append(_fact("undetermined", "warning", "engine",
-                                      "page.resourcesUnreadable", page=page_number,
-                                      params=_error_params(exc)))
-                continue
-            if subtype == _IMAGE_SUBTYPE:
-                _check_image(obj, name, page_number, walk)
-                continue
-            # A Form XObject and a tiling pattern are both content streams with
-            # resources of their own; a shading pattern is a dictionary with
-            # neither, and drops out of both branches here.
-            if isinstance(obj, pikepdf.Stream):
-                _check_content(obj, name, page_number, "page.formUnreadable", walk)
-            try:
-                nested = obj.get("/Resources")
-            except Exception as exc:
-                walk.out.append(_fact("undetermined", "warning", "engine",
-                                      "page.resourcesUnreadable", page=page_number,
-                                      params=_error_params(exc)))
-                continue
-            _walk_resources(nested, page_number, walk, depth + 1)
+            queued.append((_ENTRY, entries, name, depth))
+    walk.push(queued)
 
 
-def _annotation_appearances(page, page_number: int,
-                            walk: _Walk) -> list[tuple[str, object]]:
+def _visit_entry(entries, name, depth: int, walk: _Walk) -> None:
+    try:
+        obj = entries[name]
+        key = _identity(obj)
+        if key in walk.visited:
+            return
+        walk.visited.add(key)
+        subtype = str(obj.get("/Subtype", ""))
+    except Exception as exc:
+        _unreadable(walk, exc)
+        return
+    if subtype == _IMAGE_SUBTYPE:
+        _check_image(obj, name, walk)
+        return
+    # A Form XObject and a tiling pattern are both content streams with
+    # resources of their own; a shading pattern is a dictionary with neither,
+    # and drops out of both branches here.
+    if isinstance(obj, pikepdf.Stream):
+        _check_content(obj, name, "page.formUnreadable", walk)
+    try:
+        nested = obj.get("/Resources")
+    except Exception as exc:
+        _unreadable(walk, exc)
+        return
+    if nested is not None:
+        walk.push([(_RESOURCES, nested, None, depth + 1)])
+
+
+def _annotation_appearances(page, walk: _Walk) -> list:
     """The normal appearance streams the page renders its annotations through.
 
     Only ``/AP`` ``/N`` — the appearance a page draws with. Down and rollover
@@ -425,14 +589,14 @@ def _annotation_appearances(page, page_number: int,
     sub-dictionary holds one stream per appearance STATE and each of them is an
     appearance this page can draw, so all of them are returned.
     """
-    found: list[tuple[str, object]] = []
+    found: list = []
+    if page is None:
+        return found
     try:
         annots = page.obj.get("/Annots")
         items = list(annots) if annots is not None else []
     except Exception as exc:
-        walk.out.append(_fact("undetermined", "warning", "engine",
-                              "page.resourcesUnreadable", page=page_number,
-                              params=_error_params(exc)))
+        _unreadable(walk, exc)
         return found
     for annot in items:
         try:
@@ -444,60 +608,80 @@ def _annotation_appearances(page, page_number: int,
                 states = [(str(key).lstrip("/"), normal[key]) for key in normal.keys()]
             else:
                 states = [("", normal)]
-            for state in states:
-                found.append(state)
+            for state_name, stream in states:
+                found.append((_APPEARANCE, stream, state_name, 1))
         except Exception as exc:
-            walk.out.append(_fact("undetermined", "warning", "engine",
-                                  "page.resourcesUnreadable", page=page_number,
-                                  params=_error_params(exc)))
+            _unreadable(walk, exc)
     return found
 
 
-def _image_facts(page, page_number: int, not_decoded: set | None = None,
-                 limited: set | None = None) -> list[dict]:
-    """Everything one page reaches through its resources that will not read.
-
-    ``not_decoded`` collects the images whose pixel codec this process does not
-    apply; the caller reports them once for the document rather than once per
-    image.
-    """
-    out: list[dict] = []
-    walk = _Walk(out, not_decoded if not_decoded is not None else set(),
-                 limited if limited is not None else set())
+def _visit_appearance(appearance, name, depth: int, walk: _Walk) -> None:
+    key = _identity(appearance)
+    if key in walk.visited:
+        return
+    walk.visited.add(key)
+    if isinstance(appearance, pikepdf.Stream):
+        _check_content(appearance, name, "page.appearanceUnreadable", walk)
     try:
-        resources = page.obj.get("/Resources")
+        nested = appearance.get("/Resources")
     except Exception as exc:
-        return [_fact("undetermined", "warning", "engine", "page.resourcesUnreadable",
-                      page=page_number, params=_error_params(exc))]
-    _walk_resources(resources, page_number, walk, 0)
-    for name, appearance in _annotation_appearances(page, page_number, walk):
-        key = _identity(appearance)
-        if key in walk.visited:
-            continue
-        walk.visited.add(key)
-        if isinstance(appearance, pikepdf.Stream):
-            _check_content(appearance, name, page_number,
-                           "page.appearanceUnreadable", walk)
-        try:
-            nested = appearance.get("/Resources")
-        except Exception as exc:
-            out.append(_fact("undetermined", "warning", "engine",
-                             "page.resourcesUnreadable", page=page_number,
-                             params=_error_params(exc)))
-            continue
-        _walk_resources(nested, page_number, walk, 1)
-    return out
+        _unreadable(walk, exc)
+        return
+    if nested is not None:
+        walk.push([(_RESOURCES, nested, None, depth)])
 
 
-def _one_page_facts(pdf, index: int, not_decoded: set, limited: set) -> list[dict]:
-    """Facts for ONE page, by index — the unit both spellings step through."""
-    out: list[dict] = []
+def _advance_page(walk: _Walk) -> bool:
+    """Run one page's queued items until they are done or the STEP is spent.
+
+    True when the walk suspended with work left; False when the page is
+    finished. Raises ``_RunSpent`` when the RUN's budget is gone.
+    """
+    # A step must make progress. Suspending before the first item would let a
+    # slow enough machine — or a step budget smaller than one item costs —
+    # return "suspended" forever, and the run would never finish.
+    moved = False
+    while True:
+        if not walk.frames:
+            if walk.annotations_queued:
+                return False
+            walk.annotations_queued = True
+            walk.push(_annotation_appearances(walk.page, walk))
+            if not walk.frames:
+                return False
+        if moved and walk.budget is not None and walk.budget.step_spent():
+            return True
+        # Checked BEFORE the item, not on entering a branch: a dictionary with
+        # 4 097 direct entries is 4 097 items, and a cap tested once per
+        # recursive call never sees the 4 097th.
+        if len(walk.visited) >= _MAX_RESOURCE_OBJECTS:
+            _note_limit(walk)
+            walk.frames.clear()
+            return False
+        if walk.budget is not None:
+            walk.budget.take_item()
+        kind, obj, name, depth = walk.frames.popleft()
+        moved = True
+        if kind == _RESOURCES:
+            _expand_resources(obj, depth, walk)
+        elif kind == _ENTRY:
+            _visit_entry(obj, name, depth, walk)
+        else:
+            _visit_appearance(obj, name, depth, walk)
+
+
+def _start_page(pdf, index: int, out: list[dict], not_decoded: set, limited: set,
+                budget):
+    """Open one page, report what the page dictionary itself says, and queue
+    its resource traversal. None when the page cannot be reached at all."""
     number = index + 1
+    walk = _Walk(out, number, not_decoded, limited, budget)
     try:
         page = pdf.pages[index]
     except Exception as exc:
-        return [_fact("undetermined", "warning", "engine", "page.unreadable",
-                      page=number, params=_error_params(exc))]
+        out.append(_fact("undetermined", "warning", "engine", "page.unreadable",
+                         page=number, params=_error_params(exc)))
+        return None
     try:
         if page.get("/MediaBox") is None:
             out.append(_fact("skipped", "warning", "engine", "page.mediaBoxMissing",
@@ -505,7 +689,7 @@ def _one_page_facts(pdf, index: int, not_decoded: set, limited: set) -> list[dic
     except Exception as exc:
         out.append(_fact("undetermined", "warning", "engine", "page.unreadable",
                          page=number, params=_error_params(exc)))
-        return out
+        return None
     try:
         # Catches a content stream whose FILTER will not decode — the case
         # where nothing on the page can be drawn. It does not catch a
@@ -516,21 +700,16 @@ def _one_page_facts(pdf, index: int, not_decoded: set, limited: set) -> list[dic
     except Exception as exc:
         out.append(_fact("skipped", "warning", "engine", "page.contentUnreadable",
                          page=number, params=_error_params(exc)))
-    out.extend(_image_facts(page, number, not_decoded, limited))
-    return out
-
-
-def _page_facts(pdf, not_decoded: set, limited: set | None = None) -> list[dict]:
-    out: list[dict] = []
-    marks = limited if limited is not None else set()
     try:
-        count = len(pdf.pages)
+        resources = page.obj.get("/Resources")
     except Exception as exc:
-        return [_fact("undetermined", "warning", "engine", "pages.unreadable",
-                      params=_error_params(exc))]
-    for index in range(count):
-        out.extend(_one_page_facts(pdf, index, not_decoded, marks))
-    return out
+        out.append(_fact("undetermined", "warning", "engine",
+                         "page.resourcesUnreadable", page=number,
+                         params=_error_params(exc)))
+        resources = None
+    walk.page = page
+    walk.push([(_RESOURCES, resources, None, 0)])
+    return walk
 
 
 def _document_facts(pdf) -> list[dict]:
@@ -551,24 +730,21 @@ def _document_facts(pdf) -> list[dict]:
         return [_fact("undetermined", "warning", "engine",
                       "document.acroFormUnreadable",
                       params=_error_params(TypeError(type(acroform).__name__)))]
-    state, _entry = xfa.xfa_entry_checked(pdf)
-    if state == xfa.MALFORMED:
-        # The key IS there and does not hold what Annex K describes. Absent and
-        # malformed are different answers and only one of them is "no XFA".
-        return [_fact("undetermined", "warning", "engine",
-                      "document.xfaUnreadable",
-                      params=_error_params(TypeError(xfa.MALFORMED)))]
-    if state == xfa.ABSENT:
-        return out
     try:
-        # The same classification the XFA editing path uses, so the ledger
-        # cannot call skipped a form the product fills. Only a form whose
-        # fields exist solely in the XML is outside what is rendered.
-        form_class = xfa.classify(pdf)
+        # ONE strict reading of the declaration, typed against the clauses that
+        # give each of its values a type. Absent, malformed and dynamic are
+        # three different answers and only one of them is "no form".
+        found = xfa.inspect(pdf)
     except Exception as exc:
         return [_fact("undetermined", "warning", "engine",
                       "document.xfaUnreadable", params=_error_params(exc))]
-    if form_class == xfa.DYNAMIC:
+    if found.form_class == xfa.UNDETERMINED:
+        # `shape` is a constant of `xfa`, never text from the document, so the
+        # digest separates two malformations without carrying either.
+        return [_fact("undetermined", "warning", "engine",
+                      "document.xfaUnreadable",
+                      params=_error_params(TypeError(found.shape)))]
+    if found.form_class == xfa.DYNAMIC:
         out.append(_fact("skipped", "info", "engine", "document.xfa"))
     return out
 
@@ -581,7 +757,9 @@ def _status(facts: list[dict]) -> str:
 class _Run:
     """One stepped traversal: the open document and how far it has been read."""
 
-    __slots__ = ("pdf", "pages", "cursor", "not_decoded", "limited", "fonts_done")
+    __slots__ = ("pdf", "pages", "cursor", "not_decoded", "limited", "fonts_done",
+                 "document_done", "walk", "budget", "font_objects", "font_notes",
+                 "font_resources")
 
     def __init__(self, pdf, pages: int) -> None:
         self.pdf = pdf
@@ -590,6 +768,12 @@ class _Run:
         self.not_decoded: set = set()
         self.limited: set = set()
         self.fonts_done = False
+        self.document_done = False
+        self.walk = None
+        self.budget = _Budget()
+        self.font_objects: set = set()
+        self.font_notes: set = set()
+        self.font_resources: set = set()
 
 
 _RUNS: "OrderedDict[str, _Run]" = OrderedDict()
@@ -623,6 +807,10 @@ def document_health_begin(file: str) -> dict:
     ``done`` when there is nothing to step: an unopenable document is already a
     complete answer.
 
+    The open is ALL this does. Reading what the document declares — the form,
+    its packets — is a traversal like any other and is charged to the first
+    step, so no one request carries both an open and an inspection.
+
     Args:
         file: Input PDF path.
     """
@@ -653,7 +841,6 @@ def document_health_begin(file: str) -> dict:
         return head
 
     facts = _qpdf_facts(pdf)
-    facts.extend(_document_facts(pdf))
     # The open above succeeded with NO password, so this is not the
     # user-password case above (that one never reaches here — pikepdf raises
     # ``PasswordError`` before a ``Pdf`` object exists). A document can still
@@ -690,9 +877,11 @@ def document_health_begin(file: str) -> dict:
 def document_health_step(token: str) -> dict:
     """Inspect the next bounded batch of one run.
 
-    A step reads at most ``_STEP_PAGES`` pages, or performs the single font
-    walk once the pages are done. ``done`` true means the run finished and has
-    already been closed; no ``end`` is needed after it.
+    A step reads at most ``_STEP_PAGES`` pages and stops sooner than that at
+    its object, decoded-byte or time budget — mid-page if need be, because the
+    traversal's position is data the run holds rather than an interpreter
+    stack. ``done`` true means the run finished and has already been closed;
+    no ``end`` is needed after it.
 
     Args:
         token: Run token from ``document_health_begin``.
@@ -706,16 +895,39 @@ def document_health_step(token: str) -> dict:
                                 "health.runLost")]}
     facts: list[dict] = []
     done = False
+    run.budget.start_step()
     try:
+        if not run.document_done:
+            run.document_done = True
+            facts.extend(_document_facts(run.pdf))
         if run.cursor < run.pages:
-            stop = min(run.cursor + _STEP_PAGES, run.pages)
-            for index in range(run.cursor, stop):
-                facts.extend(_one_page_facts(run.pdf, index, run.not_decoded,
-                                             run.limited))
-            run.cursor = stop
+            read = 0
+            while run.cursor < run.pages and read < _STEP_PAGES:
+                if run.walk is None:
+                    run.walk = _start_page(run.pdf, run.cursor, facts,
+                                           run.not_decoded, run.limited, run.budget)
+                    if run.walk is None:
+                        run.cursor += 1
+                        read += 1
+                        continue
+                else:
+                    # A page resumed from an earlier step reports into THIS
+                    # step's facts.
+                    run.walk.out = facts
+                if _advance_page(run.walk):
+                    break
+                facts.extend(_font_facts(run.pdf, run, pages=[run.cursor],
+                                         include_dr=False))
+                run.walk = None
+                run.cursor += 1
+                read += 1
+                if run.budget.step_spent():
+                    break
         elif not run.fonts_done:
             run.fonts_done = True
-            facts.extend(_font_facts(run.pdf))
+            # The document-level leg of the font walk: ``/AcroForm /DR``, which
+            # belongs to no page and is therefore run once, here.
+            facts.extend(_font_facts(run.pdf, run, pages=[], include_dr=True))
             if run.not_decoded:
                 # Stated once for the document: these images' bytes are present
                 # and their pixels were never decoded here. Reported so the
@@ -728,10 +940,15 @@ def document_health_step(token: str) -> dict:
             done = True
         else:
             done = True
+    except _RunSpent:
+        facts.append(_budget_fact())
+        done = True
     except Exception as exc:
         facts.append(_fact("undetermined", "warning", "engine", "pages.unreadable",
                            params=_error_params(exc)))
         done = True
+    finally:
+        run.budget.end_step()
     if done:
         _drop(token)
     return {"token": token, "done": done, "status": _status(facts), "facts": facts}

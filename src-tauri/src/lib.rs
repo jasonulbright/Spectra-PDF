@@ -8,7 +8,8 @@ mod send_to;
 mod snapshot;
 mod watchers;
 mod web_capture;
-mod engine;
+pub mod engine;
+pub mod health_engine;
 pub mod net;
 pub mod gs;
 mod printers;
@@ -99,6 +100,8 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .manage(engine::EngineState::new())
         .manage(engine::EngineRouter::new())
+        .manage(health_engine::HealthEngineState::new())
+        .manage(health_engine::HealthRouter::new())
         .manage(app_windows::BackdropState::new())
         .manage(app_windows::ShowGate::new())
         .manage(app_windows::ComposeGate::new())
@@ -237,6 +240,7 @@ pub fn run() {
             scheduler::set_scheduled_run_enabled,
             commands::start_engine,
             commands::send_to_engine,
+            commands::send_to_health_engine,
             commands::check_auto_update_disabled,
             commands::check_field_scripts_disabled,
             commands::get_startup_enabled,
@@ -442,6 +446,7 @@ pub fn run() {
                 tauri::WindowEvent::Destroyed => {
                     session::on_window_destroyed(app, window.label());
                     tabdrag::on_window_destroyed(app, window.label());
+                    health_engine::on_window_destroyed(app, window.label());
                     app_windows::on_window_destroyed(app, window.label());
                 }
                 _ => {}
@@ -457,6 +462,15 @@ pub fn run() {
                     // Keep the app running when the window is hidden to tray
                     api.prevent_exit();
                 }
+            }
+            if let RunEvent::Exit = &event {
+                // The health worker holds nothing the product needs — every
+                // run is a read of a file on disk — so it is killed outright
+                // rather than asked to finish.
+                let app = _app.clone();
+                tauri::async_runtime::block_on(async move {
+                    health_engine::kill(&app).await;
+                });
             }
         });
 }

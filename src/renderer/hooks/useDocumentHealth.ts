@@ -149,7 +149,21 @@ export function useDocumentHealth(
           if (!proxy) return; // superseded — the newer generation's run covers it
           const facts = await collectPdfjsFacts(proxy);
           if (!isCurrent()) return;
-          setLedger((prev) => recordCollection(prev, path, buffer, 'pdfjs', 'collected', facts));
+          // A sweep that ended on `pdfjs.timeout` stopped at the page that
+          // overran and read no page after it, so the pages it never reached
+          // are unexamined rather than clean. Recording it as `collected`
+          // would present that silence as a verdict.
+          const finished = !facts.some((f) => f.code === 'pdfjs.timeout');
+          setLedger((prev) =>
+            recordCollection(
+              prev,
+              path,
+              buffer,
+              'pdfjs',
+              finished ? 'collected' : 'failed',
+              facts,
+            ),
+          );
         } catch {
           if (!isCurrent()) return;
           // pdf.js could not read these bytes at all. That is a verdict, and

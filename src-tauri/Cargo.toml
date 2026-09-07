@@ -102,3 +102,8 @@ url = "2"
 # `#[tokio::test]` for the network client's tests, which drive an in-process
 # loopback listener. No test reaches a real host.
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+# Tauri's mock runtime, for the live health-worker test: the worker is spawned,
+# routed and killed through an `AppHandle`, so proving the deadline kill needs
+# an app. A dev-dependency feature, which resolver 2 keeps out of the normal
+# build — the mock runtime is not compiled into a shipped binary.
+tauri = { version = "2", features = ["test"] }

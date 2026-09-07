@@ -27,8 +27,15 @@ export const engine = {
   /** Start the Python engine sidecar process. */
   start: () => invoke('start_engine'),
 
-  /** Send a JSON-RPC request to the engine. */
+  /** Send a JSON-RPC request to the interactive engine. */
   request: (req: object) => invoke('send_to_engine', { request: req }),
+
+  /** Send a JSON-RPC request to the HEALTH worker — a second sidecar with a
+   * wall-clock deadline and a kill, so an inspection of a hostile document
+   * cannot sit in front of the user's work. Same protocol and same id routing;
+   * its responses arrive on the same `engine:response` event, addressed to the
+   * window that asked. */
+  healthRequest: (req: object) => invoke('send_to_health_engine', { request: req }),
 
   /** Listen for JSON-RPC responses from the engine. Rust addresses each one
    * to the window that sent the request, so a response can never satisfy

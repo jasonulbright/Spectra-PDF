@@ -821,3 +821,428 @@ def test_a_zero_page_document_collects_with_zero_page_facts_and_no_error(tmp_dir
     report = document_health(path)
     assert report["status"] == "collected"
     assert not any(f["page"] is not None for f in report["facts"])
+
+
+# ── The strict XFA reading: every value typed, none coerced ─────────────
+
+
+def _typed_xfa_pdf(path, *, xfa=None, fields=None, needs_rendering=None):
+    """One page and an /AcroForm whose three classification values a caller
+    states exactly, including the wrong-typed spellings."""
+    pdf = pikepdf.Pdf.new()
+    pdf.add_blank_page(page_size=(200, 200))
+    acro = pikepdf.Dictionary()
+    if fields is not None:
+        acro["/Fields"] = fields(pdf)
+    if xfa is not None:
+        acro["/XFA"] = xfa(pdf)
+    pdf.Root["/AcroForm"] = pdf.make_indirect(acro)
+    if needs_rendering is not None:
+        pdf.Root["/NeedsRendering"] = needs_rendering
+    pdf.save(path)
+    return path
+
+
+def _one_field(pdf):
+    return pikepdf.Array([pdf.make_indirect(pikepdf.Dictionary(T=pikepdf.String("f")))])
+
+
+def _packets(pdf, name):
+    return pikepdf.Array([name, pdf.make_stream(b"<template/>")])
+
+
+def test_an_xfa_packet_name_slot_that_is_not_a_string_is_undetermined(tmp_dir):
+    """ISO 32000-2 Annex K.2: a packet is a pair of a STRING and a stream. A
+    number in the name slot renders through `str()` as readily as a name, so a
+    reading that coerces it reports a packet called "42" and calls the array
+    well formed."""
+    path = _typed_xfa_pdf(
+        os.path.join(tmp_dir, "xfa-name-int.pdf"),
+        xfa=lambda pdf: _packets(pdf, pikepdf.Integer(42)),
+        fields=_one_field,
+    )
+    report = document_health(path)
+    assert _codes(report, "document.xfaUnreadable")
+    assert _codes(report, "document.xfa") == []
+    assert report["status"] == "undetermined"
+
+
+def test_a_wrong_typed_fields_is_undetermined_never_a_missing_field_shadow(tmp_dir):
+    """ISO 32000-2 Table 224 gives `Fields` as an array. Read leniently, a
+    number answers "no field shadow", which classifies the form DYNAMIC — a
+    verdict about the document reached from a fact about its damage."""
+    path = _typed_xfa_pdf(
+        os.path.join(tmp_dir, "xfa-fields-int.pdf"),
+        xfa=lambda pdf: _packets(pdf, pikepdf.String("template")),
+        fields=lambda pdf: pikepdf.Integer(42),
+    )
+    report = document_health(path)
+    assert _codes(report, "document.xfaUnreadable")
+    assert _codes(report, "document.xfa") == []
+    assert report["status"] == "undetermined"
+
+
+def test_a_wrong_typed_needs_rendering_is_undetermined_never_coerced(tmp_dir):
+    """ISO 32000-2 Table 29 gives `NeedsRendering` as a boolean. `bool()` of
+    the string `(false)` is TRUE, so coercion classifies this document dynamic
+    on the strength of the flag being mistyped."""
+    path = _typed_xfa_pdf(
+        os.path.join(tmp_dir, "xfa-rendering-string.pdf"),
+        xfa=lambda pdf: _packets(pdf, pikepdf.String("template")),
+        fields=_one_field,
+        needs_rendering=pikepdf.String("false"),
+    )
+    report = document_health(path)
+    assert _codes(report, "document.xfaUnreadable")
+    assert _codes(report, "document.xfa") == []
+    assert report["status"] == "undetermined"
+
+
+def test_a_well_formed_static_form_is_still_not_reported(tmp_dir):
+    """The strict reading must not turn every XFA document into a finding:
+    string name, readable stream, array /Fields, absent /NeedsRendering is the
+    shape the clauses describe, and it classifies STATIC."""
+    path = _typed_xfa_pdf(
+        os.path.join(tmp_dir, "xfa-static.pdf"),
+        xfa=lambda pdf: _packets(pdf, pikepdf.String("template")),
+        fields=_one_field,
+    )
+    report = document_health(path)
+    assert _codes(report, "document.xfaUnreadable") == []
+    assert _codes(report, "document.xfa") == []
+    assert report["status"] == "collected"
+
+
+def test_a_well_formed_dynamic_form_is_still_reported_as_skipped(tmp_dir):
+    path = _typed_xfa_pdf(
+        os.path.join(tmp_dir, "xfa-dynamic.pdf"),
+        xfa=lambda pdf: _packets(pdf, pikepdf.String("template")),
+        fields=_one_field,
+        needs_rendering=True,
+    )
+    report = document_health(path)
+    assert _codes(report, "document.xfa")
+    assert _codes(report, "document.xfaUnreadable") == []
+    assert report["status"] == "collected"
+
+
+def test_each_malformed_shape_is_told_apart_from_the_others(tmp_dir):
+    """The shapes are named constants of `xfa`, so their digests differ. Two
+    different malformations reported under one marker cannot be told apart by
+    a reader that only sees facts."""
+    paths = {
+        "name": _typed_xfa_pdf(
+            os.path.join(tmp_dir, "shape-name.pdf"),
+            xfa=lambda pdf: _packets(pdf, pikepdf.Integer(42)),
+            fields=_one_field,
+        ),
+        "fields": _typed_xfa_pdf(
+            os.path.join(tmp_dir, "shape-fields.pdf"),
+            xfa=lambda pdf: _packets(pdf, pikepdf.String("template")),
+            fields=lambda pdf: pikepdf.Integer(42),
+        ),
+        "rendering": _typed_xfa_pdf(
+            os.path.join(tmp_dir, "shape-rendering.pdf"),
+            xfa=lambda pdf: _packets(pdf, pikepdf.String("template")),
+            fields=_one_field,
+            needs_rendering=pikepdf.String("false"),
+        ),
+    }
+    markers = set()
+    for path in paths.values():
+        facts = _codes(document_health(path), "document.xfaUnreadable")
+        assert len(facts) == 1
+        markers.add(facts[0]["params"]["id"])
+    assert len(markers) == 3
+
+
+# ── Budgets: a bound reached is a finding, never a clean answer ─────────
+
+
+def _wide_image_page(path, count):
+    """One page whose resource dictionary names `count` images DIRECTLY. The
+    object cap is per page, so a cap tested only on entering a recursive call
+    never sees past the first entry of this one dictionary."""
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    entries = pikepdf.Dictionary()
+    for i in range(count):
+        image = pdf.make_stream(b"x")
+        image["/Type"] = pikepdf.Name.XObject
+        image["/Subtype"] = pikepdf.Name.Image
+        image["/Width"] = 1
+        image["/Height"] = 1
+        image["/ColorSpace"] = pikepdf.Name.DeviceGray
+        image["/BitsPerComponent"] = 8
+        entries[f"/I{i}"] = pdf.make_indirect(image)
+    page.obj["/Resources"] = pikepdf.Dictionary(XObject=entries)
+    pdf.save(path)
+    return path
+
+
+def test_one_dictionary_wider_than_the_object_cap_reports_the_limit(tmp_dir):
+    """The cap is checked BEFORE every item. Checked only on entering
+    `_walk_resources`, a single dictionary of 4 097 entries passes it once and
+    then walks all of them, publishing a partial traversal as a complete one."""
+    from engine.document_health import _MAX_RESOURCE_OBJECTS
+
+    path = _wide_image_page(
+        os.path.join(tmp_dir, "wide.pdf"), _MAX_RESOURCE_OBJECTS + 1
+    )
+    report = document_health(path)
+    limits = _codes(report, "page.traversalLimit")
+    assert len(limits) == 1, [f["code"] for f in report["facts"]]
+    assert limits[0]["kind"] == "undetermined"
+    assert limits[0]["page"] == 1
+    assert report["status"] == "undetermined"
+
+
+def test_a_page_just_under_the_object_cap_reports_no_limit(tmp_dir):
+    from engine.document_health import _MAX_RESOURCE_OBJECTS
+
+    path = _wide_image_page(
+        os.path.join(tmp_dir, "narrow.pdf"), _MAX_RESOURCE_OBJECTS - 8
+    )
+    report = document_health(path)
+    assert _codes(report, "page.traversalLimit") == []
+    assert report["status"] == "collected"
+
+
+def test_the_run_decoded_byte_budget_is_a_finding(tmp_dir, monkeypatch):
+    """A document whose streams decode to more than the run will read is
+    UNDETERMINED. Reading what fits and reporting `collected` is a clean answer
+    covering objects nothing read."""
+    from engine import document_health as dh
+
+    path = _wide_image_page(os.path.join(tmp_dir, "bytes.pdf"), 64)
+    monkeypatch.setattr(dh, "_RUN_DECODED_BYTES", 4)
+    report = dh.document_health(path)
+    assert _codes(report, "document.inspectionBudget")
+    assert report["status"] == "undetermined"
+
+
+def test_the_run_time_budget_is_a_finding(tmp_dir, monkeypatch):
+    """Inspection SECONDS, driven off the module's own clock so the bound is
+    stated rather than raced for."""
+    from engine import document_health as dh
+
+    path = _wide_image_page(os.path.join(tmp_dir, "slow.pdf"), 64)
+    ticks = iter(range(0, 100000))
+    monkeypatch.setattr(dh, "_now", lambda: float(next(ticks)))
+    monkeypatch.setattr(dh, "_RUN_SECONDS", 2.0)
+    report = dh.document_health(path)
+    assert _codes(report, "document.inspectionBudget")
+    assert report["status"] == "undetermined"
+
+
+def test_a_step_object_budget_suspends_the_page_rather_than_reporting_it(tmp_dir):
+    """The STEP bound is a yield, not a verdict: the page resumes in the next
+    step and the document still reports what a single unbounded pass reports.
+    A step bound that leaked into the facts would make the ledger's answer
+    depend on how the request happened to be sliced."""
+    from engine import document_health as dh
+
+    path = _wide_image_page(os.path.join(tmp_dir, "sliced.pdf"), 200)
+    whole = dh.document_health(path)
+    assert whole["status"] == "collected"
+
+    original = dh._STEP_OBJECTS
+    try:
+        dh._STEP_OBJECTS = 4
+        head = dh.document_health_begin(path)
+        facts = list(head["facts"])
+        steps = 0
+        while not head["done"]:
+            chunk = dh.document_health_step(head["token"])
+            facts.extend(chunk["facts"])
+            head["done"] = chunk["done"]
+            steps += 1
+            assert steps < 500
+        # Many more steps than pages, and the SAME answer.
+        assert steps > 4
+        assert facts == whole["facts"]
+    finally:
+        dh._STEP_OBJECTS = original
+        dh.document_health_end(head["token"])
+
+
+def test_a_suspended_page_is_resumed_where_it_stopped_not_restarted(tmp_dir):
+    """A damaged object on a wide page is reported ONCE. A page restarted from
+    the top on every step would report it once per step."""
+    from engine import document_health as dh
+
+    path = os.path.join(tmp_dir, "resume.pdf")
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    entries = pikepdf.Dictionary()
+    for i in range(40):
+        image = pdf.make_stream(b"x" * 8)
+        image["/Type"] = pikepdf.Name.XObject
+        image["/Subtype"] = pikepdf.Name.Image
+        image["/Width"] = 1
+        image["/Height"] = 1
+        image["/ColorSpace"] = pikepdf.Name.DeviceGray
+        image["/BitsPerComponent"] = 8
+        if i == 30:
+            image["/Filter"] = pikepdf.Name("/NoSuchDecode")
+        entries[f"/I{i}"] = pdf.make_indirect(image)
+    page.obj["/Resources"] = pikepdf.Dictionary(XObject=entries)
+    pdf.save(path)
+
+    original = dh._STEP_OBJECTS
+    try:
+        dh._STEP_OBJECTS = 3
+        head = dh.document_health_begin(path)
+        facts = list(head["facts"])
+        while not head["done"]:
+            chunk = dh.document_health_step(head["token"])
+            facts.extend(chunk["facts"])
+            head["done"] = chunk["done"]
+    finally:
+        dh._STEP_OBJECTS = original
+        dh.document_health_end(head["token"])
+    broken = [f for f in facts if f["code"] == "page.imageUnreadable"]
+    assert len(broken) == 1, [f["code"] for f in facts]
+
+
+def test_the_begin_request_performs_no_inspection(tmp_dir):
+    """`begin` opens the document and says how many pages it has. Reading what
+    the document DECLARES is a traversal like any other and belongs to a step,
+    so one request never carries both an open and an inspection."""
+    from engine import document_health as dh
+
+    path = _typed_xfa_pdf(
+        os.path.join(tmp_dir, "begin-xfa.pdf"),
+        xfa=lambda pdf: _packets(pdf, pikepdf.String("template")),
+        fields=lambda pdf: pikepdf.Integer(42),
+    )
+    head = dh.document_health_begin(path)
+    try:
+        assert [f["code"] for f in head["facts"]] == []
+        first = dh.document_health_step(head["token"])
+        assert [f["code"] for f in first["facts"]][0] == "document.xfaUnreadable"
+    finally:
+        dh.document_health_end(head["token"])
+
+
+# ── No livelock: a step whose budget is already spent still moves ───────
+
+
+def test_a_step_terminates_even_when_its_time_budget_is_exhausted_at_entry(
+    tmp_dir, monkeypatch
+):
+    """``step_spent()`` is checked before a page is even started, so a clock
+    that reports the step budget as already blown on every single call must
+    still let the run finish in a bounded number of steps. A step that could
+    make zero progress and never trip `done` would spin forever."""
+    from engine import document_health as dh
+
+    path = _wide_image_page(os.path.join(tmp_dir, "livelock.pdf"), 3)
+
+    state = {"t": 0.0}
+
+    def jumpy_now():
+        # Every call jumps the clock far past `_STEP_SECONDS`, so the step
+        # budget reads as spent from the very first check inside the step.
+        state["t"] += 10.0
+        return state["t"]
+
+    monkeypatch.setattr(dh, "_now", jumpy_now)
+    head = dh.document_health_begin(path)
+    steps = 0
+    done = head["done"]
+    try:
+        while not done and steps < 10000:
+            chunk = dh.document_health_step(head["token"])
+            done = chunk["done"]
+            steps += 1
+    finally:
+        dh.document_health_end(head["token"])
+    assert done is True
+    assert steps < 10000
+
+
+# ── The renderer step-cap formula stays tied to these constants ─────────
+
+
+def test_the_renderer_step_cap_covers_the_worst_case_page(tmp_dir):
+    """``doc-health-engine.ts`` bounds the idle lane's step count per page at
+    a constant it does not derive from these values, so the two can drift
+    silently. The worst case for one page is the object cap spent
+    `_STEP_OBJECTS` at a time, plus the document-facts step and the
+    document-level font (`/DR`) step this module always spends outside the
+    per-page loop."""
+    import math
+    import re
+
+    from engine import document_health as dh
+
+    ts_path = os.path.join(
+        os.path.dirname(__file__), "..", "src", "renderer", "lib", "doc-health-engine.ts"
+    )
+    with open(ts_path, encoding="utf-8") as f:
+        ts_source = f.read()
+    match = re.search(r"STEP_CAP_PER_PAGE\s*=\s*(\d+)", ts_source)
+    assert match, "STEP_CAP_PER_PAGE constant not found in doc-health-engine.ts"
+    step_cap_per_page = int(match.group(1))
+
+    per_page_steps = math.ceil(dh._MAX_RESOURCE_OBJECTS / dh._STEP_OBJECTS)
+    total_steps = per_page_steps + 2  # document-facts step + font (/DR) step
+    assert total_steps <= step_cap_per_page
+
+
+# ── Registry hygiene: a run leaves no trace once it is finished ─────────
+
+
+def test_the_registry_is_empty_after_end(tmp_dir):
+    from engine import document_health as dh
+
+    path = _wide_image_page(os.path.join(tmp_dir, "registry-end.pdf"), 1)
+    head = dh.document_health_begin(path)
+    assert head["token"] in dh._RUNS
+    dh.document_health_end(head["token"])
+    assert len(dh._RUNS) == 0
+
+
+def test_lru_eviction_leaves_exactly_max_runs_registered(tmp_dir):
+    from engine import document_health as dh
+
+    tokens = []
+    paths = []
+    try:
+        for i in range(dh._MAX_RUNS + 1):
+            path = _wide_image_page(os.path.join(tmp_dir, f"lru-{i}.pdf"), 1)
+            paths.append(path)
+            head = dh.document_health_begin(path)
+            tokens.append(head["token"])
+        assert len(dh._RUNS) == dh._MAX_RUNS
+        assert tokens[0] not in dh._RUNS
+        assert tokens[-1] in dh._RUNS
+    finally:
+        for token in list(dh._RUNS):
+            dh.document_health_end(token)
+
+
+def test_an_exception_inside_a_step_ends_the_run_and_closes_the_handle(
+    tmp_dir, monkeypatch
+):
+    """A step that raises must not leave the run registered nor its pikepdf
+    handle open — an orphaned handle keeps the file locked (undeletable on
+    Windows) long after the caller has no token left to end it with."""
+    from engine import document_health as dh
+
+    path = _wide_image_page(os.path.join(tmp_dir, "exc.pdf"), 1)
+    head = dh.document_health_begin(path)
+    token = head["token"]
+
+    def boom(*_a, **_k):
+        raise RuntimeError("forced")
+
+    monkeypatch.setattr(dh, "_document_facts", boom)
+    chunk = dh.document_health_step(token)
+
+    assert chunk["done"] is True
+    assert token not in dh._RUNS
+    # The pikepdf handle behind the evicted/ended run must be closed, or the
+    # file stays locked and this delete raises on Windows.
+    os.remove(path)

@@ -45,6 +45,14 @@ const CODE_KEYS: Readonly<Record<string, UiKey>> = {
   // not inspected, which is the same sentence as any other traversal that
   // stopped.
   'health.runLost': 'panel.health.code.partUnreadable',
+  // The inspection cost more than the engine spends on a passive observation
+  // and stopped where it stopped. Same sentence as any other traversal that
+  // stopped part-way, because that is exactly what it is.
+  'document.inspectionBudget': 'panel.health.code.partUnreadable',
+  // A worker await that never settled. Not a refusal and not a clean result:
+  // the sweep stopped where it stopped, and the pages after it were never
+  // asked about.
+  'pdfjs.timeout': 'panel.health.code.pdfjsTimeout',
 };
 
 export function healthMessageKey(code: string): UiKey {

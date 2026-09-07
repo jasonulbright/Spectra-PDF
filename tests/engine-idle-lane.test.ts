@@ -1,9 +1,14 @@
-// The engine's idle lane: WHO GOES FIRST.
+// The background lane: WHAT IT STILL PROMISES.
 //
-// The invariant under test is that a user-requested operation never waits
-// behind a background sweep. The fake engine below is the real one's only
-// relevant property — one serial FIFO — so "who goes first" is exactly the
-// order in which requests are handed to it.
+// It used to hold background work back until the interactive engine was idle,
+// because both shared one serial process. They no longer do: health inspection
+// runs in its own killable worker sidecar, so nothing a background run submits
+// can be ahead of a user's operation in the interactive FIFO.
+//
+// What is left, and what this file gates, is smaller and still load-bearing:
+// one run at a time, and supersession asked at EVERY step rather than once per
+// run. The fake below is the worker's only relevant property — one serial
+// process — so "who goes first" is exactly the order requests are handed to it.
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   beginInteractive,
@@ -39,200 +44,116 @@ function fakeEngine() {
 /** Lets every already-resolved promise chain settle. */
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-describe('engine idle lane', () => {
+describe('the background lane', () => {
   beforeEach(() => resetEngineIdleLane());
 
-  it('holds background work back while an interactive request is outstanding', async () => {
+  it('runs one background run at a time', async () => {
+    // Several documents opening at once would otherwise interleave their steps
+    // in the worker, and each would finish later than the last.
+    const engine = fakeEngine();
+    const first = submitIdle(() => engine.send('sweep-1'), () => true);
+    const second = submitIdle(() => engine.send('sweep-2'), () => true);
+    await settle();
+    expect(engine.dispatched).toEqual(['sweep-1']);
+
+    engine.finish('sweep-1');
+    expect(await first).toBe('sweep-1');
+    await settle();
+    expect(engine.dispatched).toEqual(['sweep-1', 'sweep-2']);
+    engine.finish('sweep-2');
+    expect(await second).toBe('sweep-2');
+  });
+
+  it('does NOT wait for the interactive engine to be idle', async () => {
+    // The invariant this file used to gate, now deliberately gone: health has
+    // its own process, so delaying a background step while a user operation is
+    // outstanding would postpone work that costs the user nothing.
     const engine = fakeEngine();
     const user = trackInteractive(() => engine.send('user'));
     const sweep = submitIdle(() => engine.send('sweep'), () => true);
-    await settle();
-    expect(engine.dispatched).toEqual(['user']);
-
-    engine.finish('user');
-    await user;
     await settle();
     expect(engine.dispatched).toEqual(['user', 'sweep']);
+
+    engine.finish('user');
     engine.finish('sweep');
+    await user;
     expect(await sweep).toBe('sweep');
-    expect(interactiveInFlight()).toBe(0);
   });
 
-  it('lets an interactive request jump ahead of a queued sweep', async () => {
+  it('never submits a run superseded while it waited in the queue', async () => {
     const engine = fakeEngine();
-    const first = trackInteractive(() => engine.send('user-1'));
-    const sweep = submitIdle(() => engine.send('sweep'), () => true);
+    let wanted = true;
+    const blocking = submitIdle(() => engine.send('sweep-1'), () => true);
+    const queued = submitIdle(() => engine.send('sweep-2'), () => wanted);
     await settle();
-    // The second user operation arrives while the sweep is still waiting.
-    const second = trackInteractive(() => engine.send('user-2'));
-    engine.finish('user-1');
-    await first;
-    await settle();
-    expect(engine.dispatched).toEqual(['user-1', 'user-2']);
 
-    engine.finish('user-2');
-    await second;
+    wanted = false;
+    engine.finish('sweep-1');
+    await blocking;
     await settle();
-    expect(engine.dispatched).toEqual(['user-1', 'user-2', 'sweep']);
-    engine.finish('sweep');
-    await sweep;
+    expect(engine.dispatched).toEqual(['sweep-1']);
+    expect(await queued).toBeNull();
   });
 
-  it('runs one sweep at a time, so several opens cannot stack up in the FIFO', async () => {
+  it('abandons a run at the next step boundary once it is superseded', async () => {
+    // Supersession is asked at EVERY step, not once per run: the document can
+    // change, or a re-check can supersede this run, between two steps of it.
     const engine = fakeEngine();
-    const a = submitIdle(() => engine.send('sweep-a'), () => true);
-    const b = submitIdle(() => engine.send('sweep-b'), () => true);
-    await settle();
-    expect(engine.dispatched).toEqual(['sweep-a']);
-
-    engine.finish('sweep-a');
-    await a;
-    await settle();
-    expect(engine.dispatched).toEqual(['sweep-a', 'sweep-b']);
-    engine.finish('sweep-b');
-    await b;
-  });
-
-  it('never submits a run superseded while it waited', async () => {
-    const engine = fakeEngine();
-    const user = trackInteractive(() => engine.send('user'));
-    let current = true;
-    const sweep = submitIdle(() => engine.send('sweep'), () => current);
-    await settle();
-    current = false; // the document changed, or a re-check superseded this run
-    engine.finish('user');
-    await user;
-    expect(await sweep).toBeNull();
-    expect(engine.dispatched).toEqual(['user']);
-  });
-
-  it('a failing sweep does not wedge the lane', async () => {
-    const engine = fakeEngine();
-    const bad = submitIdle(() => engine.fail('sweep-bad'), () => true);
-    await expect(bad).rejects.toThrow('sweep-bad');
-    const good = submitIdle(() => engine.send('sweep-good'), () => true);
-    await settle();
-    expect(engine.dispatched).toEqual(['sweep-bad', 'sweep-good']);
-    engine.finish('sweep-good');
-    await good;
-  });
-
-  it('counts an interactive request only while it is outstanding', async () => {
-    const engine = fakeEngine();
-    const user = trackInteractive(() => engine.send('user'));
-    expect(interactiveInFlight()).toBe(1);
-    engine.finish('user');
-    await user;
-    expect(interactiveInFlight()).toBe(0);
-  });
-});
-
-
-// The bound the lane actually promises: ONE STEP.
-//
-// The earlier shape checked idleness once, before handing over a whole sweep,
-// and a sweep is one unbounded traversal of one document. A user request
-// arriving a moment later waited for all of it. What is pinned below is the
-// replacement promise, stated as an order of handover: the user request goes
-// over ahead of the sweep's NEXT step, and the only thing it waits for is the
-// step already in flight.
-describe('a user request arriving mid-sweep', () => {
-  beforeEach(() => resetEngineIdleLane());
-
-  /** A sweep of `count` bounded steps, each submitted through the gate. */
-  function steppedSweep(engine: ReturnType<typeof fakeEngine>, count: number) {
-    return submitIdle(async (gate) => {
-      for (let i = 0; i < count; i += 1) await gate(() => engine.send(`step-${i}`));
-      return 'swept';
-    }, () => true);
-  }
-
-  it('reaches the engine before any further health work', async () => {
-    const engine = fakeEngine();
-    const sweep = steppedSweep(engine, 3);
-    await settle();
-    expect(engine.dispatched).toEqual(['step-0']);
-
-    // The user acts while the first step is still in the engine.
-    const user = trackInteractive(() => engine.send('user'));
-    expect(engine.dispatched).toEqual(['step-0', 'user']);
-
-    engine.finish('step-0');
-    await settle();
-    // The step that was in flight finished; the next one did NOT go over,
-    // because the user request is still outstanding.
-    expect(engine.dispatched).toEqual(['step-0', 'user']);
-
-    engine.finish('user');
-    await user;
-    await settle();
-    expect(engine.dispatched).toEqual(['step-0', 'user', 'step-1']);
-    engine.finish('step-1');
-    await settle();
-    engine.finish('step-2');
-    expect(await sweep).toBe('swept');
-  });
-
-  it('waits for at most the one step already in flight', async () => {
-    const engine = fakeEngine();
-    const sweep = steppedSweep(engine, 8);
-    await settle();
-    const user = trackInteractive(() => engine.send('user'));
-    engine.finish('step-0');
-    await settle();
-    // Not step-1..step-7: the sweep is not queued ahead of the user at all.
-    expect(engine.dispatched).toEqual(['step-0', 'user']);
-    engine.finish('user');
-    await user;
-    await settle();
-    expect(engine.dispatched).toEqual(['step-0', 'user', 'step-1']);
-    engine.finish('step-1');
-    await settle();
-    for (let i = 2; i < 8; i += 1) {
-      engine.finish(`step-${i}`);
-      await settle();
-    }
-    expect(await sweep).toBe('swept');
-  });
-
-  it('abandons the run at the next step boundary once it is superseded', async () => {
-    const engine = fakeEngine();
-    let current = true;
-    const sweep = submitIdle(async (gate) => {
-      await gate(() => engine.send('step-0'));
+    let wanted = true;
+    const run = submitIdle(async (gate) => {
       await gate(() => engine.send('step-1'));
-      return 'swept';
-    }, () => current);
+      await gate(() => engine.send('step-2'));
+      return 'finished';
+    }, () => wanted);
     await settle();
-    expect(engine.dispatched).toEqual(['step-0']);
-    current = false; // the document changed, or a re-check superseded this run
-    engine.finish('step-0');
-    // `null`, never a failure: nothing was determined about the current bytes.
-    expect(await sweep).toBeNull();
-    expect(engine.dispatched).toEqual(['step-0']);
+    expect(engine.dispatched).toEqual(['step-1']);
+
+    wanted = false;
+    engine.finish('step-1');
+    expect(await run).toBeNull();
+    await settle();
+    // The step already handed over cannot be recalled; what supersession stops
+    // is the NEXT one.
+    expect(engine.dispatched).toEqual(['step-1']);
+  });
+
+  it('does not submit a run superseded before it started', async () => {
+    const engine = fakeEngine();
+    expect(await submitIdle(() => engine.send('sweep'), () => false)).toBeNull();
+    expect(engine.dispatched).toEqual([]);
+  });
+
+  it('a failing run does not wedge the lane', async () => {
+    // Chaining the tail on the caller's promise would leave every later
+    // submission rejected.
+    const engine = fakeEngine();
+    await expect(submitIdle(() => engine.fail('boom'), () => true)).rejects.toThrow('boom');
+    const next = submitIdle(() => engine.send('after'), () => true);
+    await settle();
+    engine.finish('after');
+    expect(await next).toBe('after');
   });
 });
 
-// The window between a user asking for something and the engine hearing about
-// it. `call` runs the commit gate and takes a file lock first, and both can
-// take arbitrarily long; a lane that only counted a request once it reached
-// the engine read the engine as idle for that whole window.
-describe('interactive is counted from the request, not the dispatch', () => {
+describe('the interactive count the lane publishes', () => {
   beforeEach(() => resetEngineIdleLane());
 
-  it('holds background work back while an operation is still gating', async () => {
+  it('counts a request only while it is outstanding', async () => {
     const engine = fakeEngine();
-    const release = beginInteractive(); // gate and lock run here
+    const user = trackInteractive(() => engine.send('user'));
     expect(interactiveInFlight()).toBe(1);
-    const sweep = submitIdle((gate) => gate(() => engine.send('sweep')), () => true);
-    await settle();
-    expect(engine.dispatched).toEqual([]);
+    engine.finish('user');
+    await user;
+    expect(interactiveInFlight()).toBe(0);
+  });
 
+  it('counts from the request, not from the dispatch', () => {
+    // `beginInteractive` is called before the commit gate and the file lock,
+    // because the question is "has a user asked for something", not "has a
+    // request reached the engine".
+    const release = beginInteractive();
+    expect(interactiveInFlight()).toBe(1);
     release();
-    await settle();
-    expect(engine.dispatched).toEqual(['sweep']);
-    engine.finish('sweep');
-    expect(await sweep).toBe('sweep');
     expect(interactiveInFlight()).toBe(0);
   });
 

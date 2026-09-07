@@ -17,6 +17,10 @@ interface FakePageSpec {
   unreadable?: boolean;
   /** `getOperatorList()` rejects for this page. */
   opListRejects?: Error;
+  /** `getPage()` never settles for this page. */
+  pageHangs?: boolean;
+  /** `getOperatorList()` never settles for this page. */
+  opListHangs?: boolean;
 }
 
 function fakeDoc(pages: FakePageSpec[], opts: {
@@ -35,8 +39,10 @@ function fakeDoc(pages: FakePageSpec[], opts: {
       const spec = pages[n - 1];
       if (!spec) return Promise.reject(new Error('no such page'));
       if (spec.unreadable) return Promise.reject(new Error('page unreadable'));
+      if (spec.pageHangs) return new Promise<PDFPageProxy>(() => undefined);
       const page: Partial<PDFPageProxy> = {
         getOperatorList: () => {
+          if (spec.opListHangs) return new Promise(() => undefined) as never;
           if (spec.opListRejects) return Promise.reject(spec.opListRejects);
           return Promise.resolve({ fnArray: [], argsArray: [] } as never);
         },
@@ -122,5 +128,108 @@ describe('collectPdfjsFacts under boundary failure', () => {
     } as unknown as PDFDocumentProxy;
     const facts = await collectPdfjsFacts(doc);
     expect(facts.some((f) => f.code === 'font.unreadable' && f.kind === 'undetermined')).toBe(true);
+  });
+});
+
+// The worker awaits under a wedged worker. Every one of them is bounded, the
+// FIRST timeout ends the sweep, and nothing that settles afterwards can still
+// speak.
+describe('collectPdfjsFacts when the pdf.js worker stops answering', () => {
+  it('a getPage that never settles is bounded and ends the sweep', async () => {
+    vi.useFakeTimers();
+    try {
+      const doc = fakeDoc([{ pageHangs: true }, {}, {}]);
+      const pending = collectPdfjsFacts(doc);
+      let settled = false;
+      void pending.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(60_000);
+      const facts = await pending;
+      const timeouts = facts.filter((f) => f.code === 'pdfjs.timeout');
+      expect(timeouts).toHaveLength(1);
+      expect(timeouts[0].kind).toBe('undetermined');
+      expect(timeouts[0].boundary).toBe('pdfjs');
+      expect(timeouts[0].page).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a getOperatorList that never settles on page 3 of 5 ends the sweep there: one timeout fact, pages 4-5 never asked', async () => {
+    vi.useFakeTimers();
+    try {
+      const attempted: number[] = [];
+      const base = fakeDoc([{}, {}, { opListHangs: true }, {}, {}]);
+      const doc = {
+        ...(base as unknown as Record<string, unknown>),
+        getPage: (n: number) => {
+          attempted.push(n);
+          return (base as unknown as { getPage: (n: number) => Promise<PDFPageProxy> }).getPage(n);
+        },
+      } as unknown as PDFDocumentProxy;
+
+      const pending = collectPdfjsFacts(doc);
+      await vi.advanceTimersByTimeAsync(60_000);
+      const facts = await pending;
+
+      const timeouts = facts.filter((f) => f.code === 'pdfjs.timeout');
+      expect(timeouts).toHaveLength(1);
+      expect(timeouts[0].page).toBe(2);
+      expect(attempted).toEqual([1, 2, 3]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a page result that arrives after its timeout is ignored, and cannot go unhandled', async () => {
+    vi.useFakeTimers();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      let lateResolve: ((v: unknown) => void) | null = null;
+      let lateReject: ((e: Error) => void) | null = null;
+      const page = {
+        getOperatorList: () =>
+          new Promise((resolve, reject) => {
+            lateResolve = resolve;
+            lateReject = reject;
+          }),
+        commonObjs: { has: () => true, get: () => ({ missingFile: true, name: 'Late' }) },
+      } as unknown as PDFPageProxy;
+      const doc = {
+        isPureXfa: false,
+        numPages: 1,
+        getMetadata: () => Promise.resolve({}),
+        getPage: () => Promise.resolve(page),
+      } as unknown as PDFDocumentProxy;
+
+      const pending = collectPdfjsFacts(doc);
+      await vi.advanceTimersByTimeAsync(60_000);
+      const facts = await pending;
+      expect(facts.filter((f) => f.code === 'pdfjs.timeout')).toHaveLength(1);
+
+      // The worker answers after the bound: the substitution it names must not
+      // appear on the row the sweep already closed.
+      (lateResolve as unknown as (v: unknown) => void)({
+        fnArray: [OPS.setFont],
+        argsArray: [['g_late']],
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(facts.some((f) => f.code === 'font.substituted')).toBe(false);
+
+      // A late REJECTION is equally silent: the handler installed by the bound
+      // is still the promise's rejection handler.
+      const second = collectPdfjsFacts(doc);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await second;
+      (lateReject as unknown as (e: Error) => void)(new Error('late boom'));
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      vi.useRealTimers();
+    }
   });
 });

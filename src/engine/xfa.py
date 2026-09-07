@@ -15,13 +15,28 @@ regex over the template names a document dynamic that is not.
 ISO 32000-2 Annex K gives the two `/XFA` spellings: an array of alternating
 name strings and streams, or a single stream holding one `xdp:xdp` element.
 Both appear in the wild and both are handled here.
+
+Two readings live here and they answer different questions. `classify` and
+`xfa_entry` are LENIENT: their callers act on the packets or do nothing, so a
+value of the wrong type and an absent key are the same answer to them.
+`inspect` is STRICT: it validates every value the classification rests on
+against the type its clause gives it — `/XFA` per Table 224 and Annex K.2,
+`/Fields` per Table 224, `/NeedsRendering` per Table 29 — and answers a named
+UNDETERMINED rather than a class, because a document whose declaration does not
+hold those types has a form nothing here can read, which is neither "no form"
+nor "dynamic".
 """
+
+from typing import NamedTuple
 
 import pikepdf
 
 NONE = "none"
 STATIC = "static"
 DYNAMIC = "dynamic"
+# A form whose declared shape this build cannot read. Not a class of form: the
+# answer to "which class" is that the document does not readably say one.
+UNDETERMINED = "undetermined"
 
 # What `xfa_entry_checked` distinguishes that `xfa_entry` cannot. `xfa_entry`
 # answers one question — "is there a packet source to read?" — and every
@@ -39,6 +54,148 @@ MALFORMED = "malformed"
 NEVER_READ = ("connectionSet", "sourceSet")
 
 
+# The named shapes `inspect` refuses on. Each is a CONSTANT of this module —
+# never text from an exception and never text from the document — so a caller
+# may transmit one without carrying a path, an offset, or a sentence.
+SHAPE_ACROFORM_UNREADABLE = "acroform-unreadable"
+SHAPE_ACROFORM_TYPE = "acroform-type"
+SHAPE_XFA_UNREADABLE = "xfa-unreadable"
+SHAPE_XFA_TYPE = "xfa-type"
+SHAPE_XFA_ARRAY_LENGTH = "xfa-array-length"
+SHAPE_PACKET_NAME_TYPE = "xfa-packet-name-type"
+SHAPE_PACKET_STREAM_TYPE = "xfa-packet-stream-type"
+SHAPE_PACKET_UNREADABLE = "xfa-packet-unreadable"
+SHAPE_FIELDS_TYPE = "acroform-fields-type"
+SHAPE_NEEDS_RENDERING_TYPE = "needs-rendering-type"
+
+
+class Inspection(NamedTuple):
+    """What a STRICT reading of one document's XFA declaration answers.
+
+    ``form_class`` is ``NONE``/``STATIC``/``DYNAMIC`` only when every value the
+    classification rests on held the type its clause gives it. Otherwise it is
+    ``UNDETERMINED`` and ``shape`` names which value did not.
+    """
+
+    form_class: str
+    shape: str
+    entry: object
+
+
+def _bad(shape: str, entry=None) -> Inspection:
+    return Inspection(UNDETERMINED, shape, entry)
+
+
+def _checked_entry(acro) -> tuple[str, object]:
+    """`(shape, entry)` for `/XFA`; shape is "" when the value is well formed.
+
+    Validated against ISO 32000-2 Table 224, which gives `XFA` as "stream or
+    array", and Annex K.2, which gives the array spelling exactly: a packet is
+    a pair of a string and a stream, the string naming the XML element and the
+    stream holding that element's complete text. Both slots of every pair are
+    therefore typed, and a slot count that is not even is not a sequence of
+    pairs at all.
+
+    Every packet stream is READ here, because a filter chain that will not
+    unfilter fails at the read and nowhere earlier.
+    """
+    try:
+        entry = acro.get("/XFA")
+    except Exception:
+        return SHAPE_XFA_UNREADABLE, None
+    if entry is None:
+        return "", None
+    if isinstance(entry, pikepdf.Stream):
+        try:
+            entry.read_bytes()
+        except Exception:
+            return SHAPE_PACKET_UNREADABLE, entry
+        return "", entry
+    if not isinstance(entry, pikepdf.Array):
+        return SHAPE_XFA_TYPE, entry
+    try:
+        length = len(entry)
+    except Exception:
+        return SHAPE_XFA_UNREADABLE, entry
+    if length == 0 or length % 2 != 0:
+        return SHAPE_XFA_ARRAY_LENGTH, entry
+    for i in range(0, length, 2):
+        try:
+            name, stream = entry[i], entry[i + 1]
+        except Exception:
+            return SHAPE_XFA_UNREADABLE, entry
+        # The name slot is validated, never coerced: `str()` renders a number
+        # as readily as a name, so a slot holding one reads back as a packet
+        # called "42" and the array passes for well formed.
+        if not isinstance(name, pikepdf.String):
+            return SHAPE_PACKET_NAME_TYPE, entry
+        if not isinstance(stream, pikepdf.Stream):
+            return SHAPE_PACKET_STREAM_TYPE, entry
+        try:
+            stream.read_bytes()
+        except Exception:
+            return SHAPE_PACKET_UNREADABLE, entry
+    return "", entry
+
+
+def inspect(pdf: pikepdf.Pdf) -> Inspection:
+    """Classify this document's form, refusing on any value of the wrong type.
+
+    The one strict reading. Three values decide the class and each carries a
+    type in the standard:
+
+    * `/XFA` — ISO 32000-2 Table 224, "stream or array"; the array spelling's
+      packet pairs are Annex K.2's string-and-stream.
+    * `/Fields` — ISO 32000-2 Table 224, "array".
+    * `/NeedsRendering` — ISO 32000-2 Table 29, "boolean", default false.
+
+    A value of any other type makes the class UNDETERMINED, and it is never
+    coerced: `bool()` of the string `(false)` is true, so coercing here would
+    classify a document dynamic on the strength of a mistyped flag.
+    """
+    try:
+        acro = pdf.Root.get("/AcroForm")
+    except Exception:
+        return _bad(SHAPE_ACROFORM_UNREADABLE)
+    if acro is None:
+        return Inspection(NONE, "", None)
+    if not isinstance(acro, pikepdf.Dictionary):
+        return _bad(SHAPE_ACROFORM_TYPE)
+
+    shape, entry = _checked_entry(acro)
+    if shape:
+        return _bad(shape, entry)
+    if entry is None:
+        return Inspection(NONE, "", None)
+
+    try:
+        rendering = pdf.Root.get("/NeedsRendering")
+    except Exception:
+        return _bad(SHAPE_NEEDS_RENDERING_TYPE, entry)
+    if rendering is not None and not isinstance(rendering, bool):
+        return _bad(SHAPE_NEEDS_RENDERING_TYPE, entry)
+    if rendering is True:
+        return Inspection(DYNAMIC, "", entry)
+
+    try:
+        fields = acro.get("/Fields")
+    except Exception:
+        return _bad(SHAPE_FIELDS_TYPE, entry)
+    if fields is None:
+        shadow = False
+    elif isinstance(fields, pikepdf.Array):
+        try:
+            shadow = len(fields) > 0
+        except Exception:
+            return _bad(SHAPE_FIELDS_TYPE, entry)
+    else:
+        return _bad(SHAPE_FIELDS_TYPE, entry)
+    # An XFA form whose fields exist only in the XML has nothing to fill
+    # through the PDF field objects Annex K requires a fillable form to carry,
+    # so it is dynamic for every purpose this engine has.
+    return Inspection(STATIC if shadow else DYNAMIC, "", entry)
+
+
 def acroform(pdf: pikepdf.Pdf):
     try:
         return pdf.Root.get("/AcroForm")
@@ -47,7 +204,12 @@ def acroform(pdf: pikepdf.Pdf):
 
 
 def xfa_entry(pdf: pikepdf.Pdf):
-    """The `/AcroForm` `/XFA` value, or None."""
+    """The `/AcroForm` `/XFA` value, or None. LENIENT.
+
+    Answers one question — "is there a packet source to read?" — for the
+    callers that act on the packets or do nothing. An observer asking what the
+    document DECLARES reads `inspect` instead.
+    """
     acro = acroform(pdf)
     if not isinstance(acro, pikepdf.Dictionary):
         return None

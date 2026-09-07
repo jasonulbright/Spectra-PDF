@@ -5,11 +5,47 @@ import { runCommitGate } from '../lib/commit-gate';
 import { lockKeysFor, withFileLock } from '../lib/engine-lock';
 import { useOperationQueue, isTrackableMethod } from './useOperationQueue';
 import { beginInteractive, submitIdle, trackInteractive } from '../lib/engine-idle-lane';
-import { runHealthSweep, type EngineHealthReply } from '../lib/doc-health-engine';
+import { isHealthMethod, runHealthSweep, type EngineHealthReply } from '../lib/doc-health-engine';
 
 interface PendingRequest {
   resolve: (value: EngineResult) => void;
   reject: (reason: unknown) => void;
+}
+
+/** The raw shape both sidecars answer on `engine:response` with. */
+interface EngineResponse {
+  id: number;
+  error?: { message: string };
+  result?: unknown;
+}
+
+/**
+ * Resolves ONE pending request out of the map, by id, and only that one.
+ *
+ * Pulled out as a pure function so the collision question — two sidecars
+ * answering with the same id — is testable without mounting the hook (this
+ * repo runs no DOM test environment; see `state/selectors.ts`'s note on the
+ * same constraint). Both sidecars' replies arrive on the same
+ * `engine:response` event and are correlated by id alone against this ONE
+ * map, so a response naming an id nothing is pending under is silently
+ * dropped rather than resolving an unrelated request.
+ */
+export function resolvePendingResponse(
+  pending: Map<number, PendingRequest>,
+  response: EngineResponse,
+): void {
+  const req = pending.get(response.id);
+  if (!req) return;
+  pending.delete(response.id);
+  if (response.error) {
+    // The engine-message boundary. The refusal keeps its English in `raw`
+    // (the log, the batch report and the CLI read that); `message` renders
+    // it through the catalog when the UI shows it, and passes it through
+    // verbatim when the table doesn't know it.
+    req.reject(new EngineError(response.error.message));
+  } else {
+    req.resolve(response.result as EngineResult);
+  }
 }
 
 // Canonical outline node type lives in the (dependency-free) reorder lib so the
@@ -97,6 +133,14 @@ export interface EngineResult {
 // and drop, which is the correct fate for an abandoned call's result.
 let nextEngineRequestId = 1;
 
+/** The module-scoped counter's next value. Exported so the "ids are drawn
+ * from one counter, so a same-id collision between the two sidecars is
+ * impossible by construction" invariant is provable directly, rather than
+ * only by inspection of `dispatch` below. */
+export function nextEngineRequestIdForTest(): number {
+  return nextEngineRequestId++;
+}
+
 export function useEngine() {
   const pending = useRef<Map<number, PendingRequest>>(new Map());
   const [ready, setReady] = useState(false);
@@ -108,20 +152,7 @@ export function useEngine() {
 
     // Listen for JSON-RPC responses
     const unlisten = engine.onResponse((response) => {
-      const res = response as { id: number; error?: { message: string }; result?: unknown };
-      const req = pending.current.get(res.id);
-      if (!req) return;
-      pending.current.delete(res.id);
-
-      if (res.error) {
-        // The engine-message boundary. The refusal keeps its
-        // English in `raw` (the log, the batch report and the CLI read that);
-        // `message` renders it through the catalog when the UI shows it, and
-        // passes it through verbatim when the table doesn't know it.
-        req.reject(new EngineError(res.error.message));
-      } else {
-        req.resolve(res.result as EngineResult);
-      }
+      resolvePendingResponse(pending.current, response as EngineResponse);
     });
     setReady(true);
 
@@ -130,13 +161,20 @@ export function useEngine() {
     };
   }, []);
 
+  // WHICH SIDECAR, decided from the method rather than from the caller. Health
+  // inspection runs in its own killable worker; a health method that reached
+  // the interactive sidecar would put an unbounded traversal of a document
+  // nobody asked about into the FIFO the user's operations wait in. Both
+  // sidecars answer on the same `engine:response` event with the id this
+  // renderer issued, so one pending map correlates both.
   const dispatch = useCallback((method: string, params: Record<string, unknown>): Promise<EngineResult> => {
     const id = nextEngineRequestId++;
     const request = { jsonrpc: '2.0', method, params, id };
+    const send = isHealthMethod(method) ? engine.healthRequest : engine.request;
 
     return new Promise<EngineResult>((resolve, reject) => {
       pending.current.set(id, { resolve, reject });
-      engine.request(request).catch((err: unknown) => {
+      send(request).catch((err: unknown) => {
         pending.current.delete(id);
         reject(err instanceof Error ? err : new Error(String(err)));
       });
@@ -144,19 +182,16 @@ export function useEngine() {
   }, []);
 
   // Every request a user's action produced is counted while it is outstanding,
-  // which is what the idle lane waits on. The engine reads one request at a
-  // time and cannot be preempted, so the only place a background sweep can be
-  // kept out of the way is BEFORE it is handed over.
+  // which is what `interactiveInFlight` reports.
   const rawCall = useCallback((method: string, params: Record<string, unknown> = {}): Promise<EngineResult> =>
     trackInteractive(() => dispatch(method, params)), [dispatch]);
 
   const call = useCallback(async (method: string, params: Record<string, unknown> = {}): Promise<EngineResult> => {
     if (isTrackableMethod(method)) {
-      // Counted interactive from HERE, not from the dispatch below. The gate
-      // and the lock run first and can take arbitrarily long; a lane that only
-      // learned about this operation once it reached the engine would read the
-      // engine as idle throughout that window and submit background steps into
-      // it, which is the queue this operation would then wait behind.
+      // Counted interactive from HERE, not from the dispatch below: the gate
+      // and the lock run first and can take arbitrarily long, and the question
+      // the count answers is "has a user asked for something", not "has a
+      // request reached the engine".
       const release = beginInteractive();
       try {
         // Every user-facing operation reads (and usually rewrites) the working
@@ -182,10 +217,10 @@ export function useEngine() {
   }, [rawCall, track]);
 
   // Background work nobody asked for: a passive, read-only sweep driven by a
-  // document changing rather than by a user. It runs one at a time, a bounded
-  // step at a time, and each step is submitted only while nothing interactive
-  // is outstanding. Resolves to `null` for a run abandoned before it finished
-  // — which is not a failure and must not be recorded as one.
+  // document changing rather than by a user. It runs in the health worker, one
+  // run at a time, a bounded step at a time, so a run superseded part-way stops
+  // at its next step boundary. Resolves to `null` for a run abandoned before it
+  // finished — which is not a failure and must not be recorded as one.
   const collectHealth = useCallback(
     (file: string, isCurrent: () => boolean): Promise<EngineHealthReply | null> =>
       submitIdle((gate) => runHealthSweep(dispatch, file, gate), isCurrent),

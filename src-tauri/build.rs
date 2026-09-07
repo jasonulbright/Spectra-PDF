@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -339,8 +340,30 @@ fn stage_engine_payload() -> Vec<Row> {
     rows
 }
 
+/// Give integration-test binaries the same Common Controls v6 activation
+/// context the product executable gets from its embedded manifest.
+///
+/// A test that links the library pulls in imports comctl32 exports only under
+/// version 6 (`SetWindowSubclass`, `TaskDialogIndirect`). Without a manifest
+/// the loader binds version 5, and the process dies before `main` with
+/// STATUS_ENTRYPOINT_NOT_FOUND — a failure that names no symbol and looks
+/// nothing like a test failure. `rustc-link-arg-tests` reaches `tests/*.rs`
+/// targets only: the product's own manifest is untouched, and the lib's own
+/// unit-test binary is NOT covered, so a test that needs an app belongs in
+/// `tests/`.
+fn manifest_test_binaries() {
+    // The very resource object `tauri_build::build` links into the product
+    // executable, so the two carry ONE manifest rather than two that can
+    // disagree.
+    let resource = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR")).join("resource.lib");
+    if resource.is_file() {
+        println!("cargo:rustc-link-arg-tests={}", resource.display());
+    }
+}
+
 fn main() {
     let rows = stage_engine_payload();
     tauri_build::build();
     verify_copied_resources(&rows);
+    manifest_test_binaries();
 }
