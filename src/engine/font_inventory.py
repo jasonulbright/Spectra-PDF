@@ -20,6 +20,8 @@ because the face a reader would fall back to is only knowable once the program
 is known to be missing.
 """
 
+from itertools import islice
+
 import pikepdf
 
 from .font_embedding import font_embedded
@@ -299,10 +301,26 @@ def walk_document_fonts(pdf, on_font, on_unreadable=_noop, *, pages=None,
     for.
     """
     seen_resources: set = seen if seen is not None else set()
-    selected = None if pages is None else set(pages)
-    for index, page in enumerate(pdf.pages):
-        if selected is not None and index not in selected:
-            continue
+
+    def selected_pages():
+        if pages is None:
+            yield from enumerate(pdf.pages)
+            return
+        for index in sorted({i for i in pages if isinstance(i, int) and i >= 0}):
+            try:
+                page = pdf.pages[index]
+            except (IndexError, KeyError):
+                continue
+            except (AttributeError, TypeError):
+                # Test doubles and a few PageList-compatible adapters expose
+                # iteration but not indexing. Preserve their contract without
+                # turning a request for page zero into a walk of every page.
+                page = next(islice(iter(pdf.pages), index, index + 1), None)
+                if page is None:
+                    continue
+            yield index, page
+
+    for index, page in selected_pages():
         # Inheritance-aware: /Resources may sit on an ancestor page-tree node,
         # and pikepdf's Page.resources walks up for it.
         try:

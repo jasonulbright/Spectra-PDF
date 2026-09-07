@@ -1033,7 +1033,7 @@ def _spanned_lane_count(line: _Line, lines: list[_Line], lanes: list[list[int]])
 
 
 LANE_COLUMN = "column"  # a member of an established column lane
-LANE_SPANNING = "spanning"  # lies ACROSS a gutter two supported lanes made
+LANE_SPANNING = "spanning"  # lies across a gutter accepted lanes establish
 LANE_UNPOOLED = "unpooled"  # withdrawn, but no supported gutter proves it
 
 
@@ -1049,17 +1049,18 @@ def _lane_spans(lines: list[_Line], lanes: list[list[int]]) -> list[tuple]:
 
 
 def _supported_gutters(lines: list[_Line], lanes: list[list[int]]) -> list[tuple]:
-    """The x-intervals between CONSECUTIVE lanes that BOTH carry support.
+    """The x-intervals between accepted consecutive lanes.
 
-    Two supported lanes either side ESTABLISH the gutter; a line lying
-    across one belongs to neither of them, which is what a spanning block
-    is. Derived from the topology the lanes themselves make, so a bridge
-    only a little wider than the body still reads as a bridge and a wide
-    body line with no gutter under it does not."""
+    At least one side must carry support. The other may be a genuine one-line
+    sidebar or caption column: the split has already proved that every
+    withdrawn line crosses both lanes, so throwing that gap away here would
+    turn the spanning line back into an unconstrained ``unpooled`` line.
+    Derived from the accepted topology, so a wide line with no exposed gap
+    beneath it still does not become a spanning block."""
     spans = _lane_spans(lines, lanes)
     out: list[tuple] = []
     for (_lo0, hi0, s0), (lo1, _hi1, s1) in zip(spans, spans[1:]):
-        if s0 and s1 and lo1 > hi0:
+        if (s0 or s1) and lo1 > hi0:
             out.append((hi0, lo1))
     return out
 
@@ -1083,35 +1084,48 @@ def _try_span_split(lines: list[_Line], members: list[int]):
     a real lane). Otherwise nothing is withdrawn and the single component
     stands, so a one-column page measures exactly as it did before.
 
-    The returned gutters are the split's own topology, and they decide the
-    withdrawn lines' ROLE, not the split: a line lying across a gutter that
-    two SUPPORTED lanes establish is a proven spanning block, and one
-    withdrawn beside a single-line sidebar is not.
+    The returned gutters are the accepted split's own topology, and they
+    decide the withdrawn lines' ROLE, not whether the split exists. One
+    supported body lane plus a one-line sidebar is enough to prove the gap:
+    the withdrawn line that crosses both accepted lanes is a spanning line,
+    not an evidence-free line that may rejoin the body beneath it.
 
-    Candidacy is width above the component's median line — a body line is
-    never a spanning block, and the width filter is what keeps a ragged
-    single column from being taken apart line by line. It is a FILTER and
-    not the evidence: the evidence is the gutter topology, so a bridge at
-    1.20x the median reads the same as one at 3x. A fixed width factor read
-    the second as a bridge and the first as a body line, and the first then
-    pooled two columns into one."""
-    if len(members) < 2 * LANE_MIN_LINES + 1:
+    Candidates are tried widest-first without a median-width admission rule.
+    A page may contain more headings, footers and full-width callouts than
+    body lines; in that perfectly valid topology the component median IS the
+    spanning width. The proof remains the exposed multi-lane topology and the
+    requirement that every withdrawn line cross at least two lanes. A ragged
+    single column therefore still cannot be dismantled line by line."""
+    # One established lane, one one-line neighbour and one withdrawn bridge
+    # are the smallest topology the rule accepts.
+    if len(members) < LANE_MIN_LINES + 2:
         return None
-    widths = sorted(lines[i].x1 - lines[i].x0 for i in members)
-    median = widths[len(widths) // 2]
-    if median <= 0.0:
-        return None
-    candidates = [i for i in members if (lines[i].x1 - lines[i].x0) > median]
+    candidates = [i for i in members if (lines[i].x1 - lines[i].x0) > 0.0]
     candidates.sort(key=lambda i: -(lines[i].x1 - lines[i].x0))
     withdrawn: list[int] = []
     for i in candidates:
         withdrawn.append(i)
         taken = set(withdrawn)
         rest = [j for j in members if j not in taken]
-        if len(rest) < 2 * LANE_MIN_LINES:
+        if len(rest) < LANE_MIN_LINES + 1:
             return None
         cand = _overlap_lanes(lines, rest)
         if len(cand) < 2 or not any(len(lane) >= LANE_MIN_LINES for lane in cand):
+            continue
+        supported_y = [
+            (min(lines[j].y for j in lane), max(lines[j].y for j in lane))
+            for lane in cand
+            if len(lane) >= LANE_MIN_LINES
+        ]
+        # A one-line lane is accepted only when it sits alongside an
+        # established lane. A folio hundreds of points below the body is a
+        # separate page-furniture line, not a sidebar whose gap turns every
+        # wide body line into a spanning block.
+        if any(
+            len(lane) < LANE_MIN_LINES
+            and not any(lo <= lines[j].y <= hi for j in lane for lo, hi in supported_y)
+            for lane in cand
+        ):
             continue
         if not all(_spanned_lane_count(lines[s], lines, cand) >= 2 for s in withdrawn):
             continue
@@ -4696,7 +4710,8 @@ def _rewrite_paragraph_stream(
             kept.append(ins)
             emit_feed(ins)
 
-    for instruction in instructions:
+    instructions = list(instructions)
+    for instruction_no, instruction in enumerate(instructions):
         operator = str(instruction.operator)
         operands = list(instruction.operands)
 
@@ -4794,8 +4809,11 @@ def _rewrite_paragraph_stream(
             # window runs one past the last member because a TRAILING break
             # sits after that member's show, which is also where the marker
             # for it is written back.
-            if operator == "BDC" and break_marker_count(
-                operands, resources, fallback_res
+            if (
+                operator == "BDC"
+                and break_marker_count(operands, resources, fallback_res)
+                and instruction_no + 1 < len(instructions)
+                and str(instructions[instruction_no + 1].operator) == "EMC"
             ):
                 dropping_break = True
                 continue

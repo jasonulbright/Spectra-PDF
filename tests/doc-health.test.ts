@@ -270,6 +270,38 @@ describe('the engine reply parser', () => {
     expect(verdictFor(l, '/a.pdf', A)).toBe('undetermined');
   });
 
+  it('a malformed required field invalidates the whole fact, including a benign kind', () => {
+    const parsed = parseEngineHealth({
+      status: 'collected',
+      facts: [{
+        kind: 'skipped',
+        severity: 'info',
+        boundary: 'engine',
+        code: 42,
+        page: 1,
+        params: {},
+      }],
+    });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.facts[0].kind).toBe('undetermined');
+  });
+
+  it('a whitespace-only fact code is malformed rather than a benign informational fact', () => {
+    const parsed = parseEngineHealth({
+      status: 'collected',
+      facts: [{
+        kind: 'skipped',
+        severity: 'info',
+        boundary: 'engine',
+        code: '   ',
+        page: null,
+        params: {},
+      }],
+    });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.facts[0].kind).toBe('undetermined');
+  });
+
   it('a reply of the wrong shape is not ok, so the caller fails the run', () => {
     expect(parseEngineHealth(null).ok).toBe(false);
     expect(parseEngineHealth('boom').ok).toBe(false);

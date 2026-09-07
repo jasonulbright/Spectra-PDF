@@ -183,7 +183,11 @@ export async function collectPdfjsFacts(doc: PDFDocumentProxy): Promise<HealthFa
   if (doc.isPureXfa) facts.push(fact('skipped', 'info', 'document.xfa', null));
   try {
     await withTimeout(doc.getMetadata(), WORKER_TIMEOUT_MS);
-  } catch {
+  } catch (err) {
+    if (err instanceof WorkerTimeout) {
+      facts.push(fact('undetermined', 'warning', 'pdfjs.timeout', null));
+      return facts;
+    }
     facts.push(fact('undetermined', 'warning', 'document.metadataUnreadable', null));
   }
   const substituted = new Set<string>();

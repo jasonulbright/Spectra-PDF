@@ -73,22 +73,36 @@ impl EngineRouter {
 
     /// Retire EVERY routing. For a sidecar that has been killed: nothing is
     /// coming back, so each caller is owed an answer from whoever killed it.
-    pub fn take_all(&self) -> Vec<(String, serde_json::Value)> {
+    pub fn take_all(&self) -> Vec<(u64, String, serde_json::Value)> {
         let Ok(mut map) = self.by_outer.lock() else {
             return Vec::new();
         };
         map.drain()
-            .map(|(_, route)| (route.label, route.inner))
+            .map(|(outer, route)| (outer, route.label, route.inner))
             .collect()
+    }
+
+    /// Retire every request belonging to one window and return the process ids
+    /// whose companion state must be retired with them.
+    pub fn take_label(&self, label: &str) -> Vec<u64> {
+        let Ok(mut map) = self.by_outer.lock() else {
+            return Vec::new();
+        };
+        let ids: Vec<u64> = map
+            .iter()
+            .filter_map(|(outer, route)| (route.label == label).then_some(*outer))
+            .collect();
+        for outer in &ids {
+            map.remove(outer);
+        }
+        ids
     }
 
     /// Drop a destroyed window's outstanding requests. Their responses then
     /// land on no route and are discarded, which is the correct fate for a
     /// call whose caller is gone.
     pub fn drop_label(&self, label: &str) {
-        if let Ok(mut map) = self.by_outer.lock() {
-            map.retain(|_, route| route.label != label);
-        }
+        self.take_label(label);
     }
 
     /// How many requests each window has in flight.

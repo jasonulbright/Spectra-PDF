@@ -94,7 +94,15 @@ describe('collectPdfjsFacts under boundary failure', () => {
   it('a metadata call that never resolves does not hang the sweep forever: it is bounded and recorded undetermined', async () => {
     vi.useFakeTimers();
     try {
-      const doc = fakeDoc([{}, {}], { metadata: 'hang' });
+      let pageCalls = 0;
+      const base = fakeDoc([{}, {}], { metadata: 'hang' });
+      const doc = {
+        ...(base as unknown as Record<string, unknown>),
+        getPage: (n: number) => {
+          pageCalls += 1;
+          return (base as unknown as { getPage: (n: number) => Promise<PDFPageProxy> }).getPage(n);
+        },
+      } as unknown as PDFDocumentProxy;
       const pending = collectPdfjsFacts(doc);
       let settled = false;
       void pending.then(() => { settled = true; });
@@ -108,7 +116,8 @@ describe('collectPdfjsFacts under boundary failure', () => {
       await vi.advanceTimersByTimeAsync(60_000);
       const facts = await pending;
       expect(settled).toBe(true);
-      expect(facts.some((f) => f.code === 'document.metadataUnreadable' && f.kind === 'undetermined')).toBe(true);
+      expect(facts.filter((f) => f.code === 'pdfjs.timeout')).toHaveLength(1);
+      expect(pageCalls).toBe(0);
     } finally {
       vi.useRealTimers();
     }

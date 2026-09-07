@@ -5335,6 +5335,21 @@ class TestHardBreaks:
         _apply(first, second, again, again["text"], spans=again["spans"])
         assert _paras(second)[0]["text"] == "Alpha beta " + chr(10) + "gamma delta"
 
+    def test_nonempty_actualtext_marked_content_stays_balanced(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td "
+            b"/Span <</ActualText <FEFF000A>>> BDC "
+            b"(Alpha beta) Tj EMC 0 -14 Td (gamma delta) Tj ET",
+            name="nonempty-actualtext.pdf",
+        )
+        out = os.path.join(tmp_dir, "nonempty-actualtext-edited.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"] + "!")
+        with pikepdf.open(out) as pdf:
+            operators = [str(item.operator) for item in pikepdf.parse_content_stream(pdf.pages[0])]
+        assert operators.count("BDC") == operators.count("EMC") == 1
+
     def test_removing_a_break_removes_it_from_the_page(self, tmp_dir):
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj ET",
                      name="pruned.pdf")

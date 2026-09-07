@@ -27,8 +27,9 @@ hold those types has a form nothing here can read, which is neither "no form"
 nor "dynamic".
 """
 
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
+from lxml import etree
 import pikepdf
 
 NONE = "none"
@@ -65,8 +66,22 @@ SHAPE_XFA_ARRAY_LENGTH = "xfa-array-length"
 SHAPE_PACKET_NAME_TYPE = "xfa-packet-name-type"
 SHAPE_PACKET_STREAM_TYPE = "xfa-packet-stream-type"
 SHAPE_PACKET_UNREADABLE = "xfa-packet-unreadable"
+SHAPE_PACKET_XML = "xfa-packet-xml"
+SHAPE_XDP_ROOT = "xfa-xdp-root"
 SHAPE_FIELDS_TYPE = "acroform-fields-type"
+SHAPE_FIELD_ENTRY_TYPE = "acroform-field-entry-type"
+SHAPE_FIELD_ENTRY_REFERENCE = "acroform-field-entry-reference"
 SHAPE_NEEDS_RENDERING_TYPE = "needs-rendering-type"
+
+_MAX_STRICT_PACKET_BYTES = 64 * 1024 * 1024
+
+
+class InspectionInterrupted(Exception):
+    """A caller-owned resource limit interrupted strict inspection."""
+
+
+class _PacketShapeError(Exception):
+    """The packet is not safe, bounded XML; never crosses the engine API."""
 
 
 class Inspection(NamedTuple):
@@ -86,7 +101,32 @@ def _bad(shape: str, entry=None) -> Inspection:
     return Inspection(UNDETERMINED, shape, entry)
 
 
-def _checked_entry(acro) -> tuple[str, object]:
+def _packet_root(data: bytes):
+    """Parse one packet without allowing a document type or entity grammar."""
+    if len(data) > _MAX_STRICT_PACKET_BYTES:
+        raise _PacketShapeError
+    parser = etree.XMLParser(
+        resolve_entities=False,
+        load_dtd=False,
+        no_network=True,
+        recover=False,
+        huge_tree=False,
+    )
+    root = etree.fromstring(data, parser=parser)
+    # Inspect parsed metadata rather than byte-searching for an ASCII spelling:
+    # a valid XFA packet may be UTF-16, where every markup character is encoded
+    # with an adjacent NUL. Entity resolution and network reads were already
+    # disabled above, so reaching this refusal never executes its grammar.
+    if root.getroottree().docinfo.doctype:
+        raise _PacketShapeError
+    return root
+
+
+def _checked_entry(
+    acro,
+    read_stream: Callable[[object], bytes] | None = None,
+    take_item: Callable[[], None] | None = None,
+) -> tuple[str, object]:
     """`(shape, entry)` for `/XFA`; shape is "" when the value is well formed.
 
     Validated against ISO 32000-2 Table 224, which gives `XFA` as "stream or
@@ -105,11 +145,22 @@ def _checked_entry(acro) -> tuple[str, object]:
         return SHAPE_XFA_UNREADABLE, None
     if entry is None:
         return "", None
+    reader = read_stream or (lambda stream: stream.read_bytes())
+    charge = take_item or (lambda: None)
     if isinstance(entry, pikepdf.Stream):
         try:
-            entry.read_bytes()
+            charge()
+            data = reader(entry)
+        except InspectionInterrupted:
+            raise
         except Exception:
             return SHAPE_PACKET_UNREADABLE, entry
+        try:
+            root = _packet_root(data)
+        except (etree.XMLSyntaxError, _PacketShapeError):
+            return SHAPE_PACKET_XML, entry
+        if str(root.tag).split("}")[-1].split(":")[-1] != "xdp":
+            return SHAPE_XDP_ROOT, entry
         return "", entry
     if not isinstance(entry, pikepdf.Array):
         return SHAPE_XFA_TYPE, entry
@@ -121,7 +172,10 @@ def _checked_entry(acro) -> tuple[str, object]:
         return SHAPE_XFA_ARRAY_LENGTH, entry
     for i in range(0, length, 2):
         try:
+            charge()
             name, stream = entry[i], entry[i + 1]
+        except InspectionInterrupted:
+            raise
         except Exception:
             return SHAPE_XFA_UNREADABLE, entry
         # The name slot is validated, never coerced: `str()` renders a number
@@ -132,13 +186,22 @@ def _checked_entry(acro) -> tuple[str, object]:
         if not isinstance(stream, pikepdf.Stream):
             return SHAPE_PACKET_STREAM_TYPE, entry
         try:
-            stream.read_bytes()
+            _packet_root(reader(stream))
+        except InspectionInterrupted:
+            raise
+        except (etree.XMLSyntaxError, _PacketShapeError):
+            return SHAPE_PACKET_XML, entry
         except Exception:
             return SHAPE_PACKET_UNREADABLE, entry
     return "", entry
 
 
-def inspect(pdf: pikepdf.Pdf) -> Inspection:
+def inspect(
+    pdf: pikepdf.Pdf,
+    *,
+    read_stream: Callable[[object], bytes] | None = None,
+    take_item: Callable[[], None] | None = None,
+) -> Inspection:
     """Classify this document's form, refusing on any value of the wrong type.
 
     The one strict reading. Three values decide the class and each carries a
@@ -162,7 +225,7 @@ def inspect(pdf: pikepdf.Pdf) -> Inspection:
     if not isinstance(acro, pikepdf.Dictionary):
         return _bad(SHAPE_ACROFORM_TYPE)
 
-    shape, entry = _checked_entry(acro)
+    shape, entry = _checked_entry(acro, read_stream, take_item)
     if shape:
         return _bad(shape, entry)
     if entry is None:
@@ -186,6 +249,15 @@ def inspect(pdf: pikepdf.Pdf) -> Inspection:
     elif isinstance(fields, pikepdf.Array):
         try:
             shadow = len(fields) > 0
+            for field in fields:
+                if take_item is not None:
+                    take_item()
+                if not isinstance(field, pikepdf.Dictionary):
+                    return _bad(SHAPE_FIELD_ENTRY_TYPE, entry)
+                if getattr(field, "objgen", (0, 0)) == (0, 0):
+                    return _bad(SHAPE_FIELD_ENTRY_REFERENCE, entry)
+        except InspectionInterrupted:
+            raise
         except Exception:
             return _bad(SHAPE_FIELDS_TYPE, entry)
     else:

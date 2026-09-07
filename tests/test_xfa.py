@@ -225,7 +225,9 @@ class TestIndirectXfaEntry:
     def test_indirect_valid_stream_classifies_dynamic(self, tmp_path):
         pdf = pikepdf.new()
         pdf.add_blank_page(page_size=(200, 200))
-        stream = pdf.make_stream(b"<xdp:xdp></xdp:xdp>")
+        stream = pdf.make_stream(
+            b'<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"></xdp:xdp>'
+        )
         self._acroform(pdf, xfa_value=stream, fields_value=pikepdf.Array([]))
         insp = xfa.inspect(pdf)
         assert insp.form_class == xfa.DYNAMIC
@@ -237,7 +239,12 @@ class TestIndirectXfaEntry:
         pdf = pikepdf.new()
         pdf.add_blank_page(page_size=(200, 200))
         arr = pikepdf.Array(
-            [pikepdf.String("template"), pdf.make_stream(b"<xdp:xdp></xdp:xdp>")]
+            [
+                pikepdf.String("template"),
+                pdf.make_stream(
+                    b'<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"></xdp:xdp>'
+                ),
+            ]
         )
         self._acroform(pdf, xfa_value=arr, fields_value=pikepdf.Array([]))
         insp = xfa.inspect(pdf)
@@ -884,6 +891,59 @@ class TestStrictInspection:
         # The lenient reading is what it always was, for its own callers.
         assert xfa.classify(pdf) == xfa.DYNAMIC
 
+    def test_a_fields_array_member_must_be_an_indirect_field_dictionary(self):
+        wrong_type = self._pdf(
+            xfa_value=lambda p: p.make_stream(
+                b'<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"/>'
+            ),
+            fields=lambda p: pikepdf.Array([42]),
+        )
+        assert xfa.inspect(wrong_type).shape == xfa.SHAPE_FIELD_ENTRY_TYPE
+
+        direct = self._pdf(
+            xfa_value=lambda p: p.make_stream(
+                b'<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"/>'
+            ),
+            fields=lambda p: pikepdf.Array([pikepdf.Dictionary(T=pikepdf.String("f"))]),
+        )
+        assert xfa.inspect(direct).shape == xfa.SHAPE_FIELD_ENTRY_REFERENCE
+
+    def test_a_packet_must_be_xml_and_a_single_stream_must_have_an_xdp_root(self):
+        malformed = self._pdf(
+            xfa_value=lambda p: p.make_stream(b"not xml"),
+            fields=self._one_field,
+        )
+        assert xfa.inspect(malformed).shape == xfa.SHAPE_PACKET_XML
+        wrong_root = self._pdf(
+            xfa_value=lambda p: p.make_stream(b"<template/>"),
+            fields=self._one_field,
+        )
+        assert xfa.inspect(wrong_root).shape == xfa.SHAPE_XDP_ROOT
+
+        utf16_doctype = self._pdf(
+            xfa_value=lambda p: p.make_stream(
+                '<?xml version="1.0" encoding="utf-16"?>'
+                '<!DOCTYPE xdp [<!ENTITY x "expanded">]>'
+                '<xdp xmlns="http://ns.adobe.com/xdp/">&x;</xdp>'.encode('utf-16')
+            ),
+            fields=self._one_field,
+        )
+        assert xfa.inspect(utf16_doctype).shape == xfa.SHAPE_PACKET_XML
+
+    def test_a_caller_resource_limit_is_never_reclassified_as_bad_xfa(self):
+        pdf = self._pdf(
+            xfa_value=lambda p: p.make_stream(
+                b'<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"/>'
+            ),
+            fields=self._one_field,
+        )
+
+        def stop():
+            raise xfa.InspectionInterrupted()
+
+        with pytest.raises(xfa.InspectionInterrupted):
+            xfa.inspect(pdf, take_item=stop)
+
     def test_a_wrong_typed_needs_rendering_is_named_never_coerced(self):
         """Table 29 gives `NeedsRendering` as a boolean. `bool()` of the
         string `(false)` is TRUE."""
@@ -916,7 +976,9 @@ class TestStrictInspection:
         )
         assert xfa.inspect(dynamic).form_class == xfa.DYNAMIC
         single = self._pdf(
-            xfa_value=lambda p: p.make_stream(b"<xdp:xdp/>"),
+            xfa_value=lambda p: p.make_stream(
+                b'<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"/>'
+            ),
             fields=self._one_field,
         )
         assert xfa.inspect(single).form_class == xfa.STATIC
@@ -929,7 +991,9 @@ class TestStrictInspection:
             xfa.SHAPE_XFA_UNREADABLE, xfa.SHAPE_XFA_TYPE,
             xfa.SHAPE_XFA_ARRAY_LENGTH, xfa.SHAPE_PACKET_NAME_TYPE,
             xfa.SHAPE_PACKET_STREAM_TYPE, xfa.SHAPE_PACKET_UNREADABLE,
-            xfa.SHAPE_FIELDS_TYPE, xfa.SHAPE_NEEDS_RENDERING_TYPE,
+            xfa.SHAPE_PACKET_XML, xfa.SHAPE_XDP_ROOT, xfa.SHAPE_FIELDS_TYPE,
+            xfa.SHAPE_FIELD_ENTRY_TYPE, xfa.SHAPE_FIELD_ENTRY_REFERENCE,
+            xfa.SHAPE_NEEDS_RENDERING_TYPE,
         ]
         assert len(set(names)) == len(names)
         for name in names:

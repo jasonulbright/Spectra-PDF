@@ -12,7 +12,7 @@ import pikepdf
 import pytest
 from pikepdf import Array, Dictionary, Name, Stream, String
 
-from engine.font_inventory import list_document_fonts
+from engine.font_inventory import list_document_fonts, walk_document_fonts
 
 # The Liberation face names `font_fallback._FACE_FILES` resolves against. Empty
 # files: only the NAME is chosen here, never opened.
@@ -417,3 +417,28 @@ class TestEncodingNames:
         pdf.save(path)
         pdf.close()
         assert _by_name(list_document_fonts(path, font_dir), "Symbol")["encoding"] == "Built-in"
+
+
+def test_a_selected_page_does_not_enumerate_every_page():
+    class FakePage:
+        resources = Dictionary()
+        obj = Dictionary()
+
+    class CountingPages:
+        def __init__(self, count):
+            self.count = count
+            self.yielded = 0
+
+        def __iter__(self):
+            for _ in range(self.count):
+                self.yielded += 1
+                yield FakePage()
+
+    class FakePdf:
+        def __init__(self):
+            self.pages = CountingPages(1000)
+            self.Root = Dictionary()
+
+    pdf = FakePdf()
+    walk_document_fonts(pdf, lambda *_: None, pages=[0], include_dr=False)
+    assert pdf.pages.yielded == 1

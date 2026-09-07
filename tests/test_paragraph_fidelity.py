@@ -342,6 +342,51 @@ def test_a_spanning_heading_does_not_bridge_a_one_line_sidebar():
     assert sorted(len(block) for block in paras) == [1, 1, 2, 2]
 
 
+def test_a_close_heading_over_a_one_line_sidebar_has_a_spanning_role():
+    from engine.text_paragraphs import LANE_SPANNING, _lane_roles
+
+    heading = _spanning(2, 0.0, 300.0, 110.0)
+    main_col = [
+        _synth_line(1, 100.0, 0.0, 100.0),
+        _synth_line(2, 90.0, 0.0, 60.0),
+        _synth_line(3, 80.0, 15.0, 100.0),
+        _synth_line(4, 70.0, 0.0, 55.0),
+    ]
+    sidebar = [_synth_line(5, 100.0, 200.0, 300.0)]
+    lines = heading + main_col + sidebar
+    assert _lane_roles(lines)[0][0] == LANE_SPANNING
+    assert len(_join_paragraphs(lines)[0]) == 1
+
+
+def test_the_minimal_supported_lane_and_one_line_sidebar_still_expose_the_gutter():
+    from engine.text_paragraphs import LANE_SPANNING, _lane_roles
+
+    lines = _spanning(2, 0.0, 300.0, 110.0) + [
+        _synth_line(1, 100.0, 0.0, 100.0),
+        _synth_line(2, 90.0, 0.0, 100.0),
+        _synth_line(3, 95.0, 200.0, 300.0),
+    ]
+    roles = _lane_roles(lines)
+    assert roles[0][0] == LANE_SPANNING
+    assert roles[1][1] == roles[2][1]
+    assert roles[3][1] != roles[1][1]
+
+
+def test_spanning_lines_may_outnumber_the_column_lines():
+    from engine.text_paragraphs import LANE_SPANNING, _lane_roles
+
+    spans = [_synth_line(900 + i, 150.0 - i * 10.0, 0.0, 300.0) for i in range(5)]
+    columns = [
+        _synth_line(1, 100.0, 0.0, 100.0),
+        _synth_line(2, 90.0, 0.0, 100.0),
+        _synth_line(3, 100.0, 200.0, 300.0),
+        _synth_line(4, 90.0, 200.0, 300.0),
+    ]
+    roles = _lane_roles(spans + columns)
+    assert all(role[0] == LANE_SPANNING for role in roles[:5])
+    assert roles[5][1] != roles[7][1]
+
+
 def test_a_single_column_page_is_unchanged_by_the_lane_split():
     # The lane rule must not be a second behaviour: one column has one lane.
     body = _body(LATEX)

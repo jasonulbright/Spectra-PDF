@@ -44,21 +44,36 @@ function params(value: unknown): Record<string, string | number> {
 }
 
 function parseFact(value: unknown): HealthFact {
-  const raw = asRecord(value) ?? {};
+  const record = asRecord(value);
+  const raw = record ?? {};
   const kind = raw.kind as HealthKind;
   const severity = raw.severity as HealthSeverity;
   const boundary = raw.boundary as HealthBoundary;
   const code = typeof raw.code === 'string' ? raw.code : '';
   const number = typeof raw.page === 'number' && Number.isInteger(raw.page) ? raw.page : null;
+  const rawParams = raw.params;
+  const paramsRecord = rawParams === undefined ? {} : asRecord(rawParams);
+  const paramsValid = paramsRecord !== null && Object.values(paramsRecord).every(
+    (entry) => typeof entry === 'string' || (typeof entry === 'number' && Number.isFinite(entry)),
+  );
+  const pageValid = raw.page === undefined || raw.page === null || (number !== null && number > 0);
+  const shapeValid = record !== null
+    && KINDS.includes(kind)
+    && SEVERITIES.includes(severity)
+    && BOUNDARIES.includes(boundary)
+    && code.trim().length > 0
+    && pageValid
+    && paramsValid;
   return {
-    // An unrecognized kind is `undetermined`, never a benign one: a fact this
-    // build cannot classify must not be able to leave a verdict healthy.
-    kind: KINDS.includes(kind) ? kind : 'undetermined',
+    // A fact is one boundary statement, not a bag of independently trusted
+    // fields. If any required part is malformed, its valid-looking benign kind
+    // cannot survive and make the document look healthier than the reply was.
+    kind: shapeValid ? kind : 'undetermined',
     severity: SEVERITIES.includes(severity) ? severity : 'warning',
     boundary: BOUNDARIES.includes(boundary) ? boundary : 'engine',
     code,
     page: number !== null && number > 0 ? number - 1 : null,
-    params: params(raw.params),
+    params: params(rawParams),
   };
 }
 

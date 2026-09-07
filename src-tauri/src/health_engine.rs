@@ -29,12 +29,13 @@
 //! operation is waiting, and health never makes one wait.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 use crate::engine::EngineRouter;
 
@@ -47,6 +48,14 @@ pub const HEALTH_DEADLINE: Duration = Duration::from_secs(30);
 
 /// How often the deadline is tested.
 pub const HEALTH_WATCH_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Hard per-process memory ceiling for the disposable inspection worker.
+/// Stream decoding happens inside qpdf before Python can inspect the decoded
+/// length, so a Python byte counter alone cannot bound a compression bomb.
+/// The Windows job-object limit is enforced by the kernel while bytes are
+/// being produced; the ordinary per-step/per-run counters remain the finer
+/// policy for documents below this last-resort boundary.
+pub const HEALTH_MEMORY_LIMIT: usize = 768 * 1024 * 1024;
 
 /// Overrides for the two durations above, in whole milliseconds.
 ///
@@ -103,7 +112,7 @@ impl Default for HealthRouter {
 /// a process.
 #[derive(Default)]
 pub struct Watchdog {
-    sent: std::sync::Mutex<VecDeque<Instant>>,
+    sent: std::sync::Mutex<VecDeque<(Option<u64>, Instant)>>,
 }
 
 impl Watchdog {
@@ -114,7 +123,14 @@ impl Watchdog {
     /// Record one request handed to the worker.
     pub fn armed(&self, at: Instant) {
         if let Ok(mut q) = self.sent.lock() {
-            q.push_back(at);
+            q.push_back((None, at));
+        }
+    }
+
+    /// Record the exact routed request handed to the worker.
+    pub fn armed_request(&self, outer: u64, at: Instant) {
+        if let Ok(mut q) = self.sent.lock() {
+            q.push_back((Some(outer), at));
         }
     }
 
@@ -122,6 +138,16 @@ impl Watchdog {
     pub fn disarmed(&self) {
         if let Ok(mut q) = self.sent.lock() {
             q.pop_front();
+        }
+    }
+
+    /// Retire one routed request, including a write rollback or an out-of-order
+    /// response. A FIFO assumption must not let one request disarm another.
+    pub fn disarmed_request(&self, outer: u64) {
+        if let Ok(mut q) = self.sent.lock() {
+            if let Some(index) = q.iter().position(|(id, _)| *id == Some(outer)) {
+                q.remove(index);
+            }
         }
     }
 
@@ -145,7 +171,7 @@ impl Watchdog {
             return false;
         };
         match q.front() {
-            Some(oldest) => now.saturating_duration_since(*oldest) > limit,
+            Some((_, oldest)) => now.saturating_duration_since(*oldest) > limit,
             None => false,
         }
     }
@@ -155,6 +181,11 @@ impl Watchdog {
 pub struct HealthEngineState {
     pub child: Arc<Mutex<Option<CommandChild>>>,
     pub watchdog: Arc<Watchdog>,
+    lifecycle: Arc<Mutex<()>>,
+    generation: Arc<AtomicU64>,
+    terminating: Arc<AtomicBool>,
+    terminations: Arc<std::sync::Mutex<HashMap<u64, Arc<Notify>>>>,
+    jobs: Arc<std::sync::Mutex<HashMap<u64, usize>>>,
 }
 
 impl HealthEngineState {
@@ -162,8 +193,87 @@ impl HealthEngineState {
         Self {
             child: Arc::new(Mutex::new(None)),
             watchdog: Arc::new(Watchdog::new()),
+            lifecycle: Arc::new(Mutex::new(())),
+            generation: Arc::new(AtomicU64::new(0)),
+            terminating: Arc::new(AtomicBool::new(false)),
+            terminations: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            jobs: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
+
+    /// Monotonic worker identity, exposed for the live race tests. Product
+    /// routing never treats it as a request id.
+    pub fn worker_generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg(windows)]
+fn confine_worker(pid: u32) -> Result<usize, String> {
+    use std::ffi::c_void;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY,
+    };
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+    };
+
+    unsafe {
+        let job = CreateJobObjectW(None, PCWSTR::null()).map_err(|e| e.to_string())?;
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags =
+            JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        limits.ProcessMemoryLimit = HEALTH_MEMORY_LIMIT;
+        if let Err(error) = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast::<c_void>(),
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        ) {
+            let _ = CloseHandle(job);
+            return Err(error.to_string());
+        }
+        let process = match OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid) {
+            Ok(process) => process,
+            Err(error) => {
+                let _ = CloseHandle(job);
+                return Err(error.to_string());
+            }
+        };
+        let assigned = AssignProcessToJobObject(job, process);
+        let _ = CloseHandle(process);
+        if let Err(error) = assigned {
+            let _ = CloseHandle(job);
+            return Err(error.to_string());
+        }
+        Ok(job.0 as usize)
+    }
+}
+
+#[cfg(not(windows))]
+fn confine_worker(_pid: u32) -> Result<usize, String> {
+    Err("health worker memory confinement is unavailable on this platform".to_string())
+}
+
+fn close_job(state: &HealthEngineState, generation: u64) {
+    let raw = state
+        .jobs
+        .lock()
+        .ok()
+        .and_then(|mut jobs| jobs.remove(&generation));
+    #[cfg(windows)]
+    if let Some(raw) = raw {
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        unsafe {
+            let _ = CloseHandle(HANDLE(raw as *mut std::ffi::c_void));
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = raw;
 }
 
 impl Default for HealthEngineState {
@@ -185,7 +295,10 @@ const DEADLINE_REFUSAL: &str = "health inspection exceeded its deadline";
 /// one window's refusal is not another's.
 fn refuse_outstanding<R: Runtime>(app: &AppHandle<R>) {
     let routes = app.state::<HealthRouter>().0.take_all();
-    for (label, inner) in routes {
+    for (outer, label, inner) in routes {
+        app.state::<HealthEngineState>()
+            .watchdog
+            .disarmed_request(outer);
         let refusal = serde_json::json!({
             "jsonrpc": "2.0",
             "id": inner,
@@ -195,33 +308,77 @@ fn refuse_outstanding<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// Kill the health worker if it is running. The next health request spawns a
-/// new one, so this is the whole of "respawn" as well.
-pub async fn kill<R: Runtime>(app: &AppHandle<R>) -> bool {
+async fn kill_locked<R: Runtime>(app: &AppHandle<R>) -> bool {
     let state = app.state::<HealthEngineState>();
-    let killed = {
-        let mut guard = state.child.lock().await;
-        match guard.take() {
-            Some(child) => {
-                let _ = child.kill();
-                true
-            }
-            None => false,
-        }
+    let Some(child) = state.child.lock().await.take() else {
+        state.watchdog.cleared();
+        refuse_outstanding(app);
+        return false;
     };
+
+    let generation = state.generation.fetch_add(1, Ordering::SeqCst);
+    state.terminating.store(true, Ordering::SeqCst);
+    let terminated = state
+        .terminations
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&generation).cloned())
+        .unwrap_or_else(|| Arc::new(Notify::new()));
+    // Register before the kill: `notify_one` retains a permit if the process
+    // exits between this line and the await below.
+    let notified = terminated.notified();
+    let kill_result = child.kill();
     state.watchdog.cleared();
     refuse_outstanding(app);
-    killed
+
+    if let Err(error) = kill_result {
+        eprintln!("[health] failed to kill worker generation {generation}: {error}");
+    }
+    // Closing the job is a second, kernel-enforced termination path. It also
+    // covers a child.kill() failure; either way, do not permit a replacement
+    // process until this exact generation reports Terminated.
+    close_job(&state, generation);
+    if tokio::time::timeout(Duration::from_secs(30), notified)
+        .await
+        .is_ok()
+    {
+        state.terminating.store(false, Ordering::SeqCst);
+    } else {
+        // Do not overlap two Python processes after a kill whose termination
+        // the OS never confirmed. `start_locked` refuses until the late
+        // Terminated event clears this state.
+        eprintln!("[health] worker generation {generation} did not terminate within 30 seconds");
+    }
+    if let Ok(mut map) = state.terminations.lock() {
+        map.remove(&generation);
+    }
+    true
+}
+
+/// Kill the health worker if it is running. The call does not return until
+/// that generation's Terminated event arrives, so an immediate next request
+/// cannot overlap the dying process.
+pub async fn kill<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let state = app.state::<HealthEngineState>();
+    let _lifecycle = state.lifecycle.lock().await;
+    kill_locked(app).await
 }
 
 /// Kill the worker when the request it is working on has run past the
 /// deadline. Returns whether it did.
-pub async fn enforce_deadline<R: Runtime>(app: &AppHandle<R>) -> bool {
-    let overdue = {
-        let state = app.state::<HealthEngineState>();
-        let watchdog = state.watchdog.clone();
-        watchdog.overdue(Instant::now(), health_deadline())
-    };
+async fn enforce_generation_deadline<R: Runtime>(
+    app: &AppHandle<R>,
+    expected_generation: u64,
+) -> bool {
+    let state = app.state::<HealthEngineState>();
+    let _lifecycle = state.lifecycle.lock().await;
+    // A watcher belongs to one process generation. Re-check after taking the
+    // lifecycle lock so an old watcher can never kill a replacement process
+    // that happened to become overdue while the watcher was waiting.
+    if state.generation.load(Ordering::SeqCst) != expected_generation {
+        return false;
+    }
+    let overdue = state.watchdog.overdue(Instant::now(), health_deadline());
     if !overdue {
         return false;
     }
@@ -230,18 +387,38 @@ pub async fn enforce_deadline<R: Runtime>(app: &AppHandle<R>) -> bool {
         "[health] worker exceeded its deadline; killing ({} request(s) refused)",
         dropped
     );
-    kill(app).await
+    kill_locked(app).await
+}
+
+pub async fn enforce_deadline<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let generation = app
+        .state::<HealthEngineState>()
+        .generation
+        .load(Ordering::SeqCst);
+    enforce_generation_deadline(app, generation).await
 }
 
 /// Restore a response's original id and deliver it to the window that asked.
-fn route_response<R: Runtime>(app: &AppHandle<R>, mut json: serde_json::Value) {
-    app.state::<HealthEngineState>().watchdog.disarmed();
+async fn route_response<R: Runtime>(
+    app: &AppHandle<R>,
+    generation: u64,
+    mut json: serde_json::Value,
+) {
+    let state = app.state::<HealthEngineState>();
+    let _lifecycle = state.lifecycle.lock().await;
+    if state.generation.load(Ordering::SeqCst) != generation {
+        return;
+    }
     let Some(outer) = json.get("id").and_then(|v| v.as_u64()) else {
         // An id-less line from this worker correlates to no request and no
         // window. The interactive engine's process-wide notices do not come
         // from here, so there is nothing to deliver it to.
         return;
     };
+    // The route may already have been removed because its window closed. The
+    // exact watchdog entry still belongs to this completed response and must
+    // not survive as a phantom deadline.
+    state.watchdog.disarmed_request(outer);
     let Some((label, inner)) = app.state::<HealthRouter>().0.take_route(outer) else {
         return;
     };
@@ -251,19 +428,44 @@ fn route_response<R: Runtime>(app: &AppHandle<R>, mut json: serde_json::Value) {
     let _ = app.emit_to(label.as_str(), "engine:response", json);
 }
 
-/// Start the health worker and wire its stdout to the webview. Idempotent.
-pub async fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
-    {
-        let state = app.state::<HealthEngineState>();
-        let guard = state.child.lock().await;
-        if guard.is_some() {
-            return Ok(());
+async fn retire_generation<R: Runtime>(app: &AppHandle<R>, generation: u64) {
+    let state = app.state::<HealthEngineState>();
+    if let Ok(map) = state.terminations.lock() {
+        if let Some(terminated) = map.get(&generation) {
+            terminated.notify_one();
         }
+    }
+
+    let _lifecycle = state.lifecycle.lock().await;
+    if state.generation.load(Ordering::SeqCst) != generation {
+        // A deliberate kill already invalidated this worker. Its routes and
+        // watchdog entries were retired by the kill; touching the current
+        // generation here would clobber an immediate respawn.
+        state.terminating.store(false, Ordering::SeqCst);
+        return;
+    }
+    state.generation.fetch_add(1, Ordering::SeqCst);
+    *state.child.lock().await = None;
+    state.watchdog.cleared();
+    refuse_outstanding(app);
+    state.terminating.store(false, Ordering::SeqCst);
+    if let Ok(mut map) = state.terminations.lock() {
+        map.remove(&generation);
+    };
+    close_job(&state, generation);
+}
+
+async fn start_locked<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
+    let state = app.state::<HealthEngineState>();
+    if state.terminating.load(Ordering::SeqCst) {
+        return Err("Previous health worker is still terminating".to_string());
+    }
+    if state.child.lock().await.is_some() {
+        return Ok(state.generation.load(Ordering::SeqCst));
     }
 
     let python_path = crate::engine::get_python_path(app);
     let script_path = crate::engine::get_engine_script_path(app);
-
     let shell = app.shell();
     let (mut rx, child) = shell
         .command(&python_path)
@@ -276,10 +478,17 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("Failed to start health worker: {}", e))?;
 
-    *app.state::<HealthEngineState>().child.lock().await = Some(child);
+    let generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let pid = child.pid();
+    let terminated = Arc::new(Notify::new());
+    if let Ok(mut map) = state.terminations.lock() {
+        map.insert(generation, terminated);
+    }
+    *state.child.lock().await = Some(child);
 
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
+        let mut saw_termination = false;
         while let Some(event) = rx.recv().await {
             match event {
                 tauri_plugin_shell::process::CommandEvent::Stdout(line) => {
@@ -287,7 +496,7 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
                     let trimmed = line_str.trim();
                     if !trimmed.is_empty() {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                            route_response(&app_handle, json);
+                            route_response(&app_handle, generation, json).await;
                         }
                     }
                 }
@@ -299,40 +508,55 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
                     }
                 }
                 tauri_plugin_shell::process::CommandEvent::Terminated(status) => {
-                    eprintln!("[health] exited with {:?}", status);
-                    // Whether this was our own deadline kill or a crash, every
-                    // request outstanding against it is now unanswerable.
-                    let state = app_handle.state::<HealthEngineState>();
-                    state.watchdog.cleared();
-                    *state.child.lock().await = None;
-                    refuse_outstanding(&app_handle);
+                    eprintln!("[health] generation {generation} exited with {:?}", status);
+                    saw_termination = true;
+                    retire_generation(&app_handle, generation).await;
                     break;
                 }
                 _ => {}
             }
         }
+        if !saw_termination {
+            retire_generation(&app_handle, generation).await;
+        }
     });
 
-    // The watchdog rides the worker: it exits when the worker it was started
-    // for is gone, so a respawn gets exactly one new watcher rather than
-    // stacking one per spawn.
+    // Wire termination before confinement. If assigning the kernel job fails,
+    // the same generation-aware kill barrier used at run time can then prove
+    // this process is gone before a retry is permitted to spawn another one.
+    let job = match confine_worker(pid) {
+        Ok(job) => job,
+        Err(error) => {
+            let _ = kill_locked(app).await;
+            return Err(format!("Failed to confine health worker memory: {error}"));
+        }
+    };
+    if let Ok(mut jobs) = state.jobs.lock() {
+        jobs.insert(generation, job);
+    }
+
     let watched = app.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(health_watch_interval()).await;
-            let running = watched
-                .state::<HealthEngineState>()
-                .child
-                .lock()
-                .await
-                .is_some();
-            if !running {
+            let state = watched.state::<HealthEngineState>();
+            if state.generation.load(Ordering::SeqCst) != generation
+                || state.child.lock().await.is_none()
+            {
                 break;
             }
-            enforce_deadline(&watched).await;
+            enforce_generation_deadline(&watched, generation).await;
         }
     });
 
+    Ok(generation)
+}
+
+/// Start the health worker and wire its stdout to the webview. Idempotent.
+pub async fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    let state = app.state::<HealthEngineState>();
+    let _lifecycle = state.lifecycle.lock().await;
+    start_locked(app).await?;
     Ok(())
 }
 
@@ -342,15 +566,18 @@ pub async fn send<R: Runtime>(
     label: &str,
     request: serde_json::Value,
 ) -> Result<(), String> {
-    start(app).await?;
-    let mut request = request;
-    let outer = crate::engine::route_with(&app.state::<HealthRouter>().0, label, &mut request);
-    let unroute = |app: &AppHandle<R>| {
-        if let Some(outer) = outer {
-            app.state::<HealthRouter>().0.take_route(outer);
-        }
-    };
     let state = app.state::<HealthEngineState>();
+    let _lifecycle = state.lifecycle.lock().await;
+    let _generation = start_locked(app).await?;
+    let mut request = request;
+    let outer = crate::engine::route_with(&app.state::<HealthRouter>().0, label, &mut request)
+        .ok_or_else(|| "Health request requires a non-null id".to_string())?;
+    let unroute = |app: &AppHandle<R>| {
+        app.state::<HealthRouter>().0.take_route(outer);
+        app.state::<HealthEngineState>()
+            .watchdog
+            .disarmed_request(outer);
+    };
     let mut guard = state.child.lock().await;
     let Some(child) = guard.as_mut() else {
         unroute(app);
@@ -363,20 +590,25 @@ pub async fn send<R: Runtime>(
             return Err(format!("Serialize error: {}", e));
         }
     };
+    // Arm BEFORE the write while the lifecycle lock excludes response routing.
+    // A fast reply therefore removes this exact entry after the write returns;
+    // it can never answer first and leave a phantom watchdog deadline behind.
+    state.watchdog.armed_request(outer, Instant::now());
     if let Err(e) = child.write((msg + "\n").as_bytes()) {
         unroute(app);
         return Err(format!("Failed to write to health worker: {}", e));
     }
-    drop(guard);
-    // Armed AFTER the write: the deadline measures the worker's time, not the
-    // time this command spent getting the bytes to it.
-    state.watchdog.armed(Instant::now());
     Ok(())
 }
 
 /// Drop a destroyed window's outstanding health requests.
 pub fn on_window_destroyed<R: Runtime>(app: &AppHandle<R>, label: &str) {
-    app.state::<HealthRouter>().0.drop_label(label);
+    let ids = app.state::<HealthRouter>().0.take_label(label);
+    for outer in ids {
+        app.state::<HealthEngineState>()
+            .watchdog
+            .disarmed_request(outer);
+    }
 }
 
 #[cfg(test)]
@@ -427,6 +659,19 @@ mod tests {
         // Only the second request is left, and it is 2s old at t=31.
         assert!(!dog.overdue(at(base, 31), HEALTH_DEADLINE));
         assert!(dog.overdue(at(base, 60), HEALTH_DEADLINE));
+    }
+
+    #[test]
+    fn an_out_of_order_answer_retires_only_its_own_deadline() {
+        let dog = Watchdog::new();
+        let base = Instant::now();
+        dog.armed_request(10, base);
+        dog.armed_request(11, at(base, 29));
+        dog.disarmed_request(11);
+        assert_eq!(dog.outstanding(), 1);
+        assert!(dog.overdue(at(base, 31), HEALTH_DEADLINE));
+        dog.disarmed_request(10);
+        assert_eq!(dog.outstanding(), 0);
     }
 
     #[test]

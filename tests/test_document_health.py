@@ -997,6 +997,52 @@ def test_one_dictionary_wider_than_the_object_cap_reports_the_limit(tmp_dir):
     assert report["status"] == "undetermined"
 
 
+def test_a_wrong_typed_field_member_is_undetermined(tmp_dir):
+    path = _typed_xfa_pdf(
+        os.path.join(tmp_dir, "xfa-field-member-int.pdf"),
+        xfa=lambda pdf: _packets(pdf, pikepdf.String("template")),
+        fields=lambda pdf: pikepdf.Array([42]),
+    )
+    report = document_health(path)
+    assert _codes(report, "document.xfaUnreadable")
+    assert _codes(report, "document.xfa") == []
+    assert report["status"] == "undetermined"
+
+
+def test_a_non_xml_xfa_packet_is_undetermined(tmp_dir):
+    path = _typed_xfa_pdf(
+        os.path.join(tmp_dir, "xfa-not-xml.pdf"),
+        xfa=lambda pdf: pikepdf.Array(
+            [pikepdf.String("template"), pdf.make_stream(b"not xml")]
+        ),
+        fields=_one_field,
+    )
+    report = document_health(path)
+    assert _codes(report, "document.xfaUnreadable")
+    assert report["status"] == "undetermined"
+
+
+def test_repeated_references_are_still_bounded_work_items(tmp_dir):
+    from engine.document_health import _MAX_RESOURCE_OBJECTS
+
+    path = os.path.join(tmp_dir, "repeated.pdf")
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    form = pdf.make_stream(b"")
+    form["/Subtype"] = pikepdf.Name.Form
+    form["/Resources"] = pikepdf.Dictionary()
+    entries = pikepdf.Dictionary()
+    for i in range(_MAX_RESOURCE_OBJECTS + 1):
+        entries[f"/X{i}"] = form
+    page.obj["/Resources"] = pikepdf.Dictionary(XObject=entries)
+    pdf.save(path)
+    pdf.close()
+
+    report = document_health(path)
+    assert len(_codes(report, "page.traversalLimit")) == 1
+    assert report["status"] == "undetermined"
+
+
 def test_a_page_just_under_the_object_cap_reports_no_limit(tmp_dir):
     from engine.document_health import _MAX_RESOURCE_OBJECTS
 

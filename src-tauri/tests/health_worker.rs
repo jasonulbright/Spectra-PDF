@@ -222,6 +222,11 @@ fn an_overdue_request_is_refused_the_worker_dies_and_the_next_request_respawns_i
         .get("result")
         .unwrap_or_else(|| panic!("the respawned worker did not answer: {answered}"));
     assert_eq!(
+        handle.state::<HealthEngineState>().watchdog.outstanding(),
+        0,
+        "a fast response left a phantom watchdog entry behind"
+    );
+    assert_eq!(
         result.get("status").and_then(|v| v.as_str()),
         Some("collected"),
         "unexpected health head: {result}"
@@ -260,13 +265,37 @@ fn an_overdue_request_is_refused_the_worker_dies_and_the_next_request_respawns_i
     assert!(alive(pid), "the worker answering requests is not running");
 
     assert!(tauri::async_runtime::block_on(health_engine::kill(&handle)));
-    // Termination is asynchronous; the assertion is that it happens, not that
-    // it has already happened when `kill` returns.
-    let give_up = Instant::now() + Duration::from_secs(30);
-    while alive(pid) && Instant::now() < give_up {
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    assert!(!alive(pid), "the health worker survived its kill (pid {pid})");
+    assert!(
+        !alive(pid),
+        "the kill barrier returned before the health worker died (pid {pid})"
+    );
+
+    // ── 4. Two windows cannot both win the check-then-spawn race ─────────
+    let before = handle.state::<HealthEngineState>().worker_generation();
+    let first = request(
+        4,
+        "document_health_begin",
+        serde_json::json!({ "file": file }),
+    );
+    let second = request(
+        5,
+        "document_health_begin",
+        serde_json::json!({ "file": file }),
+    );
+    let (sent_a, sent_b) = tauri::async_runtime::block_on(async {
+        tokio::join!(
+            health_engine::send(&handle, WINDOW, first),
+            health_engine::send(&handle, WINDOW, second),
+        )
+    });
+    sent_a.expect("first simultaneous send");
+    sent_b.expect("second simultaneous send");
+    assert_eq!(
+        handle.state::<HealthEngineState>().worker_generation(),
+        before + 1,
+        "simultaneous sends spawned more than one worker generation"
+    );
+    assert!(tauri::async_runtime::block_on(health_engine::kill(&handle)));
 
     std::env::remove_var(health_engine::HEALTH_WATCH_ENV);
 }
@@ -365,16 +394,9 @@ fn a_pre_kill_token_stepped_against_the_respawned_worker_reports_the_run_lost() 
         tauri::async_runtime::block_on(health_engine::kill(&handle)),
         "expected a running worker to kill"
     );
-    // `kill` does not wait for the OS to finish tearing the process down —
-    // spawning the replacement while the old one is still exiting can make
-    // the new spawn itself fail (observed: the respawned interpreter exits
-    // 1 immediately). Wait for the old pid to actually die before sending
-    // the next request, exactly as the sibling test does before asserting
-    // on `alive`.
-    let give_up = Instant::now() + Duration::from_secs(30);
-    while alive(old_pid) && Instant::now() < give_up {
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    // `kill` is a lifecycle barrier: it returns only after this generation's
+    // Terminated event. The immediate send below is deliberately not padded
+    // with a polling loop; that old workaround hid the respawn race.
     assert!(!alive(old_pid), "the pre-kill worker (pid {old_pid}) never exited");
 
     // ── 3. Step the PRE-KILL token against the newly respawned process ─────

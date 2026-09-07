@@ -421,8 +421,12 @@ def _identity(obj):
 # on: a bound checked on entering a recursive call is not checked again for
 # the 4 097th entry of the dictionary that call is looping over.
 _RESOURCES = "resources"
+_RESOURCE_KEYS = "resource-keys"
 _ENTRY = "entry"
 _APPEARANCE = "appearance"
+_ANNOTATIONS = "annotations"
+_ANNOTATION = "annotation"
+_APPEARANCE_STATES = "appearance-states"
 
 
 class _Walk:
@@ -439,7 +443,8 @@ class _Walk:
     """
 
     __slots__ = ("out", "page", "page_number", "frames", "visited",
-                 "not_decoded", "limited", "budget", "annotations_queued")
+                 "not_decoded", "limited", "budget", "annotations_queued",
+                 "items_seen")
 
     def __init__(self, out: list[dict], page_number: int, not_decoded: set,
                  limited: set, budget) -> None:
@@ -452,6 +457,7 @@ class _Walk:
         self.limited = limited
         self.budget = budget
         self.annotations_queued = False
+        self.items_seen = 0
 
     def push(self, frames) -> None:
         self.frames.extendleft(reversed(frames))
@@ -473,7 +479,19 @@ def _note_limit(walk: _Walk) -> None:
 
 def _read_stream(walk: _Walk, obj, level=None) -> bytes:
     """Read one stream and charge the run for what it decoded to."""
-    data = obj.read_raw_bytes() if level is None else obj.read_bytes(level)
+    if walk.budget is not None:
+        # Refuse a stream whose encoded bytes alone cannot fit before asking
+        # qpdf to materialize it. The decoded-size charge below remains the
+        # authoritative bound; this preflight prevents an already-known-large
+        # object from allocating before the budget gets a say.
+        raw_size = len(obj.get_raw_stream_buffer())
+        if raw_size > walk.budget.run_bytes_left:
+            raise _RunSpent()
+    data = (
+        obj.get_raw_stream_buffer()
+        if level is None
+        else obj.get_stream_buffer(level)
+    )
     if walk.budget is not None:
         walk.budget.take_bytes(len(data))
     return data
@@ -544,13 +562,28 @@ def _expand_resources(resources, depth: int, walk: _Walk) -> None:
     for category in ("/XObject", "/Pattern"):
         try:
             entries = resources.get(category)
-            names = list(entries.keys()) if entries is not None else []
+            names = iter(entries.keys()) if entries is not None else None
         except Exception as exc:
             _unreadable(walk, exc)
             continue
-        for name in names:
-            queued.append((_ENTRY, entries, name, depth))
+        if names is not None:
+            queued.append((_RESOURCE_KEYS, entries, names, depth))
     walk.push(queued)
+
+
+def _visit_resource_keys(entries, names, depth: int, walk: _Walk) -> None:
+    """Queue one dictionary entry and retain the iterator for the next step."""
+    try:
+        name = next(names)
+    except StopIteration:
+        return
+    except Exception as exc:
+        _unreadable(walk, exc)
+        return
+    walk.push([
+        (_ENTRY, entries, name, depth),
+        (_RESOURCE_KEYS, entries, names, depth),
+    ])
 
 
 def _visit_entry(entries, name, depth: int, walk: _Walk) -> None:
@@ -581,38 +614,60 @@ def _visit_entry(entries, name, depth: int, walk: _Walk) -> None:
         walk.push([(_RESOURCES, nested, None, depth + 1)])
 
 
-def _annotation_appearances(page, walk: _Walk) -> list:
-    """The normal appearance streams the page renders its annotations through.
-
-    Only ``/AP`` ``/N`` — the appearance a page draws with. Down and rollover
-    appearances are drawn during interaction, not as part of the page. A
-    sub-dictionary holds one stream per appearance STATE and each of them is an
-    appearance this page can draw, so all of them are returned.
-    """
-    found: list = []
+def _queue_annotations(page, walk: _Walk) -> None:
+    """Queue an iterator, not a materialized copy, over page annotations."""
     if page is None:
-        return found
+        return
     try:
         annots = page.obj.get("/Annots")
-        items = list(annots) if annots is not None else []
+        items = iter(annots) if annots is not None else None
     except Exception as exc:
         _unreadable(walk, exc)
-        return found
-    for annot in items:
-        try:
-            appearance = annot.get("/AP")
-            normal = appearance.get("/N") if appearance is not None else None
-            if normal is None:
-                continue
-            if isinstance(normal, pikepdf.Dictionary) and "/Subtype" not in normal:
-                states = [(str(key).lstrip("/"), normal[key]) for key in normal.keys()]
-            else:
-                states = [("", normal)]
-            for state_name, stream in states:
-                found.append((_APPEARANCE, stream, state_name, 1))
-        except Exception as exc:
-            _unreadable(walk, exc)
-    return found
+        return
+    if items is not None:
+        walk.push([(_ANNOTATIONS, items, None, 1)])
+
+
+def _visit_annotations(items, depth: int, walk: _Walk) -> None:
+    try:
+        annot = next(items)
+    except StopIteration:
+        return
+    except Exception as exc:
+        _unreadable(walk, exc)
+        return
+    walk.push([(_ANNOTATION, annot, None, depth),
+               (_ANNOTATIONS, items, None, depth)])
+
+
+def _visit_annotation(annot, depth: int, walk: _Walk) -> None:
+    """Queue one annotation's normal appearance without copying its states."""
+    try:
+        appearance = annot.get("/AP")
+        normal = appearance.get("/N") if appearance is not None else None
+        if normal is None:
+            return
+        if isinstance(normal, pikepdf.Dictionary) and "/Subtype" not in normal:
+            walk.push([(_APPEARANCE_STATES, normal, iter(normal.keys()), depth)])
+        else:
+            walk.push([(_APPEARANCE, normal, "", depth)])
+    except Exception as exc:
+        _unreadable(walk, exc)
+
+
+def _visit_appearance_states(states, names, depth: int, walk: _Walk) -> None:
+    try:
+        name = next(names)
+        stream = states[name]
+    except StopIteration:
+        return
+    except Exception as exc:
+        _unreadable(walk, exc)
+        return
+    walk.push([
+        (_APPEARANCE, stream, str(name).lstrip("/"), depth),
+        (_APPEARANCE_STATES, states, names, depth),
+    ])
 
 
 def _visit_appearance(appearance, name, depth: int, walk: _Walk) -> None:
@@ -646,7 +701,7 @@ def _advance_page(walk: _Walk) -> bool:
             if walk.annotations_queued:
                 return False
             walk.annotations_queued = True
-            walk.push(_annotation_appearances(walk.page, walk))
+            _queue_annotations(walk.page, walk)
             if not walk.frames:
                 return False
         if moved and walk.budget is not None and walk.budget.step_spent():
@@ -654,18 +709,28 @@ def _advance_page(walk: _Walk) -> bool:
         # Checked BEFORE the item, not on entering a branch: a dictionary with
         # 4 097 direct entries is 4 097 items, and a cap tested once per
         # recursive call never sees the 4 097th.
-        if len(walk.visited) >= _MAX_RESOURCE_OBJECTS:
-            _note_limit(walk)
-            walk.frames.clear()
-            return False
         if walk.budget is not None:
             walk.budget.take_item()
         kind, obj, name, depth = walk.frames.popleft()
         moved = True
+        if kind in (_ENTRY, _APPEARANCE, _ANNOTATION):
+            if walk.items_seen >= _MAX_RESOURCE_OBJECTS:
+                _note_limit(walk)
+                walk.frames.clear()
+                return False
+            walk.items_seen += 1
         if kind == _RESOURCES:
             _expand_resources(obj, depth, walk)
+        elif kind == _RESOURCE_KEYS:
+            _visit_resource_keys(obj, name, depth, walk)
         elif kind == _ENTRY:
             _visit_entry(obj, name, depth, walk)
+        elif kind == _ANNOTATIONS:
+            _visit_annotations(obj, depth, walk)
+        elif kind == _ANNOTATION:
+            _visit_annotation(obj, depth, walk)
+        elif kind == _APPEARANCE_STATES:
+            _visit_appearance_states(obj, name, depth, walk)
         else:
             _visit_appearance(obj, name, depth, walk)
 
@@ -712,7 +777,7 @@ def _start_page(pdf, index: int, out: list[dict], not_decoded: set, limited: set
     return walk
 
 
-def _document_facts(pdf) -> list[dict]:
+def _document_facts(pdf, budget: _Budget | None = None) -> list[dict]:
     """Document-level constructs the app does not render as authored."""
     out: list[dict] = []
     try:
@@ -734,7 +799,34 @@ def _document_facts(pdf) -> list[dict]:
         # ONE strict reading of the declaration, typed against the clauses that
         # give each of its values a type. Absent, malformed and dynamic are
         # three different answers and only one of them is "no form".
-        found = xfa.inspect(pdf)
+        def packet_item() -> None:
+            if budget is None:
+                return
+            try:
+                budget.take_item()
+            except _RunSpent as exc:
+                raise xfa.InspectionInterrupted() from exc
+
+        def read_packet(stream) -> bytes:
+            if budget is not None:
+                raw_size = len(stream.get_raw_stream_buffer())
+                if raw_size > budget.run_bytes_left:
+                    raise xfa.InspectionInterrupted()
+            data = bytes(stream.get_stream_buffer(pikepdf.StreamDecodeLevel.generalized))
+            if budget is not None:
+                try:
+                    budget.take_bytes(len(data))
+                except _RunSpent as exc:
+                    raise xfa.InspectionInterrupted() from exc
+            return data
+
+        found = xfa.inspect(
+            pdf,
+            read_stream=read_packet,
+            take_item=packet_item if budget is not None else None,
+        )
+    except xfa.InspectionInterrupted as exc:
+        raise _RunSpent() from exc
     except Exception as exc:
         return [_fact("undetermined", "warning", "engine",
                       "document.xfaUnreadable", params=_error_params(exc))]
@@ -899,7 +991,7 @@ def document_health_step(token: str) -> dict:
     try:
         if not run.document_done:
             run.document_done = True
-            facts.extend(_document_facts(run.pdf))
+            facts.extend(_document_facts(run.pdf, run.budget))
         if run.cursor < run.pages:
             read = 0
             while run.cursor < run.pages and read < _STEP_PAGES:
