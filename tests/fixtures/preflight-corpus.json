@@ -2410,6 +2410,114 @@
       }
     },
     {
+      "path": "tests/fixtures/health/broken-appearance.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "needs_review",
+        "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          5,
+          0,
+          1,
+          1,
+          31
+        ],
+        "web_offset_heatset": [
+          5,
+          0,
+          1,
+          1,
+          31
+        ],
+        "newsprint": [
+          5,
+          0,
+          1,
+          1,
+          31
+        ],
+        "digital_printing": [
+          4,
+          0,
+          1,
+          1,
+          32
+        ],
+        "large_format": [
+          4,
+          0,
+          1,
+          1,
+          32
+        ],
+        "pdfx_1a": [
+          9,
+          5,
+          1,
+          1,
+          22
+        ],
+        "pdfx_3": [
+          9,
+          5,
+          1,
+          1,
+          22
+        ],
+        "pdfx_4": [
+          7,
+          5,
+          1,
+          1,
+          24
+        ],
+        "office_print": [
+          3,
+          0,
+          0,
+          0,
+          35
+        ]
+      }
+    },
+    {
       "path": "tests/fixtures/health/broken-content.pdf",
       "verdicts": {
         "pdf_version": "pass",
@@ -2514,6 +2622,114 @@
           0,
           0,
           35
+        ]
+      }
+    },
+    {
+      "path": "tests/fixtures/health/broken-form-content.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "needs_review",
+        "image_min_dpi_bitonal": "needs_review",
+        "image_max_dpi": "needs_review",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "needs_review",
+        "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          5,
+          0,
+          1,
+          4,
+          28
+        ],
+        "web_offset_heatset": [
+          5,
+          0,
+          1,
+          4,
+          28
+        ],
+        "newsprint": [
+          5,
+          0,
+          1,
+          4,
+          28
+        ],
+        "digital_printing": [
+          4,
+          0,
+          1,
+          4,
+          29
+        ],
+        "large_format": [
+          4,
+          0,
+          1,
+          4,
+          29
+        ],
+        "pdfx_1a": [
+          9,
+          5,
+          1,
+          4,
+          19
+        ],
+        "pdfx_3": [
+          9,
+          5,
+          1,
+          4,
+          19
+        ],
+        "pdfx_4": [
+          7,
+          5,
+          1,
+          3,
+          22
+        ],
+        "office_print": [
+          3,
+          0,
+          0,
+          2,
+          33
         ]
       }
     },
@@ -2730,6 +2946,114 @@
           1,
           0,
           34
+        ]
+      }
+    },
+    {
+      "path": "tests/fixtures/health/owner-encrypted.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          6,
+          0,
+          1,
+          0,
+          31
+        ],
+        "web_offset_heatset": [
+          6,
+          0,
+          1,
+          0,
+          31
+        ],
+        "newsprint": [
+          6,
+          0,
+          1,
+          0,
+          31
+        ],
+        "digital_printing": [
+          5,
+          0,
+          1,
+          0,
+          32
+        ],
+        "large_format": [
+          5,
+          0,
+          1,
+          0,
+          32
+        ],
+        "pdfx_1a": [
+          9,
+          6,
+          1,
+          0,
+          22
+        ],
+        "pdfx_3": [
+          9,
+          6,
+          1,
+          0,
+          22
+        ],
+        "pdfx_4": [
+          7,
+          6,
+          1,
+          0,
+          24
+        ],
+        "office_print": [
+          3,
+          0,
+          0,
+          0,
+          35
         ]
       }
     },
