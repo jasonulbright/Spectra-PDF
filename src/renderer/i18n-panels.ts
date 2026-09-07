@@ -3197,6 +3197,52 @@ export const PANEL_STRINGS = {
   'panel.sanitize.done_one': '{{count}} category removed. Undo puts it back.',
   'panel.sanitize.done_other': '{{count}} categories removed. Undo puts them back.',
   'panel.sanitize.declined': 'Nothing was changed.',
+
+  // -- Document health ledger -------------------------------------------
+  // Ask-first observability: what the readers REPORTED about this document,
+  // said only when the reader opens the panel. Fact messages carry no
+  // placeholders on purpose - the font name, the object name and the reader's
+  // own detail are DATA, rendered beside the sentence rather than inside it,
+  // so a translation can never drop a value it did not expect.
+  'panel.health.title': 'Document health',
+  'panel.health.recheck': 'Re-check',
+  'panel.health.checking': 'Checking…',
+  'panel.health.noEvidence':
+    'Nothing has been checked for this version of the document yet.',
+  'panel.health.healthy': 'Both readers finished and reported nothing.',
+  'panel.health.undetermined':
+    'Something could not be read, so the state of this document is unknown.',
+  'panel.health.page': 'Page {{page}}',
+  'panel.health.goToPage': 'Go to page {{page}}',
+  'panel.health.repairHint': 'This is a report only — nothing here changes the document.',
+  'panel.health.boundary.pdfjs': 'Viewer',
+  'panel.health.boundary.qpdf': 'File structure',
+  'panel.health.boundary.engine': 'Document engine',
+  'panel.health.kind.recovered': 'Recovered structure',
+  'panel.health.kind.font': 'Fonts',
+  'panel.health.kind.skipped': 'Skipped or unreadable',
+  'panel.health.kind.undetermined': 'Could not be determined',
+  'panel.health.code.xrefReconstructed':
+    'The cross-reference table was damaged and had to be rebuilt before this document could be read.',
+  'panel.health.code.structureRepaired':
+    'Damaged structure was worked around while this document was read.',
+  'panel.health.code.fontNotEmbedded':
+    'This font is not embedded in the document, so a substitute face stands in for it.',
+  'panel.health.code.fontSubstituted':
+    'The viewer found no embedded program for this font and drew a substitute face.',
+  'panel.health.code.fontUnreadable':
+    'This font could not be read, so whether it is embedded is unknown.',
+  'panel.health.code.pageMediaBoxMissing': 'This page declares no page size.',
+  'panel.health.code.pageContentUnreadable':
+    'This page’s content could not be read, so part of it is not drawn.',
+  'panel.health.code.pageImageUnreadable': 'An image on this page could not be read.',
+  'panel.health.code.documentXfa':
+    'This document holds an XML form, which is shown as its plain form fields instead.',
+  'panel.health.code.documentEncrypted':
+    'This document is protected, so it could not be examined in full.',
+  'panel.health.code.documentUnreadable': 'This document could not be examined.',
+  'panel.health.code.partUnreadable': 'Part of this document could not be read.',
+  'panel.health.code.unknown': 'A reader reported something this version does not recognize.',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;

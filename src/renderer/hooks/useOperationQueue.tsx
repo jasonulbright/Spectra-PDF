@@ -129,6 +129,13 @@ const INTERNAL_METHODS = new Set([
   // just for showing a form's fields (the get_pdf_version/measure_text_box
   // hazard). Fills still go through the gated `fill_form_fields`.
   'read_form_fields',
+  // The document-health ledger's collection, driven by every buffer change
+  // for every open document (the read_form_fields case exactly). It reads the
+  // working copy and writes nothing; gating it would flush the user's pending
+  // page edits to disk merely because a document was opened, and queueing it
+  // would put a passive check in front of the user's actual work in the
+  // serial engine queue.
+  'document_health',
   // Reading /PageLabels to seed the editor panel — a lookup, not an edit;
   // set_page_labels stays gated.
   'get_page_labels',

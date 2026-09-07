@@ -38,7 +38,7 @@ batch_ocr.placeModeTakesDestination	exact	batch_ocr,guided_actions,preflight_swe
 batch_ocr.sourceDestinationSameFile	exact	batch_ocr	source and destination are the same file
 batch_ocr.sourceFolderFound	pattern	batch_ocr,create_pdf_folders,guided_actions,preflight_sweep	Source folder not found: {{source}}
 budget.timeBudgetNeedsPositive	exact	budget	a time budget needs a positive floor
-check.fileFound	pattern	check,rebuild,recognize,recover,repair	File not found: {{file}}
+check.fileFound	pattern	check,document_health,rebuild,recognize,recover,repair	File not found: {{file}}
 clause_map.checkCitesClause	pattern	clause_map	No check cites a clause of {{part}}.
 color_spaces.expectedNumberGotProcedure	exact	color_spaces	expected number, got procedure
 comment_summary.commentColumnDoesFit	pattern	comment_summary	the comment column does not fit the sheet: {{gutter}}

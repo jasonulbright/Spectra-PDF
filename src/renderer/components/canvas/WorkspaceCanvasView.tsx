@@ -10,7 +10,9 @@ import React, {
 import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
 import { usePdfProxyState } from '../../hooks/usePdfProxies';
 import { isUnrenderable } from '../../lib/render-health';
-import { tabFiles } from '../../state/selectors';
+import { showableFile, tabFiles } from '../../state/selectors';
+import { useDocumentHealth } from '../../hooks/useDocumentHealth';
+import { factsFor, isCollecting, verdictFor } from '../../lib/doc-health';
 import { useFlipReorder } from '../../hooks/useFlipReorder';
 import { computeLayout, computeDropTarget, betweenSlotY, BASE_PAGE_HEIGHT, MIN_DOC_WIDTH } from '../../canvas/layout';
 import { usePageDrag } from '../../canvas/usePageDrag';
@@ -973,6 +975,41 @@ export function WorkspaceCanvasView({
   const [signError, setSignError] = useState<string | null>(null);
   const [signDone, setSignDone] = useState<{ signer: string | null; output: string; ok: boolean } | null>(null);
   const { call: engineCall, callRaw: engineCallRaw } = useEngine();
+
+  // -- Document health ledger -------------------------------------------
+  // Ask-first observability. Collection runs per set of bytes for every open
+  // document; only the focused one is REPORTED, because the indicator sits
+  // beside the document it describes.
+  const { ledger: healthLedger, recheck: recheckHealth } = useDocumentHealth(
+    state.files,
+    engineCall,
+  );
+  const healthFile = showableFile(state);
+  // The focused file's pages in workspace order, across every partition it
+  // holds. A fact's page is an INDEX into the file as the readers saw it, so a
+  // page link is offered only while that order still stands: pending page
+  // edits reorder and delete WITHOUT replacing the buffer the facts were filed
+  // under, so an index would then name a different page. Links go quiet until
+  // the edits commit — which replaces the buffer, retires the row and
+  // re-collects. Resolved to an id at click time and never stored: page ids
+  // are generation-tagged and a kept one could re-bind after any commit.
+  const healthPages = useMemo(() => {
+    if (!healthFile || state.pageDirtyPaths.includes(healthFile.path)) return [];
+    return docs.filter((d) => d.path === healthFile.path).flatMap((d) => d.pages);
+  }, [docs, healthFile, state.pageDirtyPaths]);
+  const healthProps = healthFile
+    ? {
+        verdict: verdictFor(healthLedger, healthFile.path, healthFile.buffer),
+        facts: factsFor(healthLedger, healthFile.path, healthFile.buffer),
+        collecting: isCollecting(healthLedger, healthFile.path, healthFile.buffer),
+        pageCount: healthPages.length,
+        onGoToPage: (index: number): void => {
+          const page = healthPages[index];
+          if (page) activeCanvasHandle()?.centerOn(page.id);
+        },
+        onRecheck: (): void => recheckHealth(healthFile.path),
+      }
+    : undefined;
 
   // View-tier scanned-page recognition. Latched rather than
   // re-read per render, and subscribed so the preference takes effect on the
@@ -7327,6 +7364,7 @@ export function WorkspaceCanvasView({
       {(!state.ui.readingMode || dirty || pendingFormCount > 0 || liveMarks.length > 0) && (
         <CanvasStatusBar
           docViewMode={docViewMode}
+          health={healthProps}
           otherWindowWork={otherWindowWork}
           snap={snapSettings}
           snapScaleUnit={measureScale.toUnit}

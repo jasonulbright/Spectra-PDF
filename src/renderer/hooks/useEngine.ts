@@ -77,6 +77,11 @@ export interface EngineResult {
   updated_fields: string[];
   issues: { severity: string; message: string; type: string; category: string }[];
   issues_found: unknown[];
+  /** document_health: the read-only health facts for one document, and
+   * whether every traversal ran to the end. Parsed (never trusted raw) by
+   * `lib/doc-health-engine.ts`. */
+  facts: unknown[];
+  status: string;
   summary: { errors: number; warnings: number };
 }
 

@@ -10,6 +10,10 @@ import {
   SNAP_RADIUS_MIN,
   type SnapSettings,
 } from '../../lib/snap-settings';
+import {
+  DocumentHealthSegment,
+  type DocumentHealthSegmentProps,
+} from './DocumentHealthSegment';
 
 // The docked status bar.
 // Replaces the floating bottom-right cluster: view state (page box, zoom,
@@ -286,6 +290,10 @@ interface CanvasStatusBarProps {
   /** Slice B: the live measuring scale's reported unit, for the grid rows. */
   snapScaleUnit?: MeasureUnit;
   onSnapChange?: (next: SnapSettings) => void;
+  /** The ask-first document-health indicator. Absent where there is no
+   * document to report on (the Organize board reports per file, not per
+   * focused document). */
+  health?: DocumentHealthSegmentProps;
 }
 
 export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element {
@@ -440,6 +448,7 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
           onChange={props.onSnapChange}
         />
       )}
+      {props.health && <DocumentHealthSegment {...props.health} />}
       <button
         type="button"
         data-testid="toggle-comments"
