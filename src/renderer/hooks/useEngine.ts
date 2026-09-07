@@ -4,6 +4,7 @@ import { EngineError } from '../lib/engine-messages';
 import { runCommitGate } from '../lib/commit-gate';
 import { lockKeysFor, withFileLock } from '../lib/engine-lock';
 import { useOperationQueue, isTrackableMethod } from './useOperationQueue';
+import { submitIdle, trackInteractive } from '../lib/engine-idle-lane';
 
 interface PendingRequest {
   resolve: (value: EngineResult) => void;
@@ -128,7 +129,7 @@ export function useEngine() {
     };
   }, []);
 
-  const rawCall = useCallback(async (method: string, params: Record<string, unknown> = {}): Promise<EngineResult> => {
+  const dispatch = useCallback((method: string, params: Record<string, unknown>): Promise<EngineResult> => {
     const id = nextEngineRequestId++;
     const request = { jsonrpc: '2.0', method, params, id };
 
@@ -140,6 +141,13 @@ export function useEngine() {
       });
     });
   }, []);
+
+  // Every request a user's action produced is counted while it is outstanding,
+  // which is what the idle lane waits on. The engine reads one request at a
+  // time and cannot be preempted, so the only place a background sweep can be
+  // kept out of the way is BEFORE it is handed over.
+  const rawCall = useCallback((method: string, params: Record<string, unknown> = {}): Promise<EngineResult> =>
+    trackInteractive(() => dispatch(method, params)), [dispatch]);
 
   const call = useCallback(async (method: string, params: Record<string, unknown> = {}): Promise<EngineResult> => {
     if (isTrackableMethod(method)) {
@@ -162,6 +170,16 @@ export function useEngine() {
     return rawCall(method, params);
   }, [rawCall, track]);
 
+  // Background work nobody asked for: a passive, read-only lookup driven by a
+  // document changing rather than by a user. It waits for the engine to be
+  // idle, runs one at a time, and is dropped unsubmitted when `isCurrent`
+  // stops holding. Resolves to `null` for a run that was never sent.
+  const callIdle = useCallback(
+    (method: string, params: Record<string, unknown>, isCurrent: () => boolean) =>
+      submitIdle(() => dispatch(method, params), isCurrent),
+    [dispatch],
+  );
+
   const openFiles = useCallback(() => dialog.openFiles(), []);
   const saveFile = useCallback((defaultPath?: string) =>
     dialog.saveFile({ defaultPath }), []);
@@ -174,5 +192,5 @@ export function useEngine() {
   // exists to prevent. Batch reads ORIGINAL paths (not working copies), so
   // neither concern applies — and gating there would side-effect-commit the
   // user's unrelated pending page edits mid-batch.
-  return { call, callRaw: rawCall, openFiles, saveFile, ready };
+  return { call, callRaw: rawCall, callIdle, openFiles, saveFile, ready };
 }

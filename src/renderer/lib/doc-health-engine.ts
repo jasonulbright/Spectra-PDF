@@ -62,11 +62,18 @@ function parseFact(value: unknown): HealthFact {
   };
 }
 
-/** Parse a `document_health` reply. */
+const STATUSES: readonly string[] = ['collected', 'undetermined'];
+
+/** Parse a `document_health` reply.
+ *
+ * A reply whose `status` is missing or is not one of the enumerated values is
+ * NOT ok: the engine states whether its traversals ran to the end, and a reply
+ * that does not state it cannot be read as one that ran to the end. */
 export function parseEngineHealth(result: unknown): EngineHealthReply {
   const raw = asRecord(result);
-  const ok = raw !== null && Array.isArray(raw.facts);
+  const stated = typeof raw?.status === 'string' && STATUSES.includes(raw.status);
+  const ok = raw !== null && Array.isArray(raw.facts) && stated;
   const facts = ok ? (raw!.facts as unknown[]).map(parseFact) : [];
-  const status = raw?.status === 'collected' ? 'collected' : 'undetermined';
+  const status = stated && raw!.status === 'collected' ? 'collected' : 'undetermined';
   return { ok, status, facts };
 }

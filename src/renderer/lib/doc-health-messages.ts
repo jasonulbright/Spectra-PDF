@@ -20,6 +20,7 @@ const CODE_KEYS: Readonly<Record<string, UiKey>> = {
   'page.contentUnreadable': 'panel.health.code.pageContentUnreadable',
   'page.imageUnreadable': 'panel.health.code.pageImageUnreadable',
   'document.xfa': 'panel.health.code.documentXfa',
+  'document.imagesNotDecoded': 'panel.health.code.imagesNotDecoded',
   'document.encrypted': 'panel.health.code.documentEncrypted',
   'document.unreadable': 'panel.health.code.documentUnreadable',
   'document.metadataUnreadable': 'panel.health.code.partUnreadable',
@@ -28,6 +29,11 @@ const CODE_KEYS: Readonly<Record<string, UiKey>> = {
   // them rather than four that read the same.
   'page.unreadable': 'panel.health.code.partUnreadable',
   'page.resourcesUnreadable': 'panel.health.code.partUnreadable',
+  'document.acroFormUnreadable': 'panel.health.code.partUnreadable',
+  'document.xfaUnreadable': 'panel.health.code.partUnreadable',
+  // The reader said something no rule here classifies. That is exactly what
+  // `unknown` states, so it is the same sentence rather than a second one.
+  'qpdf.unclassifiedWarning': 'panel.health.code.unknown',
   'pages.unreadable': 'panel.health.code.partUnreadable',
   'fonts.unenumerable': 'panel.health.code.partUnreadable',
   'warnings.unreadable': 'panel.health.code.partUnreadable',

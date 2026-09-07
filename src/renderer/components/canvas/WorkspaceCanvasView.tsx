@@ -974,7 +974,7 @@ export function WorkspaceCanvasView({
   const [signingBusy, setSigningBusy] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   const [signDone, setSignDone] = useState<{ signer: string | null; output: string; ok: boolean } | null>(null);
-  const { call: engineCall, callRaw: engineCallRaw } = useEngine();
+  const { call: engineCall, callRaw: engineCallRaw, callIdle: engineCallIdle } = useEngine();
 
   // -- Document health ledger -------------------------------------------
   // Ask-first observability. Collection runs per set of bytes for every open
@@ -982,7 +982,7 @@ export function WorkspaceCanvasView({
   // beside the document it describes.
   const { ledger: healthLedger, recheck: recheckHealth } = useDocumentHealth(
     state.files,
-    engineCall,
+    engineCallIdle,
   );
   const healthFile = showableFile(state);
   // The focused file's pages in workspace order, across every partition it

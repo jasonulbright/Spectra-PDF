@@ -16,6 +16,12 @@ health ledger has to report:
     A one-page document whose content stream is not a parseable sequence of
     operators, so the page's content will not read while everything around it
     does.
+
+``form-hosted-image.pdf``
+    A one-page document whose only damaged image is not on the page: the page
+    draws a Form XObject, and the image with the undecodable filter lives in
+    THAT form's resources. A traversal that reads only the page's own
+    ``/XObject`` entries reports this document as clean.
 """
 
 import io
@@ -89,11 +95,39 @@ def _broken_content() -> bytes:
     return bytes(out)
 
 
+def _form_hosted_image() -> bytes:
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    image = pdf.make_stream(b"these bytes decode under no filter")
+    image["/Type"] = pikepdf.Name.XObject
+    image["/Subtype"] = pikepdf.Name.Image
+    image["/Width"] = 8
+    image["/Height"] = 8
+    image["/ColorSpace"] = pikepdf.Name.DeviceGray
+    image["/BitsPerComponent"] = 8
+    image["/Filter"] = pikepdf.Name("/NoSuchDecode")
+    form = pdf.make_stream(b"q 8 0 0 8 0 0 cm /Im0 Do Q")
+    form["/Type"] = pikepdf.Name.XObject
+    form["/Subtype"] = pikepdf.Name.Form
+    form["/BBox"] = pikepdf.Array([0, 0, 8, 8])
+    form["/Resources"] = pikepdf.Dictionary(
+        XObject=pikepdf.Dictionary(Im0=pdf.make_indirect(image))
+    )
+    page.obj["/Resources"] = pikepdf.Dictionary(
+        XObject=pikepdf.Dictionary(Fm0=pdf.make_indirect(form))
+    )
+    page.contents_add(pikepdf.Stream(pdf, b"q 100 0 0 100 50 50 cm /Fm0 Do Q"))
+    buf = io.BytesIO()
+    pdf.save(buf)
+    return buf.getvalue()
+
+
 def main() -> None:
     (HERE / "damaged-xref.pdf").write_bytes(
         _break_startxref(_one_page_with_unembedded_font())
     )
     (HERE / "broken-content.pdf").write_bytes(_broken_content())
+    (HERE / "form-hosted-image.pdf").write_bytes(_form_hosted_image())
 
 
 if __name__ == "__main__":

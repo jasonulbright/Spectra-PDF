@@ -233,6 +233,33 @@ describe('the engine reply parser', () => {
     expect(parseEngineHealth({ status: 'collected' }).ok).toBe(false);
   });
 
+  it('a reply that states no status is not ok, however clean its facts look', () => {
+    // The engine says whether its traversals finished. A reply that does not
+    // say it is not a reply saying they did.
+    for (const reply of [
+      { facts: [] },
+      { status: 'fine', facts: [] },
+      { status: 7, facts: [] },
+      { status: null, facts: [] },
+    ]) {
+      const parsed = parseEngineHealth(reply);
+      expect(parsed.ok, JSON.stringify(reply)).toBe(false);
+      expect(parsed.status, JSON.stringify(reply)).toBe('undetermined');
+    }
+  });
+
+  it('an undetermined reply with no facts is a stated verdict, not a clean one', () => {
+    const parsed = parseEngineHealth({ status: 'undetermined', facts: [] });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.status).toBe('undetermined');
+    // The caller records that as a FAILED run: an engine that could not
+    // finish reported no facts BECAUSE it stopped.
+    let l = beginCollection(EMPTY_HEALTH_LEDGER, '/a.pdf', A);
+    l = recordCollection(l, '/a.pdf', A, 'engine', 'failed', parsed.facts);
+    l = recordCollection(l, '/a.pdf', A, 'pdfjs', 'collected', []);
+    expect(verdictFor(l, '/a.pdf', A)).toBe('undetermined');
+  });
+
   it('drops params that are not scalar values', () => {
     const parsed = parseEngineHealth({
       status: 'collected',
@@ -250,6 +277,7 @@ describe('codes map to catalog keys, never to sentences', () => {
       'page.imageUnreadable', 'document.xfa', 'document.encrypted', 'document.unreadable',
       'document.metadataUnreadable', 'page.unreadable', 'page.resourcesUnreadable',
       'pages.unreadable', 'fonts.unenumerable', 'warnings.unreadable',
+      'document.imagesNotDecoded', 'document.acroFormUnreadable', 'document.xfaUnreadable',
     ];
     for (const code of codes) {
       expect(healthMessageKey(code), code).not.toBe('panel.health.code.unknown');
@@ -259,6 +287,13 @@ describe('codes map to catalog keys, never to sentences', () => {
 
   it('an unknown code degrades to "something was reported", not to silence', () => {
     expect(healthMessageKey('from.a.newer.engine')).toBe('panel.health.code.unknown');
+  });
+
+  it('an unclassified reader warning says exactly that, and no more', () => {
+    expect(healthMessageKey('qpdf.unclassifiedWarning')).toBe('panel.health.code.unknown');
+    expect(healthMessageKey('qpdf.unclassifiedWarning')).not.toBe(
+      healthMessageKey('structure.repaired'),
+    );
   });
 
   it('boundary and kind labels come from the catalog too', () => {

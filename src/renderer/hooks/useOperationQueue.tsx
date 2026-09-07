@@ -134,7 +134,10 @@ const INTERNAL_METHODS = new Set([
   // working copy and writes nothing; gating it would flush the user's pending
   // page edits to disk merely because a document was opened, and queueing it
   // would put a passive check in front of the user's actual work in the
-  // serial engine queue.
+  // serial engine queue. The collection itself runs in the engine's idle lane
+  // (`lib/engine-idle-lane.ts`), which is what keeps it out of the FIFO ahead
+  // of an interactive request; the row here holds if anything ever reaches it
+  // through the gated path.
   'document_health',
   // Reading /PageLabels to seed the editor panel — a lookup, not an edit;
   // set_page_labels stays gated.
