@@ -46,6 +46,9 @@ export function walkMissing(
   chars: readonly string[],
   singles: ReadonlySet<string>,
   sequences: readonly string[],
+  /** Skip the characters a paragraph never hands to a font: the word gap
+   *  (which the engine may express as a positioned kern instead) and the
+   *  hard line break (which draws nothing at all). */
   skipSpaces: boolean,
 ): string[] {
   const seqs = [...sequences].filter((q) => q.length > 1).sort((a, b) => b.length - a.length);
@@ -53,7 +56,7 @@ export function walkMissing(
   let i = 0;
   while (i < chars.length) {
     const ch = chars[i];
-    if (skipSpaces && ch === ' ') {
+    if (skipSpaces && (ch === ' ' || ch === '\n')) {
       i += 1;
       continue;
     }

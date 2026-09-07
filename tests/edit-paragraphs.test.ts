@@ -203,8 +203,9 @@ describe('relaxUnencodableSpans (position-aware relaxation)', () => {
 });
 
 describe('sanitizeParagraphInput', () => {
-  it('newlines become spaces', () => {
-    expect(sanitizeParagraphInput('a\r\nb\nc')).toBe('a b c');
+  it('keeps newlines as hard breaks, normalizing the carriage return', () => {
+    expect(sanitizeParagraphInput('a\r\nb\nc')).toBe('a\nb\nc');
+    expect(sanitizeParagraphInput('a\rb')).toBe('a\nb');
   });
 });
 

@@ -5784,6 +5784,24 @@ function ParagraphEditor({
         // Enter/Escape at the WRAPPER so they work from EVERY control
         // (the size/colour inputs, not just the textarea — regression
         // that Escape did nothing while a control had focus).
+        if (e.key === 'Enter' && e.shiftKey) {
+          // Shift+Enter is a HARD LINE BREAK inside the paragraph — the one
+          // thing plain Enter cannot be, since it already means commit (caret
+          // at an end) or split (caret inside). The newline is written into
+          // `value` here rather than left to the browser, which inserts a
+          // <br> that `textContent` would not read back as a character.
+          e.preventDefault();
+          const area = areaRef.current;
+          if (!area || !(e.target === area || area.contains(e.target as Node))) return;
+          const sel = readEditorSelection(area);
+          if (!sel) return;
+          const chars = Array.from(value);
+          applyText(
+            [...chars.slice(0, sel.start), '\n', ...chars.slice(sel.end)].join(''),
+            sel.start + 1,
+          );
+          return;
+        }
         if (e.key === 'Enter') {
           e.preventDefault(); // also stops a newline in the textarea
           // split: Enter with the caret strictly INSIDE the textarea's

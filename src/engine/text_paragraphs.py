@@ -89,12 +89,15 @@ RISE_ATTACH_EM = 0.5  # near-baseline offset attach window (× line size)
 RISE_SIZE_RATIO = 0.8  # …and the risen run must be smaller than the line
 COLUMN_GAP_EM = 1.5  # a larger same-baseline gap splits line pieces
 WORD_GAP_FRACTION = 0.5  # of the span font's space width → synthetic space
+SPACE_ADVANCE_MIN_1000 = 1.0  # below this a space code advances nothing
 FALLBACK_SPACE_1000 = 250.0  # space-less fonts: nominal space width
 DEFAULT_WORD_GAP_1000 = 250.0  # emission gap when a paragraph shows none
 PARA_JOIN_MAX_EM = 1.6  # first-pair leading cap (× larger line size)
 PARA_LEADING_DRIFT = 0.25  # later deltas within ±25% of running leading
 PARA_MIN_DELTA_EM = 0.25  # closer lines never join (shadow/overlap)
 PARA_OVERLAP_MIN = 0.5  # horizontal overlap ratio to join
+PARA_MARGIN_SUPPORT = 0.5  # fraction of a pool's lines that must share an edge
+PARA_INDENT_MAX_FRACTION = 0.25  # of the measure; wider is a block, not an indent
 SIZE_JUMP_RATIO = 1.2  # dominant-size discontinuity breaks (heading/body)
 EDGE_TOL_PT = 0.75  # alignment-evidence tolerance floor (user units)
 EDGE_TOL_FRACTION = 0.015  # …or this fraction of the box width
@@ -381,6 +384,29 @@ def _linear_key(m) -> tuple:
     return (round(a, 4), round(b, 4), round(c, 4), round(d, 4))
 
 
+def _space_advance_1000(cap) -> float:
+    """The width a word gap DRAWS when written as the font's own space
+    code, in 1000ths of an em, or 0.0 when the font cannot draw one.
+
+    A subsetter that saw no space glyph in use leaves /Widths[32] at 0
+    while the encoding still maps the code: `can_encode(" ")` is true and the
+    space advances nothing, so a re-emitted paragraph runs its words
+    together. Encodability alone is therefore never the question — the
+    advance is."""
+    if cap is None or not cap.can_encode(" "):
+        return 0.0
+    try:
+        w = float(cap.char_width(" "))
+    except Exception:
+        return 0.0
+    return w if w > SPACE_ADVANCE_MIN_1000 else 0.0
+
+
+def _draws_space(cap) -> bool:
+    """Whether a word gap may be written as this font's own space code."""
+    return _space_advance_1000(cap) > 0.0
+
+
 def _ptext_and_gaps(det) -> tuple[str, list[float], list[str]]:
     """The run's paragraph-text (synthetic spaces at TJ word gaps), the
     observed gap widths (1000ths of em) for the paragraph's median, and the
@@ -391,11 +417,7 @@ def _ptext_and_gaps(det) -> tuple[str, list[float], list[str]]:
     parts: list[str] = []
     units: list[str] = []
     gaps: list[float] = []
-    space_1000 = (
-        cap.char_width(" ")
-        if (cap is not None and cap.can_encode(" "))
-        else FALLBACK_SPACE_1000
-    )
+    space_1000 = _space_advance_1000(cap) or FALLBACK_SPACE_1000
     threshold = WORD_GAP_FRACTION * space_1000
     segments = det["segments"]
     for i, seg in enumerate(segments):
@@ -414,8 +436,14 @@ def _ptext_and_gaps(det) -> tuple[str, list[float], list[str]]:
                 isinstance(nxt, bytes) and cap is not None and cap.decode(nxt) == ""
             )
             if gap >= threshold and not spells_nothing:
-                parts.append(" ")
-                units.append(" ")
+                # A justified line stretches its gaps with a TJ kern that
+                # sits BESIDE the drawn space, and a producer may split a
+                # gap the same way; the pair is one word gap, so the second
+                # half must not spell a second space or every re-edit widens
+                # the text by one character per gap.
+                if not (parts and parts[-1].endswith(" ")):
+                    parts.append(" ")
+                    units.append(" ")
                 gaps.append(gap)
             continue
         if cap is None:
@@ -588,9 +616,7 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.adv = adv
         mem.perp = perp
         mem.vertical = vertical
-        space_1000 = (
-            cap.char_width(" ") if cap.can_encode(" ") else FALLBACK_SPACE_1000
-        )
+        space_1000 = _space_advance_1000(cap) or FALLBACK_SPACE_1000
         # generalized: the pen (e, f) maps through the frame to the
         # transposed anchor (x0, y); the advance sum runs along +x′ at the
         # `adv` scale; the em ACROSS the writing axis is the line size. Tz
@@ -834,6 +860,39 @@ class _Paragraph:
         return any(m.vertical for line in self.lines for m in line.members)
 
 
+def _modal_edge(values: list[float], tol: float, support: int) -> float | None:
+    """The edge shared by the largest cluster of `values` (within `tol`),
+    or None when no cluster reaches `support` members — i.e. when the pool
+    has no established margin to measure an indent or a short line against."""
+    best: float | None = None
+    best_n = 0
+    for v in values:
+        group = [w for w in values if abs(w - v) <= tol]
+        if len(group) > best_n:
+            best, best_n = sum(group) / len(group), len(group)
+    return best if best_n >= support else None
+
+
+def _indent_break(pool: dict, prev: _Line, line: _Line) -> bool:
+    """Whether a first-line INDENT ends the paragraph `prev` closes.
+
+    Both halves of the typographic signature are required, because either
+    alone has a live false positive: a short line alone is every
+    ragged-right line, and an indented line alone is every hanging or
+    quoted block. Together — the previous line stops short of the pool's
+    right margin AND this line starts in from its left margin — they are
+    what an indent-signalled paragraph break IS, and a block whose pool
+    has no established margins (centred text, a one-off line) never
+    reaches the test at all."""
+    left, right, tol = pool["left"], pool["right"], pool["tol"]
+    if left is None or right is None:
+        return False
+    indent = line.x0 - left
+    if indent <= tol or indent > PARA_INDENT_MAX_FRACTION * (right - left):
+        return False
+    return (right - prev.x1) > tol
+
+
 def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
     """Column-aware top-down joining: each line (y-descending) joins the
     OPEN paragraph with the best horizontal overlap whose leading/size
@@ -851,6 +910,19 @@ def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
     strict and a refused cross join simply opens a second paragraph (the
     shipped behavior)."""
     lines = sorted(lines, key=lambda l: -l.y)
+    # The pool's own margins — the reference an indent and a short
+    # line are measured against. Derived once from every line under the key,
+    # not from the paragraph being built: the evidence that "hello again" is
+    # its own paragraph is that the BLOCK has a left margin its successor
+    # starts in from, which a one-line open paragraph cannot supply.
+    span = (max(l.x1 for l in lines) - min(l.x0 for l in lines)) if lines else 0.0
+    pool_tol = max(EDGE_TOL_PT, EDGE_TOL_FRACTION * span)
+    support = max(2, math.ceil(PARA_MARGIN_SUPPORT * len(lines)))
+    pool = {
+        "left": _modal_edge([l.x0 for l in lines], pool_tol, support),
+        "right": _modal_edge([l.x1 for l in lines], pool_tol, support),
+        "tol": pool_tol,
+    }
     open_paras: list[dict] = []
     for line in lines:
         bullet = _starts_with_bullet(line)
@@ -880,6 +952,8 @@ def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
                 if line_stream not in para["streams"] and (
                     cross_ok is None or not cross_ok(para["idx"], line_idx)
                 ):
+                    continue
+                if _indent_break(pool, prev, line):
                     continue
                 if ov > best_overlap:
                     best, best_overlap = para, ov
@@ -913,8 +987,15 @@ def _detect_alignment(
         return default
     tol = max(EDGE_TOL_PT, EDGE_TOL_FRACTION * (right - left))
     non_last = lines[:-1]
-    if len(lines) >= 3 and all(
-        (l.x0 - left) <= tol and (right - l.x1) <= tol for l in non_last
+    # Justification is a RIGHT-edge property: every line but the last
+    # reaches the measure. The left edge carries the same evidence for every
+    # line except the FIRST, which a first-line indent legitimately moves in
+    # — refusing that line the exemption read a fully justified indented
+    # paragraph as flush left and re-emitted it that way.
+    if (
+        len(lines) >= 3
+        and all((right - l.x1) <= tol for l in non_last)
+        and all((l.x0 - left) <= tol for l in non_last[1:])
     ):
         return "justify"
     lefts = [l.x0 for l in lines]
@@ -2159,6 +2240,15 @@ def _styled_chars(
             col = color_at(pos, member)
             siz = size_at(pos)
             fk = face_at(pos, member)
+            if ch == "\n":
+                # A hard break draws nothing and is never encoded; it
+                # survives to the tokenizer, which turns it into the line
+                # end the author asked for. Carrying it as a styled entry
+                # (rather than dropping it here) keeps the span mapping in
+                # step with the text the caller sent.
+                styled.append((ch, ref(member, None, col, siz)))
+                i += 1
+                continue
             if rtl_style is not None and _requires_shaping(ch):
                 # A cursively joining character ALWAYS routes to a
                 # SHAPING path, whatever `convert` says and whatever face was
@@ -2244,11 +2334,14 @@ def _styled_chars(
 
 
 class _Word:
-    __slots__ = ("chars", "width", "gap_after", "gap_styles", "char_widths")
+    __slots__ = ("chars", "width", "gap_after", "gap_styles", "char_widths", "breaks")
 
     def __init__(self):
         self.chars: list[tuple[str, _StyleRef]] = []
         self.width = 0.0
+        # Hard breaks written after this word: the first ends its line,
+        # each further one leaves a blank line behind.
+        self.breaks = 0
         self.gap_after = 0.0  # user units of following space chars
         self.gap_styles: list[tuple[str, _StyleRef, float]] = []  # (char, style, w)
         # Each char's width AS MEASURED during tokenizing, i.e. in
@@ -2344,6 +2437,8 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
         # own width is fitted ACROSS the column by a recomputed Tz instead
         # (`_Emission._emit`).
         return m.tcy_em
+    if ch == "\n":
+        return 0.0  # a hard break draws nothing
     if st.shaped is not None:
         # A shaped word measures as the GLYPHS the shaper chose, and
         # the number to sum is the shaper's POSITIONED advance — because that
@@ -2370,7 +2465,7 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
         fb = fallbacks.get(st.fallback)
         w1000 = fb.width_1000(ch) if fb is not None else 0.0
         w = w1000 / 1000.0 * s["size"] + s["char_spacing"]
-    elif ch == " " and not m.cap.can_encode(" "):
+    elif ch == " " and not _draws_space(m.cap):
         # Synthetic gap — emitted as a TJ kern, so no Tc/Tw applies.
         w = median_gap_1000 / 1000.0 * s["size"]
     else:
@@ -2635,7 +2730,7 @@ def _tokenize(
 
     def close() -> None:
         nonlocal current
-        if current.chars or current.gap_styles:
+        if current.chars or current.gap_styles or current.breaks:
             words.append(current)
             current = _Word()
 
@@ -2644,6 +2739,17 @@ def _tokenize(
     for ch, st in styled:
         w = _char_width_user(ch, st, fallbacks, median_gap_1000, kerns, prev_ch, prev_st)
         prev_ch, prev_st = ch[-1] if ch else None, st
+        if ch == "\n":
+            # The author's own line end. It rides on the word it follows
+            # (a break with no word before it rides an empty one), so the
+            # filler never has to look ahead to know a line is finished.
+            # It also breaks the kern pair: the characters either side of it
+            # are never adjacent in what is drawn.
+            current.breaks += 1
+            prev_ch, prev_st = None, None
+            continue
+        if current.breaks:
+            close()  # a character after a break starts the next line's word
         if ch == " ":
             current.gap_after += w
             current.gap_styles.append((ch, st, w))
@@ -2673,7 +2779,10 @@ def _tokenize(
 
 
 class _LayoutLine:
-    __slots__ = ("words", "width", "x", "y", "justify_extra", "max_eff", "vis_items")
+    __slots__ = (
+        "words", "width", "x", "y", "justify_extra", "max_eff", "vis_items",
+        "hard_break",
+    )
 
     def __init__(self):
         self.words: list[_Word] = []
@@ -2681,6 +2790,9 @@ class _LayoutLine:
         self.x = 0.0
         self.y = 0.0
         self.justify_extra = 0.0  # per-gap addition (justified lines)
+        # This line ends at an author's hard break rather than at the
+        # measure, so it is a last line for justification purposes.
+        self.hard_break = False
         # The tallest glyph's effective size on this line, filled by
         # _fill_lines — drives the per-line leading when sizes vary.
         self.max_eff = 0.0
@@ -2758,19 +2870,29 @@ def _fill_lines(words: list[_Word], first_measure: float, body_measure: float) -
     line = _LayoutLine()
     measure = first_measure
     for word in words:
-        candidate = line.width + (line.words[-1].gap_after if line.words else 0.0) + word.width
-        if line.words and candidate > measure + WRAP_TOL:
+        if word.chars or word.gap_styles:
+            candidate = (
+                line.width + (line.words[-1].gap_after if line.words else 0.0) + word.width
+            )
+            if line.words and candidate > measure + WRAP_TOL:
+                lines.append(line)
+                line = _LayoutLine()
+                measure = body_measure
+            if line.words:
+                line.width += line.words[-1].gap_after
+            line.words.append(word)
+            line.width += word.width
+        for _ in range(word.breaks):
+            line.hard_break = True
             lines.append(line)
             line = _LayoutLine()
             measure = body_measure
-        if line.words:
-            line.width += line.words[-1].gap_after
-        line.words.append(word)
-        line.width += word.width
     if line.words:
         lines.append(line)
+    prev_eff = 0.0
     for ln in lines:
-        ln.max_eff = _line_max_eff(ln)
+        ln.max_eff = _line_max_eff(ln) or prev_eff
+        prev_eff = ln.max_eff
     return lines
 
 
@@ -2840,6 +2962,7 @@ def _position_lines(
             para.alignment == "justify"
             and i < len(lines) - 1
             and len(line.words) > 1
+            and not line.hard_break
         ):
             deficit = (right_edge - line.x) - line.width
             gaps = len(line.words) - 1
@@ -3376,7 +3499,7 @@ class _Emission:
             is_last = wi == len(line.words) - 1
             if not is_last:
                 for ch, st, w in word.gap_styles:
-                    if ch == " " and st.fallback is None and not st.member.cap.can_encode(" "):
+                    if ch == " " and st.fallback is None and not _draws_space(st.member.cap):
                         stream.append(("kern", st, w))
                     else:
                         stream.append(("ch", ch, st, w))
@@ -3402,7 +3525,7 @@ class _Emission:
             j = i
             while j < len(items) and items[j][0] == "gap":
                 _k, ch, gst, gw = items[j]
-                if ch == " " and gst.fallback is None and not gst.member.cap.can_encode(" "):
+                if ch == " " and gst.fallback is None and not _draws_space(gst.member.cap):
                     stream.append(("kern", gst, gw))
                 else:
                     stream.append(("ch", ch, gst, gw))

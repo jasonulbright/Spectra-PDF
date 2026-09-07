@@ -363,7 +363,11 @@ export async function fetchEditTextListing(
 /** Pasted newlines become spaces — Enter is the COMMIT key (parity),
  * and a paragraph is one flowing block; splitting is a stated non-goal. */
 export function sanitizeParagraphInput(value: string): string {
-  return value.replace(/[\r\n]+/g, ' ');
+  // A newline is the paragraph's HARD LINE BREAK — the engine ends the
+  // line where it sits and leaves that line unjustified — so it survives
+  // here instead of flattening to a space. Only the carriage return is
+  // normalized away, so one break is one character however it arrived.
+  return value.replace(/\r\n?/g, '\n');
 }
 
 /** The common prefix / suffix boundaries of an edit, in CODE POINTS: the
