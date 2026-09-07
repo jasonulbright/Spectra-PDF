@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { requestDocumentProxy } from '../lib/pdfDocCache';
 import { collectPdfjsFacts } from '../lib/doc-health-pdfjs';
-import { parseEngineHealth } from '../lib/doc-health-engine';
+import type { EngineHealthReply } from '../lib/doc-health-engine';
 import {
   EMPTY_HEALTH_LEDGER,
   beginCollection,
@@ -21,7 +21,8 @@ import type { OpenFile, PdfBuffer } from '../state/types';
 // import source is never collected: it is not a document the user can act on
 // (`showableFile`'s rule, applied here through `importOnly`).
 //
-// HOW THE ENGINE IS CALLED: through `useEngine`'s `callIdle`, the idle lane.
+// HOW THE ENGINE IS CALLED: through `useEngine`'s `collectHealth`, the idle
+// lane's stepped sweep.
 // The op is a passive, read-only lookup driven by every buffer change, so
 // routing it through the commit gate would flush the user's pending page edits
 // to disk merely because a document was opened. It is correct without the
@@ -32,8 +33,9 @@ import type { OpenFile, PdfBuffer } from '../state/types';
 // file. Skipping the queue is not enough on its own: the engine is one serial
 // FIFO underneath it, so opening several documents would hand it one traversal
 // per document and the user's next operation would wait behind all of them.
-// The lane holds the invariant instead — one sweep at a time, submitted only
-// while nothing interactive is outstanding.
+// The lane holds the invariant instead — one sweep at a time, submitted a
+// bounded step at a time, and each step only while nothing interactive is
+// outstanding.
 //
 // RUN IDENTITY is the pair (buffer, generation). Buffer identity alone cannot
 // answer whether a run is still wanted: a re-check retires the row and starts
@@ -49,13 +51,13 @@ export interface DocumentHealthApi {
   readonly recheck: (path: string) => void;
 }
 
-/** `useEngine`'s idle lane. Resolves to `null` for a run the lane dropped
- * because `isCurrent` stopped holding before it was submitted. */
-type IdleEngineCall = (
-  method: string,
-  params: Record<string, unknown>,
+/** `useEngine`'s stepped idle sweep. Resolves to `null` for a run the lane
+ * dropped because `isCurrent` stopped holding — before it was submitted, or at
+ * any step boundary within it. */
+type IdleHealthCall = (
+  file: string,
   isCurrent: () => boolean,
-) => Promise<unknown | null>;
+) => Promise<EngineHealthReply | null>;
 
 interface StartedRun {
   readonly buffer: PdfBuffer;
@@ -64,7 +66,7 @@ interface StartedRun {
 
 export function useDocumentHealth(
   files: Map<string, OpenFile>,
-  callIdle: IdleEngineCall,
+  collectHealth: IdleHealthCall,
 ): DocumentHealthApi {
   const [ledger, setLedger] = useState<HealthLedger>(EMPTY_HEALTH_LEDGER);
   // The runs already started, keyed per path by the bytes and the generation
@@ -114,12 +116,11 @@ export function useDocumentHealth(
 
       void (async () => {
         try {
-          const reply = await callIdle('document_health', { file: f.workingPath }, isCurrent);
-          // `null` is a run the lane never submitted, and a run that finished
-          // after being superseded describes a question nobody is asking any
-          // more. Neither is evidence about the row standing now.
-          if (reply === null || !isCurrent()) return;
-          const parsed = parseEngineHealth(reply);
+          const parsed = await collectHealth(f.workingPath, isCurrent);
+          // `null` is a run the lane abandoned part-way, and a run that
+          // finished after being superseded describes a question nobody is
+          // asking any more. Neither is evidence about the row standing now.
+          if (parsed === null || !isCurrent()) return;
           setLedger((prev) =>
             recordCollection(
               prev,
@@ -157,7 +158,7 @@ export function useDocumentHealth(
         }
       })();
     }
-  }, [files, callIdle, recheckNonce]);
+  }, [files, collectHealth, recheckNonce]);
 
   const recheck = useCallback(
     (path: string) => {

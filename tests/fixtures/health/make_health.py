@@ -22,6 +22,27 @@ health ledger has to report:
     draws a Form XObject, and the image with the undecodable filter lives in
     THAT form's resources. A traversal that reads only the page's own
     ``/XObject`` entries reports this document as clean.
+
+``broken-form-content.pdf``
+    A one-page document whose page executes a Form XObject whose own content
+    stream declares a filter that does not decode. Nothing inside the form is
+    damaged — its resources are empty — so a traversal that visits a form's
+    RESOURCES without decoding the form's own stream reports this document as
+    clean while the page draws nothing from it.
+
+``broken-appearance.pdf``
+    A one-page document carrying one annotation whose ``/AP`` ``/N`` is an
+    appearance-state sub-dictionary; the ``/Off`` state is intact and the ``/On``
+    state's stream does not decode. It proves both that appearance streams are
+    checked and that the sub-dictionary spelling is entered.
+
+``owner-encrypted.pdf``
+    A one-page, otherwise clean document encrypted with an OWNER password
+    only (empty user password), so it opens with no password at all. Proves
+    the ``document.encryptedOwner`` fact: a document a user can simply open
+    is still worth reporting as encrypted, distinctly from the
+    ``document.encrypted`` fact a locked (user-password) document reports
+    instead of a normal traversal.
 """
 
 import io
@@ -122,12 +143,77 @@ def _form_hosted_image() -> bytes:
     return buf.getvalue()
 
 
+def _broken_form_content() -> bytes:
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    form = pdf.make_stream(b"these bytes decode under no filter")
+    form["/Type"] = pikepdf.Name.XObject
+    form["/Subtype"] = pikepdf.Name.Form
+    form["/BBox"] = pikepdf.Array([0, 0, 8, 8])
+    form["/Filter"] = pikepdf.Name("/NoSuchDecode")
+    form["/Resources"] = pikepdf.Dictionary()
+    page.obj["/Resources"] = pikepdf.Dictionary(
+        XObject=pikepdf.Dictionary(Fm0=pdf.make_indirect(form))
+    )
+    page.contents_add(pikepdf.Stream(pdf, b"q 100 0 0 100 50 50 cm /Fm0 Do Q"))
+    buf = io.BytesIO()
+    pdf.save(buf)
+    return buf.getvalue()
+
+
+def _broken_appearance() -> bytes:
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+
+    def appearance(payload: bytes, broken: bool):
+        stream = pdf.make_stream(payload)
+        stream["/Type"] = pikepdf.Name.XObject
+        stream["/Subtype"] = pikepdf.Name.Form
+        stream["/BBox"] = pikepdf.Array([0, 0, 20, 20])
+        stream["/Resources"] = pikepdf.Dictionary()
+        if broken:
+            stream["/Filter"] = pikepdf.Name("/NoSuchDecode")
+        return pdf.make_indirect(stream)
+
+    annot = pikepdf.Dictionary(
+        Type=pikepdf.Name.Annot,
+        Subtype=pikepdf.Name.Widget,
+        FT=pikepdf.Name.Btn,
+        T=pikepdf.String("check"),
+        Rect=pikepdf.Array([10, 10, 30, 30]),
+        AS=pikepdf.Name("/On"),
+        AP=pikepdf.Dictionary(
+            N=pikepdf.Dictionary(
+                On=appearance(b"these bytes decode under no filter", True),
+                Off=appearance(b"q Q", False),
+            )
+        ),
+    )
+    page.obj["/Annots"] = pikepdf.Array([pdf.make_indirect(annot)])
+    page.contents_add(pikepdf.Stream(pdf, b"q Q"))
+    buf = io.BytesIO()
+    pdf.save(buf)
+    return buf.getvalue()
+
+
+def _owner_encrypted() -> bytes:
+    pdf = pikepdf.Pdf.new()
+    pdf.add_blank_page(page_size=(200, 200))
+    buf = io.BytesIO()
+    # user="" — opening needs no password at all; only /Owner differs.
+    pdf.save(buf, encryption=pikepdf.Encryption(user="", owner="owner-secret"))
+    return buf.getvalue()
+
+
 def main() -> None:
     (HERE / "damaged-xref.pdf").write_bytes(
         _break_startxref(_one_page_with_unembedded_font())
     )
     (HERE / "broken-content.pdf").write_bytes(_broken_content())
     (HERE / "form-hosted-image.pdf").write_bytes(_form_hosted_image())
+    (HERE / "broken-form-content.pdf").write_bytes(_broken_form_content())
+    (HERE / "broken-appearance.pdf").write_bytes(_broken_appearance())
+    (HERE / "owner-encrypted.pdf").write_bytes(_owner_encrypted())
 
 
 if __name__ == "__main__":

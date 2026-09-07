@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   EMPTY_HEALTH_LEDGER,
+  HEALTH_GLYPHS,
   beginCollection,
   factCount,
   factsFor,
@@ -18,6 +19,7 @@ import {
   runOf,
   verdictFor,
   type HealthFact,
+  type HealthVerdict,
 } from '../src/renderer/lib/doc-health';
 import { parseEngineHealth } from '../src/renderer/lib/doc-health-engine';
 import {
@@ -92,7 +94,7 @@ describe('health ledger verdicts', () => {
     expect(verdictFor(l, '/a.pdf', A)).toBe('undetermined');
   });
 
-  it('the four verdicts are distinct answers, not shades of one', () => {
+  it('no-evidence, healthy, facts and undetermined are four distinct answers', () => {
     const seen = new Set([
       verdictFor(EMPTY_HEALTH_LEDGER, '/a.pdf', A),
       verdictFor(collected('/a.pdf', A), '/a.pdf', A),
@@ -189,6 +191,27 @@ describe('facts never leak between documents', () => {
   });
 });
 
+// There is no DOM test environment in this repo, so the glyph mapping the
+// status-bar segment renders is pinned here as plain data — extracted from
+// the component for exactly this reason. `limited` and `undetermined` are
+// pinned by NEGATION as well as by value: a refactor that quietly widened
+// either one to the warning or healthy glyph must fail here.
+describe('the verdict-to-glyph mapping', () => {
+  it('gives every verdict its own glyph', () => {
+    const verdicts: HealthVerdict[] = ['no-evidence', 'undetermined', 'facts', 'limited', 'healthy'];
+    const glyphs = new Set(verdicts.map((v) => HEALTH_GLYPHS[v]));
+    expect(glyphs.size).toBe(verdicts.length);
+  });
+
+  it('limited never maps to the warning glyph', () => {
+    expect(HEALTH_GLYPHS.limited).not.toBe(HEALTH_GLYPHS.facts);
+  });
+
+  it('undetermined never maps to the healthy glyph', () => {
+    expect(HEALTH_GLYPHS.undetermined).not.toBe(HEALTH_GLYPHS.healthy);
+  });
+});
+
 describe('grouping', () => {
   it('groups by boundary in reader order and drops empty groups', () => {
     const facts = [
@@ -274,7 +297,8 @@ describe('codes map to catalog keys, never to sentences', () => {
     const codes = [
       'xref.reconstructed', 'structure.repaired', 'font.notEmbedded', 'font.substituted',
       'font.unreadable', 'page.mediaBoxMissing', 'page.contentUnreadable',
-      'page.imageUnreadable', 'document.xfa', 'document.encrypted', 'document.unreadable',
+      'page.imageUnreadable', 'document.xfa', 'document.encrypted',
+      'document.encryptedOwner', 'document.unreadable',
       'document.metadataUnreadable', 'page.unreadable', 'page.resourcesUnreadable',
       'pages.unreadable', 'fonts.unenumerable', 'warnings.unreadable',
       'document.imagesNotDecoded', 'document.acroFormUnreadable', 'document.xfaUnreadable',
@@ -305,5 +329,80 @@ describe('codes map to catalog keys, never to sentences', () => {
     expect(healthSubject({ font: 'Helvetica' })).toBe('Helvetica');
     expect(healthSubject({ name: 'Im0' })).toBe('Im0');
     expect(healthSubject({})).toBe('');
+  });
+});
+
+
+// The verdict MATRIX.
+//
+// Severity, not fact count, is what separates a document with something wrong
+// from one that was merely not examined in full. Every ordinary JPEG document
+// carries an `info` fact saying its pixel codec was not exercised; while any
+// non-empty fact list read as `facts`, every one of them wore the warning
+// glyph.
+describe('verdict severity', () => {
+  const info = (over: Partial<HealthFact> = {}): HealthFact =>
+    fact({ kind: 'skipped', severity: 'info', code: 'document.imagesNotDecoded', ...over });
+
+  it('is limited when every collected fact is info severity', () => {
+    const l = collected('/a.pdf', A, [info()]);
+    expect(verdictFor(l, '/a.pdf', A)).toBe('limited');
+    expect(factCount(l, '/a.pdf', A)).toBe(1);
+  });
+
+  it('is facts as soon as ONE warning-severity fact stands', () => {
+    const l = collected('/a.pdf', A, [info(), fact()]);
+    expect(verdictFor(l, '/a.pdf', A)).toBe('facts');
+  });
+
+  it('an undetermined fact outranks severity in both directions', () => {
+    const undetermined = fact({ kind: 'undetermined', severity: 'info' });
+    expect(verdictFor(collected('/a.pdf', A, [undetermined]), '/a.pdf', A)).toBe(
+      'undetermined',
+    );
+    expect(verdictFor(collected('/a.pdf', A, [info(), undetermined]), '/a.pdf', A)).toBe(
+      'undetermined',
+    );
+  });
+
+  it('an empty fact list is healthy, not limited', () => {
+    expect(verdictFor(collected('/a.pdf', A), '/a.pdf', A)).toBe('healthy');
+  });
+
+  it('a failed run is undetermined even when its facts are all info', () => {
+    let l = beginCollection(EMPTY_HEALTH_LEDGER, '/a.pdf', A);
+    l = recordCollection(l, '/a.pdf', A, 'engine', 'failed', [info()]);
+    l = recordCollection(l, '/a.pdf', A, 'pdfjs', 'collected', []);
+    expect(verdictFor(l, '/a.pdf', A)).toBe('undetermined');
+  });
+
+  it('the five verdicts are distinct answers, not shades of one', () => {
+    const seen = new Set([
+      verdictFor(EMPTY_HEALTH_LEDGER, '/a.pdf', A),
+      verdictFor(collected('/a.pdf', A), '/a.pdf', A),
+      verdictFor(collected('/a.pdf', A, [info()]), '/a.pdf', A),
+      verdictFor(collected('/a.pdf', A, [fact()]), '/a.pdf', A),
+      verdictFor(collected('/a.pdf', A, [fact({ kind: 'undetermined' })]), '/a.pdf', A),
+    ]);
+    expect(seen).toEqual(
+      new Set(['no-evidence', 'healthy', 'limited', 'facts', 'undetermined']),
+    );
+  });
+});
+
+// Every code the engine can emit has a sentence. A code with no row renders as
+// `code.unknown`, which says a reader reported something this build does not
+// recognize — so the gate here is that the codes this build DOES emit are not
+// silently degrading to that.
+describe('the codes this engine emits all carry a sentence', () => {
+  it('names the content-stream and traversal codes', () => {
+    for (const code of [
+      'page.formUnreadable',
+      'page.appearanceUnreadable',
+      'page.traversalLimit',
+      'health.runLost',
+    ]) {
+      expect(healthMessageKey(code)).not.toBe('panel.health.code.unknown');
+    }
   });
 });

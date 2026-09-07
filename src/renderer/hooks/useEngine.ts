@@ -4,7 +4,8 @@ import { EngineError } from '../lib/engine-messages';
 import { runCommitGate } from '../lib/commit-gate';
 import { lockKeysFor, withFileLock } from '../lib/engine-lock';
 import { useOperationQueue, isTrackableMethod } from './useOperationQueue';
-import { submitIdle, trackInteractive } from '../lib/engine-idle-lane';
+import { beginInteractive, submitIdle, trackInteractive } from '../lib/engine-idle-lane';
+import { runHealthSweep, type EngineHealthReply } from '../lib/doc-health-engine';
 
 interface PendingRequest {
   resolve: (value: EngineResult) => void;
@@ -151,32 +152,43 @@ export function useEngine() {
 
   const call = useCallback(async (method: string, params: Record<string, unknown> = {}): Promise<EngineResult> => {
     if (isTrackableMethod(method)) {
-      // Every user-facing operation reads (and usually rewrites) the working
-      // file — pending in-memory page edits must be committed to disk first.
-      // A gate failure rejects here, so the operation aborts instead of
-      // running against bytes that don't match what the user sees.
-      await runCommitGate();
-      // The gate runs OUTSIDE the lock, deliberately — it writes files
-      // itself, so gating from inside would have this operation wait on a
-      // commit that is waiting on this operation. Once the gate is clear,
-      // the call serializes against any other operation naming the same
-      // file: two whole-file rewrites of one path each write a temp and
-      // rename, so without this the later rename silently wins and the
-      // earlier operation's work is gone with no error anywhere.
-      return withFileLock(lockKeysFor(params), () =>
-        track(method, params, () => rawCall(method, params)),
-      ) as Promise<EngineResult>;
+      // Counted interactive from HERE, not from the dispatch below. The gate
+      // and the lock run first and can take arbitrarily long; a lane that only
+      // learned about this operation once it reached the engine would read the
+      // engine as idle throughout that window and submit background steps into
+      // it, which is the queue this operation would then wait behind.
+      const release = beginInteractive();
+      try {
+        // Every user-facing operation reads (and usually rewrites) the working
+        // file — pending in-memory page edits must be committed to disk first.
+        // A gate failure rejects here, so the operation aborts instead of
+        // running against bytes that don't match what the user sees.
+        await runCommitGate();
+        // The gate runs OUTSIDE the lock, deliberately — it writes files
+        // itself, so gating from inside would have this operation wait on a
+        // commit that is waiting on this operation. Once the gate is clear,
+        // the call serializes against any other operation naming the same
+        // file: two whole-file rewrites of one path each write a temp and
+        // rename, so without this the later rename silently wins and the
+        // earlier operation's work is gone with no error anywhere.
+        return (await withFileLock(lockKeysFor(params), () =>
+          track(method, params, () => rawCall(method, params)),
+        )) as EngineResult;
+      } finally {
+        release();
+      }
     }
     return rawCall(method, params);
   }, [rawCall, track]);
 
-  // Background work nobody asked for: a passive, read-only lookup driven by a
-  // document changing rather than by a user. It waits for the engine to be
-  // idle, runs one at a time, and is dropped unsubmitted when `isCurrent`
-  // stops holding. Resolves to `null` for a run that was never sent.
-  const callIdle = useCallback(
-    (method: string, params: Record<string, unknown>, isCurrent: () => boolean) =>
-      submitIdle(() => dispatch(method, params), isCurrent),
+  // Background work nobody asked for: a passive, read-only sweep driven by a
+  // document changing rather than by a user. It runs one at a time, a bounded
+  // step at a time, and each step is submitted only while nothing interactive
+  // is outstanding. Resolves to `null` for a run abandoned before it finished
+  // — which is not a failure and must not be recorded as one.
+  const collectHealth = useCallback(
+    (file: string, isCurrent: () => boolean): Promise<EngineHealthReply | null> =>
+      submitIdle((gate) => runHealthSweep(dispatch, file, gate), isCurrent),
     [dispatch],
   );
 
@@ -192,5 +204,5 @@ export function useEngine() {
   // exists to prevent. Batch reads ORIGINAL paths (not working copies), so
   // neither concern applies — and gating there would side-effect-commit the
   // user's unrelated pending page edits mid-batch.
-  return { call, callRaw: rawCall, callIdle, openFiles, saveFile, ready };
+  return { call, callRaw: rawCall, collectHealth, openFiles, saveFile, ready };
 }

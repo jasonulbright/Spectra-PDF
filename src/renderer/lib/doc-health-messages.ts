@@ -19,9 +19,13 @@ const CODE_KEYS: Readonly<Record<string, UiKey>> = {
   'page.mediaBoxMissing': 'panel.health.code.pageMediaBoxMissing',
   'page.contentUnreadable': 'panel.health.code.pageContentUnreadable',
   'page.imageUnreadable': 'panel.health.code.pageImageUnreadable',
+  'page.formUnreadable': 'panel.health.code.pageFormUnreadable',
+  'page.appearanceUnreadable': 'panel.health.code.pageAppearanceUnreadable',
+  'page.traversalLimit': 'panel.health.code.pageTraversalLimit',
   'document.xfa': 'panel.health.code.documentXfa',
   'document.imagesNotDecoded': 'panel.health.code.imagesNotDecoded',
   'document.encrypted': 'panel.health.code.documentEncrypted',
+  'document.encryptedOwner': 'panel.health.code.documentEncryptedOwner',
   'document.unreadable': 'panel.health.code.documentUnreadable',
   'document.metadataUnreadable': 'panel.health.code.partUnreadable',
   // The traversals that stopped part-way. They differ only in WHICH branch
@@ -37,6 +41,10 @@ const CODE_KEYS: Readonly<Record<string, UiKey>> = {
   'pages.unreadable': 'panel.health.code.partUnreadable',
   'fonts.unenumerable': 'panel.health.code.partUnreadable',
   'warnings.unreadable': 'panel.health.code.partUnreadable',
+  // A stepped run the engine no longer holds. What it would have inspected was
+  // not inspected, which is the same sentence as any other traversal that
+  // stopped.
+  'health.runLost': 'panel.health.code.partUnreadable',
 };
 
 export function healthMessageKey(code: string): UiKey {

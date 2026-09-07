@@ -118,6 +118,34 @@ async function collectPage(
   return out;
 }
 
+// `getMetadata()` has no bound of its own — it is one promise from the pdf.js
+// worker, which is a single serial queue with no per-request timeout. A
+// worker wedged on an earlier request (or one that silently drops a message)
+// leaves this await pending forever, which would hold the whole sweep at
+// `no-evidence` with no way out: every later page never gets walked, and the
+// ledger reports "checking" for a document that finished loading long ago.
+// The race below is the bound: past it, the metadata question is answered
+// `undetermined` — the same fact a rejection produces — and the sweep moves
+// on. The orphaned `getMetadata()` promise itself cannot be cancelled (pdf.js
+// exposes no cancel token for it); it is simply never awaited again.
+const _METADATA_TIMEOUT_MS = 8000;
+
+function _withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('doc-health: metadata timed out')), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 /**
  * Every fact the pdf.js boundary reports about one loaded document.
  *
@@ -134,7 +162,7 @@ export async function collectPdfjsFacts(doc: PDFDocumentProxy): Promise<HealthFa
   const facts: HealthFact[] = [];
   if (doc.isPureXfa) facts.push(fact('skipped', 'info', 'document.xfa', null));
   try {
-    await doc.getMetadata();
+    await _withTimeout(doc.getMetadata(), _METADATA_TIMEOUT_MS);
   } catch {
     facts.push(fact('undetermined', 'warning', 'document.metadataUnreadable', null));
   }

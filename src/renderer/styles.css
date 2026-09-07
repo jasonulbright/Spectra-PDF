@@ -5352,6 +5352,11 @@ input:not([type]) {
 .doc-health-undetermined {
   color: var(--warning-fg, #e0b341);
 }
+/* Collected, nothing wrong, coverage incomplete. It carries the status bar's
+   own foreground: a distinct glyph, never a warning colour. */
+.doc-health-limited {
+  color: inherit;
+}
 .canvas-status-health-popover {
   position: absolute;
   bottom: calc(100% + 6px);

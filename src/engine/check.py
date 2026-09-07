@@ -217,8 +217,16 @@ def check(file: str) -> dict:
                         "category": "page",
                         "message": f"Page {page_num}: missing Resources dictionary",
                     })
-            except Exception:
-                pass  # Not critical
+            except Exception as e:
+                # A /Resources read that RAISES is not the same answer as a
+                # page without resources: nothing was learned about what this
+                # page draws with. Swallowing it reported the page as carrying
+                # resources nobody read.
+                page_issues.append({
+                    "severity": "error",
+                    "category": "page",
+                    "message": f"Page {page_num}: cannot read Resources: {e}",
+                })
 
         if page_issues:
             report["issues"].extend(page_issues)

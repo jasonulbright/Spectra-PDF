@@ -23,6 +23,16 @@ NONE = "none"
 STATIC = "static"
 DYNAMIC = "dynamic"
 
+# What `xfa_entry_checked` distinguishes that `xfa_entry` cannot. `xfa_entry`
+# answers one question — "is there a packet source to read?" — and every
+# caller of it acts on the packets or does nothing, so a malformed value and an
+# absent key are the same answer THERE. They are not the same answer to an
+# observer: a document that declares `/XFA` and holds something else in it has
+# a form nothing here can read, which is undetermined, not "no form".
+ABSENT = "absent"
+PRESENT = "present"
+MALFORMED = "malformed"
+
 # Packets that declare bindings to external data services. They are never
 # read and never acted on: the app performs no network access, so a document
 # that names a data source gets its data from the document alone.
@@ -48,6 +58,47 @@ def xfa_entry(pdf: pikepdf.Pdf):
     if isinstance(entry, (pikepdf.Array, pikepdf.Stream)):
         return entry
     return None
+
+
+def xfa_entry_checked(pdf: pikepdf.Pdf) -> tuple[str, object]:
+    """`(state, entry)` where state separates absent from unreadable.
+
+    ISO 32000-2 Annex K gives `/XFA` exactly two spellings: a stream, or an
+    array of alternating name/stream pairs. Anything else — a number, an array
+    whose odd slots are not streams, a stream whose bytes will not decode — is
+    MALFORMED: the key is present and this build cannot read what it holds.
+
+    Every packet stream is read here, because a chain that will not unfilter
+    fails at the read and nowhere earlier.
+    """
+    acro = acroform(pdf)
+    if not isinstance(acro, pikepdf.Dictionary):
+        return ABSENT, None
+    try:
+        entry = acro.get("/XFA")
+    except Exception:
+        return MALFORMED, None
+    if entry is None:
+        return ABSENT, None
+    if isinstance(entry, pikepdf.Stream):
+        try:
+            entry.read_bytes()
+        except Exception:
+            return MALFORMED, entry
+        return PRESENT, entry
+    if not isinstance(entry, pikepdf.Array):
+        return MALFORMED, entry
+    if len(entry) == 0 or len(entry) % 2 != 0:
+        return MALFORMED, entry
+    for i in range(0, len(entry), 2):
+        stream = entry[i + 1]
+        if not isinstance(stream, pikepdf.Stream):
+            return MALFORMED, entry
+        try:
+            stream.read_bytes()
+        except Exception:
+            return MALFORMED, entry
+    return PRESENT, entry
 
 
 def packets(entry) -> list[tuple[str, object]]:

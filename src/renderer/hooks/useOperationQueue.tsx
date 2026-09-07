@@ -139,6 +139,11 @@ const INTERNAL_METHODS = new Set([
   // of an interactive request; the row here holds if anything ever reaches it
   // through the gated path.
   'document_health',
+  // The stepped spelling of the same collection: begin, one bounded batch per
+  // step, end. Same reasoning, and the one the renderer actually calls.
+  'document_health_begin',
+  'document_health_step',
+  'document_health_end',
   // Reading /PageLabels to seed the editor panel — a lookup, not an edit;
   // set_page_labels stays gated.
   'get_page_labels',

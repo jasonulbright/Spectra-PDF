@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { tChrome } from '../../i18n';
 import {
   groupByBoundary,
+  HEALTH_GLYPHS,
   type HealthFact,
   type HealthKind,
   type HealthVerdict,
@@ -23,14 +24,6 @@ import {
 //
 // OBSERVABILITY ONLY. Nothing on this surface changes the document; the one
 // sentence about repair names the Repair tool and does not run it.
-
-/** The glyph per verdict. A count rides beside it only where facts exist. */
-const GLYPHS: Readonly<Record<HealthVerdict, string>> = {
-  healthy: '✓',
-  facts: '⚠',
-  undetermined: '?',
-  'no-evidence': '·',
-};
 
 /** The order facts read in within a boundary: what the reader recovered from,
  * then what stood in, then what was skipped, then what nobody could settle. */
@@ -114,7 +107,7 @@ export function DocumentHealthSegment(props: DocumentHealthSegmentProps): React.
         onClick={() => setOpen((v) => !v)}
         className={`canvas-status-action canvas-status-quiet doc-health-glyph doc-health-${verdict}`}
       >
-        <span aria-hidden="true">{GLYPHS[verdict]}</span>
+        <span aria-hidden="true">{HEALTH_GLYPHS[verdict]}</span>
         {/* A bare numeral: notation in every locale, so it carries no key. */}
         {facts.length > 0 && <span className="doc-health-count">{facts.length}</span>}
       </button>
@@ -143,6 +136,9 @@ export function DocumentHealthSegment(props: DocumentHealthSegmentProps): React.
           )}
           {verdict === 'healthy' && (
             <p className="doc-health-state">{tChrome('panel.health.healthy')}</p>
+          )}
+          {verdict === 'limited' && (
+            <p className="doc-health-state">{tChrome('panel.health.limited')}</p>
           )}
           {verdict === 'undetermined' && (
             <p className="doc-health-state">{tChrome('panel.health.undetermined')}</p>

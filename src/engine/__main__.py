@@ -128,7 +128,12 @@ from engine.repair import repair
 from engine.rebuild import rebuild
 from engine.recover import recover
 from engine.check import check
-from engine.document_health import document_health
+from engine.document_health import (
+    document_health,
+    document_health_begin,
+    document_health_end,
+    document_health_step,
+)
 from engine.outline import get_outline, set_outline
 from engine.derived_nav import outline_from_structure, preview_structure_outline
 from engine.read_aloud import read_aloud_page
@@ -338,6 +343,9 @@ def main() -> None:
     server.register("recover", recover)
     server.register("check", check)
     server.register("document_health", document_health)
+    server.register("document_health_begin", document_health_begin)
+    server.register("document_health_step", document_health_step)
+    server.register("document_health_end", document_health_end)
     server.register("get_outline", get_outline)
     server.register("set_outline", set_outline)
     server.register("preview_structure_outline", preview_structure_outline)

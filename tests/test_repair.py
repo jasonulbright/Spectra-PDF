@@ -716,3 +716,62 @@ class TestRepairSignedDocument:
         out = os.path.join(tmp_dir, "plain-out.pdf")
         result = repair(file=sample_pdf, output=out)
         assert result["signatures_removed"] == 0
+
+
+# ── The page /Resources read that raises ────────────────────────────────
+
+
+class _RaisingResourcesPage:
+    """A page whose ``/Resources`` read fails and whose other keys do not."""
+
+    def __init__(self, page):
+        self._page = page
+
+    def __getattr__(self, name):
+        return getattr(self._page, name)
+
+    def get(self, key, default=None):
+        if key == "/Resources":
+            raise RuntimeError("resources would not read")
+        return self._page.get(key, default)
+
+
+class _RaisingResourcesPdf:
+    def __init__(self, pdf):
+        self._pdf = pdf
+
+    def __getattr__(self, name):
+        return getattr(self._pdf, name)
+
+    def __enter__(self):
+        self._pdf.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        return self._pdf.__exit__(*exc)
+
+    @property
+    def pages(self):
+        return [_RaisingResourcesPage(p) for p in self._pdf.pages]
+
+
+def test_check_reports_a_resources_read_failure(monkeypatch, sample_pdf):
+    """A /Resources read that RAISES says nothing about what the page draws
+    with. Swallowing it reported the page as carrying resources nobody read."""
+    import pikepdf as _pikepdf
+
+    from engine import check as check_module
+
+    real_open = _pikepdf.open
+    monkeypatch.setattr(
+        check_module.pikepdf, "open",
+        lambda *a, **k: _RaisingResourcesPdf(real_open(*a, **k)),
+    )
+    result = check_module.check(file=sample_pdf)
+    resource_issues = [
+        i for i in result["issues"]
+        if i["category"] == "page" and "Resources" in i["message"]
+    ]
+    assert resource_issues, result["issues"]
+    assert all(i["severity"] == "error" for i in resource_issues)
+    assert result["valid"] is False

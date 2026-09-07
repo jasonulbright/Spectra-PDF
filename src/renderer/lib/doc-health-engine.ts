@@ -77,3 +77,94 @@ export function parseEngineHealth(result: unknown): EngineHealthReply {
   const status = stated && raw!.status === 'collected' ? 'collected' : 'undetermined';
   return { ok, status, facts };
 }
+
+// The STEPPED sweep.
+//
+// The engine answers `document_health` in one request, and that spelling is
+// still the one a test or the CLI uses. The renderer does not use it: one
+// request is one unbounded traversal handed to a FIFO that cannot be
+// preempted, so a user operation arriving during it waits for the whole
+// document. The stepped spelling is what the idle lane can interleave with —
+// begin, then a bounded batch per step, each submitted only while the engine
+// is idle.
+//
+// The token is engine-side state, so it is ENDED on every exit that is not
+// `done`: a superseded run, a reply this build cannot parse, a step that
+// throws. An abandoned token holds an open file handle in the engine until it
+// is evicted.
+
+interface HealthChunk {
+  readonly ok: boolean;
+  readonly token: string;
+  readonly done: boolean;
+  readonly pages: number;
+  readonly status: 'collected' | 'undetermined';
+  readonly facts: readonly HealthFact[];
+}
+
+function parseChunk(result: unknown): HealthChunk {
+  const raw = asRecord(result);
+  const base = parseEngineHealth(result);
+  return {
+    ok: base.ok && typeof raw?.done === 'boolean',
+    token: typeof raw?.token === 'string' ? raw.token : '',
+    done: raw?.done === true,
+    pages: typeof raw?.pages === 'number' && Number.isInteger(raw.pages) ? raw.pages : 0,
+    status: base.status,
+    facts: base.facts,
+  };
+}
+
+const UNREADABLE: EngineHealthReply = { ok: false, status: 'undetermined', facts: [] };
+
+/** Engine dispatch, WITHOUT the queue or the commit gate — the sweep is a
+ * passive read of the working copy the ledger files its row under. */
+export type HealthDispatch = (
+  method: string,
+  params: Record<string, unknown>,
+) => Promise<unknown>;
+
+/**
+ * Drive one document's health sweep a bounded step at a time.
+ *
+ * Every engine request goes through `gate`, which is what holds the lane's
+ * invariant: a user request arriving mid-sweep waits for at most the step
+ * already in flight.
+ */
+export async function runHealthSweep(
+  dispatch: HealthDispatch,
+  file: string,
+  gate: <R>(send: () => Promise<R>) => Promise<R>,
+): Promise<EngineHealthReply> {
+  const begun = parseChunk(await gate(() => dispatch('document_health_begin', { file })));
+  if (!begun.ok) return UNREADABLE;
+  const facts: HealthFact[] = [...begun.facts];
+  let status = begun.status;
+  if (begun.done || !begun.token) return { ok: true, status, facts };
+
+  const token = begun.token;
+  let finished = false;
+  try {
+    // The engine ends every run; the cap only stops a reply that never says
+    // `done` from looping here forever, and is itself an unparseable answer.
+    const cap = begun.pages + 8;
+    for (let step = 0; step <= cap; step += 1) {
+      const chunk = parseChunk(await gate(() => dispatch('document_health_step', { token })));
+      if (!chunk.ok) return UNREADABLE;
+      facts.push(...chunk.facts);
+      if (chunk.status === 'undetermined') status = 'undetermined';
+      if (chunk.done) {
+        finished = true;
+        return { ok: true, status, facts };
+      }
+    }
+    return UNREADABLE;
+  } finally {
+    if (!finished) {
+      // NOT through the gate: this is the run's own cleanup, it is one
+      // bounded request, and gating it would abandon the token exactly in the
+      // case the token most needs releasing.
+      void dispatch('document_health_end', { token }).catch(() => undefined);
+    }
+  }
+}

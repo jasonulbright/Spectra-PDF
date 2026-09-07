@@ -3210,6 +3210,8 @@ export const PANEL_STRINGS = {
   'panel.health.noEvidence':
     'Nothing has been checked for this version of the document yet.',
   'panel.health.healthy': 'Both readers finished and reported nothing.',
+  'panel.health.limited':
+    'Nothing was found wrong. Some parts of this document were not examined.',
   'panel.health.undetermined':
     'Something could not be read, so the state of this document is unknown.',
   'panel.health.page': 'Page {{page}}',
@@ -3236,12 +3238,20 @@ export const PANEL_STRINGS = {
   'panel.health.code.pageContentUnreadable':
     'This page’s content could not be read, so part of it is not drawn.',
   'panel.health.code.pageImageUnreadable': 'An image on this page could not be read.',
+  'panel.health.code.pageFormUnreadable':
+    'A drawing this page reuses could not be read.',
+  'panel.health.code.pageAppearanceUnreadable':
+    'The appearance of an annotation on this page could not be read.',
+  'panel.health.code.pageTraversalLimit':
+    'This page nests too deeply to examine in full.',
   'panel.health.code.documentXfa':
     'This document holds an XML form, which is shown as its plain form fields instead.',
   'panel.health.code.imagesNotDecoded':
     'Some images in this document store their picture data in a form that was not decoded here, so they were not checked.',
   'panel.health.code.documentEncrypted':
     'This document is protected, so it could not be examined in full.',
+  'panel.health.code.documentEncryptedOwner':
+    'This document is encrypted. It opened without a password.',
   'panel.health.code.documentUnreadable': 'This document could not be examined.',
   'panel.health.code.partUnreadable': 'Part of this document could not be read.',
   'panel.health.code.unknown': 'A reader reported something this version does not recognize.',

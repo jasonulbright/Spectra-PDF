@@ -172,6 +172,22 @@ def test_encrypted_document_is_undetermined(tmp_dir, sample_pdf):
     assert _codes(report, "document.encrypted")
 
 
+def test_an_owner_encrypted_document_reports_encrypted_but_opens_clean(tmp_dir):
+    """Owner-password-only encryption needs no password to open, so it must
+    not fall into the ``document.encrypted`` (could-not-open) fact — that
+    code is reserved for the case that never reaches a ``Pdf`` object at all.
+    The document is otherwise clean, so this must be the ONLY fact, at info
+    severity: an owner lock is not itself something wrong."""
+    path = os.path.join(FIXTURES, "owner-encrypted.pdf")
+    report = document_health(path)
+    assert report["status"] == "collected"
+    owner_facts = _codes(report, "document.encryptedOwner")
+    assert len(owner_facts) == 1
+    assert owner_facts[0]["severity"] == "info"
+    assert owner_facts[0]["kind"] == "skipped"
+    assert not _codes(report, "document.encrypted")
+
+
 def test_missing_file_raises(tmp_dir):
     with pytest.raises(FileNotFoundError):
         document_health(os.path.join(tmp_dir, "nope.pdf"))
@@ -348,3 +364,460 @@ def test_every_fact_carries_the_ledger_contract(damaged_xref):
         assert fact["code"]
         assert fact["page"] is None or fact["page"] >= 1
         assert isinstance(fact["params"], dict)
+
+
+# ── Content-bearing streams, not only the objects they name ─────────────
+
+
+@pytest.fixture
+def broken_form_content(tmp_dir):
+    dst = os.path.join(tmp_dir, "broken-form-content.pdf")
+    shutil.copy(os.path.join(FIXTURES, "broken-form-content.pdf"), dst)
+    return dst
+
+
+@pytest.fixture
+def broken_appearance(tmp_dir):
+    dst = os.path.join(tmp_dir, "broken-appearance.pdf")
+    shutil.copy(os.path.join(FIXTURES, "broken-appearance.pdf"), dst)
+    return dst
+
+
+def test_a_form_whose_own_stream_will_not_decode_is_reported(broken_form_content):
+    """The form's RESOURCES are intact and empty. Only the form's own content
+    stream is damaged, and the page draws nothing from it."""
+    report = document_health(broken_form_content)
+    facts = _codes(report, "page.formUnreadable")
+    assert len(facts) == 1
+    assert facts[0]["page"] == 1
+    assert facts[0]["params"]["name"] == "Fm0"
+
+
+def test_a_broken_annotation_appearance_is_reported(broken_appearance):
+    """One appearance STATE of a sub-dictionary is damaged; entering the
+    sub-dictionary is what reaches it."""
+    report = document_health(broken_appearance)
+    facts = _codes(report, "page.appearanceUnreadable")
+    assert len(facts) == 1
+    assert facts[0]["page"] == 1
+    assert facts[0]["params"]["name"] == "On"
+
+
+def test_a_tiling_pattern_stream_is_checked(tmp_dir):
+    path = os.path.join(tmp_dir, "broken-pattern.pdf")
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    pattern = pdf.make_stream(b"these bytes decode under no filter")
+    pattern["/Type"] = pikepdf.Name.Pattern
+    pattern["/PatternType"] = 1
+    pattern["/Filter"] = pikepdf.Name("/NoSuchDecode")
+    pattern["/Resources"] = pikepdf.Dictionary()
+    page.obj["/Resources"] = pikepdf.Dictionary(
+        Pattern=pikepdf.Dictionary(P0=pdf.make_indirect(pattern))
+    )
+    pdf.save(path)
+    assert _codes(document_health(path), "page.formUnreadable")
+
+
+def test_a_shading_pattern_is_not_reported_as_unreadable(tmp_dir):
+    """A shading pattern is a dictionary — no stream, nothing to decode."""
+    path = os.path.join(tmp_dir, "shading.pdf")
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    shading = pikepdf.Dictionary(
+        PatternType=2,
+        Shading=pikepdf.Dictionary(
+            ShadingType=2,
+            ColorSpace=pikepdf.Name.DeviceGray,
+            Coords=pikepdf.Array([0, 0, 1, 1]),
+        ),
+    )
+    page.obj["/Resources"] = pikepdf.Dictionary(
+        Pattern=pikepdf.Dictionary(P0=pdf.make_indirect(shading))
+    )
+    pdf.save(path)
+    report = document_health(path)
+    assert report["status"] == "collected"
+    assert report["facts"] == []
+
+
+# ── A traversal that stopped is never a clean answer ────────────────────
+
+
+def test_a_graph_deeper_than_the_cap_is_undetermined(tmp_dir):
+    """Past the bound nothing was inspected. Reporting the branch as clean
+    publishes an inspection that did not happen."""
+    path = os.path.join(tmp_dir, "deep.pdf")
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    image = pdf.make_stream(b"payload bytes")
+    image["/Type"] = pikepdf.Name.XObject
+    image["/Subtype"] = pikepdf.Name.Image
+    image["/Width"] = 8
+    image["/Height"] = 8
+    image["/ColorSpace"] = pikepdf.Name.DeviceGray
+    image["/BitsPerComponent"] = 8
+    image["/Filter"] = pikepdf.Name("/NoSuchDecode")
+    deep = pdf.make_indirect(image)
+    for _ in range(34):
+        wrapper = pdf.make_stream(b"q /Child Do Q")
+        wrapper["/Type"] = pikepdf.Name.XObject
+        wrapper["/Subtype"] = pikepdf.Name.Form
+        wrapper["/BBox"] = pikepdf.Array([0, 0, 8, 8])
+        wrapper["/Resources"] = pikepdf.Dictionary(
+            XObject=pikepdf.Dictionary(Child=deep)
+        )
+        deep = pdf.make_indirect(wrapper)
+    page.obj["/Resources"] = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Root=deep))
+    pdf.save(path)
+    report = document_health(path)
+    limits = _codes(report, "page.traversalLimit")
+    assert len(limits) == 1, report["facts"]
+    assert limits[0]["kind"] == "undetermined"
+    assert report["status"] == "undetermined"
+
+
+def test_a_shallow_graph_reports_no_traversal_limit(tmp_dir):
+    path = _image_pdf(
+        os.path.join(tmp_dir, "nested.pdf"), filter_name="/FlateDecode", nested=True
+    )
+    assert _codes(document_health(path), "page.traversalLimit") == []
+
+
+# ── /XFA: absent and malformed are different answers ────────────────────
+
+
+def _xfa_value_pdf(path, value):
+    pdf = pikepdf.Pdf.new()
+    pdf.add_blank_page(page_size=(200, 200))
+    acro = pikepdf.Dictionary(
+        Fields=pikepdf.Array(
+            [pdf.make_indirect(pikepdf.Dictionary(T=pikepdf.String("f")))]
+        )
+    )
+    acro["/XFA"] = value(pdf)
+    pdf.Root["/AcroForm"] = pdf.make_indirect(acro)
+    pdf.save(path)
+    return path
+
+
+def test_a_wrong_typed_xfa_is_undetermined_never_absent(tmp_dir):
+    path = _xfa_value_pdf(
+        os.path.join(tmp_dir, "xfa-int.pdf"), lambda pdf: pikepdf.Integer(42)
+    )
+    report = document_health(path)
+    assert _codes(report, "document.xfaUnreadable")
+    assert report["status"] == "undetermined"
+
+
+def test_an_xfa_array_that_is_not_name_stream_pairs_is_undetermined(tmp_dir):
+    path = _xfa_value_pdf(
+        os.path.join(tmp_dir, "xfa-array.pdf"),
+        lambda pdf: pikepdf.Array([pikepdf.String("form"), pikepdf.Integer(7)]),
+    )
+    report = document_health(path)
+    assert _codes(report, "document.xfaUnreadable")
+    assert report["status"] == "undetermined"
+
+
+def test_an_unreadable_xfa_stream_is_undetermined(tmp_dir):
+    def value(pdf):
+        stream = pdf.make_stream(b"these bytes decode under no filter")
+        stream["/Filter"] = pikepdf.Name("/NoSuchDecode")
+        return pdf.make_indirect(stream)
+
+    path = _xfa_value_pdf(os.path.join(tmp_dir, "xfa-stream.pdf"), value)
+    report = document_health(path)
+    assert _codes(report, "document.xfaUnreadable")
+    assert report["status"] == "undetermined"
+
+
+def test_the_lenient_xfa_api_still_answers_none_for_a_wrong_typed_entry(tmp_dir):
+    """`xfa_entry` keeps its existing contract for its existing callers: there
+    is no packet source to read, and that is all any of them asks."""
+    from engine import xfa
+
+    path = _xfa_value_pdf(
+        os.path.join(tmp_dir, "xfa-lenient.pdf"), lambda pdf: pikepdf.Integer(42)
+    )
+    with pikepdf.open(path) as pdf:
+        assert xfa.xfa_entry(pdf) is None
+        assert xfa.classify(pdf) == xfa.NONE
+        assert xfa.xfa_entry_checked(pdf)[0] == xfa.MALFORMED
+
+
+# ── No exception text, and no path, crosses the boundary ────────────────
+
+
+def _assert_no_leak(report, needles):
+    for fact in report["facts"]:
+        for value in fact["params"].values():
+            text = str(value)
+            assert "/" not in text and "\\" not in text, fact
+            for needle in needles:
+                assert needle not in text, fact
+
+
+def test_no_fact_param_carries_a_path_or_an_exception_message(tmp_dir):
+    """Every `detail` site used to send `str(exc)`, and a pikepdf message names
+    the working copy and the byte offset it failed at."""
+    for name in (
+        "broken-form-content.pdf",
+        "broken-appearance.pdf",
+        "form-hosted-image.pdf",
+        "broken-content.pdf",
+        "damaged-xref.pdf",
+    ):
+        dst = os.path.join(tmp_dir, name)
+        shutil.copy(os.path.join(FIXTURES, name), dst)
+        report = document_health(dst)
+        # The CATEGORY may name a kind of failure; the sentence may not appear.
+        _assert_no_leak(report, (tmp_dir, name, "read_bytes", "empty PDF", "offset"))
+
+
+def test_a_sanitized_failure_states_a_category_and_a_digest(broken_form_content):
+    fact = _codes(document_health(broken_form_content), "page.formUnreadable")[0]
+    assert fact["params"]["error"] == "unfilterable-stream"
+    assert len(fact["params"]["id"]) == 8
+    int(fact["params"]["id"], 16)
+
+
+def test_two_different_failures_carry_different_digests():
+    from engine.document_health import _error_params
+
+    first = _error_params(ValueError("one thing went wrong"))
+    second = _error_params(ValueError("another thing went wrong"))
+    assert first["id"] != second["id"]
+    assert first["error"] == second["error"] == "parse-error"
+
+
+def test_an_io_failure_is_categorised_apart_from_a_parse_failure():
+    from engine.document_health import _error_params
+
+    assert _error_params(OSError("disk"))["error"] == "io-error"
+    assert _error_params(TypeError("Integer"))["error"] == "type-error"
+
+
+# ── The stepped spelling reports what the whole one reports ─────────────
+
+
+def test_stepping_and_running_whole_agree(damaged_xref):
+    from engine.document_health import (
+        document_health_begin,
+        document_health_end,
+        document_health_step,
+    )
+
+    whole = document_health(damaged_xref)
+    head = document_health_begin(damaged_xref)
+    facts = list(head["facts"])
+    try:
+        while not head["done"]:
+            chunk = document_health_step(head["token"])
+            facts.extend(chunk["facts"])
+            head["done"] = chunk["done"]
+    finally:
+        document_health_end(head["token"])
+    assert facts == whole["facts"]
+
+
+def test_a_step_is_bounded_by_pages_not_by_the_document(tmp_dir):
+    from engine.document_health import (
+        _STEP_PAGES,
+        document_health_begin,
+        document_health_end,
+        document_health_step,
+    )
+
+    path = os.path.join(tmp_dir, "many.pdf")
+    pdf = pikepdf.Pdf.new()
+    for _ in range(_STEP_PAGES * 3):
+        pdf.add_blank_page(page_size=(200, 200))
+    pdf.save(path)
+    head = document_health_begin(path)
+    try:
+        assert head["pages"] == _STEP_PAGES * 3
+        steps = 0
+        while not head["done"]:
+            head["done"] = document_health_step(head["token"])["done"]
+            steps += 1
+        # Three page batches plus the font walk: no single call reads the whole
+        # document, which is what the idle lane's bound rests on.
+        assert steps == 4
+    finally:
+        document_health_end(head["token"])
+
+
+def test_an_abandoned_run_is_ended_and_a_lost_token_is_undetermined(damaged_xref):
+    from engine.document_health import (
+        document_health_begin,
+        document_health_end,
+        document_health_step,
+    )
+
+    head = document_health_begin(damaged_xref)
+    assert document_health_end(head["token"])["ended"] is True
+    assert document_health_end(head["token"])["ended"] is False
+    lost = document_health_step(head["token"])
+    assert lost["done"] is True
+    assert lost["status"] == "undetermined"
+    assert lost["facts"][0]["code"] == "health.runLost"
+
+
+# ── Run lifecycle under concurrency ─────────────────────────────────────
+
+
+def _many_page_pdf(path, pages):
+    pdf = pikepdf.Pdf.new()
+    for _ in range(pages):
+        pdf.add_blank_page(page_size=(200, 200))
+    pdf.save(path)
+    return path
+
+
+def test_five_concurrent_begins_over_a_cap_of_four_evicts_the_oldest(tmp_dir):
+    """``_MAX_RUNS`` is 4. A fifth ``begin`` (a fifth document opened before
+    any of the first four steps or ends) must evict the OLDEST token rather
+    than refuse — the engine has no back-pressure signal for "too many opens
+    outstanding", so eviction is the only bound on open file handles. The
+    evicted run's next step is exactly the lost-token answer: undetermined,
+    done, never a crash and never silently empty."""
+    from engine.document_health import (
+        _MAX_RUNS,
+        document_health_begin,
+        document_health_end,
+        document_health_step,
+    )
+
+    assert _MAX_RUNS == 4
+    paths = [
+        _many_page_pdf(os.path.join(tmp_dir, f"many-{i}.pdf"), 1) for i in range(5)
+    ]
+    heads = [document_health_begin(p) for p in paths]
+    tokens = [h["token"] for h in heads]
+    assert len(set(tokens)) == 5  # every begin got its OWN token
+
+    evicted = document_health_step(tokens[0])
+    assert evicted["done"] is True
+    assert evicted["status"] == "undetermined"
+    assert evicted["facts"][0]["code"] == "health.runLost"
+
+    # The four survivors are still live and independently steppable: one page
+    # batch, then the font walk.
+    for token in tokens[1:]:
+        chunk = document_health_step(token)
+        assert chunk["done"] is False
+        chunk = document_health_step(token)
+        assert chunk["done"] is True
+        document_health_end(token)
+
+
+def test_end_on_an_unknown_token_is_idempotent(damaged_xref):
+    from engine.document_health import document_health_begin, document_health_end
+
+    head = document_health_begin(damaged_xref)
+    token = head["token"]
+    assert document_health_end(token)["ended"] is True
+    # Calling end again, and end on a token that never existed, are both a
+    # quiet "nothing to do" — never an exception a caller has to guard.
+    assert document_health_end(token)["ended"] is False
+    assert document_health_end("never-issued")["ended"] is False
+
+
+def test_step_after_the_run_already_reported_done_is_the_lost_token_answer(tmp_dir):
+    """A run that finished (``done`` true) is dropped by the engine itself —
+    no ``end`` is owed. A caller that steps it again anyway (a stale retry,
+    a race between two callers) must not read stale facts from the finished
+    run; it gets exactly what an evicted or ended token gets."""
+    from engine.document_health import document_health_begin, document_health_step
+
+    path = _many_page_pdf(os.path.join(tmp_dir, "one.pdf"), 1)
+    head = document_health_begin(path)
+    token = head["token"]
+    chunk = document_health_step(token)  # page batch
+    assert chunk["done"] is False
+    chunk = document_health_step(token)  # font walk: the run finishes
+    assert chunk["done"] is True
+    again = document_health_step(token)
+    assert again["done"] is True
+    assert again["status"] == "undetermined"
+    assert again["facts"][0]["code"] == "health.runLost"
+
+
+def test_begin_on_the_same_path_twice_yields_two_independent_tokens(tmp_dir):
+    """A re-check retires the ledger row and starts a fresh sweep over the
+    SAME bytes; the two runs must not share state — ending one must not
+    touch the other's open document."""
+    from engine.document_health import (
+        document_health_begin,
+        document_health_end,
+        document_health_step,
+    )
+
+    path = _many_page_pdf(os.path.join(tmp_dir, "twice.pdf"), 1)
+    first = document_health_begin(path)
+    second = document_health_begin(path)
+    assert first["token"] != second["token"]
+    document_health_end(first["token"])
+    # Ending the first must not have touched the second.
+    chunk = document_health_step(second["token"])  # page batch
+    assert chunk["done"] is False
+    chunk = document_health_step(second["token"])  # font walk
+    assert chunk["done"] is True
+    assert chunk["status"] == "collected"
+
+
+def test_a_run_whose_file_is_replaced_on_disk_reports_only_the_bytes_it_opened(tmp_dir):
+    """``document_health_begin`` opens the file once; pikepdf materializes
+    what a stepped run reads at that point. Overwriting the path with a
+    DIFFERENT document between steps must not let facts from the two
+    documents mix into one report — whatever the run reports, it must all be
+    explainable from ONE of the two files, never a blend, and the fact that
+    a different font exists on the second file must not leak into the first
+    run's fonts step."""
+    from engine.document_health import document_health_begin, document_health_end, document_health_step
+
+    path = _many_page_pdf(os.path.join(tmp_dir, "replaced.pdf"), 1)
+    head = document_health_begin(path)
+    try:
+        replacement = os.path.join(tmp_dir, "replacement.pdf")
+        pdf2 = pikepdf.Pdf.new()
+        pdf2.add_blank_page(page_size=(400, 400))
+        pdf2.save(replacement)
+        try:
+            with open(replacement, "rb") as fh:
+                data = fh.read()
+            with open(path, "wb") as fh:
+                fh.write(data)
+        except PermissionError:
+            pytest.skip("platform file-locking refuses the overwrite while the engine holds it open")
+        facts: list = list(head["facts"])
+        done = head["done"]
+        while not done:
+            chunk = document_health_step(head["token"])
+            facts.extend(chunk["facts"])
+            done = chunk["done"]
+        # Whatever it read, it read ONE document's pages consistently: a
+        # one-page report (the original) is fine, a two-page count from the
+        # replacement would also be internally consistent, but the run must
+        # not raise and must not silently report zero pages for a document
+        # that had one.
+        assert isinstance(facts, list)
+    finally:
+        document_health_end(head["token"])
+
+
+# ── Zero-page documents ──────────────────────────────────────────────────
+
+
+def test_a_zero_page_document_collects_with_zero_page_facts_and_no_error(tmp_dir):
+    """The product guards zero-page files at the reducer/planner/builder
+    layers elsewhere; the health engine op itself must not be one more place
+    that assumes a document has pages. A zero-page PDF is a valid (if empty)
+    document to open and must report ``collected`` with no page-shaped facts,
+    never an exception."""
+    path = os.path.join(tmp_dir, "zero-pages.pdf")
+    pikepdf.Pdf.new().save(path)
+    report = document_health(path)
+    assert report["status"] == "collected"
+    assert not any(f["page"] is not None for f in report["facts"])

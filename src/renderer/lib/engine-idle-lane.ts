@@ -1,25 +1,39 @@
 // The engine's IDLE lane.
 //
 // INVARIANT: a user-requested engine operation never waits behind a background
-// sweep. The Python engine is one process reading one request at a time, so
-// anything already handed to it is ahead of everything submitted later — the
-// operation queue and the commit gate sit above that FIFO and do not reorder
-// it. Work that no user asked for is therefore submitted HERE instead: one run
-// at a time, and only while nothing interactive is outstanding.
+// sweep for longer than ONE bounded step.
 //
-// Two things are enforced, and they are not the same thing:
+// That bound is the whole guarantee, stated exactly. The Python engine is one
+// process reading one request at a time and it has no cancel, so anything
+// already handed to it runs to completion — the operation queue and the commit
+// gate sit above that FIFO and do not reorder it. A background sweep is
+// therefore never handed over WHOLE. It is submitted here as a sequence of
+// bounded requests, and every one of them passes through `gate`, which waits
+// for the engine to be idle first. A user request arriving mid-sweep is
+// dispatched immediately by the interactive path and reaches the engine ahead
+// of the sweep's next step; what it waits for is the step already in flight,
+// and nothing more.
 //
-//   * ONE AT A TIME — several documents opening at once would otherwise hand
-//     the FIFO one full traversal per document, and the next interactive
-//     request would queue behind all of them.
-//   * SUBMITTED WHILE IDLE — a run is handed over only when no interactive
-//     request is in flight, and its currency is re-asked at that moment, so a
-//     run whose document changed (or whose re-check superseded it) is dropped
-//     before it costs the engine anything.
+// What is NOT guaranteed: preemption. A step already handed over finishes.
+// The engine's own step bound (`document_health.py` `_STEP_PAGES`) is the
+// other half of this promise — a lane that gated unbounded steps would gate
+// nothing.
 //
-// A run already handed to the engine cannot be recalled: the engine has no
-// cancel. `null` therefore means "never submitted", and a caller that gets it
-// must record no evidence rather than a failure.
+// Three things are enforced, and they are not the same thing:
+//
+//   * ONE RUN AT A TIME — several documents opening at once would otherwise
+//     interleave their steps and each would finish later than the last.
+//   * EVERY STEP SUBMITTED WHILE IDLE — not just the first. Checking idleness
+//     once, before a whole sweep, is the defect this shape exists to remove.
+//   * INTERACTIVE FROM THE REQUEST, NOT FROM THE DISPATCH — `beginInteractive`
+//     is called before the commit gate runs, so the window in which a user
+//     operation is gating-and-locking but not yet counted (during which the
+//     lane would read the engine as idle and submit another step) does not
+//     exist.
+//
+// A run already handed to the engine cannot be recalled. `null` therefore
+// means "abandoned before the next step", and a caller that gets it must
+// record no evidence rather than a failure.
 
 /** Interactive engine requests currently outstanding. */
 let interactive = 0;
@@ -27,17 +41,36 @@ let waiting: (() => void)[] = [];
 /** The lane's tail: each submission chains onto the previous one. */
 let tail: Promise<unknown> = Promise.resolve();
 
-/** Count one interactive request for as long as `run` is outstanding. */
-export function trackInteractive<T>(run: () => Promise<T>): Promise<T> {
+/** Thrown out of `gate` when the run was superseded while it waited. Private:
+ * `submitIdle` translates it to `null` and it never reaches a caller. */
+const SUPERSEDED = Symbol('idle-lane-superseded');
+
+/**
+ * Count one interactive request from NOW until the returned release is called.
+ *
+ * Called at the top of the interactive path — before the commit gate, before
+ * the file lock — because the lane's question is "has a user asked for
+ * something", not "has a request reached the engine".
+ */
+export function beginInteractive(): () => void {
   interactive += 1;
-  return run().finally(() => {
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
     interactive -= 1;
     if (interactive === 0) {
       const woken = waiting;
       waiting = [];
       for (const resolve of woken) resolve();
     }
-  });
+  };
+}
+
+/** Count one interactive request for as long as `run` is outstanding. */
+export function trackInteractive<T>(run: () => Promise<T>): Promise<T> {
+  const release = beginInteractive();
+  return run().finally(release);
 }
 
 /** Resolves once no interactive engine request is outstanding. */
@@ -49,22 +82,43 @@ export function whenEngineIdle(): Promise<void> {
 }
 
 /**
+ * Submits ONE bounded engine request of a background run.
+ *
+ * Every engine request a run makes goes through here: it waits for the engine
+ * to be idle, re-asks whether the run is still wanted, and only then hands the
+ * request over.
+ */
+export type IdleGate = <R>(send: () => Promise<R>) => Promise<R>;
+
+/**
  * Run background engine work in the idle lane.
  *
- * Resolves to `null` when `isCurrent` answers false at submission time — the
- * run was superseded while it waited, and was never sent.
+ * `run` receives the gate it must submit each of its engine requests through.
+ * Resolves to `null` when `isCurrent` answers false — before the run started,
+ * or at any step boundary within it, in which case the run was abandoned
+ * part-way and whatever it had collected is not evidence.
  */
 export function submitIdle<T>(
-  run: () => Promise<T>,
+  run: (gate: IdleGate) => Promise<T>,
   isCurrent: () => boolean,
 ): Promise<T | null> {
+  const gate: IdleGate = async (send) => {
+    await whenEngineIdle();
+    // Asked at EVERY step, not once per run: the document can change, or a
+    // re-check can supersede this run, between two steps of it.
+    if (!isCurrent()) throw SUPERSEDED;
+    return send();
+  };
   const queued = tail.then(async (): Promise<T | null> => {
     if (!isCurrent()) return null;
     await whenEngineIdle();
-    // Asked AGAIN after the wait: the document can have changed, or a
-    // re-check can have superseded this run, during it.
     if (!isCurrent()) return null;
-    return run();
+    try {
+      return await run(gate);
+    } catch (err) {
+      if (err === SUPERSEDED) return null;
+      throw err;
+    }
   });
   // The lane must survive a failing run: chaining the tail on the caller's
   // promise would leave every later submission rejected.

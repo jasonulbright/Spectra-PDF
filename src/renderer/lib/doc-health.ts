@@ -82,10 +82,22 @@ export const EMPTY_HEALTH_LEDGER: HealthLedger = { byPath: new Map() };
  *                  skipped. NOT a clean bill.
  * `undetermined` — a run failed, or a fact says something could not be
  *                  determined. Never reported as healthy.
- * `facts`        — both runs finished and reported something.
- * `healthy`      — both runs finished and reported nothing.
+ * `facts`        — both runs finished and at least one WARNING-severity fact
+ *                  stands: something about this document is wrong.
+ * `limited`      — both runs finished, nothing is wrong, and the coverage is
+ *                  incomplete: every fact is `info`. The commonest one is an
+ *                  ordinary JPEG, whose pixels this build does not decode.
+ *                  Reported so the ledger cannot be read as having checked
+ *                  what it did not — and NOT as a warning, because an
+ *                  unchecked image is not a damaged one.
+ * `healthy`      — both runs finished and reported nothing at all.
  */
-export type HealthVerdict = 'no-evidence' | 'undetermined' | 'facts' | 'healthy';
+export type HealthVerdict =
+  | 'no-evidence'
+  | 'undetermined'
+  | 'facts'
+  | 'limited'
+  | 'healthy';
 
 function entryFor(
   ledger: HealthLedger,
@@ -224,8 +236,32 @@ export function verdictFor(
   if (entry.pdfjs === 'failed' || entry.engine === 'failed') return 'undetermined';
   if (entry.facts.some((f) => f.kind === 'undetermined')) return 'undetermined';
   if (entry.pdfjs === 'pending' || entry.engine === 'pending') return 'no-evidence';
-  return entry.facts.length === 0 ? 'healthy' : 'facts';
+  if (entry.facts.length === 0) return 'healthy';
+  // SEVERITY decides, not fact count. Every collected fact used to read as a
+  // warning, so an ordinary JPEG document — one `info` fact saying its pixel
+  // codec was not exercised — wore the same glyph as a document with a
+  // damaged page.
+  return entry.facts.some((f) => f.severity === 'warning') ? 'facts' : 'limited';
 }
+
+/**
+ * The glyph the status-bar indicator shows per verdict. Pulled out of the
+ * component so the mapping is a plain data table a test can assert against
+ * directly — there is no DOM test environment in this repo (see
+ * `state/selectors.ts`'s own note on the same constraint), so a mapping
+ * buried inside a component's render body cannot be pinned any other way.
+ * `limited` is deliberately its own glyph, never the warning one: a document
+ * that was merely not examined in full must not read as a document with
+ * something wrong. `undetermined` is deliberately never the healthy tick,
+ * for the same reason in the other direction.
+ */
+export const HEALTH_GLYPHS: Readonly<Record<HealthVerdict, string>> = {
+  healthy: '✓',
+  facts: '⚠',
+  limited: 'ⓘ',
+  undetermined: '?',
+  'no-evidence': '·',
+};
 
 /** How many facts the indicator shows beside the glyph. */
 export function factCount(
