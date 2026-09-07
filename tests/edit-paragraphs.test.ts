@@ -15,6 +15,9 @@ import {
   paragraphUnencodable,
   relaxUnencodableSpans,
   remapRanges,
+  cutsAtomicRange,
+  hardBreakRefusal,
+  HARD_BREAK_ATOMIC_MESSAGE,
   sanitizeParagraphInput,
   seedSpanColors,
   spanColorsToStyles,
@@ -31,6 +34,10 @@ import {
   seedSpanFaces,
   seedSpanSizes,
 } from '../src/renderer/lib/edit-paragraphs';
+import {
+  localizeEngineMessage,
+  matchEngineMessage,
+} from '../src/renderer/lib/engine-messages';
 
 describe('computeEditSpans (caret inheritance)', () => {
   const spans = [
@@ -206,6 +213,47 @@ describe('sanitizeParagraphInput', () => {
   it('keeps newlines as hard breaks, normalizing the carriage return', () => {
     expect(sanitizeParagraphInput('a\r\nb\nc')).toBe('a\nb\nc');
     expect(sanitizeParagraphInput('a\rb')).toBe('a\nb');
+  });
+});
+
+describe('cutsAtomicRange (a hard break may not split an atomic block)', () => {
+  const ranges = [{ start: 2, end: 4 }];
+  it('refuses a caret strictly inside the block', () => {
+    expect(cutsAtomicRange(ranges, 3, 3)).toBe(true);
+  });
+  it('allows a caret at either edge', () => {
+    expect(cutsAtomicRange(ranges, 2, 2)).toBe(false);
+    expect(cutsAtomicRange(ranges, 4, 4)).toBe(false);
+  });
+  it('allows a selection that replaces the whole block', () => {
+    expect(cutsAtomicRange(ranges, 2, 4)).toBe(false);
+    expect(cutsAtomicRange(ranges, 0, 6)).toBe(false);
+  });
+  it('refuses a selection that ends inside the block', () => {
+    expect(cutsAtomicRange(ranges, 0, 3)).toBe(true);
+    expect(cutsAtomicRange(ranges, 3, 6)).toBe(true);
+  });
+  it('is inert with no atomic spans', () => {
+    expect(cutsAtomicRange([], 3, 3)).toBe(false);
+  });
+});
+
+describe('hardBreakRefusal (the withheld break is named, never silent)', () => {
+  const ranges = [{ start: 2, end: 4 }];
+  it('names the engine refusal for a caret inside the block', () => {
+    const message = hardBreakRefusal(ranges, 3, 3);
+    expect(message).not.toBeNull();
+    expect(message).toBe(localizeEngineMessage(HARD_BREAK_ATOMIC_MESSAGE));
+  });
+  it('carries a message the engine-message table recognizes', () => {
+    expect(matchEngineMessage(HARD_BREAK_ATOMIC_MESSAGE)?.row.key).toBe(
+      'text_paragraphs.hardLineBreakCannot',
+    );
+  });
+  it('is null for an admissible break', () => {
+    expect(hardBreakRefusal(ranges, 2, 2)).toBeNull();
+    expect(hardBreakRefusal(ranges, 2, 4)).toBeNull();
+    expect(hardBreakRefusal([], 3, 3)).toBeNull();
   });
 });
 

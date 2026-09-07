@@ -4789,6 +4789,51 @@ class TestTateChuYoko:
         assert after[0]["text"] == new_text
         assert after[0]["box"] == pytest.approx(p["box"], abs=0.05)
 
+    def _break_at(self, para: dict, at: int) -> tuple:
+        """The text and spans a hard break inserted at code-point `at`
+        produces — exactly what the editor sends."""
+        text = para["text"][:at] + chr(10) + para["text"][at:]
+        spans = []
+        for sp in para["spans"]:
+            moved = dict(sp)
+            if moved["start"] >= at:
+                moved["start"] += 1
+            if moved["end"] >= at:
+                moved["end"] += 1
+            spans.append(moved)
+        return text, spans
+
+    def test_the_listing_marks_the_block_atomic(self, tmp_dir):
+        # The renderer refuses a break inside the block, and this flag is
+        # the only thing that tells it where the block is.
+        p = _paras(self._src(tmp_dir))[0]
+        at = p["text"].index("26")
+        atomic = [sp for sp in p["spans"] if sp.get("atomic")]
+        assert len(atomic) == 1
+        assert (atomic[0]["start"], atomic[0]["end"]) == (at, at + 2)
+
+    def test_a_hard_break_inside_the_block_refuses_by_name(self, tmp_dir):
+        # The block is one em cell whose inline fit was measured whole;
+        # half of it on each of two lines is not a tate-chu-yoko. The
+        # refusal states the rule instead of reporting the accident an
+        # unencodable newline would.
+        src = self._src(tmp_dir)
+        p = _paras(src)[0]
+        text, spans = self._break_at(p, p["text"].index("26") + 1)
+        with pytest.raises(ValueError) as exc:
+            _apply(src, os.path.join(tmp_dir, "split.pdf"), p, text, spans=spans)
+        assert "tate-chu-yoko" in str(exc.value)
+
+    def test_a_hard_break_beside_the_block_is_accepted(self, tmp_dir):
+        # Beside is not inside: the break ends the line and the block
+        # survives whole on the next one.
+        src = self._src(tmp_dir)
+        out = os.path.join(tmp_dir, "beside.pdf")
+        p = _paras(src)[0]
+        text, spans = self._break_at(p, p["text"].index("26"))
+        _apply(src, out, p, text, spans=spans)
+        assert b"(26) Tj" in _content_bytes(out)
+
     def test_the_block_never_splits_across_a_column_break(self, tmp_dir):
         # It is one unit to the line breaker, the same way a shaped word is:
         # a wrap may put it at the head of the next column, never half of it

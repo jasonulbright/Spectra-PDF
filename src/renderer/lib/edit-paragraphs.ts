@@ -12,6 +12,7 @@ import { pdfRectToDisplay } from './pdfx-build';
 import type { PageGeometry } from './redaction';
 import type { EditTextRun } from './edit-text';
 import { walkMissing } from './edit-text';
+import { localizeEngineMessage } from './engine-messages';
 
 export interface EditSpan {
   start: number;
@@ -39,6 +40,11 @@ export interface EditSpan {
   italic?: boolean;
   family?: FaceSelector;
   size?: number;
+  /** The span is an INDIVISIBLE block (a tate-chu-yoko run): the engine
+   * measured its inline fit as one unit and cannot split it, so a hard
+   * line break strictly inside it is refused before the editor changes
+   * anything. Absent on every ordinary span. */
+  atomic?: boolean;
 }
 
 /**
@@ -251,6 +257,8 @@ interface EngineParagraphListing {
       italic?: boolean;
       family?: FaceSelector;
       size?: number;
+      /** The span is an indivisible block the engine cannot split. */
+      atomic?: boolean;
     }[];
     alignment: string;
     line_count: number;
@@ -325,6 +333,7 @@ export async function fetchEditTextListing(
           ? { family: s.family }
           : {}),
         ...(typeof s.size === 'number' && Number.isFinite(s.size) ? { size: s.size } : {}),
+        ...(s.atomic === true ? { atomic: true } : {}),
       })),
       alignment: p.alignment,
       lineCount: p.line_count,
@@ -408,6 +417,38 @@ export function remapRanges<T extends { start: number; end: number }>(
     if (end > start) out.push({ ...r, start, end });
   }
   return out;
+}
+
+/** Whether replacing the code-point range [start, end) would cut into
+ * an indivisible span — the caret (or selection edge) falls strictly
+ * inside one. Replacing a whole atomic span is not a cut: the block goes
+ * away entirely, which the engine can express. */
+export function cutsAtomicRange(
+  ranges: readonly { start: number; end: number }[],
+  start: number,
+  end: number,
+): boolean {
+  return ranges.some((r) => (start > r.start && start < r.end) || (end > r.start && end < r.end));
+}
+
+/** The engine's own English for the refusal a hard break into an atomic
+ * span would earn. Byte-identical to what `text_paragraphs` raises, so it
+ * resolves through the engine-message table into the UI language and the
+ * editor names the same refusal the engine would. */
+export const HARD_BREAK_ATOMIC_MESSAGE =
+  'a hard line break cannot split a tate-chu-yoko block';
+
+/** The localized refusal for a hard break at [start, end), or null when the
+ * break is admissible. Pre-empting the engine is never silent: the edit is
+ * withheld and this sentence is what says so. */
+export function hardBreakRefusal(
+  ranges: readonly { start: number; end: number }[],
+  start: number,
+  end: number,
+): string | null {
+  return cutsAtomicRange(ranges, start, end)
+    ? localizeEngineMessage(HARD_BREAK_ATOMIC_MESSAGE)
+    : null;
 }
 
 /** One per-span colour override — a CODE-POINT range painted a hex

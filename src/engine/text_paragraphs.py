@@ -884,13 +884,56 @@ def _indent_break(pool: dict, prev: _Line, line: _Line) -> bool:
     what an indent-signalled paragraph break IS, and a block whose pool
     has no established margins (centred text, a one-off line) never
     reaches the test at all."""
-    left, right, tol = pool["left"], pool["right"], pool["tol"]
-    if left is None or right is None:
+    left, right, tol = pool.get("left"), pool.get("right"), pool.get("tol")
+    if left is None or right is None or tol is None:
         return False
     indent = line.x0 - left
     if indent <= tol or indent > PARA_INDENT_MAX_FRACTION * (right - left):
         return False
     return (right - prev.x1) > tol
+
+
+def _margin_pool(lines: list[_Line]) -> dict:
+    """The modal left/right margins of one lane of lines, with the
+    tolerance they were clustered at."""
+    span = (max(l.x1 for l in lines) - min(l.x0 for l in lines)) if lines else 0.0
+    tol = max(EDGE_TOL_PT, EDGE_TOL_FRACTION * span)
+    support = max(2, math.ceil(PARA_MARGIN_SUPPORT * len(lines)))
+    return {
+        "left": _modal_edge([l.x0 for l in lines], tol, support),
+        "right": _modal_edge([l.x1 for l in lines], tol, support),
+        "tol": tol,
+    }
+
+
+def _lane_pools(lines: list[_Line]) -> list[dict]:
+    """Each line's margin pool, one pool per horizontal LANE — the
+    transitive closure of x-overlap, which is what a column IS on a page
+    whose columns do not overlap. Returned parallel to `lines`, so the
+    join loop asks about the lane the candidate line sits in.
+
+    Margin evidence must not cross a lane: a two-column page pools twice
+    as many lines behind one modal edge, no cluster reaches the support
+    fraction, and a rule that needs an established margin then never
+    fires anywhere on the page. A single-column page has exactly one lane
+    and measures identically to a whole-pool derivation."""
+    order = sorted(range(len(lines)), key=lambda i: lines[i].x0)
+    lanes: list[list[int]] = []
+    edge = 0.0
+    for i in order:
+        line = lines[i]
+        if lanes and line.x0 < edge:
+            lanes[-1].append(i)
+            edge = max(edge, line.x1)
+        else:
+            lanes.append([i])
+            edge = line.x1
+    pools: list[dict] = [{} for _ in lines]
+    for lane in lanes:
+        pool = _margin_pool([lines[i] for i in lane])
+        for i in lane:
+            pools[i] = pool
+    return pools
 
 
 def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
@@ -910,21 +953,17 @@ def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
     strict and a refused cross join simply opens a second paragraph (the
     shipped behavior)."""
     lines = sorted(lines, key=lambda l: -l.y)
-    # The pool's own margins — the reference an indent and a short
-    # line are measured against. Derived once from every line under the key,
-    # not from the paragraph being built: the evidence that "hello again" is
-    # its own paragraph is that the BLOCK has a left margin its successor
-    # starts in from, which a one-line open paragraph cannot supply.
-    span = (max(l.x1 for l in lines) - min(l.x0 for l in lines)) if lines else 0.0
-    pool_tol = max(EDGE_TOL_PT, EDGE_TOL_FRACTION * span)
-    support = max(2, math.ceil(PARA_MARGIN_SUPPORT * len(lines)))
-    pool = {
-        "left": _modal_edge([l.x0 for l in lines], pool_tol, support),
-        "right": _modal_edge([l.x1 for l in lines], pool_tol, support),
-        "tol": pool_tol,
-    }
+    # The margins an indent and a short line are measured against, one
+    # pool per LANE. Derived from the lines that share a column rather
+    # than from the paragraph being built: the evidence that "hello again"
+    # is its own paragraph is that the BLOCK has a left margin its
+    # successor starts in from, which a one-line open paragraph cannot
+    # supply. Per lane and not per key, because two side-by-side columns
+    # under one key hold each other's margins below the support threshold
+    # and every indent-signalled break in both columns is then missed.
+    pools = _lane_pools(lines)
     open_paras: list[dict] = []
-    for line in lines:
+    for line_no, line in enumerate(lines):
         bullet = _starts_with_bullet(line)
         line_stream = line.members[0].stream
         line_idx = {m.index for m in line.members}
@@ -953,7 +992,7 @@ def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
                     cross_ok is None or not cross_ok(para["idx"], line_idx)
                 ):
                     continue
-                if _indent_break(pool, prev, line):
+                if _indent_break(pools[line_no], prev, line):
                     continue
                 if ov > best_overlap:
                     best, best_overlap = para, ov
@@ -987,17 +1026,23 @@ def _detect_alignment(
         return default
     tol = max(EDGE_TOL_PT, EDGE_TOL_FRACTION * (right - left))
     non_last = lines[:-1]
-    # Justification is a RIGHT-edge property: every line but the last
-    # reaches the measure. The left edge carries the same evidence for every
-    # line except the FIRST, which a first-line indent legitimately moves in
-    # — refusing that line the exemption read a fully justified indented
-    # paragraph as flush left and re-emitted it that way.
-    if (
-        len(lines) >= 3
-        and all((right - l.x1) <= tol for l in non_last)
-        and all((l.x0 - left) <= tol for l in non_last[1:])
-    ):
-        return "justify"
+    # Justification is a property of the edge the lines GROW toward:
+    # every line but the last reaches the measure at the end of the
+    # reading direction. The opposite edge carries the same evidence for
+    # every line except the FIRST, which a first-line indent legitimately
+    # moves in — and the indent sits at the reading START, so the
+    # exemption mirrors with the base direction. Reading a justified
+    # indented paragraph as flush left (or, right-to-left, flush right)
+    # re-emitted it that way.
+    if len(lines) >= 3:
+        if base_rtl:
+            reaches = all((l.x0 - left) <= tol for l in non_last)
+            opposite = all((right - l.x1) <= tol for l in non_last[1:])
+        else:
+            reaches = all((right - l.x1) <= tol for l in non_last)
+            opposite = all((l.x0 - left) <= tol for l in non_last[1:])
+        if reaches and opposite:
+            return "justify"
     lefts = [l.x0 for l in lines]
     rights = [l.x1 for l in lines]
     centers = [(l.x0 + l.x1) / 2 for l in lines]
@@ -1647,6 +1692,11 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
                 if sfam is not None:
                     entry["family"] = sfam
                 entry["size"] = round(m.style["size"], 2)
+                if m.atomic:
+                    # The span is an INDIVISIBLE block (tate-chu-yoko): the
+                    # editor refuses a hard break strictly inside it rather
+                    # than sending an edit the engine can only refuse.
+                    entry["atomic"] = True
             spans_out.append(entry)
         out.append(
             {
@@ -2203,6 +2253,34 @@ def _styled_chars(
         member = members_by_index[int(span["run"])]
         seg_text = new_text[span["start"] : span["end"]]
         if member.atomic and seg_text:
+            # A hard break may END a tate-chu-yoko block or precede it —
+            # what it may not do is fall inside one. The block is one em
+            # cell whose inline fit was MEASURED as a whole (`tcy_em`,
+            # `tcy_cross`, the Tz the emission recomputes from them);
+            # splitting it would fabricate two cells whose widths were
+            # never measured, and two upright digits on adjacent lines are
+            # not a tate-chu-yoko at all. Refuse by name — reaching the
+            # font path below reported the accident (an unencodable
+            # character) instead of the rule.
+            lead = len(seg_text) - len(seg_text.lstrip("\n"))
+            trail = len(seg_text) - len(seg_text.rstrip("\n"))
+            core = seg_text[lead : len(seg_text) - trail]
+            if "\n" in core:
+                raise ValueError(
+                    "a hard line break cannot split a tate-chu-yoko block"
+                )
+            edge_ref = ref(
+                member, None, color_at(span["start"], member), size_at(span["start"])
+            )
+            for _ in range(lead):
+                styled.append(("\n", edge_ref))
+            if not core:
+                for _ in range(trail):
+                    styled.append(("\n", edge_ref))
+                continue
+            seg_text = core
+            span = dict(span)
+            span["start"] += lead
             # A tate-chu-yoko block is ONE entry — indivisible to
             # the width model, to the line breaker (it can never straddle a
             # column break, the same way a shaped word cannot) and to the
@@ -2228,6 +2306,8 @@ def _styled_chars(
                 seg_text,
                 ref(member, fk, color_at(span["start"], member), size_at(span["start"])),
             ))
+            for _ in range(trail):
+                styled.append(("\n", edge_ref))
             continue
         i = 0
         while i < len(seg_text):

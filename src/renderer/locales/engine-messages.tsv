@@ -784,6 +784,7 @@ text_paragraphs.editedTextNeedsSpan	exact	text_paragraphs	edited text needs its 
 text_paragraphs.fallbackFontPathRequired	exact	text_paragraphs	fallback font path is required to convert
 text_paragraphs.fallbackFontPathRequired2	exact	text_paragraphs	fallback font path is required to restyle
 text_paragraphs.fontVerticalFormsPick	exact	text_authoring,text_paragraphs	that font has no vertical forms — pick one that does
+text_paragraphs.hardLineBreakCannot	exact	text_paragraphs	a hard line break cannot split a tate-chu-yoko block
 text_paragraphs.nextParagraphMerge	exact	text_paragraphs	no next paragraph to merge with
 text_paragraphs.pageSTextChanged	exact	text_paragraphs	the page's text changed underneath this edit — reopen the editor
 text_paragraphs.paragraphCannotWrapWidth	exact	text_paragraphs	the paragraph cannot wrap to that width — a word is wider than the box

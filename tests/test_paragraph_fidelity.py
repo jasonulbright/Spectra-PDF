@@ -14,12 +14,16 @@ hand-built streams could not reach:
 """
 
 import os
+import types
 
 import pikepdf
+import pytest
 
 from engine.extract_text import extract_text
 from engine.text_paragraphs import (
     _detect_alignment,
+    _join_paragraphs,
+    _Line,
     list_text_paragraphs,
     replace_paragraph_text,
 )
@@ -221,3 +225,184 @@ def test_a_newline_is_never_asked_of_the_font(tmp_path):
     hello = next(ln for ln in drawn if abs(ln[0] - 633.33) < 0.5)
     below = [ln for ln in drawn if ln[0] < hello[0] - 1.0]
     assert below and abs(below[0][1] - hello[1]) <= EDGE_TOL
+
+
+# -- columns: margin evidence is per lane, never pooled across columns ----
+
+
+def _synth_line(index: int, y: float, x0: float, x1: float, stream: int = 0) -> "_Line":
+    """One drawn line, positioned by hand. Geometry is the whole question
+    here, so the members carry only what the join reads."""
+    line = _Line.__new__(_Line)
+    line.members = [types.SimpleNamespace(index=index, stream=stream, ptext="body")]
+    line.y = float(y)
+    line.eff = 10.0
+    line.x0 = float(x0)
+    line.x1 = float(x1)
+    return line
+
+
+def _columns(count: int) -> list:
+    """`count` side-by-side columns, each holding two paragraphs the only
+    way a typesetter marks them: a short last line, then an indented one.
+    Every column is identical, so a rule that fires anywhere must fire in
+    all of them."""
+    lines = []
+    index = 0
+    for row, (x0_off, x1_off) in enumerate(
+        [(0.0, 0.0), (0.0, -25.0), (10.0, 0.0), (0.0, 0.0)]
+    ):
+        for col in range(count):
+            base = col * 200.0
+            lines.append(
+                _synth_line(index, 100.0 - row * 10.0 - col, base + x0_off,
+                            base + 100.0 + x1_off)
+            )
+            index += 1
+    return lines
+
+
+def test_two_columns_each_keep_their_own_indent_break():
+    paras = _join_paragraphs(_columns(2))
+    assert len(paras) == 4
+    assert all(len(block) == 2 for block in paras)
+
+
+def test_three_columns_each_keep_their_own_indent_break():
+    paras = _join_paragraphs(_columns(3))
+    assert len(paras) == 6
+    assert all(len(block) == 2 for block in paras)
+
+
+def test_a_single_column_page_is_unchanged_by_the_lane_split():
+    # The lane rule must not be a second behaviour: one column has one lane.
+    body = _body(LATEX)
+    assert len(body) == 6
+
+
+# -- RTL: the justification test mirrors with the base direction ---------
+
+
+def test_rtl_justification_survives_a_first_line_indent():
+    class L:
+        def __init__(self, x0, x1):
+            self.x0, self.x1 = x0, x1
+
+    # Right-to-left: the lines grow toward the LEFT margin and the
+    # first-line indent insets the RIGHT edge.
+    indented = [L(0.0, 90.0), L(0.0, 100.0), L(0.0, 100.0), L(30.0, 100.0)]
+    assert _detect_alignment(indented, 0.0, 100.0, base_rtl=True) == "justify"
+    # The same geometry read left to right is NOT justified: its right
+    # edges are ragged and only the first line reaches the measure.
+    assert _detect_alignment(indented, 0.0, 100.0) != "justify"
+    # A LATER line inset from the right is ragged, not an indent.
+    ragged = [L(0.0, 100.0), L(0.0, 90.0), L(0.0, 100.0), L(30.0, 100.0)]
+    assert _detect_alignment(ragged, 0.0, 100.0, base_rtl=True) != "justify"
+
+
+def test_ltr_justification_is_unchanged_by_the_mirror():
+    class L:
+        def __init__(self, x0, x1):
+            self.x0, self.x1 = x0, x1
+
+    flush = [L(BODY_LEFT, BODY_RIGHT) for _ in range(3)]
+    indented = [L(INDENT_LEFT, BODY_RIGHT)] + flush + [L(BODY_LEFT, 229.0)]
+    assert _detect_alignment(indented, BODY_LEFT, BODY_RIGHT) == "justify"
+    assert _detect_alignment(indented, BODY_LEFT, BODY_RIGHT, base_rtl=True) != "justify"
+
+
+# -- RTL: a justified paragraph re-emits justified ------------------------
+
+_AR_FACE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "resources", "fonts",
+    "IBMPlexSansArabic-Regular.ttf",
+)
+RTL_LEFT, RTL_RIGHT = 100.0, 300.0
+RTL_INDENT = 15.0
+
+
+def _build_justified_rtl(path: str) -> str:
+    """A four-line right-to-left paragraph justified the way a producer
+    justifies one: each line is stretched to the measure with its own Tz,
+    the FIRST line inset from the right margin by the paragraph indent and
+    the last line flush right. Drawn in visual order, as a PDF pen must."""
+    from fontTools.ttLib import TTFont
+    from pikepdf import Dictionary
+    from test_rtl_reflow import _embed, _shape_line
+
+    face = TTFont(_AR_FACE, lazy=True)
+    upm, hmtx = face["head"].unitsPerEm, face["hmtx"]
+    gid_of = {n: i for i, n in enumerate(face.getGlyphOrder())}
+    size = 16.0
+    texts = [
+        "مرحبا بالعالم",
+        "لغة عربية جميلة",
+        "ونص طويل يحتاج",
+        "الى اكثر",
+    ]
+    measure = RTL_RIGHT - RTL_LEFT
+    targets = [measure - RTL_INDENT, measure, measure, 120.0]
+    x0s = [RTL_LEFT, RTL_LEFT, RTL_LEFT, RTL_RIGHT - 120.0]
+    runs = [_shape_line(_AR_FACE, t) for t in texts]
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    gids, gid_text = set(), {}
+    for run in runs:
+        for name, cluster in run:
+            g = gid_of[name]
+            gids.add(g)
+            if cluster:
+                gid_text[g] = cluster
+            else:
+                gid_text.setdefault(g, "")
+    font_dict = _embed(pdf, _AR_FACE, gids, gid_text)
+    ops = ["BT", "/PF1 %g Tf" % size]
+    for i, run in enumerate(runs):
+        natural = sum(hmtx[n][0] for n, _t in run) / upm * size
+        ops.append("%g Tz" % (targets[i] / natural * 100.0))
+        ops.append("1 0 0 1 %g %g Tm" % (x0s[i], 700.0 - i * 22.0))
+        ops.append("<%s> Tj" % "".join(f"{gid_of[n]:04x}" for n, _t in run))
+    ops.append("ET")
+    page.Contents = pdf.make_stream((NL.join(ops)).encode("ascii"))
+    page.Resources = Dictionary(Font=Dictionary(PF1=font_dict))
+    pdf.save(path)
+    pdf.close()
+    return path
+
+
+@pytest.mark.skipif(
+    not os.path.isfile(_AR_FACE),
+    reason="RTL faces not provisioned (scripts/sync-edit-fonts.ps1)",
+)
+def test_a_justified_rtl_paragraph_reads_and_re_emits_as_justified(tmp_path):
+    src = _build_justified_rtl(str(tmp_path / "rtl-justified.pdf"))
+    para = list_text_paragraphs(src, 1)["paragraphs"][0]
+    assert para["rtl"] is True
+    assert para["line_count"] == 4
+    assert para["alignment"] == "justify"
+    # Emitted: the edit reflows and the paragraph is still justified to the
+    # same measure — the classification is what the re-emission obeys.
+    out = str(tmp_path / "rtl-justified-edited.pdf")
+    new_text = para["text"].replace(
+        "جميلة", "جميل"
+    )
+    assert new_text != para["text"]
+    replace_paragraph_text(
+        file=src, output=out, page=1, paragraph_index=para["index"],
+        new_text=new_text,
+        spans=[{"start": 0, "end": len(new_text), "run": para["runs"][0]}],
+        expected_runs=para["runs"], expected_text=para["text"],
+        convert=True,
+        font_path=os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "resources", "fonts"
+        ),
+    )
+    after = list_text_paragraphs(out, 1)["paragraphs"][0]
+    assert after["alignment"] == "justify"
+    assert abs(after["box"][0] - RTL_LEFT) <= EDGE_TOL
+    assert abs(after["box"][2] - RTL_RIGHT) <= EDGE_TOL
+    drawn = _lines(out)
+    assert len(drawn) >= 3
+    for line in drawn[1:-1]:
+        assert abs(line[1] - RTL_LEFT) <= EDGE_TOL
+        assert abs(line[2] - RTL_RIGHT) <= EDGE_TOL

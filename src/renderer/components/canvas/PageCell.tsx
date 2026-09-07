@@ -45,6 +45,7 @@ import {
   mergeSpanSizes,
   relaxUnencodableSpans,
   remapRanges,
+  hardBreakRefusal,
   sanitizeParagraphInput,
   seedSpanColors,
   seedSpanFaces,
@@ -5202,6 +5203,19 @@ function ParagraphEditor({
   // multiples. 2 = the engine default (not sent); adjustable by typing or
   // by dragging the grip beside the field.
   const [gapField, setGapField] = useState('2');
+  // The paragraph's INDIVISIBLE ranges (a tate-chu-yoko block), from the
+  // listing and then carried along every text edit by the same diff the
+  // per-span overrides ride. A hard break strictly inside one is refused
+  // here, because the engine can only refuse it: the block's inline fit was
+  // measured as one em cell and half of it on each of two lines is not a
+  // tate-chu-yoko.
+  const [atomicRanges, setAtomicRanges] = useState<Array<{ start: number; end: number }>>(
+    () => para.spans.filter((sp) => sp.atomic).map((sp) => ({ start: sp.start, end: sp.end })),
+  );
+  // The refusal a withheld hard break left behind, shown on the editor's
+  // invalid-state strip. Transient and non-blocking: it names what did not
+  // happen and clears on the next edit or caret move.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const gapVal = ((): number => {
     const v = parseFloat(gapField);
     return Number.isFinite(v) ? Math.max(1.3, Math.min(10, v)) : 2;
@@ -5453,6 +5467,8 @@ function ParagraphEditor({
     // attached to their characters as the text is edited (never sent).
     setSeedFaces((prev) => mergeSpanFaces(remapRanges(value, next, prev)));
     setSeedSizes((prev) => mergeSpanSizes(remapRanges(value, next, prev)));
+    setAtomicRanges((prev) => remapRanges(value, next, prev));
+    setRefusal(null);
     setValue(next);
     // Always bump: when `next === value` React would otherwise skip the
     // render and leave the browser's raw DOM mutation in place.
@@ -5495,6 +5511,7 @@ function ParagraphEditor({
       const s = readEditorSelection(areaRef.current);
       if (!s) return; // selection elsewhere: keep the last one we saw
       lastSelRef.current = s;
+      setRefusal(null);
       captureRef.current();
     };
     document.addEventListener('selectionchange', onSelectionChange);
@@ -5795,6 +5812,14 @@ function ParagraphEditor({
           if (!area || !(e.target === area || area.contains(e.target as Node))) return;
           const sel = readEditorSelection(area);
           if (!sel) return;
+          // Refused BEFORE any state changes: an edit the engine can only
+          // reject never reaches the document. The text stays untouched and
+          // the engine's own refusal is named on the invalid-state strip.
+          const refused = hardBreakRefusal(atomicRanges, sel.start, sel.end);
+          if (refused !== null) {
+            setRefusal(refused);
+            return;
+          }
           const chars = Array.from(value);
           applyText(
             [...chars.slice(0, sel.start), '\n', ...chars.slice(sel.end)].join(''),
@@ -6383,7 +6408,7 @@ function ParagraphEditor({
           dangerouslySetInnerHTML={{ __html: html }}
         />
       </div>
-      {!valid && (
+      {!valid ? (
         <div className="page-edittext-error" data-testid="edit-para-error" aria-live="polite">
           {tChrome('canvas.editpara.missingGlyphs', {
             chars: missing.map((c) => `'${c}'`).join(' '),
@@ -6400,7 +6425,11 @@ function ParagraphEditor({
             {tChrome('canvas.editpara.useCompatibleFont')}
           </button>
         </div>
-      )}
+      ) : refusal !== null ? (
+        <div className="page-edittext-error" data-testid="edit-para-refusal" aria-live="polite">
+          {refusal}
+        </div>
+      ) : null}
     </div>
   );
 }
