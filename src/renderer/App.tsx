@@ -171,12 +171,12 @@ import { NavPane } from './components/navpane/NavPane';
 import { ToolDock } from './components/ToolDock';
 import { type Operation } from './commands/operations';
 import {
-  nextRecentSeq,
-  persistRecent,
-  removeRecentEntries,
+  isRecentStorageKey,
+  readRecent,
+  recordRecentOpen,
+  removeRecentEntriesSafely,
   sameRecent,
   sweepDeadRecents,
-  withRecent,
 } from './lib/recent-files';
 import { claimPaths, releasePaths, soleOwner, type ClaimRefusal } from './lib/window-claims';
 import { writeWorkbenchUi } from './lib/workbench-ui';
@@ -623,17 +623,23 @@ function AppContent(): React.ReactElement {
     app.getVersion().then((v) => setAppVersion(`v${v}`));
   }, []);
 
-  // Mirror the recent-files list (ui slice) to localStorage — the single
-  // persistence point; every mutation just dispatches UI_SET_RECENT_FILES.
-  // The key is shared by every window, so the write folds in whatever another
-  // window recorded since this one last wrote, and the result is adopted back
-  // into state rather than left to drift from what is stored.
+  const recentFilesRef = useRef(recentFiles);
+  recentFilesRef.current = recentFiles;
+
+  // localStorage's `storage` event is delivered to the OTHER windows. Adopt
+  // their committed transaction so this window's Home/menu state converges
+  // without waiting for another local mutation.
   useEffect(() => {
-    const merged = persistRecent(recentFiles);
-    if (!sameRecent(merged, recentFiles)) {
-      dispatch({ type: 'UI_SET_RECENT_FILES', files: merged });
-    }
-  }, [recentFiles, dispatch]);
+    const onStorage = (event: StorageEvent) => {
+      if (!isRecentStorageKey(event.key)) return;
+      const stored = readRecent();
+      if (!sameRecent(stored, recentFilesRef.current)) {
+        dispatch({ type: 'UI_SET_RECENT_FILES', files: stored });
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [dispatch]);
 
   // Mirror the toolbar overrides (I.6 customization) the same way.
   useEffect(() => {
@@ -1083,7 +1089,7 @@ function AppContent(): React.ReactElement {
         if (existing && !existing.importOnly) {
           outcomes.push({ name: fileName, reason: null });
           dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
-          recent = withRecent(recent, filePath, Date.now(), originFor(filePath), nextRecentSeq()); // only on success — a cancel/throw
+          recent = await recordRecentOpen(recent, filePath, Date.now(), originFor(filePath)); // only on success — a cancel/throw
           lastOpened = filePath;                  // must not pollute Recent (regression)
           freshlyOpened = null;
           changed = true;
@@ -1131,7 +1137,7 @@ function AppContent(): React.ReactElement {
           webOrigin: originFor(filePath),
         });
         inserted += 1;
-        recent = withRecent(recent, filePath, Date.now(), originFor(filePath), nextRecentSeq());
+        recent = await recordRecentOpen(recent, filePath, Date.now(), originFor(filePath));
         lastOpened = filePath;
         freshlyOpened = { path: filePath, workingPath: prepared.workingPath };
         changed = true;
@@ -3085,10 +3091,14 @@ function AppContent(): React.ReactElement {
         .classifyRecentPaths([entry.path])
         .catch(() => ['indeterminate'] as const);
       if (statuses[0] === 'missing') {
-        dispatch({
-          type: 'UI_SET_RECENT_FILES',
-          files: removeRecentEntries(stateRef.current.ui.recentFiles, [entry.path]),
-        });
+        const result = await removeRecentEntriesSafely(
+          stateRef.current.ui.recentFiles,
+          [entry.path],
+          [entry],
+        );
+        if (result.removedPaths.length > 0) {
+          dispatch({ type: 'UI_SET_RECENT_FILES', files: result.next });
+        }
       }
     },
     openPathAtPage: async (path, pageNumber) => {
@@ -3660,33 +3670,39 @@ function AppContent(): React.ReactElement {
               // Recent runs the same probe-and-prune through the same method.
               onOpenRecent={(entry) => void commandHandlers.openRecentEntry(entry)}
               onClearRecent={() => invokeCommand('file.clearRecent')}
-              onRevealRecent={(path) => {
-                void file.reveal(path).catch(async () => {
+              onRevealRecent={(entry) => {
+                void file.reveal(entry.path).catch(async () => {
                   showNotice(tChrome('chrome.home.recentFiles'), tChrome('chrome.recent.revealFailed'));
                   // A downloaded entry's local copy is a temp path whose
                   // disappearance says nothing about the entry: the web
                   // address is still the way back to the document, so a failed
                   // reveal never prunes one — the same exemption the open path
                   // and the launch sweep make.
-                  const entry = stateRef.current.ui.recentFiles.find((e) => e.path === path);
-                  if (entry?.sourceUrl) return;
+                  if (entry.sourceUrl) return;
                   const statuses = await file
-                    .classifyRecentPaths([path])
+                    .classifyRecentPaths([entry.path])
                     .catch(() => ['indeterminate'] as const);
                   if (statuses[0] === 'missing') {
-                    dispatch({
-                      type: 'UI_SET_RECENT_FILES',
-                      files: removeRecentEntries(stateRef.current.ui.recentFiles, [path]),
-                    });
+                    const result = await removeRecentEntriesSafely(
+                      stateRef.current.ui.recentFiles,
+                      [entry.path],
+                      [entry],
+                    );
+                    if (result.removedPaths.length > 0) {
+                      dispatch({ type: 'UI_SET_RECENT_FILES', files: result.next });
+                    }
                   }
                 });
               }}
-              onRemoveRecent={(path) =>
-                dispatch({
-                  type: 'UI_SET_RECENT_FILES',
-                  files: removeRecentEntries(stateRef.current.ui.recentFiles, [path]),
-                })
-              }
+              onRemoveRecent={(path) => {
+                void removeRecentEntriesSafely(stateRef.current.ui.recentFiles, [path]).then(
+                  (result) => {
+                    if (result.removedPaths.length > 0) {
+                      dispatch({ type: 'UI_SET_RECENT_FILES', files: result.next });
+                    }
+                  },
+                );
+              }}
               onOpenTool={(id) => invokeCommand(`tools.open.${id}`)}
             />
           ) : (

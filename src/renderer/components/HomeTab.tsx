@@ -24,7 +24,7 @@ interface HomeTabProps {
   /** Show one recent file in the file manager. App owns it because the
    * failure — the file has been moved or deleted since it was listed — is
    * reported through the shared notice dialog, which Home does not own. */
-  onRevealRecent: (path: string) => void;
+  onRevealRecent: (entry: RecentEntry) => void;
   /** Drop one entry from the recent list. The list is app-wide state mirrored
    * to shared storage, so the removal is App's to compute — Home names the
    * path, never the resulting list. */
@@ -184,7 +184,7 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onRe
           onClose={() => setMenu(null)}
           items={[
             { label: tChrome('chrome.recent.open'), onClick: () => onOpenRecent(menu.entry) },
-            { label: tChrome('chrome.recent.reveal'), onClick: () => onRevealRecent(menu.entry.path) },
+            { label: tChrome('chrome.recent.reveal'), onClick: () => onRevealRecent(menu.entry) },
             {
               label: tChrome('chrome.recent.copyPath'),
               // The ADDRESS for a downloaded document: copying the path of a

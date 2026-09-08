@@ -25,18 +25,20 @@ import {
  * environment in this repo, so component rendering, keyboard reachability and
  * anything that spans two launches of the binary are only provable here.
  *
- * Five properties, in the order the cases below take them:
+ * Six properties, in the order the cases below take them:
  *
- * 1. The remove control is VISIBLE and reachable without a pointer. Both
+ * 1. The shipped WebView2 exposes Web Locks on its secure app origin; all
+ *    storage mutations depend on that cross-window transaction boundary.
+ * 2. The remove control is VISIBLE and reachable without a pointer. Both
  *    controls in a row are real buttons — the row itself is not one — so Tab
  *    must reach the remove button as its own stop and Enter/Space must fire it.
- * 2. The context menu carries the same removal as its last item.
- * 3. Every surface reading the list follows immediately, the File menu's Open
+ * 3. The context menu carries the same removal as its last item.
+ * 4. Every surface reading the list follows immediately, the File menu's Open
  *    Recent submenu included: they render the same state, and nothing is
  *    re-read from storage to make them agree.
- * 4. Removal touches the LIST and nothing else — a row for an open document
+ * 5. Removal touches the LIST and nothing else — a row for an open document
  *    goes without disturbing the document.
- * 5. Automatic removal is reserved for a path positively proven gone. A file
+ * 6. Automatic removal is reserved for a path positively proven gone. A file
  *    that exists but will not parse keeps its row; a file deleted while the app
  *    was closed is dropped by the launch sweep; a downloaded document's entry
  *    survives its temp copy — through a failed reveal as through a launch
@@ -104,9 +106,9 @@ async function holdsRecents(expected: string[], what: string, ms = 2_500): Promi
 /** Empty the list through the command that owns Clear Recent, so the storage
  * generation stamp is written the way the product writes it.
  *
- * The pause is load-bearing: the clear stamps `max(previous + 1, now)`, and an
- * entry opened inside that same millisecond does not outrank the stamp and is
- * filtered back out on the next mirror. */
+ * The command resolves its storage transaction before dispatching the empty
+ * list. The short pause merely lets the menu animation settle before the next
+ * case; ordering is carried by logical sequence, never milliseconds. */
 async function clearRecents(): Promise<void> {
   await focusTab('home');
   if (await invokeAppCommand('file.clearRecent')) {
@@ -337,6 +339,17 @@ describe('recent files: removing an entry, and the launch that prunes dead ones'
     } catch {
       /* a still-open working copy is the OS temp dir's own cleanup story */
     }
+  });
+
+  it('the shipped webview exposes the cross-window storage lock', async () => {
+    expect(
+      await browser.execute(function () {
+        return {
+          secure: window.isSecureContext,
+          webLocks: typeof navigator.locks?.request === 'function',
+        };
+      }),
+    ).toEqual({ secure: true, webLocks: true });
   });
 
   describe('removing one entry by hand', () => {

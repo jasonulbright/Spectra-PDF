@@ -219,7 +219,7 @@ describe('cross-window recent merge', () => {
     A.clearRecentStorage();
     const afterClear = Date.now() + 60_000;
     // B opens something new; its stale x.pdf still goes.
-    const merged = B.persistRecent(B.withRecent(bList, 'z.pdf', afterClear));
+    const merged = await B.recordRecentOpen(bList, 'z.pdf', afterClear);
     expect(merged.map((e) => e.path)).toEqual(['z.pdf']);
   });
 
@@ -357,27 +357,28 @@ describe('the seq stamp', () => {
     expect(web).not.toHaveProperty('seq');
   });
 
-  it('mergeRecent carries the higher seq even when the OLDER record holds it', () => {
-    // Whichever record wins on openedAt, losing the higher stamp would let a
-    // stale tombstone outrank an open that actually postdates it.
+  it('mergeRecent takes the complete record with the higher sequence', () => {
+    // openedAt is display data and the wall clock can move backward. Splicing
+    // the newer sequence onto the older operation creates a record that never
+    // existed and can restore stale provenance.
     expect(
       mergeRecent(
         [{ path: 'x.pdf', openedAt: 2000, seq: 10 }],
         [{ path: 'x.pdf', openedAt: 1000, seq: 99 }],
       ),
-    ).toEqual([{ path: 'x.pdf', openedAt: 2000, seq: 99 }]);
+    ).toEqual([{ path: 'x.pdf', openedAt: 1000, seq: 99 }]);
     expect(
       mergeRecent(
         [{ path: 'x.pdf', openedAt: 1000, seq: 99 }],
         [{ path: 'x.pdf', openedAt: 2000, seq: 10 }],
       ),
-    ).toEqual([{ path: 'x.pdf', openedAt: 2000, seq: 99 }]);
+    ).toEqual([{ path: 'x.pdf', openedAt: 1000, seq: 99 }]);
   });
 
-  it('mergeRecent takes the one stamp present, and writes none when neither has one', () => {
+  it('a stamped record outranks a legacy record, and two legacy records use time', () => {
     expect(
       mergeRecent([{ path: 'x.pdf', openedAt: 2000 }], [{ path: 'x.pdf', openedAt: 1000, seq: 5 }]),
-    ).toEqual([{ path: 'x.pdf', openedAt: 2000, seq: 5 }]);
+    ).toEqual([{ path: 'x.pdf', openedAt: 1000, seq: 5 }]);
     const [merged] = mergeRecent(
       [{ path: 'x.pdf', openedAt: 2000 }],
       [{ path: 'x.pdf', openedAt: 1000 }],
@@ -569,7 +570,7 @@ describe('sweepDeadRecents', () => {
         ),
     );
     expect(result?.removedPaths).toEqual(['gone.pdf']);
-    expect(result?.next.map((e) => e.path)).toEqual(['here.pdf', 'unknown.pdf']);
+    expect(result?.next.map((e) => e.path)).toEqual(['unknown.pdf', 'here.pdf']);
   });
 
   it('removes a legacy entry that never carried a stamp', async () => {
@@ -656,6 +657,21 @@ describe('sweepDeadRecents', () => {
       },
     );
     expect(result).toBeNull();
+  });
+
+  it('spares a path re-opened in another window while the probe is in flight', async () => {
+    const A = await newWindow();
+    const B = await newWindow();
+    const state = await A.recordRecentOpen([], 'gone.pdf', 1);
+    const result = await A.sweepDeadRecents(
+      () => state,
+      async (paths) => {
+        await B.recordRecentOpen(B.readRecent(), 'gone.pdf', 2);
+        return paths.map(() => 'missing' as RecentPathStatus);
+      },
+    );
+    expect(result).toBeNull();
+    expect(B.readRecent().map((entry) => entry.path)).toEqual(['gone.pdf']);
   });
 
   it('removes nothing when the probe itself fails', async () => {

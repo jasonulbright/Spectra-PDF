@@ -1103,10 +1103,12 @@ describe('invokeCommand', () => {
     expect(invokeCommand('file.clearRecent')).toBe(false);
   });
 
-  it('file.clearRecent clears a non-empty recent list', () => {
+  it('file.clearRecent clears a non-empty recent list', async () => {
     const { dispatched } = wire(stateWith({ ui: { ...initialState.ui, recentFiles: [{ path: 'a.pdf', openedAt: null }] } }));
     expect(invokeCommand('file.clearRecent')).toBe(true);
-    expect(dispatched.at(-1)).toEqual({ type: 'UI_SET_RECENT_FILES', files: [] });
+    await vi.waitFor(() => {
+      expect(dispatched.at(-1)).toEqual({ type: 'UI_SET_RECENT_FILES', files: [] });
+    });
   });
 
   it('zoom commands require a mounted canvas handle', () => {
