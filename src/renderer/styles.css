@@ -265,6 +265,7 @@
 [data-theme="light"] .home-action:hover { background: #f3f4f6; border-color: #9ca3af; }
 [data-theme="light"] .home-recent-icon { background: #f3f4f6; color: #4b5563; }
 [data-theme="light"] .home-recent:hover .home-recent-icon { color: #111827; }
+[data-theme="light"] .home-recent-remove:hover { color: #111827; background: #e5e7eb; }
 [data-theme="light"] .bookmark-add-btn { color: #4b5563; }
 [data-theme="light"] .bookmark-add-btn:hover { color: #111827; }
 [data-theme="light"] .signatures-nav-recheck-btn { color: #4b5563; }
@@ -3751,14 +3752,8 @@ input:not([type]) {
   overflow: hidden;
 }
 .home-recent {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 10px;
-  padding-block: 9px;
-  padding-inline: 10px 14px;
-  text-align: start;
-  cursor: pointer;
   border-bottom: 1px solid #232328;
   transition: background 100ms;
 }
@@ -3767,6 +3762,37 @@ input:not([type]) {
 }
 .home-recent:hover {
   background: #232327;
+}
+/* The open control carries the column layout the row itself used to own: the
+   content sits one level in so a second, independent control can stand beside
+   it without a button nested inside a button. */
+.home-recent-open {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding-block: 9px;
+  padding-inline: 10px 14px;
+  text-align: start;
+  cursor: pointer;
+}
+.home-recent-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin-inline-end: 8px;
+  border-radius: 5px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.home-recent-remove:hover {
+  color: #e7e7ea;
+  background: #2e2e34;
 }
 .home-recent-icon {
   display: flex;

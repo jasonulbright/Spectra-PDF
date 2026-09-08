@@ -5,6 +5,7 @@
 import type { Dispatch } from 'react';
 import type { AppAction, AppState } from '../state/types';
 import type { CanvasHandle } from '../canvas/canvas-handle';
+import type { RecentEntry } from '../lib/recent-files';
 
 // Menu-bar namespaces. Every command id must live under one of them —
 // enforced by the `satisfies` check on COMMAND_IDS in registry.ts. The
@@ -42,6 +43,12 @@ export interface AppCommandHandlers {
   /** Open specific path(s) and focus the (last) opened document's tab — the
    * File ▸ Open Recent and Home-tab recent/open flows. */
   openPath(path: string): Promise<void>;
+  /** Open a remembered entry: the web dialog pre-filled for a `sourceUrl`
+   * entry, otherwise the path, followed by the probe that prunes the row only
+   * when the file is positively confirmed gone. The Home row and File ▸ Open
+   * Recent share this one implementation so they cannot disagree about
+   * pruning. */
+  openRecentEntry(entry: RecentEntry): void | Promise<void>;
   /** Open a path (if not already open) and reveal a 1-based page — the
    * cross-file search hit click (part 2). Polls for the doc to index. */
   openPathAtPage(path: string, pageNumber: number): Promise<void>;

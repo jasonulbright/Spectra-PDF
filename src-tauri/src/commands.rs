@@ -58,6 +58,110 @@ pub async fn canonicalize_paths(paths: Vec<String>) -> Result<Vec<String>, Strin
     Ok(paths.iter().map(|p| canonical_path(p)).collect())
 }
 
+/// How a remembered path resolves, for a caller that prunes a list on the
+/// answer.
+///
+/// `Missing` is the only status that licenses a deletion, so it is reserved
+/// for a POSITIVE finding: the lookup completed and nothing is at the path.
+/// A lookup that merely declines to answer — denied, offline, stalled, or
+/// aimed at a volume that is not currently reachable — is `Indeterminate`,
+/// never `Missing`. A file that is present but unopenable is `Exists`;
+/// readability is a different question and is not asked here.
+#[derive(serde::Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub enum PathStatus {
+    Exists,
+    Missing,
+    Indeterminate,
+}
+
+/// Bounds the task fan-out one call can create. The recents list holds ten
+/// entries, so a batch approaching this size is a caller error, not a load.
+const CLASSIFY_MAX_BATCH: usize = 64;
+
+/// Applied per PATH, never per batch: one unreachable share spends this
+/// deadline on its own task while every other path answers at full speed.
+const CLASSIFY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Classifies paths by existence alone — no file is opened and no byte is
+/// read, so a corrupt document and a sound one are both `Exists`.
+///
+/// Output is positional: `out[i]` classifies `paths[i]`. Each path is
+/// classified on its own task with its own deadline, so a batch costs the
+/// slowest single path rather than the sum of all of them.
+#[tauri::command]
+pub async fn classify_recent_paths(paths: Vec<String>) -> Result<Vec<PathStatus>, String> {
+    if paths.len() > CLASSIFY_MAX_BATCH {
+        return Err(format!(
+            "batch too large: {} (max {CLASSIFY_MAX_BATCH})",
+            paths.len()
+        ));
+    }
+    let mut handles = Vec::with_capacity(paths.len());
+    for p in paths {
+        handles.push(tauri::async_runtime::spawn(classify_one_path(p)));
+    }
+    let mut out = Vec::with_capacity(handles.len());
+    for h in handles {
+        // Awaiting in spawn order is what makes the result positional; the
+        // tasks themselves complete in whatever order the volumes allow.
+        out.push(h.await.unwrap_or(PathStatus::Indeterminate));
+    }
+    Ok(out)
+}
+
+async fn classify_one_path(path: String) -> PathStatus {
+    // `metadata` blocks for as long as the volume takes to answer, which for
+    // a disconnected network path is tens of seconds.
+    let join = tauri::async_runtime::spawn_blocking(move || -> PathStatus {
+        let canonical = canonical_path(&path);
+        let p = Path::new(&canonical);
+        match std::fs::metadata(p) {
+            // Metadata that resolves to something other than a file means
+            // another entry occupies the name now: the remembered document is
+            // gone.
+            Ok(meta) => {
+                if meta.is_file() {
+                    PathStatus::Exists
+                } else {
+                    PathStatus::Missing
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // NotFound does not distinguish "this file is gone" from "the
+                // volume it lives on is not reachable right now": an unmapped
+                // drive letter and an unreachable UNC server both surface this
+                // same kind, identical to a deleted file under a present
+                // parent. Only a lookup whose OWN ROOT — the drive-letter root
+                // `C:\`, or the share root `\\server\share\` — independently
+                // resolves licenses treating the path as positively dead. A
+                // missing intermediate directory still classifies `Missing`,
+                // because the root above it answers.
+                let root_reachable = p
+                    .ancestors()
+                    .last()
+                    .is_some_and(|root| std::fs::metadata(root).is_ok());
+                if root_reachable {
+                    PathStatus::Missing
+                } else {
+                    PathStatus::Indeterminate
+                }
+            }
+            // Permission denied, device error, and every kind not named above.
+            Err(_) => PathStatus::Indeterminate,
+        }
+    });
+    match tokio::time::timeout(CLASSIFY_TIMEOUT, join).await {
+        Ok(Ok(status)) => status,
+        // The blocking task panicked or its pool is shutting down.
+        Ok(Err(_)) => PathStatus::Indeterminate,
+        // Deadline. A blocking filesystem call cannot be cancelled, so the
+        // pool thread stays with it until the volume answers and the answer
+        // is then discarded.
+        Err(_) => PathStatus::Indeterminate,
+    }
+}
+
 /// The managed folder a portfolio's members extract into for "Open member":
 /// `app-data/portfolio-members/<stem>-<hash16>` — the stem for readability,
 /// a hash of the full canonical path so two same-named portfolios in
@@ -1137,6 +1241,22 @@ pub async fn open_releases_page(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// The `/select,"<path>"` argument the file manager's select switch requires:
+/// one argument, with quotes around the PATH only and never around the flag.
+///
+/// The quotes are written here because the argument reaches the command line
+/// through `raw_arg`, not `.arg()`. Automatic Windows argument quoting wraps
+/// an ENTIRE argument containing a space in one outer pair of quotes, and the
+/// `/select,` parser does not accept that form — it opens a default folder
+/// instead of reporting an error, so a path with a space anywhere in it
+/// reveals the wrong folder while a path without one works. Generated print
+/// output always carries a space in its filename.
+///
+/// Windows filenames cannot contain `"`, so the path itself needs no escaping.
+fn select_argument(canonical: &str) -> String {
+    format!("/select,\"{canonical}\"")
+}
+
 /// Shows a file in the file manager with the file SELECTED.
 ///
 /// Not a shell-open, which is the whole point: `shell().open` on a file RUNS
@@ -1146,6 +1266,10 @@ pub async fn open_releases_page(app: AppHandle) -> Result<(), String> {
 /// path is canonicalized and required to be an existing FILE before it is
 /// passed, so a directory, a missing entry, or a crafted argument string
 /// cannot reach the command line.
+///
+/// `/select,<path>` is ONE argument, and it is handed over verbatim through
+/// `raw_arg` — see `select_argument` for why the automatic quoting cannot be
+/// used here.
 #[tauri::command]
 pub async fn reveal_in_file_manager(path: String) -> Result<(), String> {
     let canonical = canonical_path(&path);
@@ -1153,13 +1277,17 @@ pub async fn reveal_in_file_manager(path: String) -> Result<(), String> {
     if !p.is_file() {
         return Err(format!("not a file: {canonical}"));
     }
-    // `/select,<path>` is ONE argument to explorer; passing it as two would
-    // make the comma-prefixed path a separate argument explorer ignores, and
-    // it would then open the user's Documents folder instead.
-    let arg = format!("/select,{canonical}");
-    std::process::Command::new("explorer.exe")
-        .arg(arg)
-        .spawn()
+    let mut cmd = std::process::Command::new("explorer.exe");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.raw_arg(select_argument(&canonical));
+    }
+    #[cfg(not(windows))]
+    {
+        cmd.arg(format!("/select,{canonical}"));
+    }
+    cmd.spawn()
         // explorer.exe exits non-zero even when it succeeds, so the spawn is
         // the only thing worth checking; the process is not awaited.
         .map(|_| ())
@@ -2070,8 +2198,174 @@ pub async fn set_startup_enabled(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_batch_log_name, is_managed_member_path, run_key_action, RunKeyAction};
+    use super::{
+        classify_recent_paths, is_batch_log_name, is_managed_member_path, run_key_action,
+        select_argument, PathStatus, RunKeyAction, CLASSIFY_MAX_BATCH,
+    };
     use std::path::Path;
+
+    /// A scratch directory of this test's own, so concurrent tests cannot see
+    /// each other's fixtures.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("spectra-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn the_select_switch_quotes_the_path_and_never_the_flag() {
+        // No space: the shape is the same, because the quoting is not
+        // conditional on the path — a conditional would reintroduce the two
+        // different command lines that hid this for so long.
+        assert_eq!(
+            select_argument(r"C:\Users\x\Documents\a.pdf"),
+            r#"/select,"C:\Users\x\Documents\a.pdf""#
+        );
+        // The failing shape: a generated print name always has a space, and
+        // automatic quoting would produce `"/select,C:\...\Printed 1.pdf"`.
+        assert_eq!(
+            select_argument(r"C:\Users\x\AppData\Local\Temp\spectrapdf\printed\Printed 1749409438.pdf"),
+            r#"/select,"C:\Users\x\AppData\Local\Temp\spectrapdf\printed\Printed 1749409438.pdf""#
+        );
+        // Exactly two quotes, one opening the path and one closing the string.
+        let arg = select_argument(r"C:\a b\c d.pdf");
+        assert_eq!(arg.matches('"').count(), 2);
+        assert!(arg.starts_with("/select,\""));
+        assert!(arg.ends_with('"'));
+    }
+
+    #[test]
+    fn the_status_wire_strings_are_the_ones_the_renderer_matches_on() {
+        // The renderer branches on these literals, so a variant rename that
+        // changed them would silently stop matching rather than fail to build.
+        for (status, wire) in [
+            (PathStatus::Exists, r#""exists""#),
+            (PathStatus::Missing, r#""missing""#),
+            (PathStatus::Indeterminate, r#""indeterminate""#),
+        ] {
+            assert_eq!(serde_json::to_string(&status).unwrap(), wire);
+        }
+    }
+
+    #[tokio::test]
+    async fn only_a_completed_lookup_that_found_nothing_classifies_as_missing() {
+        let dir = scratch("classify-kinds");
+        let present = dir.join("present.pdf");
+        std::fs::write(&present, b"%PDF-1.7\n%%EOF\n").unwrap();
+        // Present but unparseable is still present: the recents list must not
+        // drop a file the user can still see on disk.
+        let corrupt = dir.join("corrupt.pdf");
+        std::fs::write(&corrupt, b"not a pdf at all").unwrap();
+        // Something else took the remembered name.
+        let occupied = dir.join("a-folder.pdf");
+        std::fs::create_dir_all(&occupied).unwrap();
+
+        let paths = vec![
+            present.to_string_lossy().to_string(),
+            corrupt.to_string_lossy().to_string(),
+            // Never existed, parent present.
+            dir.join("never-here.pdf").to_string_lossy().to_string(),
+            // The PARENT is gone too, which is the same error kind.
+            dir.join("no-such-folder")
+                .join("x.pdf")
+                .to_string_lossy()
+                .to_string(),
+            occupied.to_string_lossy().to_string(),
+        ];
+        assert_eq!(
+            classify_recent_paths(paths).await.unwrap(),
+            vec![
+                PathStatus::Exists,
+                PathStatus::Exists,
+                PathStatus::Missing,
+                PathStatus::Missing,
+                PathStatus::Missing,
+            ],
+        );
+        // Denied and stalled lookups have no reliable fixture here; they are
+        // the two arms of `classify_one_path` that fall through to
+        // Indeterminate — every error kind other than NotFound, and the
+        // elapsed deadline — neither of which can reach Missing.
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn classify_never_calls_a_path_missing_when_its_root_does_not_resolve() {
+        // The laptop launched before the VPN maps its network drive, and the
+        // one with its external disk unplugged: the lookup answers NotFound
+        // for both, the same kind a deleted file under a present parent
+        // answers with. Only the root's own reachability separates them, and
+        // an unreachable root must never reach the one status that licenses a
+        // deletion.
+        let mut paths = vec![
+            // No host of this name resolves, so its share root cannot either.
+            r"\\spectra-recent-hygiene-nonexistent-host-9f3a\share\doc.pdf".to_string(),
+        ];
+        // The unmapped-drive-letter shape, on a machine that has a spare
+        // letter. Every letter being in use is not a failure of this test —
+        // the share above carries the assertion on its own.
+        if cfg!(windows) {
+            if let Some(letter) = ('D'..='Z').find(|l| std::fs::metadata(format!(r"{l}:\")).is_err())
+            {
+                paths.push(format!(r"{letter}:\docs\doc.pdf"));
+            }
+        }
+        let expected = vec![PathStatus::Indeterminate; paths.len()];
+        assert_eq!(classify_recent_paths(paths).await.unwrap(), expected);
+    }
+
+    #[tokio::test]
+    async fn classification_is_positional_across_a_mixed_batch() {
+        let dir = scratch("classify-order");
+        // Named so that directory order is the REVERSE of input order: a
+        // result vector assembled from completion or enumeration order cannot
+        // match this expectation.
+        std::fs::write(dir.join("z.pdf"), b"%PDF-1.7\n").unwrap();
+        std::fs::write(dir.join("a.pdf"), b"%PDF-1.7\n").unwrap();
+        let paths = vec![
+            dir.join("z.pdf").to_string_lossy().to_string(),
+            dir.join("gone-1.pdf").to_string_lossy().to_string(),
+            dir.join("a.pdf").to_string_lossy().to_string(),
+            dir.join("gone-2.pdf").to_string_lossy().to_string(),
+            dir.join("gone-3.pdf").to_string_lossy().to_string(),
+        ];
+        assert_eq!(
+            classify_recent_paths(paths).await.unwrap(),
+            vec![
+                PathStatus::Exists,
+                PathStatus::Missing,
+                PathStatus::Exists,
+                PathStatus::Missing,
+                PathStatus::Missing,
+            ],
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn an_empty_batch_answers_empty_and_an_oversized_one_refuses() {
+        assert_eq!(
+            classify_recent_paths(Vec::new()).await.unwrap(),
+            Vec::<PathStatus>::new()
+        );
+
+        let absent = |n: usize| -> Vec<String> {
+            (0..n).map(|i| format!(r"C:\no-such-root\{i}.pdf")).collect()
+        };
+        // The cap itself is served; only past it refuses.
+        assert_eq!(
+            classify_recent_paths(absent(CLASSIFY_MAX_BATCH))
+                .await
+                .unwrap()
+                .len(),
+            CLASSIFY_MAX_BATCH
+        );
+        let err = classify_recent_paths(absent(CLASSIFY_MAX_BATCH + 1))
+            .await
+            .unwrap_err();
+        assert!(err.contains("batch too large"), "{err}");
+    }
 
     #[test]
     fn a_moved_copy_gets_its_run_entry_corrected_and_a_current_one_is_left_alone() {

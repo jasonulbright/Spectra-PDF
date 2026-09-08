@@ -1,7 +1,7 @@
 // Menu + toolbar data integrity. Every static item references a
 // registered command; displayed shortcuts come from the keymap table (so a
 // label can't drift from its binding); dynamic sections produce valid leaves.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MENUS, menuCommandIds, type MenuNode } from '../src/renderer/commands/menus';
 import { toolbarCommandIds } from '../src/renderer/commands/toolbars';
 import { COMMANDS, type CommandId } from '../src/renderer/commands/registry';
@@ -11,9 +11,9 @@ import { initialState } from '../src/renderer/state/reducer';
 import type { AppState, OpenFile } from '../src/renderer/state/types';
 import type { CommandContext } from '../src/renderer/commands/types';
 
-function ctxWith(partial: Partial<AppState>): CommandContext {
+function ctxWith(partial: Partial<AppState>, app: CommandContext['app'] = null): CommandContext {
   const state = { ...initialState, ...partial, ui: { ...initialState.ui, ...(partial.ui ?? {}) } };
-  return { state, dispatch: () => {}, app: null, canvas: null };
+  return { state, dispatch: () => {}, app, canvas: null };
 }
 
 function makeFile(path: string, importOnly = false): OpenFile {
@@ -74,6 +74,22 @@ describe('dynamic sections', () => {
     expect(items).toHaveLength(1);
     expect(items[0].label).toBe('a.pdf');
     expect(items[0].disabled).toBeFalsy();
+  });
+
+  it('an Open Recent item opens through the shared handler, whole entry and all', () => {
+    // Both surfaces prune a confirmed-dead entry because both call this one
+    // method: a menu that opened the path itself would skip the probe, and a
+    // menu that read `sourceUrl` itself would decide the web case twice.
+    const build = dynamicBuild('file', 'recent-list');
+    const openRecentEntry = vi.fn();
+    const app = { openRecentEntry } as unknown as CommandContext['app'];
+    const local = { path: 'C:\\docs\\a.pdf', openedAt: null };
+    const downloaded = { path: 'C:\\tmp\\b.pdf', openedAt: null, sourceUrl: 'https://example.test/b.pdf' };
+    const ctx = ctxWith({ ui: { ...initialState.ui, recentFiles: [local, downloaded] } }, app);
+    const items = build(ctx);
+    items[0].run(ctx);
+    items[1].run(ctx);
+    expect(openRecentEntry.mock.calls).toEqual([[local], [downloaded]]);
   });
 
   it('the Window doc list excludes importOnly sources and disables the focused doc', () => {

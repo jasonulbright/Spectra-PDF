@@ -591,6 +591,7 @@
   "chrome.recent.copyPath": "העתקת הנתיב המלא",
   "chrome.recent.fromWeb": "מ־{{host}}",
   "chrome.recent.open": "פתיחה",
+  "chrome.recent.remove": "הסרה מהרשימה",
   "chrome.recent.reveal": "הצגה בתיקייה",
   "chrome.recent.revealFailed": "לא ניתן היה להציג את הקובץ — ייתכן שהוא הועבר או נמחק.",
   "chrome.recent.today": "היום {{time}}",

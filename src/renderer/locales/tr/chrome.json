@@ -580,6 +580,7 @@
   "chrome.recent.copyPath": "Tam yolu kopyala",
   "chrome.recent.fromWeb": "{{host}} adresinden",
   "chrome.recent.open": "Aç",
+  "chrome.recent.remove": "Listeden kaldır",
   "chrome.recent.reveal": "Klasörde göster",
   "chrome.recent.revealFailed": "Bu dosya gösterilemedi — taşınmış veya silinmiş olabilir.",
   "chrome.recent.today": "Bugün {{time}}",

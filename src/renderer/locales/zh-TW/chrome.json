@@ -569,6 +569,7 @@
   "chrome.recent.copyPath": "複製完整路徑",
   "chrome.recent.fromWeb": "來自 {{host}}",
   "chrome.recent.open": "開啟",
+  "chrome.recent.remove": "從清單中移除",
   "chrome.recent.reveal": "在資料夾中顯示",
   "chrome.recent.revealFailed": "無法顯示該檔案，它可能已被移動或刪除。",
   "chrome.recent.today": "今天 {{time}}",

@@ -602,6 +602,7 @@
   "chrome.recent.copyPath": "Kopiraj celotno pot",
   "chrome.recent.fromWeb": "Z naslova {{host}}",
   "chrome.recent.open": "Odpri",
+  "chrome.recent.remove": "Odstrani s seznama",
   "chrome.recent.reveal": "Pokaži v mapi",
   "chrome.recent.revealFailed": "Te datoteke ni bilo mogoče pokazati — morda je bila premaknjena ali izbrisana.",
   "chrome.recent.today": "Danes {{time}}",

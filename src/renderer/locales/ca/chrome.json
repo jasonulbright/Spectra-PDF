@@ -591,6 +591,7 @@
   "chrome.recent.copyPath": "Copia el camí complet",
   "chrome.recent.fromWeb": "De {{host}}",
   "chrome.recent.open": "Obre",
+  "chrome.recent.remove": "Suprimeix de la llista",
   "chrome.recent.reveal": "Mostra a la carpeta",
   "chrome.recent.revealFailed": "No s’ha pogut mostrar aquest fitxer: potser s’ha mogut o s’ha esborrat.",
   "chrome.recent.today": "Avui {{time}}",

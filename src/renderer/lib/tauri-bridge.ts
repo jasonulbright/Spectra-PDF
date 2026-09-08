@@ -12,6 +12,7 @@ import type {
   ScannerList,
 } from './scan';
 import type { ClipboardSourceResult } from './clipboard-source';
+import type { RecentPathStatus } from './recent-files';
 import type { CaptureRequest, CaptureResult } from './web-capture';
 import {
   readFile as fsReadFile,
@@ -594,6 +595,14 @@ export const file = {
    * not an existing file, and browses rather than shell-opens — see
    * `commands::reveal_in_file_manager`. */
   reveal: (filePath: string) => invoke<void>('reveal_in_file_manager', { path: filePath }),
+  /** Classify each recent path without reading file contents — an existing
+   * file, a positively missing or broken path, or indeterminate (permission,
+   * network, or a transient I/O failure — never treated as dead). Bounded to a
+   * small batch by the Rust side. This is the only path-liveness check in the
+   * app, and it never fetches a `sourceUrl`. Statuses come back in the order
+   * the paths went in. */
+  classifyRecentPaths: (paths: string[]) =>
+    invoke<RecentPathStatus[]>('classify_recent_paths', { paths }),
 };
 
 // ── App ───────────────────────────────────────────────────────────────────

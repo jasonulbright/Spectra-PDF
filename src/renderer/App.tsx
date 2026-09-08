@@ -170,7 +170,14 @@ import { UpdateBar } from './components/UpdateBar';
 import { NavPane } from './components/navpane/NavPane';
 import { ToolDock } from './components/ToolDock';
 import { type Operation } from './commands/operations';
-import { persistRecent, sameRecent, withRecent } from './lib/recent-files';
+import {
+  nextRecentSeq,
+  persistRecent,
+  removeRecentEntries,
+  sameRecent,
+  sweepDeadRecents,
+  withRecent,
+} from './lib/recent-files';
 import { claimPaths, releasePaths, soleOwner, type ClaimRefusal } from './lib/window-claims';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
@@ -843,6 +850,21 @@ function AppContent(): React.ReactElement {
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  // Launch-time dead-recent cleanup (auto-removes only positively confirmed
+  // missing local files; never a sourceUrl entry, never anything merely
+  // indeterminate — see sweepDeadRecents). Runs once, after hydration, without
+  // blocking first render. Reads through stateRef so the list it sweeps is the
+  // hydrated one, not the empty pre-hydration closure value.
+  useEffect(() => {
+    void sweepDeadRecents(
+      () => stateRef.current.ui.recentFiles,
+      (paths) => file.classifyRecentPaths(paths),
+    ).then((result) => {
+      if (result) dispatch({ type: 'UI_SET_RECENT_FILES', files: result.next });
+    });
+    // `dispatch` is stable, so the list is still a once-at-mount effect.
+  }, [dispatch]);
+
   // Documents this window has handed to another and not yet heard the outcome
   // for. A handover moves ownership before the receiving window has opened
   // anything, so a window destroyed in that gap gives the document back — and
@@ -1061,7 +1083,7 @@ function AppContent(): React.ReactElement {
         if (existing && !existing.importOnly) {
           outcomes.push({ name: fileName, reason: null });
           dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
-          recent = withRecent(recent, filePath, Date.now(), originFor(filePath)); // only on success — a cancel/throw
+          recent = withRecent(recent, filePath, Date.now(), originFor(filePath), nextRecentSeq()); // only on success — a cancel/throw
           lastOpened = filePath;                  // must not pollute Recent (regression)
           freshlyOpened = null;
           changed = true;
@@ -1109,7 +1131,7 @@ function AppContent(): React.ReactElement {
           webOrigin: originFor(filePath),
         });
         inserted += 1;
-        recent = withRecent(recent, filePath, Date.now(), originFor(filePath));
+        recent = withRecent(recent, filePath, Date.now(), originFor(filePath), nextRecentSeq());
         lastOpened = filePath;
         freshlyOpened = { path: filePath, workingPath: prepared.workingPath };
         changed = true;
@@ -3043,6 +3065,32 @@ function AppContent(): React.ReactElement {
     // Pre-filled, never pre-fetched: opening the dialog is not a request.
     openFromWeb: (url) => setOpenWebUrl(url ?? ''),
     openPath: async (path) => { await openByPaths([path]); },
+    // A failed open re-probes the path and drops the entry ONLY when the probe
+    // positively proves the file is gone. A file that exists but will not
+    // parse (a malformed PDF) keeps its row — removing it would delete the
+    // user's only route back to a document they may still repair. One
+    // implementation for the Home row and File ▸ Open Recent both, so the two
+    // surfaces cannot disagree about whether a dead entry is pruned.
+    openRecentEntry: async (entry) => {
+      // A downloaded entry re-opens through the DIALOG, pre-filled: its local
+      // copy is a temporary path that may already be gone, and a click is not
+      // consent to make a request. The user presses Open, as the first time.
+      if (entry.sourceUrl) {
+        setOpenWebUrl(entry.sourceUrl);
+        return;
+      }
+      const summary = await openByPaths([entry.path]);
+      if (summary.kind === 'none') return;
+      const statuses = await file
+        .classifyRecentPaths([entry.path])
+        .catch(() => ['indeterminate'] as const);
+      if (statuses[0] === 'missing') {
+        dispatch({
+          type: 'UI_SET_RECENT_FILES',
+          files: removeRecentEntries(stateRef.current.ui.recentFiles, [entry.path]),
+        });
+      }
+    },
     openPathAtPage: async (path, pageNumber) => {
       await openByPaths([path], { focus: true });
       // The OPEN_FILE dispatch + index update land over the next renders, so
@@ -3130,6 +3178,7 @@ function AppContent(): React.ReactElement {
       openFilesInPlace: () => h.current.openFilesInPlace(),
       openFromWeb: (url) => h.current.openFromWeb(url),
       openPath: (path) => h.current.openPath(path),
+      openRecentEntry: (entry) => h.current.openRecentEntry(entry),
       openPathAtPage: (path, pageNumber) => h.current.openPathAtPage(path, pageNumber),
       save: () => h.current.save(),
       saveAs: () => h.current.saveAs(),
@@ -3607,17 +3656,37 @@ function AppContent(): React.ReactElement {
             <HomeTab
               recentFiles={recentFiles}
               onOpen={() => invokeCommand('file.open')}
-              onOpenRecent={(entry) =>
-                entry.sourceUrl
-                  ? setOpenWebUrl(entry.sourceUrl)
-                  : void openByPaths([entry.path])
-              }
+              // The shared handler, not a second copy of it: File ▸ Open
+              // Recent runs the same probe-and-prune through the same method.
+              onOpenRecent={(entry) => void commandHandlers.openRecentEntry(entry)}
               onClearRecent={() => invokeCommand('file.clearRecent')}
               onRevealRecent={(path) => {
-                void file.reveal(path).catch(() =>
-                  showNotice(tChrome('chrome.home.recentFiles'), tChrome('chrome.recent.revealFailed')),
-                );
+                void file.reveal(path).catch(async () => {
+                  showNotice(tChrome('chrome.home.recentFiles'), tChrome('chrome.recent.revealFailed'));
+                  // A downloaded entry's local copy is a temp path whose
+                  // disappearance says nothing about the entry: the web
+                  // address is still the way back to the document, so a failed
+                  // reveal never prunes one — the same exemption the open path
+                  // and the launch sweep make.
+                  const entry = stateRef.current.ui.recentFiles.find((e) => e.path === path);
+                  if (entry?.sourceUrl) return;
+                  const statuses = await file
+                    .classifyRecentPaths([path])
+                    .catch(() => ['indeterminate'] as const);
+                  if (statuses[0] === 'missing') {
+                    dispatch({
+                      type: 'UI_SET_RECENT_FILES',
+                      files: removeRecentEntries(stateRef.current.ui.recentFiles, [path]),
+                    });
+                  }
+                });
               }}
+              onRemoveRecent={(path) =>
+                dispatch({
+                  type: 'UI_SET_RECENT_FILES',
+                  files: removeRecentEntries(stateRef.current.ui.recentFiles, [path]),
+                })
+              }
               onOpenTool={(id) => invokeCommand(`tools.open.${id}`)}
             />
           ) : (

@@ -624,6 +624,7 @@
   "chrome.recent.copyPath": "نسخ المسار الكامل",
   "chrome.recent.fromWeb": "من {{host}}",
   "chrome.recent.open": "فتح",
+  "chrome.recent.remove": "إزالة من القائمة",
   "chrome.recent.reveal": "إظهار في المجلد",
   "chrome.recent.revealFailed": "تعذّر إظهار هذا الملف — ربما نُقل أو حُذف.",
   "chrome.recent.today": "اليوم {{time}}",

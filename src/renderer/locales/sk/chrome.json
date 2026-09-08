@@ -602,6 +602,7 @@
   "chrome.recent.copyPath": "Kopírovať celú cestu",
   "chrome.recent.fromWeb": "Z {{host}}",
   "chrome.recent.open": "Otvoriť",
+  "chrome.recent.remove": "Odstrániť zo zoznamu",
   "chrome.recent.reveal": "Zobraziť v priečinku",
   "chrome.recent.revealFailed": "Tento súbor sa nedal zobraziť — možno bol presunutý alebo odstránený.",
   "chrome.recent.today": "Dnes, {{time}}",

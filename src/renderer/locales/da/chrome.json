@@ -580,6 +580,7 @@
   "chrome.recent.copyPath": "Kopiér den fulde sti",
   "chrome.recent.fromWeb": "Fra {{host}}",
   "chrome.recent.open": "Åbn",
+  "chrome.recent.remove": "Fjern fra listen",
   "chrome.recent.reveal": "Vis i mappen",
   "chrome.recent.revealFailed": "Den fil kunne ikke vises — den er måske flyttet eller slettet.",
   "chrome.recent.today": "I dag {{time}}",

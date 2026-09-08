@@ -168,7 +168,8 @@ describe('persistRecent', () => {
     store.set('spectra-recent', JSON.stringify([{ path: 'A', openedAt: 1 }]));
     mod.readRecent();
     // Clear Recent: a blind union would resurrect what the user just removed.
-    expect(mod.persistRecent([])).toEqual([]);
+    mod.clearRecentStorage();
+    expect(mod.readRecent()).toEqual([]);
     expect(store.get('spectra-recent')).toBe('[]');
   });
 });

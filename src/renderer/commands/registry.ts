@@ -14,6 +14,7 @@ import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
 import { focusOmniSearch, omniSearchAvailable } from './omnisearch-focus';
 import { gsBlocked } from '../lib/gs-capability';
+import { clearRecentStorage } from '../lib/recent-files';
 import {
   toggleGrid,
   toggleGuides,
@@ -1076,7 +1077,14 @@ export const COMMANDS: Record<CommandId, Command> = {
   'file.clearRecent': {
     title: 'Clear Recent',
     when: (ctx) => ctx.state.ui.recentFiles.length > 0,
-    run: ({ dispatch }) => dispatch({ type: 'UI_SET_RECENT_FILES', files: [] }),
+    // The one place a real Clear Recent originates, so the one place that may
+    // wipe the shared key. The dispatch alone cannot say so: every other
+    // recentFiles change dispatches the same action, and a per-path removal
+    // that empties this window's list is indistinguishable from it downstream.
+    run: ({ dispatch }) => {
+      clearRecentStorage();
+      dispatch({ type: 'UI_SET_RECENT_FILES', files: [] });
+    },
   },
   ...(Object.fromEntries(
     CANVAS_TOOLS.map((t) => [`tools.${t}`, toolCommand(t)]),

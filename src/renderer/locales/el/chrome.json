@@ -580,6 +580,7 @@
   "chrome.recent.copyPath": "Αντιγραφή πλήρους διαδρομής",
   "chrome.recent.fromWeb": "Από {{host}}",
   "chrome.recent.open": "Άνοιγμα",
+  "chrome.recent.remove": "Κατάργηση από τη λίστα",
   "chrome.recent.reveal": "Εμφάνιση στον φάκελο",
   "chrome.recent.revealFailed": "Δεν ήταν δυνατή η εμφάνιση αυτού του αρχείου — ίσως μετακινήθηκε ή διαγράφηκε.",
   "chrome.recent.today": "Σήμερα {{time}}",

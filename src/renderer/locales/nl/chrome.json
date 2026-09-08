@@ -580,6 +580,7 @@
   "chrome.recent.copyPath": "Volledig pad kopiëren",
   "chrome.recent.fromWeb": "Van {{host}}",
   "chrome.recent.open": "Openen",
+  "chrome.recent.remove": "Uit lijst verwijderen",
   "chrome.recent.reveal": "In map tonen",
   "chrome.recent.revealFailed": "Dat bestand kon niet worden getoond — het is misschien verplaatst of verwijderd.",
   "chrome.recent.today": "Vandaag {{time}}",

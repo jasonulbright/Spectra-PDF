@@ -580,6 +580,7 @@
   "chrome.recent.copyPath": "Kopiera hela sökvägen",
   "chrome.recent.fromWeb": "Från {{host}}",
   "chrome.recent.open": "Öppna",
+  "chrome.recent.remove": "Ta bort från listan",
   "chrome.recent.reveal": "Visa i mappen",
   "chrome.recent.revealFailed": "Filen kunde inte visas — den kan ha flyttats eller tagits bort.",
   "chrome.recent.today": "I dag {{time}}",

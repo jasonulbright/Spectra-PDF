@@ -25,6 +25,10 @@ interface HomeTabProps {
    * failure — the file has been moved or deleted since it was listed — is
    * reported through the shared notice dialog, which Home does not own. */
   onRevealRecent: (path: string) => void;
+  /** Drop one entry from the recent list. The list is app-wide state mirrored
+   * to shared storage, so the removal is App's to compute — Home names the
+   * path, never the resulting list. */
+  onRemoveRecent: (path: string) => void;
   /** Home hosts the tile grid (the docless tools surface —
    * the Tools tab is gone; ops tiles run the picker-first flow). */
   onOpenTool: (id: ToolId) => void;
@@ -54,7 +58,7 @@ const QUICK_ACTIONS: ReadonlyArray<{ command: CommandId; label: ChromeKey; icon:
   { command: 'tools.batchOcr', label: 'chrome.home.batchOcr', icon: 'find' },
 ];
 
-export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onRevealRecent, onOpenTool }: HomeTabProps): React.ReactElement {
+export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onRevealRecent, onRemoveRecent, onOpenTool }: HomeTabProps): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   // The menu carries the path it was opened on rather than an index: the list
@@ -115,11 +119,14 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onRe
           <p className="home-empty">{tChrome('chrome.home.noRecents')}</p>
         ) : (
           <div className="home-recents">
+            {/* Two independent controls per row, so the row cannot be a button:
+                a button inside a button is invalid markup and the inner one
+                never reaches the keyboard. The row is a plain container and
+                both controls are real buttons — always rendered, so removal is
+                reachable without a pointer and without the context menu. */}
             {recentFiles.map((entry) => (
-              <button
+              <div
                 key={entry.path}
-                data-testid="home-recent-item"
-                onClick={() => onOpenRecent(entry)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   setMenu({ x: e.clientX, y: e.clientY, entry });
@@ -127,21 +134,39 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onRe
                 title={entry.sourceUrl ?? entry.path}
                 className="home-recent"
               >
-                <span className="home-recent-icon">
-                  <ChromeIcon icon="document" size={16} />
-                </span>
-                <span className="home-recent-name">{entry.path.split(/[\\/]/).pop()}</span>
-                {/* Where it came from, for a downloaded document: its local
-                    copy sits in a temp folder that names nothing useful. */}
-                <span className="home-recent-folder ltr-notation">
-                  {entry.sourceUrl
-                    ? tChrome('chrome.recent.fromWeb', { host: hostOf(entry.sourceUrl) })
-                    : folderOf(entry.path)}
-                </span>
-                <span data-testid="home-recent-opened" className="home-recent-when">
-                  {formatOpenedAt(entry.openedAt, Date.now())}
-                </span>
-              </button>
+                <button
+                  data-testid="home-recent-item"
+                  onClick={() => onOpenRecent(entry)}
+                  className="home-recent-open"
+                >
+                  <span className="home-recent-icon">
+                    <ChromeIcon icon="document" size={16} />
+                  </span>
+                  <span className="home-recent-name">{entry.path.split(/[\\/]/).pop()}</span>
+                  {/* Where it came from, for a downloaded document: its local
+                      copy sits in a temp folder that names nothing useful. */}
+                  <span className="home-recent-folder ltr-notation">
+                    {entry.sourceUrl
+                      ? tChrome('chrome.recent.fromWeb', { host: hostOf(entry.sourceUrl) })
+                      : folderOf(entry.path)}
+                  </span>
+                  <span data-testid="home-recent-opened" className="home-recent-when">
+                    {formatOpenedAt(entry.openedAt, Date.now())}
+                  </span>
+                </button>
+                <button
+                  data-testid="home-recent-remove"
+                  className="home-recent-remove"
+                  aria-label={tChrome('chrome.recent.remove')}
+                  title={tChrome('chrome.recent.remove')}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveRecent(entry.path);
+                  }}
+                >
+                  <ChromeIcon icon="close" size={13} />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -167,6 +192,7 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onRe
               onClick: () =>
                 void navigator.clipboard.writeText(menu.entry.sourceUrl ?? menu.entry.path),
             },
+            { label: tChrome('chrome.recent.remove'), onClick: () => onRemoveRecent(menu.entry.path) },
           ]}
         />
       )}

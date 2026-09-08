@@ -602,6 +602,7 @@
   "chrome.recent.copyPath": "Скопіювати повний шлях",
   "chrome.recent.fromWeb": "З {{host}}",
   "chrome.recent.open": "Відкрити",
+  "chrome.recent.remove": "Вилучити зі списку",
   "chrome.recent.reveal": "Показати в теці",
   "chrome.recent.revealFailed": "Не вдалося показати цей файл — можливо, його переміщено або видалено.",
   "chrome.recent.today": "Сьогодні, {{time}}",

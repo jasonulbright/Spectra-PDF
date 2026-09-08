@@ -591,6 +591,7 @@
   "chrome.recent.copyPath": "Copiar o caminho completo",
   "chrome.recent.fromWeb": "De {{host}}",
   "chrome.recent.open": "Abrir",
+  "chrome.recent.remove": "Remover da lista",
   "chrome.recent.reveal": "Mostrar na pasta",
   "chrome.recent.revealFailed": "Não foi possível mostrar esse arquivo — ele pode ter sido movido ou excluído.",
   "chrome.recent.today": "Hoje, {{time}}",

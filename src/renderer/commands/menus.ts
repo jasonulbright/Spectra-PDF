@@ -52,15 +52,15 @@ const recentSubmenu: MenuNode = {
         if (recent.length === 0) {
           return [{ label: tChrome('chrome.menu.noRecentFiles'), disabled: true, run: () => {} }];
         }
-        return recent.slice(0, 10).map(({ path, sourceUrl }) => ({
-          label: path.split(/[\\/]/).pop() || path,
+        return recent.slice(0, 10).map((entry) => ({
+          label: entry.path.split(/[\\/]/).pop() || entry.path,
           testid: 'menuitem-recent',
-          // A downloaded entry re-opens through the DIALOG, pre-filled: its
-          // local copy is a temporary path that may already be gone, and a
-          // menu click is not consent to make a request. The user presses
-          // Open, as they did the first time.
-          run: (c: CommandContext) =>
-            sourceUrl ? c.app?.openFromWeb(sourceUrl) : void c.app?.openPath(path),
+          // The whole entry, through the app's one recent-open handler: it
+          // routes a downloaded entry to the pre-filled DIALOG (a menu click
+          // is not consent to make a request) and prunes a row only on a
+          // positively confirmed dead path. The Home tab's row calls the same
+          // method, so the two surfaces cannot disagree about either.
+          run: (c: CommandContext) => void c.app?.openRecentEntry(entry),
         }));
       },
     },

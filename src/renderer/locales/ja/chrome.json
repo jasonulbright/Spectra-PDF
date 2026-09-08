@@ -569,6 +569,7 @@
   "chrome.recent.copyPath": "フルパスをコピー",
   "chrome.recent.fromWeb": "{{host}} から",
   "chrome.recent.open": "開く",
+  "chrome.recent.remove": "一覧から削除",
   "chrome.recent.reveal": "フォルダーで表示",
   "chrome.recent.revealFailed": "そのファイルを表示できませんでした。移動または削除された可能性があります。",
   "chrome.recent.today": "今日 {{time}}",

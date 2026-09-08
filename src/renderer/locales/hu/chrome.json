@@ -580,6 +580,7 @@
   "chrome.recent.copyPath": "Teljes elérési út másolása",
   "chrome.recent.fromWeb": "Innen: {{host}}",
   "chrome.recent.open": "Megnyitás",
+  "chrome.recent.remove": "Eltávolítás a listáról",
   "chrome.recent.reveal": "Megjelenítés a mappában",
   "chrome.recent.revealFailed": "Ezt a fájlt nem sikerült megjeleníteni — lehet, hogy áthelyezték vagy törölték.",
   "chrome.recent.today": "Ma {{time}}",

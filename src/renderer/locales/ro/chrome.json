@@ -591,6 +591,7 @@
   "chrome.recent.copyPath": "Copiază calea completă",
   "chrome.recent.fromWeb": "De la {{host}}",
   "chrome.recent.open": "Deschide",
+  "chrome.recent.remove": "Elimină din listă",
   "chrome.recent.reveal": "Arată în dosar",
   "chrome.recent.revealFailed": "Acel fișier nu a putut fi arătat — poate a fost mutat sau șters.",
   "chrome.recent.today": "Astăzi {{time}}",

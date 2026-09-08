@@ -203,6 +203,7 @@ pub fn run() {
             scanner::scan_cancel,
             scanner::scan_discard,
             commands::canonicalize_paths,
+            commands::classify_recent_paths,
             commands::portfolio_member_dir,
             commands::open_portfolio_member_file,
             commands::get_bundled_gs_info,

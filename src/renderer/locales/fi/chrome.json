@@ -580,6 +580,7 @@
   "chrome.recent.copyPath": "Kopioi koko polku",
   "chrome.recent.fromWeb": "Lähteestä {{host}}",
   "chrome.recent.open": "Avaa",
+  "chrome.recent.remove": "Poista luettelosta",
   "chrome.recent.reveal": "Näytä kansiossa",
   "chrome.recent.revealFailed": "Tiedostoa ei voitu näyttää — se on ehkä siirretty tai poistettu.",
   "chrome.recent.today": "Tänään {{time}}",

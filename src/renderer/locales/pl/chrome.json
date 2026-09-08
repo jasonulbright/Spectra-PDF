@@ -602,6 +602,7 @@
   "chrome.recent.copyPath": "Kopiuj pełną ścieżkę",
   "chrome.recent.fromWeb": "Z {{host}}",
   "chrome.recent.open": "Otwórz",
+  "chrome.recent.remove": "Usuń z listy",
   "chrome.recent.reveal": "Pokaż w folderze",
   "chrome.recent.revealFailed": "Nie udało się pokazać tego pliku — mógł zostać przeniesiony lub usunięty.",
   "chrome.recent.today": "Dzisiaj, {{time}}",

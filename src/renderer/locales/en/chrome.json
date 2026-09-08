@@ -580,6 +580,7 @@
   "chrome.recent.copyPath": "Copy full path",
   "chrome.recent.fromWeb": "From {{host}}",
   "chrome.recent.open": "Open",
+  "chrome.recent.remove": "Remove from list",
   "chrome.recent.reveal": "Show in folder",
   "chrome.recent.revealFailed": "That file could not be shown — it may have been moved or deleted.",
   "chrome.recent.today": "Today {{time}}",
