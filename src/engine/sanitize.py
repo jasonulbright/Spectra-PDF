@@ -617,6 +617,8 @@ def certification_level(pdf) -> str | None:
     A certification whose level cannot be read still reports as certified: the
     warning that matters is the certification's existence, not its degree."""
     state = certification_of_pdf(pdf)
+    if state.get("error"):
+        return "unknown"
     if not state["certified"]:
         return None
     return state["level"] or "unknown"
@@ -1227,6 +1229,10 @@ def sanitize_pdf(
 
     options = {"form_fields_mode": form_fields_mode, "hidden_text_ocr": bool(hidden_text_ocr)}
     with pikepdf.open(file) as pdf:
+        from engine.incremental import signature_policy_of_pdf
+        from engine.docmdp import refuse_unreadable_policy
+        if signature_policy_of_pdf(pdf).get("error"):
+            refuse_unreadable_policy()
         # Report order is also apply order, and two pairs depend on it: hidden
         # layers are dropped before hidden text is re-analyzed, so the layer's
         # words are not looked for twice, and a flatten stamps its appearances

@@ -63,7 +63,7 @@ describe('annotations survive the commit round trip', () => {
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('a highlight added via the reducer path bakes into the saved file as /Square', async () => {
+  it('a highlight added via the reducer path bakes into the saved file as /Highlight', async () => {
     await waitForHarness();
     await openByPaths([samplePdfA]);
     await setView('canvas');
@@ -91,7 +91,7 @@ describe('annotations survive the commit round trip', () => {
       contentsObj?: { str: string };
     }[];
     expect(annots).toHaveLength(1);
-    expect(annots[0].subtype).toBe('Square');
+    expect(annots[0].subtype).toBe('Highlight');
     expect(annots[0].contentsObj?.str).toBe('e2e highlight');
     await pdf.loadingTask.destroy();
   });
@@ -147,7 +147,7 @@ describe('annotations survive the commit round trip', () => {
     const page = await pdf.getPage(1);
     const annots = (await page.getAnnotations()) as { subtype: string; color: number[] }[];
     expect(annots).toHaveLength(1);
-    expect(annots[0].subtype).toBe('Square');
+    expect(annots[0].subtype).toBe('Highlight');
     // pdf.js reports annotation color as a typed array of 0..255 RGB;
     // #2f6fed = (47, 111, 237). Array.from avoids a typed-array-vs-plain-array
     // toEqual mismatch.

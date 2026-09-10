@@ -259,7 +259,7 @@ export interface DocumentViewProps {
    *  preference is off. Reading view only — the board has no text layer. */
   ocrSelection?: import('./PageTextLayer').OcrSelectionContext | null;
   onPickLink: (region: LinkRegion) => void;
-  selectedLink: { page: number; index: number } | null;
+  selectedLink: LinkRegion | null;
   /** The captured snapshot's card, and its two actions. */
   snapshotPlacement: SnapshotPlacement | null;
   onClearSnapshotPlacement: () => void;

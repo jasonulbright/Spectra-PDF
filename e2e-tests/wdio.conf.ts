@@ -34,11 +34,12 @@
  *
  * Then: npm test
  */
-import { spawn, spawnSync, ChildProcessByStdio } from 'node:child_process';
-import type { Readable } from 'node:stream';
-import { resolve, basename } from 'node:path';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
+import { createServer } from 'node:net';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { scanText } from './scan-run-log.js';
+import { launchOwnedProcess } from './support/owned-process.js';
 
 const REPO_ROOT = resolve(__dirname, '..');
 const APP_BINARY = resolve(REPO_ROOT, 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
@@ -47,9 +48,7 @@ const TAURI_DRIVER_PORT = 4444;
 const RUN_LOG_DIR = resolve(__dirname, 'logs');
 const RUN_LOG = resolve(RUN_LOG_DIR, 'last-run.log');
 
-// stdin is ignored and both output streams are piped, which is what the
-// stdio tuple below declares — the process type has to say the same.
-let tauriDriver: ChildProcessByStdio<null, Readable, Readable> | null = null;
+let tauriDriver: ReturnType<typeof launchOwnedProcess> | null = null;
 
 // The driver-level WARN/ERROR rows are emitted inside the worker processes and
 // reach the launcher only as forwarded output, so no launcher-side logger hook
@@ -93,22 +92,28 @@ function reportRunLog(): void {
   }
 }
 
-function reapTestProcesses(): void {
-  // Force-kill the driver/app/engine process tree by image name so each
-  // session starts from a clean slate. /T covers child processes; a missing
-  // image is expected and silenced.
-  const appName = basename(APP_BINARY);
-  for (const name of ['tauri-driver.exe', 'msedgedriver.exe', appName, 'python.exe']) {
-    spawnSync('taskkill', ['/F', '/T', '/IM', name], {
-      stdio: 'ignore',
-      shell: false,
-    });
-  }
+async function reapTestProcesses(): Promise<void> {
+  const owned = tauriDriver;
+  if (!owned) return; // Launcher has no worker-owned job to reap.
+  await owned.stop();
+  tauriDriver = null;
+}
+
+async function requireFreeDriverPort(): Promise<void> {
+  await new Promise<void>((resolvePort, reject) => {
+    const server = createServer();
+    server.once('error', () => reject(new Error(`E2E port ${TAURI_DRIVER_PORT} is already in use; no existing process was stopped`)));
+    server.listen({ host: '127.0.0.1', port: TAURI_DRIVER_PORT, exclusive: true }, () => server.close(error => error ? reject(error) : resolvePort()));
+  });
 }
 
 export const config: WebdriverIO.Config = {
   runner: 'local',
-  specs: ['./specs/**/*.spec.ts'],
+  // Retained local probes are opt-in via --spec, never implicit release gates.
+  // Discover recursively so every ordinary spec remains in the full suite.
+  specs: readdirSync(resolve(__dirname, 'specs'), { recursive: true, encoding: 'utf8' })
+    .filter(name => name.endsWith('.spec.ts') && !name.includes('.local.'))
+    .map(name => resolve(__dirname, 'specs', name)),
   maxInstances: 1,
   capabilities: [
     {
@@ -162,10 +167,9 @@ export const config: WebdriverIO.Config = {
       );
     }
   },
-  beforeSession: (_config, _caps, specs: string[]) =>
-    new Promise<void>((resolveSession, rejectSession) => {
-      // Clear any orphaned driver/app/engine processes before the session starts.
-      reapTestProcesses();
+  beforeSession: async (_config, _caps, specs: string[]) => {
+      await reapTestProcesses();
+      await requireFreeDriverPort();
 
       // Set SPECTRAPDF_E2E so the Tauri binary skips single-instance + tray —
       // each WDIO session needs a clean launch and a clean exit.
@@ -176,22 +180,20 @@ export const config: WebdriverIO.Config = {
       if (specs?.some((s) => s.includes('backdrop-fallback'))) {
         env.SPECTRAPDF_E2E_FORCE_OPAQUE = '1';
       }
-      tauriDriver = spawn(
+      tauriDriver = launchOwnedProcess(
+        resolve(__dirname, 'support', 'owned-process.ps1'),
         'tauri-driver',
         ['--port', String(TAURI_DRIVER_PORT), '--native-driver', NATIVE_DRIVER],
-        {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          shell: true,
-          env,
-        },
+        env,
       );
-      tauriDriver.stderr.on('data', (chunk) => {
-        process.stderr.write(`[tauri-driver] ${chunk}`);
-      });
-      tauriDriver.on('error', rejectSession);
-      // Give tauri-driver a moment to bind the port before WDIO connects.
-      setTimeout(resolveSession, 1500);
-    }),
+      await tauriDriver.ready;
+      // Fail startup if the owned driver exits rather than connecting WDIO to
+      // a different process which raced for the same port.
+      await Promise.race([
+        new Promise<void>(resolveSession => setTimeout(resolveSession, 1500)),
+        tauriDriver.closed.then(code => { throw new Error(`Owned E2E driver exited during startup (${code})`); }),
+      ]);
+    },
   before: async () => {
     // The binary under test must carry the `e2e-net-private` feature: without
     // it every request the network spec makes to 127.0.0.1 is refused as a
@@ -220,19 +222,11 @@ export const config: WebdriverIO.Config = {
       );
     }
   },
-  afterSession: () =>
-    new Promise<void>((resolveDone) => {
-      if (tauriDriver && !tauriDriver.killed) {
-        tauriDriver.kill();
-        tauriDriver = null;
-      }
-      reapTestProcesses();
-      // Short gap to let the OS release the WebDriver port before next spec.
-      setTimeout(resolveDone, 800);
-    }),
-  onComplete: () => {
-    reapTestProcesses();
-    reportRunLog();
+  afterSession: async () => {
+    await reapTestProcesses();
+  },
+  onComplete: async () => {
+    try { await reapTestProcesses(); } finally { reportRunLog(); }
   },
 };
 

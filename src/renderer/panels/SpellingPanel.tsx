@@ -5,7 +5,7 @@ import { useOperations } from '../hooks/useOperations';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tLanguageName, currentLanguage } from '../i18n';
-import { app, dialog, file } from '../lib/tauri-bridge';
+import { app, dialog } from '../lib/tauri-bridge';
 import { loadSettings, saveSettings } from '../lib/app-settings';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import type { EditSpan } from '../lib/edit-paragraphs';
@@ -51,7 +51,7 @@ export function SpellingPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles, state, dispatch } = useActiveFile();
   const { call } = useEngine();
-  const { performOperation, confirmSignedEdit } = useOperations();
+  const { performOperation, fillFormValues } = useOperations();
 
   const [dictionaries, setDictionaries] = useState<DictionaryEntry[]>([]);
   const [preference, setPreference] = useState<string>(() => loadSettings().spellLanguage);
@@ -278,33 +278,18 @@ export function SpellingPanel(): React.ReactElement {
       if (wordAt(value, issue.start, issue.end) !== word) {
         return { issue, ok: false, reason: tChrome('panel.spelling.reasonMoved') };
       }
-      if (
-        !(await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'form-fill', [
-          issue.field,
-        ]))
-      ) {
+      const result = await fillFormValues(activeFile.path,
+        { [issue.field]: replaceRange(value, issue.start, issue.end, replacement) }, {
+          expectedWorkingPath: activeFile.workingPath,
+          expectedValues: { [issue.field]: value },
+          changedMessage: tChrome('panel.spelling.reasonMoved'),
+        });
+      if (result === EDIT_DECLINED) {
         return { issue, ok: false, reason: tChrome('panel.spelling.reasonDeclined') };
       }
-      // The shipped fill shape: snapshot (runs the commit gate) → engine fill
-      // → reload → UPDATE_FILE, so the change is one ordinary undo entry.
-      const snapshotPath = await file.snapshot(activeFile.workingPath);
-      await call('fill_form_fields', {
-        file: activeFile.workingPath,
-        output: activeFile.workingPath,
-        edits: { [issue.field]: replaceRange(value, issue.start, issue.end, replacement) },
-        font_dir: await app.getEditFontPath(),
-      });
-      const buffer = await file.readBuffer(activeFile.workingPath);
-      dispatch({
-        type: 'UPDATE_FILE',
-        path: activeFile.path,
-        pageCount: activeFile.pageCount,
-        buffer,
-        snapshotPath,
-      });
       return { issue, ok: true };
     },
-    [activeFile, call, confirmSignedEdit, dispatch, replacement],
+    [activeFile, call, fillFormValues, replacement],
   );
 
   const applyOne = useCallback(

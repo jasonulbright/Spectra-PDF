@@ -28,12 +28,7 @@ from engine import distill as distill_mod
 from engine import gs_capability
 from engine import merge as merge_mod
 from engine import soffice as soffice_mod
-from engine.acroform import (
-    carry_doc_form_extras,
-    carry_pure_data_fields,
-    prune_form_to_pages,
-    refresh_sig_flags,
-)
+from engine.page_copy import copy_pages_with_forms
 from engine.pdf_save import save_pdf
 from engine.split import parse_ranges
 
@@ -457,8 +452,8 @@ _RANGE_PART = re.compile(r"^\s*\d+\s*(?:-\s*\d+\s*)?$")
 def _subset(src: Path, dest: Path, spec: str, label: str) -> int:
     """Keep only ``spec``'s pages of ``src``, into ``dest``. Returns the count.
 
-    Form-aware by the same construction `split` uses — prune the field tree to
-    the kept pages, then `add_pages_from`, then the pure-data and /CO carries.
+    Form-aware by the same copy boundary `split` uses: one batch field map,
+    including pure-data fields, calculation order and repeated-page widgets.
     A range applied to a member of a Combine is exactly a split of that member,
     so it must not be a second, weaker implementation: a bare `pages.append`
     here would leave every widget on a kept page orphaned (the
@@ -470,21 +465,14 @@ def _subset(src: Path, dest: Path, spec: str, label: str) -> int:
             f"the page range {spec!r} for {label} is not a list of pages or "
             f"ranges like '1-3,5'"
         )
-    with pikepdf.open(str(src)) as pdf:
+    with pikepdf.open(str(src)) as pdf, pikepdf.Pdf.new() as out:
         indices = parse_ranges(str(spec), len(pdf.pages))
         if not indices:
             raise ValueError(
                 f"the page range {spec!r} selects no pages of {label} "
                 f"(it has {len(pdf.pages)})"
             )
-        prune_form_to_pages(pdf, indices)
-        out = pikepdf.Pdf.new()
-        copied = out.add_pages_from(pdf, pages=indices)
-        pure = carry_pure_data_fields(out, pdf)
-        refresh_sig_flags(out)
-        renames = dict(copied.renamed_fields)
-        renames.update({r["from"]: r["to"] for r in pure})
-        carry_doc_form_extras(out, pdf, renames)
+        copy_pages_with_forms(out, pdf, pages=indices)
         # A staging file for the assembly, never a user output; the assembled
         # document is newly authored and carries no member's protection.
         save_pdf(out, str(dest), drop_encryption=True)

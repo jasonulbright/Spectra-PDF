@@ -74,6 +74,8 @@ export function engineMessageOf(err: unknown): string {
  * renders its own catalog string from the same `reason`. */
 export function signedReasonText(note: SignedNote): string {
   switch (note.reason) {
+    case 'signature-policy-unreadable':
+      return 'signature policy could not be read; editing is blocked';
     case 'certified-no-changes':
       return 'certified to allow no changes';
     case 'certified-form-fill':

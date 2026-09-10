@@ -1457,8 +1457,13 @@ def tag_package(tmp_path: Path):
     """A scratch package standing in for a TAG's `src-tauri`, with the
     conventionally named test replaced by an accepting one.
 
-    A worktree at HEAD sharing the checkout's cargo target directory, so the
-    dependency graph is not rebuilt. The build script requires every
+    A worktree at HEAD with a separate, revision-keyed Cargo target. Sharing
+    the live checkout's target is unsafe: this mixed cdylib/rlib package has
+    an unhashed libspectrapdf_lib.rlib output. A tag's different feature graph
+    can overwrite it while Cargo still calls the live package fresh, linking
+    tests against incompatible Tauri types or a stale build script.
+    The isolated cache is reused only by fixtures for the same tag revision.
+    The build script requires every
     `resources/` entry of tauri.conf.json to exist; empty stubs satisfy it
     the way the CI jobs' stubs do. Yields (verifier args, downloaded dir,
     package dir, env).
@@ -1474,7 +1479,10 @@ def tag_package(tmp_path: Path):
         (package / "tests" / "updater_manifest.rs").write_text(ACCEPTING_UPDATER_TEST)
         args, downloaded = _draft_fixture(tmp_path)
         args[args.index("-CargoPackage") + 1] = str(package)
-        env = _verifier_env({"CARGO_TARGET_DIR": str(ROOT / "src-tauri" / "target")})
+        revision = _git("rev-parse", "HEAD", cwd=worktree).strip()
+        env = _verifier_env({
+            "CARGO_TARGET_DIR": str(ROOT / "src-tauri" / "target" / "verifier-tags" / revision),
+        })
         yield args, downloaded, package, env
     finally:
         _git("worktree", "remove", "--force", str(worktree))
@@ -1500,6 +1508,26 @@ def test_the_draft_verifier_ignores_an_accepting_test_the_verified_package_carri
     """
     args, downloaded, package, env = tag_package
     source = (ROOT / UPDATER_MANIFEST_TEST).read_bytes()
+
+    # A real foreign-package build must leave the live checkout's unhashed
+    # package slots alone, whether they were provisioned before this test or
+    # absent. This catches target sharing by its actual artifact side effect.
+    live_outputs = [
+        ROOT / "src-tauri/target/debug/deps/libspectrapdf_lib.rlib",
+        ROOT / "src-tauri/target/debug/spectrapdf.exe",
+    ]
+
+    def live_digests():
+        result = {}
+        for path in live_outputs:
+            if path.is_file():
+                with path.open("rb") as stream:
+                    result[str(path)] = hashlib.file_digest(stream, "sha256").hexdigest()
+            else:
+                result[str(path)] = None
+        return result
+
+    live_before = live_digests()
 
     _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="not-rfc3339"))
     run = subprocess.run(args, capture_output=True, text=True, env=env)
@@ -1529,6 +1557,7 @@ def test_the_draft_verifier_ignores_an_accepting_test_the_verified_package_carri
     second = re.search(rf"as .*({VERIFIER_TEST_PREFIX}[0-9a-f]{{16}}_updater_manifest)\.rs", run.stdout)
     assert second and second.group(1) != Path(staged.group(1)).stem
     assert _staged_leftovers(package) == []
+    assert live_digests() == live_before, "tag verifier overwrote the live package's build outputs"
 
 
 def test_the_draft_verifier_refuses_a_manifest_that_redirects_the_verifier_target(

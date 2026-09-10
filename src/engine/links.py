@@ -861,12 +861,8 @@ def _save(pdf, input_path: Path, output_path: Path, same_file: bool) -> bool:
     replaced while it is held open."""
     from engine.incremental import finalize_preserving_signatures
 
-    if same_file:
-        with staged_write(output_path) as staged:
-            save_pdf(pdf, str(staged))
-            preserved = finalize_preserving_signatures(str(input_path), str(staged))
-            pdf.close()
-    else:
-        save_pdf(pdf, output_path)
-        preserved = finalize_preserving_signatures(str(input_path), str(output_path))
+    with staged_write(output_path) as staged:
+        save_pdf(pdf, str(staged))
+        preserved = finalize_preserving_signatures(str(input_path), str(staged))
+        pdf.close()
     return bool(preserved.get("preserved"))

@@ -1,4 +1,4 @@
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNull, PDFRef } from 'pdf-lib';
 import { buildPdf, buildPdfx, stripExtension } from './pdfx-format';
 import { carriesManifest } from './doc-names';
 import type { ExportPage } from './pdfx-format';
@@ -8,6 +8,7 @@ import type { AppAction, OpenDocument, OpenFile, PdfBuffer, Workspace } from '..
 // a programming error nobody is meant to read, so it stays English).
 import { tChrome } from '../i18n';
 import { preserveReason, type PreserveOutcome, type PreserveRefusal } from './preserve-reason';
+import { hasPendingPageCommit, recoverPendingPageCommit, publishPageCommit, type PageCommitIo } from './page-commit-transaction';
 
 // A page's 1-based position within its file's committed order: pages of all
 // same-path documents in workspace order — what the file looks like after
@@ -198,21 +199,26 @@ const NAME_SIG = PDFName.of('Sig');
 const NAME_V = PDFName.of('V');
 const MAX_FIELD_DEPTH = 32;
 
-/** Whether these bytes carry at least one FILLED signature field — a terminal
+/** Whether these bytes carry, or cannot exclude, a FILLED signature field — a terminal
  * `/FT /Sig` (inheritable) with a `/V`. An empty signature field is not a
  * signature, and reporting one lost would be a false alarm.
  *
  * The engine owns this answer (`has_live_signatures`) and is asked for it on
  * every ordinary commit. This is the same rule read off the document's own
  * pre-commit bytes, for the one case where the engine could not answer at all:
- * without it a failed transplant either says nothing (a signature silently
- * lost) or says it for every unsigned file in the commit.
+ * false proves unsignedness for the failure fallback. True includes unknown
+ * structure and catalog certification; it blocks a commit whose engine could
+ * not establish policy instead of allowing an unverified rewrite.
  */
 export async function carriesLiveSignature(bytes: Uint8Array): Promise<boolean> {
   try {
     const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
-    const resolve = (value: unknown): unknown =>
-      value instanceof PDFRef ? doc.context.lookup(value) : value;
+    const resolve = (value: unknown): unknown => {
+      if (!(value instanceof PDFRef)) return value;
+      const resolved = doc.context.lookup(value);
+      if (resolved === undefined) throw new Error('unresolved policy reference');
+      return resolved;
+    };
     const asDict = (value: unknown): PDFDict | null => {
       const r = resolve(value);
       return r instanceof PDFDict ? r : null;
@@ -224,31 +230,36 @@ export async function carriesLiveSignature(bytes: Uint8Array): Promise<boolean> 
     // Depth-bounded: a /Kids cycle in a damaged field tree would otherwise
     // recur forever.
     const walk = (field: PDFDict, inheritedFt: unknown, depth: number): boolean => {
-      if (depth > MAX_FIELD_DEPTH) return false;
-      const own = field.get(NAME_FT);
+      if (depth > MAX_FIELD_DEPTH) return true;
+      const own = resolve(field.get(NAME_FT));
       const ft = own === undefined ? inheritedFt : own;
+      if (ft !== undefined && ![NAME_SIG, PDFName.of('Tx'), PDFName.of('Btn'), PDFName.of('Ch')].includes(ft as PDFName)) return true;
+      // /Kids may be separate widget annotations: /V belongs to their
+      // terminal field, not to the leaf widgets. Match the engine's walk.
+      const value = resolve(field.get(NAME_V));
+      if (ft === NAME_SIG && value !== undefined && value !== PDFNull) return true;
       const kids = asArray(field.get(NAME_KIDS));
-      if (!kids || kids.size() === 0) {
-        return ft === NAME_SIG && field.get(NAME_V) !== undefined;
-      }
+      if (!kids) return field.has(NAME_KIDS) || ft === undefined;
+      if (kids.size() === 0 && ft === undefined) return true;
       for (let i = 0; i < kids.size(); i++) {
         const kid = asDict(kids.get(i));
-        if (kid && walk(kid, ft, depth + 1)) return true;
+        if (!kid || walk(kid, ft, depth + 1)) return true;
       }
       return false;
     };
     const acro = asDict(doc.catalog.get(NAME_ACROFORM));
+    // Catalog certification and unreadable structures are not unsignedness.
+    if (doc.catalog.has(PDFName.of('Perms'))) return true;
     const fields = acro && asArray(acro.get(NAME_FIELDS));
-    if (!fields) return false;
+    if (!fields) return doc.catalog.has(NAME_ACROFORM);
     for (let i = 0; i < fields.size(); i++) {
       const field = asDict(fields.get(i));
-      if (field && walk(field, undefined, 0)) return true;
+      if (!field || walk(field, undefined, 0)) return true;
     }
     return false;
   } catch {
-    // Asked only after a transplant already failed, and the notice is the
-    // user's only record of it: a document this build cannot read through is
-    // reported rather than passed over.
+    // Asked after the engine failed. A document this fallback cannot read
+    // is not proven unsigned, so it cannot authorize publication.
     return true;
   }
 }
@@ -265,9 +276,8 @@ interface CommitDeps {
   files: Map<string, OpenFile>;
   dirtyPaths: string[];
   dispatch: (action: AppAction) => void;
-  snapshot: (workingPath: string) => Promise<string>;
+  transaction: PageCommitIo;
   writeBuffer: (filePath: string, bytes: Uint8Array) => Promise<unknown>;
-  rename: (fromPath: string, toPath: string) => Promise<unknown>;
   remove: (filePath: string) => Promise<unknown>;
   /** Rewrite a staged temp as an incremental append onto the SIGNED
    *  working copy (engine `transplant_incremental`).
@@ -285,7 +295,6 @@ interface CommitDeps {
 
 // Temp names are unique per run so a stale leftover (crash, prior failure)
 // can never be renamed into place by a later commit.
-let commitSeq = 0;
 // Loud reentrancy guard: concurrent runs stage/rename the same working files
 // and consume each other's temps. Callers must serialize (App shares one
 // in-flight promise across all commit entry points); this turns a bypass of
@@ -306,21 +315,16 @@ export interface CommitOutcome {
 // dirty paths commit together — cross-file moves entangle files, so partial
 // commits would desync source page indices.
 //
-// Transactional against write failures: all bytes are staged to *.commit-tmp
-// first; only when every stage succeeded are the originals snapshotted and
-// the temps renamed into place. A failure before the rename phase deletes the
-// temps and leaves both disk and state untouched, so a retry re-plans from
-// the same pre-commit buffers and produces identical bytes. (A failure among
-// the renames themselves still retries cleanly for the same reason — state
-// buffers never change until the final dispatch.)
+// Every output is staged first. One native transaction then snapshots all
+// originals and owns publication/rollback. Only a complete receipt publishes
+// the renderer state; unconfirmed restoration leaves a persistent retry gate.
 export async function commitPageEdits({
   workspace,
   files,
   dirtyPaths,
   dispatch,
-  snapshot,
+  transaction,
   writeBuffer,
-  rename,
   remove,
   preserveSignatures,
   readBack,
@@ -331,6 +335,7 @@ export async function commitPageEdits({
   commitRunning = true;
   const signatureRefusals: PreserveRefusal[] = [];
   try {
+    await recoverPendingPageCommit();
     const plans = planCommit(workspace, files, dirtyPaths);
     if (plans.length === 0) {
       dispatch({ type: 'CLEAR_PAGE_EDITS' });
@@ -338,7 +343,7 @@ export async function commitPageEdits({
     }
     const built = await Promise.all(plans.map(buildCommitBytes));
 
-    const runTag = `.commit-tmp-${++commitSeq}`;
+    const runTag = `.commit-tmp-${crypto.randomUUID()}`;
     const staged: string[] = [];
     const updates: {
       path: string;
@@ -350,14 +355,14 @@ export async function commitPageEdits({
     try {
       for (let i = 0; i < plans.length; i++) {
         const tmp = plans[i].workingPath + runTag;
+        staged.push(tmp); // a failed write can itself leave a partial file
         await writeBuffer(tmp, built[i]);
-        staged.push(tmp); // before the transplant attempt — cleanup owns it either way
         // An annotation-tier commit on a SIGNED file lands as an
         // incremental append instead of the pdf-lib rewrite, so the
-        // signature keeps verifying. Failure here (engine down, refusal)
-        // NEVER blocks the commit — the rewrite is the standing behavior
-        // and the fallback for every out-of-scope delta — but a signed file
-        // pays for that fallback with its signatures, so it is REPORTED.
+        // signature keeps verifying. A mechanical refusal can use the
+        // existing rewrite path and reports the signature loss. Unknown
+        // policy or an unavailable engine for a signed/unknown source blocks
+        // publication instead: neither authorizes that fallback.
         if (preserveSignatures && readBack) {
           let outcome: PreserveOutcome | null = null;
           // The one fact that makes the staged file's content unknown: either
@@ -366,10 +371,24 @@ export async function commitPageEdits({
           let failure: unknown;
           try {
             outcome = await preserveSignatures(plans[i].workingPath, tmp);
-            if (outcome.applied) built[i] = await readBack(tmp);
+            if (!outcome || typeof outcome.applied !== 'boolean'
+                || (outcome.blocked !== undefined && typeof outcome.blocked !== 'boolean')
+                || (!outcome.applied && (typeof outcome.reason !== 'string' || !outcome.reason))) {
+              outcome = null;
+              throw new Error('invalid preservation response');
+            }
+            if (outcome.applied && !outcome.blocked && outcome.reason !== 'signature-policy-unreadable') {
+              built[i] = await readBack(tmp);
+            }
           } catch (err) {
             failed = true;
             failure = err;
+          }
+          if (outcome?.blocked || outcome?.reason === 'signature-policy-unreadable') {
+            throw new Error(tChrome('app.signedEdit.policyUnreadable'));
+          }
+          if (failed && !outcome && (await carriesLiveSignature(plans[i].ownBytes))) {
+            throw new Error(tChrome('app.signedEdit.policyUnreadable'));
           }
           if (failed) {
             // The staged temp may hold the appended revision already — the
@@ -396,25 +415,29 @@ export async function commitPageEdits({
           }
         }
       }
-      for (let i = 0; i < plans.length; i++) {
-        const snapshotPath = await snapshot(plans[i].workingPath);
-        await rename(staged[i], plans[i].workingPath);
-        updates.push({
-          path: plans[i].path,
-          pageCount: plans[i].pageCount,
-          buffer: built[i],
-          snapshotPath,
-          authored: {
-            pages: plans[i].authoredPageIds,
-            documents: plans[i].authoredDocuments,
-          },
-        });
-      }
+      await publishPageCommit(transaction,
+        plans.map((p, i) => ({ workingPath: p.workingPath, stagedPath: staged[i] })),
+        snapshots => {
+          for (let i = 0; i < plans.length; i++) updates.push({
+            path: plans[i].path,
+            pageCount: plans[i].pageCount,
+            buffer: built[i],
+            snapshotPath: snapshots[i],
+            authored: {
+              pages: plans[i].authoredPageIds,
+              documents: plans[i].authoredDocuments,
+            },
+          });
+          dispatch({ type: 'COMMIT_PAGE_EDITS', updates });
+        },
+        async () => { await Promise.all(staged.map(tmp => Promise.resolve(remove(tmp)).catch(() => {}))); },
+      );
     } catch (err) {
-      await Promise.all(staged.map((tmp) => Promise.resolve(remove(tmp)).catch(() => {})));
+      if (!hasPendingPageCommit()) {
+        await Promise.all(staged.map((tmp) => Promise.resolve(remove(tmp)).catch(() => {})));
+      }
       throw err;
     }
-    dispatch({ type: 'COMMIT_PAGE_EDITS', updates });
     return { signatureRefusals };
   } finally {
     commitRunning = false;

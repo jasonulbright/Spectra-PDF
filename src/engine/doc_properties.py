@@ -541,6 +541,9 @@ def _signed_structural_gate(file: str, allow_signed: bool) -> str:
     (`printer.parse_page_spec`, and the standing rule it produced).
     """
     decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision.get("reason") == "signature-policy-unreadable":
+        from engine.docmdp import refuse_unreadable_policy
+        refuse_unreadable_policy()
     if decision["kind"] == "refuse":
         return "refuse"
     if decision["kind"] == "warn" and not allow_signed:

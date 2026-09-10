@@ -290,7 +290,14 @@ describe('add text', () => {
       { timeout: 30_000, timeoutMsg: 'the wrapped multi-line authored text never appeared' },
     );
 
+    const undoDepth = await browser.execute(() => (window as any).__SPECTRA_TEST__.getHistoryState().undo.length);
     expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(async () =>
+      await browser.execute(() => (window as any).__SPECTRA_TEST__.getHistoryState().undo.length) === undoDepth - 1 &&
+      (await authoredParagraph('one two three')) === null, {
+      timeout: 30_000,
+      timeoutMsg: 'undo did not remove the wrapped text before the next card opened',
+    });
   });
 
   // Vertical AUTHORING. The embed side (Identity-V, /W2) and the edit side

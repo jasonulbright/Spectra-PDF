@@ -8,12 +8,20 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { OP_EDIT_CLASS, UNGATED_OPS, opEditClass } from '../src/renderer/lib/op-edit-class';
+import { OP_EDIT_CLASS, UNGATED_OPS, opEditClass, sequenceEditClass } from '../src/renderer/lib/op-edit-class';
 import { signedEditDecision, type SignaturePolicy } from '../src/renderer/lib/signatures';
 
 const VALID = new Set(['none', 'form-fill', 'annotate', 'structural']);
 
 describe('OP_EDIT_CLASS', () => {
+  it('a compound edit takes the policy of every contributing operation', () => {
+    expect(sequenceEditClass('set_link_target', ['set_link_appearance'])).toBe('annotate');
+    expect(sequenceEditClass('set_link_target', ['rotate'])).toBe('structural');
+    expect(sequenceEditClass('set_link_target', ['reset_form_fields'])).toBe('structural');
+    expect(sequenceEditClass('sign_pdf', ['set_link_appearance'])).toBe('structural');
+    expect(sequenceEditClass('sanitize_pdf', ['sign_pdf'])).toBe('structural');
+    expect(sequenceEditClass('sign_pdf')).toBe('none');
+  });
   it('gives every op one of the four values', () => {
     for (const [method, cls] of Object.entries(OP_EDIT_CLASS)) {
       expect(VALID.has(cls), `${method} → ${cls}`).toBe(true);

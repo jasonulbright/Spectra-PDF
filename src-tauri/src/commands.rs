@@ -1107,24 +1107,13 @@ pub async fn create_working_copy(file_path: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn snapshot(working_path: String) -> Result<String, String> {
-    let path = Path::new(&working_path);
-    let dir = path.parent().ok_or("Invalid path")?;
-    let stem = path.file_stem().ok_or("Invalid filename")?.to_string_lossy();
-    let ext = path
-        .extension()
-        .map(|e| format!(".{}", e.to_string_lossy()))
-        .unwrap_or_default();
-
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let snap_path = dir.join(format!("{}_snap_{}{}", stem, timestamp, ext));
-
-    fs::copy(&working_path, &snap_path)
-        .map_err(|e| format!("Failed to snapshot: {}", e))?;
-
-    Ok(snap_path.to_string_lossy().to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::file_publication::snapshot(Path::new(&working_path))
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(|e| format!("Failed to snapshot: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1132,16 +1121,22 @@ pub async fn restore_snapshot(
     working_path: String,
     snapshot_path: String,
 ) -> Result<(), String> {
-    fs::copy(&snapshot_path, &working_path)
-        .map_err(|e| format!("Failed to restore: {}", e))?;
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::file_publication::replace_copy(Path::new(&snapshot_path), Path::new(&working_path))
+            .map_err(|e| format!("Failed to restore: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn save_as(working_path: String, dest_path: String) -> Result<(), String> {
-    fs::copy(&working_path, &dest_path)
-        .map_err(|e| format!("Failed to save: {}", e))?;
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::file_publication::replace_copy(Path::new(&working_path), Path::new(&dest_path))
+            .map_err(|e| format!("Failed to save: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ── App info ──────────────────────────────────────────────────────────────

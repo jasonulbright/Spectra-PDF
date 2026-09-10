@@ -182,7 +182,7 @@ interface DocLayerProps {
    * opens one in the panel. Shown while the Links tool is open only. */
   linkRegions: readonly LinkRegion[];
   onPickLink: (region: LinkRegion) => void;
-  selectedLink: { page: number; index: number } | null;
+  selectedLink: LinkRegion | null;
   /** The captured snapshot's card, and its two actions. */
   snapshotPlacement: SnapshotPlacement | null;
   onClearSnapshotPlacement: () => void;

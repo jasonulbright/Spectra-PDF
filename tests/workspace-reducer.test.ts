@@ -562,7 +562,8 @@ describe('COMMIT_PAGE_EDITS', () => {
     // Identity channel: the record lands keyed to THE committed buffer
     // object (adoption checks identity, not equality).
     const recA = next.files.get('a.pdf')!.authoredIdentity!;
-    expect(recA.pages).toEqual(['a#pA', 'a#pB']);
+      expect(recA.pages).toEqual(['a#pA', 'a#pB']);
+      expect(recA.sourceBuffer).toBe(state.files.get('a.pdf')!.buffer);
     expect(recA.buffer).toBe(next.files.get('a.pdf')!.buffer);
     // A later NON-authored update (engine op) drops the record.
     const afterOp = appReducer(next, {
@@ -846,17 +847,20 @@ describe('snapshot undo/redo history (multi-level)', () => {
     let state = withHistory();
     expect(state.files.get('a.pdf')?.undoStack).toEqual(['snap1', 'snap2']);
 
-    state = appReducer(state, { type: 'UNDO', path: 'a.pdf', redoSnapshot: 'redo2' });
+    state = appReducer(state, { type: 'RESTORE_HISTORY', direction: 'undo', path: 'a.pdf',
+      expected: state, snapshotPath: 'snap2', counterpart: 'redo2', buffer: [2], pageCount: 4 });
     expect(state.files.get('a.pdf')?.undoStack).toEqual(['snap1']); // second undo still possible
     expect(state.files.get('a.pdf')?.redoStack).toEqual(['redo2']);
     expect(state.files.get('a.pdf')?.dirty).toBe(true);
 
-    state = appReducer(state, { type: 'UNDO', path: 'a.pdf', redoSnapshot: 'redo1' });
+    state = appReducer(state, { type: 'RESTORE_HISTORY', direction: 'undo', path: 'a.pdf',
+      expected: state, snapshotPath: 'snap1', counterpart: 'redo1', buffer: [1], pageCount: 5 });
     expect(state.files.get('a.pdf')?.undoStack).toEqual([]);
     expect(state.files.get('a.pdf')?.redoStack).toEqual(['redo2', 'redo1']);
     expect(state.files.get('a.pdf')?.dirty).toBe(false);
 
-    state = appReducer(state, { type: 'REDO', path: 'a.pdf', undoSnapshot: 'snap1' });
+    state = appReducer(state, { type: 'RESTORE_HISTORY', direction: 'redo', path: 'a.pdf',
+      expected: state, snapshotPath: 'redo1', counterpart: 'snap1', buffer: [2], pageCount: 4 });
     expect(state.files.get('a.pdf')?.undoStack).toEqual(['snap1']);
     expect(state.files.get('a.pdf')?.redoStack).toEqual(['redo2']);
     expect(state.files.get('a.pdf')?.dirty).toBe(true);

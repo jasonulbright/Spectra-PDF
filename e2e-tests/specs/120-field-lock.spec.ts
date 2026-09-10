@@ -35,6 +35,7 @@ import {
   verifyActiveSignatures,
   setCanvasFormValue,
   applyCanvasFormValues,
+  pendingFormValueCount,
   saveActiveAs,
   placeNewField,
   createPlacedField,
@@ -349,6 +350,15 @@ describe('preparer-placed field locks', () => {
     await message.waitForDisplayed({ timeout: 20_000 });
     expect(await message.getText()).toContain('applicant');
     await clickEl('[data-testid="notice-ok"]');
+
+    // Refusal retains the user's rejected input. Explicitly discard that
+    // working session before testing the independent unlocked-field edit;
+    // otherwise Apply correctly retries (and refuses) the applicant too.
+    expect(await pendingFormValueCount()).toBe(1);
+    await closeAllFiles();
+    await openByPaths([signed]);
+    await setView('canvas');
+    expect(await pendingFormValueCount()).toBe(0);
 
     // The other field of the same document is untouched by the lock.
     expect(await setCanvasFormValue(signed, 'reviewer', 'Reviewed')).toBe(true);

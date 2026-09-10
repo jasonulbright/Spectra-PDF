@@ -116,9 +116,9 @@ describe('release gates (2p)', () => {
       input.blur();
     }, 'Appendix Z');
 
-    // The edits auto-save to the WORKING file async; a panel round-trip
-    // (switch away + back) reloads the outline from disk, proving the saves
-    // landed before saveActiveAs (a raw copy of the working file) captures them.
+    // The provider retains the draft through a panel round-trip, which is
+    // NOT evidence that queued writes finished. Save As must wait for every
+    // accepted bookmark gesture itself; the independent disk read pins that.
     await $('[data-testid="navicon-pages"]').click();
     await $('[data-testid="pages-panel"]').waitForDisplayed();
     await $('[data-testid="navicon-bookmarks"]').click();

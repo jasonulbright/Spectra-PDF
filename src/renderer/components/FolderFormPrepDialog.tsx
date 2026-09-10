@@ -61,6 +61,7 @@ const APPLY_VERB_KEY = {
 } as const satisfies Record<PrepPhase, string>;
 
 const SIGNED_REASON_KEY = {
+  'signature-policy-unreadable': 'app.signedEdit.policyUnreadable',
   signed: 'dialog.formPrep.reasonSigned',
   'certified-no-changes': 'dialog.formPrep.reasonCertifiedNone',
   'certified-form-fill': 'dialog.formPrep.reasonCertifiedFormFill',

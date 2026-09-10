@@ -101,21 +101,22 @@ describe('the drawn-bead channel', () => {
   it('delivers to a live subscriber', () => {
     const seen: number[] = [];
     const off = subscribeDrawnBead((b) => seen.push(b.page));
-    publishDrawnBead({ page: 4, rect: [0, 0, 1, 1], path: 'C:/a.pdf' });
+    publishDrawnBead({ workingPath: 'working', buffer: new Uint8Array(), page: 4, rect: [0, 0, 1, 1], path: 'C:/a.pdf' });
     expect(seen).toEqual([4]);
+    expect(consumeDrawnBead()).toBeNull(); // delivered boxes cannot replay on remount
     off();
-    publishDrawnBead({ page: 5, rect: [0, 0, 1, 1], path: 'C:/a.pdf' });
+    publishDrawnBead({ workingPath: 'working', buffer: new Uint8Array(), page: 5, rect: [0, 0, 1, 1], path: 'C:/a.pdf' });
     expect(seen).toEqual([4]);
   });
 
   it('consumes once — a remount must not re-append a box the user already has', () => {
-    publishDrawnBead({ page: 2, rect: [0, 0, 1, 1], path: 'C:/a.pdf' });
+    publishDrawnBead({ workingPath: 'working', buffer: new Uint8Array(), page: 2, rect: [0, 0, 1, 1], path: 'C:/a.pdf' });
     expect(consumeDrawnBead()?.page).toBe(2);
     expect(consumeDrawnBead()).toBeNull();
   });
 
   it('carries the document the band was drawn against', () => {
-    publishDrawnBead({ page: 1, rect: [0, 0, 1, 1], path: 'C:/only.pdf' });
+    publishDrawnBead({ workingPath: 'working', buffer: new Uint8Array(), page: 1, rect: [0, 0, 1, 1], path: 'C:/only.pdf' });
     expect(consumeDrawnBead()?.path).toBe('C:/only.pdf');
   });
 });

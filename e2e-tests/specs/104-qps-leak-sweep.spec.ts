@@ -38,7 +38,7 @@ const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 //   • Document CONTENT — file names, page labels, signer names, bookmark
 //     titles, and the ENGINE's own refusal text (the slice-D boundary).
 //     None of it is ours to bracket.
-//   • NOTATION: the align/z-order GLYPHS, the find-mode toggles (Aa, \b, .*),
+//   • NOTATION: the align/z-order GLYPHS, the find-mode toggles (Aa, ab, .*),
 //     measure UNIT symbols, PDF blend-mode VALUES, bundled FACE NAMES
 //     (Liberation Sans), format names (PDF/A, XFA, PKCS#11), unit suffixes
 //     (pt, KB, MB), COLOUR VALUES (#ffd54a — a swatch names itself by its
@@ -91,7 +91,7 @@ const notCatalog = (text: string): boolean => {
   const exact = new Set([
     'Spectra PDF',
     'Liberation Sans', 'Liberation Serif', 'Liberation Mono',
-    'Aa', '\\b', '.*', 'A-1',
+    'Aa', 'ab', '.*', 'A-1',
     'Ctrl', 'Esc', 'Tab', 'Alt', 'AV',
     'pt', 'KB', 'MB', '%',
     'PDF', 'PDF/A', 'PDF/X', 'XFA', 'AcroForm', 'OCR', 'ICC', 'CMYK', 'RGB',

@@ -15,6 +15,7 @@ import {
   commitPendingEdits,
   saveActiveAs,
   setReactInputValue,
+  openMenuItem,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -205,7 +206,7 @@ describe('document menu', () => {
       { timeoutMsg: 'no text-layer span to select' },
     );
 
-    await $('[data-testid="menu-edit"]').click();
+    await openMenuItem('menu-edit', 'menuitem-edit-copy');
     const copy = $('[data-testid="menuitem-edit-copy"]');
     await copy.waitForDisplayed();
     // Enablement re-resolves on menu OPEN (the selection isn't app state).
@@ -236,7 +237,7 @@ describe('document menu', () => {
       { timeoutMsg: 'Export ▸ Text… did not open the extract pane' },
     );
 
-    await $('[data-testid="menu-edit"]').click();
+    await openMenuItem('menu-edit', 'menuitem-edit-copy');
     const copy = $('[data-testid="menuitem-edit-copy"]');
     await copy.waitForDisplayed();
     expect(await copy.getAttribute('data-disabled')).not.toBeNull();

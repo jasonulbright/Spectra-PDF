@@ -25,6 +25,9 @@ import type { OpenDocument, PdfBuffer } from '../state/types';
 /** The identity a commit authored for one file, carried on the
  * COMMIT_PAGE_EDITS update and stored on the file entry. */
 export interface AuthoredIdentity {
+  /** Immediate pre-commit revision. Consumers may rebase revision-derived
+   * addresses only across this proven edge, never any same-path mapping. */
+  sourceBuffer?: PdfBuffer | null;
   /** THE committed buffer object — adoption applies only while the
    * file's live buffer IS this object. */
   buffer: PdfBuffer;

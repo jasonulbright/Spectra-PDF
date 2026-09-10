@@ -16,6 +16,9 @@ for the edit tier to consult before every edit.
 
 import pikepdf
 
+from .acroform import live_signature_fields
+from .docmdp import refuse_unreadable_policy
+
 # PDF /Action → wire name. A mapping table, not a computation: an action this
 # build does not know must report as unreadable rather than as the nearest one.
 ACTION_BY_NAME: dict[str, str] = {"/All": "all", "/Include": "include", "/Exclude": "exclude"}
@@ -23,8 +26,6 @@ NAME_BY_ACTION: dict[str, str] = {name: action for action, name in ACTION_BY_NAM
 ACTION_NAMES: tuple[str, ...] = ("all", "include", "exclude")
 # The two actions whose meaning depends on a field list. ``all`` ignores one.
 LIST_ACTIONS: tuple[str, ...] = ("include", "exclude")
-
-_MAX_FIELD_DEPTH = 32
 
 
 def validated_lock(lock, lock_fields, present=None, own_name: str | None = None) -> dict | None:
@@ -162,46 +163,58 @@ def lock_of_signature_value(value) -> dict | None:
     return None
 
 
-def _walk_locks(node, inherited_ft, out: list, depth: int = 0) -> None:
-    if depth > _MAX_FIELD_DEPTH or not isinstance(node, pikepdf.Dictionary):
-        return
-    ft = node.get("/FT")
-    ft = ft if ft is not None else inherited_ft
-    kids = node.get("/Kids")
-    if kids is not None and isinstance(kids, pikepdf.Array) and len(kids) > 0:
-        for kid in kids:
-            _walk_locks(kid, ft, out, depth + 1)
-        return
-    if ft != pikepdf.Name("/Sig"):
-        return
-    # An unsigned field's /Lock is a seed value for whoever signs it later; it
-    # constrains nothing yet, so only a FILLED signature's lock is reported.
-    lock = lock_of_signature_value(node.get("/V"))
-    if lock is not None:
-        out.append(lock)
-
-
-def locks_of_pdf(pdf) -> list[dict]:
-    """The locks the document's live signatures impose, in field order."""
+def locks_of_pdf(pdf, *, strict=False) -> list[dict]:
+    """Live locks; edit callers use strict mode, never the lenient display read."""
     out: list[dict] = []
     try:
-        acroform = pdf.Root.get("/AcroForm")
-        fields = acroform.get("/Fields") if isinstance(acroform, pikepdf.Dictionary) else None
+        fields = live_signature_fields(pdf, strict=strict)
     except Exception:
-        return out
-    if not isinstance(fields, pikepdf.Array):
+        if strict:
+            refuse_unreadable_policy()
         return out
     for field in fields:
-        _walk_locks(field, None, out)
+        if strict:
+            value = field.get("/V")
+            refs = value.get("/Reference")
+            if refs is None:
+                continue
+            if not isinstance(refs, pikepdf.Array):
+                refuse_unreadable_policy()
+            for ref in refs:
+                if not isinstance(ref, pikepdf.Dictionary) or not isinstance(ref.get("/TransformMethod"), pikepdf.Name):
+                    refuse_unreadable_policy()
+                if ref.TransformMethod not in (pikepdf.Name.FieldMDP, pikepdf.Name.DocMDP):
+                    refuse_unreadable_policy()
+                if ref.TransformMethod != pikepdf.Name.FieldMDP:
+                    continue
+                params = ref.get("/TransformParams")
+                if not isinstance(params, pikepdf.Dictionary) or not isinstance(params.get("/Action"), pikepdf.Name):
+                    refuse_unreadable_policy()
+                spec = _spec_of_params(params)
+                if spec is None:
+                    refuse_unreadable_policy()
+                if spec["action"] in LIST_ACTIONS and any(
+                    not isinstance(name, pikepdf.String) or not str(name)
+                    for name in params.Fields
+                ):
+                    refuse_unreadable_policy()
+                # Every reference contributes. Choosing only the first could
+                # discard a later restrictive lock in a damaged signature.
+                out.append(spec)
+            continue
+        lock = lock_of_signature_value(field.get("/V"))
+        if lock is not None:
+            out.append(lock)
     return out
 
 
-def locks_of_file(file: str) -> list[dict]:
-    """``locks_of_pdf`` over a path. An unreadable file reports no locks, so a
-    caller consulting the policy before an edit never has to distinguish a raise
-    from a verdict; the edit itself fails on the same file."""
+def locks_of_file(file: str, *, strict=False) -> list[dict]:
+    """Path wrapper. Strict edit reads raise on uncertainty; the default
+    lenient inspection read cannot establish permission to edit."""
     try:
         with pikepdf.open(file) as pdf:
-            return locks_of_pdf(pdf)
+            return locks_of_pdf(pdf, strict=strict)
     except Exception:
+        if strict:
+            refuse_unreadable_policy()
         return []

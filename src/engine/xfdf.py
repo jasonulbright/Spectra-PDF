@@ -791,14 +791,10 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
 
         in_path = Path(file)
         out_path = Path(output)
-        if is_same_file(str(in_path), str(out_path)):
-            with staged_write(out_path) as staged:
-                save_pdf(pdf, str(staged))
-                pdf.close()
-                preserved = finalize_preserving_signatures(str(in_path), str(staged))
-        else:
-            save_pdf(pdf, output)
-            preserved = finalize_preserving_signatures(str(in_path), str(out_path))
+        with staged_write(out_path) as staged:
+            save_pdf(pdf, str(staged))
+            pdf.close()
+            preserved = finalize_preserving_signatures(str(in_path), str(staged))
     out: dict = {
         "output": output,
         "added": added,

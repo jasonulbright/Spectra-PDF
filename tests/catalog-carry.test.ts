@@ -14,11 +14,14 @@ import {
   PDFName,
   PDFNumber,
   PDFRef,
+  PDFRawStream,
   PDFString,
+  decodePDFRawStream,
 } from 'pdf-lib';
 
-import { buildPdf } from '../src/renderer/lib/pdfx-build';
+import { buildPdf, buildPdfx } from '../src/renderer/lib/pdfx-build';
 import type { ExportPage } from '../src/renderer/lib/pdfx-format';
+import { carryDocumentBehavior } from '../src/renderer/lib/catalog-carry';
 
 const N = PDFName.of.bind(PDFName);
 
@@ -249,7 +252,7 @@ async function withDocActions(bytes: Uint8Array, opts?: { gotoPage?: boolean }):
   aa.set(N('WC'), js);
   if (opts?.gotoPage) {
     // A /Next chain ending in a GoTo whose destination references a PAGE —
-    // the copier-hazard shape the carry must refuse.
+    // the copier-hazard shape that requires the actual output page reference.
     const dest = doc.context.obj([doc.getPage(0).ref, N('Fit')]);
     const gotoAction = doc.context.obj({}) as PDFDict;
     gotoAction.set(N('S'), N('GoTo'));
@@ -277,10 +280,179 @@ describe('catalog carry — /AA document actions', () => {
     expect(out.catalog.get(N('AA'))).toBeUndefined();
   });
 
-  it('an /AA chain that reaches a page drops instead of dragging a page copy', async () => {
+  it('an /AA chain binds its destination to the actual output page', async () => {
     const src = await withDocActions(await plainSource(), { gotoPage: true });
     const out = await rebuild([pageOf(src, 0)]);
-    expect(out.catalog.get(N('AA'))).toBeUndefined();
+    const action = out.catalog.lookup(N('AA'), PDFDict).lookup(N('WC'), PDFDict);
+    expect(action.lookup(N('Next'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(0).ref);
     expect(out.getPageCount()).toBe(1);
+  });
+});
+
+async function scriptSource(target: 'none' | 'page' | 'named' | 'cycle' = 'none'): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create(); pdf.addPage([610, 800]); pdf.addPage([620, 800]);
+  const action = pdf.context.obj({ S: 'JavaScript', JS: pdf.context.register(pdf.context.flateStream('// preserved')) });
+  const actionRef = pdf.context.register(action);
+  if (target === 'page') action.set(N('Next'), pdf.context.obj({ S: 'GoTo', D: [pdf.getPage(0).ref, 'Fit'] }));
+  if (target === 'named') action.set(N('Next'), pdf.context.obj({ S: 'GoTo', D: PDFString.of('named') }));
+  if (target === 'cycle') action.set(N('Next'), actionRef);
+  const child = pdf.context.register(pdf.context.obj({ Limits: [PDFString.of(' Name '), PDFString.of(' Name ')], Names: [PDFString.of(' Name '), actionRef] }));
+  pdf.catalog.set(N('Names'), pdf.context.obj({ JavaScript: { Kids: [child] } }));
+  return pdf.save();
+}
+function scriptAction(pdf: PDFDocument) {
+  const tree = pdf.catalog.lookup(N('Names'), PDFDict).lookup(N('JavaScript'), PDFDict);
+  return tree.lookup(N('Kids'), PDFArray).lookup(0, PDFDict).lookup(N('Names'), PDFArray);
+}
+describe('catalog carry — document JavaScript name tree', () => {
+  it('preserves the entire nested tree, whitespace name and compressed script on a page rebuild', async () => {
+    const src = await scriptSource(), out = await rebuild([pageOf(src, 1)]), names = scriptAction(out);
+    expect(text(names.get(0))).toBe(' Name ');
+    const action = names.lookup(1, PDFDict), stream = action.lookup(N('JS'));
+    if (!(stream instanceof PDFRawStream)) throw new Error('Expected script stream');
+    expect(new TextDecoder().decode(decodePDFRawStream(stream).decode())).toBe('// preserved');
+    expect(out.getPageCount()).toBe(1);
+  });
+  it('maps a chained destination to the actual reordered output page without copying an orphan', async () => {
+    const src = await scriptSource('page'), out = await rebuild([pageOf(src, 1), pageOf(src, 0)]);
+    const next = scriptAction(out).lookup(1, PDFDict).lookup(N('Next'), PDFDict);
+    expect(next.lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
+    const pages = out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'));
+    expect(pages).toHaveLength(2);
+  });
+  it.each(['removed', 'duplicated', 'named'])('refuses an unprovable %s destination without replacing source bytes', async mode => {
+    const src = await scriptSource(mode === 'named' ? 'named' : 'page'), before = src.slice();
+    const pages = mode === 'removed' ? [pageOf(src, 1)] : mode === 'duplicated' ? [pageOf(src, 0), pageOf(src, 0)] : [pageOf(src, 0)];
+    await expect(rebuild(pages)).rejects.toThrow(); expect(src).toEqual(before);
+  });
+  it('preserves action cycles as cycles, without executing or flattening them', async () => {
+    const src = await scriptSource('cycle'), out = await rebuild([pageOf(src, 0)]), names = scriptAction(out);
+    expect(names.lookup(1, PDFDict).get(N('Next'))).toEqual(names.get(1));
+  });
+  it('does not import scripts from donor pages', async () => {
+    const own = await plainSource(), donor = await scriptSource();
+    const out = await rebuild([pageOf(own, 0), pageOf(donor, 0, 'donor')]);
+    expect(out.catalog.lookupMaybe(N('Names'), PDFDict)?.get(N('JavaScript'))).toBeUndefined();
+  });
+  it.each(['pdf', 'pdfx'])('retains own scripts when all remaining pages are donor pages: %s', async format => {
+    const own = await scriptSource(), donor = await plainSource(), pages = [pageOf(donor, 0, 'donor')];
+    const bytes = format === 'pdf' ? await buildPdf(pages, own, 'own')
+      : await buildPdfx([{ name: 'Document', pages }], 'Document', own, 'own');
+    const out = await PDFDocument.load(bytes); expect(text(scriptAction(out).get(0))).toBe(' Name '); expect(out.getPageCount()).toBe(1);
+  });
+  it.each([{ format: 'pdf', keepOwn: true }, { format: 'pdf', keepOwn: false },
+    { format: 'pdfx', keepOwn: true }, { format: 'pdfx', keepOwn: false }])('retains document ownership: $format / kept own pages = $keepOwn', async ({ format, keepOwn }) => {
+    const own = await PDFDocument.load(await richSource()), donorDoc = await PDFDocument.load(await richSource());
+    donorDoc.catalog.set(N('Lang'), PDFString.of('fr-FR'));
+    donorDoc.catalog.set(N('ViewerPreferences'), donorDoc.context.obj({ DisplayDocTitle: false }));
+    const donor = await donorDoc.save();
+    own.setCreationDate(new Date('2001-02-03T04:05:06Z')); own.setModificationDate(new Date('2002-03-04T05:06:07Z'));
+    const original = await own.save(), pages = [...(keepOwn ? [pageOf(original, 0)] : []), pageOf(donor, 0, 'donor')];
+    const bytes = format === 'pdf' ? await buildPdf(pages, original, 'own') : await buildPdfx([{ name: 'D', pages }], 'D', original, 'own');
+    const out = await PDFDocument.load(bytes, { updateMetadata: false });
+    expect(text(out.catalog.lookup(N('Lang')))).toBe('de-DE');
+    expect(out.catalog.lookup(N('ViewerPreferences'), PDFDict).lookup(N('DisplayDocTitle'), PDFBool).asBoolean()).toBe(true);
+    expect(out.getCreationDate()?.toISOString()).toBe('2001-02-03T04:05:06.000Z');
+    expect(out.getModificationDate()?.toISOString()).toBe('2002-03-04T05:06:07.000Z');
+    const heading = out.catalog.lookup(N('Outlines'), PDFDict).lookup(N('First'), PDFDict);
+    expect(text(heading.lookup(N('Title')))).toBe('Intro');
+    if (!keepOwn) { expect(heading.get(N('Dest'))).toBeUndefined(); expect(out.catalog.get(N('OCProperties'))).toBeUndefined(); }
+    expect(out.getPageCount()).toBe(keepOwn ? 2 : 1);
+  });
+  it('does not invent source dates when loading a document without metadata', async () => {
+    const own = await PDFDocument.create({ updateMetadata: false }); own.addPage();
+    const out = await PDFDocument.load(await buildPdf([pageOf(await own.save(), 0)], undefined, 'own'), { updateMetadata: false });
+    expect(out.getCreationDate()).toBeUndefined(); expect(out.getModificationDate()).toBeUndefined();
+  });
+});
+
+describe('catalog carry — complete document action graphs', () => {
+  async function fixture(edit: (pdf: PDFDocument, action: PDFDict, ref: PDFRef) => void) {
+    const pdf = await PDFDocument.create(); pdf.addPage([600, 800]); pdf.addPage([610, 800]);
+    const action = pdf.context.obj({ S: 'JavaScript', JS: pdf.context.register(pdf.context.flateStream('// never executed')) });
+    const ref = pdf.context.register(action); pdf.catalog.set(N('AA'), pdf.context.obj({ WC: ref, WS: ref }));
+    pdf.catalog.set(N('OpenAction'), ref);
+    pdf.catalog.set(N('Names'), pdf.context.obj({ JavaScript: { Names: [PDFString.of('shared'), ref] } }));
+    edit(pdf, action, ref); return pdf.save();
+  }
+  function action(pdf: PDFDocument) { return pdf.catalog.lookup(N('AA'), PDFDict).lookup(N('WC'), PDFDict); }
+  it('retains shared roots, compressed text, ordered branches and cycles in one graph', async () => {
+    const src = await fixture((pdf, act, ref) => {
+      act.set(N('Next'), pdf.context.obj([{ S: 'GoTo', D: [pdf.getPage(1).ref, 'Fit'] }, ref]));
+      // More than the old eight-level silent-drop cutoff, but within the bounded copier.
+      let node = act;
+      for (let i = 0; i < 15; i++) { const child = pdf.context.obj({}); node.set(N('Private'), child); node = child; }
+    });
+    const out = await rebuild([pageOf(src, 1), pageOf(src, 0)]), aa = out.catalog.lookup(N('AA'), PDFDict), ref = aa.get(N('WC'));
+    expect(aa.get(N('WS'))).toEqual(ref); expect(out.catalog.get(N('OpenAction'))).toEqual(ref);
+    expect(out.catalog.lookup(N('Names'), PDFDict).lookup(N('JavaScript'), PDFDict).lookup(N('Names'), PDFArray).get(1)).toEqual(ref);
+    expect(action(out).lookup(N('Next'), PDFArray).lookup(0, PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(0).ref);
+    expect(action(out).lookup(N('Next'), PDFArray).get(1)).toEqual(ref);
+    const script = action(out).lookup(N('JS'));
+    if (!(script instanceof PDFRawStream)) throw new Error('Expected retained script stream');
+    expect(new TextDecoder().decode(decodePDFRawStream(script).decode())).toBe('// never executed');
+    expect(out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'))).toHaveLength(2);
+  });
+  it.each(['array', 'modern', 'legacy'])('preserves an OpenAction %s destination through reorder', async mode => {
+    const src = await fixture(pdf => {
+      const dest = pdf.context.obj([pdf.getPage(1).ref, 'Fit']);
+      pdf.catalog.set(N('OpenAction'), mode === 'array' ? dest : mode === 'modern' ? PDFHexString.of('746172676574') : N('target'));
+      pdf.catalog.lookup(N('Names'), PDFDict).set(N('Dests'), pdf.context.obj({ Kids: [{ Names: [PDFString.of('target'), { D: dest }] }] }));
+      // The same spelling in the legacy namespace must NOT shadow a string destination.
+      pdf.catalog.set(N('Dests'), pdf.context.obj({ target: mode === 'legacy' ? dest : [pdf.getPage(0).ref, 'Fit'] }));
+    });
+    const out = await rebuild([pageOf(src, 1), pageOf(src, 0)]);
+    expect(out.catalog.lookup(N('OpenAction'), PDFArray).get(0)).toEqual(out.getPage(0).ref);
+  });
+  it('uses byte equality for named destinations, not decoded display text', async () => {
+    const src = await fixture((pdf, act) => {
+      act.set(N('Next'), pdf.context.obj({ S: 'GoTo', D: PDFString.of('target') }));
+      pdf.catalog.lookup(N('Names'), PDFDict).set(N('Dests'), pdf.context.obj({ Names: [
+        PDFString.of('target'), [pdf.getPage(1).ref, 'Fit'], PDFHexString.fromText('target'), [pdf.getPage(0).ref, 'Fit'],
+      ] }));
+    });
+    const out = await rebuild([pageOf(src, 0), pageOf(src, 1)]);
+    expect(action(out).lookup(N('Next'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
+  });
+  it.each(['removed', 'duplicated', 'missing-name', 'duplicate-name', 'cyclic-name-tree', 'malformed-root', 'depth', 'page-tree'])('refuses %s without altering source bytes', async mode => {
+    const src = await fixture((pdf, act) => {
+      if (mode === 'malformed-root') pdf.catalog.set(N('AA'), PDFNumber.of(42));
+      else if (mode === 'page-tree') act.set(N('Private'), pdf.catalog.get(N('Pages'))!);
+      else if (mode === 'depth') { let node = act; for (let i = 0; i < 140; i++) { const child = pdf.context.obj({}); node.set(N('Private'), child); node = child; } }
+      else if (mode.includes('name')) {
+        act.set(N('Next'), pdf.context.obj({ S: 'GoTo', D: PDFString.of('target') }));
+        if (mode === 'duplicate-name') pdf.catalog.lookup(N('Names'), PDFDict).set(N('Dests'), pdf.context.obj({ Names: [PDFString.of('target'), [pdf.getPage(0).ref, 'Fit'], PDFHexString.of('746172676574'), [pdf.getPage(1).ref, 'Fit']] }));
+        if (mode === 'cyclic-name-tree') { const dict = pdf.context.obj({}), ref = pdf.context.register(dict); dict.set(N('Kids'), pdf.context.obj([ref])); pdf.catalog.lookup(N('Names'), PDFDict).set(N('Dests'), ref); }
+      } else act.set(N('Next'), pdf.context.obj({ S: 'GoTo', D: [pdf.getPage(0).ref, 'Fit'] }));
+    });
+    const before = src.slice(), pages = mode === 'removed' ? [pageOf(src, 1)] : mode === 'duplicated' ? [pageOf(src, 0), pageOf(src, 0)] : [pageOf(src, 0), pageOf(src, 1)];
+    await expect(rebuild(pages)).rejects.toThrow(); expect(src).toEqual(before);
+  });
+  it('does not take an already-copied action subtree as a page-identity authority', async () => {
+    const src = await PDFDocument.load(await fixture((pdf, act) => { act.set(N('Next'), pdf.context.obj({ S: 'GoTo', D: [pdf.getPage(1).ref, 'Fit'] })); }));
+    const out = await PDFDocument.create(); const pages = await out.copyPages(src, [1, 0]); pages.forEach(p => out.addPage(p));
+    const actionRef = src.catalog.lookup(N('AA'), PDFDict).get(N('WC')) as PDFRef;
+    const wrongRef = out.context.register(out.context.obj({ S: 'JavaScript', JS: PDFString.of('// wrong copied subtree') }));
+    carryDocumentBehavior(out, { doc: src, pairs: [{ srcIndex: 1, outPage: pages[0] }, { srcIndex: 0, outPage: pages[1] }] }, new Map([[actionRef.tag, wrongRef]]));
+    expect(action(out).lookup(N('Next'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(pages[0].ref);
+    expect(action(out).lookup(N('JS'))).toBeInstanceOf(PDFRawStream);
+  });
+  it('refuses an orphan page even when its Type name is indirect', async () => {
+    const src = await fixture((pdf, act) => {
+      act.set(N('Private'), pdf.context.register(pdf.context.obj({ Type: pdf.context.register(N('Page')) })));
+    });
+    await expect(rebuild([pageOf(src, 0)])).rejects.toThrow();
+  });
+  it('preserves a remote destination without resolving it in the local namespace', async () => {
+    const src = await fixture((pdf, act) => {
+      act.set(N('Next'), pdf.context.obj({ S: 'GoToR', F: PDFString.of('external.pdf'), D: PDFString.of('external-name') }));
+    });
+    const out = await rebuild([pageOf(src, 0)]);
+    expect(text(action(out).lookup(N('Next'), PDFDict).lookup(N('D')))).toBe('external-name');
+  });
+  it.each(['pdf', 'pdfx'])('retains document action roots with donor-only pages: %s', async format => {
+    const src = await fixture(() => {}), donor = await plainSource(), pages = [pageOf(donor, 0, 'donor')];
+    const bytes = format === 'pdf' ? await buildPdf(pages, src, 'own') : await buildPdfx([{ name: 'Document', pages }], 'Document', src, 'own');
+    const out = await PDFDocument.load(bytes); expect(action(out)).toBeInstanceOf(PDFDict); expect(out.catalog.get(N('OpenAction'))).toBeDefined();
   });
 });

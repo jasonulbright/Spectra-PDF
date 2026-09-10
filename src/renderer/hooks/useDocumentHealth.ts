@@ -21,21 +21,14 @@ import type { OpenFile, PdfBuffer } from '../state/types';
 // import source is never collected: it is not a document the user can act on
 // (`showableFile`'s rule, applied here through `importOnly`).
 //
-// HOW THE ENGINE IS CALLED: through `useEngine`'s `collectHealth`, the idle
-// lane's stepped sweep.
-// The op is a passive, read-only lookup driven by every buffer change, so
-// routing it through the commit gate would flush the user's pending page edits
-// to disk merely because a document was opened. It is correct without the
-// gate for the same reason that read is: the working copy on disk holds
-// exactly `buffer` (page-tier edits touch neither until commit), and the row
-// is filed under `buffer`, so the ledger and the bytes it describes cannot
-// drift apart. This is not the `callRaw` exception — the target IS a workspace
-// file. Skipping the queue is not enough on its own: the engine is one serial
-// FIFO underneath it, so opening several documents would hand it one traversal
-// per document and the user's next operation would wait behind all of them.
-// The lane holds the invariant instead — one sweep at a time, submitted a
-// bounded step at a time, and each step only while nothing interactive is
-// outstanding.
+// HOW THE ENGINE IS CALLED: `collectHealth` writes this immutable buffer to
+// a private input inside the serial background lane. The separate, killable
+// worker never opens the live working path: a stepped reader's Windows file
+// handle would block foreground atomic publication even between requests.
+// No commit gate is needed or permitted for this passive read — opening a
+// document must not commit pending page edits. Both the inspected private
+// bytes and the ledger row belong to this exact buffer; one sweep runs at a
+// time, and supersession is checked before every step.
 //
 // RUN IDENTITY is the pair (buffer, generation). Buffer identity alone cannot
 // answer whether a run is still wanted: a re-check retires the row and starts
@@ -55,7 +48,7 @@ export interface DocumentHealthApi {
  * dropped because `isCurrent` stopped holding — before it was submitted, or at
  * any step boundary within it. */
 type IdleHealthCall = (
-  file: string,
+  buffer: PdfBuffer,
   isCurrent: () => boolean,
 ) => Promise<EngineHealthReply | null>;
 
@@ -116,7 +109,7 @@ export function useDocumentHealth(
 
       void (async () => {
         try {
-          const parsed = await collectHealth(f.workingPath, isCurrent);
+          const parsed = await collectHealth(buffer, isCurrent);
           // `null` is a run the lane abandoned part-way, and a run that
           // finished after being superseded describes a question nobody is
           // asking any more. Neither is evidence about the row standing now.

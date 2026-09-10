@@ -269,6 +269,9 @@ def tag_page_content(
         raise ValueError("Name at least one run or annotation to tag.")
 
     decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision.get("reason") == "signature-policy-unreadable":
+        from engine.docmdp import refuse_unreadable_policy
+        refuse_unreadable_policy()
     if decision["kind"] == "refuse":
         raise RuntimeError(
             "this document is certified to allow no changes, so tagging page content "

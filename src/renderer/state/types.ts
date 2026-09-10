@@ -624,13 +624,9 @@ export type AppAction =
         authored: { pages: string[]; documents: { id: string; name: string }[] };
       }[];
     }
-  // Snapshot-tier history. UNDO carries a snapshot of the pre-restore state
-  // so REDO can return to it; the caller performs the disk restore and then
-  // refreshes the buffer via REFRESH_BUFFER (which must not touch history —
-  // that was the original multi-level-undo bug: refreshing via OPEN_FILE
-  // reset the stacks after every undo).
-  | { type: 'UNDO'; path: string; redoSnapshot: string }
-  | { type: 'REDO'; path: string; undoSnapshot: string }
+  // One revision-checked publication, never a stack move followed by a reload.
+  | { type: 'RESTORE_HISTORY'; direction: 'undo' | 'redo'; expected: AppState;
+      path: string; snapshotPath: string; counterpart: string; buffer: PdfBuffer; pageCount: number }
   | { type: 'REFRESH_BUFFER'; path: string; pageCount: number; buffer: PdfBuffer }
   | { type: 'MARK_SAVED'; path: string }
   // Workspace actions. SET_WORKSPACE_DOCUMENTS is dispatched by

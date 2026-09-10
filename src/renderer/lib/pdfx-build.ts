@@ -1315,6 +1315,7 @@ async function assemblePages(
   output: PDFDocument,
   pages: ExportPage[],
   ownSourceKey?: string,
+  ownBytes?: Uint8Array,
 ): Promise<void> {
   const groups = new Map<string, { bytes: Uint8Array; indices: number[] }>();
   for (const page of pages) {
@@ -1331,7 +1332,7 @@ async function assemblePages(
   >();
   const contributions: FormContribution[] = [];
   for (const [key, g] of groups) {
-    const doc = await PDFDocument.load(g.bytes, { ignoreEncryption: true });
+    const doc = await PDFDocument.load(g.bytes, { ignoreEncryption: true, updateMetadata: false });
     if (sourceHasXfa(doc)) {
       // Page surgery on an XFA form detaches the form from its pages
       // (the XFA template lays out its own) — refuse with the reason rather
@@ -1369,6 +1370,15 @@ async function assemblePages(
     used.add(copied);
     applyPageExtras(copied, page, output, stampImages, signatureFonts);
     output.addPage(copied);
+    // copyPages clones the page leaf separately from its recursive object
+    // cache. An annotation's /P can therefore name a second, detached copy
+    // of that leaf. Bind existing backpointers to the page actually inserted;
+    // otherwise even a comment/rotation makes incremental preservation refuse.
+    // Leave optional, absent /P entries absent (no invented annotation delta).
+    for (const ref of copied.node.Annots()?.asArray() ?? []) {
+      const annotation = output.context.lookup(ref, PDFDict);
+      if (annotation.has(PDFName.of('P'))) annotation.set(PDFName.of('P'), copied.ref);
+    }
     src.contribution.copiedPages.push(copied);
     let pairs = pairsByKey.get(page.sourceKey);
     if (!pairs) {
@@ -1394,9 +1404,13 @@ async function assemblePages(
   if (ownSourceKey) {
     const own = sources.get(ownSourceKey);
     const ownPairs = pairsByKey.get(ownSourceKey);
-    if (own && ownPairs && ownPairs.length > 0) {
-      carryDocumentCatalog(output, { doc: own.doc, pairs: ownPairs });
-      carryInfoDates(output, own.doc);
+    // Document ownership is independent of retained page membership. Zero
+    // own pages still carries its language, preferences, dates and behavior;
+    // page-relative entries use an empty map, never the donor's namespace.
+    const ownDoc = own?.doc ?? (ownBytes ? await PDFDocument.load(ownBytes, { ignoreEncryption: true, updateMetadata: false }) : undefined);
+    if (ownDoc) {
+      carryDocumentCatalog(output, { doc: ownDoc, pairs: ownPairs ?? [] });
+      carryInfoDates(output, ownDoc);
     }
   }
 }
@@ -1425,7 +1439,7 @@ export async function buildPdf(
   // whenever they straddle a second boundary. Dates travel from the source
   // (carryInfoDates); /Producer is set explicitly below.
   const output = await PDFDocument.create({ updateMetadata: false });
-  await assemblePages(output, pages, ownSourceKey);
+  await assemblePages(output, pages, ownSourceKey, ownBytes);
   // Document-level catalog trees (/Names /EmbeddedFiles, /Collection) are not
   // page subtrees — without this carry a committed page edit deleted every
   // attachment (embedded-files-carry.ts).
@@ -1444,7 +1458,7 @@ export async function buildPdfx(
   const manifest: PdfxManifest = { pdfx: PDFX_VERSION, title, documents: [] };
 
   const nonEmpty = documents.filter((doc) => doc.pages.length > 0);
-  await assemblePages(output, nonEmpty.flatMap((doc) => doc.pages), ownSourceKey);
+  await assemblePages(output, nonEmpty.flatMap((doc) => doc.pages), ownSourceKey, ownBytes);
   // Carry BEFORE the manifest attach: pdf-lib's save-time embed appends to an
   // existing tree, so the manifest and carried members coexist (pinned by
   // embedded-files-carry.test.ts's pdfx leg).

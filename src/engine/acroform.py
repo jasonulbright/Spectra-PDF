@@ -6,14 +6,13 @@ annotations and their /Parent field chains but never the document-level
 via /AP pixels; nothing fillable, every /V orphaned), and delete could leave
 phantom fields whose every widget died with a deleted page. pikepdf itself
 flags the copy hazard (PageCopyWarning) and, since 10.x, ships the fix:
-``Pdf.add_pages_from`` — form-aware page copy that registers fields,
-auto-renames colliding fully-qualified names (``name+1``), merges /DR with
-per-field /DA rewrites on resource collisions, materializes inherited
-AcroForm-level /DA down onto fields, and carries /NeedAppearances. merge and
-split now build on that (hand-rolling what upstream maintains would be the
-same mistake class as hand-rolling ByteRange handling — see the pyHanko
-precedent); this module covers exactly what
-upstream does NOT:
+``Pdf.add_pages_from``. Its per-page field-copy maps, however, fork a field
+whose widgets span pages. merge/split/Combine subsets use
+``page_copy.copy_pages_with_forms`` instead: one qpdf transform_annotations
+batch per source, then add_and_rename_fields. This retains upstream /DR
+collision handling, /DA rewriting, inherited defaults and /NeedAppearances,
+while retaining one field identity across all selected pages. This module
+covers the remaining document-level behavior:
 
 - ``prune_form_to_pages`` — prune field trees to kept pages, in place. Used
   by split BEFORE the copy (add_pages_from carries a partially-selected
@@ -103,6 +102,67 @@ def has_form_fields(pdf: pikepdf.Pdf) -> bool:
     which :func:`reattach_forms_file` rewrites anything."""
     fields = _fields_of(pdf)
     return fields is not None and len(fields) > 0
+
+
+def live_signature_fields(pdf: pikepdf.Pdf, *, strict=False) -> list:
+    """Value-owning signature fields, once each, in registration order.
+
+    A terminal FIELD need not be a tree leaf: its /Kids may be its widget
+    annotations. The signature value belongs to the field, so inspect it
+    before descending and never count its widget children as extra signatures.
+    Presence and FieldMDP policy readers must use the same walk.
+    """
+    from .docmdp import refuse_unreadable_policy
+
+    acro = pdf.Root.get("/AcroForm")
+    if strict and acro is not None and not isinstance(acro, Dictionary):
+        refuse_unreadable_policy()
+    fields = acro.get("/Fields") if isinstance(acro, Dictionary) else None
+    if strict and acro is not None and not isinstance(fields, Array):
+        refuse_unreadable_policy()
+    if not isinstance(fields, Array):
+        fields = []
+    stack = [(node, None, 0) for node in reversed(list(fields or []))]
+    seen = set()
+    result = []
+    while stack:
+        node, inherited_ft, depth = stack.pop()
+        if depth > MAX_FIELD_DEPTH or not isinstance(node, Dictionary):
+            if strict:
+                refuse_unreadable_policy()
+            continue
+        if node.is_indirect:
+            if node.objgen in seen:
+                if strict:
+                    refuse_unreadable_policy()
+                continue
+            seen.add(node.objgen)
+        ft = node.get("/FT")
+        if ft is None:
+            ft = inherited_ft
+        if strict and ft is not None and ft not in (Name.Tx, Name.Btn, Name.Ch, Name.Sig):
+            refuse_unreadable_policy()
+        if ft == Name.Sig and node.get("/V") is not None:
+            if strict and not isinstance(node.get("/V"), Dictionary):
+                refuse_unreadable_policy()
+            kids = node.get("/Kids")
+            if strict and kids is not None and (
+                not isinstance(kids, Array) or any(
+                    not isinstance(kid, Dictionary) or kid.get("/Subtype") != Name.Widget
+                    or any(key in kid for key in ("/T", "/FT", "/V", "/Kids")) for kid in kids
+                )
+            ):
+                refuse_unreadable_policy()
+            result.append(node)
+            continue
+        kids = node.get("/Kids")
+        if strict and kids is not None and not isinstance(kids, Array):
+            refuse_unreadable_policy()
+        if strict and ft is None and not kids:
+            refuse_unreadable_policy()
+        if isinstance(kids, Array):
+            stack.extend((kid, ft, depth + 1) for kid in reversed(list(kids)))
+    return result
 
 
 def _is_widget(obj) -> bool:
@@ -196,8 +256,8 @@ def prune_form_to_pages(pdf: pikepdf.Pdf, kept_indices) -> None:
     of it (split), and on a document AFTER in-place page deletion (delete,
     with every remaining page kept — dead widgets drop because their /P no
     longer resolves to a live page). If no field survives, /AcroForm is
-    removed outright; otherwise /SigFlags is re-derived (and dropped when the
-    last signature field went away).
+    removed unless it still holds XFA; an XML form need not have any AcroForm
+    shadow fields. /SigFlags is re-derived from surviving fields.
     """
     fields = _fields_of(pdf)
     if fields is None or len(fields) == 0:
@@ -205,7 +265,7 @@ def prune_form_to_pages(pdf: pikepdf.Pdf, kept_indices) -> None:
     page_ids, annot_ids = _kept_sets(pdf, kept_indices)
     keep = [f for f in fields if _survive_node(f, page_ids, annot_ids, 0)]
     acro = pdf.Root.get("/AcroForm")
-    if not keep:
+    if not keep and acro.get("/XFA") is None:
         del pdf.Root["/AcroForm"]
         return
     if len(keep) != len(fields):
@@ -571,6 +631,13 @@ def _signed_terminals(node, inherited_ft, depth: int, out: list) -> bool:
     ft = node.get("/FT")
     if ft is None:
         ft = inherited_ft
+    # A terminal field can have /Kids that are only widgets. Its signature
+    # value lives HERE, not on those annotations: inspect it before walking
+    # children, and count/remove the field once regardless of widget count.
+    value = node.get("/V")
+    if ft == Name.Sig and isinstance(value, Dictionary) and value.get("/ByteRange") is not None:
+        out.append(node)
+        return True
     kids = node.get("/Kids")
     if kids is not None and isinstance(kids, Array) and len(kids) > 0:
         keep = []
@@ -581,13 +648,7 @@ def _signed_terminals(node, inherited_ft, depth: int, out: list) -> bool:
         if len(keep) != len(kids):
             node["/Kids"] = Array(keep)
         return len(keep) == 0
-    if ft != Name.Sig:
-        return False
-    value = node.get("/V")
-    if not isinstance(value, Dictionary) or value.get("/ByteRange") is None:
-        return False
-    out.append(node)
-    return True
+    return False
 
 
 def _drop_widgets(pdf: pikepdf.Pdf, dropped) -> None:
@@ -643,13 +704,13 @@ def strip_signatures(pdf: pikepdf.Pdf) -> int:
     if not dropped:
         return 0
     acro = pdf.Root.get("/AcroForm")
-    if keep:
+    if keep or acro.get("/XFA") is not None:
         acro["/Fields"] = Array(keep)
     else:
         del pdf.Root["/AcroForm"]
     _drop_widgets(pdf, dropped)
-    if keep:
-        refresh_sig_flags(pdf)
+    refresh_sig_flags(pdf)
+    _reconcile_co_in_place(pdf)
     for key in ("/Perms", "/DocMDP"):
         if pdf.Root.get(key) is not None:
             del pdf.Root[key]

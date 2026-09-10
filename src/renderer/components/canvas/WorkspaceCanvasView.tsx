@@ -7,7 +7,7 @@ import React, {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
+import { useAppState, useAppDispatch, useReadAppState, useReadLinkDrafts } from '../../state/AppStateProvider';
 import { usePdfProxyState } from '../../hooks/usePdfProxies';
 import { isUnrenderable } from '../../lib/render-health';
 import { showableFile, tabFiles } from '../../state/selectors';
@@ -103,6 +103,7 @@ import {
 import type { SignerSource } from '../SignerSourceFields';
 import {
   certifyParams,
+  parseSignaturePolicy,
   lockNeedsFields,
   lockParams,
   CERTIFICATION_LEVEL_LABEL,
@@ -182,6 +183,7 @@ import {
   formatScriptOf,
   placementDocsCurrent,
   pruneFormValues,
+  remainingFormValues,
   shownValue,
   valueShapeMatches,
 } from '../../lib/form-overlay';
@@ -413,10 +415,9 @@ interface WorkspaceCanvasViewProps {
   // Add-page ghost: pick file(s) and import their pages into a document
   // at an index (byte-only import machinery, undoable via the page tier).
   onAddPages: (docId: string, toIndex: number) => void;
-  // Bake pending on-canvas form values into one file — App implements
-  // the FormsPanel shape (snapshot(gate) → engine fill_form_fields → reload →
-  // UPDATE_FILE), so it lands on the snapshot-undo chain.
-  onFillFormValues: (path: string, values: Record<string, FormFieldValue>) => Promise<void>;
+  // Bake pending values through App's private-stage/native publication. A
+  // declined edit must retain the pending values, just like a failed write.
+  onFillFormValues: import('../../hooks/useOperations').FillFormValues;
   // Author a new form field into one file — same whole-file-op shape, and the
   // same EDIT_DECLINED contract: creating a field is a structural change, so a
   // signed document takes the decision before anything is written.
@@ -623,6 +624,8 @@ export function WorkspaceCanvasView({
 }: WorkspaceCanvasViewProps): React.ReactElement {
   useTranslation();
   const state = useAppState();
+  const readState = useReadAppState();
+  const linkDrafts = useReadLinkDrafts();
   const dispatch = useAppDispatch();
   const docs = state.workspace.documents;
   const { proxies, health: renderHealth } = usePdfProxyState(state.files);
@@ -1860,10 +1863,13 @@ export function WorkspaceCanvasView({
         if (!bead) return; // a click, not a box
         const number = workspacePageNumber(docs, doc, page.id);
         if (number === null) return;
-        publishDrawnBead({ page: number, rect: bead, path: doc.path });
+        const owner = state.files.get(doc.path);
+        if (!owner?.buffer || state.pageDirtyPaths.includes(doc.path)) return;
+        publishDrawnBead({ page: number, rect: bead, path: doc.path,
+          workingPath: owner.workingPath, buffer: owner.buffer });
       })();
     },
-    [docs, state.files],
+    [docs, state.files, state.pageDirtyPaths],
   );
   // --- Link draw ------------------------------------------------------
   // The bead band's contract exactly: the rect lands in the page's own user
@@ -1884,6 +1890,9 @@ export function WorkspaceCanvasView({
       const f = state.files.get(page.sourceDocId);
       if (!f?.buffer) return;
       const buffer = f.buffer;
+      const owner = state.files.get(doc.path);
+      const request = owner ? linkDrafts.startDraw(owner) : null;
+      if (!request) { setLinkError(tChrome('app.history.changed')); return; }
       void (async () => {
         const proxy = await getDocumentProxy(page.sourceDocId, buffer);
         const p = await proxy.getPage(page.sourcePageIndex + 1);
@@ -1895,10 +1904,10 @@ export function WorkspaceCanvasView({
         if (!region) return; // a click, not a rectangle
         const number = workspacePageNumber(docs, doc, page.id);
         if (number === null) return;
-        publishDrawnLink({ page: number, rect: region, path: doc.path });
-      })();
+        publishDrawnLink({ page: number, rect: region, ...request });
+      })().catch(error => linkDrafts.failDraw(request, error));
     },
-    [docs, state.files],
+    [docs, state.files, linkDrafts],
   );
   // --- Snapshot -------------------------------------------------------
   // The band's contract again, with one difference that matters: the capture
@@ -2285,13 +2294,16 @@ export function WorkspaceCanvasView({
       const failures: string[] = [];
       for (const [path, values] of snapshot) {
         try {
-          await onFillFormValues(path, Object.fromEntries(values));
-          // Applied — drop this file's pending values (the re-read will show
-          // them as the fields' current values).
+          if (await onFillFormValues(path, Object.fromEntries(values)) === EDIT_DECLINED) continue;
+          // Retire only values this successful publication consumed. Input
+          // typed while the engine was running still belongs to the user.
           setPendingFormValues((prev) => {
-            if (!prev.has(path)) return prev;
+            const current = prev.get(path);
+            if (!current) return prev;
+            const remaining = remainingFormValues(current, values);
             const next = new Map(prev);
-            next.delete(path);
+            if (remaining.size) next.set(path, remaining);
+            else next.delete(path);
             return next;
           });
         } catch (err) {
@@ -3222,11 +3234,11 @@ export function WorkspaceCanvasView({
     void engineCall('signature_policy', { path: workingPath })
       .then((policy) => {
         if (cancelled) return;
-        const { signed } = policy as unknown as { signed: boolean };
-        setSigCanCertify(!signed);
+        const { signed, error } = parseSignaturePolicy(policy);
+        setSigCanCertify(!signed && !error);
         // A document that cannot be certified must not carry a certify
         // request left over from an earlier card.
-        if (signed) setSigCertify(DEFAULT_CERTIFY);
+        if (signed || error) setSigCertify(DEFAULT_CERTIFY);
       })
       .catch(() => {
         if (!cancelled) setSigCanCertify(false);
@@ -3255,9 +3267,8 @@ export function WorkspaceCanvasView({
   // marks whenever its buffer SETTLES (open, commit, whole-file op, undo —
   // the very moments the invalidation below clears them). Marks and file
   // agree by construction: the transient set is always a projection of the
-  // stored one plus this session's unsaved drawing. `callRaw`, documented:
-  // this is a read of the just-settled working file — a gated call would
-  // queue a visible operation (and re-run the gate) on every settle.
+  // stored one plus this session's unsaved drawing. The internal read uses
+  // the file lock, but no commit gate or operation-queue entry.
   const seedSeqRef = useRef(new Map<string, number>());
   const pendingSeedRef = useRef<Set<string>>(new Set());
 
@@ -3323,7 +3334,7 @@ export function WorkspaceCanvasView({
       const seq = (seedSeqRef.current.get(path) ?? 0) + 1;
       seedSeqRef.current.set(path, seq);
       try {
-        const listed = (await engineCallRaw('list_redact_annotations', {
+        const listed = (await engineCall('list_redact_annotations', {
           file: f.workingPath,
         })) as unknown as {
           // Widened the listing: a stored mark reports its
@@ -3362,21 +3373,20 @@ export function WorkspaceCanvasView({
         );
       }
     },
-    [engineCallRaw, marksFromFileRects],
+    [engineCall, marksFromFileRects],
   );
 
   // --- Link regions on the page ----------------------------------------
   // The redaction-mark seed, one derivation over: the file's own links are
   // read back and projected onto the canvas so an existing one can be picked
-  // and edited. `callRaw`, the documented exception the mark seed already
-  // holds — a read of the just-settled working file, where a gated call would
-  // queue a visible operation (and re-run the commit gate) on every settle.
+  // and edited. Like the mark seed, this INTERNAL read acquires the file lock
+  // without flushing page edits or adding a visible operation.
   //
   // Seeding is QUEUED on the buffer change and drained on the docs change,
   // for the mark seed's reason: the reindex is async, and binding regions to
   // PageRefs a rebuild is about to kill puts every overlay on the wrong page.
   const [linkRegions, setLinkRegions] = useState<LinkRegion[]>([]);
-  const [selectedLink, setSelectedLink] = useState<{ page: number; index: number } | null>(null);
+  const [selectedLink, setSelectedLink] = useState<LinkRegion | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
   const linkSeedSeqRef = useRef(new Map<string, number>());
   const pendingLinkSeedRef = useRef<Set<string>>(new Set());
@@ -3387,11 +3397,15 @@ export function WorkspaceCanvasView({
       if (!f?.buffer) return;
       const seq = (linkSeedSeqRef.current.get(path) ?? 0) + 1;
       linkSeedSeqRef.current.set(path, seq);
+      const accepts = () => linkSeedSeqRef.current.get(path) === seq
+        && filesRef.current.get(path)?.buffer === f.buffer
+        && filesRef.current.get(path)?.workingPath === f.workingPath
+        && !readState().pageDirtyPaths.includes(path);
       try {
-        const listed = (await engineCallRaw('list_links', {
+        const listed = (await engineCall('list_links', {
           file: f.workingPath,
         })) as unknown as { links: LinkRecord[] };
-        if (linkSeedSeqRef.current.get(path) !== seq) return; // superseded
+        if (!accepts()) return;
         const entries = listed.links ?? [];
         if (entries.length === 0) {
           setLinkRegions((prev) => (prev.some((r) => r.path === path) ? prev.filter((r) => r.path !== path) : prev));
@@ -3412,6 +3426,8 @@ export function WorkspaceCanvasView({
           const composed = ((p.rotate + pageRef.rotation) % 360) as 0 | 90 | 180 | 270;
           seeded.push({
             path,
+            workingPath: f.workingPath,
+            buffer: f.buffer,
             page: entry.page,
             index: entry.index,
             pageId: pageRef.id,
@@ -3423,7 +3439,7 @@ export function WorkspaceCanvasView({
             ),
           });
         }
-        if (linkSeedSeqRef.current.get(path) !== seq) return;
+        if (!accepts()) return;
         setLinkRegions((prev) => [...prev.filter((r) => r.path !== path), ...seeded]);
         if (orphaned > 0) {
           setLinkError(
@@ -3433,7 +3449,7 @@ export function WorkspaceCanvasView({
           );
         }
       } catch (err) {
-        if (linkSeedSeqRef.current.get(path) !== seq) return; // superseded
+        if (!accepts()) return;
         // A listing that refuses is stated, never swallowed: a user editing
         // links on a document whose existing ones are silently absent would
         // draw a second link over one already there.
@@ -3445,13 +3461,17 @@ export function WorkspaceCanvasView({
         );
       }
     },
-    [engineCallRaw],
+    [engineCall, readState],
   );
 
   const onPickLink = useCallback((region: LinkRegion) => {
-    setSelectedLink({ page: region.page, index: region.index });
-    publishPickedLink({ path: region.path, page: region.page, index: region.index });
-  }, []);
+    const owner = filesRef.current.get(region.path);
+    if (owner?.buffer !== region.buffer || owner?.workingPath !== region.workingPath
+        || readState().pageDirtyPaths.includes(region.path)) return;
+    setSelectedLink(region);
+    publishPickedLink({ path: region.path, workingPath: region.workingPath, buffer: region.buffer,
+      page: region.page, index: region.index });
+  }, [readState]);
 
   // The overlays draw only while the Links tool is open. A link's rectangle is
   // invisible by design in a finished document; painting every one during

@@ -1,17 +1,18 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { AppStateProvider, useAppState, useAppDispatch } from './state/AppStateProvider';
-import { file, app, dialog, batch, tabDrag } from './lib/tauri-bridge';
+import { AppStateProvider, useAppState, useAppDispatch, useReadAppState } from './state/AppStateProvider';
+import { restoreHistory } from './lib/disk-history';
+import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/workspace-publication';
+import { withFileLock } from './lib/engine-lock';
+import { getPageCount } from './lib/pdfRenderer';
+import { file, app, dialog, batch, tabDrag, pageCommit } from './lib/tauri-bridge';
 import type { PhysicalScreenPoint, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
 import { flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
 import {
   decodeToRawSource,
-  engineWantsRawFallback,
-  isJpegPath,
-  isSvgPath,
-  jpegExifOrientation,
   type AddImageSource,
   type ReplacementSource,
 } from './lib/image-replace';
+import { editWorkspaceImage, type ImageEdit } from './lib/image-edit-transaction';
 import { EDIT_DECLINED } from './lib/edit-text';
 import {
   lockNeedsFields,
@@ -19,6 +20,7 @@ import {
   type EditClass,
   type FieldLock,
   type SignaturePolicy,
+  parseSignaturePolicy,
   type SignedEditDecision,
 } from './lib/signatures';
 import type { LinkSpec } from './lib/links';
@@ -100,23 +102,23 @@ import { PresentationView } from './components/canvas/PresentationView';
 import { usePdfProxies } from './hooks/usePdfProxies';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
+import { hasPendingPageCommit, recoverPendingPageCommit } from './lib/page-commit-transaction';
 import { pageEditDecision, type PageDelta } from './lib/page-edit-gate';
-import { opEditClass, type OpMethod } from './lib/op-edit-class';
+import { sequenceEditClass, type OpMethod } from './lib/op-edit-class';
 import type { PreserveOutcome, PreserveRefusal } from './lib/preserve-reason';
 import { sealBeforeClose } from './lib/close-sequence';
 import { setCommitGate, runCommitGate } from './lib/commit-gate';
 import { initialViewPlan, parseInitialView, planIsInert } from './lib/initial-view';
-import { readFormFields } from './lib/forms';
 import type { FormFieldValue } from './lib/forms';
-import { fillClosure, formCalculation, resolveFillTargets } from './lib/form-overlay';
-import { classifyFillResult } from './lib/fill-result';
-import { addFormFields } from './lib/form-authoring';
+import { fillFormValues } from './lib/form-fill-transaction';
+import { createFormFields } from './lib/form-create-transaction';
+import { executeWorkspaceOperation } from './lib/operation-transaction';
+import { trackInteractive } from './lib/engine-idle-lane';
 import type { NewFieldSpec } from './lib/form-authoring';
-import { choiceAppearanceFields, verticalFontCalls } from './lib/form-writing';
 import { DropZone } from './components/DropZone';
 import { OperationsProvider, type PerformOperation } from './hooks/useOperations';
 import { OperationQueue } from './components/OperationQueue';
-import { QueueProvider, useOperationQueue } from './hooks/useOperationQueue';
+import { QueueProvider, useOperationQueue, isTrackableMethod } from './hooks/useOperationQueue';
 import { SearchProvider } from './search/SearchProvider';
 import { SeparationPreviewProvider } from './hooks/useSeparationPreview';
 import { FlattenerPreviewProvider } from './hooks/useFlattenerPreview';
@@ -276,6 +278,7 @@ function AppContent(): React.ReactElement {
   useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();
+  const readState = useReadAppState();
   // The tab model lives in the ui slice so the command registry,
   // menus, and tab strip all read it. focusedTab replaces the old `view`.
   const focusedTab = state.ui.focusedTab;
@@ -376,7 +379,7 @@ function AppContent(): React.ReactElement {
   // Manual "Check for Updates" (Help menu): bump a signal the UpdateBar
   // watches, so the banner surfaces the available / up-to-date / disabled state.
   const [updateCheckSignal, setUpdateCheckSignal] = useState(0);
-  const { items: queue, clear: clearQueue } = useOperationQueue();
+  const { items: queue, clear: clearQueue, track: trackOperation } = useOperationQueue();
   const [extractPage, setExtractPage] = useState<number | null>(null);
   const [appVersion, setAppVersion] = useState('');
   const recentFiles = state.ui.recentFiles;
@@ -541,8 +544,13 @@ function AppContent(): React.ReactElement {
   // sign). `signature_policy` is an internal read, so asking the question does
   // not flush the user's pending annotations to disk.
   const readSignaturePolicy = useCallback(
-    async (workingPath: string): Promise<SignaturePolicy> =>
-      (await call('signature_policy', { path: workingPath })) as unknown as SignaturePolicy,
+    async (workingPath: string): Promise<SignaturePolicy> => {
+      try {
+        return parseSignaturePolicy(await call('signature_policy', { path: workingPath }));
+      } catch {
+        return parseSignaturePolicy(null);
+      }
+    },
     [call],
   );
 
@@ -667,6 +675,7 @@ function AppContent(): React.ReactElement {
   // Commit-failure banner: commits triggered from gates/effects have no
   // natural place to report, so failures surface here.
   const [commitError, setCommitError] = useState<string | null>(null);
+  const historyRetry = useRef<'undo' | 'redo' | null>(null);
 
   // Signed files whose commit could not be appended, waiting to be said out
   // loud. Queued rather than awaited inside the commit: the commit's promise
@@ -710,22 +719,30 @@ function AppContent(): React.ReactElement {
   // Materialize pending in-memory page edits onto the snapshot undo chain.
   // Runs before anything that reads or replaces file bytes (save, whole-file
   // ops, close) — all dirty files commit together because cross-file moves
-  // entangle them. Uses the raw (ungated) snapshot to avoid re-entering the
-  // commit gate.
+  // entangle them. The native page transaction owns snapshots/replacement;
+  // it does not re-enter this renderer commit gate.
   const inflightCommit = useRef<Promise<void> | null>(null);
   const commitIfNeeded = useCallback((): Promise<void> => {
     if (inflightCommit.current) return inflightCommit.current;
-    if (state.pageDirtyPaths.length === 0) return Promise.resolve();
-    const run = (async () => {
+    if (readState().pageDirtyPaths.length === 0 && !hasPendingPageCommit() && !hasWorkspacePublication()) return Promise.resolve();
+    const run = serializeWorkspacePublication(async () => {
       try {
-        const outcome = await commitPageEdits({
+        await recoverPendingPageCommit();
+        const expected = readState();
+        const outcome = await withFileLock(Array.from(expected.files.values(), f => f.workingPath), async () => {
+          const state = readState();
+          if (state.files !== expected.files || state.pageDirtyPaths !== expected.pageDirtyPaths
+              || state.pageUndoStack !== expected.pageUndoStack || state.pageRedoStack !== expected.pageRedoStack) {
+            throw new Error(tChrome('app.history.changed'));
+          }
+          if (!state.pageDirtyPaths.length) return { signatureRefusals: [] };
+          return commitPageEdits({
           workspace: state.workspace,
           files: state.files,
           dirtyPaths: state.pageDirtyPaths,
           dispatch,
-          snapshot: file.snapshotRaw,
+          transaction: pageCommit,
           writeBuffer: file.writeBuffer,
-          rename: file.rename,
           remove: file.remove,
           // callRaw, deliberately — this runs INSIDE the commit, so
           // the gated `call` would re-enter commitPageEdits (loud throw).
@@ -742,22 +759,21 @@ function AppContent(): React.ReactElement {
               modified: stagedPath,
               output: stagedPath,
             })) as unknown as PreserveOutcome;
-            return { ...r, applied: r.applied === true };
+            return r; // the commit boundary validates the actual wire types
           },
           readBack: batch.readFileBuffer,
+          });
         });
         setCommitError(null);
         reportPreserveRefusals(outcome.signatureRefusals);
       } finally {
         inflightCommit.current = null;
       }
-    })();
+    });
     inflightCommit.current = run;
     return run;
   }, [
-    state.pageDirtyPaths,
-    state.workspace,
-    state.files,
+    readState,
     dispatch,
     callRaw,
     reportPreserveRefusals,
@@ -769,6 +785,7 @@ function AppContent(): React.ReactElement {
   // throwing. Flows that must abort on failure (save, close) await
   // commitIfNeeded directly and handle the rejection themselves.
   const commitAndReport = useCallback(async () => {
+    historyRetry.current = null;
     try {
       await commitRef.current();
     } catch (err) {
@@ -792,15 +809,6 @@ function AppContent(): React.ReactElement {
       f.dirty || state.pageDirtyPaths.includes(f.path),
     [state.pageDirtyPaths],
   );
-
-  // Reload the working copy buffer and page count into state
-  const reloadFile = useCallback(async (filePath: string) => {
-    const f = state.files.get(filePath);
-    if (!f) return;
-    const buffer = await file.readBuffer(f.workingPath);
-    const info = await call('get_page_count', { file: f.workingPath });
-    return { buffer, pageCount: info.pages };
-  }, [state.files, call]);
 
   // Create a working copy, unlock if encrypted, read bytes + page count. Shared
   // by opening files and by importing a file's pages into a document.
@@ -1464,28 +1472,23 @@ function AppContent(): React.ReactElement {
   // unguarded ones. The two `none` ops own their own confirms, for reasons
   // the roster states.
   //
-  // The decision runs BEFORE the snapshot: `file.snapshot` runs the commit
-  // gate, so asking afterwards would have flushed the user's pending page
-  // edits to disk on the way to refusing the edit that caused it.
+  // Consent precedes the commit gate. The operation writes only a private
+  // stage; complete bytes, working file and history publish as one transaction.
   const performOperation = useCallback<PerformOperation>(async (
     filePath: string,
     method: OpMethod,
     params: Record<string, unknown>,
+    options,
   ) => {
-    const f = state.files.get(filePath);
-    if (!f) return null;
-    const editClass = opEditClass(method);
-    if (editClass !== 'none' && !(await confirmEditOfSignedDoc(filePath, f.workingPath, editClass))) {
-      return EDIT_DECLINED;
-    }
-    const snapshotPath = await file.snapshot(f.workingPath);
-    const answer = await call(method, { ...params, file: f.workingPath, output: f.workingPath });
-    const reloaded = await reloadFile(filePath);
-    if (reloaded) {
-      dispatch({ type: 'UPDATE_FILE', path: filePath, pageCount: reloaded.pageCount, buffer: reloaded.buffer, snapshotPath });
-    }
-    return answer;
-  }, [state.files, call, reloadFile, dispatch, confirmEditOfSignedDoc]);
+    const editClass = options?.structuralConsent ? 'structural' : sequenceEditClass(method, options?.following?.map(step => step.method));
+    return trackInteractive(() => executeWorkspaceOperation(filePath, method, params, readState, dispatch, {
+      confirm: (path, working) => editClass === 'none' ? Promise.resolve(true) : confirmEditOfSignedDoc(path, working, editClass),
+      commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
+      remove: file.remove, countPages: getPageCount, transaction: pageCommit,
+      callStaged: callRaw,
+      track: async (name, values, run) => isTrackableMethod(name) ? await trackOperation(name, values, run) as Awaited<ReturnType<typeof run>> : run(),
+    }, options));
+  }, [readState, callRaw, dispatch, confirmEditOfSignedDoc, trackOperation]);
 
   // Applying redactions REWRITES the page content, so it is a structural-class
   // edit however small the band: the append tier cannot carry it, every byte
@@ -1863,141 +1866,34 @@ function AppContent(): React.ReactElement {
   );
 
   const handleFillFormValues = useCallback(
-    async (path: string, values: Record<string, FormFieldValue>) => {
-      const f = state.files.get(path);
-      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      // Pre/post reads route through the engine — `read_form_fields` is
-      // INTERNAL, so neither read runs the commit gate. The pre-read sees the
-      // current working copy (== buffer); `file.snapshot` then flushes pending
-      // page edits, and the post-read sees those committed bytes, so the
-      // fingerprint/rename-family re-resolution below still detects an import
-      // carry's field rename exactly as with the old pdf-lib read. It happens
-      // BEFORE the signed-edit question because that question has to be asked
-      // about the TRANSITIVE set — filling an unlocked line item that
-      // recalculates a locked Total produces a document reporting as altered,
-      // and a decision taken on the typed names alone would never see it.
-      const pre = f.buffer ? await readFormFields(call, f.workingPath) : null;
-      const preFields = pre?.fields ?? [];
-      const typed = Object.keys(values);
-      const targets = pre
-        ? fillClosure(formCalculation(pre.fields, pre.calculationOrder), typed)
-        : typed;
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'form-fill', targets, typed))) return;
-      const snapshotPath = await file.snapshot(f.workingPath);
-      const postFields = (await readFormFields(call, f.workingPath)).fields;
-      const { resolved, skipped } = resolveFillTargets(preFields, postFields, values);
-      if (skipped.length > 0) {
-        throw new Error(skipped.map((s) => `"${s.name}": ${s.reason}`).join('; '));
-      }
-      // Route the fill through the ENGINE — Unicode-capable
-      // (embeds a font for non-WinAnsi values) and multi-select-optionlist
-      // aware. Read (above) and fill are now one engine implementation;
-      // `resolveFillTargets`' fingerprint/rename-family machinery is unchanged.
-      // The snapshot already flushed pending edits, and `call` is commit-gated
-      // for `fill_form_fields`, so the engine reads the committed bytes.
-      const fillReport = await call('fill_form_fields', {
-        file: f.workingPath,
-        output: f.workingPath,
-        edits: resolved,
-        font_dir: await app.getEditFontPath(),
-      });
-      // The fill's own report, read rather than discarded. The engine refuses
-      // an inconsistent fill atomically, so what is left to check is that the
-      // success path accounts for every field this call named — the on-canvas
-      // fill has no other evidence, and a silent shortfall is announced as a
-      // completed fill.
-      const outcome = classifyFillResult(fillReport, Object.keys(resolved).length);
-      // The reload runs on both paths: the document changed on disk, and the
-      // refreshed bytes are what the refusal tells the caller to trust.
-      const result = await reloadFile(path);
-      if (!result) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      dispatch({
-        type: 'UPDATE_FILE',
-        path,
-        pageCount: result.pageCount,
-        buffer: result.buffer,
-        snapshotPath,
-      });
-      if (outcome.kind === 'refused') {
-        throw new Error(
-          outcome.refusal.kind === 'incomplete'
-            ? tChrome('panel.forms.fillIncomplete', {
-                named: outcome.refusal.requested,
-                written: outcome.refusal.filled,
-              })
-            : tChrome('panel.forms.fillUnverified'),
-        );
-      }
+    async (path: string, values: Record<string, FormFieldValue>, options?: import('./lib/form-fill-transaction').FormFillOptions) => {
+      const filled = await trackInteractive(() => fillFormValues(path, values, readState, dispatch, {
+        confirm: (source, policyPath, targets, typed, flatten) => confirmEditOfSignedDoc(source, policyPath, flatten ? 'structural' : 'form-fill', targets, typed),
+        commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
+        remove: file.remove, countPages: getPageCount, fontDirectory: app.getEditFontPath,
+        callStaged: callRaw, transaction: pageCommit,
+        track: async run => { await trackOperation('fill_form_fields', { file: readState().files.get(path)?.workingPath }, run); },
+      }, options));
+      return filled.completed ? filled : EDIT_DECLINED;
     },
-    [state.files, reloadFile, dispatch, call, confirmEditOfSignedDoc],
+    [readState, dispatch, callRaw, confirmEditOfSignedDoc, trackOperation],
   );
 
-  // One snapshot, one write, one reload — so N accepted fields are ONE undo
-  // entry rather than N. The single-field placement path calls it with one
-  // spec; there is no second creation path.
-  //
-  // A VERTICAL field takes a second write: pdf-lib cannot author the
-  // CID-keyed font a column needs, so the field is created here and BOUND by
-  // the engine door, one call per script. Both writes land inside the single
-  // snapshot/reload/UPDATE_FILE pair — the pair is what makes the gesture one
-  // undo entry, and splitting it would put a horizontal half-field on the
-  // stack. A refusal from the door restores the snapshot before it rethrows,
-  // so a create that could not become a column leaves nothing behind.
+  // Single placements and accepted detection batches share one staged edit.
+  // Font binding/choice appearances finish before bytes and history publish.
   const handleAddFormFields = useCallback(
     async (path: string, specs: readonly NewFieldSpec[]) => {
-      const f = state.files.get(path);
-      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      // Creating a field authors form STRUCTURE, not a value: pdf-lib's save
-      // coalesces the file, so every byte range breaks and no certification
-      // level carries it. Asked BEFORE the snapshot — `file.snapshot` runs the
-      // commit gate, so asking after would flush pending page edits on the way
-      // to refusing this one.
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
-      const snapshotPath = await file.snapshot(f.workingPath);
-      const bytes = await file.readBuffer(f.workingPath);
-      const withFields = await addFormFields(bytes, specs);
-      await file.writeBuffer(f.workingPath, withFields);
-      const vertical = verticalFontCalls(specs);
-      const choices = choiceAppearanceFields(specs);
-      if (vertical.length > 0 || choices.length > 0) {
-        const fontDir = await app.getEditFontPath();
-        try {
-          for (const bind of vertical) {
-            await call('author_vertical_field_font', {
-              file: f.workingPath,
-              output: f.workingPath,
-              fields: bind.fields,
-              script: bind.script,
-              font_dir: fontDir,
-            });
-          }
-          // After the vertical bind, never before: a list's writing mode is
-          // stated by the font its /DA names, so the appearance door has to
-          // read the /DA the bind wrote to draw rows as columns.
-          if (choices.length > 0) {
-            await call('author_choice_appearance', {
-              file: f.workingPath,
-              output: f.workingPath,
-              fields: choices,
-              font_dir: fontDir,
-            });
-          }
-        } catch (err) {
-          await file.restoreSnapshot(f.workingPath, snapshotPath);
-          throw err;
-        }
-      }
-      const result = await reloadFile(path);
-      if (!result) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      dispatch({
-        type: 'UPDATE_FILE',
-        path,
-        pageCount: result.pageCount,
-        buffer: result.buffer,
-        snapshotPath,
+      const created = await createFormFields(path, specs, readState, dispatch, {
+        confirm: (source, working) => confirmEditOfSignedDoc(source, working, 'structural'),
+        commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
+        remove: file.remove, countPages: getPageCount, fontDirectory: app.getEditFontPath,
+        // Private staging, within the already gated/locked transaction. A
+        // normal call would recursively enter the workspace publication lane.
+        callStaged: callRaw, transaction: pageCommit,
       });
+      if (!created) return EDIT_DECLINED;
     },
-    [state.files, reloadFile, dispatch, call, confirmEditOfSignedDoc],
+    [readState, dispatch, callRaw, confirmEditOfSignedDoc],
   );
 
   const handleAddFormField = useCallback(
@@ -2384,6 +2280,15 @@ function AppContent(): React.ReactElement {
   // (gate → snapshot → engine → reload → undoable); extract is a gated read
   // that writes a NEW image file where the user chose. `opts` lets the e2e
   // harness inject what the native dialogs would collect.
+  const performImageEdit = useCallback((path: string, edit: ImageEdit) => trackInteractive(() =>
+    editWorkspaceImage(path, edit, readState, dispatch, {
+      confirm: (source, working) => confirmEditOfSignedDoc(source, working, 'structural'),
+      commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
+      remove: file.remove, countPages: getPageCount, transaction: pageCommit, callStaged: callRaw,
+      pick: dialog.pickImageFile, readSource: batch.readFileBuffer, decode: decodeToRawSource,
+      track: async (method, working, run) => { await trackOperation(method, { file: working }, run); },
+    })), [readState, dispatch, confirmEditOfSignedDoc, callRaw, trackOperation]);
+
   const handleEditImage = useCallback(
     async (
       kind: 'delete' | 'replace' | 'extract' | 'transform' | 'crop' | 'opacity',
@@ -2402,16 +2307,6 @@ function AppContent(): React.ReactElement {
     ) => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-
-      // Every mutating kind but `replace` runs through performOperation and
-      // is decided there by its roster class. `replace` is the deliberate
-      // exception: it holds ONE snapshot across a passthrough-then-raw retry
-      // (two performOperation calls would snapshot twice and leak a copy on
-      // every CMYK fallback), so it keeps its own guard — the shape is
-      // bespoke, not the decision.
-      if (kind === 'replace' && !(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) {
-        return EDIT_DECLINED;
-      }
 
       if (kind === 'delete') {
         const r = await performOperation(path, 'delete_page_image', { page, index });
@@ -2462,73 +2357,7 @@ function AppContent(): React.ReactElement {
       }
 
       if (kind === 'replace') {
-        let source = opts?.source ?? null;
-        let pickedPath: string | null = null;
-        if (!source) {
-          pickedPath = await dialog.pickImageFile();
-          if (!pickedPath) return;
-          if (isJpegPath(pickedPath)) {
-            // EXIF-rotated photos must NOT passthrough: PDF viewers render
-            // the sensor pixel grid and ignore EXIF, so a portrait phone
-            // photo would land sideways. Route those to the decode path,
-            // where the webview applies the rotation (regression).
-            const head = await batch.readFileBuffer(pickedPath);
-            if (jpegExifOrientation(head) === 1) source = { jpeg_path: pickedPath };
-          }
-        }
-        // ONE snapshot for the whole attempt — the passthrough-then-raw
-        // retry lives INSIDE it. Two performOperation calls would snapshot
-        // twice and leak the first copy on every CMYK fallback
-        // (regression); this is performOperation's exact shape with the
-        // retry between snapshot and reload.
-        const tempFiles: string[] = [];
-        const writeTemp = async (data: Uint8Array): Promise<string> => {
-          const dir = f.workingPath.replace(/[\\/][^\\/]+$/, '');
-          const sep = f.workingPath.includes('\\') ? '\\' : '/';
-          const p = `${dir}${sep}replace-${crypto.randomUUID()}.raw`;
-          await file.writeBuffer(p, data);
-          tempFiles.push(p);
-          return p;
-        };
-        try {
-          const snapshotPath = await file.snapshot(f.workingPath);
-          // The replacement letterboxes into the old frame
-          // (aspect preserved, centered) instead of stretching — the engine
-          // emits a recognized transform frame, so later moves fold it.
-          const params = {
-            file: f.workingPath,
-            output: f.workingPath,
-            page,
-            index,
-            fit: 'contain',
-          };
-          if (source) {
-            try {
-              await call('replace_page_image', { ...params, source });
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err);
-              if (!(pickedPath && engineWantsRawFallback(msg))) throw err;
-              source = null; // passthrough refused — decode below
-            }
-          }
-          if (!source) {
-            const bytes = await batch.readFileBuffer(pickedPath!);
-            const raw = await decodeToRawSource(bytes, writeTemp);
-            await call('replace_page_image', { ...params, source: raw });
-          }
-          const result = await reloadFile(path);
-          if (result) {
-            dispatch({
-              type: 'UPDATE_FILE',
-              path,
-              pageCount: result.pageCount,
-              buffer: result.buffer,
-              snapshotPath,
-            });
-          }
-        } finally {
-          for (const p of tempFiles) void file.remove(p).catch(() => {});
-        }
+        if (!await performImageEdit(path, { kind: 'replace', page, index, source: opts?.source })) return EDIT_DECLINED;
         return;
       }
 
@@ -2555,7 +2384,7 @@ function AppContent(): React.ReactElement {
         return out ? `Saved ${out.split(/[\\/]/).pop()}` : undefined;
       }
     },
-    [state.files, call, performOperation, reloadFile, dispatch, confirmEditOfSignedDoc],
+    [state.files, call, performOperation, performImageEdit],
   );
 
   // Multi-select: group transform/delete over N placements on one page —
@@ -2584,160 +2413,38 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation],
   );
 
-  // Add Image: embed a NEW raster at `rect` (PDF user-space points). Picks
-  // the file with the SAME EXIF-aware JPEG-passthrough / raw-decode routing as
-  // image replace (one snapshot for the whole attempt, incl. the CMYK raw
-  // fallback). `injected` lets the harness supply a source (the native picker
-  // is undrivable). Undoable; refuses on a signed doc. The added image is an
-  // ordinary placement afterward (movable and resizable).
+  // Raster/vector placement and replacement share one private-stage gesture.
   const handleAddImage = useCallback(
-    async (
-      path: string,
-      page: number,
-      rect: [number, number, number, number] | null,
-      injected?: AddImageSource,
-      at?: [number, number],
-    ): Promise<string | void> => {
-      const f = state.files.get(path);
-      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
-
-      // An SVG (picked or injected) places as REAL vector
-      // content — the engine compiles it into a unit-square form and the
-      // result is an ordinary placement (movable, styleable, deletable).
-      let svgPath: string | null =
-        injected && 'svg_path' in injected ? injected.svg_path : null;
-      let source: ReplacementSource | null =
-        injected && !('svg_path' in injected) ? injected : null;
-      let pickedPath: string | null = null;
-      if (!injected) {
-        pickedPath = await dialog.pickImageFile(true);
-        if (!pickedPath) return; // cancelled — no-op
-        if (isSvgPath(pickedPath)) {
-          svgPath = pickedPath;
-        } else if (isJpegPath(pickedPath)) {
-          const head = await batch.readFileBuffer(pickedPath);
-          if (jpegExifOrientation(head) === 1) source = { jpeg_path: pickedPath };
-        }
-      }
-      if (svgPath) {
-        const snapshotPath = await file.snapshot(f.workingPath);
-        await call('add_page_vector_graphic', {
-          file: f.workingPath,
-          output: f.workingPath,
-          page,
-          ...(rect ? { rect } : { at }),
-          svg_path: svgPath,
-        });
-        const result = await reloadFile(path);
-        if (result) {
-          dispatch({
-            type: 'UPDATE_FILE',
-            path,
-            pageCount: result.pageCount,
-            buffer: result.buffer,
-            snapshotPath,
-          });
-        }
-        return;
-      }
-      const tempFiles: string[] = [];
-      const writeTemp = async (data: Uint8Array): Promise<string> => {
-        const dir = f.workingPath.replace(/[\\/][^\\/]+$/, '');
-        const sep = f.workingPath.includes('\\') ? '\\' : '/';
-        const p = `${dir}${sep}addimg-${crypto.randomUUID()}.raw`;
-        await file.writeBuffer(p, data);
-        tempFiles.push(p);
-        return p;
-      };
-      try {
-        const snapshotPath = await file.snapshot(f.workingPath);
-        // A drawn box embeds aspect-honest (fit contain — the
-        // engine shrinks the box around its center to the source's aspect);
-        // a click (`at`) places at natural size, page-clamped engine-side.
-        const params = {
-          file: f.workingPath,
-          output: f.workingPath,
-          page,
-          ...(rect ? { rect, fit: 'contain' } : { at }),
-        };
-        if (source) {
-          try {
-            await call('add_page_image', { ...params, source });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            if (!(pickedPath && engineWantsRawFallback(msg))) throw err;
-            source = null; // passthrough refused — decode below
-          }
-        }
-        if (!source) {
-          const bytes = await batch.readFileBuffer(pickedPath!);
-          const raw = await decodeToRawSource(bytes, writeTemp);
-          await call('add_page_image', { ...params, source: raw });
-        }
-        const result = await reloadFile(path);
-        if (result) {
-          dispatch({
-            type: 'UPDATE_FILE',
-            path,
-            pageCount: result.pageCount,
-            buffer: result.buffer,
-            snapshotPath,
-          });
-        }
-      } finally {
-        for (const p of tempFiles) void file.remove(p).catch(() => {});
-      }
+    async (path: string, page: number, rect: [number, number, number, number] | null,
+      injected?: AddImageSource, at?: [number, number]): Promise<string | void> => {
+      if (!await performImageEdit(path, { kind: 'add', page, rect, source: injected, at })) return EDIT_DECLINED;
     },
-    [state.files, call, reloadFile, dispatch, confirmEditOfSignedDoc],
+    [performImageEdit],
   );
 
 
-  const handleUndo = useCallback(async () => {
-    if (state.pageUndoStack.length > 0) {
-      dispatch({ type: 'UNDO_PAGE_OP' });
-      return;
-    }
-    if (!activeFile || activeFile.undoStack.length === 0) return;
-    const snapshotPath = activeFile.undoStack[activeFile.undoStack.length - 1];
-    const redoSnapshot = await file.snapshotRaw(activeFile.workingPath);
-    await file.restoreSnapshot(activeFile.workingPath, snapshotPath);
-    dispatch({ type: 'UNDO', path: activeFile.path, redoSnapshot });
-    const result = await reloadFile(activeFile.path);
-    if (result) {
-      dispatch({
-        type: 'REFRESH_BUFFER',
-        path: activeFile.path,
-        pageCount: result.pageCount,
-        buffer: result.buffer,
+  const handleHistory = useCallback(async (direction: 'undo' | 'redo') => {
+    try {
+      await restoreHistory(direction, readState, dispatch, {
+        read: file.readBuffer, write: file.writeBuffer, remove: file.remove,
+        countPages: getPageCount, transaction: pageCommit,
       });
+      historyRetry.current = null;
+      setCommitError(null);
+    } catch (err) {
+      historyRetry.current = direction;
+      setCommitError(tChrome('app.history.failed', {
+        message: err instanceof Error ? err.message : String(err),
+      }));
     }
-  }, [activeFile, state.pageUndoStack.length, reloadFile, dispatch]);
-
-  const handleRedo = useCallback(async () => {
-    if (state.pageRedoStack.length > 0) {
-      dispatch({ type: 'REDO_PAGE_OP' });
-      return;
-    }
-    if (!activeFile || activeFile.redoStack.length === 0) return;
-    const snapshotPath = activeFile.redoStack[activeFile.redoStack.length - 1];
-    const undoSnapshot = await file.snapshotRaw(activeFile.workingPath);
-    await file.restoreSnapshot(activeFile.workingPath, snapshotPath);
-    dispatch({ type: 'REDO', path: activeFile.path, undoSnapshot });
-    const result = await reloadFile(activeFile.path);
-    if (result) {
-      dispatch({
-        type: 'REFRESH_BUFFER',
-        path: activeFile.path,
-        pageCount: result.pageCount,
-        buffer: result.buffer,
-      });
-    }
-  }, [activeFile, state.pageRedoStack.length, reloadFile, dispatch]);
+  }, [readState, dispatch]);
+  const handleUndo = useCallback(() => handleHistory('undo'), [handleHistory]);
+  const handleRedo = useCallback(() => handleHistory('redo'), [handleHistory]);
 
   // Run the commit ahead of a dependent step; on failure surface the error
   // and tell the caller to abort (the edits are still pending and retryable).
   const commitOrAbort = useCallback(async (): Promise<boolean> => {
+    historyRetry.current = null;
     try {
       await commitIfNeeded();
       return true;
@@ -3239,12 +2946,12 @@ function AppContent(): React.ReactElement {
       removeLink: (path, page, index) => h.current.removeLink(path, page, index),
       confirmPageEdit: (paths, delta) => h.current.confirmPageEdit(paths, delta),
     });
-    setCommandStateSource(() => ({ state: stateRef.current, dispatch }));
+    setCommandStateSource(() => ({ state: readState(), dispatch }));
     return () => {
       registerAppCommandHandlers(null);
       setCommandStateSource(null);
     };
-  }, [dispatch]);
+  }, [dispatch, readState]);
   // The ONE window-level shortcut dispatcher.
   useKeymapDispatcher();
 
@@ -3531,6 +3238,13 @@ function AppContent(): React.ReactElement {
       setTool: (tool) => dispatch({ type: 'UI_SET_TOOL', tool: tool as CanvasTool }),
       setDocViewMode: (mode) => dispatch({ type: 'UI_SET_DOC_VIEW_MODE', mode }),
       getStateSnapshot: () => harnessSnapshotRef.current(),
+      getHistoryState: () => {
+        const current = readState();
+        const f = current.activeFileId ? current.files.get(current.activeFileId) : null;
+        if (!f?.buffer) return null;
+        return { undo: [...f.undoStack], redo: [...f.redoStack],
+          buffer: Array.from(f.buffer instanceof ArrayBuffer ? new Uint8Array(f.buffer) : f.buffer) };
+      },
       subscribe: (listener) => {
         harnessListenersRef.current.add(listener);
         return () => harnessListenersRef.current.delete(listener);
@@ -3612,7 +3326,7 @@ function AppContent(): React.ReactElement {
         });
       },
     });
-  }, [openByPaths, dispatch, importFilesIntoDoc, harnessSetView, setActiveOp, call]);
+  }, [openByPaths, dispatch, importFilesIntoDoc, harnessSetView, setActiveOp, call, readState]);
 
   // Notify harness subscribers on every state-relevant change.
   useEffect(() => {
@@ -3623,6 +3337,7 @@ function AppContent(): React.ReactElement {
 
   return (
     <OperationsProvider
+      fillFormValues={handleFillFormValues}
       performOperation={performOperation}
       addFormFields={handleAddFormFields}
       confirmSignedEdit={confirmEditOfSignedDoc}
@@ -3642,7 +3357,10 @@ function AppContent(): React.ReactElement {
         <div data-testid="commit-error-bar" className="app-banner flex items-center gap-3 px-4 py-2 bg-red-600/20 border-b border-red-500/40 text-sm text-red-200 shrink-0">
           <span className="flex-1">{commitError}</span>
           <button
-            onClick={() => void commitAndReport()}
+            onClick={() => {
+              if (historyRetry.current) void handleHistory(historyRetry.current);
+              else void commitAndReport();
+            }}
             className="px-2 py-0.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded font-medium"
           >
             {tChrome('app.commit.retry')}

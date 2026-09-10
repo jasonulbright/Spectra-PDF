@@ -268,12 +268,18 @@ export interface DrawnLink {
   /** The document the band belongs to — a stale publish must not fill the
    * editor of a different file the user has since switched to. */
   path: string;
+  workingPath: string;
+  buffer: import('../state/types').PdfBuffer;
+  generation: number;
+  session: object;
 }
 
 /** An existing link the user clicked on the page, addressed the way the
  * engine addresses one. */
 export interface PickedLink {
   path: string;
+  workingPath: string;
+  buffer: import('../state/types').PdfBuffer;
   page: number;
   index: number;
 }
@@ -307,7 +313,7 @@ const drawListeners = new Set<(link: DrawnLink) => void>();
 const pickListeners = new Set<(link: PickedLink) => void>();
 
 export function publishDrawnLink(link: DrawnLink): void {
-  drawn = link;
+  drawn = drawListeners.size ? null : link;
   for (const fn of drawListeners) fn(link);
 }
 
@@ -326,7 +332,7 @@ export function subscribeDrawnLink(fn: (link: DrawnLink) => void): () => void {
 }
 
 export function publishPickedLink(link: PickedLink): void {
-  picked = link;
+  picked = pickListeners.size ? null : link;
   for (const fn of pickListeners) fn(link);
 }
 

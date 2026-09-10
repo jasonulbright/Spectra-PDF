@@ -696,7 +696,8 @@ class TestVerdictMatrix:
         modified = _rewrite_with(signed, tmp_dir, lambda pdf: None)
         out = os.path.join(tmp_dir, "out.pdf")
         r = transplant_incremental(signed, modified, out)
-        assert r == {"applied": False, "reason": "no-delta"}
+        assert r["applied"] is True and r["bytes_appended"] == 0
+        assert open(out, "rb").read() == open(signed, "rb").read()
 
 
 class TestCeilingTable:
@@ -785,7 +786,8 @@ class TestPageKeys:
         modified = _rewrite_with(signed, tmp_dir, mutate)
         out = os.path.join(tmp_dir, "out.pdf")
         r = transplant_incremental(signed, modified, out)
-        assert r == {"applied": False, "reason": "no-delta"}
+        assert r["applied"] is True and r["bytes_appended"] == 0
+        assert open(out, "rb").read() == open(signed, "rb").read()
 
     def test_removing_an_uninherited_box_is_expressible(self, tmp_dir, pki):
         src = os.path.join(tmp_dir, "cropped-base.pdf")

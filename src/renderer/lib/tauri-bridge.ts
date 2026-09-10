@@ -3,6 +3,8 @@
  * All renderer code imports from here for backend communication.
  */
 import { Channel, invoke } from '@tauri-apps/api/core';
+import { withFileLock } from './engine-lock';
+import { withFileSave } from './file-save-barrier';
 import { listen } from '@tauri-apps/api/event';
 import type {
   ScanEvent,
@@ -16,6 +18,7 @@ import type { RecentPathStatus } from './recent-files';
 import type { CaptureRequest, CaptureResult } from './web-capture';
 import {
   readFile as fsReadFile,
+  exists as fsExists,
   writeFile as fsWriteFile,
   rename as fsRename,
   remove as fsRemove,
@@ -381,6 +384,11 @@ export interface BatchPdfListing {
 }
 
 export const batch = {
+  /** Passive inspection uses an isolated input, never the working pathname.
+   * Cleanup is idempotent even when an abandoned/failed write made no file. */
+  deleteHealthScratch: async (path: string): Promise<void> => {
+    if (await fsExists(path)) await invoke<void>('delete_batch_scratch', { path });
+  },
   /** Every *.pdf under root (recursive; cycle-safe; unreadable subdirs reported). */
   listPdfsRecursive: (root: string) => invoke<BatchPdfListing>('list_pdfs_recursive', { root }),
   /** Byte copy creating destination parents — the mirror's pass-through.
@@ -559,7 +567,14 @@ export const schedule = {
 // Binary file I/O goes through plugin-fs (efficient binary IPC, capability-
 // scoped to $TEMP/spectrapdf in capabilities/main.json) — the working copies,
 // snapshots, and commit temp files all live there.
-const snapshotRaw = (workingPath: string) => invoke<string>('snapshot', { workingPath });
+const snapshotRaw = (workingPath: string) => withFileLock([workingPath], () => invoke<string>('snapshot', { workingPath }));
+
+export const pageCommit = {
+  publish: (id: string, entries: import('./page-commit-transaction').PageCommitEntry[]) =>
+    invoke('publish_page_commit', { id, entries }),
+  abort: (id: string) => invoke('abort_page_commit', { id }),
+  acknowledge: (id: string) => invoke('acknowledge_page_commit', { id }),
+};
 
 export const file = {
   readBuffer: (filePath: string) => fsReadFile(filePath),
@@ -570,9 +585,9 @@ export const file = {
    * same command the batch driver uses for its out-of-workspace sources. */
   readExternalBuffer: async (filePath: string) =>
     new Uint8Array(await invoke<ArrayBuffer>('read_file_binary', { filePath })),
-  writeBuffer: (filePath: string, bytes: Uint8Array) => fsWriteFile(filePath, bytes),
-  rename: (fromPath: string, toPath: string) => fsRename(fromPath, toPath),
-  remove: (filePath: string) => fsRemove(filePath),
+  writeBuffer: (filePath: string, bytes: Uint8Array) => withFileLock([filePath], () => fsWriteFile(filePath, bytes)),
+  rename: (fromPath: string, toPath: string) => withFileLock([fromPath, toPath], () => fsRename(fromPath, toPath)),
+  remove: (filePath: string) => withFileLock([filePath], () => fsRemove(filePath)),
   createWorkingCopy: (filePath: string) =>
     invoke<string>('create_working_copy', { filePath }),
   /**
@@ -588,9 +603,9 @@ export const file = {
   /** Ungated variant — used by the commit implementation itself. */
   snapshotRaw,
   restoreSnapshot: (workingPath: string, snapshotPath: string) =>
-    invoke('restore_snapshot', { workingPath, snapshotPath }),
+    withFileLock([workingPath, snapshotPath], () => invoke('restore_snapshot', { workingPath, snapshotPath })),
   saveAs: (workingPath: string, destPath: string) =>
-    invoke('save_as', { workingPath, destPath }),
+    withFileSave(workingPath, destPath, () => invoke('save_as', { workingPath, destPath })),
   /** Show a file in the file manager, SELECTED. Rust refuses anything that is
    * not an existing file, and browses rather than shell-opens — see
    * `commands::reveal_in_file_manager`. */

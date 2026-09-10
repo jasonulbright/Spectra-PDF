@@ -55,6 +55,7 @@ class TestAutotag:
         out = tmp_path / "tagged.pdf"
         report = autotag(file=content_pdf, output=str(out))
         assert report == {
+            "output": str(out),
             "pages": 1,
             "tagged": 4,
             "headings": 1,
@@ -101,7 +102,7 @@ class TestAutotag:
             autotag(file=str(out), output=str(tmp_path / "again.pdf"))
 
     def test_in_place(self, content_pdf):
-        autotag(file=content_pdf, output=content_pdf)
+        assert autotag(file=content_pdf, output=content_pdf)["output"] == content_pdf
         with pikepdf.open(content_pdf) as pdf:
             assert pikepdf.Name.StructTreeRoot in pdf.Root
 

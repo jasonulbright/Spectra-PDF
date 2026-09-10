@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.3
+
+*Released 2026-09-10*
+
+Maintenance Release: Various Bug Fixes
+
 ## 1.2.2
 
 *Released 2026-09-07*

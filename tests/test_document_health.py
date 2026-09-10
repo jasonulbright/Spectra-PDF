@@ -24,6 +24,43 @@ def _codes(report, code):
     return [f for f in report["facts"] if f["code"] == code]
 
 
+def test_private_health_input_does_not_lock_or_follow_working_replacement(tmp_path):
+    """A live stepped reader sees its captured revision while Undo publishes."""
+    from engine.document_health import (
+        _RUNS, document_health_begin, document_health_end, document_health_step,
+    )
+
+    working = tmp_path / "working.pdf"
+    private = tmp_path / "health.pdf"
+    stage = tmp_path / "replacement.pdf"
+    with pikepdf.Pdf.new() as pdf:
+        pdf.add_blank_page(page_size=(100, 100))
+        pdf.save(working)
+    displayed = working.read_bytes()
+    private.write_bytes(displayed)
+    with pikepdf.Pdf.new() as pdf:
+        pdf.add_blank_page(page_size=(200, 200))
+        pdf.add_blank_page(page_size=(200, 200))
+        pdf.save(stage)
+    replacement = stage.read_bytes()
+    begun = document_health_begin(str(private))
+    token = begun["token"]
+    try:
+        assert begun["pages"] == 1 and not begun["done"]
+        os.replace(stage, working)  # WinError 5 when health holds working itself.
+        assert working.read_bytes() == replacement
+        assert private.read_bytes() == displayed
+        assert len(_RUNS[token].pdf.pages) == 1
+        for _ in range(128):
+            if document_health_step(token)["done"]:
+                break
+        else:
+            pytest.fail("private health sweep did not finish")
+    finally:
+        document_health_end(token)
+    private.unlink()  # Worker completion really released the Windows handle.
+
+
 @pytest.fixture
 def damaged_xref(tmp_dir):
     """The damaged-xref fixture, copied so a test can prove it is untouched

@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
-import { EDIT_DECLINED } from '../lib/edit-text';
+import { useLayerSessions } from '../state/AppStateProvider';
+import type { Layer } from '../lib/layer-session';
+import { runCommitGate } from '../lib/commit-gate';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
@@ -10,15 +12,7 @@ import { tChrome } from '../i18n';
 import {
   processingStepLabel,
   processingStepNote,
-  type ProcessingStep,
 } from '../lib/processing-steps';
-
-interface Layer {
-  index: number;
-  name: string;
-  visible: boolean;
-  processing_step: ProcessingStep | null;
-}
 
 export function LayersPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -26,55 +20,14 @@ export function LayersPanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
   const { performOperation } = useOperations();
-  const [layers, setLayers] = useState<Layer[]>([]);
-  const [status, setStatus] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const buffer = activeFile?.buffer ?? null;
-  const workingPath = activeFile?.workingPath ?? null;
-
-  const refresh = useCallback(async () => {
-    if (!workingPath) return;
-    try {
-      const res = await call('list_layers', { file: workingPath });
-      setLayers((res as unknown as { layers: Layer[] }).layers ?? []);
-    } catch {
-      setLayers([]);
-    }
-  }, [workingPath, call]);
-
-  useEffect(() => {
-    if (!buffer || !workingPath) {
-      setLayers([]);
-      return;
-    }
-    void refresh();
-  }, [buffer, workingPath, refresh]);
-
-  const toggle = useCallback(
-    async (layer: Layer) => {
-      if (!activeFile) return;
-      setBusy(true);
-      setStatus(layer.visible ? tChrome('panel.layers.hiding', { name: layer.name }) : tChrome('panel.layers.showing', { name: layer.name }));
-      try {
-        const r = await performOperation(activeFile.path, 'set_layer_visibility', {
-          index: layer.index,
-          visible: !layer.visible,
-        });
-        if (r === EDIT_DECLINED) {
-          setStatus('');
-          return;
-        }
-        await refresh();
-        setStatus(layer.visible ? tChrome('panel.layers.hidden', { name: layer.name }) : tChrome('panel.layers.shown', { name: layer.name }));
-      } catch (e: unknown) {
-        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [activeFile, performOperation, refresh],
-  );
+  const sessions = useLayerSessions(), session = sessions.get(activeFile);
+  const layers = session?.layers ?? [], busy = !!session?.busy, buffer = session?.buffer ?? null;
+  const ready = !!session?.loaded && sessions.at(session), status = session?.error || session?.status || '';
+  useEffect(() => { if (session) void sessions.load(session, call); });
+  useEffect(() => () => { if (session) sessions.cancelLoad(session); }, [session, sessions]);
+  const toggle = useCallback(async (layer: Layer) => {
+    if (session) await sessions.toggle(session, layer, buffer, performOperation, call, runCommitGate);
+  }, [session, sessions, buffer, performOperation, call]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.layers.open')} />;
 
@@ -83,7 +36,7 @@ export function LayersPanel(): React.ReactElement {
       <div className="text-sm text-neutral-400">
         {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span>
       </div>
-      {layers.length === 0 ? (
+      {session?.loaded && layers.length === 0 ? (
         <p className="text-sm text-neutral-500" data-testid="layers-empty">{tChrome('panel.layers.empty')}</p>
       ) : (
         <div className="flex flex-col gap-1" data-testid="layers-list">
@@ -101,7 +54,7 @@ export function LayersPanel(): React.ReactElement {
                   data-testid={`layer-toggle-${l.index}`}
                   type="checkbox"
                   checked={l.visible}
-                  disabled={busy}
+                  disabled={busy || !ready || l.locked}
                   onChange={() => void toggle(l)}
                   className="mt-0.5 rounded bg-neutral-800 border-neutral-700"
                 />
@@ -123,6 +76,10 @@ export function LayersPanel(): React.ReactElement {
           })}
         </div>
       )}
+      {session?.error && <div data-testid="layers-error" role="alert">
+        {session.error}
+        <button data-testid="layers-retry" disabled={busy} onClick={() => sessions.retry(session)}>{tChrome('app.commit.retry')}</button>
+      </div>}
       <StatusBar message={status} busy={busy} />
     </div>
   );

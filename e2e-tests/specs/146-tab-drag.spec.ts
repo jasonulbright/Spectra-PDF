@@ -4,7 +4,6 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -490,14 +489,10 @@ describe('cross-window tab drag', () => {
       timeoutMsg: 'the page delete never landed in the page tier',
     });
 
-    // Make the commit fail for real rather than stubbing it: every dirty file
-    // is staged beside its working copy as `<working>.commit-tmp-N` before
-    // anything is renamed into place, and a directory sitting on that name is
-    // a write the OS refuses. The run counter advances per attempt, so the
-    // first several names are blocked together.
+    // Refuse the real destination write, independent of the private stage's
+    // unpredictable name. Never leave the working copy read-only on failure.
     const working = (await getState()).activeFile!.workingPath;
-    const blocked = [1, 2, 3, 4, 5].map((n) => `${working}.commit-tmp-${n}`);
-    for (const dir of blocked) mkdirSync(dir, { recursive: true });
+    const beforeRefusal = readFileSync(working);
 
     await browser.switchToWindow(secondHandle);
     const target = await readFrame();
@@ -505,23 +500,28 @@ describe('cross-window tab drag', () => {
     const source = await readFrame();
     const point = physical(stripCssPoint(target, 40), source.dpr);
 
-    expect(await tabDragDrop(dirtyPdf, point)).toBe(false);
-    // A refusal is a result: the notice says why, the document is still here
-    // with its edits still pending, and nothing crossed.
-    await waitForDisplayedSelector(COMMIT_ERROR, { timeout: 15_000 });
-    expect(await tabPaths()).toContain(dirtyPdf);
-    expect(await ownPages()).toHaveLength(4);
+    chmodSync(working, 0o444);
+    try {
+      expect(await tabDragDrop(dirtyPdf, point)).toBe(false);
+      // A refusal is a result: the notice says why, the document is still here
+      // with its edits still pending, and nothing crossed.
+      await waitForDisplayedSelector(COMMIT_ERROR, { timeout: 15_000 });
+      expect(await tabPaths()).toContain(dirtyPdf);
+      expect(await ownPages()).toHaveLength(4);
 
-    // The claim did not move either — the other window is still refused by name.
-    await browser.switchToWindow(secondHandle);
-    await openByPaths([dirtyPdf]);
-    await dismissClaimRefusal('dirty.pdf');
-    await browser.switchToWindow(secondHandle);
-    expect((await getState()).fileCount).toBe(0);
+      // The claim did not move either — the other window is still refused by name.
+      await browser.switchToWindow(secondHandle);
+      await openByPaths([dirtyPdf]);
+      await dismissClaimRefusal('dirty.pdf');
+      await browser.switchToWindow(secondHandle);
+      expect((await getState()).fileCount).toBe(0);
+      expect(readFileSync(working).equals(beforeRefusal)).toBe(true);
+    } finally {
+      chmodSync(working, 0o666);
+    }
 
     // Unblock the staging and drop again: the commit runs, and what the other
     // window opens is the document as this one was showing it.
-    for (const dir of blocked) rmSync(dir, { recursive: true, force: true });
     await browser.switchToWindow(mainHandle);
     expect(await tabDragDrop(dirtyPdf, point)).toBe(true);
     expect(await tabPaths()).not.toContain(dirtyPdf);

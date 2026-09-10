@@ -209,9 +209,11 @@ export type HealthDispatch = (
  * NOT through the gate: this is the run's own cleanup, it is one bounded
  * request, and gating it would abandon the token exactly in the case the token
  * most needs releasing. */
-function endRun(dispatch: HealthDispatch, token: string): void {
+async function endRun(dispatch: HealthDispatch, token: string): Promise<void> {
   if (!token) return;
-  void dispatch('document_health_end', { token }).catch(() => undefined);
+  // A private input must not be removed before the worker releases its handle.
+  // The native watchdog bounds this request too and kills before refusing it.
+  await dispatch('document_health_end', { token }).catch(() => undefined);
 }
 
 // Steps a sweep will take before it calls the reply stream broken. The engine
@@ -245,7 +247,7 @@ export async function runHealthSweep(
   const raw = await gate(() => dispatch('document_health_begin', { file }));
   const begun = parseBegin(raw);
   if (!begun.ok) {
-    endRun(dispatch, salvageToken(raw));
+    await endRun(dispatch, salvageToken(raw));
     return UNREADABLE;
   }
   const facts: HealthFact[] = [...begun.facts];
@@ -271,7 +273,7 @@ export async function runHealthSweep(
     }
     return UNREADABLE;
   } finally {
-    if (!finished) endRun(dispatch, token);
+    if (!finished) await endRun(dispatch, token);
   }
 }
 

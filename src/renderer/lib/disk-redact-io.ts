@@ -11,7 +11,7 @@ import { batch } from './tauri-bridge';
 import { loadRedactionProperties, propertiesPayload } from './redaction-properties';
 import type { DiskRedactIo, RedactRegion } from './disk-redact';
 import type { SearchRequest } from './search-redact';
-import type { SignaturePolicy } from './signatures';
+import { parseSignaturePolicy } from './signatures';
 
 export function createDiskRedactIo(
   callRaw: (method: string, params: Record<string, unknown>) => Promise<unknown>,
@@ -33,7 +33,7 @@ export function createDiskRedactIo(
       })) as Awaited<ReturnType<DiskRedactIo['search']>>;
     },
     async signaturePolicy(abs) {
-      return (await callRaw('signature_policy', { path: abs })) as SignaturePolicy;
+      return parseSignaturePolicy(await callRaw('signature_policy', { path: abs }));
     },
     async write(abs, output, regions: RedactRegion[], marksOnly) {
       const properties = propertiesPayload(loadRedactionProperties());

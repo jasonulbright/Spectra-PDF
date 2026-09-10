@@ -6,6 +6,8 @@ mod print_to_pdf;
 mod scheduler;
 mod send_to;
 mod snapshot;
+mod page_commit;
+mod file_publication;
 mod watchers;
 mod web_capture;
 pub mod engine;
@@ -111,6 +113,7 @@ pub fn run() {
         .manage(tabdrag::StripRegistry::new())
         .manage(session::SessionState::new())
         .manage(session::QuitAcks::new())
+        .manage(page_commit::PageCommitState::default())
         .manage(scanner::ScannerSessions::new())
         .manage(commands::StartupEntryNotice::new())
         .plugin(tauri_plugin_dialog::init())
@@ -184,6 +187,9 @@ pub fn run() {
 
             commands::create_working_copy,
             commands::snapshot,
+            page_commit::publish_page_commit,
+            page_commit::abort_page_commit,
+            page_commit::acknowledge_page_commit,
             commands::restore_snapshot,
             commands::save_as,
             commands::get_gs_path,

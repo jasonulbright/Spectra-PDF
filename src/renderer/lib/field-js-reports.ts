@@ -10,6 +10,7 @@ import type { ScriptRunReport } from './field-js-policy';
 type Listener = () => void;
 
 const reports = new Map<string, ScriptRunReport[]>();
+const EMPTY_REPORTS: readonly ScriptRunReport[] = Object.freeze([]);
 const listeners = new Set<Listener>();
 
 function announce(): void {
@@ -46,7 +47,7 @@ export function clearScriptReports(path: string): void {
 }
 
 export function scriptReportsFor(path: string): readonly ScriptRunReport[] {
-  return reports.get(path) ?? [];
+  return reports.get(path) ?? EMPTY_REPORTS;
 }
 
 export function subscribeScriptReports(listener: Listener): () => void {

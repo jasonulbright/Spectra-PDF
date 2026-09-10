@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { isTrackableMethod } from '../src/renderer/hooks/useOperationQueue';
 import { lockKeysFor, withFileLock, __lockedCount } from '../src/renderer/lib/engine-lock';
 
 /** A promise plus its resolver, so a test can hold an operation open. */
@@ -36,6 +38,29 @@ describe('lockKeysFor', () => {
 });
 
 describe('withFileLock', () => {
+  it('keeps passive working-file readers ahead of publication without gating page edits', async () => {
+    for (const method of ['read_form_fields', 'signature_policy', 'list_links', 'list_redact_annotations']) {
+      expect(isTrackableMethod(method)).toBe(false);
+    }
+    const source = readFileSync(new URL('../src/renderer/hooks/useEngine.ts', import.meta.url), 'utf8');
+    expect(source).toContain('return withFileLock(lockKeysFor(params), () => rawCall(method, params));');
+    const canvas = readFileSync(new URL('../src/renderer/components/canvas/WorkspaceCanvasView.tsx', import.meta.url), 'utf8');
+    for (const method of ['list_links', 'list_redact_annotations']) {
+      expect(canvas).toContain(`engineCall('${method}'`);
+      expect(canvas).not.toContain(`engineCallRaw('${method}'`);
+    }
+    const handle = deferred();
+    const order: string[] = [];
+    const reader = withFileLock(lockKeysFor({ file: 'working.pdf' }), async () => {
+      order.push('reader-open'); await handle.promise; order.push('reader-closed');
+    });
+    const undo = withFileLock(['working.pdf'], async () => { order.push('replace'); });
+    await Promise.resolve();
+    expect(order).toEqual(['reader-open']);
+    handle.resolve();
+    await Promise.all([reader, undo]);
+    expect(order).toEqual(['reader-open', 'reader-closed', 'replace']);
+  });
   it('serializes two operations on the same file', async () => {
     const order: string[] = [];
     const first = deferred();

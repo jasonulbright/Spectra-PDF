@@ -193,6 +193,15 @@ export function fillClosure(calc: FormCalculation, typed: readonly string[]): st
   return closure(typed, calc.scripts, calc.order, calc.terminals);
 }
 
+/** Remove only the submitted value versions after a successful fill. Maps and
+ * array values are immutable in the overlay, so newer edits retain ownership. */
+export function remainingFormValues(current: ReadonlyMap<string, FormFieldValue>,
+  applied: ReadonlyMap<string, FormFieldValue>): ReadonlyMap<string, FormFieldValue> {
+  const next = new Map(current);
+  for (const [name, value] of applied) if (next.get(name) === value) next.delete(name);
+  return next;
+}
+
 /** What a widget draws for a raw value: its format script's output, or the
  * raw value when it carries none or the script cannot run this value. */
 export function shownValue(format: FieldScript | undefined, raw: string): string {
@@ -285,7 +294,7 @@ export function resolveFillTargets(
 ): FillResolution {
   const preBy = new Map(preFields.map((f) => [f.name, f]));
   const postBy = new Map(postFields.map((f) => [f.name, f]));
-  const resolved: Record<string, FormFieldValue> = {};
+  const resolved: Record<string, FormFieldValue> = Object.create(null);
   const skipped: { name: string; reason: string }[] = [];
 
   const accept = (target: FormField, name: string, value: FormFieldValue): void => {

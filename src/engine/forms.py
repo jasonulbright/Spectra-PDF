@@ -41,7 +41,7 @@ from engine.acroform import calculation_order_names
 from engine.afscript import recognize
 from engine.content_walk import IDENTITY, as_matrix, bbox_of_corners_under_matrix
 from engine.document_js import decode_js
-from engine.fieldmdp import lock_of_field_dict
+from engine.fieldmdp import lock_of_field_dict, locked_fields
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_metrics import (
     GLYPH_HEIGHT_EM,
@@ -2613,6 +2613,20 @@ def fill_form_fields(
         if problems:
             raise ValueError("; ".join(problems))
 
+        # FieldMDP is a write constraint, not just a renderer precheck. A
+        # calculation can change a locked field the caller never named, and
+        # flattening removes every field. Apply the same read-only refusal as
+        # /Ff before mutating values, datasets or the output file.
+        affected = list(fields) if flatten else [field.name for field, _, _ in [*plan, *derived]]
+        from engine.incremental import signature_policy_of_pdf
+        from engine.docmdp import refuse_unreadable_policy
+        policy = signature_policy_of_pdf(pdf)
+        if policy.get("error"):
+            refuse_unreadable_policy()
+        locked = locked_fields(policy["locks"], affected)
+        if locked:
+            raise ValueError("; ".join(f"field is read-only: {name}" for name in locked))
+
         # ISO 32000-2 Annex K: a PDF field object shall exist for each field
         # the XFA resource specifies, and the XFA field values SHALL be
         # consistent with the corresponding /V entries. A fill that wrote /V
@@ -2761,16 +2775,12 @@ def fill_form_fields(
             flattened = True
             xfa_stripped = xfa_kind != xfa.NONE and not _has_xfa(pdf)
 
-        if same_file:
-            # The preservation reads the input at its own path, so it runs
-            # against the staged bytes before the swap.
-            with staged_write(output_path) as staged:
-                save_pdf(pdf, str(staged))
-                pdf.close()
-                preserved = finalize_preserving_signatures(str(input_path), str(staged))
-        else:
-            save_pdf(pdf, output_path)
-            preserved = finalize_preserving_signatures(str(input_path), str(output_path))
+        # Preservation can refuse late; no destination (including Save As)
+        # may be replaced before the complete write has succeeded.
+        with staged_write(output_path) as staged:
+            save_pdf(pdf, str(staged))
+            pdf.close()
+            preserved = finalize_preserving_signatures(str(input_path), str(staged))
 
     result = {
         "output": str(output_path),

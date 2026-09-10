@@ -1034,6 +1034,9 @@ def add_form_fields(
     specs = list(fields or [])
     validate_pdf(file)
     decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision.get("reason") == "signature-policy-unreadable":
+        from engine.docmdp import refuse_unreadable_policy
+        refuse_unreadable_policy()
     if decision["kind"] == "refuse":
         raise RuntimeError(
             "this document is certified to allow no changes, so adding form "
@@ -1104,6 +1107,9 @@ def author_vertical_field_font(
     _require_vertical_face(font_dir)
     validate_pdf(file)
     decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision.get("reason") == "signature-policy-unreadable":
+        from engine.docmdp import refuse_unreadable_policy
+        refuse_unreadable_policy()
     if decision["kind"] == "refuse":
         raise RuntimeError(
             "this document is certified to allow no changes, so setting a field's "
@@ -1212,6 +1218,9 @@ def author_choice_appearance(
         raise ValueError("Name the option lists whose appearance is being drawn.")
     validate_pdf(file)
     decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision.get("reason") == "signature-policy-unreadable":
+        from engine.docmdp import refuse_unreadable_policy
+        refuse_unreadable_policy()
     if decision["kind"] == "refuse":
         raise RuntimeError(
             "this document is certified to allow no changes, so redrawing an option "
@@ -1368,6 +1377,9 @@ def set_field_lock(
         raise ValueError("Name the signature field whose lock is being set.")
     validate_pdf(file)
     decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision.get("reason") == "signature-policy-unreadable":
+        from engine.docmdp import refuse_unreadable_policy
+        refuse_unreadable_policy()
     if decision["kind"] == "refuse":
         raise RuntimeError(
             "this document is certified to allow no changes, so setting a field "
@@ -1434,6 +1446,9 @@ def set_field_description(
     text = str(description or "").strip()
     validate_pdf(file)
     decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision.get("reason") == "signature-policy-unreadable":
+        from engine.docmdp import refuse_unreadable_policy
+        refuse_unreadable_policy()
     if decision["kind"] == "refuse":
         raise RuntimeError(
             "this document is certified to allow no changes, so setting a field "
@@ -1507,6 +1522,9 @@ def set_field_actions(
         raise ValueError("Name the form field whose actions are being set.")
     validate_pdf(file)
     decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision.get("reason") == "signature-policy-unreadable":
+        from engine.docmdp import refuse_unreadable_policy
+        refuse_unreadable_policy()
     if decision["kind"] == "refuse":
         raise RuntimeError(
             "this document is certified to allow no changes, so setting a field "

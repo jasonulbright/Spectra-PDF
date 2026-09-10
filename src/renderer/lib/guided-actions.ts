@@ -5,7 +5,7 @@
 //
 // An action is a named, ordered list of steps; every step is an EXISTING
 // gated engine op with a compact param form. The runner (the panel) drives
-// each step through the standard snapshot → call → reload shape, so a run is
+// each step through private staging and validated publication, so a run is
 // undoable step-by-step and stops on the first failure. Deliberately NO new
 // engine surface: the catalog is a curation over ops that already ship.
 

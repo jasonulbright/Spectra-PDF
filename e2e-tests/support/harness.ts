@@ -146,14 +146,15 @@ export async function setActiveOp(op: string): Promise<void> {
 }
 
 export async function saveActiveAs(destPath: string): Promise<void> {
-  await browser.executeAsync<void, [string]>(
+  const error = await browser.executeAsync<string | null, [string]>(
     function (dest, done) {
       (window as any).__SPECTRA_TEST__.saveActiveAs(dest)
-        .then(() => done(undefined))
-        .catch((err: unknown) => done(String(err) as any));
+        .then(() => done(null))
+        .catch((err: unknown) => done(String(err)));
     },
     destPath,
   );
+  if (typeof error === 'string') throw new Error(`saveActiveAs failed: ${error}`);
 }
 
 /** Compress panel run with an injected output path (panel must be open).
@@ -765,6 +766,45 @@ export async function deleteSelectedCanvasPages(): Promise<void> {
   await browser.execute(function () {
     (window as any).__SPECTRA_TEST__.deleteSelectedCanvasPages();
   });
+}
+
+/** Wait for the active document's index AND its canvas registration before
+ * capturing opaque IDs. Panel fields can load before either async boundary. */
+export async function waitForActiveCanvasPageIds(): Promise<string[]> {
+  let ids: string[] = [];
+  await browser.waitUntil(async () => {
+    const ready = await browser.execute(() => {
+      const h = (window as any).__SPECTRA_TEST__;
+      const count = h.getState().activeFile?.pageCount;
+      const pages = h.getActiveDocPages().map((p: { id: string }) => p.id);
+      const canvas = h.getWorkspacePageIds();
+      return count > 0 && pages.length === count && pages.every((id: string) => canvas.includes(id)) ? pages : null;
+    }) as string[] | null;
+    if (!ready) return false;
+    ids = ready;
+    return true;
+  }, { timeout: 30_000, timeoutMsg: 'the active document page IDs never settled on the canvas' });
+  return ids;
+}
+
+/** Positive delete cases must prove both selection and the async policy-gated
+ * deletion settled before typing into a revision-bound panel. The fire-and-
+ * forget helper above remains available to tests that answer a consent dialog. */
+export async function deleteCanvasPagesAndWait(pageIds: string[]): Promise<void> {
+  const selected = [...new Set(pageIds)].sort();
+  const before = await getWorkspacePageIds();
+  if (!selected.length || selected.some(id => !before.includes(id))) {
+    throw new Error('deleteCanvasPagesAndWait requires existing selected pages');
+  }
+  await selectCanvasPages(pageIds);
+  await browser.waitUntil(async () =>
+    JSON.stringify((await getSelectedCanvasPageIds()).sort()) === JSON.stringify(selected),
+  { timeout: 10_000, timeoutMsg: 'canvas selection never settled before delete' });
+  await deleteSelectedCanvasPages();
+  const expected = before.filter(id => !selected.includes(id));
+  await browser.waitUntil(async () =>
+    JSON.stringify(await getWorkspacePageIds()) === JSON.stringify(expected),
+  { timeout: 20_000, timeoutMsg: 'policy-gated page deletion never produced the expected survivors' });
 }
 
 /** Rotate the current canvas selection ±90 via the batched path (`[`/`]`). */
@@ -1472,6 +1512,8 @@ export async function createPlacedField(
     multiline?: boolean;
     comb?: boolean;
     maxLength?: number;
+    writing?: 'horizontal' | 'vertical';
+    script?: 'japanese' | 'simplified-chinese' | 'traditional-chinese' | 'korean';
     /** Format / accepted range / calculation — the same object the card's own
      * control produces, so the spec drives the real authoring path. */
     actions?: Record<string, unknown>;

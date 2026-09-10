@@ -39,7 +39,8 @@ describe('XFDF interchange via the CLI', () => {
     const expReport = JSON.parse(exp.slice(exp.indexOf('{'))) as { count: number };
     expect(expReport.count).toBe(2);
     const xml = readFileSync(xfdf, 'utf-8');
-    expect(xml).toContain('<square');
+    expect(xml).toContain('<highlight');
+    expect(xml).toContain('coords=');
     expect(xml).toContain('<ink');
     expect(xml).toContain('<contents>first</contents>');
 
@@ -56,7 +57,7 @@ describe('XFDF interchange via the CLI', () => {
     const list = execFileSync(APP_EXE, ['comments-list', merged], { encoding: 'utf-8' });
     const listed = JSON.parse(list.slice(list.indexOf('{'))) as { count: number; by_type: Record<string, number> };
     expect(listed.count).toBe(2);
-    expect(listed.by_type['Square']).toBe(1);
+    expect(listed.by_type['Highlight']).toBe(1);
     expect(listed.by_type['Ink']).toBe(1);
   });
 });

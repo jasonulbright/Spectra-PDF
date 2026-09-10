@@ -1075,7 +1075,7 @@ interface PageCellProps {
   // the author's scaffolding to the reader.
   linkRegions?: readonly LinkRegion[];
   onPickLink?: (region: LinkRegion) => void;
-  selectedLink?: { page: number; index: number } | null;
+  selectedLink?: LinkRegion | null;
   // Add-Image band release: converts + hands off to App's picker+embed.
   onAddImageRect: (
     docId: string,
@@ -4808,7 +4808,8 @@ function PageCellImpl({
           data-link-kind={region.kind}
           className={
             'page-link-region' +
-            (selectedLink?.page === region.page && selectedLink?.index === region.index
+            (selectedLink?.path === region.path && selectedLink?.workingPath === region.workingPath
+              && selectedLink?.buffer === region.buffer && selectedLink?.page === region.page && selectedLink?.index === region.index
               ? ' page-link-region-selected'
               : '')
           }

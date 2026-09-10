@@ -13,13 +13,8 @@ from pathlib import Path
 
 import pikepdf
 
-from engine.acroform import (
-    carry_doc_form_extras,
-    carry_pure_data_fields,
-    prune_form_to_pages,
-    refresh_sig_flags,
-    refuse_if_xfa,
-)
+from engine.acroform import refuse_if_xfa
+from engine.page_copy import copy_pages_with_forms
 from engine.fs_names import safe_file_name, unique_name
 from engine.pdf_save import save_pdf
 
@@ -52,26 +47,10 @@ def _render_part(file: str, page_indices: list[int]) -> bytes:
     from the same open would inherit the first part's prune and lose its own
     fields. A fresh open per part is what makes the prune safe to repeat.
     """
-    with pikepdf.open(file) as pdf:
-        # Prune form-field trees to the kept pages BEFORE copying — a
-        # partially-selected multi-widget field would otherwise carry its
-        # ENTIRE subtree, leaving phantom dead widgets for the excluded
-        # pages' kids. This open is private; the file on disk is untouched.
-        prune_form_to_pages(pdf, page_indices)
-        result = pikepdf.Pdf.new()
-        # Form-aware copy: registers the kept fields in the part's own
-        # /AcroForm — a plain pages.append leaves every field orphaned
-        # (rendered, dead). Widget-less pure-data fields and /SigFlags are
-        # covered by the acroform helpers.
-        copy = result.add_pages_from(pdf, pages=page_indices)
-        pure_renames = carry_pure_data_fields(result, pdf)
-        refresh_sig_flags(result)
-        # /CO reconciled to the surviving copied fields; catalog /AA carried
-        # whole. Single source, but same-name single-source fields can
-        # still rename — feed both reports.
-        renames = dict(copy.renamed_fields)
-        renames.update({r["from"]: r["to"] for r in pure_renames})
-        carry_doc_form_extras(result, pdf, renames)
+    with pikepdf.open(file) as pdf, pikepdf.Pdf.new() as result:
+        # The shared copy boundary prunes before copying and registers all
+        # selected pages' widgets through one field map, including repeats.
+        copy_pages_with_forms(result, pdf, pages=page_indices)
         buf = io.BytesIO()
         # Every part is the source document minus pages, so each part carries
         # the source's own encryption; `result` is a fresh Pdf and knows

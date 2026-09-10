@@ -5,35 +5,32 @@ from pathlib import Path
 
 import pikepdf
 
-from engine.acroform import (
-    carry_doc_form_extras,
-    carry_pure_data_fields,
-    refresh_sig_flags,
-    refuse_if_xfa,
-)
-from engine.pdf_save import encryption_profile, save_pdf
+from engine.acroform import refuse_if_xfa
+from engine.page_copy import copy_pages_with_forms
+from engine.pdf_save import encryption_profile, save_pdf, source_encryption
 
 
 def merge(files: list[str], output: str) -> dict:
     """Merge multiple PDF files into one.
 
-    Pages copy via ``add_pages_from`` (form-aware), so every input's AcroForm
+    Pages copy via ``copy_pages_with_forms``, so every input's AcroForm
     fields stay registered and fillable — a plain ``pages.extend`` imports the
     field OBJECTS but not their registration, killing every form (pikepdf's
     own PageCopyWarning flags exactly this). Cross-file field-name collisions
     rename deterministically (``name+1``) and are reported as
     ``fields_renamed``; widget-less pure-data fields (which page-driven
     copying can't discover) and /SigFlags are handled by the acroform
-    helpers.
+    helpers. One annotation-copy batch per input preserves field identity
+    across pages; the upstream per-page convenience loop splits shared fields.
     """
     output_path = Path(output)
-    merged = pikepdf.Pdf.new()
 
     total_pages = 0
     renamed: list[dict] = []
     protected_sources: list = []
     profiles: set = set()
     with ExitStack() as stack:
+        merged = stack.enter_context(pikepdf.Pdf.new())
         for file_path in files:
             pdf = stack.enter_context(pikepdf.open(file_path))
             refuse_if_xfa(pdf, file_path, "merging")
@@ -41,18 +38,9 @@ def merge(files: list[str], output: str) -> dict:
             profiles.add(profile)
             if profile is not None:
                 protected_sources.append(pdf)
-            result = merged.add_pages_from(pdf)
+            result = copy_pages_with_forms(merged, pdf)
             renamed.extend({"from": old, "to": new} for old, new in result.renamed_fields.items())
-            pure_renames = carry_pure_data_fields(merged, pdf)
-            renamed.extend(pure_renames)
-            # /CO reconciliation must see EVERY rename this source suffered —
-            # add_pages_from's report AND the pure-data carry's (a calc field
-            # can be widget-less).
-            source_renames = dict(result.renamed_fields)
-            source_renames.update({r["from"]: r["to"] for r in pure_renames})
-            carry_doc_form_extras(merged, pdf, source_renames)
             total_pages += result.pages_added
-        refresh_sig_flags(merged)
         # One combined document can only carry one encryption, so a merge that
         # mixes protections has no faithful answer and refuses rather than
         # picking one. Where every input agrees, that agreement IS the answer.
@@ -66,6 +54,12 @@ def merge(files: list[str], output: str) -> dict:
         # Sources stay open through the save — qpdf resolves foreign copies
         # lazily, so a source closed before the destination is saved risks
         # reading freed data (the old per-file `with` closed each one early).
+        # Equal public descriptors do not prove that every source's
+        # credentials can be reproduced. Validate each source before writing;
+        # validating only the eventual encryption donor let a later owner-gated
+        # input lose its owner password.
+        for source in protected_sources:
+            source_encryption(source)
         save_pdf(
             merged,
             output_path,

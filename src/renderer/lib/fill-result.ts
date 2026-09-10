@@ -32,13 +32,15 @@ export type FillOutcome =
  * edits legitimately writes none, which is why the count comes from the caller
  * rather than from a non-zero assumption here.
  */
-export function classifyFillResult(result: unknown, requested: number): FillOutcome {
-  if (result === null || typeof result !== 'object') return { kind: 'refused', refusal: { kind: 'unverified' } };
+export function classifyFillResult(result: unknown, requested: number, expectedOutput?: string): FillOutcome {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)
+      || !Number.isSafeInteger(requested) || requested < 0) return { kind: 'refused', refusal: { kind: 'unverified' } };
   const report = result as { filled?: unknown; output?: unknown };
-  if (typeof report.filled !== 'number' || !Number.isFinite(report.filled)) {
+  if (typeof report.filled !== 'number' || !Number.isSafeInteger(report.filled) || report.filled < 0) {
     return { kind: 'refused', refusal: { kind: 'unverified' } };
   }
-  if (typeof report.output !== 'string' || report.output === '') {
+  if (typeof report.output !== 'string' || report.output === ''
+      || expectedOutput !== undefined && report.output !== expectedOutput) {
     // The engine names the file it wrote. No name is no evidence a file was
     // written, whatever the counts say.
     return { kind: 'refused', refusal: { kind: 'unverified' } };
@@ -47,5 +49,8 @@ export function classifyFillResult(result: unknown, requested: number): FillOutc
   if (filled < requested) {
     return { kind: 'refused', refusal: { kind: 'incomplete', requested, filled } };
   }
+  // The engine subtracts derived calculation fields from this count; excess
+  // is not a legitimate recalculation and cannot certify the requested fill.
+  if (filled !== requested) return { kind: 'refused', refusal: { kind: 'unverified' } };
   return { kind: 'ok', filled };
 }

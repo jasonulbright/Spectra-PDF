@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { engine, dialog } from '../lib/tauri-bridge';
+import { useCallback, useEffect, useState } from 'react';
+import { engine, dialog, batch, file as fileIO } from '../lib/tauri-bridge';
 import { EngineError } from '../lib/engine-messages';
 import { runCommitGate } from '../lib/commit-gate';
 import { lockKeysFor, withFileLock } from '../lib/engine-lock';
 import { useOperationQueue, isTrackableMethod } from './useOperationQueue';
 import { beginInteractive, submitIdle, trackInteractive } from '../lib/engine-idle-lane';
 import { isHealthMethod, runHealthSweep, type EngineHealthReply } from '../lib/doc-health-engine';
+import { withHealthInput } from '../lib/doc-health-input';
+import type { PdfBuffer } from '../state/types';
 
 interface PendingRequest {
   resolve: (value: EngineResult) => void;
@@ -109,6 +111,9 @@ export interface EngineResult {
   has_user_password: boolean;
   recovered: number;
   total_pages: number;
+  /** recover: total_pages is only an observed lower bound if false. */
+  page_count_known?: boolean;
+  enumeration_error?: string | null;
   lost: number;
   recovered_pages: number[];
   lost_pages: { page: number; error: string }[];
@@ -141,24 +146,50 @@ export function nextEngineRequestIdForTest(): number {
   return nextEngineRequestId++;
 }
 
+// Transport belongs to the WebView window, not the tool panel that happens
+// to call it. Unmounting a panel must not discard an outstanding response:
+// its promise may own a file lock or a health input awaiting cleanup.
+const pendingRequests = new Map<number, PendingRequest>();
+let listenerReady: Promise<void> | undefined;
+function ensureEngineResponses(): Promise<void> {
+  if (!listenerReady) {
+    listenerReady = engine.onResponse((response) => {
+      resolvePendingResponse(pendingRequests, response as EngineResponse);
+    }).then(() => undefined, (error: unknown) => {
+      listenerReady = undefined;
+      throw error;
+    });
+  }
+  return listenerReady;
+}
+
+/** One window-wide listener serves both workers and survives panel changes.
+ * Register before sending: a fast reply must never outrun its listener. */
+export async function dispatchEngineRequest(method: string, params: Record<string, unknown>): Promise<EngineResult> {
+  await ensureEngineResponses();
+  const id = nextEngineRequestId++;
+  const request = { jsonrpc: '2.0', method, params, id };
+  const send = isHealthMethod(method) ? engine.healthRequest : engine.request;
+  return new Promise<EngineResult>((resolve, reject) => {
+    pendingRequests.set(id, { resolve, reject });
+    void Promise.resolve().then(() => send(request)).catch((err: unknown) => {
+      pendingRequests.delete(id);
+      reject(err instanceof Error ? err : new Error(String(err)));
+    });
+  });
+}
+
 export function useEngine() {
-  const pending = useRef<Map<number, PendingRequest>>(new Map());
   const [ready, setReady] = useState(false);
   const { track } = useOperationQueue();
 
   useEffect(() => {
-    // Start the Python engine sidecar
-    engine.start().catch((e) => console.error('[engine] Failed to start:', e));
-
-    // Listen for JSON-RPC responses
-    const unlisten = engine.onResponse((response) => {
-      resolvePendingResponse(pending.current, response as EngineResponse);
-    });
-    setReady(true);
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
+    let mounted = true;
+    void Promise.all([ensureEngineResponses(), engine.start()]).then(() => {
+      if (mounted) setReady(true);
+    }).catch((e: unknown) => console.error('[engine] Failed to start:', e));
+    // The window owns the listener; native window teardown owns its lifetime.
+    return () => { mounted = false; };
   }, []);
 
   // WHICH SIDECAR, decided from the method rather than from the caller. Health
@@ -167,19 +198,7 @@ export function useEngine() {
   // nobody asked about into the FIFO the user's operations wait in. Both
   // sidecars answer on the same `engine:response` event with the id this
   // renderer issued, so one pending map correlates both.
-  const dispatch = useCallback((method: string, params: Record<string, unknown>): Promise<EngineResult> => {
-    const id = nextEngineRequestId++;
-    const request = { jsonrpc: '2.0', method, params, id };
-    const send = isHealthMethod(method) ? engine.healthRequest : engine.request;
-
-    return new Promise<EngineResult>((resolve, reject) => {
-      pending.current.set(id, { resolve, reject });
-      send(request).catch((err: unknown) => {
-        pending.current.delete(id);
-        reject(err instanceof Error ? err : new Error(String(err)));
-      });
-    });
-  }, []);
+  const dispatch = dispatchEngineRequest;
 
   // Every request a user's action produced is counted while it is outstanding,
   // which is what `interactiveInFlight` reports.
@@ -213,7 +232,10 @@ export function useEngine() {
         release();
       }
     }
-    return rawCall(method, params);
+    // Read-only is not handle-free: qpdf can hold the working file while an
+    // index is built. Serialize these readers with Undo/Save/publication too,
+    // without running the commit gate or creating an operation-queue entry.
+    return withFileLock(lockKeysFor(params), () => rawCall(method, params));
   }, [rawCall, track]);
 
   // Background work nobody asked for: a passive, read-only sweep driven by a
@@ -222,8 +244,12 @@ export function useEngine() {
   // at its next step boundary. Resolves to `null` for a run abandoned before it
   // finished — which is not a failure and must not be recorded as one.
   const collectHealth = useCallback(
-    (file: string, isCurrent: () => boolean): Promise<EngineHealthReply | null> =>
-      submitIdle((gate) => runHealthSweep(dispatch, file, gate), isCurrent),
+    (buffer: PdfBuffer, isCurrent: () => boolean): Promise<EngineHealthReply | null> =>
+      submitIdle((gate) => withHealthInput(buffer, gate, {
+        allocate: () => batch.createScratch(`health-${crypto.randomUUID()}`),
+        write: fileIO.writeBuffer,
+        remove: batch.deleteHealthScratch,
+      }, (path) => runHealthSweep(dispatch, path, gate)), isCurrent),
     [dispatch],
   );
 

@@ -272,16 +272,10 @@ def delete_all_annotations(file: str, output: str, subtypes: list | None = None,
             elif "/Annots" in page.obj:
                 del page.obj["/Annots"]
 
-        if same_file:
-            # The preservation reads the input at its own path, so it runs
-            # against the staged bytes before the swap.
-            with staged_write(output_path) as staged:
-                save_pdf(pdf, str(staged))
-                pdf.close()
-                preserved = finalize_preserving_signatures(str(input_path), str(staged))
-        else:
-            save_pdf(pdf, output_path)
-            preserved = finalize_preserving_signatures(str(input_path), str(output_path))
+        with staged_write(output_path) as staged:
+            save_pdf(pdf, str(staged))
+            pdf.close()
+            preserved = finalize_preserving_signatures(str(input_path), str(staged))
 
     out = {"output": str(output_path), "removed": removed}
     if preserved.get("preserved"):

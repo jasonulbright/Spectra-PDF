@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileS
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
+import { PDFBool, PDFDict, PDFDocument, PDFName, PDFString } from 'pdf-lib';
 import {
   waitForHarness,
   openByPaths,
@@ -12,6 +13,10 @@ import {
   getWorkspacePageIds,
   commitPendingEdits,
   saveActiveAs,
+  closeAllFiles,
+  deleteSelectedCanvasPages,
+  getCanvasDocs,
+  importPagesIntoDoc,
 } from '../support/harness.js';
 
 // The catalog carry (lib/catalog-carry.ts): bookmarks and page labels
@@ -87,5 +92,30 @@ describe('catalog state survives committed page edits', () => {
     // here the committed file must still carry the roman range at all).
     const bytes = readFileSync(dest);
     expect(bytes.includes('/PageLabels')).toBe(true);
+  });
+  for (const keepOwn of [true, false]) it(`keeps document language, preferences and dates with ${keepOwn ? 'one original page' : 'only imported pages'}`, async () => {
+    const dir = mkdtempSync(resolve(__dirname, '../../docs/audit/catalog-owner-live.local.d-'));
+    const own = resolve(dir, 'own.pdf'), donor = resolve(dir, 'donor.pdf'), N = PDFName.of;
+    for (const [path, language, count] of [[own, 'de-DE', 2], [donor, 'fr-FR', 1]] as const) {
+      const pdf = await PDFDocument.create(); for (let i = 0; i < count; i++) pdf.addPage([600 + i * 10, 800]);
+      pdf.catalog.set(N('Lang'), PDFString.of(language));
+      pdf.catalog.set(N('ViewerPreferences'), pdf.context.obj({ DisplayDocTitle: path === own }));
+      pdf.setCreationDate(new Date(path === own ? '2001-02-03T04:05:06Z' : '2011-01-01T00:00:00Z'));
+      pdf.setModificationDate(new Date(path === own ? '2002-03-04T05:06:07Z' : '2012-01-01T00:00:00Z'));
+      writeFileSync(path, await pdf.save());
+    }
+    await closeAllFiles(); await openByPaths([own]);
+    const doc = (await getCanvasDocs())[0], originalIds = await getWorkspacePageIds();
+    const work = (await getState()).activeFile!.workingPath, before = readFileSync(work);
+    await importPagesIntoDoc(donor, doc.id, 2); await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 3);
+    await selectCanvasPages(keepOwn ? [originalIds[0]] : originalIds); await deleteSelectedCanvasPages();
+    await browser.waitUntil(async () => (await getWorkspacePageIds()).length === (keepOwn ? 2 : 1));
+    await commitPendingEdits(); const out = await PDFDocument.load(readFileSync(work), { updateMetadata: false });
+    expect(out.getPageCount()).toBe(keepOwn ? 2 : 1);
+    expect(out.catalog.lookup(N('Lang'), PDFString).decodeText()).toBe('de-DE');
+    expect(out.catalog.lookup(N('ViewerPreferences'), PDFDict).lookup(N('DisplayDocTitle'), PDFBool).asBoolean()).toBe(true);
+    expect(out.getCreationDate()?.toISOString()).toBe('2001-02-03T04:05:06.000Z');
+    expect(out.getModificationDate()?.toISOString()).toBe('2002-03-04T05:06:07.000Z');
+    expect(readFileSync(own).equals(before)).toBe(true);
   });
 });

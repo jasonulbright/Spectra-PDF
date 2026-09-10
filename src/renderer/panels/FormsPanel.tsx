@@ -1,15 +1,12 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
-import { file, app } from '../lib/tauri-bridge';
+import { useFormDrafts } from '../state/AppStateProvider';
+import { runCommitGate } from '../lib/commit-gate';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { readFormFields } from '../lib/forms';
-import { fillClosure, formCalculation } from '../lib/form-overlay';
-import { mergeUntouched } from '../lib/late-read';
-import { classifyFillResult } from '../lib/fill-result';
-import type { FormField, FormFieldValue, XFAKind } from '../lib/forms';
+import type { FormField, FormFieldValue } from '../lib/forms';
 import {
   ACTION_KIND_LABEL,
   ACTION_TRIGGERS,
@@ -52,122 +49,37 @@ function reportText(report: ScriptRunReport): string {
 
 /** The live report set for one document. */
 function useScriptReports(path: string | null): readonly ScriptRunReport[] {
-  const [reports, setReports] = useState<readonly ScriptRunReport[]>(() =>
-    path ? scriptReportsFor(path) : [],
-  );
-  useEffect(() => {
-    if (!path) {
-      setReports([]);
-      return;
-    }
-    setReports(scriptReportsFor(path));
-    return subscribeScriptReports(() => setReports(scriptReportsFor(path)));
-  }, [path]);
-  return reports;
+  return useSyncExternalStore(subscribeScriptReports, () => scriptReportsFor(path ?? ''));
 }
 
-/** Value equality across the FormFieldValue union (arrays compared element-wise). */
-function valueEquals(a: FormFieldValue | undefined, b: FormFieldValue | undefined): boolean {
-  if (Array.isArray(a) || Array.isArray(b)) {
-    const aa = Array.isArray(a) ? a : [];
-    const bb = Array.isArray(b) ? b : [];
-    return aa.length === bb.length && aa.every((x, i) => x === bb[i]);
-  }
-  return a === b;
-}
 
 export function FormsPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, openNewFiles, dispatch } = useActiveFile();
+  const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
-  const { confirmSignedEdit } = useOperations();
-  const workingPath = activeFile?.workingPath ?? null;
-  // The values as first read — Apply sends only the fields the user CHANGED
-  // (a diff), never the full current-state snapshot: the engine validates every
-  // edit as authoritative, so resending an untouched read-only/button/unselected
-  // field would abort the whole fill (regression). pdf-lib's per-field
-  // no-op tolerated the full snapshot; the engine does not.
-  const initialValues = useRef<Record<string, FormFieldValue>>({});
-  // Field names the user has typed into since the last read landed. The read
-  // below re-runs on EVERY buffer change — an undo, a page-edit commit, any
-  // other panel's op — so it lands mid-form routinely, and a bare
-  // `setValues(seed)` silently reverted every field filled since the panel
-  // opened. See `lib/late-read.ts` for the class and why merging (not skipping
-  // the seed) is the correct shape.
-  const touched = useRef<Set<string>>(new Set());
-  const [fields, setFields] = useState<FormField[]>([]);
-  const [xfaKind, setXfaKind] = useState<XFAKind>('none');
-  const [xfaCalculations, setXfaCalculations] = useState(false);
-  const [calculationOrder, setCalculationOrder] = useState<string[]>([]);
-  const [values, setValues] = useState<Record<string, FormFieldValue>>({});
-  const [flatten, setFlatten] = useState(false);
-  const [reading, setReading] = useState(false);
-  const [status, setStatus] = useState('');
-  const [busy, setBusy] = useState(false);
+  const { fillFormValues } = useOperations();
+  const drafts = useFormDrafts();
+  const draft = drafts.get(activeFile);
+  const fields = draft?.form?.fields ?? [];
+  const values = draft?.values ?? {};
+  const flatten = draft?.options.flatten ?? false;
+  const busy = draft?.busy ?? false;
+  const reading = !!draft?.loading && !draft.form;
+  const editable = !!draft && drafts.editable(draft);
+  const conflict = !!draft && drafts.conflict(draft);
+  const buffer = draft?.buffer ?? null;
+  const xfaKind = draft?.form?.xfa ?? 'none';
+  const xfaCalculations = draft?.form?.xfaCalculations ?? false;
+  const calculationOrder = draft?.form?.calculationOrder ?? [];
+  const status = conflict && !busy ? tChrome('panel.forms.sourceChanged')
+    : draft?.error ? tChrome('panel.common.error', { message: draft.error }) : draft?.status ?? '';
 
-  const buffer = activeFile?.buffer ?? null;
-
-  // A different document is a fresh filling session: a field name that happens
-  // to exist in both must not carry the previous document's typing forward.
-  useEffect(() => {
-    touched.current.clear();
-  }, [workingPath]);
-
-  // Read fields whenever the file's bytes change identity — the same signal
-  // the canvas indexer keys on, so this auto-refreshes after an apply
-  // (UPDATE_FILE swaps the buffer), after any whole-file op, and after undo.
-  useEffect(() => {
-    let cancelled = false;
-    if (!buffer || !workingPath) {
-      setFields([]);
-      setXfaKind('none');
-      setXfaCalculations(false);
-      setCalculationOrder([]);
-      setValues({});
-      touched.current.clear();
-      return;
-    }
-    setReading(true);
-    // Read through the engine. Keyed on `buffer` identity — the same
-    // content-change signal as before — but read from the working copy on
-    // disk, whose bytes equal `buffer` (page-tier edits touch neither until
-    // commit). `call` never gates `read_form_fields` (it is INTERNAL).
-    readFormFields(call, workingPath)
-      .then((result) => {
-        if (cancelled) return;
-        setFields(result.fields);
-        setXfaKind(result.xfa);
-        setXfaCalculations(result.xfaCalculations);
-        setCalculationOrder(result.calculationOrder);
-        const seed: Record<string, FormFieldValue> = {};
-        for (const f of result.fields) seed[f.name] = f.value;
-        // The file is always the BASELINE — Apply diffs against it, so it must
-        // be the truth even when a read lands mid-typing. Only the fields the
-        // user actually touched survive on top of it.
-        initialValues.current = seed;
-        setValues((prev) => mergeUntouched(seed, prev, touched.current));
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        setFields([]);
-        setXfaKind('none');
-        setXfaCalculations(false);
-        setCalculationOrder([]);
-        setStatus(tChrome('panel.forms.errorReading', { message: e instanceof Error ? e.message : String(e) }));
-      })
-      .finally(() => {
-        if (!cancelled) setReading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [buffer, workingPath, call]);
-
-  const setValue = useCallback((name: string, value: FormFieldValue) => {
-    touched.current.add(name);
-    setValues((prev) => ({ ...prev, [name]: value }));
-  }, []);
+  useEffect(() => { if (draft) void drafts.load(draft, call); });
+  useEffect(() => () => { if (draft) drafts.cancelLoad(draft); }, [draft, drafts]);
+  const setValue = (name: string, value: FormFieldValue) => {
+    if (draft) drafts.setValue(draft, buffer, name, value);
+  };
 
   const editableCount = fields.filter((f) => f.editable).length;
   // Fields whose /JS this app does not run, and calculations the document
@@ -203,108 +115,8 @@ export function FormsPanel(): React.ReactElement {
   }));
 
   const handleApply = useCallback(async () => {
-    if (!activeFile) return;
-    // Only the editable fields the user actually CHANGED — never read-only /
-    // button / signature / untouched fields (the engine would reject them and
-    // abort the whole fill). Flatten still runs on an empty diff (it bakes the
-    // existing values), but a plain fill with no changes is a no-op.
-    const edits: Record<string, FormFieldValue> = {};
-    for (const f of fields) {
-      if (f.editable && !valueEquals(values[f.name], initialValues.current[f.name])) {
-        edits[f.name] = values[f.name];
-      }
-    }
-    const changedCount = Object.keys(edits).length;
-    if (changedCount === 0 && !flatten) {
-      setStatus(tChrome('panel.forms.noChanges'));
-      return;
-    }
-    setBusy(true);
-    setStatus(flatten ? tChrome('panel.forms.fillingFlattening') : tChrome('panel.forms.filling'));
-    try {
-      // The signed-document decision, taken BEFORE the snapshot — `file.
-      // snapshot` runs the commit gate, so asking after it would flush pending
-      // page edits on the way to refusing this edit.
-      //
-      // Two classes, because the button does two things. A plain fill is
-      // `form-fill` and is asked about the TRANSITIVE set: filling an unlocked
-      // line item that recalculates a locked Total produces a document
-      // reporting as altered, and a decision taken on the typed names alone
-      // would never see it. Flatten BAKES the widgets away — the form stops
-      // existing — so it is structural whatever a fill-only certification
-      // permits.
-      const typedNames = Object.keys(edits);
-      const targets = fillClosure(formCalculation(fields, calculationOrder), typedNames);
-      const allowed = flatten
-        ? await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural')
-        : await confirmSignedEdit(
-            activeFile.path,
-            activeFile.workingPath,
-            'form-fill',
-            targets,
-            typedNames,
-          );
-      if (!allowed) {
-        setStatus('');
-        return;
-      }
-      // Snapshot (runs the commit gate) → fill through the
-      // ENGINE (Unicode-capable + multi-select optionlist) → reload → UPDATE_
-      // FILE (undoable via the snapshot). `call` is commit-gated (never
-      // callRaw). Page count is unchanged by a fill/flatten.
-      const snapshotPath = await file.snapshot(activeFile.workingPath);
-      const fillReport = await call('fill_form_fields', {
-        file: activeFile.workingPath,
-        output: activeFile.workingPath,
-        edits,
-        flatten,
-        font_dir: await app.getEditFontPath(),
-      });
-      // The engine refuses an inconsistent fill atomically, so a thrown error
-      // is already an error here. What is left is the report on the success
-      // path, which is the only evidence the write covered what was named —
-      // announcing success without reading it is announcing the request.
-      const outcome = classifyFillResult(fillReport, changedCount);
-      // Written: these values ARE the file's now, so the re-read the dispatch
-      // below triggers should reseed everything. (On the error path `touched`
-      // deliberately stands — nothing was written, so the typing must survive.)
-      // A report that does not add up is still a document that changed on
-      // disk, so the reload runs either way — it IS the re-read the notice
-      // tells the user to trust instead of the panel's own state.
-      touched.current.clear();
-      const buffer = await file.readBuffer(activeFile.workingPath);
-      dispatch({
-        type: 'UPDATE_FILE',
-        path: activeFile.path,
-        pageCount: activeFile.pageCount,
-        buffer,
-        snapshotPath,
-      });
-      if (outcome.kind === 'refused') {
-        setStatus(
-          tChrome('panel.common.error', {
-            message:
-              outcome.refusal.kind === 'incomplete'
-                ? tChrome('panel.forms.fillIncomplete', {
-                    named: outcome.refusal.requested,
-                    written: outcome.refusal.filled,
-                  })
-                : tChrome('panel.forms.fillUnverified'),
-          }),
-        );
-        return;
-      }
-      setStatus(
-        flatten
-          ? tChrome('panel.forms.filledFlattened')
-          : tChromeCount('panel.forms.filled', changedCount),
-      );
-    } catch (e: unknown) {
-      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setBusy(false);
-    }
-  }, [activeFile, fields, values, flatten, calculationOrder, dispatch, call, confirmSignedEdit]);
+    if (draft) await drafts.save(draft, fillFormValues);
+  }, [draft, drafts, fillFormValues]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.forms.open')} />;
 
@@ -397,13 +209,21 @@ export function FormsPanel(): React.ReactElement {
         </div>
       )}
 
+      {draft && (conflict || draft.error || !editable && !draft.loading && !busy) && (
+        <div role="alert" data-testid="forms-revision-notice">
+          <p>{conflict ? tChrome('panel.forms.sourceChanged') : status || tChrome('app.history.changed')}</p>
+          <button data-testid="forms-reload" disabled={busy} onClick={() => void drafts.reload(draft, runCommitGate)}>
+            {drafts.dirty(draft) ? tChrome('panel.forms.discardReload') : tChrome('app.commit.retry')}
+          </button>
+        </div>
+      )}
       {reading ? (
         <div className="text-sm text-neutral-500">{tChrome('panel.forms.reading')}</div>
       ) : fields.length === 0 ? (
         <div className="text-sm text-neutral-500">{tChrome('panel.forms.noFields')}</div>
       ) : (
         <>
-          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pe-1" tabIndex={0} role="region" aria-label={tChrome('panel.forms.fieldsAria')}>
+          <fieldset disabled={!editable} className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pe-1" tabIndex={0} role="region" aria-label={tChrome('panel.forms.fieldsAria')}>
             {fields.map((f) => (
               <FieldRow
                 key={f.name}
@@ -412,14 +232,15 @@ export function FormsPanel(): React.ReactElement {
                 onChange={(v) => setValue(f.name, v)}
               />
             ))}
-          </div>
+          </fieldset>
           <div className="shrink-0 flex items-center gap-4 pt-2 border-t border-neutral-800">
             <label className="flex items-center gap-2 cursor-pointer text-sm text-neutral-400">
               <input
                 data-testid="forms-flatten"
                 type="checkbox"
                 checked={flatten}
-                onChange={() => setFlatten((v) => !v)}
+                disabled={!editable}
+                onChange={() => { if (draft) drafts.setFlatten(draft, buffer, !flatten); }}
                 className="rounded bg-neutral-800 border-neutral-700"
               />
               {tChrome('panel.forms.flatten')}
@@ -427,7 +248,7 @@ export function FormsPanel(): React.ReactElement {
             <button
               data-testid="forms-apply"
               onClick={handleApply}
-              disabled={busy || editableCount === 0}
+              disabled={busy || !editable || editableCount === 0}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
             >
               {busy ? tChrome('panel.forms.applying') : flatten ? tChrome('panel.forms.fillFlatten') : tChrome('panel.forms.fillForm')}

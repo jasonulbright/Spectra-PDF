@@ -74,6 +74,10 @@ export interface TestStateSnapshot {
   } | null;
 }
 
+export interface TestHistoryState {
+  undo: string[]; redo: string[]; buffer: number[];
+}
+
 export interface TestAnnotationInput {
   kind: 'highlight' | 'freetext' | 'ink' | 'stamp';
   x: number;
@@ -1345,6 +1349,8 @@ export interface CanvasFormsHandlers {
     multiline?: boolean;
     comb?: boolean;
     maxLength?: number;
+    writing?: import('./lib/form-writing').FieldWriting;
+    script?: import('./lib/form-writing').FieldScript;
     /** Format / accepted range / calculation, in the renderer's own spelling —
      * the same object the card's control produces. */
     actions?: import('./lib/form-candidates').FieldActions;
@@ -1542,6 +1548,7 @@ export interface TestHarness {
   setDocViewMode: (mode: 'organize' | 'document') => void;
   /** Snapshot of currently observable state, for assertions. */
   getState: () => TestStateSnapshot;
+  getHistoryState: () => TestHistoryState | null;
   /** Wait for the next state change matching a predicate (10s timeout). */
   waitForState: (
     predicate: (s: TestStateSnapshot) => boolean,
@@ -1763,6 +1770,8 @@ export interface TestHarness {
     multiline?: boolean;
     comb?: boolean;
     maxLength?: number;
+    writing?: import('./lib/form-writing').FieldWriting;
+    script?: import('./lib/form-writing').FieldScript;
     /** Format / accepted range / calculation, in the renderer's own spelling —
      * the same object the card's control produces. */
     actions?: import('./lib/form-candidates').FieldActions;
@@ -2353,6 +2362,7 @@ export interface TestHarnessDeps {
   setTool: (tool: string) => void;
   setDocViewMode: (mode: 'organize' | 'document') => void;
   getStateSnapshot: () => TestStateSnapshot;
+  getHistoryState: () => TestHistoryState | null;
   subscribe: (listener: (s: TestStateSnapshot) => void) => () => void;
   /** First page of the active file's first workspace document, once the
    * async indexer has produced one; null until then. */
@@ -2630,6 +2640,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     setDocViewMode: (mode) => deps.setDocViewMode(mode),
     getActiveDocPages: () => deps.getActiveDocPages(),
     getState: () => deps.getStateSnapshot(),
+    getHistoryState: () => deps.getHistoryState(),
     waitForState: (predicate, timeoutMs = 10_000) =>
       new Promise<TestStateSnapshot>((resolve, reject) => {
         const initial = deps.getStateSnapshot();

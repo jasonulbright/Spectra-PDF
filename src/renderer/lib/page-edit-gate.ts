@@ -15,6 +15,7 @@
 // tier already renders.
 import {
   signedEditDecision,
+  parseSignaturePolicy,
   type SignaturePolicy,
   type SignedEditDecision,
 } from './signatures';
@@ -56,6 +57,8 @@ const APPROVAL_CARRIES: readonly PageDelta[] = ['page-keys', 'page-structure'];
 /** Whether the commit's transplant will carry this delta as an appended
  * revision, leaving the document's signatures verifying. */
 export function transplantPreserves(policy: SignaturePolicy, delta: PageDelta): boolean {
+  policy = parseSignaturePolicy(policy, false);
+  if (policy.error) return false;
   if (policy.certified) {
     const level =
       policy.level === 'form-fill' || policy.level === 'annotate' || policy.level === 'none'
@@ -81,6 +84,8 @@ export function pageEditDecision(
   policy: SignaturePolicy,
   delta: PageDelta,
 ): SignedEditDecision {
+  policy = parseSignaturePolicy(policy, false);
+  if (policy.error) return signedEditDecision(policy, 'structural');
   if (!policy.signed && !policy.certified) return { kind: 'proceed' };
   if (transplantPreserves(policy, delta)) return { kind: 'proceed' };
   return signedEditDecision(policy, 'structural');

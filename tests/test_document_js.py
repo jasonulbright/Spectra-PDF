@@ -166,3 +166,87 @@ class TestDocumentJs:
         broken = "function( { this is not valid javascript"
         set_document_js(src, out, [{"name": "Bad", "js": broken}])
         assert list_document_js(out)["scripts"][0]["js"] == broken
+
+
+def _editable_fixture(tmp_path, mutate=None):
+    source = tmp_path / 'scripts.pdf'
+    with pikepdf.new() as pdf:
+        pdf.add_blank_page()
+        action = pdf.make_indirect(pikepdf.Dictionary(S=pikepdf.Name.JavaScript, JS=pikepdf.String('// original')))
+        tree = pdf.make_indirect(pikepdf.Dictionary(Names=pikepdf.Array(['Script', action])))
+        pdf.Root.Names = pikepdf.Dictionary(JavaScript=tree)
+        if mutate:
+            mutate(pdf, tree, action)
+        pdf.save(source)
+    return source
+
+
+@pytest.mark.parametrize('kind', ['names-scalar', 'tree-scalar', 'odd', 'both', 'key-scalar', 'duplicate',
+    'unsorted', 'action-scalar', 'missing-js', 'wrong-js', 'next', 'wrong-type', 'wrong-action', 'opaque',
+    'bad-utf16', 'bad-stream', 'bad-filter', 'root-limits', 'child-limits', 'wrong-limits', 'direct-child',
+    'cycle', 'decoded-collision', 'oversize'])
+def test_strict_editor_never_authorizes_partial_or_lossy_replacement(tmp_path, kind):
+    def mutate(pdf, tree, action):
+        if kind == 'names-scalar': pdf.Root.Names = 42
+        elif kind == 'tree-scalar': pdf.Root.Names.JavaScript = 42
+        elif kind == 'odd': tree.Names.append(pikepdf.String('dangling'))
+        elif kind == 'both': tree.Kids = pikepdf.Array()
+        elif kind == 'key-scalar': tree.Names[0] = 42
+        elif kind == 'duplicate': tree.Names.extend(['Script', action])
+        elif kind == 'unsorted': tree.Names.extend(['A', action])
+        elif kind == 'action-scalar': tree.Names[1] = 42
+        elif kind == 'missing-js': del action['/JS']
+        elif kind == 'wrong-js': action.JS = 42
+        elif kind == 'next': action.Next = pikepdf.Dictionary(S=pikepdf.Name.JavaScript, JS='// second')
+        elif kind == 'wrong-type': action.Type = pikepdf.Name.Other
+        elif kind == 'wrong-action': action.S = pikepdf.Name.URI
+        elif kind == 'opaque': action.PrivateData = 'must survive'
+        elif kind == 'bad-utf16': action.JS = pikepdf.String(b'\xfe\xff\xd8\x00')
+        elif kind == 'bad-stream': action.JS = pdf.make_stream(b'\xfe\xff\x00')
+        elif kind == 'bad-filter':
+            action.JS = pdf.make_stream(b'broken'); action.JS.Filter = pikepdf.Name.FlateDecode
+        elif kind == 'root-limits': tree.Limits = pikepdf.Array(['Script', 'Script'])
+        elif kind in ('child-limits', 'wrong-limits', 'direct-child'):
+            leaf = pikepdf.Dictionary(Names=tree.Names, Limits=pikepdf.Array(['Script', 'Script']))
+            if kind == 'child-limits': del leaf['/Limits']
+            if kind == 'wrong-limits': leaf.Limits = pikepdf.Array(['Other', 'Script'])
+            del tree['/Names']; tree.Kids = pikepdf.Array([leaf if kind == 'direct-child' else pdf.make_indirect(leaf)])
+        elif kind == 'cycle': del tree['/Names']; tree.Kids = pikepdf.Array([tree])
+        elif kind == 'decoded-collision': tree.Names.extend([pikepdf.String(b'\xfe\xff' + 'Script'.encode('utf-16-be')), action])
+        elif kind == 'oversize': action.JS = pdf.make_stream(b'\xfe\xff' + b'\x00x' * 1000001)
+    source = _editable_fixture(tmp_path, mutate); before = source.read_bytes()
+    assert list_document_js(str(source), for_edit=True) == {'scripts': [], 'count': 0, 'complete': False}
+    assert source.read_bytes() == before
+
+
+def test_strict_complete_nested_tree_and_empty_controls(tmp_path):
+    def nested(pdf, tree, action):
+        tree.Kids = pikepdf.Array([pdf.make_indirect(pikepdf.Dictionary(Names=tree.Names, Limits=pikepdf.Array(['Script', 'Script'])))])
+        del tree['/Names']; action.Type = pikepdf.Name.Action
+    source = _editable_fixture(tmp_path, nested)
+    assert list_document_js(str(source), for_edit=True) == {'scripts': [{'name': 'Script', 'js': '// original'}], 'count': 1, 'complete': True}
+    set_document_js(str(source), str(source), [])
+    assert list_document_js(str(source), for_edit=True) == {'scripts': [], 'count': 0, 'complete': True}
+
+
+@pytest.mark.parametrize('bad', [42, {}, [{'name': 2, 'js': ''}], [{'name': 'x', 'js': 1}],
+    [{'name': 'x', 'js': 'x' * 1000001}]])
+def test_invalid_writer_preserves_existing_source_and_destination(tmp_path, bad):
+    source = _editable_fixture(tmp_path); dest = tmp_path / 'dest.pdf'; dest.write_bytes(b'existing destination')
+    before = source.read_bytes()
+    with pytest.raises(ValueError): set_document_js(str(source), str(dest), bad)
+    assert source.read_bytes() == before; assert dest.read_bytes() == b'existing destination'
+
+
+def test_whitespace_name_and_unicode_stream_round_trip_without_identity_change(tmp_path):
+    source = _editable_fixture(tmp_path); out = tmp_path / 'out.pdf'
+    scripts = [{'name': ' Script ', 'js': '// café — 你好 😀'}, {'name': 'Script', 'js': 'function( { invalid is still text'}]
+    set_document_js(str(source), str(out), scripts)
+    assert list_document_js(str(out), for_edit=True) == {'scripts': scripts, 'count': 2, 'complete': True}
+
+
+def test_strict_read_budget_also_applies_to_writer(tmp_path):
+    source = _editable_fixture(tmp_path); before = source.read_bytes()
+    with pytest.raises(ValueError, match='limits'):
+        set_document_js(str(source), str(source), [{'name': 'A', 'js': 'a' * 500000}, {'name': 'B', 'js': 'b' * 500000}])
+    assert source.read_bytes() == before

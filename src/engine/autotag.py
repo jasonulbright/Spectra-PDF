@@ -366,6 +366,7 @@ def autotag(file: str, output: str) -> dict:
             save_pdf(pdf, output_path)
 
     return {
+        "output": str(output_path),
         "pages": next_key,
         "tagged": tally["P"] + tally["H1"] + tally["H2"] + tally["Figure"],
         "headings": tally["H1"] + tally["H2"],

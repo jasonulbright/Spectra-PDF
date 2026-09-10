@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
-import { file, app, dialog, batch, actionFile } from '../lib/tauri-bridge';
+import { app, dialog, batch, actionFile } from '../lib/tauri-bridge';
+import { EDIT_DECLINED } from '../lib/edit-text';
+import { isOpMethod } from '../lib/op-edit-class';
 import { getSettings } from '../lib/app-settings';
 import { gsBlocked, requireGsPath } from '../lib/gs-capability';
 import { useGsCapability } from '../hooks/useGsCapability';
@@ -78,9 +80,9 @@ type StepStatus = 'pending' | 'running' | 'done' | { error: string };
 export function GuidedActionsPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, openNewFiles, dispatch } = useActiveFile();
+  const { activeFile, openNewFiles } = useActiveFile();
   const { call, callRaw, saveFile } = useEngine();
-  const { confirmSignedEdit } = useOperations();
+  const { performOperation } = useOperations();
   const [actions, setActions] = useState<GuidedAction[]>(() => loadGuidedActions());
   const [view, setView] = useState<PanelView>({ kind: 'list' });
   const [editError, setEditError] = useState<string | null>(null);
@@ -99,22 +101,6 @@ export function GuidedActionsPanel(): React.ReactElement {
     saveGuidedActions(list);
   };
 
-  const reloadFile = useCallback(
-    async (snapshotPath: string) => {
-      if (!activeFile) return;
-      const buf = await file.readBuffer(activeFile.workingPath);
-      const pages = await call('get_page_count', { file: activeFile.workingPath });
-      dispatch({
-        type: 'UPDATE_FILE',
-        path: activeFile.path,
-        pageCount: pages.pages,
-        buffer: buf,
-        snapshotPath,
-      });
-    },
-    [activeFile, call, dispatch],
-  );
-
   const executeRun = useCallback(
     async (action: GuidedAction, values: RunValues, terminalOverride?: string) => {
       if (!activeFile || running) return;
@@ -129,20 +115,8 @@ export function GuidedActionsPanel(): React.ReactElement {
         terminalOutput = (await saveFile(terminalOutputName(action.steps[terminalIndex]))) ?? null;
         if (!terminalOutput) return;
       }
-      // ONE signed-document decision for the whole run, before any step
-      // touches the document: an in-place step here is always a whole-file
-      // rewrite (`structural`), and asking per step would put the same dialog
-      // in front of a user N times for one gesture. A run whose only steps
-      // write elsewhere never asks. Taken before the first `file.snapshot`,
-      // whose commit gate would otherwise flush pending page edits on the way
-      // to refusing the run.
-      const touchesDocument = action.steps.some((s) => !stepDefFor(s.op).terminalOutput);
-      if (
-        touchesDocument &&
-        !(await confirmSignedEdit(activeFile.path, workingPath, 'structural'))
-      ) {
-        return;
-      }
+      // Each step asks against the revision it will actually publish, before
+      // its gate. Never reuse consent across an intervening document edit.
       setView({ kind: 'run', action });
       setRunStatuses(action.steps.map(() => 'pending'));
       setRunning(true);
@@ -167,14 +141,14 @@ export function GuidedActionsPanel(): React.ReactElement {
                 ...extras,
               });
             } else {
-              const snapshotPath = await file.snapshot(workingPath);
-              await call(engineMethodFor(step.op), {
-                file: workingPath,
-                output: workingPath,
+              const method = engineMethodFor(step.op);
+              if (!isOpMethod(method)) throw new Error(tChrome('app.operation.unverified'));
+              const result = await performOperation(activeFile.path, method, {
                 ...buildStepParams(step, values[i]),
                 ...extras,
-              });
-              await reloadFile(snapshotPath);
+              }, { expectedWorkingPath: workingPath, structuralConsent: true });
+              if (result === EDIT_DECLINED) throw new Error(tChrome('panel.spelling.reasonDeclined'));
+              if (result === null) throw new Error(tChrome('refusal.file.noLongerOpen'));
             }
             setRunStatuses((s) => s.map((v, j) => (j === i ? 'done' : v)));
           } catch (e: unknown) {
@@ -187,7 +161,7 @@ export function GuidedActionsPanel(): React.ReactElement {
         setRunning(false);
       }
     },
-    [activeFile, running, call, reloadFile, saveFile, confirmSignedEdit],
+    [activeFile, running, call, performOperation, saveFile],
   );
 
   /** Run entry: collect ask-at-run values first when any step wants them. */

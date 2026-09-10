@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEngine } from '../../hooks/useEngine';
 import { useOperations } from '../../hooks/useOperations';
-import { EDIT_DECLINED } from '../../lib/edit-text';
-import { useAppDispatch } from '../../state/AppStateProvider';
-import { file } from '../../lib/tauri-bridge';
+import { useBookmarkDrafts } from '../../state/AppStateProvider';
+import type { BookmarkDraft } from '../../lib/bookmark-drafts';
+import { runCommitGate } from '../../lib/commit-gate';
 import { getCanvasServices, pushEscapeInterceptor } from '../../commands/context';
 import {
   flattenOutline,
@@ -18,7 +18,7 @@ import { inlineDelta } from '../../lib/inline-direction';
 import { pageFieldWidth, pageLabelWidth } from '../../lib/page-field-width';
 import { ChromeIcon } from '../chrome-icons';
 import { TEST_HARNESS_ENABLED, registerCanvasOutline } from '../../testHarness';
-import type { OpenFile, PdfBuffer } from '../../state/types';
+import type { PdfBuffer } from '../../state/types';
 import type { NavPanelComponentProps } from './types';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../../i18n';
@@ -28,12 +28,13 @@ import { tChrome } from '../../i18n';
 // OutlinePanel's editing (rename / retarget page / add child / delete). Reorder
 // starts ONLY from the drag handle so the inline inputs stay editable. Every
 // mutation (reorder, edit-on-blur, add, delete) routes through one queued
-// persist (`set_outline` → snapshot → UPDATE_FILE), chained so two can't race —
-// same in-place-undoable path both predecessors used. `outline-reorder.ts` is
+// persist (private `set_outline` → validated publication), chained so two can't
+// race. `outline-reorder.ts` is
 // untouched.
 
 const INDENT_PX = 16;
 const DRAG_THRESHOLD_PX = 5;
+const EMPTY_NODES: OutlineNode[] = [];
 
 // Immutable tree update by index path (from OutlinePanel).
 function updateAt(
@@ -59,277 +60,56 @@ interface DragState {
   started: boolean;
   overIndex: number;
   depth: number;
-  filePath: string | undefined; // the file the drag started against
+  owner: BookmarkDraft;
+  buffer: PdfBuffer | null;
+  nodes: OutlineNode[];
 }
 
 export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { call } = useEngine();
-  const { performOperation, confirmSignedEdit } = useOperations();
-  const dispatch = useAppDispatch();
-  const [nodes, setNodes] = useState<OutlineNode[]>([]);
-  // The buffer reference whose real outline currently populates `nodes`. Every
-  // op that rewrites the working file installs a NEW buffer (UPDATE_FILE /
-  // COMMIT via applyFileUpdate, undo/redo via REFRESH_BUFFER), so comparing the
-  // shown file's buffer to this is a timing-INDEPENDENT "is `nodes` current for
-  // what's on disk?" signal — no post-save key to predict, no per-chain counter
-  // (two review rounds found races in the undoStack-length prediction: a stale
-  // snapshot, a failed save leaving a phantom slot, an A→B→A reseed). null until
-  // the first load, or reset to null to force a reload (no file / failed save).
-  const [loadedBuffer, setLoadedBuffer] = useState<PdfBuffer | null>(null);
-  const [status, setStatus] = useState('');
-  // In-flight saves per file path (ref-counted across the whole chain). A save
-  // OWNS the authoritative post-write tree, so the reload effect must not fetch-
-  // and-apply over one — its own `set_outline`/`file.snapshot` fires the commit
-  // gate, which can swap the buffer and trigger a reload mid-write that would
-  // otherwise land a stale tree and desync `nodes` from `loadedBuffer` (a later
-  // edit then silently clobbers the saved change — regression). `revalidate`
-  // re-runs the reload effect once a path's chain drains (so a lone failed save's
-  // revert, or an external change that arrived during a save, still reloads).
-  const savesInFlight = useRef<Map<string, number>>(new Map());
-  const [revalidate, setRevalidate] = useState(0);
+  const { performOperation } = useOperations();
+  const drafts = useBookmarkDrafts();
+  const draft = drafts.get(activeFile);
+  const nodes = draft?.nodes ?? EMPTY_NODES;
+  const loaded = !!draft?.loaded;
+  const editable = !!draft && drafts.editable(draft);
+  const conflict = !!draft && drafts.conflict(draft);
+  const status = conflict ? tChrome('nav.bookmarks.sourceChanged') : draft?.error || draft?.status || '';
+  const derive = draft?.preview ?? null, deriveMode = draft?.mode ?? 'replace', deriving = draft?.deriving ?? false;
   const [drag, setDrag] = useState<DragState | null>(null);
-  const [derive, setDerive] = useState<
-    { tagged: boolean; headings: number; existing: number; skipped: number } | null
-  >(null);
-  const [deriveMode, setDeriveMode] = useState<'replace' | 'append'>('replace');
-  const [deriving, setDeriving] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const session = useRef<DragState | null>(null);
-  const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
-  // The live active file, as a ref — every mutator captures THIS at the moment
-  // it fires (all mutators run synchronously in event handlers, before any
-  // re-render), so the queued save targets the file the user was editing, not
-  // "whichever file is active when the microtask happens to run". Without this,
-  // a doc-tab switch (or closing the edited file) between an on-blur commit and
-  // its deferred persist would write the edited tree onto the newly-active
-  // file — the same stale-target hazard the drag guards with `s.filePath`.
-  const activeFileRef = useRef(activeFile);
-  activeFileRef.current = activeFile;
+  const nodesRef = useRef(nodes); nodesRef.current = nodes;
+  const draftRef = useRef(draft); draftRef.current = draft;
+  const ioRef = useRef({ performOperation, call }); ioRef.current = { performOperation, call };
 
-  // A mutator may ONLY persist when the shown tree is the LOADED tree for the
-  // current file (its buffer === loadedBuffer) — otherwise it would write the
-  // empty initial `[]` (or, mid-switch, the previous file's tree) over the
-  // target's real bookmarks, and `set_outline` is a full REPLACE, not a merge
-  // (regression). Reads via refs so the event-handler callbacks see live
-  // values. `mutableTarget()` returns the file to write to, or null while its
-  // outline is still loading.
-  const loadedBufferRef = useRef(loadedBuffer);
-  loadedBufferRef.current = loadedBuffer;
-  const mutableTarget = useCallback((): OpenFile | null => {
-    const target = activeFileRef.current;
-    if (!target || target.buffer == null) return null;
-    // Valid when the shown tree is the loaded tree for this file, OR a save is
-    // already in flight for it: during a save the buffer churns (commit gate →
-    // UPDATE_FILE) while `nodes` stays the authoritative working tree (the
-    // reload is suppressed), so a concurrent edit is fine and queues after —
-    // without this it would be silently dropped in that window (regression).
-    if (target.buffer === loadedBufferRef.current) return target;
-    return (savesInFlight.current.get(target.path) ?? 0) > 0 ? target : null;
-  }, []);
-
-  // (Re)load when the shown file's BYTES change to something `nodes` doesn't
-  // already reflect — a file switch, an external whole-file op / undo / redo, or
-  // a forced revert. Our OWN saves set loadedBuffer to the exact buffer they
-  // dispatched (see persist), so they never self-trigger a reload that would
-  // clobber an in-progress inline edit.
-  useEffect(() => {
-    if (!activeFile || activeFile.buffer == null) {
-      setNodes([]);
-      setLoadedBuffer(null);
-      return;
-    }
-    if (activeFile.buffer === loadedBuffer) return;
-    // Don't fetch over an in-flight save for this file — it owns the post-write
-    // tree; `revalidate` re-runs us once its chain drains.
-    const path = activeFile.path;
-    if ((savesInFlight.current.get(path) ?? 0) > 0) return;
-    const targetBuffer = activeFile.buffer;
-    let cancelled = false;
-    call('get_outline', { file: activeFile.workingPath })
-      .then((res) => {
-        if (cancelled) return;
-        // Discard a read that raced a write: a save started while it was in
-        // flight (it owns the tree and will set nodes/loadedBuffer itself), or
-        // the file's bytes moved since we launched (a save that started AND
-        // finished, or an external change) — either way this read is stale and
-        // the buffer-change re-runs the effect for a fresh one.
-        if ((savesInFlight.current.get(path) ?? 0) > 0) return;
-        if (activeFileRef.current?.buffer !== targetBuffer) return;
-        setNodes((res.outline as OutlineNode[]) ?? []);
-        setLoadedBuffer(targetBuffer);
-        setStatus(res.truncated ? tChrome('nav.bookmarks.truncated') : '');
-      })
-      .catch((e: unknown) =>
-        setStatus(
-          tChrome('panel.common.error', {
-            message: e instanceof Error ? e.message : String(e),
-          }),
-        ),
-      );
-    return () => {
-      cancelled = true;
-    };
-  }, [activeFile, loadedBuffer, revalidate, call]);
-
-  // One persist path, chained so a reorder and an edit-save can't interleave
-  // (both stage the same working file). The `target` is captured by the caller
-  // at mutation time and threaded through — NOT re-read from a ref here — so a
-  // tab switch between the mutation and this deferred run can't redirect the
-  // write to a different file (regression). On success we advance
-  // loadedBuffer to the EXACT buffer we dispatched, so the reload effect sees
-  // `nodes` as already-current and doesn't self-reload (no key prediction, so no
-  // chained-save / failed-save / ping-pong race). A failure resets loadedBuffer
-  // to null, forcing a reload that reverts the optimistic tree to disk truth.
-  // Panel-local state is only touched while `target` is still the shown file.
-  const persist = useCallback(
-    async (next: OutlineNode[], target: OpenFile): Promise<void> => {
-      const stillShown = () => activeFileRef.current?.path === target.path;
-      if (stillShown()) setStatus(tChrome('nav.bookmarks.saving'));
-      try {
-        // `set_outline` rewrites the catalog's /Outlines: the file coalesces,
-        // so it is structural whatever a certification permits. Asked before
-        // the snapshot, whose commit gate would otherwise flush pending page
-        // edits on the way to refusing this one. Kept off `performOperation`
-        // because the success path advances `loadedBuffer` to the EXACT bytes
-        // dispatched — that identity is what stops the reload effect from
-        // self-reloading. A decline drops `loadedBuffer`, which is the same
-        // revert the failure path takes: the optimistic tree goes back to
-        // whatever the file actually holds.
-        if (!(await confirmSignedEdit(target.path, target.workingPath, 'structural'))) {
-          if (stillShown()) {
-            setStatus('');
-            setLoadedBuffer(null);
-          }
-          return;
-        }
-        const snapshotPath = await file.snapshot(target.workingPath);
-        await call('set_outline', {
-          file: target.workingPath,
-          outline: next,
-          output: target.workingPath,
-        });
-        const buffer = await file.readBuffer(target.workingPath);
-        dispatch({
-          type: 'UPDATE_FILE',
-          path: target.path,
-          pageCount: target.pageCount,
-          buffer,
-          snapshotPath,
-        });
-        if (stillShown()) {
-          setLoadedBuffer(buffer); // exactly what UPDATE_FILE installed → no self-reload
-          setStatus('');
-        }
-      } catch (e: unknown) {
-        if (stillShown()) {
-          setStatus(
-            tChrome('panel.common.error', {
-              message: e instanceof Error ? e.message : String(e),
-            }),
-          );
-          setLoadedBuffer(null); // reload from disk on failure so the view matches
-        }
-      }
-    },
-    [call, dispatch, confirmSignedEdit],
-  );
-  const persistRef = useRef(persist);
-  persistRef.current = persist;
-  const saveChain = useRef<Promise<void>>(Promise.resolve());
-  const queuePersist = useCallback((next: OutlineNode[], target: OpenFile): Promise<void> => {
-    const m = savesInFlight.current;
-    m.set(target.path, (m.get(target.path) ?? 0) + 1); // mark BEFORE the write's commit-gate can trigger a reload
-    const run = saveChain.current.then(() => persistRef.current(next, target));
-    saveChain.current = run.catch(() => {}).finally(() => {
-      const n = (m.get(target.path) ?? 1) - 1;
-      if (n <= 0) {
-        m.delete(target.path);
-        setRevalidate((v) => v + 1); // chain drained — let the reload effect re-check (revert / external change)
-      } else {
-        m.set(target.path, n);
-      }
-    });
-    return run;
-  }, []);
-
-  // ── Editing (from OutlinePanel) ──────────────────────────────────────────
-  // Local edits update `nodes`; commit on blur/Enter if the value changed so
-  // each finished field becomes one undoable save.
-  const editBaseline = useRef<OutlineNode[] | null>(null);
-  const beginEdit = useCallback(() => {
-    if (!editBaseline.current) editBaseline.current = nodesRef.current;
-  }, []);
-  const commitEdit = useCallback(() => {
-    const base = editBaseline.current;
-    editBaseline.current = null;
-    const target = mutableTarget();
-    if (target && base && !outlinesEqual(base, nodesRef.current)) void queuePersist(nodesRef.current, target);
-  }, [queuePersist, mutableTarget]);
-  // Commit a pending inline edit on unmount too — closing the pane / switching
-  // panels while a field is dirty-but-not-yet-blurred must not lose it (the
-  // async persist still lands via dispatch after unmount). commitEdit clears
-  // the baseline, so a blur-commit already fired makes this a no-op.
-  const commitEditRef = useRef(commitEdit);
-  commitEditRef.current = commitEdit;
-  useEffect(() => () => commitEditRef.current(), []);
-
+  useEffect(() => { if (draft) void drafts.load(draft, call); });
+  useEffect(() => () => { if (draft) drafts.cancelLoad(draft); }, [draft, drafts]);
+  const persist = useCallback(async () => {
+    if (draft) await drafts.flush(draft, performOperation, call, runCommitGate);
+  }, [draft, drafts, performOperation, call]);
+  // Blur, a document switch and pane unmount all finish the OLD session's
+  // gesture. The provider queue survives the pane, and deduplicates the blur.
+  useEffect(() => () => {
+    if (draft) void drafts.flush(draft, ioRef.current.performOperation, ioRef.current.call, runCommitGate);
+  }, [draft, drafts]);
+  const renderedBuffer = draft?.buffer ?? null;
   const editNode = useCallback((path: number[], fn: (n: OutlineNode) => OutlineNode | null) => {
-    beginEdit();
-    setNodes((prev) => updateAt(prev, path, fn));
-  }, [beginEdit]);
-
-  // Structural mutators: capture the target file, and — if an inline edit is
-  // still open — advance its baseline to the tree WE persist, so the eventual
-  // blur-commit doesn't re-detect this same structural change and fire a
-  // redundant second save (a stray extra undo step) (regression).
-  const rebaseIfEditing = useCallback((next: OutlineNode[]) => {
-    if (editBaseline.current) editBaseline.current = next;
-  }, []);
-
+    if (draft) drafts.change(draft, renderedBuffer, prev => updateAt(prev, path, fn));
+  }, [draft, drafts, renderedBuffer]);
+  const commitEdit = persist;
   const addRoot = useCallback(() => {
-    const target = mutableTarget();
-    if (!target) return;
-    const next = [
-      ...nodesRef.current,
-      { title: tChrome('nav.bookmarks.untitled'), page: null, children: [] },
-    ];
-    setNodes(next);
-    rebaseIfEditing(next);
-    void queuePersist(next, target);
-  }, [queuePersist, rebaseIfEditing, mutableTarget]);
-
-  const addChild = useCallback(
-    (path: number[]) => {
-      const target = mutableTarget();
-      if (!target) return;
-      const next = updateAt(nodesRef.current, path, (n) => ({
-        ...n,
-        children: [
-          ...n.children,
-          { title: tChrome('nav.bookmarks.untitled'), page: null, children: [] },
-        ],
-      }));
-      setNodes(next);
-      rebaseIfEditing(next);
-      void queuePersist(next, target);
-    },
-    [queuePersist, rebaseIfEditing, mutableTarget],
-  );
-
-  const deleteNode = useCallback(
-    (path: number[]) => {
-      const target = mutableTarget();
-      if (!target) return;
-      const next = updateAt(nodesRef.current, path, () => null);
-      setNodes(next);
-      rebaseIfEditing(next);
-      void queuePersist(next, target);
-    },
-    [queuePersist, rebaseIfEditing, mutableTarget],
-  );
+    if (!draft) return;
+    drafts.change(draft, renderedBuffer, prev => [...prev, { title: tChrome('nav.bookmarks.untitled'), page: null, children: [] }]);
+    void persist();
+  }, [draft, drafts, renderedBuffer, persist]);
+  const addChild = useCallback((path: number[]) => {
+    editNode(path, n => ({ ...n, children: [...n.children, { title: tChrome('nav.bookmarks.untitled'), page: null, children: [] }] }));
+    void persist();
+  }, [editNode, persist]);
+  const deleteNode = useCallback((path: number[]) => { editNode(path, () => null); void persist(); }, [editNode, persist]);
 
   const jumpTo = useCallback(
     (page: number | null) => {
@@ -397,24 +177,20 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
       detachRef.current();
       setDrag(null);
       if (!s || !s.started || !cache) return; // below threshold — not a reorder
-      // Abort if the active file changed mid-drag — the cache + path index the
-      // OLD tree; applying to the reloaded (different) file's outline would
-      // corrupt it and save to the wrong file (same guard as the Pages panel).
-      const target = mutableTarget();
-      if (!target || s.filePath !== target.path) return;
+      const target = s.owner;
+      if (!target || draftRef.current !== target || target.buffer !== s.buffer || target.nodes !== s.nodes || !drafts.editable(target)) return;
       const { overIndex, depth } = projectFromCache(s, cache, e.clientX, e.clientY);
       const next = moveOutlineNode(nodesRef.current, s.path, overIndex, depth);
       if (outlinesEqual(next, nodesRef.current)) return; // structural no-op
-      setNodes(next);
-      rebaseIfEditing(next);
-      void queuePersist(next, target);
+      drafts.change(target, s.buffer, () => next);
+      void drafts.flush(target, performOperation, call, runCommitGate);
     },
-    [queuePersist, rebaseIfEditing, mutableTarget],
+    [drafts, performOperation, call],
   );
 
   const onHandlePointerDown = useCallback(
     (path: number[], e: React.PointerEvent): void => {
-      if (e.button !== 0 || session.current) return;
+      if (e.button !== 0 || session.current || !draft || !drafts.editable(draft)) return;
       e.preventDefault();
       session.current = {
         path,
@@ -423,7 +199,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
         started: false,
         overIndex: 0,
         depth: 0,
-        filePath: activeFileRef.current?.path,
+        owner: draft, buffer: draft.buffer, nodes: draft.nodes,
       };
       const onUp = (ev: PointerEvent) => dragEnd(ev);
       const cancel = () => {
@@ -449,113 +225,31 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
         unEscape();
       };
     },
-    [dragMove, dragEnd],
+    [dragMove, dragEnd, draft, drafts],
   );
 
   useEffect(() => () => detachRef.current(), []);
+  useEffect(() => { detachRef.current(); session.current = null; dragCache.current = null; setDrag(null); }, [draft]);
 
-  // e2e harness (moved from OutlineSidebar): the tree drag is
-  // pointer-capture, so expose the reader + the exact drop path while mounted.
-  const queuePersistRef = useRef(queuePersist);
-  queuePersistRef.current = queuePersist;
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasOutline({
-      getOrder: () =>
-        flattenOutline(nodesRef.current).map((f) => ({
-          title: f.node.title,
-          depth: f.depth,
-          page: f.node.page,
-        })),
+      getOrder: () => flattenOutline(draft?.nodes ?? []).map(f => ({ title: f.node.title, depth: f.depth, page: f.node.page })),
       reorder: async (fromPath, overIndex, depth) => {
-        const target = mutableTarget();
-        if (!target) return;
-        const next = moveOutlineNode(nodesRef.current, fromPath, overIndex, depth);
-        setNodes(next);
-        rebaseIfEditing(next);
-        await queuePersistRef.current(next, target);
+        if (!draft) return;
+        drafts.change(draft, draft.buffer, prev => moveOutlineNode(prev, fromPath, overIndex, depth));
+        await drafts.flush(draft, performOperation, call, runCommitGate);
       },
     });
     return () => registerCanvasOutline(null);
-    // Register once for the panel's lifetime; the reorder closure reads live
-    // values through refs (nodesRef/queuePersistRef) and the stable-identity
-    // mutableTarget/rebaseIfEditing callbacks (empty-dep useCallbacks).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [draft, drafts, performOperation, call]);
 
-  // ── Bookmarks from structure ─────────────────────────────────────────────
-  // The preview states what the document carries BEFORE anything is written —
-  // the hairlines contract — and the two halves share the engine's own
-  // heading collector, so the count shown is the count built. A document that
-  // already has bookmarks gets the merge-or-replace choice rather than a
-  // silent decision; an UNTAGGED document is offered the chain (detect the
-  // headings, then build) and the status names which path ran, because
-  // "we read your tags" and "we guessed from font sizes" are different claims.
   const openDerive = useCallback(async () => {
-    const target = mutableTarget();
-    if (!target) return;
-    setDeriving(true);
-    setStatus(tChrome('nav.bookmarks.derive.reading'));
-    try {
-      const res = await call('preview_structure_outline', { file: target.workingPath });
-      const payload = res as unknown as {
-        tagged: boolean;
-        headings: number;
-        existing: number;
-        skipped: unknown[];
-      };
-      setDerive({
-        tagged: !!payload.tagged,
-        headings: payload.headings ?? 0,
-        existing: payload.existing ?? 0,
-        skipped: (payload.skipped ?? []).length,
-      });
-      setStatus('');
-    } catch (e: unknown) {
-      setStatus(
-        tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
-      );
-    } finally {
-      setDeriving(false);
-    }
-  }, [call, mutableTarget]);
-
-  const buildFromStructure = useCallback(
-    async (tagFirst: boolean) => {
-      const target = mutableTarget();
-      if (!target) return;
-      setDeriving(true);
-      setStatus(tChrome('nav.bookmarks.derive.building'));
-      try {
-        const res = await performOperation(target.path, 'outline_from_structure', {
-          mode: deriveMode,
-          tag_if_untagged: tagFirst,
-        });
-        if (res === EDIT_DECLINED) {
-          setStatus('');
-          return;
-        }
-        const payload = res as unknown as { added: number; source: string };
-        setDerive(null);
-        // The buffer changed, so the reload effect refetches the real tree —
-        // deliberately NOT set here: the engine authored it, and reading it
-        // back is the only way `nodes` and the file agree.
-        setLoadedBuffer(null);
-        setStatus(
-          payload.source === 'autotag'
-            ? tChrome('nav.bookmarks.derive.builtFromDetected', { count: payload.added })
-            : tChrome('nav.bookmarks.derive.builtFromTags', { count: payload.added }),
-        );
-      } catch (e: unknown) {
-        setStatus(
-          tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
-        );
-      } finally {
-        setDeriving(false);
-      }
-    },
-    [performOperation, deriveMode, mutableTarget],
-  );
+    if (draft) await drafts.preview(draft, call, runCommitGate);
+  }, [draft, drafts, call]);
+  const buildFromStructure = useCallback(async () => {
+    if (draft) await drafts.derive(draft, performOperation);
+  }, [draft, drafts, performOperation]);
 
   const flat = useMemo(() => flattenOutline(nodes), [nodes]);
   // Both page columns are sized to the document, so the widest page number in
@@ -566,19 +260,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const rest = draggedPath ? restRows(flat, draggedPath) : [];
   const indicatorPath = draggedPath ? rest[drag!.overIndex]?.path ?? null : null;
   const indicatorAtEnd = draggedPath ? drag!.overIndex >= rest.length : false;
-  // The shown tree is trustworthy only once THIS file's outline has loaded —
-  // until then `nodes` is the empty initial value (or, mid-switch, the previous
-  // file's tree). Gate the interactive UI on it so a click during the load
-  // window can't act on (and persist) a phantom tree — belt-and-suspenders with
-  // mutableTarget(), which already refuses the write.
-  // Loaded (rows interactive) when the shown tree is this file's loaded tree, OR
-  // a save is in flight for it — during a save the buffer churns but `nodes` is
-  // the authoritative working tree, so keeping rows mounted avoids a spurious
-  // "Loading…" flash and, more importantly, avoids a forced unmount-blur that
-  // would silently drop a concurrent edit in another field (regression).
-  const loaded =
-    activeFile?.buffer != null &&
-    (activeFile.buffer === loadedBuffer || (savesInFlight.current.get(activeFile.path) ?? 0) > 0);
+
 
   if (!activeFile) {
     return (
@@ -590,6 +272,15 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
 
   return (
     <div className="bookmarks-panel flex flex-col h-full min-h-0" data-testid="bookmarks-panel">
+      {draft && (conflict || draft.error || draft.readOnly) && (
+        <div role="alert" data-testid="bookmarks-revision-notice">
+          <p>{status}</p>
+          <button data-testid="bookmarks-reload" disabled={draft.busy || deriving} onClick={() => void drafts.reload(draft, runCommitGate)}>
+            {draft.dirty ? tChrome('nav.bookmarks.discardReload') : tChrome('app.commit.retry')}
+          </button>
+        </div>
+      )}
+      <fieldset disabled={!editable} className="min-h-0 flex-1 flex flex-col">
       <div className="navpanel-scroll bookmarks-list flex-1" ref={listRef}>
         {!loaded && (
           <p className="navpanel-empty" data-testid="bookmarks-loading">
@@ -702,6 +393,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
         })}
         {loaded && indicatorAtEnd && <div className="outline-drop-indicator" style={{ marginInlineStart: drag!.depth * INDENT_PX }} />}
       </div>
+      </fieldset>
       {derive && (
         <div className="bookmarks-derive" data-testid="bookmarks-derive">
           <div className="bookmarks-derive-state" data-testid="bookmarks-derive-state">
@@ -720,7 +412,8 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
               <select
                 data-testid="bookmarks-derive-mode"
                 value={deriveMode}
-                onChange={(e) => setDeriveMode(e.target.value === 'append' ? 'append' : 'replace')}
+                disabled={deriving}
+                onChange={(e) => { if (draft) drafts.setMode(draft, e.target.value === 'append' ? 'append' : 'replace'); }}
               >
                 <option value="replace">{tChrome('nav.bookmarks.derive.replace')}</option>
                 <option value="append">{tChrome('nav.bookmarks.derive.append')}</option>
@@ -730,8 +423,8 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
           <div className="bookmarks-derive-actions">
             <button
               data-testid="bookmarks-derive-build"
-              disabled={deriving || (derive.tagged && derive.headings === 0)}
-              onClick={() => void buildFromStructure(!derive.tagged)}
+              disabled={!editable || deriving || draft?.dirty || draft?.busy || (derive.tagged && derive.headings === 0)}
+              onClick={() => void buildFromStructure()}
               className="bookmark-add-btn disabled:opacity-60"
             >
               {derive.tagged
@@ -740,7 +433,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
             </button>
             <button
               data-testid="bookmarks-derive-cancel"
-              onClick={() => setDerive(null)}
+              onClick={() => { if (draft) drafts.cancelPreview(draft); }}
               className="bookmark-add-btn"
             >
               {tChrome('nav.bookmarks.derive.cancel')}
@@ -749,10 +442,15 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
         </div>
       )}
       <div className="bookmarks-footer">
+        {draft?.dirty && !conflict && !draft.readOnly && (
+          <button data-testid="bookmarks-retry" disabled={!editable || draft.busy} onClick={() => void persist()} className="bookmark-add-btn">
+            {tChrome(draft.error ? 'app.commit.retry' : 'dialog.common.save')}
+          </button>
+        )}
         <button
           data-testid="bookmark-add"
           onClick={addRoot}
-          disabled={!loaded}
+          disabled={!editable}
           className="bookmark-add-btn disabled:opacity-60"
         >
           {tChrome('nav.bookmarks.add')}
@@ -760,7 +458,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
         <button
           data-testid="bookmarks-from-structure"
           onClick={() => void openDerive()}
-          disabled={!loaded || deriving}
+          disabled={!editable || deriving || draft?.busy || draft?.dirty}
           className="bookmark-add-btn disabled:opacity-60"
         >
           {tChrome('nav.bookmarks.derive.open')}

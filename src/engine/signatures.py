@@ -999,6 +999,10 @@ def _certification_refusals(file: str, certify: bool, certify_level: str | None)
             "Choose none, form-fill, or annotate."
         )
     existing = certification_of_file(file)
+    from engine.incremental import signature_policy
+    from engine.docmdp import refuse_unreadable_policy
+    if existing.get("error") or signature_policy(file).get("error"):
+        refuse_unreadable_policy()
     if certify and existing["certified"]:
         existing_level = existing["level"] or "an unrecognized level"
         raise ValueError(

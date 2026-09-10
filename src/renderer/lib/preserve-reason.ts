@@ -23,6 +23,8 @@
  * composed `certified-<level>-forbids-<class>` name apart. */
 export interface PreserveOutcome {
   applied: boolean;
+  /** Policy uncertainty forbids the rewrite fallback as well as the append. */
+  blocked?: boolean;
   reason?: string | null;
   certification_level?: string | null;
 }

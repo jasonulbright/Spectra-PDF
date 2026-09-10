@@ -115,6 +115,25 @@ class TestLinks:
 class TestAddLinks:
     """Authoring link regions from a text selection (the N-cluster create half)."""
 
+    def test_single_append_index_is_the_previous_per_page_link_count(self, tmp_dir):
+        # The draft editor uses this correspondence when typing continues
+        # during Create. Non-link annotations never contribute an index.
+        src = os.path.join(tmp_dir, "s.pdf")
+        _pdf(src)
+        for page in (1, 2, 1):
+            before = list_links(src)["links"]
+            index = sum(link["page"] == page for link in before)
+            url = f"https://new.example/{page}/{index}"
+            add_links(src, src, links=[{"page": page, "rect": [10, 100, 50, 130], "url": url}])
+            after = list_links(src)["links"]
+            added = next(link for link in after if link["page"] == page and link["index"] == index)
+            assert added["target"] == url
+            assert [link for link in after if link is not added] == before
+            set_link_target(src, src, page=page, index=index, target={"kind": "uri", "url": url + "/edited"})
+            edited = list_links(src)["links"]
+            assert len(edited) == len(after)
+            assert next(link for link in edited if link["page"] == page and link["index"] == index)["target"] == url + "/edited"
+
     def test_adds_one_link_per_quad_and_keeps_existing(self, tmp_dir):
         src = os.path.join(tmp_dir, "s.pdf")
         out = os.path.join(tmp_dir, "o.pdf")

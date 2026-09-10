@@ -3,14 +3,18 @@ import type { NewFieldSpec } from '../lib/form-authoring';
 import type { EDIT_DECLINED } from '../lib/edit-text';
 import type { OpMethod } from '../lib/op-edit-class';
 import type { EditClass } from '../lib/signatures';
-import type { EngineResult } from './useEngine';
+import type { OperationOptions, WorkspaceOperationResult } from '../lib/operation-transaction';
+import type { FormFillOptions, FormFillReceipt } from '../lib/form-fill-transaction';
+import type { FormFieldValue } from '../lib/forms';
 
-/** An undoable in-place workspace operation: snapshot the working copy, run the
- * engine op writing back to it, reload, and push an UPDATE_FILE undo entry.
+/** An undoable workspace operation: finish and validate private output, then
+ * publish working bytes, buffer and the original undo snapshot together.
  * This is App's `performOperation` — the SAME instance the canvas edit handlers
  * use — exposed to panels (which take no props) so an in-place op like
  * signing routes through the ONE flow instead of duplicating the snapshot/
- * commit choreography (and drifting from it).
+ * commit choreography (and drifting from it). The publication receipt is the
+ * exact accepted file revision, even if another revision becomes current before
+ * the caller resumes. A `following` sequence is one edit and one undo entry.
  *
  * Resolves with the ENGINE's own answer, not with nothing: an operation that
  * reports what it could not do — a partial conversion, a count of what changed
@@ -31,7 +35,11 @@ export type PerformOperation = (
   filePath: string,
   method: OpMethod,
   params: Record<string, unknown>,
-) => Promise<EngineResult | null | typeof EDIT_DECLINED>;
+  options?: OperationOptions,
+) => Promise<WorkspaceOperationResult | null | typeof EDIT_DECLINED>;
+
+export type FillFormValues = (filePath: string, values: Record<string, FormFieldValue>,
+  options?: FormFillOptions) => Promise<FormFillReceipt | typeof EDIT_DECLINED>;
 
 /** Author N form fields as ONE undoable act — App's `handleAddFormFields`, the
  * same instance the canvas placement card calls. Field creation is renderer-side
@@ -67,6 +75,7 @@ export type ConfirmSignedEdit = (
 interface OperationsValue {
   performOperation: PerformOperation;
   addFormFields: AddFormFields;
+  fillFormValues: FillFormValues;
   confirmSignedEdit: ConfirmSignedEdit;
 }
 
@@ -75,16 +84,18 @@ const OperationsContext = createContext<OperationsValue | null>(null);
 export function OperationsProvider({
   performOperation,
   addFormFields,
+  fillFormValues,
   confirmSignedEdit,
   children,
 }: {
   performOperation: PerformOperation;
   addFormFields: AddFormFields;
+  fillFormValues: FillFormValues;
   confirmSignedEdit: ConfirmSignedEdit;
   children: ReactNode;
 }): React.ReactElement {
   return (
-    <OperationsContext.Provider value={{ performOperation, addFormFields, confirmSignedEdit }}>
+    <OperationsContext.Provider value={{ performOperation, addFormFields, fillFormValues, confirmSignedEdit }}>
       {children}
     </OperationsContext.Provider>
   );

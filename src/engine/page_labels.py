@@ -22,6 +22,18 @@ from engine.pdf_save import save_pdf
 _STYLES = {"D", "r", "R", "a", "A"}
 
 
+class _UnreadableLabels(Exception):
+    """Internal read failure: never publish a partial editable replacement."""
+
+
+def _label_budget(style: str, number: int) -> None:
+    # Roman/alphabetic labels grow with the number, not its digit count.
+    # Bound expansion before allocating it (also used by the writer).
+    length = number // 1000 + 32 if style in ("r", "R") else number // 26 + 1 if style in ("a", "A") else 32
+    if length > 10000 or number > 9007199254740991:
+        raise _UnreadableLabels
+
+
 def _to_roman(n: int) -> str:
     if n <= 0:
         return ""
@@ -81,8 +93,15 @@ def label_for(ranges: list[dict], page_index: int) -> str:
 def _normalize(ranges: list[dict], total: int) -> list[dict]:
     out = []
     seen = set()
-    for rng in ranges or []:
-        start = int(rng["start"])
+    if not isinstance(ranges, list):
+        raise ValueError("Invalid page label ranges")
+    for rng in ranges:
+        if (not isinstance(rng, dict) or type(rng.get("start")) is not int
+                or type(rng.get("start_at", 1)) is not int
+                or rng.get("start_at", 1) < 1
+                or not isinstance(rng.get("prefix", ""), str)):
+            raise ValueError("Invalid page label ranges")
+        start = rng["start"]
         if start < 0 or start >= total:
             raise ValueError(f"range start {start} is out of range (0-{total - 1})")
         if start in seen:
@@ -98,33 +117,110 @@ def _normalize(ranges: list[dict], total: int) -> list[dict]:
             "start_at": int(rng.get("start_at", 1)),
         })
     out.sort(key=lambda r: r["start"])
+    if out and out[0]["start"] != 0:
+        out.insert(0, {"start": 0, "style": "D", "prefix": "", "start_at": 1})
+    try:
+        _render_labels(out, total)
+    except _UnreadableLabels:
+        raise ValueError("Invalid page label ranges") from None
     return out
 
 
+def _read_ranges(pdf) -> list[dict]:
+    """Read the entire number tree, or refuse it (ISO 32000-2 7.9.7, 12.4.2).
+
+    A malformed child, duplicate key or exhausted budget is not an absent
+    range. Limits are checked against the actual descendants, never trusted
+    as permission to skip them. Unknown range data cannot be round-tripped
+    by this editor and likewise cannot authorize a replacement.
+    """
+    if "/PageLabels" not in pdf.Root:
+        return []
+    ranges, seen = [], set()
+    count = 0
+
+    def walk(node, depth=0):
+        nonlocal count
+        count += 1
+        if count > 10000 or depth > 64 or not isinstance(node, Dictionary):
+            raise _UnreadableLabels
+        if node.objgen != (0, 0):
+            if node.objgen in seen:
+                raise _UnreadableLabels
+            seen.add(node.objgen)
+        nums, kids = node.get("/Nums"), node.get("/Kids")
+        first = len(ranges)
+        if (nums is None) == (kids is None):
+            raise _UnreadableLabels
+        if nums is not None:
+            if not isinstance(nums, Array) or len(nums) % 2:
+                raise _UnreadableLabels
+            for i in range(0, len(nums), 2):
+                start, d = nums[i], nums[i + 1]
+                if (type(start) is not int or not 0 <= start < len(pdf.pages)
+                        or ranges and start <= ranges[-1]["start"]
+                        or not isinstance(d, Dictionary) or set(d.keys()) - {"/Type", "/S", "/P", "/St"}
+                        or d.get("/Type", Name.PageLabel) != Name.PageLabel):
+                    raise _UnreadableLabels
+                style, prefix, value = d.get("/S"), d.get("/P"), d.get("/St", 1)
+                if (style is not None and (not isinstance(style, Name) or str(style)[1:] not in _STYLES)
+                        or prefix is not None and not isinstance(prefix, String)
+                        or type(value) is not int or value < 1):
+                    raise _UnreadableLabels
+                ranges.append({"start": start, "style": str(style)[1:] if style is not None else "none",
+                               "prefix": str(prefix) if prefix is not None else "", "start_at": value})
+        else:
+            if not isinstance(kids, Array) or not kids:
+                raise _UnreadableLabels
+            for kid in kids:
+                if not isinstance(kid, Dictionary) or kid.objgen == (0, 0):
+                    raise _UnreadableLabels
+                walk(kid, depth + 1)
+        limits = node.get("/Limits")
+        if depth > 0 and limits is None or depth == 0 and limits is not None:
+            raise _UnreadableLabels
+        if limits is not None:
+            if (not isinstance(limits, Array) or len(limits) != 2 or not all(type(n) is int for n in limits)
+                    or first == len(ranges) or list(limits) != [ranges[first]["start"], ranges[-1]["start"]]):
+                raise _UnreadableLabels
+    walk(pdf.Root.get("/PageLabels"))
+    if not ranges or ranges[0]["start"] != 0:
+        raise _UnreadableLabels
+    return ranges
+
+
+def _render_labels(ranges: list[dict], total: int) -> list[str]:
+    """Read and write share one expansion budget, so writes stay readable."""
+    labels, size, index = [], 0, -1
+    for page in range(total):
+        while index + 1 < len(ranges) and ranges[index + 1]["start"] <= page:
+            index += 1
+        active = ranges[index] if index >= 0 else None
+        if active:
+            value = active["start_at"] + page - active["start"]
+            _label_budget(active["style"], value)
+            if len(active["prefix"]) > 10000:
+                raise _UnreadableLabels
+            label = active["prefix"] + _format(active["style"], value)
+        else:
+            label = str(page + 1)
+        size += len(label)
+        if size > 1000000:
+            raise _UnreadableLabels
+        labels.append(label)
+    return labels
+
+
 def get_page_labels(file: str) -> dict:
-    """Read the /PageLabels ranges. `labels` is the visible label per page."""
+    """Only complete reads may seed the editor; `labels` is for navigation."""
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)
-        ranges: list[dict] = []
-        pl = pdf.Root.get("/PageLabels")
-        nums = pl.get("/Nums") if pl is not None else None
-        if nums is not None:
-            i = 0
-            while i + 1 < len(nums):
-                try:
-                    start = int(nums[i])
-                    d = nums[i + 1]
-                    style_obj = d.get("/S")
-                    style = str(style_obj).lstrip("/") if style_obj is not None else "none"
-                    prefix = str(d.get("/P")) if d.get("/P") is not None else ""
-                    start_at = int(d.get("/St")) if d.get("/St") is not None else 1
-                    ranges.append({"start": start, "style": style, "prefix": prefix, "start_at": start_at})
-                except (TypeError, ValueError, AttributeError):
-                    pass
-                i += 2
-        ranges.sort(key=lambda r: r["start"])
-        labels = [label_for(ranges, p) for p in range(total)]
-        return {"ranges": ranges, "labels": labels, "count": len(ranges)}
+        try:
+            ranges = _read_ranges(pdf)
+            labels = _render_labels(ranges, total)
+            return {"ranges": ranges, "labels": labels, "count": len(ranges), "complete": True}
+        except (pikepdf.PdfError, TypeError, ValueError, AttributeError, _UnreadableLabels):
+            return {"ranges": [], "labels": [], "count": 0, "complete": False}
 
 
 def set_page_labels(file: str, output: str, ranges: list[dict]) -> dict:

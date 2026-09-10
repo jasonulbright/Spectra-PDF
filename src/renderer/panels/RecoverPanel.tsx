@@ -6,6 +6,7 @@ import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import { suffixedOutputName } from '../lib/output-names';
+import { recoveryOutcome } from '../lib/recovery-result';
 
 export function RecoverPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -25,11 +26,16 @@ export function RecoverPanel(): React.ReactElement {
     try {
       const r = await call('recover', { file: activeFile.workingPath, output });
       setReport(r);
-      if (r.lost === 0) {
+      const outcome = recoveryOutcome(r);
+      if (outcome === 'complete') {
         setStatus(tChrome('panel.recover.doneAll', { count: r.recovered }));
-      } else {
+      } else if (outcome === 'partial') {
         setStatus(tChrome('panel.recover.donePartial', {
           recovered: r.recovered, total: r.total_pages, lost: r.lost,
+        }));
+      } else {
+        setStatus(tChrome('panel.common.error', {
+          message: r.enumeration_error || tChrome('panel.standards.undetermined'),
         }));
       }
     } catch (e: unknown) { setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) })); setReport(null); }
@@ -45,11 +51,11 @@ export function RecoverPanel(): React.ReactElement {
       <button onClick={handleRecover} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
         {busy ? tChrome('panel.recover.busy') : tChrome('panel.recover.recover')}
       </button>
-      {report && report.lost_pages && report.lost_pages.length > 0 && (
+      {report && report.lost_pages && report.recovered_pages && recoveryOutcome(report) !== 'complete' && (
         <div className="bg-neutral-800 rounded p-3 text-xs max-h-48 overflow-y-auto" tabIndex={0} role="region" aria-label={tChrome('panel.recover.reportAria')}>
           <div className="text-neutral-300 mb-1 font-medium">{tChrome('panel.recover.reportTitle')}</div>
           <div className="text-green-400 mb-1">{tChrome('panel.recover.recoveredPages', { pages: report.recovered_pages.join(', ') })}</div>
-          <div className="text-red-400 mb-1">{tChrome('panel.recover.lostPages')}</div>
+          {report.lost_pages.length > 0 && <div className="text-red-400 mb-1">{tChrome('panel.recover.lostPages')}</div>}
           {report.lost_pages.map((lp, i: number) => (
             <div key={i} className="text-red-400 ps-2">
               {tChrome('panel.recover.lostLine', { page: lp.page, error: lp.error })}

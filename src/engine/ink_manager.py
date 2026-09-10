@@ -459,6 +459,7 @@ def alias_ink(
             raise ValueError(f'Ink "{source}" is not used in this document.')
         _save(pdf, file, output)
     return {
+        "output": str(output),
         "source": source,
         "target": target,
         "renamed": renamed,
@@ -908,6 +909,7 @@ def spot_to_process(
         _save(pdf, file, output)
 
     return {
+        "output": str(output),
         "inks": sorted(wanted),
         "carried": sorted(carried),
         "spaces": converted_spaces,

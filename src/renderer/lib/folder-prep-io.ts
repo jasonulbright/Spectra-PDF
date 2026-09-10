@@ -10,7 +10,7 @@
 import { batch } from './tauri-bridge';
 import type { DetectRequest, FolderPrepIo } from './folder-prep';
 import type { DetectedCandidate, DetectionResult } from './form-candidates';
-import type { SignaturePolicy } from './signatures';
+import { parseSignaturePolicy } from './signatures';
 
 export function createFolderPrepIo(
   callRaw: (method: string, params: Record<string, unknown>) => Promise<unknown>,
@@ -28,7 +28,7 @@ export function createFolderPrepIo(
       })) as DetectionResult;
     },
     async signaturePolicy(abs) {
-      return (await callRaw('signature_policy', { path: abs })) as SignaturePolicy;
+      return parseSignaturePolicy(await callRaw('signature_policy', { path: abs }));
     },
     async create(abs, output, candidates: DetectedCandidate[], includeSigned) {
       // The rows go back to the engine as they arrived: the grouping that

@@ -29,6 +29,16 @@ export type OpEditClass = EditClass | 'none';
  * literal union of the keys.
  */
 export const OP_EDIT_CLASS = {
+  // Guided Actions' whole-document transformations use the same publication
+  // path as individually invoked operations.
+  compress: 'structural',
+  optimize: 'structural',
+  grayscale: 'structural',
+  convert_pdfa: 'structural',
+  strip_metadata: 'structural',
+  search_and_redact: 'structural',
+  prepare_form_fields: 'structural',
+  ocr_file: 'structural',
   // ── Redaction ─────────────────────────────────────────────────────────
   // Applying rewrites page content, so it is structural however small the
   // band; SAVING marks writes /Redact annotations and removes nothing yet.
@@ -152,6 +162,10 @@ export const OP_EDIT_CLASS = {
 /** The finite set of operations the in-place flow can run. */
 export type OpMethod = keyof typeof OP_EDIT_CLASS;
 
+export function isOpMethod(method: string): method is OpMethod {
+  return Object.hasOwn(OP_EDIT_CLASS, method);
+}
+
 /** The ops that take no signed-document decision here, and are therefore the
  * ops whose surface owes one. Exported so the roster test asserts the
  * exemption list rather than counting on a reader to notice a `none`. */
@@ -159,4 +173,12 @@ export const UNGATED_OPS: readonly OpMethod[] = ['sign_pdf', 'sanitize_pdf'];
 
 export function opEditClass(method: OpMethod): OpEditClass {
   return OP_EDIT_CLASS[method];
+}
+
+/** A composite edit cannot borrow only its first call's consent. Unlike a
+ * single exempt operation, a mixed sequence has no separate surface decision. */
+export function sequenceEditClass(method: OpMethod, following: readonly OpMethod[] = []): OpEditClass {
+  if (!following.length) return opEditClass(method);
+  const classes = new Set([method, ...following].map(opEditClass));
+  return classes.size === 1 && !classes.has('none') ? opEditClass(method) : 'structural';
 }

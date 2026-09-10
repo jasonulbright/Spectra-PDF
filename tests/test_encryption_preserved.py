@@ -109,6 +109,38 @@ def test_merge_keeps_encryption_when_every_input_agrees(encrypted_pdf, tmp_dir):
     assert_still_protected(out)
 
 
+@pytest.mark.parametrize("revision", [2, 3, 4, 6])
+@pytest.mark.parametrize("gated_index", [0, 1, 2])
+@pytest.mark.parametrize("existing_output", [False, True])
+def test_merge_validates_every_sources_owner_protection(
+    tmp_path, revision, gated_index, existing_output
+):
+    """Identical descriptors must not hide a later source's owner password."""
+    sources = [tmp_path / f"source-{i}.pdf" for i in range(3)]
+    for i, path in enumerate(sources):
+        _write(path, owner="secret" if i == gated_index else "", revision=revision)
+    original_bytes = [path.read_bytes() for path in sources]
+    profiles = []
+    for i, path in enumerate(sources):
+        with pikepdf.open(path) as pdf:
+            assert pdf.is_encrypted
+            assert pdf.owner_password_matched is (i != gated_index)
+            profiles.append(encryption_profile(pdf))
+    assert len(set(profiles)) == 1  # This was the inadequate compatibility test.
+    output = tmp_path / "merged.pdf"
+    if existing_output:
+        output.write_bytes(b"previous user output")
+
+    with pytest.raises(ValueError, match="owner password"):
+        merge(list(map(str, sources)), str(output))
+
+    assert [path.read_bytes() for path in sources] == original_bytes
+    if existing_output:
+        assert output.read_bytes() == b"previous user output"
+    else:
+        assert not output.exists()
+
+
 def test_split_parts_keep_encryption(encrypted_pdf, tmp_dir):
     outdir = os.path.join(tmp_dir, "parts")
     result = split(encrypted_pdf, "1", outdir)

@@ -62,6 +62,9 @@ def search_and_redact(
     """
     edit_class = "annotate" if marks_only else "structural"
     decision = signed_edit_decision(signature_policy(file), edit_class)
+    if decision.get("reason") == "signature-policy-unreadable":
+        from engine.docmdp import refuse_unreadable_policy
+        refuse_unreadable_policy()
     if decision["kind"] == "refuse":
         raise RuntimeError(
             "this document is certified to allow no changes, so redacting it "

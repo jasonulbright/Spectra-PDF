@@ -114,3 +114,89 @@ class TestReadWrite:
         r = get_page_labels(out)
         assert r["labels"][0] == "B-10"
         assert r["ranges"][0]["prefix"] == "B-" and r["ranges"][0]["start_at"] == 10
+
+
+def test_nested_number_tree_reads_all_children(tmp_path):
+    path = tmp_path / "nested.pdf"
+    with pikepdf.new() as pdf:
+        for _ in range(4):
+            pdf.add_blank_page()
+        leaves = [pdf.make_indirect(pikepdf.Dictionary(Nums=pikepdf.Array([i, pikepdf.Dictionary(
+            Type=pikepdf.Name.PageLabel, S=pikepdf.Name.r, St=3)]), Limits=pikepdf.Array([i, i]))) for i in (0, 2)]
+        middle = pdf.make_indirect(pikepdf.Dictionary(Kids=pikepdf.Array(leaves), Limits=pikepdf.Array([0, 2])))
+        pdf.Root.PageLabels = pikepdf.Dictionary(Kids=pikepdf.Array([middle]))
+        pdf.save(path)
+    r = get_page_labels(str(path))
+    assert r["complete"] is True and r["count"] == 2
+    assert r["labels"] == ["iii", "iv", "iii", "iv"]
+
+
+@pytest.mark.parametrize("kind", ["odd", "scalar", "both", "duplicate", "negative", "fraction", "bool",
+    "wrong-prefix", "wrong-style", "zero-value", "fraction-value", "wrong-type", "unknown-data", "empty",
+    "no-zero", "child-scalar", "cycle", "missing-limits", "wrong-limits", "huge-alpha", "huge-roman", "budget"])
+def test_incomplete_reads_never_return_partial_editable_ranges(tmp_path, kind):
+    path = tmp_path / "damaged.pdf"
+    with pikepdf.new() as pdf:
+        for _ in range(4):
+            pdf.add_blank_page()
+        d = pikepdf.Dictionary(S=pikepdf.Name.D)
+        nums = pikepdf.Array([0, d, 2, pikepdf.Dictionary(P=pikepdf.String("valid second"))])
+        root = pikepdf.Dictionary(Nums=nums)
+        if kind == "odd": nums.append(3)
+        if kind == "scalar": root = pikepdf.String("wrong")
+        if kind == "both": root.Kids = pikepdf.Array([])
+        if kind == "duplicate": nums[2] = 0
+        if kind == "negative": nums[0] = -1
+        if kind == "fraction": nums[0] = 0.5
+        if kind == "bool": nums[0] = False
+        if kind == "wrong-prefix": d.P = 42
+        if kind == "wrong-style": d.S = pikepdf.Name.Unknown
+        if kind == "zero-value": d.St = 0
+        if kind == "fraction-value": d.St = 1.5
+        if kind == "wrong-type": d.Type = pikepdf.Name.Unknown
+        if kind == "unknown-data": d.Custom = pikepdf.String("preserve me")
+        if kind == "empty": root = pikepdf.Dictionary(Nums=pikepdf.Array([]))
+        if kind == "no-zero": nums[0] = 1
+        if kind == "child-scalar": root = pikepdf.Dictionary(Kids=pikepdf.Array([42]))
+        if kind == "cycle":
+            child = pdf.make_indirect(pikepdf.Dictionary(Limits=pikepdf.Array([0, 2])))
+            child.Kids = pikepdf.Array([child]); root = pikepdf.Dictionary(Kids=pikepdf.Array([child]))
+        if kind in ("missing-limits", "wrong-limits"):
+            child = pdf.make_indirect(root)
+            if kind == "wrong-limits": child.Limits = pikepdf.Array([0, 3])
+            root = pikepdf.Dictionary(Kids=pikepdf.Array([child]))
+        if kind in ("huge-alpha", "huge-roman"):
+            d.S = pikepdf.Name.A if kind == "huge-alpha" else pikepdf.Name.R; d.St = 2147483647
+        if kind == "budget": d.P = pikepdf.String("x" * 10001)
+        pdf.Root.PageLabels = root
+        pdf.save(path)
+    before = path.read_bytes()
+    assert get_page_labels(str(path)) == {"complete": False, "count": 0, "labels": [], "ranges": []}
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("patch", [{"start": True}, {"start": 0.5}, {"start_at": 0}, {"start_at": 1.5},
+    {"start_at": True}, {"prefix": 123}, {"style": "A", "start_at": 2147483647}])
+def test_invalid_writer_input_preserves_existing_files(tmp_path, patch):
+    src, out = tmp_path / "in.pdf", tmp_path / "out.pdf"
+    _pdf(str(src), 2); out.write_bytes(b"existing destination")
+    before = src.read_bytes()
+    with pytest.raises(ValueError, match="Invalid page label ranges"):
+        set_page_labels(str(src), str(out), [{"start": 0, "style": "D", **patch}])
+    assert src.read_bytes() == before and out.read_bytes() == b"existing destination"
+
+
+def test_nonzero_first_user_range_gets_explicit_physical_prefix(tmp_path):
+    src, out = tmp_path / "in.pdf", tmp_path / "out.pdf"
+    _pdf(str(src), 3)
+    set_page_labels(str(src), str(out), [{"start": 1, "style": "r"}])
+    r = get_page_labels(str(out))
+    assert r["complete"] and r["ranges"][0]["start"] == 0 and r["labels"] == ["1", "i", "ii"]
+
+
+def test_writer_cannot_emit_labels_exceeding_its_own_read_budget(tmp_path):
+    src, out = tmp_path / "in.pdf", tmp_path / "out.pdf"
+    _pdf(str(src), 201); out.write_bytes(b"existing")
+    with pytest.raises(ValueError, match="Invalid page label ranges"):
+        set_page_labels(str(src), str(out), [{"start": 0, "style": "none", "prefix": "x" * 9999}])
+    assert out.read_bytes() == b"existing"

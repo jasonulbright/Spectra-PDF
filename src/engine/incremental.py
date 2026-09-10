@@ -63,17 +63,16 @@ metadata (/Info, XMP) is deliberately IGNORED rather than transplanted:
 incidental Producer/ModDate churn from a rebuild must neither block the
 transplant nor masquerade as a user edit.
 
-Refusal is a RESULT, not an exception: every call site has a working
-rewrite path as its fallback, and the difference between "not applicable"
-and "broken" must stay visible to it.
+Mechanical refusal is a RESULT: each caller has a rewrite fallback. A failed
+policy read instead blocks both paths; the finalizer raises so its staging
+owner discards the unpublished output.
 
-Comparison notes: equality is a structural bisimulation over the two
-object graphs (pair-memoized, so shared subtrees and cycles terminate;
-streams compare raw-then-decoded; numbers compare numerically so 1 vs 1.0
-never manufactures a difference). A pairing MISS between two annotations
-only enlarges the delta (annotation replaced instead of kept) — it can
-never corrupt output — so precision there is an optimization, while page
-level mismatches refuse outright.
+Comparison notes: page content pairs structurally; owned page, field and
+annotation identities are then bound BEFORE copying any delta. Graph edges
+compare those identities, not the equal-looking contents of their targets.
+Other values use structural bisimulation (pair-memoized for cycles; streams
+compare raw-then-decoded; numbers compare numerically). Ambiguous ownership
+refuses instead of importing another copy of a page or registered field.
 """
 
 import io
@@ -86,8 +85,9 @@ from pyhanko.pdf_utils import generic
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.pdf_utils.metadata.model import DocumentMetadata
 
-from .docmdp import certification_of_file, certification_of_pdf
-from .fieldmdp import locked_fields, locks_of_file
+from .docmdp import certification_of_pdf, POLICY_UNREADABLE, refuse_unreadable_policy
+from .acroform import live_signature_fields
+from .fieldmdp import locked_fields, locks_of_pdf
 from .inplace import is_same_file
 from .validate import validate_pdf
 
@@ -144,31 +144,12 @@ def _effective_ft(node, inherited, depth=0):
     return ft if ft is not None else inherited
 
 
-def _tree_live_sig_count(node, inherited_ft, depth=0) -> int:
-    """Terminal /FT /Sig fields WITH a /V in this subtree."""
-    if depth > MAX_FIELD_DEPTH or not isinstance(node, pikepdf.Dictionary):
-        return 0
-    ft = _effective_ft(node, inherited_ft, depth)
-    kids = node.get("/Kids")
-    if kids is None or not isinstance(kids, pikepdf.Array) or len(kids) == 0:
-        return 1 if ft == pikepdf.Name("/Sig") and node.get("/V") is not None else 0
-    return sum(_tree_live_sig_count(k, ft, depth + 1) for k in kids)
-
-
 def _live_sig_count(path: str) -> int:
     try:
         with pikepdf.open(path) as pdf:
-            acro = pdf.Root.get("/AcroForm")
-            if acro is None:
-                return 0
-            fields = acro.get("/Fields")
-            if fields is None or not isinstance(fields, pikepdf.Array):
-                return 0
-            return sum(_tree_live_sig_count(f, None) for f in fields)
+            return len(live_signature_fields(pdf, strict=True))
     except Exception:
-        # An unreadable file cannot be transplanted; let the caller's
-        # rewrite path surface whatever is actually wrong with it.
-        return 0
+        refuse_unreadable_policy()
 
 
 def has_live_signatures(path: str) -> bool:
@@ -196,16 +177,32 @@ def signature_policy(path: str) -> dict:
 
     ``locks`` is per SIGNATURE, not per document: a certification and a later
     approval signature can disagree about the same field.
+    An ``error`` marks any unreadable policy component and takes precedence
+    over all partial facts. Absence of that error is required before editing.
     """
-    certification = certification_of_file(path)
-    count = _live_sig_count(path)
-    return {
-        "signed": count > 0,
-        "count": count,
-        "certified": bool(certification["certified"]),
-        "level": certification["level"],
-        "locks": locks_of_file(path),
-    }
+    try:
+        with pikepdf.open(path) as pdf:
+            return signature_policy_of_pdf(pdf)
+    except Exception:
+        return {"signed": False, "count": 0, "certified": False,
+                "level": None, "locks": [], "error": POLICY_UNREADABLE}
+
+
+def signature_policy_of_pdf(pdf) -> dict:
+    """All policy facts from one open document; uncertainty outranks facts."""
+    policy = {"signed": False, "count": 0, "certified": False,
+              "level": None, "locks": []}
+    try:
+        count = len(live_signature_fields(pdf, strict=True))
+        policy.update(signed=count > 0, count=count)
+        certification = certification_of_pdf(pdf)
+        policy.update(certified=certification["certified"], level=certification["level"])
+        if certification.get("error") is not None:
+            policy["error"] = POLICY_UNREADABLE
+        policy["locks"] = locks_of_pdf(pdf, strict=True)
+    except Exception:
+        policy["error"] = POLICY_UNREADABLE
+    return policy
 
 
 # A structural edit appears in no row: page removal, reordering, content edits
@@ -281,6 +278,8 @@ def signed_edit_decision(policy: dict, edit_class: str, fields=None, typed=None)
     """
     if edit_class not in EDIT_CLASSES:
         raise ValueError('edit class must be "form-fill", "annotate" or "structural"')
+    if policy.get("error") is not None:
+        return {"kind": "refuse", "reason": POLICY_UNREADABLE}
     signed = bool(policy.get("signed"))
     certified = bool(policy.get("certified"))
     level = policy.get("level")
@@ -316,6 +315,8 @@ def _ceiling_refusal(certification: dict, classes) -> dict | None:
     difference between "the format cannot express this" and "the author
     forbade it" must stay visible to the surface that warns about it.
     """
+    if certification.get("error") is not None:
+        return {"applied": False, "blocked": True, "reason": POLICY_UNREADABLE}
     if not certification.get("certified"):
         return None
     level = certification.get("level")
@@ -341,11 +342,28 @@ def _is_num(obj) -> bool:
     return isinstance(obj, (int, float)) or type(obj).__name__ == "Decimal"
 
 
-def _bisim(a, b, memo: set, skip: frozenset = frozenset(), depth: int = 0) -> bool:
+def _requires_correspondence(obj) -> bool:
+    """Document-owned objects cannot be imported as anonymous new subtrees."""
+    return isinstance(obj, pikepdf.Dictionary) and (
+        obj.get("/Type") in (pikepdf.Name.Page, pikepdf.Name.Pages, pikepdf.Name.Catalog)
+        or obj.get("/FT") is not None or obj.get("/Subtype") == pikepdf.Name.Widget
+    )
+
+
+def _bisim(a, b, memo: set, skip: frozenset = frozenset(), depth: int = 0,
+           identities=None) -> bool:
     if depth > 200:
         return False  # pathological nesting — refuse toward "different"
     a_ind = isinstance(a, pikepdf.Object) and a.is_indirect
     b_ind = isinstance(b, pikepdf.Object) and b.is_indirect
+    # Owned objects (pages, annotations, fields) have a separate delta pass.
+    # At an edge compare their proven identities, not recursively their pixels
+    # or values: two blank pages are not interchangeable link destinations.
+    if depth and identities is not None:
+        if b_ind and b.objgen in identities:
+            return a_ind and identities[b.objgen] == a.objgen
+        if _requires_correspondence(b):
+            return False  # an orphan cannot equal a live owner by its content
     if a_ind and b_ind:
         key = (a.objgen, b.objgen)
         if key in memo:
@@ -365,14 +383,16 @@ def _bisim(a, b, memo: set, skip: frozenset = frozenset(), depth: int = 0) -> bo
         if ka != kb:
             return False
         for k in ka:
-            if not _bisim(a.stream_dict.get(k), b.stream_dict.get(k), memo, depth=depth + 1):
+            if not _bisim(a.stream_dict.get(k), b.stream_dict.get(k), memo,
+                          depth=depth + 1, identities=identities):
                 return False
         try:
             if a.read_raw_bytes() == b.read_raw_bytes():
-                # Same filters guaranteed by the dict compare? /Filter is
-                # skipped there, so equal raw bytes only prove equality
-                # when filters match too — compare them explicitly.
-                if a.stream_dict.get("/Filter") == b.stream_dict.get("/Filter"):
+                # Raw bytes mean the same thing only under the SAME decoder,
+                # including its parameters (e.g. TIFF/PNG predictors).
+                if all(_bisim(a.stream_dict.get(k), b.stream_dict.get(k), set(),
+                              depth=depth + 1, identities=identities)
+                       for k in ("/Filter", "/DecodeParms")):
                     return True
             return a.read_bytes() == b.read_bytes()
         except Exception:
@@ -392,11 +412,11 @@ def _bisim(a, b, memo: set, skip: frozenset = frozenset(), depth: int = 0) -> bo
             # tree; comparing them by structure would drag whole documents
             # into every annotation compare. Their consistency is implied
             # by the page-level walk, so compare them by KIND only.
-            if k in ("/P", "/Parent"):
+            if identities is None and k in ("/P", "/Parent"):
                 if (a.get(k) is None) != (b.get(k) is None):
                     return False
                 continue
-            if not _bisim(a.get(k), b.get(k), memo, depth=depth + 1):
+            if not _bisim(a.get(k), b.get(k), memo, depth=depth + 1, identities=identities):
                 return False
         return True
 
@@ -407,7 +427,8 @@ def _bisim(a, b, memo: set, skip: frozenset = frozenset(), depth: int = 0) -> bo
     if a_is_arr:
         if len(a) != len(b):
             return False
-        return all(_bisim(a[i], b[i], memo, depth=depth + 1) for i in range(len(a)))
+        return all(_bisim(a[i], b[i], memo, depth=depth + 1, identities=identities)
+                   for i in range(len(a)))
 
     if isinstance(a, pikepdf.Name) or isinstance(b, pikepdf.Name):
         return isinstance(a, pikepdf.Name) and isinstance(b, pikepdf.Name) and str(a) == str(b)
@@ -442,12 +463,16 @@ def _materialize(obj, writer: IncrementalPdfFileWriter, memo: dict, depth: int =
         key = obj.objgen
         if key in memo:
             return memo[key]
+        if _requires_correspondence(obj):
+            raise _TransplantRefusal("unmapped-document-object-reference")
         placeholder = writer.allocate_placeholder()
         memo[key] = placeholder
         built = _materialize_direct(obj, writer, memo, depth)
         writer.add_object(built, idnum=placeholder.idnum)
         return placeholder
 
+    if _requires_correspondence(obj):
+        raise _TransplantRefusal("unmapped-document-object-reference")
     return _materialize_direct(obj, writer, memo, depth)
 
 
@@ -519,6 +544,36 @@ class _TransplantRefusal(Exception):
     """A delta outside the append-safe tier — reported, never raised out."""
 
 
+class _ObjectMap(dict):
+    """Copy cache plus the independently planned identities of owned objects."""
+
+    def __init__(self):
+        super().__init__()
+        self.identities = {}
+        self.reverse = {}
+        self.field_pairs = []
+        self.annot_pairs = {}
+        self.original_owners = {}
+
+    def bind(self, modified, ref, original=None):
+        if not modified.is_indirect:
+            return
+        key = modified.objgen
+        if key in self and self[key] != ref:
+            raise _TransplantRefusal("ambiguous-object-correspondence")
+        old = original.objgen if original is not None and original.is_indirect else None
+        if old is not None and old in self.reverse and self.reverse[old] != key:
+            raise _TransplantRefusal("forked-object-correspondence")
+        self[key] = ref
+        self.identities[key] = old
+        if old is not None:
+            self.reverse[old] = key
+
+    def equal(self, original, modified, *, reference=False, skip=frozenset()):
+        return _bisim(original, modified, set(), skip=skip,
+                      depth=int(reference), identities=self.identities)
+
+
 def _update_in_place(
     ref, orig_obj, mod_obj, writer, memo, depth: int = 0, only=None
 ) -> bool:
@@ -529,10 +584,11 @@ def _update_in_place(
     is a correctness trap: a widget's /P (and a kid field's /Parent) would
     be materialized too, dragging a duplicate of the whole page graph into
     the appended revision. Instead: keys whose values are bisim-equal are
-    LEFT UNTOUCHED (original nested refs intact); /P and /Parent are never
-    written at all; a /Kids array whose members pair positionally recurses
-    into per-kid reconciliation (radio groups: parent /V + kid /AS both
-    land as small in-place updates); only genuinely-new values materialize.
+    LEFT UNTOUCHED (original nested refs intact); ownership back-pointers are
+    never rewritten. Each field/widget has its own planned update, and /Kids
+    arrays use the mapped refs even when reordered. A Popup's /Parent is an
+    annotation edge, not field/page ownership, and follows the ordinary delta.
+    Only genuinely-new values materialize.
     Returns whether anything changed (and marks the update if so).
 
     ``only`` confines BOTH halves — the write pass and the removal sweep — to
@@ -549,37 +605,33 @@ def _update_in_place(
     changed = False
     for k in list(mod_obj.keys()):
         ks = str(k)
-        if ks in ("/P", "/Parent"):
+        if ks == "/P" and orig_obj.get(ks) is None:
+            # /P is optional for most annotations. A rewrite may add the
+            # pointer already implied by /Annots; keeping it absent is exact.
+            value = mod_obj.get(ks)
+            if (isinstance(value, pikepdf.Object) and value.is_indirect
+                    and memo.identities.get(value.objgen) is not None
+                    and memo.identities[value.objgen] == memo.original_owners.get(orig_obj.objgen)):
+                continue
+        if ks == "/P" or (ks == "/Parent" and mod_obj.get("/Subtype") != pikepdf.Name.Popup):
+            if not memo.equal(orig_obj.get(ks), mod_obj.get(ks), reference=True):
+                raise _TransplantRefusal("owned-object-backpointer-changed")
             continue
         if only is not None and ks not in only:
             continue
         orig_val = orig_obj.get(ks)
         mod_val = mod_obj.get(ks)
-        if orig_val is not None and _bisim(orig_val, mod_val, set()):
+        if orig_val is not None and memo.equal(orig_val, mod_val, reference=True):
             continue
-        if (
-            ks == "/Kids"
-            and orig_val is not None
-            and isinstance(orig_val, pikepdf.Array)
-            and isinstance(mod_val, pikepdf.Array)
-            and len(orig_val) == len(mod_val)
-            and all(
-                isinstance(x, pikepdf.Object) and x.is_indirect for x in orig_val
-            )
-        ):
-            for i in range(len(orig_val)):
-                kid_ref = _writer_ref(orig_val[i].objgen, writer)
-                if _update_in_place(
-                    kid_ref, orig_val[i], mod_val[i], writer, memo, depth + 1
-                ):
-                    changed = True
-            continue
+        # Child fields/widgets have their own mapped update pass. Re-listing
+        # /Kids uses those references, including a reordered widget array;
+        # positional recursion would update the wrong sibling after a reorder.
         live[generic.pdf_name(ks)] = _materialize(mod_val, writer, memo)
         changed = True
     removed_keys = (
         {str(k) for k in orig_obj.keys()}
         - {str(k) for k in mod_obj.keys()}
-        - {"/P", "/Parent"}
+        - ({"/P"} if mod_obj.get("/Subtype") == pikepdf.Name.Popup else {"/P", "/Parent"})
     )
     if only is not None:
         removed_keys &= set(only)
@@ -860,11 +912,10 @@ def _rewrite_page_tree(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf,
         if kind == "keep":
             kids.append(page_refs[ix])
             continue
-        page_obj = _materialize_direct(
-            mod.pages[ix].obj, writer, memo_mat, 0, skip=_PAGE_PARENT
-        )
+        ref = memo_mat[mod.pages[ix].obj.objgen]
+        page_obj = ref.get_object()
         page_obj[generic.pdf_name("/Parent")] = parent_ref
-        kids.append(writer.add_object(page_obj))
+        kids.append(ref)
         inserted += 1
 
     delta = len(kids) - len(orig.pages)
@@ -881,6 +932,150 @@ def _rewrite_page_tree(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf,
         writer.update_container(node)
         node = _resolved(node.get(generic.pdf_name("/Parent")))
     return inserted
+
+
+def _field_index(acro):
+    out = {}
+
+    def walk(fields, prefix="", inherited_ft=None, depth=0, ancestors=frozenset()):
+        if fields is None:
+            return
+        if depth > MAX_FIELD_DEPTH or not isinstance(fields, pikepdf.Array):
+            raise _TransplantRefusal("field-tree-unresolvable")
+        for node in fields:
+            if not isinstance(node, pikepdf.Dictionary):
+                raise _TransplantRefusal("field-tree-unresolvable")
+            key = node.objgen if node.is_indirect else None
+            if key is not None and key in ancestors:
+                raise _TransplantRefusal("field-tree-cycle")
+            t = node.get("/T")
+            name = (prefix + "." if prefix else "") + (str(t) if t is not None else "")
+            ft = _effective_ft(node, inherited_ft, depth)
+            out.setdefault(name, []).append((node, ft))
+            walk(node.get("/Kids"), name, ft, depth + 1,
+                 ancestors | {key} if key is not None else ancestors)
+
+    if isinstance(acro, pikepdf.Dictionary):
+        walk(acro.get("/Fields"))
+    return out
+
+
+def _annotation_pages(pdf):
+    owners = {}
+    for page in pdf.pages:
+        for annot in _page_annots(page):
+            if not isinstance(annot, pikepdf.Dictionary):
+                raise _TransplantRefusal("annotation-object-unresolvable")
+            owner = annot.get("/P")
+            if owner is not None and (
+                not isinstance(owner, pikepdf.Dictionary) or not owner.is_indirect
+                or owner.objgen != page.obj.objgen
+            ):
+                raise _TransplantRefusal("annotation-page-backpointer-mismatch")
+            if annot.is_indirect:
+                previous = owners.setdefault(annot.objgen, page.obj.objgen)
+                if previous != page.obj.objgen:
+                    raise _TransplantRefusal("annotation-has-multiple-pages")
+    return owners
+
+
+def _prepare_correspondence(writer, orig, mod, plan):
+    """Bind every owned identity BEFORE recursively importing any delta.
+
+    Surviving pages retain their actual writer refs. New pages enter the tree
+    as empty shells first, so even forward/cyclic destinations can use them.
+    Field and annotation pairing is a separate planning pass; shared owners
+    and popup/reply edges cannot depend on page/annotation processing order.
+    """
+    memo = _ObjectMap()
+    memo.bind(mod.Root, writer.root_ref, orig.Root)
+    page_refs = {o: writer.find_page_for_modification(o)[0] for o, _ in plan["pairs"]}
+    for o, m in plan["pairs"]:
+        memo.bind(mod.pages[m].obj, page_refs[o], orig.pages[o].obj)
+    fresh = sorted(set(range(len(mod.pages))) - {m for _, m in plan["pairs"]})
+    if plan["kind"] == "in-order":
+        for after, ix in sorted(plan["insertions"], reverse=True):
+            ref = writer.insert_page(generic.DictionaryObject({
+                generic.pdf_name("/Type"): generic.pdf_name("/Page"),
+            }), after=after)
+            memo.bind(mod.pages[ix].obj, ref)
+    else:
+        for ix in fresh:
+            memo.bind(mod.pages[ix].obj, writer.add_object(generic.DictionaryObject({
+                generic.pdf_name("/Type"): generic.pdf_name("/Page"),
+            })))
+
+    orig_owners, mod_owners = _annotation_pages(orig), _annotation_pages(mod)
+    memo.original_owners = orig_owners
+    orig_acro, mod_acro = orig.Root.get("/AcroForm"), mod.Root.get("/AcroForm")
+    if isinstance(orig_acro, pikepdf.Dictionary) and isinstance(mod_acro, pikepdf.Dictionary):
+        if orig_acro.is_indirect:
+            memo.bind(mod_acro, _writer_ref(orig_acro.objgen, writer), orig_acro)
+        originals = _field_index(orig_acro)
+        for name, modified in _field_index(mod_acro).items():
+            available = list(originals.get(name, []))
+            for m, mft in modified:
+                candidates = list(available)
+                if len(candidates) > 1:
+                    owner = mod_owners.get(m.objgen) if m.is_indirect else None
+                    old_owner = memo.identities.get(owner)
+                    candidates = [(o, ft) for o, ft in candidates
+                                  if orig_owners.get(o.objgen) == old_owner]
+                    if len(candidates) > 1:
+                        candidates = [(o, ft) for o, ft in candidates if memo.equal(o, m, skip=frozenset({
+                            "/AP", "/AS", "/V", "/DV", "/Kids", "/Parent", "/P",
+                        }))]
+                if not available:
+                    continue  # the form delta emits its existing addition refusal
+                if len(candidates) != 1:
+                    raise _TransplantRefusal("ambiguous-field-widget-correspondence")
+                o, oft = candidates[0]
+                # Consume the chosen object, not an equal-looking sibling:
+                # pikepdf dictionary equality is structural (and cyclic).
+                del available[next(i for i, pair in enumerate(available) if pair[0] is o)]
+                if oft != mft:
+                    raise _TransplantRefusal("field-type-changed")
+                memo.field_pairs.append((name, o, m, oft))
+                if o.is_indirect:
+                    memo.bind(m, _writer_ref(o.objgen, writer), o)
+
+    for oix, mix in plan["pairs"]:
+        original_annots, modified_annots = _page_annots(orig.pages[oix]), _page_annots(mod.pages[mix])
+        used = set()
+        pairs = []
+        for m in modified_annots:
+            found = None
+            if m.is_indirect and m.objgen in memo.identities:
+                wanted = memo.identities[m.objgen]
+                found = next((i for i, o in enumerate(original_annots)
+                              if i not in used and o.is_indirect and o.objgen == wanted), None)
+                if found is None and _is_widget(m):
+                    raise _TransplantRefusal("form-widget-page-changed")
+            if found is None:
+                exact = [i for i, o in enumerate(original_annots)
+                         if i not in used and memo.equal(o, m)]
+                if exact:
+                    found = exact[0]
+            if found is None:
+                nm = _annot_nm(m)
+                named = [i for i, o in enumerate(original_annots)
+                         if i not in used and nm is not None and _annot_nm(o) == nm]
+                if len(named) > 1:
+                    raise _TransplantRefusal("ambiguous-annotation-name")
+                if named:
+                    found = named[0]
+            pairs.append(found)
+            if found is not None:
+                used.add(found)
+                o = original_annots[found]
+                if o.is_indirect:
+                    memo.bind(m, _writer_ref(o.objgen, writer), o)
+        memo.annot_pairs[mod.pages[mix].obj.objgen] = pairs
+    for page in mod.pages:
+        for annot in _page_annots(page):
+            if annot.is_indirect:
+                memo.identities.setdefault(annot.objgen, None)
+    return memo, page_refs, fresh
 
 
 def _apply_annot_delta(
@@ -902,47 +1097,12 @@ def _apply_annot_delta(
     mod_annots = _page_annots(mod_page)
 
     used: set[int] = set()
-    by_nm: dict[bytes, list[int]] = {}
-    by_field: dict[str, list[int]] = {}
-    for i, a in enumerate(orig_annots):
-        nm = _annot_nm(a)
-        if nm is not None:
-            by_nm.setdefault(nm, []).append(i)
-        if _is_widget(a):
-            fname = _widget_field_name(a)
-            if fname is not None:
-                by_field.setdefault(fname, []).append(i)
-
     added = updated = 0
     classes: set[str] = set()
     new_refs = []
     new_is_orig_ref = []
-    for m in mod_annots:
-        match = None
-        for i, a in enumerate(orig_annots):
-            if i in used:
-                continue
-            if _bisim(a, m, set()):
-                match = ("keep", i)
-                break
-        if match is None and _is_widget(m):
-            # Widgets pair by FIELD identity; their content is reconciled
-            # by the /AcroForm pass on the very same objects — treating a
-            # filled widget as remove+add would fork the object graph.
-            fname = _widget_field_name(m)
-            if fname is not None:
-                for i in by_field.get(fname, []):
-                    if i not in used:
-                        match = ("keep", i)
-                        break
-        if match is None:
-            nm = _annot_nm(m)
-            if nm is not None:
-                for i in by_nm.get(nm, []):
-                    if i not in used:
-                        match = ("update", i)
-                        break
-        if match is None:
+    for m, i in zip(mod_annots, memo_mat.annot_pairs[mod_page.obj.objgen], strict=True):
+        if i is None:
             ref = _materialize(m, writer, memo_mat)
             if not isinstance(ref, generic.IndirectObject):
                 ref = writer.add_object(ref)
@@ -951,21 +1111,21 @@ def _apply_annot_delta(
             added += 1
             classes.add("form-fill" if _is_widget(m) else "annotations")
             continue
-        kind, i = match
         used.add(i)
         a = orig_annots[i]
+        changed_body = not memo_mat.equal(a, m)
         if not a.is_indirect:
             # A direct-in-array annotation has no ref to keep or update —
             # rewrite it as a fresh object with the modified content.
             ref = writer.add_object(_materialize_direct(m, writer, memo_mat, 0))
             new_refs.append(ref)
             new_is_orig_ref.append(False)
-            if kind == "update":
+            if changed_body:
                 updated += 1
                 classes.add("form-fill" if _is_widget(m) else "annotations")
             continue
         ref = _writer_ref(a.objgen, writer)
-        if kind == "update":
+        if changed_body and not _is_widget(m):
             if _update_in_place(ref, a, m, writer, memo_mat):
                 updated += 1
                 classes.add("form-fill" if _is_widget(m) else "annotations")
@@ -1040,8 +1200,9 @@ def _xfa_array_delta(orig_xfa, mod_xfa, writer, memo_mat):
 def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> int:
     """Transplant /AcroForm differences (fill: values, appearances, flags).
 
-    Fields pair by fully-qualified /T (position-disambiguated for
-    duplicates) and reconcile IN PLACE, so page /Annots references to the
+    Fields pair by fully-qualified /T; widget siblings are disambiguated by
+    page ownership and stable attributes, never array position. They reconcile
+    IN PLACE, so page /Annots references to the
     same widget objects stay intact. A field name present only in the
     MODIFIED file means the edit ADDED a form field — beyond the fill tier
     (and beyond what DocMDP permits) — so it refuses rather than half-
@@ -1061,33 +1222,13 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
         if orig_acro is None:
             return 0
         raise _TransplantRefusal("acroform-removed")
-    if orig_acro is not None and _bisim(orig_acro, mod_acro, set()):
-        return 0
     if orig_acro is None:
         raise _TransplantRefusal(
             "the edit added a form where the signed original had none"
         )
 
-    def walk(fields, prefix, out, inherited_ft=None, depth=0):
-        if depth > MAX_FIELD_DEPTH or fields is None:
-            return
-        if not isinstance(fields, pikepdf.Array):
-            return
-        for f in fields:
-            if not isinstance(f, pikepdf.Dictionary):
-                continue
-            t = f.get("/T")
-            name = (prefix + "." if prefix else "") + (str(t) if t is not None else "")
-            ft = _effective_ft(f, inherited_ft, depth)
-            out.setdefault(name, []).append((f, ft))
-            kids = f.get("/Kids")
-            if kids is not None and isinstance(kids, pikepdf.Array) and len(kids) > 0:
-                walk(kids, name, out, ft, depth + 1)
-
-    orig_fields: dict[str, list] = {}
-    mod_fields: dict[str, list] = {}
-    walk(orig_acro.get("/Fields"), "", orig_fields)
-    walk(mod_acro.get("/Fields"), "", mod_fields)
+    orig_fields = _field_index(orig_acro)
+    mod_fields = _field_index(mod_acro)
 
     # The mirror of the addition refusal below, and the guard a page REMOVAL
     # needs: dropping a page drops its widgets, and a revision that re-lists
@@ -1108,27 +1249,23 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
                 f"the edit added form field '{name}' — form structure "
                 "changes cannot be appended to a signed document"
             )
-        for pos, (m, _mod_ft) in enumerate(mods):
-            o, orig_ft = origs[pos]
-            # A signature field that already carries a value is never part of
-            # a fill delta, and comparing one is not merely wasted work: a
-            # signature carrying a /FieldMDP transform reaches the document
-            # CATALOG through its /Reference /Data entry, so it compares
-            # unequal to itself after any edit anywhere in the file. Rewriting
-            # it into the appended revision drops the signature's coverage
-            # below a whole revision and makes every later verdict unjudgeable.
-            if orig_ft == pikepdf.Name("/Sig") and o.get("/V") is not None:
-                continue
-            if _bisim(o, m, set()):
-                continue
-            if not o.is_indirect:
-                raise _TransplantRefusal(
-                    f"field '{name}' is stored inline and cannot be "
-                    "reconciled in place"
-                )
-            ref = _writer_ref(o.objgen, writer)
-            if _update_in_place(ref, o, m, writer, memo_mat):
-                updated += 1
+    for name, o, m, orig_ft in memo_mat.field_pairs:
+        # A signature field that already carries a value is never part of
+        # a fill delta: its /V and transform references belong to the signed
+        # revision, not to the rewrite. Its separate widgets still have their
+        # own field-pair entries and update without rewriting that /V.
+        if orig_ft == pikepdf.Name("/Sig") and o.get("/V") is not None:
+            continue
+        if memo_mat.equal(o, m):
+            continue
+        if not o.is_indirect:
+            raise _TransplantRefusal(
+                f"field '{name}' is stored inline and cannot be "
+                "reconciled in place"
+            )
+        ref = _writer_ref(o.objgen, writer)
+        if _update_in_place(ref, o, m, writer, memo_mat):
+            updated += 1
 
     # AcroForm-level keys (NeedAppearances, DA, DR) reconcile on the
     # /AcroForm dict itself. /Fields is excluded (its members were updated
@@ -1139,7 +1276,7 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
     # value stands, or pyHanko's own diff analysis flags the revision as a
     # suspicious modification (live e2e catch: 3 -> 1).
     _ACRO_KEEP = frozenset({"/Fields", "/SigFlags"})
-    if not _bisim(orig_acro, mod_acro, set(), skip=_ACRO_KEEP):
+    if not memo_mat.equal(orig_acro, mod_acro, skip=_ACRO_KEEP):
         # A direct /AcroForm has no object to mark updated, and the only way to
         # reach it is to rewrite the catalog — which this module never does, so
         # the delta is inexpressible rather than absent. The twin of the inline
@@ -1155,7 +1292,7 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
                 continue
             ov = orig_acro.get(ks)
             mv = mod_acro.get(ks)
-            if ov is not None and _bisim(ov, mv, set()):
+            if ov is not None and memo_mat.equal(ov, mv, reference=True):
                 continue
             if ks == "/XFA":
                 value = _xfa_array_delta(ov, mv, writer, memo_mat)
@@ -1210,7 +1347,8 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
     Returns {"applied": bool, ...counts} — applied=False carries a
     ``reason`` and writes NOTHING. On success ``output`` (which may equal
     ``modified`` but never ``original``) receives original-bytes + one
-    appended revision; the byte-prefix property is asserted before the
+    appended revision (or exactly the original bytes when the semantic delta
+    is empty); the byte-prefix property is asserted before the
     file lands (stage-and-swap, the pikepdf in-place discipline).
 
     A success also reports ``delta_classes``, and a ceiling refusal reports
@@ -1227,13 +1365,15 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
     if is_same_file(original, output):
         raise ValueError("Refusing to overwrite the signed original in place")
 
-    if not has_live_signatures(original):
-        return {"applied": False, "reason": "not-signed"}
-
     orig_bytes = Path(original).read_bytes()
 
     try:
-        with pikepdf.open(original) as orig, pikepdf.open(modified) as mod:
+        with pikepdf.open(io.BytesIO(orig_bytes)) as orig, pikepdf.open(modified) as mod:
+            policy = signature_policy_of_pdf(orig)
+            if policy.get("error"):
+                return {"applied": False, "blocked": True, "reason": POLICY_UNREADABLE}
+            if not policy["signed"]:
+                return {"applied": False, "reason": "not-signed"}
             if orig.is_encrypted or mod.is_encrypted:
                 return {"applied": False, "reason": "encrypted"}
 
@@ -1255,28 +1395,28 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
             # original's own bytes keep them, and comparing them would refuse
             # every edit of a certified or LTV-enabled document, which is the
             # opposite of preserving it.
-            if not _bisim(
-                orig.Root, mod.Root, set(),
-                skip=frozenset(
-                    {"/AcroForm", "/Pages", "/Metadata", "/PieceInfo", "/Version",
-                     "/Perms", "/DSS"}
-                ),
-            ):
-                return {"applied": False, "reason": "catalog-changed"}
-
             try:
                 plan = _plan_pages(orig, mod)
 
                 writer = IncrementalPdfFileWriter(io.BytesIO(orig_bytes))
                 writer._meta = _ClockFreeMeta()
-                memo_mat: dict = {}
+                memo_mat, page_refs, fresh_pages = _prepare_correspondence(writer, orig, mod, plan)
+                if not memo_mat.equal(orig.Root, mod.Root, skip=frozenset({
+                    "/AcroForm", "/Pages", "/Metadata", "/PieceInfo", "/Version", "/Perms", "/DSS",
+                })):
+                    return {"applied": False, "reason": "catalog-changed"}
 
                 classes: set[str] = set(plan["classes"])
                 pages_changed = added = updated = removed = keys_updated = 0
-                page_refs: dict[int, object] = {}
                 for orig_ix, mod_ix in plan["pairs"]:
-                    page_ref = writer.find_page_for_modification(orig_ix)[0]
-                    page_refs[orig_ix] = page_ref
+                    # Structural page matching establishes identity, but a
+                    # retained page's unsupported keys also need edge-aware
+                    # comparison. E.g. /AA retargeted between identical blank
+                    # pages is a real change this tier must not discard.
+                    if not memo_mat.equal(orig.pages[orig_ix].obj, mod.pages[mod_ix].obj,
+                                          skip=_PAGE_SKIP | _PAGE_PARENT):
+                        raise _TransplantRefusal("page-object-references-changed")
+                    page_ref = page_refs[orig_ix]
                     changed, a, u, r, annot_classes = _apply_annot_delta(
                         writer, page_ref, orig.pages[orig_ix],
                         mod.pages[mod_ix], memo_mat,
@@ -1299,33 +1439,22 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
                 if fields_updated:
                     classes.add("form-fill")
 
-                inserted = 0
+                inserted = len(fresh_pages)
+                for mod_ix in fresh_pages:
+                    page_ref = memo_mat[mod.pages[mod_ix].obj.objgen]
+                    page_ref.get_object().update(_materialize_direct(
+                        mod.pages[mod_ix].obj, writer, memo_mat, 0, skip=_PAGE_PARENT,
+                    ))
                 if plan["kind"] == "rebuild":
                     inserted = _rewrite_page_tree(
                         writer, orig, mod, plan, page_refs, memo_mat
                     )
-                else:
-                    # Reverse order keeps each `after` index valid against the
-                    # original numbering while earlier insertions are pending.
-                    # `after=-1` prepends into the root's /Kids — measured, not
-                    # assumed: the earlier before-first refusal read pyHanko's
-                    # "there are no pages yet" branch as a limitation it is not.
-                    for after_ix, mod_ix in sorted(plan["insertions"], reverse=True):
-                        # insert_page owns /Parent, and following the source's
-                        # would copy the modified file's whole page tree in.
-                        page_obj = _materialize_direct(
-                            mod.pages[mod_ix].obj, writer, memo_mat, 0,
-                            skip=_PAGE_PARENT,
-                        )
-                        writer.insert_page(page_obj, after=after_ix)
-                        inserted += 1
             except (ValueError, _TransplantRefusal) as e:
                 return {"applied": False, "reason": str(e)}
 
             pages_removed = len(plan["removed"])
-            if not (pages_changed or fields_updated or inserted or pages_removed
-                    or plan["reordered"]):
-                return {"applied": False, "reason": "no-delta"}
+            unchanged = not (pages_changed or fields_updated or inserted or pages_removed
+                             or plan["reordered"])
 
             # The ceiling, consulted on the FULL classified delta and before
             # any bytes exist: the writer holds the revision in memory only,
@@ -1335,9 +1464,15 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
             if refused is not None:
                 return refused
 
-            buf = io.BytesIO()
-            writer.write(buf)
-            result = buf.getvalue()
+            if unchanged:
+                # A semantically empty rebuild must not leave rewritten bytes
+                # standing: they break signatures just as a changed rebuild
+                # does. Restore the original verbatim, without a new revision.
+                result = orig_bytes
+            else:
+                buf = io.BytesIO()
+                writer.write(buf)
+                result = buf.getvalue()
     except (pikepdf.PdfError, OSError) as e:
         raise RuntimeError(f"Incremental transplant failed: {e}") from e
 
@@ -1392,11 +1527,18 @@ def finalize_preserving_signatures(original: str, rewritten_tmp: str) -> dict:
     today's behavior, and for unsigned files it is the right one).
     """
     try:
-        if not has_live_signatures(original):
+        policy = signature_policy(original)
+        if policy.get("error"):
+            refuse_unreadable_policy()
+        if not policy["signed"]:
             return {"preserved": False, "reason": "not-signed"}
         result = transplant_incremental(original, rewritten_tmp, rewritten_tmp)
+        if result.get("blocked") or result.get("reason") == POLICY_UNREADABLE:
+            refuse_unreadable_policy()
         if result.get("applied"):
             return {"preserved": True, **{k: v for k, v in result.items() if k != "applied"}}
         return {"preserved": False, "reason": result.get("reason", "unknown")}
-    except RuntimeError as e:
-        return {"preserved": False, "reason": str(e)}
+    except RuntimeError:
+        # A reader/transport failure is not a mechanical refusal authorizing
+        # the ordinary rewrite. The staging owner must discard the output.
+        refuse_unreadable_policy()

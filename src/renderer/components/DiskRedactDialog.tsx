@@ -70,6 +70,7 @@ const APPLY_VERB_KEY = {
 } as const satisfies Record<DiskPhase, string>;
 
 const SIGNED_REASON_KEY = {
+  'signature-policy-unreadable': 'app.signedEdit.policyUnreadable',
   signed: 'dialog.diskRedact.reasonSigned',
   'certified-no-changes': 'dialog.diskRedact.reasonCertifiedNone',
   'certified-form-fill': 'dialog.diskRedact.reasonCertifiedFormFill',

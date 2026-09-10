@@ -93,7 +93,15 @@ describe('durable identity', () => {
     await selectCanvasPages(picked);
     expect(await getSelectedCanvasPageIds()).toEqual(expect.arrayContaining(picked));
     await rotateSelectedCanvasPages(90);
-    await commitPendingEdits();
+    // Rotation awaits the signed-edit decision. The harness call dispatches
+    // that gesture, but does not await it. Require a real disk-history entry
+    // before checking adoption: the pre-edit ids alone also satisfy that check.
+    // Submit the gesture once; retry only the no-op-until-dirty commit gate.
+    await browser.waitUntil(async () => {
+      await commitPendingEdits();
+      return await browser.execute(() =>
+        (window as any).__SPECTRA_TEST__.getHistoryState()?.undo.length === 1);
+    }, { timeout: 15_000, timeoutMsg: 'rotation never produced the authored disk revision' });
 
     // Adoption: the SAME ids survive the rebuild — in the workspace
     // listing AND in the live selection (the payoff, end to end).

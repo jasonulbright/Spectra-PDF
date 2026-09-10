@@ -218,6 +218,7 @@ describe('colour conversion', () => {
 describe('linksForPage', () => {
   const region = (pageId: string, index: number): LinkRegion => ({
     path: 'a.pdf',
+    workingPath: 'a.work.pdf', buffer: new Uint8Array([1]),
     page: 1,
     index,
     pageId,
@@ -239,16 +240,15 @@ describe('linksForPage', () => {
 });
 
 describe('the canvas → panel channels', () => {
+  const owner = { path: 'a.pdf', workingPath: 'a.work.pdf', buffer: new Uint8Array([1]), generation: 1, session: {} };
   beforeEach(() => __resetLinkChannel());
 
   it('a drawn rect reaches a subscriber and is consumed once', () => {
     const seen: number[] = [];
     subscribeDrawnLink((l) => seen.push(l.page));
-    publishDrawnLink({ page: 3, rect: [1, 2, 3, 4], path: 'a.pdf' });
+    publishDrawnLink({ page: 3, rect: [1, 2, 3, 4], ...owner });
     expect(seen).toEqual([3]);
-    // Read on mount by a panel that was collapsed when the rect was drawn…
-    expect(consumeDrawnLink()?.page).toBe(3);
-    // …and gone afterwards, so a remount does not refill the editor.
+    // Delivery consumed it; remount cannot replay an already handled draw.
     expect(consumeDrawnLink()).toBeNull();
   });
 
@@ -256,22 +256,21 @@ describe('the canvas → panel channels', () => {
     const seen: string[] = [];
     const off = subscribeDrawnLink((l) => seen.push(l.path));
     off();
-    publishDrawnLink({ page: 1, rect: [0, 0, 1, 1], path: 'a.pdf' });
+    publishDrawnLink({ page: 1, rect: [0, 0, 1, 1], ...owner });
     expect(seen).toEqual([]);
   });
 
   it('a picked link carries the engine’s own address', () => {
     const seen: string[] = [];
     subscribePickedLink((l) => seen.push(`${l.path}:${l.page}:${l.index}`));
-    publishPickedLink({ path: 'a.pdf', page: 2, index: 1 });
+    publishPickedLink({ ...owner, page: 2, index: 1 });
     expect(seen).toEqual(['a.pdf:2:1']);
-    expect(consumePickedLink()).toEqual({ path: 'a.pdf', page: 2, index: 1 });
     expect(consumePickedLink()).toBeNull();
   });
 
   it('a second draw replaces the first — one pending rect, never a queue', () => {
-    publishDrawnLink({ page: 1, rect: [0, 0, 1, 1], path: 'a.pdf' });
-    publishDrawnLink({ page: 2, rect: [0, 0, 1, 1], path: 'a.pdf' });
+    publishDrawnLink({ page: 1, rect: [0, 0, 1, 1], ...owner });
+    publishDrawnLink({ page: 2, rect: [0, 0, 1, 1], ...owner });
     expect(consumeDrawnLink()?.page).toBe(2);
   });
 });

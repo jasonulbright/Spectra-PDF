@@ -1,37 +1,29 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
-import { EDIT_DECLINED } from '../lib/edit-text';
-import type { OpMethod } from '../lib/op-edit-class';
+import { useLinkDrafts } from '../state/AppStateProvider';
+import { runCommitGate } from '../lib/commit-gate';
 import { dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, type UiKey } from '../i18n';
-import { pagesParam as pagesArgument } from '../lib/page-scope';
-import { getCanvasServices, getCommandContext } from '../commands/context';
+import { getCanvasServices } from '../commands/context';
 import {
   AUTHORED_KINDS,
   AUTHORED_STYLES,
   HIGHLIGHT_MODES,
   VIEW_MODES,
   VIEW_OPERANDS,
-  appearancePayload,
   appearanceProblem,
   colorToTriple,
-  consumeDrawnLink,
-  consumePickedLink,
   defaultAppearance,
   emptyTarget,
   isAuthored,
-  subscribeDrawnLink,
-  subscribePickedLink,
-  targetPayload,
   targetProblem,
   tripleToColor,
   type AuthoredKind,
-  type DrawnLink,
   type LinkAppearance,
   type LinkRecord,
   type LinkTarget,
@@ -391,231 +383,54 @@ function LinkEditor({
 }
 
 export function LinksPanel(): React.ReactElement {
-  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
   const { performOperation } = useOperations();
-  const [links, setLinks] = useState<LinkRecord[]>([]);
-  const [names, setNames] = useState<NamedDestination[]>([]);
-  const [status, setStatus] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [derivePages, setDerivePages] = useState('all');
-  const [deriveEmails, setDeriveEmails] = useState(true);
-  const [found, setFound] = useState<{ count: number; already: number } | null>(null);
-
-  // The rectangle the canvas drew, and the editor bound to it.
-  const [pending, setPending] = useState<DrawnLink | null>(null);
-  const [newTarget, setNewTarget] = useState<LinkTarget>(() => emptyTarget('uri'));
-  const [newAppearance, setNewAppearance] = useState<LinkAppearance>(defaultAppearance);
-  // The existing link being edited, and its draft.
-  const [editing, setEditing] = useState<{ page: number; index: number } | null>(null);
-  const [editTarget, setEditTarget] = useState<LinkTarget>(() => emptyTarget('uri'));
-  const [editAppearance, setEditAppearance] = useState<LinkAppearance>(defaultAppearance);
-
-  const buffer = activeFile?.buffer ?? null;
-  const workingPath = activeFile?.workingPath ?? null;
+  const drafts = useLinkDrafts();
+  const session = drafts.get(activeFile);
+  const draft = session?.draft ?? null;
+  const pending = draft?.kind === 'create' ? draft : null;
+  const editing = draft?.kind === 'edit' ? draft : null;
+  const links = session?.links ?? [];
+  const names = session?.names ?? [];
+  const busy = session?.busy ?? false;
+  const ready = !!session && drafts.ready(session);
+  const conflict = !!session && drafts.conflict(session);
   const pageCount = activeFile?.pageCount ?? 0;
-  const destinationNames = useMemo(() => names.map((d) => d.name), [names]);
+  const derivePages = session?.query.pages ?? 'all';
+  const deriveEmails = session?.query.emails ?? true;
+  const found = session?.found?.buffer === activeFile?.buffer
+    && session?.found?.query === session?.query ? session?.found ?? null : null;
+  const status = conflict && !busy ? tChrome('panel.links.sourceChanged')
+    : session?.error ? tChrome('panel.common.error', { message: session.error })
+    : session?.loading ? tChrome('dialog.common.loading') : session?.status ?? '';
+  const newTarget = pending?.target ?? emptyTarget('uri');
+  const newAppearance = pending?.appearance ?? defaultAppearance();
+  const editTarget = editing?.target ?? emptyTarget('uri');
+  const editAppearance = editing?.appearance ?? defaultAppearance();
+  const destinationNames = names.map(d => d.name);
+  const newProblem = targetProblem(newTarget, { pageCount, names: destinationNames }) ?? appearanceProblem(newAppearance);
+  const editProblem = targetProblem(editTarget, { pageCount, names: destinationNames }) ?? appearanceProblem(editAppearance);
 
-  const refresh = useCallback(async () => {
-    if (!workingPath) return;
-    try {
-      const listed = await call('list_links', { file: workingPath });
-      setLinks((listed as unknown as { links: LinkRecord[] }).links ?? []);
-    } catch {
-      setLinks([]);
-    }
-    try {
-      const listed = await call('list_named_destinations', { file: workingPath });
-      setNames((listed as unknown as { destinations: NamedDestination[] }).destinations ?? []);
-    } catch {
-      setNames([]);
-    }
-  }, [workingPath, call]);
+  useEffect(() => { if (session) void drafts.load(session, call); });
+  useEffect(() => () => { if (session) drafts.cancelLoad(session); }, [session, drafts]);
+  const setNewTarget = (target: LinkTarget) => { if (session && pending) drafts.patchDraft(session, pending, { target }); };
+  const setNewAppearance = (appearance: LinkAppearance) => { if (session && pending) drafts.patchDraft(session, pending, { appearance }); };
+  const setEditTarget = (target: LinkTarget) => { if (session && editing) drafts.patchDraft(session, editing, { target }); };
+  const setEditAppearance = (appearance: LinkAppearance) => { if (session && editing) drafts.patchDraft(session, editing, { appearance }); };
+  const discard = () => { if (session) drafts.discard(session); };
+  const beginEdit = (link: LinkRecord) => { if (session) drafts.beginEdit(session, link); };
+  const setDerivePages = (pages: string) => { if (session) drafts.setQuery(session, { pages }); };
+  const setDeriveEmails = (emails: boolean) => { if (session) drafts.setQuery(session, { emails }); };
+  const findAddresses = useCallback(async () => { if (session) await drafts.find(session, call); }, [session, drafts, call]);
+  const createDerivedLinks = useCallback(async () => { if (session) await drafts.derive(session, performOperation); }, [session, drafts, performOperation]);
+  const createLink = useCallback(async () => { if (session) await drafts.save(session, performOperation); }, [session, drafts, performOperation]);
+  const applyEdit = useCallback(async () => { if (session) await drafts.save(session, performOperation); }, [session, drafts, performOperation]);
+  const deleteLink = useCallback(async (link: LinkRecord) => {
+    if (session) await drafts.remove(session, link, performOperation);
+  }, [session, drafts, performOperation]);
 
-  useEffect(() => {
-    setEditing(null);
-    if (!buffer || !workingPath) {
-      setLinks([]);
-      setNames([]);
-      return;
-    }
-    void refresh();
-  }, [buffer, workingPath, refresh]);
-
-  // The drawn rectangle, from the canvas. Read on mount too — a link drawn
-  // while the dock was collapsed must not be lost — and consume-once, so a
-  // remount does not refill the editor with a link already created.
-  useEffect(() => {
-    const take = (drawn: DrawnLink): void => {
-      setPending(drawn);
-      setEditing(null);
-      setStatus('');
-    };
-    const initial = consumeDrawnLink();
-    if (initial) take(initial);
-    return subscribeDrawnLink(take);
-  }, []);
-
-  const beginEdit = useCallback(
-    (link: LinkRecord) => {
-      setPending(null);
-      setEditing({ page: link.page, index: link.index });
-      // A target this app does not author cannot be shown in a picker that
-      // only offers the ones it does. The editor opens on a fresh URI target
-      // and the note above it says what the document actually carries, so an
-      // Apply replaces that action deliberately rather than by accident.
-      setEditTarget(isAuthored(link.target_spec.kind) ? link.target_spec : emptyTarget('uri'));
-      setEditAppearance(link.appearance);
-      setStatus('');
-    },
-    [],
-  );
-
-  // A link picked on the page opens its editor here. The pick names the
-  // engine's own (page, index), so the overlay and the row are one link.
-  useEffect(() => {
-    const take = (picked: { path: string; page: number; index: number }): void => {
-      if (activeFile && picked.path !== activeFile.path) return;
-      const link = links.find((l) => l.page === picked.page && l.index === picked.index);
-      if (link) beginEdit(link);
-    };
-    const initial = consumePickedLink();
-    if (initial) take(initial);
-    return subscribePickedLink(take);
-  }, [links, activeFile, beginEdit]);
-
-  const runLinkEdit = useCallback(
-    async (done: string, run: () => Promise<boolean>) => {
-      if (!activeFile) return false;
-      setBusy(true);
-      setStatus(tChrome('panel.common.working'));
-      try {
-        const landed = await run();
-        await refresh();
-        setStatus(landed ? done : '');
-        return landed;
-      } catch (e: unknown) {
-        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
-        return false;
-      } finally {
-        setBusy(false);
-      }
-    },
-    [activeFile, refresh],
-  );
-
-  // The derive half's own mutation shape — a whole-file op with no link
-  // address, so it does not ride the per-link gate above. `OpMethod`, not
-  // `string`: a derive op added without an edit class does not compile.
-  const runMutation = useCallback(
-    async (method: OpMethod, params: Record<string, unknown>, done: string) => {
-      if (!activeFile) return;
-      setBusy(true);
-      setStatus(tChrome('panel.common.working'));
-      try {
-        const r = await performOperation(activeFile.path, method, params);
-        if (r === EDIT_DECLINED) {
-          setStatus('');
-          return;
-        }
-        await refresh();
-        setStatus(done);
-      } catch (e: unknown) {
-        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [activeFile, performOperation, refresh],
-  );
-
-  const findAddresses = useCallback(async () => {
-    if (!activeFile) return;
-    setBusy(true);
-    setStatus(tChrome('panel.common.working'));
-    try {
-      const res = await call('find_url_links', {
-        file: activeFile.workingPath,
-        pages: pagesArgument(derivePages),
-        emails: deriveEmails,
-      });
-      const payload = res as unknown as { count: number; already_linked: number };
-      setFound({ count: payload.count ?? 0, already: payload.already_linked ?? 0 });
-      setStatus('');
-    } catch (e: unknown) {
-      setFound(null);
-      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setBusy(false);
-    }
-  }, [activeFile, call, derivePages, deriveEmails]);
-
-  const createDerivedLinks = useCallback(async () => {
-    await runMutation(
-      'create_links_from_urls',
-      { pages: pagesArgument(derivePages), emails: deriveEmails, skip_existing: true },
-      tChrome('panel.links.derive.created'),
-    );
-    setFound(null);
-  }, [runMutation, derivePages, deriveEmails]);
-
-  const newProblem =
-    targetProblem(newTarget, { pageCount, names: destinationNames }) ??
-    appearanceProblem(newAppearance);
-  const editProblem =
-    targetProblem(editTarget, { pageCount, names: destinationNames }) ??
-    appearanceProblem(editAppearance);
-
-  const createLink = useCallback(async () => {
-    if (!pending || !activeFile || newProblem) return;
-    const app = getCommandContext()?.app;
-    if (!app) return;
-    const landed = await runLinkEdit(
-      tChrome('panel.links.draw.created', { page: pending.page }),
-      () =>
-        app.addLinks(activeFile.path, [
-          {
-            page: pending.page,
-            rect: pending.rect,
-            target: targetPayload(newTarget),
-            appearance: appearancePayload(newAppearance),
-          },
-        ]),
-    );
-    if (landed) setPending(null);
-  }, [pending, activeFile, newProblem, newTarget, newAppearance, runLinkEdit]);
-
-  const applyEdit = useCallback(async () => {
-    if (!editing || !activeFile || editProblem) return;
-    const app = getCommandContext()?.app;
-    if (!app) return;
-    const { page, index } = editing;
-    // Target first, then the border: they are two engine calls, and a border
-    // written onto a link whose retarget refused would style a link the user
-    // believes they changed.
-    const landed = await runLinkEdit(tChrome('panel.links.retargeted'), async () => {
-      if (!(await app.retargetLink(activeFile.path, page, index, targetPayload(editTarget)))) {
-        return false;
-      }
-      return app.restyleLink(activeFile.path, page, index, appearancePayload(editAppearance));
-    });
-    if (landed) setEditing(null);
-  }, [editing, activeFile, editProblem, editTarget, editAppearance, runLinkEdit]);
-
-  const deleteLink = useCallback(
-    async (link: LinkRecord) => {
-      if (!activeFile) return;
-      const app = getCommandContext()?.app;
-      if (!app) return;
-      setEditing(null);
-      await runLinkEdit(tChrome('panel.links.removed'), () =>
-        app.removeLink(activeFile.path, link.page, link.index),
-      );
-    },
-    [activeFile, runLinkEdit],
-  );
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.links.open')} />;
 
@@ -644,7 +459,7 @@ export function LinksPanel(): React.ReactElement {
               onAppearance={setNewAppearance}
               pageCount={pageCount}
               names={names}
-              disabled={busy}
+              disabled={!ready || conflict}
             />
             {newProblem && (
               <span className="text-xs text-amber-400" data-testid="link-new-problem" role="alert">
@@ -655,14 +470,14 @@ export function LinksPanel(): React.ReactElement {
               <button
                 data-testid="link-new-create"
                 onClick={() => void createLink()}
-                disabled={busy || newProblem !== null}
+                disabled={busy || !ready || conflict || newProblem !== null}
                 className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded"
               >
                 {tChrome('panel.links.draw.create')}
               </button>
               <button
                 data-testid="link-new-discard"
-                onClick={() => setPending(null)}
+                onClick={discard}
                 disabled={busy}
                 className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
               >
@@ -673,8 +488,14 @@ export function LinksPanel(): React.ReactElement {
         )}
       </div>
 
+      {session && (conflict || session.error || !ready && !session.loading) && <div role="alert" data-testid="links-revision-notice">
+        <p>{conflict ? tChrome('panel.links.sourceChanged') : tChrome('app.history.changed')}</p>
+        <button data-testid="links-reload" disabled={busy} onClick={() => void drafts.reload(session, runCommitGate)}>
+          {draft ? tChrome('panel.links.discardReload') : tChrome('app.commit.retry')}
+        </button>
+      </div>}
       {links.length === 0 ? (
-        <p className="text-sm text-neutral-500" data-testid="links-empty">{tChrome('panel.links.empty')}</p>
+        <p className="text-sm text-neutral-500" data-testid={ready ? "links-empty" : "links-loading"}>{ready ? tChrome('panel.links.empty') : tChrome('dialog.common.loading')}</p>
       ) : (
         <div className="flex flex-col gap-1" data-testid="links-list">
           <div className="text-sm text-neutral-300" data-testid="links-summary">
@@ -704,15 +525,15 @@ export function LinksPanel(): React.ReactElement {
                   <button
                     data-testid={`link-jump-${l.page}-${l.index}`}
                     onClick={() => getCanvasServices()?.jumpToFilePage(activeFile.path, l.page)}
-                    disabled={busy}
+                    disabled={busy || !ready || conflict}
                     className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                   >
                     {tChrome('panel.links.jump')}
                   </button>
                   <button
                     data-testid={`link-edit-${l.page}-${l.index}`}
-                    onClick={() => (isEditing ? setEditing(null) : beginEdit(l))}
-                    disabled={busy}
+                    onClick={() => (isEditing ? discard() : beginEdit(l))}
+                    disabled={busy || !ready || conflict}
                     className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                   >
                     {tChrome('panel.links.edit.open')}
@@ -720,7 +541,7 @@ export function LinksPanel(): React.ReactElement {
                   <button
                     data-testid={`link-delete-${l.page}-${l.index}`}
                     onClick={() => void deleteLink(l)}
-                    disabled={busy}
+                    disabled={busy || !ready || conflict}
                     className="text-xs danger-action is-quiet"
                   >
                     {tChrome('panel.links.delete')}
@@ -746,7 +567,7 @@ export function LinksPanel(): React.ReactElement {
                       onAppearance={setEditAppearance}
                       pageCount={pageCount}
                       names={names}
-                      disabled={busy}
+                      disabled={!ready || conflict}
                     />
                     {editProblem && (
                       <span
@@ -761,14 +582,14 @@ export function LinksPanel(): React.ReactElement {
                       <button
                         data-testid={`link-save-${l.page}-${l.index}`}
                         onClick={() => void applyEdit()}
-                        disabled={busy || editProblem !== null}
+                        disabled={busy || !ready || conflict || editProblem !== null}
                         className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded"
                       >
                         {tChrome('panel.links.edit.apply')}
                       </button>
                       <button
                         data-testid={`link-cancel-${l.page}-${l.index}`}
-                        onClick={() => setEditing(null)}
+                        onClick={discard}
                         disabled={busy}
                         className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                       >
@@ -793,7 +614,6 @@ export function LinksPanel(): React.ReactElement {
             value={derivePages}
             onChange={(e) => {
               setDerivePages(e.target.value);
-              setFound(null);
             }}
             className="flex-1 px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
           />
@@ -805,7 +625,6 @@ export function LinksPanel(): React.ReactElement {
             checked={deriveEmails}
             onChange={(e) => {
               setDeriveEmails(e.target.checked);
-              setFound(null);
             }}
           />
           {tChrome('panel.links.derive.emails')}
@@ -814,7 +633,7 @@ export function LinksPanel(): React.ReactElement {
           <button
             data-testid="links-derive-find"
             onClick={() => void findAddresses()}
-            disabled={busy}
+            disabled={busy || !ready || conflict}
             className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
           >
             {tChrome('panel.links.derive.find')}

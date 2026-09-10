@@ -271,19 +271,23 @@ describe('signing with a Windows certificate store certificate', function () {
   it('drops the pre-selection when the remembered thumbprint is gone', async () => {
     // A certificate that expired or was removed must not sit selected: what
     // the form shows has to be something the store still offers.
-    await browser.execute(() =>
-      localStorage.setItem('spectra-signer-store-cert', '0000000000000000000000000000000000000000'),
-    );
-    await openByPaths([SAMPLE_PDF]);
+    const remembered = await rememberedThumbprint();
     await openSignForm();
-    await chooseStoreSource();
-    // The picker settled and no identity is selected — the placeholder row.
-    expect(await $(STORE_SELECT).getValue()).toBe('');
-    if (thumbprint) {
-      await browser.execute(
-        (tp: string) => localStorage.setItem('spectra-signer-store-cert', tp),
-        thumbprint,
+    await $('[data-testid="sign-source-pfx"]').click();
+    await $('[data-testid="sign-pfx-path"]').waitForDisplayed();
+    try {
+      await browser.execute(() =>
+        localStorage.setItem('spectra-signer-store-cert', '0000000000000000000000000000000000000000'),
       );
+      // Reopening an already-open file keeps its working session. Enter the
+      // source for real: that is when remembered identity is resolved.
+      await chooseStoreSource();
+      expect(await $(STORE_SELECT).getValue()).toBe('');
+    } finally {
+      await browser.execute((tp: string | null) => {
+        if (tp === null) localStorage.removeItem('spectra-signer-store-cert');
+        else localStorage.setItem('spectra-signer-store-cert', tp);
+      }, remembered);
     }
   });
 

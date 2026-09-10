@@ -18,6 +18,13 @@
 //     the catalog gate derives `tool.desc.*` / `navpanel.*` from them, the way
 //     it derives the toolbar groups and the guided-action steps.
 export const WORKBENCH_STRINGS = {
+  'panel.docjs.sourceChanged': 'The document changed. Unsaved scripts are retained but cannot be saved to this revision.',
+  'panel.docjs.incomplete': 'Document scripts could not be read completely. Editing is disabled to preserve the original scripts.',
+  'panel.docjs.discardReload': 'Discard draft and reload',
+  'panel.pageLabels.sourceChanged': 'The document changed. Unsaved page labels are retained but cannot be applied to this revision.',
+  'panel.pageLabels.incomplete': 'Page labels could not be read completely. Editing is disabled to preserve the original labels.',
+  'panel.pageLabels.invalid': 'Invalid page label ranges',
+  'panel.pageLabels.discardReload': 'Discard draft and reload',
   // ── The right tool dock ───────────────────────────────────────────────
   'dock.paneLabel': 'Tool pane',
   'dock.resize': 'Drag to resize',
@@ -41,6 +48,9 @@ export const WORKBENCH_STRINGS = {
   'nav.pages.aria': 'Page thumbnails',
 
   'nav.bookmarks.loading': 'Loading bookmarks…',
+  'nav.bookmarks.sourceChanged': 'The document changed. Unsaved bookmarks are retained but cannot be saved to this revision.',
+  'nav.bookmarks.discardReload': 'Discard draft and reload',
+  'nav.bookmarks.incomplete': 'Some bookmarks could not be read completely. Editing is disabled to preserve the original outline.',
   'nav.bookmarks.empty': 'No bookmarks yet.',
   'nav.bookmarks.truncated': 'Outline truncated (too many bookmarks)',
   'nav.bookmarks.saving': 'Saving…',
@@ -92,6 +102,8 @@ export const WORKBENCH_STRINGS = {
   'nav.articles.save': 'Save articles',
   'nav.articles.saving': 'Saving…',
   'nav.articles.unsaved': 'Unsaved changes.',
+  'nav.articles.sourceChanged': 'The document changed. Unsaved articles are retained but cannot be saved to this revision.',
+  'nav.articles.discardReload': 'Discard draft and reload',
 
   'nav.find.matchCase': 'Match case',
   'nav.find.wholeWord': 'Whole word',
@@ -241,6 +253,8 @@ export const WORKBENCH_STRINGS = {
     'This document is certified, which states what may change in it, and carries {{count}} signatures. Removing hidden information changes more than the certification allows and breaks them. Continue?',
 
   'app.signedEdit.title': 'Document is signed',
+  'app.signedEdit.policyUnreadable':
+    "The document's signature policy could not be read. Editing is blocked.",
   'app.signedEdit.body':
     'Editing this document will invalidate its digital signatures. Continue?',
   'app.signedEdit.certifiedTitle': 'Document is certified',
@@ -299,7 +313,13 @@ export const WORKBENCH_STRINGS = {
   'app.commit.failedAbort':
     'Applying page changes failed: {{message}}. Nothing was saved — your edits are still pending.',
   'app.commit.retry': 'Retry',
+  'app.commit.recoveryRequired': 'The page commit needs recovery. Original working copies are retained. Retry before continuing.',
   'app.commit.dismiss': 'Dismiss',
+  'app.history.changed': 'The document or history changed. Try again.',
+  'app.history.invalid': 'The saved history revision could not be read as a non-empty PDF.',
+  'app.history.failed': 'Undo/redo failed: {{message}}',
+  'app.formCreate.unverified': 'Form creation could not be verified.',
+  'app.operation.unverified': 'The operation result could not be verified.',
 
   // A signed document whose page changes could not be appended. The rewrite
   // is the standing fallback and it lands; what used to be missing is the

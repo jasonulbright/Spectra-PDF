@@ -70,13 +70,15 @@ export interface DrawnBead extends Bead {
   /** The document the band belongs to; a stale publish must not append a box
    * to an article the user has since switched away from. */
   path: string;
+  workingPath: string;
+  buffer: import('../state/types').PdfBuffer;
 }
 
 let drawn: DrawnBead | null = null;
 const beadListeners = new Set<(bead: DrawnBead) => void>();
 
 export function publishDrawnBead(bead: DrawnBead): void {
-  drawn = bead;
+  drawn = beadListeners.size ? null : bead;
   for (const fn of beadListeners) fn(bead);
 }
 

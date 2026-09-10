@@ -340,6 +340,34 @@ export interface SignaturePolicy {
    * signature. An unsigned field's own `/Lock` is absent: it binds nothing
    * until that field is signed. */
   locks?: FieldLock[];
+  /** Present when any part of the policy could not be established. */
+  error?: string | null;
+}
+
+/** Runtime policy boundary, also used by decisions for direct callers. */
+export function parseSignaturePolicy(value: unknown, requireLocks = true): SignaturePolicy {
+  const unreadable: SignaturePolicy = {
+    signed: false, count: 0, certified: false, level: null, locks: [],
+    error: 'signature-policy-unreadable',
+  };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return unreadable;
+  const p = value as Record<string, unknown>;
+  if (requireLocks && !Array.isArray(p.locks)) return unreadable;
+  if (p.error != null || typeof p.signed !== 'boolean' || typeof p.certified !== 'boolean'
+      || !Number.isSafeInteger(p.count) || (p.count as number) < 0
+      || p.signed !== ((p.count as number) > 0)
+      || ![null, 'none', 'form-fill', 'annotate'].includes(p.level as string | null)
+      || (!p.certified && p.level !== null)) return unreadable;
+  if (p.locks !== undefined && (!Array.isArray(p.locks) || p.locks.some((lock: unknown) => {
+    if (!lock || typeof lock !== 'object' || Array.isArray(lock)) return true;
+    const l = lock as Record<string, unknown>;
+    return !['all', 'include', 'exclude'].includes(l.action as string)
+      || !Array.isArray(l.fields) || l.fields.some((name: unknown) => typeof name !== 'string' || !name)
+      || (l.action === 'all' && l.fields.length !== 0);
+  }))) return unreadable;
+  if (!p.signed && (p.locks as unknown[] | undefined)?.length) return unreadable;
+  return { signed: p.signed, count: p.count as number, certified: p.certified,
+    level: p.level as SignaturePolicy['level'], locks: (p.locks ?? []) as FieldLock[] };
 }
 
 /** What an edit DOES, in the terms a certification is written in. */
@@ -349,6 +377,7 @@ export type EditClass = 'form-fill' | 'annotate' | 'structural';
  * typed translator accepts them without a cast. */
 export type SignedEditKey =
   | 'app.signedEdit.title'
+  | 'app.signedEdit.policyUnreadable'
   | 'app.signedEdit.body'
   | 'app.signedEdit.certifiedTitle'
   | 'app.signedEdit.certifiedRefused'
@@ -363,6 +392,7 @@ export type SignedEditKey =
  * text. A surface renders a catalog string from it; a sweep with no surface
  * writes it into its per-file report. */
 export type SignedEditReason =
+  | 'signature-policy-unreadable'
   | 'signed'
   | 'certified-no-changes'
   | 'certified-form-fill'
@@ -466,6 +496,12 @@ export function signedEditDecision(
   fields: readonly string[] | null = null,
   typed: readonly string[] | null = null,
 ): SignedEditDecision {
+  // Authored typed policies predate locks; wire adapters require that field.
+  policy = parseSignaturePolicy(policy, false);
+  if (policy.error) return {
+    kind: 'refuse', reason: 'signature-policy-unreadable',
+    titleKey: 'app.signedEdit.title', bodyKey: 'app.signedEdit.policyUnreadable',
+  };
   if (!policy.signed && !policy.certified) return { kind: 'proceed' };
   if (policy.certified && policy.level === 'none') {
     return {

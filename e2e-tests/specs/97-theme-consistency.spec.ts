@@ -27,8 +27,8 @@ interface Finding {
 const findings: Finding[] = [];
 const seen = new Set<string>();
 
-async function auditTheme(theme: WalkTheme, surface: string): Promise<void> {
-  if (theme === 'dark') return; // dark is the authoring baseline
+async function auditTheme(theme: WalkTheme, surface: string, record = true): Promise<{ descriptor: string; background: string }[]> {
+  if (theme === 'dark') return []; // dark is the authoring baseline
   const flagged = (await browser.execute((mode: string) => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d')!;
@@ -56,6 +56,20 @@ async function auditTheme(theme: WalkTheme, surface: string): Promise<void> {
     // classes carry deliberate colored fills (accent/danger/success and the
     // annotation color families all have their own theme rows).
     const excused = (el: Element): boolean => {
+      // High-contrast selected controls deliberately invert: a white box and
+      // a visible black tick/dot. Prove the STATE and both colors, not just
+      // the tag: unchecked white boxes or invisible/white glyphs still fail.
+      if (mode === 'high-contrast' && el instanceof HTMLInputElement &&
+          (el.type === 'checkbox' || el.type === 'radio') && (el.checked || el.indeterminate)) {
+        const face = resolveColor(getComputedStyle(el).backgroundColor);
+        const mark = getComputedStyle(el, '::before');
+        const ink = resolveColor(mark.backgroundColor);
+        if (face && ink && face[3] === 1 && ink[3] === 1 &&
+            luminance(face) > 0.99 && luminance(ink) < 0.01 &&
+            mark.content !== 'none' && mark.visibility === 'visible' && Number(mark.opacity) === 1 &&
+            parseFloat(mark.width) > 0 && parseFloat(mark.height) > 0 &&
+            mark.transform === 'matrix(1, 0, 0, 1, 0, 0)') return true;
+      }
       if (el.tagName === 'CANVAS' || el.tagName === 'IMG' || el.tagName === 'VIDEO') return true;
       if ((el as HTMLElement).style?.backgroundColor) return true;
       const cls = el.className?.toString() ?? '';
@@ -98,12 +112,13 @@ async function auditTheme(theme: WalkTheme, surface: string): Promise<void> {
     return out;
   }, theme)) as { descriptor: string; background: string }[];
 
-  for (const f of flagged) {
+  for (const f of record ? flagged : []) {
     const key = `${theme}|${f.descriptor}`;
     if (seen.has(key)) continue;
     seen.add(key);
     findings.push({ theme, surface, descriptor: f.descriptor, background: f.background });
   }
+  return flagged;
 }
 
 describe('theme consistency audit', () => {
@@ -111,10 +126,46 @@ describe('theme consistency audit', () => {
     await waitForHarness();
   });
 
+  it('accepts selected black-on-white controls but rejects their broken inversions', async () => {
+    await stampTheme('high-contrast');
+    try {
+      await browser.execute(() => {
+        const host = document.createElement('div');
+        host.id = 'theme-control-probes';
+        host.style.cssText = 'position:fixed;left:10px;top:150px;z-index:999999;display:flex;gap:10px;background:black';
+        const sheet = document.createElement('style');
+        sheet.textContent = `
+          #theme-control-probes input { background:white !important; }
+          #theme-control-probes [data-testid="probe-white-mark"]::before { background:white !important; }
+          #theme-control-probes [data-testid="probe-hidden-mark"]::before { opacity:0 !important; }
+        `;
+        host.append(sheet);
+        for (const id of ['checked', 'radio', 'mixed', 'unchecked', 'white-mark', 'hidden-mark']) {
+          const el = document.createElement('input');
+          el.type = id === 'radio' ? 'radio' : 'checkbox';
+          el.checked = id !== 'unchecked' && id !== 'mixed';
+          el.indeterminate = id === 'mixed';
+          el.dataset.testid = `probe-${id}`;
+          host.append(el);
+        }
+        document.body.append(host);
+      });
+      const bad = (await auditTheme('high-contrast', 'inversion-controls', false))
+        .filter((f) => f.descriptor.includes('[probe-')).map((f) => f.descriptor);
+      expect(bad).toHaveLength(3);
+      for (const id of ['unchecked', 'white-mark', 'hidden-mark']) {
+        expect(bad.some((descriptor) => descriptor.includes(`[probe-${id}]`))).toBe(true);
+      }
+    } finally {
+      await browser.execute(() => document.getElementById('theme-control-probes')?.remove());
+      await stampTheme('dark');
+    }
+  });
+
   for (const theme of WALK_THEMES) {
     it(`audits every surface — ${theme}`, async function () {
       this.timeout(300_000);
-      await walkSurfaces(theme, auditTheme);
+      await walkSurfaces(theme, async (mode, surface) => { await auditTheme(mode, surface); });
     });
   }
 

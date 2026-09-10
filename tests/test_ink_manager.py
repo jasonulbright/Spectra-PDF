@@ -111,6 +111,7 @@ class TestAliasing:
                             (0.0, 1.0, 0.75, 0.0), (0.0, 1.0, 0.75, 0.0))
         out = str(tmp_path / "aliased.pdf")
         result = alias_ink(src, out, "Pantone 185C", "PANTONE 185 C")
+        assert result["output"] == out
         assert result["renamed"] == 1
         assert _colorant_names(out) == {"PANTONE 185 C"}
 
@@ -169,7 +170,7 @@ class TestSpotToProcess:
     def test_the_spot_loses_its_plate(self, tmp_path, gs_path):
         src = spot_in_every_paint_pdf(tmp_path / "spot.pdf")
         out = str(tmp_path / "process.pdf")
-        spot_to_process(src, out, ["Warm Red"])
+        assert spot_to_process(src, out, ["Warm Red"])["output"] == out
         assert "Warm Red" in _plate_names(src, gs_path)
         assert "Warm Red" not in _plate_names(out, gs_path)
 
@@ -357,7 +358,8 @@ class TestWritingBackOverTheInput:
             tmp_path, spot_in_every_paint_pdf, "source.pdf")
         expected = spot_to_process(source, str(control), ["Warm Red"])
         result = spot_to_process(str(subject), str(subject), ["Warm Red"])
-        assert result == expected
+        assert expected["output"] == str(control)
+        assert result == {**expected, "output": str(subject)}
         assert subject.read_bytes() == control.read_bytes()
         assert "Warm Red" not in _colorant_names(str(subject))
 
@@ -371,7 +373,8 @@ class TestWritingBackOverTheInput:
         expected = alias_ink(source, str(control), "Pantone 185C", "PANTONE 185 C")
         result = alias_ink(str(subject), str(subject), "Pantone 185C",
                            "PANTONE 185 C")
-        assert result == expected
+        assert expected["output"] == str(control)
+        assert result == {**expected, "output": str(subject)}
         assert subject.read_bytes() == control.read_bytes()
         assert _colorant_names(str(subject)) == {"PANTONE 185 C"}
 

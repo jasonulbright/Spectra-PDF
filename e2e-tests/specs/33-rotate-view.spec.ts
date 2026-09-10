@@ -16,6 +16,7 @@ import {
   invokeAppCommand,
   getFirstAnnotation,
   consumeLastError,
+  openMenuItem,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -65,8 +66,8 @@ describe('rotate view', () => {
     // Letter portrait: taller than wide.
     expect(upright.h).toBeGreaterThan(upright.w);
 
-    await $('[data-testid="menu-view"]').click();
-    await $('[data-testid="submenu-view-rotate"]').click();
+    await openMenuItem('menu-view', 'submenu-view-rotate');
+    await openMenuItem('submenu-view-rotate', 'menuitem-view-rotate-cw');
     const cw = $('[data-testid="menuitem-view-rotate-cw"]');
     await cw.waitForDisplayed({ timeoutMsg: 'no Rotate View ▸ Clockwise item' });
     await cw.click();
@@ -135,10 +136,9 @@ describe('rotate view', () => {
       data: new Uint8Array(readFileSync(dest)),
     }).promise;
     const page = await doc.getPage(1);
-    // The highlight tool draws translucent BOXES — committed as /Square
-    // (the design; text-markup /Highlight needs QuadPoints on text).
+    // An authored box is a native /Highlight with its rectangle as one quad.
     const annots = (await page.getAnnotations()) as { subtype: string; rect: number[] }[];
-    const highlights = annots.filter((a) => a.subtype === 'Square');
+    const highlights = annots.filter((a) => a.subtype === 'Highlight');
     expect(highlights.length).toBe(1);
     const [x0, y0, x1, y1] = highlights[0].rect;
     // Small padding is applied by the builder; assert within a loose band.
@@ -160,8 +160,8 @@ describe('rotate view', () => {
   });
 
   it('rotating back upright restores the original aspect', async () => {
-    await $('[data-testid="menu-view"]').click();
-    await $('[data-testid="submenu-view-rotate"]').click();
+    await openMenuItem('menu-view', 'submenu-view-rotate');
+    await openMenuItem('submenu-view-rotate', 'menuitem-view-rotate-ccw');
     const ccw = $('[data-testid="menuitem-view-rotate-ccw"]');
     await ccw.waitForDisplayed();
     await ccw.click();

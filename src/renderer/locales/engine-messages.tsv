@@ -166,6 +166,8 @@ doc_properties.wellFormedLanguageTag7	pattern	doc_properties	"{{text}}" is not a
 doc_properties.zoomMustOneGot	pattern	doc_properties	zoom must be one of {{v0}}, got {{zoom}}
 doc_properties.zoomPercentMustBetween	pattern	doc_properties	zoom_percent must be between {{minimum}} and {{maximum}}, got {{zoom_percent}}
 doc_properties.zoomPercentNeedsZoom	exact	doc_properties	zoom 'percent' needs a zoom_percent
+docmdp.documentSSignaturePolicy	exact	docmdp	The document's signature policy could not be read. Editing is blocked.
+document_js.documentScriptsExceedEditing	exact	document_js	Document scripts exceed editing limits.
 document_js.duplicateDocumentScriptName	pattern	document_js	Duplicate document-script name: {{name}}.
 document_js.eachDocumentScriptMust	exact	document_js	Each document script must be an object with name and js.
 document_js.eachDocumentScriptNeeds	exact	document_js	Each document script needs a non-empty name.
@@ -318,7 +320,9 @@ ink_manager.inkUsedPatternTool	pattern	ink_manager	Ink "{{name}}" is used by a p
 ink_manager.nameLeastOneInk	exact	ink_manager	Name at least one ink to convert.
 ink_manager.processInksCannotAliased	exact	ink_manager	Process inks cannot be aliased to a spot colour.
 inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
+layers.layerConfigurationCannotRead	exact	layers	Layer configuration cannot be read completely.
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
+layers.layerLockedDefaultConfiguration	exact	layers	Layer is locked in the default configuration.
 links.documentDestinationNamed	pattern	links	this document has no destination named {{name}}
 links.linkBorderStyleMust	exact	links	link border style must be solid, dashed or underline
 links.linkBorderWidthMust	exact	links	link border width must be a number
@@ -432,6 +436,7 @@ page_images.unsupportedJpegComponentsSend	pattern	page_images	unsupported JPEG (
 page_images.vectorGraphicPlacementCannot	exact	page_images	a vector graphic placement cannot be replaced with a raster image; delete it and add a new graphic
 page_images.vectorGraphicPlacementImage	exact	page_images	a vector graphic placement has no image bytes to extract
 page_labels.duplicateRangeStart	pattern	page_labels	duplicate range start {{start}}
+page_labels.invalidPageLabelRanges	exact	page_labels	Invalid page label ranges
 page_labels.rangeStartOutRange	pattern	page_labels	range start {{start}} is out of range (0-{{v1}})
 page_labels.styleMustOneNone	pattern	page_labels	style must be one of {{v0}} or 'none', got {{style}}
 page_vectors.formChainNestedVector	exact	page_vectors	the form chain for this nested vector object was not found

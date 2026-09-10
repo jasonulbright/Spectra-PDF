@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { PDFDocument, PDFName, PDFString } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFNull, PDFString } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import {
@@ -11,6 +11,7 @@ import {
   carriesLiveSignature,
 } from '../src/renderer/lib/workspace-commit';
 import { rotateAnnotationRect } from '../src/renderer/state/reducer';
+import type { PageCommitEntry } from '../src/renderer/lib/page-commit-transaction';
 import { readManifest } from '../src/renderer/lib/pdfx-format';
 import { carriesManifest } from '../src/renderer/lib/doc-names';
 import { readRawAnnotationStyles } from '../src/renderer/lib/annotation-raw-style';
@@ -470,23 +471,35 @@ describe('commitPageEdits (transactional)', () => {
 
   function makeDeps(fs: FakeFs, opts: { failWriteAt?: number } = {}) {
     let writeCount = 0;
+    const originals = new Map<string, Uint8Array | undefined>();
     return {
       dispatch: (action: AppAction) => fs.dispatched.push(action),
-      snapshot: async (workingPath: string) => {
-        fs.snapshots.push(workingPath);
-        return `${workingPath}.snap`;
+      transaction: {
+        publish: async (_id: string, entries: PageCommitEntry[]) => {
+          for (const entry of entries) {
+            fs.snapshots.push(entry.workingPath);
+            originals.set(entry.workingPath, fs.contents.get(entry.workingPath));
+          }
+          for (const entry of entries) {
+            fs.renames.push([entry.stagedPath, entry.workingPath]);
+            fs.contents.set(entry.workingPath, fs.contents.get(entry.stagedPath)!);
+            fs.contents.delete(entry.stagedPath);
+          }
+          return { status: 'committed', snapshots: entries.map(e => `${e.workingPath}.snap`), detail: '' };
+        },
+        abort: async () => {
+          for (const [path, bytes] of originals) {
+            if (bytes) fs.contents.set(path, bytes); else fs.contents.delete(path);
+          }
+          return { status: 'rolledBack', snapshots: [], detail: '' };
+        },
+        acknowledge: async () => {},
       },
       writeBuffer: async (filePath: string, bytes: Uint8Array) => {
         writeCount++;
         if (opts.failWriteAt === writeCount) throw new Error('disk full');
         fs.writes.push(filePath);
         fs.contents.set(filePath, bytes);
-      },
-      rename: async (fromPath: string, toPath: string) => {
-        fs.renames.push([fromPath, toPath]);
-        const bytes = fs.contents.get(fromPath);
-        if (bytes) fs.contents.set(toPath, bytes);
-        fs.contents.delete(fromPath);
       },
       remove: async (filePath: string) => {
         fs.removed.push(filePath);
@@ -526,20 +539,20 @@ describe('commitPageEdits (transactional)', () => {
     };
   }
 
-  const TMP = /\.commit-tmp-\d+$/;
+  const TMP = /\.commit-tmp-[\da-f-]{36}$/;
 
   it('stages all temps, then snapshots+renames, then dispatches one atomic update', async () => {
     const { files, workspace, dirtyPaths } = await crossFileState();
     const fs = emptyFs();
     await commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(fs) });
     expect(fs.writes).toHaveLength(2);
-    expect(fs.writes[0]).toMatch(/^a\.pdf\.working\.commit-tmp-\d+$/);
-    expect(fs.writes[1]).toMatch(/^b\.pdf\.working\.commit-tmp-\d+$/);
+    expect(fs.writes[0]).toMatch(/^a\.pdf\.working\.commit-tmp-[\da-f-]{36}$/);
+    expect(fs.writes[1]).toMatch(/^b\.pdf\.working\.commit-tmp-[\da-f-]{36}$/);
     expect(fs.renames).toEqual([
       [fs.writes[0], 'a.pdf.working'],
       [fs.writes[1], 'b.pdf.working'],
     ]);
-    expect(fs.removed).toEqual([]);
+    expect(fs.removed).toEqual(fs.writes); // successful publication also retires its private stages
     expect(fs.dispatched).toHaveLength(1);
     const action = fs.dispatched[0];
     expect(action.type).toBe('COMMIT_PAGE_EDITS');
@@ -562,7 +575,7 @@ describe('commitPageEdits (transactional)', () => {
     expect(fs.renames).toEqual([]);
     expect(fs.snapshots).toEqual([]);
     expect(fs.dispatched).toEqual([]);
-    expect(fs.removed).toHaveLength(1);
+    expect(fs.removed).toHaveLength(2); // includes a possibly partial failed write
     expect(fs.removed[0]).toMatch(TMP);
 
     // Retry from the same (unchanged) state: byte-identical plans succeed.
@@ -705,26 +718,40 @@ describe('commitPageEdits (transactional)', () => {
 
     const TRANSPLANTED = new Uint8Array([9, 9, 9, 9]);
 
-    it('an engine exception on a SIGNED file is reported, not swallowed', async () => {
+    it.each([
+      { applied: false, blocked: true, reason: 'signature-policy-unreadable' },
+      { applied: false, reason: 'signature-policy-unreadable' },
+      { applied: true, blocked: true },
+      { applied: 'false', reason: 'not-signed' },
+      { applied: false },
+    ])('never publishes an unreadable or malformed preservation result %#', async (result) => {
       const { files, workspace, dirtyPaths } = await signedState();
       const fs = emptyFs();
-      const outcome = await commitPageEdits({
+      let reads = 0;
+      await expect(commitPageEdits({
+        workspace, files, dirtyPaths, ...makeDeps(fs),
+        preserveSignatures: async () => result as never,
+        readBack: async () => { reads++; return TRANSPLANTED; },
+      })).rejects.toThrow('signature policy could not be read');
+      expect(reads).toBe(0);
+      expect(fs.renames).toHaveLength(0);
+      expect(fs.dispatched).toHaveLength(0);
+      expect(fs.removed).toEqual(fs.writes);
+    });
+
+    it('an engine exception cannot authorize rewriting a SIGNED file', async () => {
+      const { files, workspace, dirtyPaths } = await signedState();
+      const fs = emptyFs();
+      await expect(commitPageEdits({
         workspace, files, dirtyPaths, ...makeDeps(fs),
         // a.pdf carries a live signature; b.pdf does not.
         preserveSignatures: async () => {
           throw new Error('engine unavailable');
         },
         readBack: async () => TRANSPLANTED,
-      });
-      expect(outcome.signatureRefusals).toEqual([
-        {
-          path: 'a.pdf',
-          reason: { key: 'app.preserve.unrecognized', detail: 'engine unavailable' },
-        },
-      ]);
-      // …and the rewrite still landed, which is what the notice reports on.
-      expect(fs.dispatched).toHaveLength(1);
-      expectBufferMatchesDisk(fs);
+      })).rejects.toThrow('signature policy could not be read');
+      expect(fs.renames).toHaveLength(0);
+      expect(fs.dispatched).toHaveLength(0);
     });
 
     it('an engine exception on an unsigned file reports no lost signature', async () => {
@@ -745,11 +772,11 @@ describe('commitPageEdits (transactional)', () => {
     // answer, so the transplanted file is what the rename publishes — a
     // commit that dispatched the rewrite bytes would leave the state buffer
     // describing a file that no longer exists.
-    it('a transplant that landed but could not be answered for does not desync the buffer', async () => {
+    it('a lost transplant response leaves the working files and state untouched', async () => {
       const { files, workspace, dirtyPaths } = await signedState();
       const fs = emptyFs();
       const deps = makeDeps(fs);
-      const outcome = await commitPageEdits({
+      await expect(commitPageEdits({
         workspace, files, dirtyPaths, ...deps,
         preserveSignatures: async (_workingPath, stagedPath) => {
           // the engine's own stage-and-swap: the temp already holds the
@@ -758,14 +785,9 @@ describe('commitPageEdits (transactional)', () => {
           throw new Error('engine exited');
         },
         readBack: async (filePath: string) => fs.contents.get(filePath)!,
-      });
-      expectBufferMatchesDisk(fs);
-      expect(outcome.signatureRefusals).toEqual([
-        {
-          path: 'a.pdf',
-          reason: { key: 'app.preserve.unrecognized', detail: 'engine exited' },
-        },
-      ]);
+      })).rejects.toThrow('signature policy could not be read');
+      expect(fs.renames).toHaveLength(0);
+      expect(fs.dispatched).toHaveLength(0);
     });
 
     // The read-back failure: the transplant APPLIED, so the temp holds the
@@ -829,13 +851,13 @@ describe('commitPageEdits (transactional)', () => {
     // The identity channel is a property of the PLAN, not of how the bytes
     // landed: the append path rewrites the staged temp in place, so the
     // old→new mapping dispatched with COMMIT_PAGE_EDITS is the same one the
-    // rewrite publishes whether the transplant applied, refused, or threw.
+    // rewrite publishes whether the transplant applied or mechanically refused.
+    // An unassessed signed-file policy now aborts instead of publishing.
     // A mapping published on only one of those paths would leave a
     // page-tree edit that landed incrementally with stale positional ids.
     it.each([
       ['applied', async () => ({ applied: true as const })],
       ['refused', async () => ({ applied: false as const, reason: 'catalog-changed' })],
-      ['threw', async () => { throw new Error('engine unavailable'); }],
     ])('publishes the authored mapping when the transplant %s', async (_label, preserveSignatures) => {
       const { files, workspace, dirtyPaths } = await signedState();
       const plans = planCommit(workspace, files, dirtyPaths);
@@ -935,6 +957,47 @@ describe('commitPageEdits (transactional)', () => {
 });
 
 describe('carriesLiveSignature', () => {
+  it.each(['unknown-type', 'missing-type', 'empty-kids', 'bad-kids', 'bad-field', 'bad-acro', 'perms'])(
+    'does not prove unsignedness from malformed or uncertified policy structure: %s', async (shape) => {
+    const doc = await PDFDocument.load(await makeSourcePdf(1, 100));
+    const ctx = doc.context;
+    const field = ctx.obj({ FT: 'Sig' });
+    if (shape === 'unknown-type') field.set(PDFName.of('FT'), PDFName.of('Unknown'));
+    if (shape === 'missing-type' || shape === 'empty-kids') field.delete(PDFName.of('FT'));
+    if (shape === 'empty-kids') field.set(PDFName.of('Kids'), ctx.obj([]));
+    if (shape === 'bad-kids') field.set(PDFName.of('Kids'), ctx.obj(42));
+    const acro = ctx.obj({ Fields: [shape === 'bad-field' ? ctx.obj(42) : ctx.register(field)] });
+    doc.catalog.set(PDFName.of('AcroForm'), shape === 'bad-acro' ? ctx.obj(42) : ctx.register(acro));
+    if (shape === 'perms') doc.catalog.set(PDFName.of('Perms'), ctx.obj({}));
+    expect(await carriesLiveSignature(await doc.save())).toBe(true);
+  });
+
+  it.each([1, 2])('finds a signed terminal field owning %i separate widgets', async (count) => {
+    const doc = await PDFDocument.load(await makeSourcePdf(1, 100));
+    const ctx = doc.context;
+    const field = ctx.obj({
+      T: PDFString.of('approval'), V: ctx.register(ctx.obj({ Type: 'Sig' })),
+    });
+    const fieldRef = ctx.register(field);
+    const widgets = Array.from({ length: count }, () => ctx.register(ctx.obj({
+      Type: 'Annot', Subtype: 'Widget', Parent: fieldRef, Rect: [0, 0, 50, 20],
+    })));
+    field.set(PDFName.of('Kids'), ctx.obj(widgets));
+    // The inherited type is itself indirect; the dictionary reader must
+    // resolve it before classifying the value-owning field.
+    const root = ctx.obj({ FT: ctx.register(PDFName.of('Sig')), Kids: [fieldRef] });
+    doc.catalog.set(PDFName.of('AcroForm'), ctx.register(ctx.obj({ Fields: [ctx.register(root)] })));
+    expect(await carriesLiveSignature(await doc.save())).toBe(true);
+  });
+
+  it('does not mistake a null signature value plus widgets for a signed field', async () => {
+    const doc = await PDFDocument.load(await makeSourcePdf(1, 100));
+    const ctx = doc.context;
+    const field = ctx.obj({ FT: 'Sig', V: PDFNull, Kids: [ctx.register(ctx.obj({ Subtype: 'Widget' }))] });
+    doc.catalog.set(PDFName.of('AcroForm'), ctx.register(ctx.obj({ Fields: [ctx.register(field)] })));
+    expect(await carriesLiveSignature(await doc.save())).toBe(false);
+  });
+
   it('is false for a document with no form at all', async () => {
     expect(await carriesLiveSignature(await makeSourcePdf(1, 100))).toBe(false);
   });

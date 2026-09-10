@@ -232,7 +232,7 @@ export function PrepressPanel(): React.ReactElement {
           ))}
         </select>
       </label>
-      <div className="flex items-center gap-2 text-sm text-neutral-300">
+      <div className="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-2 text-sm text-neutral-300">
         <span className="w-28 shrink-0 text-neutral-400">{tChrome('panel.prepress.destination')}</span>
         <select
           data-testid="cmyk-dest-profile"
@@ -245,7 +245,7 @@ export function PrepressPanel(): React.ReactElement {
               setProfile({ kind: 'installed', name: presses?.names[0] ?? '' });
             } else setProfile({ kind: 'default' });
           }}
-          className="px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+          className="min-w-0 w-full px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
         >
           <option value="default">
             {presses && presses.default !== ''
@@ -263,7 +263,7 @@ export function PrepressPanel(): React.ReactElement {
             aria-label={tChrome('panel.prepress.profileInstalledAria')}
             value={profile.name}
             onChange={(e) => setProfile({ kind: 'installed', name: e.target.value })}
-            className="px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+            className="col-start-2 min-w-0 w-full px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
           >
             {presses.names.map((name) => (
               <option key={name} value={name}>
@@ -273,7 +273,7 @@ export function PrepressPanel(): React.ReactElement {
           </select>
         )}
         {profile.kind === 'file' && (
-          <span className="text-xs text-neutral-400 truncate" title={profile.path}>
+          <span className="col-start-2 min-w-0 text-xs text-neutral-400 truncate" title={profile.path}>
             {profile.path.split(/[\\/]/).pop()}
           </span>
         )}

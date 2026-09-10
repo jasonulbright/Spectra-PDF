@@ -174,14 +174,19 @@ describe('outline sidebar', () => {
     await setView('canvas');
     await showOutline();
 
-    // Fire two reorders synchronously (both read the same pre-render tree, so
-    // the SECOND must win), then await BOTH persists. Without the persist chain
+    // Fire two reorders synchronously. The session store applies each gesture
+    // synchronously, so resolve the second target in that updated tree rather
+    // than assuming React has not yet exposed the first change. Await BOTH
+    // persists. Without the persist chain
     // their snapshot/set_outline/readBuffer sequences could interleave and let
     // the first (stale) order win the file on disk.
     const err = await browser.executeAsync<string | null, []>((done) => {
       const h = (window as any).__SPECTRA_TEST__;
       const p1 = h.reorderOutline([2], 0, 0); // Chapter 2 → top
-      const p2 = h.reorderOutline([1], 0, 0); // External Link → top (from the original tree)
+      const roots = h.getOutlineOrder().filter((row: { depth: number }) => row.depth === 0);
+      const external = roots.findIndex((row: { title: string }) => row.title === 'External Link');
+      if (external < 0) { done('External Link missing after first drop'); return; }
+      const p2 = h.reorderOutline([external], 0, 0); // External Link → top of the live tree
       Promise.all([p1, p2])
         .then(() => done(null))
         .catch((e: unknown) => done(String(e)));
@@ -193,7 +198,8 @@ describe('outline sidebar', () => {
     const pdf = await loadPdf(dest);
     const outline = (await pdf.getOutline()) as PdfOutlineItem[];
     // The SAVED file reflects the last drop (External Link on top), not the first.
-    expect(titles(outline)[0]).toBe('External Link');
+    expect(titles(outline)).toEqual(['External Link', 'Chapter 2', 'Chapter 1']);
+    expect(outline[0].url ?? outline[0].unsafeUrl).toBe('https://example.com/x');
     await pdf.loadingTask.destroy();
   });
 });

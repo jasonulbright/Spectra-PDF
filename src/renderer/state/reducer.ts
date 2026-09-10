@@ -348,7 +348,7 @@ function applyFileUpdate(
     // object; a non-authored update leaves any stale record inert (the
     // buffer-identity check fails) — but drop it anyway for hygiene.
     authoredIdentity: update.authored
-      ? { buffer: update.buffer, ...update.authored }
+      ? { sourceBuffer: existing.buffer, buffer: update.buffer, ...update.authored }
       : undefined,
   });
   return next;
@@ -696,29 +696,26 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         pageDirtyPaths: [],
       };
     }
-    case 'UNDO': {
-      const files = new Map(state.files);
-      const existing = files.get(action.path);
-      if (!existing || existing.undoStack.length === 0) return state;
+    case 'RESTORE_HISTORY': {
+      const existing = state.files.get(action.path);
+      const undo = action.direction === 'undo';
+      if (!existing || existing !== action.expected.files.get(action.path)
+          || state.pageUndoStack !== action.expected.pageUndoStack
+          || state.pageRedoStack !== action.expected.pageRedoStack
+          || state.pageDirtyPaths !== action.expected.pageDirtyPaths
+          || (undo ? existing.undoStack : existing.redoStack).at(-1) !== action.snapshotPath
+          || !Number.isSafeInteger(action.pageCount) || action.pageCount < 1) return state;
+      // Reuse the non-authored identity invalidation, within THIS reducer turn.
+      const refreshed = appReducer(state, { type: 'REFRESH_BUFFER', path: action.path,
+        buffer: action.buffer, pageCount: action.pageCount });
+      const files = new Map(refreshed.files);
       files.set(action.path, {
-        ...existing,
-        undoStack: existing.undoStack.slice(0, -1), // caller restored this snapshot
-        redoStack: [...existing.redoStack, action.redoSnapshot],
-        dirty: existing.undoStack.length > 1,
+        ...files.get(action.path)!,
+        undoStack: undo ? existing.undoStack.slice(0, -1) : [...existing.undoStack, action.counterpart],
+        redoStack: undo ? [...existing.redoStack, action.counterpart] : existing.redoStack.slice(0, -1),
+        dirty: !undo || existing.undoStack.length > 1,
       });
-      return { ...state, files };
-    }
-    case 'REDO': {
-      const files = new Map(state.files);
-      const existing = files.get(action.path);
-      if (!existing || existing.redoStack.length === 0) return state;
-      files.set(action.path, {
-        ...existing,
-        redoStack: existing.redoStack.slice(0, -1), // caller restored this snapshot
-        undoStack: [...existing.undoStack, action.undoSnapshot],
-        dirty: true,
-      });
-      return { ...state, files };
+      return { ...refreshed, files };
     }
     case 'REFRESH_BUFFER': {
       // Buffer/pageCount swap that leaves undo/redo history alone — used

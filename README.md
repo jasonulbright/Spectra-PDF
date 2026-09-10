@@ -1,10 +1,11 @@
 # Spectra PDF
 
-[![CI](https://github.com/jasonulbright/Spectra-PDF/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonulbright/Spectra-PDF/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/jasonulbright/Spectra-PDF?sort=semver)](https://github.com/jasonulbright/Spectra-PDF/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/jasonulbright/Spectra-PDF/total)](https://github.com/jasonulbright/Spectra-PDF/releases)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d4)](https://github.com/jasonulbright/Spectra-PDF/releases/latest)
+[![CI](https://github.com/jasonulbright/Spectra-PDF/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/jasonulbright/Spectra-PDF/actions/workflows/ci.yml)
+[![Signed release](https://img.shields.io/github/actions/workflow/status/jasonulbright/Spectra-PDF/release.yml?label=signed%20release)](https://github.com/jasonulbright/Spectra-PDF/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/jasonulbright/Spectra-PDF?label=release)](https://github.com/jasonulbright/Spectra-PDF/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/jasonulbright/Spectra-PDF/total?label=downloads)](https://github.com/jasonulbright/Spectra-PDF/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows-0078D4)](#requirements)
+[![License](https://img.shields.io/github/license/jasonulbright/Spectra-PDF)](LICENSE)
 
 A modern, open-source PDF workbench for Windows. Tauri v2 + React, with an embedded Python engine. No ads, no telemetry, no upsells. Ships as an installer or as a portable zip you extract and run. WebView2 prerequisite (ships with Windows 10/11). A handful of features — listed below, each marked — additionally need Ghostscript, which you install separately.
 

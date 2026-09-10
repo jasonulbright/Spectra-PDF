@@ -1,8 +1,11 @@
-// The signed-document funnel, enforced mechanically.
+// A syntactic regression guard for legacy literal write/snapshot spellings.
+// This is not proof of whole-tree publication or control-flow safety: injected
+// IO and the native transaction live behind the staged helpers, whose actual
+// failure/consent contracts are exercised in their transaction tests.
 //
-// `lib/op-edit-class` makes the roster total over the OPS. This makes it total
-// over the CALL SITES: every place in the renderer that opens an in-place
-// rewrite of a document must have taken the signed-document decision first.
+// `lib/op-edit-class` supplies the operation roster. This scan watches the
+// literal legacy call sites below for a preceding gate spelling; it does not
+// resolve imports/aliases or prove that a preceding gate actually ran.
 //
 // It exists because the claim "every in-place op goes through
 // performOperation" was verified by reading, and reading missed four surfaces
@@ -10,16 +13,14 @@
 // hand-checked claim about a whole tree is a claim that decays on the next
 // commit; this one fails, by file and line, on the next straggler.
 //
-// THE DOORS. Two calls replace a document's bytes:
+// THE LEGACY SPELLINGS watched here:
 //   `file.snapshot(...)`    — opens an in-place rewrite (its return is the
 //                             undo entry; nothing lands undoably without it),
 //                             and it runs the COMMIT GATE, which flushes the
 //                             user's pending page edits to disk.
 //   `file.writeBuffer(...)` — writes bytes at a path directly.
-// `UPDATE_FILE` is deliberately NOT a door: it publishes a `snapshotPath` that
-// only `file.snapshot` can have produced, so guarding the snapshot guards it,
-// and treating it as a door would flag the publish-only helpers a gated caller
-// hands the path to.
+// `UPDATE_FILE` also receives backups from native publication now. This scan
+// does not infer those call paths from a state action.
 //
 // THE RULE. For each door, some enclosing function must call a gate
 // (`performOperation` — which takes the decision from the op's own class —
@@ -88,13 +89,6 @@ const EXEMPT: readonly Exemption[] = [
     reason:
       'The page-tier commit, staging built bytes to a temp path before the rename-all. The decision for a page-tier gesture is taken at the GESTURE by `pageEditDecision` (lib/page-edit-gate), because the commit runs long after the user asked — asking here would ask about a batch nobody is looking at.',
   },
-  {
-    file: 'lib/workspace-commit.ts',
-    fn: 'commitPageEdits',
-    door: 'snapshot',
-    reason:
-      'The same commit taking its undo entry immediately before the rename-all. Same decision, same place: the page tier asks at the gesture, not here.',
-  },
 ];
 
 // ── the scan ──────────────────────────────────────────────────────────────
@@ -144,8 +138,7 @@ interface DoorSite {
   gated: boolean;
 }
 
-function scan(absolute: string): DoorSite[] {
-  const text = readFileSync(absolute, 'utf8');
+function scan(absolute: string, text = readFileSync(absolute, 'utf8')): DoorSite[] {
   const source = ts.createSourceFile(absolute, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const file = relative(RENDERER, absolute).split(sep).join('/');
   const sites: DoorSite[] = [];
@@ -200,22 +193,28 @@ function scan(absolute: string): DoorSite[] {
   return sites;
 }
 
-const SITES = sourceFiles(RENDERER).flatMap(scan);
+const SITES = sourceFiles(RENDERER).flatMap(path => scan(path));
 
 function isExempt(site: DoorSite): boolean {
   return EXEMPT.some((e) => e.file === site.file && e.fn === site.fn && e.door === site.door);
 }
 
-describe('the signed-document funnel is total over the tree', () => {
-  it('finds the doors at all', () => {
-    // A matcher that matches nothing would pass every assertion below while
-    // proving nothing about the tree.
-    expect(SITES.length).toBeGreaterThan(10);
-    expect(SITES.some((s) => s.door === 'file.snapshot')).toBe(true);
-    expect(SITES.some((s) => s.door === 'file.writeBuffer')).toBe(true);
+describe('legacy literal write-site policy guard', () => {
+  it('recognizes every watched spelling independently of how many remain live', () => {
+    // Migrating a legacy caller must not fail an arbitrary minimum count.
+    // Conversely, disabling the matcher must fail even if all live callers
+    // are eventually migrated: each fixed spelling has an independent pin.
+    for (const door of ['file.snapshot', 'file.writeBuffer', 'snapshot', 'writeBuffer']) {
+      const ungated = scan(join(RENDERER, 'fixture.ts'), `function write() { ${door}('work'); }`);
+      expect(ungated.map(s => ({ door: s.door, gated: s.gated }))).toEqual([{ door, gated: false }]);
+      const gated = scan(join(RENDERER, 'fixture.ts'), `function write() { confirmSignedEdit(); ${door}('work'); }`);
+      expect(gated.map(s => ({ door: s.door, gated: s.gated }))).toEqual([{ door, gated: true }]);
+      const late = scan(join(RENDERER, 'fixture.ts'), `function write() { ${door}('work'); confirmSignedEdit(); }`);
+      expect(late[0].gated).toBe(false);
+    }
   });
 
-  it('gates every in-place rewrite, or exempts it with a reason', () => {
+  it('requires a preceding gate spelling or named exemption at each watched site', () => {
     const offenders = SITES.filter((s) => !s.gated && !isExempt(s)).map(
       (s) =>
         `${s.file}:${s.line} — ${s.door} inside \`${s.fn}\` takes no signed-document decision. ` +

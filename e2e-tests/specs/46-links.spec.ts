@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync, chmodSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -16,6 +16,8 @@ import {
   getState,
   saveActiveAs,
   setReactInputValue,
+  closeAllFiles,
+  invokeAppCommand,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -97,5 +99,59 @@ describe('links manager', () => {
     await applyAndSave(dest);
     await $('[data-testid="links-empty"]').waitForDisplayed({ timeout: 20_000 });
     expect(await firstLinkUrl(dest)).toBeUndefined();
+  });
+
+  it('Apply publishes target and border together, and one Undo restores both', async () => {
+    await closeAllFiles(); await openByPaths([source]); await setView('operations'); await setActiveOp('links');
+    const working = (await getState()).activeFile!.workingPath;
+    const prior = readFileSync(working);
+    const history = () => browser.execute(() => (window as any).__SPECTRA_TEST__.getHistoryState()) as Promise<{ undo: string[]; redo: string[]; buffer: number[] }>;
+    const before = await history();
+    await $('[data-testid="link-edit-1-0"]').waitForDisplayed();
+    await $('[data-testid="link-edit-1-0"]').click();
+    await setReactInputValue('[data-testid="link-edit-1-0-url"]', 'https://atomic.example/');
+    await setReactInputValue('[data-testid="link-edit-1-0-width"]', '3');
+    chmodSync(working, 0o444);
+    try {
+      await $('[data-testid="link-save-1-0"]').click();
+      await browser.waitUntil(async () => /read.only|denied/i.test(await $('[data-testid="status-bar"]').getText()));
+      expect(readFileSync(working).equals(prior)).toBe(true); expect(await history()).toEqual(before);
+      expect(await $('[data-testid="link-edit-1-0-url"]').getValue()).toBe('https://atomic.example/');
+      expect(await $('[data-testid="link-edit-1-0-width"]').getValue()).toBe('3');
+    } finally { chmodSync(working, 0o666); }
+    await $('[data-testid="link-save-1-0"]').click();
+    await browser.waitUntil(async () => (await history()).undo.length === before.undo.length + 1);
+    expect(await firstLinkUrl(working)).toBe('https://atomic.example/');
+    const rendered = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(working)) }).promise;
+    try {
+      const annots = await (await rendered.getPage(1)).getAnnotations();
+      expect(annots.find((a: { subtype: string }) => a.subtype === 'Link').borderStyle.width).toBe(3);
+    } finally { await rendered.loadingTask.destroy(); }
+    expect(Buffer.from((await history()).buffer).equals(readFileSync(working))).toBe(true);
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(async () => (await history()).undo.length === before.undo.length);
+    expect(readFileSync(working).equals(prior)).toBe(true);
+  });
+
+  it('a native publication refusal leaves link bytes/history intact, then retries and undoes', async () => {
+    await closeAllFiles(); await openByPaths([source]); await setView('operations'); await setActiveOp('links');
+    const working = (await getState()).activeFile!.workingPath;
+    const prior = readFileSync(working);
+    const history = () => browser.execute(() => (window as any).__SPECTRA_TEST__.getHistoryState()) as Promise<{ undo: string[]; redo: string[]; buffer: number[] }>;
+    const before = await history();
+    await $('[data-testid="link-delete-1-0"]').waitForDisplayed();
+    chmodSync(working, 0o444);
+    try {
+      await $('[data-testid="link-delete-1-0"]').click();
+      await browser.waitUntil(async () => (await $('[data-testid="status-bar"]').getText()).toLowerCase().match(/read.only|denied/) !== null);
+      expect(readFileSync(working).equals(prior)).toBe(true); expect(await history()).toEqual(before);
+    } finally { chmodSync(working, 0o666); }
+    await $('[data-testid="link-delete-1-0"]').click();
+    await browser.waitUntil(async () => (await history()).undo.length === before.undo.length + 1);
+    expect(await firstLinkUrl(working)).toBeUndefined();
+    expect(Buffer.from((await history()).buffer).equals(readFileSync(working))).toBe(true);
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(async () => (await history()).undo.length === before.undo.length);
+    expect(readFileSync(working).equals(prior)).toBe(true);
   });
 });

@@ -12,12 +12,19 @@ for the edit tier to consult before every edit.
 """
 
 import pikepdf
+from decimal import Decimal
 
 # /P → wire name. Mapping tables, not a computation: an unknown /P must report
 # as an unknown level rather than round to the nearest known one.
 LEVEL_BY_VALUE: dict[int, str] = {1: "none", 2: "form-fill", 3: "annotate"}
 VALUE_BY_LEVEL: dict[str, int] = {name: value for value, name in LEVEL_BY_VALUE.items()}
 LEVEL_NAMES: tuple[str, ...] = ("none", "form-fill", "annotate")
+POLICY_UNREADABLE = "signature-policy-unreadable"
+
+
+def refuse_unreadable_policy():
+    """One public refusal for a policy that cannot authorize an edit."""
+    raise ValueError("The document's signature policy could not be read. Editing is blocked.")
 
 
 def _not_certified() -> dict:
@@ -35,41 +42,44 @@ def certification_of_pdf(pdf) -> dict:
     """
     try:
         perms = pdf.Root.get("/Perms")
+        if perms is None:
+            return _not_certified()
+        if not isinstance(perms, pikepdf.Dictionary):
+            raise ValueError
+        docmdp = perms.get("/DocMDP")
+        if docmdp is None:
+            return _not_certified()
+        if not isinstance(docmdp, pikepdf.Dictionary):
+            raise ValueError
+        refs = docmdp.get("/Reference")
+        if not isinstance(refs, pikepdf.Array):
+            raise ValueError
+        values = []
+        for ref in refs:
+            if not isinstance(ref, pikepdf.Dictionary):
+                raise ValueError
+            method = ref.get("/TransformMethod")
+            if not isinstance(method, pikepdf.Name):
+                raise ValueError
+            if method != pikepdf.Name.DocMDP:
+                continue
+            params = ref.get("/TransformParams")
+            if not isinstance(params, pikepdf.Dictionary):
+                raise ValueError
+            # /P is a number with discrete levels, defaulting to 2. Accept
+            # integral reals, never coerce strings/booleans or round fractions.
+            value = params.get("/P", 2)
+            if isinstance(value, bool) or not isinstance(value, (int, Decimal)) or value != int(value):
+                raise ValueError
+            value = int(value)
+            values.append(value)
+        if len(values) != 1:
+            raise ValueError
+        value = values[0]
+        return {"certified": True, "level": LEVEL_BY_VALUE.get(value),
+                "level_value": value, "error": None}
     except Exception:
-        return {**_not_certified(), "error": "The document catalog could not be read."}
-    if not isinstance(perms, pikepdf.Dictionary):
-        return _not_certified()
-    docmdp = perms.get("/DocMDP")
-    if not isinstance(docmdp, pikepdf.Dictionary):
-        return _not_certified()
-    refs = docmdp.get("/Reference")
-    if not isinstance(refs, pikepdf.Array):
-        return {
-            **_not_certified(),
-            "error": "The certification signature carries no transform reference.",
-        }
-    for ref in refs:
-        if not isinstance(ref, pikepdf.Dictionary):
-            continue
-        if ref.get("/TransformMethod") != pikepdf.Name("/DocMDP"):
-            continue
-        params = ref.get("/TransformParams")
-        if not isinstance(params, pikepdf.Dictionary) or "/P" not in params:
-            continue
-        try:
-            value = int(params["/P"])
-        except (TypeError, ValueError):
-            continue
-        return {
-            "certified": True,
-            "level": LEVEL_BY_VALUE.get(value),
-            "level_value": value,
-            "error": None,
-        }
-    return {
-        **_not_certified(),
-        "error": "The certification signature carries no readable permission level.",
-    }
+        return {**_not_certified(), "error": POLICY_UNREADABLE}
 
 
 def certification_of_file(file: str) -> dict:
