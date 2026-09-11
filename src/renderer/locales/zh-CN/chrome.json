@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "无法确定 PDF 版本。",
   "engine.layers.layerConfigurationCannotRead": "无法完整读取图层配置。",
   "engine.layers.layerLockedDefaultConfiguration": "该图层在默认配置中已锁定。",
   "app.operation.unverified": "无法验证操作结果。",

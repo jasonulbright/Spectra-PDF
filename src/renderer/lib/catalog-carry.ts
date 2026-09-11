@@ -282,8 +282,8 @@ function carryOutlines(output: PDFDocument, source: CarriedSourcePages, copier: 
         }
         if (name === 'A' && !(ctx.lookup(value) instanceof PDFDict)) throw fail();
         if (name === 'SE') {
-          if (!(value instanceof PDFRef) || !(ctx.lookup(value) instanceof PDFDict)
-            || (ctx.lookup(value) as PDFDict).lookup(N('Type')) !== N('StructElem')) throw fail();
+          dict.set(key, copier.structure(value));
+          continue;
         }
         if (name === 'F') {
           const flags = ctx.lookup(value);
@@ -521,25 +521,34 @@ interface CatalogObjectCopy {
   copy(value: PDFObject): PDFObject;
   destination(raw: PDFObject | undefined): PDFArray;
   copyDestination(raw: PDFObject): PDFObject;
+  structure(raw: PDFObject | undefined): PDFRef;
 }
 
 function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, objectMap: ObjectMap,
   structureMap: ObjectMap = new Map()): CatalogObjectCopy {
   const names = source.doc.catalog.lookupMaybe(N('Names'), PDFDict);
   const fail = () => new Error(tChrome('app.operation.unverified'));
+  const structure = (raw: PDFObject | undefined): PDFRef => {
+    if (!(raw instanceof PDFRef)) throw fail();
+    const elem = source.doc.context.lookup(raw), mapped = structureMap.get(raw.tag);
+    const type = elem instanceof PDFDict ? elem.lookup(N('Type')) : undefined;
+    // Optional Type is not an identity authority. Only a real retained node
+    // in the rebuilt hierarchy can satisfy SE, SD or a shared graph reference.
+    if (!(elem instanceof PDFDict) || !mapped
+      || (type !== undefined && type !== PDFNull && type !== N('StructElem'))) throw fail();
+    return mapped;
+  };
   // Resolve named local destinations in their source namespace. Only the
   // resolved array travels: donor destinations cannot shadow the source name.
   const nameKey = (value: PDFName | PDFString | PDFHexString) => value instanceof PDFName
     ? `name:${value.decodeText()}` : `string:${Array.from(value.asBytes(), b => b.toString(16).padStart(2, '0')).join('')}`;
   let named: Map<string, PDFObject> | undefined;
-  const explicit = (value: PDFObject | undefined, structure = false): PDFArray => {
+  const explicit = (value: PDFObject | undefined, isStructure = false): PDFArray => {
     if (!(value instanceof PDFArray) || value.size() < 2) throw fail();
     const target = value.get(0), mode = value.lookup(1);
     if (!(target instanceof PDFRef) || !(mode instanceof PDFName)) throw fail();
-    if (structure) {
-      const elem = source.doc.context.lookup(target);
-      if (!(elem instanceof PDFDict) || elem.lookup(N('Type')) !== N('StructElem')) throw fail();
-    } else if (!pageRefs.has(target.tag)) throw fail();
+    if (isStructure) structure(target);
+    else if (!pageRefs.has(target.tag)) throw fail();
     // ISO 32000-2 12.3.2/Table 149: validate the whole view, not just its page.
     const arity: Record<string, number> = { XYZ: 5, Fit: 2, FitH: 3, FitV: 3, FitR: 6, FitB: 2, FitBH: 3, FitBV: 3 };
     const kind = mode.decodeText();
@@ -599,6 +608,7 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
     if (++visits > 100000 || depth > 128) throw fail();
     if (value instanceof PDFRef) {
       if (pageRefs.has(value.tag)) { const page = pages.get(value.tag); if (!page) throw fail(); return page; }
+      if (structureMap.has(value.tag)) return structure(value);
       const priorRef = refs.get(value.tag); if (priorRef) return priorRef;
       const target = source.doc.context.lookup(value); if (!target) throw fail();
       if (target instanceof PDFDict && target.lookup(N('Type')) === N('StructElem')) {
@@ -667,7 +677,7 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
     }
     return copy(dest, depth + 1);
   };
-  return { copy, destination, copyDestination, bind: (sourceRef, outputRef) => {
+  return { copy, destination, copyDestination, structure, bind: (sourceRef, outputRef) => {
     const previous = refs.get(sourceRef.tag);
     if (previous && previous !== outputRef) throw fail();
     refs.set(sourceRef.tag, outputRef);

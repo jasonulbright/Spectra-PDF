@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileS
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
-import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, PDFString, decodePDFRawStream } from 'pdf-lib';
+import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFRef, PDFString, decodePDFRawStream } from 'pdf-lib';
 import {
   waitForHarness,
   openByPaths,
@@ -35,6 +35,23 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+
+async function taggedSource(role: 'P' | 'H1', sameNamespace: boolean): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create({ updateMetadata: false }), ctx = pdf.context, N = PDFName.of;
+  const page = pdf.addPage([300, 700]), root = ctx.obj({ Type: 'StructTreeRoot' }), rootRef = ctx.register(root);
+  const ns = ctx.register(ctx.obj({ Type: 'Namespace', NS: PDFHexString.fromText(sameNamespace ? 'urn:shared' : `urn:live:${role}`), RoleMapNS: { Local: role } }));
+  const element = ctx.obj({ S: 'Local', NS: ns, P: rootRef, Pg: page.ref, K: 0, ID: PDFString.of('same-id'),
+    Alt: PDFHexString.fromText(`${role} — résumé`), R: 2, C: 'Shared' });
+  const ref = ctx.register(element);
+  page.node.set(N('Contents'), ctx.register(ctx.stream('/Local <</MCID 0>> BDC 0 0 10 10 re f EMC')));
+  page.node.set(N('StructParents'), PDFNumber.of(0));
+  root.set(N('K'), ctx.obj([ref])); root.set(N('Namespaces'), ctx.obj([ns]));
+  root.set(N('ClassMap'), ctx.obj({ Shared: { O: 'Layout', TextAlign: role === 'P' ? 'Start' : 'End' } }));
+  root.set(N('ParentTree'), ctx.obj({ Nums: [0, ctx.obj([ref])] })); root.set(N('ParentTreeNextKey'), PDFNumber.of(1));
+  pdf.catalog.set(N('StructTreeRoot'), rootRef); pdf.catalog.set(N('MarkInfo'), ctx.obj({ Marked: true, Suspects: true }));
+  pdf.catalog.set(N('Version'), N('2.0'));
+  return pdf.save();
+}
 
 let TMP = '';
 
@@ -256,5 +273,100 @@ describe('catalog state survives committed page edits', () => {
       await browser.waitUntil(async () => (await PDFDocument.load(readFileSync(work), { updateMetadata: false })).getPage(0).getRotation().angle === 0);
     }
     expect(readFileSync(path).equals(original)).toBe(true);
+  });
+
+  for (const conflict of [false, true]) it(`preserves imported tag meanings or refuses their conflict atomically (conflict=${conflict})`, async () => {
+    const dir = mkdtempSync(resolve(__dirname, '../../tag-semantics-live.local.d-'));
+    const own = resolve(dir, 'own.pdf'), donor = resolve(dir, 'donor.pdf'), N = PDFName.of;
+    const originals = [Buffer.from(await taggedSource('P', conflict)), Buffer.from(await taggedSource('H1', conflict))];
+    writeFileSync(own, originals[0]); writeFileSync(donor, originals[1]);
+    await closeAllFiles(); await openByPaths([own]); await waitForActiveCanvasPageIds();
+    const work = (await getState()).activeFile!.workingPath, before = readFileSync(work);
+    await importPagesIntoDoc(donor, (await getCanvasDocs())[0].id, 1);
+    await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 2);
+    if (conflict) {
+      let error = ''; try { await commitPendingEdits(); } catch (caught) { error = String(caught); }
+      expect(error).toContain('verif'); expect(readFileSync(work).equals(before)).toBe(true);
+      expect(await invokeAppCommand('edit.undo')).toBe(true);
+      await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 1);
+    } else {
+      await commitPendingEdits();
+      const saved = readFileSync(work), out = await PDFDocument.load(saved, { updateMetadata: false });
+      expect(saved.subarray(0, 8).toString()).toBe('%PDF-2.0');
+      const root = out.catalog.lookup(N('StructTreeRoot'), PDFDict), kids = root.lookup(N('K'), PDFArray);
+      expect(kids.size()).toBe(2);
+      const list = kids.asArray().map(v => out.context.lookup(v, PDFDict));
+      expect(list.map(e => e.lookup(N('NS'), PDFDict).lookup(N('RoleMapNS'), PDFDict).lookup(e.lookup(N('S'), PDFName), PDFName).decodeText())).toEqual(['P', 'H1']);
+      expect(list.map(e => e.lookup(N('Alt'), PDFHexString).decodeText())).toEqual(['P — résumé', 'H1 — résumé']);
+      expect(list.map(e => e.lookup(N('R'), PDFNumber).asNumber())).toEqual([2, 2]);
+      const classes = root.lookup(N('ClassMap'), PDFDict);
+      expect(list.map(e => classes.lookup(e.lookup(N('C'), PDFName), PDFDict).lookup(N('TextAlign'), PDFName).decodeText())).toEqual(['Start', 'End']);
+      expect(new Set(list.map(e => Buffer.from((e.lookup(N('ID')) as PDFString | PDFHexString).asBytes()).toString('hex'))).size).toBe(2);
+      expect(list.map(e => (e.get(N('Pg')) as PDFRef).tag)).toEqual(out.getPages().map(p => p.ref.tag));
+      const parents = root.lookup(N('ParentTree'), PDFDict).lookup(N('Nums'), PDFArray);
+      for (let i = 0; i < 2; i++) {
+        const key = out.getPage(i).node.lookup(N('StructParents'), PDFNumber).asNumber();
+        const slot = parents.asArray().findIndex((v, j) => j % 2 === 0 && (v as PDFNumber).asNumber() === key);
+        expect(slot).toBeGreaterThanOrEqual(0);
+        expect(parents.lookup(slot + 1, PDFArray).get(0)).toEqual(kids.get(i));
+      }
+      expect(out.catalog.lookup(N('MarkInfo'), PDFDict).lookup(N('Suspects'), PDFBool).asBoolean()).toBe(true);
+    }
+    expect(readFileSync(own).equals(originals[0])).toBe(true); expect(readFileSync(donor).equals(originals[1])).toBe(true);
+  });
+
+  for (const conflict of [false, true]) it(`keeps format and extension declarations through publication (conflict=${conflict})`, async () => {
+    const dir = mkdtempSync(resolve(__dirname, '../../format-declarations-live.local.d-'));
+    const own = resolve(dir, 'own.pdf'), donor = resolve(dir, 'donor.pdf'), N = PDFName.of;
+    const originals: Buffer[] = [];
+    for (const [i, path] of [own, donor].entries()) {
+      const doc = await PDFDocument.create({ updateMetadata: false }); doc.addPage([300 + i * 100, 700]);
+      doc.catalog.set(N('Extensions'), doc.context.obj({ ADBE: { BaseVersion: '1.7', ExtensionLevel: conflict ? 3 : 3 + i, Private: i } }));
+      const bytes = Buffer.from(await doc.save()); bytes.set(Buffer.from('%PDF-2.0'), 0); originals.push(bytes); writeFileSync(path, bytes);
+    }
+    await closeAllFiles(); await openByPaths([own]); await waitForActiveCanvasPageIds();
+    const work = (await getState()).activeFile!.workingPath, before = readFileSync(work);
+    await importPagesIntoDoc(donor, (await getCanvasDocs())[0].id, 1);
+    await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 2);
+    if (conflict) {
+      let error = ''; try { await commitPendingEdits(); } catch (caught) { error = String(caught); }
+      expect(error).toContain('verif'); expect(readFileSync(work).equals(before)).toBe(true);
+      expect(await invokeAppCommand('edit.undo')).toBe(true);
+      await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 1);
+    } else {
+      await commitPendingEdits(); const dest = resolve(dir, 'saved.pdf'); await saveActiveAs(dest);
+      const bytes = readFileSync(dest), out = await PDFDocument.load(bytes, { updateMetadata: false });
+      expect(bytes.subarray(0, 8).toString()).toBe('%PDF-2.0'); expect(out.catalog.lookup(N('Version'), PDFName).decodeText()).toBe('2.0');
+      const entries = out.catalog.lookup(N('Extensions'), PDFDict).lookup(N('ADBE'), PDFArray);
+      expect(entries.asArray().map(v => (v as PDFDict).lookup(N('ExtensionLevel'), PDFNumber).asNumber())).toEqual([3, 4]);
+      expect(entries.asArray().map(v => (v as PDFDict).lookup(N('Private'), PDFNumber).asNumber())).toEqual([0, 1]);
+    }
+    expect(readFileSync(own).equals(originals[0])).toBe(true); expect(readFileSync(donor).equals(originals[1])).toBe(true);
+  });
+
+  it('raises the effective version for an imported PDF 2.0 page while keeping a valid signed prefix', async () => {
+    const dir = mkdtempSync(resolve(__dirname, '../../format-signed-live.local.d-'));
+    const own = resolve(dir, 'signed.pdf'), donor = resolve(dir, 'donor.pdf'), N = PDFName.of;
+    copyFileSync(resolve(__dirname, '../fixtures/signed.pdf'), own);
+    const signed = readFileSync(own), original = await PDFDocument.load(signed, { updateMetadata: false });
+    expect(original.catalog.lookup(N('Version'), PDFName).decodeText()).toBe('1.7');
+    const source = await PDFDocument.create({ updateMetadata: false }); source.addPage([300, 700]);
+    const profile = new Uint8Array(readFileSync(resolve(__dirname, '../../resources/icc/USWebCoatedSWOP.icc')));
+    source.getPage(0).node.set(N('OutputIntents'), source.context.obj([source.context.obj({ Type: 'OutputIntent', S: 'GTS_PDFX',
+      OutputConditionIdentifier: PDFString.of('Page-local live profile'), DestOutputProfile: source.context.register(source.context.flateStream(profile, { N: 4 })) })]));
+    const donorBytes = Buffer.from(await source.save()); donorBytes.set(Buffer.from('%PDF-2.0'), 0); writeFileSync(donor, donorBytes);
+    await closeAllFiles(); await openByPaths([own]); await waitForActiveCanvasPageIds();
+    const count = original.getPageCount();
+    await importPagesIntoDoc(donor, (await getCanvasDocs())[0].id, count);
+    await browser.waitUntil(async () => (await getWorkspacePageIds()).length === count + 1);
+    await commitPendingEdits(); const work = (await getState()).activeFile!.workingPath, saved = readFileSync(work);
+    expect(saved.subarray(0, signed.length).equals(signed)).toBe(true);
+    const out = await PDFDocument.load(saved, { updateMetadata: false });
+    expect(out.catalog.lookup(N('Version'), PDFName).decodeText()).toBe('2.0'); expect(out.getPageCount()).toBe(count + 1);
+    const carried = out.getPage(count).node.lookup(N('OutputIntents'), PDFArray).lookup(0, PDFDict).lookup(N('DestOutputProfile'));
+    expect(carried).toBeInstanceOf(PDFRawStream); expect(decodePDFRawStream(carried as PDFRawStream).decode()).toEqual(profile);
+    const checked = cliJson(['verify-signatures', work]) as { signatures: { intact: boolean; valid: boolean }[] };
+    expect(checked.signatures).toHaveLength(1); expect(checked.signatures[0].intact).toBe(true); expect(checked.signatures[0].valid).toBe(true);
+    expect(readFileSync(own).equals(signed)).toBe(true); expect(readFileSync(donor).equals(donorBytes)).toBe(true);
   });
 });

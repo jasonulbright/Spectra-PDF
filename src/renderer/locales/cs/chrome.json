@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "Verzi PDF nelze určit.",
   "engine.layers.layerConfigurationCannotRead": "Konfiguraci vrstev se nepodařilo přečíst úplně.",
   "engine.layers.layerLockedDefaultConfiguration": "Vrstva je ve výchozí konfiguraci zamčená.",
   "app.operation.unverified": "Výsledek operace se nepodařilo ověřit.",

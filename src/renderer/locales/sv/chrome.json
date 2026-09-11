@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "PDF-versionen kan inte fastställas.",
   "engine.layers.layerConfigurationCannotRead": "Lagerkonfigurationen kunde inte läsas fullständigt.",
   "engine.layers.layerLockedDefaultConfiguration": "Lagret är låst i standardkonfigurationen.",
   "app.operation.unverified": "Det gick inte att verifiera åtgärdens resultat.",

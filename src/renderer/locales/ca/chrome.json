@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "No es pot determinar la versió del PDF.",
   "engine.layers.layerConfigurationCannotRead": "No s’ha pogut llegir completament la configuració de capes.",
   "engine.layers.layerLockedDefaultConfiguration": "La capa està bloquejada a la configuració predeterminada.",
   "app.operation.unverified": "No s'ha pogut verificar el resultat de l'operació.",

@@ -193,7 +193,11 @@ describe('struct carry', () => {
     expect(annot.get(N('StructParent'))).toBeUndefined();
   });
 
-  it('two tagged sources merge under one root with unique keys; RoleMap merges first-wins', async () => {
+  it('two tagged sources merge under one root with unique keys, keeping both role meanings', async () => {
+    // Both sources spell X and mean different things. A first-wins merge gave
+    // the second source's elements the first source's meaning; instead the
+    // contested name becomes source-local and both edges survive, while the
+    // name only one source uses keeps its own spelling.
     const a = await taggedSource({ X: 'P' });
     const b = await taggedSource({ X: 'Sect', Y: 'H1' });
     const out = await PDFDocument.load(
@@ -207,8 +211,12 @@ describe('struct carry', () => {
     const k1 = (outPages[1].node.lookup(N('StructParents')) as PDFNumber).asNumber();
     expect(k0).not.toBe(k1);
     const roleMap = root.lookupMaybe(N('RoleMap'), PDFDict)!;
-    expect(nameOf(roleMap.lookup(N('X')))).toBe('/P'); // first-wins
+    const targets = roleMap.entries().map(([, value]) => nameOf(value)).sort();
+    expect(targets).toEqual(['/H1', '/P', '/Sect']);
     expect(nameOf(roleMap.lookup(N('Y')))).toBe('/H1');
+    // Neither contested edge is spelled X any more, so neither source's
+    // elements can pick up the other's meaning.
+    expect(roleMap.get(N('X'))).toBeUndefined();
   });
 
   it('an annotation OBJR remaps and its /StructParent is rewritten', async () => {

@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "A PDF verziója nem állapítható meg.",
   "engine.layers.layerConfigurationCannotRead": "A rétegbeállítások nem olvashatók be teljesen.",
   "engine.layers.layerLockedDefaultConfiguration": "A réteg zárolva van az alapértelmezett beállításokban.",
   "app.operation.unverified": "A művelet eredményét nem sikerült ellenőrizni.",

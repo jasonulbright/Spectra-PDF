@@ -35,6 +35,23 @@ function addTag(doc: PDFDocument) {
 }
 
 describe('outline payload preservation', () => {
+  it.each(['action', 'name-tree', 'legacy'])('preserves a Type-absent actual structure target in %s destinations', async mode => {
+    const { doc, item } = await fixture(), elemRef = addTag(doc);
+    doc.context.lookup(elemRef, PDFDict).delete(N('Type')); // optional under Table 355
+    item.set(N('SE'), elemRef);
+    const destination = doc.context.obj({ D: [doc.getPage(1).ref, 'Fit'], SD: [elemRef, 'FitH', 500] });
+    if (mode === 'action') { destination.set(N('S'), N('GoTo')); item.set(N('A'), destination); }
+    else if (mode === 'legacy') { doc.catalog.set(N('Dests'), doc.context.obj({ target: destination })); item.set(N('Dest'), N('target')); }
+    else { doc.catalog.set(N('Names'), doc.context.obj({ Dests: { Names: [PDFString.of('target'), destination] } })); item.set(N('Dest'), PDFString.of('target')); }
+    const out = await rebuild(doc, [1, 0, 2]), target = out.catalog.lookup(N('StructTreeRoot'), PDFDict).get(N('K'))!;
+    expect(first(out).get(N('SE'))).toEqual(target);
+    expect(out.context.lookup(target, PDFDict).get(N('Type'))).toBeUndefined();
+    const result = mode === 'action' ? first(out).lookup(N('A'), PDFDict)
+      : mode === 'legacy' ? out.catalog.lookup(N('Dests'), PDFDict).lookup(N('target'), PDFDict)
+      : out.catalog.lookup(N('Names'), PDFDict).lookup(N('Dests'), PDFDict).lookup(N('Names'), PDFArray).lookup(1, PDFDict);
+    expect(result.lookup(N('SD'), PDFArray).get(0)).toEqual(target);
+    expect(out.context.lookup(target, PDFDict).get(N('Pg'))).toEqual(out.getPage(0).ref);
+  });
   it.each([false, true])('retains URI actions, raw title, style and extension values (PDFX=%s)', async pdfx => {
     const { doc, item } = await fixture();
     item.set(N('A'), doc.context.obj({ S: 'URI', URI: PDFString.of('https://example.invalid/manual'), IsMap: false }));

@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "PDF-versjonen kan ikke fastslås.",
   "engine.layers.layerConfigurationCannotRead": "Lagkonfigurasjonen kunne ikke leses fullstendig.",
   "engine.layers.layerLockedDefaultConfiguration": "Laget er låst i standardkonfigurasjonen.",
   "app.operation.unverified": "Resultatet av operasjonen kunne ikke bekreftes.",

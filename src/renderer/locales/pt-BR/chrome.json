@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "Não foi possível determinar a versão do PDF.",
   "engine.layers.layerConfigurationCannotRead": "Não foi possível ler completamente a configuração das camadas.",
   "engine.layers.layerLockedDefaultConfiguration": "A camada está bloqueada na configuração padrão.",
   "app.operation.unverified": "Não foi possível verificar o resultado da operação.",

@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "تعذر تحديد إصدار ملف PDF.",
   "engine.layers.layerConfigurationCannotRead": "تعذّرت قراءة إعدادات الطبقات بالكامل.",
   "engine.layers.layerLockedDefaultConfiguration": "الطبقة مقفلة في الإعداد الافتراضي.",
   "app.operation.unverified": "تعذّر التحقق من نتيجة العملية.",

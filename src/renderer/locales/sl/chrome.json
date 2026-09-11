@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "Različice PDF ni mogoče določiti.",
   "engine.layers.layerConfigurationCannotRead": "Konfiguracije plasti ni bilo mogoče v celoti prebrati.",
   "engine.layers.layerLockedDefaultConfiguration": "Plast je zaklenjena v privzeti konfiguraciji.",
   "app.operation.unverified": "Rezultata operacije ni bilo mogoče preveriti.",

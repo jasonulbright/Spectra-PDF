@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "Die PDF-Version kann nicht ermittelt werden.",
   "engine.layers.layerConfigurationCannotRead": "Die Ebenenkonfiguration konnte nicht vollständig gelesen werden.",
   "engine.layers.layerLockedDefaultConfiguration": "Die Ebene ist in der Standardkonfiguration gesperrt.",
   "app.operation.unverified": "Das Ergebnis des Vorgangs konnte nicht überprüft werden.",

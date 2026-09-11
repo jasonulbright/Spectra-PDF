@@ -46,6 +46,7 @@ Delta classes (what the computation reports, and what the ceiling judges):
     NeedAppearances, /DA//DR additions),
   - ``page-keys`` — a page's own /Rotate and box geometry,
   - ``page-structure`` — page insertion, removal and reordering.
+  - ``format-version`` — a higher effective declaration required by the delta.
 
 Ceiling, per ISO 32000-2 Table 257 (clause 12.8.2.2): an uncertified
 (approval-signature-only) document has none — every class above is
@@ -90,6 +91,7 @@ from .acroform import live_signature_fields
 from .fieldmdp import locked_fields, locks_of_pdf
 from .inplace import is_same_file
 from .validate import validate_pdf
+from .pdf_version import effective_version
 
 MAX_FIELD_DEPTH = 32
 _NUM_EPS = 1e-6
@@ -117,7 +119,7 @@ _STREAM_SKIP = frozenset({"/Length", "/Filter", "/DecodeParms"})
 
 #: What a computed delta can consist of. Ordered so a refusal names the same
 #: class for the same delta on every run.
-DELTA_CLASSES = ("form-fill", "annotations", "page-keys", "page-structure")
+DELTA_CLASSES = ("form-fill", "annotations", "page-keys", "page-structure", "format-version")
 
 #: ISO 32000-2 Table 257 (clause 12.8.2.2): /P 1 permits no change; /P 2
 #: permits filling in forms, instantiating page templates and signing; /P 3
@@ -1382,11 +1384,11 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
             # agree, or the edit exceeds the append-safe tier. A key skipped
             # here is DELEGATED, never excused: /AcroForm's own pass judges its
             # removal as well as its content, so the skip cannot turn a dropped
-            # form into a silent success. /Version is
-            # metadata too: a signing append writes it into the catalog
-            # while rebuilds normalize it into the header — the original's
-            # own bytes keep whichever it had (live catch: a signed fixture
-            # refused every transplant over exactly this).
+            # form into a silent success. /Version is compared by effective
+            # header/catalog precedence below, not by storage location. A
+            # higher requirement is a real classified delta, never metadata
+            # churn to discard. Lower rebuild headers cannot downgrade the
+            # signed original's interpretation.
             #
             # /Perms and /DSS are SIGNATURE INFRASTRUCTURE the original owns:
             # a certification's DocMDP entry and the long-term-validation
@@ -1397,9 +1399,14 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
             # opposite of preserving it.
             try:
                 plan = _plan_pages(orig, mod)
+                original_version = effective_version(orig)
+                required_version = effective_version(mod)
+                version_changed = required_version > original_version
 
                 writer = IncrementalPdfFileWriter(io.BytesIO(orig_bytes))
                 writer._meta = _ClockFreeMeta()
+                if version_changed:
+                    writer.ensure_output_version(required_version)
                 memo_mat, page_refs, fresh_pages = _prepare_correspondence(writer, orig, mod, plan)
                 if not memo_mat.equal(orig.Root, mod.Root, skip=frozenset({
                     "/AcroForm", "/Pages", "/Metadata", "/PieceInfo", "/Version", "/Perms", "/DSS",
@@ -1407,6 +1414,8 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
                     return {"applied": False, "reason": "catalog-changed"}
 
                 classes: set[str] = set(plan["classes"])
+                if version_changed:
+                    classes.add("format-version")
                 pages_changed = added = updated = removed = keys_updated = 0
                 for orig_ix, mod_ix in plan["pairs"]:
                     # Structural page matching establishes identity, but a
@@ -1454,7 +1463,7 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
 
             pages_removed = len(plan["removed"])
             unchanged = not (pages_changed or fields_updated or inserted or pages_removed
-                             or plan["reordered"])
+                             or plan["reordered"] or version_changed)
 
             # The ceiling, consulted on the FULL classified delta and before
             # any bytes exist: the writer holds the revision in memory only,

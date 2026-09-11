@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "Nie można określić wersji PDF.",
   "engine.layers.layerConfigurationCannotRead": "Nie można odczytać całej konfiguracji warstw.",
   "engine.layers.layerLockedDefaultConfiguration": "Warstwa jest zablokowana w konfiguracji domyślnej.",
   "app.operation.unverified": "Nie udało się zweryfikować wyniku operacji.",

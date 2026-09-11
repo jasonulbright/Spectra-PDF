@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "Не удалось определить версию PDF.",
   "engine.layers.layerConfigurationCannotRead": "Не удалось полностью прочитать конфигурацию слоёв.",
   "engine.layers.layerLockedDefaultConfiguration": "Слой заблокирован в конфигурации по умолчанию.",
   "app.operation.unverified": "Не удалось проверить результат операции.",

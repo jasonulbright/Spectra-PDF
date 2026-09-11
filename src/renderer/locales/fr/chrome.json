@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "La version du PDF ne peut pas être déterminée.",
   "engine.layers.layerConfigurationCannotRead": "La configuration des calques n’a pas pu être lue entièrement.",
   "engine.layers.layerLockedDefaultConfiguration": "Le calque est verrouillé dans la configuration par défaut.",
   "app.operation.unverified": "Le résultat de l’opération n’a pas pu être vérifié.",

@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "Не вдалося визначити версію PDF.",
   "engine.layers.layerConfigurationCannotRead": "Не вдалося повністю прочитати конфігурацію шарів.",
   "engine.layers.layerLockedDefaultConfiguration": "Шар заблоковано в типовій конфігурації.",
   "app.operation.unverified": "Не вдалося перевірити результат операції.",

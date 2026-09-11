@@ -1755,3 +1755,56 @@ class TestHardLinkAliases:
         assert has_live_signatures(alias), (
             "the reverted predicate should have signed straight over the alias"
         )
+
+
+class TestFormatVersion:
+    @pytest.mark.parametrize('where', ['header', 'catalog'])
+    @pytest.mark.parametrize('with_page', [False, True])
+    def test_required_upgrade_is_a_real_append(self, where, with_page, matrix_docs, matrix_pki, tmp_dir):
+        from engine.pdf_version import effective_version
+
+        original = matrix_docs['approval']
+        modified = os.path.join(tmp_dir, 'version-modified.pdf')
+        output = os.path.join(tmp_dir, 'version-output.pdf')
+        original_bytes = open(original, 'rb').read()
+        with pikepdf.open(original) as pdf:
+            if with_page:
+                pdf.add_blank_page(page_size=(300, 700))
+            if where == 'catalog':
+                pdf.Root.Version = pikepdf.Name('/2.0')
+            else:
+                if '/Version' in pdf.Root:
+                    del pdf.Root['/Version']
+            pdf.save(modified, force_version='2.0' if where == 'header' else '1.7')
+        # Force only the intended declaration; qpdf can normalize it on save.
+        with pikepdf.open(modified) as pdf:
+            assert effective_version(pdf) == (2, 0)
+        report = transplant_incremental(original, modified, output)
+        assert report['applied'], report
+        assert 'format-version' in report['delta_classes']
+        result = open(output, 'rb').read()
+        assert result.startswith(original_bytes) and len(result) > len(original_bytes)
+        with pikepdf.open(output) as pdf:
+            assert effective_version(pdf) == (2, 0)
+            assert len(pdf.pages) == (4 if with_page else 3)
+        _assert_sig_still_valid(output, matrix_pki)
+
+    @pytest.mark.parametrize('situation', ['certified-none', 'certified-form-fill', 'certified-annotate'])
+    def test_upgrade_does_not_bypass_certification(self, situation, matrix_docs, tmp_dir):
+        original = matrix_docs[situation]
+        modified = os.path.join(tmp_dir, 'certified-version.pdf')
+        output = os.path.join(tmp_dir, 'refused-version.pdf')
+        with pikepdf.open(original) as pdf:
+            pdf.save(modified, force_version='2.0')
+        report = transplant_incremental(original, modified, output)
+        assert report['applied'] is False, report
+        assert report['forbidden_classes'] == ['format-version']
+        assert not os.path.exists(output)
+
+    def test_malformed_version_refuses_before_publication(self, matrix_docs, tmp_dir):
+        original = matrix_docs['approval']
+        modified = _rewrite_with(original, tmp_dir, lambda pdf: pdf.Root.__setitem__('/Version', pikepdf.String('2.0')))
+        output = os.path.join(tmp_dir, 'malformed-version.pdf')
+        report = transplant_incremental(original, modified, output)
+        assert report == {'applied': False, 'reason': 'The PDF version cannot be determined.'}
+        assert not os.path.exists(output)

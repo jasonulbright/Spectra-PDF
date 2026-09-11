@@ -1,4 +1,5 @@
 {
+  "engine.pdf_version.pdfVersionCannotDetermined": "PDF のバージョンを判定できません。",
   "engine.layers.layerConfigurationCannotRead": "レイヤー設定を完全に読み取れませんでした。",
   "engine.layers.layerLockedDefaultConfiguration": "このレイヤーは既定の設定でロックされています。",
   "app.operation.unverified": "操作の結果を確認できませんでした。",

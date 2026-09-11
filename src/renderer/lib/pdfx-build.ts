@@ -9,6 +9,7 @@ import { carryEmbeddedFiles } from './embedded-files-carry';
 import { carryDocumentCatalog } from './catalog-carry';
 import { carryDocumentMetadata } from './metadata-carry';
 import { copyOutputIntents } from './output-intents-carry';
+import { carryFormatDeclarations, saveWithFormatDeclarations } from './format-declarations';
 import type { MetadataOverrides } from './metadata-process';
 import type { CarriedSourcePages } from './catalog-carry';
 import { carryStructTree } from './struct-carry';
@@ -1417,6 +1418,7 @@ async function assemblePages(
     pairs: pairsByKey.get(key) ?? [],
   }));
   const structureMaps = carryStructTree(output, carriedSources);
+  const formatSources = carriedSources.map(source => source.doc);
   // Document-level catalog state (/Lang, /ViewerPreferences, /Outlines,
   // /PageLabels, /OCProperties) carries from the OWN source only — a page
   // inserted from a donor must not import the donor document's bookmarks or
@@ -1429,12 +1431,14 @@ async function assemblePages(
     // page-relative entries use an empty map, never the donor's namespace.
     const ownDoc = own?.doc ?? (ownBytes ? await PDFDocument.load(ownBytes, { ignoreEncryption: true, updateMetadata: false }) : undefined);
     if (ownDoc) {
+      formatSources.push(ownDoc);
       carryDocumentCatalog(output, { doc: ownDoc, pairs: ownPairs ?? [] }, structureMaps.get(ownDoc));
       carryDocumentInfo(output, ownDoc);
       await carryDocumentMetadata(output, ownDoc, metadataOverrides);
       carryIntents(ownDoc, ownDoc.catalog, output.catalog);
     }
   }
+  carryFormatDeclarations(output, formatSources);
 }
 
 // Info entries this builder generates for itself. A carried value would be
@@ -1538,7 +1542,7 @@ export async function buildPdf(
   // Names the writer, so it describes this build and not the source's tool.
   // GENERATED_INFO_KEYS keeps the carry off the key; this is its only writer.
   output.setProducer(`PDFX ${PDFX_VERSION}`);
-  return output.save();
+  return saveWithFormatDeclarations(output);
 }
 
 export async function buildPdfx(
@@ -1578,5 +1582,5 @@ export async function buildPdfx(
   output.setProducer(`PDFX ${PDFX_VERSION}`);
   output.setKeywords(['PDFX']);
 
-  return output.save();
+  return saveWithFormatDeclarations(output);
 }
