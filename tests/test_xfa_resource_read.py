@@ -267,10 +267,86 @@ def test_a_false_xdp_namespace_is_refused(split):
     assert result(document(parts, split=split))["shape"] == xfa.SHAPE_XDP_ROOT
 
 
-@pytest.mark.parametrize("split", [False, True])
-def test_a_root_that_is_not_the_xdp_element_is_refused(split):
+def test_a_single_stream_whose_root_is_not_the_xdp_element_is_refused():
+    # A single stream is the WHOLE resource, and the whole resource is one
+    # `xdp:xdp` element; a bare template stream is not that.
     parts = [("template", template())]
-    assert result(document(parts, split=split))["shape"] == xfa.SHAPE_XDP_ROOT
+    assert result(document(parts, split=False))["shape"] == xfa.SHAPE_XDP_ROOT
+
+
+# ── bare packet lists: complete elements with no wrapper fragments ─────────
+
+
+@pytest.mark.parametrize("dynamic", [False, True])
+def test_a_bare_packet_list_classifies_like_its_bracketed_form(dynamic):
+    # The array carries only whole elements — no `xdp:xdp` begin/end packets
+    # at all. Annex K.2's example brackets the packets; files without the
+    # brackets exist and the reader before this one accepted them, so they
+    # are read inside the standard wrapper on the same terms.
+    middles = [("template", template()), ("datasets", DATASETS), ("config", CONFIG)]
+    bare = result(document(middles, split=True, dynamic=dynamic))
+    bracketed = result(document(wrapped(*middles), split=True, dynamic=dynamic))
+    assert bare == bracketed == {"class": "dynamic" if dynamic else "static", "shape": ""}
+
+
+def test_a_bare_packet_list_of_one_whole_element_reads():
+    assert result(document([("template", template())], split=True)) == {"class": "static", "shape": ""}
+
+
+def test_authored_logic_is_found_in_a_bare_packet_list():
+    parts = [("template", template(logic="calculate", prefix="form")), ("datasets", DATASETS)]
+    assert xfa.has_authored_logic(document(parts, split=True)) is True
+    assert xfa.has_authored_logic(document([("template", template())], split=True)) is False
+
+
+def test_the_actual_end_to_end_xfa_fixtures_read_with_their_authored_logic():
+    # The shipped e2e fixtures are exactly this shape: template, datasets and
+    # two never-read packets, no wrapper fragments. Bound here so the engine
+    # contract and the live spec cannot drift apart again.
+    from engine.forms import read_form_fields
+    root = Path(__file__).resolve().parents[1] / "e2e-tests" / "fixtures"
+    for name, kind in (("xfa-static.pdf", "static"), ("xfa-dynamic.pdf", "dynamic")):
+        fixture = root / name
+        if not fixture.is_file():
+            pytest.fail(f"missing e2e fixture {name}; run e2e-tests/fixtures/make-xfa-fixtures.py")
+        reply = read_form_fields(str(fixture))
+        assert reply["xfa"] == kind
+        assert reply["xfa_calculations"] is True
+        with pikepdf.open(fixture) as pdf:
+            found = xfa.inspect(pdf)
+            assert (found.form_class, found.shape) == (kind, "")
+
+
+def test_a_bare_list_still_refuses_a_fragment_packet():
+    # The first packet is a begin tag, not a whole element, and no wrapper
+    # packet closes it: neither a bracketed list nor a bare one.
+    parts = [("template", b'<template xmlns="' + TEMPLATE_NS.encode() + b'">'), ("datasets", DATASETS)]
+    assert result(document(parts, split=True))["shape"] == xfa.SHAPE_PACKET_XML
+
+
+def test_a_bare_list_still_refuses_a_packet_that_leans_on_an_undeclared_prefix():
+    # Bracketed, this packet inherits the wrapper's `xdp:` prefix and reads;
+    # bare, no packet declares it, so it is a fragment and refused as one.
+    parts = [("xdp:template", b"<xdp:template><xdp:subform/></xdp:template>")]
+    assert result(document(parts, split=True))["shape"] == xfa.SHAPE_PACKET_XML
+
+
+def test_a_bare_list_still_refuses_two_elements_in_one_packet():
+    # Two elements in the FIRST packet: it does not parse alone, so the list
+    # is not bare, and without wrapper fragments the concatenation is not one
+    # document either. In a LATER packet the list is bare; the resource then
+    # holds one more element child than declared names, which the name/count
+    # check refuses before the per-packet boundary check is reached.
+    first = [("template", template() + CONFIG), ("datasets", DATASETS)]
+    assert result(document(first, split=True))["shape"] == xfa.SHAPE_PACKET_XML
+    later = [("template", template()), ("datasets", DATASETS + CONFIG)]
+    assert result(document(later, split=True))["shape"] == xfa.SHAPE_PACKET_NAME_MISMATCH
+
+
+def test_a_bare_list_still_refuses_a_document_type_declaration():
+    doctype = b'<!DOCTYPE template [<!ENTITY x "y">]>'
+    parts = [("template", doctype + template()), ("datasets", DATASETS)]
+    assert result(document(parts, split=True))["shape"] == xfa.SHAPE_PACKET_XML
 
 
 def test_a_middle_packet_name_that_does_not_name_its_element_is_refused():

@@ -132,6 +132,14 @@ _PARSE_CHUNK_BYTES = 64 * 1024
 
 # The XML Data Package namespace the resource's root element belongs to.
 XDP_NAMESPACE = "http://ns.adobe.com/xdp/"
+# The wrapper a BARE packet list is read inside. Annex K.2's example brackets
+# the packets with the `xdp:xdp` begin and end tags as their own first and
+# last packets; files exist whose array carries only complete elements and no
+# fragments at all, and the reader before this one accepted them. Such a list
+# is one resource too — read as if bracketed by the standard wrapper, after
+# its first packet has proven to be a whole element on its own.
+_BARE_WRAPPER_OPEN = b'<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">'
+_BARE_WRAPPER_CLOSE = b"</xdp:xdp>"
 # The XFA template namespace family. It is versioned (2.4, 3.3, …) and the
 # version is not what identifies a calculation, so the family prefix is what
 # is matched and the version travels with the document.
@@ -323,6 +331,19 @@ def _packet_names_match(root, names: tuple[str, ...]) -> bool:
     return all(_names_element(child, name) for child, name in zip(children, middles))
 
 
+def _standalone_root(data: bytes, counters):
+    """The element `data` is on its own, or None when it is not one.
+
+    A wrapper's begin fragment cannot parse alone; a complete element can.
+    That difference is what tells a bare packet list from a bracketed one.
+    Ceiling refusals propagate — they are answers, not "not an element".
+    """
+    try:
+        return _resource_root(data, counters)
+    except (etree.XMLSyntaxError, _PacketShapeError):
+        return None
+
+
 def _packet_boundaries_hold(root, names, parts, counters) -> str:
     """`""` when every middle packet is exactly the element it declares.
 
@@ -464,6 +485,19 @@ def _read_resource(
         return SHAPE_XFA_TYPE, None
 
     try:
+        # A BARE list: the first packet is a whole element rather than the
+        # wrapper's begin tag, and it is not the XDP root itself (a single
+        # packet carrying the entire `xdp:xdp` element is the bracketed case
+        # with nothing between the brackets). Read it inside the standard
+        # wrapper on the same terms as a bracketed list — every packet must
+        # still be exactly one whole element, and a packet that leans on a
+        # prefix no wrapper declared is a fragment, refused as one.
+        if names and parts:
+            first = _standalone_root(parts[0], counters)
+            if first is not None and first.tag != f"{{{XDP_NAMESPACE}}}xdp":
+                data = _BARE_WRAPPER_OPEN + data + _BARE_WRAPPER_CLOSE
+                names = ("xdp:xdp", *names, "/xdp:xdp")
+                parts = [_BARE_WRAPPER_OPEN, *parts, _BARE_WRAPPER_CLOSE]
         root = _resource_root(data, counters)
     except _ResourceTooLarge:
         return SHAPE_RESOURCE_BYTES, None
