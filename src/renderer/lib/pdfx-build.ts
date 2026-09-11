@@ -1,5 +1,6 @@
-import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFPage, PDFString, degrees } from 'pdf-lib';
+import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFNull, PDFObject, PDFPage, PDFString, degrees } from 'pdf-lib';
 
+import { tChrome } from '../i18n';
 import { MANIFEST_NAME, PDFX_VERSION } from './pdfx-format';
 import type { ExportAnnotation, ExportDocument, ExportPage, PdfxManifest } from './pdfx-format';
 import { carryAcroForm, prepareSourceForms, sourceHasXfa } from './acroform-carry';
@@ -1396,7 +1397,7 @@ async function assemblePages(
     doc: s.doc,
     pairs: pairsByKey.get(key) ?? [],
   }));
-  carryStructTree(output, carriedSources);
+  const structureMaps = carryStructTree(output, carriedSources);
   // Document-level catalog state (/Lang, /ViewerPreferences, /Outlines,
   // /PageLabels, /OCProperties) carries from the OWN source only — a page
   // inserted from a donor must not import the donor document's bookmarks or
@@ -1409,21 +1410,89 @@ async function assemblePages(
     // page-relative entries use an empty map, never the donor's namespace.
     const ownDoc = own?.doc ?? (ownBytes ? await PDFDocument.load(ownBytes, { ignoreEncryption: true, updateMetadata: false }) : undefined);
     if (ownDoc) {
-      carryDocumentCatalog(output, { doc: ownDoc, pairs: ownPairs ?? [] });
-      carryInfoDates(output, ownDoc);
+      carryDocumentCatalog(output, { doc: ownDoc, pairs: ownPairs ?? [] }, structureMaps.get(ownDoc));
+      carryDocumentInfo(output, ownDoc);
     }
   }
 }
 
-/** /CreationDate and /ModDate travel from the source document, never the run's
- * clock: a clock-stamped Info dict puts different bytes in the file on every
- * commit of the same document, which breaks byte-identity between an in-place
- * save and its control. A source with no date leaves the output with none. */
-function carryInfoDates(output: PDFDocument, source: PDFDocument): void {
-  const created = source.getCreationDate();
-  if (created) output.setCreationDate(created);
-  const modified = source.getModificationDate();
-  if (modified) output.setModificationDate(modified);
+// Info entries this builder generates for itself. A carried value would be
+// overwritten by the explicit set after assembly, so the carry skips the key
+// outright rather than depending on that ordering.
+const GENERATED_INFO_KEYS = new Set(['/Producer']);
+
+// ISO 32000-2 Table 349: /Trapped is the one name-valued Info entry, and its
+// value is one of three names (not the booleans that spell the same words).
+// An unlisted name is not a value this carry can preserve as meaningful.
+const TRAPPED_NAMES = new Set(['/True', '/False', '/Unknown']);
+
+/** pdf-lib's own getInfoDict is private; this is the same lazy shape — the
+ * trailer's existing /Info, or one registered on first use. */
+function outputInfoDict(output: PDFDocument): PDFDict {
+  const existing = output.context.lookup(output.context.trailerInfo.Info);
+  if (existing instanceof PDFDict) return existing;
+  const created = output.context.obj({});
+  output.context.trailerInfo.Info = output.context.register(created);
+  return created;
+}
+
+/** The OWN document's whole Info dictionary travels to the rebuild — not just
+ * its dates. A from-scratch rebuild otherwise published a document whose
+ * title, author and private entries were silently gone.
+ *
+ * Values carry as RAW OBJECTS, never through a decode/re-encode: pdf-lib's
+ * date accessors parse to a JS Date and re-serialize as UTC `D:…Z`, which
+ * drops the timezone offset and pads a partial date out to a full timestamp.
+ * Cloning the leaf keeps the original string kind (literal vs hex), its exact
+ * bytes and whatever precision the source actually wrote. Dates in particular
+ * never come from the run's clock: a clock-stamped Info dict puts different
+ * bytes in the file on every commit of the same document, which breaks
+ * byte-identity between an in-place save and its control.
+ *
+ * ISO 32000-2 14.3.3 makes /Info optional and requires every entry outside
+ * /CreationDate and /ModDate to be a text string; Table 349 adds /Trapped as
+ * the sole name. So a conforming Info dict holds only leaf scalars, and an
+ * entry resolving to anything else (a dict, an array, a stream) is refused
+ * before the output is touched — never dropped silently, and never followed
+ * into an object graph this carry has no business copying.
+ *
+ * Absence stays absence, including /Trapped, whose absent-means-Unknown
+ * default is not materialized. Per 7.3.9 an entry whose value is null, and a
+ * reference to a nonexistent object, are both equivalent to omitting the
+ * entry, so those are absent entries rather than malformed ones.
+ */
+function carryDocumentInfo(output: PDFDocument, source: PDFDocument): void {
+  const raw = source.context.trailerInfo.Info;
+  if (raw === undefined) return;
+  const fail = () => new Error(tChrome('app.operation.unverified'));
+  const info = source.context.lookup(raw);
+  if (info === undefined || info === PDFNull) return;
+  if (!(info instanceof PDFDict)) throw fail();
+  // The one permitted leaf for a key: `undefined` for an entry that is really
+  // absent, the leaf to clone, or a refusal. Resolving is as far as this goes
+  // — a dict, array or stream value never gets followed, so no page graph is
+  // cloned and no cycle is walked.
+  const leaf = (key: PDFName, value: PDFObject): PDFObject | undefined => {
+    const resolved = source.context.lookup(value);
+    if (resolved === undefined || resolved === PDFNull) return undefined;
+    if (key.asString() === '/Trapped') {
+      if (resolved instanceof PDFName && TRAPPED_NAMES.has(resolved.asString())) return resolved;
+      throw fail();
+    }
+    if (resolved instanceof PDFString || resolved instanceof PDFHexString) return resolved;
+    throw fail();
+  };
+  // Resolve and validate every entry BEFORE publishing any of them: a refusal
+  // must not leave the output holding half a document's identity.
+  const carried: [PDFName, PDFObject][] = [];
+  for (const [key, value] of info.entries()) {
+    if (GENERATED_INFO_KEYS.has(key.asString())) continue;
+    const resolved = leaf(key, value);
+    if (resolved) carried.push([key, resolved.clone()]);
+  }
+  if (carried.length === 0) return;
+  const target = outputInfoDict(output);
+  for (const [key, value] of carried) target.set(key, value);
 }
 
 export async function buildPdf(
@@ -1436,14 +1505,17 @@ export async function buildPdf(
   if (pages.length === 0) throw new Error('buildPdf: cannot build a PDF with no pages');
   // updateMetadata:false: pdf-lib's constructor otherwise stamps /ModDate and
   // /CreationDate from `new Date()`, so two builds of the same input differ
-  // whenever they straddle a second boundary. Dates travel from the source
-  // (carryInfoDates); /Producer is set explicitly below.
+  // whenever they straddle a second boundary. The whole Info dictionary
+  // travels from the source instead (carryDocumentInfo); /Producer is the one
+  // entry this builder generates, set explicitly below.
   const output = await PDFDocument.create({ updateMetadata: false });
   await assemblePages(output, pages, ownSourceKey, ownBytes);
   // Document-level catalog trees (/Names /EmbeddedFiles, /Collection) are not
   // page subtrees — without this carry a committed page edit deleted every
   // attachment (embedded-files-carry.ts).
   if (ownBytes) await carryEmbeddedFiles(output, ownBytes);
+  // Names the writer, so it describes this build and not the source's tool.
+  // GENERATED_INFO_KEYS keeps the carry off the key; this is its only writer.
   output.setProducer(`PDFX ${PDFX_VERSION}`);
   return output.save();
 }
@@ -1474,6 +1546,11 @@ export async function buildPdfx(
     description: 'PDFX manifest describing the documents in this collection',
   });
 
+  // A collection describes itself, so these three OVERRIDE whatever the own
+  // document's Info carried: the title is the collection's name, not a member
+  // document's, and the keyword is what identifies the file as a collection.
+  // Every other carried entry (author, subject, creator, dates, private
+  // fields) survives untouched.
   output.setTitle(title);
   output.setProducer(`PDFX ${PDFX_VERSION}`);
   output.setKeywords(['PDFX']);

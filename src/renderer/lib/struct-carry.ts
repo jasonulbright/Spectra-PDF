@@ -65,6 +65,7 @@ interface CarryCtx {
   annotParents: AnnotParent[];
   idEntries: Map<string, PDFRef>;
   visited: Set<string>;
+  structureMap: ObjectMap;
 }
 
 function copyText(v: PDFObject | undefined): PDFString | null {
@@ -196,6 +197,7 @@ function rebuildElem(
   ctx.registrations.push(...pendingRegs);
   ctx.annotParents.push(...pendingAnnots);
   if (id && !ctx.idEntries.has(id.decodeText())) ctx.idEntries.set(id.decodeText(), outRef);
+  if (srcTag) ctx.structureMap.set(srcTag, outRef);
   return outRef;
 }
 
@@ -233,8 +235,9 @@ function sweepStaleKeys(output: PDFDocument): void {
  * surviving tags. Call AFTER all pages are added, with the SAME loaded
  * source instances the builder copied from.
  */
-export function carryStructTree(output: PDFDocument, sources: CarriedSourcePages[]): void {
+export function carryStructTree(output: PDFDocument, sources: CarriedSourcePages[]): Map<PDFDocument, ObjectMap> {
   sweepStaleKeys(output);
+  const structureMaps = new Map<PDFDocument, ObjectMap>();
 
   const rootDict = output.context.obj({ Type: 'StructTreeRoot' });
   const rootRef = output.context.register(rootDict);
@@ -248,6 +251,8 @@ export function carryStructTree(output: PDFDocument, sources: CarriedSourcePages
   for (const source of sources) {
     const srcRoot = source.doc.catalog.lookupMaybe(N('StructTreeRoot'), PDFDict);
     if (!srcRoot) continue;
+    const structureMap: ObjectMap = new Map();
+    structureMaps.set(source.doc, structureMap);
     const ctx: CarryCtx = {
       output,
       source: source.doc,
@@ -260,6 +265,7 @@ export function carryStructTree(output: PDFDocument, sources: CarriedSourcePages
       annotParents,
       idEntries,
       visited: new Set(),
+      structureMap,
     };
     for (const kid of kidsOf(source.doc, srcRoot.get(N('K')))) {
       const kidTag = kid instanceof PDFRef ? kid.tag : null;
@@ -272,7 +278,7 @@ export function carryStructTree(output: PDFDocument, sources: CarriedSourcePages
     mergeMap(classMap, srcRoot.lookupMaybe(N('ClassMap'), PDFDict), ctx.copier);
   }
 
-  if (topKids.length === 0) return; // untagged rebuild — sweep already ran
+  if (topKids.length === 0) return structureMaps; // untagged rebuild — sweep already ran
 
   // ── ParentTree, renumbered in output order ──────────────────────────────
   // Page containers first (in page order), then stream containers, then one
@@ -330,6 +336,7 @@ export function carryStructTree(output: PDFDocument, sources: CarriedSourcePages
   }
   output.catalog.set(N('StructTreeRoot'), rootRef);
   output.catalog.set(N('MarkInfo'), output.context.obj({ Marked: true }));
+  return structureMaps;
 }
 
 /** "obj gen R"-style tag back to its numbers — PDFRef.tag is `${obj} ${gen} R`. */

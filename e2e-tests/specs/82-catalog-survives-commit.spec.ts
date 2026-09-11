@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileS
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
-import { PDFBool, PDFDict, PDFDocument, PDFName, PDFString } from 'pdf-lib';
+import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, PDFNumber, PDFString } from 'pdf-lib';
 import {
   waitForHarness,
   openByPaths,
@@ -17,6 +17,8 @@ import {
   deleteSelectedCanvasPages,
   getCanvasDocs,
   importPagesIntoDoc,
+  waitForActiveCanvasPageIds,
+  deleteCanvasPagesAndWait,
 } from '../support/harness.js';
 
 // The catalog carry (lib/catalog-carry.ts): bookmarks and page labels
@@ -92,6 +94,48 @@ describe('catalog state survives committed page edits', () => {
     // here the committed file must still carry the roman range at all).
     const bytes = readFileSync(dest);
     expect(bytes.includes('/PageLabels')).toBe(true);
+  });
+
+  for (const removeSelected of [false, true]) it(`preserves print/bookmark/Info identity, or refuses loss (remove selected=${removeSelected})`, async () => {
+    const dir = mkdtempSync(resolve(__dirname, '../../catalog-metadata-live.local.d-'));
+    const path = resolve(dir, 'source.pdf'), N = PDFName.of;
+    const pdf = await PDFDocument.create({ updateMetadata: false });
+    for (const width of [300, 400, 500]) pdf.addPage([width, 700]);
+    pdf.catalog.set(N('ViewerPreferences'), pdf.context.obj({ PrintPageRange: [2, 2], DisplayDocTitle: true }));
+    const info = pdf.context.obj({ Title: PDFString.of('Own document'), Author: PDFString.of('Original author'),
+      Private: PDFString.of('Private value'), CreationDate: PDFString.of('D:2020') });
+    pdf.context.trailerInfo.Info = pdf.context.register(info);
+    const root = pdf.context.obj({ Type: 'Outlines', Count: 1 }), rootRef = pdf.context.register(root);
+    const item = pdf.context.obj({ Parent: rootRef, Title: PDFString.of('Preserved only, never opened'),
+      A: { S: 'URI', URI: PDFString.of('https://example.invalid/manual') }, F: 2, C: [1, 0, 0] });
+    const ref = pdf.context.register(item); root.set(N('First'), ref); root.set(N('Last'), ref); pdf.catalog.set(N('Outlines'), rootRef);
+    const original = Buffer.from(await pdf.save()); writeFileSync(path, original);
+    await closeAllFiles(); await openByPaths([path]);
+    const work = (await getState()).activeFile!.workingPath, before = readFileSync(work);
+    const ids = await waitForActiveCanvasPageIds(); expect(ids).toHaveLength(3);
+    await deleteCanvasPagesAndWait([ids[removeSelected ? 1 : 0]]);
+    if (removeSelected) {
+      let error = ''; try { await commitPendingEdits(); } catch (caught) { error = String(caught); }
+      expect(error).toContain('commitPendingEdits failed'); expect(error).toContain('verif');
+      expect(readFileSync(work).equals(before)).toBe(true);
+      expect(await invokeAppCommand('edit.undo')).toBe(true);
+      await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 3);
+    } else {
+      await commitPendingEdits(); const saved = resolve(dir, 'saved.pdf'); await saveActiveAs(saved);
+      const out = await PDFDocument.load(readFileSync(saved), { updateMetadata: false });
+      const range = out.catalog.lookup(N('ViewerPreferences'), PDFDict).lookup(N('PrintPageRange'), PDFArray);
+      expect(range.asArray().map(x => (x as PDFNumber).asNumber())).toEqual([1, 1]);
+      expect(out.getPage(0).getWidth()).toBe(400);
+      expect(out.getTitle()).toBe('Own document'); expect(out.getAuthor()).toBe('Original author');
+      const carried = out.context.lookup(out.context.trailerInfo.Info!, PDFDict);
+      expect(carried.lookup(N('Private'), PDFString).decodeText()).toBe('Private value');
+      expect(carried.lookup(N('CreationDate'), PDFString).asString()).toBe('D:2020');
+      const bookmark = out.catalog.lookup(N('Outlines'), PDFDict).lookup(N('First'), PDFDict);
+      expect(bookmark.lookup(N('A'), PDFDict).lookup(N('URI'), PDFString).decodeText()).toBe('https://example.invalid/manual');
+      expect(bookmark.lookup(N('F'), PDFNumber).asNumber()).toBe(2);
+      expect(bookmark.lookup(N('C'), PDFArray).asArray().map(x => (x as PDFNumber).asNumber())).toEqual([1, 0, 0]);
+    }
+    expect(readFileSync(path).equals(original)).toBe(true);
   });
   for (const keepOwn of [true, false]) it(`keeps document language, preferences and dates with ${keepOwn ? 'one original page' : 'only imported pages'}`, async () => {
     const dir = mkdtempSync(resolve(__dirname, '../../docs/audit/catalog-owner-live.local.d-'));

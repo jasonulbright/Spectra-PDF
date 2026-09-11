@@ -25,11 +25,13 @@
 
 import {
   PDFArray,
+  PDFBool,
   PDFDict,
   PDFDocument,
   PDFHexString,
   PDFName,
   PDFNumber,
+  PDFNull,
   PDFObject,
   PDFObjectCopier,
   PDFPage,
@@ -116,15 +118,6 @@ export function buildInPageObjectMap(
   return map;
 }
 
-/** Kept pages: source page ref tag → copied output page. */
-function pageMapOf(source: CarriedSourcePages): Map<string, PDFPage> {
-  const map = new Map<string, PDFPage>();
-  for (const { srcIndex, outPage } of source.pairs) {
-    map.set(source.doc.getPage(srcIndex).ref.tag, outPage);
-  }
-  return map;
-}
-
 // ── /Lang + /ViewerPreferences ─────────────────────────────────────────────
 
 function carryLang(output: PDFDocument, srcCatalog: PDFDict): void {
@@ -134,210 +127,187 @@ function carryLang(output: PDFDocument, srcCatalog: PDFDict): void {
   }
 }
 
-function carryViewerPreferences(output: PDFDocument, source: PDFDocument): void {
-  const vp = source.catalog.lookup(N('ViewerPreferences'));
-  if (!(vp instanceof PDFDict)) return;
-  // Scalar-only dict (names, booleans, numbers, page-ref-free) — a plain
-  // deep copy is safe here and ONLY here.
-  const copier = PDFObjectCopier.for(source.context, output.context);
-  output.catalog.set(N('ViewerPreferences'), copier.copy(vp));
+function carryViewerPreferences(output: PDFDocument, source: CarriedSourcePages): void {
+  const raw = source.doc.catalog.get(N('ViewerPreferences'));
+  if (raw === undefined || raw === PDFNull) return;
+  const fail = () => new Error(tChrome('app.operation.unverified'));
+  const vp = source.doc.context.lookup(raw);
+  if (vp === undefined || vp === PDFNull) return;
+  if (!(vp instanceof PDFDict)) throw fail();
+  // Preferences contain data, not page/annotation/structure graphs. Validate
+  // the complete data graph before copying it; unknown data keys survive but
+  // cannot drag a detached document tree into the output. Bound malformed
+  // cycles even when an indirect reference hides one.
+  let visits = 0;
+  const active = new Set<PDFObject>(), checked = new Set<PDFObject>();
+  const validate = (value: PDFObject, depth = 0): void => {
+    if (++visits > 10000 || depth > 64) throw fail();
+    const obj = source.doc.context.lookup(value);
+    if (obj === undefined) return; // nonexistent references have null semantics (7.3.9)
+    if (obj instanceof PDFString || obj instanceof PDFHexString || obj instanceof PDFName || obj instanceof PDFBool || obj === PDFNull) return;
+    if (obj instanceof PDFNumber) { if (!Number.isFinite(obj.asNumber())) throw fail(); return; }
+    if (active.has(obj)) throw fail();
+    if (checked.has(obj)) return;
+    active.add(obj);
+    if (obj instanceof PDFArray) {
+      for (const child of obj.asArray()) validate(child, depth + 1);
+    } else if (obj instanceof PDFDict) {
+      if ([N('Page'), N('Pages'), N('Catalog'), N('Annot'), N('StructElem'), N('StructTreeRoot'), N('OCG')]
+        .includes(obj.lookup(N('Type')) as PDFName) || obj.has(N('FT'))) throw fail();
+      for (const [, child] of obj.entries()) validate(child, depth + 1);
+    } else throw fail();
+    active.delete(obj); checked.add(obj);
+  };
+  validate(vp);
+  const copied = PDFObjectCopier.for(source.doc.context, output.context).copy(vp);
+  const ranges = vp.lookup(N('PrintPageRange'));
+  if (ranges !== undefined && ranges !== PDFNull) {
+    if (!(ranges instanceof PDFArray) || ranges.size() % 2 !== 0) throw fail();
+    const limits: [number, number][] = [];
+    for (let i = 0; i < ranges.size(); i += 2) {
+      const first = ranges.lookup(i), last = ranges.lookup(i + 1);
+      if (!(first instanceof PDFNumber) || !(last instanceof PDFNumber)) throw fail();
+      const a = first.asNumber(), b = last.asNumber();
+      // ISO 32000-2 12.2/Table 147: these page numbers are ONE-based.
+      if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) || a < 1 || b < a || b > source.doc.getPageCount()) throw fail();
+      limits.push([a, b]);
+    }
+    const positions = new Map(output.getPages().map((page, index) => [page.ref.tag, index + 1]));
+    const selected = new Set<number>();
+    for (const { srcIndex, outPage } of source.pairs) {
+      if (!Number.isSafeInteger(srcIndex) || srcIndex < 0 || srcIndex >= source.doc.getPageCount()) throw fail();
+      const position = positions.get(outPage.ref.tag);
+      if (position === undefined) throw fail();
+      if (limits.some(([a, b]) => a <= srcIndex + 1 && srcIndex + 1 <= b)) selected.add(position);
+    }
+    // Dropping the range when all selected pages disappear changes it into
+    // the processor's default (often ALL pages). No safe selection remains.
+    if (limits.length > 0 && selected.size === 0) throw fail();
+    const numbers = [...selected].sort((a, b) => a - b), rebuilt: number[] = [];
+    for (const position of numbers) {
+      if (rebuilt.length > 0 && position === rebuilt[rebuilt.length - 1] + 1) rebuilt[rebuilt.length - 1] = position;
+      else rebuilt.push(position, position);
+    }
+    copied.set(N('PrintPageRange'), output.context.obj(rebuilt));
+  }
+  output.catalog.set(N('ViewerPreferences'), copied);
 }
 
 // ── /Outlines (bookmarks) ──────────────────────────────────────────────────
 
-/** Resolve an outline item's destination array: /Dest direct, /Dest named
- * (via /Names /Dests or the legacy /Dests dict), or /A GoTo. */
-function destArrayOf(source: PDFDocument, item: PDFDict): PDFArray | null {
-  const resolveNamed = (name: string): PDFArray | null => {
-    // Modern: /Names /Dests name tree.
-    const names = source.catalog.lookupMaybe(N('Names'), PDFDict);
-    const tree = names?.lookupMaybe(N('Dests'), PDFDict);
-    if (tree) {
-      const found = lookupNameTree(source, tree, name);
-      if (found instanceof PDFArray) return found;
-      if (found instanceof PDFDict) {
-        const d = found.lookup(N('D'));
-        if (d instanceof PDFArray) return d;
-      }
-    }
-    // Legacy: catalog /Dests dictionary.
-    const legacy = source.catalog.lookupMaybe(N('Dests'), PDFDict);
-    const hit = legacy?.lookup(N(name));
-    if (hit instanceof PDFArray) return hit;
-    if (hit instanceof PDFDict) {
-      const d = hit.lookup(N('D'));
-      if (d instanceof PDFArray) return d;
-    }
-    return null;
-  };
-
-  const direct = item.lookup(N('Dest'));
-  if (direct instanceof PDFArray) return direct;
-  if (direct instanceof PDFString || direct instanceof PDFHexString) {
-    return resolveNamed(direct.decodeText());
-  }
-  if (direct instanceof PDFName) return resolveNamed(direct.decodeText());
-  const action = item.lookupMaybe(N('A'), PDFDict);
-  if (action) {
-    const s = action.lookup(N('S'));
-    if (s instanceof PDFName && s.decodeText() === 'GoTo') {
-      const d = action.lookup(N('D'));
-      if (d instanceof PDFArray) return d;
-      if (d instanceof PDFString || d instanceof PDFHexString) return resolveNamed(d.decodeText());
-    }
-  }
-  return null;
-}
-
-function lookupNameTree(source: PDFDocument, node: PDFDict, name: string): PDFObject | null {
-  const names = node.lookupMaybe(N('Names'), PDFArray);
-  if (names) {
-    for (let i = 0; i + 1 < names.size(); i += 2) {
-      const key = names.lookup(i);
-      if (
-        (key instanceof PDFString || key instanceof PDFHexString) &&
-        key.decodeText() === name
-      ) {
-        return names.lookup(i + 1) ?? null;
-      }
-    }
-  }
-  const kids = node.lookupMaybe(N('Kids'), PDFArray);
-  if (kids) {
-    for (let i = 0; i < kids.size(); i++) {
-      const kid = kids.lookupMaybe(i, PDFDict);
-      if (!kid) continue;
-      const hit = lookupNameTree(source, kid, name);
-      if (hit) return hit;
-    }
-  }
-  return null;
-}
-
 interface RebuiltOutline {
+  input: PDFDict;
   ref: PDFRef;
-  descendants: number;
+  children: RebuiltOutline[];
+  visibleDescendants: number;
   open: boolean;
 }
 
-function rebuildOutlineItem(
-  output: PDFDocument,
-  source: PDFDocument,
-  item: PDFDict,
-  parentRef: PDFRef,
-  pageMap: Map<string, PDFPage>,
-  visited: Set<string>,
-): RebuiltOutline | null {
-  const title = item.lookup(N('Title'));
-  const out = output.context.obj({});
-  out.set(N('Parent'), parentRef);
-  if (title instanceof PDFString || title instanceof PDFHexString) {
-    out.set(N('Title'), PDFString.of(title.decodeText()));
-  } else {
-    out.set(N('Title'), PDFString.of('')); // a title-less item stays a node
-  }
-  // Destination: remap the page ref when the target survived; an item whose
-  // target page is GONE keeps its title (and children) but loses the jump —
-  // honest, and matches how viewers treat dangling outline items.
-  const dest = destArrayOf(source, item);
-  if (dest && dest.size() > 0) {
-    const target = dest.get(0);
-    if (target instanceof PDFRef) {
-      const mapped = pageMap.get(target.tag);
-      if (mapped) {
-        const rebuilt: PDFObject[] = [mapped.ref];
-        for (let i = 1; i < dest.size(); i++) {
-          const el = dest.lookup(i);
-          if (el instanceof PDFName) rebuilt.push(N(el.decodeText()));
-          else if (el instanceof PDFNumber) rebuilt.push(PDFNumber.of(el.asNumber()));
-          // null / unexpected entries: preserved as null-equivalent omission
-          else rebuilt.push(output.context.obj(null));
+/** Outline links are structural, while /A, /Dest, /SE and styling are data.
+ * Rebuild the linked tree, then copy its payload through the SAME identity
+ * authority used by document actions. Bind all outline refs before copying
+ * payloads so sharing and forward references do not fork the outline graph.
+ * ISO 32000-2 12.3.3/Tables 150-152. */
+function carryOutlines(output: PDFDocument, source: CarriedSourcePages, copier: CatalogObjectCopy): void {
+  const rawRoot = source.doc.catalog.get(N('Outlines'));
+  if (rawRoot === undefined || rawRoot === PDFNull) return;
+  const fail = () => new Error(tChrome('app.operation.unverified'));
+  const ctx = source.doc.context, root = ctx.lookup(rawRoot);
+  if (root === undefined || root === PDFNull) return;
+  if (!(root instanceof PDFDict)) throw fail();
+  const type = root.lookup(N('Type'));
+  if (type !== undefined && type !== N('Outlines')) throw fail();
+  const outRoot = output.context.obj({ Type: 'Outlines' }), outRootRef = output.context.register(outRoot);
+  if (rawRoot instanceof PDFRef) copier.bind(rawRoot, outRootRef);
+  const seen = new Set<PDFDict>(); let visits = 0;
+  const count = (dict: PDFDict): number | undefined => {
+    const value = dict.lookup(N('Count'));
+    if (value === undefined || value === PDFNull) return undefined;
+    if (!(value instanceof PDFNumber) || !Number.isSafeInteger(value.asNumber())) throw fail();
+    return value.asNumber();
+  };
+  const parse = (parent: PDFDict, depth: number): RebuiltOutline[] => {
+    if (depth > 128) throw fail();
+    const result: RebuiltOutline[] = [];
+    let cursor = parent.get(N('First')), previous: PDFObject | undefined;
+    while (cursor !== undefined && cursor !== PDFNull) {
+      if (++visits > 10000 || !(cursor instanceof PDFRef)) throw fail();
+      const item = ctx.lookup(cursor);
+      if (!(item instanceof PDFDict) || seen.has(item)) throw fail();
+      seen.add(item);
+      if (ctx.lookup(item.get(N('Parent'))) !== parent) throw fail();
+      const prev = item.get(N('Prev'));
+      if (previous === undefined ? prev !== undefined && prev !== PDFNull : prev !== previous) throw fail();
+      const title = item.lookup(N('Title'));
+      if (!(title instanceof PDFString || title instanceof PDFHexString)) throw fail();
+      const ref = output.context.register(output.context.obj({}));
+      copier.bind(cursor, ref);
+      const children = parse(item, depth + 1), oldCount = count(item);
+      if (children.length > 0 && oldCount === undefined) throw fail();
+      const visibleDescendants = children.reduce((n, child) => n + 1 + (child.open ? child.visibleDescendants : 0), 0);
+      result.push({ input: item, ref, children, visibleDescendants, open: oldCount === undefined || oldCount > 0 });
+      previous = cursor; cursor = item.get(N('Next'));
+    }
+    const last = parent.get(N('Last'));
+    if (previous === undefined ? last !== undefined && last !== PDFNull : last !== previous) throw fail();
+    return result;
+  };
+  const children = parse(root, 0), rootCount = count(root);
+  if (rootCount !== undefined && rootCount < 0) throw fail();
+  const kept = new Set(source.pairs.map(pair => source.doc.getPage(pair.srcIndex).ref.tag));
+  const structural = new Set(['Parent', 'Prev', 'Next', 'First', 'Last', 'Count']);
+  const wire = (parentRef: PDFRef, siblings: RebuiltOutline[]): void => {
+    const parent = output.context.lookup(parentRef, PDFDict);
+    if (siblings.length > 0) {
+      parent.set(N('First'), siblings[0].ref); parent.set(N('Last'), siblings[siblings.length - 1].ref);
+    }
+    for (let index = 0; index < siblings.length; index++) {
+      const node = siblings[index], dict = output.context.lookup(node.ref, PDFDict);
+      dict.set(N('Parent'), parentRef);
+      if (index > 0) dict.set(N('Prev'), siblings[index - 1].ref);
+      if (index + 1 < siblings.length) dict.set(N('Next'), siblings[index + 1].ref);
+      const hasValue = (key: string) => { const value = node.input.lookup(N(key)); return value !== undefined && value !== PDFNull; };
+      if (hasValue('A') && hasValue('Dest')) throw fail();
+      for (const [key, value] of node.input.entries()) {
+        const name = key.decodeText();
+        if (structural.has(name)) continue;
+        if (!hasValue(name)) continue;
+        if (name === 'Dest') {
+          const dest = copier.destination(value), target = dest.get(0) as PDFRef;
+          // A deleted direct jump retains its title/children, as before. An
+          // action chain with a removed target instead refuses in the copier;
+          // pruning only one action would silently change that chain.
+          if (kept.has(target.tag)) dict.set(key, copier.copyDestination(value));
+          continue;
         }
-        out.set(N('Dest'), output.context.obj(rebuilt));
+        if (name === 'A' && !(ctx.lookup(value) instanceof PDFDict)) throw fail();
+        if (name === 'SE') {
+          if (!(value instanceof PDFRef) || !(ctx.lookup(value) instanceof PDFDict)
+            || (ctx.lookup(value) as PDFDict).lookup(N('Type')) !== N('StructElem')) throw fail();
+        }
+        if (name === 'F') {
+          const flags = ctx.lookup(value);
+          if (!(flags instanceof PDFNumber) || !Number.isInteger(flags.asNumber()) || flags.asNumber() < 0 || flags.asNumber() > 3) throw fail();
+        }
+        if (name === 'C') {
+          const color = ctx.lookup(value);
+          if (!(color instanceof PDFArray) || color.size() !== 3) throw fail();
+          for (const raw of color.asArray()) {
+            const component = ctx.lookup(raw);
+            if (!(component instanceof PDFNumber) || !Number.isFinite(component.asNumber()) || component.asNumber() < 0 || component.asNumber() > 1) throw fail();
+          }
+        }
+        dict.set(key, copier.copy(value));
       }
+      wire(node.ref, node.children);
+      if (node.children.length > 0) dict.set(N('Count'), PDFNumber.of(node.open ? node.visibleDescendants : -node.visibleDescendants));
     }
+  };
+  for (const [key, value] of root.entries()) {
+    if (!['Type', 'First', 'Last', 'Count'].includes(key.decodeText())) outRoot.set(key, copier.copy(value));
   }
-  const outRef = output.context.register(out);
-
-  // Children via the /First → /Next chain, cycle-guarded.
-  const children: RebuiltOutline[] = [];
-  let child = item.lookupMaybe(N('First'), PDFDict);
-  let childRefTag = (() => {
-    const raw = item.get(N('First'));
-    return raw instanceof PDFRef ? raw.tag : null;
-  })();
-  while (child) {
-    if (childRefTag) {
-      if (visited.has(childRefTag)) break;
-      visited.add(childRefTag);
-    }
-    const rebuilt = rebuildOutlineItem(output, source, child, outRef, pageMap, visited);
-    if (rebuilt) children.push(rebuilt);
-    const nextRaw = child.get(N('Next'));
-    childRefTag = nextRaw instanceof PDFRef ? nextRaw.tag : null;
-    child = child.lookupMaybe(N('Next'), PDFDict);
-  }
-  wireSiblings(output, outRef, out, children);
-  const descendants = children.reduce((sum, c) => sum + 1 + c.descendants, 0);
-  if (descendants > 0) {
-    const srcCount = item.lookup(N('Count'));
-    const open = srcCount instanceof PDFNumber ? srcCount.asNumber() > 0 : true;
-    out.set(N('Count'), PDFNumber.of(open ? descendants : -descendants));
-    return { ref: outRef, descendants, open };
-  }
-  return { ref: outRef, descendants: 0, open: true };
-}
-
-function wireSiblings(
-  output: PDFDocument,
-  parentRef: PDFRef,
-  parent: PDFDict,
-  children: RebuiltOutline[],
-): void {
-  if (children.length === 0) return;
-  parent.set(N('First'), children[0].ref);
-  parent.set(N('Last'), children[children.length - 1].ref);
-  for (let i = 0; i < children.length; i++) {
-    const dict = output.context.lookup(children[i].ref) as PDFDict;
-    if (i > 0) dict.set(N('Prev'), children[i - 1].ref);
-    if (i + 1 < children.length) dict.set(N('Next'), children[i + 1].ref);
-  }
-  void parentRef;
-}
-
-function carryOutlines(
-  output: PDFDocument,
-  source: PDFDocument,
-  pageMap: Map<string, PDFPage>,
-): void {
-  const srcRoot = source.catalog.lookupMaybe(N('Outlines'), PDFDict);
-  if (!srcRoot) return;
-  const outRoot = output.context.obj({ Type: 'Outlines' });
-  const outRootRef = output.context.register(outRoot);
-  const visited = new Set<string>();
-  const children: RebuiltOutline[] = [];
-  let child = srcRoot.lookupMaybe(N('First'), PDFDict);
-  let tag = (() => {
-    const raw = srcRoot.get(N('First'));
-    return raw instanceof PDFRef ? raw.tag : null;
-  })();
-  while (child) {
-    if (tag) {
-      if (visited.has(tag)) break;
-      visited.add(tag);
-    }
-    const rebuilt = rebuildOutlineItem(output, source, child, outRootRef, pageMap, visited);
-    if (rebuilt) children.push(rebuilt);
-    const nextRaw = child.get(N('Next'));
-    tag = nextRaw instanceof PDFRef ? nextRaw.tag : null;
-    child = child.lookupMaybe(N('Next'), PDFDict);
-  }
-  if (children.length === 0) return; // an empty tree is not worth carrying
-  wireSiblings(output, outRootRef, outRoot, children);
-  outRoot.set(
-    N('Count'),
-    PDFNumber.of(children.reduce((sum, c) => sum + 1 + c.descendants, 0)),
-  );
+  wire(outRootRef, children);
+  if (children.length > 0) outRoot.set(N('Count'), PDFNumber.of(children.reduce((n, child) => n + 1 + (child.open ? child.visibleDescendants : 0), 0)));
   output.catalog.set(N('Outlines'), outRootRef);
 }
 
@@ -546,24 +516,42 @@ function carryOcProperties(
  * Removed/ambiguous targets refuse the rebuild, never silently drop behavior.
  * ISO 32000-2 12.6.2/Table 196 permits action trees via /Next; Table 200
  * defines /AA. Preservation never executes an action. */
-export function carryDocumentBehavior(output: PDFDocument, source: CarriedSourcePages, objectMap: ObjectMap): void {
-  const names = source.doc.catalog.lookupMaybe(N('Names'), PDFDict), tree = names?.get(N('JavaScript'));
-  const aa = source.doc.catalog.get(N('AA')), open = source.doc.catalog.get(N('OpenAction'));
-  if (tree === undefined && aa === undefined && open === undefined) return;
+interface CatalogObjectCopy {
+  bind(source: PDFRef, output: PDFRef): void;
+  copy(value: PDFObject): PDFObject;
+  destination(raw: PDFObject | undefined): PDFArray;
+  copyDestination(raw: PDFObject): PDFObject;
+}
+
+function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, objectMap: ObjectMap,
+  structureMap: ObjectMap = new Map()): CatalogObjectCopy {
+  const names = source.doc.catalog.lookupMaybe(N('Names'), PDFDict);
   const fail = () => new Error(tChrome('app.operation.unverified'));
-  if (aa !== undefined && !(source.doc.context.lookup(aa) instanceof PDFDict)) throw fail();
   // Resolve named local destinations in their source namespace. Only the
   // resolved array travels: donor destinations cannot shadow the source name.
   const nameKey = (value: PDFName | PDFString | PDFHexString) => value instanceof PDFName
     ? `name:${value.decodeText()}` : `string:${Array.from(value.asBytes(), b => b.toString(16).padStart(2, '0')).join('')}`;
   let named: Map<string, PDFObject> | undefined;
-  const destination = (raw: PDFObject | undefined): PDFArray => {
-    const value = source.doc.context.lookup(raw);
-    if (value instanceof PDFArray) {
-      if (!(value.get(0) instanceof PDFRef) || !pageRefs.has((value.get(0) as PDFRef).tag)) throw fail();
-      return value;
+  const explicit = (value: PDFObject | undefined, structure = false): PDFArray => {
+    if (!(value instanceof PDFArray) || value.size() < 2) throw fail();
+    const target = value.get(0), mode = value.lookup(1);
+    if (!(target instanceof PDFRef) || !(mode instanceof PDFName)) throw fail();
+    if (structure) {
+      const elem = source.doc.context.lookup(target);
+      if (!(elem instanceof PDFDict) || elem.lookup(N('Type')) !== N('StructElem')) throw fail();
+    } else if (!pageRefs.has(target.tag)) throw fail();
+    // ISO 32000-2 12.3.2/Table 149: validate the whole view, not just its page.
+    const arity: Record<string, number> = { XYZ: 5, Fit: 2, FitH: 3, FitV: 3, FitR: 6, FitB: 2, FitBH: 3, FitBV: 3 };
+    const kind = mode.decodeText();
+    if (!Object.hasOwn(arity, kind) || value.size() !== arity[kind]) throw fail();
+    for (let i = 2; i < value.size(); i++) {
+      const coordinate = value.lookup(i);
+      if (coordinate === PDFNull && kind !== 'FitR') continue;
+      if (!(coordinate instanceof PDFNumber) || !Number.isFinite(coordinate.asNumber())) throw fail();
     }
-    if (!(value instanceof PDFName || value instanceof PDFString || value instanceof PDFHexString)) throw fail();
+    return value;
+  };
+  const namedValue = (raw: PDFName | PDFString | PDFHexString): PDFObject => {
     if (!named) {
       named = new Map(); let count = 0;
       const seen = new Set<PDFDict>();
@@ -590,12 +578,17 @@ export function carryDocumentBehavior(output: PDFDocument, source: CarriedSource
         if (++count > 10000) throw fail(); add(nameKey(key), child);
       }
     }
-    const hit = source.doc.context.lookup(named.get(nameKey(value)));
-    // A structure destination needs the structure copier's own identity map;
-    // dropping /SD while keeping /D would silently change its semantics.
-    if (hit instanceof PDFDict && hit.has(N('SD'))) throw fail();
-    const result = hit instanceof PDFDict ? hit.lookup(N('D')) : hit;
-    if (!(result instanceof PDFArray)) throw fail(); return destination(result);
+    const hit = source.doc.context.lookup(named.get(nameKey(raw)));
+    if (!hit) throw fail();
+    return hit;
+  };
+  const destination = (raw: PDFObject | undefined): PDFArray => {
+    const value = source.doc.context.lookup(raw);
+    if (value instanceof PDFArray) return explicit(value);
+    if (!(value instanceof PDFName || value instanceof PDFString || value instanceof PDFHexString)) throw fail();
+    const hit = namedValue(value);
+    if (hit instanceof PDFDict && hit.has(N('SD'))) explicit(hit.lookup(N('SD')), true);
+    return explicit(hit instanceof PDFDict ? hit.lookup(N('D')) : hit);
   };
   const pageRefs = new Set(source.doc.getPages().map(p => p.ref.tag));
   const pages = new Map<string, PDFRef>(), counts = new Map<number, number>();
@@ -608,6 +601,9 @@ export function carryDocumentBehavior(output: PDFDocument, source: CarriedSource
       if (pageRefs.has(value.tag)) { const page = pages.get(value.tag); if (!page) throw fail(); return page; }
       const priorRef = refs.get(value.tag); if (priorRef) return priorRef;
       const target = source.doc.context.lookup(value); if (!target) throw fail();
+      if (target instanceof PDFDict && target.lookup(N('Type')) === N('StructElem')) {
+        const mapped = structureMap.get(value.tag); if (!mapped) throw fail(); return mapped;
+      }
       // Reuse identity-bearing page objects, not copied action subtrees. An
       // action may also be reachable through a page: that copier's GoTo can
       // still point at a detached page, so it is never an authority here.
@@ -624,7 +620,9 @@ export function carryDocumentBehavior(output: PDFDocument, source: CarriedSource
       if (value.lookup(N('S')) === N('GoTo') && !value.has(N('D'))) throw fail();
       const result = output.context.obj({}); direct.set(value, result);
       for (const [key, child] of value.entries()) {
-        result.set(key, copy(key === N('D') && value.lookup(N('S')) === N('GoTo') ? destination(child) : child, depth + 1));
+        if (key === N('D') && value.lookup(N('S')) === N('GoTo')) result.set(key, copyDestination(child, depth + 1));
+        else result.set(key, copy(key === N('SD') && value.lookup(N('S')) === N('GoTo')
+          ? explicit(source.doc.context.lookup(child), true) : child, depth + 1));
       }
       return result;
     }
@@ -638,6 +636,51 @@ export function carryDocumentBehavior(output: PDFDocument, source: CarriedSource
     }
     return value.clone(output.context);
   };
+  const retainedNames = new Map<string, { key: PDFString | PDFHexString; value: PDFObject }>();
+  const copiedNames = new Set<string>();
+  const copyDestination = (raw: PDFObject, depth = 0): PDFObject => {
+    const dest = destination(raw), key = source.doc.context.lookup(raw);
+    if (key instanceof PDFName || key instanceof PDFString || key instanceof PDFHexString) {
+      const hit = namedValue(key);
+      // A plain array can be resolved inline. A destination dictionary may
+      // additionally carry /SD or extension attributes: preserve its named
+      // identity and complete payload rather than flattening those away.
+      if (hit instanceof PDFDict && hit.entries().some(([k]) => k !== N('D'))) {
+        const tag = nameKey(key);
+        if (!copiedNames.has(tag)) {
+          copiedNames.add(tag);
+          const value = copy(hit, depth + 1);
+          if (key instanceof PDFName) {
+            const dict = output.catalog.lookupMaybe(N('Dests'), PDFDict) ?? output.context.obj({});
+            dict.set(key, value); output.catalog.set(N('Dests'), dict);
+          } else {
+            retainedNames.set(tag, { key, value });
+            const entries = [...retainedNames.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+            const values = output.context.obj([]);
+            for (const [, entry] of entries) { values.push(entry.key.clone()); values.push(entry.value); }
+            const dict = output.catalog.lookupMaybe(N('Names'), PDFDict) ?? output.context.obj({});
+            dict.set(N('Dests'), output.context.obj({ Names: values })); output.catalog.set(N('Names'), dict);
+          }
+        }
+        return key.clone();
+      }
+    }
+    return copy(dest, depth + 1);
+  };
+  return { copy, destination, copyDestination, bind: (sourceRef, outputRef) => {
+    const previous = refs.get(sourceRef.tag);
+    if (previous && previous !== outputRef) throw fail();
+    refs.set(sourceRef.tag, outputRef);
+  } };
+}
+
+export function carryDocumentBehavior(output: PDFDocument, source: CarriedSourcePages, objectMap: ObjectMap,
+  copier: CatalogObjectCopy = catalogObjectCopier(output, source, objectMap)): void {
+  const names = source.doc.catalog.lookupMaybe(N('Names'), PDFDict), tree = names?.get(N('JavaScript'));
+  const aa = source.doc.catalog.get(N('AA')), open = source.doc.catalog.get(N('OpenAction'));
+  if (tree === undefined && aa === undefined && open === undefined) return;
+  if (aa !== undefined && !(source.doc.context.lookup(aa) instanceof PDFDict)) throw new Error(tChrome('app.operation.unverified'));
+  const { copy, copyDestination } = copier;
   if (tree !== undefined) {
     const outNames = output.catalog.lookupMaybe(N('Names'), PDFDict) ?? output.context.obj({});
     outNames.set(N('JavaScript'), copy(tree)); output.catalog.set(N('Names'), outNames);
@@ -645,7 +688,7 @@ export function carryDocumentBehavior(output: PDFDocument, source: CarriedSource
   if (aa !== undefined) output.catalog.set(N('AA'), copy(aa));
   if (open !== undefined) {
     const value = source.doc.context.lookup(open);
-    output.catalog.set(N('OpenAction'), copy(value instanceof PDFDict ? open : destination(open)));
+    output.catalog.set(N('OpenAction'), value instanceof PDFDict ? copy(open) : copyDestination(open));
   }
 }
 
@@ -654,14 +697,14 @@ export function carryDocumentBehavior(output: PDFDocument, source: CarriedSource
  * must be the SAME loaded instance the builder copied pages from — the page
  * and in-page object maps are what make reference remapping possible at all.
  */
-export function carryDocumentCatalog(output: PDFDocument, source: CarriedSourcePages): void {
+export function carryDocumentCatalog(output: PDFDocument, source: CarriedSourcePages, structureMap?: ObjectMap): void {
   const srcCatalog = source.doc.catalog;
-  const pageMap = pageMapOf(source);
-  carryLang(output, srcCatalog);
-  carryViewerPreferences(output, source.doc);
-  carryOutlines(output, source.doc, pageMap);
-  carryPageLabels(output, source);
   const objectMap = buildInPageObjectMap(source, output);
+  const copier = catalogObjectCopier(output, source, objectMap, structureMap);
+  carryLang(output, srcCatalog);
+  carryViewerPreferences(output, source);
+  carryOutlines(output, source, copier);
+  carryPageLabels(output, source);
   carryOcProperties(output, source.doc, objectMap);
-  carryDocumentBehavior(output, source, objectMap);
+  carryDocumentBehavior(output, source, objectMap, copier);
 }
