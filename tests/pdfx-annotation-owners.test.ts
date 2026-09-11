@@ -53,9 +53,11 @@ describe('rebuilt annotation owner identity', () => {
       writeFileSync(modified, await buildPdf(pages, original, source));
       const report = JSON.parse(execFileSync(python, ['-B', '-c',
         'import json,sys; from engine.incremental import transplant_incremental; print(json.dumps(transplant_incremental(*sys.argv[1:])))', source, modified, output],
-      { env: { ...process.env, PYTHONPATH: resolve('src'), PYTHONDONTWRITEBYTECODE: '1' }, encoding: 'utf8' }));
+      { env: { ...process.env, PYTHONPATH: resolve('src'), PYTHONDONTWRITEBYTECODE: '1' }, encoding: 'utf8', timeout: 15_000 }));
       expect(report, kind).toMatchObject({ applied: true });
       expect(readFileSync(output).subarray(0, original.length).equals(Buffer.from(original))).toBe(true);
     }
-  });
+  // Two cold Python/crypto imports exceeded the unit-test default on hosted
+  // runners. Keep each child bounded and allow both real append checks to finish.
+  }, 40_000);
 });
