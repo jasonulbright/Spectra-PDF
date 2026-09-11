@@ -1,11 +1,13 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { once } from 'node:events';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { launchOwnedProcess } from '../e2e-tests/support/owned-process';
+import { testPython } from './support/python';
 
 const script = resolve('e2e-tests/support/owned-process.ps1');
-const python = resolve('.venv/Scripts/python.exe');
+let python: string;
 const fixture = resolve('e2e-tests/support/owned-process-fixture.py');
 const sleep = (ms: number) => new Promise(resolveWait => setTimeout(resolveWait, ms));
 async function until(check: () => boolean) {
@@ -16,7 +18,7 @@ function alive(pid: number): boolean { try { process.kill(pid, 0); return true; 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
 function paths() {
-  const directory = mkdtempSync(resolve('docs/audit/owned-process.local.d-'));
+  const directory = mkdtempSync(resolve('owned-process.local.d-'));
   return { directory, receipt: resolve(directory, 'pids.json') };
 }
 function launch(mode = 'wait', args: string[] = []) {
@@ -27,9 +29,13 @@ function launch(mode = 'wait', args: string[] = []) {
 }
 
 describe.skipIf(process.platform !== 'win32')('Windows E2E process ownership', () => {
+  beforeAll(() => { python = testPython(); });
   it('kills only the owned tree, preserving unrelated Python and another live session', async () => {
     const unrelated = spawn(python, ['-B', '-c', 'import time; time.sleep(120)'], { stdio: 'ignore', windowsHide: true });
-    cleanups.push(async () => { unrelated.kill(); });
+    const unrelatedClosed = once(unrelated, 'close');
+    void unrelatedClosed.catch(() => {});
+    await once(unrelated, 'spawn');
+    cleanups.push(async () => { unrelated.kill(); await unrelatedClosed; });
     const first = launch(); const independent = launch();
     await Promise.all([first.owned.ready, independent.owned.ready]);
     await until(() => existsSync(first.receipt) && existsSync(independent.receipt));

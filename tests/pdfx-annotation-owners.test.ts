@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { buildPdf, buildPdfx } from '../src/renderer/lib/pdfx-build';
+import { testPython } from './support/python';
 
 async function fixture() {
   const pdf = await PDFDocument.create(); const a = pdf.addPage(); const b = pdf.addPage();
@@ -43,13 +44,14 @@ describe('rebuilt annotation owner identity', () => {
   it('real incremental append preserves a signature after a builder comment/rotation', async () => {
     const source = resolve('e2e-tests/fixtures/signed.pdf');
     const original = new Uint8Array(readFileSync(source));
-    const directory = mkdtempSync(resolve('docs/audit/annotation-owners.local.d-'));
+    const directory = mkdtempSync(resolve('annotation-owners.local.d-'));
+    const python = testPython();
     for (const kind of ['comment', 'rotate'] as const) {
       const modified = resolve(directory, `${kind}.pdf`); const output = resolve(directory, `${kind}-out.pdf`);
       const pages = [{ bytes: original, sourceKey: source, pageIndex: 0,
         ...(kind === 'rotate' ? { rotation: 90 as const } : { annotations: [{ kind: 'highlight' as const, x: .2, y: .2, w: .3, h: .1, color: '#ffd54f' }] }) }];
       writeFileSync(modified, await buildPdf(pages, original, source));
-      const report = JSON.parse(execFileSync(resolve('.venv/Scripts/python.exe'), ['-B', '-c',
+      const report = JSON.parse(execFileSync(python, ['-B', '-c',
         'import json,sys; from engine.incremental import transplant_incremental; print(json.dumps(transplant_incremental(*sys.argv[1:])))', source, modified, output],
       { env: { ...process.env, PYTHONPATH: resolve('src'), PYTHONDONTWRITEBYTECODE: '1' }, encoding: 'utf8' }));
       expect(report, kind).toMatchObject({ applied: true });

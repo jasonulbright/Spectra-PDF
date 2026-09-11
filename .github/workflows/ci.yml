@@ -33,6 +33,19 @@ jobs:
       - name: Lint (ESLint — errors gate; advisory warnings are not CI noise)
         run: npm run lint -- --quiet
 
+      # The unit suite includes real Python process-ownership and incremental
+      # append tests. A clean checkout has neither a dev venv nor its packages.
+      - name: Setup Python for renderer integration tests
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install Python dependencies for renderer integration tests
+        run: python -m pip install --require-hashes -r scripts/python-requirements.txt
+
+      - name: Stage signature faces for renderer integration tests
+        run: powershell -ExecutionPolicy Bypass -File scripts/sync-signature-fonts.ps1
+
       # The renderer unit tests are a required gate here: lint, build,
       # cargo check and pytest together exercise no application logic.
       # Without this step a pdfjs-dist minor bump can land an empty

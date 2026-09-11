@@ -80,6 +80,20 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Renderer integration tests call the real engine before the later
+      # Python suite, so provision its hash-pinned interpreter environment now.
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install Python dependencies (the SHIPPED, hash-pinned set)
+        run: pip install --require-hashes -r scripts/python-requirements.txt
+
+      - name: Stage the shipped signature script faces for engine tests
+        run: powershell -ExecutionPolicy Bypass -File scripts/sync-signature-fonts.ps1
+        shell: pwsh
+
       - name: Unit tests (vitest)
         run: npm test
 
@@ -124,20 +138,12 @@ jobs:
       - name: Rust COM scheduler tests (fresh task store)
         run: cd src-tauri && cargo test scheduler -- --ignored
 
-      - name: Setup Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-
       # One install per step. The default shell on windows runners reports the
       # step's verdict as the LAST command's exit status, and a native command's
       # non-zero exit does not abort the block, so a failed install in a
       # multi-command block reports success and surfaces only as downstream
       # collection errors. `--require-hashes` is stated explicitly to match what
       # setup-python-embed.ps1 installs into the shipped runtime.
-      - name: Install Python dependencies (the SHIPPED, hash-pinned set)
-        run: pip install --require-hashes -r scripts/python-requirements.txt
-
       # The rest of the shipped set: the wheels committed under vendor/wheels/,
       # which no index is asked for. Without this the HEIF corpus cannot decode.
       - name: Install the vendored wheels (the rest of the shipped set)
@@ -155,10 +161,6 @@ jobs:
 
       - name: Stage the shipped edit fonts for engine tests
         run: powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1
-        shell: pwsh
-
-      - name: Stage the shipped signature script faces for engine tests
-        run: powershell -ExecutionPolicy Bypass -File scripts/sync-signature-fonts.ps1
         shell: pwsh
 
       # 373 MB off TDF's mirror network on EVERY run otherwise. The key is the

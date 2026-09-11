@@ -102,6 +102,18 @@ def test_the_release_trigger_ignores_non_version_tags() -> None:
     assert patterns == ["v[0-9]*"]
 
 
+@pytest.mark.parametrize("workflow,job", [("ci.yml", "lint-and-build"), ("release.yml", "verify")])
+def test_renderer_integration_prerequisites_precede_vitest(workflow: str, job: str) -> None:
+    text = (ROOT / ".github" / "workflows" / workflow).read_text()
+    jobs = re.split(r"(?m)^  (?=[A-Za-z][\w-]*:\s*$)", text)
+    block = next(part for part in jobs if part.startswith(f"{job}:"))
+    unit_test = block.index("run: npm test")
+    setup = block.index("uses: actions/setup-python@v7")
+    install = block.index("pip install --require-hashes -r scripts/python-requirements.txt")
+    assert setup < install < unit_test
+    assert block.index("scripts/sync-signature-fonts.ps1") < unit_test
+
+
 def _assert_capabilities_precede_engine_tests(workflow: str) -> None:
     text = (ROOT / ".github" / "workflows" / workflow).read_text()
     engine_test = text.index("python -m pytest tests/ -q")
