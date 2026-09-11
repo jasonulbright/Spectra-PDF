@@ -542,15 +542,17 @@ def _write_xmp(source: str, output: str, run: _Run) -> int:
     return 1
 
 
-def _set_pdf_version(source: str, output: str, run: _Run) -> int:
+def _set_pdf_version(source: str, output: str, run: _Run) -> _DoorResult:
     from engine.reversion import set_pdf_version
 
     version = str(run.get("version", "")).strip()
     if not version:
         row = run.check("pdf_version")
         version = str(row.get("params", {}).get("max_version", "1.7"))
-    set_pdf_version(source, output, version=version)
-    return 1
+    result = set_pdf_version(source, output, version=version)
+    # An equal-version request still publishes an exact, atomic copy. Do not
+    # misclassify it as no output and take the generic copy fallback.
+    return _DoorResult(int(result["changed"]), (), True)
 
 
 def _convert_to_pdfx(source: str, output: str, run: _Run) -> int:

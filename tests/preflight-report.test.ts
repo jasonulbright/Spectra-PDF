@@ -36,12 +36,24 @@ import {
   formatPreflightHtml,
   formatPreflightText,
   hiddenFindings,
+  findingDetail,
   standardsNote,
   orderedCategories,
   paramsLine,
   type Check,
   type PreflightReport,
 } from '../src/renderer/lib/preflight-report';
+import i18next from '../src/renderer/i18n';
+
+it('localizes the unreadable version reason in the report', async () => {
+  await i18next.changeLanguage('es');
+  try {
+    const detail = findingDetail({ address: { kind: 'page', page: null }, detail_key: 'read_failed', preview: '',
+      values: { reason: 'The PDF version cannot be determined.' } });
+    expect(detail).toContain(i18next.t('engine.pdf_version.pdfVersionCannotDetermined'));
+    expect(detail).not.toContain('The PDF version cannot be determined.');
+  } finally { await i18next.changeLanguage('en'); }
+});
 
 const ENGINE = resolve(__dirname, '../src/engine/preflight_profiles.py');
 

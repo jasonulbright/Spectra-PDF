@@ -25,6 +25,7 @@ from pikepdf import Array, Dictionary, Name, String
 from .inplace import is_same_file, staged_write
 from engine.incremental import signature_policy, signed_edit_decision
 from engine.pdf_save import save_pdf
+from engine.pdf_version import version_facts
 
 
 def _save(pdf, file: str, output_path: Path) -> None:
@@ -805,9 +806,15 @@ def get_advanced_properties(file: str) -> dict:
             raw_base = uri.get("/Base")
             if raw_base is not None:
                 base_url = str(raw_base)
+        # The effective declared version, plus the two declarations it
+        # came from. A physical header alone is not the document's version
+        # when the catalog declares a later one (Table 29).
+        facts = version_facts(pdf)
         return {
             "file": file,
-            "version": pdf.pdf_version,
+            "version": facts["version"],
+            "header_version": facts["header_version"],
+            "catalog_version": facts["catalog_version"],
             "linearized": bool(pdf.is_linearized),
             "tagged": _is_tagged(pdf),
             "pages": len(pdf.pages),

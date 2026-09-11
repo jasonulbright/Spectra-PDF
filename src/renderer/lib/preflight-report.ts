@@ -16,6 +16,7 @@
 // Ink names and font names are document content and reach the report verbatim
 // — which is why the HTML escaping of one is pinned by a test.
 import { currentLanguage, tChrome, textDirection } from '../i18n';
+import { localizeEngineMessage } from './engine-messages';
 import {
   CATEGORY_IDS,
   CHECK_INVENTORY,
@@ -164,6 +165,9 @@ export function findingDetail(finding: Finding): string {
   const vars: Record<string, string | number> = {};
   for (const [key, value] of Object.entries(finding.values ?? {})) {
     vars[key] = typeof value === 'number' ? value : String(value);
+  }
+  if (finding.detail_key === 'read_failed' && typeof vars.reason === 'string') {
+    vars.reason = localizeEngineMessage(vars.reason);
   }
   return tChrome(
     `panel.preflight.detail.${finding.detail_key}` as Parameters<typeof tChrome>[0],

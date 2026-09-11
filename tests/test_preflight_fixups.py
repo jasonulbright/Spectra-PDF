@@ -279,11 +279,42 @@ class TestRoundTrip:
         )
 
     def test_set_pdf_version(self, tmp_path):
-        self._round_trip(
-            tmp_path, "version_too_new",
-            [{"id": "set_pdf_version", "params": {"version": "1.7"}}],
-            "pdf_version",
-        )
+        # Forcing a newer document's label down never proved compatibility.
+        # The fixup must not clear its own ceiling by making that false claim.
+        source = builders.build('version_too_new', str(tmp_path))
+        output = tmp_path / 'version-fixed.pdf'
+        output.write_bytes(b'keep')
+        before = pathlib.Path(source).read_bytes()
+        profile = _profile([{'id': 'set_pdf_version', 'params': {'version': '1.7'}}])
+        with pytest.raises(ValueError, match='cannot be lowered'):
+            apply_fixups(source, str(output), profile=profile, checks=['pdf_version'])
+        assert output.read_bytes() == b'keep'
+        assert pathlib.Path(source).read_bytes() == before
+
+    def test_equal_version_keeps_atomic_copy_result(self, tmp_path, monkeypatch):
+        source = pathlib.Path(builders.build('version_too_new', str(tmp_path)))
+        output = tmp_path / 'same-version.pdf'
+        before = source.read_bytes()
+        profile = _profile([{'id': 'set_pdf_version', 'params': {'version': '2.0'}}])
+        def no_direct_write(*_args, **_kwargs):
+            raise AssertionError('An atomic copy must not fall through to direct publication')
+        monkeypatch.setattr(pathlib.Path, 'write_bytes', no_direct_write)
+        result = apply_fixups(str(source), str(output), profile=profile)
+        assert result['applied'] == [{'fixup': 'set_pdf_version', 'changed': 0}]
+        assert output.read_bytes() == source.read_bytes() == before
+
+    def test_set_pdf_version_can_raise_a_floor(self, tmp_path):
+        source = builders.build('version_too_new', str(tmp_path))
+        output = tmp_path / 'version-raised.pdf'
+        # Make an ordinary older source, independent of the newer corpus pin.
+        with pikepdf.new() as pdf:
+            pdf.add_blank_page()
+            pdf.save(source, force_version='1.4')
+        profile = _profile([{'id': 'set_pdf_version', 'params': {'version': '1.7'}}],
+                           pdf_version={'min_version': '1.7', 'max_version': '1.7'})
+        result = apply_fixups(source, str(output), profile=profile, checks=['pdf_version'])
+        assert _status(result['report'], 'pdf_version') == 'pass'
+        assert result['applied'][0]['changed'] == 1
 
     def test_fix_hairlines(self, tmp_path):
         self._round_trip(

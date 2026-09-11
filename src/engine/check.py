@@ -11,6 +11,7 @@ from pathlib import Path
 
 from engine.font_embedding import font_embedded
 from engine.font_inventory import walk_document_fonts
+from engine.pdf_version import version_facts
 
 
 def _font_label(font_obj, resource_name) -> str:
@@ -148,10 +149,17 @@ def check(file: str) -> dict:
             })
             return report
 
-        # Extract PDF version from header
+        # The PHYSICAL header, labelled as what it is. It is a fact about the
+        # bytes, not the version the document conforms to: a catalog may
+        # declare a later one (Table 29). The effective version is reported
+        # below, and only once both declarations have actually been read — so
+        # a document that cannot be opened presents its header and makes no
+        # claim about what it conforms to.
         version_line = header[:20].decode("latin-1", errors="replace")
         if version_line.startswith("%PDF-"):
-            report["info"]["pdf_version"] = version_line[5:].split()[0].rstrip("\r\n")
+            tokens = version_line[5:].split()
+            if tokens:
+                report["info"]["header_version"] = tokens[0]
 
     # 2. Try opening with pikepdf (validates xref, trailer, object streams)
     try:
@@ -174,7 +182,20 @@ def check(file: str) -> dict:
         return report
 
     with pdf:
-        report["info"]["encrypted"] = False
+        report["info"]["encrypted"] = bool(pdf.is_encrypted)
+
+        # The effective declared version, not a conformance certification. An
+        # unreadable declaration is a version defect in its own right, not a
+        # reason to fall back to the header as though it were the answer.
+        try:
+            report["info"]["pdf_version"] = version_facts(pdf)["version"]
+        except ValueError as unreadable:
+            report["valid"] = False
+            report["issues"].append({
+                "severity": "error",
+                "category": "version",
+                "message": str(unreadable),
+            })
 
         # 3. Page count and page tree validation
         try:

@@ -62,6 +62,7 @@ from engine import printer_marks as printer_marks_mod
 from engine import pubkey_crypt as pubkey_crypt_mod
 from engine import redact as redact_mod
 from engine import redact_marks as redact_marks_mod
+from engine import reversion as reversion_mod
 from engine import rotate as rotate_mod
 from engine import pdfa as pdfa_mod
 from engine import search_redact as search_redact_mod
@@ -1065,6 +1066,14 @@ def _transplant_onto_the_original(src: str, out: str) -> dict:
 
 
 CASES = (
+    Case(
+        "reversion",
+        reversion_mod,
+        _blank,
+        lambda src, out: reversion_mod.set_pdf_version(src, out, "2.0"),
+        lambda path: reversion_mod.get_pdf_version(path)["version"],
+        doors=("set_pdf_version",),
+    ),
     Case(
         "ocr_layer",
         ocr_layer_mod,
@@ -2287,6 +2296,7 @@ class TestTheGuardWouldHaveCaughtIt:
     @pytest.mark.parametrize(
         "case_name, door",
         [
+            ("reversion", "set_pdf_version"),
             ("struct_fix", "set_table_headers"),
             ("portfolio_make", "make_portfolio"),
             ("portfolio_update_member", "update_portfolio_member"),

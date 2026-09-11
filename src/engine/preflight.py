@@ -42,6 +42,7 @@ import pikepdf
 from pikepdf import Name  # noqa: F401  (re-exported for callers of the walk)
 
 from engine.font_embedding import font_embedded
+from engine.pdf_version import parse_version, version_facts
 from engine.processing_steps import (
     CUSTOM,
     MISSING_GROUP,
@@ -575,12 +576,19 @@ def _check_pdf_version(check, reads) -> None:
     version = reads["version"]
     if not version:
         check.status = REVIEW
-        check.findings = [_finding(_page_address(), "read_failed", values={"reason": ""})]
+        check.findings = [_finding(_page_address(), "read_failed", values={"reason": "The PDF version cannot be determined."})]
         return
     findings = []
     maximum = _version_tuple(check.params["max_version"])
     minimum = _version_tuple(check.params["min_version"])
-    current = _version_tuple(version)
+    # Do not turn an unreadable fact into a pass even if a caller supplied
+    # reads directly rather than through the ordinary gathering boundary.
+    try:
+        current = parse_version(version)
+    except ValueError:
+        check.status = REVIEW
+        check.findings = [_finding(_page_address(), "read_failed", values={"reason": "The PDF version cannot be determined."})]
+        return
     if maximum and current and current > maximum:
         findings.append(_finding(
             _page_address(), "version_above_max",
@@ -1574,7 +1582,15 @@ def _gather(file: str, profile: dict, gs_path: str, font_dir) -> dict:
             non_embedded.append(name)
 
     with pikepdf.open(file) as pdf:
-        reads["version"] = str(pdf.pdf_version)
+        # The effective declared version, not conformance or the header: a
+        # ceiling a catalog declaration exceeds is exceeded (Table 29). A
+        # declaration that cannot be read leaves the fact absent, which the
+        # check reports for review rather than passing — and never ends the
+        # whole run, since every other check still has its own reads.
+        try:
+            reads["version"] = version_facts(pdf)["version"]
+        except ValueError:
+            reads["version"] = ""
         try:
             reads["permissions"] = (bool(pdf.allow.print_lowres),
                                     bool(pdf.allow.print_highres))

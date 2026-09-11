@@ -63,6 +63,8 @@ caller falls back to the rewrite path it was already on. Document
 metadata (/Info, XMP) is deliberately IGNORED rather than transplanted:
 incidental Producer/ModDate churn from a rebuild must neither block the
 transplant nor masquerade as a user edit.
+The explicit version operation alone opts into updating XMP PDFVersion,
+derived from the original XML and governed by the format-version ceiling.
 
 Mechanical refusal is a RESULT: each caller has a rewrite fallback. A failed
 policy read instead blocks both paths; the finalizer raises so its staging
@@ -1342,7 +1344,19 @@ class _ClockFreeMeta(DocumentMetadata):
         super().__setattr__(name, value)
 
 
-def transplant_incremental(original: str, modified: str, output: str) -> dict:
+class _ExplicitVersionWriter(IncrementalPdfFileWriter):
+    """Version-only metadata is already authored from the original XML.
+
+    The default writer's metadata updater reparses XMP and adds producer
+    information. That is not part of this edit and can discard unknown XML.
+    """
+
+    def _update_meta(self):
+        pass
+
+
+def transplant_incremental(original: str, modified: str, output: str, *,
+                           update_version_metadata: bool = False) -> dict:
     """Append ``modified``'s annotate/fill/geometry/page-tree delta onto
     ``original``.
 
@@ -1403,7 +1417,8 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
                 required_version = effective_version(mod)
                 version_changed = required_version > original_version
 
-                writer = IncrementalPdfFileWriter(io.BytesIO(orig_bytes))
+                writer_type = _ExplicitVersionWriter if update_version_metadata else IncrementalPdfFileWriter
+                writer = writer_type(io.BytesIO(orig_bytes))
                 writer._meta = _ClockFreeMeta()
                 if version_changed:
                     writer.ensure_output_version(required_version)
@@ -1473,6 +1488,29 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
             if refused is not None:
                 return refused
 
+            if version_changed and update_version_metadata:
+                # Only the explicit version operation requests this. Derive
+                # the edit from ORIGINAL metadata through the same strict
+                # version/conformance rule; never adopt arbitrary rebuild
+                # metadata. The format-version ceiling above governs it.
+                from engine.reversion import _prepare_version_metadata
+
+                original_metadata = orig.Root.get('/Metadata')
+                before_metadata = original_metadata.read_bytes() if original_metadata is not None else None
+                _prepare_version_metadata(orig, '.'.join(map(str, required_version)))
+                if original_metadata is not None and original_metadata.read_bytes() != before_metadata:
+                    metadata_ref = writer.root.raw_get('/Metadata')
+                    if not isinstance(metadata_ref, generic.IndirectObject):
+                        return {'applied': False, 'reason': 'metadata-stream-not-indirect'}
+                    live_metadata = metadata_ref.get_object()
+                    # Update the original stream identity, not a copied
+                    # subtree. Unknown dictionary edges (including aliases
+                    # back to the catalog) remain original references.
+                    dictionary = {key: live_metadata.raw_get(key) for key in live_metadata
+                                  if str(key) not in {'/Length', '/Filter', '/DecodeParms'}}
+                    writer.objects[(metadata_ref.generation, metadata_ref.idnum)] = generic.StreamObject(
+                        dict_data=dictionary, stream_data=original_metadata.read_bytes())
+
             if unchanged:
                 # A semantically empty rebuild must not leave rewritten bytes
                 # standing: they break signatures just as a changed rebuild
@@ -1525,7 +1563,8 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
     }
 
 
-def finalize_preserving_signatures(original: str, rewritten_tmp: str) -> dict:
+def finalize_preserving_signatures(original: str, rewritten_tmp: str, *,
+                                   update_version_metadata: bool = False) -> dict:
     """Call-site helper for in-place engine ops (fill, XFDF import, link
     authoring, comment deletion): the op has produced a full REWRITE at
     ``rewritten_tmp``; when ``original`` carries live signatures, replace
@@ -1541,7 +1580,11 @@ def finalize_preserving_signatures(original: str, rewritten_tmp: str) -> dict:
             refuse_unreadable_policy()
         if not policy["signed"]:
             return {"preserved": False, "reason": "not-signed"}
-        result = transplant_incremental(original, rewritten_tmp, rewritten_tmp)
+        if update_version_metadata:
+            result = transplant_incremental(original, rewritten_tmp, rewritten_tmp,
+                                            update_version_metadata=True)
+        else:
+            result = transplant_incremental(original, rewritten_tmp, rewritten_tmp)
         if result.get("blocked") or result.get("reason") == POLICY_UNREADABLE:
             refuse_unreadable_policy()
         if result.get("applied"):
