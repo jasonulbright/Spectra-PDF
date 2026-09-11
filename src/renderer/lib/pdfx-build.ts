@@ -8,6 +8,7 @@ import type { FormContribution } from './acroform-carry';
 import { carryEmbeddedFiles } from './embedded-files-carry';
 import { carryDocumentCatalog } from './catalog-carry';
 import { carryDocumentMetadata } from './metadata-carry';
+import { copyOutputIntents } from './output-intents-carry';
 import type { MetadataOverrides } from './metadata-process';
 import type { CarriedSourcePages } from './catalog-carry';
 import { carryStructTree } from './struct-carry';
@@ -1321,6 +1322,20 @@ async function assemblePages(
   ownBytes?: Uint8Array,
   metadataOverrides: MetadataOverrides = {},
 ): Promise<void> {
+  // Catalog defaults belong to the document; explicit page conditions belong
+  // to that physical page. Cache per source/value so repeated page occurrences
+  // share an already validated, byte-identical intent graph.
+  const intentCopies = new Map<PDFDocument, Map<PDFObject | undefined, PDFArray | undefined>>();
+  const carryIntents = (source: PDFDocument, sourceRoot: PDFDict, targetRoot: PDFDict) => {
+    const raw = sourceRoot.get(PDFName.of('OutputIntents'));
+    const value = raw === undefined ? undefined : source.context.lookup(raw);
+    let copies = intentCopies.get(source);
+    if (!copies) { copies = new Map(); intentCopies.set(source, copies); }
+    if (!copies.has(value)) copies.set(value, copyOutputIntents(output, source, raw));
+    const copied = copies.get(value);
+    if (copied) targetRoot.set(PDFName.of('OutputIntents'), output.context.getObjectRef(copied) ?? copied);
+    else targetRoot.delete(PDFName.of('OutputIntents'));
+  };
   const groups = new Map<string, { bytes: Uint8Array; indices: number[] }>();
   for (const page of pages) {
     let g = groups.get(page.sourceKey);
@@ -1372,6 +1387,7 @@ async function assemblePages(
       [copied] = await output.copyPages(src.doc, [page.pageIndex]);
     }
     used.add(copied);
+    carryIntents(src.doc, src.doc.getPage(page.pageIndex).node, copied.node);
     applyPageExtras(copied, page, output, stampImages, signatureFonts);
     output.addPage(copied);
     // copyPages clones the page leaf separately from its recursive object
@@ -1416,6 +1432,7 @@ async function assemblePages(
       carryDocumentCatalog(output, { doc: ownDoc, pairs: ownPairs ?? [] }, structureMaps.get(ownDoc));
       carryDocumentInfo(output, ownDoc);
       await carryDocumentMetadata(output, ownDoc, metadataOverrides);
+      carryIntents(ownDoc, ownDoc.catalog, output.catalog);
     }
   }
 }

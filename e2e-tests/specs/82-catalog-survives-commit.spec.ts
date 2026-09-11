@@ -196,11 +196,14 @@ describe('catalog state survives committed page edits', () => {
     }
     expect(readFileSync(path).equals(original)).toBe(true);
   });
-  it('a signed XMP-bearing page edit keeps custom metadata and the signed byte prefix', async () => {
+  it('a signed page edit keeps XMP, output profile and the signed byte prefix', async () => {
     const dir = mkdtempSync(resolve(__dirname, '../../xmp-signed-live.local.d-')), path = resolve(dir, 'source.pdf'), N = PDFName.of;
     const xml = '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:m="https://example.invalid/matter/"><m:MatterID>Signed-metadata-143</m:MatterID></rdf:Description></rdf:RDF></x:xmpmeta>';
     const pdf = await PDFDocument.create({ updateMetadata: false }); pdf.addPage([300, 700]);
     pdf.catalog.set(N('Metadata'), pdf.context.register(pdf.context.flateStream(new TextEncoder().encode(xml), { Type: 'Metadata', Subtype: 'XML' })));
+    const profile = new Uint8Array(readFileSync(resolve(__dirname, '../../resources/icc/USWebCoatedSWOP.icc')));
+    pdf.catalog.set(N('OutputIntents'), pdf.context.obj([pdf.context.obj({ Type: 'OutputIntent', S: 'GTS_PDFX',
+      OutputConditionIdentifier: PDFString.of('U.S. Web Coated (SWOP)'), DestOutputProfile: pdf.context.register(pdf.context.flateStream(profile, { N: 4 })) })]));
     writeFileSync(path, await pdf.save()); await closeAllFiles(); await openByPaths([path]);
     await setView('operations'); await setActiveOp('signatures');
     await signActiveFileInPlace({ pfxPath: resolve(__dirname, '../fixtures/test-signer.pfx'), password: 'testpw' });
@@ -218,7 +221,40 @@ describe('catalog state survives committed page edits', () => {
     const out = await PDFDocument.load(saved, { updateMetadata: false }); expect(out.getPage(0).getRotation().angle).toBe(90);
     const metadata = out.catalog.lookup(N('Metadata')); expect(metadata).toBeInstanceOf(PDFRawStream);
     expect(new TextDecoder().decode(decodePDFRawStream(metadata as PDFRawStream).decode())).toContain('Signed-metadata-143');
+    const carriedProfile = out.catalog.lookup(N('OutputIntents'), PDFArray).lookup(0, PDFDict).lookup(N('DestOutputProfile'));
+    expect(carriedProfile).toBeInstanceOf(PDFRawStream);
+    expect(decodePDFRawStream(carriedProfile as PDFRawStream).decode()).toEqual(profile);
     const checked = cliJson(['verify-signatures', work]) as { signatures: { intact: boolean; valid: boolean }[] }; expect(checked.signatures).toHaveLength(1);
     expect(checked.signatures[0].intact).toBe(true); expect(checked.signatures[0].valid).toBe(true);
+  });
+  for (const malformed of [false, true]) it(`preserves the actual output profile or refuses without publication (malformed=${malformed})`, async () => {
+    const dir = mkdtempSync(resolve(__dirname, '../../output-intent-live.local.d-')), path = resolve(dir, 'source.pdf'), N = PDFName.of;
+    const profile = new Uint8Array(readFileSync(resolve(__dirname, '../../resources/icc/USWebCoatedSWOP.icc')));
+    expect(new TextDecoder().decode(profile.slice(36, 40))).toBe('acsp');
+    const pdf = await PDFDocument.create({ updateMetadata: false }); pdf.addPage([300, 700]);
+    pdf.catalog.set(N('OutputIntents'), malformed ? PDFString.of('not an intent array') : pdf.context.obj([
+      pdf.context.register(pdf.context.obj({ Type: 'OutputIntent', S: 'GTS_PDFX', OutputConditionIdentifier: PDFString.of('U.S. Web Coated (SWOP)'),
+        DestOutputProfile: pdf.context.register(pdf.context.flateStream(profile, { N: 4 })) })),
+    ]));
+    const original = Buffer.from(await pdf.save()); writeFileSync(path, original);
+    await closeAllFiles(); await openByPaths([path]); const ids = await waitForActiveCanvasPageIds();
+    const work = (await getState()).activeFile!.workingPath, before = readFileSync(work);
+    await selectCanvasPages([ids[0]]); expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true);
+    if (malformed) {
+      let error = ''; try { await commitPendingEdits(); } catch (caught) { error = String(caught); }
+      expect(error).toContain('verif'); expect(readFileSync(work).equals(before)).toBe(true);
+      expect(await invokeAppCommand('edit.undo')).toBe(true);
+    } else {
+      await commitPendingEdits(); const dest = resolve(dir, 'saved.pdf'); await saveActiveAs(dest);
+      const saved = await PDFDocument.load(readFileSync(dest), { updateMetadata: false });
+      const intent = saved.catalog.lookup(N('OutputIntents'), PDFArray).lookup(0, PDFDict);
+      expect(intent.lookup(N('OutputConditionIdentifier'), PDFString).decodeText()).toBe('U.S. Web Coated (SWOP)');
+      const stream = intent.lookup(N('DestOutputProfile')); expect(stream).toBeInstanceOf(PDFRawStream);
+      expect(decodePDFRawStream(stream as PDFRawStream).decode()).toEqual(profile);
+      expect(saved.getPage(0).getRotation().angle).toBe(90);
+      expect(await invokeAppCommand('edit.undo')).toBe(true);
+      await browser.waitUntil(async () => (await PDFDocument.load(readFileSync(work), { updateMetadata: false })).getPage(0).getRotation().angle === 0);
+    }
+    expect(readFileSync(path).equals(original)).toBe(true);
   });
 });
