@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.4
+
+*Released 2026-09-11*
+
+- Keep document metadata, output intents, tags, layers and version declarations through page edits.
+- Refuse a PDF version change that cannot be verified instead of writing an invalid file.
+- Show unknown document properties as unknown, and keep unsaved property edits across tabs.
+- Ask the protection-removal question once, for one document and one operation.
+- Read split XFA form packets, and detect form calculations in every XML encoding.
+- Keep chained opening actions when the initial view changes.
+- Keep the author when a document title is corrected.
+- Export reviewed tables from the displayed document, not the original file.
+
 ## 1.2.3
 
 *Released 2026-09-10*
