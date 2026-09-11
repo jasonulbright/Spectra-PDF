@@ -2432,6 +2432,28 @@ def test_the_client_tools_install_has_a_second_source() -> None:
     assert "GITHUB_ENV" in text
 
 
+@pytest.mark.parametrize("workflow,job", (
+    *PUBLISHER_JOBS, ("signing-smoke.yml", "sign-smoke"),
+))
+def test_signing_tool_setup_avoids_unattended_msi_and_has_a_deadline(
+    workflow: str, job: str,
+) -> None:
+    """An MSI that never exits prevents the fallback and consumes the job.
+
+    Pin the actual invocation, not a comment mentioning the switch. The redo
+    uses the existing tag script without changing any bundled product bytes.
+    """
+    step = dict(_job_steps(workflow, job))[SIGNING_TOOLS_STEP]
+    run = re.search(r"^        run: (.+)$", step, re.MULTILINE)
+    assert run is not None, (workflow, step)
+    assert run.group(1).split() == [
+        "powershell", "-ExecutionPolicy", "Bypass", "-File",
+        SIGN_TOOLS_SCRIPT, "-SkipWinget",
+    ], (workflow, run.group(1))
+    assert re.findall(r"^        timeout-minutes: (.+)$", step, re.MULTILINE) == ["5"]
+    assert "continue-on-error:" not in step
+
+
 def test_the_nuget_payload_is_opened_by_the_zip_reader() -> None:
     """Expand-Archive rejects a .nupkg extension on Windows PowerShell 5.1."""
     text = (ROOT / SIGN_TOOLS_SCRIPT).read_text(encoding="utf-8")

@@ -136,8 +136,11 @@ jobs:
       # never invokes a sign command it has no configuration for.
       - name: Install the Artifact Signing client tools
         if: steps.signing-regime.outputs.signed == 'true'
+        # This switch already exists in the tag's script: no product overlay.
+        # A stalled download must not consume the entire release job.
+        timeout-minutes: 5
         shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File scripts/install-signing-tools.ps1
+        run: powershell -ExecutionPolicy Bypass -File scripts/install-signing-tools.ps1 -SkipWinget
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
