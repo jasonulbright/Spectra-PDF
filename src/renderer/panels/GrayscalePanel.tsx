@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
@@ -10,7 +10,10 @@ import { app } from '../lib/tauri-bridge';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import { suffixedOutputName } from '../lib/output-names';
-import { CONSENT_DECLINED, useEncryptionConsent } from '../hooks/useEncryptionConsent';
+import { consentStopped, useEncryptionConsent } from '../hooks/useEncryptionConsent';
+
+import { useOwnedDocumentRun } from '../hooks/useOwnedDocumentRun';
+import { runCommitGate } from '../lib/commit-gate';
 
 export function GrayscalePanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -21,28 +24,34 @@ export function GrayscalePanel(): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const gs = useGsCapability();
   const { runWithConsent, consentDialog } = useEncryptionConsent();
+  const beginRun = useOwnedDocumentRun(activeFile);
+  useEffect(() => { setStatus(''); }, [activeFile?.workingPath, activeFile?.buffer]);
 
   const handleGrayscale = useCallback(async () => {
-    if (!activeFile) return;
-    const output = await saveFile(suffixedOutputName(activeFile.name, "grayscale"));
-    if (!output) return;
+    const run = beginRun();
+    if (!run || !activeFile) return;
     setBusy(true); setStatus(tChrome('panel.grayscale.converting'));
     try {
+      await run.prepare(runCommitGate);
+      const output = await saveFile(suffixedOutputName(activeFile.name, 'grayscale'));
+      if (!output) { if (run.visible()) setStatus(''); return; }
+      run.assertCurrent();
       const gs_path = await requireGsPath();
       const font_dir = await app.getEditFontPath();
       // The conversion cannot carry a protected document's encryption; the
       // engine refuses, and the consent dialog is what re-runs it.
       const r = await runWithConsent((drop_encryption) => call('grayscale', {
         file: activeFile.workingPath, output, gs_path, font_dir, drop_encryption,
-      }));
-      if (r === CONSENT_DECLINED) { setStatus(''); return; }
+      }, { assertCurrent: run.assertCurrent }), { isCurrent: run.isCurrent, subject: `${activeFile.name} → ${output}` });
+      if (consentStopped(r)) { if (run.visible()) setStatus(''); return; }
+      if (!run.visible()) return;
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.output_size / 1024).toFixed(0);
       const line = tChrome('panel.grayscale.result', { from: orig, to: out });
       setStatus(r.encryption_removed ? tChrome('panel.common.resultUnprotected', { result: line }) : line);
-    } catch (e: unknown) { setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) })); }
-    finally { setBusy(false); }
-  }, [activeFile, call, saveFile, runWithConsent]);
+    } catch (e: unknown) { if (run.visible()) setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) })); }
+    finally { run.finish(); setBusy(false); }
+  }, [activeFile, call, saveFile, runWithConsent, beginRun]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.grayscale.open')} />;
 

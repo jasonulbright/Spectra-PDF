@@ -70,7 +70,7 @@ export function FormsPanel(): React.ReactElement {
   const conflict = !!draft && drafts.conflict(draft);
   const buffer = draft?.buffer ?? null;
   const xfaKind = draft?.form?.xfa ?? 'none';
-  const xfaCalculations = draft?.form?.xfaCalculations ?? false;
+  const xfaCalculations = draft?.form ? draft.form.xfaCalculations : false;
   const calculationOrder = draft?.form?.calculationOrder ?? [];
   const status = conflict && !busy ? tChrome('panel.forms.sourceChanged')
     : draft?.error ? tChrome('panel.common.error', { message: draft.error }) : draft?.status ?? '';
@@ -138,12 +138,19 @@ export function FormsPanel(): React.ReactElement {
         </div>
       )}
 
-      {xfaCalculations && (
+      {xfaCalculations === true && (
         <div
           data-testid="forms-xfa-calculations"
           className="shrink-0 px-3 py-2 bg-amber-500/15 border border-amber-500/40 rounded text-xs text-amber-200"
         >
           {tChrome('panel.forms.xfaCalculations')}
+        </div>
+      )}
+
+      {xfaCalculations === null && (
+        <div data-testid="forms-xfa-calculations-unknown"
+          className="shrink-0 px-3 py-2 bg-amber-500/15 border border-amber-500/40 rounded text-xs text-amber-200">
+          {tChrome('panel.forms.xfaCalculationsUnknown')}
         </div>
       )}
 

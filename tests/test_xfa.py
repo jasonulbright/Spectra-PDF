@@ -132,6 +132,8 @@ def _hybrid(
         entry = pdf.make_stream(body)
     else:
         pairs = [
+            pikepdf.String("xdp:xdp"),
+            pdf.make_stream(b'<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">'),
             pikepdf.String("template"),
             pdf.make_stream(TEMPLATE),
             pikepdf.String("datasets"),
@@ -144,6 +146,7 @@ def _hybrid(
                 pikepdf.String("connectionSet"),
                 pdf.make_stream(CONNECTION_SET),
             ]
+        pairs += [pikepdf.String("/xdp:xdp"), pdf.make_stream(b"</xdp:xdp>")]
         entry = pikepdf.Array(pairs)
 
     pdf.Root["/AcroForm"] = pdf.make_indirect(
@@ -180,6 +183,21 @@ class TestClassification:
     def test_hybrid_is_static(self, tmp_path):
         with pikepdf.open(_hybrid(tmp_path / "a.pdf")) as pdf:
             assert xfa.classify(pdf) == xfa.STATIC
+
+    def test_unreadable_authored_logic_is_unknown_not_absent_in_the_field_reply(self, tmp_path):
+        source = _hybrid(tmp_path / 'bad-logic.pdf')
+        with pikepdf.open(source, allow_overwriting_input=True) as pdf:
+            pdf.Root.AcroForm.XFA = 42
+            pdf.save(source)
+        reply = read_form_fields(source)
+        assert reply['xfa_calculations'] is None
+        assert reply['count'] == len(FIELD_NAMES)
+
+    def test_a_wrapper_without_datasets_is_not_a_datasets_stream(self, tmp_path):
+        source = _without_datasets(_hybrid(tmp_path / 'no-data.pdf'))
+        with pikepdf.open(source) as pdf:
+            assert xfa.inspect(pdf).form_class == xfa.STATIC
+            assert xfa.datasets_stream(pdf) is None
 
     def test_needs_rendering_is_dynamic(self, tmp_path):
         path = _hybrid(tmp_path / "b.pdf", needs_rendering=True)
@@ -240,7 +258,7 @@ class TestIndirectXfaEntry:
         pdf.add_blank_page(page_size=(200, 200))
         arr = pikepdf.Array(
             [
-                pikepdf.String("template"),
+                pikepdf.String("xdp:xdp"),
                 pdf.make_stream(
                     b'<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"></xdp:xdp>'
                 ),
@@ -810,7 +828,12 @@ class TestStrictInspection:
 
     @staticmethod
     def _pairs(pdf, name):
-        return pikepdf.Array([name, pdf.make_stream(b"<template/>")])
+        return pikepdf.Array([
+            pikepdf.String("xdp:xdp"),
+            pdf.make_stream(b'<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">'),
+            name, pdf.make_stream(b"<template/>"),
+            pikepdf.String("/xdp:xdp"), pdf.make_stream(b"</xdp:xdp>"),
+        ])
 
     def test_no_acroform_is_none(self):
         pdf = pikepdf.Pdf.new()

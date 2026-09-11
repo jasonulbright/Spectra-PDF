@@ -17,8 +17,11 @@ import {
   openByPaths,
   setView,
   focusTab,
+  getState,
   invokeAppCommand,
   closeAllFiles,
+  openParagraphEditor,
+  setContentEditableValue,
   tableReviewList,
   tableReviewToggle,
   tableReviewMoveColumn,
@@ -245,4 +248,93 @@ describe('Table review before a spreadsheet export', () => {
     // page down, it did not throw the review away.
     expect((await tableReviewList()).length).toBe(2);
   });
+
+  it('exports the displayed working-copy edit, never the original file', async function () {
+    this.timeout(180_000);
+    // The whole defect: a workbook written from the document's identity path
+    // carries the ORIGINAL bytes, while the reviewer is looking at a working
+    // copy that has moved on. So: edit the working copy in place, prove the
+    // old review is gone with the bytes it described, review again, and read
+    // the edit back out of the workbook — with the original file untouched.
+    const originalBytes = readFileSync(source);
+    expect((await tableReviewList()).length).toBe(2);
+
+    expect(await invokeAppCommand('tools.open.edit')).toBe(true);
+    let target: { pageId: string; index: number } | null = null;
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0) return false;
+        const paras = await editParagraphs(ids[0]);
+        const prose = paras.find((p) => p.text.includes('Prose between'));
+        if (!prose) return false;
+        target = { pageId: ids[0], index: prose.index };
+        return true;
+      },
+      { timeout: 30_000, timeoutMsg: 'the prose paragraph never listed for editing' },
+    );
+    const edited = 'EDITED prose line between the two tables.';
+    await openParagraphEditor(target!.pageId, target!.index);
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    await setContentEditableValue('[data-testid="edit-para-input"]', edited);
+    await browser.keys(['Enter']);
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0) return false;
+        return (await editParagraphs(ids[0])).some((p) => p.text === edited);
+      },
+      { timeout: 30_000, timeoutMsg: 'the edited paragraph never appeared in the listing' },
+    );
+    // The working copy moved; the original did not.
+    const working = (await getState()).activeFile!.workingPath;
+    expect(Buffer.compare(readFileSync(working), originalBytes)).not.toBe(0);
+    expect(Buffer.compare(readFileSync(source), originalBytes)).toBe(0);
+    // A review of bytes the document no longer has is no review.
+    await browser.waitUntil(async () => (await tableReviewList()).length === 0, {
+      timeout: 20_000,
+      interval: 200,
+      timeoutMsg: 'the stale review survived the working-copy edit',
+    });
+
+    expect(await invokeAppCommand('tools.panel.tablereview')).toBe(true);
+    await $('[data-testid="table-review-panel"]').waitForDisplayed({ timeout: 20_000 });
+    await clickEl('[data-testid="table-review-detect"]');
+    await browser.waitUntil(async () => (await tableReviewList()).length === 2, {
+      timeout: 30_000,
+      interval: 200,
+      timeoutMsg: 'detection never found the two tables again after the edit',
+    });
+    const found = await tableReviewList();
+    await tableReviewToggle(found[1].id);
+    const out = resolve(tmp, 'working-copy.xlsx');
+    const result = (await tableReviewExport(out, { includeUntabled: true })) as { tables?: unknown[] };
+    expect(String(result)).not.toContain('__SPECTRA_E2E_ERROR__');
+    expect(result.tables?.length).toBe(1);
+
+    const cells = (await readWorkbook(out)).flatMap((sheet) => Object.values(sheet));
+    expect(cells.some((v) => v.includes('EDITED prose line'))).toBe(true);
+    expect(cells.some((v) => v.includes('Prose between'))).toBe(false);
+    expect(cells).toContain('Item');
+    // Nothing here wrote the PDF the review came from.
+    expect(Buffer.compare(readFileSync(source), originalBytes)).toBe(0);
+    expect(await pdfPageCount(source)).toBe(1);
+  });
 });
+
+async function editTextPageIds(): Promise<string[]> {
+  return await browser.execute<string[], []>(function () {
+    return (window as any).__SPECTRA_TEST__.editTextPageIds();
+  });
+}
+
+async function editParagraphs(
+  pageId: string,
+): Promise<{ index: number; text: string; lineCount: number; alignment: string }[]> {
+  return await browser.execute<
+    { index: number; text: string; lineCount: number; alignment: string }[],
+    [string]
+  >(function (p) {
+    return (window as any).__SPECTRA_TEST__.editParagraphs(p);
+  }, pageId);
+}

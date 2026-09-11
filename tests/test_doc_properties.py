@@ -152,14 +152,14 @@ class TestOpenActionThatIsAScript:
 
     def test_writing_a_destination_refuses_and_leaves_the_script(self, sample):
         self._script_open_action(sample)
-        with pytest.raises(ValueError, match="script"):
+        with pytest.raises(ValueError, match="without losing behavior"):
             set_initial_view(sample, sample, open_page=2, zoom="fit-page")
         with pikepdf.open(sample) as pdf:
             assert str(pdf.Root["/OpenAction"]["/S"]) == "/JavaScript"
 
     def test_removing_it_refuses_too(self, sample):
         self._script_open_action(sample)
-        with pytest.raises(ValueError, match="script"):
+        with pytest.raises(ValueError, match="without losing behavior"):
             set_initial_view(sample, sample, open_page=0)
 
     def test_a_goto_action_is_a_destination(self, sample):

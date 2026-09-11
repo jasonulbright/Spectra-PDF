@@ -15,12 +15,14 @@ import { tChrome } from '../i18n';
 
 interface EncryptionConsentDialogProps {
   open: boolean;
+  subject?: string;
   /** True when the user chose to proceed, false on every dismissal. */
   onResult: (proceed: boolean) => void;
 }
 
 export function EncryptionConsentDialog({
   open,
+  subject,
   onResult,
 }: EncryptionConsentDialogProps): React.ReactElement {
   useTranslation();
@@ -41,6 +43,7 @@ export function EncryptionConsentDialog({
           <Dialog.Description className="text-sm text-neutral-400 mb-2">
             {tChrome('dialog.encryptionConsent.blurb')}
           </Dialog.Description>
+          {subject && <p data-testid="encryption-consent-subject" className="text-sm break-all text-neutral-300 mb-2">{subject}</p>}
           <p className="text-sm text-neutral-400 mb-5">
             {tChrome('dialog.encryptionConsent.consequence')}
           </p>

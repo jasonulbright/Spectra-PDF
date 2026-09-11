@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
@@ -8,8 +8,8 @@ import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber } from '../i18n';
 import { runCommitGate } from '../lib/commit-gate';
 import { formatBytes } from '../lib/format-bytes';
-import { EDIT_DECLINED } from '../lib/edit-text';
-import type { OpMethod } from '../lib/op-edit-class';
+import { useReadAppState } from '../state/AppStateProvider';
+import { createPropertiesDrafts } from '../lib/properties-drafts';
 import { app } from '../lib/tauri-bridge';
 import {
   DEFAULT_INITIAL_VIEW,
@@ -22,7 +22,6 @@ import {
   ZOOM_PERCENT_STEPS,
   ZOOM_VALUES,
   initialViewChanges,
-  parseInitialView,
   type InitialView,
   type PageLayoutValue,
   type PageModeValue,
@@ -35,7 +34,6 @@ import {
   advancedChanges,
   pageSizeMeasures,
   paperNameOf,
-  parseAdvanced,
   type AdvancedProperties,
   type TrappedValue,
 } from '../lib/doc-advanced';
@@ -84,249 +82,128 @@ export interface PropertiesDialogProps {
 }
 
 export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.Element {
-  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile } = useActiveFile();
+  const readState = useReadAppState();
   const { call, saveFile } = useEngine();
   const { performOperation } = useOperations();
+  const drafts = useMemo(() => createPropertiesDrafts(readState), [readState]);
+  useSyncExternalStore(drafts.subscribe, drafts.snapshot, drafts.snapshot);
+  const d = drafts.get(activeFile);
   const [tab, setTab] = useState<PropTab>('description');
-
-  const [title, setTitle] = useState('');
-  const [author, setAuthor] = useState('');
-  const [subject, setSubject] = useState('');
-  const [keywords, setKeywords] = useState('');
-  const [status, setStatus] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const [version, setVersion] = useState<string | null>(null);
-  const [encrypted, setEncrypted] = useState<boolean | null>(null);
-
-  // Initial view, fonts, advanced. Each keeps a BASELINE beside the edited value so a
-  // save sends only what moved — every engine parameter is
-  // none-means-unchanged, and rewriting an untouched key would churn the file.
-  const [view, setView] = useState<InitialView>(DEFAULT_INITIAL_VIEW);
-  const [viewBase, setViewBase] = useState<InitialView>(DEFAULT_INITIAL_VIEW);
-  const [advanced, setAdvanced] = useState<AdvancedProperties>(DEFAULT_ADVANCED);
-  const [advancedBase, setAdvancedBase] = useState<AdvancedProperties>(DEFAULT_ADVANCED);
-  const [fonts, setFonts] = useState<DocumentFont[] | null>(null);
-  const [fontsError, setFontsError] = useState<string | null>(null);
-  const [imageRes, setImageRes] = useState<ImageResolution | null>(null);
-  const [imageResError, setImageResError] = useState<string | null>(null);
-
-  // Keyed on workingPath (stable per path, unlike the activeFile object, which
-  // swaps on every buffer update) — the MetadataPanel's own note.
   const workingPath = activeFile?.workingPath ?? null;
   const originalPath = activeFile?.path ?? null;
+  const buffer = activeFile?.buffer ?? null;
+  const current = d !== null && drafts.at(d) && !readState().pageDirtyPaths.includes(d.path);
+  const view = d?.view.draft ?? DEFAULT_INITIAL_VIEW;
+  const advanced = d?.advanced.draft ?? DEFAULT_ADVANCED;
+  const viewKnown = !!d && current && d.view.fresh;
+  const advancedKnown = !!d && current && d.advanced.fresh;
+  const metadataKnown = !!d && drafts.editable(d, d.metadata);
+  const busy = d?.busy ?? false;
+  const version = advancedKnown ? advanced.version : null;
+  const status = d && drafts.conflict(d) ? tChrome('app.history.changed') : d?.status ?? '';
+  const title = d?.metadata.draft.title ?? '';
+  const author = d?.metadata.draft.author ?? '';
+  const subject = d?.metadata.draft.subject ?? '';
+  const keywords = d?.metadata.draft.keywords ?? '';
+  const setMetadata = (key: 'title' | 'author' | 'subject' | 'keywords', value: string) => {
+    if (d) drafts.change(d, d.metadata, { ...d.metadata.draft, [key]: value });
+  };
+  const setTitle = (v: string) => setMetadata('title', v);
+  const setAuthor = (v: string) => setMetadata('author', v);
+  const setSubject = (v: string) => setMetadata('subject', v);
+  const setKeywords = (v: string) => setMetadata('keywords', v);
+  const setView = (next: InitialView) => { if (d) drafts.change(d, d.view, next); };
+  const setAdvanced = (edit: (prior: AdvancedProperties) => AdvancedProperties) => {
+    if (d) drafts.change(d, d.advanced, edit(d.advanced.draft));
+  };
+  const viewChanges = d?.view.baseline && viewKnown ? initialViewChanges(d.view.baseline, view) : null;
+  const advancedDelta = d?.advanced.baseline && advancedKnown ? advancedChanges(d.advanced.baseline, advanced) : null;
+
+  useEffect(() => { drafts.activate(); return () => drafts.deactivate(); }, [drafts]);
 
   useEffect(() => {
-    if (!workingPath) return;
-    let cancelled = false;
-    void (async () => {
-      // FLUSH FIRST. Every number in this dialog describes the document's
-      // BYTES — metadata and version are read out of the working copy, and
-      // pageCount/size come from `files`, which only moves on a real byte op.
-      // Pending page-tier edits live in `workspace` and touch none of that, so
-      // without this a Properties opened right after deleting a page reports
-      // the page as still there, disagreeing with the page counter a few pixels
-      // away. This is the commit gate's stated job — "before anything READS or
-      // replaces file bytes, so these reads are
-      // INTERNAL_METHODS (individually ungated: a panel reading on mount must
-      // not commit) is exactly why the gate has to be asked for here.
-      try {
-        await runCommitGate();
-      } catch (e: unknown) {
-        if (!cancelled) setStatus(tChrome('dialog.props.gateFailed', { message: e instanceof Error ? e.message : String(e) }));
-        return;
-      }
-      if (cancelled) return;
-      try {
-        const r = await call('get_metadata', { file: workingPath });
-        if (cancelled) return;
-        setTitle(r.title || '');
-        setAuthor(r.author || '');
-        setSubject(r.subject || '');
-        setKeywords(r.keywords || '');
-      } catch (e: unknown) {
-        if (!cancelled) setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
-      }
-      try {
-        const v = await call('get_pdf_version', { file: workingPath });
-        if (!cancelled) setVersion(v.version);
-      } catch {
-        if (!cancelled) setVersion(null);
-      }
-      try {
-        const raw = (await call('get_initial_view', { file: workingPath })) as unknown as Record<string, unknown>;
-        if (cancelled) return;
-        const parsed = parseInitialView(raw);
-        setView(parsed);
-        setViewBase(parsed);
-      } catch {
-        if (!cancelled) {
-          setView(DEFAULT_INITIAL_VIEW);
-          setViewBase(DEFAULT_INITIAL_VIEW);
-        }
-      }
-      try {
-        const raw = (await call('get_advanced_properties', { file: workingPath })) as unknown as Record<string, unknown>;
-        if (cancelled) return;
-        const parsed = parseAdvanced(raw);
-        setAdvanced(parsed);
-        setAdvancedBase(parsed);
-      } catch {
-        if (!cancelled) {
-          setAdvanced(DEFAULT_ADVANCED);
-          setAdvancedBase(DEFAULT_ADVANCED);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [workingPath, call]);
+    if (!d) return;
+    void drafts.load(d, call, runCommitGate);
+    return () => drafts.cancelLoad(d);
+  }, [d, buffer, drafts, call]);
 
-  // The font walk visits every page's resources, every nested form and every
-  // appearance stream, so it runs when the tab is first shown rather than on
-  // mount — a dialog opened to read the title must not pay for it.
+  // Expensive facts belong to an exact revision, not just a stable working
+  // pathname. Old values disappear in render before an effect can run.
+  type FontRead = { workingPath: string; buffer: PdfBuffer; value: DocumentFont[] | null; error: string | null };
+  type ImageRead = { workingPath: string; buffer: PdfBuffer; value: ImageResolution | null; error: string | null };
+  const [fontRead, setFontRead] = useState<FontRead | null>(null);
+  const [imageRead, setImageRead] = useState<ImageRead | null>(null);
+  const [security, setSecurity] = useState<{ path: string; buffer: PdfBuffer; value: boolean | null } | null>(null);
+  const fontsOwn = fontRead?.workingPath === workingPath && fontRead?.buffer === buffer && current;
+  const imagesOwn = imageRead?.workingPath === workingPath && imageRead?.buffer === buffer && current;
+  const fonts = fontsOwn ? fontRead!.value : null;
+  const fontsError = fontsOwn ? fontRead!.error : null;
+  const imageRes = imagesOwn ? imageRead!.value : null;
+  const imageResError = imagesOwn ? imageRead!.error : null;
+  const encrypted = security?.path === originalPath && security?.buffer === buffer ? security.value : null;
+  const owns = useCallback(() => !!d && !!buffer && drafts.at(d, buffer)
+    && !readState().pageDirtyPaths.includes(d.path), [d, buffer, drafts, readState]);
+
   useEffect(() => {
-    if (tab !== 'fonts' || fonts !== null || !workingPath) return;
+    if (tab !== 'fonts' || !d || !buffer || !workingPath || !current) return;
     let cancelled = false;
+    const valid = () => !cancelled && owns();
+    const assertCurrent = () => { if (!valid()) throw new Error(tChrome('app.history.changed')); };
     void (async () => {
       try {
-        // The vendored fonts directory is what makes the substitution line
-        // real; without it the engine reports the substitution as unknown.
         let fontDir: string | null = null;
-        try {
-          fontDir = await app.getEditFontPath();
-        } catch {
-          fontDir = null;
-        }
-        const raw = await call('list_document_fonts', { file: workingPath, font_dir: fontDir });
-        if (!cancelled) setFonts(parseDocumentFonts(raw as unknown));
-      } catch (e: unknown) {
-        if (!cancelled) {
-          setFonts([]);
-          setFontsError(e instanceof Error ? e.message : String(e));
-        }
+        try { fontDir = await app.getEditFontPath(); } catch { /* Substitution stays unknown. */ }
+        assertCurrent();
+        const raw = await call('list_document_fonts', { file: workingPath, font_dir: fontDir }, { assertCurrent });
+        if (valid()) setFontRead({ workingPath, buffer, value: parseDocumentFonts(raw), error: null });
+      } catch (e) {
+        if (valid()) setFontRead({ workingPath, buffer, value: null, error: e instanceof Error ? e.message : String(e) });
       }
     })();
     return () => { cancelled = true; };
-  }, [tab, fonts, workingPath, call]);
+  }, [tab, d, buffer, workingPath, current, owns, call]);
 
-  // The resolution walk parses every page's content stream, so it runs when
-  // the Advanced tab is first shown rather than on mount — the font walk's
-  // reasoning, for the same cost.
   useEffect(() => {
-    if (tab !== 'advanced' || imageRes !== null || imageResError !== null || !workingPath) return;
+    if (tab !== 'advanced' || !d || !buffer || !workingPath || !current) return;
     let cancelled = false;
+    const valid = () => !cancelled && owns();
+    const assertCurrent = () => { if (!valid()) throw new Error(tChrome('app.history.changed')); };
     void (async () => {
       try {
-        const raw = (await call('summarize_image_resolution', {
-          file: workingPath,
-        })) as unknown as Record<string, unknown>;
-        if (!cancelled) setImageRes(parseImageResolution(raw));
-      } catch (e: unknown) {
-        if (!cancelled) setImageResError(e instanceof Error ? e.message : String(e));
+        const raw = await call('summarize_image_resolution', { file: workingPath }, { assertCurrent });
+        if (valid()) setImageRead({ workingPath, buffer, value: parseImageResolution(raw as unknown as Record<string, unknown>), error: null });
+      } catch (e) {
+        if (valid()) setImageRead({ workingPath, buffer, value: null, error: e instanceof Error ? e.message : String(e) });
       }
     })();
     return () => { cancelled = true; };
-  }, [tab, imageRes, imageResError, workingPath, call]);
+  }, [tab, d, buffer, workingPath, current, owns, call]);
 
   useEffect(() => {
-    if (!originalPath) return;
+    if (!originalPath || !buffer) return;
     let cancelled = false;
-    // The ORIGINAL, not the working copy: opening an encrypted file decrypts the
-    // working copy, so asking it would always answer "not protected" — a
-    // confident, useless lie. What the user wants to know is whether the file on
-    // disk needs a password.
-    call('check_encrypted', { file: originalPath })
-      .then((r) => { if (!cancelled) setEncrypted(Boolean(r.encrypted)); })
-      .catch(() => { if (!cancelled) setEncrypted(null); });
+    // Protection is a fact about the original; the working copy is decrypted.
+    const assertCurrent = () => { if (cancelled || !owns()) throw new Error(tChrome('app.history.changed')); };
+    void call('check_encrypted', { file: originalPath }, { assertCurrent }).then(r => {
+      if (!cancelled && owns()) setSecurity({ path: originalPath, buffer, value: typeof r.encrypted === 'boolean' ? r.encrypted : null });
+    }).catch(() => {
+      if (!cancelled && owns()) setSecurity({ path: originalPath, buffer, value: null });
+    });
     return () => { cancelled = true; };
-  }, [originalPath, call]);
+  }, [originalPath, buffer, owns, call]);
 
-  const handleSave = useCallback(async () => {
-    if (!activeFile) return;
-    const output = await saveFile(suffixedOutputName(activeFile.name, "metadata"));
-    if (!output) return;
-    setBusy(true);
-    setStatus(tChrome('dialog.props.savingMetadata'));
-    try {
-      const r = await call('set_metadata', {
-        file: activeFile.workingPath, output, title, author, subject, keywords,
-      });
-      setStatus(tChrome('dialog.props.updated', { fields: (r.updated_fields as string[]).join(', ') }));
-    } catch (e: unknown) {
-      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setBusy(false);
-    }
-  }, [activeFile, title, author, subject, keywords, call, saveFile]);
-
-  const handleStrip = useCallback(async () => {
-    if (!activeFile) return;
-    const output = await saveFile(suffixedOutputName(activeFile.name, "stripped"));
-    if (!output) return;
-    setBusy(true);
-    setStatus(tChrome('dialog.props.strippingMetadata'));
-    try {
-      await call('strip_metadata', { file: activeFile.workingPath, output });
-      setTitle(''); setAuthor(''); setSubject(''); setKeywords('');
-      setStatus(tChrome('dialog.props.stripped'));
-    } catch (e: unknown) {
-      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setBusy(false);
-    }
-  }, [activeFile, call, saveFile]);
-
-  /** Both catalog writes share one shape: run the op through the undoable
-   * in-place flow — which takes the signed-document decision from the op's
-   * own edit class (a catalog edit is structural: it coalesces the file and
-   * breaks every byte range) — then re-read, so the baseline is what the file
-   * now says rather than what was typed. */
-  const runCatalogWrite = useCallback(
-    async (
-      method: OpMethod,
-      params: Record<string, unknown>,
-      savingKey: 'dialog.props.savingView' | 'dialog.props.savingAdvanced',
-    ): Promise<void> => {
-      if (!activeFile) return;
-      setBusy(true);
-      setStatus(tChrome(savingKey));
-      try {
-        if ((await performOperation(activeFile.path, method, params)) === EDIT_DECLINED) {
-          setStatus('');
-          return;
-        }
-        const rawView = (await call('get_initial_view', { file: activeFile.workingPath })) as unknown as Record<string, unknown>;
-        const parsedView = parseInitialView(rawView);
-        setView(parsedView);
-        setViewBase(parsedView);
-        const rawAdvanced = (await call('get_advanced_properties', { file: activeFile.workingPath })) as unknown as Record<string, unknown>;
-        const parsedAdvanced = parseAdvanced(rawAdvanced);
-        setAdvanced(parsedAdvanced);
-        setAdvancedBase(parsedAdvanced);
-        setStatus(tChrome('dialog.props.saved'));
-      } catch (e: unknown) {
-        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [activeFile, call, performOperation],
-  );
-
-  const viewChanges = initialViewChanges(viewBase, view);
-  const advancedDelta = advancedChanges(advancedBase, advanced);
-
-  const handleApplyView = useCallback(() => {
-    if (!viewChanges) return;
-    void runCatalogWrite('set_initial_view', viewChanges, 'dialog.props.savingView');
-  }, [viewChanges, runCatalogWrite]);
-
-  const handleApplyAdvanced = useCallback(() => {
-    if (!advancedDelta) return;
-    void runCatalogWrite('set_advanced_properties', advancedDelta, 'dialog.props.savingAdvanced');
-  }, [advancedDelta, runCatalogWrite]);
+  const handleSave = async () => {
+    if (d && activeFile) await drafts.exportMetadata(d, false,
+      () => saveFile(suffixedOutputName(activeFile.name, 'metadata')), call);
+  };
+  const handleStrip = async () => {
+    if (d && activeFile) await drafts.exportMetadata(d, true,
+      () => saveFile(suffixedOutputName(activeFile.name, 'stripped')), call);
+  };
+  const handleApplyView = () => { if (d) void drafts.apply(d, 'view', performOperation, call); };
+  const handleApplyAdvanced = () => { if (d) void drafts.apply(d, 'advanced', performOperation, call); };
 
   // The command's `when` requires a showable document, so this is unreachable —
   // but the dialog reads `activeFile` on every render, and a file can close
@@ -380,6 +257,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
                   aria-label={f.label}
                   className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
                   value={f.value}
+                  disabled={!metadataKnown}
                   onChange={(e) => f.set(e.target.value)}
                 />
               </div>
@@ -387,7 +265,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
             <div className="flex gap-2">
               <button
                 data-testid="props-save"
-                disabled={busy}
+                disabled={busy || !metadataKnown}
                 onClick={() => void handleSave()}
                 className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
               >
@@ -395,7 +273,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
               </button>
               <button
                 data-testid="props-strip"
-                disabled={busy}
+                disabled={busy || !metadataKnown}
                 onClick={() => void handleStrip()}
                 className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-60 rounded font-medium"
               >
@@ -433,11 +311,14 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
           <FontsTab fonts={fonts} error={fontsError} />
         )}
 
-        {tab === 'initialView' && (
+        {tab === 'initialView' && !d?.view.baseline && (
+          <p data-testid="props-view-unknown">{tChrome('dialog.props.unknown')}</p>
+        )}
+        {tab === 'initialView' && d?.view.baseline && (
           <InitialViewTab
             view={view}
             pages={activeFile.pageCount}
-            busy={busy}
+            busy={busy || !viewKnown}
             dirty={viewChanges !== null}
             onChange={setView}
             onApply={handleApplyView}
@@ -455,12 +336,12 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
             </Row>
             <Row label={tChrome('dialog.props.fastWebView')}>
               <span data-testid="props-linearized">
-                {tChrome(advanced.linearized ? 'dialog.props.yes' : 'dialog.props.no')}
+                {tChrome(!advancedKnown ? 'dialog.props.unknown' : advanced.linearized ? 'dialog.props.yes' : 'dialog.props.no')}
               </span>
             </Row>
             <Row label={tChrome('dialog.props.tagged')}>
               <span data-testid="props-tagged">
-                {tChrome(advanced.tagged ? 'dialog.props.yes' : 'dialog.props.no')}
+                {tChrome(!advancedKnown ? 'dialog.props.unknown' : advanced.tagged ? 'dialog.props.yes' : 'dialog.props.no')}
               </span>
             </Row>
             <Row label={tChrome('dialog.props.pageCount')}>
@@ -468,7 +349,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
             </Row>
             <Row label={tChrome('dialog.props.pageSizes')}>
               <span data-testid="props-page-sizes" className="block">
-                {advanced.page_sizes.length === 0
+                {!advancedKnown || advanced.page_sizes.length === 0
                   ? tChrome('dialog.props.unknown')
                   : advanced.page_sizes.map((size) => (
                       <span key={`${size.width}x${size.height}`} className="block">
@@ -499,12 +380,12 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
             </Row>
             <Row label={tChrome('dialog.props.openAction')}>
               <span data-testid="props-open-action">
-                {tChrome(advanced.has_open_action ? 'dialog.props.present' : 'dialog.props.absent')}
+                {tChrome(!advancedKnown ? 'dialog.props.unknown' : advanced.has_open_action ? 'dialog.props.present' : 'dialog.props.absent')}
               </span>
             </Row>
             <Row label={tChrome('dialog.props.searchIndex')}>
               <span data-testid="props-search-index" className="break-all ltr-notation">
-                {advanced.search_index ?? tChrome('dialog.props.noneRecorded')}
+                {!advancedKnown ? tChrome('dialog.props.unknown') : advanced.search_index ?? tChrome('dialog.props.noneRecorded')}
               </span>
             </Row>
 
@@ -515,7 +396,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
               <select
                 id="props-trapped"
                 data-testid="props-trapped"
-                disabled={busy}
+                disabled={busy || !advancedKnown}
                 className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
                 value={advanced.trapped}
                 onChange={(e) =>
@@ -536,7 +417,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
               <input
                 id="props-base-url"
                 data-testid="props-base-url"
-                disabled={busy}
+                disabled={busy || !advancedKnown}
                 className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm ltr-notation"
                 value={advanced.base_url}
                 onChange={(e) => setAdvanced((prev) => ({ ...prev, base_url: e.target.value }))}
@@ -545,7 +426,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
             </div>
             <button
               data-testid="props-advanced-apply"
-              disabled={busy || advancedDelta === null}
+              disabled={busy || !advancedKnown || advancedDelta === null}
               onClick={handleApplyAdvanced}
               className="self-start px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
             >
@@ -554,7 +435,17 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
           </>
         )}
 
+        {d && (d.metadata.error || d.view.error || d.advanced.error) && (
+          <p className="text-xs text-red-400" data-testid="props-read-error">
+            {tChrome('dialog.props.unknown')}: {d.metadata.error || d.view.error || d.advanced.error}
+          </p>
+        )}
         {status && <p className="text-xs text-neutral-500" data-testid="props-status">{status}</p>}
+        {d && (drafts.conflict(d) || d.metadata.error || d.view.error || d.advanced.error) && (
+          <button data-testid="props-reload" disabled={busy} onClick={() => {
+            drafts.reload(d); void drafts.load(d, call, runCommitGate);
+          }}>{tChrome('dialog.props.reload')}</button>
+        )}
       </div>
     </Shell>
   );
@@ -748,11 +639,11 @@ function InitialViewTab({
             value={view.zoom}
             onChange={(e) => {
               const zoom = e.target.value as ZoomValue;
-              patch({ zoom, zoom_percent: zoom === 'percent' ? (view.zoom_percent ?? 100) : view.zoom_percent });
+              patch({ zoom, zoom_percent: zoom === 'percent' ? (view.zoom_percent ?? 100) : null });
             }}
           >
-            {ZOOM_VALUES.map((value) => (
-              <option key={value} value={value}>
+            {ZOOM_VALUES.filter(value => value !== 'custom' || view.zoom === 'custom').map((value) => (
+              <option key={value} value={value} disabled={value === 'custom'}>
                 {tChrome(`dialog.props.iv.zoom.${value}`)}
               </option>
             ))}

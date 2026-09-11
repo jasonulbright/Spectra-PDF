@@ -32,7 +32,9 @@ import {
 import { ImageResolutionSummary } from '../components/ImageResolutionSummary';
 import { suffixedOutputName } from '../lib/output-names';
 import { FolderRouteHint } from '../components/FolderRouteHint';
-import { CONSENT_DECLINED, useEncryptionConsent } from '../hooks/useEncryptionConsent';
+import { consentStopped, useEncryptionConsent } from '../hooks/useEncryptionConsent';
+import { useOwnedDocumentRun } from '../hooks/useOwnedDocumentRun';
+import { runCommitGate } from '../lib/commit-gate';
 
 const PRESET_DPI: Record<string, number> = { screen: 72, ebook: 150, printer: 300, prepress: 300 };
 
@@ -89,6 +91,8 @@ export function CompressPanel(): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const gs = useGsCapability();
   const { runWithConsent, consentDialog } = useEncryptionConsent();
+  const beginRun = useOwnedDocumentRun(activeFile);
+  useEffect(() => { setStatus(''); }, [activeFile?.workingPath, activeFile?.buffer]);
 
   const [imageRes, setImageRes] = useState<ImageResolution | null>(null);
   const [imageResError, setImageResError] = useState<string | null>(null);
@@ -141,11 +145,16 @@ export function CompressPanel(): React.ReactElement {
   // undrivable by WebDriver (the createPdfRun precedent), and a second
   // implementation for tests would be a test of the wrong code.
   const performCompress = useCallback(
-    async (output: string): Promise<string> => {
-      if (!activeFile) return '';
+    async (chosenOutput?: string): Promise<string> => {
+      const run = beginRun();
+      if (!run || !activeFile) return '';
       setBusy(true);
       setStatus(tChrome('panel.compress.compressing'));
       try {
+        await run.prepare(runCommitGate);
+        const output = chosenOutput ?? await saveFile(suffixedOutputName(activeFile.name, 'compressed'));
+        if (!output) { if (run.visible()) setStatus(''); return ''; }
+        run.assertCurrent();
         const params: Record<string, unknown> = {
           file: activeFile.workingPath, output, gs_path: await requireGsPath(),
           font_dir: await app.getEditFontPath(),
@@ -168,10 +177,11 @@ export function CompressPanel(): React.ReactElement {
         // (either arm rewrites it through a renderer subprocess); the engine
         // refuses, and the consent dialog is what re-runs it.
         const r = await runWithConsent((drop_encryption) =>
-          call('compress', { ...params, drop_encryption }));
+          call('compress', { ...params, drop_encryption }, { assertCurrent: run.assertCurrent }),
+          { isCurrent: run.isCurrent, subject: `${activeFile.name} → ${output}` });
         // Declining ran nothing, so it is neither an outcome nor a failure —
         // the same empty answer as "no document".
-        if (r === CONSENT_DECLINED) { setStatus(''); return ''; }
+        if (consentStopped(r)) { if (run.visible()) setStatus(''); return ''; }
         const line = tChrome('panel.compress.result', {
           from: (r.original_size / 1024).toFixed(0),
           to: (r.compressed_size / 1024).toFixed(0),
@@ -181,7 +191,7 @@ export function CompressPanel(): React.ReactElement {
         const compressed = r.encryption_removed
           ? tChrome('panel.common.resultUnprotected', { result: reported })
           : reported;
-        setStatus(compressed);
+        if (run.visible()) setStatus(compressed);
         if (!thenOptimize) return 'ok';
 
         // Step two is a SECOND operation on the file step one just wrote — its
@@ -190,7 +200,7 @@ export function CompressPanel(): React.ReactElement {
         // input is never the file being replaced. Nothing here is undoable
         // either way: this panel writes a file the user named and never
         // replaces the open document's bytes.
-        setStatus(tChrome('panel.compress.optimizing'));
+        if (run.visible()) setStatus(tChrome('panel.compress.optimizing'));
         try {
           const o = await call('optimize', {
             file: output,
@@ -199,7 +209,7 @@ export function CompressPanel(): React.ReactElement {
             strip_metadata: false,
             compress_streams: true,
           });
-          setStatus(
+          if (run.visible()) setStatus(
             tChrome('panel.compress.optimizeResult', {
               result: compressed,
               to: (o.output_size / 1024).toFixed(0),
@@ -212,7 +222,7 @@ export function CompressPanel(): React.ReactElement {
         } catch (e: unknown) {
           // Step one's output is a complete compressed PDF and it is still on
           // disk, so the message says so rather than reporting only a failure.
-          setStatus(
+          if (run.visible()) setStatus(
             tChrome('panel.compress.optimizeFailed', {
               result: compressed,
               message: e instanceof Error ? e.message : String(e),
@@ -221,21 +231,18 @@ export function CompressPanel(): React.ReactElement {
           return 'error';
         }
       } catch (e: unknown) {
-        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
+        if (run.visible()) setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
         return 'error';
       } finally {
-        setBusy(false);
+        run.finish(); setBusy(false);
       }
     },
-    [activeFile, quality, dpi, mrc, mrcPreset, pdfaSafe, verifyText, verifyLangs, thenOptimize, call, runWithConsent],
+    [activeFile, quality, dpi, mrc, mrcPreset, pdfaSafe, verifyText, verifyLangs, thenOptimize, call, runWithConsent, beginRun, saveFile],
   );
 
   const handleCompress = useCallback(async () => {
-    if (!activeFile) return;
-    const output = await saveFile(suffixedOutputName(activeFile.name, "compressed"));
-    if (!output) return;
-    await performCompress(output);
-  }, [activeFile, saveFile, performCompress]);
+    await performCompress();
+  }, [performCompress]);
 
   const harnessDeps = {
     performCompress,

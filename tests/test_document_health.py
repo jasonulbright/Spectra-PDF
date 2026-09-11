@@ -107,7 +107,7 @@ def _xfa_pdf(path, *, dynamic, as_array):
     packet = b"<xdp:xdp xmlns:xdp='http://ns.adobe.com/xdp/'/>"
     if as_array:
         entry = pikepdf.Array(
-            [pikepdf.String("form"), pdf.make_indirect(pdf.make_stream(packet))]
+            [pikepdf.String("xdp:xdp"), pdf.make_indirect(pdf.make_stream(packet))]
         )
     else:
         entry = pdf.make_indirect(pdf.make_stream(packet))
@@ -885,7 +885,12 @@ def _one_field(pdf):
 
 
 def _packets(pdf, name):
-    return pikepdf.Array([name, pdf.make_stream(b"<template/>")])
+    return pikepdf.Array([
+        pikepdf.String("xdp:xdp"),
+        pdf.make_stream(b'<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">'),
+        name, pdf.make_stream(b"<template/>"),
+        pikepdf.String("/xdp:xdp"), pdf.make_stream(b"</xdp:xdp>"),
+    ])
 
 
 def test_an_xfa_packet_name_slot_that_is_not_a_string_is_undetermined(tmp_dir):

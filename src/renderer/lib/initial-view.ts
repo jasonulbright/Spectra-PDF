@@ -31,6 +31,7 @@ export type ZoomValue =
   | 'fit-width'
   | 'fit-height'
   | 'fit-visible'
+  | 'custom'
   | 'percent';
 
 export type ReadingDirection = 'L2R' | 'R2L';
@@ -61,6 +62,7 @@ export const ZOOM_VALUES: readonly ZoomValue[] = [
   'fit-width',
   'fit-height',
   'fit-visible',
+  'custom',
   'percent',
 ];
 
@@ -178,12 +180,12 @@ export function initialViewChanges(
   const zoomMoved =
     next.zoom !== base.zoom ||
     (next.zoom === 'percent' && next.zoom_percent !== base.zoom_percent);
-  if (pageMoved || zoomMoved) {
+  if (pageMoved || (zoomMoved && next.open_page !== null)) {
     // The opening page and its magnification are ONE destination, so a zoom
     // change alone still has to name the page it applies to. Zero removes the
     // open action, which is what "no opening page" means.
     params.open_page = next.open_page ?? 0;
-    if (next.open_page !== null) {
+    if (next.open_page !== null && zoomMoved && next.zoom !== 'custom') {
       params.zoom = next.zoom;
       if (next.zoom === 'percent') params.zoom_percent = next.zoom_percent ?? 100;
     }

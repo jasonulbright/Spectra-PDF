@@ -5,4 +5,9 @@
 export type EngineCall = (
   method: string,
   params?: Record<string, unknown>,
+  options?: EngineCallOptions,
 ) => Promise<unknown>;
+
+/** A caller-owned revision check. It runs again inside the file lock, after
+ * the commit gate, immediately before dispatch; a throw prevents the RPC. */
+export interface EngineCallOptions { assertCurrent?: () => void }

@@ -3,14 +3,18 @@ import { useTranslation } from 'react-i18next';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { useEngine } from '../hooks/useEngine';
+import { useOwnedDocumentRun } from '../hooks/useOwnedDocumentRun';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { getCanvasServices } from '../commands/context';
+import { runCommitGate } from '../lib/commit-gate';
 import { dialog } from '../lib/tauri-bridge';
 import { tChrome, tChromeCount, tNumber } from '../i18n';
 import { exportSummary, type ExportDocumentResult } from '../lib/export-targets';
 import {
   acceptedRegions,
+  captureExportRequest,
   selectionState,
+  sessionMatches,
   setAcceptedAll,
   toggleRegion,
   type TableDetectionResult,
@@ -74,6 +78,16 @@ export function TableReviewPanel(): React.ReactElement {
   const path = activeFile?.path ?? null;
   const workingPath = activeFile?.workingPath ?? null;
   const armed = state.ui.tool === 'tablereview';
+  // Detection and export each own the document for their whole run: reserved
+  // synchronously before any await, gated before the picker, and proven
+  // current again after it and inside the dispatch lock.
+  const beginRun = useOwnedDocumentRun(activeFile);
+  // A result line describes one revision; a new one makes it a claim about
+  // bytes nobody exported.
+  useEffect(() => {
+    setStatus('');
+    setSummary([]);
+  }, [activeFile?.workingPath, activeFile?.buffer]);
 
   // The canvas owns the region set; this mirrors it so a bounds drag or a
   // boundary nudge on the page shows here too.
@@ -101,33 +115,54 @@ export function TableReviewPanel(): React.ReactElement {
   }, [path]);
 
   const publish = useCallback((next: TableRegion[]) => {
-    setRegions(next);
-    getCanvasServices()?.tableReview.update(next);
-  }, []);
+    // The canvas refuses an edit to a review it no longer holds — the bytes
+    // moved between this mirror's last sync and the click. The refusal is
+    // shown and the mirror re-read, rather than the click landing on tables
+    // that are not there.
+    try {
+      getCanvasServices()?.tableReview.update(next);
+      setRegions(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      sync();
+    }
+  }, [sync]);
 
   const detect = useCallback(async () => {
     if (!workingPath || !path) return;
+    const pages = scope.kind === 'document' ? 'all' : parsePages(scope.pages);
+    if (scope.kind === 'pages' && (pages as number[]).length === 0) {
+      setError(tChrome('panel.tableReview.noPages'));
+      return;
+    }
+    const run = beginRun();
+    if (!run) return;
     setBusy(true);
     setError(null);
     setStatus('');
     setSummary([]);
     try {
-      const pages = scope.kind === 'document' ? 'all' : parsePages(scope.pages);
-      if (scope.kind === 'pages' && (pages as number[]).length === 0) {
-        setError(tChrome('panel.tableReview.noPages'));
-        return;
-      }
+      // The gate first, then the read: the detector reports positions IN THE
+      // FILE, so it must read the bytes the user is looking at — pending page
+      // edits flushed — and the review it produces is bound to exactly that
+      // revision, re-captured after the gate.
+      await run.prepare(runCommitGate);
+      const { source } = run;
+      if (!source.buffer) throw new Error(tChrome('app.history.changed'));
+      const revision = { workingPath: source.workingPath, buffer: source.buffer };
       const detection = (await call('detect_tables', {
-        file: workingPath,
+        file: revision.workingPath,
         pages,
-      })) as unknown as TableDetectionResult;
-      setResult(detection);
+      }, { assertCurrent: run.assertCurrent })) as unknown as TableDetectionResult;
+      run.assertCurrent();
+      if (run.visible()) setResult(detection);
       const services = getCanvasServices();
       if (!services) {
-        setError(tChrome('panel.tableReview.noCanvas'));
+        if (run.visible()) setError(tChrome('panel.tableReview.noCanvas'));
         return;
       }
-      const { shown } = await services.tableReview.publish(path, detection);
+      const { shown } = await services.tableReview.publish(path, detection, revision);
+      if (!run.visible()) return;
       // Arming AFTER the publish: a mode with nothing to draw is a mode that
       // looks broken.
       if (shown > 0) dispatch({ type: 'UI_SET_TOOL', tool: 'tablereview' });
@@ -137,38 +172,55 @@ export function TableReviewPanel(): React.ReactElement {
           : tChromeCount('panel.tableReview.found', shown),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (run.visible()) setError(err instanceof Error ? err.message : String(err));
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [call, dispatch, path, scope, workingPath]);
+  }, [beginRun, call, dispatch, path, scope, workingPath]);
 
   const runExport = useCallback(async () => {
-    const chosen = acceptedRegions(regions);
-    if (chosen.length === 0 || !activeFile) return;
-    const base = activeFile.name.replace(/\.pdf$/i, '');
-    const out = await dialog.saveFile({ defaultPath: `${base}.xlsx` });
-    if (!out) return;
+    if (acceptedRegions(regions).length === 0 || !activeFile) return;
+    const services = getCanvasServices();
+    if (!services) {
+      setError(tChrome('panel.tableReview.noCanvas'));
+      return;
+    }
+    const run = beginRun();
+    if (!run) return;
     setExporting(true);
     setError(null);
     setSummary([]);
     try {
-      const services = getCanvasServices();
-      if (!services) {
-        setError(tChrome('panel.tableReview.noCanvas'));
-        return;
-      }
-      const written = (await services.tableReview.exportTo(out, {
-        sheetPer,
-        includeUntabled,
-      })) as ExportDocumentResult;
-      setSummary(exportSummary('xlsx', written));
+      // Gate BEFORE the picker. A pending page edit committed here moves the
+      // revision the tables were read from, and the review is then over —
+      // refused now, before the user is asked where to put a workbook that
+      // cannot be written.
+      await run.prepare(runCommitGate);
+      const { source } = run;
+      const session = services.tableReview.session();
+      if (!sessionMatches(session, source)) throw new Error(tChrome('app.history.changed'));
+      // Captured before the picker: the revision and the exact tables checked
+      // at this moment. Nothing decided after the await can widen it.
+      const request = captureExportRequest(session, services.tableReview.list());
+      if (!request) throw new Error(tChrome('panel.tableReview.nothingAccepted'));
+      const base = activeFile.name.replace(/\.pdf$/i, '');
+      const out = await dialog.saveFile({ defaultPath: `${base}.xlsx` });
+      if (!out) return;
+      run.assertCurrent();
+      const written = (await services.tableReview.exportTo(
+        out,
+        { sheetPer, includeUntabled },
+        { ...request, assertCurrent: run.assertCurrent },
+      )) as ExportDocumentResult;
+      if (run.visible()) setSummary(exportSummary('xlsx', written));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (run.visible()) setError(err instanceof Error ? err.message : String(err));
     } finally {
+      run.finish();
       setExporting(false);
     }
-  }, [activeFile, includeUntabled, regions, sheetPer]);
+  }, [activeFile, beginRun, includeUntabled, regions, sheetPer]);
 
   const pages = useMemo(
     () => [...new Set(regions.map((r) => r.page))].sort((a, b) => a - b),

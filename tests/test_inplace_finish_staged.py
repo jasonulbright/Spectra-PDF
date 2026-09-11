@@ -286,8 +286,8 @@ CASES = (
         lambda src, out: doc_properties_mod.set_document_title(
             src, out, title="After the write", display=True),
         _displayed_title,
-        # The title lands in XMP too, and the XMP writer stamps a modify date.
-        deterministic=False,
+        # The field-owned writer preserves unrelated dates and is deterministic.
+        deterministic=True,
         doors=("set_document_title",),
     ),
     Case(

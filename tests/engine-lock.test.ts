@@ -42,8 +42,8 @@ describe('withFileLock', () => {
     for (const method of ['read_form_fields', 'signature_policy', 'list_links', 'list_redact_annotations']) {
       expect(isTrackableMethod(method)).toBe(false);
     }
-    const source = readFileSync(new URL('../src/renderer/hooks/useEngine.ts', import.meta.url), 'utf8');
-    expect(source).toContain('return withFileLock(lockKeysFor(params), () => rawCall(method, params));');
+    // engine-call-ownership.test.ts executes this production closure and
+    // proves both its passive no-gate path and post-lock ownership refusal.
     const canvas = readFileSync(new URL('../src/renderer/components/canvas/WorkspaceCanvasView.tsx', import.meta.url), 'utf8');
     for (const method of ['list_links', 'list_redact_annotations']) {
       expect(canvas).toContain(`engineCall('${method}'`);

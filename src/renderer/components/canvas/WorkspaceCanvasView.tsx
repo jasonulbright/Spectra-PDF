@@ -59,14 +59,18 @@ import {
   exportRegions,
   moveColumn,
   moveRegionBounds,
+  ownedAcceptedRegions,
   prunedRegions,
   quarter,
   regionsFromDetection,
   removeColumn,
+  sessionMatches,
   toggleRegion,
   type TableDetectionResult,
+  type TableExportRequest,
   type TableRegion,
   type TableReviewHandlers,
+  type TableReviewSession,
 } from '../../lib/table-review';
 import {
   findingsByPage,
@@ -2446,19 +2450,20 @@ export function WorkspaceCanvasView({
         },
       },
       tableReview: {
-        publish: async (path, result) =>
-          tableServiceRef.current?.publish(path, result) ?? {
+        publish: async (path, result, revision) =>
+          tableServiceRef.current?.publish(path, result, revision) ?? {
             shown: 0,
             skipped: result.regions.length,
           },
         list: () => [...liveTableRegionsRef.current],
+        session: () => tableSessionRef.current,
         update: (next) => tableServiceRef.current?.update(next),
         clear: () => tableServiceRef.current?.clear(),
         focus: (regionId) => tableServiceRef.current?.focus(regionId),
-        exportTo: async (output, options) => {
+        exportTo: async (output, options, request) => {
           const service = tableServiceRef.current;
           if (!service) throw new Error(tChrome('panel.tableReview.documentGone'));
-          return service.exportTo(output, options);
+          return service.exportTo(output, options, request);
         },
         subscribe: (listener) => {
           tableSubscribersRef.current.add(listener);
@@ -2973,22 +2978,45 @@ export function WorkspaceCanvasView({
     setSelectedCandidateId((prev) => (prev === candidateId ? null : prev));
   }, []);
 
+  // The revision the review was read from. A region set describes ONE set of
+  // bytes — the working copy the detector read, as the exact buffer object the
+  // workspace held — and stops describing anything the moment that revision
+  // moves. Page-id pruning alone does not catch that: a page-tier commit
+  // publishes its authored ids, so a page can keep its id while its bytes
+  // change underneath the table drawn on it.
+  const tableSessionRef = useRef<TableReviewSession | null>(null);
   // The same prune, for the same reason: a region bound to a retired page id
-  // would export a table from a page the document no longer has.
+  // would export a table from a page the document no longer has. And the
+  // revision check beside it, for the reason above: a review of bytes the
+  // document no longer has is an empty review, synchronously, before any
+  // effect gets to clear it — a reader between the two must not see stale
+  // tables as live ones.
   const liveTableRegions = useMemo(() => {
     if (tableRegions.length === 0) return NO_TABLES;
+    const session = tableSessionRef.current;
+    if (!session || !sessionMatches(session, state.files.get(session.path))) return NO_TABLES;
     const live = new Set<string>();
     for (const d of docs) for (const p of d.pages) live.add(p.id);
     const kept = prunedRegions(tableRegions, live);
     return kept.length === tableRegions.length ? tableRegions : kept;
-  }, [tableRegions, docs]);
+  }, [tableRegions, docs, state.files]);
   const liveTableRegionsRef = useRef<TableRegion[]>(NO_TABLES);
   liveTableRegionsRef.current = liveTableRegions;
+  // Drop a review whose revision has moved, so a later `update` cannot
+  // resurrect it and the panel's mirror is told.
+  useEffect(() => {
+    const session = tableSessionRef.current;
+    if (!session || sessionMatches(session, state.files.get(session.path))) return;
+    tableSessionRef.current = null;
+    setTableRegions(NO_TABLES);
+    setSelectedTableId(null);
+  }, [state.files]);
   const tableSubscribersRef = useRef(new Set<() => void>());
   const tableServiceRef = useRef<{
     publish: (
       path: string,
       result: TableDetectionResult,
+      revision: { workingPath: string; buffer: object },
     ) => Promise<{ shown: number; skipped: number }>;
     update: (next: readonly TableRegion[]) => void;
     clear: () => void;
@@ -2996,6 +3024,7 @@ export function WorkspaceCanvasView({
     exportTo: (
       output: string,
       options: { sheetPer: string; includeUntabled: boolean },
+      request?: TableExportRequest & { assertCurrent?: () => void },
     ) => Promise<ExportDocumentResult>;
   } | null>(null);
 
@@ -6042,7 +6071,18 @@ export function WorkspaceCanvasView({
   // canvas owns the geometry, and the accept side writes no document at all —
   // it hands the reviewed bounds to the spreadsheet export and nothing else.
   const publishTables = useCallback(
-    async (path: string, result: TableDetectionResult): Promise<{ shown: number; skipped: number }> => {
+    async (
+      path: string,
+      result: TableDetectionResult,
+      revision: { workingPath: string; buffer: object },
+    ): Promise<{ shown: number; skipped: number }> => {
+      // The detector read `revision`; the review is published only onto that.
+      // The panel's binding is lexical and does not move after its await —
+      // the workspace's does, and it is the workspace that says what the
+      // document's bytes are now.
+      const session: TableReviewSession = { path, ...revision };
+      const current = () => sessionMatches(session, filesRef.current.get(path));
+      if (!current()) throw new Error(tChrome('app.history.changed'));
       const doc = docsRef.current.find((d) => d.path === path);
       if (!doc) return { shown: 0, skipped: result.regions.length };
       const geometry = new Map<number, PageGeometry>();
@@ -6051,6 +6091,8 @@ export function WorkspaceCanvasView({
         if (!pageRef) continue;
         geometry.set(page, await geometryForPage(pageRef));
       }
+      // Geometry is an await; the revision can have moved across it.
+      if (!current()) throw new Error(tChrome('app.history.changed'));
       const { regions, skipped } = regionsFromDetection(
         result,
         path,
@@ -6070,6 +6112,7 @@ export function WorkspaceCanvasView({
         },
         () => crypto.randomUUID(),
       );
+      tableSessionRef.current = session;
       setTableRegions(regions);
       setSelectedTableId(null);
       return { shown: regions.length, skipped };
@@ -6081,11 +6124,45 @@ export function WorkspaceCanvasView({
     async (
       output: string,
       options: { sheetPer: string; includeUntabled: boolean },
+      request?: TableExportRequest & { assertCurrent?: () => void },
     ): Promise<ExportDocumentResult> => {
-      const chosen = acceptedRegions(liveTableRegionsRef.current);
-      if (chosen.length === 0) throw new Error(tChrome('panel.tableReview.nothingAccepted'));
-      const path = chosen[0].path;
-      const doc = docsRef.current.find((d) => d.path === path);
+      // The export is OWNED: one revision, one set of tables, both fixed
+      // before the first await and re-proven at every boundary after it. A
+      // caller that captured its request before its own picker hands it in;
+      // a caller with none (the harness) is asking for the live set as it
+      // stands this instant, which is captured here on the same terms.
+      const session = tableSessionRef.current;
+      if (!session) throw new Error(tChrome('panel.tableReview.nothingAccepted'));
+      const asked: TableExportRequest = request ?? {
+        session,
+        regionIds: acceptedRegions(liveTableRegionsRef.current).map((r) => r.id),
+      };
+      const resolved = ownedAcceptedRegions(asked, {
+        session: tableSessionRef.current,
+        regions: liveTableRegionsRef.current,
+      });
+      if (!resolved.ok) {
+        throw new Error(tChrome(
+          resolved.reason === 'nothing-accepted'
+            ? 'panel.tableReview.nothingAccepted'
+            : 'app.history.changed',
+        ));
+      }
+      const chosen = resolved.regions;
+      // Live-state proof, run again at every boundary and — through the
+      // engine call's own option — inside the file lock after the commit
+      // gate, immediately before dispatch. The panel's run check rides
+      // along when there is one; this check is the canvas's own regardless.
+      const assertCurrent = (): void => {
+        request?.assertCurrent?.();
+        if (tableSessionRef.current !== session
+            || !sessionMatches(session, filesRef.current.get(session.path))
+            || readState().pageDirtyPaths.includes(session.path)) {
+          throw new Error(tChrome('app.history.changed'));
+        }
+      };
+      assertCurrent();
+      const doc = docsRef.current.find((d) => d.path === session.path);
       if (!doc) throw new Error(tChrome('panel.tableReview.documentGone'));
       const geometry = new Map<string, { index: number; geo: PageGeometry }>();
       for (const region of chosen) {
@@ -6094,6 +6171,8 @@ export function WorkspaceCanvasView({
         if (index < 0) continue;
         geometry.set(region.pageId, { index, geo: await geometryForPage(doc.pages[index]) });
       }
+      // Geometry is an await; the revision can have moved across it.
+      assertCurrent();
       const { regions, skipped } = exportRegions(chosen, (region) => {
         const placed = geometry.get(region.pageId);
         if (!placed) return null;
@@ -6111,16 +6190,19 @@ export function WorkspaceCanvasView({
       // A table whose page has gone is not silently left out of a workbook the
       // reviewer believes carries it.
       if (skipped > 0) throw new Error(tChrome('panel.tableReview.pagesGone'));
+      // The WORKING COPY, never the identity path. `path` is where the
+      // document came from; the bytes the reviewer looked at are in the
+      // working copy, and the gate does not translate one into the other.
       return (await engineCall('export_document', {
-        file: path,
+        file: session.workingPath,
         output,
         fmt: 'xlsx',
         sheet_per: options.sheetPer,
         ...(options.includeUntabled ? { include_untabled: true } : {}),
         regions,
-      })) as unknown as ExportDocumentResult;
+      }, { assertCurrent })) as unknown as ExportDocumentResult;
     },
-    [engineCall, geometryForPage],
+    [engineCall, geometryForPage, readState],
   );
 
   // ── Accessibility findings ────────────────────────────────────────────
@@ -6187,8 +6269,19 @@ export function WorkspaceCanvasView({
 
   tableServiceRef.current = {
     publish: publishTables,
-    update: (next) => setTableRegions([...next]),
+    update: (next) => {
+      // An edited copy of the live set and nothing else: a region the live
+      // set does not hold, or one from another document, is not a review
+      // gesture on this document. Refused by name, never merged in.
+      const session = tableSessionRef.current;
+      const live = new Set(liveTableRegionsRef.current.map((r) => r.id));
+      if (!session || next.some((r) => !live.has(r.id) || r.path !== session.path)) {
+        throw new Error(tChrome('app.history.changed'));
+      }
+      setTableRegions([...next]);
+    },
     clear: () => {
+      tableSessionRef.current = null;
       setTableRegions(NO_TABLES);
       setSelectedTableId(null);
     },

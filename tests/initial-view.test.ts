@@ -122,7 +122,14 @@ describe('initialViewChanges', () => {
   it('does not send a magnification with no page to apply it to', () => {
     const base = view({ open_page: null, zoom: 'default' });
     const changes = initialViewChanges(base, { ...base, zoom: 'fit-page' });
-    expect(changes).toEqual({ open_page: 0 });
+    expect(changes).toBeNull();
+  });
+
+  it('changes only the page so exact stored coordinates and magnification survive', () => {
+    for (const zoom of ['custom', 'percent', 'fit-width'] as const) {
+      const base = view({ open_page: 2, zoom, zoom_percent: zoom === 'percent' ? 0.25 : null });
+      expect(initialViewChanges(base, { ...base, open_page: 3 })).toEqual({ open_page: 3 });
+    }
   });
 
   it('sends every window option that moved, in either direction', () => {

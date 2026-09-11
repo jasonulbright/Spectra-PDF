@@ -315,6 +315,7 @@ describe('dispatchKeyEvent', () => {
       tableReview: {
         publish: async () => ({ shown: 0, skipped: 0 }),
         list: () => [],
+        session: () => null,
         update: () => {},
         clear: () => {},
         focus: () => {},
@@ -373,6 +374,7 @@ describe('dispatchKeyEvent', () => {
       tableReview: {
         publish: async () => ({ shown: 0, skipped: 0 }),
         list: () => [],
+        session: () => null,
         update: () => {},
         clear: () => {},
         focus: () => {},

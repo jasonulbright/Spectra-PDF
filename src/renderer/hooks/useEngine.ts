@@ -8,6 +8,7 @@ import { beginInteractive, submitIdle, trackInteractive } from '../lib/engine-id
 import { isHealthMethod, runHealthSweep, type EngineHealthReply } from '../lib/doc-health-engine';
 import { withHealthInput } from '../lib/doc-health-input';
 import type { PdfBuffer } from '../state/types';
+import type { EngineCallOptions } from '../lib/engine-call';
 
 interface PendingRequest {
   resolve: (value: EngineResult) => void;
@@ -205,7 +206,8 @@ export function useEngine() {
   const rawCall = useCallback((method: string, params: Record<string, unknown> = {}): Promise<EngineResult> =>
     trackInteractive(() => dispatch(method, params)), [dispatch]);
 
-  const call = useCallback(async (method: string, params: Record<string, unknown> = {}): Promise<EngineResult> => {
+  const call = useCallback(async (method: string, params: Record<string, unknown> = {}, options?: EngineCallOptions): Promise<EngineResult> => {
+    options?.assertCurrent?.();
     if (isTrackableMethod(method)) {
       // Counted interactive from HERE, not from the dispatch below: the gate
       // and the lock run first and can take arbitrarily long, and the question
@@ -225,9 +227,13 @@ export function useEngine() {
         // file: two whole-file rewrites of one path each write a temp and
         // rename, so without this the later rename silently wins and the
         // earlier operation's work is gone with no error anywhere.
-        return (await withFileLock(lockKeysFor(params), () =>
-          track(method, params, () => rawCall(method, params)),
-        )) as EngineResult;
+        return (await withFileLock(lockKeysFor(params), () => {
+          options?.assertCurrent?.();
+          return track(method, params, async () => {
+            options?.assertCurrent?.();
+            return rawCall(method, params);
+          });
+        })) as EngineResult;
       } finally {
         release();
       }
@@ -235,7 +241,10 @@ export function useEngine() {
     // Read-only is not handle-free: qpdf can hold the working file while an
     // index is built. Serialize these readers with Undo/Save/publication too,
     // without running the commit gate or creating an operation-queue entry.
-    return withFileLock(lockKeysFor(params), () => rawCall(method, params));
+    return withFileLock(lockKeysFor(params), () => {
+      options?.assertCurrent?.();
+      return rawCall(method, params);
+    });
   }, [rawCall, track]);
 
   // Background work nobody asked for: a passive, read-only sweep driven by a

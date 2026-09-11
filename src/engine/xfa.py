@@ -16,6 +16,17 @@ ISO 32000-2 Annex K gives the two `/XFA` spellings: an array of alternating
 name strings and streams, or a single stream holding one `xdp:xdp` element.
 Both appear in the wild and both are handled here.
 
+THE ARRAY IS ONE SEGMENTED RESOURCE, NOT A LIST OF DOCUMENTS. Per Annex K.2
+the packets jointly constitute the resource; each names and carries one whole
+element, and the clause exempts the outermost two, which hold only the start
+and end tag of the wrapper. Those two are therefore fragments by contract:
+neither is a document on its own, so a reading that parses each stream in
+isolation refuses the exact sequence the clause's own example prints. The
+streams are read in array order and parsed as the resource they compose,
+which makes the two spellings equivalent by construction rather than by two
+code paths that agree only as long as someone keeps checking. Separate bounded
+parses check packet boundaries in the original wrapper's namespace context.
+
 Two readings live here and they answer different questions. `classify` and
 `xfa_entry` are LENIENT: their callers act on the packets or do nothing, so a
 value of the wrong type and an absent key are the same answer to them.
@@ -68,12 +79,65 @@ SHAPE_PACKET_STREAM_TYPE = "xfa-packet-stream-type"
 SHAPE_PACKET_UNREADABLE = "xfa-packet-unreadable"
 SHAPE_PACKET_XML = "xfa-packet-xml"
 SHAPE_XDP_ROOT = "xfa-xdp-root"
+# A declared packet name that does not name the element its stream holds, or a
+# packet sequence whose wrapper fragments do not bracket the middle packets.
+# Held apart from a name of the wrong TYPE: one is a mistyped slot, the other
+# is a resource whose parts do not describe each other.
+SHAPE_PACKET_NAME_MISMATCH = "xfa-packet-name-mismatch"
+# A packet whose bytes are not exactly the one element it declares: a fragment,
+# two elements, or an element with text beside it. Held apart from a name
+# mismatch, which is a whole element under the wrong name.
+SHAPE_PACKET_BOUNDARY = "xfa-packet-boundary"
+# The ceilings. Each is its own answer, because "too much of it" is not
+# "malformed" and a caller that reports them alike cannot tell a hostile
+# resource from a broken one.
+SHAPE_RESOURCE_BYTES = "xfa-resource-bytes"
+SHAPE_RESOURCE_PACKETS = "xfa-resource-packets"
+SHAPE_RESOURCE_NAMES = "xfa-resource-names"
+SHAPE_RESOURCE_ELEMENTS = "xfa-resource-elements"
+SHAPE_FIELDS_COUNT = "acroform-fields-count"
 SHAPE_FIELDS_TYPE = "acroform-fields-type"
 SHAPE_FIELD_ENTRY_TYPE = "acroform-field-entry-type"
 SHAPE_FIELD_ENTRY_REFERENCE = "acroform-field-entry-reference"
 SHAPE_NEEDS_RENDERING_TYPE = "needs-rendering-type"
 
-_MAX_STRICT_PACKET_BYTES = 64 * 1024 * 1024
+# The ceilings are on the WHOLE resource, not on one packet: a thousand packets
+# just under a per-packet ceiling is not a bounded read, and the resource is
+# what gets parsed.
+#
+# Bytes alone bound nothing that is not made of bytes. A resource can be a
+# million empty packets, or a handful of packets with megabyte NAMES, or four
+# bytes per element repeated until the tree costs two orders of magnitude more
+# native memory than the markup did. Each of those is counted here, and each
+# refusal says which count it was. The numbers are this engine's judgment of
+# what a real document needs, not anything a standard states; a document past
+# one of them is answered UNDETERMINED rather than read.
+_MAX_RESOURCE_BYTES = 64 * 1024 * 1024
+_MAX_RESOURCE_PACKETS = 4096
+_MAX_RESOURCE_NAME_BYTES = 64 * 1024
+# Elements, counted as the parse builds them, across every parse of one read.
+# The byte ceiling permits about sixteen million four-byte elements, and a tree
+# of those costs far more than the bytes it came from — so this, not the byte
+# count, is what bounds the parse's own allocation.
+_MAX_RESOURCE_ELEMENTS = 250_000
+# Boundary validation reuses the wrapper. Charge all parser input, including
+# repeated comments/whitespace, so a large wrapper cannot amplify a small array.
+_MAX_PARSE_BYTES = 128 * 1024 * 1024
+# `/Fields` entries walked by the strict reading. A caller with a budget
+# charges each one; a caller without one still gets a bound.
+_MAX_FIELD_ITEMS = 100_000
+# Fed to the parser in pieces, so a ceiling reached part way through a resource
+# stops the parse there instead of after the whole tree exists.
+_PARSE_CHUNK_BYTES = 64 * 1024
+
+# The XML Data Package namespace the resource's root element belongs to.
+XDP_NAMESPACE = "http://ns.adobe.com/xdp/"
+# The XFA template namespace family. It is versioned (2.4, 3.3, …) and the
+# version is not what identifies a calculation, so the family prefix is what
+# is matched and the version travels with the document.
+TEMPLATE_NAMESPACE_PREFIX = "http://www.xfa.org/schema/xfa-template/"
+# The template elements that author logic this engine will not run.
+AUTHORED_LOGIC_ELEMENTS = ("calculate", "validate")
 
 
 class InspectionInterrupted(Exception):
@@ -82,6 +146,39 @@ class InspectionInterrupted(Exception):
 
 class _PacketShapeError(Exception):
     """The packet is not safe, bounded XML; never crosses the engine API."""
+
+
+class _ResourceTooLarge(Exception):
+    """The resource exceeded the cumulative byte ceiling."""
+
+
+class _TooManyElements(Exception):
+    """The parse reached the cumulative element ceiling and was stopped."""
+
+
+class _Counters:
+    """What one read has spent. Cumulative across every packet and every parse
+    the read performs, because a per-packet allowance is no allowance."""
+
+    __slots__ = ("packets", "name_bytes", "body_bytes", "parse_bytes", "elements", "fields")
+
+    def __init__(self) -> None:
+        self.packets = 0
+        self.name_bytes = 0
+        self.body_bytes = 0
+        self.parse_bytes = 0
+        self.elements = 0
+        self.fields = 0
+
+
+class AuthoredLogicUnreadable(ValueError):
+    """`has_authored_logic` could not read the resource, so it says so.
+
+    A form whose template will not read has not been shown to author no
+    calculations; it has not been read. Returning false there is the answer to
+    a question nobody asked. Carries the module's own `shape` constant as its
+    single argument — never text from the document.
+    """
 
 
 class Inspection(NamedTuple):
@@ -101,52 +198,200 @@ def _bad(shape: str, entry=None) -> Inspection:
     return Inspection(UNDETERMINED, shape, entry)
 
 
-def _packet_root(data: bytes):
-    """Parse one packet without allowing a document type or entity grammar."""
-    if len(data) > _MAX_STRICT_PACKET_BYTES:
+def _resource_root(data: bytes, counters: _Counters | None = None):
+    """Parse a resource without a document type or entity grammar.
+
+    Fed in pieces through a pull parser so the element count is charged AS the
+    tree is built: a ceiling checked after `fromstring` returns is a ceiling
+    on a tree that already exists, which bounds nothing.
+    """
+    if len(data) > _MAX_RESOURCE_BYTES:
+        raise _ResourceTooLarge
+    if counters is not None:
+        counters.parse_bytes += len(data)
+        if counters.parse_bytes > _MAX_PARSE_BYTES:
+            raise _ResourceTooLarge
+    if not data.strip():
         raise _PacketShapeError
-    parser = etree.XMLParser(
+    parser = etree.XMLPullParser(
+        events=("start", "comment", "pi"),
         resolve_entities=False,
         load_dtd=False,
         no_network=True,
         recover=False,
         huge_tree=False,
     )
-    root = etree.fromstring(data, parser=parser)
+
+    def drain() -> None:
+        for _event, _element in parser.read_events():
+            if counters is None:
+                continue
+            counters.elements += 1
+            if counters.elements > _MAX_RESOURCE_ELEMENTS:
+                raise _TooManyElements
+
+    for offset in range(0, len(data), _PARSE_CHUNK_BYTES):
+        parser.feed(data[offset:offset + _PARSE_CHUNK_BYTES])
+        drain()
+    root = parser.close()
+    drain()
     # Inspect parsed metadata rather than byte-searching for an ASCII spelling:
-    # a valid XFA packet may be UTF-16, where every markup character is encoded
-    # with an adjacent NUL. Entity resolution and network reads were already
-    # disabled above, so reaching this refusal never executes its grammar.
+    # a valid XFA resource may be UTF-16, where every markup character is
+    # encoded with an adjacent NUL. Entity resolution and network reads were
+    # already disabled above, so reaching this refusal never executes its
+    # grammar.
     if root.getroottree().docinfo.doctype:
         raise _PacketShapeError
+    # With no DTD loaded, an undefined entity reference is already a syntax
+    # error; a reference that survived parsing is refused rather than read.
+    for node in root.iter():
+        if isinstance(node, etree._Entity):
+            raise _PacketShapeError
     return root
 
 
-def _checked_entry(
-    acro,
-    read_stream: Callable[[object], bytes] | None = None,
-    take_item: Callable[[], None] | None = None,
-) -> tuple[str, object]:
-    """`(shape, entry)` for `/XFA`; shape is "" when the value is well formed.
+def _element_names(element) -> tuple[str, str]:
+    """`(local name, qualified name)` as the document spells them."""
+    tag = element.tag
+    local = tag.split("}")[-1] if isinstance(tag, str) else ""
+    prefix = element.prefix
+    return local, (f"{prefix}:{local}" if prefix else local)
 
-    Validated against ISO 32000-2 Table 224, which gives `XFA` as "stream or
-    array", and Annex K.2, which gives the array spelling exactly: a packet is
-    a pair of a string and a stream, the string naming the XML element and the
-    stream holding that element's complete text. Both slots of every pair are
-    therefore typed, and a slot count that is not even is not a sequence of
-    pairs at all.
 
-    Every packet stream is READ here, because a filter chain that will not
-    unfilter fails at the read and nowhere earlier.
+def _names_element(element, declared: str) -> bool:
+    """Whether `declared` names `element`.
+
+    Annex K.2 makes the string slot the element's name. Which SPELLING of the
+    name it takes, the clause settles only by example, and its example is not
+    uniform: the wrapper slot reads `xdp:xdp` while the datasets slot reads
+    `datasets` for an element spelled `xfa:datasets`. Both the local and the
+    qualified spelling therefore name the element, and demanding the qualified
+    one would refuse a resource written exactly as the clause prints it.
     """
+    return declared in _element_names(element)
+
+
+def _wrapper_spellings(root) -> tuple[frozenset, frozenset]:
+    """The names the opening and closing fragments may carry."""
+    opens = frozenset(_element_names(root))
+    return opens, frozenset(f"/{name}" for name in opens)
+
+
+def _one_element_of(data: bytes, prologue: bytes, epilogue: bytes, counters):
+    """The single element a middle packet holds, read in wrapper context.
+
+    The packet is parsed BETWEEN the resource's own opening and closing
+    fragments, so a prefix the wrapper declares is in scope — Annex K.2's
+    example relies on exactly that, and a packet parsed alone would fail on an
+    undeclared prefix that the resource does declare.
+
+    Returns the element, or raises `_PacketShapeError` when the packet is not
+    exactly one element: a fragment that needs its neighbours to close, two
+    elements where the clause allows one, or text sitting beside the element.
+    Checking this per packet is the point — after concatenation the boundaries
+    are gone, and two packets that between them spell two well-named elements
+    look no different from two packets that each spell one.
+    """
+    root = _resource_root(prologue + data + epilogue, counters)
+    children = [child for child in root if isinstance(child.tag, str)]
+    if len(children) != 1:
+        raise _PacketShapeError
+    child = children[0]
+    if (root.text or "").strip() or any((node.tail or "").strip() for node in root):
+        raise _PacketShapeError
+    return child
+
+
+def _packet_names_match(root, names: tuple[str, ...]) -> bool:
+    """Whether the declared packet names describe the resource that was read.
+
+    One packet names the whole element. Otherwise the first and last are the
+    wrapper's begin and end tags per Annex K.2's exception, and what lies
+    between them names the root's element children in order.
+    """
+    if not names:
+        return True
+    if len(names) == 1:
+        return _names_element(root, names[0])
+    opens, closes = _wrapper_spellings(root)
+    if names[0] not in opens or names[-1] not in closes:
+        return False
+    children = [child for child in root if isinstance(child.tag, str)]
+    middles = names[1:-1]
+    if len(children) != len(middles):
+        return False
+    return all(_names_element(child, name) for child, name in zip(children, middles))
+
+
+def _packet_boundaries_hold(root, names, parts, counters) -> str:
+    """`""` when every middle packet is exactly the element it declares.
+
+    Only the split spelling has boundaries to check, and only its middles: the
+    first and last packets are the fragments the clause exempts, and what makes
+    them well formed is that the resource they bracket parsed at all.
+    """
+    if len(names) < 2:
+        return ""
+    prologue, epilogue = parts[0], parts[-1]
     try:
-        entry = acro.get("/XFA")
-    except Exception:
-        return SHAPE_XFA_UNREADABLE, None
-    if entry is None:
-        return "", None
+        wrapper = _resource_root(prologue + epilogue, counters)
+        if (wrapper.tag != root.tag or any(isinstance(child.tag, str) for child in wrapper)
+                or (wrapper.text or '').strip()
+                or any((node.tail or '').strip() for node in wrapper)):
+            return SHAPE_PACKET_BOUNDARY
+    except _TooManyElements:
+        return SHAPE_RESOURCE_ELEMENTS
+    except _ResourceTooLarge:
+        return SHAPE_RESOURCE_BYTES
+    except (etree.XMLSyntaxError, _PacketShapeError):
+        return SHAPE_PACKET_BOUNDARY
+    for name, data in zip(names[1:-1], parts[1:-1]):
+        try:
+            element = _one_element_of(data, prologue, epilogue, counters)
+        except _TooManyElements:
+            return SHAPE_RESOURCE_ELEMENTS
+        except _ResourceTooLarge:
+            return SHAPE_RESOURCE_BYTES
+        except (etree.XMLSyntaxError, _PacketShapeError):
+            return SHAPE_PACKET_BOUNDARY
+        if not _names_element(element, name):
+            return SHAPE_PACKET_NAME_MISMATCH
+    return ""
+
+
+class XfaResource(NamedTuple):
+    """One read of a document's XFA resource.
+
+    ``root`` is the parsed `xdp:xdp` element; ``names`` are the packet names
+    the array declared, in order, and empty for the single-stream spelling.
+    ``counters`` is what the read spent, so a later walk of the same tree
+    spends from the same allowance.
+    """
+
+    root: object
+    names: tuple[str, ...]
+    counters: object
+
+
+def _read_resource(
+    entry,
+    read_stream: Callable[[object], bytes] | None,
+    take_item: Callable[[], None] | None,
+) -> tuple[str, object]:
+    """`(shape, XfaResource)` for a `/XFA` value; shape is "" when it read.
+
+    ONE reading, shared by the strict classification and the authored-logic
+    question, because both need the same thing: the resource the document
+    declares, bounded, with no grammar and no network. Every stream is READ
+    here, because a filter chain that will not unfilter fails at the read and
+    nowhere earlier, and every read and item is charged to the caller's own
+    accounting so a budgeted traversal keeps its budget.
+    """
     reader = read_stream or (lambda stream: stream.read_bytes())
     charge = take_item or (lambda: None)
+    counters = _Counters()
+    parts: list[bytes] = []
+
     if isinstance(entry, pikepdf.Stream):
         try:
             charge()
@@ -154,46 +399,118 @@ def _checked_entry(
         except InspectionInterrupted:
             raise
         except Exception:
-            return SHAPE_PACKET_UNREADABLE, entry
+            return SHAPE_PACKET_UNREADABLE, None
+        if not isinstance(data, (bytes, bytearray)):
+            return SHAPE_PACKET_UNREADABLE, None
+        # A decode is a native allocation of its own, so its size is charged
+        # like any other: nothing here claims the read was bounded because the
+        # object it came from was small.
+        if len(data) > _MAX_RESOURCE_BYTES:
+            return SHAPE_RESOURCE_BYTES, None
+        counters.body_bytes = len(data)
+        data = bytes(data)
+        names: tuple[str, ...] = ()
+    elif isinstance(entry, pikepdf.Array):
         try:
-            root = _packet_root(data)
-        except (etree.XMLSyntaxError, _PacketShapeError):
-            return SHAPE_PACKET_XML, entry
-        if str(root.tag).split("}")[-1].split(":")[-1] != "xdp":
-            return SHAPE_XDP_ROOT, entry
-        return "", entry
-    if not isinstance(entry, pikepdf.Array):
-        return SHAPE_XFA_TYPE, entry
+            length = len(entry)
+        except Exception:
+            return SHAPE_XFA_UNREADABLE, None
+        if length == 0 or length % 2 != 0:
+            return SHAPE_XFA_ARRAY_LENGTH, None
+        declared: list[str] = []
+        # The resource is assembled in array order, and every count is checked
+        # AS it grows: a ceiling tested after the loop is a ceiling on work
+        # already done.
+        buffer = bytearray()
+        for i in range(0, length, 2):
+            counters.packets += 1
+            if counters.packets > _MAX_RESOURCE_PACKETS:
+                return SHAPE_RESOURCE_PACKETS, None
+            try:
+                charge()
+                name, stream = entry[i], entry[i + 1]
+            except InspectionInterrupted:
+                raise
+            except Exception:
+                return SHAPE_XFA_UNREADABLE, None
+            # The name slot is validated, never coerced: `str()` renders a
+            # number as readily as a name, so a slot holding one reads back as
+            # a packet called "42" and the array passes for well formed.
+            if not isinstance(name, pikepdf.String):
+                return SHAPE_PACKET_NAME_TYPE, None
+            if not isinstance(stream, pikepdf.Stream):
+                return SHAPE_PACKET_STREAM_TYPE, None
+            spelled = str(name)
+            counters.name_bytes += len(spelled.encode("utf-8", "replace"))
+            if counters.name_bytes > _MAX_RESOURCE_NAME_BYTES:
+                return SHAPE_RESOURCE_NAMES, None
+            try:
+                part = reader(stream)
+            except InspectionInterrupted:
+                raise
+            except Exception:
+                return SHAPE_PACKET_UNREADABLE, None
+            if not isinstance(part, (bytes, bytearray)):
+                return SHAPE_PACKET_UNREADABLE, None
+            counters.body_bytes += len(part)
+            if counters.body_bytes > _MAX_RESOURCE_BYTES:
+                return SHAPE_RESOURCE_BYTES, None
+            parts.append(bytes(part))
+            buffer.extend(part)
+            declared.append(spelled)
+        data = bytes(buffer)
+        names = tuple(declared)
+    else:
+        return SHAPE_XFA_TYPE, None
+
     try:
-        length = len(entry)
+        root = _resource_root(data, counters)
+    except _ResourceTooLarge:
+        return SHAPE_RESOURCE_BYTES, None
+    except _TooManyElements:
+        return SHAPE_RESOURCE_ELEMENTS, None
+    except (etree.XMLSyntaxError, _PacketShapeError):
+        return SHAPE_PACKET_XML, None
     except Exception:
-        return SHAPE_XFA_UNREADABLE, entry
-    if length == 0 or length % 2 != 0:
-        return SHAPE_XFA_ARRAY_LENGTH, entry
-    for i in range(0, length, 2):
-        try:
-            charge()
-            name, stream = entry[i], entry[i + 1]
-        except InspectionInterrupted:
-            raise
-        except Exception:
-            return SHAPE_XFA_UNREADABLE, entry
-        # The name slot is validated, never coerced: `str()` renders a number
-        # as readily as a name, so a slot holding one reads back as a packet
-        # called "42" and the array passes for well formed.
-        if not isinstance(name, pikepdf.String):
-            return SHAPE_PACKET_NAME_TYPE, entry
-        if not isinstance(stream, pikepdf.Stream):
-            return SHAPE_PACKET_STREAM_TYPE, entry
-        try:
-            _packet_root(reader(stream))
-        except InspectionInterrupted:
-            raise
-        except (etree.XMLSyntaxError, _PacketShapeError):
-            return SHAPE_PACKET_XML, entry
-        except Exception:
-            return SHAPE_PACKET_UNREADABLE, entry
-    return "", entry
+        return SHAPE_PACKET_UNREADABLE, None
+
+    # The root is the XDP element, identified by namespace as well as name: a
+    # local name alone is any producer's `xdp` in any namespace, and the
+    # resource this reads is the XML Data Package's.
+    local, _qualified = _element_names(root)
+    if local != "xdp" or root.tag != f"{{{XDP_NAMESPACE}}}xdp":
+        return SHAPE_XDP_ROOT, None
+    if not _packet_names_match(root, names):
+        return SHAPE_PACKET_NAME_MISMATCH, None
+    boundary = _packet_boundaries_hold(root, names, parts, counters)
+    if boundary:
+        return boundary, None
+    return "", XfaResource(root, names, counters)
+
+
+def _checked_entry(
+    acro,
+    read_stream: Callable[[object], bytes] | None = None,
+    take_item: Callable[[], None] | None = None,
+) -> tuple[str, object, object]:
+    """`(shape, entry, resource)` for `/XFA`; shape is "" when it read.
+
+    Validated against ISO 32000-2 Table 224, which gives `XFA` as "stream or
+    array", and Annex K.2, which gives the array spelling exactly: a packet is
+    a pair of a string and a stream, the string naming the XML element and the
+    stream holding that element's complete text, with the first and last
+    carrying the wrapper's begin and end tag instead. Both slots of every pair
+    are therefore typed, a slot count that is not even is not a sequence of
+    pairs at all, and what the pairs COMPOSE is one resource.
+    """
+    try:
+        entry = acro.get("/XFA")
+    except Exception:
+        return SHAPE_XFA_UNREADABLE, None, None
+    if entry is None:
+        return "", None, None
+    shape, resource = _read_resource(entry, read_stream, take_item)
+    return shape, entry, resource
 
 
 def inspect(
@@ -225,7 +542,7 @@ def inspect(
     if not isinstance(acro, pikepdf.Dictionary):
         return _bad(SHAPE_ACROFORM_TYPE)
 
-    shape, entry = _checked_entry(acro, read_stream, take_item)
+    shape, entry, _resource = _checked_entry(acro, read_stream, take_item)
     if shape:
         return _bad(shape, entry)
     if entry is None:
@@ -237,9 +554,16 @@ def inspect(
         return _bad(SHAPE_NEEDS_RENDERING_TYPE, entry)
     if rendering is not None and not isinstance(rendering, bool):
         return _bad(SHAPE_NEEDS_RENDERING_TYPE, entry)
-    if rendering is True:
-        return Inspection(DYNAMIC, "", entry)
-
+    # `/Fields` IS VALIDATED EVEN WHEN `NeedsRendering` SETTLES THE CLASS.
+    # Table 29's flag decides dynamic on its own, so it would be enough to
+    # answer here and stop — and that is the shortcut this does not take. This
+    # is the strict reading: its contract is that a class it returns rests
+    # entirely on values that held the types their clauses give them, and a
+    # document whose `/Fields` is a string has a form declaration this build
+    # cannot read whatever the flag says. Answering DYNAMIC there would report
+    # a readable form on the strength of a value nobody could read. The
+    # LENIENT `classify` keeps the shortcut, because its callers act on the
+    # packets and a mistyped `/Fields` changes nothing they do.
     try:
         fields = acro.get("/Fields")
     except Exception:
@@ -249,7 +573,13 @@ def inspect(
     elif isinstance(fields, pikepdf.Array):
         try:
             shadow = len(fields) > 0
+            walked = 0
             for field in fields:
+                walked += 1
+                # Bounded whether or not the caller has a budget: a field
+                # array is as long as a producer made it.
+                if walked > _MAX_FIELD_ITEMS:
+                    return _bad(SHAPE_FIELDS_COUNT, entry)
                 if take_item is not None:
                     take_item()
                 if not isinstance(field, pikepdf.Dictionary):
@@ -262,6 +592,9 @@ def inspect(
             return _bad(SHAPE_FIELDS_TYPE, entry)
     else:
         return _bad(SHAPE_FIELDS_TYPE, entry)
+
+    if rendering is True:
+        return Inspection(DYNAMIC, "", entry)
     # An XFA form whose fields exist only in the XML has nothing to fill
     # through the PDF field objects Annex K requires a fillable form to carry,
     # so it is dynamic for every purpose this engine has.
@@ -402,30 +735,66 @@ def datasets_stream(pdf: pikepdf.Pdf):
     for name, stream in found:
         if name == "datasets":
             return stream
-    for name, stream in found:
-        if name == "xdp:xdp":
-            return stream
+    # A wrapper in a segmented array is only its opening fragment, not an
+    # alternate datasets document. Only the single whole-resource spelling
+    # may be parsed to locate an embedded datasets element.
+    if len(found) == 1 and found[0][0] == "xdp:xdp":
+        return found[0][1]
     return None
 
 
-def has_authored_logic(pdf: pikepdf.Pdf) -> bool:
-    """Whether the template packet authors calculations or validations.
+def has_authored_logic(
+    pdf: pikepdf.Pdf,
+    *,
+    read_stream: Callable[[object], bytes] | None = None,
+    take_item: Callable[[], None] | None = None,
+) -> bool:
+    """Whether the template authors calculations or validations.
 
     XFA calculations are FormCalc or XFA-scoped JavaScript running against the
     XFA object model; this engine has neither, and executing the AcroForm
     scripting host against them would compute numbers no other reader
     computes. The presence is REPORTED so the refusal is by name.
+
+    Identity is the element's, not a spelling of it. The elements are found by
+    namespace and local name through the same bounded reader the strict
+    classification uses, because the question "does this template author
+    logic" has one answer per resource however the resource is spelled: a
+    prefix the author chose, a UTF-16 encoding, and a split wrapper sequence
+    are three spellings of one document, and a search for the bytes
+    `<calculate` answers it correctly for exactly one of them.
+
+    Raises `AuthoredLogicUnreadable` when the resource will not read. A
+    template nobody parsed has not been shown to author nothing.
+
+    THE ENTRANCE IS STRICT, not `xfa_entry`. The lenient entrance answers "is
+    there a packet source to read?", and it answers None for a `/XFA` holding
+    a number and for an `/AcroForm` that is not a dictionary — which is the
+    right answer for a caller that reads packets or does nothing, and the
+    wrong one here: returning false for those says the template authors no
+    logic, about a declaration nobody could read. Presence and unreadability
+    are different answers, so this asks the reading that separates them.
     """
-    entry = xfa_entry(pdf)
+    try:
+        acro = pdf.Root.get("/AcroForm")
+    except Exception:
+        raise AuthoredLogicUnreadable(SHAPE_ACROFORM_UNREADABLE) from None
+    if acro is None:
+        return False
+    if not isinstance(acro, pikepdf.Dictionary):
+        raise AuthoredLogicUnreadable(SHAPE_ACROFORM_TYPE)
+    shape, entry, resource = _checked_entry(acro, read_stream, take_item)
+    if shape:
+        raise AuthoredLogicUnreadable(shape)
     if entry is None:
         return False
-    for name, stream in packets(entry):
-        if name not in ("template", "xdp:xdp"):
+    for element in resource.root.iter():
+        tag = element.tag
+        if not isinstance(tag, str) or not tag.startswith("{"):
             continue
-        try:
-            body = stream.read_bytes()
-        except Exception:
-            continue
-        if b"<calculate" in body or b"<validate" in body:
+        namespace, _, local = tag[1:].partition("}")
+        if local in AUTHORED_LOGIC_ELEMENTS and namespace.startswith(
+            TEMPLATE_NAMESPACE_PREFIX
+        ):
             return True
     return False

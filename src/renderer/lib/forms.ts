@@ -117,7 +117,7 @@ export interface FormReadResult {
   hasXFA: boolean;
   xfa: XFAKind;
   /** The XML template authors its own calculations, which are not run here. */
-  xfaCalculations: boolean;
+  xfaCalculations: boolean | null;
   /** The document's declared calculation order, as fully-qualified names.
    * Empty means calculations do not run at all — the format puts the order
    * here, and inventing one would compute a number no other viewer computes. */
@@ -179,7 +179,7 @@ function lockOfEngineField(raw: EngineField['lock']): FieldLock | null {
 interface EngineReadResult {
   has_xfa?: boolean;
   xfa?: string;
-  xfa_calculations?: boolean;
+  xfa_calculations?: boolean | null;
   fields?: EngineField[];
   calculation_order?: string[];
 }
@@ -293,7 +293,7 @@ export async function readFormFields(call: EngineCall, path: string, requireComp
     fields,
     hasXFA: Boolean(res.has_xfa),
     xfa,
-    xfaCalculations: Boolean(res.xfa_calculations),
+    xfaCalculations: res.xfa_calculations === null ? null : res.xfa_calculations === true,
     calculationOrder: (res.calculation_order ?? []).map((n) => String(n)),
   };
 }
@@ -305,7 +305,8 @@ function completeFillRead(value: unknown): boolean {
   const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(x => typeof x === 'string');
   if (!record(value) || !Array.isArray(value.fields) || value.count !== value.fields.length
       || !strings(value.calculation_order) || typeof value.has_xfa !== 'boolean'
-      || !['none', 'static', 'dynamic'].includes(value.xfa as string) || typeof value.xfa_calculations !== 'boolean') return false;
+      || !['none', 'static', 'dynamic'].includes(value.xfa as string)
+      || (value.xfa_calculations !== null && typeof value.xfa_calculations !== 'boolean')) return false;
   const names = new Set<string>();
   return value.fields.every(f => {
     if (!record(f) || typeof f.name !== 'string' || names.has(f.name) || typeof f.type !== 'string'

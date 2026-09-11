@@ -229,6 +229,85 @@ export function acceptedRegions(regions: readonly TableRegion[]): TableRegion[] 
   return regions.filter((r) => r.accepted);
 }
 
+/**
+ * The revision a review was read from.
+ *
+ * A region's geometry and the cells the export reads back describe ONE set of
+ * bytes: the working copy the detector was pointed at, as it stood at that
+ * moment. `path` is the document's stable identity and is not where those
+ * bytes live; `workingPath` is, and `buffer` is the exact revision object the
+ * workspace held for it. A review is meaningful against this and nothing
+ * else — a commit, an undo, another tool's rewrite or a reopen replaces the
+ * buffer, and the review stops describing what is on screen.
+ */
+export interface TableReviewSession {
+  path: string;
+  workingPath: string;
+  /** Compared by identity only; the bytes are never read here. */
+  buffer: object;
+}
+
+/** Whether `session` still describes `file` — the same working copy and the
+ * same buffer object. A missing file is a session with nothing to describe. */
+export function sessionMatches(
+  session: TableReviewSession | null,
+  file: { workingPath: string; buffer: object | null } | undefined,
+): boolean {
+  return session !== null && file !== undefined && file.buffer !== null
+    && file.workingPath === session.workingPath && file.buffer === session.buffer;
+}
+
+/** What an export was asked for, captured before any await: the revision and
+ * the exact tables the reviewer had accepted at that moment. */
+export interface TableExportRequest {
+  session: TableReviewSession;
+  regionIds: string[];
+}
+
+export function captureExportRequest(
+  session: TableReviewSession | null,
+  regions: readonly TableRegion[],
+): TableExportRequest | null {
+  if (session === null) return null;
+  const ids = acceptedRegions(regions).filter((r) => r.path === session.path).map((r) => r.id);
+  return ids.length === 0 ? null : { session, regionIds: ids };
+}
+
+export type OwnershipRefusal = 'stale-session' | 'missing-region' | 'foreign-region'
+  | 'not-accepted' | 'nothing-accepted';
+
+/**
+ * The tables an export may write, resolved against what is live NOW.
+ *
+ * Every table the request named must still exist, still be accepted, and
+ * belong to the request's own document; the request's revision must be the
+ * one the live set was read from. Anything else is refused by name rather
+ * than exported from whatever happens to be current — a workbook the
+ * reviewer believes carries the tables they checked must carry those tables,
+ * from those bytes, or not exist.
+ */
+export function ownedAcceptedRegions(
+  request: TableExportRequest,
+  live: { session: TableReviewSession | null; regions: readonly TableRegion[] },
+): { ok: true; regions: TableRegion[] } | { ok: false; reason: OwnershipRefusal } {
+  const { session } = request;
+  if (live.session === null || live.session.path !== session.path
+      || live.session.workingPath !== session.workingPath || live.session.buffer !== session.buffer) {
+    return { ok: false, reason: 'stale-session' };
+  }
+  if (request.regionIds.length === 0) return { ok: false, reason: 'nothing-accepted' };
+  const byId = new Map(live.regions.map((r) => [r.id, r] as const));
+  const out: TableRegion[] = [];
+  for (const id of request.regionIds) {
+    const region = byId.get(id);
+    if (!region) return { ok: false, reason: 'missing-region' };
+    if (region.path !== session.path) return { ok: false, reason: 'foreign-region' };
+    if (!region.accepted) return { ok: false, reason: 'not-accepted' };
+    out.push(region);
+  }
+  return { ok: true, regions: out };
+}
+
 export type TriState = 'none' | 'some' | 'all';
 
 export function selectionState(regions: readonly TableRegion[]): TriState {

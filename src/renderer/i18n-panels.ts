@@ -643,6 +643,7 @@ export const PANEL_STRINGS = {
     'This is an XML form (XFA). Values you fill are saved into both its XML form data and its standard form fields, so every reader shows the same answers.',
   'panel.forms.xfaDynamic':
     'This is a dynamic XML form (XFA): it builds its own pages from an XML template, so its fields cannot be filled here. The fields below are read-only.',
+  'panel.forms.xfaCalculationsUnknown': 'The XFA template could not be read completely. Its calculations and validations are unknown; review the form in a compatible reader.',
   'panel.forms.xfaCalculations':
     "This form's XML template authors its own calculations. They are not run here, so a value another field computes from stays as the document last saved it.",
   // The value shown came from the XFA datasets packet rather than from the

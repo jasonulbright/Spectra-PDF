@@ -140,16 +140,22 @@ distill.postscriptJobDeclaresPjl	pattern	distill	not a PostScript job (it declar
 distill.postscriptJobPayloadZip	exact	distill	not a PostScript job (the payload is a ZIP/XPS package)
 distill.postscriptJobPjlEnvelope	exact	distill	not a PostScript job (the PJL envelope carries no payload)
 distill.unknownPresetScreenEbook	pattern	distill	unknown preset {{preset}} (screen, ebook, printer, prepress, default)
+doc_properties.chooseOpeningPageBefore	exact	doc_properties	Choose an opening page before changing its magnification.
 doc_properties.directionMustLR	pattern	doc_properties	direction must be 'L2R' or 'R2L', got {{direction}}
+doc_properties.documentBaseUrlMust	exact	doc_properties	The document base URL must be text.
 doc_properties.documentCertifiedAllowChanges	exact	doc_properties	this document is certified to allow no changes, so setting the document language would produce a file that reports as illegally modified
 doc_properties.documentCertifiedAllowChanges2	exact	doc_properties	this document is certified to allow no changes, so setting the document title would produce a file that reports as illegally modified
 doc_properties.documentCertifiedAllowChanges3	exact	doc_properties	this document is certified to allow no changes, so setting the tab order would produce a file that reports as illegally modified
-doc_properties.documentSOpenAction	exact	doc_properties	the document's open action is a script, not a destination; it was left unchanged
+doc_properties.documentSAdvancedProperties	exact	doc_properties	The document's advanced properties cannot be read completely.
+doc_properties.documentSInitialView	exact	doc_properties	The document's initial view cannot be read completely.
+doc_properties.documentSOpenAction	exact	doc_properties	The document's opening action cannot be changed without losing behavior.
 doc_properties.documentSignedSettingDocument	exact	doc_properties	this document is signed and setting the document language invalidates its signatures -- the run must state that signed documents are included before it will touch one
 doc_properties.documentSignedSettingDocument2	exact	doc_properties	this document is signed and setting the document title invalidates its signatures -- the run must state that signed documents are included before it will touch one
 doc_properties.documentSignedSettingTab	exact	doc_properties	this document is signed and setting the tab order invalidates its signatures -- the run must state that signed documents are included before it will touch one
+doc_properties.initialViewWindowOptions	exact	doc_properties	Initial-view window options must be booleans.
 doc_properties.nameLanguageExampleEn	exact	doc_properties	Name the language, for example en-GB.
 doc_properties.openPageOutRange	pattern	doc_properties	open_page {{page_number}} is out of range (1-{{total}})
+doc_properties.openingPageMustInteger	exact	doc_properties	The opening page must be an integer.
 doc_properties.pageHereCarriesAnnotation	exact	doc_properties	No page here carries an annotation, so there is no tab order to declare: /Tabs on a page with nothing to order says nothing.
 doc_properties.pageLayoutMustDefault	pattern	doc_properties	page_layout must be 'default' or one of {{v0}}, got {{page_layout}}
 doc_properties.pageModeMustDefault	pattern	doc_properties	page_mode must be 'default' or one of {{v0}}, got {{page_mode}}
@@ -345,6 +351,7 @@ links.unknownLinkViewMode	pattern	links	unknown link view mode {{mode}}
 links.urlMustEmpty	exact	links	url must not be empty
 links.webAddressesEmailAddresses	exact	links	No web addresses or email addresses were found in the text.
 merge.theseDocumentsCannotCombined	exact	merge	These documents cannot be combined without changing their protection: they do not all carry the same encryption and permissions, and one combined document can only have one. Give them matching protection, or decrypt them first.
+metadata.documentSMetadataCannot	exact	metadata	The document's metadata cannot be read completely.
 mrc.everyScannedPageFailed	exact	mrc	every scanned page failed mask verification — no MRC output was written
 mrc.everyScannedPageFailedText	exact	mrc	every scanned page failed text verification — no MRC output was written, because a page whose words did not survive is not an output worth having. Try the archival preset, which keeps thin strokes.
 mrc.firstDifference	pattern	mrc	{{reason}} (first difference — {{divergence}})

@@ -814,6 +814,12 @@ def read_form_fields(file: str) -> dict:
             if field.name in calculated:
                 entry["calculated"] = True
             fields.append(entry)
+        try:
+            authored_logic = xfa.has_authored_logic(pdf)
+        except xfa.AuthoredLogicUnreadable:
+            # Unknown is not evidence that the template has no calculations.
+            # Keep the readable AcroForm fields and report this separate fact.
+            authored_logic = None
         result = {
             "has_xfa": _has_xfa(pdf),
             # `none` / `static` / `dynamic` — ISO 32000-2 Table 29 plus the
@@ -827,7 +833,7 @@ def read_form_fields(file: str) -> dict:
             # JavaScript, which this engine does not execute — reported so the
             # refusal is by name rather than a value that quietly never
             # updates.
-            "xfa_calculations": kind != xfa.NONE and xfa.has_authored_logic(pdf),
+            "xfa_calculations": authored_logic,
             "fields": fields,
             "count": len(fields),
             # The declared calculation order. Empty means calculations do not

@@ -17,28 +17,27 @@ that never had a ``/ViewerPreferences`` dict does not grow an empty one.
 """
 
 import re
+import math
+from decimal import Decimal
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
-from .inplace import is_same_file, staged_write
+from .inplace import staged_write
 from engine.incremental import signature_policy, signed_edit_decision
 from engine.pdf_save import save_pdf
 from engine.pdf_version import version_facts
 
 
-def _save(pdf, file: str, output_path: Path) -> None:
-    """A same-file write stages beside the document and swaps the directory
-    entry, so a write that dies leaves the input whole. The Pdf is closed
+def _save(pdf, file: str, output_path: Path, **kwargs) -> None:
+    """Every write stages beside the destination and swaps the directory
+    entry, so a failed write leaves any existing file whole. The Pdf is closed
     inside the block because the destination cannot be replaced while it is
     held open."""
-    if is_same_file(file, str(output_path)):
-        with staged_write(output_path) as staged:
-            save_pdf(pdf, staged)
-            pdf.close()
-    else:
-        save_pdf(pdf, output_path)
+    with staged_write(output_path) as staged:
+        save_pdf(pdf, staged, **kwargs)
+        pdf.close()
 
 
 # panel value → /PageLayout name. "default" is the absent key.
@@ -85,6 +84,47 @@ _TRAPPED = {"true": "True", "false": "False", "unknown": "Unknown"}
 _TRAPPED_INVERSE = {v: k for k, v in _TRAPPED.items()}
 
 
+class _UnreadableProperty(ValueError):
+    """Absence is a fact; an unreadable value is not its default."""
+
+
+def _dictionary(value):
+    if not isinstance(value, pikepdf.Dictionary):
+        raise _UnreadableProperty
+    return value
+
+
+def _enum_name(value, choices, default):
+    if value is None:
+        return default
+    if not isinstance(value, pikepdf.Name) or str(value)[1:] not in choices:
+        raise _UnreadableProperty
+    return choices[str(value)[1:]]
+
+
+def _number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        raise _UnreadableProperty
+    result = float(value)
+    if not math.isfinite(result):
+        raise _UnreadableProperty
+    return result
+
+
+def _pdf_text(value):
+    if not isinstance(value, pikepdf.String):
+        raise _UnreadableProperty
+    raw = bytes(value)
+    for bom, encoding in ((b'\xfe\xff', 'utf-16-be'), (b'\xff\xfe', 'utf-16-le'),
+                          (b'\xef\xbb\xbf', 'utf-8')):
+        if raw.startswith(bom):
+            return raw[len(bom):].decode(encoding, 'strict')
+    text = str(value)
+    if '\ufffd' in text:
+        raise _UnreadableProperty
+    return text
+
+
 def _page_index_of(pdf, page_obj) -> int | None:
     """0-based index of a page object within the document, by object identity.
     A destination naming a page that is not in the page tree (a stale
@@ -103,44 +143,85 @@ def _page_index_of(pdf, page_obj) -> int | None:
 
 
 def _resolve_named_destination(pdf, name):
-    """A destination named by string/name: the /Names /Dests name tree first,
-    then the legacy /Dests dictionary. Returns the destination array or None."""
-    key = str(name)
-    names = pdf.Root.get("/Names")
-    if names is not None:
-        dests = names.get("/Dests")
-        if dests is not None:
-            try:
-                found = pikepdf.NameTree(dests).get(key.lstrip("/"))
-            except (TypeError, ValueError, KeyError, RuntimeError):
-                found = None
-            if found is not None:
-                return found
-    legacy = pdf.Root.get("/Dests")
-    if legacy is not None:
-        try:
-            found = legacy.get("/" + key.lstrip("/"))
-        except (TypeError, ValueError, AttributeError):
-            found = None
-        if found is not None:
-            return found
-    return None
+    """Resolve a byte-string/name identity without repair, stripping or cycles.
+
+    ISO 32000-2 12.3.2.4: name objects use the legacy dictionary; strings
+    use the name tree. A slash IN a string is part of its identity.
+    """
+    if isinstance(name, pikepdf.Name):
+        legacy = pdf.Root.get('/Dests')
+        return None if legacy is None else _dictionary(legacy).get(str(name))
+    if not isinstance(name, pikepdf.String):
+        raise _UnreadableProperty
+    names = pdf.Root.get('/Names')
+    if names is None:
+        return None
+    tree = _dictionary(names).get('/Dests')
+    if tree is None:
+        return None
+    target, found, keys, seen = bytes(name), None, set(), set()
+    stack, count, text_bytes = [(tree, 0)], 0, 0
+    while stack:
+        node, depth = stack.pop()
+        count += 1
+        if count > 10000 or depth > 64:
+            raise _UnreadableProperty
+        _dictionary(node)
+        identity = node.objgen
+        if identity != (0, 0):
+            if identity in seen:
+                raise _UnreadableProperty
+            seen.add(identity)
+        entries, kids = node.get('/Names'), node.get('/Kids')
+        if (entries is None) == (kids is None):
+            raise _UnreadableProperty
+        if kids is not None:
+            if not isinstance(kids, Array) or len(kids) + len(stack) > 10000:
+                raise _UnreadableProperty
+            stack.extend((child, depth + 1) for child in kids)
+        else:
+            if not isinstance(entries, Array) or len(entries) % 2 or len(entries) > 20000:
+                raise _UnreadableProperty
+            for i in range(0, len(entries), 2):
+                key = entries[i]
+                if not isinstance(key, String):
+                    raise _UnreadableProperty
+                raw = bytes(key)
+                text_bytes += len(raw)
+                if raw in keys or len(keys) >= 10000 or text_bytes > 2_000_000:
+                    raise _UnreadableProperty
+                keys.add(raw)
+                if raw == target:
+                    found = entries[i + 1]
+    return found
 
 
 def _destination_array(pdf, dest):
     """Normalize a destination to its ARRAY form. A destination dictionary
     keeps the array under /D; a name/string destination is looked up."""
     if isinstance(dest, pikepdf.Array):
-        return dest
-    if isinstance(dest, pikepdf.Dictionary):
-        inner = dest.get("/D")
-        return inner if isinstance(inner, pikepdf.Array) else None
-    if isinstance(dest, (pikepdf.Name, pikepdf.String)):
+        result = dest
+    elif isinstance(dest, (pikepdf.Name, pikepdf.String)):
         resolved = _resolve_named_destination(pdf, dest)
-        if resolved is None:
-            return None
-        return _destination_array(pdf, resolved)
-    return None
+        result = resolved.get('/D') if isinstance(resolved, Dictionary) else resolved
+    elif isinstance(dest, Dictionary):
+        result = dest.get('/D')
+    else:
+        raise _UnreadableProperty
+    if not isinstance(result, Array) or len(result) < 2 or not isinstance(result[1], Name):
+        raise _UnreadableProperty
+    lengths = {'/XYZ': 5, '/Fit': 2, '/FitH': 3, '/FitV': 3, '/FitR': 6,
+               '/FitB': 2, '/FitBH': 3, '/FitBV': 3}
+    fit = str(result[1])
+    if lengths.get(fit) != len(result) or _page_index_of(pdf, result[0]) is None:
+        raise _UnreadableProperty
+    for value in list(result)[2:]:
+        if value is None and fit != '/FitR':
+            continue
+        _number(value)
+    if fit == '/XYZ' and result[4] is not None and _number(result[4]) < 0:
+        raise _UnreadableProperty
+    return result
 
 
 def _open_action_destination(pdf):
@@ -150,9 +231,13 @@ def _open_action_destination(pdf):
     action = pdf.Root.get("/OpenAction")
     if action is None:
         return None
-    if isinstance(action, pikepdf.Dictionary) and "/D" not in action:
+    if isinstance(action, pikepdf.Dictionary):
         subtype = action.get("/S")
-        if subtype is not None and str(subtype) == "/GoTo":
+        if not isinstance(subtype, Name):
+            raise _UnreadableProperty
+        if subtype == Name.GoTo:
+            if action.get('/SD') is not None:
+                raise _UnreadableProperty
             return _destination_array(pdf, action.get("/D"))
         return None
     return _destination_array(pdf, action)
@@ -166,13 +251,18 @@ def _open_action_is_replaceable(pdf) -> bool:
     if action is None:
         return True
     if isinstance(action, pikepdf.Array):
+        _destination_array(pdf, action)
         return True
     if isinstance(action, pikepdf.Dictionary):
-        if "/D" in action and "/S" not in action:
-            return True
         subtype = action.get("/S")
-        return subtype is not None and str(subtype) == "/GoTo"
-    return isinstance(action, (pikepdf.Name, pikepdf.String))
+        if subtype != Name.GoTo or action.get('/SD') is not None:
+            return False
+        _destination_array(pdf, action.get('/D'))
+        return True
+    if isinstance(action, (pikepdf.Name, pikepdf.String)):
+        _destination_array(pdf, action)
+        return True
+    raise _UnreadableProperty
 
 
 def _read_zoom(dest) -> tuple[str, float | None]:
@@ -196,9 +286,57 @@ def _read_zoom(dest) -> tuple[str, float | None]:
             except (TypeError, ValueError):
                 return "default", None
             if value > 0:
-                return "percent", round(value * 100, 2)
+                return "percent", value * 100
         return "default", None
+    if fit == 'FitR':
+        return 'custom', None
     return "default", None
+
+
+def _opening_action_copy(pdf, action):
+    """Own the opening /Next graph without changing other users of it.
+
+    Preserve shared/cyclic action identities inside this chain, while a
+    link pointing at the original action keeps its original destination.
+    Opaque non-Next entries retain their exact existing references.
+    """
+    clones, originals, pending = {}, {}, []
+    references = 0
+
+    def clone(node):
+        nonlocal references
+        references += 1
+        if references > 10000:
+            raise _UnreadableProperty
+        _dictionary(node)
+        if not isinstance(node.get('/S'), Name):
+            raise _UnreadableProperty
+        identity = node.objgen if node.objgen != (0, 0) else id(node)
+        if identity not in clones:
+            if len(clones) >= 10000:
+                raise _UnreadableProperty
+            copies = Dictionary({key: value for key, value in node.items() if key != '/Next'})
+            clones[identity] = pdf.make_indirect(copies)
+            # Direct dictionaries have no PDF object number. Keep their Python
+            # wrappers alive until the whole traversal ends: id reuse must not
+            # merge distinct later actions into an already copied action.
+            originals[identity] = node
+            pending.append((node, clones[identity]))
+        return clones[identity]
+
+    result = clone(action)
+    while pending:
+        original, copied = pending.pop()
+        following = original.get('/Next')
+        if following is None:
+            continue
+        if isinstance(following, Array):
+            if len(following) > 10000:
+                raise _UnreadableProperty
+            copied.Next = Array([clone(child) for child in following])
+        else:
+            copied.Next = clone(following)
+    return result
 
 
 def _viewer_preferences(pdf) -> dict:
@@ -207,21 +345,17 @@ def _viewer_preferences(pdf) -> dict:
     vp = pdf.Root.get("/ViewerPreferences")
     if vp is None:
         return {**prefs, "direction": direction}
+    _dictionary(vp)
     for panel_key, pdf_key in _WINDOW_OPTIONS.items():
-        try:
-            prefs[panel_key] = bool(vp.get("/" + pdf_key, False))
-        except (TypeError, ValueError, AttributeError):
-            prefs[panel_key] = False
-    try:
-        raw = vp.get("/Direction")
-        if raw is not None and str(raw).lstrip("/") == "R2L":
-            direction = "R2L"
-    except (TypeError, ValueError, AttributeError):
-        pass
+        raw = vp.get('/' + pdf_key)
+        if raw is not None and not isinstance(raw, bool):
+            raise _UnreadableProperty
+        prefs[panel_key] = False if raw is None else raw
+    direction = _enum_name(vp.get('/Direction'), {'L2R': 'L2R', 'R2L': 'R2L'}, 'L2R')
     return {**prefs, "direction": direction}
 
 
-def get_initial_view(file: str) -> dict:
+def _get_initial_view(file: str) -> dict:
     """Read the document's initial view: page layout, page mode, opening page
     and magnification, window options and reading direction.
 
@@ -230,13 +364,9 @@ def get_initial_view(file: str) -> dict:
     """
     with pikepdf.open(file) as pdf:
         raw_layout = pdf.Root.get("/PageLayout")
-        layout = _PAGE_LAYOUTS_INVERSE.get(
-            str(raw_layout).lstrip("/") if raw_layout is not None else "", "default"
-        )
+        layout = _enum_name(raw_layout, _PAGE_LAYOUTS_INVERSE, 'default')
         raw_mode = pdf.Root.get("/PageMode")
-        mode = _PAGE_MODES_INVERSE.get(
-            str(raw_mode).lstrip("/") if raw_mode is not None else "", "default"
-        )
+        mode = _enum_name(raw_mode, _PAGE_MODES_INVERSE, 'default')
         dest = _open_action_destination(pdf)
         open_page = None
         if dest is not None and len(dest) >= 1:
@@ -260,6 +390,14 @@ def get_initial_view(file: str) -> dict:
             "pages": len(pdf.pages),
             **_viewer_preferences(pdf),
         }
+
+
+def get_initial_view(file: str) -> dict:
+    """Read a complete initial-view model, never a fabricated edit baseline."""
+    try:
+        return _get_initial_view(file)
+    except (ValueError, TypeError, AttributeError, IndexError, KeyError, RuntimeError, pikepdf.PdfError):
+        raise ValueError("The document's initial view cannot be read completely.") from None
 
 
 def _destination_for(page_obj, zoom: str, zoom_percent: float | None) -> Array:
@@ -286,7 +424,9 @@ def _apply_viewer_preferences(pdf, options: dict, direction: str | None) -> None
     for panel_key, pdf_key in _WINDOW_OPTIONS.items():
         value = options.get(panel_key)
         if value is not None:
-            wanted[pdf_key] = bool(value)
+            if not isinstance(value, bool):
+                raise ValueError("Initial-view window options must be booleans.")
+            wanted[pdf_key] = value
     if not wanted and direction is None:
         return
     if vp is None:
@@ -296,6 +436,14 @@ def _apply_viewer_preferences(pdf, options: dict, direction: str | None) -> None
         vp = Dictionary()
         pdf.Root[Name.ViewerPreferences] = vp
         vp = pdf.Root["/ViewerPreferences"]
+    try:
+        _dictionary(vp)
+    except _UnreadableProperty:
+        raise ValueError("The document's initial view cannot be read completely.") from None
+    # The catalog may share this dictionary with other consumers. Own only
+    # the edited preferences, preserving every unrelated entry/reference.
+    vp = Dictionary(vp)
+    pdf.Root.ViewerPreferences = vp
     for pdf_key, value in wanted.items():
         key = "/" + pdf_key
         if value:
@@ -360,7 +508,11 @@ def set_initial_view(
     if zoom == "percent":
         if zoom_percent is None:
             raise ValueError("zoom 'percent' needs a zoom_percent")
-        if not _ZOOM_MIN <= float(zoom_percent) <= _ZOOM_MAX:
+        try:
+            valid_percent = _ZOOM_MIN <= _number(zoom_percent) <= _ZOOM_MAX
+        except _UnreadableProperty:
+            valid_percent = False
+        if not valid_percent:
             minimum = f"{_ZOOM_MIN:g}"
             maximum = f"{_ZOOM_MAX:g}"
             raise ValueError(
@@ -368,6 +520,8 @@ def set_initial_view(
             )
     if direction is not None and direction not in ("L2R", "R2L"):
         raise ValueError(f"direction must be 'L2R' or 'R2L', got {direction!r}")
+    if open_page is not None and (not isinstance(open_page, int) or isinstance(open_page, bool)):
+        raise ValueError("The opening page must be an integer.")
 
     output_path = Path(output)
     with pikepdf.open(file) as pdf:
@@ -385,27 +539,51 @@ def set_initial_view(
             else:
                 pdf.Root[Name.PageMode] = Name("/" + _PAGE_MODES[page_mode])
 
-        if open_page is not None:
-            page_number = int(open_page)
+        if open_page is not None or zoom is not None:
+            try:
+                previous = _open_action_destination(pdf)
+                action = pdf.Root.get('/OpenAction')
+                replaceable = _open_action_is_replaceable(pdf)
+            except _UnreadableProperty:
+                replaceable = False
+            if not replaceable:
+                raise ValueError(
+                    "The document's opening action cannot be changed without losing behavior."
+                )
+            page_number = open_page
+            if page_number is None:
+                if previous is None:
+                    raise ValueError("Choose an opening page before changing its magnification.")
+                page_number = _page_index_of(pdf, previous[0]) + 1
             if page_number == 0:
                 if "/OpenAction" in pdf.Root:
-                    if not _open_action_is_replaceable(pdf):
+                    if isinstance(action, Dictionary) and '/Next' in action:
                         raise ValueError(
-                            "the document's open action is a script, not a destination; "
-                            "it was left unchanged"
+                            "The document's opening action cannot be changed without losing behavior."
                         )
                     del pdf.Root["/OpenAction"]
             else:
                 if page_number < 1 or page_number > total:
                     raise ValueError(f"open_page {page_number} is out of range (1-{total})")
-                if not _open_action_is_replaceable(pdf):
-                    raise ValueError(
-                        "the document's open action is a script, not a destination; "
-                        "it was left unchanged"
-                    )
-                pdf.Root[Name.OpenAction] = _destination_for(
-                    pdf.pages[page_number - 1].obj, zoom or "default", zoom_percent
-                )
+                page = pdf.pages[page_number - 1].obj
+                if zoom is None and previous is not None:
+                    destination = Array([page, *list(previous)[1:]])
+                else:
+                    destination = _destination_for(page, zoom or 'default', zoom_percent)
+                    if (previous is not None and previous[1] == Name.XYZ
+                            and destination[1] == Name.XYZ):
+                        destination[2], destination[3] = previous[2], previous[3]
+                if isinstance(action, Dictionary):
+                    try:
+                        owned = _opening_action_copy(pdf, action)
+                    except _UnreadableProperty:
+                        raise ValueError(
+                            "The document's opening action cannot be changed without losing behavior."
+                        ) from None
+                    owned.D = destination
+                    pdf.Root.OpenAction = owned
+                else:
+                    pdf.Root.OpenAction = destination
 
         _apply_viewer_preferences(
             pdf,
@@ -632,11 +810,11 @@ def set_document_title(
     output_path = Path(output)
     with pikepdf.open(file) as pdf:
         if title is not None:
-            with pdf.open_metadata() as meta:
-                meta["dc:title"] = str(title)
+            from .metadata import apply_metadata_fields
+            apply_metadata_fields(pdf, title=str(title))
         if display is not None:
             _apply_viewer_preferences(pdf, {"display_doc_title": bool(display)}, None)
-        _save(pdf, file, output_path)
+        _save(pdf, file, output_path, fix_metadata_version=False)
     return {"output": str(output_path), "title": title, "display_doc_title": display}
 
 
@@ -726,11 +904,14 @@ def _is_tagged(pdf) -> bool:
     mark_info = root.get("/MarkInfo")
     marked = False
     if mark_info is not None:
-        try:
-            marked = bool(mark_info.get("/Marked"))
-        except (TypeError, ValueError, AttributeError):
-            marked = False
-    return marked and root.get("/StructTreeRoot") is not None
+        raw = _dictionary(mark_info).get('/Marked')
+        if raw is not None and not isinstance(raw, bool):
+            raise _UnreadableProperty
+        marked = raw is True
+    tree = root.get('/StructTreeRoot')
+    if tree is not None:
+        _dictionary(tree)
+    return marked and tree is not None
 
 
 def _page_sizes(pdf) -> list[dict]:
@@ -739,13 +920,39 @@ def _page_sizes(pdf) -> list[dict]:
     rotated page presents its swapped dimensions, which is the size seen."""
     groups: dict[tuple[float, float], int] = {}
     for page in pdf.pages:
-        try:
-            box = [float(v) for v in page.cropbox]
-            width = round(abs(box[2] - box[0]), 2)
-            height = round(abs(box[3] - box[1]), 2)
-            rotate = int(page.obj.get("/Rotate", 0) or 0) % 360
-        except (TypeError, ValueError, AttributeError, IndexError):
-            continue
+        box = [_number(v) for v in page.cropbox]
+        media = [_number(v) for v in page.mediabox]
+        if len(box) != 4 or len(media) != 4:
+            raise _UnreadableProperty
+        # CropBox is clipped to MediaBox; UserUnit scales default-user-space
+        # coordinates into physical 1/72-inch points (page dictionary).
+        left = max(min(box[0], box[2]), min(media[0], media[2]))
+        right = min(max(box[0], box[2]), max(media[0], media[2]))
+        bottom = max(min(box[1], box[3]), min(media[1], media[3]))
+        top = min(max(box[1], box[3]), max(media[1], media[3]))
+        unit = _number(page.obj.get('/UserUnit', 1))
+        if unit <= 0 or right < left or top < bottom:
+            raise _UnreadableProperty
+        width = round(_number((right - left) * unit), 2)
+        height = round(_number((top - bottom) * unit), 2)
+        node, rotation, seen = page.obj, None, set()
+        for _ in range(65):
+            _dictionary(node)
+            identity = node.objgen
+            if identity != (0, 0):
+                if identity in seen:
+                    raise _UnreadableProperty
+                seen.add(identity)
+            rotation = node.get('/Rotate')
+            if rotation is not None or '/Parent' not in node:
+                break
+            node = node.Parent
+        else:
+            raise _UnreadableProperty
+        rotation = 0 if rotation is None else rotation
+        if not isinstance(rotation, int) or isinstance(rotation, bool) or rotation % 90:
+            raise _UnreadableProperty
+        rotate = rotation % 360
         if rotate in (90, 270):
             width, height = height, width
         groups[(width, height)] = groups.get((width, height), 0) + 1
@@ -763,30 +970,46 @@ def _search_index(pdf) -> str | None:
     piece_info = pdf.Root.get("/PieceInfo")
     if piece_info is None:
         return None
+    _dictionary(piece_info)
     found: list[str] = []
-
-    def walk(node, depth: int) -> None:
-        if depth > 6 or found:
-            return
+    seen = set()
+    stack = [(piece_info, 0)]
+    visited = 0
+    string_bytes = 0
+    while stack:
+        node, depth = stack.pop()
+        visited += 1
+        if visited > 10000 or depth > 64:
+            raise _UnreadableProperty
+        identity = getattr(node, 'objgen', (0, 0))
+        if identity != (0, 0):
+            if identity in seen:
+                continue
+            seen.add(identity)
         if isinstance(node, pikepdf.Dictionary):
-            for value in node.values():
-                walk(value, depth + 1)
+            if len(node) + len(stack) > 10000:
+                raise _UnreadableProperty
+            stack.extend((value, depth + 1) for value in node.values())
         elif isinstance(node, pikepdf.Array):
-            for value in node:
-                walk(value, depth + 1)
+            if len(node) + len(stack) > 10000:
+                raise _UnreadableProperty
+            stack.extend((value, depth + 1) for value in node)
         elif isinstance(node, pikepdf.String):
-            text = str(node)
+            string_bytes += len(bytes(node))
+            if string_bytes > 2 * 1024 * 1024:
+                raise _UnreadableProperty
+            text = _pdf_text(node)
             if text.lower().endswith(".pdx"):
                 found.append(text)
-
-    try:
-        walk(piece_info, 0)
-    except (TypeError, ValueError, AttributeError, RuntimeError):
-        return None
+        elif isinstance(node, pikepdf.Stream):
+            # Private opaque bytes cannot prove that no index was recorded.
+            raise _UnreadableProperty
+    if len(set(found)) > 1:
+        raise _UnreadableProperty
     return found[0] if found else None
 
 
-def get_advanced_properties(file: str) -> dict:
+def _get_advanced_properties(file: str) -> dict:
     """Read the Advanced tab's facts: version, fast web view, tagged status,
     page sizes, the trapped flag, the base URL, and whether an open action and
     a search index are recorded.
@@ -796,16 +1019,15 @@ def get_advanced_properties(file: str) -> dict:
     """
     size = Path(file).stat().st_size
     with pikepdf.open(file) as pdf:
-        trapped = "unknown"
-        raw_trapped = pdf.trailer.get("/Info", {}).get("/Trapped") if "/Info" in pdf.trailer else None
-        if raw_trapped is not None:
-            trapped = _TRAPPED_INVERSE.get(str(raw_trapped).lstrip("/"), "unknown")
+        info = pdf.trailer.get('/Info')
+        raw_trapped = _dictionary(info).get('/Trapped') if info is not None else None
+        trapped = _enum_name(raw_trapped, _TRAPPED_INVERSE, 'unknown')
         base_url = ""
         uri = pdf.Root.get("/URI")
         if uri is not None:
-            raw_base = uri.get("/Base")
+            raw_base = _dictionary(uri).get("/Base")
             if raw_base is not None:
-                base_url = str(raw_base)
+                base_url = _pdf_text(raw_base)
         # The effective declared version, plus the two declarations it
         # came from. A physical header alone is not the document's version
         # when the catalog declares a later one (Table 29).
@@ -825,6 +1047,14 @@ def get_advanced_properties(file: str) -> dict:
             "has_open_action": "/OpenAction" in pdf.Root,
             "search_index": _search_index(pdf),
         }
+
+
+def get_advanced_properties(file: str) -> dict:
+    """Complete facts or a named unreadable result, never partial absence."""
+    try:
+        return _get_advanced_properties(file)
+    except (ValueError, TypeError, AttributeError, IndexError, KeyError, RuntimeError, pikepdf.PdfError):
+        raise ValueError("The document's advanced properties cannot be read completely.") from None
 
 
 def set_advanced_properties(
@@ -852,10 +1082,18 @@ def set_advanced_properties(
             # that carries no document information at all.
             pdf.docinfo[Name.Trapped] = Name("/" + _TRAPPED[trapped])
         if base_url is not None:
-            text = str(base_url).strip()
+            if not isinstance(base_url, str):
+                raise ValueError("The document base URL must be text.")
+            text = base_url.strip()
+            previous = pdf.Root.get('/URI')
+            uri = Dictionary() if previous is None else Dictionary(_dictionary(previous))
             if text:
-                pdf.Root[Name.URI] = Dictionary(Base=String(text))
-            elif "/URI" in pdf.Root:
+                uri.Base = String(text)
+            elif '/Base' in uri:
+                del uri['/Base']
+            if len(uri):
+                pdf.Root.URI = uri
+            elif '/URI' in pdf.Root:
                 del pdf.Root["/URI"]
 
         _save(pdf, file, output_path)
