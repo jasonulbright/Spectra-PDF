@@ -8,10 +8,9 @@
 // page labels, layer configuration, document language, and viewer preferences.
 // catalog-carry.test.ts pins every carried key.
 //
-// OWN SOURCE ONLY, the embedded-files rule: these are properties of the
-// DOCUMENT, and a page inserted from a donor must not import the donor's
-// bookmarks or layer config. (A donor page's optional content still renders
-// — unregistered OCGs default to visible; its layers are simply not listed.)
+// Document-owned entries carry only from the owner. Optional content is
+// composed separately from EVERY contributing source by optional-content-carry:
+// a donor's layer state determines what its copied pages actually display.
 //
 // The hard part is REFERENCE IDENTITY: bookmarks point at pages, the layer
 // config points at OCG objects that ride the copied page subtrees. A naive
@@ -428,87 +427,6 @@ function carryPageLabels(
   output.catalog.set(N('PageLabels'), output.context.obj({ Nums: nums }));
 }
 
-// ── /OCProperties (layers) ─────────────────────────────────────────────────
-
-function mapRefArray(arr: PDFArray | undefined, map: ObjectMap, out: PDFDocument): PDFArray {
-  const rebuilt = out.context.obj([]);
-  if (!arr) return rebuilt;
-  for (let i = 0; i < arr.size(); i++) {
-    const el = arr.get(i);
-    if (el instanceof PDFRef) {
-      const mapped = map.get(el.tag);
-      if (mapped) rebuilt.push(mapped);
-    } else if (el instanceof PDFArray) {
-      const sub = mapRefArray(el, map, out);
-      if (sub.size() > 0) rebuilt.push(sub);
-    } else if (el instanceof PDFString || el instanceof PDFHexString) {
-      rebuilt.push(PDFString.of(el.decodeText())); // /Order group labels
-    }
-  }
-  return rebuilt;
-}
-
-function carryOcProperties(
-  output: PDFDocument,
-  source: PDFDocument,
-  objectMap: ObjectMap,
-): void {
-  const src = source.catalog.lookupMaybe(N('OCProperties'), PDFDict);
-  if (!src) return;
-  const srcOcgs = src.lookupMaybe(N('OCGs'), PDFArray);
-  const ocgs = mapRefArray(srcOcgs, objectMap, output);
-  if (ocgs.size() === 0) return; // every configured OCG's pages were dropped
-
-  const d = src.lookupMaybe(N('D'), PDFDict);
-  const outD = output.context.obj({});
-  if (d) {
-    for (const key of ['Name', 'Creator', 'BaseState', 'ListMode'] as const) {
-      const v = d.lookup(N(key));
-      if (v instanceof PDFName) outD.set(N(key), N(v.decodeText()));
-      else if (v instanceof PDFString || v instanceof PDFHexString)
-        outD.set(N(key), PDFString.of(v.decodeText()));
-    }
-    for (const key of ['Order', 'OFF', 'ON', 'Locked', 'RBGroups'] as const) {
-      const arr = d.lookupMaybe(N(key), PDFArray);
-      if (arr) {
-        const mapped = mapRefArray(arr, objectMap, output);
-        if (mapped.size() > 0 || key === 'Order') outD.set(N(key), mapped);
-      }
-    }
-    // /AS usage-application entries drive auto state (zoom/print); each names
-    // OCGs — carried with the refs mapped, dropped when none survive.
-    const as = d.lookupMaybe(N('AS'), PDFArray);
-    if (as) {
-      const outAs = output.context.obj([]);
-      for (let i = 0; i < as.size(); i++) {
-        const entry = as.lookupMaybe(i, PDFDict);
-        if (!entry) continue;
-        const entryOcgs = mapRefArray(entry.lookupMaybe(N('OCGs'), PDFArray), objectMap, output);
-        if (entryOcgs.size() === 0) continue;
-        const outEntry = output.context.obj({});
-        const event = entry.lookup(N('Event'));
-        if (event instanceof PDFName) outEntry.set(N('Event'), N(event.decodeText()));
-        const category = entry.lookupMaybe(N('Category'), PDFArray);
-        if (category) {
-          const cats = output.context.obj([]);
-          for (let c = 0; c < category.size(); c++) {
-            const cat = category.lookup(c);
-            if (cat instanceof PDFName) cats.push(N(cat.decodeText()));
-          }
-          outEntry.set(N('Category'), cats);
-        }
-        outEntry.set(N('OCGs'), entryOcgs);
-        outAs.push(outEntry);
-      }
-      if (outAs.size() > 0) outD.set(N('AS'), outAs);
-    }
-  }
-  const rebuilt = output.context.obj({});
-  rebuilt.set(N('OCGs'), ocgs);
-  rebuilt.set(N('D'), outD);
-  output.catalog.set(N('OCProperties'), rebuilt);
-}
-
 // ── document actions and scripts ──────────────────────────────────────────
 
 /** Preserve document-owned action roots, not just script text.
@@ -525,7 +443,7 @@ interface CatalogObjectCopy {
 }
 
 function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, objectMap: ObjectMap,
-  structureMap: ObjectMap = new Map()): CatalogObjectCopy {
+  structureMap: ObjectMap = new Map(), layerMap: Map<string, PDFRef[]> = new Map()): CatalogObjectCopy {
   const names = source.doc.catalog.lookupMaybe(N('Names'), PDFDict);
   const fail = () => new Error(tChrome('app.operation.unverified'));
   const structure = (raw: PDFObject | undefined): PDFRef => {
@@ -609,6 +527,8 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
     if (value instanceof PDFRef) {
       if (pageRefs.has(value.tag)) { const page = pages.get(value.tag); if (!page) throw fail(); return page; }
       if (structureMap.has(value.tag)) return structure(value);
+      const layers = layerMap.get(value.tag);
+      if (layers) { if (layers.length !== 1) throw fail(); return layers[0]; }
       const priorRef = refs.get(value.tag); if (priorRef) return priorRef;
       const target = source.doc.context.lookup(value); if (!target) throw fail();
       if (target instanceof PDFDict && target.lookup(N('Type')) === N('StructElem')) {
@@ -617,7 +537,8 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
       // Reuse identity-bearing page objects, not copied action subtrees. An
       // action may also be reachable through a page: that copier's GoTo can
       // still point at a detached page, so it is never an authority here.
-      if (target instanceof PDFDict && ([N('OCG'), N('Annot')].includes(target.lookup(N('Type')) as PDFName)
+      if (target instanceof PDFDict && [N('OCG'), N('OCMD')].includes(target.lookup(N('Type')) as PDFName)) throw fail();
+      if (target instanceof PDFDict && ([N('Annot')].includes(target.lookup(N('Type')) as PDFName)
         || target.has(N('FT')) || target.lookup(N('Subtype')) === N('Widget'))) {
         const mapped = objectMap.get(value.tag); if (!mapped) throw fail(); return mapped;
       }
@@ -628,9 +549,33 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
     if (value instanceof PDFDict) {
       if ([N('Page'), N('Pages'), N('Catalog'), N('StructElem'), N('StructTreeRoot')].includes(value.lookup(N('Type')) as PDFName)) throw fail();
       if (value.lookup(N('S')) === N('GoTo') && !value.has(N('D'))) throw fail();
+      if (value.lookup(N('S')) === N('SetOCGState') && !value.has(N('State'))) throw fail();
       const result = output.context.obj({}); direct.set(value, result);
       for (const [key, child] of value.entries()) {
         if (key === N('D') && value.lookup(N('S')) === N('GoTo')) result.set(key, copyDestination(child, depth + 1));
+        else if (key === N('State') && value.lookup(N('S')) === N('SetOCGState')) {
+          // Preserve the ordered action, including repeated operations on a
+          // group. Repeated pages share the carrier's one logical layer;
+          // targets come from its actual identity map, never from names.
+          const state = source.doc.context.lookup(child);
+          if (!(state instanceof PDFArray)) throw fail();
+          const mapped = output.context.obj([]); let operator = false, targetsSinceOperator = 0;
+          for (const item of state.asArray()) {
+            if (++visits > 100000) throw fail();
+            if (item instanceof PDFName && [N('ON'), N('OFF'), N('Toggle')].includes(item)) {
+              if (operator && targetsSinceOperator === 0) throw fail();
+              mapped.push(item); operator = true; targetsSinceOperator = 0;
+            } else {
+              if (!operator || !(item instanceof PDFRef)) throw fail();
+              const targets = layerMap.get(item.tag), group = source.doc.context.lookup(item);
+              if (!targets?.length || !(group instanceof PDFDict) || group.lookup(N('Type')) !== N('OCG')) throw fail();
+              for (const target of targets) { if (++visits > 100000) throw fail(); mapped.push(target); }
+              targetsSinceOperator++;
+            }
+          }
+          if (operator && targetsSinceOperator === 0) throw fail();
+          result.set(key, mapped);
+        }
         else result.set(key, copy(key === N('SD') && value.lookup(N('S')) === N('GoTo')
           ? explicit(source.doc.context.lookup(child), true) : child, depth + 1));
       }
@@ -707,14 +652,14 @@ export function carryDocumentBehavior(output: PDFDocument, source: CarriedSource
  * must be the SAME loaded instance the builder copied pages from — the page
  * and in-page object maps are what make reference remapping possible at all.
  */
-export function carryDocumentCatalog(output: PDFDocument, source: CarriedSourcePages, structureMap?: ObjectMap): void {
+export function carryDocumentCatalog(output: PDFDocument, source: CarriedSourcePages, structureMap?: ObjectMap,
+  layerMap?: Map<string, PDFRef[]>): void {
   const srcCatalog = source.doc.catalog;
   const objectMap = buildInPageObjectMap(source, output);
-  const copier = catalogObjectCopier(output, source, objectMap, structureMap);
+  const copier = catalogObjectCopier(output, source, objectMap, structureMap, layerMap);
   carryLang(output, srcCatalog);
   carryViewerPreferences(output, source);
   carryOutlines(output, source, copier);
   carryPageLabels(output, source);
-  carryOcProperties(output, source.doc, objectMap);
   carryDocumentBehavior(output, source, objectMap, copier);
 }

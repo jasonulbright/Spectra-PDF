@@ -224,10 +224,12 @@ describe('catalog carry — /OCProperties', () => {
     expect(text(name)).toBe('Watermarks');
   });
 
-  it('dropping every page that uses the OCG drops the config too', async () => {
+  it('dropping every layer-using page retains the document-owned registry and state', async () => {
     const src = await richSource();
     const out = await rebuild([pageOf(src, 0)]); // page 1 (the OCG user) gone
-    expect(out.catalog.get(N('OCProperties'))).toBeUndefined();
+    const props = out.catalog.lookup(N('OCProperties'), PDFDict);
+    const group = props.lookup(N('OCGs'), PDFArray).get(0);
+    expect(props.lookup(N('D'), PDFDict).lookup(N('OFF'), PDFArray).asArray()).toEqual([group]);
   });
 });
 
@@ -356,7 +358,12 @@ describe('catalog carry — document JavaScript name tree', () => {
     expect(out.getModificationDate()?.toISOString()).toBe('2002-03-04T05:06:07.000Z');
     const heading = out.catalog.lookup(N('Outlines'), PDFDict).lookup(N('First'), PDFDict);
     expect(text(heading.lookup(N('Title')))).toBe('Intro');
-    if (!keepOwn) { expect(heading.get(N('Dest'))).toBeUndefined(); expect(out.catalog.get(N('OCProperties'))).toBeUndefined(); }
+    if (!keepOwn) {
+      expect(heading.get(N('Dest'))).toBeUndefined();
+      // Both rich fixtures declare a registry-only group on their removed
+      // page 1; neither document's declared layer list is discarded.
+      expect(out.catalog.lookup(N('OCProperties'), PDFDict).lookup(N('OCGs'), PDFArray).size()).toBe(2);
+    }
     expect(out.getPageCount()).toBe(keepOwn ? 2 : 1);
   });
   it('does not invent source dates when loading a document without metadata', async () => {

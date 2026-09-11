@@ -30,7 +30,12 @@ describe('Layers revision and session ownership', () => {
     await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 2);
     await $('[data-testid="layer-toggle-1"]').click();
     await browser.waitUntil(async () => (await snapshot(aw)).some(l => !l.visible));
-    expect((await snapshot(aw)).map(l => l.visible)).toEqual([false, true]);
+    // The removed page's registry-only group remains declared. B is still
+    // the group rendered by the first surviving page, not group A at index 0.
+    expect((await snapshot(aw)).map(l => l.visible)).toEqual([true, false, true]);
+    const pdf = await PDFDocument.load(readFileSync(aw)), oc = pdf.catalog.lookup(N('OCProperties'), PDFDict);
+    const rendered = pdf.getPage(0).node.lookup(N('Resources'), PDFDict).lookup(N('Properties'), PDFDict).get(N('Group'));
+    expect(oc.lookup(N('D'), PDFDict).lookup(N('OFF'), PDFArray).asArray().map(ref => ref.toString())).toContain(rendered!.toString());
   });
   it('native refusal and retry stay with A across B, Home and remount; Undo restores exact bytes', async () => {
     const before = readFileSync(aw); chmodSync(aw, 0o444);

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PDFDocument, PDFName, PDFString } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from 'pdf-lib';
 import { createLayerSessions, parseLayerRead, remapLayerIndex, type Layer } from '../src/renderer/lib/layer-session';
 import { initialState } from '../src/renderer/state/reducer';
 import type { AppState, OpenFile, OpenDocument } from '../src/renderer/state/types';
@@ -18,7 +18,15 @@ async function layered(duplicateNames = false) {
   pdf.catalog.set(PDFName.of('OCProperties'), pdf.context.obj({ OCGs: groups, D: { ON: groups, OFF: [] } })); return pdf.save();
 }
 async function rebuild(bytes: Uint8Array, indices = [1, 2]) {
-  return buildPdf(indices.map(pageIndex => ({ sourceKey: 'A', bytes, pageIndex, rotation: 0 })), bytes, 'A');
+  const built = await buildPdf(indices.map(pageIndex => ({ sourceKey: 'A', bytes, pageIndex, rotation: 0 })), bytes, 'A');
+  // The builder retains registry-only A now. Deliberately reorder the real
+  // registry without changing any group references, so these tests still
+  // prove re-resolution rather than accidentally accepting the old index.
+  const pdf = await PDFDocument.load(built, { updateMetadata: false });
+  const props = pdf.catalog.lookup(PDFName.of('OCProperties'), PDFDict);
+  const groups = props.lookup(PDFName.of('OCGs'), PDFArray).asArray();
+  props.set(PDFName.of('OCGs'), pdf.context.obj([groups[1], groups[2], groups[0]]));
+  return pdf.save();
 }
 async function fixture() {
   const a: OpenFile = { path: 'A', workingPath: 'workA', name: 'A', buffer: await layered(), pageCount: 3, dirty: false, undoStack: [], redoStack: [] };
@@ -47,7 +55,7 @@ describe('layer working-session ownership', () => {
       const buffer = await rebuild(new Uint8Array(f.a.buffer!));
       f.change({ pageDirtyPaths: [], files: new Map(f.state().files).set('A', { ...f.a, buffer, pageCount: 2,
         authoredIdentity: { sourceBuffer: f.a.buffer, buffer, pages: ['page1', 'page2'], documents: [{ id: 'doc', name: 'A' }] } }) });
-      f.call.mockResolvedValue(reply(rows(['B', 'C'])));
+      f.call.mockResolvedValue(reply(rows(['B', 'C', 'A'])));
     });
     expect(f.s.error).toBe(''); expect(f.operation.mock.calls[0][2]).toEqual({ index: 0, visible: false });
   });
@@ -59,7 +67,7 @@ describe('layer working-session ownership', () => {
       f.change({ pageDirtyPaths: mode === 'new-pending' ? ['A'] : [], files: new Map(f.state().files).set('A', { ...f.a, buffer, pageCount: 2,
         authoredIdentity: mode === 'no-edge' ? undefined : { sourceBuffer: f.a.buffer, buffer,
           pages: mode === 'missing-page' ? ['foreign', 'page2'] : ['page1', 'page2'], documents: [] } }) });
-      f.call.mockResolvedValue(reply(rows(mode === 'altered-list' ? ['Foreign', 'C'] : ['B', 'C'])));
+      f.call.mockResolvedValue(reply(rows(mode === 'altered-list' ? ['Foreign', 'C', 'A'] : ['B', 'C', 'A'])));
     });
     expect(f.operation).not.toHaveBeenCalled(); expect(f.s.error).not.toBe('');
   });

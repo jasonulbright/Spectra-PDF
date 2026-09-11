@@ -7,6 +7,7 @@ import { carryAcroForm, prepareSourceForms, sourceHasXfa } from './acroform-carr
 import type { FormContribution } from './acroform-carry';
 import { carryEmbeddedFiles } from './embedded-files-carry';
 import { carryDocumentCatalog } from './catalog-carry';
+import { carryOptionalContent } from './optional-content-carry';
 import { carryDocumentMetadata } from './metadata-carry';
 import { copyOutputIntents } from './output-intents-carry';
 import { carryFormatDeclarations, saveWithFormatDeclarations } from './format-declarations';
@@ -248,20 +249,21 @@ function stripImportedOriginals(
   copied: import('pdf-lib').PDFPage,
   annotations: ExportAnnotation[],
   removedImportedOriginals: NonNullable<ExportAnnotation['importedOriginal']>[],
-): void {
+): Map<ExportAnnotation, PDFObject> {
+  const layerGates = new Map<ExportAnnotation, PDFObject>();
   // Two sources of fingerprints to strip-on-match: annotations being
   // re-appended (live, possibly edited) and ones the user REMOVED (tombstones
   // — matched and stripped same as any other, just never re-appended after).
   // Without the latter, deleting an imported annotation would be a no-op:
   // its fingerprint vanishes with it, nothing left to match the real PDF
   // object against, and the "original" reappears on reindex after commit.
-  const fingerprints = [
-    ...annotations.map((a) => a.importedOriginal),
-    ...removedImportedOriginals,
-  ].filter((f): f is NonNullable<ExportAnnotation['importedOriginal']> => !!f);
-  if (fingerprints.length === 0) return;
+  const originals = annotations.flatMap(annotation => annotation.importedOriginal
+    ? [{ fingerprint: annotation.importedOriginal, annotation: annotation as ExportAnnotation | undefined }] : []);
+  originals.push(...removedImportedOriginals.map(fingerprint => ({ fingerprint, annotation: undefined })));
+  const fingerprints = originals.map(original => original.fingerprint);
+  if (fingerprints.length === 0) return layerGates;
   const annots = copied.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
-  if (!annots) return;
+  if (!annots) return layerGates;
   const consumed = new Set<number>(); // indices into `fingerprints` already matched
   // Iterate back-to-front: PDFArray.remove(index) shifts later indices, which
   // would desync a forward loop's remaining indices mid-iteration.
@@ -296,8 +298,15 @@ function stripImportedOriginals(
     );
     if (matchIndex === -1) continue; // no positive match — never guess-remove
     consumed.add(matchIndex);
+    const annotation = originals[matchIndex].annotation;
+    const layer = dict.get(PDFName.of('OC'));
+    // Geometry and appearance are reauthored; layer membership is not.
+    // Its reference is already in the output context and configured by the
+    // optional-content carry, so the replacement uses that exact identity.
+    if (annotation && layer !== undefined) layerGates.set(annotation, layer);
     annots.remove(i);
   }
+  return layerGates;
 }
 
 /** The stroke width every dimension annotation is drawn at. */
@@ -322,7 +331,7 @@ function addAnnotations(
   stampImages: Map<string, import('pdf-lib').PDFImage>,
   signatureFonts: Map<string, import('pdf-lib').PDFFont>,
 ): void {
-  stripImportedOriginals(copied, annotations, removedImportedOriginals);
+  const layerGates = stripImportedOriginals(copied, annotations, removedImportedOriginals);
   const context = output.context;
   // CropBox (defaults to MediaBox when absent, so byte-identical for the
   // common case) — must match what annotation-import.ts reads via pdf.js's
@@ -1208,6 +1217,8 @@ function addAnnotations(
       });
       if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
     }
+    const layer = layerGates.get(a);
+    if (layer !== undefined) annot.set(PDFName.of('OC'), layer);
     const ref = context.register(annot);
     let annots = copied.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
     if (!annots) {
@@ -1375,6 +1386,7 @@ async function assemblePages(
   const stampImages = await embedStampImages(output, pages);
   const signatureFonts = await embedSignatureFonts(output, pages);
   const used = new Set<PDFPage>();
+  const pendingExtras: { copied: PDFPage; page: ExportPage }[] = [];
   // Which source page landed at which output page — the reference-identity
   // channel every catalog/struct remap depends on (catalog-carry.ts).
   const pairsByKey = new Map<string, { srcIndex: number; outPage: PDFPage }[]>();
@@ -1389,7 +1401,9 @@ async function assemblePages(
     }
     used.add(copied);
     carryIntents(src.doc, src.doc.getPage(page.pageIndex).node, copied.node);
-    applyPageExtras(copied, page, output, stampImages, signatureFonts);
+    // Layer identity is paired against the untouched copy. Adding/removing
+    // an annotation or wrapping Contents first changes that graph's shape.
+    pendingExtras.push({ copied, page });
     output.addPage(copied);
     // copyPages clones the page leaf separately from its recursive object
     // cache. An annotation's /P can therefore name a second, detached copy
@@ -1417,12 +1431,10 @@ async function assemblePages(
     doc: s.doc,
     pairs: pairsByKey.get(key) ?? [],
   }));
-  const structureMaps = carryStructTree(output, carriedSources);
   const formatSources = carriedSources.map(source => source.doc);
-  // Document-level catalog state (/Lang, /ViewerPreferences, /Outlines,
-  // /PageLabels, /OCProperties) carries from the OWN source only — a page
-  // inserted from a donor must not import the donor document's bookmarks or
-  // layer config (the embedded-files rule).
+  // Layer state belongs to every source whose content we copy. Resolve the
+  // owner separately: its registry/configurations survive even with no pages.
+  let owner: CarriedSourcePages | undefined;
   if (ownSourceKey) {
     const own = sources.get(ownSourceKey);
     const ownPairs = pairsByKey.get(ownSourceKey);
@@ -1431,12 +1443,22 @@ async function assemblePages(
     // page-relative entries use an empty map, never the donor's namespace.
     const ownDoc = own?.doc ?? (ownBytes ? await PDFDocument.load(ownBytes, { ignoreEncryption: true, updateMetadata: false }) : undefined);
     if (ownDoc) {
-      formatSources.push(ownDoc);
-      carryDocumentCatalog(output, { doc: ownDoc, pairs: ownPairs ?? [] }, structureMaps.get(ownDoc));
-      carryDocumentInfo(output, ownDoc);
-      await carryDocumentMetadata(output, ownDoc, metadataOverrides);
-      carryIntents(ownDoc, ownDoc.catalog, output.catalog);
+      owner = { doc: ownDoc, pairs: ownPairs ?? [] };
     }
+  }
+  const optionalContent = carryOptionalContent(output, carriedSources, owner);
+  if (optionalContent.properties) output.catalog.set(PDFName.of('OCProperties'),
+    output.context.getObjectRef(optionalContent.properties) ?? output.context.register(optionalContent.properties));
+  for (const { copied, page } of pendingExtras) applyPageExtras(copied, page, output, stampImages, signatureFonts);
+  const structureMaps = carryStructTree(output, carriedSources);
+  // Bookmarks, language, preferences and document actions remain owner-only.
+  // Actions use the same actual layer identities as the composed registry.
+  if (owner) {
+    formatSources.push(owner.doc);
+    carryDocumentCatalog(output, owner, structureMaps.get(owner.doc), optionalContent.identities.get(owner.doc));
+    carryDocumentInfo(output, owner.doc);
+    await carryDocumentMetadata(output, owner.doc, metadataOverrides);
+    carryIntents(owner.doc, owner.doc.catalog, output.catalog);
   }
   carryFormatDeclarations(output, formatSources);
 }
