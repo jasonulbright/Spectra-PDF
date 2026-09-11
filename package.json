@@ -78,6 +78,7 @@
     "@tesseract.js-data/tur": "1.0.0",
     "@tesseract.js-data/ukr": "1.0.0",
     "@tesseract.js-data/vie": "1.0.0",
+    "@xmldom/xmldom": "0.9.12",
     "d3-selection": "3.0.0",
     "d3-zoom": "3.0.0",
     "i18next": "26.3.6",

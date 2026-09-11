@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileS
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
-import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, PDFNumber, PDFString } from 'pdf-lib';
+import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, PDFString, decodePDFRawStream } from 'pdf-lib';
 import {
   waitForHarness,
   openByPaths,
@@ -19,6 +19,11 @@ import {
   importPagesIntoDoc,
   waitForActiveCanvasPageIds,
   deleteCanvasPagesAndWait,
+  signActiveFileInPlace,
+  setView,
+  setActiveOp,
+  focusTab,
+  getSelectedCanvasPageIds,
 } from '../support/harness.js';
 
 // The catalog carry (lib/catalog-carry.ts): bookmarks and page labels
@@ -161,5 +166,59 @@ describe('catalog state survives committed page edits', () => {
     expect(out.getCreationDate()?.toISOString()).toBe('2001-02-03T04:05:06.000Z');
     expect(out.getModificationDate()?.toISOString()).toBe('2002-03-04T05:06:07.000Z');
     expect(readFileSync(own).equals(before)).toBe(true);
+  });
+
+  for (const malformed of [false, true]) it(`preserves XMP through the actual browser worker, or refuses atomically (malformed=${malformed})`, async () => {
+    const dir = mkdtempSync(resolve(__dirname, '../../xmp-live.local.d-')), path = resolve(dir, 'source.pdf'), N = PDFName.of;
+    const packet = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:m="https://example.invalid/matter/" xmlns:pdf="http://ns.adobe.com/pdf/1.3/"><m:MatterID>Live-é-2026-143</m:MatterID><pdf:Producer>Original tool</pdf:Producer></rdf:Description></rdf:RDF></x:xmpmeta>`;
+    const pdf = await PDFDocument.create({ updateMetadata: false }); pdf.addPage([300, 700]); pdf.addPage([400, 700]);
+    pdf.catalog.set(N('Metadata'), pdf.context.register(pdf.context.flateStream(new TextEncoder().encode(malformed ? packet.replace('</rdf:RDF>', '') : packet), { Type: 'Metadata', Subtype: 'XML' })));
+    const original = Buffer.from(await pdf.save()); writeFileSync(path, original);
+    await closeAllFiles(); await openByPaths([path]); const ids = await waitForActiveCanvasPageIds(); expect(ids).toHaveLength(2);
+    const work = (await getState()).activeFile!.workingPath, before = readFileSync(work);
+    await selectCanvasPages([ids[0]]); expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true);
+    if (malformed) {
+      let error = ''; try { await commitPendingEdits(); } catch (caught) { error = String(caught); }
+      expect(error).toContain('verif'); expect(readFileSync(work).equals(before)).toBe(true);
+      expect(await invokeAppCommand('edit.undo')).toBe(true);
+    } else {
+      await commitPendingEdits(); const dest = resolve(dir, 'saved.pdf'); await saveActiveAs(dest);
+      const saved = await PDFDocument.load(readFileSync(dest), { updateMetadata: false });
+      expect(saved.getPage(0).getRotation().angle).toBe(90);
+      const stream = saved.catalog.lookup(N('Metadata')); expect(stream).toBeInstanceOf(PDFRawStream);
+      const xml = new TextDecoder('utf-8', { fatal: true }).decode(decodePDFRawStream(stream as PDFRawStream).decode());
+      expect(xml).toContain('Live-é-2026-143'); expect(xml).toContain(`PDFX`); expect(xml).not.toContain('Original tool');
+      expect(await invokeAppCommand('edit.undo')).toBe(true);
+      await browser.waitUntil(async () => {
+        const restored = await PDFDocument.load(readFileSync(work), { updateMetadata: false });
+        return restored.getPage(0).getRotation().angle === 0;
+      });
+    }
+    expect(readFileSync(path).equals(original)).toBe(true);
+  });
+  it('a signed XMP-bearing page edit keeps custom metadata and the signed byte prefix', async () => {
+    const dir = mkdtempSync(resolve(__dirname, '../../xmp-signed-live.local.d-')), path = resolve(dir, 'source.pdf'), N = PDFName.of;
+    const xml = '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:m="https://example.invalid/matter/"><m:MatterID>Signed-metadata-143</m:MatterID></rdf:Description></rdf:RDF></x:xmpmeta>';
+    const pdf = await PDFDocument.create({ updateMetadata: false }); pdf.addPage([300, 700]);
+    pdf.catalog.set(N('Metadata'), pdf.context.register(pdf.context.flateStream(new TextEncoder().encode(xml), { Type: 'Metadata', Subtype: 'XML' })));
+    writeFileSync(path, await pdf.save()); await closeAllFiles(); await openByPaths([path]);
+    await setView('operations'); await setActiveOp('signatures');
+    await signActiveFileInPlace({ pfxPath: resolve(__dirname, '../fixtures/test-signer.pfx'), password: 'testpw' });
+    const work = (await getState()).activeFile!.workingPath, signed = readFileSync(work);
+    await setView('canvas'); await focusTab({ doc: path });
+    // Signing replaces the buffer; select only a still-live post-signing page.
+    await browser.waitUntil(async () => {
+      const ids = await waitForActiveCanvasPageIds();
+      await selectCanvasPages([ids[0]]);
+      const selected = await getSelectedCanvasPageIds(), live = await getWorkspacePageIds();
+      return selected.length === 1 && selected[0] === ids[0] && live.includes(ids[0]);
+    }, { timeout: 30_000, timeoutMsg: 'signed document did not settle into a selectable canvas page' });
+    expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true); await commitPendingEdits();
+    const saved = readFileSync(work); expect(saved.subarray(0, signed.length).equals(signed)).toBe(true);
+    const out = await PDFDocument.load(saved, { updateMetadata: false }); expect(out.getPage(0).getRotation().angle).toBe(90);
+    const metadata = out.catalog.lookup(N('Metadata')); expect(metadata).toBeInstanceOf(PDFRawStream);
+    expect(new TextDecoder().decode(decodePDFRawStream(metadata as PDFRawStream).decode())).toContain('Signed-metadata-143');
+    const checked = cliJson(['verify-signatures', work]) as { signatures: { intact: boolean; valid: boolean }[] }; expect(checked.signatures).toHaveLength(1);
+    expect(checked.signatures[0].intact).toBe(true); expect(checked.signatures[0].valid).toBe(true);
   });
 });

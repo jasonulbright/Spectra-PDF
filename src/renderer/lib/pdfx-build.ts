@@ -7,6 +7,8 @@ import { carryAcroForm, prepareSourceForms, sourceHasXfa } from './acroform-carr
 import type { FormContribution } from './acroform-carry';
 import { carryEmbeddedFiles } from './embedded-files-carry';
 import { carryDocumentCatalog } from './catalog-carry';
+import { carryDocumentMetadata } from './metadata-carry';
+import type { MetadataOverrides } from './metadata-process';
 import type { CarriedSourcePages } from './catalog-carry';
 import { carryStructTree } from './struct-carry';
 import { cloudBumps } from './annotation-manipulation';
@@ -1317,6 +1319,7 @@ async function assemblePages(
   pages: ExportPage[],
   ownSourceKey?: string,
   ownBytes?: Uint8Array,
+  metadataOverrides: MetadataOverrides = {},
 ): Promise<void> {
   const groups = new Map<string, { bytes: Uint8Array; indices: number[] }>();
   for (const page of pages) {
@@ -1412,6 +1415,7 @@ async function assemblePages(
     if (ownDoc) {
       carryDocumentCatalog(output, { doc: ownDoc, pairs: ownPairs ?? [] }, structureMaps.get(ownDoc));
       carryDocumentInfo(output, ownDoc);
+      await carryDocumentMetadata(output, ownDoc, metadataOverrides);
     }
   }
 }
@@ -1509,7 +1513,7 @@ export async function buildPdf(
   // travels from the source instead (carryDocumentInfo); /Producer is the one
   // entry this builder generates, set explicitly below.
   const output = await PDFDocument.create({ updateMetadata: false });
-  await assemblePages(output, pages, ownSourceKey, ownBytes);
+  await assemblePages(output, pages, ownSourceKey, ownBytes, { producer: `PDFX ${PDFX_VERSION}` });
   // Document-level catalog trees (/Names /EmbeddedFiles, /Collection) are not
   // page subtrees — without this carry a committed page edit deleted every
   // attachment (embedded-files-carry.ts).
@@ -1530,7 +1534,9 @@ export async function buildPdfx(
   const manifest: PdfxManifest = { pdfx: PDFX_VERSION, title, documents: [] };
 
   const nonEmpty = documents.filter((doc) => doc.pages.length > 0);
-  await assemblePages(output, nonEmpty.flatMap((doc) => doc.pages), ownSourceKey, ownBytes);
+  await assemblePages(output, nonEmpty.flatMap((doc) => doc.pages), ownSourceKey, ownBytes, {
+    producer: `PDFX ${PDFX_VERSION}`, title, keywords: 'PDFX',
+  });
   // Carry BEFORE the manifest attach: pdf-lib's save-time embed appends to an
   // existing tree, so the manifest and carried members coexist (pinned by
   // embedded-files-carry.test.ts's pdfx leg).
