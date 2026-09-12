@@ -13,7 +13,7 @@ const template = (logic: boolean) => '<t:template xmlns:t="http://www.xfa.org/sc
 describe('XFA facts reach the Forms and Health surfaces', () => {
   beforeEach(async () => { await waitForHarness(); await closeAllFiles(); });
   afterEach(async () => { await closeAllFiles(); });
-  for (const shape of ['prefixed', 'utf16', 'split', 'no-logic', 'malformed'] as const) {
+  for (const shape of ['prefixed', 'utf16', 'split', 'bare-declared', 'bare-utf16', 'no-logic', 'malformed'] as const) {
     it(`reports ${shape} in the live application`, async () => {
       const directory = mkdtempSync(resolve(__dirname, '../../xfa-facts.local.d-'));
       const path = resolve(directory, `${shape}.pdf`);
@@ -27,6 +27,14 @@ describe('XFA facts reach the Forms and Health surfaces', () => {
           PDFString.of('x:xdp'), stream(utf8(XDP)),
           PDFString.of('template'), stream(utf8(template(true))),
           PDFString.of('/x:xdp'), stream(utf8(END)),
+        ]));
+      } else if (shape === 'bare-declared' || shape === 'bare-utf16') {
+        const xml = `<?xml version="1.0" encoding="${shape === 'bare-utf16' ? 'UTF-16' : 'UTF-8'}"?>`
+          + template(true);
+        const bytes = shape === 'bare-utf16'
+          ? Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(xml, 'utf16le')]) : utf8(xml);
+        form.acroForm.dict.set(PDFName.of('XFA'), pdf.context.obj([
+          PDFString.of('template'), stream(bytes),
         ]));
       } else {
         const xml = shape === 'malformed' ? 'not XML' : XDP + template(shape !== 'no-logic') + END;
@@ -47,7 +55,7 @@ describe('XFA facts reach the Forms and Health surfaces', () => {
         await $('[data-testid="forms-xfa-calculations"]').waitForDisplayed();
         expect(await $('[data-testid="forms-xfa-calculations-unknown"]').isExisting()).toBe(false);
       }
-      if (shape === 'split') {
+      if (shape === 'split' || shape === 'bare-declared' || shape === 'bare-utf16') {
         // The fixture deliberately uses the standard, unembedded Helvetica.
         // Both readers must finish with the missing/substituted-font facts,
         // not an XFA refusal.

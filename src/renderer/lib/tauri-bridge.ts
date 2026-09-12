@@ -186,8 +186,8 @@ export const claims = {
 // ── File dialogs ──────────────────────────────────────────────────────────
 
 // Dialogs are OS-modal (parented in Rust), but modality lands a beat after
-// the click — serialize here too so a rapid second click joins the open
-// dialog instead of stacking another.
+// the click — guard here too instead of stacking another. Read pickers may
+// share a result; an output picker grants its answer to exactly one caller.
 let openDialogInflight: Promise<string[]> | null = null;
 let saveDialogInflight: Promise<string | null> | null = null;
 let createPdfDialogInflight: Promise<string[]> | null = null;
@@ -213,13 +213,16 @@ export const dialog = {
     return openDialogInflight;
   },
   saveFile: (options?: { defaultPath?: string }) => {
-    if (!saveDialogInflight) {
-      saveDialogInflight = invoke<string | null>('save_file_dialog', {
-        defaultPath: options?.defaultPath,
-      }).finally(() => {
-        saveDialogInflight = null;
-      });
-    }
+    // A chosen output authorizes ONE caller's write. Sharing this promise
+    // lets another intent overwrite the first caller's output without its
+    // own picker/overwrite confirmation. Treat overlap as cancellation;
+    // the original caller retains its dialog and the next idle call may ask.
+    if (saveDialogInflight) return Promise.resolve(null);
+    saveDialogInflight = invoke<string | null>('save_file_dialog', {
+      defaultPath: options?.defaultPath,
+    }).finally(() => {
+      saveDialogInflight = null;
+    });
     return saveDialogInflight;
   },
   /** Pick a PKCS#12 (.pfx/.p12) signer file. Returns null if cancelled. */
