@@ -3,11 +3,13 @@ import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 import {
   acceptedRegions,
+  captureExportRequest,
   exportRegions,
   ownedAcceptedRegions,
   quarter,
   regionsFromDetection,
   sessionMatches,
+  tableReviewPages,
   type TableDetectionResult,
   type TableRegion,
   type TableReviewSession,
@@ -55,7 +57,7 @@ interface World {
   buffer: Uint8Array;
   session: TableReviewSession;
   files: Map<string, { path: string; workingPath: string; buffer: Uint8Array | null }>;
-  docs: { path: string; workingPath: string; buffer: Uint8Array; pages: { id: string; sourcePageIndex: number; rotation: number }[] }[];
+  docs: { path: string; workingPath: string; buffer: Uint8Array; pages: { id: string; sourceDocId: string; sourcePageIndex: number; rotation: number }[] }[];
   regions: TableRegion[];
   dirty: string[];
   dispatched: { method: string; params: Record<string, unknown> } | null;
@@ -64,7 +66,7 @@ interface World {
 
 function world(): World {
   const buffer = new Uint8Array([1, 2, 3]);
-  const pages = [{ id: `${IDENTITY}#g1#p0`, sourcePageIndex: 0, rotation: 0 }];
+  const pages = [{ id: `${IDENTITY}#g1#p0`, sourceDocId: IDENTITY, sourcePageIndex: 0, rotation: 0 }];
   const { regions } = regionsFromDetection(DETECTED, IDENTITY,
     () => ({ pageId: pages[0].id, rect: { x: 0.125, y: 0.225, w: 0.75, h: 0.175 }, rotationAtDraw: 0, totalRotationAtDraw: 0 }),
     () => 'table');
@@ -87,7 +89,7 @@ function exportClosure(w: World, hooks: { atGeometry?: () => void; inLock?: () =
   const tableSessionRef = { current: w.session as TableReviewSession | null };
   const env = {
     tableSessionRef,
-    acceptedRegions, exportRegions, ownedAcceptedRegions, sessionMatches,
+    acceptedRegions, captureExportRequest, exportRegions, ownedAcceptedRegions, sessionMatches, tableReviewPages,
     liveTableRegionsRef: { get current() { return w.regions; } },
     filesRef: { get current() { return w.files; } },
     docsRef: { get current() { return w.docs; } },
@@ -121,7 +123,7 @@ describe('reviewed table export ownership', () => {
 
   it('keeps physical-page geometry: the file page and user-space bounds and columns', async () => {
     const w = world();
-    w.docs[0].pages = [{ id: 'other#g1#p0', sourcePageIndex: 3, rotation: 0 }, ...w.docs[0].pages];
+    w.docs[0].pages = [{ id: 'other#g1#p0', sourceDocId: IDENTITY, sourcePageIndex: 3, rotation: 0 }, ...w.docs[0].pages];
     const { run } = exportClosure(w);
     await run('out.xlsx', { sheetPer: 'page', includeUntabled: true });
     expect(w.dispatched?.params).toMatchObject({
@@ -135,7 +137,7 @@ describe('reviewed table export ownership', () => {
     const { run } = exportClosure(w);
     const check = vi.fn();
     await run('out.xlsx', { sheetPer: 'table', includeUntabled: false },
-      { session: w.session, regionIds: ['table'], assertCurrent: check });
+      { ...captureExportRequest(w.session, w.regions)!, assertCurrent: check });
     expect(w.dispatched?.params.file).toBe(WORKING);
     // The panel's own run check rides along into the lock.
     expect(check).toHaveBeenCalled();
@@ -178,7 +180,7 @@ describe('reviewed table export ownership', () => {
     const w = world();
     const { run, engineCall } = exportClosure(w);
     const stale = { ...w.session, buffer: new Uint8Array([0]) };
-    await expect(run('out.xlsx', { sheetPer: 'table', includeUntabled: false }, { session: stale, regionIds: ['table'] }))
+    await expect(run('out.xlsx', { sheetPer: 'table', includeUntabled: false }, captureExportRequest(stale, w.regions)!))
       .rejects.toThrow('app.history.changed');
     expect(engineCall).not.toHaveBeenCalled();
   });
@@ -186,8 +188,9 @@ describe('reviewed table export ownership', () => {
   it('refuses a request naming a table that was unchecked meanwhile', async () => {
     const w = world();
     const { run, engineCall } = exportClosure(w);
+    const request = captureExportRequest(w.session, w.regions)!;
     w.regions = w.regions.map((r) => ({ ...r, accepted: false }));
-    await expect(run('out.xlsx', { sheetPer: 'table', includeUntabled: false }, { session: w.session, regionIds: ['table'] }))
+    await expect(run('out.xlsx', { sheetPer: 'table', includeUntabled: false }, request))
       .rejects.toThrow('app.history.changed');
     expect(engineCall).not.toHaveBeenCalled();
   });
@@ -195,16 +198,18 @@ describe('reviewed table export ownership', () => {
   it('refuses a request naming a table the live set no longer holds', async () => {
     const w = world();
     const { run, engineCall } = exportClosure(w);
-    await expect(run('out.xlsx', { sheetPer: 'table', includeUntabled: false }, { session: w.session, regionIds: ['table', 'vanished'] }))
+    const request = captureExportRequest(w.session, [...w.regions, { ...w.regions[0], id: 'vanished' }])!;
+    await expect(run('out.xlsx', { sheetPer: 'table', includeUntabled: false }, request))
       .rejects.toThrow('app.history.changed');
     expect(engineCall).not.toHaveBeenCalled();
   });
 
   it('refuses a table from another document mixed into the live set', async () => {
     const w = world();
+    const request = captureExportRequest(w.session, w.regions)!;
     w.regions = [{ ...w.regions[0], path: 'C:/docs/other.pdf' }];
     const { run, engineCall } = exportClosure(w);
-    await expect(run('out.xlsx', { sheetPer: 'table', includeUntabled: false }, { session: w.session, regionIds: ['table'] }))
+    await expect(run('out.xlsx', { sheetPer: 'table', includeUntabled: false }, request))
       .rejects.toThrow('app.history.changed');
     expect(engineCall).not.toHaveBeenCalled();
   });
@@ -225,8 +230,32 @@ describe('reviewed table export ownership', () => {
     const w = world();
     w.docs[0].pages = [];
     const { run, engineCall } = exportClosure(w);
-    await expect(run('out.xlsx', { sheetPer: 'table', includeUntabled: false })).rejects.toThrow('panel.tableReview.pagesGone');
+    await expect(run('out.xlsx', { sheetPer: 'table', includeUntabled: false })).rejects.toThrow('app.history.changed');
     expect(engineCall).not.toHaveBeenCalled();
+  });
+
+  it('refuses changed columns while the caller waits for its picker', async () => {
+    const w = world();
+    const request = captureExportRequest(w.session, w.regions)!;
+    w.regions = [{ ...w.regions[0], columns: [0, 0.8] }];
+    const { run, engineCall } = exportClosure(w);
+    await expect(run('out.xlsx', { sheetPer: 'table', includeUntabled: false }, request))
+      .rejects.toThrow('app.history.changed');
+    expect(engineCall).not.toHaveBeenCalled();
+  });
+
+  it.each(['atGeometry', 'inLock'] as const)('re-proves acceptance and geometry at %s', async (boundary) => {
+    for (const mutation of ['uncheck', 'remove', 'columns', 'rect'] as const) {
+      const w = world();
+      const { run } = exportClosure(w, { [boundary]: () => {
+        if (mutation === 'remove') w.regions = [];
+        else if (mutation === 'uncheck') w.regions = [{ ...w.regions[0], accepted: false }];
+        else if (mutation === 'columns') w.regions = [{ ...w.regions[0], columns: [0, 0.8] }];
+        else w.regions = [{ ...w.regions[0], rect: { ...w.regions[0].rect, x: 0.5 } }];
+      } });
+      await expect(run('out.xlsx', { sheetPer: 'table', includeUntabled: false })).rejects.toThrow('app.history.changed');
+      expect(w.dispatched).toBeNull();
+    }
   });
 });
 
@@ -234,7 +263,8 @@ function publishClosure(w: World, hooks: { atGeometry?: () => void } = {}) {
   const tableSessionRef = { current: null as TableReviewSession | null };
   const published: { regions: TableRegion[] | null } = { regions: null };
   const env = {
-    sessionMatches, regionsFromDetection, quarter,
+    sessionMatches, regionsFromDetection, quarter, tableReviewPages,
+    readState: () => ({ pageDirtyPaths: w.dirty }),
     filesRef: { get current() { return w.files; } },
     docsRef: { get current() { return w.docs; } },
     tableSessionRef,
@@ -250,6 +280,43 @@ function publishClosure(w: World, hooks: { atGeometry?: () => void } = {}) {
 }
 
 describe('detection publish ownership', () => {
+  it('maps file pages across manifest partitions rather than the first strip slots', async () => {
+    const w = world();
+    const a = w.docs[0];
+    w.docs = [{ ...a, pages: [{ ...a.pages[0], id: 'physical-B', sourcePageIndex: 1 }] }, a];
+    const { run, published } = publishClosure(w);
+    await run(IDENTITY, DETECTED, { workingPath: WORKING, buffer: w.buffer });
+    expect(published.regions?.[0].pageId).toBe(a.pages[0].id);
+    w.regions = published.regions!.map((r) => ({ ...r, accepted: true }));
+    await exportClosure(w).run('out.xlsx', { sheetPer: 'table', includeUntabled: false });
+    expect(w.dispatched?.params).toMatchObject({ regions: [{ page: 1 }] });
+  });
+
+  it.each(['old-index', 'pending', 'foreign-page', 'duplicate-page'] as const)('refuses an unproved physical index: %s', async (variant) => {
+    const w = world();
+    if (variant === 'old-index') w.docs[0] = { ...w.docs[0], buffer: new Uint8Array([8]) };
+    if (variant === 'pending') w.dirty = [IDENTITY];
+    if (variant === 'foreign-page') w.docs[0].pages[0].sourceDocId = 'foreign.pdf';
+    if (variant === 'duplicate-page') w.docs = [w.docs[0], { ...w.docs[0] }];
+    const { run, published } = publishClosure(w);
+    await expect(run(IDENTITY, DETECTED, { workingPath: WORKING, buffer: w.buffer }))
+      .rejects.toThrow('app.history.changed');
+    expect(published.regions).toBeNull();
+    await expect(exportClosure(w).run('out.xlsx', { sheetPer: 'table', includeUntabled: false }))
+      .rejects.toThrow('app.history.changed');
+    expect(w.dispatched).toBeNull();
+  });
+
+  it('refuses an index replaced across geometry without requiring a byte change', async () => {
+    const w = world();
+    const { run, published } = publishClosure(w, { atGeometry: () => {
+      w.docs = [{ ...w.docs[0], pages: [{ ...w.docs[0].pages[0], id: 'replacement-page' }] }];
+    } });
+    await expect(run(IDENTITY, DETECTED, { workingPath: WORKING, buffer: w.buffer }))
+      .rejects.toThrow('app.history.changed');
+    expect(published.regions).toBeNull();
+  });
+
   it('binds the review to the revision the detector read', async () => {
     const w = world();
     const { run, tableSessionRef, published } = publishClosure(w);

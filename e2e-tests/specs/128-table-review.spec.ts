@@ -320,6 +320,36 @@ describe('Table review before a spreadsheet export', () => {
     expect(Buffer.compare(readFileSync(source), originalBytes)).toBe(0);
     expect(await pdfPageCount(source)).toBe(1);
   });
+  it('detects and exports physical page two across PDFX document partitions', async () => {
+    await closeAllFiles();
+    const pdf = await PDFDocument.load(readFileSync(source));
+    pdf.insertPage(0, [612, 792]);
+    await pdf.attach(new TextEncoder().encode(JSON.stringify({
+      pdfx: '1.0', documents: [{ name: 'Cover', pages: 1 }, { name: 'Tables', pages: 1 }],
+    })), 'pdfx-manifest.json', { mimeType: 'application/json' });
+    const partitioned = resolve(tmp, 'partitioned.pdfx');
+    const bytes = await pdf.save();
+    writeFileSync(partitioned, bytes);
+    await openByPaths([partitioned]);
+    await setView('canvas');
+    await focusTab({ doc: partitioned });
+    expect(await invokeAppCommand('tools.panel.tablereview')).toBe(true);
+    await $('[data-testid="table-review-detect"]').waitForDisplayed({ timeout: 20_000 });
+    await clickEl('[data-testid="table-review-detect"]');
+    await browser.waitUntil(async () => (await tableReviewList()).length === 2, {
+      timeout: 30_000, interval: 200,
+      timeoutMsg: 'physical page two was lost behind the first manifest partition',
+    });
+    const found = await tableReviewList();
+    expect(found.every((r) => r.page === 2)).toBe(true);
+    await tableReviewToggle(found[0].id);
+    const output = resolve(tmp, 'partitioned.xlsx');
+    expect(String(await tableReviewExport(output))).not.toContain('__SPECTRA_E2E_ERROR__');
+    const cells = (await readWorkbook(output)).flatMap((sheet) => Object.values(sheet));
+    expect(cells).toContain('Region');
+    expect(cells).toContain('North');
+    expect(Buffer.compare(readFileSync(partitioned), Buffer.from(bytes))).toBe(0);
+  });
 });
 
 async function editTextPageIds(): Promise<string[]> {

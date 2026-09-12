@@ -251,7 +251,7 @@ describe('the revision a review belongs to', () => {
     const other = build({ id: 'r4', path: 'C:/other.pdf', accepted: true });
     expect(captureExportRequest(session, [...mine, rejected, other])).toEqual({
       session,
-      regionIds: ['r1', 'r2'],
+      regions: mine,
     });
     expect(captureExportRequest(session, [rejected])).toBeNull();
     expect(captureExportRequest(null, mine)).toBeNull();
@@ -277,7 +277,7 @@ describe('the revision a review belongs to', () => {
 
   it('refuses a table the live set no longer holds', () => {
     const live = setAcceptedAll([build()], true);
-    const request = { session, regionIds: ['r1', 'gone'] };
+    const request = captureExportRequest(session, [...live, build({ id: 'gone', accepted: true })])!;
     expect(ownedAcceptedRegions(request, { session, regions: live }))
       .toEqual({ ok: false, reason: 'missing-region' });
   });
@@ -291,14 +291,38 @@ describe('the revision a review belongs to', () => {
 
   it('refuses a table that belongs to another document', () => {
     const foreign = build({ path: 'C:/other.pdf', accepted: true });
-    const request = { session, regionIds: ['r1'] };
+    const request = captureExportRequest(session, [build({ accepted: true })])!;
     expect(ownedAcceptedRegions(request, { session, regions: [foreign] }))
       .toEqual({ ok: false, reason: 'foreign-region' });
   });
 
   it('refuses an empty request rather than exporting whatever is checked now', () => {
     const live = setAcceptedAll([build()], true);
-    expect(ownedAcceptedRegions({ session, regionIds: [] }, { session, regions: live }))
+    expect(ownedAcceptedRegions({ session, regions: [] }, { session, regions: live }))
       .toEqual({ ok: false, reason: 'nothing-accepted' });
+  });
+
+  it('captures independent nested values and refuses in-place changes too', () => {
+    const live = setAcceptedAll([build()], true);
+    const request = captureExportRequest(session, live)!;
+    live[0].columns[1] = 0.8;
+    live[0].rect.x = 0.5;
+    live[0].rows[0] = 0.2;
+    expect(request.regions[0].columns[1]).toBe(0.25);
+    expect(request.regions[0].rect.x).toBe(0.1);
+    expect(request.regions[0].rows[0]).toBe(0.1);
+    expect(ownedAcceptedRegions(request, { session, regions: live }))
+      .toEqual({ ok: false, reason: 'changed-region' });
+  });
+
+  it('refuses ambiguous identities and does not widen a captured set', () => {
+    const live = setAcceptedAll([build()], true);
+    const request = captureExportRequest(session, live)!;
+    expect(ownedAcceptedRegions(request, { session, regions: [...live, ...live] }))
+      .toEqual({ ok: false, reason: 'duplicate-region' });
+    expect(ownedAcceptedRegions({ ...request, regions: [...request.regions, ...request.regions] }, { session, regions: live }))
+      .toEqual({ ok: false, reason: 'duplicate-region' });
+    expect(ownedAcceptedRegions(request, { session, regions: [...live, build({ id: 'later', accepted: true })] }))
+      .toEqual({ ok: true, regions: request.regions });
   });
 });

@@ -257,11 +257,31 @@ export function sessionMatches(
     && file.workingPath === session.workingPath && file.buffer === session.buffer;
 }
 
+/** A detector addresses physical file pages, not a manifest partition's slots.
+ * Only a complete current index can project those addresses onto the canvas. */
+export function tableReviewPages<P extends {
+  id: string; sourceDocId: string; sourcePageIndex: number; rotation?: number;
+}>(session: TableReviewSession, docs: readonly {
+  path: string; workingPath: string; buffer: object | null; pages: readonly P[];
+}[]): Map<number, P> | null {
+  const owned = docs.filter((doc) => doc.path === session.path);
+  if (owned.length === 0 || owned.some((doc) => !sessionMatches(session, doc))) return null;
+  const pages = new Map<number, P>();
+  const ids = new Set<string>();
+  for (const doc of owned) for (const page of doc.pages) {
+    if (page.sourceDocId !== session.path || !Number.isSafeInteger(page.sourcePageIndex)
+        || page.sourcePageIndex < 0 || pages.has(page.sourcePageIndex + 1) || ids.has(page.id)) return null;
+    pages.set(page.sourcePageIndex + 1, page);
+    ids.add(page.id);
+  }
+  return pages;
+}
+
 /** What an export was asked for, captured before any await: the revision and
  * the exact tables the reviewer had accepted at that moment. */
 export interface TableExportRequest {
   session: TableReviewSession;
-  regionIds: string[];
+  regions: readonly TableRegion[];
 }
 
 export function captureExportRequest(
@@ -269,12 +289,29 @@ export function captureExportRequest(
   regions: readonly TableRegion[],
 ): TableExportRequest | null {
   if (session === null) return null;
-  const ids = acceptedRegions(regions).filter((r) => r.path === session.path).map((r) => r.id);
-  return ids.length === 0 ? null : { session, regionIds: ids };
+  const selected = acceptedRegions(regions).filter((r) => r.path === session.path);
+  if (selected.length === 0) return null;
+  return {
+    session: { ...session },
+    regions: selected.map((r) => ({
+      ...r, rect: { ...r.rect }, columns: [...r.columns], rows: [...r.rows],
+    })),
+  };
 }
 
 export type OwnershipRefusal = 'stale-session' | 'missing-region' | 'foreign-region'
-  | 'not-accepted' | 'nothing-accepted';
+  | 'not-accepted' | 'nothing-accepted' | 'changed-region' | 'duplicate-region';
+
+function sameReviewedRegion(a: TableRegion, b: TableRegion): boolean {
+  return a.id === b.id && a.path === b.path && a.pageId === b.pageId && a.page === b.page
+    && a.accepted === b.accepted && a.rotationAtDraw === b.rotationAtDraw
+    && a.totalRotationAtDraw === b.totalRotationAtDraw && a.caption === b.caption
+    && a.cells === b.cells && a.evidence === b.evidence
+    && a.rect.x === b.rect.x && a.rect.y === b.rect.y
+    && a.rect.w === b.rect.w && a.rect.h === b.rect.h
+    && a.columns.length === b.columns.length && a.columns.every((v, i) => v === b.columns[i])
+    && a.rows.length === b.rows.length && a.rows.every((v, i) => v === b.rows[i]);
+}
 
 /**
  * The tables an export may write, resolved against what is live NOW.
@@ -295,15 +332,20 @@ export function ownedAcceptedRegions(
       || live.session.workingPath !== session.workingPath || live.session.buffer !== session.buffer) {
     return { ok: false, reason: 'stale-session' };
   }
-  if (request.regionIds.length === 0) return { ok: false, reason: 'nothing-accepted' };
+  if (request.regions.length === 0) return { ok: false, reason: 'nothing-accepted' };
   const byId = new Map(live.regions.map((r) => [r.id, r] as const));
+  if (byId.size !== live.regions.length
+      || new Set(request.regions.map((r) => r.id)).size !== request.regions.length) {
+    return { ok: false, reason: 'duplicate-region' };
+  }
   const out: TableRegion[] = [];
-  for (const id of request.regionIds) {
-    const region = byId.get(id);
+  for (const captured of request.regions) {
+    const region = byId.get(captured.id);
     if (!region) return { ok: false, reason: 'missing-region' };
     if (region.path !== session.path) return { ok: false, reason: 'foreign-region' };
     if (!region.accepted) return { ok: false, reason: 'not-accepted' };
-    out.push(region);
+    if (!sameReviewedRegion(captured, region)) return { ok: false, reason: 'changed-region' };
+    out.push(captured);
   }
   return { ok: true, regions: out };
 }

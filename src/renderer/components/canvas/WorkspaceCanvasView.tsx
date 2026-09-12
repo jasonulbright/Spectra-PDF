@@ -54,7 +54,7 @@ import {
   type FieldCandidate,
 } from '../../lib/form-candidates';
 import {
-  acceptedRegions,
+  captureExportRequest,
   addColumn,
   exportRegions,
   moveColumn,
@@ -65,6 +65,7 @@ import {
   regionsFromDetection,
   removeColumn,
   sessionMatches,
+  tableReviewPages,
   toggleRegion,
   type TableDetectionResult,
   type TableExportRequest,
@@ -6081,23 +6082,29 @@ export function WorkspaceCanvasView({
       // the workspace's does, and it is the workspace that says what the
       // document's bytes are now.
       const session: TableReviewSession = { path, ...revision };
-      const current = () => sessionMatches(session, filesRef.current.get(path));
+      const current = () => sessionMatches(session, filesRef.current.get(path))
+        && !readState().pageDirtyPaths.includes(path);
       if (!current()) throw new Error(tChrome('app.history.changed'));
-      const doc = docsRef.current.find((d) => d.path === path);
-      if (!doc) return { shown: 0, skipped: result.regions.length };
+      const pages = tableReviewPages(session, docsRef.current);
+      if (!pages) throw new Error(tChrome('app.history.changed'));
       const geometry = new Map<number, PageGeometry>();
       for (const page of new Set(result.regions.map((r) => r.page))) {
-        const pageRef = doc.pages[page - 1];
+        const pageRef = pages.get(page);
         if (!pageRef) continue;
         geometry.set(page, await geometryForPage(pageRef));
       }
       // Geometry is an await; the revision can have moved across it.
       if (!current()) throw new Error(tChrome('app.history.changed'));
+      const currentPages = tableReviewPages(session, docsRef.current);
+      if (!currentPages || [...pages].some(([page, prior]) => {
+        const now = currentPages.get(page);
+        return !now || now.id !== prior.id || now.rotation !== prior.rotation;
+      })) throw new Error(tChrome('app.history.changed'));
       const { regions, skipped } = regionsFromDetection(
         result,
         path,
         (row) => {
-          const pageRef = doc.pages[row.page - 1];
+          const pageRef = pages.get(row.page);
           const geo = geometry.get(row.page);
           if (!pageRef || !geo) return null;
           const delta = quarter(pageRef.rotation ?? 0);
@@ -6117,7 +6124,7 @@ export function WorkspaceCanvasView({
       setSelectedTableId(null);
       return { shown: regions.length, skipped };
     },
-    [geometryForPage],
+    [geometryForPage, readState],
   );
 
   const exportReviewedTables = useCallback(
@@ -6133,10 +6140,8 @@ export function WorkspaceCanvasView({
       // stands this instant, which is captured here on the same terms.
       const session = tableSessionRef.current;
       if (!session) throw new Error(tChrome('panel.tableReview.nothingAccepted'));
-      const asked: TableExportRequest = request ?? {
-        session,
-        regionIds: acceptedRegions(liveTableRegionsRef.current).map((r) => r.id),
-      };
+      const asked = request ?? captureExportRequest(session, liveTableRegionsRef.current);
+      if (!asked) throw new Error(tChrome('panel.tableReview.nothingAccepted'));
       const resolved = ownedAcceptedRegions(asked, {
         session: tableSessionRef.current,
         regions: liveTableRegionsRef.current,
@@ -6149,27 +6154,36 @@ export function WorkspaceCanvasView({
         ));
       }
       const chosen = resolved.regions;
+      const pages = tableReviewPages(session, docsRef.current);
+      if (!pages) throw new Error(tChrome('app.history.changed'));
       // Live-state proof, run again at every boundary and — through the
       // engine call's own option — inside the file lock after the commit
       // gate, immediately before dispatch. The panel's run check rides
       // along when there is one; this check is the canvas's own regardless.
       const assertCurrent = (): void => {
         request?.assertCurrent?.();
+        const currentPages = tableReviewPages(session, docsRef.current);
         if (tableSessionRef.current !== session
             || !sessionMatches(session, filesRef.current.get(session.path))
-            || readState().pageDirtyPaths.includes(session.path)) {
+            || readState().pageDirtyPaths.includes(session.path)
+            || !ownedAcceptedRegions(asked, {
+              session: tableSessionRef.current, regions: liveTableRegionsRef.current,
+            }).ok || !currentPages || chosen.some((region) => {
+              const page = currentPages.get(region.page);
+              const captured = pages.get(region.page);
+              return !page || !captured || page.id !== region.pageId
+                || page.id !== captured.id || page.rotation !== captured.rotation;
+            })) {
           throw new Error(tChrome('app.history.changed'));
         }
       };
       assertCurrent();
-      const doc = docsRef.current.find((d) => d.path === session.path);
-      if (!doc) throw new Error(tChrome('panel.tableReview.documentGone'));
-      const geometry = new Map<string, { index: number; geo: PageGeometry }>();
+      const geometry = new Map<string, PageGeometry>();
       for (const region of chosen) {
         if (geometry.has(region.pageId)) continue;
-        const index = doc.pages.findIndex((p) => p.id === region.pageId);
-        if (index < 0) continue;
-        geometry.set(region.pageId, { index, geo: await geometryForPage(doc.pages[index]) });
+        const page = pages.get(region.page);
+        if (!page || page.id !== region.pageId) continue;
+        geometry.set(region.pageId, await geometryForPage(page));
       }
       // Geometry is an await; the revision can have moved across it.
       assertCurrent();
@@ -6179,11 +6193,11 @@ export function WorkspaceCanvasView({
         return {
           // The engine addresses the file's own page order, and a reviewed
           // table's page is where its bytes are, not where it sits on the board.
-          page: doc.pages[placed.index].sourcePageIndex + 1,
+          page: region.page,
           bounds: displayRectToPdf(
             region.rect,
-            placed.geo.box,
-            placed.geo.bakedRotate + region.rotationAtDraw,
+            placed.box,
+            placed.bakedRotate + region.rotationAtDraw,
           ),
         };
       });
