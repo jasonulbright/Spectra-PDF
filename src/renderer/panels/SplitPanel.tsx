@@ -7,80 +7,103 @@ import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import { TEST_HARNESS_ENABLED, registerSplit } from '../testHarness';
+import { useOwnedDocumentRun } from '../hooks/useOwnedDocumentRun';
+import { runCommitGate } from '../lib/commit-gate';
+import { useReadAppState } from '../state/AppStateProvider';
+import type { OpenFile } from '../state/types';
+import { splitBookmarkCount } from '../lib/split-bookmarks';
 
 type SplitMode = 'ranges' | 'every_n' | 'size' | 'bookmarks';
+type SplitDestination = { output: string } | { output_dir: string };
 
 const MODES: readonly SplitMode[] = ['ranges', 'every_n', 'size', 'bookmarks'];
-
-interface OutlineNode {
-  title: string;
-  page: number | null;
-  children?: OutlineNode[];
-}
 
 export function SplitPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, openNewFiles } = useActiveFile();
+  const { activeFile, openNewFiles, state } = useActiveFile();
+  const readState = useReadAppState();
   const { call, saveFile } = useEngine();
   const [mode, setMode] = useState<SplitMode>('ranges');
   const [ranges, setRanges] = useState('');
   const [everyN, setEveryN] = useState(10);
   const [maxMb, setMaxMb] = useState(5);
-  const [topLevel, setTopLevel] = useState<number | null>(null);
+  const [outline, setOutline] = useState<{ file: OpenFile; count: number | null; error: string } | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const beginRun = useOwnedDocumentRun(activeFile);
+  useEffect(() => { setStatus(''); }, [activeFile?.workingPath, activeFile?.buffer]);
 
-  const path = activeFile?.workingPath;
+  const dirty = !!activeFile && state.pageDirtyPaths.includes(activeFile.path);
+  const outlineCurrent = !dirty && outline?.file.path === activeFile?.path
+    && outline?.file.workingPath === activeFile?.workingPath && outline?.file.buffer === activeFile?.buffer;
+  const topLevel = outlineCurrent ? outline?.count ?? null : null;
+  const outlineError = outlineCurrent ? outline?.error ?? '' : '';
   // Bookmark mode's refusal is knowable before the run, so it is reported
   // before the run: the count of top-level entries the split would use.
   useEffect(() => {
     let live = true;
-    if (mode !== 'bookmarks' || !path) {
-      setTopLevel(null);
-      return;
-    }
-    void call('get_outline', { file: path })
+    if (mode !== 'bookmarks' || !activeFile) return;
+    const file = activeFile;
+    setOutline(null);
+    const current = () => {
+      const now = readState(), next = now.files.get(file.path);
+      return live && now.activeFileId === file.path && next?.workingPath === file.workingPath
+        && next?.buffer === file.buffer && !now.pageDirtyPaths.includes(file.path);
+    };
+    const assertCurrent = () => { if (!current()) throw new Error(tChrome('app.history.changed')); };
+    void call('get_outline', { file: file.workingPath }, { assertCurrent })
       .then((r) => {
-        if (!live) return;
-        const items = (r as unknown as { outline?: OutlineNode[] }).outline ?? [];
-        setTopLevel(items.filter((i) => typeof i.page === 'number').length);
+        if (!current()) return;
+        const count = splitBookmarkCount(r, file.pageCount);
+        setOutline({ file, count, error: count === null ? tChrome('panel.split.bookmarkUnavailable') : '' });
       })
-      .catch(() => {
-        if (live) setTopLevel(0);
+      .catch((error: unknown) => {
+        if (current()) setOutline({ file, count: null, error: tChrome('panel.common.error', {
+          message: error instanceof Error ? error.message : String(error),
+        }) });
       });
     return () => {
       live = false;
     };
-  }, [mode, path, call]);
+  }, [mode, activeFile, dirty, call, readState]);
 
-  const performSplit = useCallback(async (outputDir: string) => {
-    if (!activeFile) return;
+  const performSplit = useCallback(async (choose: () => Promise<SplitDestination | null>) => {
+    const run = beginRun();
+    if (!run) return;
     setBusy(true);
     setStatus(tChrome('panel.split.splitting'));
     try {
+      await run.prepare(runCommitGate);
+      const destination = await choose();
+      if (!destination) { if (run.visible()) setStatus(''); return; }
+      run.assertCurrent();
       const r = await call('split', {
-        file: activeFile.workingPath,
-        output_dir: outputDir,
+        file: run.source.workingPath,
+        ...destination,
         mode,
         ...(mode === 'ranges' ? { ranges } : {}),
         ...(mode === 'every_n' ? { every_n: everyN } : {}),
         ...(mode === 'size' ? { max_mb: maxMb } : {}),
-      });
+      }, { assertCurrent: run.assertCurrent });
+      if (!run.visible()) return;
       const parts = (r as unknown as { parts: number }).parts;
       const over = (r as unknown as { oversize: unknown[] }).oversize ?? [];
+      const retained = (r as unknown as { retained_files?: string[] }).retained_files ?? [];
       setStatus(
-        mode === 'ranges'
+        (mode === 'ranges'
           ? tChrome('panel.split.done', { count: r.pages_extracted })
           : tChromeCount('panel.split.doneParts', parts, { pages: r.pages_extracted }) +
-            (over.length > 0 ? ' ' + tChromeCount('panel.split.oversize', over.length) : ''),
+            (over.length > 0 ? ' ' + tChromeCount('panel.split.oversize', over.length) : '')) +
+          (retained.length ? ' ' + tChrome('panel.split.retainedFiles', { paths: retained.join('; ') }) : ''),
       );
     } catch (e: unknown) {
-      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
+      if (run.visible()) setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [activeFile, mode, ranges, everyN, maxMb, call]);
+  }, [beginRun, mode, ranges, everyN, maxMb, call]);
 
   const handleSplit = useCallback(async () => {
     if (!activeFile) return;
@@ -98,28 +121,24 @@ export function SplitPanel(): React.ReactElement {
     }
     // Range mode keeps its save-file flow (one output, named by the caller);
     // every other mode writes N files, so it picks a FOLDER.
-    let outputDir: string;
-    if (mode === 'ranges') {
-      const output = await saveFile(`split_${ranges.replace(/,/g, '_')}.pdf`);
-      if (!output) return;
-      outputDir = output.replace(/[^\\/]+$/, '');
-    } else {
-      const picked = await dialog.pickFolder(tChrome('panel.split.pickFolder'));
-      if (!picked) return;
-      outputDir = picked;
-    }
-    await performSplit(outputDir);
+    await performSplit(async () => {
+      if (mode === 'ranges') {
+        const output = await saveFile(`split_${ranges.replace(/,/g, '_')}.pdf`);
+        return output ? { output } : null;
+      }
+      const output_dir = await dialog.pickFolder(tChrome('panel.split.pickFolder'));
+      return output_dir ? { output_dir } : null;
+    });
   }, [activeFile, mode, ranges, everyN, maxMb, saveFile, performSplit]);
 
-  // Both destination pickers are native and undrivable, so e2e injects the
-  // folder and the panel's OWN state drives everything else — the same shape
-  // the compress bridge uses, and for the same reason.
+  // Directory-oriented harness callers retain their contract, through the
+  // same source ownership and dispatch path as the picker-facing handler.
   const harnessRef = useRef({ performSplit, setMode });
   harnessRef.current = { performSplit, setMode };
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerSplit({
-      run: (output) => harnessRef.current.performSplit(output),
+      run: (output) => harnessRef.current.performSplit(async () => ({ output_dir: output })),
       setMode: (value) => harnessRef.current.setMode(value as SplitMode),
     });
     return () => registerSplit(null);
@@ -173,11 +192,11 @@ export function SplitPanel(): React.ReactElement {
       )}
       {mode === 'bookmarks' && (
         <p className="text-xs text-neutral-500" data-testid="split-bookmark-note">
-          {topLevel === null
+          {outlineError || (topLevel === null
             ? tChrome('panel.split.bookmarkCounting')
             : topLevel === 0
               ? tChrome('panel.split.bookmarkNone')
-              : tChromeCount('panel.split.bookmarkCount', topLevel)}
+              : tChromeCount('panel.split.bookmarkCount', topLevel))}
         </p>
       )}
       <button data-testid="split-run" onClick={handleSplit} disabled={disabled} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">

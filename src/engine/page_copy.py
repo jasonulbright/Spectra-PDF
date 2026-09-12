@@ -13,6 +13,7 @@ from pikepdf import Array, Dictionary, Name
 # Reuse the pinned library's destination migration rather than implement a
 # second name-tree/collision policy. Tests cover this private API boundary.
 from pikepdf._page_copy import _migrate_named_destinations
+from engine.optional_content import OptionalContentCarry, read_optional_content
 
 from engine.acroform import (
     carry_doc_form_extras, carry_pure_data_fields,
@@ -89,6 +90,11 @@ def copy_pages_with_forms(dst, src, pages=None):
     indices = list(range(len(src.pages))) if pages is None else list(pages)
     src_pages = [src.pages[i] for i in indices]
     start = len(dst.pages)
+    content = getattr(dst, '_spectra_optional_content', None)
+    if content is None:
+        content = OptionalContentCarry()
+        dst._spectra_optional_content = content
+    optional_source = read_optional_content(src, src_pages, content.budget)
 
     # Read each page's annotations once so direct objects have stable site
     # identities too. Only indirect object identity can be shared across pages.
@@ -184,6 +190,7 @@ def copy_pages_with_forms(dst, src, pages=None):
     carry_doc_form_extras(dst, src, renamed)
     dst.acroform.invalidate_cache()
     added, dest_renames, dropped = _migrate_named_destinations(dst, src, src_pages, start)
+    content.add(dst, optional_source)
     return pikepdf.PageCopyResult(
         pages_added=len(src_pages), forms='preserve',
         fields_added=len(dst.acroform.fields) - before, renamed_fields=renamed,

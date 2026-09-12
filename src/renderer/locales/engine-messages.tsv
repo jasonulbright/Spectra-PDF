@@ -392,6 +392,7 @@ office_export.libreofficeReportedSuccessFile	pattern	soffice	LibreOffice reporte
 office_export.libreofficeReportedSuccessWrote	pattern	soffice	LibreOffice reported success but wrote no output (stderr: {{v0}})
 office_export.outputPathSameFile	exact	office_export,soffice	output path is the same file as the input
 office_export.unsupportedExportFormat	pattern	office_export	unsupported export format {{fmt}} (have {{v1}})
+optional_content.optionalContentConfigurationCannot	exact	optional_content	Optional-content configuration cannot be preserved completely.
 outline.bookmarkActionPayloadMust	pattern	outline	bookmark '{{title}}': action payload must be a dictionary
 outline.bookmarkDestPayloadMust	pattern	outline	bookmark '{{title}}': dest payload must be a name or string
 outline.bookmarkTargetsPage	pattern	outline	bookmark '{{title}}' targets page {{page}} of {{page_count}}
@@ -699,13 +700,23 @@ spelling.spellingDictionary	pattern	spelling	No spelling dictionary for {{langua
 spelling.unknownSpellCheckSource	pattern	spelling	unknown spell-check source {{v0}} — use text, comments or fields
 spelling.usableDictionaryNameUse	pattern	spelling	{{name}} is not a usable dictionary name — use letters, digits and underscores.
 spelling.wordSuggest	exact	spelling	No word to suggest for.
+split.cannotReplaceNonRegular	pattern	split	Cannot replace a non-regular split destination: {{path}}
+split.cannotSplitDocumentWithout	exact	split	Cannot split a document without pages
+split.chooseEitherExactSplit	exact	split	Choose either an exact split output or an output folder
 split.documentTopLevelBookmarks	exact	split	this document has no top-level bookmarks to split at
+split.exactSplitOutputOnly	exact	split	An exact split output is only valid for page ranges
 split.maximumFileSizeMust	pattern	split	maximum file size must be a number, got {{max_mb}}
 split.maximumFileSizeMust2	pattern	split	maximum file size must be greater than 0, got {{max_mb}}
 split.pagesPerFileMust	pattern	split	pages per file must be a whole number, got {{every_n}}
 split.pagesPerFileMust2	pattern	split	pages per file must be at least 1, got {{every_n}}
+split.splitDestinationChangedBefore	pattern	split	Split destination changed before publication: {{path}}
+split.splitDestinationsMustIdentify	pattern	split	Split destinations must identify different files: {{path}}
 split.splitModeMustOne	pattern	split	split mode must be one of {{v0}}, got {{mode}}
 split.splitNeedsOutputFolder	exact	split	split needs an output folder
+split.splitOutputMustReplace	pattern	split	Split output must not replace its source: {{path}}
+split.splitPublicationFailedRetained	pattern	split	Split publication failed; retained recovery files: {{details}}
+split.splitRangeSelectsPages	exact	split	The split range selects no pages
+split.splitSourceChangedDuring	exact	split	Split source changed during preparation
 stamp_appearance.chosenSignatureFaceCannot	exact	stamp_appearance	The chosen signature face cannot set that name — choose another face, or draw or import the signature instead.
 stamp_appearance.chosenSignatureStrokesDraw	exact	stamp_appearance	The chosen signature has no strokes to draw.
 stamp_appearance.chosenSignatureUsableShape	exact	stamp_appearance	The chosen signature has no usable shape — capture or import it again.
