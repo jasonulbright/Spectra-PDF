@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { PDFDocument, PDFName, PDFNull, PDFString } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFNull, PDFNumber, PDFString } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import {
@@ -54,6 +54,21 @@ async function withLiveSignature(bytes: Uint8Array, filled = true): Promise<Uint
   });
   const acro = ctx.obj({ Fields: [ctx.register(field)], SigFlags: 3 });
   doc.catalog.set(PDFName.of('AcroForm'), ctx.register(acro));
+  return doc.save();
+}
+
+// An outline root whose only item carries no /Title — a tree the catalog
+// carry cannot prove, so this file's rebuild refuses.
+async function withUnprovableOutline(bytes: Uint8Array): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(bytes);
+  const ctx = doc.context;
+  const root = ctx.obj({ Type: 'Outlines' });
+  const rootRef = ctx.register(root);
+  const itemRef = ctx.register(ctx.obj({ Parent: rootRef }));
+  root.set(PDFName.of('First'), itemRef);
+  root.set(PDFName.of('Last'), itemRef);
+  root.set(PDFName.of('Count'), PDFNumber.of(1));
+  doc.catalog.set(PDFName.of('Outlines'), rootRef);
   return doc.save();
 }
 
@@ -591,6 +606,35 @@ describe('commitPageEdits (transactional)', () => {
       expect(await pageWidths(pdf)).toEqual([200, 100, 201]);
       await pdf.loadingTask.destroy();
     }
+  });
+
+  it('names the file whose build refused, and stages nothing', async () => {
+    const aBytes = await makeSourcePdf(2, 100);
+    const bBytes = await withUnprovableOutline(await makeSourcePdf(2, 200));
+    const aPath = 'docs/reports/a.pdf';
+    const bPath = 'docs\\reports\\b.pdf';
+    const files = new Map<string, OpenFile>([
+      [aPath, makeFile(aPath, 'a.pdf', aBytes, 2)],
+      [bPath, makeFile(bPath, 'b.pdf', bBytes, 2)],
+    ]);
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a#0', files.get(aPath)!, 'a', [pageRef(aPath, 1), pageRef(aPath, 0)]),
+        makeDoc('b#0', files.get(bPath)!, 'b', [pageRef(bPath, 1)]),
+      ],
+    };
+    const fs = emptyFs();
+    // The whole dirty set builds together: the refusal has to say which
+    // document refused, or the user is told a save failed and nothing else.
+    await expect(
+      commitPageEdits({ workspace, files, dirtyPaths: [aPath, bPath], ...makeDeps(fs) }),
+    ).rejects.toThrow(/^b\.pdf: .+/);
+    expect(fs.writes).toEqual([]);
+    expect(fs.renames).toEqual([]);
+    expect(fs.snapshots).toEqual([]);
+    expect(fs.removed).toEqual([]);
+    expect(fs.dispatched).toEqual([]);
+    expect(fs.contents.size).toBe(0);
   });
 
   it('uses distinct temp names across runs so leftovers can never be renamed in', async () => {

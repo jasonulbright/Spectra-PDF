@@ -13,6 +13,7 @@ import {
   PDFHexString,
   PDFName,
   PDFNumber,
+  PDFObject,
   PDFRef,
   PDFRawStream,
   PDFString,
@@ -461,5 +462,156 @@ describe('catalog carry — complete document action graphs', () => {
     const src = await fixture(() => {}), donor = await plainSource(), pages = [pageOf(donor, 0, 'donor')];
     const bytes = format === 'pdf' ? await buildPdf(pages, src, 'own') : await buildPdfx([{ name: 'Document', pages }], 'Document', src, 'own');
     const out = await PDFDocument.load(bytes); expect(action(out)).toBeInstanceOf(PDFDict); expect(out.catalog.get(N('OpenAction'))).toBeDefined();
+  });
+});
+
+describe('catalog carry — outline jumps written as GoTo actions', () => {
+  /** Two pages, one bookmark per page, each jump written as a GoTo ACTION
+   *  rather than a /Dest — the shape commercial producers emit. */
+  async function actionOutline(opts: {
+    dest?: (pdf: PDFDocument, index: number) => PDFObject;
+    next?: (pdf: PDFDocument, index: number) => PDFObject | undefined;
+    prepare?: (pdf: PDFDocument) => void;
+    indirect?: boolean;
+  } = {}): Promise<Uint8Array> {
+    const pdf = await PDFDocument.create();
+    pdf.addPage([300, 400]); pdf.addPage([301, 400]);
+    const ctx = pdf.context;
+    opts.prepare?.(pdf);
+    const root = ctx.obj({ Type: 'Outlines' }), rootRef = ctx.register(root);
+    const items: PDFDict[] = [], refs: PDFRef[] = [];
+    for (let i = 0; i < 2; i++) {
+      const item = ctx.obj({ Title: PDFString.of(`Page ${i + 1}`) });
+      items.push(item); refs.push(ctx.register(item));
+    }
+    for (let i = 0; i < 2; i++) {
+      items[i].set(N('Parent'), rootRef);
+      const action = ctx.obj({ S: 'GoTo' });
+      action.set(N('D'), opts.dest ? opts.dest(pdf, i) : ctx.obj([pdf.getPage(i).ref, 'FitH', 796]));
+      const next = opts.next?.(pdf, i);
+      if (next) action.set(N('Next'), next);
+      items[i].set(N('A'), opts.indirect ? ctx.register(action) : action);
+      if (i > 0) { items[i].set(N('Prev'), refs[i - 1]); items[i - 1].set(N('Next'), refs[i]); }
+    }
+    root.set(N('First'), refs[0]); root.set(N('Last'), refs[1]);
+    root.set(N('Count'), PDFNumber.of(2));
+    pdf.catalog.set(N('Outlines'), rootRef);
+    return pdf.save();
+  }
+
+  async function build(format: string, src: Uint8Array, pages: ExportPage[]): Promise<PDFDocument> {
+    const bytes = format === 'pdf'
+      ? await buildPdf(pages, src, 'own')
+      : await buildPdfx([{ name: 'Document', pages }], 'Document', src, 'own');
+    return PDFDocument.load(bytes);
+  }
+
+  /** The two top-level items with their refs, read back off the links. */
+  function tops(out: PDFDocument) {
+    const rootRef = out.catalog.get(N('Outlines')) as PDFRef;
+    const root = out.context.lookup(rootRef, PDFDict);
+    const firstRef = root.get(N('First')) as PDFRef, lastRef = root.get(N('Last')) as PDFRef;
+    return {
+      rootRef, root, firstRef, lastRef,
+      first: out.context.lookup(firstRef, PDFDict),
+      last: out.context.lookup(lastRef, PDFDict),
+    };
+  }
+
+  it.each(['pdf', 'pdfx'])('keeps a bookmark whose GoTo page was deleted, dropping only the jump: %s', async format => {
+    const src = await actionOutline(), before = src.slice();
+    const out = await build(format, src, [pageOf(src, 0)]);
+    const { rootRef, root, firstRef, lastRef, first, last } = tops(out);
+    expect(text(first.lookup(N('Title')))).toBe('Page 1');
+    expect(text(last.lookup(N('Title')))).toBe('Page 2');
+    const action = first.lookup(N('A'), PDFDict);
+    expect(action.lookup(N('S'))).toBe(N('GoTo'));
+    expect(action.lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(0).ref);
+    expect(last.get(N('A'))).toBeUndefined();
+    expect(last.get(N('Dest'))).toBeUndefined();
+    expect((root.lookup(N('Count')) as PDFNumber).asNumber()).toBe(2);
+    expect(first.get(N('Parent'))).toEqual(rootRef);
+    expect(last.get(N('Parent'))).toEqual(rootRef);
+    expect(first.get(N('Prev'))).toBeUndefined();
+    expect(first.get(N('Next'))).toEqual(lastRef);
+    expect(last.get(N('Prev'))).toEqual(firstRef);
+    expect(last.get(N('Next'))).toBeUndefined();
+    expect(src).toEqual(before);
+  });
+
+  it('drops a whole action chain when its GoTo page was deleted', async () => {
+    const src = await actionOutline({
+      indirect: true,
+      next: (pdf, index) => index === 1
+        ? pdf.context.obj({ S: 'URI', URI: PDFString.of('https://example.invalid/two') })
+        : undefined,
+    });
+    const out = await build('pdf', src, [pageOf(src, 0)]);
+    const { first, last } = tops(out);
+    expect(text(last.lookup(N('Title')))).toBe('Page 2');
+    expect(last.get(N('A'))).toBeUndefined();
+    expect(first.lookup(N('A'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(0).ref);
+  });
+
+  it('carries a kept-page GoTo together with its chained URI action', async () => {
+    const src = await actionOutline({
+      next: (pdf, index) => index === 0
+        ? pdf.context.obj({ S: 'URI', URI: PDFString.of('https://example.invalid/one') })
+        : undefined,
+    });
+    const out = await build('pdf', src, [pageOf(src, 0), pageOf(src, 1)]);
+    const { first } = tops(out);
+    const action = first.lookup(N('A'), PDFDict);
+    expect(action.lookup(N('S'))).toBe(N('GoTo'));
+    expect(action.lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(0).ref);
+    const next = action.lookup(N('Next'), PDFDict);
+    expect(next.lookup(N('S'))).toBe(N('URI'));
+    expect(text(next.lookup(N('URI')))).toBe('https://example.invalid/one');
+  });
+
+  it.each(['modern', 'legacy'])('resolves a named GoTo destination before deciding: %s namespace', async namespace => {
+    const dests = (pdf: PDFDocument) => pdf.context.obj({
+      Names: [
+        PDFString.of('one'), [pdf.getPage(0).ref, 'Fit'],
+        PDFString.of('two'), [pdf.getPage(1).ref, 'Fit'],
+      ],
+    });
+    const src = await actionOutline({
+      // The legacy dictionary is keyed by NAME objects; the name tree by
+      // strings. A destination spelled in the other namespace resolves to
+      // nothing, which is a refusal, not a dropped jump.
+      dest: (_pdf, index) => namespace === 'modern'
+        ? PDFString.of(index === 0 ? 'one' : 'two')
+        : N(index === 0 ? 'one' : 'two'),
+      prepare: pdf => {
+        if (namespace === 'modern') pdf.catalog.set(N('Names'), pdf.context.obj({ Dests: dests(pdf) }));
+        else pdf.catalog.set(N('Dests'), pdf.context.obj({
+          one: [pdf.getPage(0).ref, 'Fit'], two: [pdf.getPage(1).ref, 'Fit'],
+        }));
+      },
+    });
+    const out = await build('pdf', src, [pageOf(src, 0)]);
+    const { first, last } = tops(out);
+    expect(first.lookup(N('A'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(0).ref);
+    expect(last.get(N('A'))).toBeUndefined();
+    expect(text(last.lookup(N('Title')))).toBe('Page 2');
+  });
+
+  it('refuses a named GoTo destination that resolves to nothing', async () => {
+    const src = await actionOutline({
+      dest: (_pdf, index) => PDFString.of(index === 0 ? 'absent' : 'two'),
+      prepare: pdf => pdf.catalog.set(N('Names'), pdf.context.obj({
+        Dests: { Names: [PDFString.of('two'), [pdf.getPage(1).ref, 'Fit']] },
+      })),
+    });
+    const before = src.slice();
+    await expect(build('pdf', src, [pageOf(src, 0)])).rejects.toThrow();
+    expect(src).toEqual(before);
+  });
+
+  it('refuses a GoTo onto a page copied more than once', async () => {
+    const src = await actionOutline(), before = src.slice();
+    await expect(build('pdf', src, [pageOf(src, 0), pageOf(src, 0)])).rejects.toThrow();
+    expect(src).toEqual(before);
   });
 });
