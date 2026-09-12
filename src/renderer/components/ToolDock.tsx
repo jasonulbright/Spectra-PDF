@@ -10,6 +10,7 @@ import { ToolIcon } from './tool-icons';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tOperationTitle, tToolTitle } from '../i18n';
 import { inlineExtent } from '../lib/inline-direction';
+import type { CanvasTextRequest } from '../lib/extract-text-owner';
 
 // The tool dock on the inline-end side.
 // Ops-tool panels render HERE, beside an always-visible document, instead of
@@ -22,8 +23,8 @@ interface ToolDockProps {
   panels: Record<Operation, React.ComponentType>;
   /** Extract-from-canvas hands the panel its page (the special case
    * the Tools tab used to render — the dock carries it now). */
-  extractPage: number | null;
-  onConsumeExtractPage: () => void;
+  extractPage: CanvasTextRequest | null;
+  onConsumeExtractPage: (request: CanvasTextRequest) => void;
 }
 
 export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDockProps): React.JSX.Element {
@@ -155,7 +156,7 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
             }}
           />
         ) : activeOp === 'extract_text' ? (
-          <ExtractTextPanel initialPage={extractPage} onConsumeInitialPage={onConsumeExtractPage} />
+          <ExtractTextPanel initialRequest={extractPage} onConsumeInitialRequest={onConsumeExtractPage} />
         ) : (
           <Panel />
         )}
