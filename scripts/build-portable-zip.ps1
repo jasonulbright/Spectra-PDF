@@ -38,9 +38,13 @@
 # Run:
 #   powershell -ExecutionPolicy Bypass -File scripts\build-portable-zip.ps1
 #
-# -Verify compares paths and SHA-256 against a directory. It freshly extracts
-# the installer's executable into temporary storage, never changes the tree
-# being checked, and writes no ZIP.
+# -Verify compares paths and SHA-256 against a directory, then against the
+# finished ZIP (entry names, both header copies of each name, decompressed
+# bytes). It freshly extracts the installer's executable into temporary
+# storage, never changes the tree or archive being checked, and writes no ZIP.
+#
+# The ZIP itself is written by scripts/portable-archive.ps1 with explicit
+# forward-slash entry names: the installed archive module decides nothing.
 
 param(
     [string]$ProjectRoot = "$PSScriptRoot\..",
@@ -51,10 +55,12 @@ param(
     [switch]$ExpectSigned,
     [string]$Verify = "",
     [switch]$CheckMap,
-    [string]$TauriConfig = "$ProjectRoot\src-tauri\tauri.conf.json"
+    [string]$TauriConfig = "$ProjectRoot\src-tauri\tauri.conf.json",
+    [string]$Archive = ""
 )
 
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot\portable-archive.ps1"
 
 # The notice map. It classifies every payload DIRECTORY: the value is the name
 # that must appear in THIRD-PARTY-LICENSES.md for that component, and an empty
@@ -127,12 +133,16 @@ if ($binaryName -cne 'spectrapdf.exe') { throw "unexpected main executable: $bin
 $entries += [pscustomobject]@{
     relative = $binaryName
     source   = $binaryMatch.Groups[1].Value
+    name     = ''
+    sha256   = ''
 }
 
 foreach ($m in [regex]::Matches($manifestText, '(?m)^\s*File /a "/oname=([^"]+)" "([^"]+)"')) {
     $entries += [pscustomobject]@{
         relative = $m.Groups[1].Value
         source   = $m.Groups[2].Value
+        name     = ''
+        sha256   = ''
     }
 }
 
@@ -147,17 +157,16 @@ if ($version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Z
     throw "unsafe portable version: $version"
 }
 
-# A duplicate relative path would mean two sources racing for one destination,
-# and whichever copied last would win silently.
-$dupes = $entries | Group-Object relative | Where-Object { $_.Count -gt 1 }
+# `name` is the archive entry name: forward slashes, no rooted, dot or
+# stream-addressing segment (the throw names the destination). Two manifest
+# destinations spelling one name would be two sources racing for one file, so
+# the duplicate check runs on the canonical name, case-insensitively.
+foreach ($e in $entries) {
+    $e.name = ConvertTo-PortableEntryName $e.relative
+}
+$dupes = $entries | Group-Object name | Where-Object { $_.Count -gt 1 }
 if ($dupes) {
     throw "the manifest maps one destination twice:`n  " + (($dupes | ForEach-Object { $_.Name }) -join "`n  ")
-}
-foreach ($e in $entries) {
-    # No manifest entry may escape staging or address an alternate data stream.
-    if ([IO.Path]::IsPathRooted($e.relative) -or $e.relative -match '(^|[\\/])\.\.?([\\/]|$)|:') {
-        throw "unsafe payload destination: $($e.relative)"
-    }
 }
 
 # ---------------------------------------------------------------------------
@@ -287,10 +296,13 @@ if ($Verify) {
     foreach ($f in (Get-ChildItem -LiteralPath $root -Recurse -File -Force)) {
         [void]$actual.Add($f.FullName.Substring($root.Length).TrimStart('\', '/'))
     }
+    $treeNames = @($entries | ForEach-Object { $_.name.Replace('/', '\') })
+    $treeNameSet = [System.Collections.Generic.HashSet[string]]::new(
+        [string[]]$treeNames, [System.StringComparer]::OrdinalIgnoreCase)
     # install-record.json is the installer's own marker and is expected to be
     # absent from a portable tree; it is never in the manifest either.
-    $missing = @($relatives | Where-Object { -not $actual.Contains($_) })
-    $extra = @($actual | Where-Object { -not $relativeSet.Contains($_) })
+    $missing = @($treeNames | Where-Object { -not $actual.Contains($_) })
+    $extra = @($actual | Where-Object { -not $treeNameSet.Contains($_) })
     if ($missing -or $extra) {
         $report = @()
         if ($missing) { $report += "in the installer manifest but not in the tree:`n    " + ($missing -join "`n    ") }
@@ -299,13 +311,22 @@ if ($Verify) {
         exit 1
     }
     foreach ($e in $entries) {
-        $dest = Join-Path $root $e.relative
-        if ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash -cne
-            (Get-FileHash -LiteralPath $e.source -Algorithm SHA256).Hash) {
+        $dest = Join-Path $root $e.name.Replace('/', '\')
+        $e.sha256 = (Get-FileHash -LiteralPath $e.source -Algorithm SHA256).Hash
+        if ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash -cne $e.sha256) {
             throw "portable bytes differ from installer payload source: $($e.relative)"
         }
     }
     Write-Host "Verified: $($relatives.Count) payload entries match by path and SHA-256; app bytes came from the installer."
+    # The archive is what ships; the tree is only its source. A missing archive
+    # is a refusal, never a pass by omission.
+    if (-not $Archive) { $Archive = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) "spectrapdf-$version-portable.zip" }
+    $problems = @(Test-PortableArchive -Path $Archive -Expected $entries)
+    if ($problems.Count -gt 0) {
+        Write-Error ("the portable archive does not match the installer's staging:`n  " + ($problems -join "`n  "))
+        exit 1
+    }
+    Write-Host "Verified archive: $Archive; $($entries.Count) entries match by canonical name, both header copies and SHA-256."
     exit 0
 }
 
@@ -339,25 +360,29 @@ if (Test-Path -LiteralPath $staging) {
 }
 New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
+$archiveEntries = @()
 foreach ($e in $entries) {
-    $dest = Join-Path $staging $e.relative
+    $dest = Join-Path $staging $e.name.Replace('/', '\')
     $parent = Split-Path $dest -Parent
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
     Copy-Item -LiteralPath $e.source -Destination $dest -Force
-    if ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash -cne
-        (Get-FileHash -LiteralPath $e.source -Algorithm SHA256).Hash) {
+    $e.sha256 = (Get-FileHash -LiteralPath $e.source -Algorithm SHA256).Hash
+    if ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash -cne $e.sha256) {
         throw "portable copy differs from installer payload source: $($e.relative)"
     }
+    $archiveEntries += [pscustomobject]@{ name = $e.name; source = $dest; sha256 = $e.sha256 }
 }
 
 $zipName = "spectrapdf-$version-portable.zip"
 $zipPath = Join-Path $OutputDirectory $zipName
-if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 
-# `-CompressionLevel Optimal` over the tree ROOT's children, so the archive
-# opens onto the executable rather than onto one wrapper directory the user has
-# to descend through.
-Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zipPath -CompressionLevel Optimal
+# Entries are named from the manifest, one per staged file, so the archive
+# opens onto the executable with no wrapper directory and carries hidden files
+# the archive module's wildcard walk would drop. The writer verifies the
+# finished bytes under a name it alone owns and only then replaces any
+# archive already at this path, so a refused build leaves the previous
+# verified archive in place rather than nothing.
+Write-PortableArchive -Path $zipPath -Entries $archiveEntries | Out-Null
 
 # The staging tree stays: the CI gate verifies it against the installer's own,
 # and deleting it would make that check re-extract a 12,000-file archive.

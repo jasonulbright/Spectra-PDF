@@ -293,6 +293,56 @@ def test_a_bare_packet_list_of_one_whole_element_reads():
     assert result(document([("template", template())], split=True)) == {"class": "static", "shape": ""}
 
 
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16", "utf-16-be", "iso-8859-1"])
+@pytest.mark.parametrize("dynamic", [False, True])
+def test_bare_documents_keep_their_own_encoding_and_declarations(encoding, dynamic, tmp_path):
+    from engine.forms import read_form_fields
+
+    def encoded(body, codec):
+        # XML uses the registered encoding name, not Python's codec alias.
+        declared = "UTF-16BE" if codec == "utf-16-be" else codec
+        return (f'<?xml version="1.0" encoding="{declared}"?>'
+                + body.decode('utf-8')).encode(codec)
+
+    # Each bare packet is independently encoded. The normative split-wrapper
+    # representation remains one byte stream and retains its stricter rules.
+    parts = [("template", encoded(template(logic="calculate", prefix="form"), encoding)),
+             ("datasets", encoded(DATASETS, "utf-8")), ("config", encoded(CONFIG, "utf-16"))]
+    with document(parts, split=True, dynamic=dynamic) as pdf:
+        path = tmp_path / "encoded.pdf"
+        pdf.save(path)
+    before = path.read_bytes()
+    with pikepdf.open(path) as pdf:
+        assert result(pdf) == {"class": "dynamic" if dynamic else "static", "shape": ""}
+        assert xfa.has_authored_logic(pdf) is True
+        assert [pdf.Root.AcroForm.XFA[i].read_bytes() for i in (1, 3, 5)] == [b for _, b in parts]
+    assert read_form_fields(str(path))["xfa_calculations"] is True
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("body", [
+    b'<!DOCTYPE config [<!ENTITY bad "payload">]><config>&bad;</config>',
+    b'<!DOCTYPE config SYSTEM "file:///nonexistent"><config/>',
+    b'<config>&undefined;</config>', b'<config/>unowned text',
+])
+def test_later_bare_documents_cannot_bypass_safe_xml(body):
+    pdf = document([("template", template()), ("config", body)], split=True)
+    assert result(pdf)["shape"] == xfa.SHAPE_PACKET_XML
+    with pytest.raises(xfa.AuthoredLogicUnreadable):
+        xfa.has_authored_logic(pdf)
+
+
+def test_bare_document_parses_share_element_and_byte_limits(monkeypatch):
+    pdf = document([("template", template()), ("datasets", DATASETS), ("config", CONFIG)], split=True)
+    with monkeypatch.context() as limited:
+        limited.setattr(xfa, "_MAX_RESOURCE_ELEMENTS", 5)
+        assert result(pdf)["shape"] == xfa.SHAPE_RESOURCE_ELEMENTS
+    with monkeypatch.context() as limited:
+        limited.setattr(xfa, "_MAX_PARSE_BYTES", len(template()) + len(DATASETS))
+        assert result(pdf)["shape"] == xfa.SHAPE_RESOURCE_BYTES
+    assert result(pdf) == {"class": "static", "shape": ""}
+
+
 def test_authored_logic_is_found_in_a_bare_packet_list():
     parts = [("template", template(logic="calculate", prefix="form")), ("datasets", DATASETS)]
     assert xfa.has_authored_logic(document(parts, split=True)) is True
@@ -334,13 +384,12 @@ def test_a_bare_list_still_refuses_a_packet_that_leans_on_an_undeclared_prefix()
 def test_a_bare_list_still_refuses_two_elements_in_one_packet():
     # Two elements in the FIRST packet: it does not parse alone, so the list
     # is not bare, and without wrapper fragments the concatenation is not one
-    # document either. In a LATER packet the list is bare; the resource then
-    # holds one more element child than declared names, which the name/count
-    # check refuses before the per-packet boundary check is reached.
+    # document either. A LATER bare packet likewise fails its whole-document
+    # parse; no flattening of packet boundaries may turn it into two packets.
     first = [("template", template() + CONFIG), ("datasets", DATASETS)]
     assert result(document(first, split=True))["shape"] == xfa.SHAPE_PACKET_XML
     later = [("template", template()), ("datasets", DATASETS + CONFIG)]
-    assert result(document(later, split=True))["shape"] == xfa.SHAPE_PACKET_NAME_MISMATCH
+    assert result(document(later, split=True))["shape"] == xfa.SHAPE_PACKET_XML
 
 
 def test_a_bare_list_still_refuses_a_document_type_declaration():

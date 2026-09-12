@@ -495,9 +495,20 @@ def _read_resource(
         if names and parts:
             first = _standalone_root(parts[0], counters)
             if first is not None and first.tag != f"{{{XDP_NAMESPACE}}}xdp":
-                data = _BARE_WRAPPER_OPEN + data + _BARE_WRAPPER_CLOSE
-                names = ("xdp:xdp", *names, "/xdp:xdp")
-                parts = [_BARE_WRAPPER_OPEN, *parts, _BARE_WRAPPER_CLOSE]
+                # These compatibility packets are standalone XML documents,
+                # unlike the normative bracketed resource's byte fragments.
+                # Join parsed elements, not differently encoded byte strings:
+                # inserting an XML declaration/BOM inside an ASCII wrapper
+                # makes otherwise readable packets malformed. Every element
+                # still passes the same bounded, no-DTD/no-entity parser and
+                # declared-name check; original PDF streams are never changed.
+                root = _resource_root(_BARE_WRAPPER_OPEN + _BARE_WRAPPER_CLOSE, counters)
+                for index, (name, part) in enumerate(zip(names, parts)):
+                    element = first if index == 0 else _resource_root(part, counters)
+                    if not _names_element(element, name):
+                        return SHAPE_PACKET_NAME_MISMATCH, None
+                    root.append(element)
+                return "", XfaResource(root, names, counters)
         root = _resource_root(data, counters)
     except _ResourceTooLarge:
         return SHAPE_RESOURCE_BYTES, None

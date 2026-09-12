@@ -25,13 +25,25 @@ else { [IO.File]::WriteAllText($app, 'packed application bytes') }
 $packedHash = (Get-FileHash -LiteralPath $app -Algorithm SHA256).Hash
 $installer = Join-Path $bundle 'portable-smoke-setup.exe'
 $manifest = Join-Path $work 'installer.nsi'
+# Two payload controls the archive module's wildcard walk cannot represent: a
+# hidden binary file (dropped by the walk) and a nested destination with
+# spaces and non-ASCII letters (separator and encoding both chosen by the
+# module). Sources stay ASCII-named; the manifest destination carries the name.
+$hiddenRel = 'engine\hidden data\.hidden control.bin'
+$unicodeRel = [string]::Format('engine\{0}n{1}code dir\na{1}ve r{2}sum{2}.txt', [char]0x00FC, [char]0x00EF, [char]0x00E9)
 $resources = @{
     'THIRD-PARTY-LICENSES.md' = Join-Path $repo 'THIRD-PARTY-LICENSES.md'
     'THIRD-PARTY-LICENSES-RUST.html' = Join-Path $src 'rust-notices.html'
     'icc\Adobe-Color-Profile-License.txt' = Join-Path $src 'icc-license.txt'
+    $hiddenRel = Join-Path $src 'hidden-control.bin'
+    $unicodeRel = Join-Path $src 'unicode-control.txt'
 }
 [IO.File]::WriteAllText($resources['THIRD-PARTY-LICENSES-RUST.html'], 'fixture Rust notices')
 [IO.File]::WriteAllText($resources['icc\Adobe-Color-Profile-License.txt'], 'fixture ICC notice')
+[IO.File]::WriteAllBytes($resources[$hiddenRel], [byte[]](@(0..255) + @(0..255)))
+(Get-Item -LiteralPath $resources[$hiddenRel] -Force).Attributes = [IO.FileAttributes]::Hidden
+[IO.File]::WriteAllText($resources[$unicodeRel], 'fixture unicode control')
+$hiddenHash = (Get-FileHash -LiteralPath $resources[$hiddenRel] -Algorithm SHA256).Hash
 $lines = @(
     'Unicode true', 'Name "Portable packaging smoke"', 'RequestExecutionLevel user',
     "OutFile `"$installer`"", 'SetCompressor /SOLID lzma',
@@ -48,7 +60,7 @@ $lines += @('WriteUninstaller "$INSTDIR\uninstall.exe"', 'SectionEnd', 'Section 
 [IO.File]::WriteAllLines($manifest, $lines, [Text.UTF8Encoding]::new($false))
 if ($InstallerInput) { Copy-Item -LiteralPath $InstallerInput -Destination $installer }
 else {
-    & $makensis /V2 $manifest
+    & $makensis /V2 /INPUTCHARSET UTF8 $manifest
     if ($LASTEXITCODE -ne 0) { throw "fixture NSIS build failed (exit $LASTEXITCODE)" }
 }
 if ($ExpectSigned -and -not $InstallerInput) {
@@ -97,11 +109,89 @@ try {
     finally { $sha.Dispose(); $stream.Dispose() }
     if ($zipHash -cne $packedHash) { throw 'ZIP contains the wrong app bytes' }
     if ($zip.GetEntry('uninstall.exe')) { throw 'portable must not carry an uninstaller' }
+    # Names are the manifest's, forward-slashed, nothing more and nothing less.
+    $expectedNames = @('spectrapdf.exe') + @($resources.Keys | ForEach-Object { $_.Replace('\', '/') })
+    $actualNames = @($zip.Entries | ForEach-Object { $_.FullName })
+    foreach ($name in $actualNames) { if ($name.Contains('\')) { throw "archive entry stored with a backslash: $name" } }
+    $missingNames = @($expectedNames | Where-Object { $actualNames -cnotcontains $_ })
+    $extraNames = @($actualNames | Where-Object { $expectedNames -cnotcontains $_ })
+    if ($missingNames -or $extraNames) { throw "archive names differ from the manifest: missing [$($missingNames -join ', ')] extra [$($extraNames -join ', ')]" }
+    $hiddenEntry = $zip.GetEntry($hiddenRel.Replace('\', '/'))
+    $stream = $hiddenEntry.Open()
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $hiddenZipHash = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '') }
+    finally { $sha.Dispose(); $stream.Dispose() }
+    if ($hiddenZipHash -cne $hiddenHash) { throw 'ZIP carries the wrong bytes for the hidden control' }
 } finally { $zip.Dispose() }
 $script:checks++
-Write-Host 'PASS archived app equals installer app; uninstaller excluded'
+Write-Host 'PASS archived app equals installer app; uninstaller excluded; hidden and non-ASCII entries stored by canonical name'
 Invoke-PortableCheck 'faithful-tree' @('-Verify', $tree) $true
 Invoke-PortableCheck 'faithful-tree-pwsh' @('-Verify', $tree) $true '' 'pwsh'
+
+# The finished archive, mutated one way at a time and verified against the
+# untouched tree: -Verify must read the ZIP, not infer it from the tree.
+$zipPath = Join-Path $out 'spectrapdf-9.9.9-portable.zip'
+$goodZip = Join-Path $work 'good-portable.zip'
+Copy-Item -LiteralPath $zipPath -Destination $goodZip
+function Restore-PortableArchive { Copy-Item -LiteralPath $goodZip -Destination $zipPath -Force }
+function Edit-PortableArchive([scriptblock]$Mutation) {
+    $archive = [IO.Compression.ZipFile]::Open($zipPath, 'Update')
+    try { & $Mutation $archive } finally { $archive.Dispose() }
+}
+Remove-Item -LiteralPath $zipPath
+Invoke-PortableCheck 'archive-missing' @('-Verify', $tree) $false 'portable archive missing'
+Restore-PortableArchive
+Edit-PortableArchive {
+    param($archive)
+    $entry = $archive.GetEntry('icc/Adobe-Color-Profile-License.txt')
+    $stream = $entry.Open()
+    $buffer = [IO.MemoryStream]::new()
+    try { $stream.CopyTo($buffer) } finally { $stream.Dispose() }
+    $entry.Delete()
+    $moved = $archive.CreateEntry('icc\Adobe-Color-Profile-License.txt')
+    $stream = $moved.Open()
+    try { $buffer.WriteTo($stream) } finally { $stream.Dispose() }
+}
+Invoke-PortableCheck 'archive-backslash-name' @('-Verify', $tree) $false 'backslash separator'
+Restore-PortableArchive
+Edit-PortableArchive {
+    param($archive)
+    $stream = $archive.GetEntry('THIRD-PARTY-LICENSES-RUST.html').Open()
+    try {
+        $first = $stream.ReadByte()
+        $stream.Position = 0
+        $stream.WriteByte($first -bxor 1)
+    } finally { $stream.Dispose() }
+}
+Invoke-PortableCheck 'archive-changed-bytes' @('-Verify', $tree) $false 'archive bytes differ'
+Restore-PortableArchive
+Edit-PortableArchive {
+    param($archive)
+    $stream = $archive.CreateEntry('extra.txt').Open()
+    try { $stream.WriteByte(65) } finally { $stream.Dispose() }
+}
+Invoke-PortableCheck 'archive-extra-entry' @('-Verify', $tree) $false 'in the archive but not in the installer manifest'
+Restore-PortableArchive
+Edit-PortableArchive { param($archive) $archive.GetEntry('THIRD-PARTY-LICENSES-RUST.html').Delete() }
+Invoke-PortableCheck 'archive-missing-entry' @('-Verify', $tree) $false 'in the installer manifest but not in the archive'
+Restore-PortableArchive
+Edit-PortableArchive {
+    param($archive)
+    $stream = $archive.CreateEntry('spectrapdf.exe').Open()
+    try { $stream.WriteByte(66) } finally { $stream.Dispose() }
+}
+Invoke-PortableCheck 'archive-duplicate-app' @('-Verify', $tree) $false 'duplicate entry'
+Restore-PortableArchive
+# The first local file header opens the file; its name is patched in place
+# while the central directory keeps the manifest's spelling.
+$raw = [IO.File]::ReadAllBytes($zipPath)
+if ([BitConverter]::ToUInt32($raw, 0) -ne 0x04034B50) { throw 'archive does not open with a local file header' }
+if ($raw[30] -lt 0x61 -or $raw[30] -gt 0x7A) { throw 'first entry name does not open with a lowercase letter' }
+$raw[30] = $raw[30] -bxor 0x20
+[IO.File]::WriteAllBytes($zipPath, $raw)
+Invoke-PortableCheck 'archive-local-name-tamper' @('-Verify', $tree) $false 'local header name differs'
+Restore-PortableArchive
+Invoke-PortableCheck 'archive-restored' @('-Verify', $tree) $true 'Verified archive'
 Copy-Item -LiteralPath $app -Destination $portableApp -Force
 Invoke-PortableCheck 'old-unsigned-copy' @('-Verify', $tree) $false 'portable bytes differ'
 $rustNotice = Join-Path $tree 'THIRD-PARTY-LICENSES-RUST.html'
