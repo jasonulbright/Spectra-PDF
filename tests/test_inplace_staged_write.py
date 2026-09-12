@@ -2111,6 +2111,11 @@ from inplace_doors import registered_doors, same_path_capable  # noqa: E402
 #: Doors whose output is genuinely never the document they were handed. Each
 #: says why in its own terms; "no case yet" is never one of these.
 EXCLUDED_DOORS = {
+    "split": (
+        "refuses exact and filesystem-alias source destinations in every "
+        "publication mode; tests/test_split_publication.py pins unchanged "
+        "source bytes for exact paths and hardlinks"
+    ),
     "create_pdf": (
         "builds a NEW document out of non-PDF sources, so no argument of it "
         "names a document the output could overwrite"

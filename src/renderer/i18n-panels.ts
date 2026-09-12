@@ -147,6 +147,8 @@ export const PANEL_STRINGS = {
   'panel.split.badSize': 'Enter a maximum size greater than 0.',
   'panel.split.pickFolder': 'Choose a folder for the split files',
   'panel.split.bookmarkCounting': 'Reading bookmarks…',
+  'panel.split.bookmarkUnavailable': 'The bookmark count could not be determined.',
+  'panel.split.retainedFiles': 'Output saved; temporary recovery files could not be removed: {{paths}}',
   'panel.split.bookmarkNone': 'This document has no top-level bookmarks to split at.',
   'panel.split.bookmarkCount_one': '{{count}} top-level bookmark to split at.',
   'panel.split.bookmarkCount_other': '{{count}} top-level bookmarks to split at.',

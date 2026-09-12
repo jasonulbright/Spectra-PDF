@@ -284,8 +284,10 @@ def test_the_exclusion_survives_the_page_extraction(tmp_path) -> None:
 
     single = tmp_path / "page.pdf"
     single.write_bytes(_render_part(str(hidden), [0]))
-    with pikepdf.open(single) as pdf:
-        assert pdf.Root.get("/OCProperties") is None
+    with pikepdf.open(single) as pdf, pikepdf.open(str(hidden)) as before:
+        assert {str(g["/Name"]) for g in pdf.Root.OCProperties.D.OFF} == {
+            str(g["/Name"]) for g in before.Root.OCProperties.D.OFF
+        }
 
     tagged, off_keys = _tag_optional_content_groups(str(hidden), tmp_path)
     assert tagged is not None and off_keys

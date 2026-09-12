@@ -1377,8 +1377,10 @@ class TestOptionalContentCarriedAcrossExtraction:
         # unnamed group on the page off.
         src = tmp_path / "unnamed.pdf"
         with pikepdf.new() as pdf:
-            die = self._ocg(pdf)
-            art = self._ocg(pdf)
+            # Table 96 requires /Name to be a string; empty labels are
+            # valid and still must not substitute for object identity.
+            die = self._ocg(pdf, "")
+            art = self._ocg(pdf, "")
             self._page(pdf, pikepdf.Dictionary({"/Properties": pikepdf.Dictionary(
                 {"/oc1": die, "/oc2": art})}))
             self._declare(pdf, [die, art], [die])
@@ -1574,7 +1576,7 @@ class TestOptionalContentCarriedAcrossExtraction:
         assert carried is False
         # The page was left exactly as extracted: no partial configuration
         # claiming the group the walk never reached is visible.
-        assert self._off_state(single) == (None, None)
+        assert self._off_state(single) == (["Deep", "Near"], ["Deep", "Near"])
 
     def test_a_document_turning_nothing_off_stages_without_a_refusal(
         self, tmp_path
@@ -1589,4 +1591,97 @@ class TestOptionalContentCarriedAcrossExtraction:
 
         carried, single = self._stage(src, tmp_path)
         assert carried
-        assert self._off_state(single) == (None, None)
+        assert self._off_state(single) == (["Art"], [])
+
+    def test_missing_required_group_name_refuses_without_writing(self, tmp_path):
+        from engine.split import _render_part
+
+        src = tmp_path / "missing-name.pdf"
+        with pikepdf.new() as pdf:
+            group = self._ocg(pdf)
+            self._page(pdf, pikepdf.Dictionary(Properties=pikepdf.Dictionary(G=group)))
+            self._declare(pdf, [group], [group])
+            pdf.save(src)
+        original = src.read_bytes()
+        with pytest.raises(ValueError, match="Optional-content configuration cannot"):
+            _render_part(str(src), [0])
+        assert src.read_bytes() == original
+        assert not (tmp_path / "page.pdf").exists()
+
+    @pytest.mark.parametrize("base", ["/ON", "/OFF"])
+    def test_full_configuration_reaches_profile_converter(self, tmp_path, monkeypatch, base):
+        """Actual production staging, with only the external converter replaced."""
+        from engine.separations import _stage_for_profile
+        import engine.prepress
+
+        src = tmp_path / "full-config.pdf"
+        with pikepdf.new() as pdf:
+            a, b, c, unused = [self._ocg(pdf, name) for name in ("Off", "On", "Implicit", "Unused")]
+            self._page(pdf, pikepdf.Dictionary(Properties=pikepdf.Dictionary(A=a, B=b, C=c)))
+            a.Usage = pikepdf.Dictionary(Print=pikepdf.Dictionary(PrintState=pikepdf.Name.OFF))
+            off = pdf.make_indirect(pikepdf.Array([a, unused]))
+            order = pdf.make_indirect(pikepdf.Array([a, b, c, unused]))
+            pdf.Root.OCProperties = pikepdf.Dictionary(
+                OCGs=pikepdf.Array([a, b, c, unused]),
+                D=pikepdf.Dictionary(BaseState=pikepdf.Name(base), OFF=off,
+                    ON=pikepdf.Array([b]), Order=order, Locked=pikepdf.Array([a]),
+                    AS=pikepdf.Array([pikepdf.Dictionary(Event=pikepdf.Name.Print,
+                        Category=pikepdf.Array([pikepdf.Name.Print]), OCGs=pikepdf.Array([a]))])),
+                Configs=pikepdf.Array([pikepdf.Dictionary(Name=pikepdf.String("Alternate"),
+                    BaseState=pikepdf.Name.ON, OFF=pikepdf.Array([b]))]),
+                SharedOrder=order, SharedOff=off)
+            pdf.save(src)
+        original = src.read_bytes()
+        calls = []
+
+        def convert(single, output, **kwargs):
+            with pikepdf.open(single) as pdf:
+                oc = pdf.Root.OCProperties
+                assert str(oc.D.BaseState) == base
+                assert [str(g.Name) for g in oc.D.ON] == ["On"]
+                assert [str(g.Name) for g in oc.D.OFF] == ["Off", "Unused"]
+                assert [str(g.Name) for g in oc.D.Order] == ["Off", "On", "Implicit", "Unused"]
+                assert oc.D.Order.objgen == oc.SharedOrder.objgen
+                assert oc.D.OFF.objgen == oc.SharedOff.objgen
+                assert oc.D.Locked[0].objgen == oc.D.OFF[0].objgen
+                assert oc.D.AS[0].OCGs[0].objgen == oc.D.OFF[0].objgen
+                assert oc.D.OFF[0].Usage.Print.PrintState == pikepdf.Name.OFF
+                assert str(oc.Configs[0].Name) == "Alternate"
+                assert oc.Configs[0].OFF[0].objgen == oc.D.ON[0].objgen
+                assert all("/SpectraOCKey" not in g for g in oc.OCGs)
+            calls.append(single)
+            Path(output).write_bytes(Path(single).read_bytes())
+
+        monkeypatch.setattr(engine.prepress, "convert_cmyk", convert)
+        staged = _stage_for_profile(str(src), 1, "profile.icc", tmp_path, "unused")
+        assert staged == tmp_path / "staged.pdf" and staged.exists()
+        assert len(calls) == 1
+        assert src.read_bytes() == original
+        assert not (tmp_path / "octagged.pdf").exists()
+        assert not (tmp_path / "page.pdf").exists()
+
+    @pytest.mark.parametrize("mutation", ["catalog", "off", "name"])
+    def test_incomplete_carry_refuses_without_repairing_a_subset(self, tmp_path, mutation):
+        from engine.separations import _tag_optional_content_groups, _carry_off_configuration
+        from engine.split import _render_part
+
+        src = tmp_path / "intact.pdf"
+        with pikepdf.new() as pdf:
+            a, b = self._ocg(pdf, "A"), self._ocg(pdf, "B")
+            self._page(pdf, pikepdf.Dictionary(Properties=pikepdf.Dictionary(A=a, B=b)))
+            self._declare(pdf, [a, b], [a, b])
+            pdf.save(src)
+        tagged, keys = _tag_optional_content_groups(str(src), tmp_path)
+        single = tmp_path / "page.pdf"
+        single.write_bytes(_render_part(str(tagged), [0]))
+        with pikepdf.open(single, allow_overwriting_input=True) as pdf:
+            if mutation == "catalog":
+                del pdf.Root.OCProperties
+            elif mutation == "off":
+                pdf.Root.OCProperties.D.OFF = pikepdf.Array([pdf.Root.OCProperties.OCGs[0]])
+            else:
+                del pdf.Root.OCProperties.OCGs[0].Name
+            pdf.save(single)
+        before = single.read_bytes()
+        assert _carry_off_configuration(single, keys) is False
+        assert single.read_bytes() == before

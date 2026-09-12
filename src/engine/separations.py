@@ -97,7 +97,7 @@ _MAX_OC_RESOURCE_DEPTH = 8
 #: Private key stamped on each source OCG dictionary before page extraction.
 #: Extraction copies the group dictionaries whole, so the key crosses it and
 #: gives the extracted page's own copies an exact identity. Stripped from the
-#: staged file once the configuration is rebuilt.
+#: staged file once the complete carried configuration is verified.
 _OC_KEY = "/SpectraOCKey"
 
 _PREVIEW_DIR_NAME = "separation-preview"
@@ -658,14 +658,12 @@ def _tag_optional_content_groups(source: str, out_dir: Path):
     Returns `(path, off_keys)`, or `(None, set())` when the document declares
     no default configuration, turns nothing off, or cannot be read.
 
-    Page extraction rebuilds the catalog and hands the extracted page its own
-    COPIES of the group dictionaries, so object identity cannot cross it. A
-    name cannot stand in for identity — two groups may share one, and unnamed
-    groups all share the empty string — so the identity is manufactured
-    before the extraction instead: each group dictionary gets a private key,
-    extraction copies the dictionary whole, and the key arrives on the other
-    side naming exactly one group. The extraction runs over THIS copy, never
-    the user's file, and the key is stripped from the staged page again.
+    The shared page copier preserves the complete configuration and its
+    referenced groups. These private keys independently check that every
+    explicit OFF entry arrived before conversion; they never authorize an
+    OFF-only reconstruction. Names cannot stand in for identity: groups may
+    share a name, including an empty string. The extraction runs over THIS
+    copy, never the user's file, and all keys are stripped after validation.
     """
     try:
         with pikepdf.open(source) as src:
@@ -701,31 +699,13 @@ def _tag_optional_content_groups(source: str, out_dir: Path):
 
 
 def _carry_off_configuration(single: Path, off_keys: set) -> bool:
-    """Re-establish the source's default OC configuration on the extracted page.
+    """Validate the complete carried configuration and remove private tags.
 
-    Page extraction rebuilds the catalog, so `/OCProperties` does not survive
-    it — and with it goes every group the processing-step exclusion or the
-    Layers panel turned OFF. Without this the profile staging would hand the
-    conversion a page whose die line and varnish are visible again, and the
-    plates and every ink figure measured over them would silently carry
-    manufacturing content the preview was asked to leave out.
-
-    Groups are paired by the key `_tag_optional_content_groups` stamped on
-    the source before extraction, so a group's state crosses the extraction
-    on its own: two same-named groups land with their own states, and
-    unnamed groups do not collide.
-
-    True means the page is safe to stage — the configuration was carried, or
-    the walk completed and found nothing this page turns off.
-
-    False is a REFUSAL: the caller must not stage this page. It is returned
-    when the resource walk hit `_MAX_OC_RESOURCE_DEPTH`, or the page could
-    not be read. The groups found are then a SUBSET, and writing a
-    configuration from a subset declares the groups it missed VISIBLE — the
-    failure that puts hidden manufacturing content on the plates. Refusing
-    costs the profile staging, which moves ink amounts; carrying a partial
-    set changes which content is on the page at all, so the refusal is the
-    cheaper wrong answer and the only honest one.
+    The shared page copier carries the catalog and the actual referenced
+    groups together. Rebuilding it from only the reachable OFF subset loses
+    BaseState, ON, usage applications and alternate configurations, and can
+    expose implicitly hidden artwork. Never synthesize a replacement here.
+    Missing, incomplete or inconsistent carry is a refusal with no write.
     """
     if not off_keys:
         return True
@@ -734,22 +714,25 @@ def _carry_off_configuration(single: Path, off_keys: set) -> bool:
             groups, complete = _page_optional_content_groups(pdf)
             if not complete:
                 return False
-            off = [g for g in groups
-                   if _OC_KEY in g and str(g[_OC_KEY]) in off_keys]
-            for group in groups:
+            from .optional_content import Budget, read_optional_content
+
+            carried = read_optional_content(pdf, list(pdf.pages), Budget())
+            if carried is None:
+                return False
+            properties = pdf.Root["/OCProperties"]
+            declared = [g for g in properties["/OCGs"] if g is not None]
+            off = [g for g in properties["/D"].get("/OFF") or [] if g is not None]
+            actual_off = {str(g[_OC_KEY]) for g in off if _OC_KEY in g}
+            if actual_off != off_keys:
+                return False
+            # Include catalog-only groups: their private identity keys must
+            # not survive just because this page does not paint them.
+            for group in [*declared, *groups]:
                 if _OC_KEY in group:
                     del group[_OC_KEY]
-            if off:
-                pdf.Root["/OCProperties"] = pdf.make_indirect(pikepdf.Dictionary({
-                    "/OCGs": pikepdf.Array([pdf.make_indirect(g) for g in groups]),
-                    "/D": pikepdf.Dictionary({
-                        "/OFF": pikepdf.Array([pdf.make_indirect(g) for g in off]),
-                        "/Order": pikepdf.Array([]),
-                    }),
-                }))
             pdf.save(str(single))
         return True
-    except (OSError, pikepdf.PdfError):
+    except (OSError, pikepdf.PdfError, ValueError):
         return False
 
 
@@ -763,8 +746,8 @@ def _stage_for_profile(file: str, page: int, profile_path: str, out_dir: Path,
     source-to-CMYK conversion, and staging a whole document to separate one
     page of it would pay for every page the preview is not showing.
 
-    The source's OCGs are tagged BEFORE the extraction so the extracted page
-    can be given back the groups the document turns off. None means the carry
+    The source's OCGs are tagged BEFORE extraction so the complete carried
+    configuration can be checked before conversion. None means the carry
     refused and the caller rasters the unstaged document, whose own
     `/OCProperties` still hides them.
     """
