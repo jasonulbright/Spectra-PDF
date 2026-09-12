@@ -1,9 +1,10 @@
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNull, PDFRef } from 'pdf-lib';
 import { buildPdf, buildPdfx, stripExtension } from './pdfx-format';
 import { carriesManifest } from './doc-names';
+import { baseName } from './create-pdf';
 import type { ExportPage } from './pdfx-format';
 import type { AppAction, OpenDocument, OpenFile, PdfBuffer, Workspace } from '../state/types';
-// The one refusal here that reaches the user resolves through
+// Refusals here that reach the user resolve through
 // the catalog (the concurrent-entry throw below is an internal invariant —
 // a programming error nobody is meant to read, so it stays English).
 import { tChrome } from '../i18n';
@@ -341,7 +342,19 @@ export async function commitPageEdits({
       dispatch({ type: 'CLEAR_PAGE_EDITS' });
       return { signatureRefusals };
     }
-    const built = await Promise.all(plans.map(buildCommitBytes));
+    // Every dirty file builds in one pass, so one file's refusal aborts the
+    // whole commit: without the file in the message the user is told a save
+    // failed and given no way to tell which document refused.
+    const built = await Promise.all(plans.map(async (plan) => {
+      try {
+        return await buildCommitBytes(plan);
+      } catch (err) {
+        throw new Error(tChrome('canvas.common.fileFailure', {
+          name: baseName(plan.path),
+          message: err instanceof Error ? err.message : String(err),
+        }), { cause: err });
+      }
+    }));
 
     const runTag = `.commit-tmp-${crypto.randomUUID()}`;
     const staged: string[] = [];

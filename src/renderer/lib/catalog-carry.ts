@@ -255,6 +255,32 @@ function carryOutlines(output: PDFDocument, source: CarriedSourcePages, copier: 
   if (rootCount !== undefined && rootCount < 0) throw fail();
   const kept = new Set(source.pairs.map(pair => source.doc.getPage(pair.srcIndex).ref.tag));
   const structural = new Set(['Parent', 'Prev', 'Next', 'First', 'Last', 'Count']);
+  // Whether an action chain jumps to a page the rebuild dropped. /Next is a
+  // single action or an ordered array (ISO 32000-2 12.6.2/Table 196) and may
+  // legally rejoin itself, so the walk is bounded and cycle-safe. Anything it
+  // cannot read is left to the copier, which refuses it.
+  // One budget per item: an outline large enough to exhaust the tree walk's
+  // budget must still carry its jumps.
+  const jumpsToRemovedPage = (raw: PDFObject | undefined): boolean => {
+    const seen = new Set<PDFDict>(); let steps = 0;
+    const walk = (value: PDFObject | undefined, depth: number): boolean => {
+      if (++steps > 10000 || depth > 128) throw fail();
+      const action = ctx.lookup(value);
+      if (!(action instanceof PDFDict) || seen.has(action)) return false;
+      seen.add(action);
+      if (action.lookup(N('S')) === N('GoTo') && action.has(N('D'))) {
+        const target = copier.destination(action.get(N('D'))).get(0);
+        if (target instanceof PDFRef && !kept.has(target.tag)) return true;
+      }
+      const next = action.get(N('Next')), resolved = ctx.lookup(next);
+      if (resolved instanceof PDFArray) {
+        for (const child of resolved.asArray()) if (walk(child, depth + 1)) return true;
+        return false;
+      }
+      return walk(next, depth + 1);
+    };
+    return walk(raw, 0);
+  };
   const wire = (parentRef: PDFRef, siblings: RebuiltOutline[]): void => {
     const parent = output.context.lookup(parentRef, PDFDict);
     if (siblings.length > 0) {
@@ -273,13 +299,17 @@ function carryOutlines(output: PDFDocument, source: CarriedSourcePages, copier: 
         if (!hasValue(name)) continue;
         if (name === 'Dest') {
           const dest = copier.destination(value), target = dest.get(0) as PDFRef;
-          // A deleted direct jump retains its title/children, as before. An
-          // action chain with a removed target instead refuses in the copier;
-          // pruning only one action would silently change that chain.
+          // An item whose jump target was removed keeps its title, children
+          // and styling and loses only the jump: the /Dest here, the whole /A
+          // below — a chain is dropped entire, never pruned action by action.
+          // A destination that cannot be resolved at all still refuses.
           if (kept.has(target.tag)) dict.set(key, copier.copyDestination(value));
           continue;
         }
-        if (name === 'A' && !(ctx.lookup(value) instanceof PDFDict)) throw fail();
+        if (name === 'A') {
+          if (!(ctx.lookup(value) instanceof PDFDict)) throw fail();
+          if (jumpsToRemovedPage(value)) continue;
+        }
         if (name === 'SE') {
           dict.set(key, copier.structure(value));
           continue;

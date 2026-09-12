@@ -118,6 +118,42 @@ describe('catalog state survives committed page edits', () => {
     expect(bytes.includes('/PageLabels')).toBe(true);
   });
 
+  it('keeps a bookmark whose GoTo action targeted a deleted page', async () => {
+    const dir = mkdtempSync(resolve(__dirname, '../../catalog-goto-live.local.d-'));
+    const path = resolve(dir, 'source.pdf'), N = PDFName.of;
+    const pdf = await PDFDocument.create({ updateMetadata: false }), ctx = pdf.context;
+    for (const width of [300, 400]) pdf.addPage([width, 700]);
+    const root = ctx.obj({ Type: 'Outlines', Count: 2 }), rootRef = ctx.register(root);
+    const refs = [0, 1].map((i) => ctx.register(ctx.obj({ Title: PDFString.of(`Chapter ${i + 1}`) })));
+    // One bookmark per page, each jump written as a GoTo ACTION.
+    refs.forEach((ref, i) => {
+      const item = ctx.lookup(ref, PDFDict);
+      item.set(N('Parent'), rootRef);
+      item.set(N('A'), ctx.obj({ S: 'GoTo', D: [pdf.getPage(i).ref, 'FitH', 796] }));
+      if (i > 0) { item.set(N('Prev'), refs[i - 1]); ctx.lookup(refs[i - 1], PDFDict).set(N('Next'), ref); }
+    });
+    root.set(N('First'), refs[0]); root.set(N('Last'), refs[1]);
+    pdf.catalog.set(N('Outlines'), rootRef);
+    writeFileSync(path, Buffer.from(await pdf.save()));
+
+    await closeAllFiles(); await openByPaths([path]);
+    const ids = await waitForActiveCanvasPageIds(); expect(ids).toHaveLength(2);
+    await deleteCanvasPagesAndWait([ids[1]]);
+    await commitPendingEdits();
+    const dest = resolve(dir, 'committed.pdf'); await saveActiveAs(dest);
+
+    const outline = cliJson(['outline', dest]) as { outline: { title: string; page: number | null }[] };
+    expect(outline.outline.map((entry) => entry.title)).toEqual(['Chapter 1', 'Chapter 2']);
+    expect(outline.outline[0].page).toBe(1);
+    const out = await PDFDocument.load(readFileSync(dest), { updateMetadata: false });
+    const first = out.catalog.lookup(N('Outlines'), PDFDict).lookup(N('First'), PDFDict);
+    const last = first.lookup(N('Next'), PDFDict);
+    expect(last.lookup(N('Title'), PDFString).decodeText()).toBe('Chapter 2');
+    expect(last.get(N('A'))).toBeUndefined();
+    expect(last.get(N('Dest'))).toBeUndefined();
+    expect(out.getPageCount()).toBe(1);
+  });
+
   for (const removeSelected of [false, true]) it(`preserves print/bookmark/Info identity, or refuses loss (remove selected=${removeSelected})`, async () => {
     const dir = mkdtempSync(resolve(__dirname, '../../catalog-metadata-live.local.d-'));
     const path = resolve(dir, 'source.pdf'), N = PDFName.of;
