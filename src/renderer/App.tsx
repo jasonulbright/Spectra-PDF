@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { AppStateProvider, useAppState, useAppDispatch, useReadAppState } from './state/AppStateProvider';
 import { restoreHistory } from './lib/disk-history';
+import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
 import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/workspace-publication';
 import { withFileLock } from './lib/engine-lock';
 import { getPageCount } from './lib/pdfRenderer';
@@ -380,7 +381,7 @@ function AppContent(): React.ReactElement {
   // watches, so the banner surfaces the available / up-to-date / disabled state.
   const [updateCheckSignal, setUpdateCheckSignal] = useState(0);
   const { items: queue, clear: clearQueue, track: trackOperation } = useOperationQueue();
-  const [extractPage, setExtractPage] = useState<number | null>(null);
+  const [extractPage, setExtractPage] = useState<CanvasTextRequest | null>(null);
   const [appVersion, setAppVersion] = useState('');
   const recentFiles = state.ui.recentFiles;
   const { call, callRaw, openFiles, saveFile } = useEngine();
@@ -2956,11 +2957,13 @@ function AppContent(): React.ReactElement {
   useKeymapDispatcher();
 
   const handleExtractFromCanvas = useCallback((path: string, page: number) => {
+    const request = captureCanvasTextRequest(readState(), path, page);
+    if (!request) return;
     dispatch({ type: 'SET_ACTIVE_FILE', path });
-    setExtractPage(page);
-    // Leaving the board commits, so the panel reads committed bytes.
+    setExtractPage(request);
+    // The panel proves this view and commits before reading its page number.
     invokeCommand('tools.panel.extract_text');
-  }, [dispatch]);
+  }, [dispatch, readState]);
 
   // Keep refs to current state so the close handler always sees latest values
   const filesRef = useRef(state.files);
@@ -3477,7 +3480,7 @@ function AppContent(): React.ReactElement {
                 <ToolDock
                   panels={panels}
                   extractPage={extractPage}
-                  onConsumeExtractPage={() => setExtractPage(null)}
+                  onConsumeExtractPage={(request) => setExtractPage(current => current === request ? null : current)}
                 />
               )}
             </div>
