@@ -1,4 +1,4 @@
-import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFNull, PDFObject, PDFPage, PDFString, degrees } from 'pdf-lib';
+import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFNull, PDFObject, PDFPage, PDFRef, PDFStream, PDFString, degrees } from 'pdf-lib';
 
 import { tChrome } from '../i18n';
 import { MANIFEST_NAME, PDFX_VERSION } from './pdfx-format';
@@ -6,7 +6,7 @@ import type { ExportAnnotation, ExportDocument, ExportPage, PdfxManifest } from 
 import { carryAcroForm, prepareSourceForms, sourceHasXfa } from './acroform-carry';
 import type { FormContribution } from './acroform-carry';
 import { carryEmbeddedFiles } from './embedded-files-carry';
-import { carryDocumentCatalog } from './catalog-carry';
+import { carryDocumentCatalog, jumpsToRemovedPage } from './catalog-carry';
 import { carryOptionalContent } from './optional-content-carry';
 import { carryDocumentMetadata } from './metadata-carry';
 import { copyOutputIntents } from './output-intents-carry';
@@ -1319,6 +1319,166 @@ async function embedStampImages(
   return map;
 }
 
+// copyPages follows an explicit /Dest or GoTo chain into its target page and
+// writes that page into the output even when the build dropped it, as a page
+// object outside the page tree. On the loaded source copy, before copying, a
+// link's /Dest, an annotation's /A, and each page or annotation /AA trigger
+// that jumps to a removed page is deleted. A named destination pulls no page
+// object and stays as written.
+function dropJumpsToRemovedPages(doc: PDFDocument, keptIndices: number[]): void {
+  const pages = doc.getPages();
+  const all = new Set(pages.map(page => page.ref.tag));
+  const kept = new Set(keptIndices.flatMap(index => pages[index] ? [pages[index].ref.tag] : []));
+  const removed = (destination: PDFObject): boolean => {
+    const value = doc.context.lookup(destination);
+    const target = value instanceof PDFArray && value.size() > 0 ? value.get(0) : undefined;
+    return target instanceof PDFRef && all.has(target.tag) && !kept.has(target.tag);
+  };
+  const removedAnnots = new Set<string>();
+  pages.forEach(page => {
+    if (kept.has(page.ref.tag)) return;
+    const annots = doc.context.lookup(page.node.get(PDFName.of('Annots')));
+    if (annots instanceof PDFArray) for (const raw of annots.asArray()) if (raw instanceof PDFRef) removedAnnots.add(raw.tag);
+  });
+  const onRemovedPage = (raw: PDFObject | undefined): boolean => {
+    if (!(raw instanceof PDFRef)) return false;
+    if (removedAnnots.has(raw.tag)) return true;
+    const target = doc.context.lookup(raw), page = target instanceof PDFDict ? target.get(PDFName.of('P')) : undefined;
+    return page instanceof PDFRef && all.has(page.tag) && !kept.has(page.tag);
+  };
+  const dropTriggers = (owner: PDFDict) => {
+    const triggers = doc.context.lookup(owner.get(PDFName.of('AA')));
+    if (!(triggers instanceof PDFDict)) return;
+    for (const [key, action] of triggers.entries()) {
+      if (jumpsToRemovedPage(doc.context, action, removed)) triggers.delete(key);
+    }
+  };
+  for (const index of new Set(keptIndices)) {
+    if (!pages[index]) continue;
+    dropTriggers(pages[index].node);
+    const annots = doc.context.lookup(pages[index].node.get(PDFName.of('Annots')));
+    if (!(annots instanceof PDFArray)) continue;
+    for (const raw of annots.asArray()) {
+      const annot = doc.context.lookup(raw);
+      if (!(annot instanceof PDFDict)) continue;
+      const dest = annot.get(PDFName.of('Dest'));
+      if (annot.lookup(PDFName.of('Subtype')) === PDFName.of('Link') && dest !== undefined && removed(dest)) annot.delete(PDFName.of('Dest'));
+      if (jumpsToRemovedPage(doc.context, annot.get(PDFName.of('A')), removed)) annot.delete(PDFName.of('A'));
+      dropTriggers(annot);
+      if (onRemovedPage(annot.get(PDFName.of('Popup')))) annot.delete(PDFName.of('Popup'));
+      if (onRemovedPage(annot.get(PDFName.of('IRT')))) { annot.delete(PDFName.of('IRT')); annot.delete(PDFName.of('RT')); }
+      if (annot.lookup(PDFName.of('Subtype')) === PDFName.of('Popup') && onRemovedPage(annot.get(PDFName.of('Parent')))) annot.delete(PDFName.of('Parent'));
+    }
+  }
+  // ISO 32000-2 12.4.3/Tables 159-160: beads form a circular /N-/V ring and
+  // the thread's /F bead carries /T. Beads on removed pages leave the ring;
+  // a thread left without beads is reachable from nothing and is not carried.
+  const threads = new Map<string, PDFRef>();
+  const catalogThreads = doc.context.lookup(doc.catalog.get(PDFName.of('Threads')));
+  if (catalogThreads instanceof PDFArray) for (const raw of catalogThreads.asArray()) if (raw instanceof PDFRef) threads.set(raw.tag, raw);
+  for (const index of new Set(keptIndices)) {
+    const beads = pages[index] ? doc.context.lookup(pages[index].node.get(PDFName.of('B'))) : undefined;
+    if (!(beads instanceof PDFArray)) continue;
+    for (const raw of beads.asArray()) {
+      const bead = doc.context.lookup(raw), thread = bead instanceof PDFDict ? bead.get(PDFName.of('T')) : undefined;
+      if (thread instanceof PDFRef) threads.set(thread.tag, thread);
+    }
+  }
+  for (const threadRef of threads.values()) {
+    const thread = doc.context.lookup(threadRef);
+    if (!(thread instanceof PDFDict)) continue;
+    const ring: PDFRef[] = [], seen = new Set<string>();
+    let cursor = thread.get(PDFName.of('F')), closed = false;
+    while (cursor instanceof PDFRef && !seen.has(cursor.tag) && seen.size < 100000) {
+      seen.add(cursor.tag);
+      const bead = doc.context.lookup(cursor);
+      if (!(bead instanceof PDFDict)) break;
+      ring.push(cursor);
+      cursor = bead.get(PDFName.of('N'));
+      closed = cursor instanceof PDFRef && cursor.tag === ring[0].tag;
+    }
+    if (!closed) continue;
+    const onKept = ring.filter(ref => {
+      const page = doc.context.lookup(ref, PDFDict).get(PDFName.of('P'));
+      return page instanceof PDFRef && kept.has(page.tag);
+    });
+    if (onKept.length === ring.length || onKept.length === 0) continue;
+    onKept.forEach((ref, i) => {
+      const bead = doc.context.lookup(ref, PDFDict);
+      bead.set(PDFName.of('N'), onKept[(i + 1) % onKept.length]);
+      bead.set(PDFName.of('V'), onKept[(i - 1 + onKept.length) % onKept.length]);
+    });
+    thread.set(PDFName.of('F'), onKept[0]);
+    doc.context.lookup(onKept[0], PDFDict).set(PDFName.of('T'), threadRef);
+  }
+}
+
+interface PagePlacement { doc: PDFDocument; srcIndex: number; outPage: PDFPage }
+
+// copyPages registers a second clone of a page leaf whenever the copied graph
+// references that page (an annotation /P, a link or action destination, a
+// bead), so the reference names a leaf outside the page tree that no viewer
+// can reach. A reference to a placed page re-binds to its FIRST placement in
+// output order, found by walking each source page and its copy in parallel
+// (copyPages preserves shape). Page references never live in content,
+// resources, thumbnails or streams, so the walk skips them; it is iterative
+// and visits each output object once, so page size cannot exhaust it. A
+// detached leaf nothing references afterwards is deleted.
+const NO_PAGE_REFERENCES = new Set(['Parent', 'Resources', 'Contents', 'Thumb'].map(key => PDFName.of(key)));
+function bindDetachedPageCopies(output: PDFDocument, placements: PagePlacement[]): void {
+  const TYPE = PDFName.of('Type'), PAGE = PDFName.of('Page');
+  const tree = new Set(output.getPages().map(page => page.ref.tag));
+  const detached = new Map<string, PDFRef>();
+  for (const [ref, obj] of output.context.enumerateIndirectObjects()) {
+    if (obj instanceof PDFDict && obj.lookup(TYPE) === PAGE && !tree.has(ref.tag)) detached.set(ref.tag, ref);
+  }
+  if (detached.size === 0) return;
+  const first = new Map<PDFDocument, Map<string, PDFRef>>();
+  for (const { doc, srcIndex, outPage } of placements) {
+    let byTag = first.get(doc);
+    if (!byTag) { byTag = new Map(); first.set(doc, byTag); }
+    const tag = doc.getPage(srcIndex).ref.tag;
+    if (!byTag.has(tag)) byTag.set(tag, outPage.ref);
+  }
+  interface Step { doc: PDFDocument; src: PDFObject | undefined; out: PDFObject | undefined; rebind?: (ref: PDFRef) => void }
+  const stack: Step[] = placements.map(({ doc, srcIndex, outPage }) => ({ doc, src: doc.getPage(srcIndex).node, out: outPage.node }));
+  const seen = new Set<PDFObject>();
+  for (let step = stack.pop(); step; step = stack.pop()) {
+    const { doc, src, out, rebind } = step;
+    if (src instanceof PDFRef) {
+      if (!(out instanceof PDFRef)) continue;
+      const target = doc.context.lookup(src);
+      if (target instanceof PDFDict && target.lookup(TYPE) === PAGE) {
+        const placed = detached.has(out.tag) ? first.get(doc)?.get(src.tag) : undefined;
+        if (placed && rebind) rebind(placed);
+        continue;
+      }
+      stack.push({ doc, src: target, out: output.context.lookup(out) });
+      continue;
+    }
+    if (src === undefined || out === undefined || seen.has(out)) continue;
+    seen.add(out);
+    if (src instanceof PDFDict && out instanceof PDFDict) {
+      for (const [key, value] of src.entries()) {
+        if (!NO_PAGE_REFERENCES.has(key)) stack.push({ doc, src: value, out: out.get(key), rebind: ref => out.set(key, ref) });
+      }
+    } else if (src instanceof PDFArray && out instanceof PDFArray) {
+      for (let i = 0; i < Math.min(src.size(), out.size()); i++) {
+        stack.push({ doc, src: src.get(i), out: out.get(i), rebind: ref => out.set(i, ref) });
+      }
+    }
+  }
+  const referenced = new Set<string>();
+  const scan = (obj: PDFObject): void => {
+    if (obj instanceof PDFRef) { if (detached.has(obj.tag)) referenced.add(obj.tag); }
+    else if (obj instanceof PDFDict) for (const [, value] of obj.entries()) scan(value);
+    else if (obj instanceof PDFArray) for (const value of obj.asArray()) scan(value);
+    else if (obj instanceof PDFStream) scan(obj.dict);
+  };
+  for (const [ref, obj] of output.context.enumerateIndirectObjects()) if (!detached.has(ref.tag)) scan(obj);
+  for (const [tag, ref] of detached) if (!referenced.has(tag)) output.context.delete(ref);
+}
+
 // Load each distinct source once, prepare its form-field trees for the kept
 // subset of pages, and copy every kept page in ONE copyPages call per source
 // — pdf-lib's object copier caches per call, so a field tree shared by
@@ -1376,6 +1536,7 @@ async function assemblePages(
       );
     }
     prepareSourceForms(doc, g.indices);
+    dropJumpsToRemovedPages(doc, g.indices);
     const copied = await output.copyPages(doc, g.indices);
     const copiedByIndex = new Map<number, PDFPage>();
     g.indices.forEach((idx, i) => copiedByIndex.set(idx, copied[i]));
@@ -1390,13 +1551,14 @@ async function assemblePages(
   // Which source page landed at which output page — the reference-identity
   // channel every catalog/struct remap depends on (catalog-carry.ts).
   const pairsByKey = new Map<string, { srcIndex: number; outPage: PDFPage }[]>();
+  const placements: PagePlacement[] = [];
   for (const page of pages) {
     const src = sources.get(page.sourceKey)!;
     let copied = src.copiedByIndex.get(page.pageIndex);
     if (!copied || used.has(copied)) {
-      // Defensive only: no workspace op can put the same source page into the
-      // output twice today. If one ever does, the duplicate gets its own copy
-      // rather than one page object being mutated through two ExportPages.
+      // The same source page placed twice (a file imported into itself, a
+      // merge of two partitions of one file) gets its own copy rather than
+      // one page object being mutated through two ExportPages.
       [copied] = await output.copyPages(src.doc, [page.pageIndex]);
     }
     used.add(copied);
@@ -1421,7 +1583,9 @@ async function assemblePages(
       pairsByKey.set(page.sourceKey, pairs);
     }
     pairs.push({ srcIndex: page.pageIndex, outPage: copied });
+    placements.push({ doc: src.doc, srcIndex: page.pageIndex, outPage: copied });
   }
+  bindDetachedPageCopies(output, placements);
   carryAcroForm(output, contributions);
   // The structure tree: EVERY source contributes its surviving tags —
   // a donor page's MCIDs arrive in its copied stream, so its subtree must

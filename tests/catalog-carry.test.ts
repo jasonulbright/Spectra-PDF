@@ -323,10 +323,25 @@ describe('catalog carry — document JavaScript name tree', () => {
     const pages = out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'));
     expect(pages).toHaveLength(2);
   });
-  it.each(['removed', 'duplicated', 'named'])('refuses an unprovable %s destination without replacing source bytes', async mode => {
-    const src = await scriptSource(mode === 'named' ? 'named' : 'page'), before = src.slice();
-    const pages = mode === 'removed' ? [pageOf(src, 1)] : mode === 'duplicated' ? [pageOf(src, 0), pageOf(src, 0)] : [pageOf(src, 0)];
-    await expect(rebuild(pages)).rejects.toThrow(); expect(src).toEqual(before);
+  it('omits a script entry whose chain jumps to a removed page without replacing source bytes', async () => {
+    const src = await scriptSource('page'), before = src.slice();
+    const out = await rebuild([pageOf(src, 1)]);
+    expect(out.catalog.lookupMaybe(N('Names'), PDFDict)?.get(N('JavaScript'))).toBeUndefined();
+    expect(out.getPageCount()).toBe(1);
+    expect(out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'))).toHaveLength(1);
+    expect(src).toEqual(before);
+  });
+  it('binds a chained destination to the first placement of a duplicated page without replacing source bytes', async () => {
+    const src = await scriptSource('page'), before = src.slice();
+    const out = await rebuild([pageOf(src, 1), pageOf(src, 0), pageOf(src, 0)]);
+    const next = scriptAction(out).lookup(1, PDFDict).lookup(N('Next'), PDFDict);
+    expect(next.lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
+    expect(out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'))).toHaveLength(3);
+    expect(src).toEqual(before);
+  });
+  it('refuses an unprovable named destination without replacing source bytes', async () => {
+    const src = await scriptSource('named'), before = src.slice();
+    await expect(rebuild([pageOf(src, 0)])).rejects.toThrow(); expect(src).toEqual(before);
   });
   it('preserves action cycles as cycles, without executing or flattening them', async () => {
     const src = await scriptSource('cycle'), out = await rebuild([pageOf(src, 0)]), names = scriptAction(out);
@@ -422,7 +437,25 @@ describe('catalog carry — complete document action graphs', () => {
     const out = await rebuild([pageOf(src, 0), pageOf(src, 1)]);
     expect(action(out).lookup(N('Next'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
   });
-  it.each(['removed', 'duplicated', 'missing-name', 'duplicate-name', 'cyclic-name-tree', 'malformed-root', 'depth', 'page-tree'])('refuses %s without altering source bytes', async mode => {
+  it('omits every trigger, script entry and opening action jumping to a removed page without altering source bytes', async () => {
+    const src = await fixture((pdf, act) => { act.set(N('Next'), pdf.context.obj({ S: 'GoTo', D: [pdf.getPage(0).ref, 'Fit'] })); });
+    const before = src.slice(), out = await rebuild([pageOf(src, 1)]);
+    expect(out.catalog.get(N('AA'))).toBeUndefined();
+    expect(out.catalog.get(N('OpenAction'))).toBeUndefined();
+    expect(out.catalog.lookupMaybe(N('Names'), PDFDict)?.get(N('JavaScript'))).toBeUndefined();
+    expect(out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'))).toHaveLength(1);
+    expect(src).toEqual(before);
+  });
+  it('binds every action root to the first placement of a duplicated page without altering source bytes', async () => {
+    const src = await fixture((pdf, act) => { act.set(N('Next'), pdf.context.obj({ S: 'GoTo', D: [pdf.getPage(0).ref, 'Fit'] })); });
+    const before = src.slice(), out = await rebuild([pageOf(src, 1), pageOf(src, 0), pageOf(src, 0)]);
+    expect(action(out).lookup(N('Next'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
+    expect(out.catalog.lookup(N('AA'), PDFDict).get(N('WS'))).toEqual(out.catalog.lookup(N('AA'), PDFDict).get(N('WC')));
+    expect(out.catalog.get(N('OpenAction'))).toEqual(out.catalog.lookup(N('AA'), PDFDict).get(N('WC')));
+    expect(out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'))).toHaveLength(3);
+    expect(src).toEqual(before);
+  });
+  it.each(['missing-name', 'duplicate-name', 'cyclic-name-tree', 'malformed-root', 'depth', 'page-tree'])('refuses %s without altering source bytes', async mode => {
     const src = await fixture((pdf, act) => {
       if (mode === 'malformed-root') pdf.catalog.set(N('AA'), PDFNumber.of(42));
       else if (mode === 'page-tree') act.set(N('Private'), pdf.catalog.get(N('Pages'))!);
@@ -433,7 +466,7 @@ describe('catalog carry — complete document action graphs', () => {
         if (mode === 'cyclic-name-tree') { const dict = pdf.context.obj({}), ref = pdf.context.register(dict); dict.set(N('Kids'), pdf.context.obj([ref])); pdf.catalog.lookup(N('Names'), PDFDict).set(N('Dests'), ref); }
       } else act.set(N('Next'), pdf.context.obj({ S: 'GoTo', D: [pdf.getPage(0).ref, 'Fit'] }));
     });
-    const before = src.slice(), pages = mode === 'removed' ? [pageOf(src, 1)] : mode === 'duplicated' ? [pageOf(src, 0), pageOf(src, 0)] : [pageOf(src, 0), pageOf(src, 1)];
+    const before = src.slice(), pages = [pageOf(src, 0), pageOf(src, 1)];
     await expect(rebuild(pages)).rejects.toThrow(); expect(src).toEqual(before);
   });
   it('does not take an already-copied action subtree as a page-identity authority', async () => {
@@ -609,9 +642,16 @@ describe('catalog carry — outline jumps written as GoTo actions', () => {
     expect(src).toEqual(before);
   });
 
-  it('refuses a GoTo onto a page copied more than once', async () => {
+  it.each(['pdf', 'pdfx'])('binds a GoTo onto a page copied more than once to its first placement: %s', async format => {
     const src = await actionOutline(), before = src.slice();
-    await expect(build('pdf', src, [pageOf(src, 0), pageOf(src, 0)])).rejects.toThrow();
+    const out = await build(format, src, [pageOf(src, 0), pageOf(src, 0)]);
+    const [first, second] = [0, 1].map(i => i === 0
+      ? out.catalog.lookup(N('Outlines'), PDFDict).lookup(N('First'), PDFDict)
+      : out.catalog.lookup(N('Outlines'), PDFDict).lookup(N('Last'), PDFDict));
+    expect(first.lookup(N('A'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(0).ref);
+    expect(text(second.lookup(N('Title')))).toBe('Page 2');
+    expect(second.get(N('A'))).toBeUndefined();
+    expect(out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'))).toHaveLength(2);
     expect(src).toEqual(before);
   });
 });

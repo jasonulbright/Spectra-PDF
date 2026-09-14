@@ -41,9 +41,14 @@ describe('viewer preference page identity', () => {
   it('retains the surviving part of a deleted selection', async () => {
     expect(values(await rebuild(await source([2, 3]), [2, 3]))).toEqual([1, 1]);
   });
-  it('refuses deletion of every selected page instead of defaulting to all', async () => {
-    await expect(rebuild(await source(), [0, 2, 3])).rejects.toThrow();
-    await expect(rebuild(await source(), [], false, [0])).rejects.toThrow();
+  it.each([false, true])('omits only the range when every selected page is deleted (PDFX=%s)', async pdfx => {
+    for (const [order, donors] of [[[0, 2, 3], []], [[], [0]]] as const) {
+      const prefs = (await rebuild(await source(), [...order], pdfx, [...donors])).catalog.lookup(N('ViewerPreferences'), PDFDict);
+      expect(prefs.get(N('PrintPageRange'))).toBeUndefined();
+      expect(prefs.lookup(N('DisplayDocTitle'))).toBe(PDFBool.True);
+      expect(prefs.lookup(N('NumCopies'), PDFNumber).asNumber()).toBe(2);
+      expect(prefs.lookup(N('PrivateText'), PDFString).decodeText()).toBe('Keep exactly');
+    }
   });
   it('preserves an explicitly empty range without inventing a selection', async () => {
     expect(values(await rebuild(await source([]), [3, 0]))).toEqual([]);
