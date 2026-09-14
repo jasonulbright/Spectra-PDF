@@ -111,6 +111,28 @@ function spend(budget: Budget, count = 1): void {
   if (budget.objects > MAX_OBJECTS) throw refuse();
 }
 
+/** A page graph walk charges each distinct source object once per build: a
+ * font or form shared by every page, or reached by both the occurrence map
+ * and the reference scan, is one object of work, not one per visit. A scalar
+ * leaf leads nowhere and is not charged, so the budget bounds the unique graph
+ * rather than the length of a flat array such as a font's /Widths. */
+const chargedObjects = new WeakMap<Budget, WeakMap<PDFDocument, { refs: Set<string>; direct: WeakSet<PDFObject> }>>();
+function spendOnce(budget: Budget, doc: PDFDocument, value: PDFObject | undefined): void {
+  if (!(value instanceof PDFRef || value instanceof PDFDict || value instanceof PDFArray || value instanceof PDFStream)) return;
+  let byDoc = chargedObjects.get(budget);
+  if (!byDoc) { byDoc = new WeakMap(); chargedObjects.set(budget, byDoc); }
+  let charged = byDoc.get(doc);
+  if (!charged) { charged = { refs: new Set(), direct: new WeakSet() }; byDoc.set(doc, charged); }
+  if (value instanceof PDFRef) {
+    if (charged.refs.has(value.tag)) return;
+    charged.refs.add(value.tag);
+  } else {
+    if (charged.direct.has(value)) return;
+    charged.direct.add(value);
+  }
+  spend(budget);
+}
+
 function spendBytes(budget: Budget, count: number): void {
   budget.bytes += count;
   if (budget.bytes > MAX_BYTES) throw refuse();
@@ -448,6 +470,9 @@ function pinConfigArrays(
  * where a Form XObject keeps the resources that name its groups. */
 function mapOccurrences(source: CarriedSourcePages, output: PDFDocument, budget: Budget): Occurrence[] {
   const occurrences: Occurrence[] = [];
+  // Shared across occurrences: what one source object paired with one output
+  // object reaches is the same on every page that references that pair.
+  const memo: PairMemo = new Map();
   source.pairs.forEach(({ srcIndex, outPage }) => {
     spend(budget);
     const srcPage = source.doc.getPage(srcIndex);
@@ -456,12 +481,19 @@ function mapOccurrences(source: CarriedSourcePages, output: PDFDocument, budget:
     // DIFFERENT output object in each copy of the page.
     const seen = new Set<string>();
     for (const key of ['Resources', 'Annots', 'Contents'] as const) {
-      pair(srcPage.node.get(N(key), true), outPage.node.get(N(key), true), source.doc, output, objMap, seen, 0, budget);
+      pair(srcPage.node.get(N(key), true), outPage.node.get(N(key), true), source.doc, output, objMap, seen, 0, budget, memo);
     }
     occurrences.push({ srcIndex, outPageRef: outPage.ref, objMap });
   });
   return occurrences;
 }
+
+/** The references directly beneath one paired value, each at its depth
+ * relative to that value, and the deepest relative depth its direct structure
+ * reaches. Keyed `source tag>output tag`: a page copied twice pairs the same
+ * source object with a different output object, so it is walked again. */
+interface PairReach { children: { src: PDFRef; out: PDFObject | undefined; depth: number }[]; reach: number }
+type PairMemo = Map<string, PairReach>;
 
 function pair(
   srcValue: PDFObject | undefined,
@@ -472,22 +504,56 @@ function pair(
   seen: Set<string>,
   depth: number,
   budget: Budget,
+  memo: PairMemo,
 ): void {
-  // Every traversed edge is charged, new or repeated, direct or indirect.
-  spend(budget);
+  spendOnce(budget, source, srcValue);
   // A cutoff is not permission to leave a group unreachable: an unprovable
   // graph refuses rather than quietly losing the layer it holds.
   if (depth > MAX_DEPTH) throw refuse();
+  let reach: PairReach;
+  if (srcValue instanceof PDFRef) {
+    if (!(outValue instanceof PDFRef)) return;
+    if (seen.has(srcValue.tag)) return;
+    seen.add(srcValue.tag);
+    map.set(srcValue.tag, outValue);
+    const key = `${srcValue.tag}>${outValue.tag}`;
+    const known = memo.get(key);
+    if (known) reach = known;
+    else {
+      reach = { children: [], reach: 0 };
+      memo.set(key, reach);
+      collectPair(source.context.lookup(srcValue), output.context.lookup(outValue), source, 0, reach, budget);
+    }
+  } else {
+    reach = { children: [], reach: 0 };
+    collectPair(srcValue, outValue, source, 0, reach, budget);
+  }
+  if (depth + reach.reach > MAX_DEPTH) throw refuse();
+  for (const child of reach.children) {
+    pair(child.src, child.out, source, output, map, seen, depth + child.depth, budget, memo);
+  }
+}
+
+function collectPair(
+  srcValue: PDFObject | undefined,
+  outValue: PDFObject | undefined,
+  source: PDFDocument,
+  depth: number,
+  into: PairReach,
+  budget: Budget,
+): void {
+  if (depth > 0) spendOnce(budget, source, srcValue);
+  if (depth > MAX_DEPTH) throw refuse();
+  into.reach = Math.max(into.reach, depth);
+  if (srcValue instanceof PDFRef) {
+    into.children.push({ src: srcValue, out: outValue, depth });
+    return;
+  }
   let src = srcValue;
   let out = outValue;
-  if (src instanceof PDFRef) {
-    if (!(out instanceof PDFRef)) return;
-    if (seen.has(src.tag)) return;
-    seen.add(src.tag);
-    map.set(src.tag, out);
-    src = source.context.lookup(src);
-    out = output.context.lookup(out);
-  }
+  // A link or action destination reaches another page, whose own occurrence
+  // pairs its graph; descending would chain every linked page into one path.
+  if (src instanceof PDFDict && optional(source, src, 'Type') === N('Page')) return;
   if (src instanceof PDFStream && out instanceof PDFStream) {
     src = src.dict;
     out = out.dict;
@@ -498,14 +564,14 @@ function pair(
       // whole document. (/P here is a page backpointer, never a policy name:
       // an OCMD's /P is a name, which this never descends into.)
       if (key === N('Parent') || key === N('P')) continue;
-      pair(value, out.get(key, true), source, output, map, seen, depth + 1, budget);
+      collectPair(value, out.get(key, true), source, depth + 1, into, budget);
     }
     return;
   }
   if (src instanceof PDFArray && out instanceof PDFArray) {
     if (src.size() !== out.size()) return;
     for (let i = 0, n = src.size(); i < n; i++) {
-      pair(src.get(i), out.get(i), source, output, map, seen, depth + 1, budget);
+      collectPair(src.get(i), out.get(i), source, depth + 1, into, budget);
     }
   }
 }
@@ -557,7 +623,7 @@ function referencedOptionalContent(
   };
 
   const walk = (raw: PDFObject | undefined, depth: number): void => {
-    spend(budget);
+    spendOnce(budget, doc, raw);
     // A cutoff cannot silently leave part of the page unexamined: an
     // unprovable resource graph refuses.
     if (depth > MAX_DEPTH) throw refuse();
@@ -566,6 +632,8 @@ function referencedOptionalContent(
       seen.add(raw.tag);
     }
     let value = doc.context.lookup(raw);
+    // Another page's groups are what that page references, not this one.
+    if (value instanceof PDFDict && optional(doc, value, 'Type') === N('Page')) return;
     if (value instanceof PDFStream) {
       // A stream can carry its own /OC and its own resources.
       record(value.dict.get(N('OC'), true), true);
@@ -759,10 +827,12 @@ function requireType(doc: PDFDocument, dict: PDFDict, expected: string): void {
 /** Every output object a source group became. A page kept twice was copied
  * twice, so its groups exist twice and both renderings need configuring. */
 function outputsFor(srcTag: string, occurrences: Occurrence[], budget: Budget): PDFRef[] {
+  // One charge per group: the per-page maps were already paid for when they
+  // were built, and a lookup in each is not new graph work.
+  spend(budget);
   const seen = new Set<string>();
   const refs: PDFRef[] = [];
   for (const occurrence of occurrences) {
-    spend(budget);
     const mapped = occurrence.objMap.get(srcTag);
     if (!mapped || seen.has(mapped.tag)) continue;
     seen.add(mapped.tag);

@@ -154,7 +154,7 @@ describe('catalog state survives committed page edits', () => {
     expect(out.getPageCount()).toBe(1);
   });
 
-  for (const removeSelected of [false, true]) it(`preserves print/bookmark/Info identity, or refuses loss (remove selected=${removeSelected})`, async () => {
+  for (const removeSelected of [false, true]) it(`preserves print/bookmark/Info identity, omitting a range with no retained page (remove selected=${removeSelected})`, async () => {
     const dir = mkdtempSync(resolve(__dirname, '../../catalog-metadata-live.local.d-'));
     const path = resolve(dir, 'source.pdf'), N = PDFName.of;
     const pdf = await PDFDocument.create({ updateMetadata: false });
@@ -172,18 +172,21 @@ describe('catalog state survives committed page edits', () => {
     const work = (await getState()).activeFile!.workingPath, before = readFileSync(work);
     const ids = await waitForActiveCanvasPageIds(); expect(ids).toHaveLength(3);
     await deleteCanvasPagesAndWait([ids[removeSelected ? 1 : 0]]);
-    if (removeSelected) {
-      let error = ''; try { await commitPendingEdits(); } catch (caught) { error = String(caught); }
-      expect(error).toContain('commitPendingEdits failed'); expect(error).toContain('verif');
-      expect(readFileSync(work).equals(before)).toBe(true);
-      expect(await invokeAppCommand('edit.undo')).toBe(true);
-      await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 3);
-    } else {
-      await commitPendingEdits(); const saved = resolve(dir, 'saved.pdf'); await saveActiveAs(saved);
+    {
+      await commitPendingEdits(); expect(readFileSync(work).equals(before)).toBe(false);
+      const saved = resolve(dir, 'saved.pdf'); await saveActiveAs(saved);
       const out = await PDFDocument.load(readFileSync(saved), { updateMetadata: false });
-      const range = out.catalog.lookup(N('ViewerPreferences'), PDFDict).lookup(N('PrintPageRange'), PDFArray);
-      expect(range.asArray().map(x => (x as PDFNumber).asNumber())).toEqual([1, 1]);
-      expect(out.getPage(0).getWidth()).toBe(400);
+      const prefs = out.catalog.lookup(N('ViewerPreferences'), PDFDict);
+      expect(prefs.lookup(N('DisplayDocTitle'))).toBe(PDFBool.True);
+      if (removeSelected) {
+        expect(prefs.get(N('PrintPageRange'))).toBeUndefined();
+        expect(out.getPages().map(page => page.getWidth())).toEqual([300, 500]);
+        expect(out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'))).toHaveLength(2);
+      } else {
+        const range = prefs.lookup(N('PrintPageRange'), PDFArray);
+        expect(range.asArray().map(x => (x as PDFNumber).asNumber())).toEqual([1, 1]);
+        expect(out.getPage(0).getWidth()).toBe(400);
+      }
       expect(out.getTitle()).toBe('Own document'); expect(out.getAuthor()).toBe('Original author');
       const carried = out.context.lookup(out.context.trailerInfo.Info!, PDFDict);
       expect(carried.lookup(N('Private'), PDFString).decodeText()).toBe('Private value');

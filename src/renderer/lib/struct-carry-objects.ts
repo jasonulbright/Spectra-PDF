@@ -78,6 +78,27 @@ export function spend(budget: Budget, count = 1): void {
   if (budget.objects > budget.limitObjects) throw budget.fail();
 }
 
+/** A page graph walk charges each distinct source object once per build: an
+ * object shared by every page is one object of work, not one per visit. A
+ * scalar leaf leads nowhere and is not charged, so the budget bounds the
+ * unique graph rather than the length of a flat array. */
+const chargedObjects = new WeakMap<Budget, WeakMap<PDFDocument, { refs: Set<string>; direct: WeakSet<PDFObject> }>>();
+export function spendOnce(budget: Budget, doc: PDFDocument, value: PDFObject | undefined): void {
+  if (!(value instanceof PDFRef || value instanceof PDFDict || value instanceof PDFArray || value instanceof PDFStream)) return;
+  let byDoc = chargedObjects.get(budget);
+  if (!byDoc) { byDoc = new WeakMap(); chargedObjects.set(budget, byDoc); }
+  let charged = byDoc.get(doc);
+  if (!charged) { charged = { refs: new Set(), direct: new WeakSet() }; byDoc.set(doc, charged); }
+  if (value instanceof PDFRef) {
+    if (charged.refs.has(value.tag)) return;
+    charged.refs.add(value.tag);
+  } else {
+    if (charged.direct.has(value)) return;
+    charged.direct.add(value);
+  }
+  spend(budget);
+}
+
 export function spendBytes(budget: Budget, count: number): void {
   budget.bytes += count;
   if (budget.bytes > budget.limitBytes) throw budget.fail();
@@ -106,21 +127,58 @@ function mapParallel(
   seen: Set<string>,
   depth: number,
   budget: Budget,
+  memo: ParallelMemo,
 ): void {
-  // Every traversed edge is charged, whether or not it leads anywhere new:
-  // a direct container entry and a repeat visit are both work.
-  spend(budget);
+  spendOnce(budget, source, srcValue);
   if (depth > MAP_DEPTH) throw budget.fail();
+  let reach: ParallelReach;
+  if (srcValue instanceof PDFRef) {
+    if (!(outValue instanceof PDFRef)) return;
+    if (seen.has(srcValue.tag)) return;
+    seen.add(srcValue.tag);
+    map.set(srcValue.tag, outValue);
+    const key = `${srcValue.tag}>${outValue.tag}`;
+    const known = memo.get(key);
+    if (known) reach = known;
+    else {
+      reach = { children: [], reach: 0 };
+      memo.set(key, reach);
+      collectParallel(source.context.lookup(srcValue), output.context.lookup(outValue), source, 0, reach, budget);
+    }
+  } else {
+    reach = { children: [], reach: 0 };
+    collectParallel(srcValue, outValue, source, 0, reach, budget);
+  }
+  if (depth + reach.reach > MAP_DEPTH) throw budget.fail();
+  for (const child of reach.children) {
+    mapParallel(child.src, child.out, source, output, map, seen, depth + child.depth, budget, memo);
+  }
+}
+
+/** The references directly beneath one paired value, each at its depth
+ * relative to that value, and the deepest relative depth its direct structure
+ * reaches. Keyed `source tag>output tag`: a page copied twice pairs the same
+ * source object with a different output object, so it is walked again. */
+interface ParallelReach { children: { src: PDFRef; out: PDFObject | undefined; depth: number }[]; reach: number }
+type ParallelMemo = Map<string, ParallelReach>;
+
+function collectParallel(
+  srcValue: PDFObject | undefined,
+  outValue: PDFObject | undefined,
+  source: PDFDocument,
+  depth: number,
+  into: ParallelReach,
+  budget: Budget,
+): void {
+  if (depth > 0) spendOnce(budget, source, srcValue);
+  if (depth > MAP_DEPTH) throw budget.fail();
+  into.reach = Math.max(into.reach, depth);
+  if (srcValue instanceof PDFRef) {
+    into.children.push({ src: srcValue, out: outValue, depth });
+    return;
+  }
   let srcObj = srcValue;
   let outObj = outValue;
-  if (srcObj instanceof PDFRef) {
-    if (!(outObj instanceof PDFRef)) return;
-    if (seen.has(srcObj.tag)) return;
-    seen.add(srcObj.tag);
-    map.set(srcObj.tag, outObj);
-    srcObj = source.context.lookup(srcObj);
-    outObj = output.context.lookup(outObj);
-  }
   // A Form XObject or appearance stream is a stream; its dictionary is where
   // the nested resources live, and that is what has to be walked.
   if (srcObj instanceof PDFStream && outObj instanceof PDFStream) {
@@ -132,13 +190,13 @@ function mapParallel(
       // /Parent and /P climb out of the page subtree; following them would
       // walk the whole document.
       if (key === N('Parent') || key === N('P')) continue;
-      mapParallel(value, outObj.get(key), source, output, map, seen, depth + 1, budget);
+      collectParallel(value, outObj.get(key), source, depth + 1, into, budget);
     }
     return;
   }
   if (srcObj instanceof PDFArray && outObj instanceof PDFArray) {
     for (let i = 0, n = srcObj.size(); i < n; i++) {
-      mapParallel(srcObj.get(i), outObj.get(i), source, output, map, seen, depth + 1, budget);
+      collectParallel(srcObj.get(i), outObj.get(i), source, depth + 1, into, budget);
     }
   }
 }
@@ -151,6 +209,9 @@ export function buildOccurrences(
   budget: Budget,
 ): PageOccurrence[] {
   const occurrences: PageOccurrence[] = [];
+  // Shared across occurrences: what one source object paired with one output
+  // object reaches is the same on every page that references that pair.
+  const memo: ParallelMemo = new Map();
   source.pairs.forEach(({ srcIndex, outPage }, order) => {
     const srcPage = source.doc.getPage(srcIndex);
     const map: ObjectMap = new Map();
@@ -158,7 +219,7 @@ export function buildOccurrences(
     // maps to a DIFFERENT output object in each copy of the page.
     const seen = new Set<string>();
     for (const key of ['Resources', 'Annots', 'Contents'] as const) {
-      mapParallel(srcPage.node.get(N(key)), outPage.node.get(N(key)), source.doc, output, map, seen, 0, budget);
+      mapParallel(srcPage.node.get(N(key)), outPage.node.get(N(key)), source.doc, output, map, seen, 0, budget, memo);
     }
     occurrences.push({
       srcIndex,

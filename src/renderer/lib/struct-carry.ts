@@ -852,6 +852,10 @@ function renameClasses(ctx: RebuildCtx, raw: PDFObject | undefined): PDFObject |
  * rebuild — with no carried tree, a lingering /StructParents integer points
  * into a ParentTree that does not exist. */
 function sweepStaleKeys(output: PDFDocument, budget: Budget): void {
+  // One visited set for every page: the sweep only deletes keys on OUTPUT
+  // objects, so a font or form shared by every page is swept once, not once
+  // per page against the document-wide budget.
+  const seen = new Set<string>();
   for (const page of output.getPages()) {
     spend(budget);
     page.node.delete(N('StructParents'));
@@ -867,7 +871,6 @@ function sweepStaleKeys(output: PDFDocument, budget: Budget): void {
     // like a page's, and a lingering one points into a tree that is gone.
     // Annotation appearance streams are containers too, so the sweep starts
     // from the annotations as well as the page's own content and resources.
-    const seen = new Set<string>();
     sweepStreamKeys(output, page.node.get(N('Resources')), seen, 0, budget);
     sweepStreamKeys(output, page.node.get(N('Contents')), seen, 0, budget);
     if (annots) {
@@ -885,7 +888,9 @@ function sweepStreamKeys(
   depth: number,
   budget: Budget,
 ): void {
-  spend(budget);
+  // A scalar leaf leads nowhere: only references and containers are charged,
+  // so the budget bounds traversal work, not the length of a flat array.
+  if (raw instanceof PDFRef || raw instanceof PDFDict || raw instanceof PDFArray || raw instanceof PDFStream) spend(budget);
   // Running out of depth is not permission to leave a stale key behind: the
   // sweep either reaches everything or says it could not.
   if (depth > MAX_STREAM_SWEEP_DEPTH) throw refuse();
@@ -901,6 +906,11 @@ function sweepStreamKeys(
     value = value.dict;
   }
   if (value instanceof PDFDict) {
+    // An annotation /P or a destination reaches a page or the page tree; each
+    // page sweeps its own containers, and following one chains every linked
+    // page into a single path deeper than the bound.
+    const type = value.lookup(N('Type'));
+    if (type === N('Page') || type === N('Pages')) return;
     for (const [, entry] of value.entries()) sweepStreamKeys(output, entry, seen, depth + 1, budget);
     return;
   }
@@ -948,7 +958,9 @@ export function carryStructTree(output: PDFDocument, sources: CarriedSourcePages
     limitBytes: MAX_BYTES,
     fail: refuse,
   };
-  sweepStaleKeys(output, budget);
+  // The sweep walks the OUTPUT copies of the same page graphs the occurrence
+  // maps walk in the sources; one shared budget would charge that graph twice.
+  sweepStaleKeys(output, { ...budget });
 
   const tagged = sources.filter((s) => s.doc.catalog.lookupMaybe(N('StructTreeRoot'), PDFDict));
   if (tagged.length === 0) return structureMaps;

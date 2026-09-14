@@ -145,7 +145,14 @@ describe('outline payload preservation', () => {
 });
 
 describe('outline unsafe-shape refusal', () => {
-  it.each(['cycle', 'missing-parent', 'wrong-last', 'wrong-prev', 'direct-item', 'malformed-title', 'two-actions', 'bad-style', 'bad-color', 'missing-action', 'missing-name', 'missing-structure', 'removed-structure', 'duplicate-action', 'orphan-page'])('refuses %s', async mode => {
+  it.each([false, true])('binds a GoTo bookmark to the first placement of a duplicated page (PDFX=%s)', async pdfx => {
+    const { doc, item } = await fixture();
+    item.set(N('A'), doc.context.obj({ S: 'GoTo', D: [doc.getPage(1).ref, 'Fit'] }));
+    const out = await rebuild(doc, [1, 1, 0], pdfx);
+    expect(first(out).lookup(N('A'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(0).ref);
+    expect(out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'))).toHaveLength(3);
+  });
+  it.each(['cycle', 'missing-parent', 'wrong-last', 'wrong-prev', 'direct-item', 'malformed-title', 'two-actions', 'bad-style', 'bad-color', 'missing-action', 'missing-name', 'missing-structure', 'removed-structure', 'orphan-page'])('refuses %s', async mode => {
     const { doc, root, item, ref } = await fixture();
     if (mode === 'cycle') item.set(N('Next'), ref);
     if (mode === 'missing-parent') item.delete(N('Parent'));
@@ -159,9 +166,8 @@ describe('outline unsafe-shape refusal', () => {
     if (mode === 'missing-name') item.set(N('Dest'), PDFString.of('absent'));
     if (mode.includes('structure')) item.set(N('SE'), mode === 'missing-structure' ? doc.context.register(doc.context.obj({ Type: 'StructElem' })) : addTag(doc));
     if (mode === 'two-actions') { item.set(N('Dest'), doc.context.obj([doc.getPage(0).ref, 'Fit'])); item.set(N('A'), doc.context.obj({ S: 'Named', N: 'NextPage' })); }
-    if (mode.includes('action') && mode !== 'missing-action' && mode !== 'two-actions') item.set(N('A'), doc.context.obj({ S: 'GoTo', D: [doc.getPage(1).ref, 'Fit'] }));
     if (mode === 'orphan-page') item.set(N('Private'), doc.catalog.get(N('Pages'))!);
-    const order = mode.startsWith('removed') ? [0, 2] : mode === 'duplicate-action' ? [1, 1, 0] : [0, 1, 2];
+    const order = mode.startsWith('removed') ? [0, 2] : [0, 1, 2];
     // No malformed direct linked cycle is serialized by this test harness.
     if (mode === 'direct-item') { item.delete(N('Parent')); }
     await expect(rebuild(doc, order)).rejects.toThrow();
