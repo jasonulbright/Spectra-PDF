@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.2.5
+
+*Released 2026-09-14*
+
+### Fixes
+
+- Save page edits when a bookmark, link, opening view or script points at a deleted page.
+- Keep deleted pages out of saved files that still link to them.
+- Save page edits in documents of several hundred pages.
+- Keep article threads through page edits.
+- Save when a document imported into itself or merged twice is edited.
+- Stamp headers, footers and watermarks on exactly the pages requested.
+- Refuse malformed page ranges instead of guessing, and never hang on huge ones.
+- Edit the document that was open when a tool started, never a reopened copy.
+- Correct the spelling of a comment on the reported page, not the first match.
+- Keep the printing condition and colour profile through merge and split.
+- Declare the correct PDF version after merge and split.
+- Keep scanner failures from blocking application exit.
+- Export reviewed tables from the current edits, not the original file.
+- Read split form packets with their own encoding.
+- Keep split destinations, layers and separation profiles exact.
+- Show extracted text and save it from the same document.
+- Give each export its own save location.
+
+### Security
+
+- Update the TLS library used for update checks.
+
+### Packaging
+
+- Store portable archive entries with standard path separators.
+
 ## 1.2.4
 
 *Released 2026-09-11*
