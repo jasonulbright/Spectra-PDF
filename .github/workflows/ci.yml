@@ -338,6 +338,7 @@ jobs:
         # Retries and the pinned upstream fallback live in the script.
         run: powershell -ExecutionPolicy Bypass -File scripts/install-ghostscript-test-tool.ps1
         shell: pwsh
+        timeout-minutes: 30
 
       - name: Export the test Ghostscript path
         # The Windows installer registers Ghostscript but does not necessarily
@@ -521,6 +522,7 @@ jobs:
         # Retries and the pinned upstream fallback live in the script.
         run: powershell -ExecutionPolicy Bypass -File scripts/install-ghostscript-test-tool.ps1
         shell: pwsh
+        timeout-minutes: 30
 
       # Vendoring and staging are separate steps: a failed vendoring in a
       # multi-command block would be masked by the staging command's exit

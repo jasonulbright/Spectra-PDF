@@ -1824,10 +1824,103 @@ def test_the_ghostscript_test_tool_install_retries_and_falls_back_pinned() -> No
     """
     text = (ROOT / "scripts" / "install-ghostscript-test-tool.ps1").read_text()
     assert "choco install ghostscript -y --no-progress" in text
-    assert "$attempt -le 3" in text
+    assert "$attempt -le $ChocoAttempts" in text
     assert "$FallbackSha256 = " in text
     verify = text.index("$actual -ne $FallbackSha256")
     assert verify < text.index("Start-Process -FilePath $installer")
+
+
+GS_TEST_TOOL_SCRIPT = "scripts/install-ghostscript-test-tool.ps1"
+
+
+def _gs_script_constant(text: str, name: str) -> int:
+    found = re.findall(rf"^\${name} = (\d+)$", text, re.MULTILINE)
+    assert len(found) == 1, (name, found)
+    return int(found[0])
+
+
+def test_the_ghostscript_test_tool_install_is_bounded_under_its_step_deadline() -> None:
+    """A vendor installer that never exits hung the step for six hours.
+
+    Every Chocolatey attempt carries an execution timeout, leftover installers
+    are killed before anything else runs, the fallback waits on its own
+    process with a deadline (Start-Process -Wait also waits on descendants),
+    and every workflow step running the script has a deadline above the
+    script's worst case.
+    """
+    text = (ROOT / GS_TEST_TOOL_SCRIPT).read_text()
+    attempts = _gs_script_constant(text, "ChocoAttempts")
+    choco_timeout = _gs_script_constant(text, "ChocoTimeoutSeconds")
+    retry_sleep = _gs_script_constant(text, "RetrySleepSeconds")
+    termination_wait = _gs_script_constant(text, "TerminationWaitSeconds")
+    download_timeout = _gs_script_constant(text, "FallbackDownloadTimeoutSeconds")
+    fallback_timeout = _gs_script_constant(text, "FallbackTimeoutSeconds")
+    assert 1 <= attempts <= 3
+    assert 0 < choco_timeout <= 600
+    assert 0 < fallback_timeout <= 900
+
+    choco_calls = re.findall(r"^\s*choco install ghostscript\b.*$", text, re.MULTILINE)
+    assert choco_calls == [
+        "    choco install ghostscript -y --no-progress "
+        "--execution-timeout=$ChocoTimeoutSeconds"
+    ]
+    assert "-TimeoutSec $FallbackDownloadTimeoutSeconds" in text
+
+    starts = re.findall(r"^.*Start-Process -FilePath \$installer.*$", text, re.MULTILINE)
+    assert len(starts) == 1, starts
+    assert "-PassThru" in starts[0]
+    assert "-Wait" not in starts[0]
+    start = text.index(starts[0])
+    assert "$proc.WaitForExit($FallbackTimeoutSeconds * 1000)" in text[start:]
+    assert "$null = $proc.Handle" in text[start:]
+    assert not re.search(r"^\s*Wait-Process\b", text, re.MULTILINE)
+    assert not re.search(r"(?m)^[^#\n]*Start-Process\b[^\n]*-Wait\b", text)
+
+    loop = text.index("for ($attempt = 1;")
+    loop_body = text[loop:text.index("if (-not $installed)")]
+    assert "Stop-GhostscriptInstallerProcess" in loop_body
+    assert text.index("function Stop-GhostscriptInstallerProcess") < loop
+    assert "'lib\\Ghostscript.app'" in text
+    assert "'lib-bad\\Ghostscript.app'" in text
+    assert "'^gs\\d+w64\\.exe$'" in text
+
+    worst_case_seconds = (
+        attempts * (choco_timeout + termination_wait)
+        + retry_sleep * attempts * (attempts - 1) // 2
+        + download_timeout
+        + fallback_timeout
+        + termination_wait
+    )
+    # Chocolatey's package download and the runner's process start are not
+    # covered by the constants above.
+    overhead_seconds = 300
+
+    invoking_steps = []
+    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        raw = workflow.read_text()
+        if GS_TEST_TOOL_SCRIPT not in raw:
+            continue
+        lines = raw.splitlines()
+        jobs = [
+            line[2:-1]
+            for line in lines[lines.index("jobs:") + 1:]
+            if re.fullmatch(r"  [A-Za-z][\w-]*:", line)
+        ]
+        found = [
+            (workflow.name, job, name, step)
+            for job in jobs
+            for name, step in _job_steps(workflow.name, job)
+            if GS_TEST_TOOL_SCRIPT in step
+        ]
+        assert len(found) == raw.count(GS_TEST_TOOL_SCRIPT), workflow.name
+        invoking_steps.extend(found)
+    assert {w for w, *_ in invoking_steps} >= {"ci.yml", "release.yml"}
+    for workflow, job, name, step in invoking_steps:
+        deadlines = re.findall(r"^        timeout-minutes: (\d+)$", step, re.MULTILINE)
+        assert len(deadlines) == 1, (workflow, job, name, deadlines)
+        assert worst_case_seconds + overhead_seconds < int(deadlines[0]) * 60, (
+            workflow, job, name, worst_case_seconds, deadlines[0],
+        )
 
 
 def test_the_test_hsm_download_is_version_and_hash_pinned() -> None:

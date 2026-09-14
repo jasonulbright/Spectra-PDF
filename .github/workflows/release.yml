@@ -275,6 +275,7 @@ jobs:
         # Retries and the pinned upstream fallback live in the script.
         run: powershell -ExecutionPolicy Bypass -File scripts/install-ghostscript-test-tool.ps1
         shell: pwsh
+        timeout-minutes: 30
 
       - name: Export the test Ghostscript path
         run: |
