@@ -75,6 +75,7 @@ $LibFaces = @(
     @{ Name = 'LibertinusSerif-BoldItalic.otf'; Sha256 = '47a665259f09f554f5d133d7718cdad43ff462c6a6b2328f38023465e62d57ce' }
 )
 
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 $Root = Split-Path -Parent $PSScriptRoot
 $Dest = Join-Path $Root 'resources\fonts'
 
@@ -121,7 +122,9 @@ New-Item -ItemType Directory -Force $Dest | Out-Null
 $Tmp = Join-Path $env:TEMP "liberation-fonts-$Version.tar.gz"
 
 Write-Host "Downloading Liberation Fonts $Version..."
-Invoke-WebRequest -Uri $Url -OutFile $Tmp -UseBasicParsing
+Invoke-DownloadWithRetry -Description "Liberation Fonts $Version" -OutFile $Tmp -Download {
+    Invoke-WebRequest -Uri $Url -OutFile $Tmp -UseBasicParsing -TimeoutSec $DownloadRetryTimeoutSeconds
+}
 
 $actual = (Get-FileHash -Algorithm SHA256 $Tmp).Hash.ToLowerInvariant()
 if ($actual -ne $Sha256) {
@@ -161,7 +164,9 @@ Remove-Item $Extract -Recurse -Force
 # --- Libertinus Serif OTF (OpenType features) ---
 $LibTmp = Join-Path $env:TEMP "libertinus-$LibVersion.zip"
 Write-Host "Downloading Libertinus $LibVersion..."
-Invoke-WebRequest -Uri $LibUrl -OutFile $LibTmp -UseBasicParsing
+Invoke-DownloadWithRetry -Description "Libertinus $LibVersion" -OutFile $LibTmp -Download {
+    Invoke-WebRequest -Uri $LibUrl -OutFile $LibTmp -UseBasicParsing -TimeoutSec $DownloadRetryTimeoutSeconds
+}
 $libActual = (Get-FileHash -Algorithm SHA256 $LibTmp).Hash.ToLowerInvariant()
 if ($libActual -ne $LibSha256) {
     Remove-Item $LibTmp -Force
@@ -202,7 +207,10 @@ Remove-Item $LibExtract -Recurse -Force
 $NotoBase = 'https://github.com/notofonts/noto-cjk/raw/Sans2.004/Sans/OTF/SimplifiedChinese'
 foreach ($face in $CjkFaces) {
     $Target = Join-Path $Dest $face.Name
-    Invoke-WebRequest -Uri "$NotoBase/$($face.Name)" -OutFile $Target -UseBasicParsing
+    Invoke-DownloadWithRetry -Description $face.Name -OutFile $Target -Download {
+        Invoke-WebRequest -Uri "$NotoBase/$($face.Name)" -OutFile $Target -UseBasicParsing `
+            -TimeoutSec $DownloadRetryTimeoutSeconds
+    }
     $h = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLowerInvariant()
     if ($h -ne $face.Sha256) {
         Remove-Item $Target -Force
@@ -211,7 +219,10 @@ foreach ($face in $CjkFaces) {
     Write-Host "Vendored: $Target"
 }
 $NotoLicense = Join-Path $Dest $CjkLicense.Name
-Invoke-WebRequest -Uri 'https://github.com/notofonts/noto-cjk/raw/Sans2.004/LICENSE' -OutFile $NotoLicense -UseBasicParsing
+Invoke-DownloadWithRetry -Description $CjkLicense.Name -OutFile $NotoLicense -Download {
+    Invoke-WebRequest -Uri 'https://github.com/notofonts/noto-cjk/raw/Sans2.004/LICENSE' `
+        -OutFile $NotoLicense -UseBasicParsing -TimeoutSec $DownloadRetryTimeoutSeconds
+}
 $h = (Get-FileHash -Algorithm SHA256 $NotoLicense).Hash.ToLowerInvariant()
 if ($h -ne $CjkLicense.Sha256) {
     Remove-Item $NotoLicense -Force
@@ -290,7 +301,10 @@ $RtlSources = @(
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 foreach ($src in $RtlSources) {
     $Tmp = Join-Path $env:TEMP ("rtl-" + [IO.Path]::GetRandomFileName() + ".zip")
-    Invoke-WebRequest -Uri $src.Url -OutFile $Tmp -UseBasicParsing
+    Invoke-DownloadWithRetry -Description $src.Label -OutFile $Tmp -Download {
+        Invoke-WebRequest -Uri $src.Url -OutFile $Tmp -UseBasicParsing `
+            -TimeoutSec $DownloadRetryTimeoutSeconds
+    }
     $h = (Get-FileHash -Algorithm SHA256 $Tmp).Hash.ToLowerInvariant()
     if ($h -ne $src.Sha256) {
         Remove-Item $Tmp -Force

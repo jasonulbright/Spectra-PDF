@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Неможливо повністю зберегти конфігурацію додаткового вмісту.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Неможливо повністю зберегти конфігурацію вихідної умови.",
   "engine.split.cannotReplaceNonRegular": "Не можна замінити призначення поділу, яке не є звичайним файлом: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Не можна поділити документ без сторінок",
   "engine.split.chooseEitherExactSplit": "Виберіть конкретний вихідний файл або вихідну папку",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Параметри вікна початкового вигляду мають бути логічними значеннями.",
   "engine.doc_properties.openingPageMustInteger": "Початкова сторінка має бути цілим числом.",
   "engine.pdf_version.pdfVersionCannotDetermined": "Не вдалося визначити версію PDF.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Неможливо повністю зберегти оголошення версії.",
   "engine.layers.layerConfigurationCannotRead": "Не вдалося повністю прочитати конфігурацію шарів.",
   "engine.layers.layerLockedDefaultConfiguration": "Шар заблоковано в типовій конфігурації.",
   "app.operation.unverified": "Не вдалося перевірити результат операції.",

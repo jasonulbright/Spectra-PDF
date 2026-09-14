@@ -1853,11 +1853,18 @@ def test_the_ghostscript_test_tool_install_is_bounded_under_its_step_deadline() 
     choco_timeout = _gs_script_constant(text, "ChocoTimeoutSeconds")
     retry_sleep = _gs_script_constant(text, "RetrySleepSeconds")
     termination_wait = _gs_script_constant(text, "TerminationWaitSeconds")
+    download_attempts = _gs_script_constant(text, "FallbackDownloadAttempts")
     download_timeout = _gs_script_constant(text, "FallbackDownloadTimeoutSeconds")
+    download_sleep = _gs_script_constant(text, "FallbackDownloadRetrySleepSeconds")
     fallback_timeout = _gs_script_constant(text, "FallbackTimeoutSeconds")
     assert 1 <= attempts <= 3
     assert 0 < choco_timeout <= 600
     assert 0 < fallback_timeout <= 900
+    # The fallback fetch retries a transient answer; its whole budget, not one
+    # attempt, is what the deadline below has to hold.
+    assert 1 <= download_attempts <= 4
+    assert 0 < download_timeout <= 300
+    assert 0 < download_sleep <= 30
 
     choco_calls = re.findall(r"^\s*choco install ghostscript\b.*$", text, re.MULTILINE)
     assert choco_calls == [
@@ -1887,7 +1894,8 @@ def test_the_ghostscript_test_tool_install_is_bounded_under_its_step_deadline() 
     worst_case_seconds = (
         attempts * (choco_timeout + termination_wait)
         + retry_sleep * attempts * (attempts - 1) // 2
-        + download_timeout
+        + download_attempts * download_timeout
+        + download_sleep * download_attempts * (download_attempts - 1) // 2
         + fallback_timeout
         + termination_wait
     )
@@ -2779,3 +2787,286 @@ def test_the_signing_token_is_cached_without_printing_it(workflow: str) -> None:
     assert SIGNING_TOKEN_SCOPE in step, step
     assert "expires_on" in step, step
     assert "accessToken" not in step, step
+
+
+# ---------------------------------------------------------------------------
+# Bounded retry for vendored-resource downloads
+# ---------------------------------------------------------------------------
+
+#: Every script a CI or release workflow runs that fetches bytes over the
+#: network. A transient upstream answer -- a 504 from a host that serves the
+#: same URL a minute later -- has failed whole jobs here, so each one routes
+#: its fetch through the one shared bounded-retry helper.
+RETRY_ROUTED_PS = (
+    "sync-signature-fonts.ps1",
+    "sync-edit-fonts.ps1",
+    "bundle-dictionaries.ps1",
+    "bundle-voikko.ps1",
+    "bundle-jbig2enc.ps1",
+    "bundle-libreoffice.ps1",
+    "bundle-tesseract.ps1",
+    "setup-python-embed.ps1",
+    "setup-test-softhsm.ps1",
+    "stage-corresponding-source.ps1",
+    "install-signing-tools.ps1",
+    "verify-release-draft.ps1",
+    "install-ghostscript-test-tool.ps1",
+)
+RETRY_ROUTED_PY = (
+    "fetch-ghent-suite.py",
+    "fetch-processing-steps-suite.py",
+    "fetch-pdfa-corpus.py",
+)
+PS_DOWNLOAD_CMDLETS = re.compile(r"\bInvoke-(?:WebRequest|RestMethod)\b")
+PS_HELPER = "download-retry.ps1"
+
+
+def _ps_source(name: str) -> str:
+    """The script with its comments removed, so a mention is not a call site."""
+    text = (ROOT / "scripts" / name).read_text(encoding="utf-8-sig")
+    lines = []
+    for line in text.splitlines():
+        quotes = 0
+        cut = None
+        for index, char in enumerate(line):
+            if char in "\"'":
+                quotes += 1
+            elif char == "#" and quotes % 2 == 0:
+                cut = index
+                break
+        lines.append(line if cut is None else line[:cut])
+    return "\n".join(lines)
+
+
+def _retry_blocks(text: str) -> list[tuple[int, int]]:
+    """The span of every `-Download { ... }` scriptblock, by brace matching."""
+    return _blocks(text, r"-Download\s*\{")
+
+
+@pytest.mark.parametrize("name", RETRY_ROUTED_PS)
+def test_every_powershell_download_runs_under_the_shared_retry(name: str) -> None:
+    text = _ps_source(name)
+    assert '. (Join-Path $PSScriptRoot "' + PS_HELPER + '")' in text
+    blocks = _retry_blocks(text)
+    calls = list(PS_DOWNLOAD_CMDLETS.finditer(text))
+    curls = list(re.finditer(r"curl\.exe", text))
+    assert calls or curls, name + " performs no download"
+    for call in calls:
+        assert any(start <= call.start() < end for start, end in blocks), (
+            name + ": a download is not inside a -Download block"
+        )
+        statement = text[call.start():call.start() + 400].split("}")[0]
+        assert "-TimeoutSec" in statement, (
+            name + ": a download carries no per-attempt timeout"
+        )
+    for curl in curls:
+        assert "@(Get-CurlRetryArguments)" in text[curl.start():curl.start() + 400], (
+            name + ": a curl download carries no bounded retry arguments"
+        )
+
+
+def _blocks(text: str, opening: str) -> list[tuple[int, int]]:
+    """The span of every block whose header matches `opening`, by brace match."""
+    spans = []
+    for match in re.finditer(opening, text):
+        depth = 0
+        index = match.end() - 1
+        while index < len(text):
+            if text[index] == "{":
+                depth += 1
+            elif text[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+        assert depth == 0, "unbalanced block"
+        spans.append((match.end(), index))
+    return spans
+
+
+@pytest.mark.parametrize("name", RETRY_ROUTED_PS)
+def test_no_download_script_keeps_a_private_retry_loop(name: str) -> None:
+    """One policy, not a copy per script: a private loop retried a 404 too."""
+    text = _ps_source(name)
+    for start, end in _blocks(text, r"catch(?:\s*\[[^\]]*\])?\s*\{"):
+        body = text[start:end]
+        assert not ("Start-Sleep" in body and PS_DOWNLOAD_CMDLETS.search(body)), (
+            name + ": a download is retried by a private loop"
+        )
+
+
+@pytest.mark.parametrize("name", RETRY_ROUTED_PY)
+def test_every_corpus_fetch_runs_under_the_shared_retry(name: str) -> None:
+    text = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+    assert "from download_retry import fetch_with_retry" in text
+    assert "fetch_with_retry(" in text
+    assert "urlopen" not in text, name + ": a fetch bypasses the shared retry"
+
+
+def test_the_workflows_run_no_unrouted_download_script() -> None:
+    """Every download a workflow runs goes through the one shared retry."""
+    referenced = set()
+    for workflow in ("ci.yml", "release.yml", "release-redo.yml"):
+        text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+        referenced.update(re.findall(r"scripts/([A-Za-z0-9_.-]+\.(?:ps1|py))", text))
+    routed = set(RETRY_ROUTED_PS) | set(RETRY_ROUTED_PY)
+    for name in sorted(referenced):
+        path = ROOT / "scripts" / name
+        if not path.is_file() or name in routed:
+            continue
+        source = _ps_source(name) if name.endswith(".ps1") else path.read_text(encoding="utf-8")
+        downloads = bool(PS_DOWNLOAD_CMDLETS.search(source)) or any(
+            token in source for token in ("curl.exe", "urlopen", "requests.get"))
+        assert not downloads, "scripts/" + name + " downloads outside the shared retry"
+
+
+def test_the_retry_bounds_stay_bounded_and_transient_only() -> None:
+    helper = (ROOT / "scripts" / PS_HELPER).read_text(encoding="utf-8")
+    attempts = int(re.search(r"\$DownloadRetryAttempts = (\d+)", helper).group(1))
+    delay = int(re.search(r"\$DownloadRetryBaseDelaySeconds = (\d+)", helper).group(1))
+    timeout = int(re.search(r"\$DownloadRetryTimeoutSeconds = (\d+)", helper).group(1))
+    assert 2 <= attempts <= 6
+    assert 1 <= delay <= 30
+    assert 60 <= timeout <= 3600
+    # --retry-all-errors would retry a 404 as readily as a 504.
+    arguments = helper.split("function Get-CurlRetryArguments", 1)[1]
+    assert "'--retry'" in arguments
+    assert "--retry-all-errors" not in arguments.split("return @(", 1)[1]
+
+
+PS_CLASSIFIER_PROBE = r"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+$cases = @(
+    @{{ Message = 'The operation has timed out'; Expect = 'True' }},
+    @{{ Message = 'An existing connection was forcibly closed by the remote host'; Expect = 'True' }},
+    @{{ Message = 'The remote server returned an error: (404) Not Found.'; Expect = 'False' }},
+    @{{ Message = 'Could not find a part of the path'; Expect = 'False' }}
+)
+foreach ($case in $cases) {{
+    $exception = New-Object System.Exception($case.Message)
+    $record = New-Object System.Management.Automation.ErrorRecord($exception, 'synthetic', 'NotSpecified', $null)
+    $actual = Test-TransientDownloadError $record
+    Write-Output ("" + $actual + "|" + $case.Expect + "|" + $case.Message)
+}}
+$response = New-Object System.Net.Http.HttpResponseMessage([System.Net.HttpStatusCode]::ServiceUnavailable)
+$httpError = New-Object Microsoft.PowerShell.Commands.HttpResponseException("503", $response)
+$record = New-Object System.Management.Automation.ErrorRecord($httpError, 'http', 'NotSpecified', $null)
+Write-Output ("" + (Test-TransientDownloadError $record) + "|True|status 503")
+Write-Output ("" + (Get-DownloadErrorStatus $record) + "|503|status read")
+$response = New-Object System.Net.Http.HttpResponseMessage([System.Net.HttpStatusCode]::NotFound)
+$httpError = New-Object Microsoft.PowerShell.Commands.HttpResponseException("404", $response)
+$record = New-Object System.Management.Automation.ErrorRecord($httpError, 'http', 'NotSpecified', $null)
+Write-Output ("" + (Test-TransientDownloadError $record) + "|False|status 404")
+"""
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_the_powershell_classifier_retries_only_transient_answers() -> None:
+    """The shipped classifier, run against real error records."""
+    script = PS_CLASSIFIER_PROBE.format(helper=(ROOT / "scripts" / PS_HELPER).as_posix())
+    out = subprocess.run(
+        ["pwsh", "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, cwd=ROOT,
+    )
+    assert out.returncode == 0, out.stderr
+    rows = [line for line in out.stdout.splitlines() if "|" in line]
+    assert len(rows) == 7, out.stdout
+    for row in rows:
+        actual, expect, label = row.split("|", 2)
+        assert actual == expect, label + ": classified " + actual + ", expected " + expect
+
+
+def _download_retry():
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import download_retry
+
+    return download_retry
+
+
+def test_the_python_classifier_retries_only_transient_answers() -> None:
+    module = _download_retry()
+    import urllib.error
+
+    def http(code: int):
+        return urllib.error.HTTPError("https://x", code, "", {}, None)
+
+    for code in (500, 502, 503, 504, 408, 429):
+        assert module.is_transient(http(code)), code
+    for code in (400, 401, 403, 404, 410):
+        assert not module.is_transient(http(code)), code
+    assert module.is_transient(urllib.error.URLError(TimeoutError("timed out")))
+    assert module.is_transient(ConnectionResetError("reset"))
+    assert not module.is_transient(RuntimeError("expected a zip"))
+    assert 2 <= module.ATTEMPTS <= 6
+    assert 1 <= module.BASE_DELAY_SECONDS <= 30
+
+
+class _ZipResponse:
+    headers = {"Content-Type": "application/zip"}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self):
+        return b"payload"
+
+
+def test_a_transient_fetch_is_retried_and_a_refusal_is_not(monkeypatch) -> None:
+    module = _download_retry()
+    import urllib.error
+    import urllib.request
+
+    attempts: list = []
+
+    def flaky(request, timeout=None):
+        attempts.append(timeout)
+        if len(attempts) < 3:
+            raise urllib.error.HTTPError("https://x", 504, "", {}, None)
+        return _ZipResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    request = urllib.request.Request("https://x")
+    assert module.fetch_with_retry(request, timeout=7, description="x") == b"payload"
+    assert attempts == [7, 7, 7]
+
+    def refused(request, timeout=None):
+        attempts.append(timeout)
+        raise urllib.error.HTTPError("https://x", 404, "", {}, None)
+
+    attempts.clear()
+    monkeypatch.setattr(urllib.request, "urlopen", refused)
+    with pytest.raises(urllib.error.HTTPError):
+        module.fetch_with_retry(request, timeout=7, description="x")
+    assert attempts == [7]
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout=None: _ZipResponse())
+
+    def reject(response):
+        raise RuntimeError("expected a zip")
+
+    with pytest.raises(RuntimeError, match="expected a zip"):
+        module.fetch_with_retry(request, timeout=7, description="x", inspect=reject)
+
+
+def test_a_bounded_fetch_gives_up_instead_of_hanging(monkeypatch) -> None:
+    module = _download_retry()
+    import urllib.error
+    import urllib.request
+
+    calls: list = []
+
+    def always_504(request, timeout=None):
+        calls.append(timeout)
+        raise urllib.error.HTTPError("https://x", 504, "", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", always_504)
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    with pytest.raises(RuntimeError, match="transient download failure"):
+        module.fetch_with_retry(
+            urllib.request.Request("https://x"), timeout=5, description="x")
+    assert len(calls) == module.ATTEMPTS

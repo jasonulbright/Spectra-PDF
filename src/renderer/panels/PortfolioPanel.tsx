@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
+import type { OwnedOperationRun } from '../lib/owned-operation-run';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { dialog, app } from '../lib/tauri-bridge';
 import { getCommandContext } from '../commands/context';
@@ -40,9 +42,11 @@ export function PortfolioPanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
   const { call, callRaw, saveFile } = useEngine();
   const { performOperation } = useOperations();
+  const beginRun = useOwnedOperationRun(activeFile);
   const [info, setInfo] = useState<PortfolioInfo | null>(null);
   const [title, setTitle] = useState('');
   const [status, setStatus] = useState('');
+  useEffect(() => { setStatus(''); }, [activeFile?.path, activeFile?.workingPath]);
   const [busy, setBusy] = useState(false);
 
   const buffer = activeFile?.buffer ?? null;
@@ -105,50 +109,65 @@ export function PortfolioPanel(): React.ReactElement {
 
   const handleConvert = useCallback(async () => {
     if (!activeFile) return;
+    const run = beginRun();
+    if (!run) return;
     setBusy(true);
     setStatus(tChrome('panel.portfolio.converting'));
     try {
-      if ((await performOperation(activeFile.path, 'make_portfolio', {})) === EDIT_DECLINED) {
+      const result = await run.perform(performOperation, 'make_portfolio', {});
+      if (!run.visible()) return;
+      if (result === EDIT_DECLINED) {
         setStatus('');
         return;
       }
-      await refresh();
       setStatus(tChrome('panel.portfolio.converted'));
     } catch (e: unknown) {
+      if (!run.visible()) return;
       setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [activeFile, performOperation, refresh]);
+  }, [activeFile, performOperation, beginRun]);
 
   const addWithSource = useCallback(
-    async (source: string) => {
+    async (source: string, inheritedRun?: OwnedOperationRun) => {
       if (!activeFile) return;
+      const run = inheritedRun ?? beginRun();
+      if (!run) return;
+      if (!run.visible()) { run.finish(); return; }
       setBusy(true);
       setStatus(tChrome('panel.portfolio.adding'));
       try {
-        const r = await performOperation(activeFile.path, 'add_attachment', { source });
+        const r = await run.perform(performOperation, 'add_attachment', { source });
+        if (!run.visible()) return;
         if (r === EDIT_DECLINED) {
           setStatus('');
           return;
         }
-        await refresh();
         setStatus(tChrome('panel.portfolio.added', { name: (r as unknown as { name: string }).name }));
       } catch (e: unknown) {
-        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
+        if (run.visible()) setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
         throw e;
       } finally {
+        run.finish();
         setBusy(false);
       }
     },
-    [activeFile, performOperation, refresh],
+    [activeFile, performOperation, beginRun],
   );
 
   const handleAddMember = useCallback(async () => {
-    const source = await dialog.pickAnyFile();
-    if (!source) return;
-    await addWithSource(source).catch(() => {});
-  }, [addWithSource]);
+    const run = beginRun();
+    if (!run) return;
+    setBusy(true);
+    try {
+      const source = await dialog.pickAnyFile();
+      if (source) await addWithSource(source, run);
+    } catch (e: unknown) {
+      if (run.visible()) setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
+    } finally { run.finish(); setBusy(false); }
+  }, [addWithSource, beginRun]);
 
   const handleOpenMember = useCallback(
     async (name: string) => {
@@ -232,38 +251,48 @@ export function PortfolioPanel(): React.ReactElement {
   );
 
   const updateWithSource = useCallback(
-    async (name: string, source: string) => {
+    async (name: string, source: string, inheritedRun?: OwnedOperationRun) => {
       if (!activeFile) return;
+      const run = inheritedRun ?? beginRun();
+      if (!run) return;
+      if (!run.visible()) { run.finish(); return; }
       setBusy(true);
       setStatus(tChrome('panel.portfolio.updating'));
       try {
-        const r = await performOperation(activeFile.path, 'update_portfolio_member', {
+        const r = await run.perform(performOperation, 'update_portfolio_member', {
           name,
           source,
         });
+        if (!run.visible()) return;
         if (r === EDIT_DECLINED) {
           setStatus('');
           return;
         }
-        await refresh();
         setStatus(tChrome('panel.portfolio.updated', { name }));
       } catch (e: unknown) {
-        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
+        if (run.visible()) setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
         throw e;
       } finally {
+        run.finish();
         setBusy(false);
       }
     },
-    [activeFile, performOperation, refresh],
+    [activeFile, performOperation, beginRun],
   );
 
   const handleUpdateMember = useCallback(
     async (name: string) => {
-      const source = await dialog.pickAnyFile();
-      if (!source) return;
-      await updateWithSource(name, source).catch(() => {});
+      const run = beginRun();
+      if (!run) return;
+      setBusy(true);
+      try {
+        const source = await dialog.pickAnyFile();
+        if (source) await updateWithSource(name, source, run);
+      } catch (e: unknown) {
+        if (run.visible()) setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
+      } finally { run.finish(); setBusy(false); }
     },
-    [updateWithSource],
+    [updateWithSource, beginRun],
   );
 
   // Harness bridge: the pickers and save dialogs are native and undrivable —
@@ -286,23 +315,27 @@ export function PortfolioPanel(): React.ReactElement {
   const handleRemoveMember = useCallback(
     async (name: string) => {
       if (!activeFile) return;
+      const run = beginRun();
+      if (!run) return;
       setBusy(true);
       setStatus(tChrome('panel.portfolio.removing'));
       try {
-        const r = await performOperation(activeFile.path, 'remove_attachment', { name });
+        const r = await run.perform(performOperation, 'remove_attachment', { name });
+        if (!run.visible()) return;
         if (r === EDIT_DECLINED) {
           setStatus('');
           return;
         }
-        await refresh();
         setStatus(tChrome('panel.portfolio.removed', { name }));
       } catch (e: unknown) {
+        if (!run.visible()) return;
         setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {
+        run.finish();
         setBusy(false);
       }
     },
-    [activeFile, performOperation, refresh],
+    [activeFile, performOperation, beginRun],
   );
 
   const createSection = (

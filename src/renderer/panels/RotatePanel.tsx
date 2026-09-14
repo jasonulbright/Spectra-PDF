@@ -1,6 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -14,15 +15,20 @@ export function RotatePanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { performOperation } = useOperations();
+  const beginRun = useOwnedOperationRun(activeFile);
   const [angle, setAngle] = useState<90 | 180 | 270>(90);
   const [pageInput, setPageInput] = useState('all');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  useEffect(() => { setStatus(''); }, [activeFile?.path, activeFile?.workingPath]);
 
   const handleRotate = useCallback(async () => {
     if (!activeFile) return;
-    const scope = parsePageRangeField(pageInput);
+    const run = beginRun();
+    if (!run) return;
+    const scope = parsePageRangeField(pageInput, run.pageCount);
     if ('error' in scope) {
+      run.finish();
       setStatus(tChrome('panel.rotate.badPages'));
       return;
     }
@@ -32,7 +38,8 @@ export function RotatePanel(): React.ReactElement {
       // This panel's rotate is a whole-file engine rewrite, not the page
       // tier's in-memory /Rotate — so it takes the whole-file signed-document
       // decision `performOperation` owns, from the roster's `structural`.
-      const result = await performOperation(activeFile.path, 'rotate', { pages, angle });
+      const result = await run.perform(performOperation, 'rotate', { pages, angle });
+      if (!run.visible()) return;
       if (result === EDIT_DECLINED) {
         setStatus('');
         return;
@@ -42,11 +49,12 @@ export function RotatePanel(): React.ReactElement {
         angle,
       }));
     } catch (e: unknown) {
+      if (!run.visible()) return;
       const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e);
       setStatus(tChrome('panel.common.error', { message: msg }));
     }
-    finally { setBusy(false); }
-  }, [activeFile, angle, pageInput, performOperation]);
+    finally { run.finish(); setBusy(false); }
+  }, [activeFile, angle, pageInput, performOperation, beginRun]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.rotate.open')} />;
 

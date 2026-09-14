@@ -70,6 +70,7 @@ $MsiUrls = if ($MsiUrl) { @($MsiUrl) } else {
 $ErrorActionPreference = "Stop"
 
 $Manifest = "$PSScriptRoot\libreoffice-notices.tsv"
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 
 function Read-NoticeManifest([string]$path) {
     if (-not (Test-Path -LiteralPath $path)) { throw "notice manifest not found: $path" }
@@ -249,28 +250,22 @@ if ($CacheFile -and (Test-Path -LiteralPath $CacheFile)) {
     }
 }
 
-# RETRY within a source, because a source can fail transiently — and on the
-# redirector entry a retry also re-rolls which volunteer mirror answers. FALL
-# THROUGH between sources, because a whole host can be down. Safe to do both
-# blindly: the checksum runs on whatever arrived.
+# RETRY within a source on a transient answer — and on the redirector entry a
+# retry also re-rolls which volunteer mirror answers. FALL THROUGH between
+# sources on any failure, because a whole host can be down. Neither relaxes
+# acceptance: the checksum runs on whatever arrived.
 if (-not $haveMsi) {
-    $Attempts = 3
     $failures = @()
     foreach ($url in $MsiUrls) {
         Write-Host "No local LibreOffice; downloading $url ..."
-        for ($i = 1; $i -le $Attempts; $i++) {
-            try {
-                Invoke-WebRequest -Uri $url -OutFile $Msi -UseBasicParsing
-                $haveMsi = $true
-                break
-            } catch {
-                Remove-Item $Msi -Force -ErrorAction SilentlyContinue
-                $failures += "$url : $($_.Exception.Message)"
-                if ($i -eq $Attempts) { break }
-                $wait = 5 * $i
-                Write-Host "  attempt $i/$Attempts failed ($($_.Exception.Message)); retrying in ${wait}s..."
-                Start-Sleep -Seconds $wait
+        try {
+            Invoke-DownloadWithRetry -Description $url -OutFile $Msi -Download {
+                Invoke-WebRequest -Uri $url -OutFile $Msi -UseBasicParsing -TimeoutSec 1800
             }
+            $haveMsi = $true
+        } catch {
+            Remove-Item $Msi -Force -ErrorAction SilentlyContinue
+            $failures += "$url : $($_.Exception.Message)"
         }
         if ($haveMsi) { break }
         Write-Host "  exhausted $url; trying the next source..."

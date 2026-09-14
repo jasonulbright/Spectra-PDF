@@ -402,6 +402,7 @@ outline.outlineDeeperThanLevels	pattern	outline	outline deeper than {{MAX_DEPTH}
 outlines.pageDrawsTextThrough	pattern	outlines	Page {{page}} draws text through the font resource {{name}}, which the page does not define.
 outlines.pageDrawsZeroWidth	pattern	outlines	Page {{page}} draws a zero-width line, which has no fixed width to outline.
 outlines.pageNestsFormXobjects	pattern	flattener,outlines	Page {{page}} nests form XObjects deeper than {{cap}} levels.
+output_intents.outputIntentConfigurationCannot	exact	output_intents	The output intent configuration cannot be preserved completely.
 page_boxes.boxMustOneGot	pattern	page_boxes	box must be one of {{v0}}, got {{box}}
 page_images.cropRectDegenerateNothing	exact	page_images	crop rect is degenerate (nothing would remain visible)
 page_images.cropRectMustLie	exact	page_images	crop rect must lie within the image (unit coordinates 0..1)
@@ -476,6 +477,7 @@ pdf_save.documentSEncryptionCannot4	exact	pdf_save	This document's encryption ca
 pdf_save.documentSEncryptionCannot5	exact	pdf_save	This document's encryption cannot be kept through this operation: it protects its streams, strings and embedded files with different ciphers, and a rewritten copy can carry only one cipher for all three. Decrypt the document first if you want an unprotected copy.
 pdf_save.documentSEncryptionCannot6	exact	pdf_save	This document's encryption cannot be kept through this operation: its encryption version, cipher and key length are a combination that cannot be written back exactly, and a rewritten copy would change the strength of its protection. Decrypt the document first if you want an unprotected copy.
 pdf_version.pdfVersionCannotDetermined	exact	pdf_version	The PDF version cannot be determined.
+pdf_version.versionDeclarationsCannotPreserved	exact	pdf_version	The version declarations cannot be preserved completely.
 pdfa.ghostscriptPdfConversionDid	pattern	pdfa	Ghostscript PDF/A conversion did not produce {{requested}}: the output declares {{declared}}.
 pdfa.ghostscriptPdfConversionFailed	pattern	pdfa	Ghostscript PDF/A conversion failed: {{v0}}
 pdfa.outputDeclaresPdfConformance	pattern	pdfa	The output declares no PDF/A conformance at all, so {{requested}} was not produced.
@@ -555,7 +557,7 @@ printer.mustNumberGot	pattern	printer	{{name}} must be a number, got {{value}}
 printer.mustTrueFalseGot	pattern	printer	{{name}} must be true or false, got {{value}}
 printer.pageBeyondDocumentPage	pattern	printer	Page {{end}} is beyond the document ({{page_count}} pages in total)
 printer.pageNumbersBased	pattern	printer	Page numbers are 1-based: '{{token}}'
-printer.pageSelectionEmptyPages	exact	printer	The page selection is empty (no pages match)
+printer.pageSelectionEmptyPages	exact	headers,printer	The page selection is empty (no pages match)
 printer.perSheetMustGot	pattern	printer	{{label}} per sheet must be 1-8, got {{v}}
 printer.previewDpiMustGot	pattern	printer	Preview DPI must be 18-300, got {{dpi}}
 printer.previewNeedsPaperSize	exact	printer	Preview needs the paper size (sheet_width/sheet_height)
@@ -620,7 +622,7 @@ search_redact.unknownRedactionProperty	pattern	search_redact	unknown redaction p
 search_regions.expandMustMatchWord	exact	search_regions	expand must be "match", "word" or "line"
 search_regions.giveSearchTermWord	exact	search_regions	give a search term, a word list or a built-in pattern — searching for nothing would mark every page
 search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a positive number
-search_regions.pagesMustListPage	exact	enhance_scan,form_detect,search_regions,slide_export,table_export,text_export	pages must be a list of page numbers or "all"
+search_regions.pagesMustListPage	exact	enhance_scan,form_detect,headers,search_regions,slide_export,table_export,text_export	pages must be a list of page numbers or "all"
 separations.ghostscriptFoldedSpotColours	pattern	separations	Ghostscript folded {{n}} spot colours into process; raise the spot limit or reduce the document's spots.
 separations.ghostscriptSeparationRenderFailed	pattern	separations	Ghostscript separation render failed: {{v0}}
 separations.pageDocument	pattern	flattener,object_inspector,outlines,separations	Page {{number}} is not in this document.
@@ -887,7 +889,7 @@ trapping.mustOne	pattern	trapping	{{field}} must be one of {{choices}}.
 trapping.mustTrueFalse	pattern	trapping	{{field}} must be true or false.
 trapping.mustWholeNumber	pattern	trapping	{{field}} must be a whole number.
 trapping.overridesMustTrappingParameters	pattern	trapping	The overrides for {{name}} must be trapping parameters.
-trapping.pagesDocument	pattern	trapping	Pages {{page_range}} are not in this document.
+trapping.pagesDocument	pattern	headers,trapping	Pages {{page_range}} are not in this document.
 trapping.postscriptFilePageStructure	exact	trapping	This PostScript file has no page structure to attach trapping setup to.
 trapping.postscriptLanguageLevelMust	exact	trapping	PostScript language level must be 2 or 3.
 trapping.ripTrappingLanguagelevelFacility	exact	trapping	In-RIP trapping is a LanguageLevel 3 facility and cannot be written into LanguageLevel 2 PostScript.

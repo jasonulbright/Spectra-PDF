@@ -4,6 +4,7 @@ import { tChrome } from '../i18n';
 import { EDIT_DECLINED } from './edit-text';
 import type { OpMethod } from './op-edit-class';
 import { rewriteWorkspaceFile, type WorkspaceRewriteIo } from './workspace-rewrite';
+import { assertOperationGateResult, assertOperationIntent, type OperationIntent } from './operation-intent';
 
 export interface OperationIo extends WorkspaceRewriteIo {
   callStaged: (method: string, params: Record<string, unknown>) => Promise<unknown>;
@@ -14,6 +15,10 @@ function unverified(): Error { return new Error(tChrome('app.operation.unverifie
 
 export interface OperationStep { method: OpMethod; params: Record<string, unknown> }
 export interface OperationOptions {
+  /** User-gesture revision, captured before pickers/capability awaits. */
+  intent?: OperationIntent;
+  /** Owner lifetime, checked through consent, dispatch and publication. */
+  assertActive?: () => void;
   expectedWorkingPath?: string;
   /** Revision-derived parameters must not survive a gate rebuild. */
   expectedBuffer?: PdfBuffer;
@@ -28,6 +33,11 @@ export async function executeWorkspaceOperation(path: string, method: OpMethod,
   params: Record<string, unknown>, getState: () => AppState,
   dispatch: (action: AppAction) => void, io: OperationIo,
   options: OperationOptions = {}): Promise<WorkspaceOperationResult | null | typeof EDIT_DECLINED> {
+  options.assertActive?.();
+  if (options.intent) {
+    if (options.intent.source.path !== path) throw new Error(tChrome('app.history.changed'));
+    assertOperationIntent(getState(), options.intent);
+  }
   const initial = getState().files.get(path);
   if (!initial || initial.importOnly) return null;
   if (options.expectedWorkingPath !== undefined && initial.workingPath !== options.expectedWorkingPath) {
@@ -43,6 +53,7 @@ export async function executeWorkspaceOperation(path: string, method: OpMethod,
   const following = structuredClone(options.following ?? []);
   const result = await rewriteWorkspaceFile(path, getState, dispatch, io, async (stage, original, requireCurrent) => {
     requireSource();
+    if (options.intent) assertOperationGateResult(getState().files.get(path)!, options.intent);
     // Byte identity preserves signed originals for engine append/finalization.
     // file==output retains each engine method's existing in-place semantics.
     await io.write(stage, original);
@@ -58,7 +69,7 @@ export async function executeWorkspaceOperation(path: string, method: OpMethod,
     // Keep operation-specific counts/refusals/warnings. The public output is
     // the stable working path, never the now-retired private stage.
     return reports.length === 1 ? reports[0] : { ...reports[0], stepResults: reports };
-  }, { kind: 'operation', unverified,
+  }, { kind: 'operation', unverified, assertActive: options.assertActive,
     track: run => io.track(method, { ...requested, file: initial.workingPath, output: initial.workingPath }, run) });
   return result.completed ? { ...result.value, publication: result.publication } : EDIT_DECLINED;
 }

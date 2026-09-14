@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Konfigurasjonen av valgfritt innhold kan ikke bevares fullstendig.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Konfigurasjonen av utdataintensjonen kan ikke bevares fullstendig.",
   "engine.split.cannotReplaceNonRegular": "Kan ikke erstatte et oppdelingsmål som ikke er en vanlig fil: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Kan ikke dele opp et dokument uten sider",
   "engine.split.chooseEitherExactSplit": "Velg enten en bestemt utdatafil eller en utdatamappe",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Startvisningens vindusalternativer må være boolske verdier.",
   "engine.doc_properties.openingPageMustInteger": "Startsiden må være et heltall.",
   "engine.pdf_version.pdfVersionCannotDetermined": "PDF-versjonen kan ikke fastslås.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Versjonserklæringene kan ikke bevares fullstendig.",
   "engine.layers.layerConfigurationCannotRead": "Lagkonfigurasjonen kunne ikke leses fullstendig.",
   "engine.layers.layerLockedDefaultConfiguration": "Laget er låst i standardkonfigurasjonen.",
   "app.operation.unverified": "Resultatet av operasjonen kunne ikke bekreftes.",

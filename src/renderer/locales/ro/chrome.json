@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Configurația conținutului opțional nu poate fi păstrată integral.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Configurația intenției de ieșire nu poate fi păstrată integral.",
   "engine.split.cannotReplaceNonRegular": "Nu se poate înlocui o destinație de divizare care nu este un fișier obișnuit: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Nu se poate diviza un document fără pagini",
   "engine.split.chooseEitherExactSplit": "Alegeți un fișier de ieșire precis sau un dosar de ieșire",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Opțiunile de fereastră ale vizualizării inițiale trebuie să fie valori booleene.",
   "engine.doc_properties.openingPageMustInteger": "Pagina de deschidere trebuie să fie un număr întreg.",
   "engine.pdf_version.pdfVersionCannotDetermined": "Versiunea PDF nu poate fi determinată.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Declarațiile de versiune nu pot fi păstrate integral.",
   "engine.layers.layerConfigurationCannotRead": "Configurația straturilor nu a putut fi citită complet.",
   "engine.layers.layerLockedDefaultConfiguration": "Stratul este blocat în configurația implicită.",
   "app.operation.unverified": "Rezultatul operației nu a putut fi verificat.",

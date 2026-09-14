@@ -111,6 +111,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot "github-asset-name.ps1")
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 . (Join-Path $PSScriptRoot "windows-signing.ps1")
 
 function Get-Sha256([string]$path) {
@@ -217,7 +218,7 @@ foreach ($asset in $assets) {
     $target = Join-Path $Downloads $assetName
     if (-not $Offline) {
         $url = "https://api.github.com/repos/$Repo/releases/assets/$($asset.id)"
-        & curl.exe --fail --silent --show-error --location `
+        & curl.exe --fail --silent --show-error --location @(Get-CurlRetryArguments) `
             -H "Authorization: Bearer $env:GH_TOKEN" `
             -H "Accept: application/octet-stream" `
             -o $target $url

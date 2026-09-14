@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "لا يمكن الحفاظ على إعدادات المحتوى الاختياري بالكامل.",
+  "engine.output_intents.outputIntentConfigurationCannot": "لا يمكن الحفاظ على إعداد نية الإخراج بالكامل.",
   "engine.split.cannotReplaceNonRegular": "لا يمكن استبدال وجهة تقسيم ليست ملفًا عاديًا: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "لا يمكن تقسيم مستند بلا صفحات",
   "engine.split.chooseEitherExactSplit": "اختر ملف إخراج محددًا أو مجلد إخراج",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "يجب أن تكون خيارات نافذة العرض الأولي قيمًا منطقية.",
   "engine.doc_properties.openingPageMustInteger": "يجب أن تكون صفحة البدء عددًا صحيحًا.",
   "engine.pdf_version.pdfVersionCannotDetermined": "تعذر تحديد إصدار ملف PDF.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "لا يمكن الحفاظ على إعلانات الإصدار بالكامل.",
   "engine.layers.layerConfigurationCannotRead": "تعذّرت قراءة إعدادات الطبقات بالكامل.",
   "engine.layers.layerLockedDefaultConfiguration": "الطبقة مقفلة في الإعداد الافتراضي.",
   "app.operation.unverified": "تعذّر التحقق من نتيجة العملية.",

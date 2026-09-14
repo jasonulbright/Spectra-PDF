@@ -19,20 +19,34 @@
 # second source for the same test tool, not a pin of what users are expected
 # to have.
 #
+# The fallback fetch is itself retried on a transient answer, because a 504
+# from the release asset store fails this step while the same URL serves a
+# minute later. The retry is bounded and the hash still runs on the bytes of
+# whichever attempt returned.
+#
 # Worst case, every bound exhausted:
 #   ChocoAttempts * (ChocoTimeoutSeconds + TerminationWaitSeconds)
-#   + retry sleeps + FallbackDownloadTimeoutSeconds
+#   + choco retry sleeps
+#   + FallbackDownloadAttempts * FallbackDownloadTimeoutSeconds
+#   + fallback download retry sleeps
 #   + FallbackTimeoutSeconds + TerminationWaitSeconds
-# The workflow step's timeout-minutes sits above that sum.
+# The workflow step's timeout-minutes sits above that sum. Every constant
+# below is part of it: raising one without the others crossing back under the
+# deadline is what the bound test refuses.
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 
 $ChocoAttempts = 2
 $ChocoTimeoutSeconds = 300
 $RetrySleepSeconds = 15
 $TerminationWaitSeconds = 30
-$FallbackDownloadTimeoutSeconds = 120
-$FallbackTimeoutSeconds = 600
+$FallbackDownloadAttempts = 3
+$FallbackDownloadTimeoutSeconds = 90
+$FallbackDownloadRetrySleepSeconds = 5
+# A silent NSIS install of this package completes in well under a minute; this
+# bounds a hang, and the hang it bounds once ran for six hours.
+$FallbackTimeoutSeconds = 420
 
 # Upstream release gs10071; sha256 as published for the release asset.
 $FallbackVersion = '10.07.1'
@@ -95,7 +109,11 @@ for ($attempt = 1; $attempt -le $ChocoAttempts; $attempt++) {
 
 if (-not $installed) {
     Write-Host "::warning::falling back to the pinned upstream Ghostscript $FallbackVersion installer"
-    Invoke-WebRequest -Uri $FallbackUrl -OutFile $installer -UseBasicParsing -TimeoutSec $FallbackDownloadTimeoutSeconds
+    Invoke-DownloadWithRetry -Description "Ghostscript $FallbackVersion installer" `
+        -OutFile $installer -Attempts $FallbackDownloadAttempts `
+        -BaseDelaySeconds $FallbackDownloadRetrySleepSeconds -Download {
+        Invoke-WebRequest -Uri $FallbackUrl -OutFile $installer -UseBasicParsing -TimeoutSec $FallbackDownloadTimeoutSeconds
+    }
     $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actual -ne $FallbackSha256) {
         throw "Ghostscript installer hash mismatch: expected $FallbackSha256, got $actual"

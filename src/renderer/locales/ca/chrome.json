@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "No es pot conservar completament la configuració del contingut opcional.",
+  "engine.output_intents.outputIntentConfigurationCannot": "No es pot conservar completament la configuració de la intenció de sortida.",
   "engine.split.cannotReplaceNonRegular": "No es pot substituir una destinació de divisió que no sigui un fitxer normal: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "No es pot dividir un document sense pàgines",
   "engine.split.chooseEitherExactSplit": "Trieu un fitxer de sortida concret o una carpeta de sortida",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Les opcions de finestra de la vista inicial han de ser booleanes.",
   "engine.doc_properties.openingPageMustInteger": "La pàgina d’obertura ha de ser un nombre enter.",
   "engine.pdf_version.pdfVersionCannotDetermined": "No es pot determinar la versió del PDF.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "No es poden conservar completament les declaracions de versió.",
   "engine.layers.layerConfigurationCannotRead": "No s’ha pogut llegir completament la configuració de capes.",
   "engine.layers.layerLockedDefaultConfiguration": "La capa està bloquejada a la configuració predeterminada.",
   "app.operation.unverified": "No s'ha pogut verificar el resultat de l'operació.",

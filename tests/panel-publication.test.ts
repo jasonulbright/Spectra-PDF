@@ -8,6 +8,8 @@ import { initialState } from '../src/renderer/state/reducer';
 import type { OpenFile } from '../src/renderer/state/types';
 import { fillFormValues } from '../src/renderer/lib/form-fill-transaction';
 import { executeWorkspaceOperation } from '../src/renderer/lib/operation-transaction';
+import { createOwnedOperationRuns } from '../src/renderer/lib/owned-operation-run';
+import { inspectOperationInput } from '../src/renderer/lib/operation-input';
 import { EDIT_DECLINED } from '../src/renderer/lib/edit-text';
 import { isOpMethod, sequenceEditClass } from '../src/renderer/lib/op-edit-class';
 import { STEP_CATALOG, stepDefFor, engineMethodFor, buildStepParams, newStep } from '../src/renderer/lib/guided-actions';
@@ -175,7 +177,18 @@ async function fixture() {
     if (surface === 'pageLabels') return actual('panels/PageLabelsPanel.tsx', 'handleApply', { ...panelEnv,
       draft: labelDraft, drafts: pageLabels, runCommitGate: async () => {} })();
     if (surface === 'forms') return actual('panels/FormsPanel.tsx', 'handleApply', { ...panelEnv, draft: formDraft, drafts: forms })();
-    if (surface === 'spelling') return actual('panels/SpellingPanel.tsx', 'fixField', panelEnv)({ field: 'name', start: 0, end: 8 }, 'Original');
+    if (surface === 'spelling') {
+      const owner = createOwnedOperationRuns(store.getState).begin(open)!;
+      const inspectSource = (run: typeof owner, inspect: (path: string) => Promise<unknown>) => inspectOperationInput(run,
+        { allocate: async () => 'spelling-inspection', write: env.file.writeBuffer, remove: env.file.remove }, inspect);
+      return (async () => {
+        try {
+          const fixField = actual('panels/SpellingPanel.tsx', 'fixField', { ...panelEnv, inspectSource });
+          return await fixField({ field: 'name', start: 0, end: 8 }, 'Original', owner);
+        }
+        finally { owner.finish(); }
+      })();
+    }
     if (surface === 'bookmarks') return actual('components/navpane/BookmarksPanel.tsx', 'persist', { ...panelEnv,
       draft: bookmarkDraft, drafts: bookmarks, runCommitGate: async () => {} })();
     if (surface === 'articles') return actual('components/navpane/ArticlesPanel.tsx', 'save', panelEnv)();

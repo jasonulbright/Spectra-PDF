@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { app } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
@@ -38,6 +39,7 @@ export function PrinterMarksPanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
   const { performOperation } = useOperations();
+  const beginRun = useOwnedOperationRun(activeFile);
 
   const [report, setReport] = useState<PrinterMarkReport | null>(null);
   const [kinds, setKinds] = useState<MarkKind[]>([...MARK_KINDS]);
@@ -46,6 +48,7 @@ export function PrinterMarksPanel(): React.ReactElement {
   const [offset, setOffset] = useState(9);
   const [length, setLength] = useState(18);
   const [status, setStatus] = useState('');
+  useEffect(() => { setStatus(''); }, [activeFile?.path, activeFile?.workingPath]);
   const [busy, setBusy] = useState(false);
 
   const workingPath = activeFile?.workingPath ?? null;
@@ -83,10 +86,12 @@ export function PrinterMarksPanel(): React.ReactElement {
 
   const addMarks = useCallback(async () => {
     if (!filePath) return;
+    const run = beginRun();
+    if (!run) return;
     setBusy(true);
     setStatus(tChrome('panel.printerMarks.adding'));
     try {
-      const r = await performOperation(filePath, 'add_printer_marks', {
+      const r = await run.perform(performOperation, 'add_printer_marks', {
         marks: kinds,
         style,
         weight,
@@ -94,39 +99,47 @@ export function PrinterMarksPanel(): React.ReactElement {
         length,
         font_dir: await app.getEditFontPath(),
       });
+      if (!run.visible()) return;
       if (r === EDIT_DECLINED) {
         setStatus('');
         return;
       }
       setStatus(tChrome('panel.printerMarks.added', { growth: markGrowth(offset, length) }));
     } catch (e: unknown) {
+      if (!run.visible()) return;
       setStatus(tChrome('panel.common.error', {
         message: e instanceof Error ? e.message : String(e),
       }));
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [filePath, performOperation, kinds, style, weight, offset, length]);
+  }, [filePath, performOperation, kinds, style, weight, offset, length, beginRun]);
 
   const removeMarks = useCallback(async () => {
     if (!filePath) return;
+    const run = beginRun();
+    if (!run) return;
     setBusy(true);
     setStatus(tChrome('panel.printerMarks.removing'));
     try {
-      const r = await performOperation(filePath, 'remove_printer_marks', {});
+      const r = await run.perform(performOperation, 'remove_printer_marks', {});
+      if (!run.visible()) return;
       if (r === EDIT_DECLINED) {
         setStatus('');
         return;
       }
       setStatus(tChrome('panel.printerMarks.removed'));
     } catch (e: unknown) {
+      if (!run.visible()) return;
       setStatus(tChrome('panel.common.error', {
         message: e instanceof Error ? e.message : String(e),
       }));
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [filePath, performOperation]);
+  }, [filePath, performOperation, beginRun]);
 
   if (!activeFile) {
     return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.printerMarks.open')} />;

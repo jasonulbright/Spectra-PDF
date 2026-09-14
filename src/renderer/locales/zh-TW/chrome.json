@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "無法完整保留選用內容設定。",
+  "engine.output_intents.outputIntentConfigurationCannot": "無法完整保留輸出意圖設定。",
   "engine.split.cannotReplaceNonRegular": "無法取代不是一般檔案的分割目標：{{path}}",
   "engine.split.cannotSplitDocumentWithout": "無法分割沒有頁面的文件",
   "engine.split.chooseEitherExactSplit": "請選擇指定的輸出檔案或輸出資料夾，兩者只能擇一",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "起始檢視的視窗選項必須是布林值。",
   "engine.doc_properties.openingPageMustInteger": "起始頁必須是整數。",
   "engine.pdf_version.pdfVersionCannotDetermined": "無法判定 PDF 版本。",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "無法完整保留版本宣告。",
   "engine.layers.layerConfigurationCannotRead": "無法完整讀取圖層設定。",
   "engine.layers.layerLockedDefaultConfiguration": "此圖層在預設設定中已鎖定。",
   "app.operation.unverified": "無法驗證操作結果。",

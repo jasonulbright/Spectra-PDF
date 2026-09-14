@@ -49,6 +49,9 @@ import zipfile
 from datetime import date
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from download_retry import fetch_with_retry  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEST = REPO_ROOT / "ghent-corpus"
 MANIFEST = DEST / "manifest.json"
@@ -81,11 +84,12 @@ def _download(source: dict) -> bytes:
         DOWNLOAD.format(package=source["package"]),
         headers={"User-Agent": "spectra-pdf-corpus-fetch", "Referer": source["page"]},
     )
-    with urllib.request.urlopen(request, timeout=600) as response:
+    def require_zip(response) -> None:
         kind = (response.headers.get("Content-Type") or "").split(";")[0].strip()
         if kind != "application/zip":
             raise RuntimeError(f"{source['key']}: expected a zip, server sent {kind!r}")
-        return response.read()
+
+    return fetch_with_retry(request, timeout=600, description=source["key"], inspect=require_zip)
 
 
 def _extract(archive: bytes, into: Path) -> list[dict]:

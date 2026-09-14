@@ -146,6 +146,7 @@ def add_header_footer(
     bates_start: int = 1,
     bates_digits: int = 6,
     font_dir: str = "",
+    pages: list[int] | str | None = None,
 ) -> dict:
     """Stamp header/footer/Bates text across a page range.
 
@@ -153,6 +154,9 @@ def add_header_footer(
         placements: [{position: one of tl/tc/tr/bl/bc/br, text: str}]. `text`
             may contain {page}, {pages}, {bates}.
         first_page/last_page: 1-based inclusive range (last_page None = end).
+        pages: exact 1-based page set, or "all". When provided this takes
+            precedence over the legacy contiguous range. Duplicates are
+            stamped once, in document order, including the Bates sequence.
         font_size: points (fixed; > 0).
         margin: inset from the page edges, points.
         color: #rrggbb.
@@ -180,8 +184,23 @@ def add_header_footer(
     stamped = 0
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)
-        lo = max(1, int(first_page))
-        hi = total if last_page is None else min(total, int(last_page))
+        lo, hi = 1, total
+        if pages is None:
+            lo = max(1, int(first_page))
+            hi = total if last_page is None else min(total, int(last_page))
+        selected = None
+        if pages is not None:
+            if pages == "all":
+                lo, hi = 1, total
+            else:
+                if not isinstance(pages, list) or any(type(page) is not int for page in pages):
+                    raise ValueError('pages must be a list of page numbers or "all"')
+                if not pages:
+                    raise ValueError("The page selection is empty (no pages match)")
+                if any(page < 1 or page > total for page in pages):
+                    raise ValueError(f"Pages {pages} are not in this document.")
+                selected = set(pages)
+                lo, hi = 1, total
 
         # Resolve a Unicode face PER PLACEMENT, from that placement's own
         # drawable character set — a Japanese header and an Arabic
@@ -217,7 +236,7 @@ def add_header_footer(
 
         bates_index = 0
         for index, page in enumerate(pdf.pages, start=1):
-            if index < lo or index > hi:
+            if index < lo or index > hi or selected is not None and index not in selected:
                 continue
             rotate = _resolve_rotate(page)
             x0, y0, x1, y1 = _resolve_box(page)

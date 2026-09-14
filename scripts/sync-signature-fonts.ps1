@@ -47,6 +47,7 @@ $Wanted = @(
     @{ In = 'parisienne/OFL.txt';                  Out = 'LICENSE-Parisienne-OFL.txt';   Sha256 = '1dd84b611f4bed7f9ff9089e76a96337b187e6f283a4ab33bcb987f844f2c4db' }
 )
 
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 $Root = Split-Path -Parent $PSScriptRoot
 $Dest = Join-Path $Root 'resources\fonts'
 
@@ -67,7 +68,10 @@ if ($allPresent) {
 New-Item -ItemType Directory -Force $Dest | Out-Null
 foreach ($item in $Wanted) {
     $Target = Join-Path $Dest $item.Out
-    Invoke-WebRequest -Uri "$Base/$($item.In)" -OutFile $Target -UseBasicParsing
+    Invoke-DownloadWithRetry -Description $item.Out -OutFile $Target -Download {
+        Invoke-WebRequest -Uri "$Base/$($item.In)" -OutFile $Target -UseBasicParsing `
+            -TimeoutSec $DownloadRetryTimeoutSeconds
+    }
     $h = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLowerInvariant()
     if ($h -ne $item.Sha256) {
         Remove-Item $Target -Force

@@ -15,6 +15,7 @@ pub mod health_engine;
 pub mod net;
 pub mod gs;
 mod printers;
+pub mod scan_host;
 pub mod scanner;
 pub mod scantest;
 pub mod app_windows;
@@ -478,6 +479,9 @@ pub fn run() {
                 tauri::async_runtime::block_on(async move {
                     health_engine::kill(&app).await;
                 });
+                // The scanner host holds device locks, so it is ended here
+                // rather than left to the job object that backstops a crash.
+                scan_host::shutdown();
             }
         });
 }

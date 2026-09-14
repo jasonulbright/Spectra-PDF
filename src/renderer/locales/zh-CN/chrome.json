@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "无法完整保留可选内容配置。",
+  "engine.output_intents.outputIntentConfigurationCannot": "无法完整保留输出意图配置。",
   "engine.split.cannotReplaceNonRegular": "无法替换不是普通文件的拆分目标：{{path}}",
   "engine.split.cannotSplitDocumentWithout": "无法拆分没有页面的文档",
   "engine.split.chooseEitherExactSplit": "请选择指定的输出文件或输出文件夹，两者只能选其一",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "初始视图的窗口选项必须是布尔值。",
   "engine.doc_properties.openingPageMustInteger": "起始页必须是整数。",
   "engine.pdf_version.pdfVersionCannotDetermined": "无法确定 PDF 版本。",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "无法完整保留版本声明。",
   "engine.layers.layerConfigurationCannotRead": "无法完整读取图层配置。",
   "engine.layers.layerLockedDefaultConfiguration": "该图层在默认配置中已锁定。",
   "app.operation.unverified": "无法验证操作结果。",

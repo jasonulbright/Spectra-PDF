@@ -1,6 +1,8 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
+import { parsePageRangeField } from '../lib/page-range';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { app, dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
@@ -38,6 +40,7 @@ export function WatermarkPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { performOperation } = useOperations();
+  const beginRun = useOwnedOperationRun(activeFile);
   const [source, setSource] = useState<WatermarkSource>('text');
   const [text, setText] = useState('CONFIDENTIAL');
   const [imagePath, setImagePath] = useState('');
@@ -60,6 +63,7 @@ export function WatermarkPanel(): React.ReactElement {
   const [writing, setWriting] = useState<WatermarkWriting>('horizontal');
   const [columns, setColumns] = useState<'rtl' | 'ltr' | null>(null);
   const [status, setStatus] = useState('');
+  useEffect(() => { setStatus(''); }, [activeFile?.path, activeFile?.workingPath]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -90,17 +94,13 @@ export function WatermarkPanel(): React.ReactElement {
       setStatus(tChrome('panel.watermark.noPdf'));
       return;
     }
-    const pages =
-      pageInput.trim().toLowerCase() === 'all'
-        ? undefined
-        : pageInput.split(',').map((s) => parseInt(s.trim())).filter((n) => !isNaN(n));
-    // An empty parse must never reach the engine: pages [] means "zero
-    // pages" there, and quietly stamping nothing (or, worse, everything)
-    // on a typo helps no one.
-    if (pages && pages.length === 0) {
-      setStatus(tChrome('panel.watermark.badPages'));
-      return;
+    const run = beginRun();
+    if (!run) return;
+    const scope = parsePageRangeField(pageInput, run.pageCount);
+    if ('error' in scope) {
+      run.finish(); setStatus(tChrome('panel.watermark.badPages')); return;
     }
+    const pages = scope.pages;
     setBusy(true);
     setStatus(tChrome('panel.watermark.applying'));
     try {
@@ -108,7 +108,7 @@ export function WatermarkPanel(): React.ReactElement {
       // writes the working copy in place, reloads onto the undo chain — and
       // takes the signed-document decision from the op's roster class, which
       // this panel's own copy of the shape never did.
-      const result = await performOperation(activeFile.path, 'watermark', {
+      const result = await run.perform(performOperation, 'watermark', {
         // Exactly one source reaches the engine; the others stay empty, which
         // is how the engine's own one-source refusal is expressed.
         text: source === 'text' ? text.trim() : '',
@@ -131,6 +131,7 @@ export function WatermarkPanel(): React.ReactElement {
         ...(pages ? { pages } : {}),
         ...writingParams(source, writing),
       });
+      if (!run.visible()) return;
       if (result === EDIT_DECLINED) {
         setStatus('');
         return;
@@ -148,12 +149,14 @@ export function WatermarkPanel(): React.ReactElement {
           (frames > 1 ? ' ' + tChromeCount('panel.watermark.usedFirstFrame', frames) : ''),
       );
     } catch (e: unknown) {
+      if (!run.visible()) return;
       const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e);
       setStatus(tChrome('panel.common.error', { message: msg }));
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [activeFile, source, text, imagePath, pdfPath, pdfPage, opacity, angle, color, layer, scale, position, margin, tile, tileGap, pageInput, writing, performOperation]);
+  }, [activeFile, source, text, imagePath, pdfPath, pdfPage, opacity, angle, color, layer, scale, position, margin, tile, tileGap, pageInput, writing, performOperation, beginRun]);
 
   // The pickers are native and undrivable, so e2e injects the chosen path
   // through the panel's OWN setter — the state an injected run reaches is the

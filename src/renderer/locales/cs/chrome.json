@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Konfiguraci volitelného obsahu nelze zcela zachovat.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Konfiguraci výstupního záměru nelze zcela zachovat.",
   "engine.split.cannotReplaceNonRegular": "Nelze nahradit cíl rozdělení, který není běžným souborem: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Nelze rozdělit dokument bez stránek",
   "engine.split.chooseEitherExactSplit": "Vyberte konkrétní výstupní soubor nebo výstupní složku",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Možnosti okna počátečního zobrazení musí být logické hodnoty.",
   "engine.doc_properties.openingPageMustInteger": "Počáteční stránka musí být celé číslo.",
   "engine.pdf_version.pdfVersionCannotDetermined": "Verzi PDF nelze určit.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Deklarace verze nelze zcela zachovat.",
   "engine.layers.layerConfigurationCannotRead": "Konfiguraci vrstev se nepodařilo přečíst úplně.",
   "engine.layers.layerLockedDefaultConfiguration": "Vrstva je ve výchozí konfiguraci zamčená.",
   "app.operation.unverified": "Výsledek operace se nepodařilo ověřit.",

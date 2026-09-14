@@ -2,13 +2,20 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
+import { useReadAppState } from '../state/AppStateProvider';
+import type { OpenFile } from '../state/types';
+import type { OwnedOperationRun } from '../lib/owned-operation-run';
+import { inspectOperationInput } from '../lib/operation-input';
+import { runCommitGate } from '../lib/commit-gate';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tLanguageName, currentLanguage } from '../i18n';
-import { app, dialog } from '../lib/tauri-bridge';
+import { app, batch, dialog, file } from '../lib/tauri-bridge';
 import { loadSettings, saveSettings } from '../lib/app-settings';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import type { EditSpan } from '../lib/edit-paragraphs';
+import { spellingCommentTarget, type SpellingCommentTarget } from '../lib/spelling-comment-target';
 import {
   AUTO_LANGUAGE,
   addCustomWord,
@@ -50,8 +57,10 @@ const ALL_SOURCES: SpellSource[] = ['text', 'comments', 'fields'];
 export function SpellingPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles, state, dispatch } = useActiveFile();
-  const { call } = useEngine();
+  const { call, callRaw } = useEngine();
   const { performOperation, fillFormValues } = useOperations();
+  const readState = useReadAppState();
+  const beginRun = useOwnedOperationRun(activeFile);
 
   const [dictionaries, setDictionaries] = useState<DictionaryEntry[]>([]);
   const [preference, setPreference] = useState<string>(() => loadSettings().spellLanguage);
@@ -59,6 +68,7 @@ export function SpellingPanel(): React.ReactElement {
   const [ignoreUppercase, setIgnoreUppercase] = useState(true);
   const [ignoreWithDigits, setIgnoreWithDigits] = useState(true);
   const [report, setReport] = useState<SpellReport | null>(null);
+  const [reportSource, setReportSource] = useState<OpenFile | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [replacement, setReplacement] = useState('');
@@ -69,6 +79,10 @@ export function SpellingPanel(): React.ReactElement {
 
   const workingPath = activeFile?.workingPath ?? null;
   const filePath = activeFile?.path ?? null;
+  useEffect(() => { setReport(null); setReportSource(null); setStatus(''); setSelected(null); }, [filePath, workingPath]);
+  const inspectSource = useCallback(<T,>(run: OwnedOperationRun, inspect: (path: string) => Promise<T>) =>
+    inspectOperationInput(run, { allocate: () => batch.createScratch('spelling'), write: file.writeBuffer,
+      remove: batch.deleteHealthScratch }, inspect), []);
 
   // The vendored dictionary directory and the user's own are resolved once —
   // they are Rust-owned paths that cannot change while the app runs.
@@ -134,36 +148,45 @@ export function SpellingPanel(): React.ReactElement {
   }, [dirs, preference, dictionaries, custom, docLanguage]);
 
   const visible = useMemo(
-    () => (report?.issues ?? []).filter((i) => !ignored.includes(i.word)),
-    [report, ignored],
+    () => activeFile?.buffer === reportSource?.buffer && activeFile?.workingPath === reportSource?.workingPath
+      && !state.pageDirtyPaths.includes(activeFile?.path ?? '')
+      ? (report?.issues ?? []).filter((i) => !ignored.includes(i.word)) : [],
+    [report, reportSource, activeFile, state.pageDirtyPaths, ignored],
   );
   const groups = useMemo(() => groupByWord(visible), [visible]);
 
-  const check = useCallback(async () => {
-    if (!workingPath || !engineParams) return;
+  const check = useCallback(async (source: OpenFile | null = activeFile) => {
+    if (!source || !engineParams) return;
+    const run = beginRun(source);
+    if (!run) return;
     setBusy(true);
     setStatus(tChrome('panel.spelling.checking'));
     try {
+      await run.prepareRead(runCommitGate);
       const res = (await call('check_spelling', {
-        file: workingPath,
+        file: run.source.workingPath,
         ...engineParams,
         sources,
         ignore_uppercase: ignoreUppercase,
         ignore_with_digits: ignoreWithDigits,
-      })) as unknown as SpellReport;
+      }, { assertCurrent: run.assertReadCurrent })) as unknown as SpellReport;
+      run.assertReadCurrent();
       setReport(res);
+      setReportSource(run.source);
       setSelected(null);
       setSuggestions([]);
       setStatus('');
     } catch (e: unknown) {
+      if (!run.visible()) return;
       setReport(null);
       setStatus(
         tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
       );
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [workingPath, call, engineParams, sources, ignoreUppercase, ignoreWithDigits]);
+  }, [activeFile, beginRun, call, engineParams, sources, ignoreUppercase, ignoreWithDigits]);
 
   // A word's suggestions, on selection. See the cost note at the top.
   const selectWord = useCallback(
@@ -198,14 +221,17 @@ export function SpellingPanel(): React.ReactElement {
   // name rather than correcting a different word.
 
   const fixPageText = useCallback(
-    async (issue: SpellIssue, word: string): Promise<FixOutcome> => {
+    async (issue: SpellIssue, word: string, ownedRun?: OwnedOperationRun): Promise<FixOutcome> => {
       if (!filePath || !workingPath || issue.page === undefined || issue.paragraph === undefined) {
         return { issue, ok: false, reason: tChrome('panel.spelling.reasonGone') };
       }
-      const listing = (await call('list_text_paragraphs', {
-        file: workingPath,
+      const run = ownedRun ?? beginRun();
+      if (!run) return { issue, ok: false, reason: tChrome('panel.spelling.reasonMoved') };
+      try {
+      const listing = (await inspectSource(run, path => callRaw('list_text_paragraphs', {
+        file: path,
         page: issue.page,
-      })) as unknown as {
+      }))) as unknown as {
         paragraphs: Array<{ index: number; runs: number[]; text: string; spans: EditSpan[] }>;
       };
       const para = listing.paragraphs.find((p) => p.index === issue.paragraph);
@@ -215,7 +241,7 @@ export function SpellingPanel(): React.ReactElement {
       // A correction is a content edit, so it answers to the document's own
       // signatures exactly as the canvas editor's does — decided inside
       // performOperation, from the op's own edit class.
-      const r = await performOperation(filePath, 'replace_paragraph_text', {
+      const r = await run.perform(performOperation, 'replace_paragraph_text', {
         page: issue.page,
         paragraph_index: para.index,
         new_text: fix.text,
@@ -226,50 +252,45 @@ export function SpellingPanel(): React.ReactElement {
         expected_runs: para.runs,
         expected_text: para.text,
         font_path: await app.getEditFontPath(),
-      });
+      }, { expectedBuffer: run.source.buffer!, expectedWorkingPath: run.source.workingPath });
       if (r === EDIT_DECLINED) {
         return { issue, ok: false, reason: tChrome('panel.spelling.reasonDeclined') };
       }
       return { issue, ok: true };
+      } finally { if (!ownedRun) run.finish(); }
     },
-    [filePath, workingPath, call, performOperation, replacement],
+    [filePath, workingPath, beginRun, inspectSource, callRaw, performOperation, replacement],
   );
 
   const fixComment = useCallback(
-    (issue: SpellIssue, word: string): FixOutcome => {
+    (issue: SpellIssue, word: string, run: OwnedOperationRun,
+      bindings: Map<string, SpellingCommentTarget>): FixOutcome => {
       // Comments are addressed by their TEXT within their page, not by the
       // engine listing's index: the workspace annotation tier is a separate
       // listing, and pairing two listings by ordinal is a silent mis-fix
       // waiting for the first document whose orders differ.
-      for (const doc of state.workspace.documents) {
-        if (doc.path !== filePath) continue;
-        for (const page of doc.pages) {
-          const hit = (page.annotations ?? []).find((a) => a.note === issue.annotation_text);
-          if (!hit) continue;
-          if (wordAt(hit.note ?? '', issue.start, issue.end) !== word) {
-            return { issue, ok: false, reason: tChrome('panel.spelling.reasonMoved') };
-          }
-          dispatch({
-            type: 'UPDATE_ANNOTATION',
-            docId: doc.id,
-            pageId: page.id,
-            annotationId: hit.id,
-            note: replaceRange(hit.note ?? '', issue.start, issue.end, replacement),
-          });
-          return { issue, ok: true };
-        }
+      run.assertSource();
+      const key = `${issue.page}:${issue.annotation}`;
+      const target = bindings.get(key) ?? (filePath ? spellingCommentTarget(readState(), filePath, issue) : null);
+      if (!target) return { issue, ok: false, reason: tChrome('panel.spelling.reasonGone') };
+      const note = target.annotation.note ?? '';
+      if (wordAt(note, issue.start, issue.end) !== word) {
+        return { issue, ok: false, reason: tChrome('panel.spelling.reasonMoved') };
       }
-      return { issue, ok: false, reason: tChrome('panel.spelling.reasonGone') };
+      const next = replaceRange(note, issue.start, issue.end, replacement);
+      run.editAnnotation(dispatch, target, note, next);
+      bindings.set(key, { ...target, annotation: { ...target.annotation, note: next } });
+      return { issue, ok: true };
     },
-    [state.workspace.documents, filePath, dispatch, replacement],
+    [readState, filePath, dispatch, replacement],
   );
 
   const fixField = useCallback(
-    async (issue: SpellIssue, word: string): Promise<FixOutcome> => {
-      if (!activeFile || !issue.field) {
+    async (issue: SpellIssue, word: string, run: OwnedOperationRun): Promise<FixOutcome> => {
+      if (!issue.field) {
         return { issue, ok: false, reason: tChrome('panel.spelling.reasonGone') };
       }
-      const read = (await call('read_form_fields', { file: activeFile.workingPath })) as unknown as {
+      const read = (await inspectSource(run, path => callRaw('read_form_fields', { file: path }))) as unknown as {
         fields: Array<{ name: string; value: unknown }>;
       };
       const field = read.fields.find((f) => f.name === issue.field);
@@ -278,9 +299,10 @@ export function SpellingPanel(): React.ReactElement {
       if (wordAt(value, issue.start, issue.end) !== word) {
         return { issue, ok: false, reason: tChrome('panel.spelling.reasonMoved') };
       }
-      const result = await fillFormValues(activeFile.path,
+      const result = await run.fill(fillFormValues,
         { [issue.field]: replaceRange(value, issue.start, issue.end, replacement) }, {
-          expectedWorkingPath: activeFile.workingPath,
+          expectedWorkingPath: run.source.workingPath,
+          expectedBuffer: run.source.buffer!,
           expectedValues: { [issue.field]: value },
           changedMessage: tChrome('panel.spelling.reasonMoved'),
         });
@@ -289,39 +311,52 @@ export function SpellingPanel(): React.ReactElement {
       }
       return { issue, ok: true };
     },
-    [activeFile, call, fillFormValues, replacement],
+    [inspectSource, callRaw, fillFormValues, replacement],
   );
 
   const applyOne = useCallback(
-    async (issue: SpellIssue, word: string): Promise<FixOutcome> => {
-      if (issue.source === 'text') return fixPageText(issue, word);
-      if (issue.source === 'comments') return fixComment(issue, word);
-      return fixField(issue, word);
+    async (issue: SpellIssue, word: string, run: OwnedOperationRun,
+      bindings: Map<string, SpellingCommentTarget>): Promise<FixOutcome> => {
+      if (issue.source === 'text') return fixPageText(issue, word, run);
+      if (issue.source === 'comments') return fixComment(issue, word, run, bindings);
+      return fixField(issue, word, run);
     },
     [fixPageText, fixComment, fixField],
   );
 
   const runFix = useCallback(
     async (targets: SpellIssue[], word: string) => {
-      if (!replacement.trim()) return;
+      if (!replacement.trim() || !activeFile || !reportSource
+          || activeFile.buffer !== reportSource.buffer || activeFile.workingPath !== reportSource.workingPath) return;
+      const run = beginRun();
+      if (!run) return;
       setBusy(true);
       setStatus(tChrome('panel.spelling.changing'));
       const outcomes: FixOutcome[] = [];
+      const bindings = new Map<string, SpellingCommentTarget>();
       try {
-        for (const issue of targets) {
-          outcomes.push(await applyOne(issue, word));
+        run.assertCleanSource();
+        // Disk edits first, then pending annotation edits. Stable sorting
+        // retains descending offsets within each source; no read inspects an
+        // uncommitted annotation tier or performs a pre-consent page commit.
+        const ordered = [...targets].sort((a, b) => Number(a.source === 'comments') - Number(b.source === 'comments'));
+        for (const issue of ordered) {
+          outcomes.push(await applyOne(issue, word, run, bindings));
+          run.continueAfterPublication();
         }
+        run.assertSource();
       } catch (e: unknown) {
-        setStatus(
+        if (run.visible()) setStatus(
           tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
         );
-        setBusy(false);
+        else if (run.ownsSession()) setStatus('');
+        run.finish(); setBusy(false);
         return;
       }
       const failed = outcomes.filter((o) => !o.ok);
       // Per instance, never one aggregate verdict: a run whose third
       // occurrence had moved must not report a whole-document success.
-      setStatus(
+      if (run.visible()) setStatus(
         failed.length === 0
           ? tChromeCount('panel.spelling.changed', outcomes.length)
           : tChrome('panel.spelling.changedPartly', {
@@ -330,10 +365,11 @@ export function SpellingPanel(): React.ReactElement {
               reason: failed[0].reason ?? '',
             }),
       );
-      setBusy(false);
-      await check();
+      const source = run.source;
+      run.finish(); setBusy(false);
+      await check(source);
     },
-    [applyOne, replacement, check],
+    [activeFile, reportSource, beginRun, applyOne, replacement, check],
   );
 
   const addToDictionary = useCallback(

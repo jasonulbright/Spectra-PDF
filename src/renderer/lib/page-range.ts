@@ -9,40 +9,45 @@
  *
  * Syntax: `all` (any case, surrounding space) is the whole document, spelled
  * to the engine as an absent list. Otherwise a comma-separated list of 1-based
- * page numbers and inclusive `from-to` ranges. A token that names no page is
- * dropped; a field that names no page at all is an error, because an empty
- * list means "no pages" to the engine and would act on nothing while
- * reporting success.
+ * page numbers and inclusive `from-to` ranges. Every token must be valid and
+ * in the concrete document: partial parsing silently changes the selection.
+ * Validate all intervals, then merge them before bounded expansion.
  */
 
-const RANGE = /^(\d+)\s*-\s*(\d+)$/;
+const RANGE = /^(\d+)(?:\s*-\s*(\d+))?$/;
 
 /** Pages named by the field, or `undefined` for the whole document. */
 export type PageRangeResult = { pages: number[] | undefined } | { error: 'badPages' };
 
-export function parsePageRangeField(input: string): PageRangeResult {
+export function parsePageRangeField(input: string, pageCount: number): PageRangeResult {
+  if (!Number.isSafeInteger(pageCount) || pageCount < 1 || typeof input !== 'string') return { error: 'badPages' };
   const trimmed = input.trim().toLowerCase();
   if (trimmed === 'all') return { pages: undefined };
-  const pages = new Set<number>();
+  const intervals: [number, number][] = [];
   for (const raw of trimmed.split(',')) {
     const token = raw.trim();
-    if (token === '') continue;
     const range = RANGE.exec(token);
-    if (range) {
-      const from = Number(range[1]);
-      const to = Number(range[2]);
-      // A reversed or zero-based range names no page; dropping it matches how
-      // every other unreadable token is treated, and the empty-field error
-      // below still catches a field made only of them.
-      if (from < 1 || to < from) continue;
-      for (let p = from; p <= to; p++) pages.add(p);
-      continue;
-    }
-    const n = parseInt(token, 10);
-    if (Number.isFinite(n) && n >= 1) pages.add(Math.floor(n));
+    if (!range) return { error: 'badPages' };
+    const from = Number(range[1]), to = range[2] === undefined ? from : Number(range[2]);
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to)
+        || from < 1 || to < from || to > pageCount) return { error: 'badPages' };
+    intervals.push([from, to]);
   }
-  if (pages.size === 0) return { error: 'badPages' };
-  return { pages: [...pages].sort((a, b) => a - b) };
+  intervals.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const merged: [number, number][] = [];
+  for (const [from, to] of intervals) {
+    const prior = merged[merged.length - 1];
+    if (prior && from - prior[1] <= 1) prior[1] = Math.max(prior[1], to);
+    else merged.push([from, to]);
+  }
+  const pages: number[] = [];
+  for (const [from, to] of merged) {
+    for (let page = from; ; page++) {
+      pages.push(page);
+      if (page === to) break;
+    }
+  }
+  return pages.length ? { pages } : { error: 'badPages' };
 }
 
 /**
@@ -51,12 +56,12 @@ export function parsePageRangeField(input: string): PageRangeResult {
  * `4,5` and reads as a range the user did not ask for.
  */
 export function formatPageRange(pages: readonly number[]): string {
-  const sorted = [...new Set(pages)].filter((n) => Number.isFinite(n) && n >= 1).sort((a, b) => a - b);
+  const sorted = [...new Set(pages)].filter((n) => Number.isSafeInteger(n) && n >= 1).sort((a, b) => a - b);
   const parts: string[] = [];
   let i = 0;
   while (i < sorted.length) {
     let j = i;
-    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+    while (j + 1 < sorted.length && sorted[j + 1] - sorted[j] === 1) j++;
     if (j - i >= 2) parts.push(`${sorted[i]}-${sorted[j]}`);
     else for (let k = i; k <= j; k++) parts.push(String(sorted[k]));
     i = j + 1;

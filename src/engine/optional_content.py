@@ -565,10 +565,9 @@ class OptionalContentCarry:
     def add(self, dst, source):
         if source is None:
             return
-        # A fresh qpdf document starts at 1.3. Retaining an OCMD /VE (1.6)
-        # while losing its version declaration is not a faithful copy.
-        required = max(effective_version(dst), source.minimum_version)
-        dst.Root.Version = Name(f'/{required[0]}.{required[1]}')
+        # `minimum_version` is this source's layer-feature requirement; the
+        # caller composes it with every other contribution's requirement
+        # through the shared version carry, which declares it once.
         self.sources.append(source)
         for item in self.sources:
             item.copied = {key: dst.copy_foreign(group) for key, group in item.groups.items()}

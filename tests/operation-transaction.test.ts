@@ -10,6 +10,7 @@ import { initialState } from '../src/renderer/state/reducer';
 import type { AppAction, OpenFile } from '../src/renderer/state/types';
 import { hasPendingPageCommit, recoverPendingPageCommit } from '../src/renderer/lib/page-commit-transaction';
 import { withFileLock } from '../src/renderer/lib/engine-lock';
+import { captureOperationIntent } from '../src/renderer/lib/operation-intent';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function fixture() {
@@ -64,6 +65,51 @@ async function fixture() {
 }
 
 describe('whole-file operation publication', () => {
+  it.each(['reopen', 'revision', 'pending'])('gesture captured before prerequisites refuses %s before consent or staging', async boundary => {
+    const f = await fixture();
+    const intent = captureOperationIntent(f.store.getState(), f.file);
+    if (boundary === 'reopen') f.store.dispatch({ type: 'OPEN_FILE', path: 'source', workingPath: 'new-work', name: 'source', buffer: f.original.slice(), pageCount: 1 });
+    if (boundary === 'revision') f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1 });
+    const read = () => boundary === 'pending' ? { ...f.store.getState(), pageUndoStack: [] } : f.store.getState();
+    await expect(executeWorkspaceOperation('source', 'rotate', { pages: 'all', angle: 90 }, read,
+      f.store.dispatch, f.io, { intent })).rejects.toThrow();
+    expect(f.io.confirm).not.toHaveBeenCalled(); expect(f.io.write).not.toHaveBeenCalled();
+    expect(f.io.callStaged).not.toHaveBeenCalled(); expect(f.disk.get('work')).toEqual(f.original);
+  });
+  it.each(['consent', 'gate', 'queue', 'engine'])('owner cancellation at %s refuses publication', async boundary => {
+    const f = await fixture(); let active = true;
+    const intent = captureOperationIntent(f.store.getState(), f.file);
+    if (boundary === 'consent') f.io.confirm = async () => { active = false; return true; };
+    if (boundary === 'gate') f.io.commit = async () => { active = false; };
+    if (boundary === 'queue') f.io.track = async (_m, _p, run) => { active = false; return run(); };
+    if (boundary === 'engine') { const original = f.io.callStaged; f.io.callStaged = async (...args) => { const result = await original(...args); active = false; return result; }; }
+    await expect(executeWorkspaceOperation('source', 'rotate', { pages: 'all', angle: 90 }, f.store.getState,
+      f.store.dispatch, f.io, { intent, assertActive: () => { if (!active) throw new Error('owner abandoned'); } })).rejects.toThrow();
+    expect(f.io.transaction.publish).not.toHaveBeenCalled(); expect(f.disk.get('work')).toEqual(f.original);
+  });
+  it('a fresh buffer without authored gate evidence cannot become the gesture source', async () => {
+    const f = await fixture(); const intent = captureOperationIntent(f.store.getState(), f.file);
+    f.io.commit = async () => { f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1 }); };
+    await expect(executeWorkspaceOperation('source', 'rotate', { pages: 'all', angle: 90 }, f.store.getState,
+      f.store.dispatch, f.io, { intent })).rejects.toThrow();
+    expect(f.io.callStaged).not.toHaveBeenCalled(); expect(f.disk.get('work')).toEqual(f.original);
+  });
+  it('the actual authored gate transition is accepted after consent and re-confirmed before writing', async () => {
+    const f = await fixture(); const intent = captureOperationIntent(f.store.getState(), f.file);
+    const buffer = f.original.slice();
+    const after = { ...f.file, buffer, authoredIdentity: { sourceBuffer: f.file.buffer!, buffer, pages: [], documents: [] } };
+    let committed = false;
+    const read = () => committed ? { ...f.store.getState(), files: new Map([['source', after]]) } : f.store.getState();
+    // Keep the production transaction/publication machinery. The gate's state
+    // publication uses the same source/result identity carried by page commits.
+    f.io.commit = async () => { f.events.push('commit'); committed = true; };
+    const dispatch = (action: AppAction) => { committed = false; f.store.dispatch(action); };
+    const result = await executeWorkspaceOperation('source', 'rotate', { pages: 'all', angle: 90 }, read,
+      dispatch, f.io, { intent });
+    expect(result && typeof result === 'object' && result.publication.buffer).toBe(f.store.getState().files.get('source')!.buffer);
+    expect(f.events.slice(0, 3)).toEqual(['confirm', 'commit', 'confirm']);
+    expect(f.io.callStaged).toHaveBeenCalledTimes(1);
+  });
   it.each(['before', 'gate', 'pending'])('revision-derived parameters refuse drift at %s', async boundary => {
     const f = await fixture();
     const updated = () => f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1 });

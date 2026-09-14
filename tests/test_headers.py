@@ -25,6 +25,40 @@ def tmp_dir(tmp_path):
     return str(tmp_path)
 
 
+def test_noncontiguous_pages_preserve_exact_scope_and_bates_order(tmp_path):
+    source, output = tmp_path / "source.pdf", tmp_path / "output.pdf"
+    _pdf(str(source), 3)
+    before = source.read_bytes()
+    result = add_header_footer(str(source), str(output), [{"position": "tl", "text": "ID-{bates}-P{page}"}],
+        pages=[3, 1, 3], first_page=2, last_page=2, bates_start=41, bates_digits=3)
+    assert result["pages_stamped"] == 2
+    assert "ID-041-P1" in extract_text(str(output), pages=[1])["text"]
+    assert "ID-" not in extract_text(str(output), pages=[2])["text"]
+    assert "ID-042-P3" in extract_text(str(output), pages=[3])["text"]
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("selection", [[], [True], [1.5], [0], [-1], [4], {}, "1-3"])
+def test_invalid_exact_selection_preserves_source_and_existing_output(tmp_path, selection):
+    source, output = tmp_path / "source.pdf", tmp_path / "output.pdf"
+    _pdf(str(source), 3)
+    before = source.read_bytes()
+    output.write_bytes(b"existing output must survive")
+    with pytest.raises(ValueError):
+        add_header_footer(str(source), str(output), [{"position": "tl", "text": "SCOPE"}], pages=selection)
+    assert source.read_bytes() == before
+    assert output.read_bytes() == b"existing output must survive"
+
+
+def test_explicit_all_and_legacy_interval_both_keep_their_contract(tmp_path):
+    source = tmp_path / "source.pdf"
+    _pdf(str(source), 3)
+    for args, count in [({"first_page": 2, "last_page": 2}, 1),
+                        ({"pages": "all", "first_page": 2, "last_page": 2}, 3)]:
+        output = tmp_path / f"output-{count}.pdf"
+        assert add_header_footer(str(source), str(output), [{"position": "tl", "text": "SCOPE"}], **args)["pages_stamped"] == count
+
+
 class TestDisplayToUser:
     # The displayed bottom-left corner maps to a different USER corner per
     # /Rotate — this pins the rotation convention the whole feature rests on.

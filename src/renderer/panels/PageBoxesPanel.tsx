@@ -9,6 +9,8 @@ import {
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
+import { runCommitGate } from '../lib/commit-gate';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { gsPathIfAvailable } from '../lib/gs-capability';
 import { NoFileOpen } from '../components/NoFileOpen';
@@ -31,6 +33,7 @@ export function PageBoxesPanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
   const { performOperation } = useOperations();
+  const beginRun = useOwnedOperationRun(activeFile);
   const [box, setBox] = useState('crop');
   const [top, setTop] = useState(0);
   const [bottom, setBottom] = useState(0);
@@ -38,6 +41,7 @@ export function PageBoxesPanel(): React.ReactElement {
   const [right, setRight] = useState(0);
   const [pageInput, setPageInput] = useState('all');
   const [status, setStatus] = useState('');
+  useEffect(() => { setStatus(''); }, [activeFile?.path, activeFile?.workingPath]);
   const [busy, setBusy] = useState(false);
   const [margin, setMargin] = useState(0);
   const [autoPreview, setAutoPreview] = useState<ContentCropSummary | null>(null);
@@ -76,8 +80,11 @@ export function PageBoxesPanel(): React.ReactElement {
       setStatus(tChrome('panel.pageBoxes.enterMargin'));
       return;
     }
-    const scope = parsePageScope(pageInput);
+    const run = beginRun();
+    if (!run) return;
+    const scope = parsePageScope(pageInput, run.pageCount);
     if ('error' in scope) {
+      run.finish();
       setStatus(tChrome('panel.pageBoxes.badPages'));
       return;
     }
@@ -85,7 +92,7 @@ export function PageBoxesPanel(): React.ReactElement {
     setBusy(true);
     setStatus(tChrome('panel.pageBoxes.applying'));
     try {
-      const result = await performOperation(activeFile.path, 'set_page_boxes', {
+      const result = await run.perform(performOperation, 'set_page_boxes', {
         box,
         top,
         bottom,
@@ -93,6 +100,7 @@ export function PageBoxesPanel(): React.ReactElement {
         right,
         ...(pages ? { pages } : {}),
       });
+      if (!run.visible()) return;
       if (result === EDIT_DECLINED) {
         setStatus('');
         return;
@@ -106,20 +114,25 @@ export function PageBoxesPanel(): React.ReactElement {
         }),
       );
     } catch (e: unknown) {
+      if (!run.visible()) return;
       const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e);
       setStatus(tChrome('panel.common.error', { message: msg }));
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [activeFile, box, top, bottom, left, right, pageInput, performOperation]);
+  }, [activeFile, box, top, bottom, left, right, pageInput, performOperation, beginRun]);
 
   // Auto crop: measure first, commit second — the same call with `preview`
   // flipped, so the number the reader is shown is the number that lands.
   const runAuto = useCallback(
     async (preview: boolean) => {
       if (!activeFile) return;
-      const scope = parsePageScope(pageInput);
+      const run = beginRun();
+      if (!run) return;
+      const scope = parsePageScope(pageInput, run.pageCount);
       if ('error' in scope) {
+        run.finish();
         setStatus(tChrome('panel.pageBoxes.badPages'));
         return;
       }
@@ -142,19 +155,23 @@ export function PageBoxesPanel(): React.ReactElement {
         // in-place rewrite and takes the funnel's signed-document decision.
         let result: ContentCropResult;
         if (preview) {
+          await run.prepareRead(runCommitGate);
           result = (await call('content_crop', {
             file: activeFile.workingPath,
             output: activeFile.workingPath,
             ...params,
-          })) as unknown as ContentCropResult;
+          }, { assertCurrent: run.assertReadCurrent })) as unknown as ContentCropResult;
+          run.assertReadCurrent();
         } else {
-          const answer = await performOperation(activeFile.path, 'content_crop', params);
+          const answer = await run.perform(performOperation, 'content_crop', params);
+          if (!run.visible()) return;
           if (answer === EDIT_DECLINED) {
             setStatus('');
             return;
           }
           result = answer as unknown as ContentCropResult;
         }
+        if (!run.visible()) return;
         const summary = summarizeContentCrop(result);
         if (preview) setAutoPreview(summary);
         else setAutoPreview(null);
@@ -167,14 +184,16 @@ export function PageBoxesPanel(): React.ReactElement {
           }),
         );
       } catch (e: unknown) {
+        if (!run.visible()) return;
         setAutoPreview(null);
         const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e);
         setStatus(tChrome('panel.common.error', { message: msg }));
       } finally {
+        run.finish();
         setBusy(false);
       }
     },
-    [activeFile, box, margin, pageInput, call, performOperation],
+    [activeFile, box, margin, pageInput, call, performOperation, beginRun],
   );
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.pageBoxes.open')} />;

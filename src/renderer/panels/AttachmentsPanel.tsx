@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
@@ -28,8 +29,10 @@ export function AttachmentsPanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
   const { call, saveFile } = useEngine();
   const { performOperation } = useOperations();
+  const beginRun = useOwnedOperationRun(activeFile);
   const [items, setItems] = useState<Attachment[]>([]);
   const [status, setStatus] = useState('');
+  useEffect(() => { setStatus(''); }, [activeFile?.path, activeFile?.workingPath]);
   const [busy, setBusy] = useState(false);
 
   const buffer = activeFile?.buffer ?? null;
@@ -55,24 +58,28 @@ export function AttachmentsPanel(): React.ReactElement {
 
   const handleAdd = useCallback(async () => {
     if (!activeFile) return;
-    const source = await dialog.pickAnyFile();
-    if (!source) return;
+    const run = beginRun();
+    if (!run) return;
     setBusy(true);
-    setStatus(tChrome('panel.attach.attaching'));
     try {
-      const r = await performOperation(activeFile.path, 'add_attachment', { source });
+      const source = await dialog.pickAnyFile();
+      if (!source) return;
+      if (run.visible()) setStatus(tChrome('panel.attach.attaching'));
+      const r = await run.perform(performOperation, 'add_attachment', { source });
+      if (!run.visible()) return;
       if (r === EDIT_DECLINED) {
         setStatus('');
         return;
       }
-      await refresh();
       setStatus(tChrome('panel.attach.attached', { name: (r as unknown as { name: string }).name }));
     } catch (e: unknown) {
+      if (!run.visible()) return;
       setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [activeFile, performOperation, refresh]);
+  }, [activeFile, performOperation, beginRun]);
 
   const handleExtract = useCallback(
     async (name: string) => {
@@ -96,23 +103,27 @@ export function AttachmentsPanel(): React.ReactElement {
   const handleRemove = useCallback(
     async (name: string) => {
       if (!activeFile) return;
+      const run = beginRun();
+      if (!run) return;
       setBusy(true);
       setStatus(tChrome('panel.attach.removing'));
       try {
-        const r = await performOperation(activeFile.path, 'remove_attachment', { name });
+        const r = await run.perform(performOperation, 'remove_attachment', { name });
+        if (!run.visible()) return;
         if (r === EDIT_DECLINED) {
           setStatus('');
           return;
         }
-        await refresh();
         setStatus(tChrome('panel.attach.removed', { name }));
       } catch (e: unknown) {
+        if (!run.visible()) return;
         setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {
+        run.finish();
         setBusy(false);
       }
     },
-    [activeFile, performOperation, refresh],
+    [activeFile, performOperation, beginRun],
   );
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.attach.open')} />;

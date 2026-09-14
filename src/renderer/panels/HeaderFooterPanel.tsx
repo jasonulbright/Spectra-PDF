@@ -1,6 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { app } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
@@ -9,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
 import { STAMP_PALETTE } from '../lib/stamp-palette';
+import { parsePageRangeField } from '../lib/page-range';
 
 // Six placement slots (top/bottom × left/center/right); an empty slot isn't
 // stamped. Text may contain {page}, {pages}, {bates} — the engine substitutes
@@ -30,6 +32,7 @@ export function HeaderFooterPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { performOperation } = useOperations();
+  const beginRun = useOwnedOperationRun(activeFile);
   const [slots, setSlots] = useState<Record<string, string>>({});
   const [fontSize, setFontSize] = useState(10);
   const [margin, setMargin] = useState(24);
@@ -38,6 +41,7 @@ export function HeaderFooterPanel(): React.ReactElement {
   const [batesStart, setBatesStart] = useState(1);
   const [batesDigits, setBatesDigits] = useState(6);
   const [status, setStatus] = useState('');
+  useEffect(() => { setStatus(''); }, [activeFile?.path, activeFile?.workingPath]);
   const [busy, setBusy] = useState(false);
 
   const setSlot = useCallback((pos: string, text: string) => {
@@ -54,19 +58,11 @@ export function HeaderFooterPanel(): React.ReactElement {
       setStatus(tChrome('panel.hf.enterText'));
       return;
     }
-    // Page range: "all" or a first-last from a comma/dash list (the header/footer
-    // op takes a contiguous range, unlike watermark's page set).
-    let first = 1;
-    let last: number | undefined;
-    const trimmed = pageInput.trim().toLowerCase();
-    if (trimmed !== 'all') {
-      const nums = trimmed.split(/[,-]/).map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
-      if (nums.length === 0) {
-        setStatus(tChrome('panel.hf.badRange'));
-        return;
-      }
-      first = Math.min(...nums);
-      last = Math.max(...nums);
+    const run = beginRun();
+    if (!run) return;
+    const scope = parsePageRangeField(pageInput, run.pageCount);
+    if ('error' in scope) {
+      run.finish(); setStatus(tChrome('panel.hf.badRange')); return;
     }
     setBusy(true);
     setStatus(tChrome('panel.hf.applying'));
@@ -74,10 +70,9 @@ export function HeaderFooterPanel(): React.ReactElement {
       // Through performOperation, which is where the signed-document
       // decision is taken (this stamp is structural-class in the roster) —
       // the panel's own snapshot/reload copy asked nobody.
-      const result = await performOperation(activeFile.path, 'add_header_footer', {
+      const result = await run.perform(performOperation, 'add_header_footer', {
         placements,
-        first_page: first,
-        ...(last !== undefined ? { last_page: last } : {}),
+        ...(scope.pages ? { pages: scope.pages } : {}),
         font_size: fontSize,
         margin,
         color,
@@ -85,6 +80,7 @@ export function HeaderFooterPanel(): React.ReactElement {
         bates_digits: batesDigits,
         font_dir: await app.getEditFontPath(),
       });
+      if (!run.visible()) return;
       if (result === EDIT_DECLINED) {
         setStatus('');
         return;
@@ -92,12 +88,14 @@ export function HeaderFooterPanel(): React.ReactElement {
       const n = (result as unknown as { pages_stamped: number } | null)?.pages_stamped ?? 0;
       setStatus(tChromeCount('panel.hf.stamped', n));
     } catch (e: unknown) {
+      if (!run.visible()) return;
       const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e);
       setStatus(tChrome('panel.common.error', { message: msg }));
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [activeFile, slots, fontSize, margin, color, pageInput, batesStart, batesDigits, performOperation]);
+  }, [activeFile, slots, fontSize, margin, color, pageInput, batesStart, batesDigits, performOperation, beginRun]);
 
   if (!activeFile) {
     return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.hf.open')} />;

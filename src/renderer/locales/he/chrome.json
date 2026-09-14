@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "לא ניתן לשמר במלואה את תצורת התוכן האופציונלי.",
+  "engine.output_intents.outputIntentConfigurationCannot": "לא ניתן לשמר במלואה את תצורת כוונת הפלט.",
   "engine.split.cannotReplaceNonRegular": "לא ניתן להחליף יעד פיצול שאינו קובץ רגיל: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "לא ניתן לפצל מסמך ללא עמודים",
   "engine.split.chooseEitherExactSplit": "יש לבחור קובץ פלט מסוים או תיקיית פלט",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "אפשרויות החלון של התצוגה ההתחלתית חייבות להיות ערכים בוליאניים.",
   "engine.doc_properties.openingPageMustInteger": "עמוד הפתיחה חייב להיות מספר שלם.",
   "engine.pdf_version.pdfVersionCannotDetermined": "לא ניתן לקבוע את גרסת ה-PDF.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "לא ניתן לשמר במלואן את הצהרות הגרסה.",
   "engine.layers.layerConfigurationCannotRead": "לא ניתן לקרוא את הגדרות השכבות במלואן.",
   "engine.layers.layerLockedDefaultConfiguration": "השכבה נעולה בהגדרות ברירת המחדל.",
   "app.operation.unverified": "לא ניתן היה לאמת את תוצאת הפעולה.",

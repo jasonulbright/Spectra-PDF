@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "オプションコンテンツの設定を完全に保持できません。",
+  "engine.output_intents.outputIntentConfigurationCannot": "出力インテントの設定を完全に保持できません。",
   "engine.split.cannotReplaceNonRegular": "通常のファイルではない分割先は置き換えられません: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "ページのない文書は分割できません",
   "engine.split.chooseEitherExactSplit": "特定の出力ファイルまたは出力フォルダーのいずれかを選択してください",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "開き方のウィンドウオプションはブール値である必要があります。",
   "engine.doc_properties.openingPageMustInteger": "開くページは整数である必要があります。",
   "engine.pdf_version.pdfVersionCannotDetermined": "PDF のバージョンを判定できません。",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "バージョン宣言を完全に保持できません。",
   "engine.layers.layerConfigurationCannotRead": "レイヤー設定を完全に読み取れませんでした。",
   "engine.layers.layerLockedDefaultConfiguration": "このレイヤーは既定の設定でロックされています。",
   "app.operation.unverified": "操作の結果を確認できませんでした。",

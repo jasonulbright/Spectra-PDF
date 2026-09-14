@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Невозможно полностью сохранить конфигурацию дополнительного содержимого.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Невозможно полностью сохранить конфигурацию выходного условия.",
   "engine.split.cannotReplaceNonRegular": "Нельзя заменить назначение разделения, которое не является обычным файлом: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Нельзя разделить документ без страниц",
   "engine.split.chooseEitherExactSplit": "Выберите конкретный выходной файл или выходную папку",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Параметры окна начального вида должны быть логическими значениями.",
   "engine.doc_properties.openingPageMustInteger": "Начальная страница должна быть целым числом.",
   "engine.pdf_version.pdfVersionCannotDetermined": "Не удалось определить версию PDF.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Невозможно полностью сохранить объявления версии.",
   "engine.layers.layerConfigurationCannotRead": "Не удалось полностью прочитать конфигурацию слоёв.",
   "engine.layers.layerLockedDefaultConfiguration": "Слой заблокирован в конфигурации по умолчанию.",
   "app.operation.unverified": "Не удалось проверить результат операции.",

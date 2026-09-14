@@ -1,6 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -14,16 +15,21 @@ export function DeletePanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { performOperation } = useOperations();
+  const beginRun = useOwnedOperationRun(activeFile);
   const [pageInput, setPageInput] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  useEffect(() => { setStatus(''); }, [activeFile?.path, activeFile?.workingPath]);
 
   const handleDelete = useCallback(async () => {
     if (!activeFile || !pageInput.trim()) { setStatus(tChrome('panel.delete.enterPages')); return; }
-    const scope = parsePageRangeField(pageInput);
+    const run = beginRun();
+    if (!run) return;
+    const scope = parsePageRangeField(pageInput, run.pageCount);
     // `all` is readable syntax that names every page — a delete of which is a
     // zero-page file, refused three layers down. Refusing it here says so.
     if ('error' in scope || scope.pages === undefined) {
+      run.finish();
       setStatus(tChrome('panel.delete.badPages'));
       return;
     }
@@ -32,7 +38,8 @@ export function DeletePanel(): React.ReactElement {
     try {
       // A panel delete rewrites the whole file, so it takes the whole-file
       // signed-document decision rather than the page tier's delta-aware one.
-      const result = await performOperation(activeFile.path, 'delete', { pages });
+      const result = await run.perform(performOperation, 'delete', { pages });
+      if (!run.visible()) return;
       if (result === EDIT_DECLINED) {
         setStatus('');
         return;
@@ -44,9 +51,9 @@ export function DeletePanel(): React.ReactElement {
         count: answer?.pages_deleted ?? pages.length,
         remaining: answer?.pages_remaining ?? 0,
       }));
-    } catch (e: unknown) { setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) })); }
-    finally { setBusy(false); }
-  }, [activeFile, pageInput, performOperation]);
+    } catch (e: unknown) { if (run.visible()) setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) })); }
+    finally { run.finish(); setBusy(false); }
+  }, [activeFile, pageInput, performOperation, beginRun]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.delete.open')} />;
 

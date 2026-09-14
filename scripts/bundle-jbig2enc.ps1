@@ -173,9 +173,13 @@ Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $Work | Out-Null
 
 Write-Host "Vendoring jbig2enc $Version (upstream prebuilt, Apache-2.0)..."
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 Write-Host "Downloading $Url..."
 try {
-    Invoke-WebRequest -Uri $Url -OutFile $Zip -MaximumRedirection 5
+    Invoke-DownloadWithRetry -Description "jbig2enc $Version" -OutFile $Zip -Download {
+        Invoke-WebRequest -Uri $Url -OutFile $Zip -MaximumRedirection 5 `
+            -TimeoutSec $DownloadRetryTimeoutSeconds
+    }
 } catch {
     Write-Error "Download failed: $($_.Exception.Message)"
     exit 1

@@ -14,6 +14,10 @@ from pikepdf import Array, Dictionary, Name
 # second name-tree/collision policy. Tests cover this private API boundary.
 from pikepdf._page_copy import _migrate_named_destinations
 from engine.optional_content import OptionalContentCarry, read_optional_content
+from engine.output_intents import (
+    PAGE_LEVEL_VERSION, OutputIntentCarry, read_output_intents,
+)
+from engine.pdf_version import VersionCarry
 
 from engine.acroform import (
     carry_doc_form_extras, carry_pure_data_fields,
@@ -94,7 +98,19 @@ def copy_pages_with_forms(dst, src, pages=None):
     if content is None:
         content = OptionalContentCarry()
         dst._spectra_optional_content = content
+    intents = getattr(dst, '_spectra_output_intents', None)
+    if intents is None:
+        intents = OutputIntentCarry()
+        dst._spectra_output_intents = intents
+    versions = getattr(dst, '_spectra_versions', None)
+    if versions is None:
+        versions = VersionCarry()
+        dst._spectra_versions = versions
     optional_source = read_optional_content(src, src_pages, content.budget)
+    # Both reads precede the form helper's source mutations, and both are read
+    # from the source rather than from the copied pages.
+    intent_source = read_output_intents(src, src_pages, start, intents.budget)
+    versions.contribute(src)
 
     # Read each page's annotations once so direct objects have stable site
     # identities too. Only indirect object identity can be shared across pages.
@@ -191,6 +207,12 @@ def copy_pages_with_forms(dst, src, pages=None):
     dst.acroform.invalidate_cache()
     added, dest_renames, dropped = _migrate_named_destinations(dst, src, src_pages, start)
     content.add(dst, optional_source)
+    if optional_source is not None:
+        versions.require(optional_source.minimum_version)
+    intents.add(dst, intent_source)
+    if intents.page_level_required:
+        versions.require(PAGE_LEVEL_VERSION)
+    versions.apply(dst)
     return pikepdf.PageCopyResult(
         pages_added=len(src_pages), forms='preserve',
         fields_added=len(dst.acroform.fields) - before, renamed_fields=renamed,
