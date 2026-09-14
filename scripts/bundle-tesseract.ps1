@@ -38,6 +38,7 @@ $ExpectedSha256 = "C885FFF6998E0608BA4BB8AB51436E1C6775C2BAFC2559A19B423E18678B6
 # The checked-in JBIG-free libtiff, and the hash it must have. Update both
 # deliberately, from what build-libtiff-nojbig.ps1 prints.
 $LibTiffSrc = Join-Path $PSScriptRoot "tesseract-libtiff\libtiff-6.dll"
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 $ExpectedLibTiffSha256 = "AA79B1C2EC7FD815325C94A5E97BC904A962D9A40E55C74EB06A804AD7D756D8"
 
 # Ordered installer sources, tried in turn. The project-hosted mirror carries the
@@ -186,7 +187,11 @@ if ($Override -and (Test-Path $Override)) {
     foreach ($src in $InstallerSources) {
         Write-Host "Downloading $src..."
         try {
-            Invoke-WebRequest -Uri $src -OutFile $Installer -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -MaximumRedirection 5
+            Invoke-DownloadWithRetry -Description $src -OutFile $Installer -Download {
+                Invoke-WebRequest -Uri $src -OutFile $Installer `
+                    -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -MaximumRedirection 5 `
+                    -TimeoutSec $DownloadRetryTimeoutSeconds
+            }
         } catch {
             Write-Host "  Source failed: $src -- $($_.Exception.Message)"
             Remove-Item $Installer -Force -ErrorAction SilentlyContinue

@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Não é possível preservar completamente a configuração do conteúdo opcional.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Não é possível preservar completamente a configuração da intenção de saída.",
   "engine.split.cannotReplaceNonRegular": "Não é possível substituir um destino de divisão que não seja um arquivo regular: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Não é possível dividir um documento sem páginas",
   "engine.split.chooseEitherExactSplit": "Escolha um arquivo de saída específico ou uma pasta de saída",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "As opções de janela da exibição inicial devem ser valores booleanos.",
   "engine.doc_properties.openingPageMustInteger": "A página de abertura deve ser um número inteiro.",
   "engine.pdf_version.pdfVersionCannotDetermined": "Não foi possível determinar a versão do PDF.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Não é possível preservar completamente as declarações de versão.",
   "engine.layers.layerConfigurationCannotRead": "Não foi possível ler completamente a configuração das camadas.",
   "engine.layers.layerLockedDefaultConfiguration": "A camada está bloqueada na configuração padrão.",
   "app.operation.unverified": "Não foi possível verificar o resultado da operação.",

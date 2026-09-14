@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "La configuration du contenu facultatif ne peut pas être conservée intégralement.",
+  "engine.output_intents.outputIntentConfigurationCannot": "La configuration de l'intention de sortie ne peut pas être conservée intégralement.",
   "engine.split.cannotReplaceNonRegular": "Impossible de remplacer une destination de fractionnement qui n’est pas un fichier ordinaire : {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Impossible de fractionner un document sans pages",
   "engine.split.chooseEitherExactSplit": "Choisissez un fichier de sortie précis ou un dossier de sortie",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Les options de fenêtre de la vue initiale doivent être des booléens.",
   "engine.doc_properties.openingPageMustInteger": "La page d’ouverture doit être un nombre entier.",
   "engine.pdf_version.pdfVersionCannotDetermined": "La version du PDF ne peut pas être déterminée.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Les déclarations de version ne peuvent pas être conservées intégralement.",
   "engine.layers.layerConfigurationCannotRead": "La configuration des calques n’a pas pu être lue entièrement.",
   "engine.layers.layerLockedDefaultConfiguration": "Le calque est verrouillé dans la configuration par défaut.",
   "app.operation.unverified": "Le résultat de l’opération n’a pas pu être vérifié.",

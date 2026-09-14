@@ -19,6 +19,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "windows-signing.ps1")
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 
 function Test-ToolsPresent {
     try {
@@ -70,11 +71,14 @@ if (-not $ExtractRoot) { $ExtractRoot = Join-Path ([System.IO.Path]::GetTempPath
 if (Test-Path -LiteralPath $ExtractRoot) { Remove-Item -LiteralPath $ExtractRoot -Recurse -Force }
 New-Item -ItemType Directory -Path $ExtractRoot | Out-Null
 
-$index = Invoke-RestMethod -Uri "https://api.nuget.org/v3-flatcontainer/$($NuGetPackage.ToLowerInvariant())/index.json"
+$index = Invoke-DownloadWithRetry -Description "$NuGetPackage version index" -Download {
+    Invoke-RestMethod -Uri "https://api.nuget.org/v3-flatcontainer/$($NuGetPackage.ToLowerInvariant())/index.json" `
+        -TimeoutSec $DownloadRetryTimeoutSeconds
+}
 $version = @($index.versions)[-1]
 $nupkg = Join-Path $ExtractRoot "$NuGetPackage.$version.nupkg"
 Write-Host "install-signing-tools: fetching $NuGetPackage $version from nuget.org"
-& curl.exe --fail --silent --show-error --location `
+& curl.exe --fail --silent --show-error --location @(Get-CurlRetryArguments) `
     -o $nupkg "https://api.nuget.org/v3-flatcontainer/$($NuGetPackage.ToLowerInvariant())/$version/$($NuGetPackage.ToLowerInvariant()).$version.nupkg"
 if ($LASTEXITCODE -ne 0) { throw "install-signing-tools: could not download $NuGetPackage $version" }
 

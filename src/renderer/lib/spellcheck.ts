@@ -33,6 +33,8 @@ export interface SpellIssue {
   annotation?: number;
   subtype?: string;
   annotation_text?: string;
+  /** Raw PDF-space rectangle from the same reviewed annotation listing. */
+  annotation_rect?: [number, number, number, number] | null;
   /** `fields`: the field's fully-qualified name. */
   field?: string;
   field_text?: string;

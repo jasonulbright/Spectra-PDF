@@ -831,6 +831,7 @@ def check_spelling(
                     "annotation": index,
                     "subtype": annot.get("subtype"),
                     "annotation_text": text,
+                    "annotation_rect": annot.get("rect"),
                     "word": token["word"],
                     "start": token["start"],
                     "end": token["end"],

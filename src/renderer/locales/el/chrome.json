@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Δεν είναι δυνατή η πλήρης διατήρηση της διαμόρφωσης του προαιρετικού περιεχομένου.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Δεν είναι δυνατή η πλήρης διατήρηση της διαμόρφωσης της πρόθεσης εξόδου.",
   "engine.split.cannotReplaceNonRegular": "Δεν είναι δυνατή η αντικατάσταση προορισμού διαχωρισμού που δεν είναι κανονικό αρχείο: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Δεν είναι δυνατός ο διαχωρισμός εγγράφου χωρίς σελίδες",
   "engine.split.chooseEitherExactSplit": "Επιλέξτε συγκεκριμένο αρχείο εξόδου ή φάκελο εξόδου",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Οι επιλογές παραθύρου της αρχικής προβολής πρέπει να είναι τιμές Boolean.",
   "engine.doc_properties.openingPageMustInteger": "Η αρχική σελίδα πρέπει να είναι ακέραιος αριθμός.",
   "engine.pdf_version.pdfVersionCannotDetermined": "Δεν είναι δυνατό να προσδιοριστεί η έκδοση του PDF.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Δεν είναι δυνατή η πλήρης διατήρηση των δηλώσεων έκδοσης.",
   "engine.layers.layerConfigurationCannotRead": "Δεν ήταν δυνατή η πλήρης ανάγνωση της διαμόρφωσης επιπέδων.",
   "engine.layers.layerLockedDefaultConfiguration": "Το επίπεδο είναι κλειδωμένο στην προεπιλεγμένη διαμόρφωση.",
   "app.operation.unverified": "Δεν ήταν δυνατή η επαλήθευση του αποτελέσματος της ενέργειας.",

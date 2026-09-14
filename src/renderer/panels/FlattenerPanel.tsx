@@ -1,7 +1,8 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { useFlattenerPreview } from '../hooks/useFlattenerPreview';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -39,6 +40,7 @@ export function FlattenerPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { performOperation } = useOperations();
+  const beginRun = useOwnedOperationRun(activeFile);
   const {
     armed, setArmed, report, balance, setBalance, dpi, setDpi,
     shown, toggleCategory, outlines, setOutlines, outlineReport,
@@ -46,6 +48,7 @@ export function FlattenerPanel(): React.ReactElement {
   } = useFlattenerPreview();
 
   const [status, setStatus] = useState('');
+  useEffect(() => { setStatus(''); }, [activeFile?.path, activeFile?.workingPath]);
   const gs = useGsCapability();
   const [applying, setApplying] = useState(false);
 
@@ -62,10 +65,12 @@ export function FlattenerPanel(): React.ReactElement {
 
   const apply = useCallback(async () => {
     if (!filePath) return;
+    const run = beginRun();
+    if (!run) return;
     setApplying(true);
     setStatus(tChrome('panel.flattener.flattening'));
     try {
-      const result = await performOperation(filePath, 'flatten_transparency', {
+      const result = await run.perform(performOperation, 'flatten_transparency', {
         balance,
         dpi,
         gs_path: await requireGsPath(),
@@ -73,6 +78,7 @@ export function FlattenerPanel(): React.ReactElement {
         outline_strokes: outlines.strokes,
         font_dir: await app.getEditFontPath(),
       });
+      if (!run.visible()) return;
       if (result === EDIT_DECLINED) {
         setStatus('');
         return;
@@ -82,13 +88,15 @@ export function FlattenerPanel(): React.ReactElement {
         regions: (result as unknown as { regions?: number } | null)?.regions ?? 0,
       }));
     } catch (e: unknown) {
+      if (!run.visible()) return;
       setStatus(tChrome('panel.common.error', {
         message: e instanceof Error ? e.message : String(e),
       }));
     } finally {
+      run.finish();
       setApplying(false);
     }
-  }, [filePath, performOperation, balance, dpi, outlines, invalidate]);
+  }, [filePath, performOperation, balance, dpi, outlines, invalidate, beginRun]);
 
   if (!activeFile) {
     return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.flattener.open')} />;

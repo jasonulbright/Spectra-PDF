@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "De configuratie van optionele inhoud kan niet volledig worden behouden.",
+  "engine.output_intents.outputIntentConfigurationCannot": "De configuratie van de uitvoerintentie kan niet volledig worden behouden.",
   "engine.split.cannotReplaceNonRegular": "Een splitsingsdoel dat geen gewoon bestand is, kan niet worden vervangen: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Een document zonder pagina’s kan niet worden gesplitst",
   "engine.split.chooseEitherExactSplit": "Kies een specifiek uitvoerbestand of een uitvoermap",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "De vensteropties van de beginweergave moeten booleaanse waarden zijn.",
   "engine.doc_properties.openingPageMustInteger": "De beginpagina moet een geheel getal zijn.",
   "engine.pdf_version.pdfVersionCannotDetermined": "De PDF-versie kan niet worden bepaald.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "De versiedeclaraties kunnen niet volledig worden behouden.",
   "engine.layers.layerConfigurationCannotRead": "De laagconfiguratie kon niet volledig worden gelezen.",
   "engine.layers.layerLockedDefaultConfiguration": "De laag is vergrendeld in de standaardconfiguratie.",
   "app.operation.unverified": "Het resultaat van de bewerking kon niet worden geverifieerd.",

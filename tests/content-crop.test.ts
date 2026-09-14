@@ -3,10 +3,12 @@
 // is no DOM test environment to exercise it there.
 import { describe, it, expect } from 'vitest';
 import {
-  parsePageScope,
+  parsePageScope as parseBoundedScope,
   summarizeContentCrop,
   type ContentCropResult,
 } from '../src/renderer/lib/content-crop';
+
+const parsePageScope = (input: string) => parseBoundedScope(input, 100);
 
 function page(
   n: number,
@@ -40,9 +42,9 @@ describe('parsePageScope', () => {
     expect(parsePageScope('3, 1,3 , 2')).toEqual({ pages: [1, 2, 3] });
   });
 
-  it('drops entries that are not page numbers', () => {
-    expect(parsePageScope('1, x, 4')).toEqual({ pages: [1, 4] });
-    expect(parsePageScope('0, 2')).toEqual({ pages: [2] });
+  it('refuses the whole selection when any entry is malformed', () => {
+    expect(parsePageScope('1, x, 4')).toEqual({ error: 'badPages' });
+    expect(parsePageScope('0, 2')).toEqual({ error: 'badPages' });
   });
 
   // An empty list means "no pages" to the engine, so a field naming nothing

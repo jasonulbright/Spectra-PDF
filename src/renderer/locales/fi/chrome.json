@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Valinnaisen sisällön asetuksia ei voida säilyttää kokonaisuudessaan.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Tulosteen tarkoituksen asetuksia ei voida säilyttää kokonaisuudessaan.",
   "engine.split.cannotReplaceNonRegular": "Jakokohdetta, joka ei ole tavallinen tiedosto, ei voi korvata: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Sivutonta asiakirjaa ei voi jakaa",
   "engine.split.chooseEitherExactSplit": "Valitse joko tietty tulostiedosto tai tuloskansio",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Aloitusnäkymän ikkuna-asetusten on oltava totuusarvoja.",
   "engine.doc_properties.openingPageMustInteger": "Aloitussivun on oltava kokonaisluku.",
   "engine.pdf_version.pdfVersionCannotDetermined": "PDF-versiota ei voida määrittää.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Versioilmoituksia ei voida säilyttää kokonaisuudessaan.",
   "engine.layers.layerConfigurationCannotRead": "Tasojen määritystä ei voitu lukea kokonaan.",
   "engine.layers.layerLockedDefaultConfiguration": "Taso on lukittu oletusmäärityksessä.",
   "app.operation.unverified": "Toiminnon tulosta ei voitu vahvistaa.",

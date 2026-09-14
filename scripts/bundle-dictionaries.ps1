@@ -103,6 +103,7 @@ if ($bad) { throw "dictionary notice gate refused:`n  " + ($bad -join "`n  ") }
 # it per tag would multiply the traffic for no gain.
 # ---------------------------------------------------------------------------
 New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 $fetched = @{}
 function Get-Upstream {
     param([string]$Path)
@@ -110,7 +111,9 @@ function Get-Upstream {
     $local = Join-Path $CacheDir ($Path -replace '[\\/]', '_')
     if (-not (Test-Path $local)) {
         Write-Host "  fetching $Path"
-        Invoke-WebRequest -Uri "$Base/$Path" -OutFile $local -TimeoutSec 300
+        Invoke-DownloadWithRetry -Description $Path -OutFile $local -Download {
+            Invoke-WebRequest -Uri "$Base/$Path" -OutFile $local -TimeoutSec 300
+        }
     }
     $fetched[$Path] = $local
     return $local

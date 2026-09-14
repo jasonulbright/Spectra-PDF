@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Nie można w pełni zachować konfiguracji zawartości opcjonalnej.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Nie można w pełni zachować konfiguracji warunku wyjściowego.",
   "engine.split.cannotReplaceNonRegular": "Nie można zastąpić celu podziału, który nie jest zwykłym plikiem: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Nie można podzielić dokumentu bez stron",
   "engine.split.chooseEitherExactSplit": "Wybierz określony plik wynikowy albo folder wynikowy",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Opcje okna widoku początkowego muszą być wartościami logicznymi.",
   "engine.doc_properties.openingPageMustInteger": "Strona początkowa musi być liczbą całkowitą.",
   "engine.pdf_version.pdfVersionCannotDetermined": "Nie można określić wersji PDF.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Nie można w pełni zachować deklaracji wersji.",
   "engine.layers.layerConfigurationCannotRead": "Nie można odczytać całej konfiguracji warstw.",
   "engine.layers.layerLockedDefaultConfiguration": "Warstwa jest zablokowana w konfiguracji domyślnej.",
   "app.operation.unverified": "Nie udało się zweryfikować wyniku operacji.",

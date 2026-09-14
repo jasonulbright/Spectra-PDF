@@ -9,6 +9,8 @@ import { createAppStore } from '../src/renderer/state/store';
 import { initialState } from '../src/renderer/state/reducer';
 import type { AppAction, OpenFile } from '../src/renderer/state/types';
 import { hasPendingPageCommit, recoverPendingPageCommit } from '../src/renderer/lib/page-commit-transaction';
+import { captureOperationIntent } from '../src/renderer/lib/operation-intent';
+import { createOwnedOperationRuns } from '../src/renderer/lib/owned-operation-run';
 
 const hash = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 async function fixture() {
@@ -73,6 +75,49 @@ async function fixture() {
 }
 
 describe('form fill publication', () => {
+  it.each(['entry', 'consent', 'gate', 'engine'])('a mutation owner must survive %s', async phase => {
+    const f = await fixture();
+    const intent = captureOperationIntent(f.store.getState(), f.file);
+    let alive = phase !== 'entry';
+    const assertActive = () => { if (!alive) throw new Error('owner expired'); };
+    if (phase === 'consent') f.io.confirm = async () => { alive = false; return true; };
+    if (phase === 'gate') f.io.commit = async () => { alive = false; };
+    if (phase === 'engine') {
+      const call = f.io.callStaged;
+      f.io.callStaged = async (...args) => {
+        const result = await call(...args);
+        if (args[0] === 'fill_form_fields') alive = false;
+        return result;
+      };
+    }
+    await expect(fillFormValues('source', { name: 'Changed' }, f.store.getState, f.dispatch, f.io,
+      { intent, assertActive })).rejects.toThrow('owner expired');
+    f.unchanged(); expect(f.io.transaction.publish).not.toHaveBeenCalled();
+  });
+  it('an owned fill cannot adopt an unrelated same-path replacement during the page gate', async () => {
+    const f = await fixture(), intent = captureOperationIntent(f.store.getState(), f.file);
+    f.io.commit = async () => f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1 });
+    await expect(fillFormValues('source', { name: 'Changed' }, f.store.getState, f.dispatch, f.io,
+      { intent })).rejects.toThrow('changed');
+    expect(f.disk.get('work')).toEqual(f.original); expect(f.io.transaction.publish).not.toHaveBeenCalled();
+  });
+  it('a sequence advances through two real fill publications, never through cloned callback settings', async () => {
+    const f = await fixture(), owners = createOwnedOperationRuns(f.store.getState), run = owners.begin(f.file)!;
+    const fill = async (path: string, values: Record<string, import('../src/renderer/lib/forms').FormFieldValue>,
+      options?: import('../src/renderer/lib/form-fill-transaction').FormFillOptions) => {
+      const result = await fillFormValues(path, values, f.store.getState, f.dispatch, f.io, options);
+      if (!result.completed) throw new Error('Unexpected declined control');
+      return result;
+    };
+    await run.fill(fill, { name: 'First' }, { expectedBuffer: run.source.buffer! });
+    run.continueAfterPublication();
+    await run.fill(fill, { name: 'Second' }, { expectedBuffer: run.source.buffer!, expectedValues: { name: 'First' } });
+    run.continueAfterPublication(); run.assertSource();
+    expect((await PDFDocument.load(f.disk.get('work')!)).getForm().getTextField('name').getText()).toBe('Second');
+    expect(f.io.transaction.publish).toHaveBeenCalledTimes(2);
+    expect(f.store.getState().files.get('source')!.undoStack).toHaveLength(2);
+    run.finish();
+  });
   it.each(['before', 'pending', 'gate'])('a draft revision is checked %s', async phase => {
     const f = await fixture();
     if (phase === 'before') f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1 });

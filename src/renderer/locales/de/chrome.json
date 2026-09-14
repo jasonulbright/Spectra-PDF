@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Die Konfiguration optionaler Inhalte kann nicht vollständig erhalten werden.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Die Konfiguration der Ausgabebedingung kann nicht vollständig erhalten werden.",
   "engine.split.cannotReplaceNonRegular": "Ein Aufteilungsziel, das keine reguläre Datei ist, kann nicht ersetzt werden: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Ein Dokument ohne Seiten kann nicht aufgeteilt werden",
   "engine.split.chooseEitherExactSplit": "Wählen Sie entweder eine bestimmte Ausgabedatei oder einen Ausgabeordner",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Die Fensteroptionen der Anfangsansicht müssen boolesche Werte sein.",
   "engine.doc_properties.openingPageMustInteger": "Die Startseite muss eine ganze Zahl sein.",
   "engine.pdf_version.pdfVersionCannotDetermined": "Die PDF-Version kann nicht ermittelt werden.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Die Versionsdeklarationen können nicht vollständig erhalten werden.",
   "engine.layers.layerConfigurationCannotRead": "Die Ebenenkonfiguration konnte nicht vollständig gelesen werden.",
   "engine.layers.layerLockedDefaultConfiguration": "Die Ebene ist in der Standardkonfiguration gesperrt.",
   "app.operation.unverified": "Das Ergebnis des Vorgangs konnte nicht überprüft werden.",

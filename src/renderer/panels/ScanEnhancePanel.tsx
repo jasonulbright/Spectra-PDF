@@ -3,6 +3,7 @@ import { useAppState } from '../state/AppStateProvider';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { invokeCommand } from '../commands/context';
@@ -48,11 +49,13 @@ export function ScanEnhancePanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
   const { performOperation } = useOperations();
+  const beginRun = useOwnedOperationRun(activeFile);
 
   const [settings, setSettings] = useState<ScanEnhanceSettings>(DEFAULT_SCAN_ENHANCE);
   const [scope, setScope] = useState<ScanScope['kind']>('page');
   const [report, setReport] = useState<ScanAnalysis | null>(null);
   const [status, setStatus] = useState('');
+  useEffect(() => { setStatus(''); }, [activeFile?.path, activeFile?.workingPath]);
   const [busy, setBusy] = useState(false);
   const gs = useGsCapability();
 
@@ -152,30 +155,35 @@ export function ScanEnhancePanel(): React.ReactElement {
 
   const apply = useCallback(async () => {
     if (!filePath || problem) return;
+    const run = beginRun();
+    if (!run) return;
     setBusy(true);
     setStatus(tChrome('panel.scanEnhance.applying'));
     try {
       // The standard snapshot(gate) → engine → reload → UPDATE_FILE flow, so
       // the whole enhancement is ONE undo step.
-      const r = await performOperation(filePath, 'enhance_scan', {
+      const r = await run.perform(performOperation, 'enhance_scan', {
         ...params,
         ...(await toolPaths()),
       });
+      if (!run.visible()) return;
       if (r === EDIT_DECLINED) {
         setStatus('');
         return;
       }
       setStatus(tChromeCount('panel.scanEnhance.applied', counts.changing));
     } catch (e: unknown) {
+      if (!run.visible()) return;
       setStatus(
         tChrome('panel.common.error', {
           message: e instanceof Error ? e.message : String(e),
         }),
       );
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [filePath, performOperation, params, problem, counts.changing, toolPaths]);
+  }, [filePath, performOperation, params, problem, counts.changing, toolPaths, beginRun]);
 
   const skew = worstSkew(report);
   const uncertain = uncertainOrientation(report, settings.osd_confidence);

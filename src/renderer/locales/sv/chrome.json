@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Konfigurationen för valfritt innehåll kan inte bevaras fullständigt.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Konfigurationen för utdataavsikten kan inte bevaras fullständigt.",
   "engine.split.cannotReplaceNonRegular": "Det går inte att ersätta ett delningsmål som inte är en vanlig fil: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Det går inte att dela ett dokument utan sidor",
   "engine.split.chooseEitherExactSplit": "Välj antingen en specifik utdatafil eller en utdatamapp",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Startvyns fönsteralternativ måste vara booleska värden.",
   "engine.doc_properties.openingPageMustInteger": "Startsidan måste vara ett heltal.",
   "engine.pdf_version.pdfVersionCannotDetermined": "PDF-versionen kan inte fastställas.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Versionsdeklarationerna kan inte bevaras fullständigt.",
   "engine.layers.layerConfigurationCannotRead": "Lagerkonfigurationen kunde inte läsas fullständigt.",
   "engine.layers.layerLockedDefaultConfiguration": "Lagret är låst i standardkonfigurationen.",
   "app.operation.unverified": "Det gick inte att verifiera åtgärdens resultat.",

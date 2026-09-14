@@ -3,6 +3,7 @@ import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { dialog } from '../lib/tauri-bridge';
 import { getCanvasServices, getCommandContext } from '../commands/context';
@@ -102,10 +103,12 @@ export function CommentsPanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
   const { performOperation } = useOperations();
+  const beginRun = useOwnedOperationRun(activeFile);
   const [model, setModel] = useState<CommentModel | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [status, setStatus] = useState('');
+  useEffect(() => { setStatus(''); }, [activeFile?.path, activeFile?.workingPath]);
   const [busy, setBusy] = useState(false);
   const [options, setOptions] = useState<SummaryOptions>(DEFAULT_SUMMARY_OPTIONS);
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -230,17 +233,19 @@ export function CommentsPanel(): React.ReactElement {
 
   const importXfdf = useCallback(async () => {
     if (!activeFile) return;
-    const xfdf = await dialog.pickAnyFile();
-    if (!xfdf) return;
+    const run = beginRun();
+    if (!run) return;
     setBusy(true);
-    setStatus(tChrome('panel.comments.importing'));
     try {
-      const r = await performOperation(activeFile.path, 'import_xfdf', { xfdf });
+      const xfdf = await dialog.pickAnyFile();
+      if (!xfdf) return;
+      if (run.visible()) setStatus(tChrome('panel.comments.importing'));
+      const r = await run.perform(performOperation, 'import_xfdf', { xfdf });
+      if (!run.visible()) return;
       if (r === EDIT_DECLINED) {
         setStatus('');
         return;
       }
-      await refresh();
       const rr = r as unknown as { added: number; skipped: { reason: string }[] };
       const skipped = rr.skipped.length
         ? tChrome('panel.comments.importedSkipped', { count: rr.skipped.length })
@@ -252,32 +257,38 @@ export function CommentsPanel(): React.ReactElement {
         }),
       );
     } catch (e: unknown) {
+      if (!run.visible()) return;
       setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [activeFile, performOperation, refresh]);
+  }, [activeFile, performOperation, beginRun]);
 
   const deleteAll = useCallback(async () => {
     if (!activeFile) return;
+    const run = beginRun();
+    if (!run) return;
     setConfirming(false);
     setBusy(true);
     setStatus(tChrome('panel.comments.deleting'));
     try {
-      const r = await performOperation(activeFile.path, 'delete_all_annotations', {});
+      const r = await run.perform(performOperation, 'delete_all_annotations', {});
+      if (!run.visible()) return;
       if (r === EDIT_DECLINED) {
         setStatus('');
         return;
       }
-      await refresh();
       const n = (r as unknown as { removed: number }).removed;
       setStatus(tChromeCount('panel.comments.removed', n));
     } catch (e: unknown) {
+      if (!run.visible()) return;
       setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
+      run.finish();
       setBusy(false);
     }
-  }, [activeFile, performOperation, refresh]);
+  }, [activeFile, performOperation, beginRun]);
 
   // The produced file opens like any other document — through App's one open
   // funnel, never a second implementation of "open some files".

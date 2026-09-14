@@ -783,6 +783,7 @@ class TestDocumentWalk:
         assert [i["word"] for i in result["issues"]] == ["definately"]
         assert result["issues"][0]["annotation"] == 0
         assert result["issues"][0]["subtype"] == "Text"
+        assert result["issues"][0]["annotation_rect"] == [10.0, 10.0, 30.0, 30.0]
 
     def test_form_field_values_are_walked(self, tmp_dir):
         _require("en_US")

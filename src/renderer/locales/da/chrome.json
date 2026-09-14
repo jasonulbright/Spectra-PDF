@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Konfigurationen af valgfrit indhold kan ikke bevares fuldstændigt.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Konfigurationen af output-intent kan ikke bevares fuldstændigt.",
   "engine.split.cannotReplaceNonRegular": "Kan ikke erstatte et opdelingsmål, der ikke er en almindelig fil: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Kan ikke opdele et dokument uden sider",
   "engine.split.chooseEitherExactSplit": "Vælg enten en bestemt outputfil eller en outputmappe",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Startvisningens vinduesindstillinger skal være booleske værdier.",
   "engine.doc_properties.openingPageMustInteger": "Startsiden skal være et helt tal.",
   "engine.pdf_version.pdfVersionCannotDetermined": "PDF-versionen kan ikke bestemmes.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Versionsangivelserne kan ikke bevares fuldstændigt.",
   "engine.layers.layerConfigurationCannotRead": "Lagkonfigurationen kunne ikke læses fuldstændigt.",
   "engine.layers.layerLockedDefaultConfiguration": "Laget er låst i standardkonfigurationen.",
   "app.operation.unverified": "Resultatet af handlingen kunne ikke bekræftes.",

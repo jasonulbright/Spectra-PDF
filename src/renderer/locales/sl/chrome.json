@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "Konfiguracije izbirne vsebine ni mogoče v celoti ohraniti.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Konfiguracije izhodnega namena ni mogoče v celoti ohraniti.",
   "engine.split.cannotReplaceNonRegular": "Cilja razdelitve, ki ni navadna datoteka, ni mogoče zamenjati: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Dokumenta brez strani ni mogoče razdeliti",
   "engine.split.chooseEitherExactSplit": "Izberite določeno izhodno datoteko ali izhodno mapo",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Možnosti okna začetnega pogleda morajo biti logične vrednosti.",
   "engine.doc_properties.openingPageMustInteger": "Začetna stran mora biti celo število.",
   "engine.pdf_version.pdfVersionCannotDetermined": "Različice PDF ni mogoče določiti.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Navedb različice ni mogoče v celoti ohraniti.",
   "engine.layers.layerConfigurationCannotRead": "Konfiguracije plasti ni bilo mogoče v celoti prebrati.",
   "engine.layers.layerLockedDefaultConfiguration": "Plast je zaklenjena v privzeti konfiguraciji.",
   "app.operation.unverified": "Rezultata operacije ni bilo mogoče preveriti.",

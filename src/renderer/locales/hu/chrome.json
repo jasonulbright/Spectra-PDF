@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "A választható tartalom konfigurációja nem őrizhető meg teljes egészében.",
+  "engine.output_intents.outputIntentConfigurationCannot": "A kimeneti szándék konfigurációja nem őrizhető meg teljes egészében.",
   "engine.split.cannotReplaceNonRegular": "Nem cserélhető le olyan felosztási cél, amely nem normál fájl: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Oldalak nélküli dokumentum nem osztható fel",
   "engine.split.chooseEitherExactSplit": "Válasszon egy konkrét kimeneti fájlt vagy egy kimeneti mappát",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "A kezdeti nézet ablakbeállításainak logikai értékeknek kell lenniük.",
   "engine.doc_properties.openingPageMustInteger": "A kezdőoldalnak egész számnak kell lennie.",
   "engine.pdf_version.pdfVersionCannotDetermined": "A PDF verziója nem állapítható meg.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "A verziómegadások nem őrizhetők meg teljes egészében.",
   "engine.layers.layerConfigurationCannotRead": "A rétegbeállítások nem olvashatók be teljesen.",
   "engine.layers.layerLockedDefaultConfiguration": "A réteg zárolva van az alapértelmezett beállításokban.",
   "app.operation.unverified": "A művelet eredményét nem sikerült ellenőrizni.",

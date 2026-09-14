@@ -2,7 +2,10 @@
 // them read a hyphen, so `1-5` scoped an operation to page 1 and reported
 // success — the reason these are pinned rather than left to the components.
 import { describe, expect, it } from 'vitest';
-import { formatPageRange, parsePageRangeField } from '../src/renderer/lib/page-range';
+import { formatPageRange, parsePageRangeField as parseBounded } from '../src/renderer/lib/page-range';
+
+// These syntax controls describe a concrete 100-page fixture.
+const parsePageRangeField = (input: string) => parseBounded(input, 100);
 
 describe('parsePageRangeField', () => {
   it('reads "all" as the whole document, in any case and with space', () => {
@@ -28,12 +31,22 @@ describe('parsePageRangeField', () => {
     expect(parsePageRangeField('1-4,3-6')).toEqual({ pages: [1, 2, 3, 4, 5, 6] });
   });
 
-  it('drops entries that name no page', () => {
-    expect(parsePageRangeField('1, x, 4')).toEqual({ pages: [1, 4] });
-    expect(parsePageRangeField('0, 2')).toEqual({ pages: [2] });
-    // Reversed and zero-based ranges name nothing; the good token survives.
-    expect(parsePageRangeField('5-1, 8')).toEqual({ pages: [8] });
-    expect(parsePageRangeField('0-3, 8')).toEqual({ pages: [8] });
+  it('refuses the entire field instead of silently dropping bad tokens', () => {
+    for (const text of ['1, x, 4', '0, 2', '5-1, 8', '0-3, 8', '2oops', '1.9', '1e2', '1,', ',1', '1,,2']) {
+      expect(parsePageRangeField(text)).toEqual({ error: 'badPages' });
+    }
+  });
+  it('bounds every endpoint before expansion, including unsafe increment endpoints', () => {
+    for (const text of ['4', '1-4', '9007199254740992-9007199254740992', '1-9007199254740991']) {
+      expect(parseBounded(text, 3)).toEqual({ error: 'badPages' });
+    }
+    expect(parseBounded('1-3', 3)).toEqual({ pages: [1, 2, 3] });
+    for (const bound of [0, -1, NaN, Infinity, 1.5, Number.MAX_VALUE]) expect(parseBounded('all', bound)).toEqual({ error: 'badPages' });
+    expect(parseBounded(String(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER)).toEqual({ pages: [Number.MAX_SAFE_INTEGER] });
+  });
+  it('merges repeated intervals before expanding their union', () => {
+    const result = parseBounded(Array(10000).fill('1-10000').join(','), 10000);
+    expect(result).toEqual({ pages: Array.from({ length: 10000 }, (_, i) => i + 1) });
   });
 
   it('refuses a field that names no valid page', () => {

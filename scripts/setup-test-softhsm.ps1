@@ -13,6 +13,7 @@ $ArchiveSha256 = "85273bcc1a6b90e877f7bb4f7e90221d57103d8f5241d154a79dd730a135b9
 $ModuleSha256 = "1980a74f3088a7273d7efa502b6ceb8de6a5285d5bcd36d49512a8717bf89635"
 
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 $TestsRoot = [IO.Path]::GetFullPath((Join-Path $RepoRoot "tests"))
 $DestFull = [IO.Path]::GetFullPath($DestDir)
 $TestsPrefix = $TestsRoot.TrimEnd('\') + '\'
@@ -39,20 +40,9 @@ New-Item -ItemType Directory -Path $Work -Force | Out-Null
 
 try {
     Write-Host "Downloading test-only SoftHSM2 $Version ..."
-    $Attempts = 4
-    for ($i = 1; $i -le $Attempts; $i++) {
-        try {
-            Invoke-WebRequest -Uri $Url -OutFile $Archive -UseBasicParsing
-            break
-        } catch {
-            Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue
-            if ($i -eq $Attempts) {
-                throw "SoftHSM2 download failed after $Attempts attempts: $($_.Exception.Message)"
-            }
-            $wait = 5 * $i
-            Write-Host "  attempt $i/$Attempts failed; retrying in ${wait}s..."
-            Start-Sleep -Seconds $wait
-        }
+    Invoke-DownloadWithRetry -Description "SoftHSM2 $Version" -OutFile $Archive -Download {
+        Invoke-WebRequest -Uri $Url -OutFile $Archive -UseBasicParsing `
+            -TimeoutSec $DownloadRetryTimeoutSeconds
     }
     $actualArchive = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualArchive -ne $ArchiveSha256) {

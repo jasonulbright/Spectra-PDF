@@ -6,6 +6,14 @@ use clap::Parser;
 use spectrapdf_lib::cli::{classify_launch, Cli, LaunchMode};
 
 fn main() {
+    // The scanner host is dispatched before anything else: it must not attach
+    // a console, raise a dialog, or reach the parser, and its stdio carries a
+    // protocol that any other output would corrupt.
+    let argv: Vec<String> = std::env::args().collect();
+    if spectrapdf_lib::scan_host::host_arg_present(&argv) {
+        std::process::exit(spectrapdf_lib::scan_host::serve());
+    }
+
     // Handle /? before anything else — show a GUI help dialog.
     // Clap doesn't recognize / switches, so we intercept early.
     if std::env::args().any(|a| a == "/?" || a == "-?") {

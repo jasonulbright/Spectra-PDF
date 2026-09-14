@@ -1,5 +1,6 @@
 {
   "engine.optional_content.optionalContentConfigurationCannot": "İsteğe bağlı içerik yapılandırması bütünüyle korunamıyor.",
+  "engine.output_intents.outputIntentConfigurationCannot": "Çıktı amacı yapılandırması bütünüyle korunamıyor.",
   "engine.split.cannotReplaceNonRegular": "Normal dosya olmayan bölme hedefi değiştirilemez: {{path}}",
   "engine.split.cannotSplitDocumentWithout": "Sayfası olmayan belge bölünemez",
   "engine.split.chooseEitherExactSplit": "Belirli bir çıktı dosyası veya bir çıktı klasörü seçin",
@@ -23,6 +24,7 @@
   "engine.doc_properties.initialViewWindowOptions": "Başlangıç görünümünün pencere seçenekleri boole değeri olmalıdır.",
   "engine.doc_properties.openingPageMustInteger": "Açılış sayfası bir tam sayı olmalıdır.",
   "engine.pdf_version.pdfVersionCannotDetermined": "PDF sürümü belirlenemiyor.",
+  "engine.pdf_version.versionDeclarationsCannotPreserved": "Sürüm bildirimleri bütünüyle korunamıyor.",
   "engine.layers.layerConfigurationCannotRead": "Katman yapılandırması tamamen okunamadı.",
   "engine.layers.layerLockedDefaultConfiguration": "Katman varsayılan yapılandırmada kilitli.",
   "app.operation.unverified": "İşlemin sonucu doğrulanamadı.",

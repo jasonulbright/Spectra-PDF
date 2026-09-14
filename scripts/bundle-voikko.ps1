@@ -129,12 +129,15 @@ if (-not $SevenZip) {
 
 New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
 
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 function Get-Pinned {
     param([string]$Url, [string]$Sha, [string]$Name)
     $local = Join-Path $CacheDir $Name
     if (-not (Test-Path $local)) {
         Write-Host "  fetching $Name"
-        Invoke-WebRequest -Uri $Url -OutFile $local -MaximumRedirection 5 -TimeoutSec 300
+        Invoke-DownloadWithRetry -Description $Name -OutFile $local -Download {
+            Invoke-WebRequest -Uri $Url -OutFile $local -MaximumRedirection 5 -TimeoutSec 300
+        }
     }
     $actual = (Get-FileHash $local -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actual -ne $Sha) {

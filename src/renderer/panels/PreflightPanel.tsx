@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { useAppDispatch } from '../state/AppStateProvider';
 import { NoFileOpen } from '../components/NoFileOpen';
@@ -311,6 +312,7 @@ export function PreflightPanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
   const { performOperation } = useOperations();
+  const beginRun = useOwnedOperationRun(activeFile);
   const dispatch = useAppDispatch();
   const [report, setReport] = useState<PreflightReport | null>(null);
   const [shipped, setShipped] = useState<PreflightProfile[]>([]);
@@ -324,6 +326,7 @@ export function PreflightPanel(): React.ReactElement {
   const [openCheck, setOpenCheck] = useState<string | null>(null);
   const [shownCheck, setShownCheck] = useState<string | null>(null);
   const [status, setStatus] = useState('');
+  useEffect(() => { setStatus(''); }, [activeFile?.path, activeFile?.workingPath]);
   const [busy, setBusy] = useState(false);
   const gs = useGsCapability();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -531,10 +534,12 @@ export function PreflightPanel(): React.ReactElement {
   const runFix = useCallback(
     async (params: Record<string, unknown>): Promise<boolean> => {
       if (!activeFile) return false;
+      const run = beginRun();
+      if (!run) return false;
       setBusy(true);
       setStatus(tChrome('panel.preflight.fixing'));
       try {
-        const r = await performOperation(activeFile.path, 'apply_preflight_fixups', {
+        const r = await run.perform(performOperation, 'apply_preflight_fixups', {
           ...params,
           ...(await tools()),
           tesseract_path: await app.getTesseractPath(),
@@ -544,6 +549,7 @@ export function PreflightPanel(): React.ReactElement {
           // AFTER is never skipped.
           ...(report ? { report } : {}),
         });
+        if (!run.visible()) return false;
         if (r === EDIT_DECLINED) {
           setStatus('');
           return false;
@@ -553,6 +559,7 @@ export function PreflightPanel(): React.ReactElement {
         setStatus(tChrome('panel.preflight.fixed'));
         return true;
       } catch (e: unknown) {
+        if (!run.visible()) return false;
         setStatus(
           tChrome('panel.common.error', {
             message: e instanceof Error ? e.message : String(e),
@@ -560,10 +567,11 @@ export function PreflightPanel(): React.ReactElement {
         );
         return false;
       } finally {
+        run.finish();
         setBusy(false);
       }
     },
-    [activeFile, performOperation, report, tools],
+    [activeFile, performOperation, report, tools, beginRun],
   );
 
   /** Repair one row: the engine resolves the check to its doors and applies

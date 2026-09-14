@@ -5,6 +5,7 @@ import { fillClosure, formCalculation, resolveFillTargets } from './form-overlay
 import { classifyFillResult } from './fill-result';
 import { rewriteWorkspaceFile, type WorkspaceRewriteIo } from './workspace-rewrite';
 import type { EngineCall } from './engine-call';
+import { assertOperationGateResult, assertOperationIntent, type OperationIntent } from './operation-intent';
 
 export interface FormFillIo extends Omit<WorkspaceRewriteIo, 'confirm'> {
   confirm: (path: string, policyPath: string, targets: readonly string[], typed: readonly string[], flatten: boolean) => Promise<boolean>;
@@ -18,6 +19,8 @@ function bytes(buffer: PdfBuffer): Uint8Array {
 }
 
 export interface FormFillOptions {
+  intent?: OperationIntent;
+  assertActive?: () => void;
   flatten?: boolean;
   expectedWorkingPath?: string;
   /** A panel draft's loaded revision; unlike a fresh canvas fill, stale page
@@ -41,10 +44,16 @@ function sameValue(a: FormFieldValue, b: FormFieldValue): boolean {
 export async function fillFormValues(path: string, values: Record<string, FormFieldValue>,
   getState: () => AppState, dispatch: (action: AppAction) => void, io: FormFillIo,
   options: FormFillOptions = {}): Promise<FormFillReceipt | { completed: false }> {
+  options.assertActive?.();
+  if (options.intent) {
+    if (options.intent.source.path !== path) throw new Error(tChrome('app.history.changed'));
+    assertOperationIntent(getState(), options.intent);
+  }
   const requested = structuredClone(values);
-  const { expectedBuffer, ...rest } = options;
+  const { expectedBuffer, intent, assertActive, ...rest } = options;
   const settings = structuredClone(rest);
   const requireDraftRevision = () => {
+    assertActive?.();
     if (expectedBuffer !== undefined && (getState().files.get(path)?.buffer !== expectedBuffer
         || getState().pageDirtyPaths.includes(path))) throw new Error(tChrome('app.history.changed'));
   };
@@ -96,6 +105,7 @@ export async function fillFormValues(path: string, values: Record<string, FormFi
     },
   }, async (stage, original, requireCurrent) => {
     requireDraftRevision();
+    if (intent) assertOperationGateResult(getState().files.get(path)!, intent);
     await io.write(stage, original);
     const fontDir = await io.fontDirectory();
     requireCurrent();
@@ -109,6 +119,6 @@ export async function fillFormValues(path: string, values: Record<string, FormFi
         : unverified();
     }
     if ((report as Record<string, unknown>).flattened !== (settings.flatten === true)) throw unverified();
-  }, { kind: 'forms', preservePageCount: true, unverified, track: io.track });
+  }, { kind: 'forms', preservePageCount: true, unverified, track: io.track, assertActive });
   return result.completed ? { completed: true, publication: result.publication } : result;
 }

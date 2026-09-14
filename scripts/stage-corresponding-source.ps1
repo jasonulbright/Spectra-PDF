@@ -17,6 +17,7 @@ $Manifest = if ($Manifest) {
     Join-Path $PSScriptRoot "corresponding-source.tsv"
 }
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 $output = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
     [IO.Path]::GetFullPath($OutputDirectory)
 } else {
@@ -73,7 +74,9 @@ foreach ($row in $rows) {
 
     if ($row.source -match '^https://') {
         Write-Host "Downloading $($row.component) $($row.version) source..."
-        Invoke-WebRequest -Uri $row.source -OutFile $part
+        Invoke-DownloadWithRetry -Description $row.file -OutFile $part -Download {
+            Invoke-WebRequest -Uri $row.source -OutFile $part -TimeoutSec $DownloadRetryTimeoutSeconds
+        }
     } else {
         $source = [IO.Path]::GetFullPath((Join-Path $repoRoot $row.source))
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {

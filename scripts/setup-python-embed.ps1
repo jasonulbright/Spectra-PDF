@@ -1,6 +1,7 @@
 # Downloads and configures the embedded Python runtime for Spectra PDF.
 # Run once before packaging: powershell -ExecutionPolicy Bypass -File scripts\setup-python-embed.ps1
 
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 $PythonVersion = "3.14.5"
 $Url = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
 $ZipPath = "$env:TEMP\python-embed.zip"
@@ -17,7 +18,9 @@ Write-Host "Setting up Python $PythonVersion embedded runtime..."
 # Download (re-download if the target version's runtime isn't already present)
 if (-not (Test-Path $VersionMarker)) {
     Write-Host "Downloading $Url..."
-    Invoke-WebRequest -Uri $Url -OutFile $ZipPath
+    Invoke-DownloadWithRetry -Description "Python $PythonVersion" -OutFile $ZipPath -Download {
+        Invoke-WebRequest -Uri $Url -OutFile $ZipPath -TimeoutSec $DownloadRetryTimeoutSeconds
+    }
     Write-Host "Extracting to $DestDir..."
     Remove-Item $DestDir -Recurse -Force -ErrorAction SilentlyContinue
     Expand-Archive -Path $ZipPath -DestinationPath $DestDir -Force
@@ -39,7 +42,10 @@ if ($pthFile) {
 
 # Install pip
 Write-Host "Installing pip..."
-Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$env:TEMP\get-pip.py"
+Invoke-DownloadWithRetry -Description "get-pip.py" -OutFile "$env:TEMP\get-pip.py" -Download {
+    Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$env:TEMP\get-pip.py" `
+        -TimeoutSec $DownloadRetryTimeoutSeconds
+}
 & $DestDir\python.exe "$env:TEMP\get-pip.py" --no-warn-script-location 2>&1 | Out-Null
 
 # Install the hash-pinned dependency tree. Every package -- top-level AND

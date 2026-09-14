@@ -34,14 +34,18 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
   dispatch: (action: AppAction) => void, io: WorkspaceRewriteIo,
   build: (stage: string, original: Uint8Array, requireCurrent: () => void) => Promise<T>,
   options: { kind: 'forms' | 'operation'; preservePageCount?: boolean; unverified: () => Error;
+    assertActive?: () => void;
     track?: (run: () => Promise<T>) => Promise<T> },
 ): Promise<{ completed: true; value: T; publication: OpenFile } | { completed: false }> {
   const before = getState();
+  options.assertActive?.();
   const initial = before.files.get(path);
   if (!initial || initial.importOnly) throw new Error(tChrome('refusal.file.noLongerOpen'));
   if (!await io.confirm(path, initial.workingPath)) return { completed: false };
+  options.assertActive?.();
   if (!sameRevision(getState(), before, path)) throw changed();
   await io.commit();
+  options.assertActive?.();
   const expected = getState();
   const current = expected.files.get(path);
   if (!current?.buffer || current.importOnly || current.workingPath !== initial.workingPath
@@ -49,7 +53,10 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
   let publication: OpenFile | undefined;
   const publish = () => serializeWorkspacePublication(() => withFileLock([current.workingPath], async () => {
     await recoverPendingPageCommit();
-    const requireCurrent = () => { if (!sameRevision(getState(), expected, path)) throw changed(); };
+    const requireCurrent = () => {
+      options.assertActive?.();
+      if (!sameRevision(getState(), expected, path)) throw changed();
+    };
     requireCurrent();
     const original = copy(current.buffer!);
     const expectedWorkingSha256 = await digest(original);
@@ -79,6 +86,7 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
   // Refresh consent before tracking a write, rather than recording a declined
   // prompt as a completed operation. The locked revision check still fences drift.
   if (current.buffer !== initial.buffer && !await io.confirm(path, current.workingPath)) return { completed: false };
+  options.assertActive?.();
   if (!sameRevision(getState(), expected, path)) throw changed();
   const value = await (options.track ? options.track(publish) : publish());
   // Captured at dispatch, not by re-reading after an acknowledgement await:
