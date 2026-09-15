@@ -6,7 +6,7 @@
 
 ### Fixes
 
-- Save page edits when a bookmark, link, opening view or script points at a deleted page.
+- Save page edits when a bookmark, link, opening view or script targets a deleted page.
 - Keep deleted pages out of saved files that still link to them.
 - Save page edits in documents of several hundred pages.
 - Keep article threads through page edits.
