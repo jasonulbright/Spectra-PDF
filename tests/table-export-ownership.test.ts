@@ -3,6 +3,7 @@ import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 import {
   acceptedRegions,
+  awaitReviewPages,
   captureExportRequest,
   exportRegions,
   ownedAcceptedRegions,
@@ -259,14 +260,26 @@ describe('reviewed table export ownership', () => {
   });
 });
 
-function publishClosure(w: World, hooks: { atGeometry?: () => void } = {}) {
+function publishClosure(
+  w: World,
+  hooks: { atGeometry?: () => void; onDocsRead?: () => void } = {},
+) {
   const tableSessionRef = { current: null as TableReviewSession | null };
   const published: { regions: TableRegion[] | null } = { regions: null };
   const env = {
     sessionMatches, regionsFromDetection, quarter, tableReviewPages,
+    // The real wait, on a deadline a test can outlast.
+    awaitReviewPages: (
+      session: TableReviewSession,
+      getDocs: () => World['docs'],
+      isCurrent: () => boolean,
+    ) => awaitReviewPages(session, getDocs, isCurrent, {
+      timeoutMs: 200,
+      sleep: () => Promise.resolve(),
+    }),
     readState: () => ({ pageDirtyPaths: w.dirty }),
     filesRef: { get current() { return w.files; } },
-    docsRef: { get current() { return w.docs; } },
+    docsRef: { get current() { hooks.onDocsRead?.(); return w.docs; } },
     tableSessionRef,
     geometryForPage: async () => { hooks.atGeometry?.(); return { box: [0, 0, 400, 400], bakedRotate: 0 }; },
     pdfRectToDisplay: () => ({ x: 0.125, y: 0.225, w: 0.75, h: 0.175 }),
@@ -292,9 +305,32 @@ describe('detection publish ownership', () => {
     expect(w.dispatched?.params).toMatchObject({ regions: [{ page: 1 }] });
   });
 
-  it.each(['old-index', 'pending', 'foreign-page', 'duplicate-page'] as const)('refuses an unproved physical index: %s', async (variant) => {
+  it('projects onto the index the async reindex publishes after detection returns', async () => {
     const w = world();
-    if (variant === 'old-index') w.docs[0] = { ...w.docs[0], buffer: new Uint8Array([8]) };
+    const settled = w.docs;
+    // The index has not caught up to the bytes the detector read: the state a
+    // freshly opened document is in while its reindex is still in flight.
+    w.docs = [{ ...settled[0], buffer: new Uint8Array([8]) }];
+    let polls = 0;
+    const { run, published } = publishClosure(w, { onDocsRead: () => {
+      polls += 1;
+      if (polls >= 3) w.docs = settled;
+    } });
+    await run(IDENTITY, DETECTED, { workingPath: WORKING, buffer: w.buffer });
+    expect(published.regions?.[0]).toMatchObject({ pageId: `${IDENTITY}#g1#p0` });
+  });
+
+  it('refuses when the index never catches up to the bytes the detector read', async () => {
+    const w = world();
+    w.docs = [{ ...w.docs[0], buffer: new Uint8Array([8]) }];
+    const { run, published } = publishClosure(w);
+    await expect(run(IDENTITY, DETECTED, { workingPath: WORKING, buffer: w.buffer }))
+      .rejects.toThrow('app.history.changed');
+    expect(published.regions).toBeNull();
+  });
+
+  it.each(['pending', 'foreign-page', 'duplicate-page'] as const)('refuses an unproved physical index: %s', async (variant) => {
+    const w = world();
     if (variant === 'pending') w.dirty = [IDENTITY];
     if (variant === 'foreign-page') w.docs[0].pages[0].sourceDocId = 'foreign.pdf';
     if (variant === 'duplicate-page') w.docs = [w.docs[0], { ...w.docs[0] }];

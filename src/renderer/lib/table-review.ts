@@ -257,24 +257,89 @@ export function sessionMatches(
     && file.workingPath === session.workingPath && file.buffer === session.buffer;
 }
 
-/** A detector addresses physical file pages, not a manifest partition's slots.
- * Only a complete current index can project those addresses onto the canvas. */
-export function tableReviewPages<P extends {
+interface IndexedPage {
   id: string; sourceDocId: string; sourcePageIndex: number; rotation?: number;
-}>(session: TableReviewSession, docs: readonly {
+}
+
+interface IndexedDoc<P extends IndexedPage> {
   path: string; workingPath: string; buffer: object | null; pages: readonly P[];
-}[]): Map<number, P> | null {
+}
+
+/**
+ * What the workspace index says about a session's physical pages.
+ *
+ * `behind` and `contradicted` are different facts: the index is published by
+ * an async reindex, so a document opened a moment ago is not yet in it at all,
+ * or is in it under the previous buffer — the session's bytes are not in
+ * question there, only whether the index has caught up. A page that names
+ * another document, or two pages claiming one physical index, is the index
+ * DISPROVING the projection, and no amount of waiting makes it true.
+ */
+export type ReviewIndexState<P extends IndexedPage> =
+  | { kind: 'ready'; pages: Map<number, P> }
+  | { kind: 'behind' }
+  | { kind: 'contradicted' };
+
+export function reviewIndexState<P extends IndexedPage>(
+  session: TableReviewSession,
+  docs: readonly IndexedDoc<P>[],
+): ReviewIndexState<P> {
   const owned = docs.filter((doc) => doc.path === session.path);
-  if (owned.length === 0 || owned.some((doc) => !sessionMatches(session, doc))) return null;
+  if (owned.length === 0 || owned.some((doc) => !sessionMatches(session, doc))) {
+    return { kind: 'behind' };
+  }
   const pages = new Map<number, P>();
   const ids = new Set<string>();
   for (const doc of owned) for (const page of doc.pages) {
     if (page.sourceDocId !== session.path || !Number.isSafeInteger(page.sourcePageIndex)
-        || page.sourcePageIndex < 0 || pages.has(page.sourcePageIndex + 1) || ids.has(page.id)) return null;
+        || page.sourcePageIndex < 0 || pages.has(page.sourcePageIndex + 1) || ids.has(page.id)) {
+      return { kind: 'contradicted' };
+    }
     pages.set(page.sourcePageIndex + 1, page);
     ids.add(page.id);
   }
-  return pages;
+  return { kind: 'ready', pages };
+}
+
+/** A detector addresses physical file pages, not a manifest partition's slots.
+ * Only a complete current index can project those addresses onto the canvas. */
+export function tableReviewPages<P extends IndexedPage>(
+  session: TableReviewSession,
+  docs: readonly IndexedDoc<P>[],
+): Map<number, P> | null {
+  const state = reviewIndexState(session, docs);
+  return state.kind === 'ready' ? state.pages : null;
+}
+
+/**
+ * The index a review is projected onto, waited for.
+ *
+ * Detection finishes against the file's bytes; the index that says which
+ * on-screen page each physical page is arrives from the async reindex, and for
+ * a document opened moments earlier — a `.pdfx` whose manifest partitions are
+ * read during that index — it can arrive after. Waiting is not a weakened
+ * check: `isCurrent` still proves the workspace holds the session's exact
+ * bytes on every pass, so what is awaited is only the index catching up to
+ * them. Bytes that move, an index that contradicts the projection, or a wait
+ * that outlasts the deadline all refuse.
+ */
+export async function awaitReviewPages<P extends IndexedPage>(
+  session: TableReviewSession,
+  getDocs: () => readonly IndexedDoc<P>[],
+  isCurrent: () => boolean,
+  options: { timeoutMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<Map<number, P> | null> {
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const sleep = options.sleep
+    ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (!isCurrent()) return null;
+    const state = reviewIndexState(session, getDocs());
+    if (state.kind === 'ready') return state.pages;
+    if (state.kind === 'contradicted' || Date.now() >= deadline) return null;
+    await sleep(50);
+  }
 }
 
 /** What an export was asked for, captured before any await: the revision and

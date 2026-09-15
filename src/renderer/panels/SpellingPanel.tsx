@@ -16,6 +16,7 @@ import { loadSettings, saveSettings } from '../lib/app-settings';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import type { EditSpan } from '../lib/edit-paragraphs';
 import { spellingCommentTarget, type SpellingCommentTarget } from '../lib/spelling-comment-target';
+import { placementDocsCurrent } from '../lib/form-overlay';
 import {
   AUTO_LANGUAGE,
   addCustomWord,
@@ -324,6 +325,24 @@ export function SpellingPanel(): React.ReactElement {
     [fixPageText, fixComment, fixField],
   );
 
+  // A comment target is resolved against the workspace index, and a disk
+  // correction earlier in the same run replaced the bytes that index describes:
+  // its pages, and the annotations imported with them, are republished by the
+  // async reindex. Binding before that lands asks a superseded index where a
+  // note is and is answered "gone". Waiting is not a weakened check — the run's
+  // own revision is re-proven on every pass, and the bind, the text check and
+  // the reducer step after it all still run against the settled index.
+  const awaitAnnotationIndex = useCallback(async (run: OwnedOperationRun) => {
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      run.assertSource();
+      const now = readState();
+      if (filePath && placementDocsCurrent(now.files, now.workspace.documents, filePath)) return;
+      if (Date.now() >= deadline) throw new Error(tChrome('app.history.changed'));
+      await new Promise<void>((resolve) => { setTimeout(resolve, 50); });
+    }
+  }, [readState, filePath]);
+
   const runFix = useCallback(
     async (targets: SpellIssue[], word: string) => {
       if (!replacement.trim() || !activeFile || !reportSource
@@ -340,7 +359,12 @@ export function SpellingPanel(): React.ReactElement {
         // retains descending offsets within each source; no read inspects an
         // uncommitted annotation tier or performs a pre-consent page commit.
         const ordered = [...targets].sort((a, b) => Number(a.source === 'comments') - Number(b.source === 'comments'));
+        let indexAwaited = false;
         for (const issue of ordered) {
+          if (issue.source === 'comments' && !indexAwaited) {
+            indexAwaited = true;
+            await awaitAnnotationIndex(run);
+          }
           outcomes.push(await applyOne(issue, word, run, bindings));
           run.continueAfterPublication();
         }
@@ -369,7 +393,7 @@ export function SpellingPanel(): React.ReactElement {
       run.finish(); setBusy(false);
       await check(source);
     },
-    [activeFile, reportSource, beginRun, applyOne, replacement, check],
+    [activeFile, reportSource, beginRun, applyOne, awaitAnnotationIndex, replacement, check],
   );
 
   const addToDictionary = useCallback(

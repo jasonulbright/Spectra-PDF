@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createOwnedOperationRuns } from '../src/renderer/lib/owned-operation-run';
 import { inspectOperationInput } from '../src/renderer/lib/operation-input';
 import { spellingCommentTarget } from '../src/renderer/lib/spelling-comment-target';
+import { placementDocsCurrent } from '../src/renderer/lib/form-overlay';
 import { paragraphFix, replaceRange, wordAt, type SpellIssue } from '../src/renderer/lib/spellcheck';
 import { createAppStore } from '../src/renderer/state/store';
 import { initialState } from '../src/renderer/state/reducer';
@@ -39,15 +40,25 @@ function fixture(attack: 'none' | 'late-publication' | 'read-reopen' = 'none') {
   const owners = createOwnedOperationRuns(store.getState), events: string[] = [];
   const disk = new Map<string, Uint8Array>();
   let text = 'helo helo', field = 'helo helo', serial = 1;
+  let indexed = { ...file, id: 'd', pages: [page] };
   const publish = () => {
     store.dispatch({ type: 'REFRESH_BUFFER', path: 'A', buffer: new Uint8Array([++serial]), pageCount: 1 });
-    return store.getState().files.get('A')!;
+    const next = store.getState().files.get('A')!;
+    // The indexer republishes the document AFTER the buffer lands, never with
+    // it, and the pages it comes back with carry a fresh generation: an edit
+    // made against the index left behind does not survive the republish.
+    const current = store.getState().workspace.documents.find(doc => doc.id === 'd') ?? indexed;
+    indexed = { ...current, ...next, id: 'd',
+      pages: current.pages.map(page => ({ ...page, id: `p#g${serial}` })) };
+    const settled = indexed;
+    setTimeout(() => store.dispatch({ type: 'SET_WORKSPACE_DOCUMENTS', path: 'A', documents: [settled] }), 60);
+    return next;
   };
   const check = vi.fn(async () => {}), status = vi.fn(), busy = vi.fn();
   const bindings: Record<string, unknown> = {
     activeFile: file, reportSource: file, filePath: 'A', workingPath: 'work', replacement: 'hello',
     beginRun: () => owners.begin(file), readState: store.getState, dispatch: store.dispatch,
-    paragraphFix, spellingCommentTarget, wordAt, replaceRange, EDIT_DECLINED,
+    paragraphFix, spellingCommentTarget, placementDocsCurrent, wordAt, replaceRange, EDIT_DECLINED,
     setStatus: status, setBusy: busy, check,
     tChrome: (key: string) => key, tChromeCount: (key: string, count: number) => `${key}:${count}`,
     app: { getEditFontPath: async () => 'fonts' },
@@ -75,7 +86,7 @@ function fixture(attack: 'none' | 'late-publication' | 'read-reopen' = 'none') {
       events.push('field'); field = values.field; return { completed: true, publication: publish() };
     },
   };
-  for (const name of ['fixPageText', 'fixComment', 'fixField', 'applyOne']) bindings[name] = callback(name, bindings);
+  for (const name of ['fixPageText', 'fixComment', 'fixField', 'applyOne', 'awaitAnnotationIndex']) bindings[name] = callback(name, bindings);
   return { run: callback('runFix', bindings), events, check, status, busy, disk, store,
     contents: () => ({ text, field, note: store.getState().workspace.documents[0].pages[0].annotations![0].note }) };
 }
@@ -89,6 +100,9 @@ describe('actual Spelling panel correction sequence', () => {
     const f = fixture();
     await f.run([issue('comments', 5), issue('text', 5), issue('fields', 5),
       issue('comments', 0), issue('text', 0), issue('fields', 0)], 'helo');
+    // Read after the lagged republish has landed: an edit made against the
+    // index the writes left behind does not survive it.
+    await new Promise<void>(resolve => { setTimeout(resolve, 200); });
     expect(f.contents()).toEqual({ text: 'hello hello', field: 'hello hello', note: 'hello hello' });
     expect(f.events).toEqual(['text', 'field', 'text', 'field']);
     expect(f.status).toHaveBeenCalledWith('panel.spelling.changed:6');

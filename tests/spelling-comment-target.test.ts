@@ -31,6 +31,24 @@ describe('spelling comment identity', () => {
     const state = fixture([page('p1', []), page('p2', [note('wrong', [25, 0, 45, 20]), note('right')])]);
     expect(spellingCommentTarget(state, 'A', issue)).toMatchObject({ annotationId: 'right' });
   });
+  it('binds a sticky note whose imported rect is the viewer icon box, not the file rect', () => {
+    // The viewer publishes a /Text rect as a fixed icon box anchored at the
+    // rect's top-left corner; the engine reports the file's own /Rect.
+    const state = fixture([page('p1', []), page('p2', [note('icon', [100, 98, 122, 120])])]);
+    const reported = { ...issue, annotation_rect: [100, 100, 120, 120] as [number, number, number, number] };
+    expect(spellingCommentTarget(state, 'A', reported)).toMatchObject({ annotationId: 'icon' });
+  });
+  it('still refuses a sticky note anchored somewhere else', () => {
+    const state = fixture([page('p1', []), page('p2', [note('elsewhere', [101, 98, 123, 120])])]);
+    const reported = { ...issue, annotation_rect: [100, 100, 120, 120] as [number, number, number, number] };
+    expect(spellingCommentTarget(state, 'A', reported)).toBeNull();
+  });
+  it('compares a non-note subtype against the whole file rect', () => {
+    const square: PageAnnotation = { ...note('square'), importedOriginal: { subtype: 'Square',
+      rect: [0, 0, 20, 21], contents: 'helo', color: '#000000', hasAppearance: false } };
+    const state = fixture([page('p1', []), page('p2', [square])]);
+    expect(spellingCommentTarget(state, 'A', { ...issue, subtype: 'Square' })).toBeNull();
+  });
   it('refuses ambiguous identities instead of guessing from a global listing ordinal', () => {
     const state = fixture([page('p1', []), page('p2', [note('one'), note('two')])]);
     expect(spellingCommentTarget(state, 'A', issue)).toBeNull();
