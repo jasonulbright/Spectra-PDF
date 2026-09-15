@@ -54,6 +54,7 @@ import {
   type FieldCandidate,
 } from '../../lib/form-candidates';
 import {
+  awaitReviewPages,
   captureExportRequest,
   addColumn,
   exportRegions,
@@ -6085,7 +6086,11 @@ export function WorkspaceCanvasView({
       const current = () => sessionMatches(session, filesRef.current.get(path))
         && !readState().pageDirtyPaths.includes(path);
       if (!current()) throw new Error(tChrome('app.history.changed'));
-      const pages = tableReviewPages(session, docsRef.current);
+      // The reindex that publishes the physical page index is async, and for a
+      // document opened moments earlier it can land after detection returns.
+      // The wait is on the INDEX only; the session's bytes are re-proven on
+      // every pass.
+      const pages = await awaitReviewPages(session, () => docsRef.current, current);
       if (!pages) throw new Error(tChrome('app.history.changed'));
       const geometry = new Map<number, PageGeometry>();
       for (const page of new Set(result.regions.map((r) => r.page))) {

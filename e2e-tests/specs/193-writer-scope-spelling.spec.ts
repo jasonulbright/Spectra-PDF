@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString, StandardFonts } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFString, StandardFonts } from 'pdf-lib';
 import { expect } from '@wdio/globals';
 // @ts-ignore — the legacy entry has no separate declaration file.
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -73,7 +73,11 @@ describe('owned writers preserve page scope and mixed-source spelling', () => {
     expect(texts).toHaveLength(3); for (const text of texts) expect(text).toContain('SCOPE');
     expect(readFileSync(source)).toEqual(before);
   });
-  it('Change all corrects text, a field, and duplicate notes without losing earlier corrections', async () => {
+  it('Change all corrects text, a field, and duplicate notes without losing earlier corrections', async function () {
+    // Eight corrections across three surfaces, each its own owned run, plus a
+    // dictionary load and a full recheck: the case's own waits outlast the
+    // default per-test budget.
+    this.timeout(240_000);
     await open('spelling', true); const before = readFileSync(source);
     await $('[data-testid="spelling-language"] option[value="en_US"]').waitForExist({ timeout: 30000 });
     await $('[data-testid="spelling-language"]').selectByAttribute('value', 'en_US');
@@ -93,7 +97,9 @@ describe('owned writers preserve page scope and mixed-source spelling', () => {
       const notes = annotations.asArray().map(ref => pdf.context.lookup(ref, PDFDict))
         .filter(a => a.get(PDFName.of('Subtype')) === PDFName.of('Text'));
       expect(notes).toHaveLength(1);
-      expect(notes[0].lookup(PDFName.of('Contents'), PDFString).decodeText()).toBe('definitely definitely');
+      // A PDF text string is literal or hex; a corrected note is written UTF-16 hex.
+      const contents = notes[0].lookup(PDFName.of('Contents')) as PDFString | PDFHexString;
+      expect(contents.decodeText()).toBe('definitely definitely');
     }
     expect(readFileSync(source)).toEqual(before);
   });

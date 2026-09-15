@@ -52,13 +52,20 @@ describe('Document action preservation through actual page commits', () => {
     const verified = await verifyActiveSignatures(); expect(verified.signatures).toHaveLength(1);
     expect(verified.all_valid).toBe(true);
   });
-  it('deleting the action target refuses atomically; undoing the deletion permits a faithful edit', async () => {
+  it('deleting the action target drops only the jump; undoing the deletion restores the graph', async () => {
     const ids = await getWorkspacePageIds(); await selectCanvasPages([ids[1]]); await deleteSelectedCanvasPages();
     await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 1);
-    await expect(commitPendingEdits()).rejects.toThrow('commitPendingEdits failed');
-    expect(readFileSync(work).equals(before)).toBe(true); expect((await history()).undo).toHaveLength(0);
-    expect((await getWorkspacePageIds()).length).toBe(1); await invokeAppCommand('edit.undo');
+    await commitPendingEdits();
+    // The opening action and the close trigger both chain into a GoTo onto the
+    // deleted page, so each entry is omitted whole; nothing else changes.
+    const committed = await PDFDocument.load(readFileSync(work), { updateMetadata: false });
+    expect(committed.getPageCount()).toBe(1);
+    expect(committed.catalog.get(N('OpenAction'))).toBeUndefined();
+    expect(committed.catalog.get(N('AA'))).toBeUndefined();
+    expect(readFileSync(source).equals(before)).toBe(true); expect((await history()).undo).toHaveLength(1);
+    await invokeAppCommand('edit.undo');
     await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 2);
+    await browser.waitUntil(async () => readFileSync(work).equals(before));
     await rotate((await getWorkspacePageIds())[0]); await commitPendingEdits(); await assertActions(work);
   });
   it('native publication refusal retains pending rotation for retry without losing actions', async () => {
