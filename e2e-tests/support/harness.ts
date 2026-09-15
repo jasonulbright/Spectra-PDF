@@ -99,13 +99,45 @@ export async function openMenuItem(menuTestId: string, itemTestId: string): Prom
   const trigger = $(`[data-testid="${menuTestId}"]`);
   await trigger.waitForDisplayed({ timeout: 15_000 });
 
+  // The item is probed in the page rather than through an element reference
+  // the driver holds across the round trip: a menu instance that is closing
+  // is removed WHILE the probe is in flight, which answers the probe with a
+  // stale-element failure for a node whose removal is the point. The probe
+  // also refuses a menu that is CLOSING (Radix marks the content it is in
+  // `data-state="closed"`), so the trigger is re-clicked rather than the item
+  // reported as ready on a node about to go. The state is read from the
+  // ancestry only — a submenu TRIGGER carries `closed` for its own submenu
+  // while sitting in a perfectly open menu.
+  const itemShown = async (): Promise<boolean> =>
+    await browser.execute(function (testid: string) {
+      const el = document.querySelector('[data-testid="' + testid + '"]');
+      if (!(el instanceof HTMLElement)) return false;
+      if (el.parentElement?.closest('[data-state="closed"]')) return false;
+      if (typeof el.checkVisibility === 'function') {
+        return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+      }
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }, itemTestId);
+
+  // Shown TWICE across a settle: the dismissal this function exists to
+  // survive arrives tens of milliseconds after the menu opens, so a single
+  // observation can be of a menu already on its way out — and the caller's
+  // next act is a click on that item. Re-issuing the trigger is the remedy
+  // either way, which is why the check loops rather than throwing here.
+  const itemSettled = async (): Promise<boolean> => {
+    if (!(await itemShown())) return false;
+    await browser.pause(150);
+    return await itemShown();
+  };
+
   await browser.waitUntil(
     async () => {
-      if (await $(`[data-testid="${itemTestId}"]`).isDisplayed()) return true;
+      if (await itemSettled()) return true;
       if ((await trigger.getAttribute('aria-expanded')) !== 'true') {
         await trigger.click();
       }
-      return await $(`[data-testid="${itemTestId}"]`).isDisplayed();
+      return await itemSettled();
     },
     {
       timeout: 20_000,

@@ -55,6 +55,17 @@ async function editParagraphs(pageId: string): Promise<ListedParagraph[]> {
   }, pageId);
 }
 
+// The card is GONE, asked in the page rather than through an element
+// reference the driver holds across the round trip: the card unmounts while
+// such a probe is in flight, which answers it with a stale-element failure
+// for the very removal being waited on. Unmounted is also the stronger claim
+// than not-displayed — the card is a conditional render, not a hidden node.
+async function cardGone(): Promise<boolean> {
+  return await browser.execute(function () {
+    return document.querySelector('[data-testid="add-text-form"]') === null;
+  });
+}
+
 // The authored paragraph, once the post-commit re-index lists it.
 async function authoredParagraph(
   needle: string,
@@ -265,7 +276,7 @@ describe('add text', () => {
     // Close without authoring (Escape cancels the card).
     await browser.keys(['Escape']);
     await browser.waitUntil(
-      async () => !(await $('[data-testid="add-text-form"]').isDisplayed().catch(() => false)),
+      cardGone,
       { timeout: 10_000, timeoutMsg: 'the card never closed' },
     );
   });
@@ -333,7 +344,7 @@ describe('add text', () => {
 
     await $('[data-testid="add-text-create"]').click();
     await browser.waitUntil(
-      async () => !(await $('[data-testid="add-text-form"]').isDisplayed().catch(() => false)),
+      cardGone,
       { timeout: 30_000, timeoutMsg: 'the card never closed after authoring the column' },
     );
 
