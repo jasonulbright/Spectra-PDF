@@ -4,46 +4,13 @@
 
 *Released 2026-09-15*
 
-### Fixes
-
-- Save page edits when a bookmark, link, opening view or script targets a deleted page.
-- Keep deleted pages out of saved files that still link to them.
-- Save page edits in documents of several hundred pages.
-- Keep article threads through page edits.
-- Save when a document imported into itself or merged twice is edited.
-- Stamp headers, footers and watermarks on exactly the pages requested.
-- Refuse malformed page ranges instead of guessing, and never hang on huge ones.
-- Edit the document that was open when a tool started, never a reopened copy.
-- Correct the spelling of a comment on the reported page, not the first match.
-- Keep the printing condition and colour profile through merge and split.
-- Declare the correct PDF version after merge and split.
-- Keep scanner failures from blocking application exit.
-- Export reviewed tables from the current edits, not the original file.
-- Read split form packets with their own encoding.
-- Keep split destinations, layers and separation profiles exact.
-- Show extracted text and save it from the same document.
-- Give each export its own save location.
-
-### Security
-
-- Update the TLS library used for update checks.
-
-### Packaging
-
-- Store portable archive entries with standard path separators.
+Various bug fixes.
 
 ## 1.2.4
 
 *Released 2026-09-11*
 
-- Keep document metadata, output intents, tags, layers and version declarations through page edits.
-- Refuse a PDF version change that cannot be verified instead of writing an invalid file.
-- Show unknown document properties as unknown, and keep unsaved property edits across tabs.
-- Ask the protection-removal question once, for one document and one operation.
-- Read split XFA form packets, and detect form calculations in every XML encoding.
-- Keep chained opening actions when the initial view changes.
-- Keep the author when a document title is corrected.
-- Export reviewed tables from the displayed document, not the original file.
+Various bug fixes.
 
 ## 1.2.3
 
