@@ -203,21 +203,30 @@ export interface StoreCertificate {
   machine_store: boolean;
 }
 
-/** What a pinned certificate-store enumeration answers with. */
-export type StoreCertificateAnswer = { rows: StoreCertificate[] } | { error: string };
+/** Why `list_store_certificates` refused, as the command serializes it. */
+export interface StoreReadErrorPayload {
+  reason: 'open-failed' | 'unsupported';
+  code: string | null;
+  message: string;
+}
+
+/** What a pinned certificate-store enumeration answers with. `delayMs` holds
+ * the answer back, so the window before a read lands can be observed. */
+export type StoreCertificateAnswer =
+  | { rows: StoreCertificate[]; delayMs?: number }
+  | { error: StoreReadErrorPayload; delayMs?: number };
 
 let pinnedStoreCertificates: StoreCertificateAnswer | null = null;
 
 /**
  * Test seam: pin what the certificate-store enumeration answers.
  *
- * An empty store and a store that refuses cannot be arranged from outside —
- * the only real answer is to delete the machine's own certificates, which no
- * suite may do, and the IPC cannot be stubbed from the page
- * (`__TAURI_INTERNALS__.invoke` is non-writable). So the pin sits here, in the
- * module the shipped code already reads, reached only from the harness, which
- * exists only in a `VITE_E2E` build — the `pinGsCapability` precedent. `null`
- * unpins and the next read goes to Windows for real.
+ * An empty store and a store that refuses cannot be arranged from outside: a
+ * suite may not delete the machine's own certificates, and
+ * `__TAURI_INTERNALS__.invoke` is non-writable, so the IPC cannot be stubbed
+ * from the page. The pin sits in the module the shipped code already reads and
+ * is reached only from the harness, which exists only in a `VITE_E2E` build.
+ * `null` unpins and the next read goes to Windows for real.
  */
 export function pinStoreCertificates(answer: StoreCertificateAnswer | null): void {
   pinnedStoreCertificates = answer;
@@ -270,12 +279,17 @@ export const dialog = {
    * thing a signing request later carries is a thumbprint. Enumeration runs
    * under a silent context, so opening the picker never raises a PIN prompt.
    */
+  /** Rejects with a `StoreReadErrorPayload` when the store refuses, and with
+   * whatever the IPC layer produced when the command itself cannot run. */
   listStoreCertificates: (): Promise<StoreCertificate[]> => {
     const pinned = pinnedStoreCertificates;
     if (pinned) {
-      return 'error' in pinned
-        ? Promise.reject(new Error(pinned.error))
-        : Promise.resolve(pinned.rows);
+      return new Promise((resolve, reject) => {
+        setTimeout(() => {
+          if ('error' in pinned) reject(pinned.error);
+          else resolve(pinned.rows);
+        }, pinned.delayMs ?? 0);
+      });
     }
     return invoke<StoreCertificate[]>('list_store_certificates');
   },

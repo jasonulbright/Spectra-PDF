@@ -12,8 +12,11 @@ import {
   sourceAfterStoreRead,
   sourceOnOpen,
   storeAvailability,
+  storeSelectionAfterRead,
+  classifyStoreFailure,
   type SignerSource,
   type SignerSourceMode,
+  type StoreReadFailure,
 } from '../lib/signer-sources';
 import {
   CSC_GRANTS,
@@ -42,11 +45,12 @@ import {
 // PRIMARY source and are enumerated as the form opens; the rest are offered
 // under their own heading below.
 //
-// LAYOUT: each source is a full-width row whose label WRAPS. A single row of
-// side-by-side source buttons does not fit either surface — the tool dock at
-// its 300px minimum leaves the group about 70px, the canvas card about 110px,
-// and against `overflow-hidden` a flex item resolves `min-width` to 0, so the
-// last sources were clipped away with no affordance that they existed.
+// LAYOUT: each source is a full-width row whose label wraps. Side-by-side
+// source controls cannot fit either surface — the tool dock at its minimum
+// width or the canvas card — in every locale, and a flex item inside an
+// `overflow-hidden` group resolves `min-width` to 0, so whatever does not fit
+// is clipped with no scrollbar and no affordance that it exists.
+//
 // SECURITY: this component never holds the SIGNING password or token PIN —
 // only the generator sub-form's own password, which is cleared the moment
 // generation finishes (the user then types it again as the signing
@@ -180,7 +184,7 @@ export function SignerSourceFields({
   const [genDone, setGenDone] = useState<GenerateResult | null>(null);
   const [storeCerts, setStoreCerts] = useState<StoreCertificate[] | null>(null);
   const [storeBusy, setStoreBusy] = useState(false);
-  const [storeError, setStoreError] = useState<string | null>(null);
+  const [storeFailure, setStoreFailure] = useState<StoreReadFailure | null>(null);
 
   const inStoreMode = value.mode === 'store';
   const storeThumbprint = value.mode === 'store' ? value.thumbprint : null;
@@ -193,14 +197,14 @@ export function SignerSourceFields({
 
   const loadStoreCerts = useCallback(async () => {
     setStoreBusy(true);
-    setStoreError(null);
+    setStoreFailure(null);
     try {
       const rows = await dialog.listStoreCertificates();
       setStoreCerts(rows);
       return rows;
     } catch (e: unknown) {
       setStoreCerts([]);
-      setStoreError(e instanceof Error ? e.message : String(e));
+      setStoreFailure(classifyStoreFailure(e));
       return [];
     } finally {
       setStoreBusy(false);
@@ -208,7 +212,11 @@ export function SignerSourceFields({
   }, []);
 
   const certOptions = useMemo(() => signerCertificateOptions(storeCerts ?? []), [storeCerts]);
-  const availability = storeAvailability({ busy: storeBusy, rows: storeCerts, error: storeError });
+  const availability = storeAvailability({
+    busy: storeBusy,
+    rows: storeCerts,
+    failed: storeFailure !== null,
+  });
 
   // Opening the form READS the store: installed certificates are the primary
   // source, so they are on offer before the user asks for them.
@@ -216,43 +224,33 @@ export function SignerSourceFields({
     void loadStoreCerts();
   }, [loadStoreCerts]);
 
-  /** The selection, but only while the store still enumerates it. The caller's
-   * state outlives one opening of the form, so a thumbprint chosen against an
-   * earlier read can name a certificate that has since expired or been
-   * removed. */
+  /** The selection, but only while the store still enumerates it. The
+   * caller's state outlives one opening of the form, so a thumbprint chosen
+   * against an earlier read can name a certificate that has since expired or
+   * been removed. */
   const offeredThumbprint = rememberedCertificate(certOptions, storeThumbprint)?.thumbprint ?? null;
 
-  // The remembered thumbprint is pre-selected ONLY while that certificate is
-  // still one of the rows the store actually offers — a certificate that
-  // expired or was removed must not sit selected in the form, and one carried
-  // in from a previous opening is dropped for the same reason.
+  // Settle the store selection against each read: a stale one is dropped
+  // or replaced by the remembered certificate, a live one takes its store
+  // location from the row just read.
   useEffect(() => {
-    if (!inStoreMode || availability === 'loading') return;
-    const stale = storeThumbprint !== null && offeredThumbprint === null;
-    // A live selection stands; only an absent or stale one is resolved.
-    if (storeThumbprint !== null && !stale) return;
-    const match = rememberedCertificate(certOptions, lastStoreCertificate());
-    if (match) {
-      onChange({ mode: 'store', thumbprint: match.thumbprint, machineStore: match.machineStore });
-    } else if (stale) {
-      onChange({ mode: 'store', thumbprint: null, machineStore: false });
-    }
-    // `onChange` and the current selection are read, not depended on: this
-    // runs when the source is entered or re-read, never again on the selection
-    // changing — a selection the user CLEARED has to stay cleared.
+    if (value.mode !== 'store' || availability === 'loading') return;
+    const next = storeSelectionAfterRead({
+      selection: { thumbprint: value.thumbprint, machineStore: value.machineStore },
+      options: certOptions,
+      remembered: lastStoreCertificate(),
+    });
+    if (next) onChange({ mode: 'store', ...next });
+    // Runs on entering the source and on each read, never on the selection
+    // changing: a selection the user cleared has to stay cleared.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inStoreMode, availability, certOptions]);
 
-  // Re-decide the source every time the form opens. The caller's state
-  // outlives one opening, so a fallback taken because the store was
-  // unavailable would otherwise outlive the form that took it and a recovered
-  // store would never be offered again. Only an UNCONFIGURED source moves —
-  // a file, a label or a credential already chosen is the user's.
+  // Once per mount: the incoming source is read, not depended on. See
+  // `sourceOnOpen` for why an unconfigured source returns to the store.
   useEffect(() => {
     const next = sourceOnOpen(value);
     if (next !== value.mode) onChange(emptySourceFor(next));
-    // Runs once per mount by design; the incoming source is read, not
-    // depended on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -273,11 +271,8 @@ export function SignerSourceFields({
     [idPrefix],
   );
 
-  // A store that refused, or that holds no signer, hands the selection to the
-  // first advanced source rather than leaving an empty picker selected. The
-  // store's message stays on the store row either way, so the move explains
-  // itself. Once per opened form, on the FIRST answer only, and never over a
-  // source the user picked — the guards are `sourceAfterStoreRead`'s.
+  // Once per opened form, on the FIRST answer only: a later manual return to
+  // the store source has to stick. The guards are `sourceAfterStoreRead`'s.
   const fallbackSettled = useRef(false);
   useEffect(() => {
     if (fallbackSettled.current || availability === 'loading') return;
@@ -361,8 +356,13 @@ export function SignerSourceFields({
    * every locale. The hint sits OUTSIDE the label and is referenced by
    * `aria-describedby` — inside it, it would become part of the radio's
    * accessible name and be read on every pass through the group. */
-  const sourceRow = (m: SignerSourceMode, hint?: string): React.ReactElement => {
+  const sourceRow = (
+    m: SignerSourceMode,
+    opts: { hint?: string; describedBy?: string; after?: React.ReactNode } = {},
+  ): React.ReactElement => {
+    const { hint, after } = opts;
     const hintId = hint ? `${idPrefix}-source-${m}-hint` : undefined;
+    const describedBy = [hintId, opts.describedBy].filter(Boolean).join(' ') || undefined;
     return (
       <div key={m} className="flex flex-col">
         <label
@@ -376,7 +376,7 @@ export function SignerSourceFields({
             // and what reports the set size honestly.
             name={`${idPrefix}-signer-source`}
             data-testid={`${idPrefix}-source-input-${m}`}
-            aria-describedby={hintId}
+            aria-describedby={describedBy}
             checked={value.mode === m}
             onChange={() => {
               userPicked.current = true;
@@ -394,53 +394,91 @@ export function SignerSourceFields({
           </span>
         </label>
         {hint ? (
-          <span id={hintId} className="ps-5 text-[11px] text-neutral-500 break-words">
+          <span
+            id={hintId}
+            data-testid={`${idPrefix}-source-${m}-hint`}
+            className="ps-5 text-[11px] text-neutral-500 break-words"
+          >
             {hint}
           </span>
         ) : null}
+        {after}
       </div>
     );
   };
 
+  const storeFailureText = (f: StoreReadFailure): string => {
+    switch (f.kind) {
+      case 'denied':
+        return tChrome('dialog.signer.storeErrorDenied');
+      case 'missing':
+        return tChrome('dialog.signer.storeErrorMissing');
+      case 'unsupported':
+        return tChrome('dialog.signer.storeErrorUnsupported');
+      case 'code':
+        return tChrome('dialog.signer.storeErrorCode', { code: f.code });
+      case 'unknown':
+        return tChrome('dialog.signer.storeErrorUnknown');
+    }
+  };
+
+  const verdictId = `${idPrefix}-store-verdict`;
+  const verdictShown = availability === 'error' || availability === 'empty';
+  const certificateSelectId = `${idPrefix}-store-cert-select`;
+
   return (
     // A fieldset + legend names the ONE native radio group the five sources
-    // form. `min-w-0` is load-bearing, not tidy: a fieldset's default
-    // `min-width` is `min-content`, so without it this element refuses to
-    // shrink below its widest label and reintroduces the overflow above.
+    // form. `min-w-0` is load-bearing: a fieldset's default `min-width` is
+    // `min-content`, so without it this element cannot shrink below its
+    // widest label and overflows the panel at narrow widths.
     <fieldset className="min-w-0">
       <legend className="text-xs text-neutral-400 mb-1.5">{tChrome('dialog.signer.label')}</legend>
       <div ref={rootRef} className="flex flex-col gap-2">
-        {sourceRow(PRIMARY_SIGNER_SOURCE, tChrome('dialog.signer.modeStoreHint'))}
-
-        {/* The store's verdict renders whatever source is selected. The
-            fallback below moves the selection off an unusable store, and a
-            message gated on that selection would unmount in the same commit
-            that moved it — leaving a silent switch with no reason. */}
-        {availability === 'error' ? (
-          <div data-testid={`${idPrefix}-store-error`} className="text-xs text-red-400 break-words">
-            {storeError}
-          </div>
-        ) : availability === 'empty' ? (
-          <p
-            data-testid={`${idPrefix}-store-empty`}
-            className="text-[11px] text-neutral-500 break-words"
-          >
-            {tChrome('dialog.signer.storeNone')}
+        {sourceRow(PRIMARY_SIGNER_SOURCE, {
+          hint: tChrome('dialog.signer.modeStoreHint'),
+          describedBy: verdictId,
+          after: (
+            // Mounted whether or not it has anything to say: a live region
+            // inserted together with its text is not reliably announced. It
+            // renders whatever source is selected, because the fallback moves
+            // the selection off an unusable store and a verdict gated on the
+            // selection would unmount in the same commit.
+            <div id={verdictId} data-testid={`${idPrefix}-store-verdict`} role="status">
+              {availability === 'error' && storeFailure ? (
+                <p
+                  data-testid={`${idPrefix}-store-error`}
+                  className="mt-1 text-xs text-red-400 break-words"
+                >
+                  {storeFailureText(storeFailure)}
+                </p>
+              ) : availability === 'empty' ? (
+                <p
+                  data-testid={`${idPrefix}-store-empty`}
+                  className="mt-1 text-[11px] text-neutral-500 break-words"
+                >
+                  {tChrome('dialog.signer.storeNone')}
+                </p>
+              ) : null}
+            </div>
+          ),
+        })}
+        {availability === 'loading' && inStoreMode ? (
+          <p data-testid={`${idPrefix}-store-loading`} className="text-[11px] text-neutral-500">
+            {tChrome('dialog.signer.storeLoading')}
           </p>
-        ) : availability === 'loading' && inStoreMode ? (
-          <p className="text-[11px] text-neutral-500">{tChrome('dialog.signer.storeLoading')}</p>
         ) : null}
 
         {value.mode === 'store' ? (
           <>
-            {/* The label is stacked, not inline: this control carries a
-                subject, an issuer and a date, and an 80px inline label leaves
-                it too narrow to show any of them at the dock's minimum width. */}
-            <span className="text-xs text-neutral-400">
+            {/* Stacked rather than inline: the select carries a subject, an
+                issuer and a date, and an inline label leaves it too narrow to
+                show any of them at the dock's minimum width. */}
+            <label htmlFor={certificateSelectId} className="text-xs text-neutral-400">
               {tChrome('dialog.signer.storeCertificate')}
-            </span>
+            </label>
             <div className="flex items-center gap-2 -mt-1">
               <select
+                id={certificateSelectId}
                 data-testid={`${idPrefix}-store-cert`}
                 value={value.thumbprint ?? ''}
                 disabled={storeBusy || certOptions.length === 0}
@@ -455,6 +493,12 @@ export function SignerSourceFields({
                 className="flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
               >
                 <option value="">{tChrome('dialog.signer.storeChoose')}</option>
+                {/* The request is built from the selection whether or not a
+                    read has confirmed it yet, so an unconfirmed one is shown
+                    rather than rendered as "Choose…". */}
+                {value.thumbprint && !offeredThumbprint ? (
+                  <option value={value.thumbprint}>{value.thumbprint}</option>
+                ) : null}
                 {certOptions.map((c) => (
                   <option key={c.thumbprint} value={c.thumbprint}>
                     {tChrome('dialog.signer.storeRow', {
@@ -496,7 +540,12 @@ export function SignerSourceFields({
         <span className="text-xs text-neutral-400 mt-1">
           {tChrome('dialog.signer.sourceAdvanced')}
         </span>
-        {ADVANCED_SIGNER_SOURCES.map((m) => sourceRow(m))}
+        {ADVANCED_SIGNER_SOURCES.map((m) =>
+          sourceRow(m, {
+            describedBy:
+              verdictShown && m === ADVANCED_SIGNER_SOURCES[0] ? verdictId : undefined,
+          }),
+        )}
         <button
           data-testid={`${idPrefix}-generate-open`}
           onClick={() => {

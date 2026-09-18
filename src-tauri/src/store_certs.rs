@@ -55,6 +55,33 @@ pub struct StoreCertificate {
     pub machine_store: bool,
 }
 
+/// Why the store could not be listed, in a form the picker can put into the
+/// user's language.
+///
+/// The platform's own error text is localized by the OS, not by this app, and
+/// matching on it would break in every other Windows language — so the reason
+/// and the HRESULT travel as fields, and `message` is the English line the CLI
+/// prints.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct StoreReadError {
+    /// `open-failed` or `unsupported`.
+    pub reason: &'static str,
+    /// The HRESULT, as `0x` and eight uppercase hex digits, when there is one.
+    pub code: Option<String>,
+    pub message: String,
+}
+
+impl std::fmt::Display for StoreReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+/// An HRESULT in the spelling `StoreReadError::code` carries.
+pub fn hresult_hex(code: i32) -> String {
+    format!("0x{:08X}", code as u32)
+}
+
 /// Whether a certificate belongs in the signing picker.
 ///
 /// Separate from every Windows call so the rule can be read and tested on its
@@ -272,7 +299,7 @@ unsafe fn hardware_backed(cert: *const CERT_CONTEXT) -> bool {
 
 /// Every eligible certificate in one store location.
 #[cfg(windows)]
-fn read_store(machine_store: bool) -> Result<Vec<StoreCertificate>, String> {
+fn read_store(machine_store: bool) -> Result<Vec<StoreCertificate>, StoreReadError> {
     let name = wide("MY");
     let location = if machine_store {
         CERT_SYSTEM_STORE_LOCAL_MACHINE_ID
@@ -289,7 +316,11 @@ fn read_store(machine_store: bool) -> Result<Vec<StoreCertificate>, String> {
             ),
             Some(name.as_ptr() as *const _),
         )
-        .map_err(|e| format!("The Windows certificate store could not be opened: {e}"))?;
+        .map_err(|e| StoreReadError {
+            reason: "open-failed",
+            code: Some(hresult_hex(e.code().0)),
+            message: format!("The Windows certificate store could not be opened: {e}"),
+        })?;
 
         let now = now_filetime();
         let mut rows: Vec<StoreCertificate> = Vec::new();
@@ -327,8 +358,12 @@ fn read_store(machine_store: bool) -> Result<Vec<StoreCertificate>, String> {
 }
 
 #[cfg(not(windows))]
-fn read_store(_machine_store: bool) -> Result<Vec<StoreCertificate>, String> {
-    Err("The Windows certificate store is not available on this system.".to_string())
+fn read_store(_machine_store: bool) -> Result<Vec<StoreCertificate>, StoreReadError> {
+    Err(StoreReadError {
+        reason: "unsupported",
+        code: None,
+        message: "The Windows certificate store is not available on this system.".to_string(),
+    })
 }
 
 /// Both store locations, the user's first.
@@ -338,7 +373,7 @@ fn read_store(_machine_store: bool) -> Result<Vec<StoreCertificate>, String> {
 /// on the key container is the normal case), and a key they cannot reach
 /// refuses at sign time by name. A store that will not open at all
 /// contributes nothing and does not fail the user's own list.
-pub fn list_certificates() -> Result<Vec<StoreCertificate>, String> {
+pub fn list_certificates_detailed() -> Result<Vec<StoreCertificate>, StoreReadError> {
     let user = read_store(false)?;
     let mut rows = user;
     if let Ok(machine) = read_store(true) {
@@ -351,9 +386,14 @@ pub fn list_certificates() -> Result<Vec<StoreCertificate>, String> {
     Ok(rows)
 }
 
+/// The same listing with the refusal as English text, for the CLI.
+pub fn list_certificates() -> Result<Vec<StoreCertificate>, String> {
+    list_certificates_detailed().map_err(|e| e.message)
+}
+
 #[tauri::command]
-pub fn list_store_certificates() -> Result<Vec<StoreCertificate>, String> {
-    list_certificates()
+pub fn list_store_certificates() -> Result<Vec<StoreCertificate>, StoreReadError> {
+    list_certificates_detailed()
 }
 
 #[cfg(test)]
@@ -423,6 +463,28 @@ mod tests {
     #[test]
     fn an_empty_eku_list_declares_no_restriction() {
         assert!(!code_signing_only(&[]));
+    }
+
+    #[test]
+    fn an_hresult_is_spelled_as_the_picker_matches_it() {
+        // A negative i32 HRESULT must come out as its unsigned bit pattern,
+        // or the renderer's code table never matches a real failure.
+        assert_eq!(hresult_hex(0x8007_0005_u32 as i32), "0x80070005");
+        assert_eq!(hresult_hex(0x8009_2004_u32 as i32), "0x80092004");
+        assert_eq!(hresult_hex(5), "0x00000005");
+    }
+
+    #[test]
+    fn a_store_refusal_serializes_as_fields_not_text() {
+        let e = StoreReadError {
+            reason: "open-failed",
+            code: Some(hresult_hex(0x8007_0005_u32 as i32)),
+            message: "The Windows certificate store could not be opened: x".to_string(),
+        };
+        let v = serde_json::to_value(&e).expect("serializes");
+        assert_eq!(v["reason"], "open-failed");
+        assert_eq!(v["code"], "0x80070005");
+        assert!(v["message"].as_str().is_some());
     }
 }
 
