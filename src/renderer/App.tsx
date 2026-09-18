@@ -3238,6 +3238,7 @@ function AppContent(): React.ReactElement {
       setView: (v) => harnessSetView(v),
       focusTab: (tab) => dispatch({ type: 'UI_FOCUS_TAB', tab }),
       setActiveOp: (op) => setActiveOp(op as Operation),
+      setToolDockWidth: (width) => dispatch({ type: 'UI_SET_TOOL_DOCK_WIDTH', width }),
       setTool: (tool) => dispatch({ type: 'UI_SET_TOOL', tool: tool as CanvasTool }),
       setDocViewMode: (mode) => dispatch({ type: 'UI_SET_DOC_VIEW_MODE', mode }),
       getStateSnapshot: () => harnessSnapshotRef.current(),

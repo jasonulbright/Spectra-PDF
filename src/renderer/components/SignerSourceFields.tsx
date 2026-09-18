@@ -1,8 +1,20 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useEngine } from '../hooks/useEngine';
 import { useTranslation } from 'react-i18next';
 import { dialog, type StoreCertificate } from '../lib/tauri-bridge';
-import { tChrome, tDate } from '../i18n';
+import { tChrome, tDate, type UiKey } from '../i18n';
+import {
+  ADVANCED_SIGNER_SOURCES,
+  PRIMARY_SIGNER_SOURCE,
+  emptySourceFor,
+  rememberedCertificate,
+  signerCertificateOptions,
+  sourceAfterStoreRead,
+  sourceOnOpen,
+  storeAvailability,
+  type SignerSource,
+  type SignerSourceMode,
+} from '../lib/signer-sources';
 import {
   CSC_GRANTS,
   DEFAULT_SCOPE,
@@ -23,9 +35,18 @@ import {
 } from '../lib/csc-providers';
 
 // The signer source both sign flows (SignaturesPanel invisible form, canvas
-// visible-signature popover) share: a PKCS#12 file, a PEM key+cert pair, a
-// PKCS#11 hardware token, a certificate in the Windows certificate store, or a
-// freshly generated self-signed .pfx (which becomes the selected .pfx).
+// visible-signature popover) share: a certificate installed in the Windows
+// certificate store, a PKCS#12 file, a PEM key+cert pair, a PKCS#11 hardware
+// token, a remote signing service, or a freshly generated self-signed .pfx
+// (which becomes the selected .pfx). The installed certificates are the
+// PRIMARY source and are enumerated as the form opens; the rest are offered
+// under their own heading below.
+//
+// LAYOUT: each source is a full-width row whose label WRAPS. A single row of
+// side-by-side source buttons does not fit either surface — the tool dock at
+// its 300px minimum leaves the group about 70px, the canvas card about 110px,
+// and against `overflow-hidden` a flex item resolves `min-width` to 0, so the
+// last sources were clipped away with no affordance that they existed.
 // SECURITY: this component never holds the SIGNING password or token PIN —
 // only the generator sub-form's own password, which is cleared the moment
 // generation finishes (the user then types it again as the signing
@@ -34,32 +55,22 @@ import {
 // source has no secret here at all: Windows collects any PIN itself, inside
 // the engine's sign call, and only a thumbprint ever leaves this component.
 
-export type SignerSource =
-  | { mode: 'pfx'; pfxPath: string | null }
-  | { mode: 'pem'; keyPath: string | null; certPath: string | null }
-  | {
-      mode: 'pkcs11';
-      modulePath: string | null;
-      tokenLabel: string;
-      certLabel: string;
-      keyLabel: string;
-    }
-  | { mode: 'store'; thumbprint: string | null; machineStore: boolean }
-  | {
-      mode: 'csc';
-      providerId: string | null;
-      credentialId: string | null;
-      /** The completed browser sign-in, for an authorization-code provider.
-       * Null on a client-credentials one, which needs no person. */
-      authorization: { code: string; redirectUri: string; verifier: string } | null;
-    };
+export type { SignerSource };
 
 /** Engine params for one signer source. Booleans ride as booleans — the
  * engine's store-location flag is one, and a stringified "false" would read
  * as true. */
 export type SignerParams = Record<string, string | boolean>;
 
-export const EMPTY_SIGNER_SOURCE: SignerSource = { mode: 'pfx', pfxPath: null };
+const SOURCE_LABEL_KEYS: Record<SignerSourceMode, UiKey> = {
+  store: 'dialog.signer.modeStore',
+  pfx: 'dialog.signer.modePfx',
+  pem: 'dialog.signer.modePem',
+  pkcs11: 'dialog.signer.modeToken',
+  csc: 'dialog.signer.modeCsc',
+};
+
+export const EMPTY_SIGNER_SOURCE: SignerSource = emptySourceFor(PRIMARY_SIGNER_SOURCE);
 
 /** The last store certificate signed with, so the picker can OFFER it again.
  * Pre-selection only — a remembered thumbprint never signs on its own, and a
@@ -173,6 +184,12 @@ export function SignerSourceFields({
 
   const inStoreMode = value.mode === 'store';
   const storeThumbprint = value.mode === 'store' ? value.thumbprint : null;
+  /** The user has operated the source chooser. A late store answer never
+   * moves a selection they made themselves. */
+  const userPicked = useRef(false);
+  /** The picker's own subtree, for finding a source radio without reaching
+   * into the other surface's copy of this form. */
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const loadStoreCerts = useCallback(async () => {
     setStoreBusy(true);
@@ -190,27 +207,92 @@ export function SignerSourceFields({
     }
   }, []);
 
-  // Entering the store mode reads the store once. The remembered thumbprint is
-  // pre-selected ONLY while that certificate is still one of the rows the
-  // store actually offers — a certificate that expired or was removed must not
-  // sit selected in the form.
+  const certOptions = useMemo(() => signerCertificateOptions(storeCerts ?? []), [storeCerts]);
+  const availability = storeAvailability({ busy: storeBusy, rows: storeCerts, error: storeError });
+
+  // Opening the form READS the store: installed certificates are the primary
+  // source, so they are on offer before the user asks for them.
   useEffect(() => {
-    if (!inStoreMode) return;
-    let live = true;
-    void (async () => {
-      const rows = storeCerts ?? (await loadStoreCerts());
-      if (!live || storeThumbprint) return;
-      const remembered = lastStoreCertificate();
-      const match = rows.find((r) => r.thumbprint === remembered);
-      if (match) onChange({ mode: 'store', thumbprint: match.thumbprint, machineStore: match.machine_store });
-    })();
-    return () => {
-      live = false;
-    };
+    void loadStoreCerts();
+  }, [loadStoreCerts]);
+
+  /** The selection, but only while the store still enumerates it. The caller's
+   * state outlives one opening of the form, so a thumbprint chosen against an
+   * earlier read can name a certificate that has since expired or been
+   * removed. */
+  const offeredThumbprint = rememberedCertificate(certOptions, storeThumbprint)?.thumbprint ?? null;
+
+  // The remembered thumbprint is pre-selected ONLY while that certificate is
+  // still one of the rows the store actually offers — a certificate that
+  // expired or was removed must not sit selected in the form, and one carried
+  // in from a previous opening is dropped for the same reason.
+  useEffect(() => {
+    if (!inStoreMode || availability === 'loading') return;
+    const stale = storeThumbprint !== null && offeredThumbprint === null;
+    // A live selection stands; only an absent or stale one is resolved.
+    if (storeThumbprint !== null && !stale) return;
+    const match = rememberedCertificate(certOptions, lastStoreCertificate());
+    if (match) {
+      onChange({ mode: 'store', thumbprint: match.thumbprint, machineStore: match.machineStore });
+    } else if (stale) {
+      onChange({ mode: 'store', thumbprint: null, machineStore: false });
+    }
     // `onChange` and the current selection are read, not depended on: this
-    // runs when the mode is entered, never again on every keystroke above it.
+    // runs when the source is entered or re-read, never again on the selection
+    // changing — a selection the user CLEARED has to stay cleared.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inStoreMode]);
+  }, [inStoreMode, availability, certOptions]);
+
+  // Re-decide the source every time the form opens. The caller's state
+  // outlives one opening, so a fallback taken because the store was
+  // unavailable would otherwise outlive the form that took it and a recovered
+  // store would never be offered again. Only an UNCONFIGURED source moves —
+  // a file, a label or a credential already chosen is the user's.
+  useEffect(() => {
+    const next = sourceOnOpen(value);
+    if (next !== value.mode) onChange(emptySourceFor(next));
+    // Runs once per mount by design; the incoming source is read, not
+    // depended on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Move the keyboard onto a source radio. A selection that moves without
+   * its focus leaves the arrow keys walking from a row that is no longer the
+   * chosen one. */
+  const focusSourceRadio = useCallback(
+    (mode: SignerSourceMode) => {
+      const active = document.activeElement;
+      const inThisPicker =
+        active instanceof HTMLElement
+        && (active.getAttribute('data-testid') ?? '').startsWith(`${idPrefix}-source-input-`);
+      if (!inThisPicker) return;
+      rootRef.current
+        ?.querySelector<HTMLInputElement>(`[data-testid="${idPrefix}-source-input-${mode}"]`)
+        ?.focus();
+    },
+    [idPrefix],
+  );
+
+  // A store that refused, or that holds no signer, hands the selection to the
+  // first advanced source rather than leaving an empty picker selected. The
+  // store's message stays on the store row either way, so the move explains
+  // itself. Once per opened form, on the FIRST answer only, and never over a
+  // source the user picked — the guards are `sourceAfterStoreRead`'s.
+  const fallbackSettled = useRef(false);
+  useEffect(() => {
+    if (fallbackSettled.current || availability === 'loading') return;
+    const next = sourceAfterStoreRead({
+      mode: value.mode,
+      thumbprint: offeredThumbprint,
+      userPicked: userPicked.current,
+      availability,
+    });
+    fallbackSettled.current = true;
+    if (next === value.mode) return;
+    onChange(emptySourceFor(next));
+    focusSourceRadio(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availability, inStoreMode, offeredThumbprint, focusSourceRadio]);
 
   const pickPfx = useCallback(async () => {
     const p = await dialog.pickCertificate();
@@ -272,319 +354,342 @@ export function SignerSourceFields({
     p ? p.split(/[\\/]/).pop()
       : <span className="text-neutral-600">{tChrome('dialog.signer.noneChosen')}</span>;
 
+  /** One source as a full-width row.
+   *
+   * The label WRAPS instead of being clipped: these rows are the one layout
+   * that survives both the dock at its minimum width and the canvas card, in
+   * every locale. The hint sits OUTSIDE the label and is referenced by
+   * `aria-describedby` — inside it, it would become part of the radio's
+   * accessible name and be read on every pass through the group. */
+  const sourceRow = (m: SignerSourceMode, hint?: string): React.ReactElement => {
+    const hintId = hint ? `${idPrefix}-source-${m}-hint` : undefined;
+    return (
+      <div key={m} className="flex flex-col">
+        <label
+          data-testid={`${idPrefix}-source-${m}`}
+          className="flex w-full items-start gap-2 cursor-pointer"
+        >
+          <input
+            type="radio"
+            // One native group of five, named by the fieldset's legend: the
+            // shared name is what makes the arrow keys traverse every source
+            // and what reports the set size honestly.
+            name={`${idPrefix}-signer-source`}
+            data-testid={`${idPrefix}-source-input-${m}`}
+            aria-describedby={hintId}
+            checked={value.mode === m}
+            onChange={() => {
+              userPicked.current = true;
+              // Picking the source already picked changes nothing. A fresh
+              // empty source would DISCARD the chosen certificate or path,
+              // and the store's pre-select is keyed on ENTERING the source —
+              // it does not run again to put the selection back.
+              if (value.mode === m) return;
+              onChange(emptySourceFor(m));
+            }}
+            className="mt-0.5 shrink-0"
+          />
+          <span className="min-w-0 text-xs text-neutral-300 break-words">
+            {tChrome(SOURCE_LABEL_KEYS[m])}
+          </span>
+        </label>
+        {hint ? (
+          <span id={hintId} className="ps-5 text-[11px] text-neutral-500 break-words">
+            {hint}
+          </span>
+        ) : null}
+      </div>
+    );
+  };
+
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.label')}</span>
-        <div className="flex rounded overflow-hidden border border-neutral-700">
-          {(['pfx', 'pem', 'pkcs11', 'store', 'csc'] as const).map((m) => (
-            <button
-              key={m}
-              data-testid={`${idPrefix}-source-${m}`}
-              onClick={() => {
-                // Picking the source already picked changes nothing. A fresh
-                // empty source would DISCARD the chosen certificate or path,
-                // and the store's pre-select is keyed on ENTERING the mode —
-                // it does not run again to put the selection back.
-                if (value.mode === m) return;
-                onChange(
-                  m === 'pfx'
-                    ? { mode: 'pfx', pfxPath: null }
-                    : m === 'pem'
-                      ? { mode: 'pem', keyPath: null, certPath: null }
-                      : m === 'store'
-                        ? { mode: 'store', thumbprint: null, machineStore: false }
-                        : m === 'csc'
-                          ? { mode: 'csc', providerId: null, credentialId: null, authorization: null }
-                          : { mode: 'pkcs11', modulePath: null, tokenLabel: '', certLabel: '', keyLabel: '' },
-                );
-              }}
-              className={`px-2.5 py-1 text-xs font-medium ${
-                value.mode === m
-                  ? 'bg-neutral-600 text-neutral-100'
-                  : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
-              }`}
-            >
-              {tChrome(
-                m === 'pfx'
-                  ? 'dialog.signer.modePfx'
-                  : m === 'pem'
-                    ? 'dialog.signer.modePem'
-                    : m === 'store'
-                      ? 'dialog.signer.modeStore'
-                      : m === 'csc'
-                        ? 'dialog.signer.modeCsc'
-                        : 'dialog.signer.modeToken',
-              )}
-            </button>
-          ))}
-        </div>
+    // A fieldset + legend names the ONE native radio group the five sources
+    // form. `min-w-0` is load-bearing, not tidy: a fieldset's default
+    // `min-width` is `min-content`, so without it this element refuses to
+    // shrink below its widest label and reintroduces the overflow above.
+    <fieldset className="min-w-0">
+      <legend className="text-xs text-neutral-400 mb-1.5">{tChrome('dialog.signer.label')}</legend>
+      <div ref={rootRef} className="flex flex-col gap-2">
+        {sourceRow(PRIMARY_SIGNER_SOURCE, tChrome('dialog.signer.modeStoreHint'))}
+
+        {/* The store's verdict renders whatever source is selected. The
+            fallback below moves the selection off an unusable store, and a
+            message gated on that selection would unmount in the same commit
+            that moved it — leaving a silent switch with no reason. */}
+        {availability === 'error' ? (
+          <div data-testid={`${idPrefix}-store-error`} className="text-xs text-red-400 break-words">
+            {storeError}
+          </div>
+        ) : availability === 'empty' ? (
+          <p
+            data-testid={`${idPrefix}-store-empty`}
+            className="text-[11px] text-neutral-500 break-words"
+          >
+            {tChrome('dialog.signer.storeNone')}
+          </p>
+        ) : availability === 'loading' && inStoreMode ? (
+          <p className="text-[11px] text-neutral-500">{tChrome('dialog.signer.storeLoading')}</p>
+        ) : null}
+
+        {value.mode === 'store' ? (
+          <>
+            {/* The label is stacked, not inline: this control carries a
+                subject, an issuer and a date, and an 80px inline label leaves
+                it too narrow to show any of them at the dock's minimum width. */}
+            <span className="text-xs text-neutral-400">
+              {tChrome('dialog.signer.storeCertificate')}
+            </span>
+            <div className="flex items-center gap-2 -mt-1">
+              <select
+                data-testid={`${idPrefix}-store-cert`}
+                value={value.thumbprint ?? ''}
+                disabled={storeBusy || certOptions.length === 0}
+                onChange={(e) => {
+                  const row = certOptions.find((r) => r.thumbprint === e.target.value);
+                  onChange({
+                    mode: 'store',
+                    thumbprint: row ? row.thumbprint : null,
+                    machineStore: row ? row.machineStore : false,
+                  });
+                }}
+                className="flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
+              >
+                <option value="">{tChrome('dialog.signer.storeChoose')}</option>
+                {certOptions.map((c) => (
+                  <option key={c.thumbprint} value={c.thumbprint}>
+                    {tChrome('dialog.signer.storeRow', {
+                      subject: c.subject,
+                      issuer: c.issuer,
+                      date: tDate(c.notAfter),
+                    })}
+                  </option>
+                ))}
+              </select>
+              <button
+                data-testid={`${idPrefix}-store-refresh`}
+                onClick={() => void loadStoreCerts()}
+                disabled={storeBusy}
+                className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded font-medium"
+              >
+                {tChrome('dialog.signer.storeRefresh')}
+              </button>
+            </div>
+            {(() => {
+              const selected = certOptions.find((c) => c.thumbprint === value.thumbprint);
+              if (!selected) return null;
+              const marks: string[] = [];
+              if (selected.hardwareBacked) marks.push(tChrome('dialog.signer.storeHardware'));
+              if (selected.machineStore) marks.push(tChrome('dialog.signer.storeMachine'));
+              return (
+                <p className="text-[11px] text-neutral-500 -mt-1 break-all">
+                  {selected.thumbprint}
+                  {marks.length > 0 ? ` · ${marks.join(' · ')}` : ''}
+                </p>
+              );
+            })()}
+            <p className="text-[11px] text-neutral-500 -mt-1">
+              {tChrome('dialog.signer.storeNote')}
+            </p>
+          </>
+        ) : null}
+
+        <span className="text-xs text-neutral-400 mt-1">
+          {tChrome('dialog.signer.sourceAdvanced')}
+        </span>
+        {ADVANCED_SIGNER_SOURCES.map((m) => sourceRow(m))}
         <button
           data-testid={`${idPrefix}-generate-open`}
           onClick={() => {
             setShowGenerate((v) => !v);
             setGenError(null);
           }}
-          className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
+          className="self-start px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
           title={tChrome('dialog.signer.createTitle')}
         >
           {tChrome('dialog.signer.create')}
         </button>
-      </div>
 
-      {value.mode === 'pfx' ? (
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.modePfx')}</span>
-          <span
-            data-testid={`${idPrefix}-pfx-path`}
-            className="flex-1 text-xs text-neutral-300 truncate"
-            title={value.pfxPath ?? undefined}
-          >
-            {fileName(value.pfxPath)}
-          </span>
-          <button
-            data-testid={`${idPrefix}-pick-pfx`}
-            onClick={() => void pickPfx()}
-            className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
-          >
-            {tChrome('dialog.signer.choose')}
-          </button>
-        </div>
-      ) : value.mode === 'store' ? (
-        <>
+        {value.mode === 'pfx' ? (
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">
-              {tChrome('dialog.signer.storeCertificate')}
-            </span>
-            <select
-              data-testid={`${idPrefix}-store-cert`}
-              value={value.thumbprint ?? ''}
-              disabled={storeBusy || !storeCerts || storeCerts.length === 0}
-              onChange={(e) => {
-                const row = (storeCerts ?? []).find((r) => r.thumbprint === e.target.value);
-                onChange({
-                  mode: 'store',
-                  thumbprint: row ? row.thumbprint : null,
-                  machineStore: row ? row.machine_store : false,
-                });
-              }}
-              className="flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
-            >
-              <option value="">{tChrome('dialog.signer.storeChoose')}</option>
-              {(storeCerts ?? []).map((c) => (
-                <option key={c.thumbprint} value={c.thumbprint}>
-                  {tChrome('dialog.signer.storeRow', {
-                    subject: c.subject || c.thumbprint,
-                    issuer: c.issuer || c.thumbprint,
-                    date: tDate(c.not_after),
-                  })}
-                </option>
-              ))}
-            </select>
-            <button
-              data-testid={`${idPrefix}-store-refresh`}
-              onClick={() => void loadStoreCerts()}
-              disabled={storeBusy}
-              className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded font-medium"
-            >
-              {tChrome('dialog.signer.storeRefresh')}
-            </button>
-          </div>
-          {storeError ? (
-            <div data-testid={`${idPrefix}-store-error`} className="text-xs text-red-400 ml-[5.5rem]">
-              {storeError}
-            </div>
-          ) : storeBusy ? (
-            <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
-              {tChrome('dialog.signer.storeLoading')}
-            </p>
-          ) : storeCerts && storeCerts.length === 0 ? (
-            <p
-              data-testid={`${idPrefix}-store-empty`}
-              className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]"
-            >
-              {tChrome('dialog.signer.storeNone')}
-            </p>
-          ) : null}
-          {(() => {
-            const selected = (storeCerts ?? []).find((c) => c.thumbprint === value.thumbprint);
-            if (!selected) return null;
-            const marks: string[] = [];
-            if (selected.hardware_backed) marks.push(tChrome('dialog.signer.storeHardware'));
-            if (selected.machine_store) marks.push(tChrome('dialog.signer.storeMachine'));
-            return (
-              <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem] break-all">
-                {selected.thumbprint}
-                {marks.length > 0 ? ` · ${marks.join(' · ')}` : ''}
-              </p>
-            );
-          })()}
-          <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
-            {tChrome('dialog.signer.storeNote')}
-          </p>
-        </>
-      ) : value.mode === 'csc' ? (
-        <CscSignerFields value={value} onChange={onChange} idPrefix={idPrefix} />
-      ) : value.mode === 'pkcs11' ? (
-        <>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.module')}</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.modePfx')}</span>
             <span
-              className="flex-1 text-xs text-neutral-300 truncate"
-              title={value.modulePath ?? undefined}
+              data-testid={`${idPrefix}-pfx-path`}
+              className="flex-1 min-w-0 text-xs text-neutral-300 truncate"
+              title={value.pfxPath ?? undefined}
             >
-              {fileName(value.modulePath)}
+              {fileName(value.pfxPath)}
             </span>
             <button
-              data-testid={`${idPrefix}-pick-module`}
-              onClick={() => void pickModule()}
+              data-testid={`${idPrefix}-pick-pfx`}
+              onClick={() => void pickPfx()}
               className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
             >
               {tChrome('dialog.signer.choose')}
             </button>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.token')}</span>
-            <input
-              data-testid={`${idPrefix}-token-label`}
-              value={value.tokenLabel}
-              onChange={(e) => onChange({ ...value, tokenLabel: e.target.value })}
-              placeholder={tChrome('dialog.signer.tokenPlaceholder')}
-              className="flex-1 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.certLabel')}</span>
-            <input
-              data-testid={`${idPrefix}-cert-label`}
-              value={value.certLabel}
-              onChange={(e) => onChange({ ...value, certLabel: e.target.value })}
-              placeholder={tChrome('dialog.signer.certPlaceholder')}
-              className="flex-1 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.keyLabel')}</span>
-            <input
-              data-testid={`${idPrefix}-key-label`}
-              value={value.keyLabel}
-              onChange={(e) => onChange({ ...value, keyLabel: e.target.value })}
-              placeholder={tChrome('dialog.signer.keyPlaceholder')}
-              className="flex-1 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
-            {tChrome('dialog.signer.tokenNote')}
-          </p>
-        </>
-      ) : (
-        <>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.keyFile')}</span>
-            <span className="flex-1 text-xs text-neutral-300 truncate" title={value.keyPath ?? undefined}>
-              {fileName(value.keyPath)}
-            </span>
-            <button
-              data-testid={`${idPrefix}-pick-key`}
-              onClick={() => void pickKey()}
-              className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
-            >
-              {tChrome('dialog.signer.choose')}
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.certificate')}</span>
-            <span className="flex-1 text-xs text-neutral-300 truncate" title={value.certPath ?? undefined}>
-              {fileName(value.certPath)}
-            </span>
-            <button
-              data-testid={`${idPrefix}-pick-cert`}
-              onClick={() => void pickCert()}
-              className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
-            >
-              {tChrome('dialog.signer.choose')}
-            </button>
-          </div>
-          <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
-            {tChrome('dialog.signer.pemNote')}
-          </p>
-        </>
-      )}
+        ) : value.mode === 'csc' ? (
+          <CscSignerFields value={value} onChange={onChange} idPrefix={idPrefix} />
+        ) : value.mode === 'pkcs11' ? (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.module')}</span>
+              <span
+                className="flex-1 min-w-0 text-xs text-neutral-300 truncate"
+                title={value.modulePath ?? undefined}
+              >
+                {fileName(value.modulePath)}
+              </span>
+              <button
+                data-testid={`${idPrefix}-pick-module`}
+                onClick={() => void pickModule()}
+                className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
+              >
+                {tChrome('dialog.signer.choose')}
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.token')}</span>
+              <input
+                data-testid={`${idPrefix}-token-label`}
+                value={value.tokenLabel}
+                onChange={(e) => onChange({ ...value, tokenLabel: e.target.value })}
+                placeholder={tChrome('dialog.signer.tokenPlaceholder')}
+                className="flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.certLabel')}</span>
+              <input
+                data-testid={`${idPrefix}-cert-label`}
+                value={value.certLabel}
+                onChange={(e) => onChange({ ...value, certLabel: e.target.value })}
+                placeholder={tChrome('dialog.signer.certPlaceholder')}
+                className="flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.keyLabel')}</span>
+              <input
+                data-testid={`${idPrefix}-key-label`}
+                value={value.keyLabel}
+                onChange={(e) => onChange({ ...value, keyLabel: e.target.value })}
+                placeholder={tChrome('dialog.signer.keyPlaceholder')}
+                className="flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
+              {tChrome('dialog.signer.tokenNote')}
+            </p>
+          </>
+        ) : value.mode === 'pem' ? (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.keyFile')}</span>
+              <span className="flex-1 min-w-0 text-xs text-neutral-300 truncate" title={value.keyPath ?? undefined}>
+                {fileName(value.keyPath)}
+              </span>
+              <button
+                data-testid={`${idPrefix}-pick-key`}
+                onClick={() => void pickKey()}
+                className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
+              >
+                {tChrome('dialog.signer.choose')}
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.certificate')}</span>
+              <span className="flex-1 min-w-0 text-xs text-neutral-300 truncate" title={value.certPath ?? undefined}>
+                {fileName(value.certPath)}
+              </span>
+              <button
+                data-testid={`${idPrefix}-pick-cert`}
+                onClick={() => void pickCert()}
+                className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
+              >
+                {tChrome('dialog.signer.choose')}
+              </button>
+            </div>
+            <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
+              {tChrome('dialog.signer.pemNote')}
+            </p>
+          </>
+        ) : null}
 
-      {showGenerate && (
-        <div className="rounded border border-neutral-700 bg-neutral-900/70 p-2.5 flex flex-col gap-2">
-          <div className="text-xs text-neutral-300 font-medium">{tChrome('dialog.signer.newTitle')}</div>
-          <p className="text-[11px] text-neutral-500 -mt-1">
-            {tChrome('dialog.signer.newNote')}
-          </p>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.name')}</span>
-            <input
-              data-testid={`${idPrefix}-generate-name`}
-              type="text"
-              value={genName}
-              onChange={(e) => setGenName(e.target.value)}
-              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
-            />
+        {showGenerate && (
+          <div className="rounded border border-neutral-700 bg-neutral-900/70 p-2.5 flex flex-col gap-2">
+            <div className="text-xs text-neutral-300 font-medium">{tChrome('dialog.signer.newTitle')}</div>
+            <p className="text-[11px] text-neutral-500 -mt-1">
+              {tChrome('dialog.signer.newNote')}
+            </p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.name')}</span>
+              <input
+                data-testid={`${idPrefix}-generate-name`}
+                type="text"
+                value={genName}
+                onChange={(e) => setGenName(e.target.value)}
+                className="flex-1 min-w-0 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.organization')}</span>
+              <input
+                type="text"
+                value={genOrg}
+                placeholder={tChrome('dialog.signer.optional')}
+                onChange={(e) => setGenOrg(e.target.value)}
+                className="flex-1 min-w-0 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.password')}</span>
+              <input
+                data-testid={`${idPrefix}-generate-password`}
+                type="password"
+                value={genPassword}
+                onChange={(e) => setGenPassword(e.target.value)}
+                className="flex-1 min-w-0 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            {genError && <div className="text-xs text-red-400">{genError}</div>}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowGenerate(false);
+                  setGenPassword('');
+                  setGenError(null);
+                }}
+                className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
+              >
+                {tChrome('dialog.common.cancel')}
+              </button>
+              <button
+                data-testid={`${idPrefix}-generate-apply`}
+                onClick={() => void handleGenerate()}
+                disabled={genBusy}
+                className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
+              >
+                {tChrome(genBusy ? 'dialog.signer.generating' : 'dialog.signer.generate')}
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.organization')}</span>
-            <input
-              type="text"
-              value={genOrg}
-              placeholder={tChrome('dialog.signer.optional')}
-              onChange={(e) => setGenOrg(e.target.value)}
-              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.password')}</span>
-            <input
-              data-testid={`${idPrefix}-generate-password`}
-              type="password"
-              value={genPassword}
-              onChange={(e) => setGenPassword(e.target.value)}
-              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          {genError && <div className="text-xs text-red-400">{genError}</div>}
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={() => {
-                setShowGenerate(false);
-                setGenPassword('');
-                setGenError(null);
-              }}
-              className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
-            >
-              {tChrome('dialog.common.cancel')}
-            </button>
-            <button
-              data-testid={`${idPrefix}-generate-apply`}
-              onClick={() => void handleGenerate()}
-              disabled={genBusy}
-              className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
-            >
-              {tChrome(genBusy ? 'dialog.signer.generating' : 'dialog.signer.generate')}
-            </button>
-          </div>
-        </div>
-      )}
+        )}
 
-      {genDone && (
-        <div
-          data-testid={`${idPrefix}-generate-done`}
-          className="text-[11px] text-green-300/90 bg-green-600/10 border border-green-600/30 rounded px-2 py-1"
-        >
-          {/* One whole message, not a sentence assembled around a <strong>:
-              the clause order differs per language (the Settings precedent). */}
-          {tChrome('dialog.signer.created', {
-            name: genDone.common_name,
-            date: tDate(genDone.not_after),
-          })}
-        </div>
-      )}
-    </div>
+        {genDone && (
+          <div
+            data-testid={`${idPrefix}-generate-done`}
+            className="text-[11px] text-green-300/90 bg-green-600/10 border border-green-600/30 rounded px-2 py-1"
+          >
+            {/* One whole message, not a sentence assembled around a <strong>:
+                the clause order differs per language (the Settings precedent). */}
+            {tChrome('dialog.signer.created', {
+              name: genDone.common_name,
+              date: tDate(genDone.not_after),
+            })}
+          </div>
+        )}
+      </div>
+    </fieldset>
   );
 }
 
@@ -804,7 +909,7 @@ function CscSignerFields({
         <div className="flex items-center gap-2">
           <span className={labelClass}>{tChrome('dialog.signer.cscCaBundle')}</span>
           <span
-            className="flex-1 text-xs text-neutral-300 truncate"
+            className="flex-1 min-w-0 text-xs text-neutral-300 truncate"
             title={draft.caBundle ?? undefined}
           >
             {draft.caBundle ? (

@@ -203,6 +203,26 @@ export interface StoreCertificate {
   machine_store: boolean;
 }
 
+/** What a pinned certificate-store enumeration answers with. */
+export type StoreCertificateAnswer = { rows: StoreCertificate[] } | { error: string };
+
+let pinnedStoreCertificates: StoreCertificateAnswer | null = null;
+
+/**
+ * Test seam: pin what the certificate-store enumeration answers.
+ *
+ * An empty store and a store that refuses cannot be arranged from outside —
+ * the only real answer is to delete the machine's own certificates, which no
+ * suite may do, and the IPC cannot be stubbed from the page
+ * (`__TAURI_INTERNALS__.invoke` is non-writable). So the pin sits here, in the
+ * module the shipped code already reads, reached only from the harness, which
+ * exists only in a `VITE_E2E` build — the `pinGsCapability` precedent. `null`
+ * unpins and the next read goes to Windows for real.
+ */
+export function pinStoreCertificates(answer: StoreCertificateAnswer | null): void {
+  pinnedStoreCertificates = answer;
+}
+
 export const dialog = {
   openFiles: () => {
     if (!openDialogInflight) {
@@ -250,7 +270,15 @@ export const dialog = {
    * thing a signing request later carries is a thumbprint. Enumeration runs
    * under a silent context, so opening the picker never raises a PIN prompt.
    */
-  listStoreCertificates: () => invoke<StoreCertificate[]>('list_store_certificates'),
+  listStoreCertificates: (): Promise<StoreCertificate[]> => {
+    const pinned = pinnedStoreCertificates;
+    if (pinned) {
+      return 'error' in pinned
+        ? Promise.reject(new Error(pinned.error))
+        : Promise.resolve(pinned.rows);
+    }
+    return invoke<StoreCertificate[]>('list_store_certificates');
+  },
   /**
    * Sign in to a remote signing service in the SYSTEM BROWSER (RFC 8252) and
    * return the authorization code its redirect carried.

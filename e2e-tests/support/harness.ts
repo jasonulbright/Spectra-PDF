@@ -177,6 +177,250 @@ export async function setActiveOp(op: string): Promise<void> {
   );
 }
 
+/**
+ * Pin what the certificate-store enumeration answers.
+ *
+ * `{ rows: [] }` is an empty store, `{ error: '…' }` a store that refuses, and
+ * `null` unpins so the next read goes to Windows for real. Neither of the
+ * first two can be arranged from outside — a suite may not delete the
+ * machine's own certificates and the IPC is not stubbable from the page.
+ */
+export async function pinStoreCertificates(
+  answer: { rows: unknown[] } | { error: string } | null,
+): Promise<void> {
+  await browser.execute<void, [unknown]>(
+    function (a) {
+      (window as any).__SPECTRA_TEST__.storeCertsPin(a);
+    },
+    answer,
+  );
+}
+
+/** Switch the UI language live, the way Preferences does. A layout assertion
+ * that only ever runs in `en` proves nothing about the locale whose label is
+ * longest. */
+export async function setUiLanguage(code: string): Promise<void> {
+  await browser.execute<void, [string]>(
+    function (c) {
+      (window as any).__SPECTRA_TEST__.setLanguage(c);
+    },
+    code,
+  );
+  await browser.waitUntil(
+    async () => (await browser.execute(() => document.documentElement.lang)) === code,
+    { timeout: 10_000, timeoutMsg: `the UI never switched to ${code}` },
+  );
+}
+
+/** Resize the tool dock. The reducer clamps, so a value below the minimum
+ * lands exactly ON the minimum — which is the width a panel has to survive. */
+export async function setToolDockWidth(width: number): Promise<void> {
+  await browser.execute<void, [number]>(
+    function (w) {
+      (window as any).__SPECTRA_TEST__.setToolDockWidth(w);
+    },
+    width,
+  );
+}
+
+export interface MeasuredBox {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+export interface BoxFit {
+  /** The element's box lies inside the container's client box along the INLINE
+   * axis. This is the one a clipped control fails: `overflow: hidden` narrows
+   * what is painted, never the box `getBoundingClientRect` reports. */
+  insideHorizontally: boolean;
+  /** The same along the block axis. A long panel that scrolls is not clipped,
+   * so this is information, not a verdict. */
+  insideVertically: boolean;
+  element: MeasuredBox;
+  container: MeasuredBox;
+}
+
+/**
+ * Measure one element against a container's CLIENT box, WITHOUT scrolling.
+ *
+ * Nothing here may scroll first: `overflow: hidden` still makes a scroll
+ * container, so `scrollIntoView` slides a clipped control into its clipping
+ * parent's visible strip and makes a clipped layout measure as a fitting one.
+ * That is also why a testid click proves nothing — WebDriver scrolls before it
+ * clicks.
+ */
+export async function boxFit(selector: string, containerSelector: string): Promise<BoxFit> {
+  return browser.execute(
+    function (sel: string, contSel: string) {
+      const el = document.querySelector(sel);
+      const cont = document.querySelector(contSel);
+      if (!el) throw new Error(`boxFit: no element for ${sel}`);
+      if (!cont) throw new Error(`boxFit: no container for ${contSel}`);
+      const e = el.getBoundingClientRect();
+      const c = cont.getBoundingClientRect();
+      // The container's client box, so its own scrollbar gutter is not counted
+      // as room the element may occupy.
+      const right = c.left + cont.clientLeft + cont.clientWidth;
+      const bottom = c.top + cont.clientTop + cont.clientHeight;
+      const left = c.left + cont.clientLeft;
+      const top = c.top + cont.clientTop;
+      const round = (b: MeasuredBox): MeasuredBox => ({
+        left: Math.round(b.left),
+        right: Math.round(b.right),
+        top: Math.round(b.top),
+        bottom: Math.round(b.bottom),
+        width: Math.round(b.width),
+        height: Math.round(b.height),
+      });
+      return {
+        insideHorizontally: e.width > 0 && e.left >= left - 0.5 && e.right <= right + 0.5,
+        insideVertically: e.height > 0 && e.top >= top - 0.5 && e.bottom <= bottom + 0.5,
+        element: round({ left: e.left, right: e.right, top: e.top, bottom: e.bottom, width: e.width, height: e.height }),
+        container: round({ left, right, top, bottom, width: cont.clientWidth, height: cont.clientHeight }),
+      };
+    },
+    selector,
+    containerSelector,
+  ) as Promise<BoxFit>;
+}
+
+export interface HorizontalOverflow {
+  /** `scrollWidth - clientWidth`. Blind on its own: it counts only what lies
+   * past the END edge in the scroll direction, so content poking out of the
+   * START edge reads zero. */
+  scroll: number;
+  /** The furthest any descendant pokes out of the container's client box on
+   * the left, in px. */
+  left: number;
+  /** The same on the right. */
+  right: number;
+  /** What the container tagged as poking out, for the failure message. */
+  worst: { testid: string | null; tag: string; text: string; left: number; right: number } | null;
+}
+
+/**
+ * How far a container's content overflows it along the inline axis, measured
+ * at BOTH edges.
+ *
+ * `scrollWidth - clientWidth` alone is not enough: a 2000px child appended to
+ * the end reads as overflow, while a real 7px poke out of the inline-start
+ * edge reads as zero — and in a scroll container that start-side strip is
+ * clipped and unreachable, which is the worse of the two.
+ */
+export async function horizontalOverflow(containerSelector: string): Promise<HorizontalOverflow> {
+  return browser.execute(function (sel: string) {
+    const el = document.querySelector(sel) as HTMLElement | null;
+    if (!el) throw new Error(`horizontalOverflow: no container for ${sel}`);
+    const rect = el.getBoundingClientRect();
+    // The client box in page coordinates, with the current scroll applied so a
+    // scrolled container is compared against what it is showing.
+    const clientLeft = rect.left + el.clientLeft;
+    const clientRight = clientLeft + el.clientWidth;
+    let left = 0;
+    let right = 0;
+    let worst: { testid: string | null; tag: string; text: string; left: number; right: number } | null = null;
+    el.querySelectorAll('*').forEach((node) => {
+      const r = node.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return;
+      const overLeft = clientLeft - r.left;
+      const overRight = r.right - clientRight;
+      const over = Math.max(overLeft, overRight);
+      if (over <= 0.5) return;
+      if (overLeft > left) left = overLeft;
+      if (overRight > right) right = overRight;
+      if (!worst || over > Math.max(clientLeft - worst.left, worst.right - clientRight)) {
+        worst = {
+          testid: node.getAttribute('data-testid'),
+          tag: node.tagName + '.' + (node.getAttribute('class') ?? '').slice(0, 40),
+          text: (node.textContent ?? '').trim().slice(0, 40),
+          left: Math.round(r.left),
+          right: Math.round(r.right),
+        };
+      }
+    });
+    return {
+      scroll: el.scrollWidth - el.clientWidth,
+      left: Math.round(left),
+      right: Math.round(right),
+      worst,
+    };
+  }, containerSelector) as Promise<HorizontalOverflow>;
+}
+
+export interface RowMetrics {
+  /** The row's own box. */
+  width: number;
+  height: number;
+  /** The container's CONTENT width — its client box less its own padding,
+   * which is the width a full-width child can actually occupy. */
+  containerWidth: number;
+  /** The most lines any single text node in the row occupies, from that
+   * node's own computed line-height. A squeezed control stays inside its
+   * container and grows TALLER instead, so containment cannot see it. */
+  lines: number;
+  lineHeight: number;
+  insideHorizontally: boolean;
+}
+
+/**
+ * Measure one row's legibility against its container, WITHOUT scrolling.
+ *
+ * Containment is not enough once labels wrap: a control squeezed into a
+ * 45px-wide, 64px-tall column is still fully inside its panel. Width against
+ * the container's content box and a per-text-node line count are what separate
+ * a laid-out row from a squeezed one.
+ */
+export async function rowMetrics(selector: string, containerSelector: string): Promise<RowMetrics> {
+  return browser.execute(
+    function (sel: string, contSel: string) {
+      const el = document.querySelector(sel) as HTMLElement | null;
+      const cont = document.querySelector(contSel) as HTMLElement | null;
+      if (!el) throw new Error(`rowMetrics: no element for ${sel}`);
+      if (!cont) throw new Error(`rowMetrics: no container for ${contSel}`);
+      const r = el.getBoundingClientRect();
+      const c = cont.getBoundingClientRect();
+      const clientLeft = c.left + cont.clientLeft;
+      const clientRight = clientLeft + cont.clientWidth;
+      const contStyle = window.getComputedStyle(cont);
+      const pad = (parseFloat(contStyle.paddingLeft) || 0) + (parseFloat(contStyle.paddingRight) || 0);
+      // Per TEXT NODE, each against its OWN line-height: a row is as tall as
+      // its tallest child, and the question is how many lines a label needed.
+      let lines = 0;
+      let lineHeight = 0;
+      const leaves = el.querySelectorAll('*');
+      const measure = (node: Element) => {
+        if (node.children.length > 0) return;
+        if (!(node.textContent ?? '').trim()) return;
+        const st = window.getComputedStyle(node);
+        const parsed = parseFloat(st.lineHeight);
+        const lh = Number.isFinite(parsed) ? parsed : (parseFloat(st.fontSize) || 0) * 1.2;
+        if (lh <= 0) return;
+        const n = Math.round(node.getBoundingClientRect().height / lh);
+        if (n > lines) {
+          lines = n;
+          lineHeight = lh;
+        }
+      };
+      leaves.forEach(measure);
+      if (leaves.length === 0) measure(el);
+      return {
+        width: Math.round(r.width),
+        height: Math.round(r.height),
+        containerWidth: Math.round(cont.clientWidth - pad),
+        lines,
+        lineHeight: Math.round(lineHeight),
+        insideHorizontally: r.width > 0 && r.left >= clientLeft - 0.5 && r.right <= clientRight + 0.5,
+      };
+    },
+    selector,
+    containerSelector,
+  ) as Promise<RowMetrics>;
+}
+
 export async function saveActiveAs(destPath: string): Promise<void> {
   const error = await browser.executeAsync<string | null, [string]>(
     function (dest, done) {
