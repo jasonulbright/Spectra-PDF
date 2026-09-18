@@ -38,6 +38,9 @@ live in a document. This module is that pass, run once after every page:
   - DERIVATIVES. The catalog's /PieceInfo can hold an authoring application's
     private copy of the whole document; the document XMP can hold
     xmp:Thumbnails, a raster of a page as it was. Both go.
+  - FONTS. A font keeps the glyph program of every character it drew, and its
+    tables name those characters. Every font whose use shrank is cut to what
+    the remaining text draws (`redact_fonts`).
 """
 
 from __future__ import annotations
@@ -574,11 +577,15 @@ def strip_document_derivatives(pdf) -> None:
 
 def finish(pdf, run) -> None:
     """Every document-wide step, in the order their inputs require: the
-    structure pass reads liveness after the shared resources are cleaned, and
-    the JBIG2 conversion reads what the file keeps after both."""
+    structure pass reads liveness after the shared resources are cleaned, the
+    JBIG2 conversion reads what the file keeps after both, and the font cut
+    counts what the file still draws once nothing else will leave it."""
+    from engine import redact_fonts
+
     clean_shared_resources(pdf, set(run.copies_of) | set(run.removed_originals))
     live = reachable_from_pages(pdf)
     rebind_structure(pdf, run, live)
     prune_fields(pdf, run.removed_widgets)
     convert_jbig2_sharers(pdf, run)
     strip_document_derivatives(pdf)
+    redact_fonts.prune(pdf, getattr(run, "fonts", None))

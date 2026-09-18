@@ -63,6 +63,7 @@ class Bench:
     pdf: str
     transparent: str
     postscript: str
+    jbig2: str
     out: Path
 
     def target(self, name: str) -> str:
@@ -79,6 +80,7 @@ def bench(tmp_path) -> Bench:
         pdf=str(pdf),
         transparent=_transparent_pdf(tmp_path),
         postscript=_postscript(tmp_path),
+        jbig2=_jbig2_pdf(tmp_path),
         out=out,
     )
 
@@ -99,6 +101,41 @@ def _transparent_pdf(directory: Path) -> str:
         Dictionary(ExtGState=Dictionary(GS0=state)),
         b"q /GS0 gs 1 0 0 rg 100 100 300 300 re f Q\n"
         b"q 0 0 1 rg 200 200 300 300 re f Q\n",
+    )
+    doc.save(str(path))
+    return str(path)
+
+
+def _jbig2_pdf(directory: Path) -> str:
+    """A 16 x 16 JBIG2 image that a redaction mark covers in part.
+
+    Its stream holds two segments, a page information segment (type 48) and
+    an end of page segment (type 49): it passes the structure check that runs
+    before any decoder, so the redaction reaches the decode, which is the
+    Ghostscript leg.
+    """
+    import struct
+
+    size = 16
+    info = struct.pack(">IIIIBH", size, size, 0, 0, 0, 0)
+    data = (
+        struct.pack(">IBBBI", 0, 48, 0, 1, len(info)) + info
+        + struct.pack(">IBBBI", 1, 49, 0, 1, 0)
+    )
+    path = directory / "jbig2.pdf"
+    doc = pikepdf.new()
+    image = doc.make_stream(data)
+    image["/Type"] = Name.XObject
+    image["/Subtype"] = Name.Image
+    image["/Width"] = size
+    image["/Height"] = size
+    image["/ColorSpace"] = Name.DeviceGray
+    image["/BitsPerComponent"] = 1
+    image["/Filter"] = Name.JBIG2Decode
+    builders.add_page(
+        doc,
+        Dictionary(XObject=Dictionary(Im0=image)),
+        b"q 16 0 0 16 0 0 cm /Im0 Do Q\n",
     )
     doc.save(str(path))
     return str(path)
@@ -156,6 +193,13 @@ def _image_export(b: Bench) -> object:
     from engine.image_export import export_images
 
     return export_images(b.pdf, b.target("page.png"))
+
+
+def _image_redact(b: Bench) -> object:
+    # A partly marked JBIG2 image is decoded before its marked pixels go.
+    from engine.redact import redact
+
+    return redact(b.jbig2, b.target("out.pdf"), [{"page": 1, "rect": [0, 0, 8, 8]}])
 
 
 def _mrc(b: Bench) -> object:
@@ -259,6 +303,7 @@ ROSTER: dict[str, Callable[[Bench], object]] = {
     "flattener": _flattener,
     "grayscale": _grayscale,
     "image_export": _image_export,
+    "image_redact": _image_redact,
     "mrc": _mrc,
     "mrc_codecs": _mrc_codecs,
     "object_inspector": _object_inspector,

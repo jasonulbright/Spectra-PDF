@@ -313,6 +313,7 @@ image_export.ghostscriptReportedSuccessExpected	pattern	image_export	Ghostscript
 image_export.outputPathDirectoryFile	pattern	create_pdf,extract_text,image_export,office_export,soffice	output path is a directory, not a file: {{output}}
 image_export.unsupportedImageFormat	pattern	image_export	unsupported image format {{fmt}} (have {{v1}})
 image_redact.imageCannotPartlyRedacted	pattern	image_redact	This image cannot be partly redacted ({{reason}}). Mark the whole image to remove it.
+image_redact.redactedCharactersCannotRemoved	pattern	image_redact	The redacted characters cannot be removed from the font {{font}} ({{reason}}).
 incremental.editClassMustForm	exact	incremental	edit class must be "form-fill", "annotate" or "structural"
 incremental.incrementalTransplantFailed	pattern	incremental	Incremental transplant failed: {{e}}
 incremental.incrementalWriteDidPreserve	exact	incremental	Incremental write did not preserve the original bytes verbatim — refusing to emit a signature-breaking file
@@ -370,8 +371,9 @@ mrc_codecs.jbigEncoderAvailableJbig	pattern	mrc_codecs	The JBIG2 encoder is not 
 mrc_codecs.jbigEncoderProducedOutput	pattern	mrc_codecs	The JBIG2 encoder produced no output for page {{v0}}.
 mrc_codecs.jbigEncoderProducedSymbol	exact	mrc_codecs	The JBIG2 encoder produced no symbol dictionary — the shared /JBIG2Globals stream every page refers to is missing.
 mrc_codecs.jbigSymbolThresholdMust	pattern	mrc_codecs	the JBIG2 symbol threshold must be {{MIN_SYMBOL_THRESHOLD}}-{{MAX_SYMBOL_THRESHOLD}}, got {{symbol_threshold}}
+mrc_codecs.jpegBackgroundCouldEncoded	exact	mrc_codecs	the JPEG 2000 background could not be encoded exactly
+mrc_codecs.jpegBackgroundNeedsPositive	pattern	mrc_codecs	a JPEG 2000 background needs a positive quantization step and 0-{{JPX_MAX_LEVELS}} decomposition levels, got {{step}} and {{levels}}
 mrc_codecs.jpegQualityMustGot	pattern	mrc_codecs	JPEG quality must be 1-100, got {{quality}}
-mrc_codecs.jpegRateMustGot	pattern	mrc_codecs	a JPEG2000 rate must be >= 1, got {{rate}}
 mrc_codecs.maskMustBitImage	pattern	mrc_codecs	a mask must be a 1-bit image (Pillow mode '1'), got mode {{v0}}
 mrc_codecs.maskVerificationCouldDecode	pattern	mrc_codecs	mask verification could not decode the stencil: {{detail}}
 mrc_codecs.maskVerificationFailedEmbedded	pattern	mrc_codecs	mask verification failed: the embedded {{v0}} stencil decodes to {{got}} ink coverage, the mask it came from has {{v2}}.
