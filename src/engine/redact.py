@@ -41,8 +41,10 @@ removed with their popups and replies.
 Last, once per document (`redact_document.finish`): shared and inherited
 resource dictionaries that still list a replaced original, structure
 references to replaced objects, fields whose widgets were all removed, JBIG2
-symbol dictionaries a redacted image used, and the document's own thumbnails
-and private data.
+symbol dictionaries a redacted image used, the document's own thumbnails and
+private data, and every font the removed text drew with, cut to what the
+remaining text draws (`redact_fonts`, measured against a scan taken before the
+first page changes).
 
 Remaining limitations:
   - A glyph's box is its ADVANCE box. Ink can overhang the advance by a side
@@ -63,7 +65,7 @@ from typing import NamedTuple
 import pikepdf
 from pikepdf import Name
 
-from engine import image_redact, redact_document, vector_redact
+from engine import image_redact, redact_document, redact_fonts, vector_redact
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import walk_inheritable
@@ -397,6 +399,7 @@ class _Run:
         self.removed_annotations: set = set()
         self.paths_redacted = 0
         self.inline_count = 0
+        self.fonts = None  # redact_fonts.FontBaseline, taken before any page changes
 
     def note_copy(self, original, copy) -> None:
         key = _objgen(original)
@@ -1753,6 +1756,9 @@ def redact(
     with pikepdf.open(file) as pdf:
         run = _Run(pdf, gs_path)
         total = len(pdf.pages)
+        marked = [pdf.pages[number - 1] for number in by_page if 1 <= number <= total]
+        if marked:
+            run.fonts = redact_fonts.baseline(pdf, marked)
         for page_num, specs in by_page.items():
             if not (1 <= page_num <= total):
                 continue

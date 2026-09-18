@@ -1523,6 +1523,39 @@ class TestJpeg2000:
         assert np.array_equal(after[:16], before[:16])
         assert np.array_equal(after[48:], before[48:])
 
+    def test_a_fixed_quality_background_is_rewritten_near_its_own_size(self, tmp_dir):
+        """The MRC background (`encode_layer_jpx`) codes its RGB samples
+        through the reversible colour transform. The lossless rewrite keeps
+        that transform: coding the three components apart grows this
+        background several times over."""
+        from PIL import Image
+
+        from engine.mrc_codecs import encode_layer_jpx
+
+        size = 128
+        rows, cols = np.mgrid[0:size, 0:size].astype(float)
+        tint = np.stack(
+            [236 + 6 * np.sin(cols / 9), 230 + 5 * np.cos(rows / 11), 214 + 4 * np.sin((cols + rows) / 13)],
+            axis=-1,
+        )
+        data = encode_layer_jpx(Image.fromarray(tint.astype(np.uint8), "RGB"), 2**4, 3)
+        keys = {
+            "/Width": size,
+            "/Height": size,
+            "/ColorSpace": Name("/DeviceRGB"),
+            "/BitsPerComponent": 8,
+            "/Filter": Name("/JPXDecode"),
+        }
+        src = _pixel_pdf(os.path.join(tmp_dir, "in.pdf"), data, keys, size, size)
+        out = os.path.join(tmp_dir, "out.pdf")
+
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": _px_rect(60, 60, 68, 68, size)}])
+
+        assert result["images_modified"] == 1
+        _name, raw, _keys = _only_image_raw(out)
+        rewritten, source = len(raw), len(data)
+        assert rewritten <= 3 * source
+
     def test_a_rate_controlled_codestream_is_removed_whole_and_says_why(self, tmp_dir):
         """A lossy codestream's truncation points are chosen against one
         threshold for the whole picture, so every pixel of it depends on what
@@ -1848,14 +1881,16 @@ class TestJbig2:
 
     @needs_jbig2
     def test_without_ghostscript_a_jbig2_image_refuses_by_name(self, tmp_dir, gs_absent):
+        from engine import gs_capability
         from engine.mrc_codecs import JBIG2_GENERIC, encode_masks_jbig2
 
         size = 64
         [stream] = encode_masks_jbig2([_stencil_bitmap(size)], mode=JBIG2_GENERIC)
         src = _jbig2_pdf(os.path.join(tmp_dir, "in.pdf"), [stream], size)
         out = os.path.join(tmp_dir, "out.pdf")
-        with pytest.raises(ValueError, match="needs Ghostscript"):
+        with pytest.raises(gs_capability.GsUnavailable) as caught:
             redact(file=src, output=out, regions=[{"page": 1, "rect": [0, 44, 30, 64]}])
+        assert caught.value.reason == gs_capability.NOT_CONFIGURED
         assert not os.path.exists(out)
 
     @needs_jbig2
@@ -2035,15 +2070,9 @@ class TestMrcScans:
         assert np.array_equal(after[~touched], before[~touched]), "a stroke outside the mark changed"
         assert (before[touched] == 0).any(), "the mark covered strokes"
         assert (after[touched] == 255).all(), "a marked stroke survived"
-        if variant == "pdfa-safe":
-            assert result["images_modified"] == 2
-            assert result["images_removed"] == 0
-        else:
-            # The background is a rate-controlled JPEG 2000 codestream: every
-            # pixel of it depends on the mark, so it goes whole and says so.
-            assert result["images_modified"] == 1
-            assert result["images_removed"] == 1
-            assert result["images_removed_for_compression"] == 1
+        assert result["images_modified"] == 2
+        assert result["images_removed"] == 0
+        assert result["images_removed_for_compression"] == 0
 
     def test_two_scans_that_differ_only_under_the_mark_redact_to_the_same_images(self, tmp_dir, gs_path):
         from engine.compress import compress

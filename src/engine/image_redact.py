@@ -67,8 +67,11 @@ JPEG 2000 is read per ISO 32000-2 §7.4.9: without /ColorSpace, the colour
 comes from the codestream. Any codec shape outside these refuses by name.
 
 Every refusal is `refuse(reason)`: one sentence, one raise site, the reason its
-only variable part. The source file is never touched, because the caller
-raises before anything is saved.
+only variable part. A font the redaction cannot cut (`redact_fonts`) refuses
+through the same function, naming the font. A Ghostscript that is not usable
+refuses through the capability authority (`gs_capability.require`), as at every
+Ghostscript door. The source file is never touched, because the caller raises
+before anything is saved.
 """
 
 from __future__ import annotations
@@ -89,8 +92,13 @@ from engine import redact_geometry
 from engine.content_walk import Matrix
 
 
-def refuse(reason: str) -> NoReturn:
-    """The one refusal sentence, raised from this one site."""
+def refuse(reason: str, *, font: str | None = None) -> NoReturn:
+    """The one redaction refusal: one sentence for an image whose pixels, and
+    one for a font whose glyphs, cannot be rewritten safely."""
+    if font is not None:
+        raise ValueError(
+            f"The redacted characters cannot be removed from the font {font} ({reason})."
+        )
     raise ValueError(
         f"This image cannot be partly redacted ({reason})."
         " Mark the whole image to remove it."
@@ -1182,13 +1190,7 @@ class Context:
         if self._gs is None:
             from engine import gs_capability
 
-            answer = gs_capability.resolve(self.gs_path)
-            if not answer.available:
-                refuse(
-                    "JBIG2 data needs Ghostscript, which is not configured"
-                    " — set its path in Preferences > Engine"
-                )
-            self._gs = answer.path
+            self._gs = gs_capability.require(self.gs_path).path
         return self._gs
 
 
@@ -1548,6 +1550,11 @@ def _jpx_rewrite(raster: _Raster, destroy, role: str, fill):
     }
     if layout.tile_w < raster.width or layout.tile_h < raster.height:
         options["tile_size"] = (layout.tile_w, layout.tile_h)
+    if colour_bands == 3:
+        # The reversible colour transform (T.800 G.2) is lossless too. Without
+        # it the three components are coded apart, and a background coded
+        # with it grows several times over.
+        options["mct"] = 1
     buffer = io.BytesIO()
     try:
         out.save(buffer, **options)
