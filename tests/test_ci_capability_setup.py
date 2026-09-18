@@ -607,7 +607,7 @@ def test_the_payload_gates_are_mirrored_locally() -> None:
         assert command.removeprefix("python ") in text
     assert "build-portable-zip.ps1 -CheckMap" in text
     assert "tests/test_ci_capability_setup.py" in text
-    assert f"{LIVE_CLI_ENV}=1 cargo test --test cli_bytecode" in text
+    assert f"{LIVE_CLI_ENV}=1 {LIVE_CLI_COMMAND}'" in text
     # The updater manifest parse runs locally against the tracked fixture, in
     # the env-driven mode the draft verifier uses.
     assert "SPECTRAPDF_UPDATER_MANIFEST=tests/fixtures/updater-manifest/latest.json" in text
@@ -615,7 +615,13 @@ def test_the_payload_gates_are_mirrored_locally() -> None:
 
 
 LIVE_CLI_ENV = "SPECTRAPDF_REQUIRE_LIVE_CLI"
-LIVE_CLI_STEP = "Live CLI leaves no bytecode in the engine payload (provisioned runtime)"
+LIVE_CLI_STEP = "Live CLI tests against the provisioned runtime"
+#: The Rust tests that launch the product binary and refuse to skip under the
+#: live env, run as one command. `test_every_live_cli_test_runs_in_the_provisioned_step`
+#: derives the same list from the test sources, so a live CLI test that no gate
+#: runs cannot land.
+LIVE_CLI_TESTS = ("cli_bytecode", "cli_run_action")
+LIVE_CLI_COMMAND = "cargo test " + " ".join(f"--test {name}" for name in LIVE_CLI_TESTS)
 
 
 @pytest.mark.parametrize(
@@ -628,11 +634,12 @@ LIVE_CLI_STEP = "Live CLI leaves no bytecode in the engine payload (provisioned 
 def test_the_live_cli_test_runs_against_a_provisioned_runtime(
     workflow: str, job: str, provisioner: str
 ) -> None:
-    """The bytecode regression test may skip on a developer checkout only.
+    """The live CLI tests may skip on a developer checkout only.
 
     Every automatic gate that has the embedded runtime sets the env that
     turns absence into a failure, after the step that vendors the runtime,
-    so a removal of the interpreter's no-bytecode setup cannot stay green.
+    so a removal of the interpreter's no-bytecode setup, or a guided action
+    that asks for Ghostscript it does not need, cannot stay green.
     """
     steps = _job_steps(workflow, job)
     names = [name for name, _ in steps]
@@ -640,11 +647,27 @@ def test_the_live_cli_test_runs_against_a_provisioned_runtime(
     provisioned = [i for i, (_n, t) in enumerate(steps) if provisioner in t]
     assert provisioned and max(provisioned) < live, (workflow, job)
     text = dict(steps)[LIVE_CLI_STEP]
-    assert "cargo test --test cli_bytecode" in text
+    assert f"run: cd src-tauri && {LIVE_CLI_COMMAND}\n" in text + "\n"
     assert f'{LIVE_CLI_ENV}: "1"' in text
-    rust = (ROOT / "src-tauri" / "tests" / "cli_bytecode.rs").read_text()
-    assert f'const REQUIRE_LIVE: &str = "{LIVE_CLI_ENV}";' in rust
-    assert "std::env::var_os(REQUIRE_LIVE)" in rust
+    for name in LIVE_CLI_TESTS:
+        rust = (ROOT / "src-tauri" / "tests" / f"{name}.rs").read_text(encoding="utf-8")
+        assert f'const REQUIRE_LIVE: &str = "{LIVE_CLI_ENV}";' in rust, name
+        assert "std::env::var_os(REQUIRE_LIVE)" in rust, name
+
+
+def test_every_live_cli_test_runs_in_the_provisioned_step() -> None:
+    """A Rust test that launches the product binary and refuses to skip under
+    the live env is a live CLI test, and every one of them is in the command
+    the provisioned steps run."""
+    declared = []
+    for path in (ROOT / "src-tauri" / "tests").glob("*.rs"):
+        source = path.read_text(encoding="utf-8")
+        if (
+            f'const REQUIRE_LIVE: &str = "{LIVE_CLI_ENV}";' in source
+            and 'env!("CARGO_BIN_EXE_spectrapdf")' in source
+        ):
+            declared.append(path.stem)
+    assert sorted(declared) == sorted(LIVE_CLI_TESTS)
 
 
 @pytest.mark.parametrize(

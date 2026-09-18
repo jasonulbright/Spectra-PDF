@@ -23,6 +23,10 @@ import { pagesParam } from './page-scope';
 // Watermark panel uses, so the two surfaces cannot disagree about what a mode
 // on a non-text source means or about a horizontal stamp sending no key.
 import { writingParams, type WatermarkSource } from './watermark-writing';
+// The engine's step table as the committed catalog mirrors it. The Python
+// suite pins the file to `engine/guided_actions.py::_STEPS` in both
+// directions; each step's Ghostscript demand is read from it, not restated.
+import { steps as ENGINE_STEPS } from '../../../tests/fixtures/guided-step-catalog.json';
 
 // Slice 2 grew the catalog: OCR (the batch pipeline's single-file arm),
 // header/footer (one positioned text per step — several positions compose as
@@ -95,11 +99,13 @@ export interface StepDef {
    * step ids to `run_action`, whose `_STEPS` table binds the callables
    * itself. Absent means the step id IS the method name. */
   engineMethod?: string;
-  /** The step's engine call takes gs_path (the panel resolves it once per run). */
+  /** The step's engine call takes gs_path and cannot run without it. Set from
+   * the engine's step table (`ENGINE_STEPS`), never written in a catalog
+   * entry. */
   needsGs?: boolean;
   /** The step's engine call takes gs_path when a Ghostscript is configured
-   * and runs without one: only a branch of the step needs it, so a plan
-   * without Ghostscript is not blocked. Exclusive with `needsGs`. */
+   * and runs without one, so a plan without Ghostscript is not blocked. Set
+   * from the engine's step table; exclusive with `needsGs`. */
   optionalGs?: boolean;
   /** The step's engine call takes font_dir (Unicode text faces). */
   needsFontDir?: boolean;
@@ -134,11 +140,10 @@ export interface StepDef {
   params: readonly StepParamDef[];
 }
 
-export const STEP_CATALOG: readonly StepDef[] = [
+const STEP_DEFS: readonly Omit<StepDef, 'needsGs' | 'optionalGs'>[] = [
   {
     op: 'compress',
     title: 'Compress',
-    needsGs: true,
     needsFontDir: true,
     // The MRC arm an imported action file can select routes through this same
     // op and verifies its text with the recognizer. The folder tier hands the
@@ -208,14 +213,12 @@ export const STEP_CATALOG: readonly StepDef[] = [
   {
     op: 'grayscale',
     title: 'Convert to Grayscale',
-    needsGs: true,
     needsFontDir: true,
     params: [],
   },
   {
     op: 'convert_pdfa',
     title: 'Convert to PDF/A',
-    needsGs: true,
     params: [
       {
         key: 'level',
@@ -241,7 +244,6 @@ export const STEP_CATALOG: readonly StepDef[] = [
     title: 'Bring Up to a Print Profile',
     // `preflight` as a method is the CHECK, which takes no `output`.
     engineMethod: 'apply_preflight_fixups',
-    needsGs: true,
     needsFontDir: true,
     needsTesseract: true,
     params: [
@@ -383,8 +385,6 @@ export const STEP_CATALOG: readonly StepDef[] = [
     title: 'Search & Redact',
     engineMethod: 'search_and_redact',
     needsFontDir: true,
-    // A hit over part of a JBIG2 scan decodes it through Ghostscript.
-    optionalGs: true,
     params: [
       { key: 'query', label: 'Search for', kind: 'text', defaultValue: '' },
       {
@@ -468,7 +468,6 @@ export const STEP_CATALOG: readonly StepDef[] = [
     op: 'prepare_forms',
     title: 'Prepare Forms (detect fields)',
     engineMethod: 'prepare_form_fields',
-    needsGs: true,
     needsTesseract: true,
     needsFontDir: true,
     params: [
@@ -611,7 +610,6 @@ export const STEP_CATALOG: readonly StepDef[] = [
   {
     op: 'ocr_file',
     title: 'Make Searchable (OCR)',
-    needsGs: true,
     needsTesseract: true,
     // The MRC tail prepares its source the way the Ghostscript-backed ops
     // prepare theirs, so an /AP-less field is not left to the producer.
@@ -634,7 +632,6 @@ export const STEP_CATALOG: readonly StepDef[] = [
     // to look at a measurement first.
     op: 'enhance_scan',
     title: 'Enhance Scans',
-    needsGs: true,
     needsTesseract: true,
     params: [
       {
@@ -816,7 +813,6 @@ export const STEP_CATALOG: readonly StepDef[] = [
     op: 'export_document',
     title: 'Export to a document format',
     terminalOutput: true,
-    needsGs: true,
     needsSoffice: true,
     params: [
       {
@@ -909,7 +905,6 @@ export const STEP_CATALOG: readonly StepDef[] = [
     op: 'export_images',
     title: 'Export the pages as images',
     terminalOutput: true,
-    needsGs: true,
     params: [
       {
         key: 'fmt',
@@ -964,7 +959,6 @@ export const STEP_CATALOG: readonly StepDef[] = [
     op: 'create_pdf',
     title: 'Create PDF from any file',
     sourceStep: true,
-    needsGs: true,
     needsSoffice: true,
     params: [
       {
@@ -1030,7 +1024,6 @@ export const STEP_CATALOG: readonly StepDef[] = [
     op: 'create_pdf_folders',
     title: 'Create one PDF per folder',
     sourceStep: true,
-    needsGs: true,
     needsSoffice: true,
     params: [
       {
@@ -1115,6 +1108,25 @@ export const STEP_CATALOG: readonly StepDef[] = [
     }),
   },
 ];
+
+interface EngineStepRow {
+  tools: readonly string[];
+  optional_tools: readonly string[];
+}
+
+/** The Ghostscript flags the engine's step table gives `op`: a step handed
+ * gs_path needs it unless the table lists gs_path among the tool paths the
+ * step runs without. */
+function engineGsFlags(op: GuidedStepOp): Pick<StepDef, 'needsGs' | 'optionalGs'> {
+  const row: EngineStepRow = ENGINE_STEPS[op];
+  if (!row.tools.includes('gs_path')) return {};
+  return row.optional_tools.includes('gs_path') ? { optionalGs: true } : { needsGs: true };
+}
+
+export const STEP_CATALOG: readonly StepDef[] = STEP_DEFS.map((def) => ({
+  ...def,
+  ...engineGsFlags(def.op),
+}));
 
 /** The source a watermark step stamps from. Exactly one of the three fields
  * carries a value (`requireOneOf`), so a named picture or PDF IS the source
@@ -1360,8 +1372,9 @@ export function openDocumentBlocker(action: GuidedAction): string | null {
  *
  * A saved action is a promise about a whole sequence, so a run that dies at
  * step four because the fourth step needed an interpreter has already
- * rewritten the document three times. The registry's own `needsGs` flags are
- * the roster, so a new gs-bearing step cannot ship without an answer here.
+ * rewritten the document three times. The `needsGs` flags, set from the
+ * engine's step table, are the roster: a new step the engine hands gs_path is
+ * refused here unless that table says the step runs without one.
  */
 export function gsBlockedSteps(action: GuidedAction): GuidedStepOp[] {
   const blocked: GuidedStepOp[] = [];

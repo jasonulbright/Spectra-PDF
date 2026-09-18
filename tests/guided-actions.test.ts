@@ -525,7 +525,9 @@ describe('the create_pdf source step', () => {
       resolve(__dirname, '../src/engine/guided_actions.py'),
       'utf-8',
     );
-    const block = engine.slice(engine.indexOf('"create_pdf": ('));
+    const row = engine.indexOf('"create_pdf": _Step(');
+    expect(row, 'the create_pdf row of _STEPS').toBeGreaterThan(-1);
+    const block = engine.slice(row);
     for (const p of catalogDef.params) {
       expect(block.slice(0, 600), p.key).toContain(`"${p.key}"`);
     }
@@ -596,7 +598,12 @@ describe('the create_pdf source step', () => {
 describe('the two step catalogs are pinned against each other', () => {
   const fixture = JSON.parse(
     readFileSync(resolve(__dirname, 'fixtures/guided-step-catalog.json'), 'utf8'),
-  ) as { steps: Record<string, { method: string; params: string[]; tools: string[] }> };
+  ) as {
+    steps: Record<
+      string,
+      { method: string; params: string[]; tools: string[]; optional_tools: string[] }
+    >;
+  };
 
   it('offers exactly the ops the engine dispatches, in both directions', () => {
     expect([...STEP_CATALOG].map((d) => d.op).sort()).toEqual(Object.keys(fixture.steps).sort());
@@ -648,6 +655,17 @@ describe('the two step catalogs are pinned against each other', () => {
         fixture.steps[def.op].tools.filter((t) => !(t in FLAGS)),
         `${def.op} takes a tool path the editor has no flag for`,
       ).toEqual(def.op === 'compress' ? ['jbig2_path'] : []);
+    }
+  });
+
+  it('needs Ghostscript exactly where the engine table does not list it as optional', () => {
+    // A plan refuses a step with `needsGs` when no Ghostscript is configured
+    // and runs one with `optionalGs`, so the split must be the engine's.
+    for (const def of STEP_CATALOG) {
+      const handed = fixture.steps[def.op].tools.includes('gs_path');
+      const optional = fixture.steps[def.op].optional_tools.includes('gs_path');
+      expect(def.needsGs === true, `${def.op}.needsGs`).toBe(handed && !optional);
+      expect(def.optionalGs === true, `${def.op}.optionalGs`).toBe(handed && optional);
     }
   });
 

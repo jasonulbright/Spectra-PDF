@@ -646,7 +646,9 @@ class TestCatalogPin:
     against the same file in `tests/guided-actions.test.ts`. A step or a
     parameter added on one side alone therefore goes red on that side rather
     than surfacing as an unknown-op refusal in front of a user (the
-    `enhance_scan` drift this test exists for).
+    `enhance_scan` drift this test exists for). The renderer and the command
+    line also read each step's Ghostscript demand from the file's `tools` and
+    `optional_tools`, so those two columns must equal this table's.
     """
 
     FIXTURE = json.loads(
@@ -663,13 +665,13 @@ class TestCatalogPin:
             assert sorted(_STEPS[op][1]) == entry["params"], op
 
     def test_every_op_is_callable_with_its_declared_tool_paths(self):
-        # The third element of a row is the tool-path set `_apply_steps`
-        # injects; a name outside the run's own vocabulary would be passed as
-        # an empty string to a keyword the callable does not take.
+        # `tools` is the tool-path set `_apply_steps` injects; a name outside
+        # the run's own vocabulary would be passed as an empty string to a
+        # keyword the callable does not take.
         known = {"gs_path", "tesseract_path", "soffice_path", "font_dir", "jbig2_path"}
-        for op, (fn, _allowed, needed) in _STEPS.items():
-            assert callable(fn), op
-            assert set(needed) <= known, op
+        for op, spec in _STEPS.items():
+            assert callable(spec.fn), op
+            assert set(spec.tools) <= known, op
 
     def test_every_op_declares_every_tool_path_its_callable_takes(self):
         # The totality the fixture cannot state: a tool-path keyword the op
@@ -678,13 +680,21 @@ class TestCatalogPin:
         # instance this pin exists for is the `font_dir` a bare non-WinAnsi
         # widget appearance needs on `compress` and `grayscale`.
         known = {"gs_path", "tesseract_path", "soffice_path", "font_dir", "jbig2_path"}
-        for op, (fn, _allowed, needed) in _STEPS.items():
-            takes = known & set(inspect.signature(fn).parameters)
-            assert takes == set(needed), op
+        for op, spec in _STEPS.items():
+            takes = known & set(inspect.signature(spec.fn).parameters)
+            assert takes == set(spec.tools), op
 
     def test_the_tool_paths_match_the_fixture_in_both_directions(self):
         for op, entry in self.FIXTURE["steps"].items():
             assert sorted(_STEPS[op][2]) == entry["tools"], op
+
+    def test_the_tool_paths_each_op_runs_without_match_the_fixture_in_both_directions(self):
+        for op, entry in self.FIXTURE["steps"].items():
+            assert sorted(_STEPS[op].optional_tools) == entry["optional_tools"], op
+
+    def test_an_op_runs_without_only_tool_paths_it_is_handed(self):
+        for op, spec in _STEPS.items():
+            assert spec.optional_tools <= spec.tools, op
 
     def test_every_step_method_is_registered_and_binds_the_same_callable(self):
         # The single-document runner sends the fixture's `method` as a JSON-RPC
@@ -706,6 +716,53 @@ class TestCatalogPin:
             # The symbol comparison is only sound while the handler is imported
             # under its own name.
             assert f" as {registered[method]}" not in main_py, op
+
+
+class TestStepsThatRunWithoutGhostscript:
+    """An op whose `optional_tools` lists `gs_path` runs with no Ghostscript.
+
+    The renderer and the command line start a run over such a step without
+    resolving one, so the declaration is a promise about the callable. Every
+    op that makes it carries a request here that does the step's own work,
+    and the text that work removes from the page.
+    """
+
+    REQUESTS = {"search_redact": ({"query": "Jane Roe"}, "Jane Roe")}
+
+    @staticmethod
+    def _text_pdf(path: Path) -> None:
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(612, 792))
+        page.Resources = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(
+                F1=doc.make_indirect(
+                    pikepdf.Dictionary(
+                        Type=pikepdf.Name.Font,
+                        Subtype=pikepdf.Name.Type1,
+                        BaseFont=pikepdf.Name("/Helvetica"),
+                        Encoding=pikepdf.Name.WinAnsiEncoding,
+                    )
+                )
+            )
+        )
+        page.Contents = doc.make_stream(b"BT /F1 18 Tf 40 700 Td (Contact Jane Roe at once) Tj ET")
+        doc.save(path)
+        doc.close()
+
+    def test_every_op_declared_to_run_without_ghostscript_does(self, tmp_path, gs_absent):
+        declared = sorted(op for op, spec in _STEPS.items() if "gs_path" in spec.optional_tools)
+        assert declared == sorted(self.REQUESTS)
+        for op in declared:
+            params, removed = self.REQUESTS[op]
+            src = tmp_path / op / "in"
+            src.mkdir(parents=True)
+            self._text_pdf(src / "a.pdf")
+            dest = tmp_path / op / "out"
+            report = run_action(
+                str(src), str(dest), [{"op": op, "params": params}], write_log=False
+            )
+            assert (report["ok"], report["failed"]) == (1, 0), report
+            assert removed not in extract_text(str(dest / "a.pdf"))["text"], op
 
 
 class TestFolderGroupingSource:
