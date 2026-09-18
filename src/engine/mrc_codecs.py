@@ -51,18 +51,29 @@ Correctness constraints:
    `MaskStream.codec` says which ran. Refusing a whole document because one
    stencil was expensive throws away every page that encoded correctly, and a
    safe slower codec was available the whole time.
+7. **The background is FIXED-quality JPEG 2000, never rate-controlled.** A
+   rate target picks every code-block's truncation against one threshold for
+   the whole picture, so every background pixel depends on the content under
+   any redaction mark, and a partial redaction must remove the whole layer.
+   `encode_layer_jpx` quantizes each coefficient on its own value and codes
+   every pass, so a partial redaction destroys only the mark and the 5/3
+   filter's reach around it.
 """
 
 from __future__ import annotations
 
+import functools
 import io
+import math
 import os
+import struct
 import subprocess
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 from PIL.TiffImagePlugin import ROWSPERSTRIP
 
@@ -552,21 +563,583 @@ def encode_layer_jpeg(image: Image.Image, quality: int = 45) -> bytes:
     return buf.getvalue()
 
 
-def encode_layer_jpx(image: Image.Image, rate: int = 60) -> bytes:
-    """`/JPXDecode` bytes for the background layer.
+#: The most wavelet decomposition levels a background may use. A partial
+#: redaction of a fixed-quality codestream destroys the mark plus the 5/3
+#: filter's reach, `5 * 2**levels - 4` pixels of the layer on every side
+#: (`codec_taint.jpx_taint`), so each level doubles the ring of background a
+#: redaction takes with it; the lowest-frequency subband is coded exactly, so
+#: each level fewer quadruples what that costs.
+JPX_MAX_LEVELS = 5
+#: How much coarser the chroma detail subbands are quantized than luma's. The
+#: inverse RCT adds a chroma error to red and to blue one for one.
+JPX_CHROMA_WEIGHT = 2.0
 
-    `rate` is a JPEG2000 compression RATIO (Pillow's `quality_layers` under
-    `quality_mode="rates"`), so a larger number is a smaller file — the
-    opposite sense to JPEG quality, which is why the parameter is not named
-    `quality`.
+#: Code-block side, as the exponent T.800 A.6.1 signals (64 = 2**6).
+_JPX_BLOCK_EXP = 6
+#: Guard bits the encoder writes in QCD, and so the bit-plane budget a
+#: code-block's zero-bit-plane count is measured against.
+_JPX_GUARD_BITS = 2
+
+
+class _Unassembled(Exception):
+    """A codestream the assembly cannot carry through unchanged; the detail
+    rides the public refusal's cause."""
+
+
+def jpx_levels(width: int, height: int, levels: int) -> int:
+    """`levels`, or fewer for a layer narrower than `2**levels` pixels, which
+    the encoder refuses to decompose that far. The quantizer and the
+    codestream must use the same count: the redaction model reads the reach
+    from the codestream's own."""
+    while levels and min(width, height) < (1 << levels):
+        levels -= 1
+    return levels
+
+
+def _lift_forward(x: np.ndarray, axis: int) -> tuple[np.ndarray, np.ndarray]:
+    """One reversible 5/3 analysis step along `axis`: `(low, high)`.
+
+    T.800 F.3.8 with the first sample low-pass (the layer's origin is 0) and
+    whole-sample symmetric extension (F.3.7). `>>` is the floor the lifting
+    steps round with, negative values included.
     """
-    if rate < 1:
-        raise ValueError(f"a JPEG2000 rate must be >= 1, got {rate}")
-    buf = io.BytesIO()
-    image.convert("RGB").save(
-        buf, format="JPEG2000", quality_mode="rates", quality_layers=[rate]
+    x = np.moveaxis(x, axis, 0)
+    even, odd = x[0::2], x[1::2]
+    count = odd.shape[0]
+    if count == 0:
+        return np.moveaxis(even.copy(), 0, axis), np.moveaxis(odd.copy(), 0, axis)
+    right = even[1 : count + 1] if even.shape[0] > count else np.concatenate([even[1:], even[-1:]])
+    high = odd - ((even[:count] + right) >> 1)
+    before = np.concatenate([high[:1], high])[: even.shape[0]]
+    after = high if even.shape[0] == count else np.concatenate([high, high[-1:]])
+    low = even + ((before + after + 2) >> 2)
+    return np.moveaxis(low, 0, axis), np.moveaxis(high, 0, axis)
+
+
+def _lift_inverse(low: np.ndarray, high: np.ndarray, axis: int) -> np.ndarray:
+    """The exact inverse of `_lift_forward`."""
+    low = np.moveaxis(low, axis, 0)
+    high = np.moveaxis(high, axis, 0)
+    count = high.shape[0]
+    if count == 0:
+        return np.moveaxis(low.copy(), 0, axis)
+    before = np.concatenate([high[:1], high])[: low.shape[0]]
+    after = high if low.shape[0] == count else np.concatenate([high, high[-1:]])
+    even = low - ((before + after + 2) >> 2)
+    right = even[1 : count + 1] if even.shape[0] > count else np.concatenate([even[1:], even[-1:]])
+    out = np.empty((low.shape[0] + count,) + low.shape[1:], dtype=low.dtype)
+    out[0::2] = even
+    out[1::2] = high + ((even[:count] + right) >> 1)
+    return np.moveaxis(out, 0, axis)
+
+
+def _dwt_forward(plane: np.ndarray, levels: int) -> list:
+    """`[LL, (HL, LH, HH) of the coarsest level, ..., of the finest]`.
+
+    Vertical before horizontal at every level (T.800 F.4.2), the order the
+    encoder's own forward transform uses. Another order yields other
+    coefficients from the same samples, and the lossless coder then pays for
+    the difference in every subband.
+    """
+    details = []
+    for _ in range(levels):
+        low, high = _lift_forward(plane, 0)
+        plane, hl = _lift_forward(low, 1)
+        lh, hh = _lift_forward(high, 1)
+        details.append((hl, lh, hh))
+    return [plane] + details[::-1]
+
+
+def _dwt_inverse(bands: list) -> np.ndarray:
+    plane = bands[0]
+    for hl, lh, hh in bands[1:]:
+        plane = _lift_inverse(_lift_inverse(plane, hl, 1), _lift_inverse(lh, hh, 1), 0)
+    return plane
+
+
+@functools.lru_cache(maxsize=None)
+def _detail_norms(levels: int) -> tuple:
+    """L2 norm of one coefficient's synthesis basis in each detail subband,
+    `((HL, LH, HH) of the coarsest level, ..., of the finest)`.
+
+    An error e in one coefficient puts (e * norm)^2 of squared error into the
+    picture, so a step of `step / norm` in every subband spreads the error
+    evenly over them.
+    """
+
+    def inverse(low: np.ndarray, high: np.ndarray, axis: int) -> np.ndarray:
+        low = np.moveaxis(low, axis, 0)
+        high = np.moveaxis(high, axis, 0)
+        even = low - (np.concatenate([high[:1], high[:-1]]) + high) / 4.0
+        out = np.empty((low.shape[0] * 2,) + low.shape[1:])
+        out[0::2] = even
+        out[1::2] = high + (even + np.concatenate([even[1:], even[-1:]])) / 2.0
+        return np.moveaxis(out, 0, axis)
+
+    # Large enough that no basis function meets the edge of the plane.
+    size = 1 << (levels + 5)
+
+    def norm(position: int, orient: int) -> float:
+        bands: list = [np.zeros((size >> levels, size >> levels))]
+        for level in range(levels, 0, -1):
+            bands.append([np.zeros((size >> level, size >> level)) for _ in range(3)])
+        target = bands[position][orient]
+        target[target.shape[0] // 2, target.shape[1] // 2] = 1.0
+        plane = bands[0]
+        for hl, lh, hh in bands[1:]:
+            plane = inverse(inverse(plane, hl, 1), inverse(lh, hh, 1), 0)
+        return float(np.sqrt((plane * plane).sum()))
+
+    return tuple(
+        tuple(norm(position, orient) for orient in range(3)) for position in range(1, levels + 1)
     )
-    return buf.getvalue()
+
+
+def _quantize_detail(coefficients: np.ndarray, step: float, norm: float) -> np.ndarray:
+    """Dead-zone quantization with the power-of-two step nearest
+    `step / norm`, reconstructed at the lower edge of each bin.
+
+    The low bit-planes of every coefficient become zero, which the coder
+    spends almost nothing on, and no magnitude grows.
+    """
+    shift = max(int(math.floor(math.log2(step / norm) + 0.5)), 0)
+    if shift == 0:
+        return coefficients
+    return np.sign(coefficients) * ((np.abs(coefficients) >> shift) << shift)
+
+
+def _quantized_components(image: Image.Image, step: float, levels: int) -> tuple[int, list]:
+    """`(levels, [Y, Cb, Cr])`: the RCT components (T.800 G.2) rebuilt from
+    their quantized subbands, before any clipping.
+
+    `step` is the luma step of a detail subband whose synthesis norm is 1;
+    chroma is `JPX_CHROMA_WEIGHT` times coarser. The lowest-frequency subband
+    is kept exact: its coefficients are local means, so quantizing them draws
+    contour lines across a smooth background, and a dead zone there rounds a
+    faint paper tint to grey.
+    """
+    if not (step > 0 and 0 <= levels <= JPX_MAX_LEVELS):
+        raise ValueError(
+            f"a JPEG 2000 background needs a positive quantization step and 0-{JPX_MAX_LEVELS} "
+            f"decomposition levels, got {step} and {levels}"
+        )
+    rgb = np.asarray(image.convert("RGB"), dtype=np.int32)
+    red, green, blue = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    components = ((red + 2 * green + blue) >> 2, blue - green, red - green)
+    del rgb, red, green, blue
+    levels = jpx_levels(image.width, image.height, levels)
+    norms = _detail_norms(levels)
+    rebuilt = []
+    for index, component in enumerate(components):
+        scale = step * (1.0 if index == 0 else JPX_CHROMA_WEIGHT)
+        bands = _dwt_forward(component, levels)
+        for position in range(1, len(bands)):
+            bands[position] = tuple(
+                _quantize_detail(band, scale, norm)
+                for band, norm in zip(bands[position], norms[position - 1])
+            )
+        rebuilt.append(_dwt_inverse(bands))
+        del bands
+    return levels, rebuilt
+
+
+def _to_rgb(components: list) -> np.ndarray:
+    """Inverse RCT and the clip to 0..255 every decoder applies last."""
+    luma, cb, cr = components
+    green = luma - ((cb + cr) >> 2)
+    return np.clip(np.stack([cr + green, green, cb + green], axis=-1), 0, 255).astype(np.uint8)
+
+
+def jpx_reconstruction(image: Image.Image, step: float, levels: int) -> np.ndarray:
+    """The RGB samples every reader decodes from `encode_layer_jpx`, uint8."""
+    return _to_rgb(_quantized_components(image, step, levels)[1])
+
+
+# --------------------------------------------------------------------------
+# Codestream assembly: the quantized components, coded unclipped
+# --------------------------------------------------------------------------
+class _HeaderReader:
+    """Packet-header bits (T.800 B.10.1): MSB first, and a byte that follows
+    0xFF carries only seven."""
+
+    __slots__ = ("data", "pos", "byte", "left", "last")
+
+    def __init__(self, data: bytes, pos: int):
+        self.data, self.pos, self.byte, self.left, self.last = data, pos, 0, 0, 0
+
+    def bit(self) -> int:
+        if self.left == 0:
+            if self.pos >= len(self.data):
+                raise _Unassembled("a packet header runs past its tile")
+            value = self.data[self.pos]
+            self.pos += 1
+            self.left = 7 if self.last == 0xFF else 8
+            self.last = value
+            self.byte = value & (0x7F if self.left == 7 else 0xFF)
+        self.left -= 1
+        return (self.byte >> self.left) & 1
+
+    def bits(self, count: int) -> int:
+        value = 0
+        for _ in range(count):
+            value = (value << 1) | self.bit()
+        return value
+
+    def end(self) -> int:
+        """The offset after the header; a final 0xFF is followed by its stuffed byte."""
+        if self.last == 0xFF:
+            self.pos += 1
+        return self.pos
+
+
+class _HeaderWriter:
+    """The writing side of `_HeaderReader`."""
+
+    __slots__ = ("out", "byte", "free", "count")
+
+    def __init__(self):
+        self.out = bytearray()
+        self.byte = 0
+        self.free = 8
+        self.count = 0
+
+    def bit(self, value: int) -> None:
+        self.free -= 1
+        self.byte |= (value & 1) << self.free
+        self.count += 1
+        if self.free == 0:
+            self._emit()
+
+    def bits(self, value: int, count: int) -> None:
+        for shift in range(count - 1, -1, -1):
+            self.bit((value >> shift) & 1)
+
+    def _emit(self) -> None:
+        self.out.append(self.byte)
+        self.free = 7 if self.byte == 0xFF else 8
+        self.byte = 0
+        self.count = 0
+
+    def finish(self) -> bytes:
+        if self.count:
+            self._emit()
+        if self.out and self.out[-1] == 0xFF:
+            self.out.append(0)
+        return bytes(self.out)
+
+
+class _TagTree:
+    """T.800 B.10.2 over one subband's code-block grid, in both directions."""
+
+    __slots__ = ("shapes", "value", "low", "known")
+
+    def __init__(self, width: int, height: int, leaves: Sequence[int] | None = None):
+        self.shapes = []
+        w, h = max(width, 1), max(height, 1)
+        while True:
+            self.shapes.append((w, h))
+            if w == 1 and h == 1:
+                break
+            w, h = (w + 1) // 2, (h + 1) // 2
+        unknown = 1 << 30
+        self.value = [[unknown] * (w * h) for w, h in self.shapes]
+        self.low = [[0] * (w * h) for w, h in self.shapes]
+        self.known = [[False] * (w * h) for w, h in self.shapes]
+        if leaves is not None:
+            self.value[0] = list(leaves)
+            for depth in range(1, len(self.shapes)):
+                w, _h = self.shapes[depth]
+                child_w, child_h = self.shapes[depth - 1]
+                row = self.value[depth]
+                for y in range(child_h):
+                    for x in range(child_w):
+                        k = (y // 2) * w + x // 2
+                        row[k] = min(row[k], self.value[depth - 1][y * child_w + x])
+
+    def _path(self, x: int, y: int) -> list:
+        path = []
+        for depth, (w, _h) in enumerate(self.shapes):
+            path.append((depth, y * w + x))
+            x //= 2
+            y //= 2
+        return path[::-1]
+
+    def decode(self, bits: _HeaderReader, x: int, y: int, threshold: int) -> bool:
+        low = 0
+        depth = index = 0
+        for depth, index in self._path(x, y):
+            low = max(low, self.low[depth][index])
+            while low < threshold and low < self.value[depth][index]:
+                if bits.bit():
+                    self.value[depth][index] = low
+                else:
+                    low += 1
+            self.low[depth][index] = low
+        return self.value[depth][index] < threshold
+
+    def encode(self, out: _HeaderWriter, x: int, y: int, threshold: int) -> None:
+        low = 0
+        for depth, index in self._path(x, y):
+            low = max(low, self.low[depth][index])
+            while low < threshold:
+                if low >= self.value[depth][index]:
+                    if not self.known[depth][index]:
+                        out.bit(1)
+                        self.known[depth][index] = True
+                    break
+                out.bit(0)
+                low += 1
+            self.low[depth][index] = low
+
+
+def _read_passes(bits: _HeaderReader) -> int:
+    """T.800 Table B.4."""
+    if not bits.bit():
+        return 1
+    if not bits.bit():
+        return 2
+    value = bits.bits(2)
+    if value != 3:
+        return 3 + value
+    value = bits.bits(5)
+    if value != 31:
+        return 6 + value
+    return 37 + bits.bits(7)
+
+
+def _write_passes(out: _HeaderWriter, count: int) -> None:
+    if count == 1:
+        out.bit(0)
+    elif count == 2:
+        out.bits(0b10, 2)
+    elif count <= 5:
+        out.bits(0b11, 2)
+        out.bits(count - 3, 2)
+    elif count <= 36:
+        out.bits(0b1111, 4)
+        out.bits(count - 6, 5)
+    else:
+        out.bits(0b111111111, 9)
+        out.bits(count - 37, 7)
+
+
+def _block_grids(width: int, height: int, levels: int) -> list:
+    """Per resolution, the code-block grid `(wide, high)` of each subband in
+    packet order: LL, then HL, LH, HH (T.800 B.5 with the origin at 0, one
+    tile, one precinct per resolution)."""
+    side = 1 << _JPX_BLOCK_EXP
+    out = []
+    for resolution in range(levels + 1):
+        if resolution == 0:
+            scale = 1 << levels
+            sizes = [(-(-width // scale), -(-height // scale))]
+        else:
+            scale = 1 << (levels - resolution + 1)
+            half = scale >> 1
+            low_w, low_h = -(-width // scale), -(-height // scale)
+            high_w, high_h = -(-(width - half) // scale), -(-(height - half) // scale)
+            sizes = [(high_w, low_h), (low_w, high_h), (high_w, high_h)]
+        out.append([(-(-w // side), -(-h // side)) for w, h in sizes])
+    return out
+
+
+def _read_component_packets(tile: bytes, grids: list) -> list:
+    """Every packet of a one-component, one-layer tile in resolution order:
+    `(blocks, body)`, where `blocks` holds per subband one entry per
+    code-block — None when it is left out, else `(zero_planes, passes,
+    lblock, length)`."""
+    pos = 0
+    packets = []
+    for bands in grids:
+        bits = _HeaderReader(tile, pos)
+        blocks: list = []
+        if bits.bit():
+            for wide, high in bands:
+                inclusion, zero = _TagTree(wide, high), _TagTree(wide, high)
+                band: list = []
+                for k in range(wide * high):
+                    x, y = k % wide, k // wide
+                    if not inclusion.decode(bits, x, y, 1):
+                        band.append(None)
+                        continue
+                    threshold = 0
+                    while not zero.decode(bits, x, y, threshold):
+                        threshold += 1
+                    passes = _read_passes(bits)
+                    lblock = 3
+                    while bits.bit():
+                        lblock += 1
+                    length = bits.bits(lblock + passes.bit_length() - 1)
+                    band.append((threshold - 1, passes, lblock, length))
+                blocks.append(band)
+        else:
+            blocks = [[None] * (wide * high) for wide, high in bands]
+        pos = bits.end()
+        size = sum(block[3] for band in blocks for block in band if block)
+        packets.append((blocks, tile[pos : pos + size]))
+        pos += size
+    if pos != len(tile):
+        raise _Unassembled("a tile holds data after its last packet")
+    return packets
+
+
+def _write_packet_header(blocks: list, bands: list, drop_planes: int) -> bytes:
+    """The packet header for `blocks`, each zero-bit-plane count lowered by
+    `drop_planes`; every other field is written as it was read."""
+    out = _HeaderWriter()
+    if not any(block for band in blocks for block in band):
+        out.bit(0)
+        return out.finish()
+    out.bit(1)
+    for band, (wide, high) in zip(blocks, bands):
+        unused = 1 << 20
+        zeros = []
+        for block in band:
+            if block is None:
+                zeros.append(unused)
+            elif block[0] < drop_planes:
+                raise _Unassembled("a code-block holds more bit-planes than an 8-bit layer carries")
+            else:
+                zeros.append(block[0] - drop_planes)
+        inclusion = _TagTree(wide, high, [0 if block else 1 for block in band])
+        zero = _TagTree(wide, high, zeros)
+        for k, block in enumerate(band):
+            x, y = k % wide, k // wide
+            inclusion.encode(out, x, y, 1)
+            if block is None:
+                continue
+            _zero_planes, passes, lblock, length = block
+            zero.encode(out, x, y, unused)
+            _write_passes(out, passes)
+            out.bits((1 << (lblock - 3)) - 1, lblock - 3)
+            out.bit(0)
+            out.bits(length, lblock + passes.bit_length() - 1)
+    return out.finish()
+
+
+def _quantization_segment(levels: int, depth: int) -> bytes:
+    """QCD for reversible coding (T.800 A.6.4): no quantization, one exponent
+    per subband equal to the sample depth plus the subband's gain."""
+    exponents = [depth] + [depth + gain for _ in range(levels) for gain in (1, 1, 2)]
+    return bytes([_JPX_GUARD_BITS << 5]) + bytes(e << 3 for e in exponents)
+
+
+def _component_packets(plane: np.ndarray, offset: int, levels: int, grids: list) -> list:
+    """One component coded alone, losslessly, as 16-bit samples.
+
+    The quantized components leave the 8-bit sample range wherever the
+    quantization overshoots, and an 8-bit coder given the clipped samples
+    would code the clipping too — in every subband around each clipped
+    sample. A 16-bit carrier holds them unclipped; `offset` moves the
+    component onto the carrier so that its DC level shift (T.800 G.1) leaves
+    exactly what an 8-bit codestream's shift would.
+    """
+    samples = plane + offset
+    if samples.min() < 0 or samples.max() > 0xFFFF:
+        raise _Unassembled("a component left its 16-bit carrier")
+    height, width = plane.shape
+    buf = io.BytesIO()
+    Image.frombytes("I;16", (width, height), samples.astype("<u2").tobytes()).save(
+        buf, format="JPEG2000", irreversible=False, num_resolutions=levels + 1, no_jp2=True
+    )
+    codestream = buf.getvalue()
+    markers: dict = {}
+    pos = 2
+    while True:
+        marker, length = struct.unpack(">HH", codestream[pos : pos + 4])
+        if marker == 0xFF90:
+            break
+        markers[marker] = codestream[pos + 4 : pos + 2 + length]
+        pos += 2 + length
+    coding = markers.get(0xFF52, b"")
+    expected = bytes([0, 0, 0, 1, 0, levels, _JPX_BLOCK_EXP - 2, _JPX_BLOCK_EXP - 2, 0, 1])
+    if coding != expected or markers.get(0xFF5C) != _quantization_segment(levels, 16):
+        raise _Unassembled("the encoder wrote an unexpected coding style")
+    part_length = struct.unpack(">I", codestream[pos + 6 : pos + 10])[0]
+    data = pos + 14
+    if codestream[data - 2 : data] != b"\xff\x93" or pos + part_length != len(codestream) - 2:
+        raise _Unassembled("the encoder wrote an unexpected tile layout")
+    return _read_component_packets(codestream[data : pos + part_length], grids)
+
+
+def _codestream(components: list, width: int, height: int, levels: int) -> bytes:
+    """One 8-bit, three-component codestream carrying `components` (the RCT
+    signalled, T.800 A.6.1) with every packet's code-block data kept byte
+    for byte from the one-component codestreams."""
+    grids = _block_grids(width, height, levels)
+    packets = [
+        _component_packets(plane, 0x8000 - (0x80 if index == 0 else 0), levels, grids)
+        for index, plane in enumerate(components)
+    ]
+    size = struct.pack(">HIIIIIIIIH", 0, width, height, 0, 0, width, height, 0, 0, 3)
+    size += bytes([7, 1, 1]) * 3
+    coding = bytes([0, 0, 0, 1, 1, levels, _JPX_BLOCK_EXP - 2, _JPX_BLOCK_EXP - 2, 0, 1])
+    body = bytearray()
+    for resolution, bands in enumerate(grids):
+        for component in packets:
+            blocks, data = component[resolution]
+            # The 16-bit carrier's QCD gives every subband 16 - 8 more
+            # magnitude bit-planes than this codestream's 8-bit QCD.
+            body += _write_packet_header(blocks, bands, 16 - 8)
+            body += data
+    out = bytearray(b"\xff\x4f")
+    for marker, payload in (
+        (0xFF51, size),
+        (0xFF52, coding),
+        (0xFF5C, _quantization_segment(levels, 8)),
+    ):
+        out += struct.pack(">HH", marker, len(payload) + 2) + payload
+    out += struct.pack(">HHHIBB", 0xFF90, 10, 0, 14 + len(body), 0, 1)
+    out += b"\xff\x93" + body + b"\xff\xd9"
+    return bytes(out)
+
+
+def _jp2(codestream: bytes, width: int, height: int) -> bytes:
+    """The JP2 file (ISO/IEC 15444-1 Annex I): three 8-bit sRGB components."""
+
+    def box(kind: bytes, payload: bytes) -> bytes:
+        return struct.pack(">I", 8 + len(payload)) + kind + payload
+
+    header = box(b"ihdr", struct.pack(">IIHBBBB", height, width, 3, 7, 7, 0, 0))
+    header += box(b"colr", struct.pack(">BBBI", 1, 0, 0, 16))
+    return (
+        box(b"jP  ", b"\r\n\x87\n")
+        + box(b"ftyp", b"jp2 " + bytes(4) + b"jp2 ")
+        + box(b"jp2h", header)
+        + box(b"jp2c", codestream)
+    )
+
+
+def encode_layer_jpx(image: Image.Image, step: float, levels: int) -> bytes:
+    """`/JPXDecode` bytes for the background layer, at FIXED quality.
+
+    Every wavelet coefficient is quantized on its own value with a step fixed
+    per subband (`_quantized_components`), and the codestream codes every
+    pass of every code-block. Nothing is cut to meet a size, so a decoded
+    pixel depends on the layer only through the 5/3 filter's reach, and a
+    partial redaction keeps the rest of the layer exactly. A rate target
+    cannot give that: its truncation threshold is chosen for the whole
+    picture, so every pixel depends on the content under any mark.
+
+    The quantized coefficients are coded as they are, through the same RCT
+    and 5/3 transform: every reader rebuilds exactly the quantized
+    components and clips them to 0..255 itself (`jpx_reconstruction`). The
+    codestream is decoded back before it is returned, and one that does not
+    decode to that reconstruction raises.
+
+    A larger `step` is a smaller file; `levels` bounds the reach
+    (`JPX_MAX_LEVELS`).
+    """
+    levels, components = _quantized_components(image, step, levels)
+    width, height = image.size
+    try:
+        data = _jp2(_codestream(components, width, height, levels), width, height)
+        with Image.open(io.BytesIO(data)) as decoded:
+            if decoded.mode != "RGB" or not np.array_equal(np.asarray(decoded), _to_rgb(components)):
+                raise _Unassembled("the codestream does not decode to its reconstruction")
+    except _Unassembled as exc:
+        raise RuntimeError("the JPEG 2000 background could not be encoded exactly") from exc
+    return data
 
 
 # --------------------------------------------------------------------------

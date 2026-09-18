@@ -1,6 +1,6 @@
 """MRC layer codec regression coverage.
 
-These cases verify six constraints that a size-and-renders check cannot prove:
+These cases verify seven constraints that a size-and-renders check cannot prove:
 
   1. multi-strip group 4 (decodes progressively wrong, LOOKS like erosion)
   2. stencil polarity (renders solid black; OCR still returns words from it)
@@ -10,6 +10,8 @@ These cases verify six constraints that a size-and-renders check cannot prove:
      stencils are grain costs the SQUARE of its marks in symbol mode)
   6. every arm degrades rather than refuses (a codec is a preference;
      finishing is not)
+  7. a fixed-quality background (a rate-controlled one ties every pixel to
+     every other, and a partial redaction then removes all of it)
 
 The decode-back pins are skip-if-absent on Ghostscript (the standing
 precedent), and the JBIG2 pins are skip-if-absent on the vendored encoder.
@@ -17,6 +19,7 @@ precedent), and the JBIG2 pins are skip-if-absent on the vendored encoder.
 
 from __future__ import annotations
 
+import io
 import os
 import time
 from pathlib import Path
@@ -31,6 +34,7 @@ from engine.mrc_codecs import (
     CCITT_G4,
     JBIG2_GENERIC,
     JBIG2_SYMBOL,
+    JPX_MAX_LEVELS,
     MASK_CODEC_MIXED,
     MASK_CODECS,
     SYMBOL_MIN_MARK_AREA,
@@ -42,6 +46,7 @@ from engine.mrc_codecs import (
     encode_masks_jbig2,
     jbig2_available,
     jbig2_candidates,
+    jpx_reconstruction,
     mask_ink_fraction,
     resolve_jbig2,
     symbol_mode_suits,
@@ -110,6 +115,18 @@ def gray_page() -> Image.Image:
         "L", (w, h), bytes(((x * 97 + y * 57 + x * y * 13) % 256) for y in range(h) for x in range(w))
     )
     return Image.merge("RGB", (grad, noise, Image.blend(grad, noise, 0.5)))
+
+
+def _decoded(data: bytes) -> np.ndarray:
+    with Image.open(io.BytesIO(data)) as im:
+        return np.asarray(im)
+
+
+def _span_mask(spans, width: int, height: int) -> np.ndarray:
+    mask = np.zeros((height, width), dtype=bool)
+    for row, lo, hi in spans:
+        mask[row, lo:hi] = True
+    return mask
 
 
 class TestMaskConvention:
@@ -536,21 +553,148 @@ class TestContinuousToneLayers:
         with pytest.raises(ValueError, match="JPEG quality"):
             encode_layer_jpeg(gray_page(), quality=0)
 
-    def test_jpx_layer_round_trips(self):
-        data = encode_layer_jpx(gray_page(), rate=60)
-        with Image.open(__import__("io").BytesIO(data)) as im:
-            assert im.size == (W // 4, H // 4)
+    @pytest.mark.parametrize("levels", (3, 4))
+    def test_jpx_layer_decodes_to_exactly_its_reconstruction(self, levels):
+        # Every reader rebuilds the same quantized components and clips them
+        # the same way, so every reader draws the same pixels.
+        image = gray_page()
+        decoded = _decoded(encode_layer_jpx(image, step=16.0, levels=levels))
+        assert decoded.shape == (H // 4, W // 4, 3)
+        assert np.array_equal(decoded, jpx_reconstruction(image, 16.0, levels))
 
-    def test_jpx_rate_is_a_ratio_not_a_quality(self):
-        # Larger rate = smaller file, the opposite sense to JPEG quality. The
+    def test_a_larger_jpx_step_is_a_smaller_file(self):
+        # Larger step = smaller file, the opposite sense to JPEG quality. The
         # pin exists because the two parameters read alike at a call site.
-        small = encode_layer_jpx(gray_page(), rate=120)
-        large = encode_layer_jpx(gray_page(), rate=10)
+        small = encode_layer_jpx(gray_page(), step=32.0, levels=4)
+        large = encode_layer_jpx(gray_page(), step=8.0, levels=4)
         assert len(small) < len(large)
 
-    def test_jpx_rate_is_bounded(self):
-        with pytest.raises(ValueError, match="JPEG2000 rate"):
-            encode_layer_jpx(gray_page(), rate=0)
+    def test_jpx_parameters_are_bounded(self):
+        for step, levels in ((0, 4), (-4.0, 4), (16.0, -1), (16.0, JPX_MAX_LEVELS + 1)):
+            with pytest.raises(ValueError, match="JPEG 2000 background needs a positive quantization step"):
+                encode_layer_jpx(gray_page(), step=step, levels=levels)
+
+    @pytest.mark.parametrize("levels", (3, 4))
+    def test_the_redaction_model_reads_the_codestream_as_fixed_quality(self, levels):
+        # The model's own classifier is the acceptance test: a codestream it
+        # reads as rate-controlled loses the whole background to any partial
+        # redaction mark.
+        from engine import codec_taint
+
+        layout = codec_taint.jpx_layout(encode_layer_jpx(gray_page(), step=32.0, levels=levels))
+        assert layout.complete
+        assert not codec_taint.jpx_lossy(layout)
+        style = next(iter(layout.styles.values()))
+        assert (style.transform, style.levels, style.mct) == (1, levels, 1)
+
+    @pytest.mark.parametrize("levels", (3, 4))
+    def test_a_change_moves_no_pixel_beyond_the_filter_reach(self, levels):
+        # Two layers that differ only inside a box encode to layers that
+        # differ only within the reach the redaction model destroys around a
+        # mark over that box.
+        from engine import codec_taint
+
+        box = (96, 160, 112, 176)
+        before = gray_page()
+        after = before.copy()
+        after.paste((255, 0, 0), box)
+        data = encode_layer_jpx(before, step=32.0, levels=levels)
+        changed = encode_layer_jpx(after, step=32.0, levels=levels)
+        differs = (_decoded(data) != _decoded(changed)).any(axis=-1)
+        height, width = differs.shape
+        spans = codec_taint.rects_to_spans([box], width, height)
+        reach = codec_taint.jpx_taint(codec_taint.jpx_layout(data), spans, width, height)
+        assert reach is not None, "the model read the codestream as rate-controlled"
+        assert (differs & ~_span_mask(spans, width, height)).any(), "the change must spread past the box"
+        assert not (differs & ~_span_mask(reach, width, height)).any()
+
+    @pytest.mark.parametrize("levels", (3, 4))
+    def test_the_quantizer_stops_at_the_depth_the_codestream_declares(self, levels):
+        # The model sizes the reach from the codestream's own level count. A
+        # quantizer that went deeper would reach farther than the model
+        # destroys; its lowest-frequency subband at the declared depth would
+        # then differ from the source's, which is kept exact.
+        from engine import codec_taint
+
+        source = Image.eval(gray_page(), lambda v: 60 + v // 2)
+        data = encode_layer_jpx(source, step=32.0, levels=levels)
+        assert next(iter(codec_taint.jpx_layout(data).styles.values())).levels == levels
+
+        def components(image: Image.Image) -> list:
+            rgb = np.asarray(image, dtype=np.int32)
+            red, green, blue = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+            return [(red + 2 * green + blue) >> 2, blue - green, red - green]
+
+        decoded = Image.fromarray(_decoded(data))
+        for kept, original in zip(components(decoded), components(source)):
+            assert np.array_equal(
+                mrc_codecs._dwt_forward(kept, levels)[0], mrc_codecs._dwt_forward(original, levels)[0]
+            )
+
+    @pytest.mark.parametrize("levels", (3, 4))
+    def test_the_lifting_is_the_encoder_s_own(self, levels):
+        # A grey plane synthesized from its lowest-frequency subband alone has
+        # no detail under the encoder's transform, so the codestream carries
+        # no detail code-block at all. A lifting that differs from the
+        # encoder's (order, rounding, edge rule) hands it detail to code.
+        from engine import codec_taint
+
+        rng = np.random.default_rng(3)
+        bands = mrc_codecs._dwt_forward(np.zeros((150, 211), np.int32), levels)
+        bands[0] = rng.integers(60, 190, bands[0].shape).astype(np.int32)
+        bands[1:] = [tuple(np.zeros_like(band) for band in triple) for triple in bands[1:]]
+        plane = mrc_codecs._dwt_inverse(bands).astype(np.uint8)
+        grey = Image.fromarray(np.stack([plane] * 3, axis=-1))
+        data = encode_layer_jpx(grey, step=1.0, levels=levels)
+        assert np.array_equal(_decoded(data)[..., 0], plane)
+        detail = [
+            value[1] for key, value in codec_taint.jpx_layout(data).blocks.items() if key[2] > 0
+        ]
+        assert detail and all(maximum == -1 for maximum in detail)
+
+    def test_an_overshoot_past_white_is_clipped_by_the_reader_not_coded(self):
+        # Paper at the top of the range: the quantized components overshoot
+        # it. The codestream carries them as they are and every reader clips;
+        # coding the clipped samples instead pays for the clipping in every
+        # subband around each clipped sample.
+        rng = np.random.default_rng(4)
+        paper = np.full((300, 240, 3), 253, np.int32)
+        for y in range(20, 280, 24):
+            for x in range(16, 220, 30):
+                paper[y : y + 6, x : x + 18] -= 12
+        paper += rng.integers(-2, 3, paper.shape)
+        image = Image.fromarray(paper.astype(np.uint8))
+        levels, components = mrc_codecs._quantized_components(image, 16.0, 4)
+        green = components[0] - ((components[1] + components[2]) >> 2)
+        assert max(int((components[2] + green).max()), int(green.max())) > 255, "no overshoot to clip"
+        coded = encode_layer_jpx(image, step=16.0, levels=4)
+        assert np.array_equal(_decoded(coded), jpx_reconstruction(image, 16.0, 4))
+        clipped = io.BytesIO()
+        Image.fromarray(jpx_reconstruction(image, 16.0, 4)).save(
+            clipped, format="JPEG2000", irreversible=False, mct=1, num_resolutions=levels + 1
+        )
+        assert len(coded) * 2 < len(clipped.getvalue())
+
+    def test_a_flat_tint_keeps_its_colour_at_any_step(self):
+        # The lowest-frequency subband is coded exactly: quantizing it draws
+        # contour lines, and a dead zone there would round the tint to grey.
+        tint = (251, 243, 228)
+        for step in (8.0, 64.0, 512.0):
+            rebuilt = jpx_reconstruction(Image.new("RGB", (80, 48), tint), step, 4)
+            assert (rebuilt == np.array(tint, np.uint8)).all()
+
+    def test_a_layer_narrower_than_the_decomposition_still_encodes(self):
+        # The encoder refuses to decompose a layer further than its narrowest
+        # side allows, and the quantizer must use the same count: the model
+        # reads the reach from the codestream's.
+        from engine import codec_taint
+
+        for size in ((1, 1), (5, 90), (15, 15)):
+            image = Image.new("RGB", size, (200, 180, 150))
+            data = encode_layer_jpx(image, step=16.0, levels=4)
+            style = next(iter(codec_taint.jpx_layout(data).styles.values()))
+            assert style.levels == mrc_codecs.jpx_levels(*size, 4) < 4
+            assert np.array_equal(_decoded(data), jpx_reconstruction(image, 16.0, 4))
 
 
 class TestBudget:

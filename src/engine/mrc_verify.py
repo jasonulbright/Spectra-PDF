@@ -13,7 +13,7 @@ obvious shape would have been wrong:
 1. **The comparison is made against the LAYERS THAT WERE ENCODED, not against
    an idealised composite.** `reconstruct_page` decodes the very `bg`/`fg`
    bytes about to be embedded and composites them through the very stencil
-   that was verified — so JPEG blocking, JPEG2000 rate loss and the
+   that was verified — so JPEG blocking, JPEG 2000 quantization and the
    downsample/upsample round trip are all inside the measurement. A
    reconstruction built from the pre-encode arrays would grade a page on
    quality it is not going to ship.

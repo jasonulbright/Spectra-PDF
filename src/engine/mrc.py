@@ -12,7 +12,9 @@ with the codec it actually suits —
   * a small **foreground** carrying the ink COLOUR, drawn through the
     stencil as a `/Mask`;
   * a small **background** carrying the paper, inpainted so the text leaves
-    no ghost behind it.
+    no ghost behind it, and coded at FIXED quality
+    (`mrc_codecs.encode_layer_jpx`) so that a partial redaction keeps every
+    background pixel beyond the wavelet's reach around the mark.
 
 The scan image's `Do` is replaced
 in the page's own content stream by two `Do`s (`page_images.
@@ -102,6 +104,13 @@ from engine.pdf_save import save_pdf
 #: greyscale page, handing the user back the original they asked to shrink —
 #: a false revert is its own silent degradation, and setting the floor at the
 #: measured best case is how you build one.
+#:
+#: `bg_step` and `bg_levels` are the background's fixed quantizer step and
+#: wavelet depth (`mrc_codecs.encode_layer_jpx`). A larger step is a smaller
+#: file; every subband's step is rounded to a power of two, so two steps
+#: closer than a half-octave can write the same bytes. A partial redaction
+#: destroys the mark plus `5 * 2**bg_levels - 4` background pixels around it,
+#: and each level fewer quadruples the coefficients coded exactly.
 PRESETS: dict[str, dict] = {
     "archival": {
         "mask_codec": JBIG2_GENERIC,  # no symbol may stand in for another
@@ -112,7 +121,8 @@ PRESETS: dict[str, dict] = {
         # "Invalid value for threshold" (matrix-caught).
         "symbol_threshold": 0.97,
         "bg_div": 2,
-        "bg_rate": 40,
+        "bg_step": 2**3.5,
+        "bg_levels": 3,
         "fg_div": 3,
         "fg_quality": 65,
         "sauvola_k": 0.10,
@@ -122,7 +132,8 @@ PRESETS: dict[str, dict] = {
         "mask_codec": JBIG2_SYMBOL,
         "symbol_threshold": 0.92,  # jbig2enc's own default
         "bg_div": 3,
-        "bg_rate": 60,
+        "bg_step": 2**4,
+        "bg_levels": 3,
         "fg_div": 4,
         "fg_quality": 45,
         "sauvola_k": 0.20,
@@ -132,7 +143,8 @@ PRESETS: dict[str, dict] = {
         "mask_codec": JBIG2_SYMBOL,
         "symbol_threshold": 0.85,
         "bg_div": 4,
-        "bg_rate": 120,
+        "bg_step": 2**4.5,
+        "bg_levels": 4,
         "fg_div": 6,
         "fg_quality": 35,
         "sauvola_k": 0.30,
@@ -1126,7 +1138,11 @@ def mrc_compress(
                 bg_bytes = encode_layer_jpeg(background, quality=75)
                 bg_filter = "/DCTDecode"
             else:
-                bg_bytes = encode_layer_jpx(background, rate=int(settings["bg_rate"]))
+                bg_bytes = encode_layer_jpx(
+                    background,
+                    step=float(settings["bg_step"]),
+                    levels=int(settings["bg_levels"]),
+                )
                 bg_filter = "/JPXDecode"
 
             if ink.any():
