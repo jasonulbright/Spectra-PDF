@@ -15,6 +15,7 @@ import {
 } from './lib/image-replace';
 import { editWorkspaceImage, type ImageEdit } from './lib/image-edit-transaction';
 import { EDIT_DECLINED } from './lib/edit-text';
+import { applyRedactions } from './lib/redaction';
 import {
   lockNeedsFields,
   signedEditDecision,
@@ -1501,7 +1502,7 @@ function AppContent(): React.ReactElement {
     async (path: string, regions: { page: number; rect: [number, number, number, number] }[]): Promise<boolean> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      return (await performOperation(path, 'redact', { regions })) !== EDIT_DECLINED;
+      return (await applyRedactions(performOperation, path, regions, gsPathIfAvailable)) !== EDIT_DECLINED;
     },
     [state.files, performOperation],
   );

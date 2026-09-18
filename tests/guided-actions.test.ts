@@ -632,7 +632,9 @@ describe('the two step catalogs are pinned against each other', () => {
     // never resolves it, so the MRC arm of a guided compress takes the
     // encoder the engine finds for itself.
     const FLAGS: Record<string, (d: StepDef) => boolean> = {
-      gs_path: (d) => d.needsGs === true,
+      // Required or optional, the path reaches the engine the same way; the
+      // two differ only in whether a plan without Ghostscript may run.
+      gs_path: (d) => d.needsGs === true || d.optionalGs === true,
       font_dir: (d) => d.needsFontDir === true,
       tesseract_path: (d) => d.needsTesseract === true,
       soffice_path: (d) => d.needsSoffice === true,

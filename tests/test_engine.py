@@ -537,21 +537,39 @@ class TestRedact:
             xobjects = node.Resources.get("/XObject", {})
             assert list(xobjects.keys() if xobjects else []) == []
 
-    def test_redact_drops_the_whole_instruction_on_partial_overlap(self, tmp_dir):
-        # A region overlapping only PART of a large image/text run must
-        # still remove the entire instruction — the module's documented
-        # "over-redact rather than risk a false negative" behavior.
+    def test_redact_destroys_only_the_marked_pixels_on_partial_overlap(self, tmp_dir):
+        # A region overlapping only PART of an image removes THOSE PIXELS and
+        # keeps the rest. Dropping the whole instruction — what this did until
+        # the pixel path existed — blanked a page that is one scanned image the
+        # moment a few lines of it were marked, and reported success. The
+        # over-removal direction is kept where it still matters: the pixel
+        # bounds round outward, and an unmappable placement still goes whole.
         src = os.path.join(tmp_dir, "redact_partial.pdf")
         out = os.path.join(tmp_dir, "redact_partial_out.pdf")
         _make_redact_fixture(src)
 
-        # The image spans (200,50)-(300,150); this region only clips its
-        # bottom-left corner.
+        # The 3x3 image spans (200,50)-(300,150), so one pixel is 33.3 points;
+        # this region clips its bottom-left pixel only.
         result = redact(file=src, output=out, regions=[{"page": 1, "rect": [190, 40, 220, 70]}])
-        assert result["images_removed"] == 1
+        assert result["images_removed"] == 0
+        assert result["images_modified"] == 1
         with pikepdf.open(out) as pdf:
-            xobjects = pdf.pages[0].get("/Resources", {}).get("/XObject", {})
-            assert list(xobjects.keys() if xobjects else []) == []
+            xobjects = pdf.pages[0]["/Resources"]["/XObject"]
+            names = [str(k) for k in xobjects.keys()]
+            assert names == ["/RdxIm0"], names
+            samples = bytes(xobjects[Name("/RdxIm0")].read_bytes())
+        # Row 2 (the bottom row) column 0 is black; every other pixel is still
+        # the fixture's red.
+        assert samples[2 * 9 : 2 * 9 + 3] == bytes([0, 0, 0])
+        assert samples[: 2 * 9] == bytes([255, 0, 0] * 6)
+        assert samples[2 * 9 + 3 :] == bytes([255, 0, 0] * 2)
+        # And the original image object is unreachable: nothing else drew it.
+        with pikepdf.open(out) as pdf:
+            assert not any(
+                _stream_contains(obj, bytes([255, 0, 0] * 9))
+                for obj in pdf.objects
+                if isinstance(obj, pikepdf.Stream)
+            )
 
     def test_redact_tracks_rotated_cm_and_multiple_text_lines(self, tmp_dir):
         # A rotated cm (image placement) and two Td-separated lines of text

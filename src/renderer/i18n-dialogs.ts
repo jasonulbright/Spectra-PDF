@@ -175,6 +175,25 @@ export const DIALOG_STRINGS = {
   'dialog.opqueue.format': '{{op}} {{fmt}} — {{file}}',
   'dialog.opqueue.formatDpi': '{{op}} {{fmt}} {{dpi}}dpi — {{file}}',
 
+  // What a redaction did to the images under its marks: the detail of a
+  // finished queue line. Each count is a whole message; the line joins them
+  // with the language's own list pattern and frames the list with
+  // `dialog.opqueue.outcome`. The categories are disjoint, so no image is
+  // counted twice.
+  'dialog.opqueue.outcome': '{{label}} — {{detail}}',
+  'dialog.opqueue.redactImagesEdited_one': '{{count}} image partly redacted',
+  'dialog.opqueue.redactImagesEdited_other': '{{count}} images partly redacted',
+  'dialog.opqueue.redactImagesWidened_one':
+    '{{count}} image redacted past the mark because of its compression',
+  'dialog.opqueue.redactImagesWidened_other':
+    '{{count}} images redacted past the mark because of their compression',
+  'dialog.opqueue.redactImagesRemoved_one': '{{count}} image removed',
+  'dialog.opqueue.redactImagesRemoved_other': '{{count}} images removed',
+  'dialog.opqueue.redactImagesCompressed_one':
+    '{{count}} image removed whole because of its compression',
+  'dialog.opqueue.redactImagesCompressed_other':
+    '{{count}} images removed whole because of their compression',
+
   'dialog.props.title': 'Document Properties',
   'dialog.props.tabsAria': 'Properties tabs',
   'dialog.props.tab.description': 'Description',

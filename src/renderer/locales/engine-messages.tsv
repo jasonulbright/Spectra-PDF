@@ -312,6 +312,7 @@ image_export.dpiMustNumberGot	pattern	image_export	dpi must be a number, got {{d
 image_export.ghostscriptReportedSuccessExpected	pattern	image_export	Ghostscript reported success but {{v0}} expected output file(s) are missing (first: {{v1}})
 image_export.outputPathDirectoryFile	pattern	create_pdf,extract_text,image_export,office_export,soffice	output path is a directory, not a file: {{output}}
 image_export.unsupportedImageFormat	pattern	image_export	unsupported image format {{fmt}} (have {{v1}})
+image_redact.imageCannotPartlyRedacted	pattern	image_redact	This image cannot be partly redacted ({{reason}}). Mark the whole image to remove it.
 incremental.editClassMustForm	exact	incremental	edit class must be "form-fill", "annotate" or "structural"
 incremental.incrementalTransplantFailed	pattern	incremental	Incremental transplant failed: {{e}}
 incremental.incrementalWriteDidPreserve	exact	incremental	Incremental write did not preserve the original bytes verbatim — refusing to emit a signature-breaking file

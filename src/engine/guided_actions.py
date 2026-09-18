@@ -142,7 +142,7 @@ _STEPS: dict = {
                 "properties",
             }
         ),
-        frozenset({"font_dir"}),
+        frozenset({"font_dir", "gs_path"}),
     ),
     "watermark": (
         watermark,
