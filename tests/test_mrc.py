@@ -22,6 +22,10 @@ What is pinned, and why each pin exists rather than being obvious:
     most words, and it scores a CORRECT page at 7/713.
   * **PDF/A** — probe-verified that gs keeps the layering
     and transcodes JPX to DCT for PDF/A-1; the pin freezes that.
+  * **Redaction** — the background is fixed-quality JPEG 2000, so a partial
+    redaction of an MRC page destroys the mark and the wavelet's reach around
+    it and keeps the rest. A rate-controlled background ties every pixel to
+    the content under any mark, and the redaction then removes all of it.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import zlib
 from pathlib import Path
 
 import pikepdf
@@ -316,6 +321,10 @@ class TestPresets:
         for key in ("bg_div", "fg_div"):
             vals = [PRESETS[p][key] for p in ("archival", "balanced", "smallest")]
             assert vals == sorted(vals)
+
+    def test_the_background_step_grows_with_aggressiveness(self):
+        steps = [PRESETS[p]["bg_step"] for p in ("archival", "balanced", "smallest")]
+        assert steps == sorted(steps)
 
     def test_unknown_preset_refused_by_name(self):
         with pytest.raises(ValueError, match="unknown MRC preset"):
@@ -713,7 +722,7 @@ class TestSize:
         report = mrc_compress(scan, out, preset=preset, gs_path=gs_path)
         ratio = report["output_size"] / report["original_size"]
         # Recorded band, measured on these fixtures: archival lands near a
-        # quarter of the source and smallest near a fiftieth.
+        # sixth of the source, smallest between a forty-fifth and an eighteenth.
         assert ratio < 0.30, f"{preset}: {ratio:.3f} of the source"
 
     def test_the_presets_are_ordered_by_size(self, text_scan, tmp_dir, gs_path):
@@ -1152,3 +1161,123 @@ class TestGrainRouting:
         assert codecs[2] == JBIG2_GENERIC
         assert report["pages_mask_fallback"] == 1
         assert report["mask_codec_pages"] == {JBIG2_SYMBOL: 1, JBIG2_GENERIC: 1}
+
+
+# --------------------------------------------------------------------------
+# A partial redaction of the output
+# --------------------------------------------------------------------------
+#: Paper, and two tints with the paper's own luma. The segmentation reads the
+#: grey image, so either tint gives the same stencil and the same ink colour,
+#: and the two scans differ in the background layer alone.
+_PAPER = (235, 235, 235)
+_TINTS = ((255, 221, 255), (227, 255, 150))
+#: The smallest 300-dpi scan whose background, at every preset's divisor,
+#: keeps pixels beyond the filter's reach around the mark.
+_TINT_SCAN_SIDE = 704
+#: The tint's pixel box; the mark covers exactly this box.
+_TINT_BOX = (328, 328, 376, 376)
+
+
+def _tinted_scan(dest: str, tint) -> str:
+    """Word-shaped strokes along two edges, paper elsewhere and `tint` in
+    `_TINT_BOX`, stored lossless so two variants differ in no pixel outside
+    the box."""
+    side = _TINT_SCAN_SIDE
+    pixels = np.empty((side, side, 3), np.uint8)
+    pixels[:] = _PAPER
+    for row in (24, 48, side - 72, side - 48):
+        for col in range(24, side - 48, 40):
+            pixels[row : row + 14, col : col + 28] = (25, 25, 40)
+    x0, y0, x1, y1 = _TINT_BOX
+    pixels[y0:y1, x0:x1] = tint
+    pdf = pikepdf.Pdf.new()
+    st = pikepdf.Stream(pdf, zlib.compress(pixels.tobytes()))
+    st["/Type"] = pikepdf.Name("/XObject")
+    st["/Subtype"] = pikepdf.Name("/Image")
+    st["/Width"] = side
+    st["/Height"] = side
+    st["/ColorSpace"] = pikepdf.Name("/DeviceRGB")
+    st["/BitsPerComponent"] = 8
+    st["/Filter"] = pikepdf.Name("/FlateDecode")
+    points = side * 72 / 300
+    page = pikepdf.Dictionary(
+        Type=pikepdf.Name("/Page"),
+        MediaBox=[0, 0, points, points],
+        Resources=pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=pdf.make_indirect(st))),
+        Contents=pdf.make_stream(f"q {points} 0 0 {points} 0 0 cm /Im0 Do Q".encode("ascii")),
+    )
+    pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
+    pdf.save(dest)
+    return dest
+
+
+def _background(path: str) -> tuple[bytes, np.ndarray]:
+    """The page's JPEG 2000 background: its codestream and its samples."""
+    with pikepdf.open(path) as pdf:
+        xobjects = pdf.pages[0].obj["/Resources"]["/XObject"]
+        raw = next(
+            bytes(xobjects[key].read_raw_bytes())
+            for key in xobjects.keys()
+            if xobjects[key].get("/Filter") == pikepdf.Name("/JPXDecode")
+        )
+    with Image.open(io.BytesIO(raw)) as im:
+        return raw, np.asarray(im)
+
+
+def _span_mask(spans, width: int, height: int) -> np.ndarray:
+    mask = np.zeros((height, width), dtype=bool)
+    for row, lo, hi in spans:
+        mask[row, lo:hi] = True
+    return mask
+
+
+class TestRedactingTheOutput:
+    """Two scans that differ only under the mark: after MRC and a partial
+    redaction, the backgrounds must be identical, and every background pixel
+    beyond the filter's reach around the mark must be the one MRC wrote."""
+
+    @pytest.mark.parametrize("preset", ("archival", "balanced", "smallest"))
+    def test_a_partial_mark_keeps_the_background_and_nothing_kept_depends_on_it(
+        self, tmp_dir, gs_path, preset
+    ):
+        from engine import codec_taint, image_redact
+        from engine.redact import redact
+
+        lumas = {Image.new("RGB", (1, 1), c).convert("L").getpixel((0, 0)) for c in (_PAPER, *_TINTS)}
+        assert len(lumas) == 1, "the tints must be invisible to the segmentation"
+        points = _TINT_SCAN_SIDE * 72 / 300
+        x0, y0, x1, y1 = (value * 72 / 300 for value in _TINT_BOX)
+        mark = (x0, points - y1, x1, points - y0)
+        before, after = [], []
+        for index, tint in enumerate(_TINTS):
+            src = _tinted_scan(os.path.join(tmp_dir, f"scan{index}.pdf"), tint)
+            mrc = os.path.join(tmp_dir, f"mrc{index}.pdf")
+            mrc_compress(src, mrc, preset=preset, gs_path=gs_path)
+            out = os.path.join(tmp_dir, f"out{index}.pdf")
+            result = redact(
+                file=mrc, output=out, regions=[{"page": 1, "rect": list(mark)}], gs_path=gs_path
+            )
+            # The background and the stencil the ink is drawn through are
+            # each redacted in part; neither goes whole.
+            assert result["images_modified"] == 2
+            assert result["images_removed"] == 0
+            assert result["images_removed_for_compression"] == 0
+            before.append(_background(mrc))
+            after.append(_background(out))
+
+        codestream, first = before[0]
+        layout = codec_taint.jpx_layout(codestream)
+        assert not codec_taint.jpx_lossy(layout)
+        height, width = first.shape[:2]
+        marked = image_redact.pixel_spans((points, 0, 0, points, 0, 0), [mark], width, height)
+        reach = _span_mask(codec_taint.jpx_taint(layout, marked, width, height), width, height)
+        differs = (first != before[1][1]).any(axis=-1)
+        # The tint travels past the mark through the wavelet, and no farther
+        # than the reach the redaction destroys ...
+        assert (differs & ~_span_mask(marked, width, height)).any()
+        assert not (differs & ~reach).any()
+        # ... every pixel beyond that reach is the one MRC wrote ...
+        assert (~reach).any()
+        assert np.array_equal(after[0][1][~reach], first[~reach])
+        # ... and nothing left in the background depends on the tint.
+        assert np.array_equal(after[0][1], after[1][1])
