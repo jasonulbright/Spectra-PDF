@@ -97,6 +97,10 @@ export interface StepDef {
   engineMethod?: string;
   /** The step's engine call takes gs_path (the panel resolves it once per run). */
   needsGs?: boolean;
+  /** The step's engine call takes gs_path when a Ghostscript is configured
+   * and runs without one: only a branch of the step needs it, so a plan
+   * without Ghostscript is not blocked. Exclusive with `needsGs`. */
+  optionalGs?: boolean;
   /** The step's engine call takes font_dir (Unicode text faces). */
   needsFontDir?: boolean;
   /** The step's engine call takes tesseract_path (OCR). */
@@ -379,6 +383,8 @@ export const STEP_CATALOG: readonly StepDef[] = [
     title: 'Search & Redact',
     engineMethod: 'search_and_redact',
     needsFontDir: true,
+    // A hit over part of a JBIG2 scan decodes it through Ghostscript.
+    optionalGs: true,
     params: [
       { key: 'query', label: 'Search for', kind: 'text', defaultValue: '' },
       {
@@ -1363,6 +1369,27 @@ export function gsBlockedSteps(action: GuidedAction): GuidedStepOp[] {
     if (stepDefFor(step.op).needsGs && !blocked.includes(step.op)) blocked.push(step.op);
   }
   return blocked;
+}
+
+/** How a run finds Ghostscript: the refusing lookup and the one that
+ * answers '' when none is configured. */
+export interface GsLookup {
+  require: () => Promise<string>;
+  ifAvailable: () => Promise<string>;
+}
+
+/** The gs_path one step's engine call is handed, or undefined when the step
+ * takes none. */
+export async function stepGsPath(def: StepDef, lookup: GsLookup): Promise<string | undefined> {
+  if (def.needsGs) return lookup.require();
+  if (def.optionalGs) return lookup.ifAvailable();
+  return undefined;
+}
+
+/** The gs_path a folder run hands the engine for every step at once: the
+ * refusing lookup only when some step cannot run without Ghostscript. */
+export async function actionGsPath(action: GuidedAction, lookup: GsLookup): Promise<string> {
+  return gsBlockedSteps(action).length > 0 ? lookup.require() : lookup.ifAvailable();
 }
 
 /** Why this action cannot run without a Ghostscript, or null when it can.

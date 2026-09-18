@@ -47,6 +47,7 @@ def search_and_redact(
     allow_signed: bool = False,
     properties=None,
     font_dir: str = "",
+    gs_path: str = "",
 ) -> dict:
     """Redact every occurrence of `query` / `terms` / `patterns` in one file.
 
@@ -56,6 +57,8 @@ def search_and_redact(
     `marks_only` writes `/Redact` annotations and removes nothing -- the
     interchange format, for a sweep whose output a person reviews and applies.
     `properties` carries the redaction appearance keys onto every region.
+    `gs_path` is the user's Ghostscript, which a hit over part of a JBIG2 scan
+    needs to decode it; without one that image refuses by name.
 
     A document whose own signatures forbid the edit REFUSES; one they merely
     make invalid refuses unless `allow_signed` says the caller accepted that.
@@ -124,7 +127,7 @@ def search_and_redact(
     if marks_only:
         written = save_redaction_marks(file, output, regions)
     else:
-        written = redact(file, output, regions, font_dir)
+        written = redact(file, output, regions, font_dir, gs_path)
     written.pop("output", None)
     result.update(written)
     return result

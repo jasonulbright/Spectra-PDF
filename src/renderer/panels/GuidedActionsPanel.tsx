@@ -6,7 +6,7 @@ import { app, dialog, batch, actionFile } from '../lib/tauri-bridge';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { isOpMethod } from '../lib/op-edit-class';
 import { getSettings } from '../lib/app-settings';
-import { gsBlocked, requireGsPath } from '../lib/gs-capability';
+import { gsBlocked, gsPathIfAvailable, requireGsPath } from '../lib/gs-capability';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { NoFileOpen } from '../components/NoFileOpen';
@@ -15,6 +15,7 @@ import { TEST_HARNESS_ENABLED, registerGuidedActionsHandlers } from '../testHarn
 import {
   STEP_CATALOG,
   actionFileJson,
+  actionGsPath,
   askedParamKeys,
   buildStepParams,
   editorParams,
@@ -28,6 +29,7 @@ import {
   saveGuidedActions,
   stepConfigCue,
   stepDefFor,
+  stepGsPath,
   terminalOutputName,
   validateAction,
   validateRunValues,
@@ -53,6 +55,8 @@ import {
 // export/import as files.
 
 type RunValues = Record<number, Record<string, string | number>>;
+
+const GS_LOOKUP = { require: requireGsPath, ifAvailable: gsPathIfAvailable };
 
 interface FolderReport {
   total: number;
@@ -127,7 +131,8 @@ export function GuidedActionsPanel(): React.ReactElement {
           try {
             const def = stepDefFor(step.op);
             const extras: Record<string, string> = {};
-            if (def.needsGs) extras.gs_path = await requireGsPath();
+            const gsPath = await stepGsPath(def, GS_LOOKUP);
+            if (gsPath !== undefined) extras.gs_path = gsPath;
             if (def.needsFontDir) extras.font_dir = await app.getEditFontPath();
             if (def.needsTesseract) extras.tesseract_path = await app.getTesseractPath();
             if (def.needsSoffice) extras.soffice_path = await app.getSofficePath();
@@ -217,7 +222,7 @@ export function GuidedActionsPanel(): React.ReactElement {
           dest: inPlace ? '' : dest,
           steps,
           action_name: action.name,
-          gs_path: await requireGsPath(),
+          gs_path: await actionGsPath(action, GS_LOOKUP),
           tesseract_path: await app.getTesseractPath(),
           // A folder run may START with a create_pdf step, so
           // the LibreOffice arm has to be reachable from here too.

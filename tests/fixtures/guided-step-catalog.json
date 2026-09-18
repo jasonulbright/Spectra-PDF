@@ -237,7 +237,8 @@
         "whole_word"
       ],
       "tools": [
-        "font_dir"
+        "font_dir",
+        "gs_path"
       ]
     },
     "strip_metadata": {

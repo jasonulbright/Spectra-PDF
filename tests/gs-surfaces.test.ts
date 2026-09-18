@@ -23,7 +23,14 @@ import {
 import { classify, postscriptSources } from '../src/renderer/lib/create-pdf';
 import { GS_ONLY_OPERATIONS } from '../src/renderer/commands/registry';
 import { OPERATIONS } from '../src/renderer/commands/operations';
-import { STEP_CATALOG, gsBlockedSteps, gsBlocker } from '../src/renderer/lib/guided-actions';
+import {
+  STEP_CATALOG,
+  actionGsPath,
+  gsBlockedSteps,
+  gsBlocker,
+  stepDefFor,
+  stepGsPath,
+} from '../src/renderer/lib/guided-actions';
 import type { GuidedAction } from '../src/renderer/lib/guided-actions';
 
 describe('export: the format list, not the door', () => {
@@ -129,6 +136,74 @@ describe('guided actions refuse at PLAN time', () => {
   it('says "needs" of one step and "need" of several', () => {
     expect(gsBlocker(action('compress'), false)).toContain('needs Ghostscript');
     expect(gsBlocker(action('compress', 'grayscale'), false)).toContain('need Ghostscript');
+  });
+
+  it('keeps the optional roster apart from the required one', () => {
+    // Search & Redact needs Ghostscript only for a hit over part of a JBIG2
+    // scan; the step itself runs without one.
+    const optional = STEP_CATALOG.filter((s) => s.optionalGs).map((s) => s.op).sort();
+    expect(optional).toEqual(['search_redact']);
+    expect(STEP_CATALOG.filter((s) => s.needsGs && s.optionalGs)).toEqual([]);
+    expect(gsBlockedSteps(action('search_redact'))).toEqual([]);
+    expect(gsBlocker(action('search_redact', 'optimize'), false)).toBeNull();
+  });
+
+  it('together the two rosters are every step the engine hands gs_path', () => {
+    const fixture = JSON.parse(
+      readFileSync(resolve(__dirname, 'fixtures/guided-step-catalog.json'), 'utf8'),
+    ) as { steps: Record<string, { tools: string[] }> };
+    const engine = Object.entries(fixture.steps)
+      .filter(([, entry]) => entry.tools.includes('gs_path'))
+      .map(([op]) => op)
+      .sort();
+    const renderer = STEP_CATALOG.filter((s) => s.needsGs || s.optionalGs).map((s) => s.op).sort();
+    expect(renderer).toEqual(engine);
+  });
+});
+
+describe('guided actions resolve Ghostscript per step', () => {
+  const action = (...ops: string[]): GuidedAction => ({
+    id: 'a1',
+    name: 'test',
+    steps: ops.map((op) => ({ op, params: {} })),
+  }) as unknown as GuidedAction;
+  const lookup = (configured: string) => {
+    const asked: string[] = [];
+    return {
+      asked,
+      require: async () => {
+        asked.push('require');
+        if (!configured) throw new Error('Ghostscript is required');
+        return configured;
+      },
+      ifAvailable: async () => {
+        asked.push('ifAvailable');
+        return configured;
+      },
+    };
+  };
+
+  it('hands an optional step the configured Ghostscript and runs it without one', async () => {
+    const present = lookup('C:/gs/bin/gswin64c.exe');
+    expect(await stepGsPath(stepDefFor('search_redact'), present)).toBe('C:/gs/bin/gswin64c.exe');
+    const absent = lookup('');
+    expect(await stepGsPath(stepDefFor('search_redact'), absent)).toBe('');
+    expect(absent.asked).toEqual(['ifAvailable']);
+  });
+
+  it('asks the refusing lookup for a required step and none for a step that takes none', async () => {
+    const absent = lookup('');
+    await expect(stepGsPath(stepDefFor('compress'), absent)).rejects.toThrow('Ghostscript');
+    expect(await stepGsPath(stepDefFor('optimize'), absent)).toBeUndefined();
+    expect(absent.asked).toEqual(['require']);
+  });
+
+  it('refuses a folder run only when a step cannot run without Ghostscript', async () => {
+    const absent = lookup('');
+    expect(await actionGsPath(action('search_redact', 'optimize'), absent)).toBe('');
+    await expect(actionGsPath(action('search_redact', 'compress'), absent)).rejects.toThrow('Ghostscript');
+    const present = lookup('C:/gs/bin/gswin64c.exe');
+    expect(await actionGsPath(action('search_redact'), present)).toBe('C:/gs/bin/gswin64c.exe');
   });
 });
 

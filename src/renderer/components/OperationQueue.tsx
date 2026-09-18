@@ -1,7 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
-import { formatQueueLabel, type QueueLabel } from '../hooks/useOperationQueue';
+import {
+  formatOutcome,
+  formatQueueLabel,
+  type QueueLabel,
+  type QueueOutcome,
+} from '../hooks/useOperationQueue';
 
 export interface QueueItem {
   id: string;
@@ -13,6 +18,9 @@ export interface QueueItem {
    * engine wrote it). Empty for running and completed operations, whose
    * wording is the queue's own. */
   message: string;
+  /** What a finished operation's result says it did, as data rendered at
+   * the current language; null when it says nothing beyond completing. */
+  outcome: QueueOutcome | null;
   startTime: number;
 }
 
@@ -82,7 +90,7 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
                 {/* Completion is the queue's OWN wording, keyed off the state
                     discriminant rather than off any text the hook wrote —
                     a failure's text belongs to the engine and passes through. */}
-                {item.status === 'done' ? tChrome('dialog.opqueue.complete') : item.message}
+                {item.status === 'done' ? formatOutcome(item.outcome) : item.message}
               </span>
               <span className="text-neutral-500 shrink-0">
                 {item.status === 'done'

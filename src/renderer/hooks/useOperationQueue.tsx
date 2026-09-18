@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useCallback, useState, useRef } from 'react';
 import type { QueueItem } from '../components/OperationQueue';
 import { app } from '../lib/tauri-bridge';
-import { tChrome, tChromeCount, tQueueOp } from '../i18n';
+import { formattingLocale, tChrome, tChromeCount, tQueueOp } from '../i18n';
 import { rawEngineMessage } from '../lib/engine-messages';
 
 interface QueueContextValue {
@@ -291,6 +291,81 @@ function pageList(pages: unknown): string | null {
   return null;
 }
 
+/**
+ * What an operation's RESULT adds to its record, as data rather than as a
+ * sentence — the same whitelist discipline the label follows, so nothing the
+ * engine returns can reach a sink unless it is named here.
+ *
+ * Redaction is the case that needs it: an image under a mark either loses the
+ * marked PIXELS (the image stays, its unmarked area intact) or is removed
+ * whole, and a run that reports only the number of regions cannot tell a user
+ * which happened to a scanned page.
+ */
+export interface QueueOutcome {
+  /** Images that kept their unmarked pixels and lost only the marked ones. */
+  imagesModified: number;
+  /** Of those, the ones that lost pixels past the mark: their compression
+   * ties those pixels to the marked ones. */
+  imagesWidened: number;
+  /** Images taken away entirely. */
+  imagesRemoved: number;
+  /** Of those, the ones only partly marked whose compression ties every
+   * pixel to the mark. */
+  imagesRemovedForCompression: number;
+}
+
+/** The methods whose result carries the redactor's image counts. */
+const REDACTING_METHODS = new Set(['redact', 'search_and_redact']);
+
+function countOf(fields: Record<string, unknown>, key: string): number | null {
+  const value = Number(fields[key] ?? 0);
+  return Number.isFinite(value) ? Math.max(Math.trunc(value), 0) : null;
+}
+
+export function describeResult(method: string, result: unknown): QueueOutcome | null {
+  if (!REDACTING_METHODS.has(method) || result === null || typeof result !== 'object') return null;
+  const fields = result as Record<string, unknown>;
+  const modified = countOf(fields, 'images_modified');
+  const widened = countOf(fields, 'images_widened');
+  const removed = countOf(fields, 'images_removed');
+  const compressed = countOf(fields, 'images_removed_for_compression');
+  if (modified === null || widened === null || removed === null || compressed === null) return null;
+  if (modified === 0 && removed === 0) return null;
+  return {
+    imagesModified: modified,
+    imagesWidened: Math.min(widened, modified),
+    imagesRemoved: removed,
+    imagesRemovedForCompression: Math.min(compressed, removed),
+  };
+}
+
+/**
+ * A finished operation's status text: "Complete", or "Complete" framed with
+ * what a redaction did to its images. `lng` pins the language — the log
+ * passes 'en'. Every piece is a catalog message; the list between them is the
+ * language's own list pattern, never a hand-written separator.
+ */
+export function formatOutcome(outcome: QueueOutcome | null, lng?: string): string {
+  const complete = tChrome('dialog.opqueue.complete', undefined, lng);
+  if (!outcome) return complete;
+  const parts: string[] = [];
+  const exact = outcome.imagesModified - outcome.imagesWidened;
+  const plain = outcome.imagesRemoved - outcome.imagesRemovedForCompression;
+  if (exact > 0) parts.push(tChromeCount('dialog.opqueue.redactImagesEdited', exact, undefined, lng));
+  if (outcome.imagesWidened > 0) {
+    parts.push(tChromeCount('dialog.opqueue.redactImagesWidened', outcome.imagesWidened, undefined, lng));
+  }
+  if (plain > 0) parts.push(tChromeCount('dialog.opqueue.redactImagesRemoved', plain, undefined, lng));
+  if (outcome.imagesRemovedForCompression > 0) {
+    parts.push(
+      tChromeCount('dialog.opqueue.redactImagesCompressed', outcome.imagesRemovedForCompression, undefined, lng),
+    );
+  }
+  if (parts.length === 0) return complete;
+  const detail = new Intl.ListFormat(formattingLocale(lng), { style: 'long', type: 'unit' }).format(parts);
+  return tChrome('dialog.opqueue.outcome', { label: complete, detail }, lng);
+}
+
 /** Build the descriptor for an engine call. Pure, and the only place that
  * ever reads `params` on the queue's behalf. */
 export function describeOperation(
@@ -405,6 +480,69 @@ export function formatQueueLabel(l: QueueLabel, lng?: string): string {
   }
 }
 
+/** The item list with `item` added, or put in place of the one sharing its
+ * id — an operation keeps one line from start to finish. */
+export function upsertQueueItem(items: QueueItem[], item: QueueItem): QueueItem[] {
+  return items.some((existing) => existing.id === item.id)
+    ? items.map((existing) => (existing.id === item.id ? item : existing))
+    : [...items, item];
+}
+
+/** Where a tracked operation's record goes: the queue's item list and the
+ * operation log. */
+export interface QueueSinks {
+  /** Add the item, or replace the one with the same id. */
+  put: (item: QueueItem) => void;
+  log: (line: string) => void;
+  now: () => number;
+}
+
+/**
+ * Run one operation under the queue: a running item first, then the
+ * finished one — with what the result says it did — or the failure, and one
+ * log line either way.
+ */
+export function runTracked(
+  id: string,
+  method: string,
+  params: Record<string, unknown>,
+  operation: () => Promise<unknown>,
+  sinks: QueueSinks,
+): Promise<unknown> {
+  const startTime = sinks.now();
+  // Read `params` ONCE, here, into the whitelisted descriptor — nothing
+  // else about the call is retained (see describeOperation's note).
+  const label = describeOperation(method, params);
+  sinks.put({ id, label, status: 'running', message: '', outcome: null, startTime });
+
+  // The log is a DIAGNOSTIC sink and stays English regardless of the UI
+  // language (the same boundary the engine's own messages sit on).
+  const logLine = (status: string, detail: string) => {
+    const ts = new Date(startTime).toISOString();
+    const elapsed = ((sinks.now() - startTime) / 1000).toFixed(1);
+    const english = formatQueueLabel(label, 'en');
+    sinks.log(`${ts} [${status}] ${english} — ${detail} (${elapsed}s)`);
+  };
+
+  return operation().then(
+    (result) => {
+      const outcome = describeResult(method, result);
+      sinks.put({ id, label, status: 'done', message: '', outcome, startTime });
+      logLine('OK', formatOutcome(outcome, 'en'));
+      return result;
+    },
+    (err) => {
+      // The queue LINE renders in the UI language; the LOG stays English
+      // (an engine refusal keeps its original text in the
+      // diagnostic sink, exactly as the label above passes `lng: 'en'`).
+      const message = err instanceof Error ? err.message : String(err);
+      sinks.put({ id, label, status: 'error', message, outcome: null, startTime });
+      logLine('ERROR', rawEngineMessage(err));
+      throw err;
+    },
+  );
+}
+
 export function QueueProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const [items, setItems] = useState<QueueItem[]>([]);
   const idCounter = useRef(0);
@@ -415,41 +553,13 @@ export function QueueProvider({ children }: { children: React.ReactNode }): Reac
     operation: () => Promise<unknown>,
   ) => {
     const id = String(++idCounter.current);
-    const startTime = Date.now();
-    // Read `params` ONCE, here, into the whitelisted descriptor — nothing
-    // else about the call is retained (see describeOperation's note).
-    const label = describeOperation(method, params);
-    setItems((prev) => [...prev, { id, label, status: 'running', message: '', startTime }]);
-
-    // The log is a DIAGNOSTIC sink and stays English regardless of the UI
-    // language (the same boundary the engine's own messages sit on).
-    const logLine = (status: string, detail: string) => {
-      const ts = new Date(startTime).toISOString();
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      const english = formatQueueLabel(label, 'en');
-      app.appendOperationLog(`${ts} [${status}] ${english} — ${detail} (${elapsed}s)`).catch(() => {});
-    };
-
-    return operation().then(
-      (result) => {
-        setItems((prev) => prev.map((item) =>
-          item.id === id ? { ...item, status: 'done' as const, message: '' } : item
-        ));
-        logLine('OK', 'Complete');
-        return result;
+    return runTracked(id, method, params, operation, {
+      put: (item) => setItems((prev) => upsertQueueItem(prev, item)),
+      log: (line) => {
+        app.appendOperationLog(line).catch(() => {});
       },
-      (err) => {
-        // The queue LINE renders in the UI language; the LOG stays English
-        // (an engine refusal keeps its original text in the
-        // diagnostic sink, exactly as the label above passes `lng: 'en'`).
-        const message = err instanceof Error ? err.message : String(err);
-        setItems((prev) => prev.map((item) =>
-          item.id === id ? { ...item, status: 'error' as const, message } : item
-        ));
-        logLine('ERROR', rawEngineMessage(err));
-        throw err;
-      },
-    );
+      now: () => Date.now(),
+    });
   }, []);
 
   const clear = useCallback(() => setItems([]), []);
