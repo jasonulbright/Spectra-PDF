@@ -341,6 +341,16 @@ export const DIALOG_STRINGS = {
   'dialog.signer.storeLoading': 'Reading the certificate store…',
   'dialog.signer.storeNone':
     'No certificate in the Windows certificate store can sign a document.',
+  'dialog.signer.storeErrorDenied':
+    'Windows refused access to your certificate store.',
+  'dialog.signer.storeErrorMissing':
+    'This account has no personal certificate store to read.',
+  'dialog.signer.storeErrorUnsupported':
+    'The Windows certificate store is not available on this system.',
+  'dialog.signer.storeErrorCode':
+    'The Windows certificate store could not be read (error {{code}}).',
+  'dialog.signer.storeErrorUnknown':
+    'The Windows certificate store could not be read.',
   'dialog.signer.storeHardware': 'hardware-held key',
   'dialog.signer.storeMachine': 'machine store',
   'dialog.signer.storeNote':

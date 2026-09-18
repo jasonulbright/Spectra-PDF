@@ -177,16 +177,28 @@ export async function setActiveOp(op: string): Promise<void> {
   );
 }
 
+/** What the store command rejects with when the store refuses. */
+export interface PinnedStoreRefusal {
+  reason: 'open-failed' | 'unsupported';
+  code: string | null;
+  message: string;
+}
+
 /**
  * Pin what the certificate-store enumeration answers.
  *
- * `{ rows: [] }` is an empty store, `{ error: '…' }` a store that refuses, and
- * `null` unpins so the next read goes to Windows for real. Neither of the
- * first two can be arranged from outside — a suite may not delete the
- * machine's own certificates and the IPC is not stubbable from the page.
+ * `{ rows: [] }` is an empty store, `{ error }` a store that refuses in the
+ * shape the command serializes, and `null` unpins so the next read goes to
+ * Windows for real. `delayMs` holds the answer back so the window before it
+ * lands can be observed. An empty or refusing store cannot be arranged from
+ * outside: a suite may not delete the machine's own certificates, and the IPC
+ * is not stubbable from the page.
  */
 export async function pinStoreCertificates(
-  answer: { rows: unknown[] } | { error: string } | null,
+  answer:
+    | { rows: unknown[]; delayMs?: number }
+    | { error: PinnedStoreRefusal; delayMs?: number }
+    | null,
 ): Promise<void> {
   await browser.execute<void, [unknown]>(
     function (a) {
@@ -306,10 +318,10 @@ export interface HorizontalOverflow {
  * How far a container's content overflows it along the inline axis, measured
  * at BOTH edges.
  *
- * `scrollWidth - clientWidth` alone is not enough: a 2000px child appended to
- * the end reads as overflow, while a real 7px poke out of the inline-start
- * edge reads as zero — and in a scroll container that start-side strip is
- * clipped and unreachable, which is the worse of the two.
+ * `scrollWidth - clientWidth` alone is not enough: it measures only past the
+ * END edge in the scroll direction, so content poking out of the START edge
+ * reads zero — and in a scroll container that start-side strip is clipped and
+ * cannot be scrolled back into view.
  */
 export async function horizontalOverflow(containerSelector: string): Promise<HorizontalOverflow> {
   return browser.execute(function (sel: string) {
@@ -358,21 +370,20 @@ export interface RowMetrics {
   /** The container's CONTENT width — its client box less its own padding,
    * which is the width a full-width child can actually occupy. */
   containerWidth: number;
-  /** The most lines any single text node in the row occupies, from that
-   * node's own computed line-height. A squeezed control stays inside its
-   * container and grows TALLER instead, so containment cannot see it. */
+  /** The most line boxes any single TEXT NODE in the row occupies. Counted
+   * from the node's own line fragments, so a label whose text sits directly
+   * beside an element child is measured too. */
   lines: number;
-  lineHeight: number;
   insideHorizontally: boolean;
 }
 
 /**
  * Measure one row's legibility against its container, WITHOUT scrolling.
  *
- * Containment is not enough once labels wrap: a control squeezed into a
- * 45px-wide, 64px-tall column is still fully inside its panel. Width against
- * the container's content box and a per-text-node line count are what separate
- * a laid-out row from a squeezed one.
+ * Containment is not enough once labels wrap: a squeezed control stays inside
+ * its panel and grows taller instead. Width against the container's content
+ * box and a per-text-node line count are what separate a laid-out row from a
+ * squeezed one.
  */
 export async function rowMetrics(selector: string, containerSelector: string): Promise<RowMetrics> {
   return browser.execute(
@@ -387,38 +398,228 @@ export async function rowMetrics(selector: string, containerSelector: string): P
       const clientRight = clientLeft + cont.clientWidth;
       const contStyle = window.getComputedStyle(cont);
       const pad = (parseFloat(contStyle.paddingLeft) || 0) + (parseFloat(contStyle.paddingRight) || 0);
-      // Per TEXT NODE, each against its OWN line-height: a row is as tall as
-      // its tallest child, and the question is how many lines a label needed.
       let lines = 0;
-      let lineHeight = 0;
-      const leaves = el.querySelectorAll('*');
-      const measure = (node: Element) => {
-        if (node.children.length > 0) return;
-        if (!(node.textContent ?? '').trim()) return;
-        const st = window.getComputedStyle(node);
-        const parsed = parseFloat(st.lineHeight);
-        const lh = Number.isFinite(parsed) ? parsed : (parseFloat(st.fontSize) || 0) * 1.2;
-        if (lh <= 0) return;
-        const n = Math.round(node.getBoundingClientRect().height / lh);
-        if (n > lines) {
-          lines = n;
-          lineHeight = lh;
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+        if (!(t.textContent ?? '').trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(t);
+        const tops = new Set<number>();
+        for (const fr of Array.from(range.getClientRects())) {
+          if (fr.width > 0 && fr.height > 0) tops.add(Math.round(fr.top));
         }
-      };
-      leaves.forEach(measure);
-      if (leaves.length === 0) measure(el);
+        if (tops.size > lines) lines = tops.size;
+      }
       return {
         width: Math.round(r.width),
         height: Math.round(r.height),
         containerWidth: Math.round(cont.clientWidth - pad),
         lines,
-        lineHeight: Math.round(lineHeight),
         insideHorizontally: r.width > 0 && r.left >= clientLeft - 0.5 && r.right <= clientRight + 0.5,
       };
     },
     selector,
     containerSelector,
   ) as Promise<RowMetrics>;
+}
+
+export interface ControlVisibility {
+  /** Share of the control's box left after every clipping ancestor and the
+   * viewport, once its real scroll container has scrolled it into reach. */
+  visibleFraction: number;
+  /** The point at the centre of the visible part hits the control itself (or
+   * a descendant), not something painted over it. */
+  hitsItself: boolean;
+  visibility: string;
+  /** Product of the control's and every ancestor's opacity. */
+  opacity: number;
+  width: number;
+  height: number;
+  /** The control's own content is wider than its box: truncated or clipped. */
+  textClipped: boolean;
+  /** Some line of its text lies outside the control's own box. */
+  textOutsideBox: boolean;
+  /** Its text is drawn in the colour of what is behind it, or fully
+   * transparent. */
+  textInvisible: boolean;
+  /** Which ancestor clipped it most, for the failure message. */
+  clippedBy: string | null;
+}
+
+/**
+ * Whether a control can actually be seen, not only where its box is.
+ *
+ * Boxes alone miss a control clipped by an ancestor on EITHER axis, one
+ * collapsed or covered, and one drawn invisibly. Only the given scroll
+ * container is scrolled, and only by setting its own `scrollTop`:
+ * `scrollIntoView` would also scroll an `overflow: hidden` ancestor and make a
+ * clipped control measure as visible.
+ */
+export async function controlVisibility(
+  selector: string,
+  scrollContainerSelector: string | null,
+): Promise<ControlVisibility> {
+  return browser.execute(
+    function (sel: string, scrollSel: string | null) {
+      const el = document.querySelector(sel) as HTMLElement | null;
+      if (!el) throw new Error(`controlVisibility: no element for ${sel}`);
+      const sc = scrollSel ? (document.querySelector(scrollSel) as HTMLElement | null) : null;
+      if (sc) {
+        const er = el.getBoundingClientRect();
+        const cr = sc.getBoundingClientRect();
+        const top = cr.top + sc.clientTop;
+        const bottom = top + sc.clientHeight;
+        if (er.top < top) sc.scrollTop -= top - er.top + 2;
+        else if (er.bottom > bottom) sc.scrollTop += Math.min(er.top - top, er.bottom - bottom + 2);
+      }
+      const r = el.getBoundingClientRect();
+      let left = r.left;
+      let top = r.top;
+      let right = r.right;
+      let bottom = r.bottom;
+      let clippedBy: string | null = null;
+      let worstLoss = 0;
+      for (let a = el.parentElement; a; a = a.parentElement) {
+        const cs = window.getComputedStyle(a);
+        const clipsX = cs.overflowX !== 'visible';
+        const clipsY = cs.overflowY !== 'visible';
+        if (!clipsX && !clipsY) continue;
+        const ar = a.getBoundingClientRect();
+        const cl = ar.left + a.clientLeft;
+        const ct = ar.top + a.clientTop;
+        const before = Math.max(0, right - left) * Math.max(0, bottom - top);
+        if (clipsX) {
+          left = Math.max(left, cl);
+          right = Math.min(right, cl + a.clientWidth);
+        }
+        if (clipsY) {
+          top = Math.max(top, ct);
+          bottom = Math.min(bottom, ct + a.clientHeight);
+        }
+        const after = Math.max(0, right - left) * Math.max(0, bottom - top);
+        if (before - after > worstLoss) {
+          worstLoss = before - after;
+          clippedBy = a.tagName.toLowerCase() + '.' + String(a.className).slice(0, 60);
+        }
+      }
+      left = Math.max(left, 0);
+      top = Math.max(top, 0);
+      right = Math.min(right, window.innerWidth);
+      bottom = Math.min(bottom, window.innerHeight);
+      const area = r.width * r.height;
+      const visibleArea = Math.max(0, right - left) * Math.max(0, bottom - top);
+      let hitsItself = false;
+      if (visibleArea > 0) {
+        const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+        hitsItself = !!hit && (hit === el || el.contains(hit));
+      }
+      let opacity = 1;
+      for (let a: HTMLElement | null = el; a; a = a.parentElement) {
+        opacity *= parseFloat(window.getComputedStyle(a).opacity || '1');
+      }
+      // Every text line must lie inside the control's own box.
+      let textOutsideBox = false;
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+        if (!(t.textContent ?? '').trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(t);
+        for (const fr of Array.from(range.getClientRects())) {
+          if (fr.width <= 0 || fr.height <= 0) continue;
+          if (fr.left < r.left - 0.5 || fr.right > r.right + 0.5 || fr.top < r.top - 0.5 || fr.bottom > r.bottom + 0.5) {
+            textOutsideBox = true;
+          }
+        }
+      }
+      // Text drawn in the colour of what is behind it, judged per text node
+      // against the element that actually paints it.
+      const rgb = (c: string): number[] | null => {
+        const m = /rgba?\(([^)]+)\)/.exec(c);
+        if (!m) return null;
+        return m[1].split(',').map((v) => parseFloat(v));
+      };
+      const backdrop = (from: Element | null): number[] | null => {
+        for (let a: Element | null = from; a; a = a.parentElement) {
+          const b = rgb(window.getComputedStyle(a).backgroundColor);
+          if (b && (b.length < 4 || b[3] > 0)) return b;
+        }
+        return null;
+      };
+      let textInvisible = false;
+      const painters = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let t = painters.nextNode(); t; t = painters.nextNode()) {
+        if (!(t.textContent ?? '').trim() || !t.parentElement) continue;
+        const fg = rgb(window.getComputedStyle(t.parentElement).color);
+        const bg = backdrop(t.parentElement);
+        if (!fg) continue;
+        if (fg.length === 4 && fg[3] === 0) textInvisible = true;
+        else if (bg && Math.abs(fg[0] - bg[0]) + Math.abs(fg[1] - bg[1]) + Math.abs(fg[2] - bg[2]) < 3) {
+          textInvisible = true;
+        }
+      }
+      return {
+        visibleFraction: area > 0 ? Math.round((visibleArea / area) * 1000) / 1000 : 0,
+        hitsItself,
+        visibility: window.getComputedStyle(el).visibility,
+        opacity: Math.round(opacity * 100) / 100,
+        width: Math.round(r.width),
+        height: Math.round(r.height),
+        textClipped: el.scrollWidth > el.clientWidth + 1,
+        textOutsideBox,
+        textInvisible,
+        clippedBy,
+      };
+    },
+    selector,
+    scrollContainerSelector,
+  ) as Promise<ControlVisibility>;
+}
+
+/**
+ * Pairs of controls whose painted extents intersect: each control's box
+ * together with every line of its text, since text can spill out of a box
+ * that has been collapsed under it.
+ */
+export async function overlappingControls(selectors: string[]): Promise<string[]> {
+  return browser.execute(function (sels: string[]) {
+    type Box = { l: number; t: number; r: number; b: number };
+    const ink = (el: Element): Box => {
+      const r = el.getBoundingClientRect();
+      const box: Box = { l: r.left, t: r.top, r: r.right, b: r.bottom };
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+        if (!(t.textContent ?? '').trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(t);
+        for (const fr of Array.from(range.getClientRects())) {
+          if (fr.width <= 0 || fr.height <= 0) continue;
+          box.l = Math.min(box.l, fr.left);
+          box.t = Math.min(box.t, fr.top);
+          box.r = Math.max(box.r, fr.right);
+          box.b = Math.max(box.b, fr.bottom);
+        }
+      }
+      return box;
+    };
+    const found: { sel: string; box: Box }[] = [];
+    for (const sel of sels) {
+      const el = document.querySelector(sel);
+      if (el) found.push({ sel, box: ink(el) });
+    }
+    const out: string[] = [];
+    for (let i = 0; i < found.length; i += 1) {
+      for (let k = i + 1; k < found.length; k += 1) {
+        const a = found[i].box;
+        const b = found[k].box;
+        const w = Math.min(a.r, b.r) - Math.max(a.l, b.l);
+        const h = Math.min(a.b, b.b) - Math.max(a.t, b.t);
+        if (w > 0.5 && h > 0.5) {
+          out.push(`${found[i].sel} \u00d7 ${found[k].sel}: ${Math.round(w)}\u00d7${Math.round(h)}px`);
+        }
+      }
+    }
+    return out;
+  }, selectors) as Promise<string[]>;
 }
 
 export async function saveActiveAs(destPath: string): Promise<void> {

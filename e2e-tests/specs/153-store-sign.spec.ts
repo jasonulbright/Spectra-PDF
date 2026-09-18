@@ -1,16 +1,18 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect } from '@wdio/globals';
 import {
   answerNextSaveDialog,
   boxFit,
+  controlVisibility,
   getState,
   horizontalOverflow,
   invokeAppCommand,
   createPlacedField,
   openByPaths,
+  overlappingControls,
   placeNewField,
   pinStoreCertificates,
   placeSignature,
@@ -24,18 +26,19 @@ import {
   setView,
   waitForDisplayedSelector,
   waitForHarness,
+  type ControlVisibility,
   type RowMetrics,
 } from '../support/harness.js';
 
-// F29 — the FOURTH signer source: a certificate in the Windows store, signed
-// through CNG with the private key never leaving the platform.
+// Signing with a certificate in the Windows store, through CNG, with the
+// private key never leaving the platform — and the picker that offers it.
 //
-// The whole point of this source is that the app holds no secret, so the test
-// cannot supply one either: the setup imports a throwaway self-signed
-// certificate into the CURRENT USER's `MY` store through `certutil` — the same
-// door an administrator would use, no elevation needed for one's own store —
-// and the teardown removes it. That is `tests/win_store.py`'s approach, driven
-// from here so the e2e run needs no pytest process beside it.
+// This source holds no secret, so the test cannot supply one either: the setup
+// imports a throwaway self-signed certificate into the CURRENT USER's `MY`
+// store through `certutil` — the door an administrator would use, no elevation
+// needed for one's own store — and the teardown removes it. That is
+// `tests/win_store.py`'s approach, driven from here so the e2e run needs no
+// pytest process beside it.
 //
 // The signing itself is the SHIPPED path end to end: the real picker reads the
 // real store through the Rust enumeration, the real panel handler assembles the
@@ -63,6 +66,8 @@ const SOURCES = ['store', 'pfx', 'pem', 'pkcs11', 'csc'] as const;
 
 /** The dock clamps to this; a narrower request lands exactly on it. */
 const DOCK_MIN_WIDTH = 300;
+/** The width a fresh profile opens the dock at. */
+const DOCK_DEFAULT_WIDTH = 400;
 
 let SCRATCH = '';
 let thumbprint: string | null = null;
@@ -166,27 +171,33 @@ async function chooseStoreSource(): Promise<void> {
 
 /**
  * Seat the signatures panel in the TOOL DOCK (not the full-page Tools tab) at
- * the dock's MINIMUM width, with the sign form open. That is the narrowest
- * real width this panel has.
+ * a given dock width.
  *
  * The width is waited on, not assumed: the dock animates its width, so a
  * measurement taken straight after the dispatch reads a frame part-way between
  * the old width and the new one.
  */
-async function openDockSignForm(): Promise<void> {
+async function seatDockPanel(width: number): Promise<void> {
   await setView('canvas');
   expect(await invokeAppCommand('tools.panel.signatures')).toBe(true);
   await waitForDisplayedSelector('[data-testid="tool-dock"]', { timeout: 20_000 });
-  await setToolDockWidth(DOCK_MIN_WIDTH - 100);
+  // The reducer clamps, so asking for less than the minimum lands on it.
+  await setToolDockWidth(width === DOCK_MIN_WIDTH ? width - 100 : width);
   await browser.waitUntil(
     async () =>
       (await browser.execute(() => {
         const dock = document.querySelector('[data-testid="tool-dock"]');
         return dock ? Math.round(dock.getBoundingClientRect().width) : -1;
-      })) === DOCK_MIN_WIDTH,
-    { timeout: 10_000, timeoutMsg: 'the dock never settled at its minimum width' },
+      })) === width,
+    { timeout: 10_000, timeoutMsg: `the dock never settled at ${width}px` },
   );
   await waitForDisplayedSelector('[data-testid="sign-open"]', { timeout: 20_000 });
+}
+
+/** The sign form open in the dock at its MINIMUM width — the narrowest real
+ * width this panel has. */
+async function openDockSignForm(): Promise<void> {
+  await seatDockPanel(DOCK_MIN_WIDTH);
   if (!(await $(SIGN_FORM).isExisting())) {
     await $('[data-testid="sign-open"]').click();
   }
@@ -194,7 +205,7 @@ async function openDockSignForm(): Promise<void> {
 }
 
 /** CLOSE the sign form and open it again, so the picker remounts and re-reads
- * the store. The open-time decision is per opening, and the pinned answer only
+ * the store. The open-time decision is per opening, and a pinned answer only
  * takes effect on the next read. */
 async function reopenDockSignForm(): Promise<void> {
   await openDockSignForm();
@@ -209,14 +220,9 @@ async function reopenDockSignForm(): Promise<void> {
 
 /**
  * A control is BOTH present and entirely inside its container along the inline
- * axis.
- *
- * The distinction is the whole point: the source controls once sat in an
- * `overflow-hidden` flex group that could neither wrap nor scroll, so two of
- * the five were painted nowhere — and a testid click still reached them,
- * because WebDriver scrolls a control into view before clicking it. Nothing
- * here scrolls first, and the box is compared against the panel rather than
- * against the clipping group.
+ * axis. Nothing here scrolls first: WebDriver scrolls a control into view
+ * before clicking it, and `overflow: hidden` is still scrollable, so a clipped
+ * control answers to a testid click and to `scrollIntoView` alike.
  */
 async function assertFullyVisible(selector: string, container: string): Promise<void> {
   await expect($(selector)).toBeDisplayed();
@@ -234,16 +240,13 @@ const MAX_LABEL_LINES = 2;
 /** How much narrower than its container a full-width row may measure. Covers
  * the row's own border/rounding only. */
 const ROW_WIDTH_SLACK = 8;
+/** Share of a control's box that must survive every clipping ancestor. */
+const MIN_VISIBLE_FRACTION = 0.99;
 
 /**
- * A source row is laid out, not squeezed.
- *
- * Containment stopped being sufficient the moment the labels began to wrap: a
- * row squeezed into a narrow column stays inside its panel and grows TALLER
- * instead. Squeezing the group back into one `overflow-hidden` flex row put
- * these rows at 45–76px wide and 64px tall (four lines for `.pfx file`) with
- * containment still reporting true. So the row must span its container and
- * its label must fit in at most two lines.
+ * A source row is laid out, not squeezed: it spans its container, and its
+ * label fits in at most two lines. A squeezed row stays inside its container
+ * and grows taller instead, so containment alone cannot see it.
  */
 async function assertRowLaidOut(selector: string, container: string): Promise<RowMetrics> {
   await expect($(selector)).toBeDisplayed();
@@ -261,12 +264,96 @@ async function assertRowLaidOut(selector: string, container: string): Promise<Ro
   return m;
 }
 
+/**
+ * A control can actually be SEEN: its box survives every clipping ancestor on
+ * both axes, the point at the centre of what survives is the control and not
+ * something painted over it, it is drawn at all, and its text is neither
+ * truncated, spilling out of its box, nor drawn in the colour behind it.
+ *
+ * A `<select>` shows a prefix of its chosen option by design, so its own text
+ * width is not held against it.
+ */
+async function assertSeen(
+  selector: string,
+  scrollContainer: string | null,
+  opts: { allowTruncatedText?: boolean } = {},
+): Promise<ControlVisibility> {
+  const v = await controlVisibility(selector, scrollContainer);
+  const detail = `${selector}: ${JSON.stringify(v)}`;
+  if (v.width <= 0 || v.height <= 0) throw new Error(`not drawn — ${detail}`);
+  if (v.visibility !== 'visible' || v.opacity < 0.5) throw new Error(`not drawn — ${detail}`);
+  if (v.visibleFraction < MIN_VISIBLE_FRACTION) throw new Error(`clipped — ${detail}`);
+  if (!v.hitsItself) throw new Error(`covered — ${detail}`);
+  if (v.textClipped && !opts.allowTruncatedText) throw new Error(`text truncated — ${detail}`);
+  if (v.textOutsideBox) throw new Error(`text spills out of its box — ${detail}`);
+  if (v.textInvisible) throw new Error(`text drawn invisibly — ${detail}`);
+  return v;
+}
+
+/** One surface's picker: every source row, the store hint, the certificate
+ * select when the store is chosen, and the generator. */
+function pickerControls(prefix: 'sign' | 'canvas-sign', withStoreFields: boolean): string[] {
+  const t = (id: string) => `[data-testid="${prefix}-${id}"]`;
+  return [
+    t('source-store'),
+    t('source-store-hint'),
+    ...(withStoreFields ? [t('store-cert')] : []),
+    ...SOURCES.filter((m) => m !== 'store').map((m) => t(`source-${m}`)),
+    t('generate-open'),
+  ];
+}
+
+/**
+ * The whole picker is laid out AND visible: every row full width and at most
+ * two lines, every control seen, and no two controls overlapping.
+ */
+async function assertPickerShown(
+  prefix: 'sign' | 'canvas-sign',
+  container: string,
+  scrollContainer: string,
+): Promise<void> {
+  // Measure the SETTLED picker: a store answer can still move the selection,
+  // and with it which controls exist.
+  await browser.waitUntil(
+    async () => !(await $(`[data-testid="${prefix}-store-loading"]`).isExisting()),
+    { timeout: 30_000, timeoutMsg: 'the store never answered' },
+  );
+  const withStoreFields = await $(`[data-testid="${prefix}-store-cert"]`).isExisting();
+  for (const mode of SOURCES) {
+    const m = await assertRowLaidOut(`[data-testid="${prefix}-source-${mode}"]`, container);
+    expect(m.width).toBeGreaterThan(200);
+  }
+  await assertRowLaidOut(`[data-testid="${prefix}-source-store-hint"]`, container);
+  const controls = pickerControls(prefix, withStoreFields);
+  for (const sel of controls) {
+    await assertSeen(sel, scrollContainer, {
+      allowTruncatedText: sel.endsWith('-store-cert"]'),
+    });
+  }
+  const overlaps = await overlappingControls(controls);
+  if (overlaps.length > 0) throw new Error(`controls overlap: ${overlaps.join('; ')}`);
+}
+
 /** No content pokes out of a container on EITHER inline edge. */
 async function assertNoHorizontalOverflow(container: string): Promise<void> {
   const o = await horizontalOverflow(container);
   if (o.scroll > 0 || o.left > 0 || o.right > 0) {
     throw new Error(`${container} overflows horizontally: ${JSON.stringify(o)}`);
   }
+}
+
+/** A catalog string exactly as a locale ships it, read from the catalog the
+ * build embeds, so a translated message is asserted without restating it. */
+function catalogString(locale: string, key: string, params: Record<string, string> = {}): string {
+  const file = resolve(REPO_ROOT, 'src', 'renderer', 'locales', locale, 'chrome.json');
+  const text = (JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>)[key];
+  if (text === undefined) throw new Error(`${locale} has no ${key}`);
+  return text.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, name: string) => params[name] ?? '');
+}
+
+async function describedByIds(selector: string): Promise<string[]> {
+  const v = await $(selector).getAttribute('aria-describedby');
+  return (v ?? '').split(/\s+/).filter(Boolean);
 }
 
 async function rememberedThumbprint(): Promise<string | null> {
@@ -330,9 +417,7 @@ describe('signing with a Windows certificate store certificate', function () {
   });
 
   it('opens on the installed-certificate source, with no source chosen for it', async () => {
-    // The issue this closes: the store source shipped at every layer and the
-    // picker rendered it, but nothing in the UI led to it. It is now the
-    // source a freshly opened form already holds.
+    // The store source is what a freshly opened form holds.
     await openSignForm();
     await waitForDisplayedSelector(STORE_SELECT, { timeout: 20_000 });
     expect(await $(`[data-testid="sign-source-input-store"]`).isSelected()).toBe(true);
@@ -511,38 +596,22 @@ describe('signing with a Windows certificate store certificate', function () {
     expect(match!.machine_store).toBe(false);
   });
 
-  it('lays every source out inside the dock panel at its minimum width', async () => {
-    // 300px is the narrowest the dock goes, which leaves this panel about
-    // 250px of content. A single row of five source labels needs ~300px and
-    // got ~70px, and the group it sat in could neither wrap nor scroll.
+  it('shows every source inside the dock panel at its minimum width', async () => {
     await openDockSignForm();
     const panel = await boxFit(SIGN_FORM, DOCK_BODY);
     expect(panel.container.width).toBeLessThanOrEqual(DOCK_MIN_WIDTH);
-
-    for (const mode of SOURCES) {
-      const m = await assertRowLaidOut(`[data-testid="sign-source-${mode}"]`, SIGN_FORM);
-      // Each row is the full content width of the panel, not a squeezed column.
-      expect(m.width).toBeGreaterThan(200);
-    }
-    // The generator is a source too, and it was the one that survived the old
-    // clipping only because it was a sibling of the clipped group.
+    await assertPickerShown('sign', SIGN_FORM, DOCK_BODY);
     await assertFullyVisible('[data-testid="sign-generate-open"]', SIGN_FORM);
-    // Nothing pokes out of either inline edge: not the panel, not the dock.
     await assertNoHorizontalOverflow(SIGN_FORM);
     await assertNoHorizontalOverflow(DOCK_BODY);
   });
 
-  it('lays every source out inside the canvas sign card', async () => {
-    // The narrower of the two surfaces: a 320px card with 12px padding, so
-    // the source list has 296px and no user control over it at all.
+  it('shows every source inside the canvas sign card', async () => {
     await setView('canvas');
     await placeSignature({ x: 0.1, y: 0.6, w: 0.4, h: 0.12 });
     await waitForDisplayedSelector(CANVAS_FORM, { timeout: 20_000 });
     try {
-      for (const mode of SOURCES) {
-        const m = await assertRowLaidOut(`[data-testid="canvas-sign-source-${mode}"]`, CANVAS_FORM);
-        expect(m.width).toBeGreaterThan(200);
-      }
+      await assertPickerShown('canvas-sign', CANVAS_FORM, CANVAS_FORM);
       await assertFullyVisible('[data-testid="canvas-sign-generate-open"]', CANVAS_FORM);
       await assertNoHorizontalOverflow(CANVAS_FORM);
     } finally {
@@ -550,23 +619,28 @@ describe('signing with a Windows certificate store certificate', function () {
     }
   });
 
+  it('names the certificate picker and each source for assistive technology', async () => {
+    await openDockSignForm();
+    await waitForDisplayedSelector(STORE_SELECT, { timeout: 20_000 });
+    expect(await $(STORE_SELECT).getComputedLabel()).toBe(catalogString('en', 'dialog.signer.storeCertificate'));
+    // The hint is a description, not part of the name.
+    expect(await $(SOURCE_STORE).getComputedLabel()).toBe(catalogString('en', 'dialog.signer.modeStore'));
+    expect(await describedByIds(SOURCE_STORE)).toContain('sign-source-store-hint');
+  });
+
   it('fits the picker and the action row in the longest shipped locales', async () => {
-    // The labels are longest in these: `sourceAdvanced` and `modeStore` in el,
-    // `modePem` in de, `modeStoreHint` in pl, `modeToken` and `create` in ca,
-    // `modeCsc` in hu, `label` in fi, `storeRefresh` in ro. The panel's action
-    // row lost 7px of Cancel off the inline-start edge in el and 6px in de,
-    // where a scroll container clips and cannot scroll back.
-    const locales = ['el', 'de', 'pl', 'ca', 'hu', 'fi', 'ro'];
+    // Each of these holds the longest translation of at least one string on
+    // this surface; the store hint wraps to two lines in pl at the dock minimum.
+    const locales = ['el', 'de', 'pl', 'ca', 'hu', 'fi', 'ro', 'nl'];
     try {
       for (const locale of locales) {
         await setUiLanguage(locale);
         await openDockSignForm();
-        for (const mode of SOURCES) {
-          await assertRowLaidOut(`[data-testid="sign-source-${mode}"]`, SIGN_FORM);
+        await assertPickerShown('sign', SIGN_FORM, DOCK_BODY);
+        for (const id of ['sign-cancel', 'sign-in-place', 'sign-apply']) {
+          await assertFullyVisible(`[data-testid="${id}"]`, SIGN_FORM);
+          await assertSeen(`[data-testid="${id}"]`, DOCK_BODY);
         }
-        await assertFullyVisible('[data-testid="sign-cancel"]', SIGN_FORM);
-        await assertFullyVisible('[data-testid="sign-in-place"]', SIGN_FORM);
-        await assertFullyVisible('[data-testid="sign-apply"]', SIGN_FORM);
         await assertNoHorizontalOverflow(SIGN_FORM);
         await assertNoHorizontalOverflow(DOCK_BODY);
       }
@@ -576,38 +650,62 @@ describe('signing with a Windows certificate store certificate', function () {
   });
 
   it('says why when the store holds no signer, and hands over a usable source', async () => {
-    // The fallback and the reason are one act: the message is rendered on the
-    // store ROW, not inside the store source's own fields, because a message
-    // gated on the selection would unmount in the same commit that moved it.
     try {
       await pinStoreCertificates({ rows: [] });
       await reopenDockSignForm();
       await waitForDisplayedSelector('[data-testid="sign-store-empty"]', { timeout: 20_000 });
-      const said = await $('[data-testid="sign-store-empty"]').getText();
-      expect(said).toContain('certificate');
+      expect(await $('[data-testid="sign-store-empty"]').getText()).toBe(
+        catalogString('en', 'dialog.signer.storeNone'),
+      );
       // Handed over: a usable source is selected, and the store's own fields
       // are gone with it.
       expect(await $(SOURCE_PFX).isSelected()).toBe(true);
       expect(await $(STORE_SELECT).isExisting()).toBe(false);
-      // The store row is still there to go back to, and the reason with it.
+      // The store row is still there to go back to, with the reason under it.
       await assertRowLaidOut('[data-testid="sign-source-store"]', SIGN_FORM);
-      await assertFullyVisible('[data-testid="sign-store-empty"]', SIGN_FORM);
+      await assertSeen('[data-testid="sign-store-empty"]', DOCK_BODY);
+      // Announced, and attached to both radios the move concerns.
+      expect(await $('[data-testid="sign-store-verdict"]').getAttribute('role')).toBe('status');
+      expect(await describedByIds(SOURCE_PFX)).toContain('sign-store-verdict');
+      expect(await describedByIds(SOURCE_STORE)).toContain('sign-store-verdict');
     } finally {
       await pinStoreCertificates(null);
     }
   });
 
-  it('names the store’s own refusal and keeps it on screen', async () => {
+  it('moves the keyboard with the selection and leaves the reason on the radio it lands on', async () => {
+    // Held back so focus can be on the store radio when the answer lands.
     try {
-      await pinStoreCertificates({ error: 'the certificate store could not be opened (0x80090016)' });
+      await pinStoreCertificates({ rows: [], delayMs: 2_000 });
+      await reopenDockSignForm();
+      // Focus placed without operating the chooser: a pick makes the selection
+      // the user's, and a user's selection is never moved.
+      await browser.execute((sel: string) => (document.querySelector(sel) as HTMLElement).focus(), SOURCE_STORE);
+      expect(await focusedSourceTestId()).toBe('sign-source-input-store');
+      await waitForDisplayedSelector('[data-testid="sign-store-empty"]', { timeout: 20_000 });
+      expect(await focusedSourceTestId()).toBe('sign-source-input-pfx');
+      expect(await $(SOURCE_PFX).isSelected()).toBe(true);
+      expect(await describedByIds(SOURCE_PFX)).toContain('sign-store-verdict');
+    } finally {
+      await pinStoreCertificates(null);
+    }
+  });
+
+  it('names the store\u2019s refusal in the UI language and keeps it on screen', async () => {
+    try {
+      await pinStoreCertificates({
+        error: { reason: 'open-failed', code: '0x80090016', message: 'The Windows certificate store could not be opened: x' },
+      });
       await reopenDockSignForm();
       await waitForDisplayedSelector('[data-testid="sign-store-error"]', { timeout: 20_000 });
-      expect(await $('[data-testid="sign-store-error"]').getText()).toContain('0x80090016');
+      expect(await $('[data-testid="sign-store-error"]').getText()).toBe(
+        catalogString('en', 'dialog.signer.storeErrorCode', { code: '0x80090016' }),
+      );
       expect(await $(SOURCE_PFX).isSelected()).toBe(true);
-      // Still legible where it matters: the dock at its minimum width.
-      await assertFullyVisible('[data-testid="sign-store-error"]', SIGN_FORM);
+      await assertSeen('[data-testid="sign-store-error"]', DOCK_BODY);
       await assertNoHorizontalOverflow(SIGN_FORM);
-      // Going back to the store source sticks — the answer that moved the
+      expect(await describedByIds(SOURCE_PFX)).toContain('sign-store-verdict');
+      // Going back to the store source sticks: the answer that moved the
       // selection fires once, not every time the source is re-entered.
       await $(SOURCE_STORE).click();
       await waitForDisplayedSelector(STORE_SELECT, { timeout: 10_000 });
@@ -618,10 +716,27 @@ describe('signing with a Windows certificate store certificate', function () {
     }
   });
 
-  it('offers the installed certificates again once the store recovers', async () => {
-    // The fallback must not outlive the form that took it: the panel's source
-    // state survives a close, so a recovered store would otherwise never be
-    // offered again.
+  it('words a known store refusal from the catalog, never from the platform text', async () => {
+    try {
+      await setUiLanguage('de');
+      await pinStoreCertificates({
+        error: { reason: 'open-failed', code: '0x80070005', message: 'Access is denied.' },
+      });
+      await reopenDockSignForm();
+      await waitForDisplayedSelector('[data-testid="sign-store-error"]', { timeout: 20_000 });
+      expect(await $('[data-testid="sign-store-error"]').getText()).toBe(
+        catalogString('de', 'dialog.signer.storeErrorDenied'),
+      );
+    } finally {
+      await pinStoreCertificates(null);
+      await setUiLanguage('en');
+    }
+  });
+
+  it('offers the installed certificates again once the store recovers', async function () {
+    if (!requireCertificate(this)) return;
+    // The panel's source state survives a close, so the fallback must be
+    // re-decided on the next open or a recovered store is never offered again.
     try {
       await pinStoreCertificates({ rows: [] });
       await reopenDockSignForm();
@@ -629,13 +744,70 @@ describe('signing with a Windows certificate store certificate', function () {
       expect(await $(SOURCE_PFX).isSelected()).toBe(true);
       await pinStoreCertificates(null);
       await reopenDockSignForm();
-      await waitForDisplayedSelector(STORE_SELECT, { timeout: 20_000 });
+      // Wait for the recovered store's ANSWER, not only for the select: the
+      // select renders while the read is still in flight.
+      await browser.waitUntil(
+        async () =>
+          (await $(STORE_SELECT).isEnabled())
+          && (await $$(`${STORE_SELECT} option`).length) >= 2,
+        { timeout: 30_000, timeoutMsg: 'the recovered store never answered' },
+      );
       expect(await $(SOURCE_STORE).isSelected()).toBe(true);
       expect(await $('[data-testid="sign-store-empty"]').isExisting()).toBe(false);
     } finally {
       await pinStoreCertificates(null);
     }
   });
+
+  it('shows the certificate a reopened form will sign with while the store is still read', async function () {
+    if (!requireCertificate(this)) return;
+    const row = cliStoreCerts().find((r) => r.thumbprint === thumbprint);
+    expect(row).toBeDefined();
+    try {
+      await openDockSignForm();
+      await $(SOURCE_STORE).click();
+      await chooseStoreSource();
+      await setReactSelectValue(STORE_SELECT, thumbprint!);
+      // Held back, so the window between opening and the answer is observable.
+      await pinStoreCertificates({ rows: [row!], delayMs: 3_000 });
+      await $('[data-testid="sign-open"]').click();
+      await browser.waitUntil(async () => !(await $(SIGN_FORM).isExisting()), { timeout: 10_000 });
+      await $('[data-testid="sign-open"]').click();
+      await waitForDisplayedSelector(STORE_SELECT, { timeout: 10_000 });
+      // Still reading: what the picker shows is what the request would carry.
+      expect(await $(STORE_SELECT).isEnabled()).toBe(false);
+      expect(await $(STORE_SELECT).getValue()).toBe(thumbprint);
+      // Answered: the same certificate, now confirmed by the store.
+      await browser.waitUntil(async () => $(STORE_SELECT).isEnabled(), { timeout: 20_000 });
+      expect(await $(STORE_SELECT).getValue()).toBe(thumbprint);
+    } finally {
+      await pinStoreCertificates(null);
+    }
+  });
+
+  it('keeps the signing actions reachable with a long file name in long locales', async () => {
+    // A file name is one unbroken word of any length; the panel header must
+    // wrap it rather than push the button that opens the signing form out of
+    // the dock, at the default width as well as the minimum.
+    const longName = join(SCRATCH, 'Quarterly_Supplier_Agreement_2026_Countersigned.pdf');
+    copyFileSync(SAMPLE_PDF, longName);
+    await openByPaths([longName]);
+    try {
+      for (const locale of ['en', 'nl', 'de', 'el']) {
+        await setUiLanguage(locale);
+        for (const width of [DOCK_MIN_WIDTH, DOCK_DEFAULT_WIDTH]) {
+          await seatDockPanel(width);
+          for (const id of ['signatures-heading', 'signatures-recheck', 'sign-open']) {
+            await assertSeen(`[data-testid="${id}"]`, DOCK_BODY);
+          }
+          await assertNoHorizontalOverflow(DOCK_BODY);
+        }
+      }
+    } finally {
+      await setUiLanguage('en');
+    }
+  });
+
 
   it('reaches every source with the keyboard alone', async () => {
     await openDockSignForm();

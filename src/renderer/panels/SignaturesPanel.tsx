@@ -549,8 +549,14 @@ export function SignaturesPanel(): React.ReactElement {
 
   return (
     <div className="flex flex-col gap-4 h-full">
-      <div className="shrink-0 flex items-center gap-3">
-        <div className="text-sm text-neutral-400">
+      {/* Wraps, and the file name breaks anywhere: a name is one unbroken word
+          of any length, and a row that can neither wrap nor shrink pushes the
+          button that opens the signing form out of the dock. */}
+      <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div
+          data-testid="signatures-heading"
+          className="min-w-0 flex-auto text-sm text-neutral-400 wrap-anywhere"
+        >
           {tChrome('panel.sig.heading')} <span className="text-neutral-200">{activeFile.name}</span>
         </div>
         <button

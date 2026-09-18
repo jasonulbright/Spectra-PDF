@@ -1,30 +1,22 @@
 // Which certificate source the signing form offers, in what order, and what
-// it does when the platform store has nothing to give.
+// it holds when the platform store has nothing to give.
 //
 // Installed Windows certificates are the PRIMARY source: they are enumerated
-// when the form opens and offered for selection directly, and the file, token
-// and service sources sit behind one disclosure as the advanced choices. That
-// ordering is a fact about the product, not about a component, so it lives
-// here where it can be read and tested.
+// when the form opens and offered for selection directly. The file, token and
+// service sources follow under their own heading.
 //
-// The rule the store source established holds: a remembered choice is an
-// OFFER, never an action. A remembered thumbprint pre-selects only while the
-// store still enumerates it, so a certificate that expired or was removed
-// cannot sit selected in a form.
+// A remembered choice is an OFFER, never an action. A remembered thumbprint
+// pre-selects only while the store still enumerates it, so a certificate that
+// expired or was removed cannot sit selected in a form.
 //
-// Pure over its inputs — there is no DOM test environment, which is why none
-// of this lives in the component.
+// Pure over its inputs: there is no DOM test environment, so every decision
+// the picker takes lives here where it can be tested.
 
 import type { StoreCertificate } from './tauri-bridge';
 
 export type SignerSourceMode = 'store' | 'pfx' | 'pem' | 'pkcs11' | 'csc';
 
-/**
- * One chosen certificate source and whatever has been configured for it.
- *
- * Lives here rather than in the component so the decisions below can be taken
- * over a real source rather than over a mode alone.
- */
+/** One chosen certificate source and whatever has been configured for it. */
 export type SignerSource =
   | { mode: 'pfx'; pfxPath: string | null }
   | { mode: 'pem'; keyPath: string | null; certPath: string | null }
@@ -48,8 +40,8 @@ export type SignerSource =
 /** The installed-certificate source, offered first and selected by default. */
 export const PRIMARY_SIGNER_SOURCE: SignerSourceMode = 'store';
 
-/** The sources that need a file, a device or a service registration. Order is
- * the order the picker renders them in. */
+/** The sources that need a file, a device or a service registration, in the
+ * order the picker renders them. */
 export const ADVANCED_SIGNER_SOURCES: readonly SignerSourceMode[] = [
   'pfx',
   'pem',
@@ -64,9 +56,8 @@ export const SIGNER_SOURCE_ORDER: readonly SignerSourceMode[] = [
 
 /** A fresh, empty source of one mode.
  *
- * Exhaustive over `SignerSourceMode`, which is what ties the ordered list the
- * picker renders to the shapes the sign request can be assembled from — a
- * mode with no case here does not compile. */
+ * Exhaustive over `SignerSourceMode`: a mode added to the picker's list with
+ * no shape here does not compile. */
 export function emptySourceFor(mode: SignerSourceMode): SignerSource {
   switch (mode) {
     case 'store':
@@ -106,12 +97,12 @@ export function sourceIsUnconfigured(source: SignerSource): boolean {
 /**
  * The source a freshly opened signing form should hold.
  *
- * The caller's state outlives one opening of the form, so a fallback taken
- * because the store was unavailable would otherwise outlive the form that took
- * it — and a store that has since recovered would never be offered again. An
- * UNCONFIGURED source carries no work to lose, so it returns to the primary
- * one on every open; a source with a file, a label or a credential in it is
- * the user's and is kept.
+ * The caller's state outlives one opening of the form. An UNCONFIGURED source
+ * carries no work to lose, so it returns to the primary one on every open —
+ * otherwise a fallback taken while the store was unavailable would outlive
+ * the form that took it, and a recovered store would never be offered again.
+ * A source with a file, a label or a credential in it is the user's and is
+ * kept.
  */
 export function sourceOnOpen(source: SignerSource): SignerSourceMode {
   return sourceIsUnconfigured(source) ? PRIMARY_SIGNER_SOURCE : source.mode;
@@ -122,18 +113,61 @@ export function sourceOnOpen(source: SignerSource): SignerSourceMode {
  *
  * `error` and `empty` are different findings and are reported differently: a
  * store that refused says why, a store that opened and holds no signer says
- * so. Neither is allowed to render as a blank picker.
+ * so. Neither may render as a blank picker.
  */
 export type StoreAvailability = 'loading' | 'offer' | 'empty' | 'error';
 
 export function storeAvailability(state: {
   busy: boolean;
   rows: readonly StoreCertificate[] | null;
-  error: string | null;
+  failed: boolean;
 }): StoreAvailability {
-  if (state.error) return 'error';
+  if (state.failed) return 'error';
   if (state.busy || state.rows === null) return 'loading';
   return state.rows.length > 0 ? 'offer' : 'empty';
+}
+
+/**
+ * Why the store could not be listed, as the picker words it.
+ *
+ * Classified from structured fields only. The platform's own error text is
+ * localized by the OS rather than by this app, so matching on it would break
+ * in every other Windows language.
+ */
+export type StoreReadFailure =
+  | { kind: 'denied'; code: string }
+  | { kind: 'missing'; code: string }
+  | { kind: 'unsupported' }
+  | { kind: 'code'; code: string }
+  | { kind: 'unknown' };
+
+/** E_ACCESSDENIED. */
+const DENIED_CODES: ReadonlySet<string> = new Set(['0x80070005']);
+/** ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND and CRYPT_E_NOT_FOUND: the
+ * account has no personal store to open. */
+const MISSING_CODES: ReadonlySet<string> = new Set(['0x80070002', '0x80070003', '0x80092004']);
+
+/** An HRESULT normalized to `0x` and eight uppercase hex digits, or null when
+ * the value is not one. */
+function normalizeHresult(code: unknown): string | null {
+  if (typeof code !== 'string') return null;
+  const m = /^0x([0-9a-f]{1,8})$/i.exec(code.trim());
+  return m ? `0x${m[1].toUpperCase().padStart(8, '0')}` : null;
+}
+
+export function classifyStoreFailure(e: unknown): StoreReadFailure {
+  if (typeof e === 'object' && e !== null && 'reason' in e) {
+    const { reason, code } = e as { reason?: unknown; code?: unknown };
+    if (reason === 'unsupported') return { kind: 'unsupported' };
+    const hresult = normalizeHresult(code);
+    if (hresult) {
+      if (DENIED_CODES.has(hresult)) return { kind: 'denied', code: hresult };
+      if (MISSING_CODES.has(hresult)) return { kind: 'missing', code: hresult };
+      return { kind: 'code', code: hresult };
+    }
+  }
+  // An IPC failure, or a refusal with no code: nothing structured to name.
+  return { kind: 'unknown' };
 }
 
 /**
@@ -141,20 +175,19 @@ export function storeAvailability(state: {
  *
  * A store that refused, or that holds no signer, leaves the primary source
  * with nothing to choose from, so the selection moves to the first advanced
- * source instead of parking the user on an empty picker. The store's own
- * message does NOT travel with the selection — it is rendered on the store
- * row whatever is selected, which is the only way the reason for this move
- * survives it.
+ * source instead of parking the user on an empty picker. The caller renders
+ * the store's verdict on the store row whatever is selected; a verdict gated
+ * on the selection would unmount in the commit that moved it.
  *
  * Never fires over a choice the user made: a source they picked themselves is
  * theirs even if the answer arrives afterwards, and a store selection that
- * already names a certificate is a choice too.
+ * names a certificate the store still offers is a choice too.
  */
 export function sourceAfterStoreRead(state: {
   mode: SignerSourceMode;
-  /** A thumbprint the store STILL OFFERS. One it no longer enumerates is not
-   * a selection — it is a certificate that expired or was removed, and
-   * counting it as one would park the user on a store that cannot serve. */
+  /** A thumbprint the store STILL OFFERS, or null. One it no longer
+   * enumerates is not a selection, and counting it as one would park the
+   * user on a store that cannot serve. */
   thumbprint: string | null;
   /** The user has operated the source chooser at least once. */
   userPicked: boolean;
@@ -215,12 +248,12 @@ export function signerCertificateOptions(
 }
 
 /**
- * The remembered certificate, if the store still offers it.
+ * The option for a thumbprint, if the store still offers it.
  *
  * Null for a thumbprint the store no longer enumerates, and null for no
- * remembered thumbprint at all — there is deliberately no fallback to "the
- * first row", because a pre-selection the user never made is a selection they
- * did not make.
+ * thumbprint at all — there is deliberately no fallback to "the first row",
+ * because a pre-selection the user never made is a selection they did not
+ * make.
  */
 export function rememberedCertificate(
   options: readonly SignerCertificateOption[],
@@ -228,4 +261,45 @@ export function rememberedCertificate(
 ): SignerCertificateOption | null {
   if (!remembered) return null;
   return options.find((o) => o.thumbprint === remembered) ?? null;
+}
+
+/** A store selection: which certificate, and in which store location. */
+export interface StoreSelection {
+  thumbprint: string | null;
+  machineStore: boolean;
+}
+
+/**
+ * The store selection once a read has answered, or null to leave it as it is.
+ *
+ * - A selection the store still offers stands, but its store location is
+ *   re-derived from the row just read: the request is built from this state,
+ *   and a certificate that moved between the user and machine stores would
+ *   otherwise be looked for where it no longer is.
+ * - A selection the store no longer offers is not a selection. It resolves
+ *   to the remembered certificate if that is offered, otherwise to none.
+ * - With nothing selected, the remembered certificate is offered if the store
+ *   still has it. A selection the user cleared is not re-filled here: the
+ *   caller runs this on entering the source and on each read, never on the
+ *   selection changing.
+ */
+export function storeSelectionAfterRead(state: {
+  selection: StoreSelection;
+  options: readonly SignerCertificateOption[];
+  remembered: string | null;
+}): StoreSelection | null {
+  const { selection, options } = state;
+  if (selection.thumbprint !== null) {
+    const live = rememberedCertificate(options, selection.thumbprint);
+    if (live) {
+      return live.machineStore === selection.machineStore
+        ? null
+        : { thumbprint: live.thumbprint, machineStore: live.machineStore };
+    }
+  }
+  const remembered = rememberedCertificate(options, state.remembered);
+  if (remembered) {
+    return { thumbprint: remembered.thumbprint, machineStore: remembered.machineStore };
+  }
+  return selection.thumbprint !== null ? { thumbprint: null, machineStore: false } : null;
 }

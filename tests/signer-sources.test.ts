@@ -1,10 +1,10 @@
 // Certificate-source ordering and store availability (lib/signer-sources.ts).
 //
-// What is under test is the DISCOVERABILITY CONTRACT: installed Windows
-// certificates are the first source offered, and the advanced sources are on
-// screen whenever the primary one cannot serve. The defect this replaces was a
-// signing form that rendered every source and showed two of them, so the
-// property with no visible symptom is "a usable source is never hidden".
+// Under test: installed Windows certificates are the first source offered,
+// a usable source is never hidden when the primary one cannot serve, and the
+// store selection the request is built from is always one the store offers.
+// Each of these fails with no visible symptom, which is why they are pinned
+// here rather than left to a component with no test environment.
 import { describe, expect, it } from 'vitest';
 import {
   ADVANCED_SIGNER_SOURCES,
@@ -17,6 +17,8 @@ import {
   sourceIsUnconfigured,
   sourceOnOpen,
   storeAvailability,
+  storeSelectionAfterRead,
+  classifyStoreFailure,
   type SignerSource,
   type StoreAvailability,
 } from '../src/renderer/lib/signer-sources';
@@ -54,25 +56,76 @@ describe('the order the sources are offered in', () => {
 
 describe('what the store enumeration has produced', () => {
   it('reads as loading until the first answer lands', () => {
-    expect(storeAvailability({ busy: true, rows: null, error: null })).toBe('loading');
-    expect(storeAvailability({ busy: false, rows: null, error: null })).toBe('loading');
-    expect(storeAvailability({ busy: true, rows: [], error: null })).toBe('loading');
+    expect(storeAvailability({ busy: true, rows: null, failed: false })).toBe('loading');
+    expect(storeAvailability({ busy: false, rows: null, failed: false })).toBe('loading');
+    expect(storeAvailability({ busy: true, rows: [], failed: false })).toBe('loading');
   });
 
   it('separates a store that refused from a store that holds no signer', () => {
-    expect(storeAvailability({ busy: false, rows: [], error: 'no store here' })).toBe('error');
-    expect(storeAvailability({ busy: false, rows: [], error: null })).toBe('empty');
+    expect(storeAvailability({ busy: false, rows: [], failed: true })).toBe('error');
+    expect(storeAvailability({ busy: false, rows: [], failed: false })).toBe('empty');
   });
 
   it('reports an offer once there is a row to offer', () => {
-    expect(storeAvailability({ busy: false, rows: [cert()], error: null })).toBe('offer');
+    expect(storeAvailability({ busy: false, rows: [cert()], failed: false })).toBe('offer');
   });
 
-  it('returns to a wait while a Refresh re-reads, since the read clears the error first', () => {
-    // The reachable sequence: a failed read leaves rows=[] and an error, then
-    // Refresh sets busy and clears the error in the same commit.
-    expect(storeAvailability({ busy: false, rows: [], error: 'no store here' })).toBe('error');
-    expect(storeAvailability({ busy: true, rows: [], error: null })).toBe('loading');
+  it('returns to a wait while a Refresh re-reads, since the read clears the failure first', () => {
+    // The reachable sequence: a failed read leaves rows=[] and a failure, then
+    // Refresh sets busy and clears the failure in the same commit.
+    expect(storeAvailability({ busy: false, rows: [], failed: true })).toBe('error');
+    expect(storeAvailability({ busy: true, rows: [], failed: false })).toBe('loading');
+  });
+});
+
+describe('naming the store\u2019s refusal', () => {
+  it('names an access refusal by its HRESULT, not by the platform\u2019s wording', () => {
+    expect(
+      classifyStoreFailure({ reason: 'open-failed', code: '0x80070005', message: 'Zugriff verweigert' }),
+    ).toEqual({ kind: 'denied', code: '0x80070005' });
+  });
+
+  it('names a missing personal store by any of its codes', () => {
+    for (const code of ['0x80070002', '0x80070003', '0x80092004']) {
+      expect(classifyStoreFailure({ reason: 'open-failed', code, message: '' })).toEqual({
+        kind: 'missing',
+        code,
+      });
+    }
+  });
+
+  it('normalizes the spelling of a code before matching it', () => {
+    expect(classifyStoreFailure({ reason: 'open-failed', code: '0X80070005' })).toEqual({
+      kind: 'denied',
+      code: '0x80070005',
+    });
+    expect(classifyStoreFailure({ reason: 'open-failed', code: '0x5' })).toEqual({
+      kind: 'code',
+      code: '0x00000005',
+    });
+  });
+
+  it('carries an unmapped code into the generic message', () => {
+    expect(classifyStoreFailure({ reason: 'open-failed', code: '0x80090016' })).toEqual({
+      kind: 'code',
+      code: '0x80090016',
+    });
+  });
+
+  it('reports a platform with no store as unsupported', () => {
+    expect(classifyStoreFailure({ reason: 'unsupported', code: null })).toEqual({
+      kind: 'unsupported',
+    });
+  });
+
+  it('falls back to the generic sentence for anything unstructured', () => {
+    // An IPC failure rejects with plain text; an Error has no fields to read.
+    for (const e of ['Command list_store_certificates not found', new Error('x'), null, undefined, {}]) {
+      expect(classifyStoreFailure(e)).toEqual({ kind: 'unknown' });
+    }
+    expect(classifyStoreFailure({ reason: 'open-failed', code: 'not-a-code' })).toEqual({
+      kind: 'unknown',
+    });
   });
 });
 
@@ -204,6 +257,55 @@ describe('the enumeration as a list to choose from', () => {
     expect(option.hardwareBacked).toBe(true);
     expect(option.machineStore).toBe(true);
     expect(option.notAfter).toBe('2031-06-05T00:00:00Z');
+  });
+});
+
+describe('the store selection after a read', () => {
+  const options = signerCertificateOptions([
+    cert({ thumbprint: 'USER', subject: 'User signer', machine_store: false }),
+    cert({ thumbprint: 'MACH', subject: 'Machine signer', machine_store: true }),
+  ]);
+  const after = (thumbprint: string | null, machineStore: boolean, remembered: string | null) =>
+    storeSelectionAfterRead({ selection: { thumbprint, machineStore }, options, remembered });
+
+  it('leaves a live selection whose store location still matches', () => {
+    expect(after('USER', false, null)).toBeNull();
+    expect(after('MACH', true, 'USER')).toBeNull();
+  });
+
+  it('re-derives the store location of a live selection from the row just read', () => {
+    // The request carries the location from this state: a certificate that
+    // moved stores must be looked for where it now is.
+    expect(after('MACH', false, null)).toEqual({ thumbprint: 'MACH', machineStore: true });
+    expect(after('USER', true, null)).toEqual({ thumbprint: 'USER', machineStore: false });
+  });
+
+  it('replaces a stale selection with the remembered certificate when offered', () => {
+    expect(after('GONE', false, 'MACH')).toEqual({ thumbprint: 'MACH', machineStore: true });
+  });
+
+  it('clears a stale selection when nothing remembered is offered', () => {
+    expect(after('GONE', true, null)).toEqual({ thumbprint: null, machineStore: false });
+    expect(after('GONE', true, 'ALSO-GONE')).toEqual({ thumbprint: null, machineStore: false });
+  });
+
+  it('offers the remembered certificate into an empty selection', () => {
+    expect(after(null, false, 'USER')).toEqual({ thumbprint: 'USER', machineStore: false });
+  });
+
+  it('leaves an empty selection empty when nothing remembered is offered', () => {
+    expect(after(null, false, null)).toBeNull();
+    expect(after(null, false, 'GONE')).toBeNull();
+  });
+
+  it('clears a selection against an empty store', () => {
+    expect(
+      storeSelectionAfterRead({
+        selection: { thumbprint: 'USER', machineStore: false },
+        options: [],
+        remembered: 'USER',
+      }),
+    ).toEqual({ thumbprint: null, machineStore: false });
   });
 });
 
