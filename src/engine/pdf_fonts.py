@@ -24,7 +24,12 @@ Editability taxonomy (every run is LISTED; refusal carries the reason):
   - Simple Type1/TrueType with a resolvable encoding → editable.
   - Symbolic simple fonts without one: ToUnicode when present, else a map
     DERIVED from the embedded program's cmap + glyph names; refused
-    only when neither yields a single code.
+    only when neither yields a single code. An embedded Type 1 program
+    whose fixed-content portion was left out — which ISO 32000-2:2020,
+    9.9.1, Table 125 permits and hands to the processor to add — is
+    COMPLETED before its one bounded parse; a program that fails records
+    WHY in `FontCapability.diagnostic` (engine-internal, English, and free
+    of document bytes by construction).
   - Type0 + Identity-H + ToUnicode → editable (the copy-paste capability
     bar: text you can extract is text you can re-enter). Identity-V and
     Uni*-UCS2-V are their vertical twins: same 2-byte codes, same
@@ -54,6 +59,59 @@ def _strip_subset_prefix(base_font: str) -> str:
     if len(base_font) > 7 and base_font[6] == "+" and base_font[:6].isalpha() and base_font[:6].isupper():
         return base_font[7:]
     return base_font
+
+
+#: Parser failures whose text is a FIXED string in the library that raises it.
+#: Repeating one of these cannot disclose anything, because no part of it came
+#: from the document or from this machine. Every other failure contributes its
+#: exception TYPE and nothing else: `PSError("name error: " + name)` splices in
+#: the font program's own bytes, `T1Error("bad chunk code: " + repr(code))` a
+#: byte from it, and an OSError its local filesystem path — and a diagnostic is
+#: exactly the string a reporter pastes into a public issue. Exact match, so a
+#: message that grows an interpolation upstream degrades to the type name
+#: rather than starting to leak.
+_SAFE_PARSER_FAILURES = frozenset({
+    "can't find end of eexec part",
+    "corrupt LWFN file",
+    "corrupt PFB file",
+    "dictstack underflow",
+    "index may not be negative",
+    "invalid end of eexec part",
+    "not a PostScript font",
+    "not a Type 1 font",
+    "not an encrypted Type 1 font",
+    "stack underflow",
+})
+
+
+def _parser_failure(exc: BaseException) -> str:
+    """One font-program failure as a disclosure-free line.
+
+    The TYPE always travels: it is the part that distinguishes a program this
+    reader cannot open from one it opened and could not describe, and it is a
+    short identifier by construction. A generically named type is qualified
+    with its module, so `binascii.Error` does not read as a bare `Error` while
+    `T1Error` and `PSError` stay as they are. The message travels only when it
+    is one the library states literally."""
+    cls = type(exc)
+    name = cls.__name__
+    if name in ("Error", "error") and cls.__module__ not in ("builtins", None):
+        name = f"{cls.__module__}.{name}"
+    message = str(exc).strip()
+    return f"{name}: {message}" if message in _SAFE_PARSER_FAILURES else name
+
+
+#: How much text a capability's `diagnostic` may carry. Enough for any line
+#: this module composes; not enough to carry a payload. The same bound and the
+#: same clip as `csc._MAX_PROVIDER_DETAIL`.
+_MAX_DIAGNOSTIC = 200
+
+
+def _clip(text: str) -> str:
+    """Bound a diagnostic before it is stored."""
+    if len(text) <= _MAX_DIAGNOSTIC:
+        return text
+    return text[:_MAX_DIAGNOSTIC].rstrip() + "…"
 
 
 def _code_lengths(trie: dict) -> dict[int, int]:
@@ -130,9 +188,24 @@ class FontCapability:
         default_declared: bool = False,
         writes_vertical: Optional[bool] = None,
         reader_limit: bool = False,
+        diagnostic: Optional[str] = None,
     ):
         self.editable = editable
         self.reason = reason
+        # Why the EMBEDDED PROGRAM yielded nothing, when a refusal came from
+        # a program derivation that failed rather than from a font that
+        # declares nothing. `reason` names the class and is the string the
+        # message catalog matches; this names the mechanism, and a swallowed
+        # parse error is what made this whole class indistinguishable from a
+        # font that really is symbolic.
+        #
+        # ENGINE-INTERNAL: it is not localized and it does not ride any run,
+        # paragraph or report payload. Triage reads it off the capability for
+        # the font in hand. A field on the wire that no surface renders is
+        # dead weight, and this one is assembled from parser failures, so
+        # keeping it off the wire is also what bounds its blast radius.
+        # Clipped HERE, at the one place every producer's text passes.
+        self.diagnostic = _clip(diagnostic) if diagnostic is not None else None
         # Does `reason` describe the DOCUMENT or THIS READER? A font that
         # carries no mapping is a defect in the file; an encoding this build
         # does not implement is a gap in us, and a check that reports the
@@ -335,6 +408,7 @@ def _refused(
     default_declared: bool = False,
     writes_vertical: bool = False,
     reader_limit: bool = False,
+    diagnostic: Optional[str] = None,
 ) -> FontCapability:
     """A non-editable capability. `code_bytes` must still be RIGHT (2 for
     composite fonts): the run LISTER measures refused runs' widths for
@@ -361,6 +435,7 @@ def _refused(
         default_declared=default_declared,
         writes_vertical=writes_vertical,
         reader_limit=reader_limit,
+        diagnostic=diagnostic,
     )
 
 
@@ -496,12 +571,15 @@ def _glyph_names_to_maps(
     return code2uni, code2width
 
 
-def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
+def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float], Optional[str]]:
     """Bare-CFF FontFile3 (Type1C). The CFF carries its OWN encoding
     (code→glyph name) and every charstring encodes its advance — cffLib
     exposes both, so 'two refusals, zero justification' had a two-parser
     answer. CID-keyed CFF has no encoding and returns empty (a CID program
-    in a SIMPLE font slot is malformed; the caller keeps the refusal)."""
+    in a SIMPLE font slot is malformed; the caller keeps the refusal).
+
+    The third element states why an empty derivation is empty; it never
+    changes the refusal, only records its mechanism."""
     try:
         from fontTools.cffLib import CFFFontSet
         from fontTools.pens.basePen import NullPen
@@ -510,7 +588,20 @@ def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
         cff.decompile(BytesIO(raw), None)
         td = cff[cff.fontNames[0]]
         if hasattr(td, "ROS"):
-            return {}, {}  # CID-keyed — no builtin encoding to honor
+            # CID-keyed — no builtin encoding to honor
+            return {}, {}, "the embedded CFF program is CID-keyed and carries no encoding"
+        if not hasattr(td, "charset") or td.charset is None:
+            # A Top DICT that omits the charset operator declares the default
+            # charset, ISOAdobe — the Compact Font Format specification (Adobe
+            # Technical Note #5176; NOT held in `pdfa/`, so cited second-hand
+            # as a RECORDED GAP), charset operator, default 0 = ISOAdobe.
+            # cffLib applies that default only when the operator is present with
+            # value 0; when it is absent, reading `charset` raises, and building
+            # CharStrings below would raise with it. Supply the same list cffLib
+            # would, truncated to the glyph count as it truncates it.
+            from fontTools.cffLib import cffISOAdobeStrings
+
+            td.charset = list(cffISOAdobeStrings[: td.numGlyphs])
         # cffLib hands back the STRING 'StandardEncoding'/'ExpertEncoding'
         # for the predefined encodings and a 256-list only for custom ones —
         # enumerating the string mapped code 0→'S', 1→'t', … and ACCEPTED
@@ -522,11 +613,12 @@ def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
 
                 encoding = list(StandardEncoding)
             else:
-                return {}, {}  # ExpertEncoding — ornament sets, no honest text map
+                # ExpertEncoding — ornament sets, no honest text map
+                return {}, {}, f"the embedded CFF program uses {encoding}"
         charstrings = td.CharStrings
         upem = 1.0 / float(td.FontMatrix[0]) if td.FontMatrix[0] else 1000.0
-    except Exception:
-        return {}, {}
+    except Exception as exc:
+        return {}, {}, f"the embedded CFF program will not parse ({_parser_failure(exc)})"
 
     def width_of(gname: str):
         if gname not in charstrings:
@@ -543,17 +635,170 @@ def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
         for c, n in enumerate(encoding)
         if n and n != ".notdef" and n in charstrings
     }
-    return _glyph_names_to_maps(names_by_code, width_of)
+    code2uni, code2width = _glyph_names_to_maps(names_by_code, width_of)
+    return code2uni, code2width, None
 
 
-def _type1_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
-    """/FontFile (Type1, PFA or PFB). t1Lib parses from a temp file
-    (its API is path-based); the font's builtin encoding + charstring
-    widths come out the same way the CFF path's do."""
+_T1_EEXEC = b"currentfile eexec"
+#: The fixed-content portion ISO 32000-2:2020, 9.9.1, Table 125 names: 512
+#: ASCII zeros (conventionally eight 64-byte lines) and `cleartomark`. The
+#: clause names both, so both are written — `cleartomark` is not what bounds
+#: the section for fontTools (the zero run is), but a program this reader
+#: completes is completed to what the standard describes.
+_T1_TRAILER = (b"0" * 64 + b"\n") * 8 + b"cleartomark\n"
+
+#: A Type 1 font program above this is refused unparsed. It bounds the BYTES
+#: read and scanned, not the interpretation — a small program can still loop or
+#: allocate without limit, which `_T1_MAX_INTERP_STEPS` and `_T1_MAX_INTERP_CELLS`
+#: bound instead. The format is a 256-code simple font: a full, unsubsetted text
+#: face with hinting is under 200 KB and an embedded subset tens of KB. A font
+#: stream is untrusted input whose compressed size bounds nothing (a 42 KB Flate
+#: stream expands past 17 MB). Same shape and order of magnitude as
+#: `csc.MAX_RESPONSE_BYTES`; checked after the stream's filters are decoded, as
+#: `xfa` checks its own.
+MAX_TYPE1_PROGRAM_BYTES = 4 * 1024 * 1024
+
+#: A Type 1 program is a PostScript program, and t1Lib runs it on an
+#: interpreter (`fontTools.misc.psLib`) that has no step or allocation limit of
+#: its own: `0 0 -1 {pop} for` never returns, and `50000000 array` reaches
+#: hundreds of MB, in a 700-byte font. The engine answers one request at a time
+#: (`ipc.py`) with no per-request timeout, so one such font stalls every later
+#: request until restart. Bytes do not bound this — the work is set by the
+#: program's LOOPS, not its length — so the interpreter is bounded directly, the
+#: way `document_health` bounds its own in-process walk with `_STEP_OBJECTS` and
+#: `color_spaces` caps its Type 4 calculator: a wall-clock or address-space
+#: limit is not portably available in-process on the shipped target, and a
+#: subprocess per font is the wrong shape when the parse is already in-process.
+#:
+#: The budgets are FLAT, not tied to program size: a size-tied budget lets a
+#: larger crafted program buy more work, and the largest real program measured
+#: needs the same order of magnitude as the smallest. Calibrated against every
+#: real Type 1 program on hand (max 21,091 executed steps, 147,751 allocated
+#: cells): ~24x and ~54x margin. A breach refuses by name with `/Widths`
+#: surviving, in bounded time — a pure loop trips in a second or two on a
+#: current machine, an oversized allocation before it happens at all.
+_T1_MAX_INTERP_STEPS = 500_000
+#: List slots + string bytes the interpreter may allocate in one program.
+#: 8M cells is about 64 MB of pointers worst case, the scale of `xfa`'s own
+#: resource cap and far under the 382 MB an unbounded `array` reaches.
+_T1_MAX_INTERP_CELLS = 8_000_000
+#: Operand-stack depth. A loop with an empty body grows the stack without
+#: allocating an array or string, so the step budget alone would let it reach
+#: hundreds of MB of stacked objects before it trips; this bounds that. The
+#: deepest real stack measured is 279, so 65,536 is ~235x margin.
+_T1_MAX_INTERP_STACK = 65_536
+
+
+class _T1InterpreterBudget(Exception):
+    """A Type 1 program that outran the interpreter's step or allocation
+    budget. Its message is a fixed, disclosure-free string set at the raise
+    site — the caller reports it verbatim, never through `_parser_failure`."""
+
+
+def _bounded_t1_interpreter():
+    """A `psLib.PSInterpreter` subclass that refuses a program which executes
+    more than `_T1_MAX_INTERP_STEPS` objects or allocates more than
+    `_T1_MAX_INTERP_CELLS` cells. Built lazily so importing this module does
+    not import `psLib`.
+
+    Every executed object passes through `handle_object`, and every loop
+    iteration through `call_procedure` (an empty-procedure `for` loop calls no
+    `handle_object` at all), so both are counted. `array`/`string` allocate
+    whatever count the program states, so their operand is checked before the
+    allocation happens rather than after."""
+    from fontTools.misc import psLib
+
+    class _Bounded(psLib.PSInterpreter):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._steps_left = _T1_MAX_INTERP_STEPS
+            self._cells_left = _T1_MAX_INTERP_CELLS
+
+        def _tick(self):
+            self._steps_left -= 1
+            if self._steps_left < 0:
+                raise _T1InterpreterBudget(
+                    "the embedded Type 1 program exceeded the interpreter step "
+                    "budget and was not parsed"
+                )
+            if len(self.stack) > _T1_MAX_INTERP_STACK:
+                raise _T1InterpreterBudget(
+                    "the embedded Type 1 program overflowed the interpreter "
+                    "stack and was not parsed"
+                )
+
+        def _charge(self):
+            # The operand `array`/`string` will consume, peeked before the
+            # allocation. A non-integer operand is left for the base method to
+            # reject as a type error.
+            try:
+                count = int(self.stack[-1].value)
+            except (IndexError, AttributeError, TypeError, ValueError):
+                return
+            if count < 0 or count > self._cells_left:
+                raise _T1InterpreterBudget(
+                    "the embedded Type 1 program requested more interpreter "
+                    "memory than allowed and was not parsed"
+                )
+            self._cells_left -= count
+
+        def handle_object(self, obj):
+            self._tick()
+            super().handle_object(obj)
+
+        def call_procedure(self, proc):
+            self._tick()
+            super().call_procedure(proc)
+
+        def ps_array(self):
+            self._charge()
+            super().ps_array()
+
+        def ps_string(self):
+            self._charge()
+            super().ps_string()
+
+    return _Bounded
+
+#: The whitespace fontTools lets interrupt the trailer's zeros (`t1Lib.EEXECEND`).
+_T1_WHITESPACE = b" \t\r\n"
+_T1_ZERO_RUN = b"0" * 512
+_T1_ZERO_BLOCK = b"0" * 16
+#: fontTools finds the end of the encrypted section with a regular expression
+#: that re-scans every run of zeros SHORTER than 512 from each position in it —
+#: quadratic in the run: 13 s for 4 MB of crafted 511-zero runs, against 0.04 s
+#: for 4 MB of cipher text. A real encrypted section has no such runs (sixteen
+#: zeros in a row are about 2^-128 likely in binary cipher text and 2^-64 in
+#: hex), and a real program has at most one trailer's worth, 31 blocks when it
+#: is truncated. Past this many 16-zero blocks outside whole 512-zero runs the
+#: program is refused rather than scanned.
+_T1_MAX_SHORT_ZERO_BLOCKS = 64
+
+
+def _parse_type1_program(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
+    """One t1Lib pass over a Type 1 program: its builtin encoding through the
+    AGL plus charstring advances, the same way the CFF path derives them.
+    RAISES on a program t1Lib cannot read — the caller decides whether that
+    is final — and `_T1InterpreterBudget` on a program that loops or allocates
+    past the budget.
+
+    The dictionary parse runs on the bounded interpreter. `suckfont`
+    constructs `psLib.PSInterpreter` by that module-global name, so the bound
+    is installed by rebinding it for the duration of the parse and restoring it
+    in `finally`; the engine is single-threaded (`ipc.py`), so the rebinding
+    cannot race. The later charstring `draw` is a separate, non-looping
+    interpreter (`psCharStrings`) bounded by the program's own length and
+    Python's recursion limit."""
     import os
     import tempfile
 
+    from fontTools.misc import psLib
+
+    # t1Lib's API is path-based and `T1Font(path)` dispatches on the
+    # EXTENSION: `.pfa` routes to `readOther`, which is the reader a plain
+    # (non-segmented) /FontFile stream needs, so `kind` stays defaulted.
     fd, tmp = tempfile.mkstemp(suffix=".pfb" if raw[:1] == b"\x80" else ".pfa")
+    original_interpreter = psLib.PSInterpreter
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(raw)
@@ -561,7 +806,11 @@ def _type1_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
         from fontTools.t1Lib import T1Font
 
         font = T1Font(tmp)
-        font.parse()
+        psLib.PSInterpreter = _bounded_t1_interpreter()
+        try:
+            font.parse()
+        finally:
+            psLib.PSInterpreter = original_interpreter
         fdict = font.font
         encoding = fdict.get("Encoding")
         charstrings = fdict.get("CharStrings", {})
@@ -571,8 +820,6 @@ def _type1_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
             from fontTools.encodings.StandardEncoding import StandardEncoding
 
             encoding = list(StandardEncoding)
-    except Exception:
-        return {}, {}
     finally:
         try:
             os.unlink(tmp)
@@ -594,7 +841,99 @@ def _type1_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
     return _glyph_names_to_maps(names_by_code, width_of)
 
 
-def _program_encoding_map(font_obj) -> tuple[dict[int, str], dict[int, float]]:
+def _type1_encoding_map(
+    raw: bytes,
+) -> tuple[dict[int, str], dict[int, float], Optional[str]]:
+    """/FontFile (Type1, PFA or PFB) → (code→unicode, code→advance, failure).
+
+    ONE interpretation, on the one program that can succeed. ISO 32000-2:2020,
+    9.9.1, Table 125 lets a Type 1 program in a PDF leave out its fixed-content
+    portion — `/Length3 0` declares the 512 zeros and `cleartomark` omitted, to
+    be added by the processor — but fontTools cannot bound the encrypted
+    section without them. So the reader completes the program exactly when the
+    zero run fontTools scans for is absent after `currentfile eexec`, and
+    leaves it as embedded otherwise:
+      - absent: the program as embedded CANNOT parse (`findEncryptedChunks`
+        raises before interpreting anything), and the completed one can.
+      - present: completing it CANNOT help — a second `cleartomark` finds no
+        mark and interpretation fails — and the program as embedded can.
+    The bytes answer the question `/Length3` only declares an answer to, so
+    the declaration is not consulted: a `/Length3 0` on a program that kept its
+    trailer, or a positive one over a truncated trailer, costs nothing. Junk a
+    truncated trailer leaves behind is harmless — t1Lib keeps the cipher only
+    up to the decrypted `currentfile closefile` and resumes at the zero run.
+    /Length1 and /Length2 are not used to cut the program either: eexec is a
+    stream cipher, so a cut before `closefile` fails and a cut after it is
+    byte-identical to the whole stream.
+
+    A PFB-segmented program (`0x80` magic) is read by its segment headers, not
+    by the zero-run scan, so it is never completed; nor is a program with no
+    `currentfile eexec`, which has no section to close.
+
+    The trailer is appended with no separator. A separator is never required —
+    `EEXECEND` matches the zero run wherever it starts — and appending one is
+    strictly less robust: a program whose final cipher byte is `0x30` and which
+    was cut exactly at the zero run (a corrupted `/Length3 0` embedding) then
+    parses only without the separator, and nothing on the corpus parses only
+    with it.
+
+    Work is bounded for untrusted bytes at every stage: `MAX_TYPE1_PROGRAM_BYTES`
+    on the bytes, the zero-run screen before fontTools' quadratic scan, and
+    `_T1_MAX_INTERP_STEPS`/`_T1_MAX_INTERP_CELLS` on the interpretation itself.
+
+    A program that fails states WHY in the third element — whether it was
+    completed, and the failure named through `_parser_failure`, which carries
+    no document bytes — instead of an empty derivation indistinguishable from
+    a font that genuinely declares no encoding. A parse that SUCCEEDS but names
+    no character (a subset whose glyph names are outside the AGL) says so too,
+    so it is not mistaken for the absence of a program."""
+    if len(raw) > MAX_TYPE1_PROGRAM_BYTES:
+        return {}, {}, (
+            "the embedded Type 1 program is larger than "
+            f"{MAX_TYPE1_PROGRAM_BYTES} bytes and was not parsed"
+        )
+    completed = False
+    marker = raw.find(_T1_EEXEC)
+    if raw[:1] != b"\x80" and marker >= 0:
+        # Exactly what t1Lib scans — everything after the marker and the one
+        # byte ending its line — with the whitespace its pattern skips removed.
+        # Transient: released before the program is parsed.
+        section = raw[marker + len(_T1_EEXEC) + 1:].translate(None, _T1_WHITESPACE)
+        # A 512-run holds exactly 32 blocks, so this counts the blocks of the
+        # runs that fall short of it: the only ones the scan re-reads from
+        # every position.
+        short_blocks = section.count(_T1_ZERO_BLOCK) - (
+            len(_T1_ZERO_RUN) // len(_T1_ZERO_BLOCK)
+        ) * section.count(_T1_ZERO_RUN)
+        if short_blocks > _T1_MAX_SHORT_ZERO_BLOCKS:
+            return {}, {}, (
+                "the embedded Type 1 program was not parsed: its encrypted "
+                "section holds zero runs no encrypted section has"
+            )
+        completed = _T1_ZERO_RUN not in section
+        del section
+    program = raw + _T1_TRAILER if completed else raw
+    try:
+        code2uni, code2width = _parse_type1_program(program)
+    except _T1InterpreterBudget as exc:
+        return {}, {}, str(exc)
+    except Exception as exc:
+        how = " once completed" if completed else ""
+        return {}, {}, (
+            f"the embedded Type 1 program will not parse{how} "
+            f"({_parser_failure(exc)})"
+        )
+    if not code2uni:
+        return {}, {}, (
+            "the embedded Type 1 program parsed but names no character "
+            "the Adobe Glyph List maps"
+        )
+    return code2uni, code2width, None
+
+
+def _program_encoding_map(
+    font_obj,
+) -> tuple[dict[int, str], dict[int, float], Optional[str]]:
     """code → unicode + code → advance (1000/em) derived from the embedded
     font program — the last resort for a symbolic
     simple font with no usable /Encoding and no ToUnicode. FontFile2 and
@@ -610,11 +949,12 @@ def _program_encoding_map(font_obj) -> tuple[dict[int, str], dict[int, float]]:
     Codes with no derivable unicode stay unmapped (decode → U+FFFD, encode
     refuses); widths still cover every code resolving to a real glyph, since
     decoded_width keys on CODES. An EMPTY derivation returns ({}, {}) — the
-    caller must keep refusing rather than accept garbage decoding."""
+    caller must keep refusing rather than accept garbage decoding — and the
+    third element states why it is empty, which is reported, never acted on."""
     try:
         desc = font_obj.get("/FontDescriptor")
         if desc is None:
-            return {}, {}
+            return {}, {}, None
         program = desc.get("/FontFile2")
         kind = "sfnt"
         if program is None:
@@ -623,10 +963,10 @@ def _program_encoding_map(font_obj) -> tuple[dict[int, str], dict[int, float]]:
             program = desc.get("/FontFile")
             kind = "type1" if program is not None else kind
         if program is None:
-            return {}, {}
+            return {}, {}, None
         raw = program.read_bytes()
-    except Exception:
-        return {}, {}
+    except Exception as exc:
+        return {}, {}, f"the embedded font program will not read ({_parser_failure(exc)})"
     if kind == "type1":
         return _type1_encoding_map(raw)
     try:
@@ -674,8 +1014,12 @@ def _program_encoding_map(font_obj) -> tuple[dict[int, str], dict[int, float]]:
             if u:
                 code2uni[code] = u
         if code2uni:
-            return code2uni, _hmtx_code_widths(tt, code2glyph)
-    return {}, {}
+            return code2uni, _hmtx_code_widths(tt, code2glyph), None
+    return {}, {}, (
+        "no cmap subtable of the embedded program names a character"
+        if by_key
+        else "the embedded program carries no readable cmap subtable"
+    )
 
 
 def _declared_simple_widths(font_obj) -> dict[int, float]:
@@ -1159,13 +1503,16 @@ def font_capability(font_obj) -> FontCapability:
             # embedded program. ToUnicode and usable-/Encoding paths above
             # stay byte-identical; an empty derivation keeps the refusal
             # (never accept a font that would decode as garbage).
-            derived, program_widths = _program_encoding_map(font_obj)
+            derived, program_widths, program_failure = _program_encoding_map(font_obj)
             if not derived:
                 # /Widths is code-keyed and needs no encoding, so the
                 # advances survive the refusal even though the text does not.
+                # The reason names the class and is matched verbatim by the
+                # message catalog; `diagnostic` carries the mechanism.
                 return _refused(
                     "no resolvable encoding (symbolic font without ToUnicode)",
                     widths=_declared_simple_widths(font_obj),
+                    diagnostic=program_failure,
                 )
             code2uni = derived
     elif tou_map:
