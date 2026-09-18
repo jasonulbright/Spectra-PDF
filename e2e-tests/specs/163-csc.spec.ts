@@ -124,7 +124,7 @@ class MockProvider {
 
 const SIGN_OPEN = '[data-testid="sign-open"]';
 const SIGN_FORM = '[data-testid="sign-form"]';
-const SOURCE_CSC = '[data-testid="sign-source-csc"]';
+const SOURCE_CSC = '[data-testid="sign-source-input-csc"]';
 const PROVIDER = '[data-testid="sign-csc-provider"]';
 const CREDENTIAL = '[data-testid="sign-csc-credential"]';
 const LIST = '[data-testid="sign-csc-list"]';

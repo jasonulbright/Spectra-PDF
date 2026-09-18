@@ -9,7 +9,7 @@
  * grant any capability the renderer doesn't already have. Treat it as a
  * scriptable remote control over the public IPC surface.
  */
-import { app, dialog, file, engine, scanner as scannerBridge } from './lib/tauri-bridge';
+import { app, dialog, file, engine, pinStoreCertificates, scanner as scannerBridge, type StoreCertificateAnswer } from './lib/tauri-bridge';
 import { windowLabel } from './lib/window-label';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
 import {
@@ -1535,6 +1535,9 @@ export interface TestHarness {
   focusTab: (tab: FocusedTab) => void;
   /** Select an operation in the sidebar. */
   setActiveOp: (op: string) => void;
+  /** Resize the tool dock (clamped by the reducer). A panel at its narrowest
+   * real width is a layout condition no other harness call can set up. */
+  setToolDockWidth: (width: number) => void;
   /** Invoke a command-registry entry — the ONE entry point the menus,
    * toolbars and keymap share. Returns false when the command's
    * enablement predicate refused; throws on an unknown id. */
@@ -2089,6 +2092,14 @@ export interface TestHarness {
    */
   gsForceAbsent: (reason?: string) => void;
   /**
+   * Pin what the certificate-store enumeration answers, so the empty and
+   * refused paths can be driven. `null` unpins and the next read goes to
+   * Windows for real. The `gsForceAbsent` reason applies unchanged: a
+   * machine's own certificates cannot be removed by a suite, and the IPC is
+   * not stubbable from the page.
+   */
+  storeCertsPin: (answer: StoreCertificateAnswer | null) => void;
+  /**
    * Lift the force and probe for real, returning the answer that landed.
    *
    * The no-restart claim in one call: a spec asserts a surface disabled,
@@ -2359,6 +2370,7 @@ export interface TestHarnessDeps {
   setView: (view: 'welcome' | 'operations' | 'canvas') => void;
   focusTab: (tab: FocusedTab) => void;
   setActiveOp: (op: string) => void;
+  setToolDockWidth: (width: number) => void;
   setTool: (tool: string) => void;
   setDocViewMode: (mode: 'organize' | 'document') => void;
   getStateSnapshot: () => TestStateSnapshot;
@@ -2628,6 +2640,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     setView: (view) => deps.setView(view),
     focusTab: (tab) => deps.focusTab(tab),
     setActiveOp: (op) => deps.setActiveOp(op),
+    setToolDockWidth: (width) => deps.setToolDockWidth(width),
     invokeCommand: (id) => {
       if (!(id in COMMANDS)) {
         const msg = `invokeCommand: unknown command id "${id}"`;
@@ -3612,6 +3625,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     breakTabOrderPublish: () => {
       setTabOrderChannel({ flush: async () => false });
     },
+    storeCertsPin: (answer) => pinStoreCertificates(answer),
     gsForceAbsent: (reason) => {
       pinGsCapability({
         available: false,

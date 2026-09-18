@@ -7628,7 +7628,14 @@ export function WorkspaceCanvasView({
       {(liveSigPlacement || sigFieldTarget) && (
         <div
           data-testid="sign-canvas-form"
-          className="absolute bottom-4 start-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
+          // Its own scroll box: the signer source list and a chosen source's
+          // fields together can outgrow the viewport, and a card anchored at
+          // the bottom edge grows UPWARD past the top of the window, where
+          // nothing can scroll it back.
+          // The cap is a percentage of the CANVAS AREA, not of the viewport:
+          // the area sits between the toolbars and the status bar, and a
+          // viewport-relative cap overshoots by however tall those are.
+          className="absolute bottom-4 start-4 z-30 w-80 max-h-[calc(100%-2rem)] overflow-y-auto rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
         >
           <div className="text-sm text-neutral-200 font-medium">
             {sigFieldTarget
@@ -7641,18 +7648,23 @@ export function WorkspaceCanvasView({
             )}
           </p>
           <SignerSourceFields value={sigSource} onChange={setSigSource} idPrefix="canvas-sign" />
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">
-              {tChrome('canvas.sign.password')}
-            </span>
-            <input
-              data-testid="canvas-sign-password"
-              type="password"
-              value={sigPassword}
-              onChange={(e) => setSigPassword(e.target.value)}
-              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
-            />
-          </div>
+          {/* A store certificate's private key never leaves the platform's
+              keystore, so the request carries no secret for this field to
+              hold — the same rule the panel's form applies. */}
+          {sigSource.mode !== 'store' && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400 w-20 shrink-0">
+                {tChrome('canvas.sign.password')}
+              </span>
+              <input
+                data-testid="canvas-sign-password"
+                type="password"
+                value={sigPassword}
+                onChange={(e) => setSigPassword(e.target.value)}
+                className="flex-1 min-w-0 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <span className="text-xs text-neutral-400 w-20 shrink-0">
               {tChrome('canvas.sign.reason')}
@@ -7735,6 +7747,7 @@ export function WorkspaceCanvasView({
           {signError && <div data-testid="canvas-sign-error" className="text-xs text-red-400">{signError}</div>}
           <div className="flex justify-end gap-2">
             <button
+              data-testid="canvas-sign-cancel"
               onClick={() => {
                 setSigPlacement(null);
                 setSigFieldTarget(null);

@@ -762,7 +762,7 @@ export function SignaturesPanel(): React.ReactElement {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+                className="flex-1 min-w-0 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
               />
             </div>
           )}
@@ -774,7 +774,7 @@ export function SignaturesPanel(): React.ReactElement {
               value={reason}
               placeholder={tChrome('panel.sig.optional')}
               onChange={(e) => setReason(e.target.value)}
-              className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+              className="flex-1 min-w-0 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -785,7 +785,7 @@ export function SignaturesPanel(): React.ReactElement {
               value={location}
               placeholder={tChrome('panel.sig.optional')}
               onChange={(e) => setLocation(e.target.value)}
-              className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+              className="flex-1 min-w-0 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
           <label className="flex items-center gap-2 text-xs text-neutral-300">
@@ -808,7 +808,7 @@ export function SignaturesPanel(): React.ReactElement {
               value={tsaUrl}
               placeholder={tChrome('panel.sig.tsaPlaceholder')}
               onChange={(e) => setTsaUrl(e.target.value)}
-              className="ltr-notation flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+              className="ltr-notation flex-1 min-w-0 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
           <label className={`flex items-center gap-2 text-xs ${pades ? 'text-neutral-300' : 'text-neutral-600'}`}>
@@ -853,7 +853,7 @@ export function SignaturesPanel(): React.ReactElement {
                     onChange={(e) =>
                       setCertify((c) => ({ ...c, level: e.target.value as CertificationLevel }))
                     }
-                    className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+                    className="flex-1 min-w-0 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
                   >
                     {CERTIFY_LEVELS.map((level) => (
                       <option key={level} value={level}>
@@ -883,8 +883,12 @@ export function SignaturesPanel(): React.ReactElement {
             idPrefix="sign"
           />
           {signError && <div className="text-xs text-red-400">{signError}</div>}
-          <div className="flex justify-end gap-2">
+          {/* Wraps: three buttons whose labels are long in several locales do
+              not fit the dock at its minimum width, and the row's inline-START
+              overflow is clipped by the scroll container and unreachable. */}
+          <div className="flex flex-wrap justify-end gap-2">
             <button
+              data-testid="sign-cancel"
               onClick={() => {
                 setShowSign(false);
                 setPassword('');
