@@ -137,11 +137,12 @@ gate corpus-pin "$R/.venv/Scripts/python.exe" -m pytest \
 #     on CI. Cheap enough to belong here. ---
 gate cargo-test sh -c 'cd src-tauri && cargo test'
 
-# --- CI/Release gate: the live CLI leaves no bytecode in the engine payload.
-#     `cargo test` above lets the test skip when no runtime sits beside the
-#     exe; this machine has the vendored runtime, so the skip is refused here
-#     the way the provisioned CI and release runs refuse it. ---
-gate cli-bytecode sh -c 'cd src-tauri && SPECTRAPDF_REQUIRE_LIVE_CLI=1 cargo test --test cli_bytecode'
+# --- CI/Release gate: the live CLI tests. The CLI leaves no bytecode in the
+#     engine payload, and run-action asks for Ghostscript only when a step
+#     needs it. `cargo test` above lets these tests skip when no runtime sits
+#     beside the exe; this machine has the vendored runtime, so the skip is
+#     refused here the way the provisioned CI and release runs refuse it. ---
+gate live-cli sh -c 'cd src-tauri && SPECTRAPDF_REQUIRE_LIVE_CLI=1 cargo test --test cli_bytecode --test cli_run_action'
 
 # --- Release gate: latest.json is parsed by the updater plugin's own
 #     deserializer (scripts/verify-release-draft.ps1 runs this against the

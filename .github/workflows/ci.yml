@@ -103,8 +103,9 @@ jobs:
       # the tests, so the printer, watched-folder and scheduler assertions never
       # execute here. `cargo test` compiles too, so it supersedes the check.
       # This is the STUB-ONLY Rust run: the stubs above are empty directories,
-      # so tests/cli_bytecode.rs skips here. Its provisioned run is in the
-      # test-engine job, after the embedded runtime is vendored.
+      # so tests/cli_bytecode.rs and tests/cli_run_action.rs skip here. Their
+      # provisioned run is in the test-engine job, after the embedded runtime
+      # is vendored.
       - name: Rust tests
         run: cd src-tauri && cargo test
 
@@ -237,9 +238,9 @@ jobs:
       # The live CLI against the SHIPPED runtime. This job is the one that
       # assembles every resource the bundle declares; with the embedded Python
       # vendored beside them, `cargo test` stages the engine payload and lays
-      # the runtime next to the test binary, and tests/cli_bytecode.rs launches
-      # the product's CLI for real. The skip that lint-and-build's stub-only
-      # run takes is refused here.
+      # the runtime next to the test binary, and tests/cli_bytecode.rs and
+      # tests/cli_run_action.rs launch the product's CLI for real. The skip
+      # that lint-and-build's stub-only run takes is refused here.
       - name: Provision embedded Python (vendored, for the live CLI test)
         run: powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1
         shell: pwsh
@@ -256,8 +257,8 @@ jobs:
             src-tauri/target
           key: ${{ runner.os }}-cargo-live-cli-${{ hashFiles('src-tauri/Cargo.lock') }}
 
-      - name: Live CLI leaves no bytecode in the engine payload (provisioned runtime)
-        run: cd src-tauri && cargo test --test cli_bytecode
+      - name: Live CLI tests against the provisioned runtime
+        run: cd src-tauri && cargo test --test cli_bytecode --test cli_run_action
         env:
           SPECTRAPDF_REQUIRE_LIVE_CLI: "1"
 

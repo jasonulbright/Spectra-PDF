@@ -12,7 +12,7 @@ import { createOwnedOperationRuns } from '../src/renderer/lib/owned-operation-ru
 import { inspectOperationInput } from '../src/renderer/lib/operation-input';
 import { EDIT_DECLINED } from '../src/renderer/lib/edit-text';
 import { isOpMethod, sequenceEditClass } from '../src/renderer/lib/op-edit-class';
-import { STEP_CATALOG, stepDefFor, engineMethodFor, buildStepParams, newStep } from '../src/renderer/lib/guided-actions';
+import { STEP_CATALOG, stepDefFor, stepGsPath, engineMethodFor, buildStepParams, newStep } from '../src/renderer/lib/guided-actions';
 import { replaceRange, wordAt } from '../src/renderer/lib/spellcheck';
 import { createArticleDrafts } from '../src/renderer/lib/article-drafts';
 import { emptyArticle } from '../src/renderer/lib/article-beads';
@@ -145,7 +145,7 @@ async function fixture() {
     running: false, setRunning: () => {}, setView: () => {},
     setRunStatuses: (value: unknown[] | ((s: unknown[]) => unknown[])) => { result.statuses = typeof value === 'function' ? value(result.statuses) : value; },
     stepDefFor, engineMethodFor, buildStepParams, saveFile: async () => 'export', terminalOutputName: () => 'export',
-    requireGsPath: async () => 'gs',
+    stepGsPath, GS_LOOKUP: { require: async () => 'gs', ifAvailable: async () => 'gs' },
     editing: { page: 1, index: 0 }, editProblem: null,
     editTarget: { kind: 'uri', url: 'https://new.example/' }, editAppearance: { width: 2 },
     targetPayload: (v: unknown) => v, appearancePayload: (v: unknown) => v,

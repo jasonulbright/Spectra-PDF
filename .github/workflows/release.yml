@@ -127,7 +127,8 @@ jobs:
       # printer's job naming, the watched-folder validation and the scheduler --
       # all of which decide what lands on a user's disk. This is the STUB-ONLY
       # Rust run: the resource stubs above are empty, so tests/cli_bytecode.rs
-      # skips here; its provisioned run is in the `release` job after vendoring.
+      # and tests/cli_run_action.rs skip here; their provisioned run is in the
+      # `release` job after vendoring.
       - name: Rust tests
         run: cd src-tauri && cargo test
 
@@ -423,11 +424,12 @@ jobs:
         shell: pwsh
 
       # The live CLI against the runtime this job just vendored. The verify
-      # job's Rust run sees empty stubs and this test skips there; here the
+      # job's Rust run sees empty stubs and these tests skip there; here the
       # skip is refused, so a release cannot go out without having launched
-      # the product's CLI and read the payload tree it left behind.
-      - name: Live CLI leaves no bytecode in the engine payload (provisioned runtime)
-        run: cd src-tauri && cargo test --test cli_bytecode
+      # the product's CLI, read the payload tree it left behind, and run guided
+      # actions with and without a Ghostscript.
+      - name: Live CLI tests against the provisioned runtime
+        run: cd src-tauri && cargo test --test cli_bytecode --test cli_run_action
         env:
           SPECTRAPDF_REQUIRE_LIVE_CLI: "1"
 

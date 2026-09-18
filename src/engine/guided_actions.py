@@ -26,8 +26,10 @@ by name), it is incompatible with in-place mode, and its presence widens what
 the run walks from PDFs to the whole Create PDF accepted set.
 """
 
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 import os
 import shutil
 
@@ -63,9 +65,21 @@ from engine.links import create_links_from_urls
 from engine.search_redact import search_and_redact
 from engine.watermark import watermark
 
-# op name -> (callable, allowed data params, needed tool-path params).
-_STEPS: dict = {
-    "compress": (
+
+class _Step(NamedTuple):
+    """One dispatchable op. `tools` are the tool-path keywords `run_action`
+    injects; `optional_tools` are the ones among them the op runs without. A
+    planner refuses a run over a missing tool only when that tool is in
+    `tools` and not in `optional_tools`."""
+
+    fn: Callable[..., object]
+    params: frozenset
+    tools: frozenset
+    optional_tools: frozenset = frozenset()
+
+
+_STEPS: dict[str, _Step] = {
+    "compress": _Step(
         compress,
         frozenset(
             {
@@ -92,23 +106,23 @@ _STEPS: dict = {
     # optimize"). Lossless and Ghostscript-free, so it composes after any
     # step; running it LAST is what leaves the object streams the earlier
     # steps rewrote in their smallest form.
-    "optimize": (
+    "optimize": _Step(
         optimize,
         frozenset({"linearize", "strip_metadata", "compress_streams"}),
         frozenset(),
     ),
-    "grayscale": (grayscale, frozenset(), frozenset({"gs_path", "font_dir"})),
-    "convert_pdfa": (convert_pdfa, frozenset({"level"}), frozenset({"gs_path"})),
-    "strip_metadata": (strip_metadata, frozenset(), frozenset()),
+    "grayscale": _Step(grayscale, frozenset(), frozenset({"gs_path", "font_dir"})),
+    "convert_pdfa": _Step(convert_pdfa, frozenset({"level"}), frozenset({"gs_path"})),
+    "strip_metadata": _Step(strip_metadata, frozenset(), frozenset()),
     # Authoring navigation over a whole tree is where these two stop being a
     # nicety: nobody links the addresses in 400 documents by hand, and nobody
     # transcribes the headings of a folder of tagged reports.
-    "links_from_urls": (
+    "links_from_urls": _Step(
         create_links_from_urls,
         frozenset({"pages", "emails", "skip_existing"}),
         frozenset(),
     ),
-    "outline_from_structure": (
+    "outline_from_structure": _Step(
         outline_from_structure,
         frozenset({"mode", "max_level", "tag_if_untagged"}),
         frozenset(),
@@ -116,7 +130,7 @@ _STEPS: dict = {
     # An unattended run is where "clean every document leaving this folder"
     # actually lives. The category list is a run parameter, never a default:
     # the step removes exactly what the action names.
-    "sanitize": (
+    "sanitize": _Step(
         sanitize_pdf,
         frozenset({"categories", "form_fields_mode", "hidden_text_ocr", "all_removable"}),
         frozenset(),
@@ -124,7 +138,7 @@ _STEPS: dict = {
     # No review step exists in a folder run, so this redacts every hit the
     # request finds. `marks_only` is the reviewable half: it writes /Redact
     # annotations and removes nothing.
-    "search_redact": (
+    "search_redact": _Step(
         search_and_redact,
         frozenset(
             {
@@ -143,8 +157,11 @@ _STEPS: dict = {
             }
         ),
         frozenset({"font_dir", "gs_path"}),
+        # Only a hit over part of a JBIG2 image needs Ghostscript, to decode
+        # it; every other redaction runs without one.
+        optional_tools=frozenset({"gs_path"}),
     ),
-    "watermark": (
+    "watermark": _Step(
         watermark,
         frozenset(
             {
@@ -167,7 +184,7 @@ _STEPS: dict = {
         ),
         frozenset({"font_dir"}),
     ),
-    "add_header_footer": (
+    "add_header_footer": _Step(
         add_header_footer,
         # position/text is the GUI's saved/exported one-pair-per-step shape;
         # validate_steps folds it into placements so an exported action file
@@ -186,7 +203,7 @@ _STEPS: dict = {
         ),
         frozenset({"font_dir"}),
     ),
-    "ocr_file": (
+    "ocr_file": _Step(
         ocr_file,
         frozenset({"language"}),
         # `font_dir` reaches the MRC tail, which prepares its source the same
@@ -195,7 +212,7 @@ _STEPS: dict = {
     ),
     # Deskew, despeckle, whiten and re-orient the scanned pages. Its ORDER
     # against the other two scan steps is enforced in validate_steps.
-    "enhance_scan": (
+    "enhance_scan": _Step(
         enhance_scan,
         frozenset(
             {
@@ -218,7 +235,7 @@ _STEPS: dict = {
     # No review step exists in a folder run, so this creates every field the
     # detector offers. `kinds` is the only narrowing available without a
     # reviewer.
-    "prepare_forms": (
+    "prepare_forms": _Step(
         prepare_form_fields,
         frozenset({"pages", "scan", "lang", "max_candidates", "kinds", "allow_signed"}),
         frozenset({"gs_path", "tesseract_path", "font_dir"}),
@@ -232,19 +249,19 @@ _STEPS: dict = {
     # Fix only, deliberately: every step here TRANSFORMS the document it is
     # handed, and a check produces a report an action has nowhere to put. The
     # droplet is where a check over a folder lives.
-    "preflight": (
+    "preflight": _Step(
         apply_fixups,
         frozenset({"profile", "profile_path", "checks"}),
         frozenset({"gs_path", "font_dir", "tesseract_path"}),
     ),
-    "encrypt": (encrypt, frozenset({"user_password", "owner_password", "permissions"}), frozenset()),
+    "encrypt": _Step(encrypt, frozenset({"user_password", "owner_password", "permissions"}), frozenset()),
     # The one step that PRODUCES the document instead of
     # transforming it, which is why it is handled by `run_action` directly
     # rather than by `_apply_steps`: every other step is `fn(file=p,
     # output=p)`, and `create_pdf` refuses to write over its own source (the
     # identity guard). Its presence also widens what the run WALKS — a folder
     # of .docx files is the whole point of the step.
-    "create_pdf": (
+    "create_pdf": _Step(
         create_pdf,
         frozenset(
             {
@@ -262,7 +279,7 @@ _STEPS: dict = {
     # than files. Everything after it runs on the assembled PDF, which is what
     # makes "one PDF per scan folder, then straighten it, then make it
     # searchable" a single unattended job.
-    "create_pdf_folders": (
+    "create_pdf_folders": _Step(
         create_pdf_folders,
         frozenset(
             {
@@ -281,7 +298,7 @@ _STEPS: dict = {
     # write a different kind of file at a different extension, so nothing can
     # follow them and `run_action` handles them directly rather than through
     # `_apply_steps` (every other step is `fn(file=p, output=p)`).
-    "export_document": (
+    "export_document": _Step(
         export_document,
         frozenset(
             {
@@ -296,7 +313,7 @@ _STEPS: dict = {
         ),
         frozenset({"gs_path", "soffice_path"}),
     ),
-    "export_images": (
+    "export_images": _Step(
         export_images,
         frozenset({"fmt", "dpi", "pages", "gray", "quality"}),
         frozenset({"gs_path"}),
@@ -364,7 +381,7 @@ def validate_steps(steps) -> list[dict]:
         params = s.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError(f"step {i + 1} ({op}): params must be an object")
-        allowed = _STEPS[op][1]
+        allowed = _STEPS[op].params
         unknown = sorted(set(params) - allowed)
         if unknown:
             raise ValueError(f"step {i + 1} ({op}): unknown parameter(s) {unknown}")
@@ -478,22 +495,22 @@ def validate_steps(steps) -> list[dict]:
 def _apply_steps(path: str, steps: list[dict], tool_paths: dict) -> int:
     """Run every step in-place on `path`; returns the count applied."""
     for step in steps:
-        fn, _allowed, needed = _STEPS[step["op"]]
+        spec = _STEPS[step["op"]]
         kwargs = dict(step["params"])
-        for key in needed:
+        for key in spec.tools:
             kwargs[key] = tool_paths.get(key, "")
-        fn(file=path, output=path, **kwargs)
+        spec.fn(file=path, output=path, **kwargs)
     return len(steps)
 
 
 def _run_export(source: Path, output: Path, step: dict, tool_paths: dict) -> None:
     """The terminal export: `fn(file=source, output=output)` across a change of
     format, which is why it cannot go through `_apply_steps`."""
-    fn, _allowed, needed = _STEPS[step["op"]]
+    spec = _STEPS[step["op"]]
     kwargs = dict(step["params"])
-    for key in needed:
+    for key in spec.tools:
         kwargs[key] = tool_paths.get(key, "")
-    fn(file=str(source), output=str(output), **kwargs)
+    spec.fn(file=str(source), output=str(output), **kwargs)
 
 
 def _readable_output(path: Path) -> bool:

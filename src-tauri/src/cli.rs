@@ -6,6 +6,7 @@
 
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -2806,6 +2807,137 @@ pub fn soffice_system_fallback() -> String {
     String::new()
 }
 
+// ── Guided actions: the Ghostscript each step takes ─────────────────────────
+
+/// The committed guided-step catalog. `tests/test_guided_actions.py` pins its
+/// `tools` and `optional_tools` lists to the engine's dispatch table in both
+/// directions, so a step listed with `gs_path` here is a step `run_action`
+/// hands `gs_path`, and one that also lists it as optional runs without it.
+const GUIDED_STEP_CATALOG: &str = include_str!("../../tests/fixtures/guided-step-catalog.json");
+
+/// What a guided action needs from Ghostscript before it may start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GsDemand {
+    /// No step takes `gs_path`.
+    None,
+    /// Every step that takes `gs_path` also runs without it.
+    Optional,
+    /// A step cannot run without Ghostscript.
+    Required,
+}
+
+/// The demand of every step the engine hands `gs_path`.
+fn gs_steps() -> &'static BTreeMap<String, GsDemand> {
+    static STEPS: std::sync::OnceLock<BTreeMap<String, GsDemand>> = std::sync::OnceLock::new();
+    STEPS.get_or_init(|| {
+        gs_steps_in(GUIDED_STEP_CATALOG)
+            .unwrap_or_else(|e| panic!("the embedded guided-step catalog is unreadable: {e}"))
+    })
+}
+
+/// The demand of each step a catalog lists with `gs_path`. A row without a
+/// `tools` or an `optional_tools` list refuses: read as empty, the first would
+/// start a Ghostscript step without the path it needs, and the second would
+/// refuse a run the step can do without one.
+fn gs_steps_in(catalog: &str) -> Result<BTreeMap<String, GsDemand>, String> {
+    let catalog: Value = serde_json::from_str(catalog).map_err(|e| e.to_string())?;
+    let rows = catalog
+        .get("steps")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "no \"steps\" object".to_string())?;
+    let lists_gs = |op: &str, row: &Value, key: &str| -> Result<bool, String> {
+        let list = row
+            .get(key)
+            .and_then(Value::as_array)
+            .ok_or_else(|| format!("step {op} has no \"{key}\" list"))?;
+        Ok(list.iter().any(|tool| tool.as_str() == Some("gs_path")))
+    };
+    let mut found = BTreeMap::new();
+    for (op, row) in rows {
+        let handed = lists_gs(op, row, "tools")?;
+        let optional = lists_gs(op, row, "optional_tools")?;
+        if handed {
+            let demand = if optional { GsDemand::Optional } else { GsDemand::Required };
+            found.insert(op.clone(), demand);
+        }
+    }
+    Ok(found)
+}
+
+/// The demand of an action file's `steps`. An entry that is not a step object,
+/// or that names an op the catalog does not list, adds nothing: the engine
+/// refuses it by name before any step runs.
+fn action_gs_demand(steps: &Value) -> GsDemand {
+    let mut demand = GsDemand::None;
+    let ops = steps
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|step| step.get("op").and_then(Value::as_str));
+    for op in ops {
+        match gs_steps().get(op) {
+            Some(GsDemand::Required) => return GsDemand::Required,
+            Some(GsDemand::Optional) => demand = GsDemand::Optional,
+            _ => {}
+        }
+    }
+    demand
+}
+
+/// The one `gs_path` a run hands the engine, which injects it only into the
+/// steps that take it. A required step refuses with the resolver's own error,
+/// an optional step takes `""` when nothing resolves, and an action with
+/// neither never asks the resolver.
+fn action_gs_path(
+    demand: GsDemand,
+    resolve: impl FnOnce() -> Result<PathBuf, String>,
+) -> Result<String, String> {
+    Ok(match demand {
+        GsDemand::Required => resolve()?.to_string_lossy().into_owned(),
+        GsDemand::Optional => resolve()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        GsDemand::None => String::new(),
+    })
+}
+
+fn run_action_params(
+    args: &RunActionArgs,
+    action: &Value,
+    resolve: impl FnOnce() -> Result<PathBuf, String>,
+) -> Result<Value, String> {
+    let steps = action
+        .get("steps")
+        .cloned()
+        .ok_or_else(|| "Action file has no \"steps\"".to_string())?;
+    let name = action
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let gs_path = action_gs_path(action_gs_demand(&steps), resolve)?;
+    let mut params = json!({
+        "source": abs(&args.source).to_string_lossy(),
+        "dest": args.dest.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
+        "steps": steps,
+        "action_name": name,
+        "gs_path": gs_path,
+        "tesseract_path": resolve_tesseract().to_string_lossy(),
+        // An action may START with a create_pdf step, so
+        // the LibreOffice arm has to be reachable from a scheduled run
+        // and a watched folder too — both invoke this same subcommand.
+        "soffice_path": resolve_soffice(),
+        "font_dir": resolve_fonts().to_string_lossy(),
+        "write_log": args.log_dir.is_some(),
+        "progress": true,
+        "in_place": args.in_place,
+        "move_processed_root": args.moved.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
+    });
+    if let Some(dir) = &args.log_dir {
+        params["log_dir"] = json!(abs(dir).to_string_lossy());
+    }
+    Ok(params)
+}
+
 // ── Engine communication ────────────────────────────────────────────────────
 
 struct CliEngine {
@@ -4373,35 +4505,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 .map_err(|e| format!("Cannot read action file {}: {e}", args.action.display()))?;
             let parsed: serde_json::Value = serde_json::from_str(&raw)
                 .map_err(|e| format!("Action file is not valid JSON: {e}"))?;
-            let steps = parsed
-                .get("steps")
-                .cloned()
-                .ok_or_else(|| "Action file has no \"steps\"".to_string())?;
-            let name = parsed
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            let mut params = json!({
-                "source": abs(&args.source).to_string_lossy(),
-                "dest": args.dest.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
-                "steps": steps,
-                "action_name": name,
-                "gs_path": resolve_gs()?.to_string_lossy(),
-                "tesseract_path": resolve_tesseract().to_string_lossy(),
-                // An action may START with a create_pdf step, so
-                // the LibreOffice arm has to be reachable from a scheduled run
-                // and a watched folder too — both invoke this same subcommand.
-                "soffice_path": resolve_soffice(),
-                "font_dir": resolve_fonts().to_string_lossy(),
-                "write_log": args.log_dir.is_some(),
-                "progress": true,
-                "in_place": args.in_place,
-                "move_processed_root": args.moved.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
-            });
-            if let Some(dir) = &args.log_dir {
-                params["log_dir"] = json!(abs(dir).to_string_lossy());
-            }
-            engine.call("run_action", params)
+            engine.call("run_action", run_action_params(args, &parsed, resolve_gs)?)
         }
 
         CliCommand::PortfolioCreate(args) => {
@@ -6497,5 +6601,142 @@ mod tests {
             "--list-store-certs", "--pfx", "s.pfx",
         ])
         .is_err());
+    }
+
+    // ── run-action: the Ghostscript each step takes ───────────────────────
+
+    const FOUND_GS: &str = r"C:\gs\bin\gswin64c.exe";
+
+    fn run_action_args() -> RunActionArgs {
+        let cli = parse(&[
+            "spectrapdf", "run-action", "in", "--dest", "out", "--action", "a.json",
+        ]);
+        match cli.command {
+            Some(CliCommand::RunAction(args)) => args,
+            _ => panic!("not the run-action arm"),
+        }
+    }
+
+    fn action(ops: &[&str]) -> Value {
+        let steps: Vec<Value> = ops.iter().map(|op| json!({ "op": op, "params": {} })).collect();
+        json!({ "name": "gs-demand", "steps": steps })
+    }
+
+    /// The `gs_path` the run-action request carries, and how many times the
+    /// resolver was asked. `found` is what the resolver answers; `None`
+    /// refuses with the CLI's named error.
+    fn gs_path_for(ops: &[&str], found: Option<&str>) -> (Result<String, String>, u32) {
+        let calls = std::cell::Cell::new(0);
+        let resolve = || {
+            calls.set(calls.get() + 1);
+            found
+                .map(PathBuf::from)
+                .ok_or_else(|| crate::gs::CLI_REQUIRED.to_string())
+        };
+        let params = run_action_params(&run_action_args(), &action(ops), resolve);
+        let gs = params.map(|p| p["gs_path"].as_str().expect("a gs_path string").to_string());
+        (gs, calls.get())
+    }
+
+    #[test]
+    fn an_action_without_a_ghostscript_step_never_asks_for_one() {
+        for ops in [
+            &["optimize"][..],
+            &["strip_metadata", "watermark", "encrypt"],
+            &["no_such_step"],
+            &[],
+        ] {
+            assert_eq!(gs_path_for(ops, None), (Ok(String::new()), 0), "{ops:?}");
+            assert_eq!(gs_path_for(ops, Some(FOUND_GS)), (Ok(String::new()), 0), "{ops:?}");
+        }
+    }
+
+    /// The ops the catalog gives `demand`, in catalog order.
+    fn ops_with(demand: GsDemand) -> Vec<&'static str> {
+        let ops: Vec<&'static str> = gs_steps()
+            .iter()
+            .filter(|(_, d)| **d == demand)
+            .map(|(op, _)| op.as_str())
+            .collect();
+        assert!(!ops.is_empty(), "the catalog lists no {demand:?} Ghostscript step");
+        ops
+    }
+
+    #[test]
+    fn a_required_step_refuses_before_the_run_starts() {
+        let refused = Err(crate::gs::CLI_REQUIRED.to_string());
+        for op in ops_with(GsDemand::Required) {
+            let ops = ["optimize", op];
+            assert_eq!(gs_path_for(&ops, None), (refused.clone(), 1), "{op}");
+            assert_eq!(gs_path_for(&ops, Some(FOUND_GS)), (Ok(FOUND_GS.to_string()), 1), "{op}");
+        }
+        let mixed = [ops_with(GsDemand::Optional)[0], ops_with(GsDemand::Required)[0]];
+        assert_eq!(gs_path_for(&mixed, None), (refused, 1));
+    }
+
+    #[test]
+    fn an_optional_step_runs_either_way_and_takes_the_path_only_when_present() {
+        for op in ops_with(GsDemand::Optional) {
+            for ops in [&[op][..], &["optimize", op, "encrypt"]] {
+                assert_eq!(gs_path_for(ops, Some(FOUND_GS)), (Ok(FOUND_GS.to_string()), 1), "{ops:?}");
+                assert_eq!(gs_path_for(ops, None), (Ok(String::new()), 1), "{ops:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_step_list_the_engine_refuses_adds_no_demand() {
+        for steps in [
+            json!(null),
+            json!("compress"),
+            json!({ "op": "compress" }),
+            json!(["compress"]),
+            json!([{ "op": 7 }]),
+        ] {
+            assert_eq!(action_gs_demand(&steps), GsDemand::None, "{steps}");
+        }
+    }
+
+    #[test]
+    fn a_catalog_row_without_either_tool_list_refuses() {
+        assert!(gs_steps_in(r#"{"steps": []}"#).is_err());
+        assert!(gs_steps_in(r#"{"steps": {"a": {"optional_tools": []}}}"#).is_err());
+        assert!(gs_steps_in(r#"{"steps": {"a": {"tools": ["gs_path"]}}}"#).is_err());
+        let catalog = r#"{"steps": {
+            "a": {"tools": ["gs_path"], "optional_tools": []},
+            "b": {"tools": ["font_dir", "gs_path"], "optional_tools": ["gs_path"]},
+            "c": {"tools": ["font_dir"], "optional_tools": []}
+        }}"#;
+        let expected = BTreeMap::from([
+            ("a".to_string(), GsDemand::Required),
+            ("b".to_string(), GsDemand::Optional),
+        ]);
+        assert_eq!(gs_steps_in(catalog), Ok(expected));
+    }
+
+    #[test]
+    fn the_ghostscript_demands_match_the_fixture() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("tests")
+            .join("fixtures")
+            .join("guided-step-catalog.json");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let fixture: Value = serde_json::from_str(&text).expect("the fixture parses");
+        let rows = fixture["steps"].as_object().expect("a steps object");
+        let has_gs = |row: &Value, key: &str| {
+            let list = row[key].as_array().unwrap_or_else(|| panic!("a {key} list"));
+            list.iter().any(|tool| tool.as_str() == Some("gs_path"))
+        };
+        let mut expected = BTreeMap::new();
+        for (op, row) in rows {
+            match (has_gs(row, "tools"), has_gs(row, "optional_tools")) {
+                (true, true) => expected.insert(op.clone(), GsDemand::Optional),
+                (true, false) => expected.insert(op.clone(), GsDemand::Required),
+                (false, _) => None,
+            };
+        }
+        assert_eq!(*gs_steps(), expected);
     }
 }
