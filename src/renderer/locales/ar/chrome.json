@@ -129,7 +129,7 @@
   "app.unreadableRecord.startupTitle": "لم تُطبَّق إعدادات بدء التشغيل",
   "app.window.claimTitle": "مفتوح في نافذة أخرى",
   "app.window.focusOther": "إظهار تلك النافذة",
-  "app.window.folderBusy": "نافذة أخرى تكتب بالفعل في هذا المجلد: {{folder}}.",
+  "app.window.folderBusy": "عملية أخرى تكتب بالفعل في هذا المجلد: {{folder}}.",
   "app.window.folderBusyHere": "لا يزال تشغيل في هذه النافذة يكتب في هذا المجلد: {{folder}}. انتظر حتى يتوقف، ثم أعد المحاولة.",
   "app.window.importElsewhere": "لا يمكن استيراد صفحات من ملف مفتوح في نافذة أخرى: {{names}}.",
   "app.window.openElsewhere": "مفتوح بالفعل في نافذة أخرى: {{names}}. يمكن تحرير الملف في نافذة واحدة فقط في كل مرة.",
@@ -6521,5 +6521,8 @@
   "toolbar.group.zoom": "تكبير/تصغير",
   "tools.heading": "الأدوات",
   "tools.openFirst": "افتح ملف PDF أولًا",
-  "tools.sub": "اختر ما تريد فعله بمستندك."
+  "tools.sub": "اختر ما تريد فعله بمستندك.",
+  "engine.redact.pageContainsMalformedDrawing": "تحتوي الصفحة على مسار رسم غير سليم. لم يتم تطبيق التنقيح.",
+  "engine.redact_document.documentStructureTooComplex": "بنية المستند معقدة للغاية ولا يمكن تنقيحه بأمان.",
+  "refusal.scan.pageUnreadable": "تعذرت قراءة الصفحة الممسوحة ضوئيًا: {{folder}}."
 }

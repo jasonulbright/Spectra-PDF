@@ -125,7 +125,7 @@
   "app.unreadableRecord.startupTitle": "Параметры запуска не применены",
   "app.window.claimTitle": "Открыт в другом окне",
   "app.window.focusOther": "Показать это окно",
-  "app.window.folderBusy": "Другое окно уже выполняет запись в эту папку: {{folder}}.",
+  "app.window.folderBusy": "Другой процесс уже записывает данные в эту папку: {{folder}}.",
   "app.window.folderBusyHere": "Запуск в этом окне ещё выполняет запись в эту папку: {{folder}}. Дождитесь его остановки и повторите попытку.",
   "app.window.importElsewhere": "Нельзя импортировать страницы из файла, открытого в другом окне: {{names}}.",
   "app.window.openElsewhere": "Уже открыт в другом окне: {{names}}. Файл можно редактировать только в одном окне одновременно.",
@@ -6249,5 +6249,8 @@
   "toolbar.group.zoom": "Масштаб",
   "tools.heading": "Инструменты",
   "tools.openFirst": "Сначала откройте PDF",
-  "tools.sub": "Выберите, что вы хотите сделать с документом."
+  "tools.sub": "Выберите, что вы хотите сделать с документом.",
+  "engine.redact.pageContainsMalformedDrawing": "Страница содержит некорректный контур рисования. Редактирование конфиденциальных данных не выполнено.",
+  "engine.redact_document.documentStructureTooComplex": "Структура документа слишком сложна для безопасного удаления конфиденциальных данных.",
+  "refusal.scan.pageUnreadable": "Не удалось прочитать отсканированную страницу: {{folder}}."
 }

@@ -44,6 +44,7 @@ Editability taxonomy (every run is LISTED; refusal carries the reason):
 
 import re
 import zlib
+from contextlib import contextmanager
 from io import BytesIO
 from typing import Callable, Optional
 
@@ -890,6 +891,7 @@ def _glyph_names_to_maps(
 
     code2uni: dict[int, str] = {}
     code2width: dict[int, float] = {}
+    widths: dict[str, Optional[float]] = {}
     for code, gname in names_by_code.items():
         if not gname or gname == ".notdef":
             continue
@@ -897,12 +899,65 @@ def _glyph_names_to_maps(
         if u:
             code2uni[code] = u
         try:
-            w = width_of(gname)
+            if gname not in widths:
+                widths[gname] = width_of(gname)
+            w = widths[gname]
+        except _CharStringBudget:
+            raise
         except Exception:
             w = None
         if w is not None:
             code2width[code] = float(w)
     return code2uni, code2width
+
+
+MAX_CHARSTRING_WORK = 2_000_000
+MAX_CHARSTRING_DEPTH = 64
+
+
+class _CharStringBudget(Exception):
+    """A font's glyph programs exceed the work allowed for width derivation."""
+
+
+class _CharStringWork:
+    def __init__(self):
+        self.remaining = MAX_CHARSTRING_WORK
+        self.depth = 0
+
+    @contextmanager
+    def guard(self):
+        """Bound drawing, decompilation and subsetting through their shared
+        interpreter. The engine serves one request at a time; the method is
+        restored before another request can use fontTools."""
+        from fontTools.misc.psCharStrings import SimpleT2Decompiler
+
+        original = SimpleT2Decompiler.execute
+
+        def execute(extractor, program, **kwargs):
+            # Charge every invocation, including already decompiled Subrs.
+            # A shallow call graph can expand exponentially; recursion depth
+            # and the font's byte count do not bound that work.
+            self.remaining -= max(1, len(program.bytecode or program.program))
+            if self.remaining < 0 or self.depth >= MAX_CHARSTRING_DEPTH:
+                raise _CharStringBudget("the embedded font exceeded the charstring work budget and was not parsed")
+            self.depth += 1
+            try:
+                return original(extractor, program, **kwargs)
+            finally:
+                self.depth -= 1
+
+        SimpleT2Decompiler.execute = execute
+        try:
+            yield
+        finally:
+            SimpleT2Decompiler.execute = original
+
+    def width(self, charstring):
+        from fontTools.pens.basePen import NullPen
+
+        with self.guard():
+            charstring.draw(NullPen())
+        return charstring.width
 
 
 def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float], Optional[str]]:
@@ -916,7 +971,6 @@ def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float], Opt
     changes the refusal, only records its mechanism."""
     try:
         from fontTools.cffLib import CFFFontSet
-        from fontTools.pens.basePen import NullPen
 
         cff = CFFFontSet()
         cff.decompile(BytesIO(raw), None)
@@ -954,12 +1008,13 @@ def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float], Opt
     except Exception as exc:
         return {}, {}, f"the embedded CFF program will not parse ({_parser_failure(exc)})"
 
+    work = _CharStringWork()
+
     def width_of(gname: str):
         if gname not in charstrings:
             return None
         cs = charstrings[gname]
-        cs.draw(NullPen())  # sets .width (nominal/default applied)
-        return cs.width * (1000.0 / upem)
+        return work.width(cs) * (1000.0 / upem)
 
     # Only glyphs the font actually HAS: a predefined encoding names the
     # full standard set, but claiming a char whose glyph is absent would
@@ -969,7 +1024,10 @@ def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float], Opt
         for c, n in enumerate(encoding)
         if n and n != ".notdef" and n in charstrings
     }
-    code2uni, code2width = _glyph_names_to_maps(names_by_code, width_of)
+    try:
+        code2uni, code2width = _glyph_names_to_maps(names_by_code, width_of)
+    except _CharStringBudget as exc:
+        return {}, {}, str(exc)
     return code2uni, code2width, None
 
 
@@ -1120,9 +1178,8 @@ def _parse_type1_program(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
     constructs `psLib.PSInterpreter` by that module-global name, so the bound
     is installed by rebinding it for the duration of the parse and restoring it
     in `finally`; the engine is single-threaded (`ipc.py`), so the rebinding
-    cannot race. The later charstring `draw` is a separate, non-looping
-    interpreter (`psCharStrings`) bounded by the program's own length and
-    Python's recursion limit."""
+    cannot race. Charstring execution has a separate cumulative work budget
+    shared by every glyph and subroutine used for this font's widths."""
     import os
     import tempfile
 
@@ -1136,7 +1193,6 @@ def _parse_type1_program(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(raw)
-        from fontTools.pens.basePen import NullPen
         from fontTools.t1Lib import T1Font
 
         font = T1Font(tmp)
@@ -1160,12 +1216,13 @@ def _parse_type1_program(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
         except OSError:
             pass
 
+    work = _CharStringWork()
+
     def width_of(gname: str):
         cs = charstrings.get(gname)
         if cs is None:
             return None
-        cs.draw(NullPen())
-        return cs.width * (1000.0 / upem)
+        return work.width(cs) * (1000.0 / upem)
 
     names_by_code = {
         c: n
@@ -1249,7 +1306,7 @@ def _type1_encoding_map(
     program = raw + _T1_TRAILER if completed else raw
     try:
         code2uni, code2width = _parse_type1_program(program)
-    except _T1InterpreterBudget as exc:
+    except (_T1InterpreterBudget, _CharStringBudget) as exc:
         return {}, {}, str(exc)
     except Exception as exc:
         how = " once completed" if completed else ""

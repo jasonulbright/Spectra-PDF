@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import {
-  applyRedactions,
   buildRedactionRegions,
   projectMarkRect,
   rotateNormalizedPoint,
@@ -14,49 +11,6 @@ import { workspacePageNumber } from '../src/renderer/lib/workspace-commit';
 import { displayRectToPdf } from '../src/renderer/lib/pdfx-build';
 import { rotateAnnotationRect } from '../src/renderer/state/reducer';
 import type { OpenDocument, PageAnnotation, PageRef } from '../src/renderer/state/types';
-
-// The canvas apply path has no DOM test environment, so the decision lives in
-// `applyRedactions` and App's dispatch is pinned to it as source text.
-describe('applyRedactions — the engine call a document\'s marks become', () => {
-  const regions = [{ page: 1, rect: [10, 10, 50, 50] as [number, number, number, number] }];
-
-  it('hands the engine the regions and the configured Ghostscript', async () => {
-    const calls: unknown[][] = [];
-    const answer = await applyRedactions(
-      async (...args) => {
-        calls.push(args);
-        return 'ran';
-      },
-      'C:/scans/a.pdf',
-      regions,
-      async () => 'C:/gs/bin/gswin64c.exe',
-    );
-    expect(answer).toBe('ran');
-    expect(calls).toEqual([
-      ['C:/scans/a.pdf', 'redact', { regions, gs_path: 'C:/gs/bin/gswin64c.exe' }],
-    ]);
-  });
-
-  it('still redacts when none is configured', async () => {
-    const calls: unknown[][] = [];
-    await applyRedactions(
-      async (...args) => {
-        calls.push(args);
-        return null;
-      },
-      'C:/scans/a.pdf',
-      regions,
-      async () => '',
-    );
-    expect(calls).toEqual([['C:/scans/a.pdf', 'redact', { regions, gs_path: '' }]]);
-  });
-
-  it('is what App dispatches, with the Ghostscript lookup that never refuses', () => {
-    const app = readFileSync(resolve(__dirname, '../src/renderer/App.tsx'), 'utf8');
-    expect(app).toContain('applyRedactions(performOperation, path, regions, gsPathIfAvailable)');
-    expect(app).not.toMatch(/performOperation\(\s*path,\s*'redact'/);
-  });
-});
 
 function pageRef(path: string, index: number, rotation: 0 | 90 | 180 | 270 = 0): PageRef {
   return {

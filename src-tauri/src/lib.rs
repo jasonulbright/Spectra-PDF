@@ -8,6 +8,8 @@ mod send_to;
 mod snapshot;
 mod page_commit;
 mod file_publication;
+mod folder_claims;
+mod process_job;
 mod scratch;
 mod staging;
 mod watchers;

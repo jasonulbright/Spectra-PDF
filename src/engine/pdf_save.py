@@ -504,4 +504,16 @@ def save_pdf(
             kwargs.pop("object_stream_mode")
         else:
             kwargs["object_stream_mode"] = mode
+    versions = getattr(pdf, "_spectra_versions", None)
+    if versions is not None and versions.required is not None:
+        required = f"{versions.required[0]}.{versions.required[1]}"
+        requested = kwargs.get("min_version", "")
+        base, level = requested if isinstance(requested, tuple) else (requested, 0)
+        # qpdf rewrites /ADBE /BaseVersion from the output header. A catalog
+        # /Version alone therefore cannot carry a copied extension faithfully.
+        kwargs["min_version"] = (max(required, base), max(pdf.extension_level, level))
+    if "/Size" not in pdf.trailer:
+        # qpdf updates an existing Size to the written xref count, but leaves
+        # it absent after recovering an input that omitted this required key.
+        pdf.trailer["/Size"] = 1
     pdf.save(target, **kwargs)

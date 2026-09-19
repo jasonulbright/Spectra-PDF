@@ -52,7 +52,12 @@ describe('derived navigation', () => {
     // The document starts with no bookmarks at all.
     expect(await getOutlineOrder()).toEqual([]);
 
-    await $('[data-testid="bookmarks-from-structure"]').click();
+    const deriveButton = $('[data-testid="bookmarks-from-structure"]');
+    await browser.waitUntil(() => deriveButton.isEnabled(), {
+      timeout: 20_000,
+      timeoutMsg: 'bookmark editing did not become ready',
+    });
+    await deriveButton.click();
     const state = await $('[data-testid="bookmarks-derive-state"]');
     await state.waitForDisplayed({ timeoutMsg: 'the structure preview did not appear' });
     // Counted BEFORE anything is written — the hairlines contract.

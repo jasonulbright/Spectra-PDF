@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { indexOpenFile } from '../lib/workspace';
-import { evictExcept, subscribeProxyEvictions } from '../lib/pdfDocCache';
+import { evictDocumentProxy, evictExcept, subscribeProxyEvictions } from '../lib/pdfDocCache';
 import { createIndexRuns } from '../lib/index-runs';
-import { clearIndexFailure, needsIndex, recordIndexFailure, recordIndexSuccess } from '../lib/workspace-settle';
+import { indexFailed, needsIndex, recordIndexFailure, recordIndexSuccess, subscribeIndexRetries } from '../lib/workspace-settle';
 
 // Keeps AppState.workspace in sync with AppState.files. Whenever a file's
 // buffer changes (open, whole-file op, undo/redo), its workspace documents are
@@ -19,6 +19,12 @@ export function useWorkspaceIndexer(): void {
   // A destroyed proxy abandons the run reading it; this re-runs the pass that
   // starts it again.
   const [restarts, setRestarts] = useState(0);
+
+  useEffect(() => subscribeIndexRetries((path, buffer) => {
+    runs.current.abandon(path, buffer);
+    evictDocumentProxy(path, buffer);
+    setRestarts(n => n + 1);
+  }), []);
 
   useEffect(
     () =>
@@ -38,9 +44,9 @@ export function useWorkspaceIndexer(): void {
       // — never a strip. evictExcept above still keeps their proxy alive.
       if (f.importOnly) continue;
       if (!needsIndex(indexed, path)) continue;
+      if (indexFailed(buffer)) continue;
       const token = runs.current.begin(path, buffer);
       if (token === null) continue;
-      clearIndexFailure(buffer);
       indexOpenFile(f)
         .then((documents) => {
           if (!runs.current.live(path, token)) return;

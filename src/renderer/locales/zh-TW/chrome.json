@@ -119,7 +119,7 @@
   "app.unreadableRecord.startupTitle": "未套用啟動設定",
   "app.window.claimTitle": "已在其他視窗中開啟",
   "app.window.focusOther": "顯示該視窗",
-  "app.window.folderBusy": "另一個視窗正在寫入此資料夾：{{folder}}。",
+  "app.window.folderBusy": "另一個工作已在寫入此資料夾：{{folder}}。",
   "app.window.folderBusyHere": "此視窗中的一次執行仍在寫入此資料夾：{{folder}}。請等它停止後再重試。",
   "app.window.importElsewhere": "無法從在其他視窗中開啟的檔案匯入頁面：{{names}}。",
   "app.window.openElsewhere": "已在其他視窗中開啟：{{names}}。同一個檔案一次只能在一個視窗中編輯。",
@@ -5841,5 +5841,8 @@
   "toolbar.group.zoom": "縮放",
   "tools.heading": "工具",
   "tools.openFirst": "請先開啟 PDF",
-  "tools.sub": "選擇您想對文件做什麼。"
+  "tools.sub": "選擇您想對文件做什麼。",
+  "engine.redact.pageContainsMalformedDrawing": "頁面包含格式錯誤的繪圖路徑。未套用密文遮蓋。",
+  "engine.redact_document.documentStructureTooComplex": "文件結構過於複雜，無法安全地套用密文遮蓋。",
+  "refusal.scan.pageUnreadable": "無法讀取掃描的頁面：{{folder}}。"
 }

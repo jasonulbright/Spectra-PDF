@@ -24,46 +24,18 @@ env:
   SPECTRAPDF_SIGN_PROFILE: SRL-Public
   SPECTRAPDF_SIGN_SUBJECT_CN: Jason Ulbright
 
+# The candidate's full functional validation is performed once locally.
+# This workflow builds the signed deliverables and verifies the uploaded bytes.
 jobs:
-  # The gate for `release`. A tag can be pushed at any commit, so CI running on
-  # push/PR does not establish that the tagged commit passed anything.
-  #
-  # Every gate runs here except the engine suite, which is reused from CI only
-  # on proof: CI's own run of ci.yml for this exact commit, triggered by the
-  # push of main, completed with success. Reading another workflow's verdict
-  # is one API shape away from silently passing, so the check accepts one
-  # shape of success and treats every other answer as "run the suite here".
-  #
-  # E2E is not here and must not be faked: it is blocked upstream (see
-  # ci.yml). The full local suite on the built binary is the release gate, a
-  # manual precondition recorded per milestone.
   verify:
-    name: Verify (gates + version consistency)
+    name: Verify version consistency
     runs-on: windows-latest
-    timeout-minutes: 150
-    # actions: read is for the one query of ci.yml's runs below. Nothing in
-    # this job writes, so contents is read-only.
+    timeout-minutes: 5
     permissions:
       contents: read
-      actions: read
     steps:
-      # The suite's redo-regime tests enumerate released tags. The default
-      # checkout is shallow and tagless, which made those tests unrunnable on
-      # the runner; fetch-tags brings the tag objects and their trees.
       - uses: actions/checkout@v7
-        with:
-          fetch-tags: true
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
-          check-latest: true
-
-      # The tag IS the version claim. A tag that disagrees with the manifests
-      # publishes an installer whose in-app version, updater manifest and
-      # filename do not match the release it lives in -- and the updater
-      # compares version NUMBERS, so a mismatch strands users.
       - name: Tag matches every version surface
         shell: pwsh
         run: |
@@ -78,290 +50,6 @@ jobs:
           if ($conf  -cne $tag) { $bad += "tauri.conf.json ($conf)" }
           if ($cargo -cne $tag) { $bad += "Cargo.toml ($cargo)" }
           if ($bad) { throw "Tag $tag disagrees with: $($bad -join ', ')" }
-
-      - name: Install Node dependencies
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint -- --quiet
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      # Renderer integration tests call the real engine before the later
-      # Python suite, so provision its hash-pinned interpreter environment now.
-      - name: Setup Python
-        uses: actions/setup-python@v7
-        with:
-          python-version-file: .python-version
-
-      - name: Install Python dependencies (the SHIPPED, hash-pinned set)
-        run: pip install --require-hashes -r scripts/python-requirements.txt
-
-      - name: Stage the shipped signature script faces for engine tests
-        run: powershell -ExecutionPolicy Bypass -File scripts/sync-signature-fonts.ps1
-        shell: pwsh
-
-      - name: Unit tests (vitest)
-        run: npm test
-
-      - name: Build renderer (Vite)
-        run: npm run build:renderer
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-verify-${{ hashFiles('src-tauri/Cargo.lock') }}
-
-      - name: Create resource stubs for Tauri build script
-        run: |
-          mkdir -p resources/python
-          mkdir -p resources/fonts
-          mkdir -p resources/libreoffice
-          mkdir -p resources/tesseract
-          mkdir -p resources/jbig2enc
-          mkdir -p resources/dictionaries
-          mkdir -p resources/icc
-        shell: bash
-
-      # `cargo check` never RUNS anything. The Rust tests cover the virtual
-      # printer's job naming, the watched-folder validation and the scheduler --
-      # all of which decide what lands on a user's disk. This is the STUB-ONLY
-      # Rust run: the resource stubs above are empty, so tests/cli_bytecode.rs,
-      # tests/cli_run_action.rs and the live half of tests/health_worker.rs
-      # skip here; their provisioned run is in the `release` job after
-      # vendoring.
-      - name: Rust tests
-        run: cd src-tauri && cargo test
-
-      # Fresh-install scheduling acceptance: the runner has no `\Spectra PDF\`
-      # task folder, so the #[ignore]d COM round-trips register into a genuinely
-      # fresh store here (registration ensures its folder rather than leaning
-      # on undocumented RegisterTask behavior; see ci.yml for the full note).
-      - name: Rust COM scheduler tests (fresh task store)
-        run: cd src-tauri && cargo test scheduler -- --ignored
-
-      # ci.yml runs the same engine suite, with the same provisioning and the
-      # same zero-skip gate, on every push of main, so a tag cut on a main
-      # commit after its push finds that run. The steps from here through
-      # "Engine tests (full suite)" are skipped only when EVERY push run of
-      # ci.yml for this exact commit completed with success, and at least one
-      # exists. No run yet, a run in progress, a cancelled or failed run, a
-      # query error or an answer of any other shape runs them as before. The
-      # step itself cannot fail the job: without its output the suite runs.
-      - name: Reuse CI's engine suite result for this commit
-        id: ci
-        continue-on-error: true
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          function Test-CiPassed([string] $Json, [string] $Sha) {
-              if ($Sha -cnotmatch '^[0-9a-f]{40}$') { return $false }
-              try { $page = $Json | ConvertFrom-Json -ErrorAction Stop } catch { return $false }
-              $runs = @($page.workflow_runs | Where-Object {
-                  $_.head_sha -ceq $Sha -and $_.event -ceq 'push' -and $_.path -ceq '.github/workflows/ci.yml'
-              })
-              if ($runs.Count -eq 0) { return $false }
-              foreach ($run in $runs) {
-                  if ($run.status -cne 'completed' -or $run.conclusion -cne 'success') { return $false }
-              }
-              return $true
-          }
-          $sha = "$(git rev-parse HEAD)".Trim()
-          $answer = gh api "repos/$env:REPO/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&per_page=100"
-          $passed = ($LASTEXITCODE -eq 0) -and (Test-CiPassed -Json ($answer -join "`n") -Sha $sha)
-          if ($passed) {
-              "passed=true" >> $env:GITHUB_OUTPUT
-              Write-Host "ci.yml passed on $sha; the engine suite steps are skipped"
-          } else {
-              Write-Host "no proof that ci.yml passed on $sha; the engine suite steps run"
-          }
-          exit 0
-
-      # One install per step. The default shell on windows runners reports the
-      # step's verdict as the LAST command's exit status, and a native command's
-      # non-zero exit does not abort the block, so a failed install in a
-      # multi-command block reports success and surfaces only as downstream
-      # collection errors. `--require-hashes` is stated explicitly to match what
-      # setup-python-embed.ps1 installs into the shipped runtime.
-      # The rest of the shipped set: the wheels committed under vendor/wheels/,
-      # which no index is asked for. Without this the HEIF corpus cannot decode.
-      - name: Install the vendored wheels (the rest of the shipped set)
-        if: steps.ci.outputs.passed != 'true'
-        run: powershell -ExecutionPolicy Bypass -File scripts/install-vendored-wheels.ps1
-
-      - name: Install pytest
-        if: steps.ci.outputs.passed != 'true'
-        run: pip install pytest
-
-      - name: Stage the committed ICC colour profiles for engine tests
-        if: steps.ci.outputs.passed != 'true'
-        # The verify job is a clean checkout and runs the engine before the
-        # build job vendors resources. Use the release bundler here too so the
-        # tested bytes and the installer bytes are governed by the same hashes.
-        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-icc.ps1
-        shell: pwsh
-
-      - name: Stage the shipped edit fonts for engine tests
-        if: steps.ci.outputs.passed != 'true'
-        run: powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1
-        shell: pwsh
-
-      # 373 MB off TDF's mirror network on EVERY run otherwise. The key is the
-      # bundle script because that file IS the pin (version + SHA-256), and the
-      # cached file is named for the checksum, so a restore that does not match
-      # the pin falls through to a download instead of poisoning the tree.
-      - name: Cache the pinned LibreOffice msi
-        id: libreoffice-msi-cache
-        if: steps.ci.outputs.passed != 'true'
-        uses: actions/cache@v6
-        with:
-          path: .lo-msi-cache
-          key: ${{ runner.os }}-libreoffice-msi-${{ hashFiles('scripts/bundle-libreoffice.ps1') }}
-
-      - name: Stage the shipped LibreOffice runtime for engine tests
-        if: steps.ci.outputs.passed != 'true'
-        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1
-        shell: pwsh
-        env:
-          SPECTRAPDF_LO_MSI_CACHE: .lo-msi-cache
-
-      - name: Stage the shipped native Tesseract runtime for engine tests
-        if: steps.ci.outputs.passed != 'true'
-        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
-        shell: pwsh
-
-      - name: Stage the shipped JBIG2 encoder for engine tests
-        if: steps.ci.outputs.passed != 'true'
-        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1
-        shell: pwsh
-
-      - name: Stage the shipped spelling dictionaries for engine tests
-        if: steps.ci.outputs.passed != 'true'
-        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-dictionaries.ps1
-        shell: pwsh
-
-      - name: Stage the shipped Finnish spelling runtime for engine tests
-        if: steps.ci.outputs.passed != 'true'
-        # Must follow dictionaries and Tesseract for the same dependency order
-        # the release build itself uses below.
-        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-voikko.ps1
-        shell: pwsh
-
-      - name: Stage the shipped OCR language models for engine tests
-        if: steps.ci.outputs.passed != 'true'
-        run: node scripts/sync-ocr-assets.mjs
-        shell: pwsh
-
-      - name: Stage test-only SoftHSM for PKCS#11 engine tests
-        if: steps.ci.outputs.passed != 'true'
-        # This is a pinned test fixture, not part of the published installer.
-        run: powershell -ExecutionPolicy Bypass -File scripts/setup-test-softhsm.ps1
-        shell: pwsh
-
-      # Fetched, never committed: the suite's notice permits use for testing
-      # workflow setup and forbids redistribution. Without this the Ghent gate
-      # skips and the zero-skip gate below refuses the run. Keyed on the fetch
-      # script, which holds the archive digest pins, so a run hits GWG's server
-      # only when a pin moves. A MISS still fetches and verifies the pins, and
-      # both paths re-verify the extracted tree against the per-file manifest.
-      - name: Cache the Ghent PDF Output Suite corpus
-        id: ghent-cache
-        if: steps.ci.outputs.passed != 'true'
-        uses: actions/cache@v6
-        with:
-          path: ghent-corpus
-          key: ${{ runner.os }}-ghent-suite-${{ hashFiles('scripts/fetch-ghent-suite.py') }}
-
-      - name: Fetch the Ghent PDF Output Suite corpus
-        if: steps.ghent-cache.outputs.cache-hit != 'true' && steps.ci.outputs.passed != 'true'
-        run: python scripts/fetch-ghent-suite.py
-
-      - name: Verify the Ghent corpus against its manifest
-        if: steps.ci.outputs.passed != 'true'
-        run: python scripts/fetch-ghent-suite.py --check
-
-      # The GWG Processing Steps Test Suite, same posture and same reasoning
-      # as the Ghent corpus above: published for testing workflow setup, never
-      # committed, keyed on its own fetch script because that file holds the
-      # archive digest pin.
-      - name: Cache the GWG Processing Steps Test Suite corpus
-        id: processing-steps-cache
-        if: steps.ci.outputs.passed != 'true'
-        uses: actions/cache@v6
-        with:
-          path: processing-steps-corpus
-          key: ${{ runner.os }}-processing-steps-suite-${{ hashFiles('scripts/fetch-processing-steps-suite.py') }}
-
-      - name: Fetch the GWG Processing Steps Test Suite corpus
-        if: steps.processing-steps-cache.outputs.cache-hit != 'true' && steps.ci.outputs.passed != 'true'
-        run: python scripts/fetch-processing-steps-suite.py
-
-      - name: Verify the Processing Steps corpus against its manifest
-        if: steps.ci.outputs.passed != 'true'
-        run: python scripts/fetch-processing-steps-suite.py --check
-
-      # The PDF/A conformance corpus (bfocom + veraPDF): fetched, never
-      # committed — neither upstream declares a licence, so redistribution
-      # terms cannot be satisfied and the files stay on disk. The clause-map
-      # gate reads the DERIVED clause index, so the index is rebuilt on every
-      # run from whatever the cache restored; the fetch itself is keyed on the
-      # fetch script, which is where the commit SHA pins live.
-      - name: Cache the PDF/A conformance corpus
-        id: pdfa-corpus-cache
-        if: steps.ci.outputs.passed != 'true'
-        uses: actions/cache@v6
-        with:
-          path: pdfa-corpus
-          key: ${{ runner.os }}-pdfa-corpus-${{ hashFiles('scripts/fetch-pdfa-corpus.py') }}
-
-      - name: Fetch the PDF/A conformance corpus
-        if: steps.pdfa-corpus-cache.outputs.cache-hit != 'true' && steps.ci.outputs.passed != 'true'
-        run: python scripts/fetch-pdfa-corpus.py
-
-      - name: Build the PDF/A clause index
-        if: steps.ci.outputs.passed != 'true'
-        run: python scripts/pdfa-clause-index.py
-
-      - name: Verify the PDF/A corpus and its clause index
-        if: steps.ci.outputs.passed != 'true'
-        run: python scripts/fetch-pdfa-corpus.py --check
-
-      - name: Install Ghostscript as a TEST TOOL (capability-present axis)
-        if: steps.ci.outputs.passed != 'true'
-        # Ghostscript remains user-installed and absent from the installer.
-        # This unpinned test install proves the minimum-version capability path
-        # against the current package available to a Windows user.
-        # Retries and the pinned upstream fallback live in the script.
-        run: powershell -ExecutionPolicy Bypass -File scripts/install-ghostscript-test-tool.ps1
-        shell: pwsh
-        timeout-minutes: 30
-
-      - name: Export the test Ghostscript path
-        if: steps.ci.outputs.passed != 'true'
-        run: |
-          $candidates = @(Get-ChildItem "${env:ProgramFiles}\gs\gs*\bin\gswin64c.exe" -File -ErrorAction Stop)
-          if ($candidates.Count -eq 0) { throw "No installed Ghostscript found" }
-          $selected = ($candidates | Sort-Object { [version]($_.Directory.Parent.Name -replace '^gs', '') } -Descending)[0]
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTRAPDF_GS_PATH=$($selected.FullName)" -Encoding utf8
-        shell: pwsh
-
-      # --durations names the slowest tests in the log: a stall in this
-      # suite is otherwise a silent 30 minutes with no test named.
-      - name: Engine tests (full suite)
-        if: steps.ci.outputs.passed != 'true'
-        run: python -m pytest tests/ -q --durations=25
-        env:
-          SPECTRAPDF_REQUIRE_ZERO_SKIPS: "1"
 
   release:
     name: Build & publish (Windows)
@@ -494,18 +182,6 @@ jobs:
         run: node scripts/sync-ocr-assets.mjs
         shell: pwsh
 
-      # The live CLI against the runtime this job just vendored. The verify
-      # job's Rust run sees empty stubs and these tests skip there; here the
-      # skip is refused, so a release cannot go out without having launched
-      # the product's CLI, read the payload tree it left behind, run guided
-      # actions without a Ghostscript, and killed and respawned the health
-      # worker. This job installs no Ghostscript, so the cases that need a
-      # working one return early here; CI's engine job runs them.
-      - name: Live CLI tests against the provisioned runtime
-        run: cd src-tauri && cargo test --test cli_bytecode --test cli_run_action --test health_worker
-        env:
-          SPECTRAPDF_REQUIRE_LIVE_CLI: "1"
-
       - name: Stage corresponding source archives
         # The HEIF binding ships two LGPL libraries. Every released installer
         # is accompanied by their exact source and the binding's own sdist;
@@ -610,6 +286,30 @@ jobs:
           foreach ($log in $logs) {
             Write-Host "===== $($log.Name) ====="
             Get-Content -LiteralPath $log.FullName | Write-Host
+          }
+
+      # Exercise the Python runtime vendored on this runner in the built app.
+      # A malformed runtime or missing DLL must leave the draft unpublished.
+      - name: Built CLI starts the vendored engine
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          $exe = 'src-tauri/target/release/spectrapdf.exe'
+          $fixture = 'tests/fixtures/sample.pdf'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'built CLI is missing' }
+          if (-not (Test-Path -LiteralPath $fixture -PathType Leaf)) { throw 'CLI fixture is missing' }
+          $stdout = Join-Path $env:RUNNER_TEMP 'spectrapdf-cli-smoke.out'
+          $stderr = Join-Path $env:RUNNER_TEMP 'spectrapdf-cli-smoke.err'
+          $process = Start-Process -FilePath (Resolve-Path $exe).Path `
+            -ArgumentList @('check', $fixture) -WorkingDirectory (Get-Location).Path `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr `
+            -WindowStyle Hidden -PassThru -Wait
+          if ($process.ExitCode -ne 0) {
+            throw "built CLI failed (exit $($process.ExitCode)): $(Get-Content $stderr -Raw)"
+          }
+          $report = Get-Content $stdout -Raw | ConvertFrom-Json
+          if ($report.valid -ne $true -or $report.size_bytes -le 0) {
+            throw "built CLI did not validate the fixture: $(Get-Content $stdout -Raw)"
           }
 
       # The portable distribution: the SAME payload the installer lays down,

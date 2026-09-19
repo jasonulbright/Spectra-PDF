@@ -13,6 +13,7 @@ redacts it, and requires the marker to be gone from the saved file.
 from __future__ import annotations
 
 import base64
+import io
 import os
 import zlib
 
@@ -256,6 +257,36 @@ def _tagged(doc, page, kids, alt="Photo of passport number X1234567", parent_tre
 
 
 class TestStructure:
+    @pytest.mark.parametrize("description", ["/ActualText", "/Alt", "/E"])
+    @pytest.mark.parametrize("parent_link", ["normal", "missing", "cycle"])
+    def test_ancestor_descriptions_go_and_other_branches_stay(self, tmp_dir, description, parent_link):
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(200, 100))
+        page.Resources = Dictionary(Font=Dictionary(F1=_helvetica()))
+        page.Contents = doc.make_stream(b"/Span <</MCID 0>> BDC BT /F1 12 Tf 10 40 Td (" + MARKER + b") Tj ET EMC")
+        page.obj.StructParents = 0
+        root = doc.make_indirect(Dictionary(Type=Name.StructTreeRoot))
+        parent = doc.make_indirect(Dictionary(Type=Name.StructElem, S=Name.P, P=root))
+        child = doc.make_indirect(Dictionary(Type=Name.StructElem, S=Name.Span, P=parent, Pg=page.obj, K=0))
+        sibling = doc.make_indirect(Dictionary(Type=Name.StructElem, S=Name.P, P=root, Alt=String("unrelated description")))
+        parent[description] = String(MARKER)
+        parent.K = Array([child])
+        root.K = Array([parent, sibling])
+        root.ParentTree = Dictionary(Nums=Array([0, Array([child])]))
+        doc.Root.StructTreeRoot = root
+        doc.Root.MarkInfo = Dictionary(Marked=True)
+        if parent_link == "missing":
+            del child["/P"]
+        elif parent_link == "cycle":
+            parent.P = child
+
+        _src, out, result = _run(tmp_dir, doc, [0, 30, 200, 60])
+
+        assert result["text_runs_removed"] == 1
+        assert not _anywhere(out, MARKER)
+        with pikepdf.open(out) as saved:
+            assert str(saved.Root.StructTreeRoot.K[1].Alt) == "unrelated description"
+
     def test_an_image_that_is_a_structure_item_is_rebound_to_its_copy(self, tmp_dir):
         doc = pikepdf.new()
         page = doc.add_blank_page(page_size=(100, 100))
@@ -459,6 +490,62 @@ def _xmp_with_thumbnail(payload: bytes) -> bytes:
 
 
 class TestDerivatives:
+    @pytest.mark.parametrize("prefix", ["xmp:", ""])
+    @pytest.mark.parametrize("encoding", ["utf-8", "utf-16"])
+    def test_thumbnail_removal_uses_the_xml_namespace(self, tmp_dir, prefix, encoding):
+        from PIL import Image
+
+        thumbnail = io.BytesIO()
+        Image.frombytes("RGB", (W, H), SECRET).save(thumbnail, format="JPEG")
+        original = thumbnail.getvalue()
+        body = _xmp_with_thumbnail(original).decode("ascii")
+        body = body.replace("<xmp:Thumbnails>", f'<{prefix}Thumbnails xmlns="http://ns.adobe.com/xap/1.0/">')
+        body = body.replace("</xmp:Thumbnails>", f"</{prefix}Thumbnails>")
+        body = body.replace("</rdf:Description>", '<other:Thumbnails xmlns:other="urn:unrelated">keep</other:Thumbnails></rdf:Description>')
+        doc = pikepdf.new()
+        self._page_with_image(doc)
+        doc.Root.Metadata = doc.make_stream(body.encode(encoding))
+
+        _src, out, result = _run(tmp_dir, doc, [10, 10, 50, 50])
+
+        assert result["images_modified"] == 1
+        with pikepdf.open(out) as saved:
+            from lxml import etree
+
+            data = saved.Root.Metadata.read_bytes()
+            assert base64.b64encode(original) not in data
+            tree = etree.fromstring(data)
+            assert tree.find(".//{http://ns.adobe.com/xap/1.0/}Thumbnails") is None
+            assert tree.find(".//{urn:unrelated}Thumbnails").text == "keep"
+            assert b"application/pdf" in data
+
+    @pytest.mark.parametrize("failure", ["syntax", "doctype", "bytes", "elements"])
+    def test_unreadable_thumbnail_metadata_is_removed(self, tmp_dir, monkeypatch, failure):
+        from engine import redact_document
+
+        body = _xmp_with_thumbnail(MARKER)
+        if failure == "syntax":
+            body += b"<"
+        elif failure == "doctype":
+            body = b'<!DOCTYPE x:xmpmeta [<!ENTITY secret "hidden">]>' + body
+        elif failure == "bytes":
+            monkeypatch.setattr(redact_document, "MAX_METADATA_BYTES", len(body) - 1)
+        else:
+            monkeypatch.setattr(redact_document, "MAX_METADATA_ELEMENTS", 2)
+        doc = pikepdf.new()
+        self._page_with_image(doc)
+        doc.Root.Metadata = doc.make_stream(body)
+        src = os.path.join(tmp_dir, "malformed.pdf")
+        out = os.path.join(tmp_dir, "redacted.pdf")
+        doc.save(src, fix_metadata_version=False)
+        doc.close()
+        with pikepdf.open(src) as saved:
+            assert saved.Root.Metadata.read_bytes() == body
+        redact(src, out, [{"page": 1, "rect": [10, 10, 50, 50]}])
+
+        with pikepdf.open(out) as saved:
+            assert "/Metadata" not in saved.Root
+
     def _page_with_image(self, doc, size=(100, 100)):
         page = doc.add_blank_page(page_size=size)
         page.Resources = Dictionary(XObject=Dictionary(Im0=_image(doc)))
@@ -636,7 +723,7 @@ def _painted(path: str) -> list:
 
     for ins in instructions:
         op = str(ins.operator)
-        args = [float(v) for v in ins.operands] if op not in ("d", "BDC", "Tf", "Tj", "TJ", "Do", "cs", "scn", "gs") else []
+        args = [float(v) for v in ins.operands] if op not in ("d", "BMC", "BDC", "MP", "DP", "Tf", "Tj", "TJ", "Do", "cs", "scn", "gs") else []
         if op == "q":
             stack.append((ctm, width))
         elif op == "Q":
@@ -679,6 +766,29 @@ def _near(point, rect, reach) -> bool:
 
 
 class TestPaths:
+    @pytest.mark.parametrize("content", [
+        b"10 50 m 2 w 90 50 l S",
+        b"10 50 m 0 0 1 RG 90 50 l S",
+        b"10 50 m 1 0 0 1 0 0 cm 90 50 l S",
+        b"10 50 m 90 50 l",
+    ])
+    def test_a_malformed_path_refuses_without_publishing(self, tmp_dir, content):
+        with pytest.raises(ValueError, match="malformed drawing path"):
+            self._page(tmp_dir, content)
+        assert not os.path.exists(os.path.join(tmp_dir, "in_out.pdf"))
+
+    @pytest.mark.parametrize("content", [
+        b"10 50 m /Artifact BMC 90 50 l S EMC",
+        b"10 50 m BX EX 90 50 l S",
+        b"10 50 m /Point MP 90 50 l S",
+    ])
+    def test_non_drawing_markers_do_not_split_a_path(self, tmp_dir, content):
+        _src, out, result = self._page(tmp_dir, content)
+        assert result["paths_redacted"] == 1
+        for _op, polygons, _width in _painted(out):
+            for polygon in polygons:
+                assert all(not _near(point, MARK, 0) for point in polygon)
+
     def _page(self, tmp_dir, content: bytes, rect=MARK, name="in"):
         doc = pikepdf.new()
         doc.add_blank_page(page_size=(100, 100)).Contents = doc.make_stream(content)

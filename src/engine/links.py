@@ -458,7 +458,16 @@ def _write_target(pdf, annot, target: dict) -> None:
     up carrying two targets that disagree."""
     action = target_dictionary(pdf, target)
     if action is None:
-        annot["/Dest"] = String(str(target["name"]).strip())
+        name = str(target["name"]).strip()
+        names = pdf.Root.get("/Names")
+        tree = names.get("/Dests") if isinstance(names, Dictionary) else None
+        try:
+            in_tree = tree is not None and pikepdf.NameTree(tree).get(name) is not None
+        except (TypeError, ValueError, KeyError, RuntimeError):
+            in_tree = False
+        # ISO 32000-2 12.3.2.4: a string addresses the name tree; a name
+        # addresses the catalog's legacy destination dictionary.
+        annot["/Dest"] = String(name) if in_tree else Name("/" + name)
         if "/A" in annot:
             del annot["/A"]
         return

@@ -125,7 +125,7 @@
   "app.unreadableRecord.startupTitle": "Nastavení spouštění nebylo použito",
   "app.window.claimTitle": "Otevřeno v jiném okně",
   "app.window.focusOther": "Zobrazit toto okno",
-  "app.window.folderBusy": "Do této složky už zapisuje jiné okno: {{folder}}.",
+  "app.window.folderBusy": "Do této složky již zapisuje jiná úloha: {{folder}}.",
   "app.window.folderBusyHere": "Běh v tomto okně stále zapisuje do této složky: {{folder}}. Počkejte, až se zastaví, a pak to zkuste znovu.",
   "app.window.importElsewhere": "Ze souboru otevřeného v jiném okně nelze importovat stránky: {{names}}.",
   "app.window.openElsewhere": "Už je otevřeno v jiném okně: {{names}}. Soubor lze upravovat vždy jen v jednom okně.",
@@ -6249,5 +6249,8 @@
   "toolbar.group.zoom": "Přiblížení",
   "tools.heading": "Nástroje",
   "tools.openFirst": "Nejprve otevřete PDF",
-  "tools.sub": "Zvolte, co chcete se svým dokumentem udělat."
+  "tools.sub": "Zvolte, co chcete se svým dokumentem udělat.",
+  "engine.redact.pageContainsMalformedDrawing": "Stránka obsahuje chybnou kreslicí cestu. Redakce nebyla provedena.",
+  "engine.redact_document.documentStructureTooComplex": "Struktura dokumentu je příliš složitá pro bezpečnou redakci.",
+  "refusal.scan.pageUnreadable": "Naskenovanou stránku nelze přečíst: {{folder}}."
 }

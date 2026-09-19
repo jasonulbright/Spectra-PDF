@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFRawStream, StandardFonts, decodePDFRawStream } from 'pdf-lib';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — no type declarations for the deep legacy import
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -17,6 +17,9 @@ import {
   applyRedactions,
   clearRedactionMarks,
   getRedactionMarkCount,
+  selectCanvasPages,
+  rotateSelectedCanvasPages,
+  closeAllFiles,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -51,6 +54,22 @@ async function pageTexts(path: string): Promise<string[]> {
   }
   await pdf.loadingTask.destroy();
   return texts;
+}
+
+async function makeScanFixture(path: string): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([256, 320]);
+  const pixels = Uint8Array.from({ length: 16 * 16 * 3 }, (_, i) => 1 + i % 251);
+  const image = pdf.context.register(pdf.context.flateStream(pixels, {
+    Type: 'XObject', Subtype: 'Image', Width: 16, Height: 16,
+    BitsPerComponent: 8, ColorSpace: 'DeviceRGB',
+  }));
+  page.node.set(PDFName.of('Resources'), pdf.context.obj({ XObject: { Scan: image } }));
+  page.node.set(PDFName.of('Contents'), pdf.context.register(
+    pdf.context.flateStream('q 256 0 0 320 0 0 cm /Scan Do Q'),
+  ));
+  writeFileSync(path, await pdf.save());
+  return pixels;
 }
 
 describe('redaction strips content through the real engine round trip', () => {
@@ -101,4 +120,41 @@ describe('redaction strips content through the real engine round trip', () => {
     expect(texts[0]).toContain('KEEP ME BOTTOM');
     expect(texts[1]).toContain('PAGE TWO SURVIVES');
   });
+
+  for (const rotate of [false, true]) {
+    it(`removes only marked scan pixels${rotate ? ' after a pending page rotation' : ''}`, async () => {
+      await closeAllFiles();
+      const scan = resolve(tmp, `scan-${rotate}.pdf`);
+      const output = resolve(tmp, `scan-redacted-${rotate}.pdf`);
+      const original = await makeScanFixture(scan);
+      const sourceBytes = readFileSync(scan);
+      await openByPaths([scan]);
+      await setView('canvas');
+      const { pageId } = await addRedactionMark({ x: 0.25, y: 0.25, w: 0.25, h: 0.25 });
+      if (rotate) {
+        await selectCanvasPages([pageId]);
+        await rotateSelectedCanvasPages(90);
+        await browser.waitUntil(() => browser.execute(id =>
+          Array.from(document.querySelectorAll('[data-page-id]')).find(cell => cell.getAttribute('data-page-id') === id)
+            ?.getAttribute('data-natural-w') === '320', pageId),
+        { timeout: 10_000, timeoutMsg: 'the page rotation did not finish' });
+      }
+      await applyRedactions();
+      await saveActiveAs(output);
+      const saved = await PDFDocument.load(readFileSync(output));
+      // Inspect every saved image, including unreachable objects: leaving an
+      // original raster behind would let a recipient recover the removed data.
+      const images = saved.context.enumerateIndirectObjects().map(([, obj]) => obj)
+        .filter((obj): obj is PDFRawStream => obj instanceof PDFRawStream
+          && obj.dict.get(PDFName.of('Subtype')) === PDFName.of('Image'));
+      expect(images).toHaveLength(1);
+      const expected = original.slice();
+      for (let row = 4; row < 8; row++) {
+        for (let col = 4; col < 8; col++) expected.fill(0, (row * 16 + col) * 3, (row * 16 + col) * 3 + 3);
+      }
+      expect(Buffer.from(decodePDFRawStream(images[0]).decode())).toEqual(Buffer.from(expected));
+      expect(readFileSync(scan)).toEqual(sourceBytes);
+      expect(await getRedactionMarkCount()).toBe(0);
+    });
+  }
 });

@@ -300,7 +300,7 @@ export const WORKBENCH_STRINGS = {
   'app.window.importElsewhere':
     'Pages cannot be imported from a file that is open in another window: {{names}}.',
   'app.window.folderBusy':
-    'Another window is already writing to this folder: {{folder}}.',
+    'Another run is already writing to this folder: {{folder}}.',
   // A run whose dialog was closed while it stopped still writes until its
   // current file is done; a second run on that folder is refused until then.
   'app.window.folderBusyHere':

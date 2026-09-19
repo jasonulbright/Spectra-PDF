@@ -121,7 +121,7 @@
   "app.unreadableRecord.startupTitle": "Käynnistysasetuksia ei otettu käyttöön",
   "app.window.claimTitle": "Avoinna toisessa ikkunassa",
   "app.window.focusOther": "Näytä kyseinen ikkuna",
-  "app.window.folderBusy": "Toinen ikkuna kirjoittaa jo tähän kansioon: {{folder}}.",
+  "app.window.folderBusy": "Toinen ajo kirjoittaa jo tähän kansioon: {{folder}}.",
   "app.window.folderBusyHere": "Tämän ikkunan ajo kirjoittaa yhä tähän kansioon: {{folder}}. Odota, kunnes se pysähtyy, ja yritä sitten uudelleen.",
   "app.window.importElsewhere": "Sivuja ei voi tuoda tiedostosta, joka on avoinna toisessa ikkunassa: {{names}}.",
   "app.window.openElsewhere": "Jo avoinna toisessa ikkunassa: {{names}}. Tiedostoa voi muokata vain yhdessä ikkunassa kerrallaan.",
@@ -5977,5 +5977,8 @@
   "toolbar.group.zoom": "Zoomaus",
   "tools.heading": "Työkalut",
   "tools.openFirst": "Avaa ensin PDF",
-  "tools.sub": "Valitse, mitä haluat tehdä asiakirjallesi."
+  "tools.sub": "Valitse, mitä haluat tehdä asiakirjallesi.",
+  "engine.redact.pageContainsMalformedDrawing": "Sivu sisältää virheellisen piirtopolun. Peittämistä ei tehty.",
+  "engine.redact_document.documentStructureTooComplex": "Asiakirjan rakenne on liian monimutkainen turvalliseen peittämiseen.",
+  "refusal.scan.pageUnreadable": "Skannattua sivua ei voitu lukea: {{folder}}."
 }

@@ -33,6 +33,7 @@ ones. Five invariants hold it to what the certification actually permits:
 import logging
 
 from pyhanko.pdf_utils import generic
+from pyhanko.pdf_utils.misc import PdfReadError
 from pyhanko.pdf_utils.reader import RawPdfPath
 from pyhanko.sign.diff_analysis import (
     DEFAULT_DIFF_POLICY,
@@ -405,6 +406,11 @@ class LockedFieldModification(SuspiciousModification):
         self.fields = list(fields)
 
 
+class UnjudgeableModification(SuspiciousModification):
+    """The signed baseline cannot be read well enough to judge later edits.
+    No revision is cleared, but cryptographic verification can still run."""
+
+
 class LockAwareDiffPolicy(StandardDiffPolicy):
     """The standard policy, reporting a locked-field update as its own kind.
 
@@ -414,6 +420,15 @@ class LockAwareDiffPolicy(StandardDiffPolicy):
     suspicious modification that is not a lock violation propagates unchanged
     rather than being relabelled as one.
     """
+
+    def review_file(self, reader, base_revision, field_mdp_spec=None, doc_mdp=None):
+        try:
+            return super().review_file(reader, base_revision, field_mdp_spec, doc_mdp)
+        except PdfReadError as exc:
+            # A malformed field name in the signed bytes is not evidence that
+            # the signature's digest or CMS is invalid. Keep this failure in
+            # the modification analysis, with no permission verdict.
+            return UnjudgeableModification(str(exc))
 
     def apply(self, old, new, field_mdp_spec=None, doc_mdp=None):
         try:

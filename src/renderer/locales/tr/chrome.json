@@ -121,7 +121,7 @@
   "app.unreadableRecord.startupTitle": "Başlangıç ayarları uygulanmadı",
   "app.window.claimTitle": "Başka bir pencerede açık",
   "app.window.focusOther": "O pencereyi göster",
-  "app.window.folderBusy": "Başka bir pencere bu klasöre zaten yazıyor: {{folder}}.",
+  "app.window.folderBusy": "Başka bir işlem bu klasöre zaten yazıyor: {{folder}}.",
   "app.window.folderBusyHere": "Bu penceredeki bir çalıştırma hâlâ bu klasöre yazıyor: {{folder}}. Durmasını bekleyin, ardından yeniden deneyin.",
   "app.window.importElsewhere": "Başka bir pencerede açık olan bir dosyadan sayfa içe aktarılamaz: {{names}}.",
   "app.window.openElsewhere": "Zaten başka bir pencerede açık: {{names}}. Bir dosya aynı anda yalnızca tek bir pencerede düzenlenebilir.",
@@ -5977,5 +5977,8 @@
   "toolbar.group.zoom": "Yakınlaştırma",
   "tools.heading": "Araçlar",
   "tools.openFirst": "Önce bir PDF açın",
-  "tools.sub": "Belgenizle ne yapmak istediğinizi seçin."
+  "tools.sub": "Belgenizle ne yapmak istediğinizi seçin.",
+  "engine.redact.pageContainsMalformedDrawing": "Sayfa hatalı bir çizim yolu içeriyor. Karartma uygulanmadı.",
+  "engine.redact_document.documentStructureTooComplex": "Belge yapısı güvenli karartma için çok karmaşık.",
+  "refusal.scan.pageUnreadable": "Taranan sayfa okunamadı: {{folder}}."
 }

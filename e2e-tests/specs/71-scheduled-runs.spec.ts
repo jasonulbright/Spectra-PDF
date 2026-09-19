@@ -36,6 +36,13 @@ function taskExists(name: string): boolean {
 
 function forceDelete(name: string): void {
   try {
+    execFileSync('schtasks.exe', ['/End', '/TN', `\\Spectra PDF\\${name}`], {
+      stdio: 'pipe',
+    });
+  } catch {
+    /* not running */
+  }
+  try {
     execFileSync('schtasks.exe', ['/Delete', '/F', '/TN', `\\Spectra PDF\\${name}`], {
       stdio: 'pipe',
     });
@@ -62,7 +69,7 @@ describe('scheduled batch runs', () => {
   after(() => {
     // Every task this spec can register, whether or not its test reached the
     // delete — a failed assertion must not leave one on the machine.
-    for (const name of [TASK_NAME, 'E2E Preset Run', 'E2E InPlace Run', 'E2E Contradiction']) {
+    for (const name of [TASK_NAME, 'E2E Preset Run', 'E2E InPlace Run', 'E2E Contradiction', 'E2E Nested Job Run']) {
       forceDelete(name);
     }
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
@@ -94,6 +101,31 @@ describe('scheduled batch runs', () => {
     // The assertion that matters: not that our UI says so, but that the OS has
     // it. A schedule the app believes in and Windows does not would never fire.
     expect(taskExists(TASK_NAME)).toBe(true);
+  });
+
+  it('runs the scheduled engine inside Task Scheduler and writes the result', async function () {
+    this.timeout(120_000);
+    const name = 'E2E Nested Job Run';
+    const runSource = resolve(tmp, 'nested-job-in');
+    const runDest = resolve(tmp, 'nested-job-out');
+    mkdirSync(runSource, { recursive: true });
+    copyFileSync(SCANNED, resolve(runSource, 'scan.pdf'));
+    forceDelete(name);
+    try {
+      await scheduleCreate({
+        name, source: runSource, dest: runDest, lang: 'eng', logDir: logs,
+        frequency: 'daily', time: '09:30',
+      });
+      expect(taskExists(name)).toBe(true);
+      execFileSync('schtasks.exe', ['/Run', '/TN', `\\Spectra PDF\\${name}`], { stdio: 'pipe' });
+      await browser.waitUntil(async () => existsSync(resolve(runDest, 'scan.pdf')), {
+        timeout: 90_000,
+        interval: 1000,
+        timeoutMsg: 'the scheduled engine did not publish its PDF',
+      });
+    } finally {
+      forceDelete(name);
+    }
   });
 
   it('lists it back, reading the settings off the task that will actually run', async () => {

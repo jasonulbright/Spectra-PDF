@@ -41,7 +41,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -183,7 +183,7 @@ struct Host {
     generation: u64,
     /// The job object holding the child, so a parent that dies without
     /// unwinding does not leave a scanner process behind.
-    job: usize,
+    job: AtomicUsize,
 }
 
 impl Host {
@@ -203,7 +203,16 @@ impl Host {
             let _ = child.kill();
             let _ = child.wait();
         }
-        close_job(self.job);
+        // A dead child can be retired again by the next request. Windows
+        // recycles handle values, so closing the old value twice can close
+        // an unrelated document or settings file opened in the meantime.
+        close_job(self.job.swap(0, Ordering::AcqRel));
+    }
+}
+
+impl Drop for Host {
+    fn drop(&mut self) {
+        self.terminate();
     }
 }
 
@@ -365,7 +374,7 @@ fn spawn_host() -> Result<Host, ScanRefusal> {
         pending,
         next_id: AtomicU64::new(1),
         generation,
-        job,
+        job: AtomicUsize::new(job),
     };
     match ready.recv_timeout(HANDSHAKE_DEADLINE) {
         Ok(()) => Ok(host),
@@ -1003,6 +1012,55 @@ mod tests {
         for device in &devices {
             assert!(!device.id.is_empty());
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn terminating_a_host_twice_cannot_close_a_reused_file_handle() {
+        use std::os::windows::io::AsRawHandle;
+        use std::os::windows::process::CommandExt;
+        // Isolate handle allocation from other tests: another thread could
+        // otherwise take the exact slot this regression needs to exercise.
+        const PROBE: &str = "SPECTRAPDF_TEST_REUSED_JOB_HANDLE";
+        if std::env::var_os(PROBE).is_none() {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "scan_host::tests::terminating_a_host_twice_cannot_close_a_reused_file_handle",
+                    "--nocapture",
+                ])
+                .env(PROBE, "1")
+                .creation_flags(0x0800_0000)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr));
+            return;
+        }
+        let host = spawn_host().expect("a private host starts");
+        let job = host.job.load(Ordering::Acquire);
+        assert_ne!(job, 0, "the host has a kernel job");
+        host.terminate();
+
+        // Keep allocations alive until Windows reuses the retired job's slot.
+        // The second termination must not close the unrelated file now there.
+        let scratch = tempfile::tempdir().unwrap();
+        let path = scratch.path().join("still-owned");
+        let mut handles = Vec::new();
+        let mut reused = None;
+        for _ in 0..4096 {
+            let file = std::fs::File::create(&path).unwrap();
+            if file.as_raw_handle() as usize == job {
+                reused = Some(file);
+                break;
+            }
+            handles.push(file);
+        }
+        let mut file = reused.expect("Windows reused the closed job handle");
+        host.terminate();
+        file.write_all(b"still owned").unwrap();
+        file.sync_all().unwrap();
     }
 
     #[test]

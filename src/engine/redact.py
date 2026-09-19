@@ -758,8 +758,12 @@ def _walk(
                 paths_redacted += 1
                 touch()
             continue
-        if path_ops or clip_op is not None:
-            flush_path()
+        if (path_ops or clip_op is not None) and operator not in (
+            "BMC", "BDC", "EMC", "MP", "DP", "BX", "EX",
+        ):
+            # A state change cannot split one path into independent pieces:
+            # a viewer may still paint every piece after the final operator.
+            raise ValueError("The page contains a malformed drawing path. Redaction was not applied.")
 
         if operator == "q":
             style_stack.append((stroke, fill_is_pattern, stroke_is_pattern, fill_pattern, stroke_pattern))
@@ -1059,7 +1063,8 @@ def _walk(
         else:
             kept.append(instruction)
 
-    flush_path()
+    if path_ops or clip_op is not None:
+        raise ValueError("The page contains a malformed drawing path. Redaction was not applied.")
     while marked:
         close_marked(marked.pop())
 

@@ -910,7 +910,15 @@ pub async fn paths_same_file(a: String, b: String) -> Result<bool, String> {
 ///   file, which would fail run 2's promised overwrite with a bare
 ///   access-denied).
 #[tauri::command]
-pub async fn copy_file_creating_dirs(src: String, dest: String) -> Result<(), String> {
+pub async fn copy_file_creating_dirs(app: AppHandle, window: tauri::WebviewWindow, src: String, dest: String) -> Result<(), String> {
+    let leases = app.state::<crate::app_windows::ClaimState>().folder_leases(window.label());
+    tauri::async_runtime::spawn_blocking(move || {
+        let _leases = leases;
+        copy_file_creating_dirs_at(src, dest)
+    }).await.map_err(|e| e.to_string())?
+}
+
+fn copy_file_creating_dirs_at(src: String, dest: String) -> Result<(), String> {
     let dest_path = Path::new(&dest);
     if let Some(parent) = dest_path.parent() {
         fs::create_dir_all(parent)
@@ -961,7 +969,15 @@ pub async fn copy_file_creating_dirs(src: String, dest: String) -> Result<(), St
 ///   legitimately contain a same-named file from an earlier run, and silently
 ///   replacing a previously-moved ORIGINAL would be unreported data loss.
 #[tauri::command]
-pub async fn move_file_creating_dirs(src: String, dest: String) -> Result<String, String> {
+pub async fn move_file_creating_dirs(app: AppHandle, window: tauri::WebviewWindow, src: String, dest: String) -> Result<String, String> {
+    let leases = app.state::<crate::app_windows::ClaimState>().folder_leases(window.label());
+    tauri::async_runtime::spawn_blocking(move || {
+        let _leases = leases;
+        move_file_creating_dirs_at(src, dest)
+    }).await.map_err(|e| e.to_string())?
+}
+
+fn move_file_creating_dirs_at(src: String, dest: String) -> Result<String, String> {
     let src_path = Path::new(&src);
     if !src_path.is_file() {
         return Err(format!("not a file: {src}"));
@@ -1629,15 +1645,13 @@ pub async fn send_to_engine(
     request: serde_json::Value,
 ) -> Result<(), String> {
     let mut request = request;
-    let outer = engine::route_request(&app, window.label(), &mut request);
-    let unroute = |app: &AppHandle| {
-        if let Some(outer) = outer {
-            engine::unroute_request(app, outer);
-        }
-    };
     let state = app.state::<EngineState>();
     let mut guard = state.child.lock().await;
     if let Some(ref mut child) = *guard {
+        let outer = engine::route_request(&app, window.label(), &mut request, child.child.pid())?;
+        let unroute = |app: &AppHandle| {
+            if let Some(outer) = outer { engine::unroute_request(app, outer); }
+        };
         let msg = match serde_json::to_string(&request) {
             Ok(msg) => msg,
             Err(e) => {
@@ -1645,7 +1659,7 @@ pub async fn send_to_engine(
                 return Err(format!("Serialize error: {}", e));
             }
         };
-        if let Err(e) = child.write((msg + "\n").as_bytes()) {
+        if let Err(e) = child.child.write((msg + "\n").as_bytes()) {
             unroute(&app);
             return Err(format!("Failed to write to engine: {}", e));
         }
@@ -1653,7 +1667,6 @@ pub async fn send_to_engine(
         engine::publish_activity(&app);
         Ok(())
     } else {
-        unroute(&app);
         Err("Engine not running".to_string())
     }
 }
@@ -2288,8 +2301,8 @@ pub async fn set_startup_enabled(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_line_at, classify_recent_paths, copy_file_creating_dirs, is_batch_log_name,
-        is_managed_member_path, load_startup_config_at, move_file_creating_dirs,
+        append_line_at, classify_recent_paths, copy_file_creating_dirs_at, is_batch_log_name,
+        is_managed_member_path, load_startup_config_at, move_file_creating_dirs_at,
         reclaim_batch_log_stages, run_key_action, save_as, select_argument, working_copy_in,
         write_action_file, write_batch_log_at, write_profile_file, write_report_file,
         write_startup_flag_at, LaunchRecord, PathStatus, RunKeyAction, StartupConfig,
@@ -3014,18 +3027,18 @@ mod tests {
         std::fs::write(&source, b"%PDF-1.7 run one").unwrap();
         let path = |p: &Path| p.to_string_lossy().to_string();
 
-        copy_file_creating_dirs(path(&source), path(&mirror)).await.unwrap();
+        copy_file_creating_dirs_at(path(&source), path(&mirror)).unwrap();
         assert_eq!(std::fs::read(&mirror).unwrap(), b"%PDF-1.7 run one");
         let mut permissions = std::fs::metadata(&mirror).unwrap().permissions();
         permissions.set_readonly(true);
         std::fs::set_permissions(&mirror, permissions).unwrap();
 
         std::fs::write(&source, b"%PDF-1.7 run two, longer").unwrap();
-        copy_file_creating_dirs(path(&source), path(&mirror)).await.unwrap();
+        copy_file_creating_dirs_at(path(&source), path(&mirror)).unwrap();
         assert_eq!(std::fs::read(&mirror).unwrap(), b"%PDF-1.7 run two, longer");
         assert_eq!(listing(mirror.parent().unwrap()), ["scan.pdf".to_string()].into());
 
-        assert!(copy_file_creating_dirs(path(&source), path(&source)).await.is_err());
+        assert!(copy_file_creating_dirs_at(path(&source), path(&source)).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3039,8 +3052,7 @@ mod tests {
         std::fs::write(&source, b"moved now").unwrap();
         let path = |p: &Path| p.to_string_lossy().to_string();
 
-        let landed = move_file_creating_dirs(path(&source), path(&moved.join("a.pdf")))
-            .await
+        let landed = move_file_creating_dirs_at(path(&source), path(&moved.join("a.pdf")))
             .unwrap();
         assert_eq!(landed, path(&moved.join("a (2).pdf")));
         assert_eq!(std::fs::read(moved.join("a.pdf")).unwrap(), b"moved earlier");
@@ -3156,7 +3168,7 @@ mod tests {
         }
 
         write_startup_flag_at(&startup_json, "startMinimized", true).unwrap();
-        copy_file_creating_dirs(path(&source), path(&mirror)).await.unwrap();
+        copy_file_creating_dirs_at(path(&source), path(&mirror)).unwrap();
         write_report_file(path(&report), "report".into()).await.unwrap();
         write_profile_file(path(&profile), "{}".into()).await.unwrap();
         write_action_file(path(&action), "{}".into()).await.unwrap();

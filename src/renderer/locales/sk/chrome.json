@@ -125,7 +125,7 @@
   "app.unreadableRecord.startupTitle": "Nastavenia spúšťania neboli použité",
   "app.window.claimTitle": "Otvorené v inom okne",
   "app.window.focusOther": "Zobraziť toto okno",
-  "app.window.folderBusy": "Do tohto priečinka už zapisuje iné okno: {{folder}}.",
+  "app.window.folderBusy": "Do tohto priečinka už zapisuje iná úloha: {{folder}}.",
   "app.window.folderBusyHere": "Beh v tomto okne stále zapisuje do tohto priečinka: {{folder}}. Počkajte, kým sa zastaví, a potom to skúste znova.",
   "app.window.importElsewhere": "Zo súboru otvoreného v inom okne nemožno importovať strany: {{names}}.",
   "app.window.openElsewhere": "Už je otvorené v inom okne: {{names}}. Súbor možno upravovať vždy len v jednom okne.",
@@ -6249,5 +6249,8 @@
   "toolbar.group.zoom": "Priblíženie",
   "tools.heading": "Nástroje",
   "tools.openFirst": "Najprv otvorte PDF",
-  "tools.sub": "Zvoľte, čo chcete so svojím dokumentom urobiť."
+  "tools.sub": "Zvoľte, čo chcete so svojím dokumentom urobiť.",
+  "engine.redact.pageContainsMalformedDrawing": "Stránka obsahuje chybnú kresliacu cestu. Redakcia sa nevykonala.",
+  "engine.redact_document.documentStructureTooComplex": "Štruktúra dokumentu je príliš zložitá na bezpečnú redakciu.",
+  "refusal.scan.pageUnreadable": "Naskenovanú stranu sa nepodarilo prečítať: {{folder}}."
 }

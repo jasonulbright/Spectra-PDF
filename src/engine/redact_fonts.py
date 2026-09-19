@@ -1316,7 +1316,11 @@ class _Cut:
             programs.setdefault(_key(stream), (slot, stream, []))[2].append(font)
         for program_key, (slot, stream, users) in programs.items():
             if self.touches(users):
-                self._program(program_key, slot, stream, users)
+                try:
+                    with pdf_fonts._CharStringWork().guard():
+                        self._program(program_key, slot, stream, users)
+                except pdf_fonts._CharStringBudget:
+                    _refuse(users[0], "its font program cannot be cut")
         self._widths()
         self._encodings()
         self._type3()

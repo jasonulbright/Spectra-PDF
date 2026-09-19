@@ -123,7 +123,7 @@
   "app.unreadableRecord.startupTitle": "Setările de pornire nu au fost aplicate",
   "app.window.claimTitle": "Deschis în altă fereastră",
   "app.window.focusOther": "Arată acea fereastră",
-  "app.window.folderBusy": "O altă fereastră scrie deja în acest dosar: {{folder}}.",
+  "app.window.folderBusy": "O altă execuție scrie deja în acest dosar: {{folder}}.",
   "app.window.folderBusyHere": "O rulare din această fereastră încă scrie în acest dosar: {{folder}}. Așteptați până se oprește, apoi încercați din nou.",
   "app.window.importElsewhere": "Nu se pot importa pagini dintr-un fișier deschis în altă fereastră: {{names}}.",
   "app.window.openElsewhere": "Deja deschis în altă fereastră: {{names}}. Un fișier poate fi editat într-o singură fereastră odată.",
@@ -6113,5 +6113,8 @@
   "toolbar.group.zoom": "Zoom",
   "tools.heading": "Instrumente",
   "tools.openFirst": "Deschideți mai întâi un PDF",
-  "tools.sub": "Alegeți ce doriți să faceți cu documentul dumneavoastră."
+  "tools.sub": "Alegeți ce doriți să faceți cu documentul dumneavoastră.",
+  "engine.redact.pageContainsMalformedDrawing": "Pagina conține o cale de desenare incorectă. Redactarea nu a fost aplicată.",
+  "engine.redact_document.documentStructureTooComplex": "Structura documentului este prea complexă pentru o redactare sigură.",
+  "refusal.scan.pageUnreadable": "Pagina scanată nu a putut fi citită: {{folder}}."
 }

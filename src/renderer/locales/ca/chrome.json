@@ -123,7 +123,7 @@
   "app.unreadableRecord.startupTitle": "No s’ha aplicat la configuració d’inici",
   "app.window.claimTitle": "Obert en una altra finestra",
   "app.window.focusOther": "Mostra aquella finestra",
-  "app.window.folderBusy": "Una altra finestra ja està escrivint en aquesta carpeta: {{folder}}.",
+  "app.window.folderBusy": "Una altra execució ja està escrivint en aquesta carpeta: {{folder}}.",
   "app.window.folderBusyHere": "Una execució d’aquesta finestra encara està escrivint en aquesta carpeta: {{folder}}. Espereu que s’aturi i torneu-ho a provar.",
   "app.window.importElsewhere": "No es poden importar pàgines d’un fitxer obert en una altra finestra: {{names}}.",
   "app.window.openElsewhere": "Ja està obert en una altra finestra: {{names}}. Un fitxer només es pot editar en una finestra alhora.",
@@ -6113,5 +6113,8 @@
   "toolbar.group.zoom": "Zoom",
   "tools.heading": "Eines",
   "tools.openFirst": "Obriu primer un PDF",
-  "tools.sub": "Trieu què voleu fer amb el vostre document."
+  "tools.sub": "Trieu què voleu fer amb el vostre document.",
+  "engine.redact.pageContainsMalformedDrawing": "La pàgina conté un traçat de dibuix mal format. No s’ha aplicat la censura.",
+  "engine.redact_document.documentStructureTooComplex": "L’estructura del document és massa complexa per censurar-lo amb seguretat.",
+  "refusal.scan.pageUnreadable": "No s’ha pogut llegir la pàgina escanejada: {{folder}}."
 }

@@ -123,7 +123,7 @@
   "app.unreadableRecord.startupTitle": "Configurações de inicialização não aplicadas",
   "app.window.claimTitle": "Aberto em outra janela",
   "app.window.focusOther": "Mostrar essa janela",
-  "app.window.folderBusy": "Outra janela já está gravando nesta pasta: {{folder}}.",
+  "app.window.folderBusy": "Outra execução já está gravando nesta pasta: {{folder}}.",
   "app.window.folderBusyHere": "Uma execução nesta janela ainda está gravando nesta pasta: {{folder}}. Aguarde até que ela pare e tente novamente.",
   "app.window.importElsewhere": "Não é possível importar páginas de um arquivo aberto em outra janela: {{names}}.",
   "app.window.openElsewhere": "Já aberto em outra janela: {{names}}. Um arquivo só pode ser editado em uma janela por vez.",
@@ -6113,5 +6113,8 @@
   "toolbar.group.zoom": "Zoom",
   "tools.heading": "Ferramentas",
   "tools.openFirst": "Abra antes um PDF",
-  "tools.sub": "Escolha o que você quer fazer com o seu documento."
+  "tools.sub": "Escolha o que você quer fazer com o seu documento.",
+  "engine.redact.pageContainsMalformedDrawing": "A página contém um caminho de desenho inválido. A redação não foi aplicada.",
+  "engine.redact_document.documentStructureTooComplex": "A estrutura do documento é complexa demais para aplicar a redação com segurança.",
+  "refusal.scan.pageUnreadable": "Não foi possível ler a página digitalizada: {{folder}}."
 }

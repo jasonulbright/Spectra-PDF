@@ -8,6 +8,7 @@ from pikepdf import OutlineItem
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import key_name, key_text, name_object
+from engine.fieldactions import destination_array
 
 MAX_DEPTH = 32
 MAX_NODES = 10_000
@@ -133,22 +134,10 @@ def _resolve_dest_array(pdf: pikepdf.Pdf, item):
     if dest is None:
         return None
 
-    # Named destination — resolve through the document's name tree.
-    if isinstance(dest, (pikepdf.Name, pikepdf.String, str, bytes)):
-        try:
-            names = pikepdf.NameTree(pdf.Root.Names.Dests)
-            key = str(dest)
-            resolved = names.get(key.lstrip("/")) or names.get(key)
-            if resolved is None:
-                return None
-            dest = resolved
-            if isinstance(dest, pikepdf.Dictionary):
-                dest = dest.get("/D")
-        except Exception:
-            return None
-    if dest is None or not isinstance(dest, pikepdf.Array) or len(dest) == 0:
+    try:
+        return destination_array(pdf, dest)
+    except (TypeError, ValueError, KeyError, RuntimeError):
         return None
-    return dest
 
 
 def _resolve_dest_page(pdf: pikepdf.Pdf, dest) -> int | None:

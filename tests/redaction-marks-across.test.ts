@@ -435,8 +435,8 @@ describe('the canvas', () => {
   it('lets apply and save take their marks', () => {
     expect(view.match(/setMarkLedger\(\(ledger\) => marksInRun\(ledger, payload\.markIds, run\)\);/g)).toHaveLength(2);
     expect(view.match(/setMarkLedger\(\(ledger\) => marksAfterRun\(ledger, run, wrote\)\);/g)).toHaveLength(2);
-    expect(view).toContain('wrote = await onRedactFile(payload.path, payload.regions);');
-    expect(view).toContain('wrote = await onSaveRedactionMarks(payload.path, payload.regions);');
+    expect(view).toContain('wrote = await onRedactFile(payload.path, payload.marks, state);');
+    expect(view).toContain('wrote = await onSaveRedactionMarks(payload.path, payload.marks, state);');
   });
 
   it('lands an empty listing of stored marks', () => {
@@ -449,7 +449,7 @@ describe('the App', () => {
   const app = source('src/renderer/App.tsx');
 
   it('answers whether apply and save wrote new bytes', () => {
-    expect(app).toContain('return wroteBytes(await applyRedactions(performOperation, path, regions, gsPathIfAvailable));');
-    expect(app).toContain("return wroteBytes(await performOperation(path, 'save_redaction_marks', { regions }));");
+    expect(app).toContain('writeRedactionMarks(path, marks, seen, \'redact\', readState, performOperation, redactionGeometry, gsPathIfAvailable)');
+    expect(app).toContain("writeRedactionMarks(path, marks, seen, 'save_redaction_marks', readState, performOperation, redactionGeometry, gsPathIfAvailable)");
   });
 });

@@ -1821,6 +1821,8 @@ pub enum PageIntegrity {
     /// The format carries no self-describing length this check can read; the
     /// page is passed on rather than refused on a guess.
     Unverifiable,
+    /// The bytes could not be inspected; this is not proof of a short transfer.
+    Unreadable { error: String },
 }
 
 /// The bytes a BMP's own headers promise, from `bfSize` when the encoder wrote
@@ -1864,68 +1866,59 @@ fn bmp_declared_len(head: &[u8]) -> Option<u64> {
 /// records what the callback was told, and a lost device is exactly the case
 /// where that and the file disagree.
 pub fn page_integrity(path: &Path) -> PageIntegrity {
-    let Ok(actual) = std::fs::metadata(path).map(|m| m.len()) else {
-        return PageIntegrity::Truncated {
-            declared: 0,
-            actual: 0,
-        };
-    };
+    for attempt in 0..=5 {
+        match read_page_integrity(path) {
+            Ok(verdict) => return verdict,
+            Err(error) if matches!(error.raw_os_error(), Some(32 | 33)) && attempt < 5 => {
+                std::thread::sleep(std::time::Duration::from_millis(20 * (attempt + 1)));
+            }
+            Err(error) => return PageIntegrity::Unreadable { error: error.to_string() },
+        }
+    }
+    unreachable!()
+}
+
+fn read_page_integrity(path: &Path) -> std::io::Result<PageIntegrity> {
+    use std::io::{Read, Seek, SeekFrom};
+    // One handle supplies both the length and bytes. A failed metadata/open
+    // call used to fabricate a zero-length page and report device loss.
+    let mut file = std::fs::File::open(path)?;
+    let actual = file.metadata()?.len();
     let mut head = [0u8; 54];
-    let read = {
-        use std::io::Read;
-        std::fs::File::open(path)
-            .and_then(|mut f| f.read(&mut head))
-            .unwrap_or_default()
-    };
-    let head = &head[..read];
+    let count = actual.min(head.len() as u64) as usize;
+    file.read_exact(&mut head[..count])?;
+    let head = &head[..count];
     if head.starts_with(b"BM") {
-        return match bmp_declared_len(head) {
+        return Ok(match bmp_declared_len(head) {
             Some(declared) if actual < declared => PageIntegrity::Truncated { declared, actual },
             Some(_) => PageIntegrity::Complete,
             None => PageIntegrity::Unverifiable,
-        };
+        });
     }
     if head.starts_with(PNG_SIGNATURE) {
-        // PNG declares no total length; its terminator is the promise.
-        let mut tail = [0u8; 8];
-        let ended = {
-            use std::io::{Read, Seek, SeekFrom};
-            actual >= 8
-                && std::fs::File::open(path)
-                    .and_then(|mut f| {
-                        f.seek(SeekFrom::End(-8))?;
-                        f.read_exact(&mut tail)?;
-                        Ok(())
-                    })
-                    .is_ok()
-                && &tail[4..8] == b"IEND"
-        };
-        return if ended {
-            PageIntegrity::Complete
-        } else {
-            PageIntegrity::Truncated {
-                declared: 0,
-                actual,
-            }
-        };
+        // IEND is a zero-length chunk followed by its four-byte CRC.
+        const IEND: [u8; 12] = [0, 0, 0, 0, b'I', b'E', b'N', b'D', 0xAE, 0x42, 0x60, 0x82];
+        let mut tail = [0u8; 12];
+        let ended = if actual >= 12 {
+            file.seek(SeekFrom::End(-12))?;
+            file.read_exact(&mut tail)?;
+            tail == IEND
+        } else { false };
+        return Ok(if ended { PageIntegrity::Complete } else {
+            PageIntegrity::Truncated { declared: 0, actual }
+        });
     }
-    // TIFF and anything else: no cheap self-describing total length.
-    if actual == 0 {
-        PageIntegrity::Truncated {
-            declared: 0,
-            actual: 0,
-        }
-    } else {
-        PageIntegrity::Unverifiable
-    }
+    Ok(if actual == 0 {
+        PageIntegrity::Truncated { declared: 0, actual }
+    } else { PageIntegrity::Unverifiable })
 }
 
 const PNG_SIGNATURE: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
 
-/// The first staged page that is short of its own header, if any.
-pub fn first_truncated_page(pages: &[PathBuf]) -> Option<(PathBuf, PageIntegrity)> {
+/// The first staged page that is short or cannot be inspected, if any.
+pub fn first_incomplete_page(pages: &[PathBuf]) -> Option<(PathBuf, PageIntegrity)> {
     pages.iter().find_map(|path| match page_integrity(path) {
-        short @ PageIntegrity::Truncated { .. } => Some((path.clone(), short)),
+        short @ (PageIntegrity::Truncated { .. } | PageIntegrity::Unreadable { .. }) => Some((path.clone(), short)),
         _ => None,
     })
 }
@@ -2429,6 +2422,15 @@ fn is_feeder_interruption(hr: HRESULT) -> bool {
     hr == WIA_ERROR_PAPER_JAM || hr == WIA_ERROR_PAPER_PROBLEM
 }
 
+fn unreadable_page(path: &Path, error: String) -> ScanRefusal {
+    ScanRefusal {
+        key: "scan.pageUnreadable",
+        message: format!("The scanned page could not be read: {} ({error})", path.display()),
+        code: None,
+        folder: Some(path.to_string_lossy().into_owned()),
+    }
+}
+
 /// The verdict on one finished transfer: the pages to offer, or the refusal
 /// that names what went wrong.
 ///
@@ -2460,10 +2462,10 @@ pub fn judge_transfer(outcome: TransferOutcome<'_>) -> Result<TransferVerdict, S
             // and makes the user feed them again.
             let mut kept = Vec::with_capacity(staged.len());
             for page in staged {
-                if matches!(page_integrity(&page), PageIntegrity::Truncated { .. }) {
-                    let _ = std::fs::remove_file(&page);
-                } else {
-                    kept.push(page);
+                match page_integrity(&page) {
+                    PageIntegrity::Truncated { .. } => { let _ = std::fs::remove_file(&page); },
+                    PageIntegrity::Unreadable { error } => return Err(unreadable_page(&page, error)),
+                    _ => kept.push(page),
                 }
             }
             if kept.is_empty() {
@@ -2481,7 +2483,10 @@ pub fn judge_transfer(outcome: TransferOutcome<'_>) -> Result<TransferVerdict, S
     // as the assembler's unreadable-image error, which names nothing the user
     // can act on, and a run that lost its device has no honest partial to
     // offer.
-    if first_truncated_page(&staged).is_some() {
+    if let Some((path, verdict)) = first_incomplete_page(&staged) {
+        if let PageIntegrity::Unreadable { error } = verdict {
+            return Err(unreadable_page(&path, error));
+        }
         for page in &staged {
             let _ = std::fs::remove_file(page);
         }
@@ -3267,14 +3272,9 @@ mod tests {
         whole.extend_from_slice(&[0, 0, 0, 0]);
         whole.extend_from_slice(b"IEND");
         whole.extend_from_slice(&[0xAE, 0x42, 0x60, 0x82]);
-        // The check reads the last eight bytes: length then chunk type.
-        let mut ended = PNG_SIGNATURE.to_vec();
-        ended.extend_from_slice(&[1, 2, 3, 4]);
-        ended.extend_from_slice(&[0, 0, 0, 0]);
-        ended.extend_from_slice(b"IEND");
         let path = root.join("ended.png");
         std::fs::create_dir_all(&root).expect("a staging folder");
-        std::fs::write(&path, &ended).expect("a staged page");
+        std::fs::write(&path, &whole).expect("a staged page");
         assert_eq!(page_integrity(&path), PageIntegrity::Complete);
 
         let cut = root.join("cut.png");
@@ -3307,11 +3307,38 @@ mod tests {
         let (head, total) = bmp_header(16, 16, true);
         let good = stage_page(&root, "page-0000.bmp", &head, total);
         let short = stage_page(&root, "page-0001.bmp", &head, total - 10);
-        assert!(first_truncated_page(std::slice::from_ref(&good)).is_none());
-        let (named, _) = first_truncated_page(&[good, short.clone()])
+        assert!(first_incomplete_page(std::slice::from_ref(&good)).is_none());
+        let (named, _) = first_incomplete_page(&[good, short.clone()])
             .expect("a run holding a short page is caught");
         assert_eq!(named, short);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_real_png_has_a_complete_terminator() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("page.png");
+        // A complete 2 by 2 RGB PNG, including the IEND chunk CRC.
+        std::fs::write(&path, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x08, 0x02, 0x00, 0x00, 0x00, 0xfd, 0xd4, 0x9a, 0x73, 0x00, 0x00, 0x00, 0x12, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x14, 0xd1, 0xb0, 0x61, 0x60, 0x60, 0x60, 0x62, 0x00, 0x03, 0x00, 0x05, 0xa2, 0x00, 0x7c, 0xa5, 0xca, 0xb4, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]).unwrap();
+        assert_eq!(page_integrity(&path), PageIntegrity::Complete);
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::write(&path, &bytes[..bytes.len() - 4]).unwrap();
+        assert!(matches!(page_integrity(&path), PageIntegrity::Truncated { .. }));
+    }
+
+    #[test]
+    fn an_unreadable_page_is_not_a_truncated_transfer_and_is_not_deleted() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (head, total) = bmp_header(16, 16, true);
+        let page = stage_page(dir.path(), "page.bmp", &head, total);
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&page).unwrap();
+        assert!(matches!(page_integrity(&page), PageIntegrity::Unreadable { .. }));
+        let refusal = judged(false, false, None, None, std::slice::from_ref(&page)).unwrap_err();
+        assert_eq!(refusal.key, "scan.pageUnreadable");
+        drop(held);
+        assert_eq!(page_integrity(&page), PageIntegrity::Complete);
+        assert_eq!(std::fs::read(&page).unwrap().len() as u64, total);
     }
 
     fn judged(
@@ -3397,6 +3424,7 @@ mod tests {
         assert_eq!(verdict.interrupted.map(|r| r.key), Some("scan.paperProblem"));
 
         // A jam with nothing whole behind it has no honest partial to offer.
+        let torn = stage_page(&root, "page-0003.bmp", &head, total - 500);
         let refusal = judged(
             false,
             false,
@@ -4061,6 +4089,7 @@ mod tests {
             "scan.cancelledAtDevice",
             "scan.notResponding",
             "scan.scratchFull",
+            "scan.pageUnreadable",
         ]);
         for key in &produced {
             assert!(

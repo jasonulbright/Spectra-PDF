@@ -9,7 +9,12 @@ use tokio::sync::Mutex;
 
 /// Manages the Python JSON-RPC engine sidecar process.
 pub struct EngineState {
-    pub child: Arc<Mutex<Option<CommandChild>>>,
+    pub child: Arc<Mutex<Option<EngineChild>>>,
+}
+
+pub struct EngineChild {
+    pub child: CommandChild,
+    _job: crate::process_job::ProcessJob,
 }
 
 impl EngineState {
@@ -38,6 +43,8 @@ pub struct EngineRouter {
 struct Route {
     label: String,
     inner: serde_json::Value,
+    leases: Vec<Arc<crate::folder_claims::FolderLease>>,
+    _workers: Vec<crate::folder_claims::WorkerLease>,
 }
 
 impl EngineRouter {
@@ -48,7 +55,9 @@ impl EngineRouter {
         }
     }
 
-    fn register(&self, label: &str, inner: serde_json::Value) -> u64 {
+    fn register(&self, label: &str, inner: serde_json::Value,
+        leases: Vec<Arc<crate::folder_claims::FolderLease>>,
+        workers: Vec<crate::folder_claims::WorkerLease>) -> u64 {
         let outer = self.next_outer.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut map) = self.by_outer.lock() {
             map.insert(
@@ -56,6 +65,8 @@ impl EngineRouter {
                 Route {
                     label: label.to_string(),
                     inner,
+                    leases,
+                    _workers: workers,
                 },
             );
         }
@@ -63,7 +74,7 @@ impl EngineRouter {
     }
 
     fn take(&self, outer: u64) -> Option<Route> {
-        self.by_outer.lock().ok()?.remove(&outer)
+        self.by_outer.lock().ok()?.remove(&outer).filter(|route| !route.label.is_empty())
     }
 
     /// Retire one routing, answering who asked and under which id.
@@ -77,7 +88,7 @@ impl EngineRouter {
         let Ok(mut map) = self.by_outer.lock() else {
             return Vec::new();
         };
-        map.drain()
+        map.drain().filter(|(_, route)| !route.label.is_empty())
             .map(|(outer, route)| (outer, route.label, route.inner))
             .collect()
     }
@@ -93,7 +104,13 @@ impl EngineRouter {
             .filter_map(|(outer, route)| (route.label == label).then_some(*outer))
             .collect();
         for outer in &ids {
-            map.remove(outer);
+            if map.get(outer).is_some_and(|route| !route.leases.is_empty()) {
+                // Retain the lease, not the destroyed UI's delivery address.
+                // The eventual response removes this entry and releases it.
+                map.get_mut(outer).unwrap().label.clear();
+            } else {
+                map.remove(outer);
+            }
         }
         ids
     }
@@ -110,6 +127,7 @@ impl EngineRouter {
         let mut counts: HashMap<String, usize> = HashMap::new();
         if let Ok(map) = self.by_outer.lock() {
             for route in map.values() {
+                if route.label.is_empty() { continue; }
                 *counts.entry(route.label.clone()).or_insert(0) += 1;
             }
         }
@@ -149,8 +167,10 @@ pub fn publish_activity(app: &AppHandle) {
 
 /// Rewrite an outbound request's id to a process-global number and remember
 /// who asked. Returns the outer id when one was allocated.
-pub fn route_request(app: &AppHandle, label: &str, request: &mut serde_json::Value) -> Option<u64> {
-    route_with(&app.state::<EngineRouter>(), label, request)
+pub fn route_request(app: &AppHandle, label: &str, request: &mut serde_json::Value, pid: u32) -> Result<Option<u64>, String> {
+    let leases = app.state::<crate::app_windows::ClaimState>().folder_leases(label);
+    let workers = leases.iter().map(|lease| lease.retain_in_worker(pid)).collect::<Result<Vec<_>, _>>()?;
+    Ok(route_with_leases(&app.state::<EngineRouter>(), label, request, leases, workers))
 }
 
 /// The same rewrite against a NAMED router. Each sidecar keeps its own table:
@@ -162,12 +182,18 @@ pub fn route_with(
     label: &str,
     request: &mut serde_json::Value,
 ) -> Option<u64> {
+    route_with_leases(router, label, request, Vec::new(), Vec::new())
+}
+
+fn route_with_leases(router: &EngineRouter, label: &str, request: &mut serde_json::Value,
+    leases: Vec<Arc<crate::folder_claims::FolderLease>>,
+    workers: Vec<crate::folder_claims::WorkerLease>) -> Option<u64> {
     let obj = request.as_object_mut()?;
     let inner = obj.get("id").cloned()?;
     if inner.is_null() {
         return None;
     }
-    let outer = router.register(label, inner);
+    let outer = router.register(label, inner, leases, workers);
     obj.insert("id".to_string(), serde_json::Value::from(outer));
     Some(outer)
 }
@@ -381,12 +407,10 @@ pub fn python_env() -> Vec<(String, String)> {
 pub async fn start(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<EngineState>();
 
-    // Already running — don't spawn another
-    {
-        let guard = state.child.lock().await;
-        if guard.is_some() {
-            return Ok(());
-        }
+    // Hold the startup lock until the child and its lifetime guard are ready.
+    let mut guard = state.child.lock().await;
+    if guard.is_some() {
+        return Ok(());
     }
 
     let python_path = get_python_path(app);
@@ -400,8 +424,15 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("Failed to start engine: {}", e))?;
 
-    // Store the child process handle
-    *state.child.lock().await = Some(child);
+    let job = match crate::process_job::ProcessJob::attach(child.pid()) {
+        Ok(job) => job,
+        Err(error) => {
+            let _ = child.kill();
+            return Err(format!("The engine process could not be contained: {error}"));
+        }
+    };
+    let pid = child.pid();
+    *guard = Some(EngineChild { child, _job: job });
 
     // Forward stdout lines to the webview as engine:response events
     let app_handle = app.clone();
@@ -431,6 +462,21 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
                 _ => {}
             }
         }
+        // A closed event stream also means the worker cannot answer. Ignore a
+        // previous worker's late termination after an intentional restart.
+        let state = app_handle.state::<EngineState>();
+        let mut guard = state.child.lock().await;
+        if guard.as_ref().is_some_and(|current| current.child.pid() == pid) {
+            guard.take(); // closes the job, including any surviving descendants
+            let routes = app_handle.state::<EngineRouter>().take_all();
+            drop(guard);
+            for (_, label, inner) in routes {
+                let _ = app_handle.emit_to(label.as_str(), "engine:response", serde_json::json!({
+                    "id": inner, "error": { "message": "The document engine stopped before completing the operation." }
+                }));
+            }
+            publish_activity(&app_handle);
+        }
     });
 
     Ok(())
@@ -448,6 +494,30 @@ pub async fn restart_for_assent(app: &AppHandle) {
     let state = app.state::<EngineState>();
     let mut guard = state.child.lock().await;
     if let Some(child) = guard.take() {
-        let _ = child.kill();
+        let _ = child.child.kill();
+    }
+}
+
+#[cfg(test)]
+mod lease_tests {
+    use super::*;
+    #[test]
+    fn closing_a_window_keeps_its_folders_until_work_finishes() {
+        for terminate in [false, true] {
+            let scratch = tempfile::tempdir().unwrap();
+            let registry = scratch.path().join("claims");
+            let roots = vec![scratch.path().join("output").to_string_lossy().into_owned()];
+            let lease = Arc::new(crate::folder_claims::claim_in(&registry, &roots).unwrap());
+            let router = EngineRouter::new();
+            let mut request = serde_json::json!({"id": 7});
+            let outer = route_with_leases(&router, "doc-1", &mut request, vec![lease.clone()], Vec::new()).unwrap();
+            router.drop_label("doc-1");
+            drop(lease);
+            assert!(router.outstanding().is_empty());
+            assert!(matches!(crate::folder_claims::claim_in(&registry, &roots), Err(crate::folder_claims::ClaimError::Busy(_))));
+            if terminate { assert!(router.take_all().is_empty()); }
+            else { assert!(router.take_route(outer).is_none()); }
+            assert!(crate::folder_claims::claim_in(&registry, &roots).is_ok());
+        }
     }
 }

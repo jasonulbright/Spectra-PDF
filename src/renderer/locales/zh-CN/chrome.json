@@ -119,7 +119,7 @@
   "app.unreadableRecord.startupTitle": "未应用启动设置",
   "app.window.claimTitle": "已在其他窗口中打开",
   "app.window.focusOther": "显示该窗口",
-  "app.window.folderBusy": "另一个窗口正在写入此文件夹：{{folder}}。",
+  "app.window.folderBusy": "另一个任务已在写入此文件夹：{{folder}}。",
   "app.window.folderBusyHere": "此窗口中的一次运行仍在写入此文件夹：{{folder}}。请等待它停止后再重试。",
   "app.window.importElsewhere": "无法从在其他窗口中打开的文件导入页面：{{names}}。",
   "app.window.openElsewhere": "已在其他窗口中打开：{{names}}。同一个文件一次只能在一个窗口中编辑。",
@@ -5841,5 +5841,8 @@
   "toolbar.group.zoom": "缩放",
   "tools.heading": "工具",
   "tools.openFirst": "请先打开一个 PDF",
-  "tools.sub": "选择你想对文档做什么。"
+  "tools.sub": "选择你想对文档做什么。",
+  "engine.redact.pageContainsMalformedDrawing": "页面包含格式错误的绘图路径。未应用密文遮盖。",
+  "engine.redact_document.documentStructureTooComplex": "文档结构过于复杂，无法安全地应用密文遮盖。",
+  "refusal.scan.pageUnreadable": "无法读取扫描的页面：{{folder}}。"
 }

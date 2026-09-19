@@ -123,7 +123,7 @@
   "app.unreadableRecord.startupTitle": "No se aplicó la configuración de inicio",
   "app.window.claimTitle": "Abierto en otra ventana",
   "app.window.focusOther": "Mostrar esa ventana",
-  "app.window.folderBusy": "Otra ventana ya está escribiendo en esta carpeta: {{folder}}.",
+  "app.window.folderBusy": "Otra ejecución ya está escribiendo en esta carpeta: {{folder}}.",
   "app.window.folderBusyHere": "Una ejecución de esta ventana todavía está escribiendo en esta carpeta: {{folder}}. Espere a que se detenga y vuelva a intentarlo.",
   "app.window.importElsewhere": "No se pueden importar páginas de un archivo abierto en otra ventana: {{names}}.",
   "app.window.openElsewhere": "Ya está abierto en otra ventana: {{names}}. Un archivo solo se puede editar en una ventana a la vez.",
@@ -6113,5 +6113,8 @@
   "toolbar.group.zoom": "Zoom",
   "tools.heading": "Herramientas",
   "tools.openFirst": "Abra primero un PDF",
-  "tools.sub": "Elija qué quiere hacer con el documento."
+  "tools.sub": "Elija qué quiere hacer con el documento.",
+  "engine.redact.pageContainsMalformedDrawing": "La página contiene un trazado de dibujo incorrecto. No se aplicó la censura.",
+  "engine.redact_document.documentStructureTooComplex": "La estructura del documento es demasiado compleja para censurarlo de forma segura.",
+  "refusal.scan.pageUnreadable": "No se pudo leer la página escaneada: {{folder}}."
 }

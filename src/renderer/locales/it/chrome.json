@@ -123,7 +123,7 @@
   "app.unreadableRecord.startupTitle": "Impostazioni di avvio non applicate",
   "app.window.claimTitle": "Aperto in un’altra finestra",
   "app.window.focusOther": "Mostra quella finestra",
-  "app.window.folderBusy": "Un’altra finestra sta già scrivendo in questa cartella: {{folder}}.",
+  "app.window.folderBusy": "Un’altra esecuzione sta già scrivendo in questa cartella: {{folder}}.",
   "app.window.folderBusyHere": "Un’esecuzione in questa finestra sta ancora scrivendo in questa cartella: {{folder}}. Attendere che si fermi, quindi riprovare.",
   "app.window.importElsewhere": "Non è possibile importare pagine da un file aperto in un’altra finestra: {{names}}.",
   "app.window.openElsewhere": "Già aperto in un’altra finestra: {{names}}. Un file può essere modificato in una sola finestra per volta.",
@@ -6113,5 +6113,8 @@
   "toolbar.group.zoom": "Zoom",
   "tools.heading": "Strumenti",
   "tools.openFirst": "Aprire prima un PDF",
-  "tools.sub": "Scegliere che cosa fare con il proprio documento."
+  "tools.sub": "Scegliere che cosa fare con il proprio documento.",
+  "engine.redact.pageContainsMalformedDrawing": "La pagina contiene un tracciato di disegno non valido. L’oscuramento non è stato applicato.",
+  "engine.redact_document.documentStructureTooComplex": "La struttura del documento è troppo complessa per un oscuramento sicuro.",
+  "refusal.scan.pageUnreadable": "Impossibile leggere la pagina acquisita: {{folder}}."
 }

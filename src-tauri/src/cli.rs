@@ -3269,6 +3269,7 @@ const ENGINE_SURFACE: (&str, &str) = ("SPECTRAPDF_ENGINE_SURFACE", "cli");
 struct CliEngine {
     child: std::process::Child,
     reader: BufReader<std::process::ChildStdout>,
+    _job: crate::process_job::ProcessJob,
 }
 
 impl CliEngine {
@@ -3297,6 +3298,14 @@ impl CliEngine {
             .spawn()
             .map_err(|e| format!("Failed to start engine: {}", e))?;
 
+        let job = match crate::process_job::ProcessJob::attach(child.id()) {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("The engine process could not be contained: {error}"));
+            }
+        };
         let stdout = child.stdout.take().expect("stdout not captured");
         let reader = BufReader::new(stdout);
 
@@ -3314,7 +3323,7 @@ impl CliEngine {
             }
         });
 
-        Ok(Self { child, reader })
+        Ok(Self { child, reader, _job: job })
     }
 
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
@@ -3788,6 +3797,16 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
         }
     };
 
+    // Hold ownership through shutdown too: a transport failure does not
+    // prove that the worker has stopped writing.
+    let _folder_guard = match claim_command_folders(&engine, &command) {
+        Ok(guard) => guard,
+        Err(message) => {
+            engine.shutdown();
+            eprintln!("error: {message}");
+            return 1;
+        }
+    };
     let result = dispatch(&mut engine, &command);
     engine.shutdown();
 
@@ -3802,6 +3821,56 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
             1
         }
     }
+}
+
+/// All headless operations that sweep and write a folder use the GUI's lease
+/// authority, including scheduled and watched-folder Run Action invocations.
+fn written_folder_roots(command: &CliCommand) -> Vec<String> {
+    let paths: Vec<&Path> = match command {
+        CliCommand::RunAction(args) => {
+            let mut roots = Vec::new();
+            if let Some(dest) = &args.dest { roots.push(dest.as_path()); }
+            if args.in_place || args.moved.is_some() { roots.push(args.source.as_path()); }
+            if let Some(moved) = &args.moved { roots.push(moved.as_path()); }
+            roots
+        },
+        CliCommand::CreatePdfFolders(args) => vec![args.dest.as_path()],
+        CliCommand::ExportFolder(args) => vec![args.dest.as_path()],
+        CliCommand::PreflightSweep(args) => {
+            let mut roots = Vec::new();
+            if let Some(dest) = &args.dest { roots.push(dest.as_path()); }
+            if args.in_place || args.moved.is_some() { roots.push(args.source.as_path()); }
+            if let Some(moved) = &args.moved { roots.push(moved.as_path()); }
+            roots
+        },
+        CliCommand::BatchOcr(args) => {
+            let mut roots = Vec::new();
+            if let Some(dest) = &args.dest { roots.push(dest.as_path()); }
+            if args.in_place || args.moved.is_some() || args.errors.is_some() || args.replace_repaired {
+                roots.push(args.source.as_path());
+            }
+            if let Some(moved) = &args.moved { roots.push(moved.as_path()); }
+            if let Some(errors) = &args.errors { roots.push(errors.as_path()); }
+            roots
+        },
+        CliCommand::Batch(args) => vec![args.output.as_path()],
+        _ => Vec::new(),
+    };
+    paths.into_iter().map(|path| abs(path).to_string_lossy().into_owned()).collect()
+}
+
+fn claim_command_folders(engine: &CliEngine, command: &CliCommand)
+    -> Result<Option<(crate::folder_claims::FolderLease, crate::folder_claims::WorkerLease)>, String> {
+    let roots = written_folder_roots(command);
+    let result = if roots.is_empty() { None } else {
+        let folders = crate::folder_claims::claim(&roots).map_err(|error| match error {
+            crate::folder_claims::ClaimError::Busy(folder) => format!("Another run is writing to this folder: {folder}"),
+            crate::folder_claims::ClaimError::Unavailable(message) => message,
+        })?;
+        let worker = folders.retain_in_worker(engine.child.id())?;
+        Some((folders, worker))
+    };
+    Ok(result)
 }
 
 fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, String> {
@@ -6880,6 +6949,29 @@ mod tests {
     // ── Guided actions: the plan the engine answers ───────────────────────
 
     const FOUND_GS: &str = r"C:\gs\bin\gswin64c.exe";
+    #[test]
+    fn headless_folder_writers_claim_every_modified_tree() {
+        let cases = [
+            (vec!["spectrapdf", "run-action", "C:/source", "--dest", "C:/out", "--action", "C:/action.json"], vec!["C:/out"]),
+            (vec!["spectrapdf", "run-action", "C:/source", "--dest", "C:/out", "--moved", "C:/done", "--action", "C:/action.json"], vec!["C:/out", "C:/source", "C:/done"]),
+            (vec!["spectrapdf", "run-action", "C:/source", "--in-place", "--action", "C:/action.json"], vec!["C:/source"]),
+            (vec!["spectrapdf", "create-pdf-folders", "C:/source", "--dest", "C:/out"], vec!["C:/out"]),
+            (vec!["spectrapdf", "export-folder", "C:/source", "--dest", "C:/out"], vec!["C:/out"]),
+            (vec!["spectrapdf", "preflight-sweep", "C:/source", "--dest", "C:/out"], vec!["C:/out"]),
+            (vec!["spectrapdf", "preflight-sweep", "C:/source", "--dest", "C:/out", "--fix", "--moved", "C:/done"], vec!["C:/out", "C:/source", "C:/done"]),
+            (vec!["spectrapdf", "preflight-sweep", "C:/source", "--in-place", "--fix"], vec!["C:/source"]),
+            (vec!["spectrapdf", "batch-ocr", "C:/source", "--dest", "C:/out"], vec!["C:/out"]),
+            (vec!["spectrapdf", "batch-ocr", "C:/source", "--in-place"], vec!["C:/source"]),
+            (vec!["spectrapdf", "batch-ocr", "C:/source", "--dest", "C:/out", "--repair", "--replace-repaired"], vec!["C:/out", "C:/source"]),
+            (vec!["spectrapdf", "batch-ocr", "C:/source", "--dest", "C:/out", "--moved", "C:/done", "--errors", "C:/failed"], vec!["C:/out", "C:/source", "C:/done", "C:/failed"]),
+            (vec!["spectrapdf", "batch", "C:/source", "--output", "C:/out", "rotate", "--angle", "90"], vec!["C:/out"]),
+        ];
+        for (argv, expected) in cases {
+            let command = Cli::try_parse_from(argv).unwrap().command.unwrap();
+            assert_eq!(written_folder_roots(&command), expected.iter().map(|p| abs(Path::new(p)).to_string_lossy().into_owned()).collect::<Vec<_>>());
+        }
+    }
+
     const MISSING_GS: &str = r"D:\nowhere\gswin64c.exe";
 
     fn run_action_args() -> RunActionArgs {
