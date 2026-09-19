@@ -703,6 +703,8 @@ def document_language(file: str) -> dict:
     interface language of whoever opened it."""
     import pikepdf
 
+    from engine.pdf_tree import token_text
+
     with pikepdf.open(file) as pdf:
         try:
             lang = pdf.Root.get("/Lang")
@@ -710,7 +712,7 @@ def document_language(file: str) -> dict:
             return {"language": None}
         if lang is None:
             return {"language": None}
-        text = str(lang).strip()
+        text = token_text(lang).strip()
         return {"language": text or None}
 
 

@@ -46,6 +46,7 @@ from engine.redact import IDENTITY, _resolve_resources
 from engine.struct_tree import _is_elem, _kids, _page_map, _page_no
 from engine.text_metrics import _FontCache
 from engine.text_runs import _walk_runs
+from engine.pdf_tree import key_text
 
 MAX_LEVEL = 6
 
@@ -70,7 +71,7 @@ def _role_map(root) -> dict:
         return out
     for key, value in table.items():
         try:
-            out[str(key).lstrip("/")] = str(value).lstrip("/")
+            out[str(key).lstrip("/")] = key_text(value).lstrip("/")
         except Exception:
             continue
     return out
@@ -99,7 +100,7 @@ def _elem_tag(elem) -> str:
     if value is None:
         return ""
     try:
-        return str(value).lstrip("/")
+        return key_text(value).lstrip("/")
     except Exception:
         return ""
 

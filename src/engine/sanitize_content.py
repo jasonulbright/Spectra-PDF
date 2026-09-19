@@ -69,6 +69,7 @@ from engine.text_metrics import (
     wide_width,
 )
 from engine.text_runs import _resource_lookup
+from engine.pdf_tree import key_text, token_text
 
 SHOW_OPS = ("Tj", "'", '"', "TJ")
 
@@ -222,7 +223,7 @@ def off_ocg_set(pdf) -> set:
                     out.add(og)
         return out
 
-    base_off = str(d.get("/BaseState", "")) == "/OFF"
+    base_off = token_text(d.get("/BaseState", "")) == "/OFF"
     if not base_off:
         return og_set("/OFF")
     everything = set()
@@ -240,7 +241,7 @@ def oc_hidden(obj, off_set: set) -> bool:
     default configuration? An OCMD's /P policy decides; AnyOn is the default."""
     if not isinstance(obj, pikepdf.Dictionary):
         return False
-    kind = str(obj.get("/Type", ""))
+    kind = token_text(obj.get("/Type", ""))
     if kind == "/OCMD":
         groups = obj.get("/OCGs")
         members = []
@@ -254,7 +255,7 @@ def oc_hidden(obj, off_set: set) -> bool:
         for g in members:
             og = _objgen(g)
             states.append(og is not None and og in off_set)
-        policy = str(obj.get("/P", "/AnyOn"))
+        policy = token_text(obj.get("/P", "/AnyOn"))
         if policy == "/AllOn":
             return any(states)
         if policy == "/AnyOff":
@@ -269,19 +270,18 @@ def oc_hidden(obj, off_set: set) -> bool:
 def _bdc_hidden(operands: list, resources, off_set: set) -> bool:
     """Does this BDC open a hidden optional-content block? The property is
     either an inline dictionary or a name resolved through /Properties."""
-    if len(operands) < 2 or str(operands[0]) != "/OC":
+    if len(operands) < 2 or key_text(operands[0]) != "/OC":
         return False
     prop = operands[1]
     if isinstance(prop, pikepdf.Dictionary):
         return oc_hidden(prop, off_set)
-    try:
-        name = str(prop)
-    except Exception:
+    if not isinstance(prop, pikepdf.Name):
         return False
+    name = key_text(prop)
     props = resources.get("/Properties") if resources is not None else None
     if not isinstance(props, pikepdf.Dictionary):
         return False
-    target = props.get(Name(name))
+    target = props[name] if name in props else None
     return oc_hidden(target, off_set) if target is not None else False
 
 
@@ -403,10 +403,10 @@ def _gs_opacity(entry) -> Optional[dict]:
         except (TypeError, ValueError):
             pass
     if "/SMask" in entry:
-        out["smask"] = str(entry["/SMask"]) != "/None"
+        out["smask"] = token_text(entry["/SMask"]) != "/None"
     if "/BM" in entry:
         bm = entry["/BM"]
-        first = str(bm[0]) if isinstance(bm, pikepdf.Array) and len(bm) else str(bm)
+        first = token_text(bm[0]) if isinstance(bm, pikepdf.Array) and len(bm) else token_text(bm)
         out["blend"] = first
     return out
 
@@ -503,7 +503,7 @@ def _walk_analysis(
     hidden_at = None if hidden_depth == 0 else 0
 
     for instruction in instructions:
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
 
         if operator == "q":
@@ -644,9 +644,9 @@ def _walk_analysis(
             continue
 
         if operator == "Do":
-            name = str(operands[0]) if operands else None
+            name = key_text(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback)
-            subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
+            subtype = token_text(xobj.get("/Subtype", "")) if xobj is not None else ""
             xobj_hidden = xobj is not None and oc_hidden(xobj.get("/OC"), an.off_set)
             if subtype == "/Image":
                 box = bbox_of_corners_under_matrix(state.ctm, 0.0, 0.0, 1.0, 1.0)
@@ -842,11 +842,11 @@ def _balancing(buffer: list) -> list:
     dropping all of it leaves the stack where it was. A malformed block that
     does not balance keeps its `q`/`Q` operators, so the stack depth after the
     removal still matches what the rest of the stream expects."""
-    saves = sum(1 for i in buffer if str(i.operator) == "q")
-    restores = sum(1 for i in buffer if str(i.operator) == "Q")
+    saves = sum(1 for i in buffer if token_text(i.operator) == "q")
+    restores = sum(1 for i in buffer if token_text(i.operator) == "Q")
     if saves == restores:
         return []
-    return [i for i in buffer if str(i.operator) in ("q", "Q")]
+    return [i for i in buffer if token_text(i.operator) in ("q", "Q")]
 
 
 def _prune_hidden_xobjects(resources, kept: list, dropped: set) -> None:
@@ -859,11 +859,11 @@ def _prune_hidden_xobjects(resources, kept: list, dropped: set) -> None:
     if not isinstance(table, pikepdf.Dictionary):
         return
     still_drawn = {
-        str(i.operands[0]) for i in kept if str(i.operator) == "Do" and i.operands
+        key_text(i.operands[0]) for i in kept if token_text(i.operator) == "Do" and i.operands
     }
     for name in dropped - still_drawn:
-        if Name(name) in table:
-            del table[Name(name)]
+        if name in table:
+            del table[name]
 
 
 def _strip_hidden(pdf, instructions, resources, fallback, off_set, stats, depth, seen) -> tuple:
@@ -875,7 +875,7 @@ def _strip_hidden(pdf, instructions, resources, fallback, off_set, stats, depth,
     mc_depth = 0
     drop_at = None
     for instruction in instructions:
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
 
         if operator in ("BDC", "BMC"):
@@ -905,7 +905,7 @@ def _strip_hidden(pdf, instructions, resources, fallback, off_set, stats, depth,
             continue
 
         if operator == "Do":
-            name = str(operands[0]) if operands else None
+            name = key_text(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback)
             if xobj is not None and oc_hidden(xobj.get("/OC"), off_set):
                 stats["blocks"] += 1
@@ -914,7 +914,7 @@ def _strip_hidden(pdf, instructions, resources, fallback, off_set, stats, depth,
                 continue
             if (
                 xobj is not None
-                and str(xobj.get("/Subtype", "")) == "/Form"
+                and token_text(xobj.get("/Subtype", "")) == "/Form"
                 and depth < MAX_FORM_DEPTH
             ):
                 _strip_hidden_form(pdf, xobj, resources, off_set, stats, depth + 1, seen)
@@ -1049,7 +1049,7 @@ def _rewrite_runs(
     taken = {str(k) for k in (resources.get("/XObject") or {}).keys()} if resources else set()
 
     for instruction in instructions:
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
 
         if state.feed(operator, operands):
@@ -1082,11 +1082,11 @@ def _rewrite_runs(
             continue
 
         if operator == "Do":
-            name = str(operands[0]) if operands else None
+            name = key_text(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback)
             if (
                 xobj is not None
-                and str(xobj.get("/Subtype", "")) == "/Form"
+                and token_text(xobj.get("/Subtype", "")) == "/Form"
                 and depth < MAX_FORM_DEPTH
             ):
                 form_matrix = as_matrix(xobj.get("/Matrix")) or IDENTITY
@@ -1192,7 +1192,7 @@ def drop_optional_content_groups(pdf, off_set: set) -> int:
         props = resources.get("/Properties") if isinstance(resources, pikepdf.Dictionary) else None
         if not isinstance(props, pikepdf.Dictionary):
             continue
-        for key in [str(k) for k in props.keys()]:
-            if oc_hidden(props.get(Name(key)), off_set):
-                del props[Name(key)]
+        for key in list(props.keys()):
+            if oc_hidden(props[key], off_set):
+                del props[key]
     return removed

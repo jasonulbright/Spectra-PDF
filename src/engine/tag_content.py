@@ -49,6 +49,7 @@ from engine.struct_audit import audit_tree
 from engine.struct_tree import _elem_positions, _is_elem, _kids, _write_kids
 from engine.text_metrics import _FontCache
 from engine.text_runs import MAX_FORM_DEPTH, SHOW_OPS, _lookup_xobject, _walk_runs
+from engine.pdf_tree import key_text, token_text
 
 # The roles this door will bind content to. Anything outside the standard set
 # would produce a tree whose tag names mean nothing without a /RoleMap, which
@@ -80,7 +81,7 @@ def _page_mcids(instructions) -> set:
     """
     used: set = set()
     for instruction in instructions:
-        if str(instruction.operator) != "BDC":
+        if token_text(instruction.operator) != "BDC":
             continue
         operands = list(instruction.operands)
         if len(operands) < 2 or not isinstance(operands[1], pikepdf.Dictionary):
@@ -113,7 +114,7 @@ class _Positions:
 
     def _scan(self, instructions, resources, fallback, depth, form_name, top):
         for position, instruction in enumerate(instructions):
-            operator = str(instruction.operator)
+            operator = token_text(instruction.operator)
             operands = list(instruction.operands)
             if operator in SHOW_OPS:
                 if top:
@@ -124,9 +125,9 @@ class _Positions:
                 continue
             if operator != "Do":
                 continue
-            name = str(operands[0]) if operands else None
+            name = key_text(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback)
-            if xobj is None or str(xobj.get("/Subtype", "")) != "/Form":
+            if xobj is None or token_text(xobj.get("/Subtype", "")) != "/Form":
                 continue
             if depth >= MAX_FORM_DEPTH:
                 continue

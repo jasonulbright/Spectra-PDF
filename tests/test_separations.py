@@ -920,10 +920,11 @@ class TestSoftProofRefusals:
 
         src = nested_separation_spot_pdf(tmp_path / "nested.pdf")
         alternates = soft_proof.page_alternates(src, 1)
-        assert alternates["Nested Spot"]["family"] == "Separation"
+        key = b"Nested Spot".hex()
+        assert alternates[key]["family"] == "Separation"
         profile = _bundled_path(DEFAULT_PRESS)
         tables, assumed, refusal = soft_proof.spot_tables(
-            ["Nested Spot"], alternates, str(profile))
+            [key], alternates, str(profile), labels={key: "Nested Spot"})
         assert tables == {}
         assert assumed == []
         assert refusal == (

@@ -21,6 +21,8 @@ import math
 
 import pikepdf
 
+from .pdf_tree import name_bytes, name_label, name_object
+
 _MAX_DEPTH = 8  # colour-space / function nesting guard (cyclic or hostile input)
 
 
@@ -536,6 +538,20 @@ def _device_resolver(name: str):
     return None
 
 
+def _spelling(cs) -> tuple[str, object]:
+    """(the name as `/`-prefixed text, the name object that indexes a
+    resource table) for a bare colour-space name.
+
+    A name need not be UTF-8 (ISO 32000-2 §7.3.5): its text is for matching
+    the device families, which are ASCII, and the lookup goes by its bytes.
+    """
+    raw = name_bytes(cs)
+    if raw is None:
+        text = str(cs)
+        return text, (pikepdf.Name(text) if text.startswith("/") else None)
+    return "/" + name_label(raw), name_object(raw)
+
+
 def build_resolver(cs, resources, depth: int = 0):
     """Return `resolve(comps: list[float]) -> [r,g,b] | None` for a colour
     space `cs` (a Name string, a pikepdf Name, or an Array), or None when the
@@ -545,7 +561,7 @@ def build_resolver(cs, resources, depth: int = 0):
         return None
     # A bare name: a device space, or a key into /Resources /ColorSpace.
     if isinstance(cs, (str, pikepdf.Name)):
-        name = str(cs)
+        name, key = _spelling(cs)
         dev = _device_resolver(name)
         if dev is not None:
             return dev
@@ -558,7 +574,7 @@ def build_resolver(cs, resources, depth: int = 0):
             try:
                 csdict = resources.get("/ColorSpace")
                 if csdict is not None:
-                    target = csdict.get(pikepdf.Name(name))
+                    target = csdict.get(key)
                     if target is not None:
                         return build_resolver(target, resources, depth + 1)
             except (AttributeError, KeyError):
@@ -568,7 +584,7 @@ def build_resolver(cs, resources, depth: int = 0):
     if isinstance(cs, pikepdf.Array):
         if len(cs) == 0:
             return None
-        family = str(cs[0])
+        family, _key = _spelling(cs[0]) if isinstance(cs[0], (str, pikepdf.Name)) else ("", None)
         if family == "/ICCBased":
             return _icc_resolver(cs, resources, depth)
         if family == "/Indexed" or family == "/I":
@@ -717,14 +733,14 @@ def _base_component_count(cs, resources, depth) -> int | None:
     """Number of colour components a space consumes — needed to stride an
     Indexed lookup table."""
     if isinstance(cs, (str, pikepdf.Name)):
-        name = str(cs)
+        name, key = _spelling(cs)
         if name in _DEVICE_COMPONENTS:
             return _DEVICE_COMPONENTS[name]
         if resources is not None:
             try:
                 csdict = resources.get("/ColorSpace")
                 if csdict is not None:
-                    target = csdict.get(pikepdf.Name(name))
+                    target = csdict.get(key)
                     if target is not None:
                         return _base_component_count(target, resources, depth + 1)
             except (AttributeError, KeyError):
@@ -772,7 +788,9 @@ def resolve_color(space_op, value_op, resources, pdf=None):
     if sname_op.lower() not in ("cs",) or not sname_vals:
         return None
     space_name = sname_vals[0]
-    if not isinstance(space_name, str):
+    # The shared walker hands a UTF-8 name over as text and any other name as
+    # the name object itself.
+    if not isinstance(space_name, (str, pikepdf.Name)):
         return None
     # A trailing name operand ⇒ a pattern (coloured or uncoloured) — unknown.
     if any(isinstance(v, str) for v in vals):

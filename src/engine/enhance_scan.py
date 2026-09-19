@@ -84,6 +84,7 @@ from .mrc import (
 from .page_images import _walk_placements, replace_placement_with_layers
 from .redact import IDENTITY, _lookup_xobject, _resolve_resources
 from .validate import validate_pdf
+from .pdf_tree import token_text
 
 # --------------------------------------------------------------------------
 # Decisions. Reported, never fatal — a mixed document is enhanced on its
@@ -187,8 +188,8 @@ def _filter_name(xobj) -> str:
     if filt is None:
         return ""
     if isinstance(filt, pikepdf.Array):
-        return str(filt[-1]) if len(filt) else ""
-    return str(filt)
+        return token_text(filt[-1]) if len(filt) else ""
+    return token_text(filt)
 
 
 def _lift(pdf, page, candidate: _Candidate) -> tuple[Image.Image | None, str]:

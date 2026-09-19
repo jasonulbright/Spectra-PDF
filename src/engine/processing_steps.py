@@ -78,6 +78,8 @@ import re
 
 import pikepdf
 
+from .pdf_tree import name_bytes, name_object
+
 #: The OCG key the declaration lives under, and its two members.
 METADATA_KEY = "/GTS_Metadata"
 GROUP_KEY = "/GTS_ProcStepsGroup"
@@ -146,6 +148,23 @@ def _text(obj) -> str:
         return str(obj).lstrip("/")
     except Exception:
         return ""
+
+
+def _name_key(obj):
+    """The name object that indexes a resource table for a name operand.
+
+    A name need not be UTF-8 (ISO 32000-2 §7.3.5), so the lookup goes by its
+    bytes, never through its text.
+    """
+    raw = name_bytes(obj)
+    if raw is None:
+        raw = _text(obj).encode("utf-8")
+    return name_object(raw)
+
+
+def _colorant_bytes(obj) -> bytes:
+    raw = name_bytes(obj)
+    return raw if raw is not None else _text(obj).encode("utf-8")
 
 
 def _objgen(obj):
@@ -283,14 +302,14 @@ def hide_processing_steps(pdf) -> int:
 
 
 def _colorants(cs, resources, out: set, depth: int = 0) -> None:
-    """Every `/Separation` and `/DeviceN` colorant name this space can paint."""
+    """Every `/Separation` and `/DeviceN` colorant this space can paint, as
+    the bytes of its name: two names that differ in one byte are two inks."""
     if isinstance(cs, (pikepdf.Name, str)):
-        named = _text(cs)
         space = None
         if isinstance(resources, pikepdf.Dictionary):
             table = resources.get("/ColorSpace")
             if isinstance(table, pikepdf.Dictionary):
-                space = table.get("/" + named)
+                space = table.get(_name_key(cs))
         if space is not None and depth < _MAX_ALTERNATE_DEPTH:
             _colorants(space, resources, out, depth + 1)
         return
@@ -298,11 +317,11 @@ def _colorants(cs, resources, out: set, depth: int = 0) -> None:
         return
     family = _text(cs[0])
     if family == "Separation" and len(cs) >= 4:
-        out.add(_text(cs[1]))
+        out.add(_colorant_bytes(cs[1]))
     elif family == "DeviceN" and len(cs) >= 4:
         try:
             for component in cs[1]:
-                out.add(_text(component))
+                out.add(_colorant_bytes(component))
         except Exception:
             return
     else:
@@ -322,7 +341,7 @@ def _resource(resources, category: str, name):
     table = resources.get(category)
     if not isinstance(table, pikepdf.Dictionary):
         return None
-    return table.get("/" + _text(name))
+    return table.get(_name_key(name))
 
 
 def _oc_is_processing_step(obj, steps: dict) -> bool:

@@ -80,6 +80,7 @@ from .page_images import _walk_placements, replace_placement_with_layers
 from .redact import IDENTITY, _lookup_xobject, _resolve_resources
 from .validate import validate_pdf
 from engine.pdf_save import save_pdf
+from .pdf_tree import key_text, token_text
 
 # --------------------------------------------------------------------------
 # Presets
@@ -233,7 +234,7 @@ def _has_other_visible_content(pdf, instructions, resources, fallback, depth=0,
 
     state = _child_state(IDENTITY, parent)
     for instruction in list(instructions):
-        op = str(instruction.operator)
+        op = token_text(instruction.operator)
         operands = list(instruction.operands)
         if state.feed(op, operands):
             continue
@@ -246,11 +247,11 @@ def _has_other_visible_content(pdf, instructions, resources, fallback, depth=0,
         if op == "INLINE IMAGE":
             return True
         if op == "Do":
-            name = str(operands[0]) if operands else None
+            name = key_text(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback)
             if xobj is None:
                 continue
-            subtype = str(xobj.get("/Subtype", ""))
+            subtype = token_text(xobj.get("/Subtype", ""))
             if subtype == "/Image":
                 continue  # counted as a placement by the caller
             if subtype == "/Form":
@@ -285,7 +286,7 @@ def _image_refusal(xobj) -> str | None:
         # Not a failure: a 1-bit page has no background to separate.
         return "the page image is already 1-bit"
     cs = xobj.get("/ColorSpace")
-    if cs is not None and isinstance(cs, pikepdf.Array) and len(cs) and str(cs[0]) == "/Indexed":
+    if cs is not None and isinstance(cs, pikepdf.Array) and len(cs) and token_text(cs[0]) == "/Indexed":
         return "the page image uses an indexed colour space"
     return None
 

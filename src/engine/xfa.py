@@ -43,6 +43,8 @@ from typing import Callable, NamedTuple
 from lxml import etree
 import pikepdf
 
+from .pdf_tree import token_text
+
 NONE = "none"
 STATIC = "static"
 DYNAMIC = "dynamic"
@@ -728,7 +730,7 @@ def packets(entry) -> list[tuple[str, object]]:
     for i in range(0, len(entry) - 1, 2):
         name, stream = entry[i], entry[i + 1]
         if isinstance(stream, pikepdf.Stream):
-            out.append((str(name), stream))
+            out.append((token_text(name), stream))
     return out
 
 

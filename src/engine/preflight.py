@@ -59,6 +59,7 @@ from engine.preflight_profiles import (
     resolve_profile,
     resolved_params,
 )
+from engine.pdf_tree import token_text
 
 _MAX_DEPTH = 12
 
@@ -252,7 +253,7 @@ def walk_page_resources(
                     obj = xo[key]
                     if not mark(obj):
                         continue
-                    sub = str(obj.get("/Subtype"))
+                    sub = token_text(obj.get("/Subtype"))
                     if sub == "/Image":
                         on_image(obj)
                         img_cs = obj.get("/ColorSpace")
@@ -266,7 +267,7 @@ def walk_page_resources(
                                 )
                     elif sub == "/Form":
                         grp = obj.get("/Group")
-                        if grp is not None and str(grp.get("/S")) == "/Transparency":
+                        if grp is not None and token_text(grp.get("/S")) == "/Transparency":
                             on_transparency()
                         stream(obj, origin)
                         visit_res(obj.get("/Resources"), depth + 1, origin)
@@ -295,7 +296,7 @@ def walk_page_resources(
                     caa = gs.get("/CA")
                     if (ca is not None and float(ca) < 1.0) or (caa is not None and float(caa) < 1.0):
                         on_transparency()
-                    if gs.get("/SMask") is not None and str(gs.get("/SMask")) != "/None":
+                    if gs.get("/SMask") is not None and token_text(gs.get("/SMask")) != "/None":
                         on_transparency()
                 except Exception as exc:
                     unreadable((TRANSPARENCY,), f"a graphics state will not read: {exc}")
@@ -515,7 +516,7 @@ def _annotation_rows(pdf) -> tuple:
             continue
         for ordinal, annot in enumerate(listed):
             try:
-                subtype = str(annot.get("/Subtype") or "").lstrip("/")
+                subtype = token_text(annot.get("/Subtype") or "").lstrip("/")
                 flags = int(annot.get("/F") or 0)
             except Exception as exc:
                 unreadable.append(
@@ -553,7 +554,7 @@ def _javascript_sites(pdf) -> list:
                 entry = holder.get(key) if holder is not None else None
                 if entry is None:
                     continue
-                if str(entry.get("/S") or "") == "/JavaScript":
+                if token_text(entry.get("/S") or "") == "/JavaScript":
                     sites.append(where)
                     continue
                 for trigger in list(entry.keys()):
@@ -1791,7 +1792,7 @@ def _output_intents(pdf, note) -> list | None:
         for intent in intents:
             identifier = intent.get("/OutputConditionIdentifier")
             out.append({
-                "subtype": str(intent.get("/S") or "").lstrip("/"),
+                "subtype": token_text(intent.get("/S") or "").lstrip("/"),
                 "identifier": str(identifier) if identifier is not None else "",
                 "condition": str(intent.get("/OutputCondition") or ""),
                 "embedded": intent.get("/DestOutputProfile") is not None,

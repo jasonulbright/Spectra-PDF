@@ -50,6 +50,7 @@ from engine.redact import (
     _resolve_resources,
 )
 from engine.validate import validate_pdf
+from engine.pdf_tree import token_text
 
 DEFAULT_THRESHOLD_PT = 0.25
 DEFAULT_REPLACEMENT_PT = 0.25
@@ -482,7 +483,7 @@ def list_hairlines(
                             f"not read: {exc}"
                         )
                         continue
-                    subtype = str(annot.get("/Subtype", ""))
+                    subtype = token_text(annot.get("/Subtype", ""))
                     if width is not None and width != 0 and width < threshold:
                         row["annotations"].append({
                             "index": index, "subtype": subtype,

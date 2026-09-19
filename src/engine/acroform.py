@@ -63,6 +63,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name
 from engine.pdf_save import save_pdf
+from engine.pdf_tree import token_text
 
 MAX_FIELD_DEPTH = 32
 
@@ -311,7 +312,7 @@ def carry_pure_data_fields(dst: pikepdf.Pdf, src: pikepdf.Pdf) -> list[dict]:
         except Exception:
             continue
         if t is not None:
-            taken.add(str(t))
+            taken.add(token_text(t))
 
     renamed: list[dict] = []
     for f in pure:
@@ -319,7 +320,7 @@ def carry_pure_data_fields(dst: pikepdf.Pdf, src: pikepdf.Pdf) -> list[dict]:
         copied = dst.copy_foreign(handle)
         t = copied.get("/T")
         if t is not None:
-            name = str(t)
+            name = token_text(t)
             if name in taken:
                 n = 1
                 while f"{name}+{n}" in taken:
@@ -352,7 +353,7 @@ def fq_field_name(node) -> str | None:
             seen.add(og)
         t = node.get("/T")
         if t is not None:
-            parts.append(str(t))
+            parts.append(token_text(t))
         node = node.get("/Parent")
         depth += 1
     if not parts:
@@ -372,7 +373,8 @@ def _forest_names(pdf: pikepdf.Pdf) -> dict:
         if depth > MAX_FIELD_DEPTH or not isinstance(node, Dictionary):
             return
         t = node.get("/T")
-        name = prefix if t is None else (f"{prefix}.{t}" if prefix else str(t))
+        part = None if t is None else token_text(t)
+        name = prefix if part is None else (f"{prefix}.{part}" if prefix else part)
         if name:
             out.setdefault(name, node)
         kids = node.get("/Kids")

@@ -19,6 +19,7 @@ import pikepdf
 from pikepdf import Array, Name
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
+from engine.pdf_tree import token_text
 
 # Subtypes that count as a "comment"/markup annotation (everything except the
 # structural Widget/Link/Popup — Popup rides its parent and is swept with it).
@@ -107,7 +108,7 @@ def reply_relationship(annot) -> Relationship:
     if target is None:
         name = None
         if raw is not None:
-            spelling = str(raw)
+            spelling = token_text(raw)
             if spelling.startswith("/"):
                 name = spelling[1:]
         return Relationship(None, None, name, True)
@@ -115,7 +116,7 @@ def reply_relationship(annot) -> Relationship:
         return Relationship(target, REPLY, None, True)
     if not isinstance(raw, pikepdf.Name):
         return Relationship(target, UNKNOWN, None, False)
-    spelling = str(raw)
+    spelling = token_text(raw)
     kind = _RELATIONSHIP.get(spelling, UNKNOWN)
     return Relationship(target, kind, spelling[1:], True)
 
@@ -253,7 +254,7 @@ def delete_all_annotations(file: str, output: str, subtypes: list | None = None,
             kept = []
             for a in annots:
                 try:
-                    subtype = str(a.get("/Subtype"))
+                    subtype = token_text(a.get("/Subtype"))
                 except Exception:
                     kept.append(a)
                     continue

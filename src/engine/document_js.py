@@ -21,6 +21,7 @@ from pathlib import Path
 import pikepdf
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
+from engine.pdf_tree import token_text
 
 # The PDF text-string UTF-16BE byte-order mark. `/JS` is a "text string or
 # stream" (ISO 32000-2 12.6.4.17): PDFDocEncoding, or UTF-16 with a BOM. We WRITE
@@ -60,7 +61,7 @@ def decode_js(action) -> str | None:
         except (LookupError, UnicodeDecodeError):
             return raw.decode("latin-1", "replace")
     # A Name or other atypical value — surface its text rather than dropping it.
-    return str(js)
+    return token_text(js)
 
 
 class _IncompleteScripts(Exception):

@@ -76,6 +76,7 @@ from engine.print_layout import expand_page_spec, place_in_cell
 from engine.redact import _annot_key
 from engine.text_authoring import block_height, emit_text_box, layout_text_box
 from engine.watermark import _lift_page, _resolve_box, _resolve_rotate, _source_matrix
+from engine.pdf_tree import token_text
 
 #: Annotations that are not comments and never enter the count: a popup rides
 #: its parent, a widget is a form field, a link is a navigation region.
@@ -395,7 +396,7 @@ def _read(pdf) -> tuple[list[dict], dict, list[dict], int]:
             continue
         for annot in entries:
             try:
-                subtype = str(annot.get("/Subtype"))
+                subtype = token_text(annot.get("/Subtype"))
             except Exception:
                 unreadable.append({"page": number, "reason": "Subtype"})
                 continue

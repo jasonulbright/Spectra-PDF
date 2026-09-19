@@ -36,6 +36,7 @@ from engine.inplace import is_same_file, staged_write
 from engine.page_boxes import MIN_EXTENT, box_key, effective_box
 from engine.pdf_save import save_pdf
 from engine.redact import _resolve_resources
+from engine.pdf_tree import token_text
 
 #: Annotation subtypes that draw nothing on the page. A /Popup is closed until
 #: clicked and a /Link is an invisible hot spot; neither is content, and
@@ -76,7 +77,7 @@ def _annotation_boxes(page) -> list:
         return out
     for annot in entries:
         try:
-            subtype = str(annot.get("/Subtype", ""))
+            subtype = token_text(annot.get("/Subtype", ""))
             if subtype in _INVISIBLE_ANNOTS:
                 continue
             flags = int(annot.get("/F", 0))

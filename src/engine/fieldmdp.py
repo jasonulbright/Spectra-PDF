@@ -18,6 +18,7 @@ import pikepdf
 
 from .acroform import live_signature_fields
 from .docmdp import refuse_unreadable_policy
+from .pdf_tree import token_text
 
 # PDF /Action → wire name. A mapping table, not a computation: an action this
 # build does not know must report as unreadable rather than as the nearest one.
@@ -116,7 +117,7 @@ def locked_fields(locks: list, field_names) -> list[str]:
 def _spec_of_params(params) -> dict | None:
     if not isinstance(params, pikepdf.Dictionary):
         return None
-    action = ACTION_BY_NAME.get(str(params.get("/Action") or ""))
+    action = ACTION_BY_NAME.get(token_text(params.get("/Action") or ""))
     if action is None:
         return None
     if action == "all":
@@ -124,7 +125,7 @@ def _spec_of_params(params) -> dict | None:
     listed = params.get("/Fields")
     if not isinstance(listed, pikepdf.Array):
         return None
-    return {"action": action, "fields": [str(f) for f in listed]}
+    return {"action": action, "fields": [token_text(f) for f in listed]}
 
 
 def lock_of_field_dict(field) -> dict | None:

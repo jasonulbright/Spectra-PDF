@@ -84,6 +84,7 @@ from engine.text_metrics import (  # noqa: F401  (_operand_bytes is a re-export)
     show_items,
     string_advance,
 )
+from engine.pdf_tree import key_name, key_text, token_text
 
 SHOW_OPS = ("Tj", "'", '"', "TJ")
 
@@ -175,7 +176,7 @@ def _bdc_mcid(operands: list, resources, fallback):
                 table = source.get("/Properties")
                 if table is None:
                     continue
-                found = table.get(str(props))
+                found = table.get(props)
             except (AttributeError, TypeError):
                 continue
             if found is not None:
@@ -244,7 +245,7 @@ def break_marker_count(operands: list, resources, fallback) -> int:
     Only a replacement text that is NOTHING BUT line breaks counts. An
     /ActualText carrying real replacement characters belongs to whoever wrote
     it, and reading one as a break would rewrite their text."""
-    if len(operands) < 2 or str(operands[0]) != BREAK_MARKER_TAG:
+    if len(operands) < 2 or key_text(operands[0]) != BREAK_MARKER_TAG:
         return 0
     props = operands[1]
     if isinstance(props, pikepdf.Name):
@@ -253,7 +254,7 @@ def break_marker_count(operands: list, resources, fallback) -> int:
                 continue
             try:
                 table = source.get("/Properties")
-                found = None if table is None else table.get(str(props))
+                found = None if table is None else table.get(props)
             except (AttributeError, TypeError):
                 continue
             if found is not None:
@@ -337,14 +338,14 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
     # (break count, run count at open) per open sequence, parallel to `marks`.
     mark_breaks: list = []
     for instruction in instructions:
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
         # Fed with the CURRENT ctm BEFORE state.feed (which consumes-and-
         # continues past q/Q/cm) — path-point ops never move the CTM.
         clips.feed(operator, operands, state.ctm)
         if operator in ("BDC", "BMC"):
             marks.append(_bdc_mcid(operands, resources, fallback) if operator == "BDC" else None)
-            mark_tags.append(str(operands[0]) if operands else "")
+            mark_tags.append(key_text(operands[0]) if operands else "")
             # An authored hard break is an EMPTY sequence, so the count is
             # held open and only recorded if no run lands inside it — an
             # /ActualText over real glyphs is replacement text, not a break.
@@ -471,9 +472,9 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                 )
             state.advance_after_show(raw_width, vertical)
         elif operator == "Do":
-            name = str(operands[0]) if operands else None
+            name = key_text(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback)
-            subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
+            subtype = token_text(xobj.get("/Subtype", "")) if xobj is not None else ""
             if xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
                 form_matrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
                 form_res = xobj.get("/Resources")
@@ -596,7 +597,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
     new_forms: dict = {}  # copies made at THIS level, for the caller (staging rule)
     adjusting = False  # True after the edit, until a line boundary
     for instruction in instructions:
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
 
         if adjusting:
@@ -707,7 +708,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                         if edit.style_size is not None and gts.font_name:
                             kept.append(
                                 _instruction(
-                                    [Name(gts.font_name), round(float(eff_size), 4)], "Tf"
+                                    [key_name(gts.font_name), round(float(eff_size), 4)], "Tf"
                                 )
                             )
                     kept.append(_instruction([pikepdf.String(encoded)], "Tj"))
@@ -739,9 +740,9 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
             continue
 
         if operator == "Do" and not edit.done:
-            name = str(operands[0]) if operands else None
+            name = key_text(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback)
-            subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
+            subtype = token_text(xobj.get("/Subtype", "")) if xobj is not None else ""
             if xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
                 form_res = xobj.get("/Resources")
                 read_res = form_res if form_res is not None else resources
@@ -1026,7 +1027,7 @@ def convert_text_run(
             if gts.font_name:
                 # Restore the run's original font — subsequent runs must be
                 # byte-untouched by the fallback.
-                instructions.append(_instruction([Name(gts.font_name), gts.font_size], "Tf"))
+                instructions.append(_instruction([key_name(gts.font_name), gts.font_size], "Tf"))
             return instructions, new_raw
 
         edit = _TextEditState(int(index), str(new_text), builder=builder)
@@ -1054,7 +1055,7 @@ def convert_text_run(
         if edit.pending_font is not None:
             fname, fdict = edit.pending_font
             if any(
-                str(i.operator) == "Tf" and i.operands and str(i.operands[0]) == fname
+                token_text(i.operator) == "Tf" and i.operands and key_text(i.operands[0]) == fname
                 for i in kept
             ):
                 _register_font(pdf, resources, fname, fdict)

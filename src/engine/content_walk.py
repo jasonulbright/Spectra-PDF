@@ -22,6 +22,8 @@ from typing import Callable, NamedTuple, Optional
 
 import pikepdf
 
+from engine.pdf_tree import key_text
+
 Matrix = tuple[float, float, float, float, float, float]
 Rect = tuple[float, float, float, float]
 
@@ -318,10 +320,7 @@ class GraphicsTextState:
             except (TypeError, ValueError, IndexError):
                 pass
             if operands:
-                try:
-                    self.font_name = str(operands[0])
-                except (TypeError, ValueError):
-                    self.font_name = None
+                self.font_name = key_text(operands[0])
             found = self._resolve("/Font", operands[0] if operands else None)
             self.font = found if isinstance(found, pikepdf.Dictionary) else None
             return True

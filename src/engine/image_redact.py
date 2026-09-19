@@ -90,6 +90,7 @@ from pikepdf import Name
 from engine import codec_taint
 from engine import redact_geometry
 from engine.content_walk import Matrix
+from engine.pdf_tree import key_text, token_text
 
 
 def refuse(reason: str, *, font: str | None = None) -> NoReturn:
@@ -513,7 +514,7 @@ def _space(cs, resolve, depth: int = 0) -> _Space:
         entries = list(cs)
         if not entries:
             refuse("an unreadable colour space")
-        head = _ABBREVIATED_VALUES.get(str(entries[0]), str(entries[0]))
+        head = _ABBREVIATED_VALUES.get(token_text(entries[0]), token_text(entries[0]))
         if head == "/Indexed":
             if len(entries) < 4:
                 refuse("an unreadable colour space")
@@ -570,7 +571,7 @@ def _space(cs, resolve, depth: int = 0) -> _Space:
             return _Space(family, ncomp)
         refuse(f"an unsupported colour space {head}")
 
-    name = str(cs)
+    name = key_text(cs)
     if name in _DEVICE_SPACES:
         family, ncomp = _DEVICE_SPACES[name]
         return _Space(family, ncomp)
@@ -791,8 +792,8 @@ def _filter_names(obj) -> tuple:
     if filt is None:
         return ()
     if isinstance(filt, (pikepdf.Array, list)):
-        return tuple(_ABBREVIATED_FILTERS.get(str(f), str(f)) for f in filt)
-    return (_ABBREVIATED_FILTERS.get(str(filt), str(filt)),)
+        return tuple(_ABBREVIATED_FILTERS.get(token_text(f), token_text(f)) for f in filt)
+    return (_ABBREVIATED_FILTERS.get(token_text(filt), token_text(filt)),)
 
 
 _ABBREVIATED_FILTERS = {
@@ -1588,7 +1589,9 @@ def _rebuild(pdf, obj, data: bytes, filter_name: str | None, parms=None):
             continue
         value = obj[key]
         if full == "/ColorSpace" and isinstance(value, pikepdf.Name):
-            value = Name(_ABBREVIATED_VALUES.get(str(value), str(value)))
+            abbreviated = _ABBREVIATED_VALUES.get(token_text(value))
+            if abbreviated is not None:
+                value = Name(abbreviated)
         if full == "/ColorSpace" and isinstance(value, pikepdf.Array) and len(value):
             head = str(value[0])
             if head in _ABBREVIATED_VALUES:

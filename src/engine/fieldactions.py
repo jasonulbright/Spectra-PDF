@@ -41,6 +41,7 @@ import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
 from engine.acroform import fq_field_name
+from engine.pdf_tree import name_text, token_text
 
 #: Widget action triggers, in the order a document declares them. ``A`` is the
 #: activation action and lives on the widget itself; the rest are `/AA` keys.
@@ -96,7 +97,7 @@ class ActionError(ValueError):
 
 
 def _text(value) -> str:
-    return "" if value is None else str(value)
+    return "" if value is None else token_text(value)
 
 
 def _flags(node, key: str = "/Flags") -> int:
@@ -122,8 +123,9 @@ def _page_index_of(pdf: pikepdf.Pdf, ref) -> int | None:
 
 def _named_destination(pdf: pikepdf.Pdf, name):
     """A destination named by string or name: the `/Names /Dests` name tree
-    first, then the legacy `/Dests` dictionary."""
-    key = str(name).lstrip("/")
+    first, then the legacy `/Dests` dictionary, which a name indexes by its
+    own bytes (ISO 32000-2 §12.3.2.4, §7.3.5)."""
+    key = name_text(name).lstrip("/")
     names = pdf.Root.get("/Names")
     if names is not None:
         dests = names.get("/Dests")
@@ -137,7 +139,7 @@ def _named_destination(pdf: pikepdf.Pdf, name):
     legacy = pdf.Root.get("/Dests")
     if legacy is not None:
         try:
-            found = legacy.get("/" + key)
+            found = legacy.get(name if isinstance(name, pikepdf.Name) else "/" + key)
         except (TypeError, ValueError, AttributeError):
             found = None
         if found is not None:
@@ -226,7 +228,7 @@ def _file_spec(value) -> str:
         for key in ("/UF", "/F"):
             inner = value.get(key)
             if inner is not None:
-                return str(inner)
+                return token_text(inner)
     return ""
 
 
@@ -235,7 +237,7 @@ def classify(pdf: pikepdf.Pdf, node) -> dict | None:
     if not isinstance(node, Dictionary):
         return None
     try:
-        subtype = str(node.get("/S"))
+        subtype = token_text(node.get("/S"))
     except (TypeError, ValueError):
         return {"kind": "other", "action": ""}
     if subtype == "/GoTo":

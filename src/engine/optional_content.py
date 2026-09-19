@@ -12,6 +12,7 @@ from decimal import Decimal
 import pikepdf
 from pikepdf import Array, Dictionary, Name, Stream, String
 from engine.pdf_version import effective_version
+from engine.pdf_tree import key_text, name_bytes, name_object
 
 MAX_WORK = 200_000
 MAX_BYTES = 64 * 1024 * 1024
@@ -48,8 +49,8 @@ def _names(value, default, budget):
     if value is None:
         return set(default)
     if isinstance(value, Name):
-        budget.spend(size=len(str(value)))
-        return {str(value)}
+        budget.spend(size=len(bytes(value)))
+        return {key_text(value)}
     if not isinstance(value, Array):
         _refuse()
     result = set()
@@ -57,7 +58,7 @@ def _names(value, default, budget):
         budget.spend()
         if not isinstance(item, Name):
             _refuse()
-        result.add(str(item))
+        result.add(key_text(item))
     return result
 
 
@@ -243,9 +244,9 @@ def _walk(roots, budget, visitor, pure=False, seen=None):
             visitor(obj)
             if pure:
                 kind, action = obj.get('/Type'), obj.get('/S')
-                if isinstance(kind, Name) and str(kind) in SEMANTIC_TYPES:
+                if isinstance(kind, Name) and key_text(kind) in SEMANTIC_TYPES:
                     _refuse()
-                if isinstance(action, Name) and str(action) in ACTION_TYPES:
+                if isinstance(action, Name) and key_text(action) in ACTION_TYPES:
                     _refuse()
             elif obj.get('/Type') in (Name.Catalog, Name.Page, Name.Pages):
                 # Page/annotation back-pointers do not add rendered resources.
@@ -404,9 +405,12 @@ def _copy(dst, source, value, depth=0):
         source.budget.spend(size=len(bytes(value)))
         return String(bytes(value))
     if isinstance(value, Name):
-        return Name(str(value))
+        return name_object(name_bytes(value))
     if isinstance(value, Dictionary):
-        return Dictionary({key: _copy(dst, source, item, depth + 1) for key, item in value.items()})
+        copied = Dictionary()
+        for key, item in value.items():
+            copied[key] = _copy(dst, source, item, depth + 1)
+        return copied
     if isinstance(value, Array):
         return Array([_copy(dst, source, item, depth + 1) for item in value])
     _refuse()
@@ -647,7 +651,7 @@ class OptionalContentCarry:
                 if key in ('/OCGs', '/D', '/Configs') or value is None:
                     continue
                 copied = _copy(dst, item, value)
-                if root.get(key) is not None:
+                if key in root and root[key] is not None:
                     equivalences.append((root[key], copied))
                 else:
                     root[key] = copied

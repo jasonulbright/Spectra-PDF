@@ -98,8 +98,9 @@ def _declaration_identity(value, depth: int = 0) -> bytes:
         return b"null;"
     if isinstance(value, Dictionary):
         parts = [b"dict("]
-        for key in sorted(str(k) for k in value.keys()):
-            parts.append(key.encode() + b"=" + _declaration_identity(value[key], depth + 1))
+        for key in sorted(value.keys()):
+            parts.append(key.encode("utf-8", "surrogateescape") + b"="
+                         + _declaration_identity(value[key], depth + 1))
         return b"".join(parts) + b");"
     if isinstance(value, Array):
         if len(value) > MAX_DECLARATIONS:
@@ -109,7 +110,7 @@ def _declaration_identity(value, depth: int = 0) -> bytes:
     if isinstance(value, String):
         return b"string(" + bytes(value) + b");"
     if isinstance(value, Name):
-        return b"name(" + str(value).encode() + b");"
+        return b"name(" + bytes(value) + b");"
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         _refuse_declarations()
     return b"number(" + repr(value).encode() + b");"
@@ -167,8 +168,10 @@ def _compose_declaration(kept, incoming):
     if kept["base"] != incoming["base"]:
         _refuse_declarations()
     for candidate in (kept, incoming):
-        rest = Dictionary({k: v for k, v in candidate["value"].items()
-                           if k not in _DECLARATION_ORDERED})
+        rest = Dictionary()
+        for key, entry in candidate["value"].items():
+            if key not in _DECLARATION_ORDERED:
+                rest[key] = entry
         candidate["rest"] = _declaration_identity(rest)
     if kept["rest"] != incoming["rest"]:
         _refuse_declarations()

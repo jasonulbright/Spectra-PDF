@@ -68,6 +68,7 @@ from engine.struct_audit import (
 )
 from engine.text_metrics import _child_state, _FontCache
 from engine.text_runs import NOTHING_TO_EDIT, UNNAMED_FONT, _resource_lookup, _walk_runs
+from engine.pdf_tree import key_text, name_text, token_text
 
 PASS = "pass"
 FAIL = "fail"
@@ -542,7 +543,7 @@ def _annotations(entries: list) -> list:
     for entry in entries:
         annot = entry["obj"]
         try:
-            subtype = str(annot.get("/Subtype") or "")
+            subtype = token_text(annot.get("/Subtype") or "")
         except Exception:
             subtype = ""
         try:
@@ -731,7 +732,7 @@ def _fields(pdf) -> tuple:
             except Exception:
                 continue
         try:
-            ftype = str(node.get("/FT") or "")
+            ftype = token_text(node.get("/FT") or "")
         except Exception:
             ftype = ""
         out.append(
@@ -951,17 +952,17 @@ def _link_target(annot) -> str:
         dest = action.get("/D")
         if dest is not None:
             try:
-                return "dest:" + str(dest)
+                return "dest:" + key_text(dest)
             except Exception:
                 return "dest:?"
         try:
-            return "action:" + str(action.get("/S") or "")
+            return "action:" + token_text(action.get("/S") or "")
         except Exception:
             return "action:?"
     dest = annot.get("/Dest")
     if dest is not None:
         try:
-            return "dest:" + str(dest)
+            return "dest:" + key_text(dest)
         except Exception:
             return "dest:?"
     return ""
@@ -1506,7 +1507,7 @@ def _check_tab_order(check, pdf, annots, cropboxes):
         page = pdf.pages[page_no - 1]
         try:
             tabs = page.obj.get("/Tabs")
-            value = str(tabs).lstrip("/") if tabs is not None else ""
+            value = token_text(tabs).lstrip("/") if tabs is not None else ""
         except Exception:
             value = ""
         if value == "S":
@@ -2196,7 +2197,7 @@ def _check_table_summary(check, tree, mcid_tables):
     for entry in found:
         table = entry["table"]
         summary = table.attrs.get("Summary")
-        if summary is not None and str(summary).strip():
+        if summary is not None and token_text(summary).strip():
             continue
         preview, rect = _node_preview(table, mcid_tables)
         findings.append(
@@ -2531,7 +2532,7 @@ def _paints_outside_marks(pdf) -> tuple:
             continue
         depth = 0
         for _operands, operator in operations:
-            name = str(operator)
+            name = token_text(operator)
             if name in ("BDC", "BMC"):
                 depth += 1
             elif name == "EMC":
@@ -2605,13 +2606,13 @@ def _program_preimages(font_obj) -> dict:
     # Re-deriving either mapping here would be a second implementation of what
     # `pdf_fonts` already owns, so anything else yields no statement to compare.
     encoding = font_obj.get("/Encoding")
-    if not isinstance(encoding, pikepdf.Name) or str(encoding) not in (
+    if not isinstance(encoding, pikepdf.Name) or token_text(encoding) not in (
         "/Identity-H", "/Identity-V"
     ):
         return {}
     descendant = descendants[0]
     c2g = descendant.get("/CIDToGIDMap")
-    if c2g is not None and str(c2g) != "/Identity":
+    if c2g is not None and token_text(c2g) != "/Identity":
         return {}
     descriptor = descendant.get("/FontDescriptor")
     if descriptor is None:
@@ -2687,7 +2688,7 @@ def _unicode_conflicts(pdf) -> tuple:
                     continue
                 seen.add(key)
             try:
-                if str(font_obj.get("/Subtype") or "") != "/Type0":
+                if token_text(font_obj.get("/Subtype") or "") != "/Type0":
                     continue
                 raw = font_obj.get("/ToUnicode")
                 if raw is None:
@@ -2870,7 +2871,7 @@ def _marked_paint(pdf) -> dict:
         stack: list = [(1.0, 1.0)]
         marks: list = []
         for operands, operator in operations:
-            name = str(operator)
+            name = token_text(operator)
             if name == "q":
                 stack.append(stack[-1])
             elif name == "Q" and len(stack) > 1:
@@ -3241,7 +3242,7 @@ def _numbering_of(node) -> str:
     if value is None:
         return ""
     try:
-        return str(value).lstrip("/")
+        return token_text(value).lstrip("/")
     except Exception:
         return ""
 
@@ -3620,7 +3621,7 @@ def _uri_actions(annot) -> list:
                     continue
                 seen.add(og)
             try:
-                if str(item.get("/S") or "") == "/URI":
+                if token_text(item.get("/S") or "") == "/URI":
                     out.append(item)
                 nxt = item.get("/Next")
             except Exception:
@@ -3686,9 +3687,9 @@ def _typed_dictionaries(pdf, type_name: str, subtype: str = "") -> tuple:
         if not isinstance(obj, pikepdf.Dictionary):
             continue
         try:
-            if str(obj.get("/Type") or "") != type_name:
+            if token_text(obj.get("/Type") or "") != type_name:
                 continue
-            if subtype and str(obj.get("/S") or "") != subtype:
+            if subtype and token_text(obj.get("/S") or "") != subtype:
                 continue
         except Exception as exc:
             unread.append(str(exc))
@@ -3747,7 +3748,7 @@ def _check_reference_xobjects(check, pdf):
         if not isinstance(obj, pikepdf.Stream):
             continue
         try:
-            if str(obj.get("/Subtype") or "") != "/Form":
+            if token_text(obj.get("/Subtype") or "") != "/Form":
                 continue
             forms.append((obj, obj.get("/Ref") is not None))
         except Exception as exc:
@@ -3830,7 +3831,7 @@ def _rendered_fonts(pdf) -> tuple:
             return
         state = _child_state(IDENTITY, parent, lookup=_resource_lookup(resources, fallback))
         for operands, operator in operations:
-            name = str(operator)
+            name = token_text(operator)
             operands = list(operands)
             if state.feed(name, operands):
                 continue
@@ -3839,13 +3840,13 @@ def _rendered_fonts(pdf) -> tuple:
                     remember(state.font)
             elif name == "Do" and operands:
                 try:
-                    xobj = _lookup_xobject(str(operands[0]), resources, fallback)
+                    xobj = _lookup_xobject(key_text(operands[0]), resources, fallback)
                 except Exception:
                     continue
                 if not isinstance(xobj, pikepdf.Stream):
                     continue
                 try:
-                    if str(xobj.get("/Subtype") or "") != "/Form":
+                    if token_text(xobj.get("/Subtype") or "") != "/Form":
                         continue
                     og = xobj.objgen
                     nested = xobj.get("/Resources")
@@ -3913,7 +3914,7 @@ def _descriptor_of(font_obj):
     resolved here once instead of at every reader.
     """
     try:
-        subtype = str(font_obj.get("/Subtype") or "")
+        subtype = token_text(font_obj.get("/Subtype") or "")
     except Exception:
         return None, "", None
     if subtype != "/Type0":
@@ -4043,7 +4044,7 @@ def _differences_names(encoding) -> list:
     out = []
     for item in items:
         if isinstance(item, pikepdf.Name):
-            out.append(str(item).lstrip("/"))
+            out.append(name_text(item))
     return out
 
 
@@ -4115,13 +4116,13 @@ def _check_font_encodings(check, rendered, unread):
             continue
         base = ""
         if isinstance(encoding, pikepdf.Name):
-            base = str(encoding)
+            base = token_text(encoding)
         elif isinstance(encoding, pikepdf.Dictionary):
             try:
                 raw = encoding.get("/BaseEncoding")
             except Exception:
                 raw = None
-            base = str(raw) if raw is not None else ""
+            base = token_text(raw) if raw is not None else ""
         if base not in _TRUETYPE_ENCODINGS:
             findings.append(
                 _finding(_object_address(), "nonsymbolic_truetype_bad_encoding",
@@ -4180,7 +4181,7 @@ def _check_cid_to_gid_map(check, pdf):
         if subtype != "/Type0" or not isinstance(descendant, pikepdf.Dictionary):
             continue
         try:
-            if str(descendant.get("/Subtype") or "") != "/CIDFontType2":
+            if token_text(descendant.get("/Subtype") or "") != "/CIDFontType2":
                 continue
         except Exception as exc:
             unread.append(str(exc))
@@ -4195,7 +4196,7 @@ def _check_cid_to_gid_map(check, pdf):
             continue
         if isinstance(mapping, pikepdf.Stream):
             continue
-        if isinstance(mapping, pikepdf.Name) and str(mapping) == "/Identity":
+        if isinstance(mapping, pikepdf.Name) and token_text(mapping) == "/Identity":
             continue
         name = _base_font(font_obj)
         findings.append(

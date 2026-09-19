@@ -31,6 +31,7 @@ from .stroke_outline import stroke_outline
 from .text_metrics import _child_state, _FontCache, _run_metrics, show_items
 from .text_runs import _resource_lookup
 from .validate import validate_pdf
+from .pdf_tree import key_name, key_text, token_text
 
 _CONSTRUCT = frozenset({"m", "l", "c", "v", "y", "re", "h"})
 _CLIP = frozenset({"W", "W*"})
@@ -137,8 +138,14 @@ def _colour_ops(capture) -> list[str]:
 
 
 def _operand_text(value) -> str:
+    """One captured colour operand as content-stream syntax. A name is written
+    with its escapes (ISO 32000-2 §7.3.5): the capture spells a UTF-8 name as
+    text and keeps any other name as the name object, and neither text nor a
+    name's bytes are ASCII in general."""
+    if isinstance(value, pikepdf.Name):
+        return value.unparse().decode("ascii")
     if isinstance(value, str):
-        return value
+        return key_name(value).unparse().decode("ascii") if value.startswith("/") else value
     try:
         return _fmt(float(value))
     except (TypeError, ValueError):
@@ -341,7 +348,7 @@ def rewrite_instructions(instructions, resources, ctx: _Context, base_ctm=IDENTI
         clip_pending = False
 
     for instruction in instructions:
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
 
         if operator == "q":
@@ -416,11 +423,11 @@ def rewrite_instructions(instructions, resources, ctx: _Context, base_ctm=IDENTI
             name = _placed_form(operands[0], resources, fallback, state, strokes, ctx, depth)
             if name is not None:
                 changed = True
-                replaced.add(str(operands[0]))
-                drawn.add(str(name))
+                replaced.add(key_text(operands[0]))
+                drawn.add(key_text(name))
                 keep(pikepdf.ContentStreamInstruction([name], pikepdf.Operator("Do")))
                 continue
-            drawn.add(str(operands[0]))
+            drawn.add(key_text(operands[0]))
 
         state.feed(operator, operands)
         keep(instruction)
@@ -428,8 +435,8 @@ def rewrite_instructions(instructions, resources, ctx: _Context, base_ctm=IDENTI
     table = resources.get("/XObject") if resources is not None else None
     if table is not None:
         for name in replaced - drawn:
-            if pikepdf.Name(name) in table:
-                del table[pikepdf.Name(name)]
+            if name in table:
+                del table[name]
     return (out if changed else None)
 
 

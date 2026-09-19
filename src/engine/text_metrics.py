@@ -351,6 +351,12 @@ class ShowItem(NamedTuple):
     ink is taken to occupy, from `x`. Spacing moves the NEXT glyph and draws
     nothing, so a negative `Tc` puts the pen end inside the glyph just drawn.
     A kern draws nothing and has no width.
+
+    Down a column the ink hangs below the pen whichever way the glyph moves
+    it: the position vector places a glyph from the pen, and the displacement
+    only places the next one (ISO 32000-2 §9.7.4.3). So a vertical glyph's
+    `width` is the size of its advance, and a glyph that moves the pen UP
+    has a negative `advance` and a positive `width`.
     """
 
     kern: bool
@@ -405,7 +411,8 @@ def show_items_from_segments(
             if raw == b" ":
                 # The single-byte code 32 (§9.3.3), whatever the font's kind.
                 advance += sign * state.word_spacing
-            items.append(ShowItem(False, raw, 0.0, advance, x, own))
+            ink = abs(own) if cap.writes_vertical else own
+            items.append(ShowItem(False, raw, 0.0, advance, x, ink))
             x += advance
     return items
 

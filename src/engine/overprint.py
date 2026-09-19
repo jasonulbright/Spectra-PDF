@@ -31,6 +31,7 @@ from __future__ import annotations
 import pikepdf
 
 from engine.color_spaces import build_resolver
+from engine.pdf_tree import name_bytes, name_object, name_text, token_text
 
 _MAX_DEPTH = 8
 _EPS = 1e-6
@@ -51,13 +52,28 @@ def _family_of(cs) -> str:
     """The colour-space FAMILY name, which is what decides whether a tint of
     zero means "no ink" — the sRGB the resolver produces cannot say."""
     if isinstance(cs, (str, pikepdf.Name)):
-        return str(cs).lstrip("/")
+        return name_text(cs).lstrip("/")
     if isinstance(cs, pikepdf.Array) and len(cs) > 0:
         try:
-            return str(cs[0]).lstrip("/")
+            return name_text(cs[0]).lstrip("/")
         except Exception:
             return ""
     return ""
+
+
+def _entry(resources, category: str, name):
+    """The `category` resource a name operand selects, looked up by the name's
+    bytes: a name need not be UTF-8 (ISO 32000-2 §7.3.5). The operand is the
+    name object itself, or its text as the shared walker spells a UTF-8 one."""
+    if resources is None:
+        return None
+    table = resources.get(category)
+    if table is None:
+        return None
+    raw = name_bytes(name)
+    if raw is None:
+        raw = str(name).lstrip("/").encode("utf-8")
+    return table.get(name_object(raw))
 
 
 def resolve_ink(space_op, value_op, resources) -> tuple:
@@ -66,6 +82,10 @@ def resolve_ink(space_op, value_op, resources) -> tuple:
     Device operators (`g`/`rg`/`k`) name their family outright; `cs` + `scn`
     resolves the name against the stream's `/ColorSpace`. A pattern operand is
     not a flat colour and reports unknown.
+
+    The capture holds either the content stream's own operands — name
+    objects, and a real as a `Decimal` — or the shared walker's reading of
+    them, which spells a UTF-8 name as text; both resolve alike.
     """
     if value_op is None:
         # Nothing set and no non-device space selected is the stream default,
@@ -89,12 +109,15 @@ def resolve_ink(space_op, value_op, resources) -> tuple:
     if str(sname_op).lower() != "cs" or not sname_vals:
         return ("", None)
     name = sname_vals[0]
-    if not isinstance(name, str):
+    if not isinstance(name, (str, pikepdf.Name)):
         return ("", None)
     if any(isinstance(v, str) for v in vals):
         return ("", None)  # a pattern operand — not a flat colour
-    comps = [float(v) for v in vals if isinstance(v, (int, float))]
-    family = name.lstrip("/")
+    try:
+        comps = [float(v) for v in vals]
+    except (TypeError, ValueError):
+        return ("", None)
+    family = name_text(name).lstrip("/")
     if family not in ("DeviceGray", "DeviceRGB", "DeviceCMYK"):
         target = None
         if resources is not None:
@@ -174,8 +197,7 @@ class _State:
 def _gs_overprint(resources, name) -> dict:
     """The overprint entries of one `/ExtGState`, or an empty answer."""
     try:
-        table = resources.get("/ExtGState") if resources is not None else None
-        entry = table.get(pikepdf.Name(str(name))) if table is not None else None
+        entry = _entry(resources, "/ExtGState", name)
     except Exception:
         return {}
     if entry is None:
@@ -197,7 +219,7 @@ def _walk(pdf, instructions, resources, state, depth, page_no, rows, unreadable,
           seen) -> None:
     stack: list = []
     for instruction in instructions:
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
 
         if operator == "q":
@@ -254,9 +276,8 @@ def _walk(pdf, instructions, resources, state, depth, page_no, rows, unreadable,
                 )
                 continue
             try:
-                table = resources.get("/XObject") if resources is not None else None
-                xobj = table.get(pikepdf.Name(str(operands[0]))) if table is not None else None
-                if xobj is None or str(xobj.get("/Subtype")) != "/Form":
+                xobj = _entry(resources, "/XObject", operands[0])
+                if xobj is None or name_bytes(xobj.get("/Subtype")) != b"Form":
                     continue
                 ident = xobj.objgen if getattr(xobj, "is_indirect", False) else id(xobj)
                 if ident in seen:

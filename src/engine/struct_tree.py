@@ -44,6 +44,7 @@ import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
+from engine.pdf_tree import name_text, token_text
 
 # Deep enough for any real document's nesting; combined with the visited-set
 # cycle guard it bounds walks over malformed self-referential trees.
@@ -103,9 +104,9 @@ def _is_elem(obj) -> bool:
     if not isinstance(obj, pikepdf.Dictionary):
         return False
     t = obj.get("/Type")
-    if t is not None and str(t) in ("/MCR", "/OBJR"):
+    if t is not None and token_text(t) in ("/MCR", "/OBJR"):
         return False
-    return obj.get("/S") is not None or t is not None and str(t) == "/StructElem"
+    return obj.get("/S") is not None or t is not None and token_text(t) == "/StructElem"
 
 
 def _elem_positions(kids: list) -> list[int]:
@@ -154,7 +155,7 @@ def _str_or_empty(node, key: str) -> str:
     if v is None:
         return ""
     try:
-        return str(v)
+        return token_text(v)
     except Exception:
         return ""
 
@@ -203,7 +204,7 @@ def get_struct_tree(file: str) -> dict:
                         if own_page is not None:
                             content.append({"page": own_page, "mcid": int(k)})
                     elif isinstance(k, pikepdf.Dictionary):
-                        t = str(k.get("/Type")) if k.get("/Type") is not None else ""
+                        t = token_text(k.get("/Type")) if k.get("/Type") is not None else ""
                         pg = _page_no(pages_by_og, k.get("/Pg"), own_page)
                         if t == "/MCR" and k.get("/MCID") is not None and pg is not None:
                             content.append({"page": pg, "mcid": int(k.get("/MCID"))})
@@ -241,7 +242,7 @@ def get_struct_tree(file: str) -> dict:
         if rm is not None and isinstance(rm, pikepdf.Dictionary):
             for key, value in rm.items():
                 try:
-                    role_map[str(key).lstrip("/")] = str(value).lstrip("/")
+                    role_map[name_text(key)] = name_text(value).lstrip("/")
                 except Exception:
                     continue
 
@@ -282,7 +283,7 @@ def _set_table_attr(pdf, elem, pdf_key: str, value) -> None:
     owned = None
     for attrs in _attr_dicts_of(elem):
         owner = attrs.get("/O")
-        if owner is not None and str(owner) == "/Table":
+        if owner is not None and token_text(owner) == "/Table":
             owned = attrs
             break
     if value is None:

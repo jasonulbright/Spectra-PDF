@@ -61,7 +61,8 @@ def _identity(obj, budget, seen=None, depth=0):
         parts = [b'dict(']
         for key in sorted(str(k) for k in obj.keys()):
             budget.spend()
-            parts.append(key.encode() + b'=' + _identity(obj[key], budget, seen, depth + 1))
+            parts.append(key.encode('utf-8', 'surrogateescape') + b'='
+                         + _identity(obj[key], budget, seen, depth + 1))
         return b''.join(parts) + b');'
     if isinstance(obj, Array):
         budget.spend(len(obj))
@@ -69,7 +70,7 @@ def _identity(obj, budget, seen=None, depth=0):
     if isinstance(obj, String):
         return b'string(' + bytes(obj) + b');'
     if isinstance(obj, Name):
-        return b'name(' + str(obj).encode() + b');'
+        return b'name(' + bytes(obj) + b');'
     return b'other(' + repr(obj).encode() + b');'
 
 
