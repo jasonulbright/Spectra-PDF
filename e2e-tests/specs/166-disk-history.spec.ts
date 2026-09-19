@@ -22,9 +22,10 @@ describe('disk history publication', () => {
   beforeEach(async () => {
     await waitForHarness();
     await closeAllFiles();
-    // Each test opens its own copy. Reopening the path the previous test just
-    // closed races that close: the open funnel's already-open check reads the
-    // last rendered state, and the claim release is not awaited.
+    // Each test opens its own copy of the fixture. A reopen of the path the
+    // previous test closed is safe too: the open funnel reads the store, which
+    // every dispatch settles at once, and the close's release goes out before
+    // the reopen's claim, or not at all once the reopen holds the path.
     const source = resolve(directory, `history-${++opened}.pdf`);
     copyFileSync(resolve(__dirname, '..', 'fixtures', 'sample.pdf'), source);
     await openByPaths([source]);

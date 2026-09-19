@@ -3,7 +3,7 @@ import { buildPdf, buildPdfx, stripExtension } from './pdfx-format';
 import { carriesManifest } from './doc-names';
 import { baseName } from './create-pdf';
 import type { ExportPage } from './pdfx-format';
-import type { AppAction, OpenDocument, OpenFile, PageTierStacks, PdfBuffer, Workspace } from '../state/types';
+import type { AppAction, OpenDocument, OpenFile, PageAnnotation, PageRef, PageTierStacks, PdfBuffer, Workspace } from '../state/types';
 import { editsSincePlan } from '../state/page-tier';
 // Refusals here that reach the user resolve through
 // the catalog (the concurrent-entry throw below is an internal invariant —
@@ -101,15 +101,18 @@ export function planCommit(
     if (docs.length === 0) continue;
     const documents: CommitDocumentPlan[] = docs.map((d) => ({
       name: d.name,
-      pages: d.pages.map(
-        (p): ExportPage => ({
+      pages: d.pages.map((p): ExportPage => {
+        // A baked annotation is already in the source page's /Annots, and the
+        // page copy carries it.
+        const authored = p.annotations?.filter((a) => !a.baked) ?? [];
+        return {
           bytes: bytesFor(p.sourceDocId),
           sourceKey: p.sourceDocId,
           pageIndex: p.sourcePageIndex,
           ...(p.rotation ? { rotation: p.rotation } : {}),
-          ...(p.annotations?.length
+          ...(authored.length
             ? {
-                annotations: p.annotations.map(
+                annotations: authored.map(
                   ({ kind, x, y, w, h, color, note, points, strokes, inkStyle, imageData, signatureFont, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, countGroup, countSymbol, countSeq, legendRows, legendTitle, legendTotalWord, symbolId, symbolParts, importedOriginal }) => ({
                     kind,
                     x,
@@ -164,8 +167,8 @@ export function planCommit(
           ...(p.removedImportedOriginals?.length
             ? { removedImportedOriginals: p.removedImportedOriginals }
             : {}),
-        }),
-      ),
+        };
+      }),
     }));
     const pageCount = documents.reduce((sum, d) => sum + d.pages.length, 0);
     if (pageCount === 0) continue;
@@ -182,6 +185,43 @@ export function planCommit(
     });
   }
   return plans;
+}
+
+/**
+ * The documents a commit's bytes hold for one path, from the documents the
+ * commit was planned from (`docs`, that path's documents in workspace order).
+ *
+ * The commit writes every page of `docs` in order, so each page reads from
+ * `buffer` at its running position. The pending rotation is written into the
+ * page, so it reads 0 and the viewport size swaps for a quarter turn. Every
+ * annotation is written too, so each one is `baked`: the removed original a
+ * fingerprint named is gone from the bytes, and so are the fingerprints.
+ */
+export function committedDocuments(docs: readonly OpenDocument[], buffer: PdfBuffer): OpenDocument[] {
+  let position = 0;
+  return docs.map((doc) => {
+    const pages = doc.pages.map((page): PageRef => {
+      const quarterTurn = page.rotation === 90 || page.rotation === 270;
+      const committed: PageRef = {
+        id: page.id,
+        sourceDocId: doc.path,
+        sourcePageIndex: position++,
+        rotation: 0,
+        width: quarterTurn ? page.height : page.width,
+        height: quarterTurn ? page.width : page.height,
+      };
+      if (page.annotations?.length) {
+        committed.annotations = page.annotations.map(
+          ({ importedOriginal: _original, geometryDiverged: _diverged, ...annotation }): PageAnnotation => ({
+            ...annotation,
+            baked: true,
+          }),
+        );
+      }
+      return committed;
+    });
+    return { ...doc, buffer, pageCount: pages.length, pages, provisional: true };
+  });
 }
 
 export async function buildCommitBytes(plan: CommitFilePlan): Promise<Uint8Array> {
@@ -365,13 +405,7 @@ export async function commitPageEdits({
 
     const runTag = `.commit-tmp-${crypto.randomUUID()}`;
     const staged: string[] = [];
-    const updates: {
-      path: string;
-      pageCount: number;
-      buffer: PdfBuffer;
-      snapshotPath: string;
-      authored: { pages: string[]; documents: { id: string; name: string }[] };
-    }[] = [];
+    const updates: Extract<AppAction, { type: 'COMMIT_PAGE_EDITS' }>['updates'] = [];
     try {
       for (let i = 0; i < plans.length; i++) {
         const tmp = plans[i].workingPath + runTag;
@@ -452,6 +486,10 @@ export async function commitPageEdits({
               pages: plans[i].authoredPageIds,
               documents: plans[i].authoredDocuments,
             },
+            documents: committedDocuments(
+              workspace.documents.filter((d) => d.path === plans[i].path),
+              built[i],
+            ),
           });
           dispatch({ type: 'COMMIT_PAGE_EDITS', updates, planned: tier.planned });
         },

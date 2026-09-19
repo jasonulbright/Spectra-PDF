@@ -225,6 +225,13 @@ export interface PageAnnotation {
   // original still shows until the commit resolves both — the same
   // pending-tier semantics as deleting an imported annotation.
   geometryDiverged?: boolean;
+  // Written into the file's current bytes by the page-tier commit, and not
+  // read back yet. The raster draws it and the copied page's /Annots carries
+  // it, so the overlay draws no body and a commit authors nothing for it. It
+  // has no fingerprint of the written object, so an edit that changes or
+  // removes it, and an import that copies it, is refused until the read-back
+  // replaces it with an import.
+  baked?: true;
 }
 
 export interface PageRef {
@@ -253,6 +260,11 @@ export interface PageRef {
 export interface OpenDocument extends OpenFile {
   id: string;       // unique within the workspace — path alone can't distinguish manifest partitions
   pages: PageRef[]; // page-level index, mutated in memory by page-level ops
+  // Composed by the page-tier commit that wrote `buffer`, not read from it.
+  // Page ids, order, positions and rotations describe `buffer` exactly; each
+  // annotation the commit wrote is `baked`. The reindex of `buffer` replaces
+  // the document, and a commit waits for that read-back.
+  provisional?: true;
 }
 
 export interface Workspace {
@@ -669,6 +681,10 @@ export type AppAction =
         snapshotPath: string;
         // The identity channel — old ids in authored (new-file) order.
         authored: { pages: string[]; documents: { id: string; name: string }[] };
+        // The path's documents as the new bytes hold them, placed in the
+        // workspace in the same step, so nothing reads the previous
+        // composition against the new bytes.
+        documents: OpenDocument[];
       }[];
       // The stacks the commit was planned from. Entries pushed on top of
       // them after planning are edits the commit does not contain.

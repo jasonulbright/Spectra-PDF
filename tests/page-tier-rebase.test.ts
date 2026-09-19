@@ -1,13 +1,15 @@
 // Page edits made while a commit is being built, or after it lands but before
-// the reindex of its bytes, are pending edits on documents that describe the
-// previous bytes. The reindex re-derives those documents; the edits must be
-// carried onto them (the commit's ids are adopted, so the recorded edits
-// still address the same pages) or refused with a notice — never dropped
-// while the path stays dirty.
+// the reindex of its bytes, are pending edits on the documents the commit
+// composed for its bytes. The reindex re-derives those documents; the edits
+// must be carried onto them (the commit's ids are adopted, so the recorded
+// edits still address the same pages) or refused with a notice — never
+// dropped while the path stays dirty.
 import { describe, expect, it } from 'vitest';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
 import { editsSincePlan } from '../src/renderer/state/page-tier';
 import { workspaceSettled } from '../src/renderer/lib/workspace-settle';
+import { committedDocuments } from '../src/renderer/lib/workspace-commit';
+import { buildMergedPageRefs, mergedPageSources } from '../src/renderer/lib/merge-docs';
 import type {
   AppAction,
   AppState,
@@ -83,6 +85,7 @@ function commit(planned: AppState, during: AppAction[] = []): Committed {
         pages: plan.documents.flatMap((d) => d.pages.map((p) => p.id)),
         documents: plan.documents.map((d) => ({ id: d.id, name: d.name })),
       },
+      documents: committedDocuments(plan.documents, plan.buffer),
     })),
     planned: { pageUndoStack: planned.pageUndoStack, pageRedoStack: planned.pageRedoStack },
   });
@@ -144,7 +147,8 @@ describe('an edit made after a commit lands and before its reindex lands', () =>
   it('rotate: the second turn is carried onto the re-derived page, not dropped', () => {
     const c = commit(pendingTurn());
     const edited = appReducer(c.state, TURN);
-    expect(pageById(edited, 'b.pdf#p4').rotation).toBe(180); // on the superseded frame
+    // On the committed frame: the first turn is written into the page.
+    expect(pageById(edited, 'b.pdf#p4').rotation).toBe(90);
     const s = land(c, edited, 'b.pdf');
     const p4 = pageById(s, 'b.pdf#p4');
     // The committed bytes bake the first turn; the pending one is the second.
@@ -164,11 +168,12 @@ describe('an edit made after a commit lands and before its reindex lands', () =>
 
   it('rotate through the absolute single-page action: carried as the turn it made', () => {
     const c = commit(pendingTurn());
+    // Absolute on the committed frame, where the first turn reads 0.
     const edited = appReducer(c.state, {
-      type: 'ROTATE_PAGE_REF', docId: 'b#0', pageId: 'b.pdf#p4', rotation: 180,
+      type: 'ROTATE_PAGE_REF', docId: 'b#0', pageId: 'b.pdf#p4', rotation: 270,
     });
     const s = land(c, edited, 'b.pdf');
-    expect(pageById(s, 'b.pdf#p4').rotation).toBe(90);
+    expect(pageById(s, 'b.pdf#p4').rotation).toBe(270);
     expect(s.pageDirtyPaths).toEqual(['b.pdf']);
   });
 
@@ -229,13 +234,14 @@ describe('an edit made after a commit lands and before its reindex lands', () =>
   });
 
   it('insert: pages whose indexes were read from the superseded bytes are refused with a notice', () => {
-    const c = commit(pendingTurn());
+    const planned = pendingTurn();
+    const c = commit(planned);
     const before = c.state;
     // Pages read from b.pdf's previous buffer, e.g. an import that reused the
     // open file's bytes before the commit replaced them.
     const edited = appReducer(before, {
       type: 'IMPORT_PAGES', toDocId: 'b#0', toIndex: 0, pages: [page('b.pdf', 3, { id: 'copy' })],
-      sources: [{ path: 'b.pdf', buffer: before.workspace.documents[0].buffer! }],
+      sources: [{ path: 'b.pdf', buffer: planned.files.get('b.pdf')!.buffer! }],
     });
     expect(edited.workspace).toBe(before.workspace);
     expect(edited.pageEditRefusals).toBe(1);
@@ -317,10 +323,15 @@ describe('an edit made after a commit lands and before its reindex lands', () =>
       { type: 'ADD_ANNOTATION', docId: 'b#0', pageId: 'b.pdf#p1', annotation: added },
       { type: 'RECOLOR_ANNOTATION', docId: 'b#0', pageId: 'b.pdf#p0', annotationId: 'n1', color: '#000000' },
     );
+    // The committed note is in the bytes with no fingerprint of what the
+    // commit wrote, so the recolor is refused when it is made, not later.
+    expect(pageById(edited, 'b.pdf#p0').annotations?.map((a) => [a.id, a.color, a.baked])).toEqual([
+      ['n1', '#ffd54a', true],
+    ]);
+    expect(edited.pageEditRefusals).toBe(1);
     const s = land(c, edited, 'b.pdf');
     expect(pageById(s, 'b.pdf#p1').annotations?.map((a) => a.id)).toEqual(['n2']);
-    // The committed note came back as an import under a new id; the recolor
-    // named the old id, so it cannot be carried.
+    // The committed note came back as an import under a new id.
     expect(pageById(s, 'b.pdf#p0').annotations?.map((a) => [a.id, a.color])).toEqual([
       ['n1@reimported', '#ffd54a'],
     ]);
@@ -426,6 +437,200 @@ describe('an edit made after a commit lands and before its reindex lands', () =>
   });
 });
 
+describe('the documents a commit lands', () => {
+  /** b.pdf, four pages; the plan reorders them and turns one. */
+  function reorderedAndTurned(): AppState {
+    const b = file('b.pdf', [1], 4);
+    const pages = [0, 1, 2, 3].map((i) => page('b.pdf', i, { width: 100 + i, height: 400 }));
+    const s = state([b], [doc(b, 'b#0', pages)]);
+    return run(
+      s,
+      { type: 'REORDER_PAGES', docId: 'b#0', order: ['b.pdf#p2', 'b.pdf#p0', 'b.pdf#p3', 'b.pdf#p1'] },
+      { type: 'ROTATE_PAGE_REFS', pageIds: ['b.pdf#p0'], delta: 90 },
+    );
+  }
+
+  it('read every page from the new bytes at its written position, from the moment the commit lands', () => {
+    const c = commit(reorderedAndTurned());
+    const committed = c.plans.get('b.pdf')!.buffer;
+    const [landed] = c.state.workspace.documents;
+    expect(landed.buffer).toBe(committed);
+    expect(landed.provisional).toBe(true);
+    expect(landed.pages.map((p) => [p.id, p.sourceDocId, p.sourcePageIndex, p.rotation])).toEqual([
+      ['b.pdf#p2', 'b.pdf', 0, 0],
+      ['b.pdf#p0', 'b.pdf', 1, 0],
+      ['b.pdf#p3', 'b.pdf', 2, 0],
+      ['b.pdf#p1', 'b.pdf', 3, 0],
+    ]);
+    // The written quarter turn swaps the page's viewport size.
+    expect([pageById(c.state, 'b.pdf#p0').width, pageById(c.state, 'b.pdf#p0').height]).toEqual([400, 100]);
+    expect(c.state.pageDirtyPaths).toEqual([]);
+    expect(workspaceSettled(c.state)).toBe(false);
+  });
+
+  it('are not placed for a file that closed before the commit landed', () => {
+    const planned = reorderedAndTurned();
+    const closed = appReducer(planned, { type: 'CLOSE_FILE', path: 'b.pdf' });
+    const buffer = [9];
+    const s = appReducer(closed, {
+      type: 'COMMIT_PAGE_EDITS',
+      updates: [{
+        path: 'b.pdf', pageCount: 4, buffer, snapshotPath: 's',
+        authored: { pages: [], documents: [] },
+        documents: committedDocuments(planned.workspace.documents, buffer),
+      }],
+      planned: { pageUndoStack: closed.pageUndoStack, pageRedoStack: closed.pageRedoStack },
+    });
+    expect(s.files.has('b.pdf')).toBe(false);
+    expect(s.workspace.documents).toEqual([]);
+  });
+
+  it('are replaced by the read-back, which settles the workspace', () => {
+    const c = commit(reorderedAndTurned());
+    const s = land(c, c.state, 'b.pdf');
+    expect(s.workspace.documents[0].provisional).toBeUndefined();
+    expect(workspaceSettled(s)).toBe(true);
+    expect(s.pageEditRefusals).toBe(0);
+  });
+
+  const note: PageAnnotation = { id: 'n1', kind: 'note', x: 0.1, y: 0.1, w: 0.05, h: 0.05, color: '#ffd54a', note: 'hi' };
+  const shape: PageAnnotation = {
+    id: 's1', kind: 'shape', shapeType: 'rect', x: 0.2, y: 0.2, w: 0.3, h: 0.3, color: '#ff0000',
+    importedOriginal: { subtype: 'Square', rect: [1, 2, 3, 4], color: '#ff0000', hasAppearance: true },
+  };
+  const count: PageAnnotation = {
+    id: 'c1', kind: 'count', x: 0.5, y: 0.5, w: 0.02, h: 0.02, color: '#00ff00',
+    countGroup: 'Doors', countSymbol: 'circle', countSeq: 1, note: 'Doors 1',
+  };
+  const measure: PageAnnotation = {
+    id: 'm1', kind: 'measure', measureKind: 'distance', x: 0.1, y: 0.6, w: 0.2, h: 0, points: [0.1, 0.6, 0.3, 0.6],
+    color: '#0000ff', note: '1 in', measureUnitsPerPt: 1, measureUnit: 'in', measureRatio: '1 in = 1 in',
+  };
+
+  /** A committed page whose annotations the commit wrote. */
+  function committedWithAnnotations(): Committed {
+    const start = run(
+      pendingTurn(),
+      { type: 'ADD_ANNOTATION', docId: 'b#0', pageId: 'b.pdf#p0', annotation: note },
+      { type: 'ADD_ANNOTATION', docId: 'b#0', pageId: 'b.pdf#p0', annotation: shape },
+      { type: 'ADD_ANNOTATION', docId: 'b#0', pageId: 'b.pdf#p0', annotation: count },
+      { type: 'ADD_ANNOTATION', docId: 'b#0', pageId: 'b.pdf#p0', annotation: measure },
+    );
+    return commit(start);
+  }
+
+  it('carry the annotations the commit wrote as baked, without the fingerprints the bytes no longer hold', () => {
+    const c = committedWithAnnotations();
+    const annotations = pageById(c.state, 'b.pdf#p0').annotations!;
+    expect(annotations.map((a) => [a.id, a.baked, a.importedOriginal])).toEqual([
+      ['n1', true, undefined],
+      ['s1', true, undefined],
+      ['c1', true, undefined],
+      ['m1', true, undefined],
+    ]);
+  });
+
+  const target = { docId: 'b#0', pageId: 'b.pdf#p0' };
+  const refusedEdits: [string, AppAction][] = [
+    ['UPDATE_ANNOTATION', { type: 'UPDATE_ANNOTATION', ...target, annotationId: 'n1', note: 'changed' }],
+    ['RECOLOR_ANNOTATION', { type: 'RECOLOR_ANNOTATION', ...target, annotationId: 'n1', color: '#000000' }],
+    ['REMOVE_ANNOTATION', { type: 'REMOVE_ANNOTATION', ...target, annotationId: 'n1' }],
+    ['RECALIBRATE_ANNOTATION', {
+      type: 'RECALIBRATE_ANNOTATION', ...target, annotationId: 'm1',
+      measureUnitsPerPt: 2, measureUnit: 'in', measureRatio: '1 in = 2 in', note: '2 in',
+    }],
+    ['RECOLOR_ANNOTATIONS', { type: 'RECOLOR_ANNOTATIONS', ...target, annotationIds: ['s1'], color: '#000000' }],
+    ['REMOVE_ANNOTATIONS', { type: 'REMOVE_ANNOTATIONS', ...target, annotationIds: ['s1'] }],
+    ['RESTYLE_ANNOTATIONS', { type: 'RESTYLE_ANNOTATIONS', ...target, annotationIds: ['s1'], style: { strokeWidth: 5 } }],
+    ['TRANSFORM_ANNOTATIONS', {
+      type: 'TRANSFORM_ANNOTATIONS', docId: 'b#0',
+      edits: [{ pageId: 'b.pdf#p0', annotationId: 's1', x: 0.4, y: 0.4, w: 0.3, h: 0.3 }],
+    }],
+    ['REORDER_ANNOTATIONS', { type: 'REORDER_ANNOTATIONS', ...target, annotationIds: ['s1'], direction: 'front' }],
+    ['REGROUP_COUNT_MARKS', {
+      type: 'REGROUP_COUNT_MARKS', ...target, annotationIds: ['c1'], group: 'Windows', color: '#0000ff', symbol: 'square',
+    }],
+  ];
+
+  it.each(refusedEdits)('refuse %s on a baked annotation until the read-back, and say so', (_name, action) => {
+    const c = committedWithAnnotations();
+    const s = appReducer(c.state, action);
+    expect(s.workspace).toBe(c.state.workspace);
+    expect(s.pageUndoStack).toBe(c.state.pageUndoStack);
+    expect(s.pageDirtyPaths).toEqual([]);
+    expect(s.pageEditRefusals).toBe(c.state.pageEditRefusals + 1);
+    // After the read-back the same edit lands on the import it became.
+    const back = land(c, c.state, 'b.pdf');
+    const reimported = JSON.parse(JSON.stringify(action).replace(/"(n1|s1|c1|m1)"/g, '"$1@reimported"')) as AppAction;
+    const edited = appReducer(back, reimported);
+    expect(edited.pageUndoStack).toHaveLength(back.pageUndoStack.length + 1);
+    expect(edited.pageEditRefusals).toBe(back.pageEditRefusals);
+  });
+
+  it('let a baked annotation turn with its page, and let new ones be edited', () => {
+    const c = committedWithAnnotations();
+    const turned = appReducer(c.state, { type: 'ROTATE_PAGE_REFS', pageIds: ['b.pdf#p0'], delta: 90 });
+    expect(turned.pageEditRefusals).toBe(0);
+    expect(pageById(turned, 'b.pdf#p0').annotations![0]).toMatchObject({
+      id: 'n1', baked: true, x: expect.closeTo(0.85, 9), y: expect.closeTo(0.1, 9),
+    });
+    const added: PageAnnotation = { ...note, id: 'n2' };
+    const withNew = run(
+      c.state,
+      { type: 'ADD_ANNOTATION', ...target, annotation: added },
+      { type: 'RECOLOR_ANNOTATION', ...target, annotationId: 'n2', color: '#000000' },
+      { type: 'REORDER_ANNOTATIONS', ...target, annotationIds: ['n2'], direction: 'back' },
+    );
+    expect(withNew.pageEditRefusals).toBe(0);
+    expect(withNew.pageUndoStack).toHaveLength(3);
+  });
+
+  it('refuse a copy of a page that carries baked annotations until the read-back, and say so', () => {
+    const c = committedWithAnnotations();
+    const a = file('a.pdf', [5], 1);
+    const withA: AppState = {
+      ...c.state,
+      files: new Map(c.state.files).set('a.pdf', a),
+      workspace: { documents: [...c.state.workspace.documents, doc(a, 'a#0', [page('a.pdf', 0)])] },
+    };
+    const source = withA.workspace.documents[0];
+    const copy = (s: AppState): AppAction => ({
+      type: 'IMPORT_PAGES', toDocId: 'a#0', toIndex: 1,
+      pages: buildMergedPageRefs(s.workspace.documents[0]),
+      sources: mergedPageSources(s.workspace.documents, s.files, s.workspace.documents[0]),
+    });
+    const refused = appReducer(withA, copy(withA));
+    expect(refused.workspace).toBe(withA.workspace);
+    expect(refused.pageEditRefusals).toBe(withA.pageEditRefusals + 1);
+    // Once the read-back lands, the copy carries imports and lands.
+    const back = land(c, withA, 'b.pdf');
+    expect(back.workspace.documents[0].id).toBe(source.id);
+    const copied = appReducer(back, copy(back));
+    expect(copied.pageUndoStack).toHaveLength(back.pageUndoStack.length + 1);
+    expect(copied.pageEditRefusals).toBe(back.pageEditRefusals);
+  });
+
+  it('number a count mark placed before the read-back after the ones the commit wrote', () => {
+    const c = committedWithAnnotations();
+    const mark: PageAnnotation = { ...count, id: 'c2', countSeq: undefined, note: undefined };
+    const s = appReducer(c.state, { type: 'ADD_ANNOTATION', ...target, annotation: mark });
+    expect(pageById(s, 'b.pdf#p0').annotations!.find((a) => a.id === 'c2')).toMatchObject({ countSeq: 2, note: 'Doors 2' });
+  });
+
+  it('refuse, while the commit is published, an edit made to an annotation the commit then wrote', () => {
+    const start = run(pendingTurn(), { type: 'ADD_ANNOTATION', docId: 'b#0', pageId: 'b.pdf#p0', annotation: note });
+    const c = commit(start, [
+      { type: 'RECOLOR_ANNOTATION', docId: 'b#0', pageId: 'b.pdf#p0', annotationId: 'n1', color: '#000000' },
+      TURN,
+    ]);
+    expect(c.state.pageEditRefusals).toBe(1);
+    expect(pageById(c.state, 'b.pdf#p0').annotations!.map((a) => [a.color, a.baked])).toEqual([['#ffd54a', true]]);
+    // The turn made during the commit is carried and stays undoable.
+    expect(pageById(c.state, 'b.pdf#p4').rotation).toBe(90);
+    expect(c.state.pageUndoStack).toHaveLength(1);
+  });
+});
+
 describe('where re-derived documents land', () => {
   // Fresh ids name no outgoing slot, so no slot is theirs to keep: the
   // re-derived partitions land together at the first outgoing slot.
@@ -497,13 +702,49 @@ describe('an edit made while the commit is built and published', () => {
     expect(pagesOf(clean, 'a.pdf')).toHaveLength(2);
   });
 
-  it('keeps every dirty path and says so when the stacks no longer show what the plan held', () => {
-    const planned = pendingTurn();
-    const c = commit(planned, [
+  it('shows the committed bytes, re-derives every other dirty path, and says so when the stacks no longer show what the plan held', () => {
+    const a = file('a.pdf', [5], 1);
+    const start = pendingTurn();
+    const withA: AppState = {
+      ...start,
+      files: new Map(start.files).set('a.pdf', a),
+      workspace: { documents: [...start.workspace.documents, doc(a, 'a#0', [page('a.pdf', 0)])] },
+    };
+    // a.pdf is edited during the commit, which holds only b.pdf.
+    const c = commit(withA, [
+      { type: 'ROTATE_PAGE_REFS', pageIds: ['a.pdf#p0'], delta: 180 },
       TURN,
       { type: 'OPEN_FILE', path: 'z.pdf', workingPath: 'z.w', name: 'z.pdf', pageCount: 1, buffer: [3] },
     ]);
-    expect(c.state.pageDirtyPaths).toEqual(['b.pdf']);
+    expect([...c.plans.keys()]).toEqual(['b.pdf']);
+    // Which pending edit the plan held is unknown, so the ones made during the
+    // commit are dropped and said: b.pdf shows exactly its new bytes, and
+    // a.pdf, which could hold a page moved from b.pdf, waits for its own
+    // index.
+    expect(pageById(c.state, 'b.pdf#p4')).toMatchObject({ sourcePageIndex: 4, rotation: 0 });
+    expect(pagesOf(c.state, 'a.pdf')).toEqual([]);
+    expect(c.state.pageDirtyPaths).toEqual([]);
+    expect(c.state.pageEditRefusals).toBe(1);
+  });
+
+  it('drops, when the stacks no longer show what the plan held, a page moved out of a committed file meanwhile', () => {
+    const a = file('a.pdf', [5], 1);
+    const start = pendingTurn();
+    const withA: AppState = {
+      ...start,
+      files: new Map(start.files).set('a.pdf', a),
+      workspace: { documents: [...start.workspace.documents, doc(a, 'a#0', [page('a.pdf', 0)])] },
+    };
+    const c = commit(withA, [
+      { type: 'MOVE_PAGES', pageIds: ['b.pdf#p1'], toDocId: 'a#0', toIndex: 1 },
+      { type: 'OPEN_FILE', path: 'z.pdf', workingPath: 'z.w', name: 'z.pdf', pageCount: 1, buffer: [3] },
+    ]);
+    // The moved page indexes b.pdf's previous bytes; it is not left in a.pdf
+    // to name another page of the new ones. b.pdf keeps it where it was written.
+    const holders = c.state.workspace.documents.filter((d) => d.pages.some((p) => p.id === 'b.pdf#p1'));
+    expect(holders.map((d) => d.path)).toEqual(['b.pdf']);
+    expect(pageById(c.state, 'b.pdf#p1')).toMatchObject({ sourceDocId: 'b.pdf', sourcePageIndex: 1 });
+    expect(pagesOf(c.state, 'a.pdf')).toEqual([]);
     expect(c.state.pageEditRefusals).toBe(1);
   });
 });

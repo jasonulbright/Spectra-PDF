@@ -13,7 +13,19 @@
 // by string prefix.
 
 import { claims } from './tauri-bridge';
+import { createCallOrder, createClaimHolds } from './window-claims';
 import { tChrome } from '../i18n';
+
+// The arbiter's root claim is idempotent per window and its release drops the
+// window's claim whatever preceded it. A dialog shows its finished phase while
+// the run's release is still in flight, so the next run's claim can be
+// processed first and then lose to that release, leaving the run unclaimed.
+// Each call on a root is sent only after the previous call on that root from
+// this window has answered, and a release is sent only when no run of this
+// window holds the root at its turn: a run that is still stopping after its
+// dialog closed must not take the next run's claim with it.
+const inRootOrder = createCallOrder();
+const rootHolds = createClaimHolds();
 
 export interface OutputRootClaim {
   granted: boolean;
@@ -31,20 +43,34 @@ export async function claimOutputRoot(root: string): Promise<OutputRootClaim> {
   if (!root) {
     return { granted: true, message: '', release: async () => {} };
   }
-  const outcome = await claims.claimOutputRoot(root);
+  rootHolds.hold([root]);
+  let outcome: Awaited<ReturnType<typeof claims.claimOutputRoot>>;
+  try {
+    outcome = await inRootOrder(root, () => claims.claimOutputRoot(root));
+  } catch (error) {
+    rootHolds.drop([root]);
+    throw error;
+  }
   if (!outcome.granted) {
+    rootHolds.drop([root]);
     return {
       granted: false,
       message: tChrome('app.window.folderBusy', { folder: root }),
       release: async () => {},
     };
   }
+  let held = true;
   return {
     granted: true,
     message: '',
     release: async () => {
+      if (!held) return;
+      held = false;
+      rootHolds.drop([root]);
       try {
-        await claims.releaseOutputRoot(root);
+        await inRootOrder(root, async () => {
+          if (!rootHolds.held(root)) await claims.releaseOutputRoot(root);
+        });
       } catch {
         // The claim outlives only this window, which releases everything it
         // held when it is destroyed.

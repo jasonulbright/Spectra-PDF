@@ -3,6 +3,7 @@
 // and the buffer-identity invalidation that moved with them.
 import { describe, expect, it } from 'vitest';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
+import { committedDocuments } from '../src/renderer/lib/workspace-commit';
 import type { AppAction, AppState, OpenDocument, OpenFile, PageRef } from '../src/renderer/state/types';
 import { NAV_PANE_MAX_WIDTH, NAV_PANE_MIN_WIDTH } from '../src/renderer/state/types';
 import { selectedPageNumbers } from '../src/renderer/state/selectors';
@@ -657,18 +658,46 @@ describe('selection invalidation on buffer-identity changes (per-path prune)', (
     expect(selected(s)).toEqual(['b.pdf#p0']);
   });
 
-  it('COMMIT_PAGE_EDITS keeps the whole selection (adoption decides at reindex)', () => {
+  it('COMMIT_PAGE_EDITS keeps the whole selection (the committed documents keep the planned ids)', () => {
     const s = select(twoDocState(), ['a.pdf#p0', 'b.pdf#p0'], 'a.pdf#p0');
+    const buffer = [9];
     const next = appReducer(s, {
       type: 'COMMIT_PAGE_EDITS',
       updates: [{
-        path: 'a.pdf', pageCount: 3, buffer: [9], snapshotPath: 'snap',
+        path: 'a.pdf', pageCount: 3, buffer, snapshotPath: 'snap',
         authored: { pages: ['a.pdf#p0', 'a.pdf#p1', 'a.pdf#p2'], documents: [{ id: 'a#0', name: 'a' }] },
+        documents: committedDocuments(s.workspace.documents.filter((d) => d.path === 'a.pdf'), buffer),
       }],
       planned: { pageUndoStack: s.pageUndoStack, pageRedoStack: s.pageRedoStack },
     });
     expect(next.ui.selectedPageIds.size).toBe(2);
     expect(next.ui.selectionAnchor).toBe('a.pdf#p0');
+  });
+
+  it('COMMIT_PAGE_EDITS prunes a selected page an edit made during the commit could not carry', () => {
+    // The page came from a.pdf's previous bytes; the commit replaced them, so
+    // the import made while it ran cannot be carried onto the committed file.
+    const s0 = twoDocState();
+    const stale = s0.files.get('a.pdf')!.buffer!;
+    const imported = appReducer(s0, {
+      type: 'IMPORT_PAGES', toDocId: 'b.pdf#0', toIndex: 0,
+      pages: [{ ...makePages('a.pdf', 1)[0], id: 'copy' }],
+      sources: [{ path: 'a.pdf', buffer: stale }],
+    });
+    const s = select(imported, ['copy', 'b.pdf#p0'], 'copy');
+    const buffer = [9];
+    const next = appReducer(s, {
+      type: 'COMMIT_PAGE_EDITS',
+      updates: [{
+        path: 'a.pdf', pageCount: 3, buffer, snapshotPath: 'snap',
+        authored: { pages: ['a.pdf#p0', 'a.pdf#p1', 'a.pdf#p2'], documents: [{ id: 'a.pdf#0', name: 'a' }] },
+        documents: committedDocuments(s0.workspace.documents.filter((d) => d.path === 'a.pdf'), buffer),
+      }],
+      planned: { pageUndoStack: s0.pageUndoStack, pageRedoStack: s0.pageRedoStack },
+    });
+    expect(next.pageEditRefusals).toBe(1);
+    expect(selected(next)).toEqual(['b.pdf#p0']);
+    expect(next.ui.selectionAnchor).toBeNull();
   });
 
   it('a REOPEN (OPEN_FILE on an open path) prunes its own path only; a fresh OPEN_FILE does not touch selection', () => {

@@ -43,21 +43,26 @@ export interface ClaimPartition {
 // processed second and leave the reopened document with no claim. Each call
 // on a path is therefore sent only after the previous call on that path from
 // this window has answered, whatever its outcome.
-const lastCallOnPath = new Map<string, Promise<void>>();
+export type CallOrder = <T>(key: string, call: () => Promise<T>) => Promise<T>;
 
-function inPathOrder<T>(path: string, call: () => Promise<T>): Promise<T> {
-  const previous = lastCallOnPath.get(path) ?? Promise.resolve();
-  const current = previous.then(call);
-  const settled = current.then(
-    () => {},
-    () => {},
-  );
-  lastCallOnPath.set(path, settled);
-  void settled.then(() => {
-    if (lastCallOnPath.get(path) === settled) lastCallOnPath.delete(path);
-  });
-  return current;
+export function createCallOrder(): CallOrder {
+  const lastCallOn = new Map<string, Promise<void>>();
+  return <T>(key: string, call: () => Promise<T>): Promise<T> => {
+    const previous = lastCallOn.get(key) ?? Promise.resolve();
+    const current = previous.then(call);
+    const settled = current.then(
+      () => {},
+      () => {},
+    );
+    lastCallOn.set(key, settled);
+    void settled.then(() => {
+      if (lastCallOn.get(key) === settled) lastCallOn.delete(key);
+    });
+    return current;
+  };
 }
+
+const inPathOrder = createCallOrder();
 
 /**
  * Claim every path, keeping what was granted and reporting what was not.
@@ -82,6 +87,32 @@ export async function claimPaths(
   return { granted, refused };
 }
 
+/** The flows of this window that hold the claim on each path while they run
+ * (an open, an import), counted. The arbiter keeps one claim per path and
+ * window, so each of them holds that same claim. */
+export interface ClaimHolds {
+  hold(paths: readonly string[]): void;
+  drop(paths: readonly string[]): void;
+  held(path: string): boolean;
+}
+
+export function createClaimHolds(): ClaimHolds {
+  const counts = new Map<string, number>();
+  return {
+    hold(paths) {
+      for (const path of paths) counts.set(path, (counts.get(path) ?? 0) + 1);
+    },
+    drop(paths) {
+      for (const path of paths) {
+        const left = (counts.get(path) ?? 0) - 1;
+        if (left > 0) counts.set(path, left);
+        else counts.delete(path);
+      }
+    },
+    held: (path) => (counts.get(path) ?? 0) > 0,
+  };
+}
+
 /**
  * The single window a refusal set points at, or null when it points at more
  * than one. Only a single owner can be offered as somewhere to go.
@@ -93,13 +124,23 @@ export function soleOwner(refused: readonly ClaimRefusal[]): string | null {
 }
 
 /** Release each path this window no longer holds. Failures are ignored: the
- * window's own destruction releases everything it held. */
-export async function releasePaths(paths: readonly string[]): Promise<void> {
+ * window's own destruction releases everything it held.
+ *
+ * `inUse` is asked when the release's turn comes, not when it is called. The
+ * arbiter keeps one claim per path and window, so another open, import or
+ * document of this window that took the path meanwhile holds that same claim,
+ * and the release would drop it; a path still in use is kept. */
+export async function releasePaths(
+  paths: readonly string[],
+  inUse: (path: string) => boolean = () => false,
+): Promise<void> {
   // Every release takes its place in its path's order now, not after the
   // releases before it answer: a claim made meanwhile must queue behind it.
   await Promise.all(
     paths.map((path) =>
-      inPathOrder(path, () => claims.release(path)).catch(() => {
+      inPathOrder(path, async () => {
+        if (!inUse(path)) await claims.release(path);
+      }).catch(() => {
         // The claim outlives only this window; a failed release is not a
         // state the user can be asked to do anything about.
       }),
