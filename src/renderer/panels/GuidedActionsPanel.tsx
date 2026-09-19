@@ -6,6 +6,7 @@ import { app, dialog, batch, actionFile } from '../lib/tauri-bridge';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { isOpMethod } from '../lib/op-edit-class';
 import { getSettings } from '../lib/app-settings';
+import { claimOutputRoots, writtenRoots, type OutputRootClaim } from '../lib/output-root-claim';
 import { gsBlocked, gsPathIfAvailable, requireGsPath } from '../lib/gs-capability';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { GsRequiredNotice } from '../components/GsRequiredNotice';
@@ -272,7 +273,12 @@ export function GuidedActionsPanel(): React.ReactElement {
       if (running) return;
       setView({ kind: 'folderrun', action, report: null, error: null });
       setRunning(true);
+      let root: OutputRootClaim | null = null;
       try {
+        // Two runs writing one tree overwrite each other file by file; an
+        // in-place run writes its source tree.
+        root = await claimOutputRoots(writtenRoots({ source, dest, inPlace }));
+        if (!root.granted) throw new Error(root.message);
         // Planned over the picked folder, so a step that converts files is
         // decided from the files: when every file needs Ghostscript the run
         // refuses here, and when only some do, those refuse by name in the
@@ -311,6 +317,7 @@ export function GuidedActionsPanel(): React.ReactElement {
         setView({ kind: 'folderrun', action, report: null, error: msg });
       } finally {
         setRunning(false);
+        await root?.release();
       }
     },
     [running, callRaw, planRequest],

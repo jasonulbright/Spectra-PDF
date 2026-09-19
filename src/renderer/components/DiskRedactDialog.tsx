@@ -39,7 +39,7 @@ import {
   type SignedNote,
 } from '../lib/disk-redact';
 import { createDiskRedactIo } from '../lib/disk-redact-io';
-import { claimOutputRoot } from '../lib/output-root-claim';
+import { claimOutputRoots, writtenRoots } from '../lib/output-root-claim';
 import { diskRedactLogFileName, formatDiskRedactLog } from '../lib/disk-redact-log';
 
 // Tools ▸ Search & Redact Folder…: the disk scope of Search & Redact.
@@ -252,9 +252,11 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
 
   const apply = useCallback(async (): Promise<void> => {
     if (!searchReport || selected.size === 0) return;
-    // An in-place run has no output tree to own; a mirrored one does, and two
-    // windows writing the same tree overwrite each other file by file.
-    const root = await claimOutputRoot(inPlace ? '' : (dest ?? ''));
+    // Two runs writing the same tree overwrite each other file by file; an
+    // in-place run writes its source tree.
+    const root = await claimOutputRoots(
+      writtenRoots({ source: source ?? '', dest: dest ?? '', inPlace }),
+    );
     if (!root.granted) {
       setError(root.message);
       return;
@@ -294,7 +296,10 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
     } finally {
       await root.release();
     }
-  }, [searchReport, selected, inPlace, dest, marksOnly, includeSigned, makeIo, writeLog, resetLog]);
+  }, [
+    searchReport, selected, inPlace, source, dest, marksOnly, includeSigned, makeIo, writeLog,
+    resetLog,
+  ]);
 
   const stop = useCallback((): void => {
     setStopping(true);

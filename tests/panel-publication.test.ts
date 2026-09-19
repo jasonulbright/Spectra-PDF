@@ -13,6 +13,7 @@ import { inspectOperationInput } from '../src/renderer/lib/operation-input';
 import { EDIT_DECLINED } from '../src/renderer/lib/edit-text';
 import { isOpMethod, sequenceEditClass } from '../src/renderer/lib/op-edit-class';
 import { STEP_CATALOG, stepDefFor, engineMethodFor, buildStepParams, newStep, planAction, gsBlocker, gsPathFor } from '../src/renderer/lib/guided-actions';
+import { writtenRoots } from '../src/renderer/lib/output-root-claim';
 import { replaceRange, wordAt } from '../src/renderer/lib/spellcheck';
 import { createArticleDrafts } from '../src/renderer/lib/article-drafts';
 import { emptyArticle } from '../src/renderer/lib/article-beads';
@@ -268,17 +269,24 @@ describe('actual panel publication callbacks', () => {
   });
   it('Guided Actions plans a folder run over the picked folder before it starts', async () => {
     const f = await fixture(); const views: { error?: string | null }[] = [];
-    const sent: Record<string, unknown>[] = [];
+    const sent: Record<string, unknown>[] = []; const order: string[] = [];
     let plan = { gs: 'required', steps: [{ op: 'create_pdf', gs: 'required' }] };
     const env = { ...f.panelEnv, gsBlocked: () => true, setView: (v: { error?: string | null }) => { views.push(v); },
-      planRequest: async (params: Record<string, unknown>) => { sent.push(params); return plan; },
+      planRequest: async (params: Record<string, unknown>) => { sent.push(params); order.push('plan'); return plan; },
       getSettings: () => ({ batchLogEnabled: false, batchLogRetentionDays: 0, batchLogDir: '' }),
       batch: { logDir: async () => '', pruneLogs: async () => 0 },
-      app: { getEditFontPath: async () => 'fonts', getTesseractPath: async () => 'tess', getSofficePath: async () => 'soffice' } };
+      app: { getEditFontPath: async () => 'fonts', getTesseractPath: async () => 'tess', getSofficePath: async () => 'soffice' },
+      writtenRoots,
+      claimOutputRoots: async (roots: string[]) => {
+        order.push(`claim ${roots.join(',')}`);
+        return { granted: true, message: '', release: async () => { order.push(`release ${roots.join(',')}`); } };
+      } };
     const action = { name: 'create', steps: [newStep('create_pdf')] };
     const run = actual('panels/GuidedActionsPanel.tsx', 'executeFolderRun', env);
     await run(action, {}, 'C:/in', 'C:/out');
     expect(sent).toEqual([{ source: 'C:/in', dest: '', steps: [{ op: 'create_pdf', params: buildStepParams(action.steps[0]) }], plan: true }]);
+    // The destination is claimed before the plan and released after the refusal.
+    expect(order).toEqual(['claim C:/out', 'plan', 'release C:/out']);
     expect(views.at(-1)?.error).toContain('Ghostscript');
     expect(f.calls).toEqual([]);
     plan = { gs: 'optional', steps: [{ op: 'create_pdf', gs: 'optional' }] };
@@ -287,6 +295,24 @@ describe('actual panel publication callbacks', () => {
     plan = { gs: 'never', steps: [{ op: 'create_pdf', gs: 'never' }] };
     f.calls.length = 0; await run(action, {}, 'C:/in', 'C:/out');
     expect(f.calls.find((c) => c.method === 'run_action')?.params.gs_path).toBe('');
+  });
+  it('Guided Actions runs nothing over a folder another run is writing, and says so', async () => {
+    const f = await fixture(); const views: { error?: string | null }[] = [];
+    const planned: unknown[] = []; const claimed: string[][] = [];
+    const env = { ...f.panelEnv, setView: (v: { error?: string | null }) => { views.push(v); },
+      planRequest: async (params: Record<string, unknown>) => { planned.push(params); return { gs: 'never', steps: [] }; },
+      writtenRoots,
+      claimOutputRoots: async (roots: string[]) => {
+        claimed.push(roots);
+        return { granted: false, message: `busy: ${roots.join(',')}`, release: async () => {} };
+      } };
+    const run = actual('panels/GuidedActionsPanel.tsx', 'executeFolderRun', env);
+    await run({ name: 'gray', steps: [newStep('grayscale')] }, {}, 'C:/in', '', true);
+    // An in-place run writes its source tree, so that is the folder it claims.
+    expect(claimed).toEqual([['C:/in']]);
+    expect(views.at(-1)?.error).toBe('busy: C:/in');
+    expect(planned).toEqual([]);
+    expect(f.calls).toEqual([]);
   });
   it.each(['runAction', 'runActionOnFolder', 'runActionInPlace'])('Guided Actions %s opens nothing for an action its plan blocks', async (name) => {
     const f = await fixture(); const opened: unknown[] = [];

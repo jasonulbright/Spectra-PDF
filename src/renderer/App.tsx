@@ -42,6 +42,8 @@ import type { FieldActions } from './lib/form-candidates';
 import type { EditImageMaskParam } from './lib/edit-images';
 import type { ParagraphEditOpts } from './lib/edit-paragraphs';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
+import { createConfirmQueue } from './lib/confirm-queue';
+import { reportLaunch } from './lib/launch-notices';
 import { PasswordDialog, PasswordResult } from './components/PasswordDialog';
 import { CertUnlockDialog, CertUnlockResult } from './components/CertUnlockDialog';
 import { SplitPanel } from './panels/SplitPanel';
@@ -262,6 +264,17 @@ const panels: Record<Operation, React.ComponentType> = {
   spelling: SpellingPanel,
 };
 
+/** One request for the confirm dialog. `id` tells a late answer to an earlier
+ * request apart from an answer to the one on screen. */
+interface ConfirmRequest {
+  id: number;
+  message: string;
+  kind?: 'unsaved' | 'proceed' | 'notice';
+  title?: string;
+  affirmLabel?: string;
+  resolve: (result: ConfirmResult) => void;
+}
+
 function AppContent(): React.ReactElement {
   // Re-render on language change; the banner's buttons and every
   // confirm/notice message below resolve via tChrome.
@@ -379,14 +392,18 @@ function AppContent(): React.ReactElement {
 
   // Confirm dialog state — 3-choice unsaved (Save / Don't Save / Cancel),
   // 2-choice proceed (Continue / Cancel), or 1-button notice (OK); one
-  // dialog, one result type.
-  const [confirmState, setConfirmState] = useState<{
-    message: string;
-    kind?: 'unsaved' | 'proceed' | 'notice';
-    title?: string;
-    affirmLabel?: string;
-    resolve: (result: ConfirmResult) => void;
-  } | null>(null);
+  // dialog, one result type. `confirmState` is the request on screen; the
+  // others wait in `confirmQueue`.
+  const [confirmState, setConfirmState] = useState<ConfirmRequest | null>(null);
+  const [confirmQueue] = useState(() => createConfirmQueue<ConfirmRequest>(setConfirmState));
+  const lastConfirmId = useRef(0);
+  const requestConfirm = useCallback(
+    (request: Omit<ConfirmRequest, 'id'>): void => {
+      lastConfirmId.current += 1;
+      confirmQueue.push({ ...request, id: lastConfirmId.current });
+    },
+    [confirmQueue],
+  );
 
   // Password prompt dialog state
   const [passwordState, setPasswordState] = useState<{
@@ -436,16 +453,16 @@ function AppContent(): React.ReactElement {
 
   const showConfirm = useCallback((message: string): Promise<ConfirmResult> => {
     return new Promise((resolve) => {
-      setConfirmState({ message, resolve });
+      requestConfirm({ message, resolve });
     });
-  }, []);
+  }, [requestConfirm]);
 
   /** Two-choice Continue/Cancel confirmation; resolves true on Continue. */
   const showProceedConfirm = useCallback((title: string, message: string): Promise<boolean> => {
     return new Promise((resolve) => {
-      setConfirmState({ message, kind: 'proceed', title, resolve: (r) => resolve(r === 'save') });
+      requestConfirm({ message, kind: 'proceed', title, resolve: (r) => resolve(r === 'save') });
     });
-  }, []);
+  }, [requestConfirm]);
 
   // The submission consent dialog's state. It resolves ONE answer for ONE
   // request: there is no per-host memory to keep, deliberately, so the state
@@ -488,25 +505,23 @@ function AppContent(): React.ReactElement {
   /** One-button OK notice — errors and outcomes with no choice to make. */
   const showNotice = useCallback((title: string, message: string): Promise<void> => {
     return new Promise((resolve) => {
-      setConfirmState({ message, kind: 'notice', title, resolve: () => resolve() });
+      requestConfirm({ message, kind: 'notice', title, resolve: () => resolve() });
     });
-  }, []);
+  }, [requestConfirm]);
 
-  // A launch that found a "Start with Windows" entry naming a path this copy
-  // has moved away from corrects it before any window exists. Only the launch
-  // that could NOT write the correction has anything to say, and it says it
-  // here because the correction ran with no surface to say it on.
+  // A launch that corrected a "Start with Windows" entry, or found a record it
+  // could not read, did so before any window existed; it reports here.
   useEffect(() => {
-    void app
-      .startupEntryNotice()
-      .then((detail) => {
-        if (!detail) return;
-        void showNotice(
-          tChrome('app.startupEntry.staleTitle'),
-          tChrome('app.startupEntry.stale', { detail }),
-        );
-      })
-      .catch(() => {});
+    void reportLaunch({
+      startupEntryNotice: () => app.startupEntryNotice(),
+      takeUnreadableRecords: () => app.takeUnreadableRecords(),
+      saveStartupFlags: () => {
+        const settings = getSettings();
+        app.setStartMinimized(settings.startMinimized).catch(() => {});
+        app.setRestoreWindowsOnLaunch(settings.restoreWindowsOnLaunch).catch(() => {});
+      },
+      showNotice,
+    });
   }, [showNotice]);
 
   /** A refusal that has somewhere to send the user: the affirmative button
@@ -514,7 +529,7 @@ function AppContent(): React.ReactElement {
   const showActionConfirm = useCallback(
     (title: string, message: string, affirmLabel: string): Promise<boolean> => {
       return new Promise((resolve) => {
-        setConfirmState({
+        requestConfirm({
           message,
           kind: 'proceed',
           title,
@@ -523,7 +538,7 @@ function AppContent(): React.ReactElement {
         });
       });
     },
-    [],
+    [requestConfirm],
   );
 
   const editWarnedPathsRef = useRef<Set<string>>(new Set());
@@ -611,11 +626,8 @@ function AppContent(): React.ReactElement {
   );
 
   const handleConfirmResult = useCallback((result: ConfirmResult) => {
-    if (confirmState) {
-      confirmState.resolve(result);
-      setConfirmState(null);
-    }
-  }, [confirmState]);
+    if (confirmState) confirmQueue.answer(confirmState.id)?.resolve(result);
+  }, [confirmState, confirmQueue]);
 
   // Fetch app version on mount
   useEffect(() => {
@@ -3573,6 +3585,10 @@ function AppContent(): React.ReactElement {
         <CustomizeToolbarDialog onClose={() => setShowCustomizeToolbar(false)} />
       )}
       <ConfirmDialog
+        // A queued request replaces the one on screen without the dialog
+        // closing; a new key opens it fresh, as a first request would be, so
+        // focus and the announcement start over.
+        key={confirmState?.id ?? 0}
         open={confirmState !== null}
         message={confirmState?.message ?? ''}
         kind={confirmState?.kind}

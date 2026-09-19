@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
 
 use crate::app_windows::{self, ClaimState, WindowRegistry, MAIN_LABEL};
+use crate::commands::{LaunchRecord, UnreadableRecord, UnreadableRecords};
 
 const SESSION_FILE: &str = "session.json";
 
@@ -768,7 +769,14 @@ fn session_path(app: &AppHandle) -> Option<PathBuf> {
 
 pub fn load(app: &AppHandle) -> Session {
     session_path(app)
-        .map(|path| load_from(&path, std::process::id(), crate::staging::process_running))
+        .map(|path| {
+            load_from(
+                &path,
+                std::process::id(),
+                crate::staging::process_running,
+                &app.state::<UnreadableRecords>(),
+            )
+        })
         .unwrap_or_default()
 }
 
@@ -778,7 +786,12 @@ pub fn load(app: &AppHandle) -> Session {
 /// A record that exists but cannot be read or parsed is set aside. Every write
 /// that follows replaces the file whole, so a launch that cannot restore from
 /// those bytes would otherwise also destroy them.
-fn load_from(path: &Path, own: u32, running: impl Fn(u32) -> bool) -> Session {
+fn load_from(
+    path: &Path,
+    own: u32,
+    running: impl Fn(u32) -> bool,
+    unreadable: &UnreadableRecords,
+) -> Session {
     crate::staging::reclaim_record_stages(path, own, running);
     let failure = match crate::staging::read_record(path) {
         Ok(None) => return Session::default(),
@@ -788,17 +801,27 @@ fn load_from(path: &Path, own: u32, running: impl Fn(u32) -> bool) -> Session {
         },
         Err(e) => e.to_string(),
     };
-    match crate::staging::set_aside(path) {
-        Ok(aside) => eprintln!(
-            "session: {} is unreadable ({failure}); kept as {}",
-            path.display(),
-            aside.display()
-        ),
-        Err(e) => eprintln!(
-            "session: {} is unreadable ({failure}) and could not be set aside: {e}",
-            path.display()
-        ),
-    }
+    let kept_as = match crate::staging::set_aside(path) {
+        Ok(aside) => {
+            eprintln!(
+                "session: {} is unreadable ({failure}); kept as {}",
+                path.display(),
+                aside.display()
+            );
+            Some(aside.to_string_lossy().into_owned())
+        }
+        Err(e) => {
+            eprintln!(
+                "session: {} is unreadable ({failure}) and could not be set aside: {e}",
+                path.display()
+            );
+            None
+        }
+    };
+    unreadable.push(UnreadableRecord {
+        record: LaunchRecord::Session,
+        kept_as,
+    });
     Session::default()
 }
 
@@ -2056,7 +2079,12 @@ mod tests {
         write_at(&path, &saved_session()).unwrap();
 
         assert!(!orphan.exists());
-        assert_eq!(load_from(&path, std::process::id(), |_| false), saved_session());
+        let unreadable = UnreadableRecords::new();
+        assert_eq!(
+            load_from(&path, std::process::id(), |_| false, &unreadable),
+            saved_session()
+        );
+        assert!(unreadable.take().is_empty());
     }
 
     #[test]
@@ -2065,16 +2093,32 @@ mod tests {
         let path = dir.path().join(SESSION_FILE);
         let torn = b"{\"version\":1,\"windows\":[{\"labelKi";
         std::fs::write(&path, torn).unwrap();
+        let unreadable = UnreadableRecords::new();
 
-        assert_eq!(load_from(&path, 4100, |_| false), Session::default());
+        assert_eq!(
+            load_from(&path, 4100, |_| false, &unreadable),
+            Session::default()
+        );
 
         // The next write lands on a free name; the unread bytes survive it.
         assert!(!path.exists());
         let aside = dir.path().join(format!("{SESSION_FILE}.unreadable"));
         assert_eq!(std::fs::read(&aside).unwrap(), torn);
+        assert_eq!(
+            unreadable.take(),
+            vec![UnreadableRecord {
+                record: LaunchRecord::Session,
+                kept_as: Some(aside.to_string_lossy().into_owned()),
+            }]
+        );
 
-        // No record at all is a first run, and nothing is set aside for it.
-        assert_eq!(load_from(&path, 4100, |_| false), Session::default());
+        // No record at all is a first run: nothing is set aside, and nothing is
+        // reported, so the next launch says nothing about the last one.
+        assert_eq!(
+            load_from(&path, 4100, |_| false, &unreadable),
+            Session::default()
+        );
+        assert!(unreadable.take().is_empty());
         let left: std::collections::BTreeSet<String> = std::fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
@@ -2082,6 +2126,63 @@ mod tests {
         assert_eq!(
             left,
             std::collections::BTreeSet::from([format!("{SESSION_FILE}.unreadable")])
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_session_record_that_cannot_be_read_is_set_aside_and_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SESSION_FILE);
+        std::fs::create_dir(&path).unwrap();
+        let unreadable = UnreadableRecords::new();
+
+        assert_eq!(
+            load_from(&path, 4100, |_| false, &unreadable),
+            Session::default()
+        );
+
+        let aside = dir.path().join(format!("{SESSION_FILE}.unreadable"));
+        assert!(aside.is_dir());
+        assert_eq!(
+            unreadable.take(),
+            vec![UnreadableRecord {
+                record: LaunchRecord::Session,
+                kept_as: Some(aside.to_string_lossy().into_owned()),
+            }]
+        );
+    }
+
+    /// A holder that shares reading but not deletion lets the record be read
+    /// and refuses the rename that would set it aside.
+    #[cfg(windows)]
+    #[test]
+    fn a_session_record_that_cannot_be_set_aside_is_reported_where_it_stands() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SESSION_FILE);
+        let torn = b"{\"version\":1,\"win";
+        std::fs::write(&path, torn).unwrap();
+        let holder = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1) // FILE_SHARE_READ
+            .open(&path)
+            .unwrap();
+        let unreadable = UnreadableRecords::new();
+
+        assert_eq!(
+            load_from(&path, 4100, |_| false, &unreadable),
+            Session::default()
+        );
+
+        drop(holder);
+        assert_eq!(std::fs::read(&path).unwrap(), torn);
+        assert_eq!(
+            unreadable.take(),
+            vec![UnreadableRecord {
+                record: LaunchRecord::Session,
+                kept_as: None,
+            }]
         );
     }
 
@@ -2105,10 +2206,12 @@ mod tests {
             std::fs::write(dir.path().join(name), "{\"version\":9}").unwrap();
         }
 
-        let session = load_from(&path, OWN, |pid| pid == LIVE);
+        let unreadable = UnreadableRecords::new();
+        let session = load_from(&path, OWN, |pid| pid == LIVE, &unreadable);
 
         // The record reads as written: reclaiming never touches it.
         assert_eq!(session, saved_session());
+        assert!(unreadable.take().is_empty());
         let left: std::collections::BTreeSet<String> = std::fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())

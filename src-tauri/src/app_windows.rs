@@ -382,7 +382,44 @@ fn roots_conflict(a: &str, b: &str) -> bool {
     contains(&a, &b) || contains(&b, &a)
 }
 
-/// Which paths and output folders each window holds.
+/// One folder run's hold on every folder it writes.
+///
+/// Held per run, not per window: a window can have two runs at once, one still
+/// finishing after its dialog closed and one just started. A hold shared by the
+/// window lets the second run write the first one's tree, and lets the first
+/// one's release strip the second of its protection.
+#[derive(Clone, Debug)]
+struct RunClaim {
+    token: u64,
+    label: String,
+    roots: Vec<String>,
+}
+
+#[derive(Default)]
+struct RunClaims {
+    /// Never reused, so a late release of a finished run cannot land on a run
+    /// that started after it.
+    last_token: u64,
+    held: Vec<RunClaim>,
+}
+
+/// The outcome of claiming the folders one run writes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunClaimOutcome {
+    pub granted: bool,
+    /// The window whose run holds a conflicting folder. Empty when granted.
+    pub owner: String,
+    /// The conflicting run belongs to the window that asked.
+    pub same_window: bool,
+    /// The requested folder that conflicts. Empty when granted.
+    pub folder: String,
+    /// The key `release_run` takes. `None` when refused.
+    pub token: Option<u64>,
+}
+
+/// Which paths each window holds, and which output folders each folder run
+/// holds.
 ///
 /// This is the one piece of authoritative state that moves to this side of
 /// the boundary. A renderer-side map cannot express it: a second renderer is
@@ -391,14 +428,14 @@ fn roots_conflict(a: &str, b: &str) -> bool {
 /// the window's own destruction instead.
 pub struct ClaimState {
     by_path: Mutex<HashMap<String, Vec<Claim>>>,
-    roots: Mutex<Vec<(String, String)>>,
+    runs: Mutex<RunClaims>,
 }
 
 impl ClaimState {
     pub fn new() -> Self {
         Self {
             by_path: Mutex::new(HashMap::new()),
-            roots: Mutex::new(Vec::new()),
+            runs: Mutex::new(RunClaims::default()),
         }
     }
 
@@ -517,26 +554,59 @@ impl ClaimState {
         paths
     }
 
-    pub fn claim_root(&self, root: &str, label: &str) -> ClaimOutcome {
-        let Ok(mut roots) = self.roots.lock() else {
-            return ClaimOutcome::granted();
-        };
-        if let Some((_, owner)) = roots
+    /// Claim every folder one run writes: all of them, or none.
+    ///
+    /// A folder conflicts with any folder another run holds that names it or
+    /// contains it, whichever window that run belongs to. The folders of one
+    /// run never conflict with each other.
+    pub fn claim_roots(&self, roots: &[String], label: &str) -> RunClaimOutcome {
+        // A root that trims to nothing would contain every UNC path under the
+        // separator rule of `roots_conflict`.
+        let roots: Vec<String> = roots
             .iter()
-            .find(|(r, l)| l != label && roots_conflict(r, root))
-        {
-            return ClaimOutcome::refused(owner);
+            .filter(|root| !root.trim_end_matches(['\\', '/']).is_empty())
+            .cloned()
+            .collect();
+        let mut runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        for wanted in &roots {
+            let holder = runs
+                .held
+                .iter()
+                .find(|run| run.roots.iter().any(|held| roots_conflict(held, wanted)));
+            if let Some(holder) = holder {
+                return RunClaimOutcome {
+                    granted: false,
+                    owner: holder.label.clone(),
+                    same_window: holder.label == label,
+                    folder: wanted.clone(),
+                    token: None,
+                };
+            }
         }
-        if !roots.iter().any(|(r, l)| r == root && l == label) {
-            roots.push((root.to_string(), label.to_string()));
+        runs.last_token += 1;
+        let token = runs.last_token;
+        runs.held.push(RunClaim {
+            token,
+            label: label.to_string(),
+            roots,
+        });
+        RunClaimOutcome {
+            granted: true,
+            owner: String::new(),
+            same_window: false,
+            folder: String::new(),
+            token: Some(token),
         }
-        ClaimOutcome::granted()
     }
 
-    pub fn release_root(&self, root: &str, label: &str) {
-        if let Ok(mut roots) = self.roots.lock() {
-            roots.retain(|(r, l)| !(r == root && l == label));
-        }
+    /// Give back the folders of one run. False when `token` names no run of
+    /// this window.
+    pub fn release_run(&self, token: u64, label: &str) -> bool {
+        let mut runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        let before = runs.held.len();
+        runs.held
+            .retain(|run| !(run.token == token && run.label == label));
+        runs.held.len() != before
     }
 
     /// Drop everything a window held. Driven by the window's destruction so a
@@ -548,9 +618,11 @@ impl ClaimState {
                 !holders.is_empty()
             });
         }
-        if let Ok(mut roots) = self.roots.lock() {
-            roots.retain(|(_, l)| l != label);
-        }
+        self.runs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .held
+            .retain(|run| run.label != label);
     }
 }
 
@@ -1091,23 +1163,26 @@ pub async fn release_document(
 }
 
 #[tauri::command]
-pub async fn claim_output_root(
+pub async fn claim_output_roots(
     app: AppHandle,
     window: tauri::WebviewWindow,
-    path: String,
-) -> Result<ClaimOutcome, String> {
-    let path = crate::commands::canonical_path(&path);
-    Ok(app.state::<ClaimState>().claim_root(&path, window.label()))
+    paths: Vec<String>,
+) -> Result<RunClaimOutcome, String> {
+    let roots: Vec<String> = paths
+        .iter()
+        .map(|p| crate::commands::canonical_path(p))
+        .collect();
+    let claims = app.state::<ClaimState>();
+    Ok(claims.claim_roots(&roots, window.label()))
 }
 
 #[tauri::command]
-pub async fn release_output_root(
+pub async fn release_output_roots(
     app: AppHandle,
     window: tauri::WebviewWindow,
-    path: String,
+    token: u64,
 ) -> Result<(), String> {
-    let path = crate::commands::canonical_path(&path);
-    app.state::<ClaimState>().release_root(&path, window.label());
+    app.state::<ClaimState>().release_run(token, window.label());
     Ok(())
 }
 
@@ -1454,17 +1529,185 @@ mod tests {
         assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Write).granted);
     }
 
+    /// One run of `label` claiming `paths`.
+    fn run(state: &ClaimState, label: &str, paths: &[&str]) -> RunClaimOutcome {
+        let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
+        state.claim_roots(&paths, label)
+    }
+
     #[test]
     fn destroying_a_window_drops_everything_it_held() {
         let state = ClaimState::new();
         assert!(state.claim("C:\\a.pdf", "doc-1", ClaimMode::Write).granted);
-        assert!(state.claim_root("C:\\out", "doc-1").granted);
+        assert!(run(&state, "doc-1", &["C:\\out"]).granted);
+        assert!(run(&state, "doc-1", &["C:\\out2"]).granted);
+        assert!(run(&state, "main", &["C:\\kept"]).granted);
 
         state.release_label("doc-1");
 
         assert_eq!(state.owner("C:\\a.pdf"), None);
         assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
-        assert!(state.claim_root("C:\\out", "main").granted);
+        assert!(run(&state, "main", &["C:\\out"]).granted);
+        assert!(run(&state, "main", &["C:\\out2"]).granted);
+        // Another window's run is not the destroyed window's to drop.
+        let kept = run(&state, "doc-2", &["C:\\kept"]);
+        assert!(!kept.granted);
+        assert_eq!(kept.owner, "main");
+    }
+
+    #[test]
+    fn a_second_run_of_one_window_on_the_same_folder_is_refused() {
+        let state = ClaimState::new();
+        assert!(run(&state, "main", &["C:\\out"]).granted);
+
+        // The first run is still writing: its dialog was closed while it stopped.
+        let second = run(&state, "main", &["C:\\out"]);
+        assert!(!second.granted);
+        assert_eq!(second.owner, "main");
+        assert!(second.same_window);
+        assert_eq!(second.folder, "C:\\out");
+        assert_eq!(second.token, None);
+    }
+
+    #[test]
+    fn a_second_run_of_one_window_on_a_nested_folder_is_refused_both_ways() {
+        let outer_first = ClaimState::new();
+        assert!(run(&outer_first, "main", &["C:\\out"]).granted);
+        let inner = run(&outer_first, "main", &["C:\\out\\sub"]);
+        assert!(!inner.granted);
+        assert!(inner.same_window);
+        assert_eq!(inner.folder, "C:\\out\\sub");
+
+        let inner_first = ClaimState::new();
+        assert!(run(&inner_first, "main", &["C:\\out\\sub"]).granted);
+        let outer = run(&inner_first, "main", &["C:\\out"]);
+        assert!(!outer.granted);
+        assert!(outer.same_window);
+        assert_eq!(outer.folder, "C:\\out");
+    }
+
+    #[test]
+    fn a_refusal_says_whether_the_run_in_the_way_is_this_windows_own() {
+        let state = ClaimState::new();
+        assert!(run(&state, "doc-1", &["C:\\out"]).granted);
+        let refused = run(&state, "main", &["C:\\out"]);
+        assert!(!refused.granted);
+        assert_eq!(refused.owner, "doc-1");
+        assert!(!refused.same_window);
+    }
+
+    #[test]
+    fn releasing_one_run_leaves_the_other_runs_folders_claimed() {
+        let state = ClaimState::new();
+        let first = run(&state, "main", &["C:\\out\\a"]).token.unwrap();
+        let second = run(&state, "main", &["C:\\out\\b"]).token.unwrap();
+        assert_ne!(first, second);
+
+        assert!(state.release_run(first, "main"));
+
+        // The second run still writes C:\out\b: no run of any window may write
+        // over it, its own window's included.
+        let over = run(&state, "doc-1", &["C:\\out"]);
+        assert!(!over.granted);
+        assert_eq!(over.owner, "main");
+        assert!(!run(&state, "main", &["C:\\out\\b"]).granted);
+        // The first run's folder is free again.
+        let reuse = run(&state, "doc-1", &["C:\\out\\a"]);
+        assert!(reuse.granted);
+
+        assert!(state.release_run(second, "main"));
+        assert!(state.release_run(reuse.token.unwrap(), "doc-1"));
+        assert!(run(&state, "doc-2", &["C:\\out"]).granted);
+    }
+
+    #[test]
+    fn a_release_frees_only_a_run_of_the_window_that_sends_it() {
+        let state = ClaimState::new();
+        let token = run(&state, "main", &["C:\\out"]).token.unwrap();
+
+        // Tokens are sequential; a window that sends another window's token
+        // releases nothing.
+        assert!(!state.release_run(token, "doc-1"));
+        assert!(!run(&state, "doc-1", &["C:\\out"]).granted);
+
+        assert!(state.release_run(token, "main"));
+        // A token is spent once.
+        assert!(!state.release_run(token, "main"));
+        assert!(!state.release_run(token + 1, "main"));
+    }
+
+    #[test]
+    fn a_token_is_never_issued_twice() {
+        let state = ClaimState::new();
+        let first = run(&state, "main", &["C:\\out"]).token.unwrap();
+        assert!(state.release_run(first, "main"));
+        let second = run(&state, "main", &["C:\\out"]).token.unwrap();
+        assert_ne!(first, second);
+
+        // A late release of the first run does not free the second.
+        assert!(!state.release_run(first, "main"));
+        assert!(!run(&state, "doc-1", &["C:\\out"]).granted);
+    }
+
+    #[test]
+    fn a_run_claims_all_its_folders_or_none() {
+        let state = ClaimState::new();
+        assert!(run(&state, "doc-1", &["C:\\moved"]).granted);
+
+        let refused = run(&state, "main", &["C:\\out", "C:\\moved\\x"]);
+        assert!(!refused.granted);
+        assert_eq!(refused.owner, "doc-1");
+        assert_eq!(refused.folder, "C:\\moved\\x");
+
+        // Nothing of the refused run stayed behind.
+        assert!(run(&state, "doc-2", &["C:\\out"]).granted);
+    }
+
+    #[test]
+    fn one_runs_own_folders_do_not_conflict_with_each_other() {
+        // An in-place run writes its source tree and files its originals into
+        // a folder inside it.
+        let state = ClaimState::new();
+        let in_place = run(&state, "main", &["C:\\docs", "C:\\docs\\done"]);
+        assert!(in_place.granted);
+        assert!(!run(&state, "doc-1", &["C:\\docs\\done"]).granted);
+        assert!(state.release_run(in_place.token.unwrap(), "main"));
+        assert!(run(&state, "doc-1", &["C:\\docs\\done"]).granted);
+    }
+
+    #[test]
+    fn a_blank_folder_claims_nothing() {
+        let state = ClaimState::new();
+        assert!(run(&state, "main", &["", "/"]).granted);
+        assert!(run(&state, "doc-1", &["\\\\server\\share\\out"]).granted);
+        assert!(run(&state, "doc-2", &["/srv/out"]).granted);
+    }
+
+    #[test]
+    fn a_run_claim_crosses_the_wire_in_the_shape_the_renderer_reads() {
+        let state = ClaimState::new();
+        let granted = run(&state, "main", &["C:\\out"]);
+        assert_eq!(
+            serde_json::to_value(&granted).unwrap(),
+            serde_json::json!({
+                "granted": true,
+                "owner": "",
+                "sameWindow": false,
+                "folder": "",
+                "token": granted.token.unwrap(),
+            })
+        );
+        let refused = run(&state, "doc-1", &["C:\\out\\sub"]);
+        assert_eq!(
+            serde_json::to_value(&refused).unwrap(),
+            serde_json::json!({
+                "granted": false,
+                "owner": "main",
+                "sameWindow": false,
+                "folder": "C:\\out\\sub",
+                "token": null,
+            })
+        );
     }
 
     #[test]
@@ -1487,11 +1730,13 @@ mod tests {
         assert!(!roots_conflict("C:\\out", "C:\\other"));
 
         let state = ClaimState::new();
-        assert!(state.claim_root("C:\\out", "main").granted);
-        let refused = state.claim_root("C:\\out\\sub", "doc-1");
+        assert!(run(&state, "main", &["C:\\out"]).granted);
+        let refused = run(&state, "doc-1", &["C:\\out\\sub"]);
         assert!(!refused.granted);
         assert_eq!(refused.owner, "main");
-        assert!(state.claim_root("C:\\out2", "doc-1").granted);
+        assert!(run(&state, "doc-1", &["C:\\out2"]).granted);
+        assert!(!run(&state, "main", &["C:\\out2\\x"]).granted);
+        assert!(run(&state, "main", &["C:\\other"]).granted);
     }
 
     #[test]

@@ -17,7 +17,7 @@ import {
   type BatchReport,
 } from '../lib/batch-ocr';
 import { createBatchIo } from '../lib/batch-ocr-io';
-import { claimOutputRoot } from '../lib/output-root-claim';
+import { claimOutputRoots, writtenRoots } from '../lib/output-root-claim';
 import { formatBatchLog, batchLogFileName } from '../lib/batch-log';
 import { getSettings } from '../lib/app-settings';
 import {
@@ -393,6 +393,14 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const startInPlace = async (): Promise<void> => {
     if (!canStart || !source) return;
     setConfirmInPlace(false);
+    // Rewrites the source tree and files failures into the error folder.
+    const root = await claimOutputRoots(
+      writtenRoots({ source, dest: '', inPlace: true, filing: [errorRoot] }),
+    );
+    if (!root.granted) {
+      setError(root.message);
+      return;
+    }
     setPhase('running');
     setError(null);
     setProgress(null);
@@ -429,14 +437,25 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
       setPhase('setup');
+    } finally {
+      await root.release();
     }
   };
 
   const start = async (): Promise<void> => {
     if (!canStart || !source || !dest || !entries) return;
-    // Two windows sweeping into one output tree overwrite each other file by
-    // file, and neither the commit gate nor the per-file lock spans windows.
-    const root = await claimOutputRoot(dest);
+    // Two runs sweeping into one tree overwrite each other file by file, and
+    // neither the commit gate nor the per-file lock spans windows. Filing an
+    // original, or replacing a repaired one, writes the source tree too.
+    const root = await claimOutputRoots(
+      writtenRoots({
+        source,
+        dest,
+        inPlace: false,
+        filing: [movedRoot, errorRoot],
+        changesSource: Boolean(movedRoot) || Boolean(errorRoot) || (repairDamaged && replaceRepaired),
+      }),
+    );
     if (!root.granted) {
       setError(root.message);
       return;

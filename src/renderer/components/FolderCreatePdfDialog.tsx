@@ -20,7 +20,7 @@ import {
   type FolderProgress,
 } from '../lib/folder-create-pdf';
 import { createFolderCreatePdfIo, listSourceFolders } from '../lib/folder-create-pdf-io';
-import { claimOutputRoot } from '../lib/output-root-claim';
+import { claimOutputRoots } from '../lib/output-root-claim';
 import {
   folderCreatePdfLogFileName,
   formatFolderCreatePdfLog,
@@ -222,7 +222,7 @@ export function FolderCreatePdfDialog({
     if (!listing || listing.groups.length === 0 || source === null || dest === null) return;
     // Two windows sweeping into one output tree overwrite each other file by
     // file, and neither the commit gate nor the per-file lock spans windows.
-    const root = await claimOutputRoot(dest);
+    const root = await claimOutputRoots([dest]);
     if (!root.granted) {
       setError(root.message);
       return;
