@@ -768,10 +768,16 @@ fn session_path(app: &AppHandle) -> Option<PathBuf> {
 }
 
 pub fn load(app: &AppHandle) -> Session {
-    let Some(path) = session_path(app) else {
-        return Session::default();
-    };
-    let Ok(contents) = std::fs::read_to_string(&path) else {
+    session_path(app)
+        .map(|path| load_from(&path, std::process::id(), crate::staging::process_running))
+        .unwrap_or_default()
+}
+
+/// Read the record, first removing the staging files that killed writers left
+/// beside it.
+fn load_from(path: &Path, own: u32, running: impl Fn(u32) -> bool) -> Session {
+    reclaim_staging(path, own, running);
+    let Ok(contents) = std::fs::read_to_string(path) else {
         return Session::default();
     };
     serde_json::from_str(&contents).unwrap_or_default()
@@ -786,6 +792,29 @@ fn staging_path(path: &Path) -> PathBuf {
         .and_then(|n| n.to_str())
         .unwrap_or(SESSION_FILE);
     path.with_file_name(format!("{}.{}.tmp", name, std::process::id()))
+}
+
+/// The process whose `staging_path` produced `entry` beside the record named
+/// `record`.
+fn staging_owner(record: &str, entry: &str) -> Option<u32> {
+    let pid = entry
+        .strip_prefix(record)?
+        .strip_prefix('.')?
+        .strip_suffix(".tmp")?;
+    crate::staging::decimal_pid(pid)
+}
+
+/// Remove each staging file beside the record whose process is neither this
+/// one nor still running.
+///
+/// A process killed between creating its staging file and renaming it leaves
+/// the file under its own id, and no later write uses that name.
+fn reclaim_staging(path: &Path, own: u32, running: impl Fn(u32) -> bool) -> usize {
+    let (Some(dir), Some(record)) = (path.parent(), path.file_name().and_then(|n| n.to_str()))
+    else {
+        return 0;
+    };
+    crate::staging::reclaim(dir, own, |entry| staging_owner(record, entry), running)
 }
 
 /// Replace the record in one step.
@@ -2036,6 +2065,61 @@ mod tests {
         std::fs::create_dir(staging_path(&path)).unwrap();
         assert!(write_staged(&path, "{\"version\":2}").is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"version\":1}");
+    }
+
+    #[test]
+    fn a_launch_reclaims_only_the_staging_a_stopped_process_left() {
+        const OWN: u32 = 4100;
+        const LIVE: u32 = 4200;
+        const DEAD: u32 = 4300;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SESSION_FILE);
+        let record = serde_json::to_string(&saved_session()).unwrap();
+        std::fs::write(&path, &record).unwrap();
+        let beside = [
+            "session.json.bak".to_string(),
+            "session.json.abc.tmp".to_string(),
+            format!("session.json.{OWN}.tmp"),
+            format!("session.json.{LIVE}.tmp"),
+            format!("session.json.{DEAD}.tmp"),
+        ];
+        for name in &beside {
+            std::fs::write(dir.path().join(name), "{\"version\":9}").unwrap();
+        }
+
+        let session = load_from(&path, OWN, |pid| pid == LIVE);
+
+        // The record reads as written: reclaiming never touches it.
+        assert_eq!(session, saved_session());
+        let left: std::collections::BTreeSet<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        let mut kept: std::collections::BTreeSet<String> = beside.into_iter().collect();
+        kept.insert(SESSION_FILE.to_string());
+        kept.remove(&format!("session.json.{DEAD}.tmp"));
+        assert_eq!(left, kept);
+    }
+
+    #[test]
+    fn the_reclaim_recognises_exactly_the_names_the_writer_stages() {
+        let path = Path::new("C:\\data").join(SESSION_FILE);
+        let staged = staging_path(&path);
+        let name = staged.file_name().unwrap().to_str().unwrap();
+        assert_eq!(staging_owner(SESSION_FILE, name), Some(std::process::id()));
+        for other in [
+            SESSION_FILE,
+            "session.json.bak",
+            "session.json.tmp",
+            "session.json..tmp",
+            "session.json.abc.tmp",
+            "session.json.04300.tmp",
+            "session.json.4300.tmp.bak",
+            "session.json4300.tmp",
+            "other.json.4300.tmp",
+        ] {
+            assert_eq!(staging_owner(SESSION_FILE, other), None, "{other}");
+        }
     }
 
     // ── The quit gate ─────────────────────────────────────────────────────

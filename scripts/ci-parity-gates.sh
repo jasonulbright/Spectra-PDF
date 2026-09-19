@@ -7,7 +7,7 @@
 # gate and the tag/version-consistency check, which the full battery does not
 # run.
 #
-# This is NOT the full battery (tsc/lint/vitest/pytest — run those too). This
+# This is NOT the full battery (lint/vitest/pytest — run those too). This
 # is the set of CI gates the battery historically OMITTED. Run BOTH.
 #
 # The full engine suite runs here only as the workflow-contract gate's single
@@ -85,6 +85,10 @@ fi
 #     change that did not regenerate it. ---
 gate engine-manifest "$R/.venv/Scripts/python.exe" scripts/gen-engine-payload-manifest.py --check
 gate engine-payload "$R/.venv/Scripts/python.exe" scripts/check-engine-payload.py
+
+# --- CI job: Lint & Build type-checks the renderer. ESLint does not, and the
+#     Vite build strips types without checking them. ---
+gate typecheck npm run typecheck
 
 # --- CI/Release gate: the shipped renderer carries no e2e test harness. The
 #     harness is compiled out by VITE_E2E; dist/renderer on this machine may be

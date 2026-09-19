@@ -1210,6 +1210,35 @@ def test_every_job_running_the_suite_checks_out_with_tags() -> None:
             assert "fetch-tags: true" in text, (workflow, job)
 
 
+LINT_RUN = "run: npm run lint"
+TYPECHECK_RUN = "run: npm run typecheck"
+
+
+def test_every_job_that_lints_the_renderer_also_typechecks_it() -> None:
+    """ESLint does not type-check, and the Vite build strips types without
+    checking them. A job that lints without a typecheck passes a type error,
+    and when that job is the one CI runs on push, the error surfaces first in
+    the release Verify job. The local parity run carries the same gate."""
+    linting = [
+        (workflow, job)
+        for workflow in sorted(p.name for p in (ROOT / ".github" / "workflows").glob("*.yml"))
+        for job in _workflow_jobs(workflow)
+        if any(LINT_RUN in text for _name, text in _job_steps(workflow, job))
+    ]
+    assert ("ci.yml", "lint-and-build") in linting
+    assert ("release.yml", "verify") in linting
+    for workflow, job in linting:
+        steps = [text for _name, text in _job_steps(workflow, job)]
+        install = next(i for i, text in enumerate(steps) if "run: npm ci" in text)
+        checks = [
+            i for i, text in enumerate(steps)
+            if any(line.strip() == TYPECHECK_RUN for line in text.splitlines())
+        ]
+        assert checks and install < min(checks), (workflow, job)
+    parity = (ROOT / "scripts" / "ci-parity-gates.sh").read_text().splitlines()
+    assert "gate typecheck npm run typecheck" in parity
+
+
 @pytest.mark.parametrize("index", range(RELEASED_TAG_COUNT))
 def test_the_redo_selects_a_regime_every_released_tag_can_run(index: int) -> None:
     """Every script the redo runs exists where the redo will look for it.

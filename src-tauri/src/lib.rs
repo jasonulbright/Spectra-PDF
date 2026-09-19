@@ -8,6 +8,7 @@ mod send_to;
 mod snapshot;
 mod page_commit;
 mod file_publication;
+mod staging;
 mod watchers;
 mod web_capture;
 pub mod engine;

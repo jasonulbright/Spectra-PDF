@@ -20,7 +20,7 @@
 //! matching across the machine — the same discipline as the batch-log sweep and
 //! `delete_batch_scratch`. This code never touches a task outside that folder.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tauri::AppHandle;
@@ -143,6 +143,30 @@ fn action_file_path(name: &str) -> Result<PathBuf, String> {
     // `name` has passed valid_task_name: no separators, no wildcards — safe
     // as a file name inside our own folder.
     Ok(actions_dir()?.join(format!("{name}.json")))
+}
+
+/// Where a frozen action waits for its task to register: beside its final
+/// name, under the staging process's id. A process killed during the
+/// registration leaves the file, and the id is what tells that leftover apart
+/// from a stage another process is still writing.
+fn action_staging_path(final_path: &Path, pid: u32) -> PathBuf {
+    let mut name = final_path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{pid}.new"));
+    final_path.with_file_name(name)
+}
+
+/// The process whose `action_staging_path` produced `entry`.
+fn action_staging_owner(entry: &str) -> Option<u32> {
+    let (action, pid) = entry.strip_suffix(".new")?.rsplit_once('.')?;
+    if !action.ends_with(".json") {
+        return None;
+    }
+    crate::staging::decimal_pid(pid)
+}
+
+/// Remove the stages that killed processes left in the actions folder.
+fn reclaim_action_stages(dir: &Path, own: u32, running: impl Fn(u32) -> bool) -> usize {
+    crate::staging::reclaim(dir, own, action_staging_owner, running)
 }
 
 /// A task name we are willing to create or delete. Deliberately strict: this
@@ -471,7 +495,7 @@ pub async fn create_scheduled_run(
     if profile.run_type == "action" {
         if let Some(json) = action_json.as_deref().filter(|j| !j.trim().is_empty()) {
             let final_path = PathBuf::from(&profile.action_file);
-            let staging = final_path.with_extension("json.new");
+            let staging = action_staging_path(&final_path, std::process::id());
             if let Some(parent) = final_path.parent() {
                 std::fs::create_dir_all(parent)
                     .map_err(|e| format!("Could not create the scheduled-actions folder: {e}"))?;
@@ -839,6 +863,9 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 /// cannot return anything we did not put there.
 #[tauri::command]
 pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
+    if let Ok(dir) = actions_dir() {
+        reclaim_action_stages(&dir, std::process::id(), crate::staging::process_running);
+    }
     let out = match run(schtasks().args([
         "/Query",
         "/TN",
@@ -1294,5 +1321,67 @@ mod tests {
         p.enhance = false;
         let args = build_arguments("exe", &p);
         assert!(!args.contains("--enhance"), "{args}");
+    }
+
+    #[test]
+    fn an_action_stages_under_the_writing_process() {
+        let final_path =
+            Path::new(r"C:\ProgramData\Spectra PDF\scheduled-actions\Nightly v1.2.json");
+        let staged = action_staging_path(final_path, 4300);
+        assert_eq!(
+            staged,
+            Path::new(r"C:\ProgramData\Spectra PDF\scheduled-actions\Nightly v1.2.json.4300.new")
+        );
+        let name = staged.file_name().unwrap().to_str().unwrap();
+        assert_eq!(action_staging_owner(name), Some(4300));
+        for other in [
+            "Nightly.json",
+            "Nightly.json.new",
+            "Nightly.json.x.new",
+            "Nightly.json.04300.new",
+            "Nightly.txt.4300.new",
+            "Nightly.json.4300.new.bak",
+            "Nightly.json.4300",
+        ] {
+            assert_eq!(action_staging_owner(other), None, "{other}");
+        }
+    }
+
+    #[test]
+    fn a_listing_reclaims_only_the_stages_of_stopped_processes() {
+        const OWN: u32 = 4100;
+        const LIVE: u32 = 4200;
+        const DEAD: u32 = 4300;
+        let dir = tempfile::tempdir().unwrap();
+        let final_path = dir.path().join("Nightly.json");
+        let names = [
+            "Nightly.json".to_string(),
+            "Nightly.json.new".to_string(),
+            action_staging_name(&final_path, OWN),
+            action_staging_name(&final_path, LIVE),
+            action_staging_name(&final_path, DEAD),
+            action_staging_name(&dir.path().join("a.b.json"), DEAD),
+        ];
+        for name in &names {
+            std::fs::write(dir.path().join(name), "{}").unwrap();
+        }
+
+        assert_eq!(reclaim_action_stages(dir.path(), OWN, |pid| pid == LIVE), 2);
+
+        let left: std::collections::BTreeSet<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        let kept: std::collections::BTreeSet<String> = names[..4].iter().cloned().collect();
+        assert_eq!(left, kept);
+    }
+
+    fn action_staging_name(final_path: &Path, pid: u32) -> String {
+        action_staging_path(final_path, pid)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
     }
 }
