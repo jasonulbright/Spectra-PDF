@@ -62,10 +62,3 @@ export async function renderPageToCanvas(
   await page.render({ canvas, canvasContext: ctx, viewport }).promise;
   return canvas;
 }
-
-export async function getPageCount(buffer: PdfBuffer): Promise<number> {
-  const doc = await loadDocument(buffer);
-  const count = doc.numPages;
-  doc.loadingTask.destroy();
-  return count;
-}

@@ -15,6 +15,7 @@
 // and the loser's whole session disappears with no error anywhere.
 
 import { claims } from './tauri-bridge';
+import type { OpenFile } from '../state/types';
 
 export type ClaimMode = 'write' | 'read';
 
@@ -111,6 +112,20 @@ export function createClaimHolds(): ClaimHolds {
     },
     held: (path) => (counts.get(path) ?? 0) > 0,
   };
+}
+
+/**
+ * The byte-only import sources `previous` held that `next` no longer holds.
+ *
+ * A source leaves `files` once no page references it, and nothing else
+ * releases its read claim: another window could not open that file for
+ * editing until this window closed.
+ */
+export function departedImportSources(
+  previous: ReadonlyMap<string, OpenFile>,
+  next: ReadonlyMap<string, OpenFile>,
+): string[] {
+  return [...previous.values()].filter((f) => f.importOnly && !next.has(f.path)).map((f) => f.path);
 }
 
 /**

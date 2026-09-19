@@ -5,6 +5,7 @@ import { editWorkspaceImage, type ImageEdit, type ImageEditIo } from '../src/ren
 import { createAppStore } from '../src/renderer/state/store';
 import { initialState } from '../src/renderer/state/reducer';
 import type { AppAction, OpenFile } from '../src/renderer/state/types';
+import { readingWith } from './helpers/published-bytes';
 
 const raw = { raw_path: 'input.raw', width: 1, height: 1, channels: 3 as const };
 const hash = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
@@ -25,7 +26,7 @@ function fixture() {
     pick: vi.fn(async () => 'photo.jpg'), readSource: vi.fn(async () => new Uint8Array([0xff, 0xd8, 0xff, 0xd9])),
     decode: vi.fn(async (_bytes, write) => ({ ...raw, raw_path: await write(new Uint8Array([0, 255, 0])) })),
     write: vi.fn(async (p, b) => { disk.set(p, b.slice()); }),
-    read: vi.fn(async p => disk.get(p)!.slice()), remove: async p => { disk.delete(p); }, countPages: async () => 1,
+    read: vi.fn(async p => disk.get(p)!.slice()), remove: async p => { disk.delete(p); }, index: readingWith(async () => 1),
     callStaged: vi.fn(async (_method, params = {}) => {
       expect(params.file).not.toBe('work'); expect(params.file).toBe(params.output);
       expect(disk.get('work')).toEqual(original); expect(disk.get(String(params.file))).toEqual(original);
@@ -63,7 +64,7 @@ describe('image gesture publication', () => {
       const f = fixture(); const fail = async () => { throw new Error('injected'); };
       if (where === 'write') f.io.write = fail;
       if (where === 'read') f.io.read = fail;
-      if (where === 'count') f.io.countPages = fail;
+      if (where === 'count') f.io.index = readingWith(fail);
       if (where === 'publish') f.io.transaction.publish = fail;
       if (where === 'engine') { const call = f.io.callStaged; f.io.callStaged = async (m, p) => { await call(m, p); return fail(); }; }
       await expect(f.run(edit)).rejects.toThrow('injected'); f.unchanged(); expect(f.events).not.toContain('success');
@@ -115,7 +116,7 @@ describe('image gesture publication', () => {
   });
   it('a changed post-gate revision gets fresh consent without repeating the picker', async () => {
     const f = fixture(); const confirm = vi.fn(async () => true); f.io.confirm = confirm;
-    f.io.commit = async () => f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: f.original.slice(), pageCount: 1, snapshotPath: 'gate-snapshot' });
+    f.io.commit = async () => f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: f.original.slice(), pageCount: 1, snapshotPath: 'gate-snapshot', documents: [] });
     await f.run({ kind: 'add', page: 1, rect: null });
     expect(confirm).toHaveBeenCalledTimes(2); expect(f.io.pick).toHaveBeenCalledTimes(1);
   });

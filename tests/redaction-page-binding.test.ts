@@ -72,11 +72,21 @@ describe('pageForFilePageNumber', () => {
     expect([1, 2, 3].map((n) => idOf(moved, n))).toEqual(['a.pdf#p2', 'a.pdf#p0', 'a.pdf#p1']);
   });
 
-  it('binds nothing while the documents describe the previous bytes', () => {
+  it('binds nothing while the documents describe other bytes than the file holds', () => {
+    const s = opened();
+    const files = new Map(s.files);
+    files.set('a.pdf', { ...files.get('a.pdf')!, buffer: [7] });
+    expect([1, 2, 3].map((n) => idOf({ ...s, files }, n))).toEqual([null, null, null]);
+  });
+
+  it('binds the documents an operation places with its bytes', () => {
+    const buffer = [7];
+    const a = { ...opened().files.get('a.pdf')!, buffer };
+    const read = [{ ...a, id: 'a#g2#0', pages: pages('a.pdf', 3).map((p, i) => ({ ...p, id: `a#g2#p${i}` })) }];
     const replaced = appReducer(opened(), {
-      type: 'UPDATE_FILE', path: 'a.pdf', pageCount: 3, buffer: [7], snapshotPath: 's',
+      type: 'UPDATE_FILE', path: 'a.pdf', pageCount: 3, buffer, snapshotPath: 's', documents: read,
     });
-    expect([1, 2, 3].map((n) => idOf(replaced, n))).toEqual([null, null, null]);
+    expect([1, 2, 3].map((n) => idOf(replaced, n))).toEqual(['a#g2#p0', 'a#g2#p1', 'a#g2#p2']);
   });
 
   it('binds nothing for a page number the bytes do not have', () => {

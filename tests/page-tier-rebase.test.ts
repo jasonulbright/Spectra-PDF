@@ -340,16 +340,14 @@ describe('an edit made after a commit lands and before its reindex lands', () =>
     expect(s.pageDirtyPaths).toEqual(['b.pdf']);
   });
 
-  it('a path whose ids do not survive the reindex refuses its edits with a notice and drops its dirt', () => {
-    // An engine operation replaced the bytes: the reindex mints a fresh generation.
+  it('a read-back whose ids do not survive refuses the edits made meanwhile with a notice and drops their dirt', () => {
+    // A read-back that does not adopt the commit's ids mints a fresh generation.
     const b = file('b.pdf', [1], 3);
     const s0 = state([b], [doc(b, 'b#0', [0, 1, 2].map((i) => page('b.pdf', i)))]);
-    const replaced = appReducer(s0, {
-      type: 'UPDATE_FILE', path: 'b.pdf', pageCount: 3, buffer: [2], snapshotPath: 's',
-    });
-    const edited = appReducer(replaced, { type: 'DELETE_PAGE_REFS', pageIds: ['b.pdf#p1'] });
+    const c = commit(run(s0, { type: 'ROTATE_PAGE_REFS', pageIds: ['b.pdf#p0'], delta: 90 }));
+    const edited = appReducer(c.state, { type: 'DELETE_PAGE_REFS', pageIds: ['b.pdf#p1'] });
     expect(edited.pageDirtyPaths).toEqual(['b.pdf']);
-    const newBytes = replaced.files.get('b.pdf')!;
+    const newBytes = c.state.files.get('b.pdf')!;
     const s = appReducer(edited, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'b.pdf',
@@ -379,22 +377,22 @@ describe('an edit made after a commit lands and before its reindex lands', () =>
     expect(s.pageEditRefusals).toBe(1);
   });
 
-  it('a selected page the rebuild could not carry is pruned wherever it sat', () => {
-    // b.pdf's bytes were replaced by an operation, so its reindex mints fresh
-    // ids; a page moved out of it meanwhile sits in a.pdf's document.
+  it('a selected page the read-back could not carry is pruned wherever it sat', () => {
+    // b.pdf's read-back does not adopt the commit's ids; a page moved out of
+    // its composed documents meanwhile sits in a.pdf's document.
     const a = file('a.pdf', [5], 1);
     const b = file('b.pdf', [1], 2);
     const s0 = state([a, b], [
       doc(a, 'a#0', [page('a.pdf', 0)]),
       doc(b, 'b#0', [page('b.pdf', 0), page('b.pdf', 1)]),
     ]);
-    const replaced = appReducer(s0, { type: 'UPDATE_FILE', path: 'b.pdf', pageCount: 2, buffer: [2], snapshotPath: 's' });
+    const c = commit(run(s0, { type: 'ROTATE_PAGE_REFS', pageIds: ['b.pdf#p0'], delta: 90 }));
     const moved = run(
-      replaced,
+      c.state,
       { type: 'MOVE_PAGES', pageIds: ['b.pdf#p1'], toDocId: 'a#0', toIndex: 1 },
       { type: 'UI_SET_SELECTION', pageIds: ['b.pdf#p1', 'a.pdf#p0'], anchor: 'b.pdf#p1' },
     );
-    const newBytes = replaced.files.get('b.pdf')!;
+    const newBytes = c.state.files.get('b.pdf')!;
     const s = appReducer(moved, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'b.pdf',
@@ -634,7 +632,7 @@ describe('the documents a commit lands', () => {
 describe('where re-derived documents land', () => {
   // Fresh ids name no outgoing slot, so no slot is theirs to keep: the
   // re-derived partitions land together at the first outgoing slot.
-  it('a non-adopted reindex of interleaved partitions lands as one block', () => {
+  it('partitions read from new bytes land as one block', () => {
     const b = file('b.pdfx', [1], 2);
     const a = file('a.pdf', [5], 1);
     const s0 = state([b, a], [
@@ -642,11 +640,10 @@ describe('where re-derived documents land', () => {
       doc(a, 'a#0', [page('a.pdf', 0)]),
       doc(b, 'b#1', [page('b.pdfx', 1)]),
     ]);
-    const replaced = appReducer(s0, { type: 'UPDATE_FILE', path: 'b.pdfx', pageCount: 2, buffer: [2], snapshotPath: 's' });
-    const newBytes = replaced.files.get('b.pdfx')!;
-    const s = appReducer(replaced, {
-      type: 'SET_WORKSPACE_DOCUMENTS',
-      path: 'b.pdfx',
+    const buffer = [2];
+    const newBytes = file('b.pdfx', buffer, 2);
+    const s = appReducer(s0, {
+      type: 'UPDATE_FILE', path: 'b.pdfx', pageCount: 2, buffer, snapshotPath: 's',
       documents: [
         doc(newBytes, 'b#g2#0', [page('b.pdfx', 0, { id: 'b#g2#p0' })]),
         doc(newBytes, 'b#g2#1', [page('b.pdfx', 1, { id: 'b#g2#p1' })]),

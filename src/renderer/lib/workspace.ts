@@ -11,12 +11,15 @@ import {
   positionalPageId,
 } from './durable-identity';
 import type { OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer } from '../state/types';
+import type { ReadPublishedBytes } from './workspace-settle';
 
 // Derives the workspace's page-level view of an open file: reads the .pdfx
 // manifest (if present) to recover document boundaries, and captures per-page
 // dimensions for the canvas layout. A plain PDF yields a single document
-// covering all pages. Runs off the open/update critical path — see
-// useWorkspaceIndexer.
+// covering all pages. An open, and a page-tier commit's read-back, are indexed
+// off the critical path (useWorkspaceIndexer); an operation or a disk undo or
+// redo reads the bytes it publishes before it places them
+// (readPublishedBytes).
 //
 // Identity: positional ids are minted
 // under a fresh per-path GENERATION each index, so an id from before any
@@ -39,10 +42,26 @@ export async function indexOpenFile(file: OpenFile): Promise<OpenDocument[]> {
 // import reading the shared proxy could wait forever. The pages index
 // `file.buffer`; the import is refused when the file no longer holds it.
 export async function indexImportSource(file: OpenFile): Promise<OpenDocument[]> {
-  if (!file.buffer) return [];
-  const doc = await loadDocument(file.buffer);
+  const buffer = file.buffer;
+  if (!buffer) return [];
+  return withOwnDocument(buffer, (doc) => indexDocument(file, buffer, doc));
+}
+
+// The bytes an operation or a disk undo or redo is about to place, read through
+// a pdf.js document of their own: the shared proxy still draws the bytes being
+// replaced. The documents land in the same step as the bytes. Bytes that
+// pdf.js cannot load, or whose pages it cannot read, refuse the publication:
+// placed anyway, they would show as a document with no pages.
+export const readPublishedBytes: ReadPublishedBytes = (file, buffer) =>
+  withOwnDocument(buffer, async (doc) => ({
+    pageCount: doc.numPages,
+    documents: await indexDocument({ ...file, buffer }, buffer, doc),
+  }));
+
+async function withOwnDocument<T>(buffer: PdfBuffer, read: (doc: PDFDocumentProxy) => Promise<T>): Promise<T> {
+  const doc = await loadDocument(buffer);
   try {
-    return await indexDocument(file, file.buffer, doc);
+    return await read(doc);
   } finally {
     void Promise.resolve()
       .then(() => doc.loadingTask.destroy())

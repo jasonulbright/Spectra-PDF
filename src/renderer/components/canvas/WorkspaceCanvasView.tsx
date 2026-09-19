@@ -34,8 +34,8 @@ import {
   sanitizePageEntry,
 } from '../../lib/page-labels';
 import { getDocumentProxy, requestDocumentProxy } from '../../lib/pdfDocCache';
-import { buildRedactionRegions, pageForFilePageNumber } from '../../lib/redaction';
-import { pathDescribesCurrentBytes } from '../../lib/workspace-settle';
+import { buildRedactionRegions, pageForFilePageNumber, withSeededMarks } from '../../lib/redaction';
+import { drawingTarget, pathDescribesCurrentBytes } from '../../lib/workspace-settle';
 import { displayRectToPdf, pdfRectToDisplay } from '../../lib/pdfx-build';
 import { sameRegion } from '../../lib/search-redact';
 import {
@@ -83,7 +83,7 @@ import {
   type PlaceableFinding,
 } from '../../lib/a11y-findings';
 import type { ExportDocumentResult } from '../../lib/export-targets';
-import type { PageRef } from '../../state/types';
+import type { OpenDocument, PageRef } from '../../state/types';
 import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import { captureSnapshot, type SnapshotPlacement } from '../../lib/snapshot-capture';
@@ -635,6 +635,20 @@ export function WorkspaceCanvasView({
   const linkDrafts = useReadLinkDrafts();
   const dispatch = useAppDispatch();
   const docs = state.workspace.documents;
+  // A gesture ends on the page its render showed; the store may hold other
+  // bytes or ids by then. A drawing that cannot land where it was drawn is
+  // refused with the notice every refused edit owes.
+  const acceptDrawing = useCallback(
+    (docId: string | undefined, pageId: string, rotationAtDraw: number): { doc: OpenDocument; page: PageRef } | null => {
+      const rendered = docs.find((d) => d.id === docId);
+      const target = rendered
+        ? drawingTarget(readState(), { docId: rendered.id, pageId, buffer: rendered.buffer, rotation: rotationAtDraw })
+        : null;
+      if (!target) dispatch({ type: 'NOTE_EDIT_REFUSED' });
+      return target;
+    },
+    [docs, readState, dispatch],
+  );
   const { proxies, health: renderHealth } = usePdfProxyState(state.files);
   // The documents on this board whose bytes pdf.js refused. The engine opened
   // them, so the tab, the page count, the panels and every extraction the
@@ -1519,19 +1533,14 @@ export function WorkspaceCanvasView({
       rect: { x: number; y: number; w: number; h: number },
       rotationAtDraw: 0 | 90 | 180 | 270,
     ) => {
-      const doc = docs.find((d) => d.id === docId);
-      if (!doc) return;
-      // Anchor only to CURRENT ids: docs indexed from a
-      // superseded buffer are about to be re-identified (fresh generation),
-      // so a placement drawn against them is stillborn — refuse it rather
-      // than arm a box that dies at SET_WORKSPACE_DOCUMENTS moments later.
-      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
-      setNewFieldPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
+      const target = acceptDrawing(docId, pageId, rotationAtDraw);
+      if (!target) return;
+      setNewFieldPlacement({ id: crypto.randomUUID(), path: target.doc.path, pageId, rect, rotationAtDraw });
       setSigPlacement(null); // one placement card at a time (see onSetSignaturePlacement)
       setAddTextPlacement(null); // …including the Add-Text card
       setNfError(null);
     },
-    [docs, state.files],
+    [acceptDrawing],
   );
   const onClearNewFieldPlacement = useCallback(() => setNewFieldPlacement(null), []);
 
@@ -1769,16 +1778,11 @@ export function WorkspaceCanvasView({
       rect: { x: number; y: number; w: number; h: number },
       rotationAtDraw: 0 | 90 | 180 | 270,
     ) => {
-      const doc = docs.find((d) => d.id === docId);
-      if (!doc) return;
-      // Anchor only to CURRENT ids — the onSetNewFieldRect rule:
-      // The sibling flows shared the silent-no-op
-      // pattern without the guard). A placement drawn against docs indexed
-      // from a superseded buffer dies at SET_WORKSPACE_DOCUMENTS — refuse.
-      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
+      const target = acceptDrawing(docId, pageId, rotationAtDraw);
+      if (!target) return;
       setAddTextPlacement({
         id: crypto.randomUUID(),
-        path: doc.path,
+        path: target.doc.path,
         pageId,
         rect,
         rotationAtDraw,
@@ -1790,7 +1794,7 @@ export function WorkspaceCanvasView({
       setAtText('');
       setAtError(null);
     },
-    [docs, state.files, atRotate],
+    [acceptDrawing, atRotate],
   );
   // --- Crop draw ------------------------------------------------------
   // The band is the region to KEEP. Nothing commits here: the insets are
@@ -1807,11 +1811,9 @@ export function WorkspaceCanvasView({
       rect: { x: number; y: number; w: number; h: number },
       rotationAtDraw: 0 | 90 | 180 | 270,
     ) => {
-      const doc = docs.find((d) => d.id === docId);
-      const page = doc?.pages.find((p) => p.id === pageId);
-      if (!doc || !page) return;
-      // Anchor only to CURRENT ids — the onSetNewFieldRect rule.
-      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
+      const target = acceptDrawing(docId, pageId, rotationAtDraw);
+      if (!target) return;
+      const { doc, page } = target;
       const f = state.files.get(page.sourceDocId);
       if (!f?.buffer) return;
       const buffer = f.buffer;
@@ -1839,7 +1841,7 @@ export function WorkspaceCanvasView({
         setCropPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
       })();
     },
-    [docs, state.files],
+    [docs, state.files, acceptDrawing],
   );
   const onClearCropPlacement = useCallback(() => setCropPlacement(null), []);
   // --- Article bead draw ----------------------------------------------
@@ -1855,10 +1857,9 @@ export function WorkspaceCanvasView({
       rect: { x: number; y: number; w: number; h: number },
       rotationAtDraw: 0 | 90 | 180 | 270,
     ) => {
-      const doc = docs.find((d) => d.id === docId);
-      const page = doc?.pages.find((p) => p.id === pageId);
-      if (!doc || !page) return;
-      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
+      const target = acceptDrawing(docId, pageId, rotationAtDraw);
+      if (!target) return;
+      const { doc, page } = target;
       const f = state.files.get(page.sourceDocId);
       if (!f?.buffer) return;
       const buffer = f.buffer;
@@ -1876,7 +1877,7 @@ export function WorkspaceCanvasView({
           workingPath: owner.workingPath, buffer: owner.buffer });
       })();
     },
-    [docs, state.files, state.pageDirtyPaths],
+    [docs, state.files, state.pageDirtyPaths, acceptDrawing],
   );
   // --- Link draw ------------------------------------------------------
   // The bead band's contract exactly: the rect lands in the page's own user
@@ -1890,10 +1891,9 @@ export function WorkspaceCanvasView({
       rect: { x: number; y: number; w: number; h: number },
       rotationAtDraw: 0 | 90 | 180 | 270,
     ) => {
-      const doc = docs.find((d) => d.id === docId);
-      const page = doc?.pages.find((p) => p.id === pageId);
-      if (!doc || !page) return;
-      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
+      const target = acceptDrawing(docId, pageId, rotationAtDraw);
+      if (!target) return;
+      const { doc, page } = target;
       const f = state.files.get(page.sourceDocId);
       if (!f?.buffer) return;
       const buffer = f.buffer;
@@ -1914,7 +1914,7 @@ export function WorkspaceCanvasView({
         publishDrawnLink({ page: number, rect: region, ...request });
       })().catch(error => linkDrafts.failDraw(request, error));
     },
-    [docs, state.files, linkDrafts],
+    [docs, state.files, linkDrafts, acceptDrawing],
   );
   // --- Snapshot -------------------------------------------------------
   // The band's contract again, with one difference that matters: the capture
@@ -1936,10 +1936,9 @@ export function WorkspaceCanvasView({
       rect: { x: number; y: number; w: number; h: number },
       rotationAtDraw: 0 | 90 | 180 | 270,
     ) => {
-      const doc = docs.find((d) => d.id === docId);
-      const page = doc?.pages.find((p) => p.id === pageId);
-      if (!doc || !page) return;
-      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
+      const target = acceptDrawing(docId, pageId, rotationAtDraw);
+      if (!target) return;
+      const { doc, page } = target;
       const f = state.files.get(page.sourceDocId);
       if (!f?.buffer) return;
       const buffer = f.buffer;
@@ -1975,7 +1974,7 @@ export function WorkspaceCanvasView({
         }
       })();
     },
-    [docs, state.files],
+    [state.files, acceptDrawing],
   );
   const onClearSnapshotPlacement = useCallback(() => {
     setSnapshotPlacement(null);
@@ -2335,13 +2334,8 @@ export function WorkspaceCanvasView({
 
   // Workspace-flattened page order (doc order, then page order) — the basis
   // for workspace-order group moves (selection semantics themselves moved
-  // into the reducer with the ui slice). Refs keep the harness registration
-  // stable while reading the latest order/selection.
+  // into the reducer with the ui slice).
   const flatOrder = useMemo(() => docs.flatMap((d) => d.pages.map((p) => p.id)), [docs]);
-  const flatOrderRef = useRef(flatOrder);
-  flatOrderRef.current = flatOrder;
-  const selectionRef = useRef(selectedPageIds);
-  selectionRef.current = selectedPageIds;
 
   // Keyboard shortcuts (Escape chain, Ctrl+F, select-all/delete/rotate/zoom)
   // are owned by the app-level keymap dispatcher now (commands/keymap.ts) —
@@ -2500,11 +2494,13 @@ export function WorkspaceCanvasView({
   // command paths here, mirroring the redaction/signature/OCR hooks.
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
+    // Ids come from the store, never from the last render: an id the store no
+    // longer holds is refused when a spec edits through it.
     registerCanvasSelection({
       selectPageIds: (ids) =>
         dispatch({ type: 'UI_SET_SELECTION', pageIds: ids, anchor: ids[ids.length - 1] ?? null }),
-      getSelectedPageIds: () => [...selectionRef.current],
-      getWorkspacePageIds: () => [...flatOrderRef.current],
+      getSelectedPageIds: () => [...readState().ui.selectedPageIds],
+      getWorkspacePageIds: () => readState().workspace.documents.flatMap((d) => d.pages.map((p) => p.id)),
       deleteSelected: () => void invokeCommand('document.deleteSelection'),
       rotateSelected: (delta) =>
         void invokeCommand(
@@ -2512,7 +2508,7 @@ export function WorkspaceCanvasView({
         ),
     });
     return () => registerCanvasSelection(null);
-  }, [dispatch]);
+  }, [dispatch, readState]);
 
   const onAddAnnotation = useCallback(
     (docId: string, pageId: string, annotation: PageAnnotation) =>
@@ -3113,13 +3109,13 @@ export function WorkspaceCanvasView({
       rect: { x: number; y: number; w: number; h: number },
       rotationAtDraw: 0 | 90 | 180 | 270,
     ) => {
-      const doc = docs.find((d) => d.id === docId);
-      if (!doc) return;
+      const target = acceptDrawing(docId, pageId, rotationAtDraw);
+      if (!target) return;
       setMarks((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
-          path: doc.path,
+          path: target.doc.path,
           pageId,
           rect,
           rotationAtDraw,
@@ -3131,7 +3127,7 @@ export function WorkspaceCanvasView({
         },
       ]);
     },
-    [docs],
+    [acceptDrawing],
   );
 
   const onRemoveRedactionMark = useCallback(
@@ -3165,14 +3161,15 @@ export function WorkspaceCanvasView({
 
   const onAddGuide = useCallback(
     (pageId: string, axis: GuideAxis, pos: number, rotationAtDraw: 0 | 90 | 180 | 270) => {
-      const doc = docs.find((d) => d.pages.some((p) => p.id === pageId));
-      if (!doc) return;
+      const holder = docs.find((d) => d.pages.some((p) => p.id === pageId));
+      const target = acceptDrawing(holder?.id, pageId, rotationAtDraw);
+      if (!target) return;
       setGuides((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), path: doc.path, pageId, axis, pos, rotationAtDraw },
+        { id: crypto.randomUUID(), path: target.doc.path, pageId, axis, pos, rotationAtDraw },
       ]);
     },
-    [docs],
+    [docs, acceptDrawing],
   );
   const onMoveGuide = useCallback(
     (guideId: string, axis: GuideAxis, pos: number, rotationAtDraw: 0 | 90 | 180 | 270) =>
@@ -3204,20 +3201,16 @@ export function WorkspaceCanvasView({
       rect: { x: number; y: number; w: number; h: number },
       rotationAtDraw: 0 | 90 | 180 | 270,
     ) => {
-      const doc = docs.find((d) => d.id === docId);
-      if (!doc) return;
-      // Anchor only to CURRENT ids — the onSetNewFieldRect rule:
-      // a placement drawn against docs indexed from
-      // a superseded buffer is stillborn — refuse rather than arm it.
-      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
-      setSigPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
+      const target = acceptDrawing(docId, pageId, rotationAtDraw);
+      if (!target) return;
+      setSigPlacement({ id: crypto.randomUUID(), path: target.doc.path, pageId, rect, rotationAtDraw });
       setNewFieldPlacement(null);
       setAddTextPlacement(null); // one placement card at a time
       setSigFieldTarget(null);
       setSignDone(null);
       setSignError(null);
     },
-    [docs, state.files],
+    [acceptDrawing],
   );
   const onClearSignaturePlacement = useCallback(() => setSigPlacement(null), []);
 
@@ -3391,7 +3384,7 @@ export function WorkspaceCanvasView({
         const { marks: seeded, orphaned, buffer } = await marksFromFileRects(path, listed.marks);
         if (seedSeqRef.current.get(path) !== seq || buffer !== f.buffer) return;
         markPathsEverRef.current.add(path);
-        setMarks((prev) => [...prev.filter((m) => m.path !== path), ...seeded]);
+        setMarks((prev) => withSeededMarks(prev, path, seeded));
         if (orphaned > 0) {
           setRedactError(
             tChromeCount('canvas.redact.seedOrphaned', orphaned, {
@@ -3535,10 +3528,10 @@ export function WorkspaceCanvasView({
       if (!current.has(path)) invalidated.add(path); // closed — a later reopen reuses the same positional ids
     }
     // Queue a mark re-seed for newly-opened files and still-open files
-    // whose buffer changed. QUEUED, not run: the workspace reindex is
-    // async, and seeding against the OLD PageRefs would bind marks to ids
-    // a non-authored rebuild is about to kill. The docs effect below
-    // drains the queue once the fresh pages exist.
+    // whose buffer changed. QUEUED, not run: an open's documents arrive with
+    // its async index, and seeding against documents of other bytes binds
+    // marks to ids that are about to die. The docs effect below drains the
+    // queue once the path's documents describe its bytes.
     for (const path of current.keys()) {
       if (!prev.has(path) || (invalidated.has(path) && current.get(path))) {
         pendingSeedRef.current.add(path);
@@ -5091,15 +5084,16 @@ export function WorkspaceCanvasView({
       rect: { x: number; y: number; w: number; h: number },
       rotationAtDraw: 0 | 90 | 180 | 270,
     ): Promise<void> => {
-      const doc = docs.find((d) => d.id === docId);
-      if (!doc || addImageRef.current || editBusy) return;
+      if (addImageRef.current || editBusy) return;
+      const target = acceptDrawing(docId, pageId, rotationAtDraw);
+      if (!target) return;
       addImageRef.current = true;
       setEditBusy(true);
       setEditNotice(null);
       try {
         const placement: SignaturePlacement = {
           id: crypto.randomUUID(),
-          path: doc.path,
+          path: target.doc.path,
           pageId,
           rect,
           rotationAtDraw,
@@ -5139,7 +5133,7 @@ export function WorkspaceCanvasView({
         setEditBusy(false);
       }
     },
-    [docs, state.files, onAddImage, editBusy],
+    [docs, state.files, onAddImage, editBusy, acceptDrawing],
   );
 
   // --- Snapping: per-page geometry + the live preferences -------------------
@@ -6504,7 +6498,8 @@ export function WorkspaceCanvasView({
     (rect: { x: number; y: number; w: number; h: number }) => { markId: string; docId: string; pageId: string } | null
   >(() => null);
   harnessAddMarkRef.current = (rect) => {
-    const doc = docs.find((d) => d.path === state.activeFileId);
+    const now = readState();
+    const doc = now.workspace.documents.find((d) => d.path === now.activeFileId);
     const page = doc?.pages[0];
     if (!doc || !page) return null;
     const id = crypto.randomUUID();
@@ -6882,13 +6877,13 @@ export function WorkspaceCanvasView({
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasMerge({
       getDocs: () =>
-        docsRef.current.map((d) => ({ id: d.id, path: d.path, name: d.name, pages: d.pages.length })),
+        readState().workspace.documents.map((d) => ({ id: d.id, path: d.path, name: d.name, pages: d.pages.length })),
       mergeUp: (docId) => mergeUpRef.current(docId),
       removeDoc: (docId) => removeDocRef.current(docId),
       noticeText: () => mergeNoticeRef.current,
     });
     return () => registerCanvasMerge(null);
-  }, []);
+  }, [readState]);
 
   const { intoDocId, intoIndex, betweenIndex, ghostSize, betweenPages } = deriveDropGhosts(
     docs,

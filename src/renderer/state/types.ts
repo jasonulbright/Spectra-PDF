@@ -648,8 +648,9 @@ export interface AppState {
   pageUndoStack: PageEditSnapshot[];
   pageRedoStack: PageEditSnapshot[];
   pageDirtyPaths: string[]; // open files whose content must be rebuilt at commit
-  // Page edits refused because they could not be carried onto documents
-  // re-derived from new bytes. Monotonic: each increase is one notice owed.
+  // Edits refused because they could not be carried onto documents re-derived
+  // from new bytes, or because the document or page they address is gone or
+  // no longer as it was drawn on. Monotonic: each increase is one notice owed.
   pageEditRefusals: number;
 }
 
@@ -668,7 +669,10 @@ export type AppAction =
   | { type: 'REGISTER_IMPORT_SOURCE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer }
   | { type: 'CLOSE_FILE'; path: string }
   | { type: 'SET_ACTIVE_FILE'; path: string }
-  | { type: 'UPDATE_FILE'; path: string; pageCount: number; buffer: PdfBuffer; snapshotPath: string }
+  // `documents`: the path's documents as `buffer` holds them, read from it
+  // and placed in the same step, so nothing addresses the previous documents
+  // against the new bytes. Empty leaves the path to the workspace indexer.
+  | { type: 'UPDATE_FILE'; path: string; pageCount: number; buffer: PdfBuffer; snapshotPath: string; documents: OpenDocument[] }
   // Atomic variant dispatched by the commit bridge after all files are
   // rebuilt on disk: applies every file update and clears the page-edit tier
   // in one step, so no intermediate state is observable.
@@ -692,8 +696,12 @@ export type AppAction =
     }
   // One revision-checked publication, never a stack move followed by a reload.
   | { type: 'RESTORE_HISTORY'; direction: 'undo' | 'redo'; expected: AppState;
-      path: string; snapshotPath: string; counterpart: string; buffer: PdfBuffer; pageCount: number }
-  | { type: 'REFRESH_BUFFER'; path: string; pageCount: number; buffer: PdfBuffer }
+      path: string; snapshotPath: string; counterpart: string; buffer: PdfBuffer; pageCount: number;
+      documents: OpenDocument[] }
+  // `documents` as for UPDATE_FILE.
+  | { type: 'REFRESH_BUFFER'; path: string; pageCount: number; buffer: PdfBuffer; documents: OpenDocument[] }
+  // An edit refused outside the reducer: one more notice is owed.
+  | { type: 'NOTE_EDIT_REFUSED' }
   | { type: 'MARK_SAVED'; path: string }
   // Workspace actions. SET_WORKSPACE_DOCUMENTS is dispatched by
   // useWorkspaceIndexer after a file is opened or its buffer changes. The

@@ -1,4 +1,4 @@
-// Rung 3 — scale calibration: the ratio derived from a known length, and the
+// Scale calibration: the ratio derived from a known length, and the
 // per-measurement override (RECALIBRATE_ANNOTATION).
 import { describe, expect, it } from 'vitest';
 import { scaleFromCalibration, measureRatioLabel, measureUnitsPerPoint } from '../src/renderer/lib/measure';
