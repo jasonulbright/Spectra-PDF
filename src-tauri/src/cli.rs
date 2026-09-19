@@ -6,7 +6,6 @@
 
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -31,7 +30,8 @@ pub struct Cli {
 
     /// Path to a Ghostscript console executable (gswin64c.exe). Ghostscript is
     /// installed separately; without this the CLI looks at SPECTRAPDF_GS_PATH,
-    /// the machine's installed programs, and PATH.
+    /// the machine's installed programs, and PATH. When this is given, no
+    /// other Ghostscript is used.
     #[arg(long, global = true, value_name = "PATH")]
     pub gs_path: Option<String>,
 }
@@ -2684,6 +2684,10 @@ fn resolve_engine_script() -> PathBuf {
 /// The `--gs-path` value for this process, set once from the parsed argv.
 static EXPLICIT_GS: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
+fn explicit_gs() -> Option<String> {
+    EXPLICIT_GS.get().cloned().flatten()
+}
+
 /// The vendored Ghostscript, if this build still carries one. A CANDIDATE,
 /// never the answer — the resolution must not assume the tree exists.
 fn bundled_gs_candidate() -> Option<PathBuf> {
@@ -2696,8 +2700,19 @@ fn bundled_gs_candidate() -> Option<PathBuf> {
 /// One resolver for all 29 gs-needing subcommands: the error text is written
 /// once, so no subcommand can drift back into reporting a raw spawn failure.
 fn resolve_gs() -> Result<PathBuf, String> {
-    let explicit = EXPLICIT_GS.get().cloned().flatten();
-    crate::gs::resolve_for_cli(explicit.as_deref(), bundled_gs_candidate().as_deref())
+    crate::gs::resolve_for_cli(explicit_gs().as_deref(), bundled_gs_candidate().as_deref())
+}
+
+/// The `gs_path` an optional Ghostscript leg carries when no probed path is in
+/// hand: the configured `--gs-path`, or `""` when the flag is absent or blank.
+///
+/// This is the engine's own representation (`gs_capability.resolve`): `""`
+/// is the only value it searches for, and any other value is the whole answer.
+/// Handing `""` for a configured path that does not run lets the engine decode
+/// with a Ghostscript the user did not name; handing the path makes the one
+/// input that needs Ghostscript refuse by that path's name.
+fn optional_gs_path(explicit: Option<&str>) -> String {
+    explicit.map(str::trim).unwrap_or_default().to_string()
 }
 
 /// The vendored native Tesseract. Mirrors `resolve_gs`:
@@ -2807,114 +2822,340 @@ pub fn soffice_system_fallback() -> String {
     String::new()
 }
 
-// ── Guided actions: the Ghostscript each step takes ─────────────────────────
+// ── Ghostscript: what each command needs ─────────────────────────────────────
 
-/// The committed guided-step catalog. `tests/test_guided_actions.py` pins its
-/// `tools` and `optional_tools` lists to the engine's dispatch table in both
-/// directions, so a step listed with `gs_path` here is a step `run_action`
-/// hands `gs_path`, and one that also lists it as optional runs without it.
-const GUIDED_STEP_CATALOG: &str = include_str!("../../tests/fixtures/guided-step-catalog.json");
-
-/// What a guided action needs from Ghostscript before it may start.
+/// What work needs from Ghostscript: a command, a guided step, or one file of
+/// a batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GsDemand {
-    /// No step takes `gs_path`.
-    None,
-    /// Every step that takes `gs_path` also runs without it.
+    /// Nothing the work does reaches Ghostscript.
+    Never,
+    /// Only some content reaches it: the work runs without one, and the engine
+    /// refuses an input that needs one by name.
     Optional,
-    /// A step cannot run without Ghostscript.
+    /// The work cannot run without Ghostscript.
     Required,
 }
 
-/// The demand of every step the engine hands `gs_path`.
-fn gs_steps() -> &'static BTreeMap<String, GsDemand> {
-    static STEPS: std::sync::OnceLock<BTreeMap<String, GsDemand>> = std::sync::OnceLock::new();
-    STEPS.get_or_init(|| {
-        gs_steps_in(GUIDED_STEP_CATALOG)
-            .unwrap_or_else(|e| panic!("the embedded guided-step catalog is unreadable: {e}"))
-    })
+/// How a command decides what it needs from Ghostscript.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GsNeed {
+    /// From its arguments, before the engine starts any work.
+    Command(GsDemand),
+    /// Per item it reads: the steps and rows the engine plans for an action
+    /// file or a folder-of-folders run, or each file of a batch.
+    PerItem,
 }
 
-/// The demand of each step a catalog lists with `gs_path`. A row without a
-/// `tools` or an `optional_tools` list refuses: read as empty, the first would
-/// start a Ghostscript step without the path it needs, and the second would
-/// refuse a run the step can do without one.
-fn gs_steps_in(catalog: &str) -> Result<BTreeMap<String, GsDemand>, String> {
-    let catalog: Value = serde_json::from_str(catalog).map_err(|e| e.to_string())?;
-    let rows = catalog
-        .get("steps")
-        .and_then(Value::as_object)
-        .ok_or_else(|| "no \"steps\" object".to_string())?;
-    let lists_gs = |op: &str, row: &Value, key: &str| -> Result<bool, String> {
-        let list = row
-            .get(key)
-            .and_then(Value::as_array)
-            .ok_or_else(|| format!("step {op} has no \"{key}\" list"))?;
-        Ok(list.iter().any(|tool| tool.as_str() == Some("gs_path")))
-    };
-    let mut found = BTreeMap::new();
-    for (op, row) in rows {
-        let handed = lists_gs(op, row, "tools")?;
-        let optional = lists_gs(op, row, "optional_tools")?;
-        if handed {
-            let demand = if optional { GsDemand::Optional } else { GsDemand::Required };
-            found.insert(op.clone(), demand);
-        }
-    }
-    Ok(found)
-}
-
-/// The demand of an action file's `steps`. An entry that is not a step object,
-/// or that names an op the catalog does not list, adds nothing: the engine
-/// refuses it by name before any step runs.
-fn action_gs_demand(steps: &Value) -> GsDemand {
-    let mut demand = GsDemand::None;
-    let ops = steps
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|step| step.get("op").and_then(Value::as_str));
-    for op in ops {
-        match gs_steps().get(op) {
-            Some(GsDemand::Required) => return GsDemand::Required,
-            Some(GsDemand::Optional) => demand = GsDemand::Optional,
-            _ => {}
-        }
-    }
-    demand
-}
-
-/// The one `gs_path` a run hands the engine, which injects it only into the
-/// steps that take it. A required step refuses with the resolver's own error,
-/// an optional step takes `""` when nothing resolves, and an action with
-/// neither never asks the resolver.
-fn action_gs_path(
+/// The `gs_path` work hands the engine. Required work takes the resolver's
+/// path or refuses with its error; optional work takes the resolver's path or
+/// else `optional_gs_path`; work that never reaches Ghostscript takes `""` and
+/// never asks the resolver.
+///
+/// Every command gets the same discovery answer from this one resolver: with
+/// nothing configured it searches the environment, the registry and PATH,
+/// where `""` alone would let the engine search only the environment and PATH.
+fn gs_path_for(
     demand: GsDemand,
+    explicit: Option<&str>,
     resolve: impl FnOnce() -> Result<PathBuf, String>,
 ) -> Result<String, String> {
     Ok(match demand {
         GsDemand::Required => resolve()?.to_string_lossy().into_owned(),
-        GsDemand::Optional => resolve()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        GsDemand::None => String::new(),
+        GsDemand::Optional => match resolve() {
+            Ok(path) => path.to_string_lossy().into_owned(),
+            Err(_) => optional_gs_path(explicit),
+        },
+        GsDemand::Never => String::new(),
     })
 }
 
-fn run_action_params(
-    args: &RunActionArgs,
-    action: &Value,
-    resolve: impl FnOnce() -> Result<PathBuf, String>,
-) -> Result<Value, String> {
-    let steps = action
+/// The source suffixes Create PDF distills through Ghostscript, as
+/// `POSTSCRIPT_SUFFIXES` in `engine/create_pdf.py` classifies them.
+const POSTSCRIPT_SUFFIXES: [&str; 2] = ["ps", "eps"];
+
+/// Create PDF reaches Ghostscript only to distill a PostScript source.
+fn create_pdf_demand<'a>(sources: impl IntoIterator<Item = &'a PathBuf>) -> GsDemand {
+    let postscript = sources.into_iter().any(|path| {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| POSTSCRIPT_SUFFIXES.contains(&ext.to_ascii_lowercase().as_str()))
+    });
+    if postscript {
+        GsDemand::Required
+    } else {
+        GsDemand::Never
+    }
+}
+
+/// Merge converts through Create PDF when any input is not a PDF.
+fn merge_converts(inputs: &[PathBuf]) -> bool {
+    inputs.iter().any(|p| {
+        !matches!(p.extension().and_then(|e| e.to_str()), Some(e) if e.eq_ignore_ascii_case("pdf"))
+    })
+}
+
+/// Only the presentation target renders each page's graphics through
+/// Ghostscript; every other export format reads the document without it.
+fn export_demand(format: &str) -> GsDemand {
+    if format.eq_ignore_ascii_case("pptx") {
+        GsDemand::Required
+    } else {
+        GsDemand::Never
+    }
+}
+
+/// The formats export-folder writes as page images, each rendered through
+/// Ghostscript.
+fn export_folder_writes_images(format: &str) -> bool {
+    matches!(format, "png" | "jpeg" | "tiff")
+}
+
+fn export_folder_demand(format: &str) -> GsDemand {
+    if export_folder_writes_images(format) {
+        GsDemand::Required
+    } else {
+        export_demand(format)
+    }
+}
+
+/// Form detection renders through Ghostscript only on its raster arm: every
+/// page with `always`, no page with `never`, and with `auto` only a page whose
+/// content a walk cannot read.
+fn form_scan_demand(scan: &str) -> GsDemand {
+    match scan {
+        "always" => GsDemand::Required,
+        "never" => GsDemand::Never,
+        _ => GsDemand::Optional,
+    }
+}
+
+/// Every command's Ghostscript need. One match with no wildcard arm, so a new
+/// command cannot land without a decision, and the dispatch arms read their
+/// `gs_path` through it.
+fn command_gs_need(command: &CliCommand) -> GsNeed {
+    use CliCommand as C;
+    use GsDemand::{Never, Optional, Required};
+    let demand = match command {
+        // Every input is rendered, converted or spooled through Ghostscript.
+        C::Compress(_)
+        | C::Print(_)
+        | C::Pdfa(_)
+        | C::ConvertCmyk(_)
+        | C::ConvertPdfx(_)
+        | C::ExportPostscript(_)
+        | C::ExportImages(_)
+        | C::Grayscale(_)
+        | C::Distill(_)
+        | C::Rebuild(_) => Required,
+        // The arguments decide.
+        C::Compare(args) => {
+            if args.visual {
+                Required
+            } else {
+                Never
+            }
+        }
+        C::CreatePdf(args) => create_pdf_demand(&args.sources),
+        C::Merge(args) => {
+            if merge_converts(&args.inputs) {
+                create_pdf_demand(&args.inputs)
+            } else {
+                Never
+            }
+        }
+        C::Export(args) => export_demand(&args.format),
+        C::ExportFolder(args) => export_folder_demand(&args.format),
+        C::OcrFile(args) => {
+            if args.mrc {
+                Required
+            } else {
+                Optional
+            }
+        }
+        C::BatchOcr(args) => {
+            if args.mrc {
+                Required
+            } else {
+                Optional
+            }
+        }
+        C::PageBox(args) => {
+            if args.auto {
+                Optional
+            } else {
+                Never
+            }
+        }
+        C::DetectFields(args) => form_scan_demand(&args.scan),
+        C::PrepareForms(args) => form_scan_demand(&args.scan),
+        // The content decides: a JBIG2 image under a partial mark, a
+        // transparent region, a codestream this build cannot decode, a colour
+        // or conversion fixup, the ink coverage check.
+        C::Redact(_)
+        | C::SearchRedact(_)
+        | C::Flatten(_)
+        | C::EnhanceScan(_)
+        | C::Preflight(_)
+        | C::PreflightFix(_)
+        | C::PreflightSweep(_) => Optional,
+        C::RunAction(_) | C::CreatePdfFolders(_) | C::Batch(_) => return GsNeed::PerItem,
+        // A scan's pages are images, and every other command reads or edits
+        // the document without rendering it.
+        C::Scan(_)
+        | C::Rotate(_)
+        | C::Split(_)
+        | C::Encrypt(_)
+        | C::Decrypt(_)
+        | C::EncryptCerts(_)
+        | C::DecryptCert(_)
+        | C::PrinterMarks(_)
+        | C::PrinterMarksRemove(_)
+        | C::PrinterMarksList(_)
+        | C::HairlinesList(_)
+        | C::HairlinesFix(_)
+        | C::FlattenList(_)
+        | C::OutlinesList(_)
+        | C::TrapFields
+        | C::TrapList(_)
+        | C::TrapAssign(_)
+        | C::ExtractText(_)
+        | C::Delete(_)
+        | C::SearchRegions(_)
+        | C::Watermark(_)
+        | C::HeaderFooter(_)
+        | C::PageLabels(_)
+        | C::XfdfExport(_)
+        | C::XfdfImport(_)
+        | C::CountSummary(_)
+        | C::AttachList(_)
+        | C::AttachAdd(_)
+        | C::AttachExtract(_)
+        | C::AttachRemove(_)
+        | C::PortfolioInfo(_)
+        | C::PortfolioCreate(_)
+        | C::PortfolioMake(_)
+        | C::PortfolioUpdate(_)
+        | C::LayerList(_)
+        | C::LayerSet(_)
+        | C::Accessibility(_)
+        | C::AccessibilityFix(_)
+        | C::PreflightProfiles
+        | C::CommentsList(_)
+        | C::CommentsReview(_)
+        | C::CommentsSummary(_)
+        | C::CommentsDeleteAll(_)
+        | C::LinkList(_)
+        | C::LinkSet(_)
+        | C::LinkDelete(_)
+        | C::LinkAdd(_)
+        | C::LinkFromUrls(_)
+        | C::Articles(_)
+        | C::OutlineFromStructure(_)
+        | C::TagsList(_)
+        | C::TagsSet(_)
+        | C::TagsMove(_)
+        | C::TagsDelete(_)
+        | C::TagsAdd(_)
+        | C::DocumentJsList(_)
+        | C::DocumentJsSet(_)
+        | C::VerifySignatures(_)
+        | C::Sign(_)
+        | C::GenerateSigner(_)
+        | C::Forms(_)
+        | C::Audit(_)
+        | C::Sanitize(_)
+        | C::AuditSpace(_)
+        | C::Outline(_)
+        | C::Metadata(_)
+        | C::Optimize(_)
+        | C::PdfVersion(_)
+        | C::Repair(_)
+        | C::Autotag(_)
+        | C::Recover(_)
+        | C::Check(_)
+        | C::Printers(_)
+        | C::Scanners(_)
+        | C::ScanTest(_)
+        | C::IncrementalSave(_) => Never,
+    };
+    GsNeed::Command(demand)
+}
+
+/// The `gs_path` for a command whose arguments decide its need. A per-item
+/// command decides per item and takes nothing here.
+fn command_gs_path(command: &CliCommand) -> Result<String, String> {
+    match command_gs_need(command) {
+        GsNeed::Command(demand) => gs_path_for(demand, explicit_gs().as_deref(), resolve_gs),
+        GsNeed::PerItem => Ok(String::new()),
+    }
+}
+
+/// A batch operation's need for one file.
+fn batch_gs_demand(operation: &BatchOperation, file: &PathBuf) -> GsDemand {
+    match operation {
+        BatchOperation::Compress { .. }
+        | BatchOperation::Pdfa { .. }
+        | BatchOperation::Grayscale
+        | BatchOperation::Rebuild => GsDemand::Required,
+        BatchOperation::CreatePdf { .. } => create_pdf_demand([file]),
+        BatchOperation::Rotate { .. }
+        | BatchOperation::Optimize { .. }
+        | BatchOperation::Repair
+        | BatchOperation::Recover => GsDemand::Never,
+    }
+}
+
+// ── Guided actions: the Ghostscript a run takes ─────────────────────────────
+
+/// The request that asks the engine to plan a run of `steps` over `source`.
+/// `engine/guided_actions.py::step_gs_need` decides each step's need, and
+/// the window reads the same plan: this is the one evaluator both surfaces
+/// ask, never a second copy of its rules.
+fn plan_request(source: &Path, steps: &Value) -> Value {
+    json!({
+        "source": abs(source).to_string_lossy(),
+        "dest": "",
+        "steps": steps,
+        "plan": true,
+    })
+}
+
+/// The demand a plan names. A run the plan leaves undecided runs as optional
+/// work: `run_action` refuses before its first row when the need turns out
+/// to be required.
+fn plan_demand(plan: &Value) -> Result<GsDemand, String> {
+    match plan.get("gs").and_then(Value::as_str) {
+        Some("required") => Ok(GsDemand::Required),
+        Some("optional" | "undecided") => Ok(GsDemand::Optional),
+        Some("never") => Ok(GsDemand::Never),
+        other => Err(format!("the engine planned no known Ghostscript need: {other:?}")),
+    }
+}
+
+/// The `gs_path` for a run of `steps` over `source`, planned by the engine
+/// before any row of the run starts.
+fn planned_gs_path(engine: &mut CliEngine, source: &Path, steps: &Value) -> Result<String, String> {
+    let plan = engine.call("run_action", plan_request(source, steps))?;
+    gs_path_for(plan_demand(&plan)?, explicit_gs().as_deref(), resolve_gs)
+}
+
+/// An action file's `steps`.
+fn action_steps(action: &Value) -> Result<Value, String> {
+    action
         .get("steps")
         .cloned()
-        .ok_or_else(|| "Action file has no \"steps\"".to_string())?;
+        .ok_or_else(|| "Action file has no \"steps\"".to_string())
+}
+
+/// The run request. The engine injects `gs_path` only into the steps that
+/// take it.
+fn run_action_params(args: &RunActionArgs, action: &Value, gs_path: String) -> Result<Value, String> {
+    let steps = action_steps(action)?;
     let name = action
         .get("name")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
-    let gs_path = action_gs_path(action_gs_demand(&steps), resolve)?;
     let mut params = json!({
         "source": abs(&args.source).to_string_lossy(),
         "dest": args.dest.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
@@ -2938,7 +3179,92 @@ fn run_action_params(
     Ok(params)
 }
 
+/// The one-step action a folder-of-folders run plans as: the engine groups
+/// the folders, and a folder with a PostScript page needs Ghostscript.
+fn folders_plan_steps(args: &CreatePdfFoldersArgs) -> Value {
+    json!([{
+        "op": "create_pdf_folders",
+        "params": { "sources": args.sources, "include_subfolders": !args.no_subfolders },
+    }])
+}
+
+// ── Redaction: the request each command sends ───────────────────────────────
+
+fn redact_params(args: &RedactArgs, gs_path: String) -> Result<Value, String> {
+    let rect: Vec<f64> = args
+        .rect
+        .split(',')
+        .map(|s| s.trim().parse::<f64>())
+        .collect::<Result<Vec<f64>, _>>()
+        .map_err(|_| "--rect requires exactly 4 comma-separated numbers: x0,y0,x1,y1".to_string())?;
+    if rect.len() != 4 {
+        return Err("--rect requires exactly 4 comma-separated numbers: x0,y0,x1,y1".to_string());
+    }
+    let fill = parse_hex_rgb(&args.fill)?;
+    Ok(json!({
+        "file": abs(&args.input).to_string_lossy(),
+        "output": abs(&args.output).to_string_lossy(),
+        "regions": [{
+            "page": args.page,
+            "rect": rect,
+            "fill": fill,
+            "overlay_text": args.overlay_text,
+            "repeat_overlay": args.repeat_overlay,
+            "align": args.overlay_align,
+            "font_size": args.overlay_size,
+        }],
+        // An overlay whose text is not Latin-1
+        // EMBEDS through the bundled faces rather than drawing
+        // '?' — a redaction code printed as question marks tells
+        // the reader nothing.
+        "font_dir": resolve_fonts().to_string_lossy().to_string(),
+        "gs_path": gs_path,
+    }))
+}
+
+fn search_redact_params(args: &SearchRedactArgs, gs_path: String) -> Result<Value, String> {
+    // Only the properties the caller actually set are sent: "no
+    // overlay" and "an overlay of nothing" stay distinguishable
+    // through the file, and the engine refuses a key it does not know
+    // rather than dropping it.
+    let mut properties = json!({});
+    let fill = parse_hex_rgb(&args.fill)?;
+    if args.fill.trim().to_ascii_lowercase() != "#000000" {
+        properties["fill"] = json!(fill);
+    }
+    if !args.overlay_text.is_empty() {
+        properties["overlay_text"] = json!(args.overlay_text);
+        properties["repeat_overlay"] = json!(args.repeat_overlay);
+        properties["align"] = json!(args.overlay_align);
+        properties["font_size"] = json!(args.overlay_size);
+    }
+    Ok(json!({
+        "file": abs(&args.input).to_string_lossy(),
+        "output": abs(&args.output).to_string_lossy(),
+        "query": args.query,
+        "terms": args.terms,
+        "patterns": args.patterns,
+        "pages": parse_pages(&args.pages),
+        "regex": args.regex,
+        "case_sensitive": args.case_sensitive,
+        "whole_word": args.whole_word,
+        "expand": args.expand,
+        "max_hits": args.max_hits,
+        "marks_only": args.marks_only,
+        "allow_signed": args.include_signed,
+        "properties": properties,
+        "font_dir": resolve_fonts().to_string_lossy().to_string(),
+        "gs_path": gs_path,
+    }))
+}
+
 // ── Engine communication ────────────────────────────────────────────────────
+
+/// The engine's surface variable and the command line's value
+/// (`engine/gs_capability.py` `SURFACE_ENV_VAR`, `CLI_SURFACE`). A Ghostscript
+/// refusal then names `--gs-path` and `SPECTRAPDF_GS_PATH`, and the window's
+/// engine, which never sets it, names Preferences.
+const ENGINE_SURFACE: (&str, &str) = ("SPECTRAPDF_ENGINE_SURFACE", "cli");
 
 struct CliEngine {
     child: std::process::Child,
@@ -2966,6 +3292,7 @@ impl CliEngine {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .envs(crate::engine::python_env())
+            .env(ENGINE_SURFACE.0, ENGINE_SURFACE.1)
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("Failed to start engine: {}", e))?;
@@ -3478,14 +3805,16 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
 }
 
 fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, String> {
+    // Every command's Ghostscript is settled here, before its arm runs, so
+    // what `command_gs_need` decides is what the command does.
+    let gs = command_gs_path(command)?;
     match command {
         CliCommand::Compress(args) => {
-            let gs = resolve_gs()?;
             let mut params = json!({
                 "file": abs(&args.input).to_string_lossy(),
                 "output": abs(&args.output).to_string_lossy(),
                 "quality": args.quality,
-                "gs_path": gs.to_string_lossy(),
+                "gs_path": gs,
                 // Ignored by the Ghostscript branch, read by the MRC one.
                 // One op, one dispatch — a second subcommand is how a surface
                 // gets left behind.
@@ -3504,14 +3833,13 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Print(args) => {
-            let gs = resolve_gs()?;
             let mut params = json!({
                 "file": abs(&args.input).to_string_lossy(),
                 "printer": args.printer,
                 "pages": args.pages,
                 "copies": args.copies,
                 "fit": args.fit,
-                "gs_path": gs.to_string_lossy(),
+                "gs_path": gs,
                 "collate": !args.no_collate,
                 "subset": args.subset,
                 "reverse": args.reverse,
@@ -3677,19 +4005,14 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             // An all-PDF list still calls `merge` DIRECTLY. Not laziness: the
             // standing rule is that a widening must not change existing
             // default output, and the merge is what that path has always run.
-            let needs_conversion = args
-                .inputs
-                .iter()
-                .any(|p| !matches!(p.extension().and_then(|e| e.to_str()),
-                                   Some(e) if e.eq_ignore_ascii_case("pdf")));
-            if needs_conversion {
+            if merge_converts(&args.inputs) {
                 let sources: Vec<Value> = files.iter().map(|f| json!({ "path": f })).collect();
                 return engine.call(
                     "create_pdf",
                     json!({
                         "sources": sources,
                         "output": abs(&args.output).to_string_lossy(),
-                        "gs_path": resolve_gs()?.to_string_lossy(),
+                        "gs_path": gs,
                         "soffice_path": resolve_soffice(),
                     }),
                 );
@@ -3726,7 +4049,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "image_dpi_default": args.image_dpi,
                     "distill_preset": args.quality,
                     "on_unsupported": if args.skip_unsupported { "skip" } else { "refuse" },
-                    "gs_path": resolve_gs()?.to_string_lossy(),
+                    "gs_path": gs,
                     "soffice_path": resolve_soffice(),
                 }),
             )
@@ -3780,7 +4103,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     // The resolution the device REPORTED BACK, so a driver
                     // that clamped the request still sizes its pages right.
                     "image_dpi_default": if result.dpi > 0 { result.dpi as f64 } else { args.image_dpi },
-                    "gs_path": resolve_gs()?.to_string_lossy(),
+                    "gs_path": gs,
                     "soffice_path": resolve_soffice(),
                 }),
             );
@@ -3792,6 +4115,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             // The whole tree in ONE engine call: the walk, the grouping, the
             // ordering and the log all live engine-side, so this arm, a guided
             // action and a scheduled run assemble folders identically.
+            let gs = planned_gs_path(engine, &args.source, &folders_plan_steps(args))?;
             engine.call(
                 "create_pdf_folders",
                 json!({
@@ -3806,7 +4130,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "distill_preset": args.quality,
                     "log_dir": args.log_dir.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
                     "progress": args.verbose,
-                    "gs_path": resolve_gs()?.to_string_lossy(),
+                    "gs_path": gs,
                     "soffice_path": resolve_soffice(),
                 }),
             )
@@ -3880,20 +4204,18 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Pdfa(args) => {
-            let gs = resolve_gs()?;
             engine.call(
                 "convert_pdfa",
                 json!({
                     "file": abs(&args.input).to_string_lossy(),
                     "output": abs(&args.output).to_string_lossy(),
                     "level": args.level,
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                 }),
             )
         }
 
         CliCommand::ConvertCmyk(args) => {
-            let gs = resolve_gs()?;
             // A bare bundled-profile name passes through; a path is absolutized.
             let profile = if args.dest_profile.is_empty()
                 || !(args.dest_profile.contains('/') || args.dest_profile.contains('\\'))
@@ -3909,7 +4231,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "output": abs(&args.output).to_string_lossy(),
                     "render_intent": args.render_intent,
                     "dest_profile": profile,
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                     "icc_dir": resolve_icc().to_string_lossy().to_string(),
                     "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
@@ -3917,7 +4239,6 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::ConvertPdfx(args) => {
-            let gs = resolve_gs()?;
             let profile = if args.dest_profile.is_empty()
                 || !(args.dest_profile.contains('/') || args.dest_profile.contains('\\'))
             {
@@ -3934,7 +4255,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "dest_profile": profile,
                     "condition": args.condition,
                     "identifier": args.identifier,
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                     "icc_dir": resolve_icc().to_string_lossy().to_string(),
                 }),
             )
@@ -3968,37 +4289,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Redact(args) => {
-            let rect: Vec<f64> = args
-                .rect
-                .split(',')
-                .map(|s| s.trim().parse::<f64>())
-                .collect::<Result<Vec<f64>, _>>()
-                .map_err(|_| "--rect requires exactly 4 comma-separated numbers: x0,y0,x1,y1".to_string())?;
-            if rect.len() != 4 {
-                return Err("--rect requires exactly 4 comma-separated numbers: x0,y0,x1,y1".to_string());
-            }
-            let fill = parse_hex_rgb(&args.fill)?;
-            engine.call(
-                "redact",
-                json!({
-                    "file": abs(&args.input).to_string_lossy(),
-                    "output": abs(&args.output).to_string_lossy(),
-                    "regions": [{
-                        "page": args.page,
-                        "rect": rect,
-                        "fill": fill,
-                        "overlay_text": args.overlay_text,
-                        "repeat_overlay": args.repeat_overlay,
-                        "align": args.overlay_align,
-                        "font_size": args.overlay_size,
-                    }],
-                    // An overlay whose text is not Latin-1
-                    // EMBEDS through the bundled faces rather than drawing
-                    // '?' — a redaction code printed as question marks tells
-                    // the reader nothing.
-                    "font_dir": resolve_fonts().to_string_lossy().to_string(),
-                }),
-            )
+            engine.call("redact", redact_params(args, gs)?)
         }
 
         CliCommand::SearchRegions(args) => {
@@ -4023,43 +4314,10 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             )
         }
 
-        CliCommand::SearchRedact(args) => {
-            // Only the properties the caller actually set are sent: "no
-            // overlay" and "an overlay of nothing" stay distinguishable
-            // through the file, and the engine refuses a key it does not know
-            // rather than dropping it.
-            let mut properties = json!({});
-            let fill = parse_hex_rgb(&args.fill)?;
-            if args.fill.trim().to_ascii_lowercase() != "#000000" {
-                properties["fill"] = json!(fill);
-            }
-            if !args.overlay_text.is_empty() {
-                properties["overlay_text"] = json!(args.overlay_text);
-                properties["repeat_overlay"] = json!(args.repeat_overlay);
-                properties["align"] = json!(args.overlay_align);
-                properties["font_size"] = json!(args.overlay_size);
-            }
-            engine.call(
-                "search_and_redact",
-                json!({
-                    "file": abs(&args.input).to_string_lossy(),
-                    "output": abs(&args.output).to_string_lossy(),
-                    "query": args.query,
-                    "terms": args.terms,
-                    "patterns": args.patterns,
-                    "pages": parse_pages(&args.pages),
-                    "regex": args.regex,
-                    "case_sensitive": args.case_sensitive,
-                    "whole_word": args.whole_word,
-                    "expand": args.expand,
-                    "max_hits": args.max_hits,
-                    "marks_only": args.marks_only,
-                    "allow_signed": args.include_signed,
-                    "properties": properties,
-                    "font_dir": resolve_fonts().to_string_lossy().to_string(),
-                }),
-            )
-        }
+        CliCommand::SearchRedact(args) => engine.call(
+            "search_and_redact",
+            search_redact_params(args, gs)?,
+        ),
 
         CliCommand::Watermark(args) => {
             // Exactly one source. Passing two would silently honour one of
@@ -4235,7 +4493,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "output": abs(&args.output).to_string_lossy(),
                 "balance": args.balance,
                 "dpi": args.dpi,
-                "gs_path": resolve_gs()?.to_string_lossy(),
+                "gs_path": gs,
                 "outline_text": args.outline_text,
                 "outline_strokes": args.outline_strokes,
                 "font_dir": resolve_fonts().to_string_lossy().to_string(),
@@ -4289,7 +4547,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "output": abs(&args.output).to_string_lossy(),
                 "level": args.level,
                 "trapping": !args.no_trapping,
-                "gs_path": resolve_gs()?.to_string_lossy(),
+                "gs_path": gs,
             });
             if let Some(pages) = &args.pages {
                 let numbers = parse_page_numbers(pages)?;
@@ -4320,7 +4578,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "box": args.box_,
                     "margin": args.margin,
                     "preview": args.preview,
-                    "gs_path": resolve_gs()?.to_string_lossy(),
+                    "gs_path": gs,
                 })
             } else {
                 json!({
@@ -4445,7 +4703,6 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         ),
 
         CliCommand::OcrFile(args) => {
-            let gs = resolve_gs()?;
             let tesseract = resolve_tesseract();
             engine.call(
                 "ocr_file",
@@ -4454,7 +4711,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "output": abs(&args.output).to_string_lossy(),
                     "language": args.language,
                     "tesseract_path": tesseract.to_string_lossy(),
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                     "mrc": args.mrc,
                     "mrc_preset": args.mrc_preset,
                     "mrc_verify_text": args.mrc_verify_text,
@@ -4486,7 +4743,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "background_strength": args.background_strength,
                 "osd_confidence": args.osd_confidence,
                 "jpeg_quality": args.jpeg_quality,
-                "gs_path": resolve_gs()?.to_string_lossy(),
+                "gs_path": gs,
                 "tesseract_path": resolve_tesseract().to_string_lossy(),
             });
             if args.analyze {
@@ -4505,7 +4762,8 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 .map_err(|e| format!("Cannot read action file {}: {e}", args.action.display()))?;
             let parsed: serde_json::Value = serde_json::from_str(&raw)
                 .map_err(|e| format!("Action file is not valid JSON: {e}"))?;
-            engine.call("run_action", run_action_params(args, &parsed, resolve_gs)?)
+            let gs = planned_gs_path(engine, &args.source, &action_steps(&parsed)?)?;
+            engine.call("run_action", run_action_params(args, &parsed, gs)?)
         }
 
         CliCommand::PortfolioCreate(args) => {
@@ -4579,7 +4837,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 // The bundled device. Total area coverage is the one check
                 // that needs it, and a missing one is reported by the check
                 // rather than refused by the run.
-                "gs_path": resolve_gs()?.to_string_lossy(),
+                "gs_path": gs,
             }),
         ),
 
@@ -4595,7 +4853,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     .map(|p| abs(p).to_string_lossy().into_owned())
                     .unwrap_or_default(),
                 "checks": if args.fixes.is_empty() { None } else { Some(args.fixes.clone()) },
-                "gs_path": resolve_gs()?.to_string_lossy(),
+                "gs_path": gs,
                 "font_dir": resolve_fonts().to_string_lossy(),
                 "tesseract_path": resolve_tesseract().to_string_lossy(),
             }),
@@ -4612,7 +4870,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "profile_path": args.profile_path.as_ref()
                     .map(|p| abs(p).to_string_lossy().into_owned())
                     .unwrap_or_default(),
-                "gs_path": resolve_gs()?.to_string_lossy(),
+                "gs_path": gs,
                 "font_dir": resolve_fonts().to_string_lossy(),
                 "tesseract_path": resolve_tesseract().to_string_lossy(),
                 "write_log": args.log_dir.is_some(),
@@ -4757,7 +5015,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "output": abs(&args.output).to_string_lossy(),
                 "fmt": args.format,
                 "soffice_path": resolve_soffice(),
-                "gs_path": resolve_gs()?.to_string_lossy(),
+                "gs_path": gs,
             });
             // An omitted option stays absent rather than defaulting here: the
             // engine refuses an option the target does not take, and a value
@@ -4787,7 +5045,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             // An omitted option stays absent rather than defaulting here: the
             // engine refuses an option the target does not take, and a value
             // sent unasked would turn every such refusal into a false one.
-            let image = matches!(args.format.as_str(), "png" | "jpeg" | "tiff");
+            let image = export_folder_writes_images(&args.format);
             let mut params = serde_json::Map::new();
             params.insert("fmt".into(), json!(args.format));
             if !args.pages.trim().is_empty() {
@@ -4827,7 +5085,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "dest": abs(&args.dest).to_string_lossy(),
                     "steps": [{ "op": op, "params": serde_json::Value::Object(params) }],
                     "action_name": format!("Export folder to {}", args.format),
-                    "gs_path": resolve_gs()?.to_string_lossy(),
+                    "gs_path": gs,
                     "soffice_path": resolve_soffice(),
                     "log_dir": args
                         .log_dir
@@ -4840,7 +5098,6 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::ExportImages(args) => {
-            let gs = resolve_gs()?;
             engine.call(
                 "export_images",
                 json!({
@@ -4851,7 +5108,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "pages": args.pages,
                     "gray": args.gray,
                     "quality": args.quality,
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                 }),
             )
         }
@@ -4975,14 +5232,13 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
 
         CliCommand::Compare(args) => {
             if args.visual {
-                let gs = resolve_gs()?;
                 engine.call(
                     "compare_visual",
                     json!({
                         "file_a": abs(&args.a).to_string_lossy(),
                         "file_b": abs(&args.b).to_string_lossy(),
                         "dpi": args.dpi,
-                        "gs_path": gs.to_string_lossy(),
+                        "gs_path": gs,
                     }),
                 )
             } else {
@@ -5321,7 +5577,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "scan": args.scan,
                     "lang": args.lang,
                     "tesseract_path": resolve_tesseract().to_string_lossy(),
-                    "gs_path": resolve_gs()?.to_string_lossy(),
+                    "gs_path": gs,
                     "max_candidates": args.max_candidates,
                 }),
             )
@@ -5343,7 +5599,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "scan": args.scan,
                 "lang": args.lang,
                 "tesseract_path": resolve_tesseract().to_string_lossy(),
-                "gs_path": resolve_gs()?.to_string_lossy(),
+                "gs_path": gs,
                 "max_candidates": args.max_candidates,
                 "allow_signed": args.include_signed,
                 "font_dir": resolve_fonts().to_string_lossy().to_string(),
@@ -5546,27 +5802,25 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Grayscale(args) => {
-            let gs = resolve_gs()?;
             engine.call(
                 "grayscale",
                 json!({
                     "file": abs(&args.input).to_string_lossy(),
                     "output": abs(&args.output).to_string_lossy(),
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                     "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
             )
         }
 
         CliCommand::Distill(args) => {
-            let gs = resolve_gs()?;
             engine.call(
                 "distill",
                 json!({
                     "file": abs(&args.input).to_string_lossy(),
                     "output": abs(&args.output).to_string_lossy(),
                     "preset": args.preset,
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                 }),
             )
         }
@@ -5620,7 +5874,6 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             // log all live engine-side (engine/batch_ocr.py) so the CLI and a
             // scheduled run behave identically to each other -- and log
             // identically to the GUI.
-            let gs = resolve_gs()?;
             engine.call(
                 "batch_ocr",
                 json!({
@@ -5628,7 +5881,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "dest": args.dest.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
                     "lang": args.lang,
                     "tesseract_path": resolve_tesseract().to_string_lossy(),
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                     "moved_root": args.moved.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
                     "error_root": args.errors.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
                     "repair_damaged": args.repair,
@@ -5658,13 +5911,12 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Rebuild(args) => {
-            let gs = resolve_gs()?;
             engine.call(
                 "rebuild",
                 json!({
                     "file": abs(&args.input).to_string_lossy(),
                     "output": abs(&args.output).to_string_lossy(),
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                 }),
             )
         }
@@ -5716,7 +5968,23 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
         });
     }
 
-    let gs = resolve_gs()?;
+    // Each file asks the resolver only for what its own work needs, and the
+    // resolver runs at most once. When every file needs Ghostscript the batch
+    // refuses before its first file with the resolver's error, rather than
+    // failing every file the same way.
+    let demands: Vec<GsDemand> =
+        pdfs.iter().map(|pdf| batch_gs_demand(&args.operation, pdf)).collect();
+    let explicit = explicit_gs();
+    let mut resolved: Option<Result<PathBuf, String>> = None;
+    let mut gs_for = |demand: GsDemand| {
+        gs_path_for(demand, explicit.as_deref(), || {
+            resolved.get_or_insert_with(resolve_gs).clone()
+        })
+    };
+    if demands.iter().all(|demand| *demand == GsDemand::Required) {
+        gs_for(GsDemand::Required)?;
+    }
+
     let total = pdfs.len();
     let mut succeeded = 0usize;
     let mut failed = 0usize;
@@ -5724,6 +5992,15 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
 
     for (i, pdf) in pdfs.iter().enumerate() {
         let filename = pdf.file_name().unwrap().to_string_lossy().to_string();
+        let gs = match gs_for(demands[i]) {
+            Ok(path) => path,
+            Err(refusal) => {
+                failed += 1;
+                eprintln!("[{}/{}] {}\n  error: {}", i + 1, total, filename, refusal);
+                results.push(json!({ "file": filename, "status": "error", "error": refusal }));
+                continue;
+            }
+        };
         // A converted source's output name GAINS `.pdf` rather than replacing
         // the extension: `invoice.docx` and `invoice.pdf` in one folder must
         // not collide, and the original name stays legible.
@@ -5750,7 +6027,7 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
                     "file": pdf.to_string_lossy(),
                     "output": out_path.to_string_lossy(),
                     "quality": quality,
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                     "mrc_preset": mrc_preset,
                     "mrc_mask_codec": mrc_mask_codec.clone().unwrap_or_default(),
                     "mrc_pdfa_safe": mrc_pdfa_safe,
@@ -5775,7 +6052,7 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
                     "file": pdf.to_string_lossy(),
                     "output": out_path.to_string_lossy(),
                     "level": level,
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                 }),
             ),
             BatchOperation::Grayscale => engine.call(
@@ -5783,7 +6060,7 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
                 json!({
                     "file": pdf.to_string_lossy(),
                     "output": out_path.to_string_lossy(),
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                     "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
             ),
@@ -5804,17 +6081,14 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
                     "output": out_path.to_string_lossy(),
                 }),
             ),
-            BatchOperation::Rebuild => {
-                let gs = resolve_gs()?;
-                engine.call(
-                    "rebuild",
-                    json!({
-                        "file": pdf.to_string_lossy(),
-                        "output": out_path.to_string_lossy(),
-                        "gs_path": gs.to_string_lossy(),
-                    }),
-                )
-            }
+            BatchOperation::Rebuild => engine.call(
+                "rebuild",
+                json!({
+                    "file": pdf.to_string_lossy(),
+                    "output": out_path.to_string_lossy(),
+                    "gs_path": gs,
+                }),
+            ),
             BatchOperation::Recover => engine.call(
                 "recover",
                 json!({
@@ -5838,7 +6112,7 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
                     "margin_pt": margin,
                     "image_dpi_default": image_dpi,
                     "distill_preset": quality,
-                    "gs_path": gs.to_string_lossy(),
+                    "gs_path": gs,
                     "soffice_path": resolve_soffice(),
                 }),
             ),
@@ -6603,9 +6877,10 @@ mod tests {
         .is_err());
     }
 
-    // ── run-action: the Ghostscript each step takes ───────────────────────
+    // ── Guided actions: the plan the engine answers ───────────────────────
 
     const FOUND_GS: &str = r"C:\gs\bin\gswin64c.exe";
+    const MISSING_GS: &str = r"D:\nowhere\gswin64c.exe";
 
     fn run_action_args() -> RunActionArgs {
         let cli = parse(&[
@@ -6617,15 +6892,136 @@ mod tests {
         }
     }
 
-    fn action(ops: &[&str]) -> Value {
-        let steps: Vec<Value> = ops.iter().map(|op| json!({ "op": op, "params": {} })).collect();
-        json!({ "name": "gs-demand", "steps": steps })
+    #[test]
+    fn a_plan_names_the_demand_a_run_takes() {
+        use GsDemand::{Never, Optional, Required};
+        for (gs, demand) in [
+            ("required", Required),
+            ("optional", Optional),
+            ("undecided", Optional),
+            ("never", Never),
+        ] {
+            assert_eq!(plan_demand(&json!({ "gs": gs, "steps": [] })), Ok(demand), "{gs}");
+        }
+        for plan in [json!({}), json!({ "gs": "sometimes" }), json!({ "gs": 1 }), json!(null)] {
+            assert!(plan_demand(&plan).is_err(), "{plan}");
+        }
     }
 
-    /// The `gs_path` the run-action request carries, and how many times the
-    /// resolver was asked. `found` is what the resolver answers; `None`
-    /// refuses with the CLI's named error.
-    fn gs_path_for(ops: &[&str], found: Option<&str>) -> (Result<String, String>, u32) {
+    #[test]
+    fn the_plan_request_asks_for_a_plan_of_the_steps_over_the_source() {
+        let steps = json!([{ "op": "create_pdf", "params": {} }]);
+        let request = plan_request(Path::new("in"), &steps);
+        assert_eq!(request["plan"], json!(true));
+        assert_eq!(request["steps"], steps);
+        assert_eq!(request["dest"], json!(""));
+        assert_eq!(request["source"], json!(abs(Path::new("in")).to_string_lossy()));
+    }
+
+    #[test]
+    fn the_run_request_carries_the_planned_path() {
+        let action = json!({ "name": "gs", "steps": [{ "op": "compress", "params": {} }] });
+        for gs in [FOUND_GS, MISSING_GS, ""] {
+            let params = run_action_params(&run_action_args(), &action, gs.to_string())
+                .expect("the request builds");
+            assert_eq!(params["gs_path"], json!(gs));
+            assert_eq!(params["steps"], action["steps"]);
+        }
+        let no_steps = json!({ "name": "gs" });
+        assert!(run_action_params(&run_action_args(), &no_steps, String::new()).is_err());
+        assert!(action_steps(&no_steps).is_err());
+    }
+
+    #[test]
+    fn a_folder_of_folders_is_planned_as_the_one_step_its_run_takes() {
+        let folders = |argv: &[&str]| match command(argv) {
+            CliCommand::CreatePdfFolders(args) => folders_plan_steps(&args),
+            _ => panic!("not the create-pdf-folders arm"),
+        };
+        assert_eq!(
+            folders(&["create-pdf-folders", "in", "-d", "out", "--sources", "all", "--no-subfolders"]),
+            json!([{
+                "op": "create_pdf_folders",
+                "params": { "sources": "all", "include_subfolders": false },
+            }])
+        );
+        assert_eq!(
+            folders(&["create-pdf-folders", "in", "-d", "out"]),
+            json!([{
+                "op": "create_pdf_folders",
+                "params": { "sources": "images", "include_subfolders": true },
+            }])
+        );
+    }
+
+    /// Every command line the evaluator's vectors name gets the need the
+    /// evaluator gives the same operation.
+    #[test]
+    fn every_command_agrees_with_the_step_evaluator() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("tests")
+            .join("fixtures")
+            .join("gs-need-vectors.json");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let fixture: Value = serde_json::from_str(&text).expect("the vectors parse");
+        let vectors = fixture["vectors"].as_array().expect("a vectors list");
+        let mut ops = std::collections::BTreeSet::new();
+        let mut checked = std::collections::BTreeSet::new();
+        for vector in vectors {
+            let op = vector["op"].as_str().expect("an op");
+            ops.insert(op);
+            let Some(lines) = vector.get("cli").and_then(Value::as_array) else {
+                continue;
+            };
+            let demand = match vector["need"].as_str() {
+                Some("required") => GsDemand::Required,
+                Some("optional") => GsDemand::Optional,
+                Some("never") => GsDemand::Never,
+                other => panic!("{op}: a command line needs a decided need, not {other:?}"),
+            };
+            for line in lines {
+                let argv: Vec<&str> = line
+                    .as_array()
+                    .expect("an argv")
+                    .iter()
+                    .map(|arg| arg.as_str().expect("an argument"))
+                    .collect();
+                assert_eq!(need(&argv), GsNeed::Command(demand), "{op} {argv:?}");
+                checked.insert(op);
+            }
+        }
+        // The folder-of-folders run is the one the command line plans through
+        // the engine, so it has no rule of its own to compare.
+        let planned: Vec<&str> = ops.difference(&checked).copied().collect();
+        assert_eq!(planned, ["create_pdf_folders"]);
+    }
+
+    fn gs_path_of(params: Result<Value, String>) -> String {
+        let params = params.expect("the request builds");
+        params["gs_path"].as_str().expect("a gs_path string").to_string()
+    }
+
+    // ── Every command: what it needs from Ghostscript ──────────────────────
+
+    fn command(argv: &[&str]) -> CliCommand {
+        let mut full = vec!["spectrapdf"];
+        full.extend_from_slice(argv);
+        parse(&full).command.expect("a subcommand")
+    }
+
+    fn need(argv: &[&str]) -> GsNeed {
+        command_gs_need(&command(argv))
+    }
+
+    /// The `gs_path` a demand yields, and how many times the resolver was
+    /// asked. `found` is what the resolver answers; `None` refuses.
+    fn path_for(
+        demand: GsDemand,
+        configured: Option<&str>,
+        found: Option<&str>,
+    ) -> (Result<String, String>, u32) {
         let calls = std::cell::Cell::new(0);
         let resolve = || {
             calls.set(calls.get() + 1);
@@ -6633,110 +7029,172 @@ mod tests {
                 .map(PathBuf::from)
                 .ok_or_else(|| crate::gs::CLI_REQUIRED.to_string())
         };
-        let params = run_action_params(&run_action_args(), &action(ops), resolve);
-        let gs = params.map(|p| p["gs_path"].as_str().expect("a gs_path string").to_string());
-        (gs, calls.get())
+        (super::gs_path_for(demand, configured, resolve), calls.get())
     }
 
     #[test]
-    fn an_action_without_a_ghostscript_step_never_asks_for_one() {
-        for ops in [
-            &["optimize"][..],
-            &["strip_metadata", "watermark", "encrypt"],
-            &["no_such_step"],
-            &[],
+    fn a_command_that_always_needs_ghostscript_refuses_without_one() {
+        use GsDemand::Required;
+        for argv in [
+            &["pdfa", "in.pdf", "-o", "out.pdf"][..],
+            &["compress", "in.pdf", "-o", "out.pdf"],
+            &["grayscale", "in.pdf", "-o", "out.pdf"],
+            &["rebuild", "in.pdf", "-o", "out.pdf"],
+            &["export-images", "in.pdf", "-o", "page.png"],
+            &["compare", "a.pdf", "b.pdf", "--visual"],
         ] {
-            assert_eq!(gs_path_for(ops, None), (Ok(String::new()), 0), "{ops:?}");
-            assert_eq!(gs_path_for(ops, Some(FOUND_GS)), (Ok(String::new()), 0), "{ops:?}");
+            assert_eq!(need(argv), GsNeed::Command(Required), "{argv:?}");
         }
-    }
-
-    /// The ops the catalog gives `demand`, in catalog order.
-    fn ops_with(demand: GsDemand) -> Vec<&'static str> {
-        let ops: Vec<&'static str> = gs_steps()
-            .iter()
-            .filter(|(_, d)| **d == demand)
-            .map(|(op, _)| op.as_str())
-            .collect();
-        assert!(!ops.is_empty(), "the catalog lists no {demand:?} Ghostscript step");
-        ops
-    }
-
-    #[test]
-    fn a_required_step_refuses_before_the_run_starts() {
         let refused = Err(crate::gs::CLI_REQUIRED.to_string());
-        for op in ops_with(GsDemand::Required) {
-            let ops = ["optimize", op];
-            assert_eq!(gs_path_for(&ops, None), (refused.clone(), 1), "{op}");
-            assert_eq!(gs_path_for(&ops, Some(FOUND_GS)), (Ok(FOUND_GS.to_string()), 1), "{op}");
-        }
-        let mixed = [ops_with(GsDemand::Optional)[0], ops_with(GsDemand::Required)[0]];
-        assert_eq!(gs_path_for(&mixed, None), (refused, 1));
+        assert_eq!(path_for(Required, Some(MISSING_GS), None), (refused.clone(), 1));
+        assert_eq!(path_for(Required, None, None), (refused, 1));
+        assert_eq!(path_for(Required, None, Some(FOUND_GS)), (Ok(FOUND_GS.to_string()), 1));
     }
 
     #[test]
-    fn an_optional_step_runs_either_way_and_takes_the_path_only_when_present() {
-        for op in ops_with(GsDemand::Optional) {
-            for ops in [&[op][..], &["optimize", op, "encrypt"]] {
-                assert_eq!(gs_path_for(ops, Some(FOUND_GS)), (Ok(FOUND_GS.to_string()), 1), "{ops:?}");
-                assert_eq!(gs_path_for(ops, None), (Ok(String::new()), 1), "{ops:?}");
-            }
+    fn a_command_whose_arguments_decide_asks_only_when_its_input_needs_one() {
+        use GsDemand::{Never, Optional, Required};
+        let cases: [(&[&str], GsDemand); 16] = [
+            (&["create-pdf", "scan.png", "-o", "out.pdf"], Never),
+            (&["create-pdf", "a.docx", "b.jpg", "-o", "out.pdf"], Never),
+            (&["create-pdf", "page.ps", "-o", "out.pdf"], Required),
+            (&["create-pdf", "scan.png", "art.EPS", "-o", "out.pdf"], Required),
+            (&["merge", "a.pdf", "b.pdf", "-o", "out.pdf"], Never),
+            (&["merge", "a.pdf", "page.ps", "-o", "out.pdf"], Required),
+            (&["export", "in.pdf", "-o", "out.docx", "--format", "docx"], Never),
+            (&["export", "in.pdf", "-o", "out.pptx", "--format", "pptx"], Required),
+            (&["export-folder", "in", "--dest", "out", "--format", "docx"], Never),
+            (&["export-folder", "in", "--dest", "out", "--format", "png"], Required),
+            (&["compare", "a.pdf", "b.pdf"], Never),
+            (&["page-box", "in.pdf", "-o", "out.pdf", "--auto"], Optional),
+            (&["page-box", "in.pdf", "-o", "out.pdf", "--top", "9"], Never),
+            (&["ocr-file", "in.pdf", "-o", "out.pdf", "--mrc"], Required),
+            (&["detect-fields", "in.pdf", "--scan", "never"], Never),
+            (&["detect-fields", "in.pdf", "--scan", "always"], Required),
+        ];
+        for (argv, demand) in cases {
+            assert_eq!(need(argv), GsNeed::Command(demand), "{argv:?}");
         }
+        assert_eq!(need(&["ocr-file", "in.pdf", "-o", "out.pdf"]), GsNeed::Command(Optional));
+        assert_eq!(need(&["detect-fields", "in.pdf"]), GsNeed::Command(Optional));
+        assert_eq!(path_for(Never, Some(MISSING_GS), Some(FOUND_GS)), (Ok(String::new()), 0));
     }
 
     #[test]
-    fn a_step_list_the_engine_refuses_adds_no_demand() {
-        for steps in [
-            json!(null),
-            json!("compress"),
-            json!({ "op": "compress" }),
-            json!(["compress"]),
-            json!([{ "op": 7 }]),
+    fn a_command_whose_content_decides_runs_without_ghostscript() {
+        use GsDemand::Optional;
+        for argv in [
+            &["preflight", "in.pdf"][..],
+            &["preflight-fix", "in.pdf", "-o", "out.pdf"],
+            &["flatten", "in.pdf", "-o", "out.pdf"],
+            &["enhance-scan", "in.pdf", "--analyze"],
+            &["redact", "in.pdf", "-o", "out.pdf", "-p", "1", "--rect", "0,0,8,8"],
+            &["search-redact", "in.pdf", "-o", "out.pdf", "-q", "SECRET"],
         ] {
-            assert_eq!(action_gs_demand(&steps), GsDemand::None, "{steps}");
+            assert_eq!(need(argv), GsNeed::Command(Optional), "{argv:?}");
         }
     }
 
     #[test]
-    fn a_catalog_row_without_either_tool_list_refuses() {
-        assert!(gs_steps_in(r#"{"steps": []}"#).is_err());
-        assert!(gs_steps_in(r#"{"steps": {"a": {"optional_tools": []}}}"#).is_err());
-        assert!(gs_steps_in(r#"{"steps": {"a": {"tools": ["gs_path"]}}}"#).is_err());
-        let catalog = r#"{"steps": {
-            "a": {"tools": ["gs_path"], "optional_tools": []},
-            "b": {"tools": ["font_dir", "gs_path"], "optional_tools": ["gs_path"]},
-            "c": {"tools": ["font_dir"], "optional_tools": []}
-        }}"#;
-        let expected = BTreeMap::from([
-            ("a".to_string(), GsDemand::Required),
-            ("b".to_string(), GsDemand::Optional),
-        ]);
-        assert_eq!(gs_steps_in(catalog), Ok(expected));
+    fn a_command_that_never_needs_ghostscript_never_asks() {
+        for argv in [
+            &["rotate", "in.pdf", "-o", "out.pdf", "--angle", "90"][..],
+            &["optimize", "in.pdf", "-o", "out.pdf"],
+            &["check", "in.pdf"],
+            &["extract-text", "in.pdf"],
+            &["scan", "-o", "out.pdf"],
+        ] {
+            assert_eq!(need(argv), GsNeed::Command(GsDemand::Never), "{argv:?}");
+        }
+        assert_eq!(
+            need(&["run-action", "in", "--dest", "out", "--action", "a.json"]),
+            GsNeed::PerItem
+        );
+        assert_eq!(need(&["batch", "in", "-o", "out", "rotate", "--angle", "90"]), GsNeed::PerItem);
+        for argv in [
+            &["create-pdf-folders", "in", "-d", "out"][..],
+            &["create-pdf-folders", "in", "-d", "out", "--sources", "all"],
+        ] {
+            assert_eq!(need(argv), GsNeed::PerItem, "{argv:?}");
+        }
+    }
+
+    /// F2: one discovery answer. With nothing configured the resolver runs its
+    /// own search, and the path it finds is what the engine gets.
+    #[test]
+    fn an_optional_leg_takes_what_the_one_resolver_finds() {
+        use GsDemand::Optional;
+        assert_eq!(path_for(Optional, None, Some(FOUND_GS)), (Ok(FOUND_GS.to_string()), 1));
+        assert_eq!(path_for(Optional, None, None), (Ok(String::new()), 1));
+        assert_eq!(path_for(Optional, Some(MISSING_GS), None), (Ok(MISSING_GS.to_string()), 1));
+        assert_eq!(
+            path_for(Optional, Some("gswin64c"), Some(FOUND_GS)),
+            (Ok(FOUND_GS.to_string()), 1)
+        );
     }
 
     #[test]
-    fn the_ghostscript_demands_match_the_fixture() {
+    fn a_batch_asks_per_file_and_per_operation() {
+        let op = |argv: &[&str]| match command(argv) {
+            CliCommand::Batch(args) => args.operation,
+            _ => panic!("not the batch arm"),
+        };
+        let png = PathBuf::from("scan.png");
+        let ps = PathBuf::from("PAGE.PS");
+        let rotate = op(&["batch", "in", "-o", "out", "rotate", "--angle", "90"]);
+        let compress = op(&["batch", "in", "-o", "out", "compress"]);
+        let create = op(&["batch", "in", "-o", "out", "create-pdf"]);
+        assert_eq!(batch_gs_demand(&rotate, &png), GsDemand::Never);
+        assert_eq!(batch_gs_demand(&compress, &png), GsDemand::Required);
+        assert_eq!(batch_gs_demand(&create, &png), GsDemand::Never);
+        assert_eq!(batch_gs_demand(&create, &ps), GsDemand::Required);
+    }
+
+    #[test]
+    fn the_postscript_suffixes_are_the_engines() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
-            .join("tests")
-            .join("fixtures")
-            .join("guided-step-catalog.json");
-        let text = std::fs::read_to_string(&path)
+            .join("src")
+            .join("engine")
+            .join("create_pdf.py");
+        let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let fixture: Value = serde_json::from_str(&text).expect("the fixture parses");
-        let rows = fixture["steps"].as_object().expect("a steps object");
-        let has_gs = |row: &Value, key: &str| {
-            let list = row[key].as_array().unwrap_or_else(|| panic!("a {key} list"));
-            list.iter().any(|tool| tool.as_str() == Some("gs_path"))
+        let listed: Vec<String> = POSTSCRIPT_SUFFIXES.iter().map(|s| format!("\".{s}\"")).collect();
+        let line = format!("POSTSCRIPT_SUFFIXES = ({})", listed.join(", "));
+        assert!(source.contains(&line), "{} no longer says {line}", path.display());
+    }
+
+    #[test]
+    fn the_redaction_requests_carry_the_path_they_are_given() {
+        let redact = match command(&["redact", "in.pdf", "-o", "out.pdf", "-p", "1", "--rect", "0,0,8,8"]) {
+            CliCommand::Redact(args) => args,
+            _ => panic!("not the redact arm"),
         };
-        let mut expected = BTreeMap::new();
-        for (op, row) in rows {
-            match (has_gs(row, "tools"), has_gs(row, "optional_tools")) {
-                (true, true) => expected.insert(op.clone(), GsDemand::Optional),
-                (true, false) => expected.insert(op.clone(), GsDemand::Required),
-                (false, _) => None,
-            };
+        let search = match command(&["search-redact", "in.pdf", "-o", "out.pdf", "-q", "SECRET"]) {
+            CliCommand::SearchRedact(args) => args,
+            _ => panic!("not the search-redact arm"),
+        };
+        for gs in [FOUND_GS, MISSING_GS, ""] {
+            assert_eq!(gs_path_of(redact_params(&redact, gs.to_string())), gs);
+            assert_eq!(gs_path_of(search_redact_params(&search, gs.to_string())), gs);
         }
-        assert_eq!(*gs_steps(), expected);
+    }
+
+    #[test]
+    fn the_engine_surface_is_the_engines() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("src")
+            .join("engine")
+            .join("gs_capability.py");
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let (name, value) = ENGINE_SURFACE;
+        for line in [
+            format!("SURFACE_ENV_VAR = \"{name}\""),
+            format!("CLI_SURFACE = \"{value}\""),
+        ] {
+            assert!(source.contains(&line), "{} no longer says {line}", path.display());
+        }
     }
 }

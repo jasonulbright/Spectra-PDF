@@ -28,6 +28,7 @@ needs_gs = gs_axis.requires_gs
 def clean_capability_cache(monkeypatch):
     """Every test starts with no probed answers and no ambient override."""
     monkeypatch.delenv(gc.PATH_ENV_VAR, raising=False)
+    monkeypatch.delenv(gc.SURFACE_ENV_VAR, raising=False)
     gc.clear_cache()
     yield
     gc.clear_cache()
@@ -183,6 +184,31 @@ def test_no_candidate_at_all_is_not_configured(monkeypatch):
     assert answer.reason == gc.NOT_CONFIGURED
 
 
+def test_a_blank_path_is_nothing_configured_and_searches(monkeypatch):
+    # The CLI and the renderer both read a blank setting as "not configured";
+    # the engine must give it the one answer that permits a search.
+    found = r"C:\gs\bin\gswin64c.exe"
+    gs_axis.force_available(monkeypatch, found)
+    for unconfigured in (None, "", "   "):
+        answer = gc.resolve(unconfigured)
+        assert answer.available, repr(unconfigured)
+        assert answer.path == found
+
+
+def test_a_configured_value_never_consults_discovery(monkeypatch, tmp_path):
+    def searched():
+        raise AssertionError("a configured Ghostscript must not start a search")
+
+    monkeypatch.setattr(gc, "discover", searched)
+    monkeypatch.setattr(gc.shutil, "which", lambda *_a, **_k: None)
+    named = str(tmp_path / "gswin64c.exe")
+    for configured in (named, "gswin64c"):
+        with pytest.raises(gc.GsUnavailable) as caught:
+            gc.require(configured)
+        assert caught.value.reason == gc.NOT_EXECUTABLE
+        assert caught.value.path == configured
+
+
 # ── The refusal ───────────────────────────────────────────────────────────
 
 
@@ -203,6 +229,60 @@ def test_every_reason_has_its_own_message(tmp_path):
     assert len(texts) == 3
     assert gc._minimum_text() in gc.message(old)
     assert old.version in gc.message(old)
+
+
+#: The fix the window's text names, as `_refuse` writes it.
+WINDOW_FIX = "then set its path in Preferences > Engine."
+
+
+def _unavailable_answers(directory):
+    """One unavailable answer per reason."""
+    return {
+        gc.NOT_EXECUTABLE: gc.probe(os.path.join(directory, "gswin64c.exe")),
+        gc.PROBE_FAILED: gc.GsCapability(
+            False, os.path.join(directory, "gs.exe"), "10.05.0", gc.PROBE_FAILED,
+            "no Resource tree",
+        ),
+        gc.VERSION_BELOW_MINIMUM: gc.probe(stub_gs(directory, "9.50")),
+        gc.NOT_CONFIGURED: gc.probe(""),
+    }
+
+
+def test_the_window_names_preferences_for_every_reason(tmp_path):
+    for reason, answer in _unavailable_answers(str(tmp_path)).items():
+        assert answer.reason == reason
+        text = gc.message(answer)
+        assert text.endswith(WINDOW_FIX), (reason, text)
+        assert "--gs-path" not in text, (reason, text)
+
+
+def test_the_command_line_names_its_flag_and_variable_for_every_reason(tmp_path, monkeypatch):
+    answers = _unavailable_answers(str(tmp_path))
+    window = {reason: gc.message(answer) for reason, answer in answers.items()}
+    monkeypatch.setenv(gc.SURFACE_ENV_VAR, gc.CLI_SURFACE)
+    for reason, answer in answers.items():
+        text = gc.message(answer)
+        assert text.endswith(
+            f"then name it with --gs-path or the {gc.PATH_ENV_VAR} environment variable."
+        ), (reason, text)
+        assert "Preferences" not in text, (reason, text)
+        # The problem half is built from the refusal's own fields, so it
+        # reads as the window's does: only the fix differs.
+        assert text.split(". Install")[0] == window[reason].split(". Install")[0], reason
+
+
+def test_the_raised_refusal_names_the_fix_of_the_surface_that_shows_it(tmp_path, monkeypatch):
+    missing = str(tmp_path / "gswin64c.exe")
+    with pytest.raises(gc.GsUnavailable) as caught:
+        gc.require(missing)
+    refusal = caught.value
+    assert str(refusal).endswith(WINDOW_FIX)
+    monkeypatch.setenv(gc.SURFACE_ENV_VAR, "window")
+    assert str(refusal).endswith(WINDOW_FIX)
+    monkeypatch.setenv(gc.SURFACE_ENV_VAR, gc.CLI_SURFACE)
+    assert "--gs-path" in str(refusal) and missing in str(refusal)
+    # The message the refusal table matches stays the window's own.
+    assert refusal.args[0].endswith(WINDOW_FIX)
 
 
 def test_describe_is_a_structured_answer(monkeypatch):

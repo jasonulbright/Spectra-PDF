@@ -25,13 +25,16 @@ import { GS_ONLY_OPERATIONS } from '../src/renderer/commands/registry';
 import { OPERATIONS } from '../src/renderer/commands/operations';
 import {
   STEP_CATALOG,
-  actionGsPath,
-  gsBlockedSteps,
   gsBlocker,
-  stepDefFor,
-  stepGsPath,
+  gsPathFor,
+  gsRequiredSteps,
+  planAction,
+  planSteps,
+  type GsNeed,
+  type GsPlan,
+  type GuidedAction,
+  type GuidedStepOp,
 } from '../src/renderer/lib/guided-actions';
-import type { GuidedAction } from '../src/renderer/lib/guided-actions';
 
 describe('export: the format list, not the door', () => {
   it('gates the rendered formats and NOTHING else', () => {
@@ -74,7 +77,6 @@ describe('the chrome gate', () => {
       'outputpreview',
       'pdfa',
       'rebuild',
-      'scanenhance',
     ]);
     for (const op of GS_ONLY_OPERATIONS) expect(OPERATIONS).toContain(op);
   });
@@ -82,91 +84,138 @@ describe('the chrome gate', () => {
   it('leaves every PARTIAL operation reachable', () => {
     // Each of these works on documents that need no interpreter: Compare's
     // text mode, Preflight's structural checks, the flattener's listing,
-    // trap-preset authoring, vector form detection, and a crop whose
-    // codestream this runtime can decode.
-    for (const op of ['compare', 'preflight', 'flattener', 'trappresets', 'prepareform', 'pagebox']) {
+    // trap-preset authoring, vector form detection, and a crop or a scan
+    // enhancement whose codestream this runtime can decode.
+    for (const op of [
+      'compare',
+      'preflight',
+      'flattener',
+      'trappresets',
+      'prepareform',
+      'pagebox',
+      'scanenhance',
+    ]) {
       expect(GS_ONLY_OPERATIONS.has(op as (typeof OPERATIONS)[number])).toBe(false);
     }
   });
 });
 
-describe('guided actions refuse at PLAN time', () => {
-  const action = (...ops: string[]): GuidedAction => ({
-    id: 'a1',
-    name: 'test',
-    steps: ops.map((op) => ({ op, params: {} })),
-  }) as unknown as GuidedAction;
+/** The engine's shared vectors (`engine/guided_actions.py::step_gs_need`). */
+interface Vector {
+  op: string;
+  params: Record<string, unknown>;
+  sources?: string[];
+  asked?: string[];
+  need: GsNeed;
+}
+const VECTORS = (
+  JSON.parse(readFileSync(resolve(__dirname, 'fixtures/gs-need-vectors.json'), 'utf8')) as {
+    vectors: Vector[];
+  }
+).vectors;
 
-  it('keeps the renderer roster at the engine registry’s eleven', () => {
-    // The roster IS the test: a new gs-bearing step cannot ship without an
-    // absent-state answer, and the two registries are at parity by count.
-    const declared = STEP_CATALOG.filter((s) => s.needsGs).map((s) => s.op).sort();
-    expect(declared).toEqual([
-      'compress',
-      'convert_pdfa',
-      'create_pdf',
-      'create_pdf_folders',
-      'enhance_scan',
-      'export_document',
-      'export_images',
-      'grayscale',
-      'ocr_file',
-      'preflight',
-      'prepare_forms',
-    ]);
+describe('the rules the dialogs keep answer the evaluator’s vectors', () => {
+  // The export dialog and Create PDF decide a single request before any
+  // engine call. Their rules answer the same vectors the engine's evaluator
+  // and the command line answer, so the three cannot drift apart.
+  const decided = (op: string) =>
+    VECTORS.filter((v) => v.op === op && v.need !== 'undecided' && v.asked === undefined);
+
+  it('the export formats', () => {
+    const exported = [...decided('export_document'), ...decided('export_images')];
+    expect(exported.length).toBeGreaterThan(0);
+    for (const v of exported) {
+      const format = String(v.params.fmt).toLowerCase() as (typeof EXPORT_FORMATS)[number];
+      expect(EXPORT_FORMATS, format).toContain(format);
+      expect(exportFormatNeedsGs(format), format).toBe(v.need === 'required');
+    }
   });
 
-  it('names the blocked steps of a saved action, deduplicated and in order', () => {
-    expect(gsBlockedSteps(action('optimize', 'compress', 'watermark', 'compress'))).toEqual([
-      'compress',
-    ]);
-    expect(gsBlockedSteps(action('optimize', 'watermark', 'encrypt'))).toEqual([]);
-  });
-
-  it('refuses the whole action BEFORE its first step rewrites the document', () => {
-    // A run that dies at step four has already rewritten the document three
-    // times, so the answer is taken from the plan.
-    const blocked = gsBlocker(action('optimize', 'compress', 'convert_pdfa'), false);
-    expect(blocked).not.toBeNull();
-    expect(blocked).toContain('Ghostscript');
-    expect(gsBlocker(action('optimize', 'watermark'), false)).toBeNull();
-    expect(gsBlocker(action('compress'), true)).toBeNull();
-  });
-
-  it('says "needs" of one step and "need" of several', () => {
-    expect(gsBlocker(action('compress'), false)).toContain('needs Ghostscript');
-    expect(gsBlocker(action('compress', 'grayscale'), false)).toContain('need Ghostscript');
-  });
-
-  it('keeps the optional roster apart from the required one', () => {
-    // Search & Redact needs Ghostscript only for a hit over part of a JBIG2
-    // scan; the step itself runs without one.
-    const optional = STEP_CATALOG.filter((s) => s.optionalGs).map((s) => s.op).sort();
-    expect(optional).toEqual(['search_redact']);
-    expect(STEP_CATALOG.filter((s) => s.needsGs && s.optionalGs)).toEqual([]);
-    expect(gsBlockedSteps(action('search_redact'))).toEqual([]);
-    expect(gsBlocker(action('search_redact', 'optimize'), false)).toBeNull();
-  });
-
-  it('together the two rosters are every step the engine hands gs_path', () => {
-    const fixture = JSON.parse(
-      readFileSync(resolve(__dirname, 'fixtures/guided-step-catalog.json'), 'utf8'),
-    ) as { steps: Record<string, { tools: string[] }> };
-    const engine = Object.entries(fixture.steps)
-      .filter(([, entry]) => entry.tools.includes('gs_path'))
-      .map(([op]) => op)
-      .sort();
-    const renderer = STEP_CATALOG.filter((s) => s.needsGs || s.optionalGs).map((s) => s.op).sort();
-    expect(renderer).toEqual(engine);
+  it('the Create PDF sources', () => {
+    const created = decided('create_pdf');
+    expect(created.length).toBeGreaterThan(0);
+    for (const v of created) {
+      const sources = v.sources ?? [];
+      expect(postscriptSources(sources).length > 0, sources.join(', ')).toBe(v.need === 'required');
+    }
   });
 });
 
-describe('guided actions resolve Ghostscript per step', () => {
-  const action = (...ops: string[]): GuidedAction => ({
+describe('guided actions take their Ghostscript need from the engine’s plan', () => {
+  const action = (...steps: GuidedAction['steps']): GuidedAction => ({
     id: 'a1',
     name: 'test',
-    steps: ops.map((op) => ({ op, params: {} })),
-  }) as unknown as GuidedAction;
+    steps,
+  });
+  const plan = (gs: GsNeed, ...steps: [GuidedStepOp, GsNeed][]): GsPlan => ({
+    gs,
+    steps: steps.map(([op, need]) => ({ op, gs: need })),
+  });
+
+  it('carries no Ghostscript demand of its own', () => {
+    for (const def of STEP_CATALOG) {
+      expect(Object.keys(def), def.op).not.toContain('needsGs');
+      expect(Object.keys(def), def.op).not.toContain('optionalGs');
+    }
+    const lib = readFileSync(resolve(__dirname, '../src/renderer/lib/guided-actions.ts'), 'utf8');
+    expect(lib).not.toContain('guided-step-catalog.json');
+  });
+
+  it('asks the engine for a plan of the steps over the picked folder', async () => {
+    const sent: Record<string, unknown>[] = [];
+    const answer = plan('optional', ['search_redact', 'optional']);
+    const request = async (params: Record<string, unknown>) => {
+      sent.push(params);
+      return answer;
+    };
+    const redact = action({ op: 'search_redact', params: { query: 'x' } });
+    expect(await planAction(request, redact, undefined, 'C:/in')).toBe(answer);
+    expect(await planAction(request, redact)).toBe(answer);
+    expect(sent).toEqual([
+      { source: 'C:/in', dest: '', steps: planSteps(redact), plan: true },
+      { source: '', dest: '', steps: planSteps(redact), plan: true },
+    ]);
+  });
+
+  it('marks the values a run collects later, and sends the collected ones', () => {
+    const slides = action({ op: 'export_document', params: { fmt: 'pptx' }, ask: ['fmt'] });
+    expect(planSteps(slides)).toEqual([
+      { op: 'export_document', params: expect.objectContaining({ fmt: 'pptx' }), ask: ['fmt'] },
+    ]);
+    const sent = planSteps(slides, { 0: { fmt: 'txt' } });
+    expect(sent).toEqual([{ op: 'export_document', params: expect.objectContaining({ fmt: 'txt' }) }]);
+    expect(sent[0]).not.toHaveProperty('ask');
+  });
+
+  it('refuses a run before its first step only when the plan requires Ghostscript', () => {
+    const required = plan('required', ['optimize', 'never'], ['compress', 'required']);
+    const blocked = gsBlocker(required, false);
+    expect(blocked).not.toBeNull();
+    expect(blocked).toContain('Ghostscript');
+    expect(gsBlocker(required, true)).toBeNull();
+    for (const need of ['optional', 'undecided', 'never'] as const) {
+      expect(gsBlocker(plan(need, ['search_redact', need]), false), need).toBeNull();
+    }
+    // A plan not answered yet blocks nothing; the run asks again first.
+    expect(gsBlocker(null, false)).toBeNull();
+  });
+
+  it('names each step that needs Ghostscript once, in order', () => {
+    const twice = plan(
+      'required',
+      ['compress', 'required'],
+      ['search_redact', 'optional'],
+      ['grayscale', 'required'],
+      ['compress', 'required'],
+    );
+    expect(gsRequiredSteps(twice)).toEqual(['compress', 'grayscale']);
+    expect(gsBlocker(twice, false)).toContain('need Ghostscript');
+    const once = plan('required', ['optimize', 'never'], ['compress', 'required']);
+    expect(gsBlocker(once, false)).toContain('needs Ghostscript');
+  });
+});
+
+describe('guided actions resolve Ghostscript per planned need', () => {
   const lookup = (configured: string) => {
     const asked: string[] = [];
     return {
@@ -183,27 +232,51 @@ describe('guided actions resolve Ghostscript per step', () => {
     };
   };
 
-  it('hands an optional step the configured Ghostscript and runs it without one', async () => {
-    const present = lookup('C:/gs/bin/gswin64c.exe');
-    expect(await stepGsPath(stepDefFor('search_redact'), present)).toBe('C:/gs/bin/gswin64c.exe');
+  it('asks the refusing lookup for a required need', async () => {
     const absent = lookup('');
-    expect(await stepGsPath(stepDefFor('search_redact'), absent)).toBe('');
-    expect(absent.asked).toEqual(['ifAvailable']);
-  });
-
-  it('asks the refusing lookup for a required step and none for a step that takes none', async () => {
-    const absent = lookup('');
-    await expect(stepGsPath(stepDefFor('compress'), absent)).rejects.toThrow('Ghostscript');
-    expect(await stepGsPath(stepDefFor('optimize'), absent)).toBeUndefined();
+    await expect(gsPathFor('required', absent)).rejects.toThrow('Ghostscript');
     expect(absent.asked).toEqual(['require']);
+    expect(await gsPathFor('required', lookup('C:/gs/bin/gswin64c.exe'))).toBe('C:/gs/bin/gswin64c.exe');
   });
 
-  it('refuses a folder run only when a step cannot run without Ghostscript', async () => {
+  it('hands a need the content decides whatever is usable, and runs without one', async () => {
+    for (const need of ['optional', 'undecided'] as const) {
+      const absent = lookup('');
+      expect(await gsPathFor(need, absent), need).toBe('');
+      expect(absent.asked, need).toEqual(['ifAvailable']);
+      expect(await gsPathFor(need, lookup('C:/gs/bin/gswin64c.exe')), need).toBe(
+        'C:/gs/bin/gswin64c.exe',
+      );
+    }
+  });
+
+  it('asks nothing for work that never reaches Ghostscript', async () => {
     const absent = lookup('');
-    expect(await actionGsPath(action('search_redact', 'optimize'), absent)).toBe('');
-    await expect(actionGsPath(action('search_redact', 'compress'), absent)).rejects.toThrow('Ghostscript');
-    const present = lookup('C:/gs/bin/gswin64c.exe');
-    expect(await actionGsPath(action('search_redact'), present)).toBe('C:/gs/bin/gswin64c.exe');
+    expect(await gsPathFor('never', absent)).toBeUndefined();
+    expect(absent.asked).toEqual([]);
+  });
+});
+
+describe('scan enhancement: the content, not the panel', () => {
+  const text = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
+
+  it('hands the panel’s calls what is usable and never gates the panel', () => {
+    const panel = text('src/renderer/panels/ScanEnhancePanel.tsx');
+    expect(panel).toContain('gsPathIfAvailable()');
+    expect(panel).not.toContain('requireGsPath');
+    expect(panel).not.toContain('gsBlocked');
+  });
+
+  it('keeps the scan dialog’s enhancement open and gates only recognition', () => {
+    const dialog = text('src/renderer/components/ScanDialog.tsx');
+    expect(dialog).not.toContain('requireGsPath');
+    const checkbox = (testId: string) => {
+      const at = dialog.indexOf(`data-testid="${testId}"`);
+      expect(at, testId).toBeGreaterThan(-1);
+      return dialog.slice(at, dialog.indexOf('/>', at));
+    };
+    expect(checkbox('scan-enhance')).not.toContain('gsOff');
+    expect(checkbox('scan-ocr')).toContain('gsOff');
   });
 });
 

@@ -26,15 +26,17 @@ by name), it is incompatible with in-place mode, and its presence widens what
 the run walks from PDFs to the whole Create PDF accepted set.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
+import inspect
 import os
 import shutil
 
 import pikepdf
 
+from engine import gs_capability
 from engine.batch_ocr import (
     _format_duration,
     _format_timestamp,
@@ -45,6 +47,7 @@ from engine.batch_ocr import (
     ocr_file,
 )
 from engine.compress import compress
+from engine.create_pdf import POSTSCRIPT_SUFFIXES
 from engine.create_pdf import accepted_suffixes as create_pdf_suffixes
 from engine.enhance_scan import enhance_scan
 from engine.create_pdf import create_pdf
@@ -66,16 +69,103 @@ from engine.search_redact import search_and_redact
 from engine.watermark import watermark
 
 
+# ── What a step needs from Ghostscript ─────────────────────────────────────
+#
+# One evaluator, `step_gs_need`, answers this for every surface: `run_action`
+# enforces it before a run starts, and the window and the command line ask it
+# through `run_action(plan=True)` rather than keeping a copy of the rules.
+
+#: Nothing the step does reaches Ghostscript.
+GS_NEVER = "never"
+#: Only some content reaches it: the step runs without one, and the engine
+#: refuses the one input that needs it by name.
+GS_OPTIONAL = "optional"
+#: The step cannot run without Ghostscript.
+GS_REQUIRED = "required"
+#: A parameter or a source that decides it is not known yet (asked at run
+#: time, or a folder not walked yet).
+GS_UNDECIDED = "undecided"
+
+_UNSET = object()
+
+
+def _param(fn: Callable[..., object], params: Mapping, asked: frozenset, key: str):
+    """The value a run hands `key`, or _UNSET when the run has not decided it."""
+    if key in asked:
+        return _UNSET
+    if key in params:
+        return params[key]
+    default = inspect.signature(fn).parameters[key].default
+    return _UNSET if default is inspect.Parameter.empty else default
+
+
+def _is_postscript(name: str) -> bool:
+    return Path(str(name)).suffix.lower() in POSTSCRIPT_SUFFIXES
+
+
+def _gs_never(fn, params, asked, sources) -> str:
+    return GS_NEVER
+
+
+def _gs_always(fn, params, asked, sources) -> str:
+    return GS_REQUIRED
+
+
+def _gs_by_content(fn, params, asked, sources) -> str:
+    return GS_OPTIONAL
+
+
+def _gs_by_mrc(fn, params, asked, sources) -> str:
+    """The MRC tail verifies every mask through Ghostscript; recognition
+    renders only the pages that need it."""
+    mrc = _param(fn, params, asked, "mrc")
+    if mrc is _UNSET:
+        return GS_UNDECIDED
+    return GS_REQUIRED if mrc else GS_OPTIONAL
+
+
+def _gs_by_format(fn, params, asked, sources) -> str:
+    """The presentation target renders each page's graphics through
+    Ghostscript (`office_export`); every other target reads the document."""
+    fmt = _param(fn, params, asked, "fmt")
+    if fmt is _UNSET:
+        return GS_UNDECIDED
+    return GS_REQUIRED if str(fmt).strip().lower() == "pptx" else GS_NEVER
+
+
+def _gs_by_scan_mode(fn, params, asked, sources) -> str:
+    """Form detection renders through Ghostscript only on its raster arm."""
+    scan = _param(fn, params, asked, "scan")
+    if scan is _UNSET:
+        return GS_UNDECIDED
+    return {"always": GS_REQUIRED, "never": GS_NEVER}.get(str(scan), GS_OPTIONAL)
+
+
+def _gs_by_sources(fn, params, asked, sources) -> str:
+    """Create PDF distills a PostScript source through Ghostscript."""
+    if sources is None:
+        return GS_UNDECIDED
+    return GS_REQUIRED if any(_is_postscript(s) for s in sources) else GS_NEVER
+
+
+def _gs_by_folder_sources(fn, params, asked, sources) -> str:
+    which = _param(fn, params, asked, "sources")
+    if which is _UNSET:
+        return GS_UNDECIDED
+    if str(which) == "images":
+        return GS_NEVER
+    return _gs_by_sources(fn, params, asked, sources)
+
+
 class _Step(NamedTuple):
     """One dispatchable op. `tools` are the tool-path keywords `run_action`
-    injects; `optional_tools` are the ones among them the op runs without. A
-    planner refuses a run over a missing tool only when that tool is in
-    `tools` and not in `optional_tools`."""
+    injects; `gs` decides what the op needs from Ghostscript for the
+    parameters and the source files one item of a run hands it."""
 
     fn: Callable[..., object]
     params: frozenset
     tools: frozenset
-    optional_tools: frozenset = frozenset()
+    gs: Callable[..., str] = _gs_never
 
 
 _STEPS: dict[str, _Step] = {
@@ -101,6 +191,7 @@ _STEPS: dict[str, _Step] = {
             }
         ),
         frozenset({"gs_path", "jbig2_path", "tesseract_path", "font_dir"}),
+        gs=_gs_always,
     ),
     # The pair the single-document panel already offers as one flow ("then
     # optimize"). Lossless and Ghostscript-free, so it composes after any
@@ -111,8 +202,10 @@ _STEPS: dict[str, _Step] = {
         frozenset({"linearize", "strip_metadata", "compress_streams"}),
         frozenset(),
     ),
-    "grayscale": _Step(grayscale, frozenset(), frozenset({"gs_path", "font_dir"})),
-    "convert_pdfa": _Step(convert_pdfa, frozenset({"level"}), frozenset({"gs_path"})),
+    "grayscale": _Step(grayscale, frozenset(), frozenset({"gs_path", "font_dir"}), gs=_gs_always),
+    "convert_pdfa": _Step(
+        convert_pdfa, frozenset({"level"}), frozenset({"gs_path"}), gs=_gs_always
+    ),
     "strip_metadata": _Step(strip_metadata, frozenset(), frozenset()),
     # Authoring navigation over a whole tree is where these two stop being a
     # nicety: nobody links the addresses in 400 documents by hand, and nobody
@@ -159,7 +252,7 @@ _STEPS: dict[str, _Step] = {
         frozenset({"font_dir", "gs_path"}),
         # Only a hit over part of a JBIG2 image needs Ghostscript, to decode
         # it; every other redaction runs without one.
-        optional_tools=frozenset({"gs_path"}),
+        gs=_gs_by_content,
     ),
     "watermark": _Step(
         watermark,
@@ -209,6 +302,7 @@ _STEPS: dict[str, _Step] = {
         # `font_dir` reaches the MRC tail, which prepares its source the same
         # way the Ghostscript-backed ops prepare theirs.
         frozenset({"gs_path", "tesseract_path", "font_dir"}),
+        gs=_gs_by_mrc,
     ),
     # Deskew, despeckle, whiten and re-orient the scanned pages. Its ORDER
     # against the other two scan steps is enforced in validate_steps.
@@ -231,6 +325,8 @@ _STEPS: dict[str, _Step] = {
             }
         ),
         frozenset({"gs_path", "tesseract_path"}),
+        # Only a codestream this build cannot decode is rendered instead.
+        gs=_gs_by_content,
     ),
     # No review step exists in a folder run, so this creates every field the
     # detector offers. `kinds` is the only narrowing available without a
@@ -239,6 +335,7 @@ _STEPS: dict[str, _Step] = {
         prepare_form_fields,
         frozenset({"pages", "scan", "lang", "max_candidates", "kinds", "allow_signed"}),
         frozenset({"gs_path", "tesseract_path", "font_dir"}),
+        gs=_gs_by_scan_mode,
     ),
     # A print profile inside a longer authored action ("convert every Office
     # file that lands here, then bring it up to the house press rule, then
@@ -253,6 +350,9 @@ _STEPS: dict[str, _Step] = {
         apply_fixups,
         frozenset({"profile", "profile_path", "checks"}),
         frozenset({"gs_path", "font_dir", "tesseract_path"}),
+        # Only a colour, downsample or conversion fixup the document needs
+        # runs through Ghostscript.
+        gs=_gs_by_content,
     ),
     "encrypt": _Step(encrypt, frozenset({"user_password", "owner_password", "permissions"}), frozenset()),
     # The one step that PRODUCES the document instead of
@@ -273,6 +373,7 @@ _STEPS: dict[str, _Step] = {
             }
         ),
         frozenset({"gs_path", "soffice_path"}),
+        gs=_gs_by_sources,
     ),
     # The second source step, and the one that changes the run's UNIT: a
     # folder of pages is one document, so the run walks DIRECTORIES rather
@@ -293,6 +394,7 @@ _STEPS: dict[str, _Step] = {
             }
         ),
         frozenset({"gs_path", "soffice_path"}),
+        gs=_gs_by_folder_sources,
     ),
     # The two steps that CONSUME the document instead of transforming it. They
     # write a different kind of file at a different extension, so nothing can
@@ -312,11 +414,13 @@ _STEPS: dict[str, _Step] = {
             }
         ),
         frozenset({"gs_path", "soffice_path"}),
+        gs=_gs_by_format,
     ),
     "export_images": _Step(
         export_images,
         frozenset({"fmt", "dpi", "pages", "gray", "quality"}),
         frozenset({"gs_path"}),
+        gs=_gs_always,
     ),
 }
 
@@ -492,6 +596,150 @@ def validate_steps(steps) -> list[dict]:
     return out
 
 
+def step_gs_need(
+    op: str,
+    params: Mapping | None = None,
+    *,
+    asked: Iterable[str] = (),
+    sources: Iterable[str] | None = None,
+) -> str:
+    """What one step needs from Ghostscript: `GS_NEVER`, `GS_OPTIONAL`,
+    `GS_REQUIRED` or `GS_UNDECIDED`.
+
+    `params` are the step's parameters and `asked` the keys a run collects
+    later. `sources` are the files one row of a run hands a source step; a
+    source step without them is undecided.
+    """
+    spec = _STEPS[op]
+    return spec.gs(
+        spec.fn,
+        dict(params or {}),
+        frozenset(asked),
+        None if sources is None else [str(s) for s in sources],
+    )
+
+
+def items_gs_need(needs: Iterable[str]) -> str:
+    """A run's need from the needs of its rows. Every row needs Ghostscript:
+    the run refuses before it starts. Only some rows need it: those rows
+    refuse by name and the others run."""
+    needs = list(needs)
+    if GS_UNDECIDED in needs:
+        return GS_UNDECIDED
+    if needs and all(need == GS_REQUIRED for need in needs):
+        return GS_REQUIRED
+    return GS_OPTIONAL if GS_REQUIRED in needs else GS_NEVER
+
+
+def _run_gs_need(needs: Iterable[str]) -> str:
+    """The need of a sequence: its most demanding step."""
+    needs = set(needs)
+    for need in (GS_REQUIRED, GS_UNDECIDED, GS_OPTIONAL):
+        if need in needs:
+            return need
+    return GS_NEVER
+
+
+def _listing(source_path: Path, clean_steps: list[dict]) -> tuple[list, list, dict]:
+    """The rows of a run over `source_path`, as `(entries, skipped_dirs,
+    group_members)`.
+
+    Ordinarily a row is a file; with the folder-grouping source step it is a
+    directory of pages that becomes one document, so the listing, the row key
+    and the output name all change together rather than a file walk being
+    reinterpreted downstream.
+    """
+    group_members: dict[str, list[str]] = {}
+    if groups_by_folder(clean_steps):
+        listing = list_source_folders(
+            str(source_path),
+            sources=str(clean_steps[0]["params"].get("sources", "images")),
+            include_subfolders=bool(clean_steps[0]["params"].get("include_subfolders", True)),
+        )
+        entries = []
+        for group in listing["groups"]:
+            entries.append((Path(group["files"][0]).parent, group["output"]))
+            group_members[group["output"]] = group["files"]
+        return entries, listing["skipped_dirs"], group_members
+    # Guided actions run PDF steps; image sources are the batch-OCR sweep's
+    # own option and would have nothing to run against here, UNLESS the action
+    # starts by CREATING the document, which is exactly the "convert every
+    # Office file that lands in this folder" run.
+    extra = CREATE_PDF_EXTRA_SUFFIXES if creates_its_own_source(clean_steps) else ()
+    entries, skipped_dirs = _list_sources(source_path, False, extra)
+    return entries, skipped_dirs, group_members
+
+
+def _gs_plan(clean_steps: list[dict], entries: list | None, group_members: dict) -> tuple:
+    """`(run need, per-step needs)`. A source step, which validation keeps
+    first, is decided from the files each row converts; with no walk
+    (`entries` None) it is undecided."""
+    per_step: list[str] = []
+    for step in clean_steps:
+        op, params, asked = step["op"], step["params"], step.get("ask", ())
+        if op in SOURCE_STEPS and entries is not None:
+            need = items_gs_need(
+                step_gs_need(
+                    op, params, asked=asked, sources=group_members.get(rel, [str(abs_path)])
+                )
+                for abs_path, rel in entries
+            )
+        else:
+            need = step_gs_need(op, params, asked=asked)
+        per_step.append(need)
+    return _run_gs_need(per_step), per_step
+
+
+def _plan_steps(steps) -> list[dict]:
+    """The shape half of `validate_steps`, carrying each step's asked keys.
+
+    A plan is asked before a run collects its values, so a value the step
+    still lacks is not refused here: the rule that reads it answers
+    undecided instead.
+    """
+    if not isinstance(steps, list):
+        raise ValueError("the action has no steps")
+    out: list[dict] = []
+    for i, s in enumerate(steps):
+        if not isinstance(s, dict) or not isinstance(s.get("op"), str):
+            raise ValueError(f"step {i + 1} is not a step object")
+        op = s["op"]
+        if op not in _STEPS:
+            raise ValueError(f"step {i + 1}: unknown operation {op!r}")
+        params = s.get("params") or {}
+        if not isinstance(params, dict):
+            raise ValueError(f"step {i + 1} ({op}): params must be an object")
+        ask = s.get("ask") or []
+        if not isinstance(ask, list):
+            raise ValueError(f"step {i + 1} is not a step object")
+        out.append({"op": op, "params": dict(params), "ask": [str(k) for k in ask]})
+    return out
+
+
+def plan_gs(steps, source: str = "") -> dict:
+    """What a run of `steps` needs from Ghostscript, before any of it runs:
+    `{"gs": run need, "steps": [{"op", "gs"}, ...]}`.
+
+    With `source`, the steps are validated as the run validates them and the
+    folder is walked, so a source step is decided from the files of each row.
+    Without one, a step may carry `ask`, the keys a run collects later.
+    """
+    if source:
+        source_path = Path(source).resolve()
+        if not source_path.is_dir():
+            raise ValueError(f"Source folder not found: {source}")
+        clean = validate_steps(steps)
+        entries, _skipped, group_members = _listing(source_path, clean)
+    else:
+        clean = _plan_steps(steps)
+        entries, group_members = None, {}
+    run, per_step = _gs_plan(clean, entries, group_members)
+    return {
+        "gs": run,
+        "steps": [{"op": step["op"], "gs": need} for step, need in zip(clean, per_step)],
+    }
+
+
 def _apply_steps(path: str, steps: list[dict], tool_paths: dict) -> int:
     """Run every step in-place on `path`; returns the count applied."""
     for step in steps:
@@ -540,13 +788,23 @@ def run_action(
     progress: bool = False,
     in_place: bool = False,
     move_processed_root: str = "",
+    plan: bool = False,
 ) -> dict:
     """Run a step sequence over every PDF under `source`, mirroring into
     `dest` — or, with `in_place`, REPLACING each original with its processed
     version (in-place batch mode; staged beside the original, verified,
     then swapped atomically). Returns the report; writes an
     `action-run-*.log` beside the batch-OCR logs when `write_log` and a
-    `log_dir` are given."""
+    `log_dir` are given.
+
+    With `plan`, nothing runs and nothing is written: the answer is
+    `plan_gs(steps, source)`, which the window and the command line read
+    before they hand a run its Ghostscript.
+
+    A run whose steps, or every one of whose rows, need Ghostscript refuses
+    before its first row when `gs_path` does not resolve."""
+    if plan:
+        return plan_gs(steps, source)
     source_path = Path(source).resolve()
     if not source_path.is_dir():
         raise ValueError(f"Source folder not found: {source}")
@@ -615,30 +873,9 @@ def run_action(
     }
 
     started_at = datetime.now()
-    # What one ROW of this run is. Ordinarily a file; with the folder-grouping
-    # source step, a directory of pages that becomes one document — so the
-    # listing, the row key and the output name all change together rather than
-    # a file walk being reinterpreted downstream.
-    group_members: dict[str, list[str]] = {}
-    if grouping:
-        listing = list_source_folders(
-            str(source_path),
-            sources=str(clean_steps[0]["params"].get("sources", "images")),
-            include_subfolders=bool(clean_steps[0]["params"].get("include_subfolders", True)),
-        )
-        skipped_dirs = listing["skipped_dirs"]
-        entries = []
-        for group in listing["groups"]:
-            entries.append((Path(group["files"][0]).parent, group["output"]))
-            group_members[group["output"]] = group["files"]
-    else:
-        # Guided actions run PDF steps; image sources are the batch-OCR
-        # sweep's own option and would have nothing to run against here —
-        # UNLESS the action starts by CREATING the document, which is exactly
-        # the "convert every Office file that lands in this folder" run.
-        entries, skipped_dirs = _list_sources(
-            source_path, False, CREATE_PDF_EXTRA_SUFFIXES if creates else ()
-        )
+    entries, skipped_dirs, group_members = _listing(source_path, clean_steps)
+    if _gs_plan(clean_steps, entries, group_members)[0] == GS_REQUIRED:
+        gs_capability.require(gs_path)
     results: list[dict] = []
     # A terminal export CONSUMES the document; everything before it transforms
     # a copy of it, which is the shape `_apply_steps` speaks.

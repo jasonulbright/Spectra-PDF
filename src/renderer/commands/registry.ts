@@ -30,9 +30,10 @@ import {
  *
  * Partial consumers are deliberately absent: Compare's text mode, Create PDF's
  * image and Office sources, Preflight's structural checks, the flattener's
- * listing, trap-preset authoring and vector form detection all work with no
- * interpreter at all, so their menu entries stay enabled and the surfaces gate
- * the one leg that needs one.
+ * listing, trap-preset authoring, vector form detection and the enhancement of
+ * a scan whose codestream this build decodes all work with no interpreter at
+ * all, so their menu entries stay enabled and the surfaces gate the one leg
+ * that needs one.
  */
 export const GS_ONLY_OPERATIONS: ReadonlySet<Operation> = new Set<Operation>([
   'compress',
@@ -42,7 +43,6 @@ export const GS_ONLY_OPERATIONS: ReadonlySet<Operation> = new Set<Operation>([
   'rebuild',
   'outputpreview',
   'inkmanager',
-  'scanenhance',
 ]);
 
 /** Whether a gs-only surface may be reached right now. Pending is permitted:

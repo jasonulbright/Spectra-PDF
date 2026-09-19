@@ -56,12 +56,19 @@ NOT_EXECUTABLE = "not-executable"
 PROBE_FAILED = "probe-failed"
 VERSION_BELOW_MINIMUM = "version-below-minimum"
 
-#: Environment override for the explicit path, for the CLI and for tests. The
-#: GUI's explicit path arrives as the `gs_path` parameter instead.
+#: The first place discovery looks. It is a search candidate, not a configured
+#: path: a candidate here that fails gives way to PATH. A configured path, from
+#: the GUI or the CLI, arrives as the `path` argument of `resolve` instead.
 PATH_ENV_VAR = "SPECTRAPDF_GS_PATH"
 
 #: Console executable names, most specific first.
 _CANDIDATE_NAMES = ("gswin64c", "gswin32c", "gs")
+
+#: Which surface this engine process serves, so a refusal names that
+#: surface's fix. The command line sets it to `CLI_SURFACE` on the engine it
+#: starts; the window leaves it unset.
+SURFACE_ENV_VAR = "SPECTRAPDF_ENGINE_SURFACE"
+CLI_SURFACE = "cli"
 
 
 @dataclass(frozen=True)
@@ -94,12 +101,33 @@ class GsUnavailable(RuntimeError):
     repo bans in control flow. It stays a RuntimeError subclass so the
     existing per-file and per-folder handlers keep turning it into a reported
     row rather than a crash.
+
+    Its text names the fix of the surface the process serves. The message is
+    the window's (Preferences); on the command line the text is built from
+    the structured fields and names `--gs-path` and `PATH_ENV_VAR` instead.
+    Every report row and error reply takes `str()` of the refusal, so each
+    one names the fix of the surface that shows it.
     """
 
-    def __init__(self, message: str, *, reason: str, path: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str,
+        path: str = "",
+        version: str = "",
+        detail: str = "",
+    ) -> None:
         super().__init__(message)
         self.reason = reason
         self.path = path
+        self.version = version
+        self.detail = detail
+
+    def __str__(self) -> str:
+        if os.environ.get(SURFACE_ENV_VAR) == CLI_SURFACE:
+            return _cli_text(self)
+        return super().__str__()
 
 
 # --------------------------------------------------------------------------
@@ -250,10 +278,13 @@ def discover() -> list[str]:
 def resolve(path: str | Path | None = None) -> GsCapability:
     """The capability answer for `path`, or for what discovery turns up.
 
-    An EXPLICIT path that fails is the answer — discovery does not paper over
-    it, because silently running a different Ghostscript than the one the user
-    named is how a settings screen starts lying. Only an empty value, or a
-    bare command name (the old `or "gs"` shape), falls through to discovery.
+    `path` carries the distinction every caller shares. An empty or blank
+    value means nothing is configured, and it is the only value discovery
+    answers. Any other value is configured and is the whole answer, even when
+    it fails: silently running a different Ghostscript than the one the user
+    named is how a settings screen starts lying. A path is probed as given; a
+    bare command name (the old `or "gs"` shape) resolves through PATH under
+    that name only.
     """
     text = str(path or "").strip()
     if text:
@@ -281,10 +312,11 @@ def resolve(path: str | Path | None = None) -> GsCapability:
 def _refuse(answer: GsCapability) -> None:
     """Raise the named refusal for one unavailable answer.
 
-    The four messages are authored HERE, as literals, and nowhere else: the
-    refusal table (`scripts/engine_message_sweep.py`) enumerates raise sites,
-    so a message assembled somewhere else would reach the UI unlocalized.
-    `message()` reads them back rather than restating them.
+    The window's four messages are authored HERE, as literals, and nowhere
+    else: the refusal table (`scripts/engine_message_sweep.py`) enumerates
+    raise sites, so a message assembled somewhere else would reach the UI
+    unlocalized. `message()` reads them back rather than restating them. The
+    command line's text is `_cli_text`'s, built from the same answer.
     """
     if answer.reason == NOT_EXECUTABLE:
         raise GsUnavailable(
@@ -293,6 +325,8 @@ def _refuse(answer: GsCapability) -> None:
             f"set its path in Preferences > Engine.",
             reason=answer.reason,
             path=answer.path,
+            version=answer.version,
+            detail=answer.detail,
         )
     if answer.reason == PROBE_FAILED:
         raise GsUnavailable(
@@ -302,6 +336,8 @@ def _refuse(answer: GsCapability) -> None:
             f"Preferences > Engine.",
             reason=answer.reason,
             path=answer.path,
+            version=answer.version,
+            detail=answer.detail,
         )
     if answer.reason == VERSION_BELOW_MINIMUM:
         raise GsUnavailable(
@@ -311,6 +347,8 @@ def _refuse(answer: GsCapability) -> None:
             f"Preferences > Engine.",
             reason=answer.reason,
             path=answer.path,
+            version=answer.version,
+            detail=answer.detail,
         )
     raise GsUnavailable(
         "Ghostscript is required for this operation and none is configured. "
@@ -318,6 +356,38 @@ def _refuse(answer: GsCapability) -> None:
         "Preferences > Engine.",
         reason=NOT_CONFIGURED,
         path=answer.path,
+        version=answer.version,
+        detail=answer.detail,
+    )
+
+
+def _cli_text(refusal: GsUnavailable) -> str:
+    """The command line's text for one refusal, from its structured fields.
+
+    English only and never localized: the renderer never receives it, so it
+    has no row in the refusal table.
+    """
+    fix = f"then name it with --gs-path or the {PATH_ENV_VAR} environment variable."
+    if refusal.reason == NOT_EXECUTABLE:
+        return (
+            f"Ghostscript is required for this operation and there is no program "
+            f"at {refusal.path}. Install Ghostscript from ghostscript.com, {fix}"
+        )
+    if refusal.reason == PROBE_FAILED:
+        return (
+            f"Ghostscript at {refusal.path} did not pass its capability check "
+            f"({refusal.detail or 'the probe render produced nothing'}). Install "
+            f"Ghostscript from ghostscript.com, {fix}"
+        )
+    if refusal.reason == VERSION_BELOW_MINIMUM:
+        return (
+            f"Ghostscript {refusal.version or '(unknown version)'} at {refusal.path} "
+            f"is older than the {_minimum_text()} this build requires. Install a "
+            f"newer Ghostscript from ghostscript.com, {fix}"
+        )
+    return (
+        "Ghostscript is required for this operation and none is configured. "
+        f"Install Ghostscript from ghostscript.com, {fix}"
     )
 
 

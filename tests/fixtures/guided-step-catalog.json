@@ -1,5 +1,5 @@
 {
-  "note": "The guided-step catalog, generated from engine/guided_actions.py::_STEPS. That table is the authority on op names, the parameter keys each op accepts, the tool paths each op is handed (`tools`) and the handed tool paths each op runs without (`optional_tools`); tests/test_guided_actions.py pins this file to it in both directions. src/renderer/lib/guided-actions.ts is the editor over the same set, and it and src-tauri/src/cli.rs read their Ghostscript demand from this file: a step handed gs_path needs Ghostscript unless its optional_tools lists gs_path. `method` is the registered JSON-RPC name the single-document runner sends for the step; the folder tier sends step ids to run_action instead. Regenerate with gen-step-fixture.local.py and review the diff.",
+  "note": "The guided-step catalog, generated from engine/guided_actions.py::_STEPS. That table is the authority on op names, the parameter keys each op accepts and the tool paths each op is handed (`tools`); tests/test_guided_actions.py pins this file to it in both directions. src/renderer/lib/guided-actions.ts is the editor over the same set. What a step needs from Ghostscript is not recorded here: the window and the command line ask engine/guided_actions.py::step_gs_need through run_action(plan=True). `method` is the registered JSON-RPC name the single-document runner sends for the step; the folder tier sends step ids to run_action instead. Regenerate with gen-step-fixture.local.py and review the diff.",
   "steps": {
     "add_header_footer": {
       "method": "add_header_footer",
@@ -15,8 +15,7 @@
       ],
       "tools": [
         "font_dir"
-      ],
-      "optional_tools": []
+      ]
     },
     "compress": {
       "method": "compress",
@@ -36,8 +35,7 @@
         "gs_path",
         "jbig2_path",
         "tesseract_path"
-      ],
-      "optional_tools": []
+      ]
     },
     "convert_pdfa": {
       "method": "convert_pdfa",
@@ -46,8 +44,7 @@
       ],
       "tools": [
         "gs_path"
-      ],
-      "optional_tools": []
+      ]
     },
     "create_pdf": {
       "method": "create_pdf",
@@ -61,8 +58,7 @@
       "tools": [
         "gs_path",
         "soffice_path"
-      ],
-      "optional_tools": []
+      ]
     },
     "create_pdf_folders": {
       "method": "create_pdf_folders",
@@ -78,8 +74,7 @@
       "tools": [
         "gs_path",
         "soffice_path"
-      ],
-      "optional_tools": []
+      ]
     },
     "encrypt": {
       "method": "encrypt",
@@ -88,8 +83,7 @@
         "permissions",
         "user_password"
       ],
-      "tools": [],
-      "optional_tools": []
+      "tools": []
     },
     "enhance_scan": {
       "method": "enhance_scan",
@@ -110,8 +104,7 @@
       "tools": [
         "gs_path",
         "tesseract_path"
-      ],
-      "optional_tools": []
+      ]
     },
     "export_document": {
       "method": "export_document",
@@ -127,8 +120,7 @@
       "tools": [
         "gs_path",
         "soffice_path"
-      ],
-      "optional_tools": []
+      ]
     },
     "export_images": {
       "method": "export_images",
@@ -141,8 +133,7 @@
       ],
       "tools": [
         "gs_path"
-      ],
-      "optional_tools": []
+      ]
     },
     "grayscale": {
       "method": "grayscale",
@@ -150,8 +141,7 @@
       "tools": [
         "font_dir",
         "gs_path"
-      ],
-      "optional_tools": []
+      ]
     },
     "links_from_urls": {
       "method": "create_links_from_urls",
@@ -160,8 +150,7 @@
         "pages",
         "skip_existing"
       ],
-      "tools": [],
-      "optional_tools": []
+      "tools": []
     },
     "ocr_file": {
       "method": "ocr_file",
@@ -172,8 +161,7 @@
         "font_dir",
         "gs_path",
         "tesseract_path"
-      ],
-      "optional_tools": []
+      ]
     },
     "optimize": {
       "method": "optimize",
@@ -182,8 +170,7 @@
         "linearize",
         "strip_metadata"
       ],
-      "tools": [],
-      "optional_tools": []
+      "tools": []
     },
     "outline_from_structure": {
       "method": "outline_from_structure",
@@ -192,8 +179,7 @@
         "mode",
         "tag_if_untagged"
       ],
-      "tools": [],
-      "optional_tools": []
+      "tools": []
     },
     "preflight": {
       "method": "apply_preflight_fixups",
@@ -206,8 +192,7 @@
         "font_dir",
         "gs_path",
         "tesseract_path"
-      ],
-      "optional_tools": []
+      ]
     },
     "prepare_forms": {
       "method": "prepare_form_fields",
@@ -223,8 +208,7 @@
         "font_dir",
         "gs_path",
         "tesseract_path"
-      ],
-      "optional_tools": []
+      ]
     },
     "sanitize": {
       "method": "sanitize_pdf",
@@ -234,8 +218,7 @@
         "form_fields_mode",
         "hidden_text_ocr"
       ],
-      "tools": [],
-      "optional_tools": []
+      "tools": []
     },
     "search_redact": {
       "method": "search_and_redact",
@@ -256,16 +239,12 @@
       "tools": [
         "font_dir",
         "gs_path"
-      ],
-      "optional_tools": [
-        "gs_path"
       ]
     },
     "strip_metadata": {
       "method": "strip_metadata",
       "params": [],
-      "tools": [],
-      "optional_tools": []
+      "tools": []
     },
     "watermark": {
       "method": "watermark",
@@ -288,8 +267,7 @@
       ],
       "tools": [
         "font_dir"
-      ],
-      "optional_tools": []
+      ]
     }
   }
 }

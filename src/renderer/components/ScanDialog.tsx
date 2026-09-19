@@ -11,7 +11,7 @@ import { extractPageText } from '../search/extract';
 import { displayRectToPdf } from '../lib/pdfx-build';
 import { recognizePage } from '../lib/ocr-recognize';
 import { tesseractPath } from '../lib/ocr-recognize';
-import { gsBlocked, gsPathIfAvailable, requireGsPath } from '../lib/gs-capability';
+import { gsBlocked, gsPathIfAvailable } from '../lib/gs-capability';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { GsRequiredNotice } from './GsRequiredNotice';
 import { DEFAULT_OCR_LANGUAGE, OCR_LANGUAGES } from '../ocr/languages';
@@ -124,9 +124,10 @@ export function ScanDialog({
   const [contrast, setContrast] = useState<number | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const gs = useGsCapability();
-  // Scanning and assembly need no interpreter; enhancement and recognition
-  // both go through a raster, so those two OPTIONS gate and the dialog does
-  // not.
+  // Scanning and assembly need no interpreter, and enhancement needs one only
+  // for a codestream this build cannot decode, which the engine refuses by
+  // name. Recognition renders every page through one, so that OPTION gates
+  // and the dialog does not.
   const gsOff = gsBlocked(gs);
   const [enhance, setEnhance] = useState(false);
   const [ocr, setOcr] = useState(false);
@@ -350,8 +351,8 @@ export function ScanDialog({
         setProgress({ message: tChrome('dialog.scan.building') });
         // Scanned pages are IMAGES: Create PDF assembles them without
         // Ghostscript, which it needs only for a PostScript source. Assembly
-        // therefore proceeds with no capability at all; the enhance and OCR
-        // legs below are the ones that require one.
+        // therefore proceeds with no capability at all; the OCR leg below is
+        // the one that requires one.
         const [gsPath, sofficePath] = await Promise.all([gsPathIfAvailable(), app.getSofficePath()]);
         await track('create_pdf', { file: output }, () =>
           callRaw('create_pdf', {
@@ -372,15 +373,15 @@ export function ScanDialog({
         // is the defect the enhancement exists to fix, and doing it the other
         // way would bake a worse text layer into the document at the one
         // moment the whole pipeline is ours.
-        if (enhance && !gsOff) {
+        if (enhance) {
           setProgress({ message: tChrome('dialog.scan.enhancing') });
-          const [gs, tess] = await Promise.all([requireGsPath(), tesseractPath()]);
+          const tess = await tesseractPath();
           await track('enhance_scan', { file: output }, () =>
             callRaw('enhance_scan', {
               file: output,
               output,
               orientation: true,
-              gs_path: gs,
+              gs_path: gsPath,
               tesseract_path: tess,
             }),
           );
@@ -828,17 +829,17 @@ export function ScanDialog({
                 )}
 
                 <div className="flex flex-col gap-1.5">
-                  {gsOff && <GsRequiredNotice capability={gs} testId="scan-gs" />}
                   <label className="flex items-center gap-2 text-xs">
                     <input
                       type="checkbox"
                       data-testid="scan-enhance"
-                      checked={enhance && !gsOff}
-                      disabled={busy || gsOff}
+                      checked={enhance}
+                      disabled={busy}
                       onChange={(e) => setEnhance(e.target.checked)}
                     />
                     {tChrome('dialog.scan.enhance')}
                   </label>
+                  {gsOff && <GsRequiredNotice capability={gs} testId="scan-gs" />}
                   <label className="flex items-center gap-2 text-xs">
                     <input
                       type="checkbox"
