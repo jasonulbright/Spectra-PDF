@@ -783,7 +783,7 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
     run: (ctx) => ctx.app!.openPresentation(),
   },
-  // Reading mode (I.6): collapse the chrome around the document. Doc tabs
+  // Reading mode: collapse the chrome around the document. Doc tabs
   // only — Home/Tools NEED their chrome, and leaving the doc tab clears it.
   'view.readingMode': {
     title: 'Reading Mode',
@@ -860,14 +860,14 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => inCanvas(ctx) && ctx.canvas !== null,
     run: (ctx) => ctx.canvas!.clearGuides(),
   },
-  // Toolbar customization (I.6): per-item show/hide over the catalog. The
+  // Toolbar customization: per-item show/hide over the catalog. The
   // toolbar exists on every tab, so no canvas gate.
   'view.customizeToolbar': {
     title: 'Customize Toolbar…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openCustomizeToolbar(),
   },
-  // Page Display (I.6): single-page column vs two-up facing spreads, and the
+  // Page Display: single-page column vs two-up facing spreads, and the
   // cover convention. Layout is a reading-view property, so they gate on the
   // canvas exactly like Rotate View does.
   'view.singlePage': {

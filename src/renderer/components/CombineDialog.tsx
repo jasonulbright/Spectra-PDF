@@ -85,7 +85,7 @@ export function CombineDialog({
   onClose: () => void;
   /** Open a newly created PDF through the normal open funnel. Rejection is
    * surfaced IN the dialog — a fire-and-forget open loses failures once the
-   * dialog has closed (the Create PDF review catch). */
+   * dialog has closed. */
   onOpenResult: (path: string) => Promise<void>;
   /** The documents the user can add pages to — real, showable documents
    * only; a byte-only import ghost is never one of them. */

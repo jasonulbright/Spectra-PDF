@@ -41,9 +41,12 @@ const CANDIDATE_NAMES: [&str; 3] = ["gswin64c", "gswin32c", "gs"];
 /// ends up reporting a raw spawn failure instead. `31-print.spec.ts` asserts
 /// a driver-open failure's stderr does NOT mention Ghostscript, so this text
 /// may only ever be produced by the capability path.
+///
+/// It names the command line's own fix, `--gs-path` and `PATH_ENV_VAR`, and
+/// never the window's Preferences: the CLI is the only surface that shows it.
 pub const CLI_REQUIRED: &str = "this command requires Ghostscript; none is configured -- \
-install it from ghostscript.com, or point Spectra at an existing install with --gs-path \
-(Preferences > Engine in the app)";
+install it from ghostscript.com, then name it with --gs-path or the SPECTRAPDF_GS_PATH \
+environment variable";
 
 /// One validated answer about one Ghostscript path.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -141,16 +144,20 @@ pub fn parse_version(text: &str) -> Option<(u32, u32)> {
     Some((major, minor))
 }
 
+/// The directory one probe renders into, created for that probe alone.
+///
+/// Two probes that share a directory delete each other's raster before it is
+/// checked, and the cache then keeps a working program's answer as
+/// `probe-failed`. A name taken from the clock is not enough: threads that
+/// start together read the same tick.
+fn probe_dir() -> std::io::Result<tempfile::TempDir> {
+    tempfile::Builder::new().prefix("spectra-gs-probe-").tempdir()
+}
+
 /// Render one tiny page. `Ok(())` only when a raster actually came out.
 fn smoke(exe: &str) -> Result<(), String> {
-    let dir = std::env::temp_dir().join(format!(
-        "spectra-gs-probe-{}",
-        std::process::id() as u64 * 31 + rand_suffix()
-    ));
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        return Err(format!("cannot create a probe directory: {}", e));
-    }
-    let png = dir.join("probe.png");
+    let dir = probe_dir().map_err(|e| format!("cannot create a probe directory: {}", e))?;
+    let png = dir.path().join("probe.png");
     let outcome = command(exe)
         .args([
             "-q",
@@ -182,16 +189,8 @@ fn smoke(exe: &str) -> Result<(), String> {
             _ => Err("the probe render produced no output".to_string()),
         },
     };
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = dir.close();
     verdict
-}
-
-/// A per-call suffix so two concurrent probes cannot share a scratch dir.
-fn rand_suffix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos() as u64)
-        .unwrap_or(0)
 }
 
 /// Validate ONE candidate path.
@@ -565,6 +564,61 @@ mod tests {
 
     fn missing_names_the_shared_error(text: &str) -> bool {
         text.starts_with(CLI_REQUIRED)
+    }
+
+    #[test]
+    fn the_cli_error_names_the_command_lines_fix_for_every_reason() {
+        assert_eq!(
+            CLI_REQUIRED,
+            "this command requires Ghostscript; none is configured -- install it from \
+             ghostscript.com, then name it with --gs-path or the SPECTRAPDF_GS_PATH \
+             environment variable"
+        );
+        assert!(CLI_REQUIRED.contains(PATH_ENV_VAR));
+        let at = |reason: &str, version: &str, detail: &str| GsAnswer {
+            available: false,
+            path: "C:\\gs\\gswin64c.exe".into(),
+            version: version.into(),
+            reason: reason.into(),
+            detail: detail.into(),
+        };
+        for answer in [
+            at(NOT_CONFIGURED, "", ""),
+            at(NOT_EXECUTABLE, "", ""),
+            at(PROBE_FAILED, "10.07.1", "the probe render failed"),
+            at(PROBE_FAILED, "10.07.1", ""),
+            at(VERSION_BELOW_MINIMUM, "9.50", ""),
+            at(VERSION_BELOW_MINIMUM, "", ""),
+        ] {
+            let text = cli_error(&answer);
+            assert!(missing_names_the_shared_error(&text), "{}: {text}", answer.reason);
+            assert!(text.contains("--gs-path"), "{}: {text}", answer.reason);
+            assert!(text.contains(PATH_ENV_VAR), "{}: {text}", answer.reason);
+            assert!(!text.contains("Preferences"), "{}: {text}", answer.reason);
+        }
+    }
+
+    #[test]
+    fn probes_that_start_together_never_share_a_directory() {
+        use std::sync::{Arc, Barrier};
+        const WIDTH: usize = 16;
+        for _ in 0..50 {
+            let barrier = Arc::new(Barrier::new(WIDTH));
+            let starts: Vec<_> = (0..WIDTH)
+                .map(|_| {
+                    let barrier = barrier.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        probe_dir().expect("a probe directory")
+                    })
+                })
+                .collect();
+            let dirs: Vec<tempfile::TempDir> =
+                starts.into_iter().map(|t| t.join().expect("a probe thread")).collect();
+            let distinct: std::collections::HashSet<PathBuf> =
+                dirs.iter().map(|d| d.path().to_path_buf()).collect();
+            assert_eq!(distinct.len(), WIDTH);
+        }
     }
 
     #[test]

@@ -501,8 +501,8 @@ class TestFillFormFields:
         assert not os.path.exists(out)
 
     def test_non_winansi_value_fails_closed(self, tmp_dir):
-        # Caught at VALIDATION time now (review round: the all-problems
-        # contract includes encodability), with the WinAnsi message. Without a
+        # Caught at VALIDATION time (the all-problems contract includes
+        # encodability), with the WinAnsi message. Without a
         # font_dir there is no fallback, so a non-WinAnsi value is still refused.
         out = os.path.join(tmp_dir, "nope.pdf")
         with pytest.raises(ValueError, match="WinAnsi"):
@@ -613,7 +613,7 @@ class TestFillFormFields:
 
     @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
     def test_fc1_broad_control_chars_render(self, tmp_dir):
-        # S4-regression analog for forms: a Unicode value with a control char
+        # A Unicode value with a control char
         # beyond \n\r\t (VT, Unicode LINE SEPARATOR) now FILLS (flattened to
         # space) instead of being refused in validation.
         out = os.path.join(tmp_dir, "ctlbroad.pdf")

@@ -305,10 +305,10 @@ export function OmniSearch(): React.JSX.Element {
                 onClick={() => run(hit)}
               >
                 <span className="omnisearch-page">p.{hit.pageNumber}</span>
-                {/* N13: the third result surface, and the same omission — the
-                    term the reader typed was drawn in the body colour, so a
-                    row of context said nothing about WHY it matched. Falls back
-                    to the document name, which has nothing to mark. */}
+                {/* The third result surface marks the term the reader typed:
+                    drawn in the body colour, a row of context says nothing
+                    about WHY it matched. Falls back to the document name,
+                    which has nothing to mark. */}
                 <span className="omnisearch-snippet">
                   {hit.snippet
                     ? markSnippet(hit.snippet, debounced).map((seg, i) =>

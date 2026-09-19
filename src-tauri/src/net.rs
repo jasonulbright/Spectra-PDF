@@ -60,7 +60,7 @@ const TOTAL_TIMEOUT_SECS: u64 = 120;
 /// One outbound request.
 ///
 /// `body_path` is a FILE rather than bytes: the form submission has already
-/// been built to disk by the engine, and P39's GET arm has no body at all.
+/// been built to disk by the engine, and the open-from-web GET has no body at all.
 /// Neither caller needs a payload to cross the renderer boundary twice.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

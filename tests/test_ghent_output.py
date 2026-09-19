@@ -85,7 +85,7 @@ def test_table_parses_and_states_a_disposition():
 
 def test_not_applicable_rows_carry_their_reason():
     """A row excluded from the tally says why, in its own notes, or it is
-    silently green — the thing the F24/F25 discipline exists to prevent."""
+    silently green — the thing the corpus pins exist to prevent."""
     for row in TABLE:
         if row.applicable:
             continue

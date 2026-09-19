@@ -1,6 +1,6 @@
 """Split modes beyond page ranges: every-n, file size, top-level bookmarks.
 
-Design: docs/architecture/59-p25-split-modes.md. The range mode's own
+The range mode's own
 behaviour is covered in test_engine.py (TestSplit) and its AcroForm carry in
 test_acroform_carry.py (TestSplitForms); this file covers the three added
 modes, the shared naming rule, and the claim that every mode goes through the

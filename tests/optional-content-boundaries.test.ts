@@ -34,8 +34,7 @@ describe('independent optional-content boundaries', () => {
     a.config.set(N('AS'), a.ctx.obj([{ Event: 'View', Category: ['Zoom'] }]));
     const out = await carry([a.doc, b.doc]);
     const application = properties(out).lookup(N('D'), PDFDict).lookup(N('AS'), PDFArray).lookup(0, PDFDict);
-    // Table 101: the default is empty, not all groups. This replaces an
-    // incorrect reviewer premise; the original failing assertion is retained.
+    // Table 101: the default is empty, not all groups.
     const groups = application.lookupMaybe(N('OCGs'), PDFArray);
     expect(groups?.asArray() ?? []).toEqual([]);
   });

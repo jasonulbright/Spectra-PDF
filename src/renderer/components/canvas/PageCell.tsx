@@ -245,7 +245,7 @@ export interface StampPreset {
    * /Contents like any other stamp's. */
   symbolId?: string;
   symbolParts?: readonly SymbolPart[];
-  /** A PERSONAL SIGNATURE armed from the signature store (F31). It rides the
+  /** A PERSONAL SIGNATURE armed from the signature store. It rides the
    * stamp preset because arming, sizing, undo and commit are already the
    * stamp tool's, and a signature needs none of them re-invented — but it
    * places as whichever ordinary annotation carries it faithfully: `ink` for
@@ -1093,7 +1093,7 @@ interface PageCellProps {
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
-  // Click-selection for the properties bar (I.6) + manipulation (rung 1).
+  // Click-selection for the properties bar + manipulation.
   // Select tool only — armed modes keep their band/stroke gestures untouched.
   // Selection is SAME-PAGE (multi via ctrl-click / ctrl-marquee); ids are
   // globally unique so the cell checks membership without a page key.
@@ -1869,7 +1869,7 @@ function PageCellImpl({
     [page.id],
   );
 
-  // ── Annotation manipulation (rung 1): move / resize / marquee ─────────
+  // ── Annotation manipulation: move / resize / marquee ─────────
   // Gestures run with window-level listeners (the canvas invariant), preview
   // through local state in the STORED frame (so the render-side projection is
   // the ONE projection), and dispatch a single batch edit on release — one
@@ -2427,7 +2427,7 @@ function PageCellImpl({
     window.addEventListener('blur', onBlur);
   };
 
-  // ── Shape + callout creation (rung 2) ────────────────────────────────
+  // ── Shape + callout creation ────────────────────────────────
   // Line/arrow: a drag. Polygon/polyline/cloud: a vertex-click sequence
   // (double-click or click-the-last-vertex finishes — the measure tools'
   // convention). Rect/ellipse and the callout box ride the generic band at
@@ -2773,7 +2773,7 @@ function PageCellImpl({
       measureRatio: measureRatioLabel(measScale),
       measureUnitsPerPt: measureUnitsPerPoint(measScale),
       measureUnit: measScale.toUnit,
-      // Flat-padded box (rung 3): a horizontal dimension needs a clickable
+      // Flat-padded box: a horizontal dimension needs a clickable
       // body for selection and the right-click recalibrate. Points exact.
       ...paddedPointsBbox(stored),
       color: annotationColor ?? MEASURE_COLOR,
@@ -3465,7 +3465,7 @@ function PageCellImpl({
         // in the CURRENTLY LOADED file with AnnotationMode.ENABLE — including
         // ones we've imported but haven't touched. Painting our own visible
         // body on top of an untouched import would double it up. Only once
-        // color/note — or, since rung 1, geometry (geometryDiverged) —
+        // color/note — or geometry (geometryDiverged) —
         // diverges from the importedOriginal snapshot is the file on disk
         // stale relative to the edit, and the overlay must take over
         // (same as any brand-new, uncommitted annotation always does).
@@ -3682,8 +3682,7 @@ function PageCellImpl({
             // end ticks are perpendicular to the line and a non-uniform viewBox
             // shears them.
             //
-            // Three things the audit measured as absent, all of them what makes
-            // a measurement readable rather than decorative:
+            // Three things make a measurement readable rather than decorative:
             //  · CONTRAST. A 1px amber hairline on white measured 1.79:1,
             //    under the 3:1 floor a graphical object that carries
             //    information owes. The line is drawn as a dark CASING with the
@@ -3692,9 +3691,8 @@ function PageCellImpl({
             //    carries the contrast, the colour is what says "measurement".
             //  · END TICKS. Without them the line has no endpoints, so what is
             //    being measured is a guess.
-            //  · THE VALUE, ON THE LINE. The only readout sat in the top
-            //    ribbon, which is ambiguous the moment a page carries two
-            //    measurements.
+            //  · THE VALUE, ON THE LINE. A readout only in the top ribbon is
+            //    ambiguous the moment a page carries two measurements.
             const bw = Math.max(1, da.w * displayWidth);
             const bh = Math.max(1, da.h * pageHeight);
             const pts = da.points ?? [];

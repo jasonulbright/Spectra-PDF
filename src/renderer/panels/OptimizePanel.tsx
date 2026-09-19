@@ -235,10 +235,10 @@ export function OptimizePanel(): React.ReactElement {
                   >
                     {sharePercent(row)}
                   </span>
-                  {/* N16: the sub-line ran knob · objects · Details as inline
-                      text, so the buttons followed variable-length prose and
-                      landed at eleven different x positions, one of them
-                      wrapped onto a second line. The row is a flex line with
+                  {/* As inline text, the sub-line's knob · objects · Details
+                      buttons follow variable-length prose and land at
+                      different x positions, some wrapped onto a second line.
+                      The row is a flex line with
                       the prose taking the slack and the button pinned to the
                       table's own trailing edge, which is what makes the
                       buttons a column. */}

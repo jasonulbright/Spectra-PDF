@@ -67,7 +67,7 @@ export interface AppCommandHandlers {
   /** Open the Export Pages as Images dialog (image half). */
   openExportImages(): void;
   openExportDocument(format: 'txt' | 'xlsx' | 'pptx'): void;
-  /** Enter full-screen presentation mode on the active document (I.6). */
+  /** Enter full-screen presentation mode on the active document. */
   openPresentation(): void;
   /** Close one open file, with the unsaved-changes prompt. */
   closeFile(path: string): Promise<void>;
@@ -130,7 +130,7 @@ export interface AppCommandHandlers {
   openLicenses(): void;
   /** Open the About dialog (name/version/repo). */
   openAbout(): void;
-  /** Open the Customize Toolbar dialog (I.6 — per-item show/hide). */
+  /** Open the Customize Toolbar dialog (per-item show/hide). */
   openCustomizeToolbar(): void;
   /** Manual update check (Help ▸ Check for Updates) — surfaces the
    * available-flow / up-to-date / enterprise-disabled states on the UpdateBar. */

@@ -1,5 +1,5 @@
 // transformXmpXml (lib/xmp-packet.ts): rewrite only the supplied fields of a
-// decoded XMP packet and carry everything else through. BA-37's rebuild loses
+// decoded XMP packet and carry everything else through. A rebuild loses
 // the packet outright; reconstructing three Info values in its place would
 // drop unknown schemas, language alternatives and author sequences, so the
 // transform edits the real packet instead.

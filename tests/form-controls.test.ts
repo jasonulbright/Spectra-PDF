@@ -264,7 +264,7 @@ describe('colour-swatch pickers speak one language', () => {
   });
 
   it('clears the 3:1 boundary floor for a swatch on every ground it lands on', () => {
-    // N3: the palette black measured 1.10:1 with a 1.88:1 ring, and the Black
+    // The palette black measured 1.10:1 with a 1.88:1 ring, and the Black
     // ink chip 1.01:1 with a 2.09:1 border — both read as an EMPTY swatch,
     // which in an ink list is a different claim from "black". The FILL is the
     // value and cannot carry a floor, so the BOUNDARY carries it, and it does
@@ -319,7 +319,7 @@ describe('colour-swatch pickers speak one language', () => {
 
 describe('the select layer positions its own chevron', () => {
   it('places the chevron physically, because background-position has no logical keywords', () => {
-    // N1, ten of thirty-six screenshots: `center end 7px` parses as nothing,
+    // `center end 7px` parses as nothing,
     // the declaration is dropped, and the chevron falls back to `0% 0%` — top
     // left, clipped by the control's own top border, on EVERY select.
     const body = ruleBody(CSS, ['select']);
@@ -335,7 +335,8 @@ describe('the select layer positions its own chevron', () => {
   });
 
   it('ellipsises an overlong select value rather than slicing a glyph', () => {
-    // N2: "Over conten" and "Keep each source's own s" read as stored values.
+    // Sliced values ("Over conten", "Keep each source's own s") read as
+    // stored values.
     const body = ruleBody(CSS, ['select']) ?? '';
     expect(body).toMatch(/text-overflow:\s*ellipsis/);
     expect(body).toMatch(/overflow:\s*hidden/);
@@ -366,7 +367,7 @@ describe('the select layer positions its own chevron', () => {
 
 describe('informational text on the signature card', () => {
   it('takes the product muted token rather than a private outlier', () => {
-    // N8: #6b7280 measured 3.53:1 on #1c1c1c at ~10px, on three lines of real
+    // #6b7280 measures 3.53:1 on #1c1c1c at ~10px, on three lines of real
     // information (integrity, field name, claimed time), while the same class
     // of text everywhere else runs 6.94:1.
     const body = ruleBody(CSS, ['.signature-nav-detail']) ?? '';
@@ -377,7 +378,7 @@ describe('informational text on the signature card', () => {
 
 describe('a measurement drawn on the page carries its own contrast', () => {
   it('gives the committed dimension label a legible ground and the casing a floor', () => {
-    // N8: a 1px amber hairline on white measured 1.79:1, under the 3:1 a
+    // A 1px amber hairline on white measures 1.79:1, under the 3:1 a
     // graphical object that carries information owes, with no label, no ticks
     // and no endpoints. Drawn ON the page, so the colours are literals.
     const body = ruleBody(CSS, ['.measure-annot-label']);

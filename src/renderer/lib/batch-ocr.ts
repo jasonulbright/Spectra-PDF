@@ -187,7 +187,7 @@ export function joinDest(destRoot: string, rel: string): string {
 
 /** True when dest is the source root or inside it — refused before a run
  * starts: dest === source would overwrite the originals in place (the
- * surprise-mutation class the phase doc forbids), and dest inside source
+ * surprise-mutation class), and dest inside source
  * makes the mirror a subtree of what it mirrors. Windows: case-insensitive
  * on canonical strings. */
 export function destConflictsWithSource(sourceRoot: string, destRoot: string): boolean {

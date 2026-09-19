@@ -372,7 +372,7 @@ function AppContent(): React.ReactElement {
   const [showExportImages, setShowExportImages] = useState(false);
   const [exportDocFormat, setExportDocFormat] = useState<DocumentExportFormat | null>(null);
   const [showCustomizeToolbar, setShowCustomizeToolbar] = useState(false);
-  // Full-screen presentation mode (I.6): a transient overlay; `startIndex`
+  // Full-screen presentation mode: a transient overlay; `startIndex`
   // is the page to open on, resolved from the page being read.
   const [presentation, setPresentation] = useState<{ startIndex: number } | null>(null);
   // Own proxy map (pdfDocCache dedupes against the canvas's) so the overlay
@@ -651,7 +651,7 @@ function AppContent(): React.ReactElement {
     return () => window.removeEventListener('storage', onStorage);
   }, [dispatch]);
 
-  // Mirror the toolbar overrides (I.6 customization) the same way.
+  // Mirror the toolbar overrides the same way.
   useEffect(() => {
     persistToolbarOverrides(state.ui.toolbarOverrides);
   }, [state.ui.toolbarOverrides]);
@@ -2757,7 +2757,7 @@ function AppContent(): React.ReactElement {
   );
 
   // --- Command layer ----------------------------------------------------
-  // Reading mode's Escape exit (I.6). An interceptor, not a keymap entry —
+  // Reading mode's Escape exit. An interceptor, not a keymap entry —
   // in-flight drags push their own interceptors ABOVE this one (LIFO), so Esc
   // still cancels a drag first, then leaves reading mode on the next press.
   const readingModeOn = state.ui.readingMode;
@@ -3431,7 +3431,7 @@ function AppContent(): React.ReactElement {
           ) : (
             <div className="flex-1 flex flex-row overflow-hidden">
               {/* Left navigation pane — thumbnails etc. for the active doc.
-                  Hidden entirely in reading mode (I.6); navPane.open state is
+                  Hidden entirely in reading mode; navPane.open state is
                   untouched underneath, so exiting restores it exactly. */}
               {!state.ui.readingMode && <NavPane
                 activeFile={activeFile ?? null}

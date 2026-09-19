@@ -842,10 +842,9 @@ def _contains_run(haystack, needle) -> bool:
 class TestRightToLeftAuthoring:
     """Add Text authors right-to-left scripts.
 
-    Until this, the bundled Liberation faces could not express them, so
-    `build_fallback_font` refused BY NAME. That refusal was honest but it
-    meant the paragraph editor could reflow Arabic while the Add Text card
-    could not write a word of it.
+    The bundled Liberation faces cannot express them, and a refusal BY NAME
+    from `build_fallback_font` would leave the paragraph editor reflowing
+    Arabic while the Add Text card could not write a word of it.
     """
 
     AR = "مرحبا بالعالم"

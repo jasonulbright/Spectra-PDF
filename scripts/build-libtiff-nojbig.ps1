@@ -3,8 +3,8 @@
 #
 # The vendored Tesseract build's libtiff-6.dll carries a static (non-delayed) PE
 # import of libjbig-0.dll, so the tree cannot ship without that DLL: the process
-# never starts. libjbig is JBIG-KIT, GPL-2.0-or-later, and the license-class gate
-# in CLAUDE.md refuses GPL object code. Nothing in the product can reach JBIG --
+# never starts. libjbig is JBIG-KIT, GPL-2.0-or-later, and GPL object code is
+# never shipped. Nothing in the product can reach JBIG --
 # both Tesseract spawn sites are handed a PNG this program rendered -- so the
 # compression is rebuilt out rather than the dependency reasoned around.
 #

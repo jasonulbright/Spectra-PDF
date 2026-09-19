@@ -4,7 +4,7 @@
 // elements silently took the other's meaning, namespaces vanished, UTF-16
 // descriptions and byte-string identifiers were re-encoded into different
 // values, element revisions and Ref relationships were dropped, and MarkInfo
-// was replaced by an unqualified Marked assertion (BA-39).
+// was replaced by an unqualified Marked assertion.
 //
 // Field shapes and semantics follow ISO 32000-2 14.7.2–14.7.6 (Tables
 // 353–358) and 14.8.6. Every assertion here reads a SAVED AND REOPENED

@@ -239,7 +239,7 @@ class TestAutomaticFixes:
         _round_trip(src, "nested_alt", lambda p: apply_accessibility_fixes(p, p, ["nested_alt"]))
         # The figure is still described — by the ancestor whose /Alt swallowed
         # it — so clearing the inner one must not turn into an alt-text
-        # failure. That was a live false positive this round closed.
+        # failure: that would be a false positive.
         assert _statuses(src)["figures_alt"] in _BENIGN
 
     def test_alt_hides_annotation(self, tmp_dir):

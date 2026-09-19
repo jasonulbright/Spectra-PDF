@@ -21,9 +21,8 @@ explains is flagged rather than counted.
 
 A claim sourced this way is worded "corroborated by two independent conformance
 suites at clause X". It is never worded "the standard requires", because the
-standard is ISO 19005 and this repository does not hold it (see `docs/README.md`
-for what `pdfa/` does hold). Where the normative text IS on disk, it outranks
-every file here.
+standard is ISO 19005 and this repository does not hold it. Where the
+normative text IS on disk, it outranks every file here.
 
 WHAT IS FETCHED
 

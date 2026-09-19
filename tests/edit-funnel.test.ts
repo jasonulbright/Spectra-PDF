@@ -242,7 +242,7 @@ describe('legacy literal write-site policy guard', () => {
   });
 
   it('leaves no panel snapshotting a document outside the funnel', () => {
-    // The F4 shape specifically: a panel that opens its own rewrite. Panels
+    // The failure shape: a panel that opens its own rewrite. Panels
     // either call `performOperation` (no snapshot of their own remains) or
     // gate first; either way an ungated snapshot under panels/ is the defect.
     const panelDoors = SITES.filter(

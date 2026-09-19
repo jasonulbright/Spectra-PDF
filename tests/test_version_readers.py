@@ -2,8 +2,8 @@
 
 Every public reader used to answer with the PHYSICAL header, so a valid file
 with a 1.3 header and a catalog `/Version /2.0` was reported as 1.3 by
-Advanced Properties and structural Check, and passed a preflight 1.7 ceiling
-(BA-42). Table 29 makes the catalog's declaration the document's version when
+Advanced Properties and structural Check, and passed a preflight 1.7 ceiling.
+Table 29 makes the catalog's declaration the document's version when
 it is the later of the two.
 
 The fixtures are assembled byte by byte as classic cross-reference tables. A

@@ -48,7 +48,7 @@ interface DragSession {
 const DRAG_THRESHOLD_PX = 6;
 // Zoomed out past the into-target gate, the only possible drop creates a new
 // document — demand a clearly deliberate motion so a jittery click can't
-// split a page off (review finding: 6px at far zoom-out was an accident trap).
+// split a page off (6px at far zoom-out is an accident trap).
 const DRAG_THRESHOLD_ZOOMED_OUT_PX = 24;
 
 // Pointer-event drag controller for canvas pages (drop-target math, deferred

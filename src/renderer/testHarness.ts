@@ -56,7 +56,7 @@ export interface TestStateSnapshot {
   activeToolId: string | null;
   /** Which document pane is showing (the View menu's mode items). */
   docViewMode: 'organize' | 'document';
-  /** Split view (I.6, Window ▸ Split): two stacked reading panes. */
+  /** Split view (Window ▸ Split): two stacked reading panes. */
   splitView: boolean;
   /** The full split shape ('off' | 'two' | 'quad'); splitView stays the
    * boolean projection so pre-quad specs' truthy checks hold. */
@@ -1620,7 +1620,7 @@ export interface TestHarness {
     hasImage?: boolean;
   } | null>;
   /** Every pending annotation on one page, workspace order (= z-order) —
-   * geometry assertions for the manipulation gestures (rung 1). */
+   * geometry assertions for the manipulation gestures. */
   getPageAnnotations: (
     docId: string,
     pageId: string,
@@ -2397,7 +2397,7 @@ export interface TestHarnessDeps {
     hasImage?: boolean;
   } | null;
   /** Every pending annotation on one page, workspace order (= z-order) —
-   * for asserting geometry after manipulation gestures (rung 1). */
+   * for asserting geometry after manipulation gestures. */
   getPageAnnotations: (
     docId: string,
     pageId: string,

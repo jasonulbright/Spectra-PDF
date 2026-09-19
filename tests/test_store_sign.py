@@ -49,7 +49,7 @@ def ec_cert(tmp_path_factory):
 class TestStoreSign:
     def test_signs_and_self_verifies(self, rsa_cert, tmp_dir, sample_pdf):
         out = os.path.join(tmp_dir, "signed.pdf")
-        r = sign_pdf(sample_pdf, out, store_cert=rsa_cert, reason="F29 pytest")
+        r = sign_pdf(sample_pdf, out, store_cert=rsa_cert, reason="store-sign pytest")
         assert r["valid"] and r["intact"] and r["covers_whole_document"]
         assert r["signer"] == win_store.TEST_COMMON_NAME
         v = verify_signatures(out)

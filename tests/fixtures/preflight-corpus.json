@@ -3,7 +3,7 @@
     "The preflight verdict of every PDF in the tree, pinned per profile.",
     "The full verdict map is the default profile; the other eight are pinned as their summary tuple (passed/failed/warnings/needs_review/not_applicable).",
     "Total area coverage is disabled here and pinned separately over constructed fixtures.",
-    "Regenerate with f25-corpus-build.local.py and review the diff."
+    "Regenerate with scripts/gen-preflight-corpus.py and review the diff."
   ],
   "default_profile": "sheetfed_offset",
   "profiles": [
@@ -567,7 +567,7 @@
     },
     {
       "path": "e2e-tests/fixtures/encrypted.pdf",
-      "refused": "C:\\projects\\spectra-studio\\e2e-tests\\fixtures\\encrypted.pdf: invalid password"
+      "refused": "e2e-tests/fixtures/encrypted.pdf: invalid password"
     },
     {
       "path": "e2e-tests/fixtures/hairlines-ladder.pdf",
@@ -787,7 +787,7 @@
     },
     {
       "path": "e2e-tests/fixtures/malformed.pdf",
-      "refused": "C:\\projects\\spectra-studio\\e2e-tests\\fixtures\\malformed.pdf: unable to find trailer dictionary while recovering damaged file"
+      "refused": "e2e-tests/fixtures/malformed.pdf: unable to find trailer dictionary while recovering damaged file"
     },
     {
       "path": "e2e-tests/fixtures/mongolian-columns.pdf",

@@ -13,9 +13,9 @@
 //     already consistent.
 //   - Everything a person READS — button labels, hints, statuses, headings
 //     inside a panel — is Sentence case.
-// The audit found "Apply Watermark" beside "Apply", "Enhance the scans" and
-// "Detect fields" on adjacent surfaces: three registers for one kind of label,
-// so casing had stopped carrying the name/not-a-name distinction at all. When
+// Mixed casing on adjacent surfaces ("Apply Watermark" beside "Apply") is
+// three registers for one kind of label, and then casing no longer carries
+// the name/not-a-name distinction. When
 // a button's job IS to run a named operation, its label spells that operation
 // the same way the operation is named ("Detect form fields"), in the button's
 // own register.
@@ -693,7 +693,7 @@ export const PANEL_STRINGS = {
   'panel.forms.scriptsTitle': 'Scripts this app does not run',
   'panel.forms.scriptsPosition':
     'This app runs no form script it cannot verify. It runs the standard formatting, validation and calculation calls, which are declarative and carry no code; anything else is left in the document exactly as it was, and reported here.',
-  // F26: the same list, once scripts can actually run. Off is still the
+  // The same list, once scripts can actually run. Off is still the
   // default, so the wording above stands and these only add what the reader
   // needs to act: which switch decides it, and what happened to each script
   // that did run.

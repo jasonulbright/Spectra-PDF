@@ -90,7 +90,7 @@ export function MainToolbar(): React.ReactElement {
     return undefined;
   };
   // The rendered layout: the catalog filtered by the user's show/hide
-  // overrides (I.6 toolbar customization) — reactive, so the customize
+  // overrides (toolbar customization) — reactive, so the customize
   // dialog's checkboxes apply live.
   const nodes = visibleToolbarNodes(state.ui.toolbarOverrides);
   // Right-click anywhere on the strip opens the customize entry point.

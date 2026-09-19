@@ -126,7 +126,7 @@ export function formatAreaWithFactor(areaPts2: number, unitsPerPt: number, unit:
   return `${trim(areaPts2 * unitsPerPt * unitsPerPt)} sq ${unit}`;
 }
 
-// ── Calibration (rung 3) ─────────────────────────────────────────────────
+// ── Calibration ─────────────────────────────────────────────────
 // The user drags a KNOWN length and states its real-world value; the toolbar
 // ratio derives from it. Normalized to "1 in = X unit" — the same phrasing
 // the ratio label and the /Measure /R string already use.

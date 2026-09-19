@@ -111,7 +111,7 @@ export interface SecondaryToolbarProps {
    * module store this component reads directly, so the strip and the Takeoff
    * panel cannot disagree about it. */
   countGroups: readonly CountGroup[];
-  /** Shape mode (rung 2): which figure the gesture draws — a mode option in
+  /** Shape mode: which figure the gesture draws — a mode option in
    * the stamp-preset sense. */
   shapeType: ShapeType;
   onSetShapeType: (type: ShapeType) => void;

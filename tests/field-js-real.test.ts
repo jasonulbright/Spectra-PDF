@@ -336,7 +336,7 @@ describe('the vendored interpreter, loaded and run', () => {
     });
     const result = await session.commit('Send', '');
     // The vendored stub does nothing and does not throw, so the statements
-    // after it still take effect — the F23 posture, proven against the engine.
+    // after it still take effect — the refusal posture, proven against the engine.
     expect(result.values.get('Send')).toBe('ran');
     expect(result.reports.map((r) => `${r.kind}:${r.detail}`)).toContain('refused:submitForm');
   });

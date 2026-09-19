@@ -104,7 +104,7 @@ export function toggleOne(key: string, selected: ReadonlySet<string>): Set<strin
 /**
  * Two page-space rects naming the same region.
  *
- * Half a point, the brief's tolerance: a mark the user already has and a hit
+ * Half a point: a mark the user already has and a hit
  * the search just produced are "the same" when every edge agrees to within
  * half a point. Tighter and a re-run of the same search offers to mark
  * everything again (float noise through two coordinate conversions); looser

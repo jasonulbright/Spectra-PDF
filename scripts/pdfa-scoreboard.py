@@ -14,8 +14,8 @@ win.
 
 WHAT IT MEASURES, AND WHY THAT IS THE HONEST SET TODAY
 
-There is no PDF/A validator in this tree — that absence is register row O18 and
-this tool exists to size it rather than to hide it. The shipped preflight
+There is no PDF/A validator in this tree, and this tool exists to size that
+absence rather than to hide it. The shipped preflight
 profiles are press and PDF/X profiles; none of them is PDF/A. What the product
 genuinely does with an arbitrary file is therefore what gets measured:
 
@@ -54,9 +54,9 @@ WHAT THE CLAUSE SECTIONS REPORT
               suite's pass verdict is per TEST, so it says the file satisfies
               the rule that test targets, not that the file satisfies every
               requirement of the clause the test is filed under. Deciding
-              which of the two a case is takes a person, and the three
-              adjudicated so far are recorded in `engine/clause_map.py` and
-              the punchlist rather than in a counter.
+              which of the two a case is takes a person, and the cases
+              adjudicated so far are recorded in `engine/clause_map.py`
+              rather than in a counter.
 
               UNEVIDENCED CITATION — no fire on any of the clause's failing
               files, so the corpus supports the citation with nothing.
@@ -363,7 +363,7 @@ def main() -> int:
         # The accessibility checks are the ONE set this product ships that a
         # conformance corpus can score directly, so the PDF/UA parts get them.
         # Nothing equivalent exists for PDF/A — the shipped preflight profiles
-        # are press and PDF/X — and that absence is O18, measured below rather
+        # are press and PDF/X — and that absence is measured below rather
         # than papered over with a nearby check.
         if target["part"].startswith("PDF/UA"):
             measured["accessibility"] = _accessibility(path)

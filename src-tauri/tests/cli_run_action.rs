@@ -5,8 +5,9 @@
 //! file), per the engine's plan (a `run-action`, a `create-pdf-folders` run),
 //! or never (`rotate`). An optional leg (a `search_redact` step,
 //! `search-redact`, `redact`) runs without one, and needs one only for a JBIG2
-//! image under a partial mark. The refusal of such an input names the command
-//! line's fix, `--gs-path` and `SPECTRAPDF_GS_PATH`.
+//! image under a partial mark. Every refusal, the resolver's before a run and
+//! the engine's for one input, names the command line's fix, `--gs-path` and
+//! `SPECTRAPDF_GS_PATH`.
 //!
 //! An explicit `--gs-path` is the whole answer: an optional leg that meets such
 //! an image refuses by that path's name, and never decodes it with a
@@ -369,8 +370,8 @@ fn redact_the_word() -> Value {
     json!([{ "op": "search_redact", "params": { "query": "SECRET" } }])
 }
 
-/// A refusal the engine wrote for the command line: it names the flag and the
-/// variable that fix it, and not the window's Preferences.
+/// A refusal the command line shows: it names the flag and the variable that
+/// fix it, and not the window's Preferences.
 fn names_the_command_lines_fix(text: &str) {
     assert!(
         text.contains("--gs-path") && text.contains(spectrapdf_lib::gs::PATH_ENV_VAR),
@@ -419,6 +420,7 @@ fn a_required_step_refuses_before_any_step_runs() {
     assert_eq!(output.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains(spectrapdf_lib::gs::CLI_REQUIRED), "{stderr}");
     assert!(stderr.contains(&missing), "{stderr}");
+    names_the_command_lines_fix(&stderr);
     assert!(!run.dest().exists(), "a step ran before the refusal");
 }
 
@@ -519,6 +521,7 @@ fn refused_by_the_resolver(output: &Output, written: &Path, missing: &str) {
         stderr.contains(spectrapdf_lib::gs::CLI_REQUIRED) && stderr.contains(missing),
         "{stderr}"
     );
+    names_the_command_lines_fix(&stderr);
 }
 
 #[test]
@@ -617,6 +620,7 @@ fn a_batch_asks_only_for_the_operations_and_files_that_need_it() {
         refusal.contains(spectrapdf_lib::gs::CLI_REQUIRED) && refusal.contains(&missing),
         "{report}"
     );
+    names_the_command_lines_fix(&refusal);
 }
 
 #[test]

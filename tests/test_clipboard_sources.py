@@ -1,12 +1,11 @@
 """What a Windows clipboard hands over, through the shipped Create PDF door.
 
-P35's clipboard half adds NO engine arm: the Rust side writes the payload to a
-scratch file whose extension the engine already accepts, and everything below
+The clipboard half of Create PDF adds NO engine arm: the Rust side writes the
+payload to a scratch file whose extension the engine already accepts, and everything below
 is the proof that each of those four shapes really does convert. So the pins
 here are about PAYLOADS, not about a new module.
 
-Three of them were measured before a line of product code was written
-(`p35-clipboard-probe.local.py`):
+Three of them were measured before a line of product code was written:
 
 * a packed `CF_DIB` is exactly a headerless `.dib`, Pillow reads it, and
   `biXPelsPerMeter` reaches the page size — including the 0 that most

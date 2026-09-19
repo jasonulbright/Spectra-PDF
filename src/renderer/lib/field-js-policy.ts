@@ -15,12 +15,12 @@ import { sfnFields, type SfnNode } from './af-script';
 import type { FormField, FormFieldActions } from './forms';
 
 /** The `/AA` triggers whose `/JS` this app can execute. `/K` `/F` `/V` `/C`
- * carry value semantics (F23's four); `/Fo` and `/Bl` are the focus pair the
+ * carry value semantics; `/Fo` and `/Bl` are the focus pair the
  * wild corpus shows driving field appearance. */
 export const JS_TRIGGERS = ['K', 'F', 'V', 'C', 'Fo', 'Bl'] as const;
 export type JsTrigger = (typeof JS_TRIGGERS)[number];
 
-/** The four triggers F23 reports on when scripting is OFF. Kept separate from
+/** The four triggers reported when scripting is OFF. Kept separate from
  * `JS_TRIGGERS` on purpose: the off-state report is preserved exactly as it
  * shipped, so turning the preference on is the only thing that changes it. */
 export const DECLARATIVE_TRIGGERS = ['K', 'V', 'C', 'F'] as const;
@@ -98,7 +98,7 @@ function sfnNamesResolve(expr: SfnNode, fieldNames: ReadonlySet<string>): boolea
 
 /** Whether a body is one the declarative evaluator runs. A recognized script
  * that `unrunnable` rejects (a shape recognized but not executable for any
- * value) is NOT declarative — it is exactly what F23 refused.
+ * value) is NOT declarative — it is exactly what scripting-off refuses.
  *
  * `fieldNames` is the document's own name set. Without it an SFN body cannot be
  * told from a string-assigning JavaScript body, and the answer is the safe one:

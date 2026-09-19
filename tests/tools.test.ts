@@ -95,9 +95,9 @@ describe('tools registry', () => {
 
   it('every canvas mode is owned by exactly one tool — except select', () => {
     // The property the secondary toolbar rests on: on a document tab, the
-    // armed MODE must name the active TOOL, unambiguously. It didn't before
-    // this slice — Fill & Sign and Prepare Form both wanted 'forms', because
-    // authoring was a boolean riding on the fill mode rather than a mode.
+    // armed MODE must name the active TOOL, unambiguously. A shared mode
+    // (Fill & Sign and Prepare Form both on 'forms', with authoring a boolean
+    // riding on the fill mode) breaks that.
     const owners = new Map<CanvasTool, ToolId[]>();
     for (const tool of TOOL_DEFS) {
       for (const m of tool.canvasTools ?? []) owners.set(m, [...(owners.get(m) ?? []), tool.id]);
@@ -176,7 +176,7 @@ describe('tools registry', () => {
   });
 
   it('Fill & Sign and Prepare Form own DIFFERENT modes', () => {
-    // The split this slice exists for: filling a form and authoring one are
+    // Filling a form and authoring one are
     // different jobs, so they cannot share one mode — that ambiguity is what
     // made "which tool is armed?" unanswerable.
     expect(toolForCanvasTool('forms')?.id).toBe('fillsign');

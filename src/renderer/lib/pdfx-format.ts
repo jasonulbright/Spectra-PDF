@@ -64,7 +64,7 @@ export interface ExportAnnotation {
   measureRatio?: string;
   measureUnitsPerPt?: number;
   measureUnit?: string;
-  // shape/callout (rung 2) — see PageAnnotation's field comments.
+  // shape/callout — see PageAnnotation's field comments.
   shapeType?: 'rect' | 'ellipse' | 'line' | 'arrow' | 'polygon' | 'polyline' | 'cloud';
   strokeWidth?: number;
   fillColor?: string;

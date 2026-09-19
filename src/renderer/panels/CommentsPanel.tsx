@@ -199,7 +199,7 @@ export function CommentsPanel(): React.ReactElement {
     [],
   );
 
-  // XFDF interchange (rung 4). Export is a gate-flushed read (the engine
+  // XFDF interchange. Export is a gate-flushed read (the engine
   // call's commit gate bakes pending comments first, so the file it reads
   // matches what the user sees); import is the standard undoable mutation.
   const exportXfdf = useCallback(async () => {

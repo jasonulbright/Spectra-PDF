@@ -56,7 +56,7 @@ export interface FieldScriptRunner {
   /** A value was committed into a field — run the document's scripts for it. */
   commit: (path: string, fieldName: string, value: FormFieldValue) => void;
   /** `/Fo` and `/Bl`. Their corpus-dominant use is appearance, which the
-   * vendored object model keeps in-memory; see the design doc's boundary. */
+   * vendored object model keeps in-memory. */
   focus: (path: string, fieldName: string, value: FormFieldValue) => void;
   blur: (path: string, fieldName: string, value: FormFieldValue) => void;
 }

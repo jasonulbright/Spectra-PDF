@@ -9,6 +9,7 @@ six-check one it replaced, because the reader now has 56 reasons to doubt it.
 import json
 import os
 import pathlib
+import subprocess
 
 import pikepdf
 import pytest
@@ -1327,14 +1328,14 @@ class TestCorpusGate:
     """Every PDF already in the tree, with its verdict pinned.
 
     A verdict that moves on a document nobody edited is a regression, and this
-    is what catches it. Regenerate with `f24-corpus-build.local.py` and review
+    is what catches it. Regenerate with `scripts/gen-a11y-corpus.py` and review
     the diff.
     """
 
     CORPUS = REPO / "tests" / "fixtures" / "a11y-corpus.json"
 
     def test_the_corpus_is_pinned(self):
-        assert self.CORPUS.exists(), "run f24-corpus-build.local.py"
+        assert self.CORPUS.exists(), "run scripts/gen-a11y-corpus.py"
         pinned = json.loads(self.CORPUS.read_text(encoding="utf8"))
         assert pinned["documents"], "the corpus found no PDFs to pin"
 
@@ -1364,6 +1365,23 @@ class TestCorpusGate:
                         if now.get(k) != entry["verdicts"].get(k)}
                 moved.append({"path": entry["path"], "diff": diff})
         assert moved == [], json.dumps(moved, indent=2)
+
+    def test_the_corpus_is_the_git_index_not_a_glob(self):
+        """A tracked PDF with no row is a document whose verdict can move with
+        nothing pinning it. A scratch probe folder is not in the index, so it
+        is never a row."""
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "*.pdf", "*.PDF"],
+            cwd=str(REPO), capture_output=True, check=True,
+        ).stdout.decode("utf8")
+        tracked = {
+            name for name in listed.split("\0")
+            # The PDF/UA techniques corpus has a gate of its own whose
+            # expectations come from upstream.
+            if name and "tests/fixtures/pdfua-techniques/" not in name
+        }
+        pinned = json.loads(self.CORPUS.read_text(encoding="utf8"))
+        assert {e["path"] for e in pinned["documents"]} == tracked
 
 
 class TestShippedShapeStillReadable:

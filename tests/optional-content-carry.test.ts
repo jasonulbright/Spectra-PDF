@@ -3,8 +3,7 @@
 // them. The previous carrier reached groups only six dictionary levels deep
 // so a group inside a Form stream lost its registry, dropped every alternate
 // configuration, and read one source's OCProperties while ignoring the
-// others — which turned a donor page its own document had hidden visible
-// (BA-41).
+// others — which turned a donor page its own document had hidden visible.
 //
 // Semantics follow ISO 32000-2 8.11.2 through 8.11.4.5, Tables 96 to 101.
 // Every case builds a real PDF, saves it, reopens it, and asserts group

@@ -597,7 +597,7 @@ describe('RECOLOR_ANNOTATIONS / REMOVE_ANNOTATIONS', () => {
 });
 
 describe('the overlay never paints over an appearance stream it did not draw', () => {
-  // N4, measured off the shipped screenshot: a committed FreeText note rendered
+  // Measured off a screenshot: a committed FreeText note rendered
   // at 1.11:1 on the page (#F8ECE7 text on its own #FAFAF5 ground) while the
   // SAME note showed at full contrast in the comment panel beside it.
   //

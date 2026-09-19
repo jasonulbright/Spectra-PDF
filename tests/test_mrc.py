@@ -778,7 +778,7 @@ class TestLegibility:
     def test_mrc_reads_at_least_as_well_as_ghostscript_ebook(
         self, text_scan, tmp_dir, gs_path
     ):
-        # The other half of the register's claim: smaller AND not worse.
+        # The other half of the claim: smaller AND not worse.
         mrc = os.path.join(tmp_dir, "mrc.pdf")
         ebook = os.path.join(tmp_dir, "ebook.pdf")
         mrc_compress(text_scan, mrc, gs_path=gs_path)

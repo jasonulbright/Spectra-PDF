@@ -1,4 +1,4 @@
-// U7 — a failed open must say something, and what it says must name the file
+// A failed open must say something, and what it says must name the file
 // the user chose. Both halves are pure: the translation away from the temp
 // working copy, and the collapse of a batch's outcomes into ONE notice.
 import { describe, it, expect } from 'vitest';

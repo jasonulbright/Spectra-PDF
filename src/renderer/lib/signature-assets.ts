@@ -354,7 +354,7 @@ export function signatureFootprint(
 }
 
 // ---------------------------------------------------------------------------
-// The F30 consumer's accessor
+// The certificate-stamp consumer's accessor
 // ---------------------------------------------------------------------------
 
 /** One chosen asset, resolved into what a stamp-appearance author needs:
@@ -404,8 +404,8 @@ export function decodeImageDataUrl(
 }
 
 /**
- * Resolve an asset into the certificate-stamp face source (F30's one entry
- * point into this store).
+ * Resolve an asset into the certificate-stamp face source (the stamp's one
+ * entry point into this store).
  *
  * Returns null when the asset cannot be presented as a face at all — an
  * image whose data URL will not decode. Callers surface that; nothing

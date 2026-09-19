@@ -80,7 +80,7 @@ fn check_writes_no_bytecode_into_the_engine_payload() {
             engine.join("__startup__.py").is_file()
         );
         eprintln!(
-            "skipped: no provisioned python/engine beside {} (see punchlist § Dev environment notes)",
+            "skipped: no provisioned python/engine beside {} (scripts/setup-python-embed.ps1 provisions it)",
             exe.display()
         );
         return;

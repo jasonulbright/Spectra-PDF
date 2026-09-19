@@ -623,8 +623,8 @@ export function SearchRedactPanel(): React.ReactElement {
                             title={tChrome('panel.searchRedact.jump')}
                           >
                             <span className="text-neutral-200">{hit.text}</span>
-                            {/* N13: the context repeated the match in the body
-                                colour, so the row gave the reader no way to see
+                            {/* Context that repeats the match in the body
+                                colour gives the reader no way to see
                                 WHERE in the line the mark will land — which on a
                                 snippet flattened out of a table is the only
                                 thing that says whether the row is a hit at all.

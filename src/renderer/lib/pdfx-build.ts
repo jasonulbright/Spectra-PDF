@@ -226,7 +226,7 @@ function apMatrixFor(rotation: number): number[] {
   }
 }
 
-// The cloud border's scalloped path (rung 2) as PDF operators — the bump
+// The cloud border's scalloped path as PDF operators — the bump
 // geometry itself is shared with the SVG renderer (cloudBumps) so the two
 // looks cannot drift.
 function cloudPath(verts: [number, number][], r: number): string {

@@ -17,8 +17,8 @@ import { startSymbolDrag } from '../lib/symbol-drag';
 
 // The searchable symbol palette.
 //
-// ONE component, two surfaces (the brief's "one symbol registry, two
-// consumers"): the Comment tool's stamp picker places symbols from it, and the
+// ONE component, two surfaces (one symbol registry, two consumers): the
+// Comment tool's stamp picker places symbols from it, and the
 // Takeoff panel picks a count group's marker from it. The difference is a
 // `mode`, not a second implementation — the alternative was two pickers
 // drifting apart over which sets they knew about.

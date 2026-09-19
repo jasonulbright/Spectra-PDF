@@ -367,15 +367,12 @@ function applyFileUpdate(
  * swallowed, with no chrome saying why. A tool whose mode is "none", and the
  * tile grid (`toolId: null`, no tool open at all), must DISARM the last one.
  *
- * This bug was fixed FOUR times before landing here — once at each dispatcher
- * that happened to be under review that round (`tools.open.*`, then again for a
- * second variable, then `tools.panel.*` via the rail and the Tools menu, then
- * the ‹ Tools back button, which an earlier round's own notes had already named
- * as a door and left open). Every one of those fixes was correct and none of
- * them was enough, because the rule isn't about any dispatcher: opening a tool
- * DETERMINES the canvas mode, so the code that changes the tool must be the code
- * that sets the mode. Anything else is a rule that survives only as long as the
- * next author remembers it.
+ * A fix at any one dispatcher (`tools.open.*`, `tools.panel.*` via the rail
+ * and the Tools menu, the ‹ Tools back button) leaves the others open, because
+ * the rule isn't about any dispatcher: opening a tool DETERMINES the canvas
+ * mode, so the code that changes the tool must be the code that sets the mode.
+ * Anything else is a rule that survives only as long as the next author
+ * remembers it.
  */
 function openTool(ui: UiState, toolId: string | null): UiState {
   const owner = toolId ? toolById(toolId) : undefined;
@@ -480,8 +477,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         // (e.g. a page-import source) never yanks the user onto the board.
         // A REOPENED path's old workspace composition is stale the moment
         // the new bytes land — serving it until the async indexer catches up
-        // briefly resurrects pre-reopen state (possibly already-edited docs;
-        // the 2p known-bug fix, surfaced while writing 06-annotations). Drop
+        // briefly resurrects pre-reopen state (possibly already-edited docs). Drop
         // this path's docs (the indexer rebuilds them from the fresh buffer)
         // and its now-meaningless page-tier dirt; other files' compositions
         // and dirt stay — an open invalidates only its own path.
@@ -1326,7 +1322,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return applyPageEdit(state, documents, [doc.path]);
     }
     case 'RESTYLE_ANNOTATIONS': {
-      // Shared style edit (rung 2), one undo step. Property applicability is
+      // Shared style edit, one undo step. Property applicability is
       // enforced HERE (the kind-rules seam): shape/callout take everything;
       // ink takes strokeWidth/opacity (no interior to fill); other kinds keep
       // their fixed looks. `fillColor: null` clears the fill.

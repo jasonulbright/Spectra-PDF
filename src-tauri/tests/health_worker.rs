@@ -127,7 +127,7 @@ fn an_overdue_request_is_refused_the_worker_dies_and_the_next_request_respawns_i
             engine.join("__startup__.py").is_file()
         );
         eprintln!(
-            "skipped: no provisioned python/engine under {} (see punchlist § Dev environment notes)",
+            "skipped: no provisioned python/engine under {} (scripts/setup-python-embed.ps1 provisions it)",
             exe_dir.display()
         );
         return;
@@ -322,7 +322,7 @@ fn a_pre_kill_token_stepped_against_the_respawned_worker_reports_the_run_lost() 
             engine.join("__startup__.py").is_file()
         );
         eprintln!(
-            "skipped: no provisioned python/engine under {} (see punchlist § Dev environment notes)",
+            "skipped: no provisioned python/engine under {} (scripts/setup-python-embed.ps1 provisions it)",
             exe_dir.display()
         );
         return;

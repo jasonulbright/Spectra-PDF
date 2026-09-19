@@ -301,8 +301,7 @@ class TestReplaceTextRun:
     def test_subset_widths_range_gates_encoding(self, tmp_dir):
         """A subset-embedded simple font (narrow /Widths range) must REFUSE
         characters outside the declared range — encode() succeeding for a
-        never-subsetted glyph writes .notdef boxes silently (regression;
-        the phase doc's own glyph-availability promise)."""
+        never-subsetted glyph writes .notdef boxes silently."""
         from engine.pdf_fonts import font_capability
 
         pdf = pikepdf.new()
@@ -714,7 +713,7 @@ _EDIT_FONT = os.path.join(
     reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
 )
 class TestOffPageRetypeGuard:
-    """Round 30 (lens): a retype re-anchors at the original
+    """A retype re-anchors at the original
     position, so longer text marched off the page silently — success
     result, invisible text. Worst for rotated authored runs (no
     paragraph-editor fallback). The guard refuses when the NEW rect
@@ -740,7 +739,7 @@ class TestOffPageRetypeGuard:
         return out
 
     def test_retype_longer_past_the_right_edge_refuses(self, tmp_dir):
-        # Lens repro shape: box near the right edge; authored rect ends
+        # Box near the right edge; authored rect ends
         # ~571 (on-sheet); tripling the text would run to ~700 > 612.
         src = self._authored(tmp_dir, [510, 400, 606, 430])
         out = os.path.join(tmp_dir, "o.pdf")
@@ -753,7 +752,7 @@ class TestOffPageRetypeGuard:
 
     def test_rotated_retype_longer_past_the_top_edge_refuses(self, tmp_dir):
         # 90-deg authored run reads bottom-to-top; longer text marches past
-        # the page TOP (y1 ~890 > 792 in the lens repro).
+        # the page TOP (y1 ~890 > 792).
         src = self._authored(tmp_dir, [300, 700, 330, 790], rotate=90)
         out = os.path.join(tmp_dir, "o.pdf")
         idx = next(

@@ -455,7 +455,7 @@ class TestHebrewIgnoreTable:
         assert "־" not in chars and "׀" not in chars
 
     def test_a_pointed_word_is_one_token_and_its_span_takes_the_points_with_it(self):
-        # The F6 rule, exercised on the language that made it visible: a mark
+        # The rule, exercised on the language that made it visible: a mark
         # left outside the reported span re-attaches to whatever replaces it.
         _require("he_IL")
         pointed = WORDS["he_IL"]["pointed"][0]

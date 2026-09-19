@@ -1,4 +1,4 @@
-// Pure geometry for annotation manipulation (rung 1 of the catch-up ladder):
+// Pure geometry for annotation manipulation:
 // move/resize transforms, alignment, distribution, size matching, nudges, and
 // the measure-value recompute. Everything here works on display-normalized
 // 0..1 coordinates in the page.rotation frame (the frame PageAnnotation

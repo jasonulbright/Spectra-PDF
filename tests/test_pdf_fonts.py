@@ -1066,7 +1066,7 @@ class TestSymbolicProgramDerivedEncoding:
         assert cap.reason == "no resolvable encoding (symbolic font without ToUnicode)"
 
 class TestWidthsGuardHardening:
-    """Review round: the /Widths subset guard vs degenerate arrays."""
+    """The /Widths subset guard vs degenerate arrays."""
 
     def test_empty_widths_array_does_not_collapse_encodability(self):
         # regression: /Widths [] inverted the guard range and
