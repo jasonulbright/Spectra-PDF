@@ -17,7 +17,7 @@ import { carriesManifest } from '../src/renderer/lib/doc-names';
 import { readRawAnnotationStyles } from '../src/renderer/lib/annotation-raw-style';
 import { importPageAnnotations } from '../src/renderer/lib/annotation-import';
 import { legendText } from '../src/renderer/lib/count-marks';
-import type { AppAction, OpenDocument, OpenFile, PageRef, Workspace } from '../src/renderer/state/types';
+import type { AppAction, OpenDocument, OpenFile, PageEditSnapshot, PageRef, Workspace } from '../src/renderer/state/types';
 
 const require = createRequire(import.meta.url);
 pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
@@ -487,7 +487,9 @@ describe('commitPageEdits (transactional)', () => {
   function makeDeps(fs: FakeFs, opts: { failWriteAt?: number } = {}) {
     let writeCount = 0;
     const originals = new Map<string, Uint8Array | undefined>();
+    const planned = { pageUndoStack: [], pageRedoStack: [] };
     return {
+      tier: { planned, current: () => planned },
       dispatch: (action: AppAction) => fs.dispatched.push(action),
       transaction: {
         publish: async (_id: string, entries: PageCommitEntry[]) => {
@@ -644,6 +646,46 @@ describe('commitPageEdits (transactional)', () => {
     await commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(first) });
     await commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(second) });
     expect(first.writes[0]).not.toBe(second.writes[0]);
+  });
+
+  // The landing replays edits made during the build onto the committed
+  // composition; it can only do that while the live stacks still show which
+  // entries the plan held.
+  describe('edits made while the commit is built and published', () => {
+    const entry = (): PageEditSnapshot => ({
+      documents: [], dirtyPaths: [], action: { type: 'REMOVE_DOC', docId: 'x' },
+    });
+
+    it('publishes, naming the planned stacks, when the live stacks only grew', async () => {
+      const { files, workspace, dirtyPaths } = await crossFileState();
+      const fs = emptyFs();
+      const planned = { pageUndoStack: [entry()], pageRedoStack: [] };
+      await commitPageEdits({
+        workspace, files, dirtyPaths, ...makeDeps(fs),
+        tier: {
+          planned,
+          current: () => ({ pageUndoStack: [...planned.pageUndoStack, entry()], pageRedoStack: [] }),
+        },
+      });
+      expect(fs.dispatched).toHaveLength(1);
+      const action = fs.dispatched[0];
+      expect(action.type === 'COMMIT_PAGE_EDITS' && action.planned).toBe(planned);
+    });
+
+    it('refuses publication, rolling the files back, when the stacks no longer show what the plan held', async () => {
+      const { files, workspace, dirtyPaths } = await crossFileState();
+      const fs = emptyFs();
+      fs.contents.set('a.pdf.working', new Uint8Array([1]));
+      fs.contents.set('b.pdf.working', new Uint8Array([2]));
+      const planned = { pageUndoStack: [entry()], pageRedoStack: [] };
+      await expect(commitPageEdits({
+        workspace, files, dirtyPaths, ...makeDeps(fs),
+        tier: { planned, current: () => ({ pageUndoStack: [], pageRedoStack: [entry()] }) },
+      })).rejects.toThrow('The document or history changed. Try again.');
+      expect(fs.dispatched).toEqual([]);
+      expect(fs.contents.get('a.pdf.working')).toEqual(new Uint8Array([1]));
+      expect(fs.contents.get('b.pdf.working')).toEqual(new Uint8Array([2]));
+    });
   });
 
   it('rejects concurrent entry loudly instead of corrupting the staged files', async () => {

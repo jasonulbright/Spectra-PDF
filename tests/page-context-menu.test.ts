@@ -79,12 +79,21 @@ describe('buildPageContextMenu', () => {
     expect(items.find((i) => i.label === 'Delete 3 pages')?.disabled).toBe(true);
   });
 
-  it('single rotate dispatches ROTATE_PAGE_REF with the accumulated rotation', async () => {
+  // The gate awaits before the dispatch; a reindex landing meanwhile resets
+  // the page's rotation to 0 over bytes that bake the old one, so an angle
+  // taken from the menu's documents would double a committed turn.
+  it('single rotate dispatches a turn, never an angle read from the menu documents', async () => {
     const dispatch = vi.fn<(a: AppAction) => void>();
-    const items = buildPageContextMenu({ ...base, selectedPageIds: new Set(), dispatch });
+    const turned = {
+      ...doc,
+      pages: doc.pages.map((p) => (p.id === 'a.pdf#p1' ? { ...p, rotation: 90 as const } : p)),
+    };
+    const items = buildPageContextMenu({ ...base, docs: [turned], selectedPageIds: new Set(), dispatch });
     items.find((i) => i.label === 'Rotate right 90°')!.onClick();
+    items.find((i) => i.label === 'Rotate left 90°')!.onClick();
     await flush();
-    expect(dispatch).toHaveBeenCalledWith({ type: 'ROTATE_PAGE_REF', docId: doc.id, pageId: 'a.pdf#p1', rotation: 90 });
+    expect(dispatch).toHaveBeenCalledWith({ type: 'ROTATE_PAGE_REFS', pageIds: ['a.pdf#p1'], delta: 90 });
+    expect(dispatch).toHaveBeenCalledWith({ type: 'ROTATE_PAGE_REFS', pageIds: ['a.pdf#p1'], delta: 270 });
   });
 
   // The page tier's signed-document gate — asked BEFORE the dispatch, with the

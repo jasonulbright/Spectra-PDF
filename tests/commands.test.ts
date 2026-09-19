@@ -135,7 +135,7 @@ describe('enablement helpers', () => {
   it('canUndo/canRedo: page tier first, then the active file snapshots', () => {
     expect(canUndo(initialState)).toBe(false);
     const pageTier = stateWith({
-      pageUndoStack: [{ documents: [], dirtyPaths: [] }],
+      pageUndoStack: [{ documents: [], dirtyPaths: [], action: { type: 'REMOVE_DOC', docId: 'a' } }],
     });
     expect(canUndo(pageTier)).toBe(true);
     const snapshots = stateWith({

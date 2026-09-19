@@ -108,7 +108,7 @@ describe('REORDER_FILE', () => {
     const before: AppState = {
       ...dirty,
       pageDirtyPaths: ['a'],
-      pageUndoStack: [{ documents: [], dirtyPaths: ['a'] }],
+      pageUndoStack: [{ documents: [], dirtyPaths: ['a'], action: { type: 'REMOVE_DOC', docId: 'a' } }],
     };
     const after = reorder(before, 'b', 0);
     expect(order(after)).toEqual(['b', 'a']);

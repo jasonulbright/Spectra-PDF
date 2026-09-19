@@ -13,14 +13,28 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-function destroyEntry(entry: CacheEntry): void {
+// A request sent to a proxy whose transport has started terminating never
+// settles, so a holder mid-read hangs on the destroyed proxy. Holders that
+// must finish (the workspace indexer) listen here and start over.
+type EvictionListener = (path: string, buffer: PdfBuffer) => void;
+const evictionListeners = new Set<EvictionListener>();
+
+export function subscribeProxyEvictions(listener: EvictionListener): () => void {
+  evictionListeners.add(listener);
+  return () => {
+    evictionListeners.delete(listener);
+  };
+}
+
+function destroyEntry(path: string, entry: CacheEntry): void {
   void entry.promise.then((proxy) => proxy.loadingTask.destroy()).catch(() => {});
+  for (const listener of [...evictionListeners]) listener(path, entry.buffer);
 }
 
 export function getDocumentProxy(path: string, buffer: PdfBuffer): Promise<PDFDocumentProxy> {
   const existing = cache.get(path);
   if (existing && existing.buffer === buffer) return existing.promise;
-  if (existing) destroyEntry(existing);
+  if (existing) destroyEntry(path, existing);
   const entry: CacheEntry = { buffer, promise: loadDocument(buffer) };
   // A rejected load must not stay cached: retriers (the indexer re-running
   // on state changes, useWorkspaceForms' bounded retry) would replay the
@@ -52,7 +66,7 @@ export function requestDocumentProxy(
 export function evictExcept(openPaths: ReadonlySet<string>): void {
   for (const [path, entry] of cache) {
     if (openPaths.has(path)) continue;
-    destroyEntry(entry);
     cache.delete(path);
+    destroyEntry(path, entry);
   }
 }

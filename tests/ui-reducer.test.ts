@@ -114,11 +114,9 @@ describe('ui per-document focus', () => {
   // content") is structurally impossible, and the correct behavior is to
   // KEEP a focus whose id survives.
   it('KEEPS a per-doc focus whose id survives the reindex (adoption)', () => {
-    const a = makeFile('book.pdfx', 5);
-    const focused = appReducer(
-      { ...partitionedState(), activeFileId: 'book.pdfx' },
-      { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' },
-    );
+    const start = { ...partitionedState(), activeFileId: 'book.pdfx' };
+    const a = start.files.get('book.pdfx')!;
+    const focused = appReducer(start, { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' });
     expect(focused.ui.focusedDocId).toBe('book.pdfx#1');
     // An authored commit reindexed; adoption carried the doc ids through.
     const reindexed = appReducer(focused, {
@@ -164,11 +162,9 @@ describe('ui per-document focus', () => {
   });
 
   it('drops a per-doc focus when the focused id vanishes (partitions collapse to one)', () => {
-    const a = makeFile('book.pdfx', 5);
-    const focused = appReducer(
-      { ...partitionedState(), activeFileId: 'book.pdfx' },
-      { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' },
-    );
+    const start = { ...partitionedState(), activeFileId: 'book.pdfx' };
+    const a = start.files.get('book.pdfx')!;
+    const focused = appReducer(start, { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' });
     const reindexed = appReducer(focused, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'book.pdfx',
@@ -222,11 +218,13 @@ describe('ui per-document focus', () => {
 
   it('leaves a per-doc focus alone when a DIFFERENT path re-indexes', () => {
     const focused = appReducer(twoDocState(), { type: 'UI_FOCUS_DOC', docId: 'b.pdf#0' });
+    const a = focused.files.get('a.pdf')!;
     const reindexed = appReducer(focused, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'a.pdf',
-      documents: [makeDoc(makeFile('a.pdf', 3), 'a.pdf#0', makePages('a.pdf', 3))],
+      documents: [makeDoc(a, 'a.pdf#g3#0', makePages('a.pdf#g3', 3))],
     });
+    expect(reindexed.workspace).not.toBe(focused.workspace);
     expect(reindexed.ui.focusedDocId).toBe('b.pdf#0');
   });
 
@@ -253,8 +251,8 @@ describe('ui per-document focus', () => {
   // case — same id, same logical page — so the reading position holds. One
   // whose id vanishes (fresh generation) still clears.
   it('keeps the current page when its id survives the reindex; clears when it vanishes', () => {
-    const a = makeFile('a.pdf', 3);
     const s = appReducer(twoDocState(), { type: 'UI_SET_CURRENT_PAGE', pageId: 'a.pdf#p2' });
+    const a = s.files.get('a.pdf')!;
     const adopted = appReducer(s, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'a.pdf',
@@ -295,8 +293,8 @@ describe('ui per-document focus', () => {
 
   // Selection joins the same survive-or-prune pass.
   it('prunes the selection to ids the incoming documents still carry', () => {
-    const a = makeFile('a.pdf', 3);
     let s = select(twoDocState(), ['a.pdf#p0', 'a.pdf#p2', 'b.pdf#p0'], 'a.pdf#p2');
+    const a = s.files.get('a.pdf')!;
     s = appReducer(s, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'a.pdf',
@@ -308,8 +306,8 @@ describe('ui per-document focus', () => {
   });
 
   it("a fresh-generation reindex prunes ALL of the path's selection but keeps other files", () => {
-    const a = makeFile('a.pdf', 2);
     let s = select(twoDocState(), ['a.pdf#p0', 'b.pdf#p0'], 'a.pdf#p0');
+    const a = s.files.get('a.pdf')!;
     s = appReducer(s, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'a.pdf',
@@ -329,15 +327,15 @@ describe('ui per-document focus', () => {
   });
 
   it('leaves the current page alone when a DIFFERENT file re-indexes', () => {
-    const b = makeFile('b.pdf', 2);
     const s = appReducer(twoDocState(), { type: 'UI_SET_CURRENT_PAGE', pageId: 'b.pdf#p0' });
+    const a = s.files.get('a.pdf')!;
     const reindexed = appReducer(s, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'a.pdf',
-      documents: [makeDoc(makeFile('a.pdf', 3), 'a.pdf#0', makePages('a.pdf', 3))],
+      documents: [makeDoc(a, 'a.pdf#g3#0', makePages('a.pdf#g3', 3))],
     });
+    expect(reindexed.workspace).not.toBe(s.workspace);
     expect(reindexed.ui.currentPageId).toBe('b.pdf#p0');
-    void b;
   });
 
   it('clearing to null returns to the default (first doc of the active file)', () => {
@@ -667,6 +665,7 @@ describe('selection invalidation on buffer-identity changes (per-path prune)', (
         path: 'a.pdf', pageCount: 3, buffer: [9], snapshotPath: 'snap',
         authored: { pages: ['a.pdf#p0', 'a.pdf#p1', 'a.pdf#p2'], documents: [{ id: 'a#0', name: 'a' }] },
       }],
+      planned: { pageUndoStack: s.pageUndoStack, pageRedoStack: s.pageRedoStack },
     });
     expect(next.ui.selectedPageIds.size).toBe(2);
     expect(next.ui.selectionAnchor).toBe('a.pdf#p0');

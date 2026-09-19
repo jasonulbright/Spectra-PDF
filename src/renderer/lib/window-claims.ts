@@ -35,6 +35,30 @@ export interface ClaimPartition {
   refused: ClaimRefusal[];
 }
 
+// The arbiter's claim is idempotent per window and its release drops the
+// window's claim whatever preceded it, so the ORDER in which one window's
+// calls on a path are processed decides who holds the path afterwards. Both
+// are async commands, and arrival order does not fix processing order: a
+// close's release still in flight when a reopen claims the same path can be
+// processed second and leave the reopened document with no claim. Each call
+// on a path is therefore sent only after the previous call on that path from
+// this window has answered, whatever its outcome.
+const lastCallOnPath = new Map<string, Promise<void>>();
+
+function inPathOrder<T>(path: string, call: () => Promise<T>): Promise<T> {
+  const previous = lastCallOnPath.get(path) ?? Promise.resolve();
+  const current = previous.then(call);
+  const settled = current.then(
+    () => {},
+    () => {},
+  );
+  lastCallOnPath.set(path, settled);
+  void settled.then(() => {
+    if (lastCallOnPath.get(path) === settled) lastCallOnPath.delete(path);
+  });
+  return current;
+}
+
 /**
  * Claim every path, keeping what was granted and reporting what was not.
  *
@@ -51,7 +75,7 @@ export async function claimPaths(
   const granted: string[] = [];
   const refused: ClaimRefusal[] = [];
   for (const path of paths) {
-    const outcome = await claims.claim(path, mode);
+    const outcome = await inPathOrder(path, () => claims.claim(path, mode));
     if (outcome.granted) granted.push(path);
     else refused.push({ path, owner: outcome.owner });
   }
@@ -71,12 +95,14 @@ export function soleOwner(refused: readonly ClaimRefusal[]): string | null {
 /** Release each path this window no longer holds. Failures are ignored: the
  * window's own destruction releases everything it held. */
 export async function releasePaths(paths: readonly string[]): Promise<void> {
-  for (const path of paths) {
-    try {
-      await claims.release(path);
-    } catch {
-      // The claim outlives only this window; a failed release is not a state
-      // the user can be asked to do anything about.
-    }
-  }
+  // Every release takes its place in its path's order now, not after the
+  // releases before it answer: a claim made meanwhile must queue behind it.
+  await Promise.all(
+    paths.map((path) =>
+      inPathOrder(path, () => claims.release(path)).catch(() => {
+        // The claim outlives only this window; a failed release is not a
+        // state the user can be asked to do anything about.
+      }),
+    ),
+  );
 }

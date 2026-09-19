@@ -264,6 +264,50 @@ export interface Workspace {
 export interface PageEditSnapshot {
   documents: OpenDocument[];
   dirtyPaths: string[];
+  // The edit between this entry's composition and the composition above it.
+  // Documents re-derived from new bytes invalidate every stored composition;
+  // replaying these actions onto the re-derived base is what rebuilds them.
+  action: PageEditAction;
+}
+
+// The page-tier edits: every action that lands through the undo tier. Each is
+// addressed by page and document ids only, so it replays onto documents that
+// carry the same ids. The absolute ROTATE_PAGE_REF is recorded as its delta.
+export type PageEditAction = Extract<
+  AppAction,
+  {
+    type:
+      | 'REORDER_PAGES'
+      | 'MOVE_PAGE'
+      | 'MOVE_PAGE_TO_NEW_DOC'
+      | 'MOVE_PAGES'
+      | 'MOVE_PAGES_TO_NEW_DOC'
+      | 'IMPORT_PAGES'
+      | 'DELETE_PAGE_REF'
+      | 'DELETE_PAGE_REFS'
+      | 'SPLIT_DOC'
+      | 'ADD_ANNOTATION'
+      | 'REGROUP_COUNT_MARKS'
+      | 'UPDATE_ANNOTATION'
+      | 'RECOLOR_ANNOTATION'
+      | 'REMOVE_ANNOTATION'
+      | 'TRANSFORM_ANNOTATIONS'
+      | 'REORDER_ANNOTATIONS'
+      | 'RESTYLE_ANNOTATIONS'
+      | 'RECALIBRATE_ANNOTATION'
+      | 'RECOLOR_ANNOTATIONS'
+      | 'REMOVE_ANNOTATIONS'
+      | 'ROTATE_PAGE_REFS'
+      | 'REORDER_DOCS'
+      | 'RENAME_DOC'
+      | 'REMOVE_DOC';
+  }
+>;
+
+// The two page-tier stacks by reference: what a commit planned from.
+export interface PageTierStacks {
+  pageUndoStack: PageEditSnapshot[];
+  pageRedoStack: PageEditSnapshot[];
 }
 
 // The canvas interaction tool. Lives in the ui slice so command enablement
@@ -592,6 +636,9 @@ export interface AppState {
   pageUndoStack: PageEditSnapshot[];
   pageRedoStack: PageEditSnapshot[];
   pageDirtyPaths: string[]; // open files whose content must be rebuilt at commit
+  // Page edits refused because they could not be carried onto documents
+  // re-derived from new bytes. Monotonic: each increase is one notice owed.
+  pageEditRefusals: number;
 }
 
 export type AppAction =
@@ -623,6 +670,9 @@ export type AppAction =
         // The identity channel — old ids in authored (new-file) order.
         authored: { pages: string[]; documents: { id: string; name: string }[] };
       }[];
+      // The stacks the commit was planned from. Entries pushed on top of
+      // them after planning are edits the commit does not contain.
+      planned: PageTierStacks;
     }
   // One revision-checked publication, never a stack move followed by a reload.
   | { type: 'RESTORE_HISTORY'; direction: 'undo' | 'redo'; expected: AppState;
@@ -647,7 +697,16 @@ export type AppAction =
   // Splice NEW page refs (sourced from a REGISTER_IMPORT_SOURCE byte-only file)
   // into an existing document at an index — the import-into-doc machinery,
   // one page-edit undo step.
-  | { type: 'IMPORT_PAGES'; toDocId: string; toIndex: number; pages: PageRef[] }
+  // `sources` names, per source path, the buffer the pages' positional
+  // indexes were read from. A page index resolves against the file's buffer
+  // at commit, so a source whose buffer changed since then names another page.
+  | {
+      type: 'IMPORT_PAGES';
+      toDocId: string;
+      toIndex: number;
+      pages: PageRef[];
+      sources: { path: string; buffer: PdfBuffer }[];
+    }
   | { type: 'DELETE_PAGE_REF'; docId: string; pageId: string }
   | { type: 'DELETE_PAGE_REFS'; pageIds: string[] }
   | { type: 'ADD_ANNOTATION'; docId: string; pageId: string; annotation: PageAnnotation }

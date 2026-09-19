@@ -1,0 +1,536 @@
+// Page edits made while a commit is being built, or after it lands but before
+// the reindex of its bytes, are pending edits on documents that describe the
+// previous bytes. The reindex re-derives those documents; the edits must be
+// carried onto them (the commit's ids are adopted, so the recorded edits
+// still address the same pages) or refused with a notice — never dropped
+// while the path stays dirty.
+import { describe, expect, it } from 'vitest';
+import { appReducer, initialState } from '../src/renderer/state/reducer';
+import { editsSincePlan } from '../src/renderer/state/page-tier';
+import { workspaceSettled } from '../src/renderer/lib/workspace-settle';
+import type {
+  AppAction,
+  AppState,
+  OpenDocument,
+  OpenFile,
+  PageAnnotation,
+  PageRef,
+  PdfBuffer,
+} from '../src/renderer/state/types';
+
+const W = 300;
+const H = 400;
+
+function file(path: string, buffer: PdfBuffer, pageCount: number, over: Partial<OpenFile> = {}): OpenFile {
+  return {
+    path, workingPath: `${path}.w`, name: path, pageCount, buffer,
+    dirty: false, undoStack: [], redoStack: [], ...over,
+  };
+}
+
+function page(path: string, index: number, over: Partial<PageRef> = {}): PageRef {
+  return {
+    id: `${path}#p${index}`, sourceDocId: path, sourcePageIndex: index,
+    rotation: 0, width: W, height: H, ...over,
+  };
+}
+
+function doc(f: OpenFile, id: string, pages: PageRef[]): OpenDocument {
+  return { ...f, id, pages, pageCount: pages.length };
+}
+
+function state(files: OpenFile[], documents: OpenDocument[]): AppState {
+  return { ...initialState, files: new Map(files.map((f) => [f.path, f])), workspace: { documents } };
+}
+
+const run = (s: AppState, ...actions: AppAction[]): AppState => actions.reduce(appReducer, s);
+
+const pagesOf = (s: AppState, path: string): PageRef[] =>
+  s.workspace.documents.filter((d) => d.path === path).flatMap((d) => d.pages);
+
+const pageById = (s: AppState, id: string): PageRef => {
+  const found = s.workspace.documents.flatMap((d) => d.pages).find((p) => p.id === id);
+  if (!found) throw new Error(`no page ${id}`);
+  return found;
+};
+
+interface Committed {
+  state: AppState;
+  // Per committed path: the documents the plan read, and the buffer written.
+  plans: Map<string, { documents: OpenDocument[]; buffer: number[] }>;
+}
+
+/** What `commitPageEdits` dispatches for the dirty paths of `planned`. The
+ * edits in `during` land after the plan was read and before the landing,
+ * the way a gesture lands while the build and the publication are awaited. */
+function commit(planned: AppState, during: AppAction[] = []): Committed {
+  const plans = new Map<string, { documents: OpenDocument[]; buffer: number[] }>();
+  for (const path of planned.pageDirtyPaths) {
+    plans.set(path, {
+      documents: planned.workspace.documents.filter((d) => d.path === path),
+      buffer: [plans.size + 100],
+    });
+  }
+  const live = run(planned, ...during);
+  const next = appReducer(live, {
+    type: 'COMMIT_PAGE_EDITS',
+    updates: [...plans].map(([path, plan]) => ({
+      path,
+      pageCount: plan.documents.reduce((n, d) => n + d.pages.length, 0),
+      buffer: plan.buffer,
+      snapshotPath: `${path}.snap`,
+      authored: {
+        pages: plan.documents.flatMap((d) => d.pages.map((p) => p.id)),
+        documents: plan.documents.map((d) => ({ id: d.id, name: d.name })),
+      },
+    })),
+    planned: { pageUndoStack: planned.pageUndoStack, pageRedoStack: planned.pageRedoStack },
+  });
+  return { state: next, plans };
+}
+
+/** The documents the indexer derives from the committed bytes, with the
+ * commit's ids adopted: every page now reads from the committed file at its
+ * new position, its committed turn is baked into the page (the viewport's
+ * size swaps, the pending rotation reads 0), and its annotations come back as
+ * imports of what the commit wrote, under fresh annotation ids. */
+function reindexed(c: Committed, path: string): OpenDocument[] {
+  const plan = c.plans.get(path)!;
+  const committedFile = c.state.files.get(path)!;
+  let position = 0;
+  return plan.documents.map((d) => ({
+    ...committedFile,
+    id: d.id,
+    name: d.name,
+    pageCount: d.pages.length,
+    pages: d.pages.map((p): PageRef => {
+      const turned = p.rotation === 90 || p.rotation === 270;
+      const fresh: PageRef = {
+        id: p.id,
+        sourceDocId: path,
+        sourcePageIndex: position++,
+        rotation: 0,
+        width: turned ? p.height : p.width,
+        height: turned ? p.width : p.height,
+      };
+      if (p.annotations?.length) {
+        fresh.annotations = p.annotations.map((a) => ({
+          ...a,
+          id: `${a.id}@reimported`,
+          importedOriginal: {
+            subtype: 'Square', rect: [0, 0, 10, 10], color: a.color, hasAppearance: true,
+          },
+        }));
+      }
+      return fresh;
+    }),
+  }));
+}
+
+const land = (c: Committed, s: AppState, path: string): AppState =>
+  appReducer(s, { type: 'SET_WORKSPACE_DOCUMENTS', path, documents: reindexed(c, path) });
+
+/** b.pdf, five pages in one document, with the last page's quarter-turn
+ * pending — the edit the first commit carries. */
+function pendingTurn(): AppState {
+  const b = file('b.pdf', [1], 5);
+  const s = state([b], [doc(b, 'b#0', [0, 1, 2, 3, 4].map((i) => page('b.pdf', i)))]);
+  return run(s, { type: 'ROTATE_PAGE_REFS', pageIds: ['b.pdf#p4'], delta: 90 });
+}
+
+const TURN: AppAction = { type: 'ROTATE_PAGE_REFS', pageIds: ['b.pdf#p4'], delta: 90 };
+
+describe('an edit made after a commit lands and before its reindex lands', () => {
+  it('rotate: the second turn is carried onto the re-derived page, not dropped', () => {
+    const c = commit(pendingTurn());
+    const edited = appReducer(c.state, TURN);
+    expect(pageById(edited, 'b.pdf#p4').rotation).toBe(180); // on the superseded frame
+    const s = land(c, edited, 'b.pdf');
+    const p4 = pageById(s, 'b.pdf#p4');
+    // The committed bytes bake the first turn; the pending one is the second.
+    expect(p4.rotation).toBe(90);
+    expect(p4.sourcePageIndex).toBe(4);
+    expect([p4.width, p4.height]).toEqual([H, W]);
+    expect(s.workspace.documents[0].buffer).toBe(c.plans.get('b.pdf')!.buffer);
+    expect(s.pageDirtyPaths).toEqual(['b.pdf']);
+    expect(s.pageUndoStack).toHaveLength(1);
+    expect(s.pageEditRefusals).toBe(0);
+    // Undo returns to exactly the committed composition on the new bytes.
+    const undone = appReducer(s, { type: 'UNDO_PAGE_OP' });
+    expect(pageById(undone, 'b.pdf#p4').rotation).toBe(0);
+    expect(undone.pageDirtyPaths).toEqual([]);
+    expect(undone.workspace.documents[0].buffer).toBe(c.plans.get('b.pdf')!.buffer);
+  });
+
+  it('rotate through the absolute single-page action: carried as the turn it made', () => {
+    const c = commit(pendingTurn());
+    const edited = appReducer(c.state, {
+      type: 'ROTATE_PAGE_REF', docId: 'b#0', pageId: 'b.pdf#p4', rotation: 180,
+    });
+    const s = land(c, edited, 'b.pdf');
+    expect(pageById(s, 'b.pdf#p4').rotation).toBe(90);
+    expect(s.pageDirtyPaths).toEqual(['b.pdf']);
+  });
+
+  // A commit waits until every document names its file's current bytes, so a
+  // partition made in the window must take the committed bytes when carried.
+  it('split: the new partition is carried onto the committed bytes, and the landing settles', () => {
+    const c = commit(pendingTurn());
+    const edited = appReducer(c.state, {
+      type: 'SPLIT_DOC', docId: 'b#0', atIndex: 2, newDocId: 'b#split', newName: 'tail',
+    });
+    expect(workspaceSettled(edited)).toBe(false);
+    const s = land(c, edited, 'b.pdf');
+    expect(s.workspace.documents.map((d) => [d.id, d.pages.length])).toEqual([['b#0', 2], ['b#split', 3]]);
+    expect(s.workspace.documents.every((d) => d.buffer === c.plans.get('b.pdf')!.buffer)).toBe(true);
+    expect(workspaceSettled(s)).toBe(true);
+    expect(s.pageDirtyPaths).toEqual(['b.pdf']);
+  });
+
+  it('delete: the page stays deleted and the file stays dirty', () => {
+    const c = commit(pendingTurn());
+    const edited = appReducer(c.state, { type: 'DELETE_PAGE_REFS', pageIds: ['b.pdf#p1'] });
+    const s = land(c, edited, 'b.pdf');
+    expect(pagesOf(s, 'b.pdf').map((p) => p.id)).toEqual(['b.pdf#p0', 'b.pdf#p2', 'b.pdf#p3', 'b.pdf#p4']);
+    // Every surviving page indexes the committed bytes at its committed slot.
+    expect(pagesOf(s, 'b.pdf').map((p) => p.sourcePageIndex)).toEqual([0, 2, 3, 4]);
+    expect(s.pageDirtyPaths).toEqual(['b.pdf']);
+    expect(s.pageEditRefusals).toBe(0);
+  });
+
+  it('reorder: the new order is carried', () => {
+    const c = commit(pendingTurn());
+    const order = ['b.pdf#p4', 'b.pdf#p0', 'b.pdf#p1', 'b.pdf#p2', 'b.pdf#p3'];
+    const edited = appReducer(c.state, { type: 'REORDER_PAGES', docId: 'b#0', order });
+    const s = land(c, edited, 'b.pdf');
+    expect(pagesOf(s, 'b.pdf').map((p) => p.id)).toEqual(order);
+    expect(pagesOf(s, 'b.pdf')[0].sourcePageIndex).toBe(4);
+    expect(pagesOf(s, 'b.pdf')[0].rotation).toBe(0); // the turn is baked, not re-applied
+    expect(s.pageDirtyPaths).toEqual(['b.pdf']);
+  });
+
+  it('insert: pages imported from a byte-only source are carried', () => {
+    const c = commit(pendingTurn());
+    const x = file('x.pdf', [7], 1, { importOnly: true });
+    const withSource = appReducer(c.state, {
+      type: 'REGISTER_IMPORT_SOURCE', path: 'x.pdf', workingPath: 'x.w', name: 'x.pdf', pageCount: 1, buffer: x.buffer!,
+    });
+    const edited = appReducer(withSource, {
+      type: 'IMPORT_PAGES', toDocId: 'b#0', toIndex: 2, pages: [page('x.pdf', 0)],
+      sources: [{ path: 'x.pdf', buffer: x.buffer! }],
+    });
+    const s = land(c, edited, 'b.pdf');
+    expect(pagesOf(s, 'b.pdf').map((p) => p.id)).toEqual([
+      'b.pdf#p0', 'b.pdf#p1', 'x.pdf#p0', 'b.pdf#p2', 'b.pdf#p3', 'b.pdf#p4',
+    ]);
+    expect(pageById(s, 'x.pdf#p0').sourceDocId).toBe('x.pdf');
+    expect(s.files.has('x.pdf')).toBe(true); // still referenced, tier non-empty
+    expect(s.pageDirtyPaths).toEqual(['b.pdf']);
+  });
+
+  it('insert: pages whose indexes were read from the superseded bytes are refused with a notice', () => {
+    const c = commit(pendingTurn());
+    const before = c.state;
+    // Pages read from b.pdf's previous buffer, e.g. an import that reused the
+    // open file's bytes before the commit replaced them.
+    const edited = appReducer(before, {
+      type: 'IMPORT_PAGES', toDocId: 'b#0', toIndex: 0, pages: [page('b.pdf', 3, { id: 'copy' })],
+      sources: [{ path: 'b.pdf', buffer: before.workspace.documents[0].buffer! }],
+    });
+    expect(edited.workspace).toBe(before.workspace);
+    expect(edited.pageEditRefusals).toBe(1);
+  });
+
+  it('undo: the undone edit stays redoable on the re-derived documents', () => {
+    const c = commit(pendingTurn());
+    const edited = run(c.state, TURN, { type: 'UNDO_PAGE_OP' });
+    const s = land(c, edited, 'b.pdf');
+    expect(pageById(s, 'b.pdf#p4').rotation).toBe(0);
+    expect(s.pageDirtyPaths).toEqual([]);
+    expect(s.pageUndoStack).toEqual([]);
+    expect(s.pageRedoStack).toHaveLength(1);
+    expect(s.pageRedoStack[0].documents[0].buffer).toBe(c.plans.get('b.pdf')!.buffer);
+    const redone = appReducer(s, { type: 'REDO_PAGE_OP' });
+    expect(pageById(redone, 'b.pdf#p4').rotation).toBe(90);
+    expect(redone.pageDirtyPaths).toEqual(['b.pdf']);
+  });
+
+  it('undo of several: the redo order survives the rebuild', () => {
+    const c = commit(pendingTurn());
+    const edited = run(
+      c.state,
+      { type: 'MOVE_PAGE', fromDocId: 'b#0', toDocId: 'b#0', pageId: 'b.pdf#p4', toIndex: 0 },
+      { type: 'MOVE_PAGE', fromDocId: 'b#0', toDocId: 'b#0', pageId: 'b.pdf#p3', toIndex: 0 },
+      { type: 'UNDO_PAGE_OP' },
+      { type: 'UNDO_PAGE_OP' },
+    );
+    const s = land(c, edited, 'b.pdf');
+    expect(s.pageRedoStack).toHaveLength(2);
+    const once = appReducer(s, { type: 'REDO_PAGE_OP' });
+    expect(pagesOf(once, 'b.pdf').map((p) => p.id)).toEqual([
+      'b.pdf#p4', 'b.pdf#p0', 'b.pdf#p1', 'b.pdf#p2', 'b.pdf#p3',
+    ]);
+    const twice = appReducer(once, { type: 'REDO_PAGE_OP' });
+    expect(pagesOf(twice, 'b.pdf').map((p) => p.id)).toEqual([
+      'b.pdf#p3', 'b.pdf#p4', 'b.pdf#p0', 'b.pdf#p1', 'b.pdf#p2',
+    ]);
+  });
+
+  it('redo: a redone edit is carried and stays undoable', () => {
+    const c = commit(pendingTurn());
+    const edited = run(c.state, TURN, { type: 'UNDO_PAGE_OP' }, { type: 'REDO_PAGE_OP' });
+    const s = land(c, edited, 'b.pdf');
+    expect(pageById(s, 'b.pdf#p4').rotation).toBe(90);
+    expect(s.pageUndoStack).toHaveLength(1);
+    expect(s.pageRedoStack).toEqual([]);
+    expect(s.pageDirtyPaths).toEqual(['b.pdf']);
+  });
+
+  it('a move into a file the commit did not touch carries the committed page', () => {
+    const a = file('a.pdf', [5], 1);
+    const start = pendingTurn();
+    const withA: AppState = {
+      ...start,
+      files: new Map(start.files).set('a.pdf', a),
+      workspace: { documents: [...start.workspace.documents, doc(a, 'a#0', [page('a.pdf', 0)])] },
+    };
+    const c = commit(withA);
+    const edited = appReducer(c.state, {
+      type: 'MOVE_PAGES', pageIds: ['b.pdf#p4'], toDocId: 'a#0', toIndex: 1,
+    });
+    const s = land(c, edited, 'b.pdf');
+    const moved = pagesOf(s, 'a.pdf')[1];
+    expect(moved.id).toBe('b.pdf#p4');
+    // It now reads from the committed bytes, where the turn is baked.
+    expect(moved.sourcePageIndex).toBe(4);
+    expect(moved.rotation).toBe(0);
+    expect([...s.pageDirtyPaths].sort()).toEqual(['a.pdf', 'b.pdf']);
+  });
+
+  it('annotations: one added in the window is carried; an edit to a committed one is refused and said', () => {
+    const note: PageAnnotation = { id: 'n1', kind: 'note', x: 0.1, y: 0.1, w: 0.05, h: 0.05, color: '#ffd54a', note: 'hi' };
+    const start = run(pendingTurn(), { type: 'ADD_ANNOTATION', docId: 'b#0', pageId: 'b.pdf#p0', annotation: note });
+    const c = commit(start);
+    const added: PageAnnotation = { ...note, id: 'n2', note: 'later' };
+    const edited = run(
+      c.state,
+      { type: 'ADD_ANNOTATION', docId: 'b#0', pageId: 'b.pdf#p1', annotation: added },
+      { type: 'RECOLOR_ANNOTATION', docId: 'b#0', pageId: 'b.pdf#p0', annotationId: 'n1', color: '#000000' },
+    );
+    const s = land(c, edited, 'b.pdf');
+    expect(pageById(s, 'b.pdf#p1').annotations?.map((a) => a.id)).toEqual(['n2']);
+    // The committed note came back as an import under a new id; the recolor
+    // named the old id, so it cannot be carried.
+    expect(pageById(s, 'b.pdf#p0').annotations?.map((a) => [a.id, a.color])).toEqual([
+      ['n1@reimported', '#ffd54a'],
+    ]);
+    expect(s.pageEditRefusals).toBe(1);
+    expect(s.pageUndoStack).toHaveLength(1);
+    expect(s.pageDirtyPaths).toEqual(['b.pdf']);
+  });
+
+  it('a path whose ids do not survive the reindex refuses its edits with a notice and drops its dirt', () => {
+    // An engine operation replaced the bytes: the reindex mints a fresh generation.
+    const b = file('b.pdf', [1], 3);
+    const s0 = state([b], [doc(b, 'b#0', [0, 1, 2].map((i) => page('b.pdf', i)))]);
+    const replaced = appReducer(s0, {
+      type: 'UPDATE_FILE', path: 'b.pdf', pageCount: 3, buffer: [2], snapshotPath: 's',
+    });
+    const edited = appReducer(replaced, { type: 'DELETE_PAGE_REFS', pageIds: ['b.pdf#p1'] });
+    expect(edited.pageDirtyPaths).toEqual(['b.pdf']);
+    const newBytes = replaced.files.get('b.pdf')!;
+    const s = appReducer(edited, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'b.pdf',
+      documents: [doc(newBytes, 'b#g9#0', [0, 1, 2].map((i) => page('b.pdf', i, { id: `b#g9#p${i}` })))],
+    });
+    expect(pagesOf(s, 'b.pdf')).toHaveLength(3);
+    expect(s.pageDirtyPaths).toEqual([]);
+    expect(s.pageUndoStack).toEqual([]);
+    expect(s.pageEditRefusals).toBe(1);
+  });
+
+  it('edits the stacks no longer record (another file closed) are refused with a notice, not kept dirty', () => {
+    const a = file('a.pdf', [5], 1);
+    const start = pendingTurn();
+    const withA: AppState = {
+      ...start,
+      files: new Map(start.files).set('a.pdf', a),
+      workspace: { documents: [...start.workspace.documents, doc(a, 'a#0', [page('a.pdf', 0)])] },
+    };
+    const c = commit(withA);
+    const edited = run(c.state, TURN, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect(edited.pageUndoStack).toEqual([]);
+    expect(edited.pageDirtyPaths).toEqual(['b.pdf']);
+    const s = land(c, edited, 'b.pdf');
+    expect(pageById(s, 'b.pdf#p4').rotation).toBe(0);
+    expect(s.pageDirtyPaths).toEqual([]);
+    expect(s.pageEditRefusals).toBe(1);
+  });
+
+  it('a selected page the rebuild could not carry is pruned wherever it sat', () => {
+    // b.pdf's bytes were replaced by an operation, so its reindex mints fresh
+    // ids; a page moved out of it meanwhile sits in a.pdf's document.
+    const a = file('a.pdf', [5], 1);
+    const b = file('b.pdf', [1], 2);
+    const s0 = state([a, b], [
+      doc(a, 'a#0', [page('a.pdf', 0)]),
+      doc(b, 'b#0', [page('b.pdf', 0), page('b.pdf', 1)]),
+    ]);
+    const replaced = appReducer(s0, { type: 'UPDATE_FILE', path: 'b.pdf', pageCount: 2, buffer: [2], snapshotPath: 's' });
+    const moved = run(
+      replaced,
+      { type: 'MOVE_PAGES', pageIds: ['b.pdf#p1'], toDocId: 'a#0', toIndex: 1 },
+      { type: 'UI_SET_SELECTION', pageIds: ['b.pdf#p1', 'a.pdf#p0'], anchor: 'b.pdf#p1' },
+    );
+    const newBytes = replaced.files.get('b.pdf')!;
+    const s = appReducer(moved, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'b.pdf',
+      documents: [doc(newBytes, 'b#g4#0', [0, 1].map((i) => page('b.pdf', i, { id: `b#g4#p${i}` })))],
+    });
+    expect(pagesOf(s, 'a.pdf').map((p) => p.id)).toEqual(['a.pdf#p0']);
+    expect([...s.ui.selectedPageIds]).toEqual(['a.pdf#p0']);
+    expect(s.ui.selectionAnchor).toBeNull();
+    expect(s.pageEditRefusals).toBe(1);
+  });
+
+  it('keeps a reading position that names a document still to be indexed', () => {
+    const c = commit(pendingTurn());
+    const waiting = appReducer(c.state, { type: 'UI_SET_CURRENT_PAGE', pageId: 'c.pdf#p0' });
+    const s = land(c, appReducer(waiting, TURN), 'b.pdf');
+    expect(s.ui.currentPageId).toBe('c.pdf#p0');
+  });
+
+  it('an index of a buffer the file no longer holds does not land', () => {
+    const c = commit(pendingTurn());
+    const stale = reindexed(c, 'b.pdf').map((d) => ({ ...d, buffer: [42] }));
+    const edited = appReducer(c.state, TURN);
+    const s = appReducer(edited, { type: 'SET_WORKSPACE_DOCUMENTS', path: 'b.pdf', documents: stale });
+    expect(s).toBe(edited);
+  });
+
+  it("partitions interleaved with another file's documents keep their slots", () => {
+    const b = file('b.pdfx', [1], 2);
+    const a = file('a.pdf', [5], 1);
+    const s0 = state([b, a], [
+      doc(b, 'b#0', [page('b.pdfx', 0)]),
+      doc(a, 'a#0', [page('a.pdf', 0)]),
+      doc(b, 'b#1', [page('b.pdfx', 1)]),
+    ]);
+    const c = commit(run(s0, { type: 'ROTATE_PAGE_REFS', pageIds: ['b.pdfx#p1'], delta: 90 }));
+    const edited = appReducer(c.state, { type: 'REORDER_DOCS', docId: 'a#0', direction: -1 });
+    const s = land(c, edited, 'b.pdfx');
+    expect(s.workspace.documents.map((d) => d.id)).toEqual(['a#0', 'b#0', 'b#1']);
+    expect(s.pageEditRefusals).toBe(0);
+  });
+});
+
+describe('where re-derived documents land', () => {
+  // Fresh ids name no outgoing slot, so no slot is theirs to keep: the
+  // re-derived partitions land together at the first outgoing slot.
+  it('a non-adopted reindex of interleaved partitions lands as one block', () => {
+    const b = file('b.pdfx', [1], 2);
+    const a = file('a.pdf', [5], 1);
+    const s0 = state([b, a], [
+      doc(b, 'b#0', [page('b.pdfx', 0)]),
+      doc(a, 'a#0', [page('a.pdf', 0)]),
+      doc(b, 'b#1', [page('b.pdfx', 1)]),
+    ]);
+    const replaced = appReducer(s0, { type: 'UPDATE_FILE', path: 'b.pdfx', pageCount: 2, buffer: [2], snapshotPath: 's' });
+    const newBytes = replaced.files.get('b.pdfx')!;
+    const s = appReducer(replaced, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'b.pdfx',
+      documents: [
+        doc(newBytes, 'b#g2#0', [page('b.pdfx', 0, { id: 'b#g2#p0' })]),
+        doc(newBytes, 'b#g2#1', [page('b.pdfx', 1, { id: 'b#g2#p1' })]),
+      ],
+    });
+    expect(s.workspace.documents.map((d) => d.id)).toEqual(['b#g2#0', 'b#g2#1', 'a#0']);
+  });
+
+  it('an adopted reindex keeps each partition in its own slot', () => {
+    const b = file('b.pdfx', [1], 2);
+    const a = file('a.pdf', [5], 1);
+    const s0 = state([b, a], [
+      doc(b, 'b#0', [page('b.pdfx', 0)]),
+      doc(a, 'a#0', [page('a.pdf', 0)]),
+      doc(b, 'b#1', [page('b.pdfx', 1)]),
+    ]);
+    const c = commit(run(s0, { type: 'ROTATE_PAGE_REFS', pageIds: ['b.pdfx#p0'], delta: 90 }));
+    const s = land(c, c.state, 'b.pdfx');
+    expect(s.workspace.documents.map((d) => d.id)).toEqual(['b#0', 'a#0', 'b#1']);
+  });
+});
+
+describe('an edit made while the commit is built and published', () => {
+  it('stays pending, undoable, and dirties only what it touched', () => {
+    const a = file('a.pdf', [5], 2);
+    const start = pendingTurn();
+    const withA: AppState = {
+      ...start,
+      files: new Map(start.files).set('a.pdf', a),
+      workspace: {
+        documents: [...start.workspace.documents, doc(a, 'a#0', [page('a.pdf', 0), page('a.pdf', 1)])],
+      },
+    };
+    const c = commit(withA, [
+      { type: 'DELETE_PAGE_REFS', pageIds: ['a.pdf#p1'] },
+      TURN,
+    ]);
+    // The commit contained only b.pdf's first turn.
+    expect(c.plans.has('a.pdf')).toBe(false);
+    expect([...c.state.pageDirtyPaths].sort()).toEqual(['a.pdf', 'b.pdf']);
+    expect(c.state.pageUndoStack).toHaveLength(2);
+    expect(c.state.pageUndoStack[0].dirtyPaths).toEqual([]);
+    expect(pagesOf(c.state, 'a.pdf').map((p) => p.id)).toEqual(['a.pdf#p0']);
+    expect(c.state.pageEditRefusals).toBe(0);
+    // The reindex carries both onto the committed bytes.
+    const s = land(c, c.state, 'b.pdf');
+    expect(pageById(s, 'b.pdf#p4').rotation).toBe(90);
+    expect(pagesOf(s, 'a.pdf').map((p) => p.id)).toEqual(['a.pdf#p0']);
+    expect([...s.pageDirtyPaths].sort()).toEqual(['a.pdf', 'b.pdf']);
+    // Undoing both leaves nothing to commit.
+    const clean = run(s, { type: 'UNDO_PAGE_OP' }, { type: 'UNDO_PAGE_OP' });
+    expect(clean.pageDirtyPaths).toEqual([]);
+    expect(pagesOf(clean, 'a.pdf')).toHaveLength(2);
+  });
+
+  it('keeps every dirty path and says so when the stacks no longer show what the plan held', () => {
+    const planned = pendingTurn();
+    const c = commit(planned, [
+      TURN,
+      { type: 'OPEN_FILE', path: 'z.pdf', workingPath: 'z.w', name: 'z.pdf', pageCount: 1, buffer: [3] },
+    ]);
+    expect(c.state.pageDirtyPaths).toEqual(['b.pdf']);
+    expect(c.state.pageEditRefusals).toBe(1);
+  });
+});
+
+describe('editsSincePlan', () => {
+  const entry = (): AppState['pageUndoStack'][number] => ({
+    documents: [], dirtyPaths: [], action: { type: 'REMOVE_DOC', docId: 'x' },
+  });
+
+  it('is empty for the planned stacks themselves', () => {
+    const planned = { pageUndoStack: [entry()], pageRedoStack: [entry()] };
+    expect(editsSincePlan(planned, planned)).toEqual([]);
+  });
+
+  it('returns the entries pushed on top of the planned ones', () => {
+    const e1 = entry();
+    const e2 = entry();
+    const planned = { pageUndoStack: [e1], pageRedoStack: [entry()] };
+    expect(editsSincePlan({ pageUndoStack: [e1, e2], pageRedoStack: [] }, planned)).toEqual([e2]);
+  });
+
+  it('is null after an undo, a redo, a reset, or a rewritten entry', () => {
+    const e1 = entry();
+    const planned = { pageUndoStack: [e1], pageRedoStack: [] };
+    expect(editsSincePlan({ pageUndoStack: [], pageRedoStack: [entry()] }, planned)).toBeNull();
+    expect(editsSincePlan({ pageUndoStack: [e1, entry()], pageRedoStack: [entry()] }, planned)).toBeNull();
+    expect(editsSincePlan({ pageUndoStack: [], pageRedoStack: [] }, planned)).toBeNull();
+    expect(editsSincePlan({ pageUndoStack: [entry(), entry()], pageRedoStack: [] }, planned)).toBeNull();
+  });
+});

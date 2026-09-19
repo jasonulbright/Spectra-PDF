@@ -100,8 +100,10 @@ describe('page commit acknowledgement and recovery', () => {
       await expect(publishPageCommit(other.io, entries, other.publishState, other.cleanup)).rejects.toThrow('needs recovery');
       expect(other.events).toEqual([]);
       // Exercise the actual empty-plan boundary, not only its App spelling.
+      const planned = { pageUndoStack: [], pageRedoStack: [] };
       await expect(commitPageEdits({
         workspace: { documents: [] }, files: new Map(), dirtyPaths: [],
+        tier: { planned, current: () => planned },
         transaction: other.io,
         dispatch: () => { throw new Error('empty plan bypassed recovery'); },
         writeBuffer: async () => { throw new Error('unexpected write'); },

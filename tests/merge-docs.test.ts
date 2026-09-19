@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
 import {
   buildMergedPageRefs,
+  mergedPageSources,
   pathBlockedFromClose,
   pathReferencedByOtherDocs,
 } from '../src/renderer/lib/merge-docs';
@@ -15,7 +16,7 @@ function doc(path: string, pages: PageRef[], id = path): OpenDocument {
     workingPath: `${path}.working`,
     name: path,
     pageCount: pages.length,
-    buffer: null,
+    buffer: [path.length],
     dirty: false,
     undoStack: [],
     redoStack: [],
@@ -120,6 +121,7 @@ describe('merge-up through the real reducer (IMPORT_PAGES with copies)', () => {
       toDocId: 'A',
       toIndex: a.pages.length,
       pages: buildMergedPageRefs(b),
+      sources: mergedPageSources(state.workspace.documents, state.files, b),
     });
     const mergedA = next.workspace.documents.find((d) => d.id === 'A')!;
     const stillB = next.workspace.documents.find((d) => d.id === 'B')!;
@@ -139,6 +141,56 @@ describe('merge-up through the real reducer (IMPORT_PAGES with copies)', () => {
     const undone = appReducer(next, { type: 'UNDO_PAGE_OP' });
     expect(undone.workspace.documents.find((d) => d.id === 'A')!.pages).toHaveLength(2);
     expect(pathBlockedFromClose(undone.workspace.documents, undone.pageDirtyPaths, 'b.pdf')).toBe(false);
+  });
+
+  // A commit changed b.pdf's buffer and its reindex has not landed: b's
+  // documents still index the previous bytes, so copies of them would name
+  // other pages of the new file.
+  it('refuses, and counts, a copy of documents indexed from a superseded buffer', () => {
+    const a = doc('a.pdf', [page('a.pdf', 0)], 'A');
+    const b = doc('b.pdf', [page('b.pdf', 0), page('b.pdf', 1)], 'B');
+    const state = stateWith([a, b]);
+    const committed: AppState = {
+      ...state,
+      files: new Map(state.files).set('b.pdf', { ...state.files.get('b.pdf')!, buffer: [99] }),
+    };
+    const next = appReducer(committed, {
+      type: 'IMPORT_PAGES',
+      toDocId: 'A',
+      toIndex: 1,
+      pages: buildMergedPageRefs(b),
+      sources: mergedPageSources(committed.workspace.documents, committed.files, b),
+    });
+    expect(next.workspace).toBe(committed.workspace);
+    expect(next.pageUndoStack).toEqual([]);
+    expect(next.pageEditRefusals).toBe(committed.pageEditRefusals + 1);
+  });
+});
+
+describe('mergedPageSources', () => {
+  it('names each source path once, by the buffer its documents were indexed from', () => {
+    const a = doc('a.pdf', [page('a.pdf', 0)]);
+    const b = doc('b.pdf', [page('b.pdf', 0)]);
+    // A pending cross-file move put a b-sourced page and a byte-only source's
+    // page into a's document.
+    const from = doc('a.pdf', [page('a.pdf', 0), page('b.pdf', 1), page('x.pdf', 0), page('a.pdf', 1)]);
+    const ghost = { buffer: [7] };
+    const files = new Map<string, { buffer: number[] | null }>([
+      ['a.pdf', { buffer: [55] }], // superseded: the documents still say a.buffer
+      ['b.pdf', { buffer: b.buffer as number[] }],
+      ['x.pdf', ghost],
+    ]);
+    expect(mergedPageSources([a, b], files, from)).toEqual([
+      { path: 'a.pdf', buffer: a.buffer },
+      { path: 'b.pdf', buffer: b.buffer },
+      { path: 'x.pdf', buffer: ghost.buffer },
+    ]);
+    expect(mergedPageSources([a, b], files, from)[0].buffer).toBe(a.buffer);
+  });
+
+  it('omits a source nothing holds, so the import is refused rather than guessed', () => {
+    const from = doc('a.pdf', [page('gone.pdf', 0)]);
+    expect(mergedPageSources([], new Map(), from)).toEqual([]);
   });
 });
 

@@ -7,7 +7,7 @@
 // file's pages, and the copy semantic leaves the source strip visibly intact
 // until the user removes it (post-commit, once the copies re-bake to the
 // target's own file, closing the source is ordinary).
-import type { OpenDocument, PageAnnotation, PageRef } from '../state/types';
+import type { OpenDocument, PageAnnotation, PageRef, PdfBuffer } from '../state/types';
 
 // Fresh page-ref copies for splicing into another document. Ids must be
 // fresh: `PageRef.id` is positional (`path#pN`) and a copy of an OPEN file's
@@ -44,6 +44,25 @@ export function buildMergedPageRefs(doc: OpenDocument): PageRef[] {
     }
     return copy;
   });
+}
+
+// The buffer each copied page's index was read from, per source path: the
+// documents of that path carry it, and a byte-only source has no documents,
+// only its file entry. The import is refused when any of them is no longer
+// the source's current buffer.
+export function mergedPageSources(
+  docs: readonly OpenDocument[],
+  files: ReadonlyMap<string, { buffer: PdfBuffer | null }>,
+  from: OpenDocument,
+): { path: string; buffer: PdfBuffer }[] {
+  const sources: { path: string; buffer: PdfBuffer }[] = [];
+  for (const page of from.pages) {
+    if (sources.some((s) => s.path === page.sourceDocId)) continue;
+    const buffer =
+      docs.find((d) => d.path === page.sourceDocId)?.buffer ?? files.get(page.sourceDocId)?.buffer;
+    if (buffer) sources.push({ path: page.sourceDocId, buffer });
+  }
+  return sources;
 }
 
 // Whether any OTHER document's pages still read their bytes from `path` —
