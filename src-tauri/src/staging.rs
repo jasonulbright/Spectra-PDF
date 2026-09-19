@@ -62,7 +62,7 @@ pub(crate) fn process_running(_pid: u32) -> bool {
 /// is refused while any such handle exists; every refusal except an absent
 /// file reads as held.
 #[cfg(windows)]
-fn held_open(path: &Path) -> bool {
+pub(crate) fn held_open(path: &Path) -> bool {
     use std::os::windows::fs::OpenOptionsExt;
     match std::fs::OpenOptions::new()
         .read(true)
@@ -75,7 +75,7 @@ fn held_open(path: &Path) -> bool {
 }
 
 #[cfg(not(windows))]
-fn held_open(_path: &Path) -> bool {
+pub(crate) fn held_open(_path: &Path) -> bool {
     false
 }
 
@@ -254,6 +254,146 @@ pub(crate) fn copy_record(source: &Path, record: &Path) -> io::Result<u64> {
     Ok(copied)
 }
 
+// ── Exports ──────────────────────────────────────────────────────────────
+
+#[cfg(windows)]
+const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+
+/// Whether an open of `path` that asks for `access` alone is refused for lack
+/// of that access. A path held by another handle, or gone, is not refused.
+#[cfg(windows)]
+fn access_refused(path: &Path, access: u32, flags: u32) -> bool {
+    use std::os::windows::fs::OpenOptionsExt;
+    matches!(
+        std::fs::OpenOptions::new()
+            .access_mode(access)
+            .custom_flags(flags)
+            .open(path),
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied
+    )
+}
+
+/// Whether the folder `dir` refuses this process a new file.
+#[cfg(windows)]
+pub(crate) fn create_denied(dir: &Path) -> bool {
+    const FILE_ADD_FILE: u32 = 0x0002;
+    access_refused(dir, FILE_ADD_FILE, FILE_FLAG_BACKUP_SEMANTICS)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn create_denied(_dir: &Path) -> bool {
+    false
+}
+
+/// Whether this process may not replace `target` by renaming another file
+/// over it. The rename needs DELETE on `target`, which the file's own access
+/// list grants or its folder's delete-child right grants, so an open that asks
+/// for DELETE alone answers for both.
+#[cfg(windows)]
+pub(crate) fn replace_denied(target: &Path) -> bool {
+    const DELETE: u32 = 0x0001_0000;
+    access_refused(target, DELETE, 0)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn replace_denied(_target: &Path) -> bool {
+    false
+}
+
+/// Whether `record` exists and this process may not replace it by a rename.
+fn replace_refused(record: &Path) -> bool {
+    record.is_file() && replace_denied(record)
+}
+
+/// Whether a stage that could not be created in `dir` was refused because
+/// `dir` denies this process a new file. A name taken by a folder, a full
+/// disk or a folder that is gone is not that refusal.
+pub(crate) fn refused_for_create(refused: &io::Error, dir: &Path) -> bool {
+    refused.kind() == io::ErrorKind::PermissionDenied && create_denied(dir)
+}
+
+/// Write the existing `record` in place through `fill`, under the record's
+/// lock. A record that does not open for writing leaves `refusal` standing.
+fn rewrite_existing(
+    record: &Path,
+    refusal: io::Error,
+    fill: impl FnOnce(&mut File) -> io::Result<()>,
+) -> io::Result<()> {
+    let lock = record_lock(record);
+    let _serialized = lock.lock().unwrap_or_else(|e| e.into_inner());
+    let Ok(mut file) = std::fs::OpenOptions::new().write(true).open(record) else {
+        return Err(refusal);
+    };
+    file.set_len(0)?;
+    fill(&mut file)?;
+    file.sync_all()
+}
+
+/// Replace `record` with `bytes` like [`write_record`], for a file written to
+/// a folder the user chose.
+///
+/// A folder can let a user change a file and still refuse to create one
+/// beside it, or refuse to replace it by a rename. When `record` exists and
+/// opens for writing, and its folder refuses the stage for the first reason
+/// (see [`refused_for_create`]) or its replacement for the second (see
+/// [`replace_denied`], asked before any stage exists), the bytes are written
+/// into it in place.
+pub(crate) fn export_record(record: &Path, bytes: &[u8]) -> io::Result<()> {
+    if replace_refused(record) {
+        let refusal = io::Error::from(io::ErrorKind::PermissionDenied);
+        return rewrite_existing(record, refusal, |file| file.write_all(bytes));
+    }
+    let mut create_refused = false;
+    let staged = replace_record(record, |staged| {
+        let mut file = File::create(staged).inspect_err(|e| {
+            create_refused = staged.parent().is_some_and(|dir| refused_for_create(e, dir));
+        })?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        Ok(file)
+    });
+    match staged {
+        Err(refusal) if create_refused => {
+            rewrite_existing(record, refusal, |file| file.write_all(bytes))
+        }
+        landed => landed,
+    }
+}
+
+/// Replace `record` with a copy of `source` like [`copy_record`], with the
+/// in-place write [`export_record`] falls back to. Returns the byte count.
+pub(crate) fn export_copy(source: &Path, record: &Path) -> io::Result<u64> {
+    if replace_refused(record) {
+        let refusal = io::Error::from(io::ErrorKind::PermissionDenied);
+        return copy_in_place(source, record, refusal);
+    }
+    let mut copied = 0;
+    let mut create_refused = false;
+    let staged = replace_record(record, |staged| {
+        let (count, held) = copy_to_stage(source, staged).inspect_err(|e| {
+            create_refused = staged.parent().is_some_and(|dir| refused_for_create(e, dir));
+        })?;
+        copied = count;
+        Ok(held)
+    });
+    match staged {
+        Ok(()) => Ok(copied),
+        Err(refusal) if create_refused => copy_in_place(source, record, refusal),
+        Err(refusal) => Err(refusal),
+    }
+}
+
+/// Copy `source` into the existing `record` through [`rewrite_existing`].
+/// Returns the byte count.
+fn copy_in_place(source: &Path, record: &Path, refusal: io::Error) -> io::Result<u64> {
+    let mut copied = 0;
+    rewrite_existing(record, refusal, |file| {
+        copied = io::copy(&mut File::open(source)?, file)?;
+        Ok(())
+    })?;
+    Ok(copied)
+}
+
 /// A record's bytes, or `None` when no record exists. Every other failure is
 /// an error: a record that exists but cannot be read is not an absent one.
 pub(crate) fn read_record(record: &Path) -> io::Result<Option<Vec<u8>>> {
@@ -363,6 +503,118 @@ pub(crate) fn reclaim_aged(
         }
     }
     removed
+}
+
+/// Denials in the access lists of the current user, set up with `icacls` so
+/// every refusal comes from the file system itself, and removed when the
+/// value is dropped.
+#[cfg(all(test, windows))]
+pub(crate) struct Denied {
+    paths: Vec<PathBuf>,
+    sid: String,
+}
+
+#[cfg(all(test, windows))]
+impl Denied {
+    fn current_user() -> Self {
+        let who = std::process::Command::new("whoami")
+            .args(["/user", "/fo", "csv", "/nh"])
+            .output()
+            .unwrap();
+        assert!(who.status.success(), "whoami failed");
+        let text = String::from_utf8_lossy(&who.stdout).to_string();
+        let sid = text.trim().rsplit(',').next().unwrap().trim_matches('"').to_string();
+        assert!(sid.starts_with("S-1-"), "no SID in {text:?}");
+        Self {
+            paths: Vec::new(),
+            sid,
+        }
+    }
+
+    fn icacls(&mut self, target: &Path, action: &str, rights: &str) {
+        let status = std::process::Command::new("icacls")
+            .arg(target)
+            .arg(action)
+            .arg(format!("*{}:{rights}", self.sid))
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "icacls {action} on {}", target.display());
+        if action == "/deny" {
+            self.paths.push(target.to_path_buf());
+        }
+    }
+
+    /// `dir` refuses a new file; the files in `writable` stay writable.
+    pub(crate) fn create(dir: &Path, writable: &[&Path]) -> Self {
+        let mut denied = Self::current_user();
+        denied.icacls(dir, "/deny", "(WD)");
+        for file in writable {
+            denied.icacls(file, "/grant", "(W)");
+        }
+        let probe = dir.join("a-new-file.probe");
+        assert_eq!(
+            File::create(&probe).map(drop).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied,
+            "the folder still accepts a new file"
+        );
+        denied
+    }
+
+    /// `rights` are refused on `path`, and nothing else.
+    pub(crate) fn only(path: &Path, rights: &str) -> Self {
+        let mut denied = Self::current_user();
+        denied.icacls(path, "/deny", rights);
+        denied
+    }
+
+    /// Nothing may replace `target` in `dir` by a rename: deleting `target`
+    /// and deleting a child of `dir` are refused. New files and writes stay
+    /// allowed.
+    pub(crate) fn replace(dir: &Path, target: &Path) -> Self {
+        let mut denied = Self::current_user();
+        denied.icacls(target, "/deny", "(DE)");
+        denied.icacls(dir, "/deny", "(DC)");
+        let probe = dir.join("a-replacement.probe");
+        std::fs::write(&probe, b"probe").unwrap();
+        let refused = std::fs::rename(&probe, target).unwrap_err();
+        std::fs::remove_file(&probe).unwrap();
+        assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied);
+        denied
+    }
+}
+
+/// The volume and index that name the file at `path`, read through a handle
+/// that is closed again: a rename over a file some handle holds is refused.
+#[cfg(all(test, windows))]
+pub(crate) fn file_id(path: &Path) -> (u32, u32, u32) {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+    let file = File::open(path).unwrap();
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }.unwrap();
+    (
+        info.dwVolumeSerialNumber,
+        info.nFileIndexHigh,
+        info.nFileIndexLow,
+    )
+}
+
+#[cfg(all(test, windows))]
+impl Drop for Denied {
+    fn drop(&mut self) {
+        for path in &self.paths {
+            let _ = std::process::Command::new("icacls")
+                .arg(path)
+                .arg("/remove:d")
+                .arg(format!("*{}", self.sid))
+                .stdout(std::process::Stdio::null())
+                .status();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -868,5 +1120,148 @@ mod tests {
         let now = born(&stage) + Duration::from_secs(60);
         assert_eq!(reclaim_aged(dir.path(), legacy, LEGACY_STAGE_AGE, now), 0);
         assert!(stage.exists());
+    }
+
+    // ── Exports ───────────────────────────────────────────────────────────
+
+    #[cfg(windows)]
+    #[test]
+    fn only_a_folder_that_denies_a_new_file_reads_as_denying_creation() {
+        let dir = tempfile::tempdir().unwrap();
+        let open = dir.path().join("open");
+        let closed = dir.path().join("closed");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::create_dir(&closed).unwrap();
+        assert!(!create_denied(&open));
+        assert!(!create_denied(&dir.path().join("absent")));
+
+        let _denied = Denied::create(&closed, &[]);
+        assert!(create_denied(&closed));
+        let access = io::Error::from(io::ErrorKind::PermissionDenied);
+        assert!(refused_for_create(&access, &closed));
+        assert!(!refused_for_create(&access, &open));
+        let taken = io::Error::from(io::ErrorKind::AlreadyExists);
+        assert!(!refused_for_create(&taken, &closed));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_export_is_rewritten_in_place_where_the_folder_refuses_a_new_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = dir.path().join("scan-test-report.json");
+        let scan = dir.path().join("page-0000.bmp");
+        std::fs::write(&report, b"an earlier and longer report").unwrap();
+        std::fs::write(&scan, b"BM an earlier and longer page").unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let page = elsewhere.path().join("page-0000.bmp");
+        std::fs::write(&page, b"BM this run").unwrap();
+
+        {
+            let _denied = Denied::create(dir.path(), &[&report, &scan]);
+            export_record(&report, b"this report").unwrap();
+            assert_eq!(export_copy(&page, &scan).unwrap(), 11);
+            let new = dir.path().join("new-report.json");
+            let refused = export_record(&new, b"needs a new file").unwrap_err();
+            assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied);
+            assert!(write_record(&report, b"not an export").is_err());
+        }
+
+        assert_eq!(std::fs::read(&report).unwrap(), b"this report");
+        assert_eq!(std::fs::read(&scan).unwrap(), b"BM this run");
+        assert_eq!(
+            names(dir.path()),
+            ["page-0000.bmp", "scan-test-report.json"].map(String::from).into()
+        );
+    }
+
+    /// A folder under the stage's name refuses the stage for access too, in a
+    /// folder that accepts new files. Nothing is written in place.
+    #[test]
+    fn an_export_refused_for_another_reason_leaves_the_file_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = dir.path().join("scan-test-report.json");
+        std::fs::write(&record, b"the earlier report").unwrap();
+        let source = dir.path().join("source.bin");
+        std::fs::write(&source, b"the new bytes").unwrap();
+        std::fs::create_dir(stage_path(&record, std::process::id())).unwrap();
+
+        assert!(export_record(&record, b"a new report").is_err());
+        assert!(export_copy(&source, &record).is_err());
+        assert_eq!(std::fs::read(&record).unwrap(), b"the earlier report");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_a_refused_delete_of_the_file_and_of_its_folder_s_child_denies_a_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("report.json");
+        std::fs::write(&target, b"{}").unwrap();
+        assert!(!replace_denied(&target));
+        assert!(!replace_denied(&dir.path().join("absent.json")));
+        {
+            let _file_only = Denied::only(&target, "(DE)");
+            assert!(!replace_denied(&target));
+        }
+        {
+            let _folder_only = Denied::only(dir.path(), "(DC)");
+            assert!(!replace_denied(&target));
+        }
+        let _both = Denied::replace(dir.path(), &target);
+        assert!(replace_denied(&target));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_export_is_rewritten_in_place_where_the_folder_refuses_its_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = dir.path().join("scan-test-report.json");
+        let scan = dir.path().join("page-0000.bmp");
+        std::fs::write(&report, b"an earlier and longer report").unwrap();
+        std::fs::write(&scan, b"BM an earlier and longer page").unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let page = elsewhere.path().join("page-0000.bmp");
+        std::fs::write(&page, b"BM this run").unwrap();
+        let (report_file, scan_file) = (file_id(&report), file_id(&scan));
+
+        {
+            let _report = Denied::replace(dir.path(), &report);
+            let _scan = Denied::only(&scan, "(DE)");
+            export_record(&report, b"this report").unwrap();
+            assert_eq!(export_copy(&page, &scan).unwrap(), 11);
+            assert!(write_record(&report, b"not an export").is_err());
+        }
+
+        assert_eq!(std::fs::read(&report).unwrap(), b"this report");
+        assert_eq!(std::fs::read(&scan).unwrap(), b"BM this run");
+        assert_eq!(file_id(&report), report_file, "the report was not written in place");
+        assert_eq!(file_id(&scan), scan_file, "the scan was not written in place");
+        assert_eq!(
+            names(dir.path()),
+            ["page-0000.bmp", "scan-test-report.json"].map(String::from).into()
+        );
+    }
+
+    #[test]
+    fn an_export_lands_through_the_stage_where_the_folder_allows_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = dir.path().join("scan-test-report.txt");
+        let source = dir.path().join("source.bin");
+        std::fs::write(&source, b"copied bytes").unwrap();
+        export_record(&record, b"first").unwrap();
+        #[cfg(windows)]
+        let first = file_id(&record);
+        export_record(&record, b"second").unwrap();
+        #[cfg(windows)]
+        assert_ne!(file_id(&record), first, "written in place, not through the stage");
+        assert_eq!(std::fs::read(&record).unwrap(), b"second");
+        let copy = dir.path().join("copy.bin");
+        assert_eq!(export_copy(&source, &copy).unwrap(), 12);
+        assert_eq!(std::fs::read(&copy).unwrap(), b"copied bytes");
+        assert_eq!(
+            names(dir.path()),
+            ["copy.bin", "scan-test-report.txt", "source.bin"]
+                .map(String::from)
+                .into()
+        );
     }
 }

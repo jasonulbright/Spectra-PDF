@@ -22,6 +22,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
 use tauri::AppHandle;
 
@@ -89,8 +90,9 @@ pub struct ScheduleProfile {
     #[serde(default)]
     pub run_type: String,
     /// Action runs only: the frozen action file the task reads. Set by
-    /// `create_scheduled_run` (never by the caller) — derived from the task
-    /// name inside this app's machine-scoped scheduled-actions folder.
+    /// `create_scheduled_run` (never by the caller): a file of this app's
+    /// machine-scoped scheduled-actions folder that belongs to one
+    /// registration of the task.
     #[serde(default)]
     pub action_file: String,
 }
@@ -139,51 +141,61 @@ fn actions_dir() -> Result<PathBuf, String> {
     Ok(base.join(TASK_FOLDER).join("scheduled-actions"))
 }
 
-fn action_file_path(name: &str) -> Result<PathBuf, String> {
-    // `name` has passed valid_task_name: no separators, no wildcards — safe
-    // as a file name inside our own folder.
-    Ok(actions_dir()?.join(format!("{name}.json")))
+// ── Action files ─────────────────────────────────────────────────────────
+//
+// Each registration of an action schedule names an action file of its own,
+// `<task>@<pid>-<8 hex>.json`, written whole before the task is registered and
+// never written again. A registered task therefore always reads the action it
+// was registered with, at every instant: a process killed after Windows
+// accepts a task and before anything else happens leaves a task that names a
+// complete file. The file the task named before is removed only after the new
+// registration is accepted. No task name can hold `@`, so no name an earlier
+// version gave an action file (`<task>.json`, `<task>.json.new`) reads as one
+// of these.
+
+/// The action file one registration of `task` by the process `pid` names.
+fn registration_action_name(task: &str, pid: u32, unique: &str) -> String {
+    format!("{task}@{pid}-{unique}.json")
 }
 
-/// Where a frozen action waits for its task to register: beside its final
-/// name, under the staging process's id. A process killed during the
-/// registration leaves the file, and the id is what tells that leftover apart
-/// from a stage another process is still writing.
-fn action_staging_path(final_path: &Path, pid: u32) -> PathBuf {
-    let mut name = final_path.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".{pid}.new"));
-    final_path.with_file_name(name)
-}
-
-/// The process whose `action_staging_path` produced `entry`.
-fn action_staging_owner(entry: &str) -> Option<u32> {
-    let (action, pid) = entry.strip_suffix(".new")?.rsplit_once('.')?;
-    if !action.ends_with(".json") {
+/// The task and the writing process a registration's action file name carries.
+fn registration_action_owner(entry: &str) -> Option<(&str, u32)> {
+    let (task, tag) = entry.strip_suffix(".json")?.split_once('@')?;
+    let (pid, unique) = tag.split_once('-')?;
+    if !valid_task_name(task)
+        || unique.len() != 8
+        || !unique.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    {
         return None;
     }
-    crate::staging::decimal_pid(pid)
+    Some((task, crate::staging::decimal_pid(pid)?))
 }
 
-/// Remove the stages that killed processes left in the actions folder.
-fn reclaim_action_stages(dir: &Path, own: u32, running: impl Fn(u32) -> bool) -> usize {
-    crate::staging::reclaim(dir, own, action_staging_owner, running)
+/// The task whose action file versions without per-registration files named
+/// `<task>.json`.
+fn legacy_action_file(entry: &str) -> Option<&str> {
+    entry.strip_suffix(".json").filter(|task| valid_task_name(task))
 }
 
-/// Whether `entry` in `dir` is a stage from a version that staged an action
-/// as `<task>.json.new`, with the task's action file beside it.
+/// The task of a stage that versions without per-registration files wrote as
+/// `<task>.json.new`.
+fn legacy_stage_task(entry: &str) -> Option<&str> {
+    entry.strip_suffix(".json.new").filter(|task| valid_task_name(task))
+}
+
+/// Whether `entry` in `dir` is a legacy stage with the task's action file
+/// beside it.
 ///
 /// Those versions removed the action file before renaming the stage over it,
 /// so a kill between the two left the stage as the only copy of the action a
-/// registered task reads. A stage with no action file beside it is never
-/// taken.
+/// registered task reads. A stage with no action file beside it is taken only
+/// by the orphan reclaim, which first asks whether any task names that file.
 fn legacy_action_stage(dir: &Path, entry: &str) -> bool {
-    entry
-        .strip_suffix(".json.new")
-        .is_some_and(|task| valid_task_name(task) && dir.join(format!("{task}.json")).is_file())
+    legacy_stage_task(entry).is_some_and(|task| dir.join(format!("{task}.json")).is_file())
 }
 
 /// Remove the legacy action stages that have outlived any registration.
-fn reclaim_legacy_action_stages(dir: &Path, now: std::time::SystemTime) -> usize {
+fn reclaim_legacy_action_stages(dir: &Path, now: SystemTime) -> usize {
     crate::staging::reclaim_aged(
         dir,
         |entry| legacy_action_stage(dir, entry),
@@ -192,58 +204,360 @@ fn reclaim_legacy_action_stages(dir: &Path, now: std::time::SystemTime) -> usize
     )
 }
 
-/// A frozen action on its way to disk for one task registration.
-#[derive(Debug)]
-enum ActionWrite {
-    /// No action file existed, so the action is written in place before the
-    /// task is registered: a registered task never lacks its action. A
-    /// refused registration removes it again.
-    Placed(PathBuf),
-    /// An action file exists and a task may be reading it. The replacement
-    /// waits beside it, flushed, and takes its name in one rename once
-    /// Windows accepts the task.
-    Staged { stage: PathBuf, action: PathBuf },
+/// Whether `path` names an action file of `task` in `dir`: a registration's
+/// file, or the file versions without per-registration files named.
+fn action_file_of(dir: &Path, task: &str, path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let belongs = registration_action_owner(name).is_some_and(|(owner, _)| owner == task)
+        || legacy_action_file(name) == Some(task);
+    belongs
+        && path
+            .parent()
+            .is_some_and(|parent| same_file::is_same_file(parent, dir).unwrap_or(false))
 }
 
-impl ActionWrite {
-    fn begin(action: &Path, json: &str) -> Result<Self, String> {
-        let placed = crate::staging::create_record(action, |staged| {
-            crate::staging::write_stage(staged, json.as_bytes())
-        });
-        match placed {
-            Ok(()) => return Ok(Self::Placed(action.to_path_buf())),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(format!("Could not write the action file: {e}")),
+/// The value of the `--action` argument in a task definition.
+fn action_argument(definition: &str) -> Option<String> {
+    let arguments = extract_tag(definition, "Arguments")?;
+    let tokens = tokenize(&arguments);
+    let at = tokens.iter().position(|t| t == "--action")?;
+    tokens.get(at + 1).cloned()
+}
+
+/// The action file of `task` in `dir` that the task `definition` names, if
+/// it names one of this app's action files for that task.
+fn named_action(dir: &Path, task: &str, definition: &str) -> Option<PathBuf> {
+    let named = PathBuf::from(action_argument(definition)?);
+    action_file_of(dir, task, &named).then_some(named)
+}
+
+/// The action file of `task` in `dir` that the registered task names now.
+/// `Ok(None)` when no such task is registered, or it names no action file of
+/// this app's for that task.
+fn registered_action(dir: &Path, task: &str) -> Result<Option<PathBuf>, String> {
+    Ok(registered_task_definition(task_path(task))?
+        .and_then(|definition| named_action(dir, task, &definition)))
+}
+
+/// A registration's action file, written whole and flushed, and held open
+/// until the registration's outcome is known, so an orphan reclaim running
+/// meanwhile finds it held.
+struct RegistrationAction {
+    path: PathBuf,
+    held: std::fs::File,
+}
+
+impl RegistrationAction {
+    fn write(dir: &Path, task: &str, json: &str) -> Result<Self, String> {
+        use std::io::Write;
+        let refused = |e: std::io::Error| format!("Could not write the action file: {e}");
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("Could not create the scheduled-actions folder: {e}"))?;
+        for _ in 0..16 {
+            let unique = uuid::Uuid::new_v4().simple().to_string();
+            let name = registration_action_name(task, std::process::id(), &unique[..8]);
+            let path = dir.join(name);
+            let mut held = match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(held) => held,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(refused(e)),
+            };
+            return match held.write_all(json.as_bytes()).and_then(|()| held.sync_all()) {
+                Ok(()) => Ok(Self { path, held }),
+                Err(e) => {
+                    drop(held);
+                    let _ = std::fs::remove_file(&path);
+                    Err(refused(e))
+                }
+            };
         }
-        let stage = action_staging_path(action, std::process::id());
-        if let Err(e) = crate::staging::write_stage(&stage, json.as_bytes()) {
-            let _ = std::fs::remove_file(&stage);
-            return Err(format!("Could not write the action file: {e}"));
-        }
-        Ok(Self::Staged {
-            stage,
-            action: action.to_path_buf(),
-        })
+        Err("Could not write the action file: every name tried is taken.".into())
     }
 
-    /// Undo after Windows refused the task.
+    /// Windows refused the task: nothing names the file.
     fn abandon(self) {
-        let written = match self {
-            Self::Placed(action) => action,
-            Self::Staged { stage, .. } => stage,
-        };
-        let _ = std::fs::remove_file(written);
+        drop(self.held);
+        let _ = std::fs::remove_file(&self.path);
     }
 
-    /// Finish after Windows accepted the task.
-    fn land(self) -> std::io::Result<()> {
-        match self {
-            Self::Placed(_) => Ok(()),
-            Self::Staged { stage, action } => std::fs::rename(&stage, &action).inspect_err(|_| {
-                let _ = std::fs::remove_file(&stage);
-            }),
+    /// Windows accepted the task: the file belongs to the registration now.
+    fn release(self) {
+        drop(self.held);
+    }
+}
+
+/// Serializes the registrations and deletions of this process: each one reads
+/// the action file the task names, and a second one in between would remove
+/// the file the first one registered.
+static REGISTRATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Register `profile` through `register`, with the action file it names.
+///
+/// `current` is the action file of the task's registration now (see
+/// [`registered_action`]). An action run with `json` names a new file of
+/// its own in `dir`; one without names the current file, which must exist.
+/// The current file is removed only once `register` has accepted the new
+/// registration, and only when the new one does not name it. A refused
+/// registration removes the new file and leaves the current one.
+fn register_with_action(
+    profile: &mut ScheduleProfile,
+    json: Option<&str>,
+    dir: Result<PathBuf, String>,
+    current: Result<Option<PathBuf>, String>,
+    register: impl FnOnce(&ScheduleProfile) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut written = None;
+    let mut kept = None;
+    if profile.run_type == "action" {
+        match json {
+            Some(json) => {
+                let action = RegistrationAction::write(&dir?, &profile.name, json)?;
+                profile.action_file = action.path.to_string_lossy().to_string();
+                written = Some(action);
+            }
+            None => {
+                let current = current
+                    .clone()?
+                    .filter(|file| file.is_file())
+                    .ok_or("An action schedule needs a guided action to run.")?;
+                profile.action_file = current.to_string_lossy().to_string();
+                kept = Some(current);
+            }
         }
     }
+    if let Err(refused) = register(profile) {
+        if let Some(action) = written {
+            action.abandon();
+        }
+        return Err(refused);
+    }
+    if let Some(action) = written {
+        action.release();
+    }
+    if let Ok(Some(previous)) = current {
+        if kept.as_ref() != Some(&previous) {
+            let _ = std::fs::remove_file(previous);
+        }
+    }
+    Ok(())
+}
+
+/// Delete a task through `delete`, then the action file it named. A refused
+/// deletion keeps the file: the task still reads it.
+fn delete_with(
+    named: Option<PathBuf>,
+    delete: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    delete()?;
+    if let Some(file) = named {
+        let _ = std::fs::remove_file(file);
+    }
+    Ok(())
+}
+
+// ── Orphaned action files ────────────────────────────────────────────────
+
+/// An action file no registration may name any more, pending the check that
+/// no task definition mentions `kept_by`.
+#[derive(Debug, PartialEq, Eq)]
+struct Orphan {
+    path: PathBuf,
+    kept_by: String,
+}
+
+/// The files of `dir` that may be orphans: a registration's file whose writer
+/// is neither `own` nor `running`, and a file without a process id once it
+/// has existed [`crate::staging::LEGACY_STAGE_AGE`]. Each is a file, and owned
+/// by this account (`ours`).
+///
+/// Taken BEFORE the task definitions are read: a writer that had already
+/// stopped cannot register a task naming its file after that read.
+///
+/// `ours` keeps another account's files out: a standard account sees only
+/// the tasks it created, and the account that created the folder may still
+/// delete every file in it.
+fn orphan_candidates(
+    dir: &Path,
+    own: u32,
+    running: impl Fn(u32) -> bool,
+    ours: impl Fn(&Path) -> bool,
+    now: SystemTime,
+) -> Vec<Orphan> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let aged = |path: &Path| {
+        std::fs::symlink_metadata(path)
+            .and_then(|meta| meta.created())
+            .ok()
+            .and_then(|born| now.duration_since(born).ok())
+            .is_some_and(|existed| existed >= crate::staging::LEGACY_STAGE_AGE)
+    };
+    let mut found = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let kept_by = if let Some((_, pid)) = registration_action_owner(&name) {
+            (pid != own && !running(pid)).then(|| name.clone())
+        } else if legacy_action_file(&name).is_some() {
+            aged(&path).then(|| name.clone())
+        } else if let Some(task) = legacy_stage_task(&name) {
+            let action = format!("{task}.json");
+            (aged(&path) && !dir.join(&action).is_file()).then_some(action)
+        } else {
+            None
+        };
+        let Some(kept_by) = kept_by else {
+            continue;
+        };
+        if entry.file_type().is_ok_and(|kind| kind.is_file()) && ours(&path) {
+            found.push(Orphan { path, kept_by });
+        }
+    }
+    found
+}
+
+/// Whether some definition names a file called `name`: the name right after a
+/// path separator, in any case.
+fn mentioned(definitions: &[String], name: &str) -> bool {
+    let name = name.to_lowercase();
+    let (back, forward) = (format!("\\{name}"), format!("/{name}"));
+    definitions.iter().any(|definition| {
+        let definition = definition.to_lowercase();
+        definition.contains(&back) || definition.contains(&forward)
+    })
+}
+
+/// Remove the orphans of `dir` that no definition mentions and that no handle
+/// holds open when they are removed. `definitions` is read only when there
+/// are candidates, and a definition set that cannot be read in full removes
+/// nothing.
+fn reclaim_orphans_with(
+    dir: &Path,
+    own: u32,
+    running: impl Fn(u32) -> bool,
+    ours: impl Fn(&Path) -> bool,
+    now: SystemTime,
+    definitions: impl FnOnce() -> Result<Vec<String>, String>,
+) -> usize {
+    let candidates = orphan_candidates(dir, own, running, ours, now);
+    if candidates.is_empty() {
+        return 0;
+    }
+    let Ok(definitions) = definitions() else {
+        return 0;
+    };
+    candidates
+        .into_iter()
+        .filter(|orphan| {
+            !mentioned(&definitions, &orphan.kept_by)
+                && !crate::staging::held_open(&orphan.path)
+                && std::fs::remove_file(&orphan.path).is_ok()
+        })
+        .count()
+}
+
+/// Remove the action files of `dir` that no task of this app's folder names
+/// and no running registration can still name. Holds [`REGISTRATION`], so no
+/// registration of this process updates a task while its definitions are
+/// read.
+fn reclaim_orphaned_actions(dir: &Path) -> usize {
+    let _registering = REGISTRATION.lock().unwrap_or_else(|e| e.into_inner());
+    reclaim_orphans_with(
+        dir,
+        std::process::id(),
+        crate::staging::process_running,
+        owned_by_this_account,
+        SystemTime::now(),
+        || folder_task_definitions(format!("\\{TASK_FOLDER}")),
+    )
+}
+
+/// Whether this process's account owns `path`: the file's owner is the owner
+/// this process gives the files it creates. Anything unreadable is not ours.
+#[cfg(windows)]
+fn owned_by_this_account(path: &Path) -> bool {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::{
+        EqualSid, GetKernelObjectSecurity, GetSecurityDescriptorOwner, GetTokenInformation,
+        TokenOwner, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, TOKEN_OWNER,
+        TOKEN_QUERY,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    const READ_CONTROL: u32 = 0x0002_0000;
+
+    let Ok(file) = std::fs::OpenOptions::new()
+        .access_mode(READ_CONTROL)
+        .open(path)
+    else {
+        return false;
+    };
+    let handle = HANDLE(file.as_raw_handle());
+    let mut needed = 0u32;
+    let _ = unsafe {
+        GetKernelObjectSecurity(handle, OWNER_SECURITY_INFORMATION.0, None, 0, &mut needed)
+    };
+    if needed == 0 {
+        return false;
+    }
+    // A security descriptor requires DWORD alignment.
+    let mut descriptor = vec![0u32; (needed as usize).div_ceil(4)];
+    let sd = PSECURITY_DESCRIPTOR(descriptor.as_mut_ptr().cast());
+    if unsafe {
+        GetKernelObjectSecurity(handle, OWNER_SECURITY_INFORMATION.0, Some(sd), needed, &mut needed)
+    }
+    .is_err()
+    {
+        return false;
+    }
+    let mut file_owner = PSID::default();
+    let mut defaulted = windows::core::BOOL::default();
+    if unsafe { GetSecurityDescriptorOwner(sd, &mut file_owner, &mut defaulted) }.is_err()
+        || file_owner.0.is_null()
+    {
+        return false;
+    }
+
+    let mut token = HANDLE::default();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.is_err() {
+        return false;
+    }
+    let mut length = 0u32;
+    let _ = unsafe { GetTokenInformation(token, TokenOwner, None, 0, &mut length) };
+    // TOKEN_OWNER holds a pointer, so the buffer is pointer-aligned.
+    let mut buffer = vec![0usize; (length as usize).div_ceil(std::mem::size_of::<usize>())];
+    let read = unsafe {
+        GetTokenInformation(
+            token,
+            TokenOwner,
+            Some(buffer.as_mut_ptr().cast()),
+            length,
+            &mut length,
+        )
+    };
+    unsafe {
+        let _ = CloseHandle(token);
+    }
+    if read.is_err() || length == 0 {
+        return false;
+    }
+    let owner = unsafe { &*(buffer.as_ptr() as *const TOKEN_OWNER) };
+    unsafe { EqualSid(file_owner, owner.Owner) }.is_ok()
+}
+
+#[cfg(not(windows))]
+fn owned_by_this_account(_path: &Path) -> bool {
+    false
 }
 
 /// A task name we are willing to create or delete. Deliberately strict: this
@@ -398,6 +712,121 @@ fn register_task_com(
     .map_err(|_| "The task registration thread panicked.".to_string())?
 }
 
+/// Run `work` against a connected Task Scheduler service on a thread of its
+/// own, for the same reasons as [`register_task_com`].
+#[cfg(windows)]
+fn with_task_service<T: Send + 'static>(
+    work: impl FnOnce(&windows::Win32::System::TaskScheduler::ITaskService) -> Result<T, String>
+        + Send
+        + 'static,
+) -> Result<T, String> {
+    std::thread::spawn(move || -> Result<T, String> {
+        use windows::Win32::System::Com::{
+            CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+            COINIT_APARTMENTTHREADED,
+        };
+        use windows::Win32::System::TaskScheduler::{ITaskService, TaskScheduler};
+        use windows::Win32::System::Variant::VARIANT;
+
+        unsafe {
+            let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let owned = init.is_ok();
+            let outcome = (|| -> Result<T, String> {
+                let service: ITaskService =
+                    CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER)
+                        .map_err(|e| format!("Task Scheduler is unavailable: {}", e.message()))?;
+                service
+                    .Connect(
+                        &VARIANT::default(),
+                        &VARIANT::default(),
+                        &VARIANT::default(),
+                        &VARIANT::default(),
+                    )
+                    .map_err(|e| format!("Could not connect to Task Scheduler: {}", e.message()))?;
+                work(&service)
+            })();
+            if owned {
+                CoUninitialize();
+            }
+            outcome
+        }
+    })
+    .join()
+    .map_err(|_| "The Task Scheduler thread panicked.".to_string())?
+}
+
+/// Whether a Task Scheduler call failed because the task or folder it names
+/// does not exist (ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND).
+#[cfg(windows)]
+fn absent(error: &windows::core::Error) -> bool {
+    matches!(error.code().0 as u32, 0x8007_0002 | 0x8007_0003)
+}
+
+/// The definition (task XML) of the task at `task_path`, or `None` when no
+/// such task exists.
+#[cfg(windows)]
+fn registered_task_definition(task_path: String) -> Result<Option<String>, String> {
+    with_task_service(move |service| unsafe {
+        use windows::core::BSTR;
+        let root = service
+            .GetFolder(&BSTR::from("\\"))
+            .map_err(|e| format!("Could not open the task folder: {}", e.message()))?;
+        match root.GetTask(&BSTR::from(task_path.as_str())) {
+            Ok(task) => task
+                .Xml()
+                .map(|xml| Some(xml.to_string()))
+                .map_err(|e| format!("Could not read the task {task_path}: {}", e.message())),
+            Err(e) if absent(&e) => Ok(None),
+            Err(e) => Err(format!("Could not open the task {task_path}: {}", e.message())),
+        }
+    })
+}
+
+#[cfg(not(windows))]
+fn registered_task_definition(_task_path: String) -> Result<Option<String>, String> {
+    Err("Task Scheduler is available on Windows only.".into())
+}
+
+/// The definition of every task in `folder`, hidden ones included; an empty
+/// list when the folder does not exist. A task whose definition cannot be
+/// read fails the whole call, so the list is never read as complete when it
+/// is not.
+#[cfg(windows)]
+fn folder_task_definitions(folder: String) -> Result<Vec<String>, String> {
+    with_task_service(move |service| unsafe {
+        use windows::core::BSTR;
+        use windows::Win32::System::TaskScheduler::TASK_ENUM_HIDDEN;
+        use windows::Win32::System::Variant::VARIANT;
+        let folder = match service.GetFolder(&BSTR::from(folder.as_str())) {
+            Ok(folder) => folder,
+            Err(e) if absent(&e) => return Ok(Vec::new()),
+            Err(e) => return Err(format!("Could not open the task folder: {}", e.message())),
+        };
+        let tasks = folder
+            .GetTasks(TASK_ENUM_HIDDEN.0)
+            .map_err(|e| format!("Could not list the task folder: {}", e.message()))?;
+        let count = tasks
+            .Count()
+            .map_err(|e| format!("Could not count the tasks: {}", e.message()))?;
+        let mut definitions = Vec::with_capacity(count.max(0) as usize);
+        for index in 1..=count {
+            let task = tasks
+                .get_Item(&VARIANT::from(index))
+                .map_err(|e| format!("Could not open task {index}: {}", e.message()))?;
+            let xml = task
+                .Xml()
+                .map_err(|e| format!("Could not read task {index}: {}", e.message()))?;
+            definitions.push(xml.to_string());
+        }
+        Ok(definitions)
+    })
+}
+
+#[cfg(not(windows))]
+fn folder_task_definitions(_folder: String) -> Result<Vec<String>, String> {
+    Err("Task Scheduler is available on Windows only.".into())
+}
+
 fn run(cmd: &mut Command) -> Result<String, String> {
     let out = cmd
         .output()
@@ -543,7 +972,9 @@ fn build_arguments(exe: &str, p: &ScheduleProfile) -> String {
 /// scheduled-actions folder; a scheduled task must not depend on the GUI's
 /// localStorage (wrong profile under a service account, and the run fires with
 /// the app closed). Omitting it while replacing an existing action schedule
-/// keeps the file already on disk.
+/// keeps the action file the registered task names. See
+/// [`register_with_action`] for how the action file follows the
+/// registration.
 #[tauri::command]
 pub async fn create_scheduled_run(
     app: AppHandle,
@@ -552,78 +983,54 @@ pub async fn create_scheduled_run(
     action_json: Option<String>,
 ) -> Result<String, String> {
     validate_profile(&profile)?;
-    if profile.run_type == "action" {
-        let file = action_file_path(&profile.name)?;
-        profile.action_file = file.to_string_lossy().to_string();
-        if action_json.as_deref().map_or(true, |j| j.trim().is_empty()) && !file.is_file() {
-            return Err("An action schedule needs a guided action to run.".into());
-        }
-    }
     let exe = std::env::current_exe()
         .map_err(|e| format!("Cannot resolve this application's path: {e}"))?
         .to_string_lossy()
         .to_string();
     let _ = app;
 
-    // A failed registration must not clobber the file an EXISTING schedule of
-    // the same name is still reading; see `ActionWrite`.
-    let mut staged_action: Option<ActionWrite> = None;
-    if profile.run_type == "action" {
-        if let Some(json) = action_json.as_deref().filter(|j| !j.trim().is_empty()) {
-            let final_path = PathBuf::from(&profile.action_file);
-            if let Some(parent) = final_path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("Could not create the scheduled-actions folder: {e}"))?;
+    let _registering = REGISTRATION.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = actions_dir();
+    let current = match &dir {
+        Ok(dir) => registered_action(dir, &profile.name),
+        Err(e) => Err(e.clone()),
+    };
+    let json = action_json.as_deref().filter(|j| !j.trim().is_empty());
+    register_with_action(&mut profile, json, dir, current, |profile| {
+        // Registration goes through TASK XML, not `/TR`, and that is not a
+        // style choice: `/TR` is capped at 261 characters by schtasks, and a
+        // real run (exe path + source + destination + moved + error + log
+        // folders) exceeds that cap with realistic paths.
+        let xml = build_task_xml(&exe, profile, password.as_deref())?;
+
+        // COM takes the XML as a string, so no staged temp file and no
+        // UTF-16-with-BOM encoding (both were schtasks requirements). The
+        // 261-character `/TR` cap above is still why the definition is XML.
+        register_task_com(
+            task_path(&profile.name),
+            xml,
+            profile.account.trim().to_string(),
+            password.clone(),
+        )
+        .map_err(|e| {
+            // The two failures worth naming, because both
+            // register-then-never-fire.
+            if e.contains("Access is denied") {
+                format!(
+                    "Windows refused to create the schedule: {e}\nRunning as another account \
+                     usually requires administrator rights."
+                )
+            } else if e.to_lowercase().contains("logon") {
+                format!(
+                    "Windows refused the account: {e}\nThe account also needs the \
+                     \"Log on as a batch job\" right on this machine, or the task registers \
+                     but never runs."
+                )
+            } else {
+                e
             }
-            staged_action = Some(ActionWrite::begin(&final_path, json)?);
-        }
-    }
-
-    // Registration goes through TASK XML, not `/TR`, and that is not a style
-    // choice: `/TR` is capped at 261 characters by schtasks, and a real run
-    // (exe path + source + destination + moved + error + log folders) exceeds
-    // that cap with realistic paths.
-    let xml = build_task_xml(&exe, &profile, password.as_deref())?;
-
-    // COM takes the XML as a string, so no staged temp file and no
-    // UTF-16-with-BOM encoding (both were schtasks requirements). The
-    // 261-character `/TR` cap above is still why the definition is XML.
-    let outcome = register_task_com(
-        task_path(&profile.name),
-        xml,
-        profile.account.trim().to_string(),
-        password.clone(),
-    );
-    if outcome.is_err() {
-        if let Some(write) = staged_action.take() {
-            write.abandon();
-        }
-    }
-    outcome.map_err(|e| {
-        // The two failures worth naming, because both register-then-never-fire.
-        if e.contains("Access is denied") {
-            format!(
-                "Windows refused to create the schedule: {e}\nRunning as another account \
-                 usually requires administrator rights."
-            )
-        } else if e.to_lowercase().contains("logon") {
-            format!(
-                "Windows refused the account: {e}\nThe account also needs the \
-                 \"Log on as a batch job\" right on this machine, or the task registers \
-                 but never runs."
-            )
-        } else {
-            e
-        }
+        })
     })?;
-    if let Some(write) = staged_action {
-        write.land().map_err(|e| {
-            format!(
-                "The schedule was created but its action file could not be placed: {e}\n\
-                 Delete and recreate the schedule."
-            )
-        })?;
-    }
 
     Ok(task_path(&profile.name))
 }
@@ -932,8 +1339,8 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 #[tauri::command]
 pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
     if let Ok(dir) = actions_dir() {
-        reclaim_action_stages(&dir, std::process::id(), crate::staging::process_running);
-        reclaim_legacy_action_stages(&dir, std::time::SystemTime::now());
+        reclaim_legacy_action_stages(&dir, SystemTime::now());
+        reclaim_orphaned_actions(&dir);
     }
     let out = match run(schtasks().args([
         "/Query",
@@ -1015,16 +1422,17 @@ pub async fn delete_scheduled_run(name: String) -> Result<(), String> {
     if !valid_task_name(&name) {
         return Err(format!("Not a schedule this app created: {name}"));
     }
-    run(schtasks().args(["/Delete", "/F", "/TN", &task_path(&name)]))?;
     // The GUI owns the WHOLE lifecycle: a deleted action schedule leaves no
-    // frozen file behind. Addressed inside our own folder by the validated
-    // name — never a pattern. Best-effort: the task is already gone.
-    if let Ok(file) = action_file_path(&name) {
-        if file.is_file() {
-            let _ = std::fs::remove_file(&file);
-        }
-    }
-    Ok(())
+    // frozen file behind. The file is the one the task names, and only when
+    // it is an action file of this task in our own folder — never a pattern.
+    // A definition that cannot be read leaves the file to the orphan reclaim.
+    let _registering = REGISTRATION.lock().unwrap_or_else(|e| e.into_inner());
+    let named = actions_dir()
+        .ok()
+        .and_then(|dir| registered_action(&dir, &name).ok().flatten());
+    delete_with(named, || {
+        run(schtasks().args(["/Delete", "/F", "/TN", &task_path(&name)])).map(drop)
+    })
 }
 
 /// Run a scheduled batch immediately, through Task Scheduler, so it runs under
@@ -1058,6 +1466,7 @@ pub async fn set_scheduled_run_enabled(name: String, enabled: bool) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn action_profile() -> ScheduleProfile {
         ScheduleProfile {
@@ -1392,68 +1801,6 @@ mod tests {
         assert!(!args.contains("--enhance"), "{args}");
     }
 
-    #[test]
-    fn an_action_stages_under_the_writing_process() {
-        let final_path =
-            Path::new(r"C:\ProgramData\Spectra PDF\scheduled-actions\Nightly v1.2.json");
-        let staged = action_staging_path(final_path, 4300);
-        assert_eq!(
-            staged,
-            Path::new(r"C:\ProgramData\Spectra PDF\scheduled-actions\Nightly v1.2.json.4300.new")
-        );
-        let name = staged.file_name().unwrap().to_str().unwrap();
-        assert_eq!(action_staging_owner(name), Some(4300));
-        for other in [
-            "Nightly.json",
-            "Nightly.json.new",
-            "Nightly.json.x.new",
-            "Nightly.json.04300.new",
-            "Nightly.txt.4300.new",
-            "Nightly.json.4300.new.bak",
-            "Nightly.json.4300",
-        ] {
-            assert_eq!(action_staging_owner(other), None, "{other}");
-        }
-    }
-
-    #[test]
-    fn a_listing_reclaims_only_the_stages_of_stopped_processes() {
-        const OWN: u32 = 4100;
-        const LIVE: u32 = 4200;
-        const DEAD: u32 = 4300;
-        let dir = tempfile::tempdir().unwrap();
-        let final_path = dir.path().join("Nightly.json");
-        let names = [
-            "Nightly.json".to_string(),
-            "Nightly.json.new".to_string(),
-            action_staging_name(&final_path, OWN),
-            action_staging_name(&final_path, LIVE),
-            action_staging_name(&final_path, DEAD),
-            action_staging_name(&dir.path().join("a.b.json"), DEAD),
-        ];
-        for name in &names {
-            std::fs::write(dir.path().join(name), "{}").unwrap();
-        }
-
-        assert_eq!(reclaim_action_stages(dir.path(), OWN, |pid| pid == LIVE), 2);
-
-        let left: std::collections::BTreeSet<String> = std::fs::read_dir(dir.path())
-            .unwrap()
-            .map(|e| e.unwrap().file_name().into_string().unwrap())
-            .collect();
-        let kept: std::collections::BTreeSet<String> = names[..4].iter().cloned().collect();
-        assert_eq!(left, kept);
-    }
-
-    fn action_staging_name(final_path: &Path, pid: u32) -> String {
-        action_staging_path(final_path, pid)
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string()
-    }
-
     fn listing(dir: &Path) -> std::collections::BTreeSet<String> {
         std::fs::read_dir(dir)
             .unwrap()
@@ -1462,61 +1809,486 @@ mod tests {
     }
 
     #[test]
-    fn a_new_schedule_s_action_is_on_disk_before_its_task_registers() {
-        let dir = tempfile::tempdir().unwrap();
-        let action = dir.path().join("Nightly.json");
-        let write = ActionWrite::begin(&action, "{\"steps\":[1]}").unwrap();
-        assert!(matches!(write, ActionWrite::Placed(_)), "{write:?}");
-        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[1]}");
-        write.land().unwrap();
-        assert_eq!(listing(dir.path()), ["Nightly.json".to_string()].into());
+    fn a_registration_file_name_carries_its_task_and_its_writer() {
+        let name = registration_action_name("Nightly v1.2", 4300, "0a1b2c3d");
+        assert_eq!(name, "Nightly v1.2@4300-0a1b2c3d.json");
+        assert_eq!(registration_action_owner(&name), Some(("Nightly v1.2", 4300)));
+        assert_eq!(legacy_action_file(&name), None);
+        assert_eq!(legacy_stage_task(&name), None);
+        for other in [
+            "Nightly v1.2.json",
+            "Nightly v1.2.json.new",
+            "Nightly@04300-0a1b2c3d.json",
+            "Nightly@4300-0A1B2C3D.json",
+            "Nightly@4300-0a1b2c3.json",
+            "Nightly@4300-0a1b2c3d4.json",
+            "Nightly@4300-0a1b2c3g.json",
+            "Nightly@4300.json",
+            "Nightly@x-0a1b2c3d.json",
+            "Nightly@4300-0a1b2c3d.json.new",
+            "Nightly@4300-0a1b2c3d.JSON",
+            "a+b@4300-0a1b2c3d.json",
+            "..@4300-0a1b2c3d.json",
+            "@4300-0a1b2c3d.json",
+            "Nightly@4300@1-0a1b2c3d.json",
+        ] {
+            assert_eq!(registration_action_owner(other), None, "{other}");
+        }
+        assert_eq!(legacy_action_file("Nightly v1.2.json"), Some("Nightly v1.2"));
+        assert_eq!(legacy_stage_task("Nightly v1.2.json.new"), Some("Nightly v1.2"));
+        for other in ["a+b.json", ".json", "Nightly.JSON", "Nightly.json.new"] {
+            assert_eq!(legacy_action_file(other), None, "{other}");
+        }
+        for other in ["a+b.json.new", ".json.new", "Nightly.json.4300.new", "Nightly.json"] {
+            assert_eq!(legacy_stage_task(other), None, "{other}");
+        }
+    }
 
-        // A refused registration takes the placed file back out.
-        let refused = dir.path().join("Refused.json");
-        ActionWrite::begin(&refused, "{}").unwrap().abandon();
-        assert!(!refused.exists());
+    fn definition_naming(action: &Path) -> String {
+        let mut p = action_profile();
+        p.action_file = action.to_string_lossy().to_string();
+        build_task_xml(r"C:\Program Files\Spectra PDF\spectrapdf.exe", &p, None).unwrap()
     }
 
     #[test]
-    fn a_replaced_action_stays_whole_until_its_task_is_accepted() {
+    fn only_an_action_file_of_the_task_in_its_folder_is_the_named_action() {
         let dir = tempfile::tempdir().unwrap();
-        let action = dir.path().join("Nightly.json");
-        std::fs::write(&action, b"{\"steps\":[\"old\"]}").unwrap();
+        let task = "Nightly Strip";
+        let own = dir.path().join(registration_action_name(task, 4300, "0a1b2c3d"));
+        let legacy = dir.path().join(format!("{task}.json"));
+        let other_task = dir.path().join(registration_action_name("Weekly", 4300, "0a1b2c3d"));
+        let other_legacy = dir.path().join("Weekly.json");
+        let elsewhere = tempfile::tempdir().unwrap();
+        let outside = elsewhere.path().join(registration_action_name(task, 4300, "0a1b2c3d"));
+        let stranger = dir.path().join("notes.txt");
 
-        let write = ActionWrite::begin(&action, "{\"steps\":[\"new\"]}").unwrap();
-        assert!(matches!(write, ActionWrite::Staged { .. }), "{write:?}");
-        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[\"old\"]}");
-        write.land().unwrap();
-        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[\"new\"]}");
-        assert_eq!(listing(dir.path()), ["Nightly.json".to_string()].into());
+        let named = |action: &Path| named_action(dir.path(), task, &definition_naming(action));
+        assert_eq!(named(&own), Some(own.clone()));
+        assert_eq!(named(&legacy), Some(legacy.clone()));
+        assert_eq!(named(&other_task), None);
+        assert_eq!(named(&other_legacy), None);
+        assert_eq!(named(&outside), None);
+        assert_eq!(named(&stranger), None);
+        let batch = build_task_xml("exe", &ocr_profile(), None).unwrap();
+        assert_eq!(named_action(dir.path(), task, &batch), None);
+    }
 
-        ActionWrite::begin(&action, "{\"steps\":[\"refused\"]}")
-            .unwrap()
-            .abandon();
-        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[\"new\"]}");
-        assert_eq!(listing(dir.path()), ["Nightly.json".to_string()].into());
+    /// The instant Windows accepts a task, the file it names already holds the
+    /// action it was registered with, and the file the task named before is
+    /// still whole: a process killed at that instant leaves a task that runs
+    /// its own action.
+    #[test]
+    fn the_file_a_registration_names_holds_its_own_action_when_windows_accepts_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let previous = dir.path().join("Nightly Strip.json");
+        std::fs::write(&previous, b"{\"steps\":[\"old\"]}").unwrap();
+        let mut profile = action_profile();
+        let mut accepted = None;
+
+        register_with_action(
+            &mut profile,
+            Some("{\"steps\":[\"new\"]}"),
+            Ok(dir.path().to_path_buf()),
+            Ok(Some(previous.clone())),
+            |registered| {
+                let named = PathBuf::from(&registered.action_file);
+                assert_eq!(std::fs::read(&named).unwrap(), b"{\"steps\":[\"new\"]}");
+                assert_eq!(std::fs::read(&previous).unwrap(), b"{\"steps\":[\"old\"]}");
+                accepted = Some(named);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        let named = accepted.unwrap();
+        assert_eq!(profile.action_file, named.to_string_lossy());
+        let name = named.file_name().unwrap().to_str().unwrap();
+        assert_eq!(
+            registration_action_owner(name),
+            Some(("Nightly Strip", std::process::id()))
+        );
+        assert_eq!(named.parent().unwrap(), dir.path());
+        assert!(!previous.exists(), "the replaced action stayed");
+        assert_eq!(listing(dir.path()), [name.to_string()].into());
     }
 
     #[test]
-    fn a_stage_that_cannot_be_written_or_landed_leaves_the_action_as_it_was() {
+    fn a_refused_registration_keeps_the_current_action_and_leaves_no_new_file() {
         let dir = tempfile::tempdir().unwrap();
-        let action = dir.path().join("Nightly.json");
-        std::fs::write(&action, b"{\"steps\":[\"old\"]}").unwrap();
+        let current = dir.path().join(registration_action_name("Nightly Strip", 4300, "0a1b2c3d"));
+        std::fs::write(&current, b"{\"steps\":[\"current\"]}").unwrap();
+        let mut profile = action_profile();
 
-        let stage = action_staging_path(&action, std::process::id());
-        std::fs::create_dir(&stage).unwrap();
-        assert!(ActionWrite::begin(&action, "{\"steps\":[\"new\"]}").is_err());
-        std::fs::remove_dir(&stage).unwrap();
+        let refused = register_with_action(
+            &mut profile,
+            Some("{\"steps\":[\"new\"]}"),
+            Ok(dir.path().to_path_buf()),
+            Ok(Some(current.clone())),
+            |_| Err("Access is denied.".to_string()),
+        );
 
-        let write = ActionWrite::begin(&action, "{\"steps\":[\"new\"]}").unwrap();
-        let mut permissions = std::fs::metadata(&action).unwrap().permissions();
-        permissions.set_readonly(true);
-        std::fs::set_permissions(&action, permissions.clone()).unwrap();
-        assert!(write.land().is_err());
-        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[\"old\"]}");
-        assert_eq!(listing(dir.path()), ["Nightly.json".to_string()].into());
-        permissions.set_readonly(false);
-        std::fs::set_permissions(&action, permissions).unwrap();
+        assert_eq!(refused.unwrap_err(), "Access is denied.");
+        assert_eq!(std::fs::read(&current).unwrap(), b"{\"steps\":[\"current\"]}");
+        assert_eq!(
+            listing(dir.path()),
+            [current.file_name().unwrap().to_str().unwrap().to_string()].into()
+        );
+    }
+
+    #[test]
+    fn a_registration_without_an_action_keeps_the_file_the_task_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join(registration_action_name("Nightly Strip", 4300, "0a1b2c3d"));
+        std::fs::write(&current, b"{\"steps\":[\"current\"]}").unwrap();
+        let mut profile = action_profile();
+        profile.action_file = r"C:\somewhere\else.json".into();
+
+        register_with_action(
+            &mut profile,
+            None,
+            Ok(dir.path().to_path_buf()),
+            Ok(Some(current.clone())),
+            |registered| {
+                assert_eq!(registered.action_file, current.to_string_lossy());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(current.exists(), "the kept action was removed");
+        assert_eq!(listing(dir.path()).len(), 1);
+
+        let register_nothing = |_: &ScheduleProfile| -> Result<(), String> {
+            panic!("a schedule without its action was registered")
+        };
+        let missing = dir.path().join(registration_action_name("Nightly Strip", 4300, "ffffffff"));
+        for current in [Ok(None), Ok(Some(missing)), Err("unreadable".to_string())] {
+            let refused = register_with_action(
+                &mut action_profile(),
+                None,
+                Ok(dir.path().to_path_buf()),
+                current,
+                register_nothing,
+            );
+            assert!(refused.is_err());
+        }
+    }
+
+    #[test]
+    fn a_batch_run_replacing_an_action_schedule_drops_its_file_once_accepted() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join(registration_action_name("Nightly Scans", 4300, "0a1b2c3d"));
+        std::fs::write(&current, b"{}").unwrap();
+
+        let refused = register_with_action(
+            &mut ocr_profile(),
+            None,
+            Err("ProgramData is not set".to_string()),
+            Ok(Some(current.clone())),
+            |_| Err("refused".to_string()),
+        );
+        assert!(refused.is_err());
+        assert!(current.exists());
+
+        register_with_action(
+            &mut ocr_profile(),
+            None,
+            Err("ProgramData is not set".to_string()),
+            Ok(Some(current.clone())),
+            |registered| {
+                assert!(registered.action_file.is_empty());
+                assert!(current.exists());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(!current.exists());
+    }
+
+    #[test]
+    fn a_deletion_removes_the_named_file_only_once_the_task_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let named = dir.path().join(registration_action_name("Nightly Strip", 4300, "0a1b2c3d"));
+        std::fs::write(&named, b"{}").unwrap();
+        assert!(delete_with(Some(named.clone()), || Err("refused".into())).is_err());
+        assert!(named.exists());
+        delete_with(Some(named.clone()), || Ok(())).unwrap();
+        assert!(!named.exists());
+        delete_with(None, || Ok(())).unwrap();
+    }
+
+    /// A process id that no running process holds while the returned child is
+    /// alive: the child has exited, and its handle keeps the id from reuse.
+    #[cfg(windows)]
+    fn stopped_process() -> (std::process::Child, u32) {
+        let mut child = std::process::Command::new("cmd")
+            .args(["/C", "exit 0"])
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        let pid = child.id();
+        (child, pid)
+    }
+
+    #[test]
+    fn an_orphan_goes_only_when_no_running_writer_or_task_can_name_it() {
+        const OWN: u32 = 4100;
+        const LIVE: u32 = 4200;
+        const DEAD: u32 = 4300;
+        let dir = tempfile::tempdir().unwrap();
+        let file = |name: String| {
+            std::fs::write(dir.path().join(&name), b"{}").unwrap();
+            name
+        };
+        let own = file(registration_action_name("A", OWN, "0a1b2c3d"));
+        let live = file(registration_action_name("A", LIVE, "0a1b2c3d"));
+        let dead = file(registration_action_name("A", DEAD, "0a1b2c3d"));
+        let dead_named = file(registration_action_name("B", DEAD, "0a1b2c3d"));
+        let dead_foreign = file(registration_action_name("C", DEAD, "0a1b2c3d"));
+        let legacy = file("D.json".to_string());
+        let legacy_named = file("E.json".to_string());
+        let stage_alone = file("F.json.new".to_string());
+        let stage_named = file("G.json.new".to_string());
+        let stranger = file("notes.json.bak".to_string());
+        let folder = registration_action_name("H", DEAD, "0a1b2c3d");
+        std::fs::create_dir(dir.path().join(&folder)).unwrap();
+        let definitions = vec![
+            format!("<Arguments>--action \"C:\\data\\{}\"</Arguments>", dead_named.to_uppercase()),
+            format!("<Arguments>--action \"C:/data/{legacy_named}\"</Arguments>"),
+            r#"<Arguments>--action "C:\data\G.json"</Arguments>"#.to_string(),
+            // A longer name that ends in another file's name keeps nothing.
+            r#"<Arguments>--action "C:\data\XD.json"</Arguments>"#.to_string(),
+        ];
+        let ours = |path: &Path| !path.ends_with(&dead_foreign);
+        let later = SystemTime::now() + crate::staging::LEGACY_STAGE_AGE + Duration::from_secs(60);
+
+        let removed = reclaim_orphans_with(
+            dir.path(),
+            OWN,
+            |pid| pid == LIVE,
+            ours,
+            later,
+            || Ok(definitions),
+        );
+
+        assert_eq!(removed, 3);
+        let kept: std::collections::BTreeSet<String> = [
+            own,
+            live,
+            dead_named,
+            dead_foreign,
+            legacy_named,
+            stage_named,
+            stranger,
+            folder,
+        ]
+        .into();
+        assert_eq!(listing(dir.path()), kept);
+        assert!(![dead, legacy, stage_alone].iter().any(|n| dir.path().join(n).exists()));
+    }
+
+    #[test]
+    fn a_young_file_without_a_process_id_and_an_unread_task_list_keep_every_file() {
+        const OWN: u32 = 4100;
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["D.json".to_string(), "F.json.new".to_string()] {
+            std::fs::write(dir.path().join(name), b"{}").unwrap();
+        }
+        let untouched = || -> Result<Vec<String>, String> {
+            panic!("the task list was read with no candidate to check")
+        };
+        let now = SystemTime::now();
+        assert_eq!(reclaim_orphans_with(dir.path(), OWN, |_| false, |_| true, now, untouched), 0);
+
+        let dead = registration_action_name("A", 4300, "0a1b2c3d");
+        std::fs::write(dir.path().join(&dead), b"{}").unwrap();
+        let unread = || Err("Task Scheduler is unavailable".to_string());
+        assert_eq!(reclaim_orphans_with(dir.path(), OWN, |_| false, |_| true, now, unread), 0);
+        assert_eq!(listing(dir.path()).len(), 3);
+
+        // A stage whose action file is beside it is the other rule's to take.
+        std::fs::write(dir.path().join("D.json.new"), b"{}").unwrap();
+        let later = now + crate::staging::LEGACY_STAGE_AGE + Duration::from_secs(60);
+        let found = orphan_candidates(dir.path(), OWN, |_| false, |_| true, later);
+        let names: Vec<String> = found
+            .iter()
+            .map(|o| o.path.file_name().unwrap().to_str().unwrap().to_string())
+            .collect();
+        assert!(!names.contains(&"D.json.new".to_string()), "{names:?}");
+        assert_eq!(found.len(), 3, "{names:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_orphan_a_handle_holds_open_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_writer, dead) = stopped_process();
+        let held = dir.path().join(registration_action_name("A", dead, "0a1b2c3d"));
+        std::fs::write(&held, b"{}").unwrap();
+        let handle = std::fs::File::open(&held).unwrap();
+        let reclaim = || {
+            reclaim_orphans_with(
+                dir.path(),
+                std::process::id(),
+                crate::staging::process_running,
+                owned_by_this_account,
+                SystemTime::now(),
+                || Ok(Vec::new()),
+            )
+        };
+        assert_eq!(reclaim(), 0);
+        assert!(held.exists());
+        drop(handle);
+        assert_eq!(reclaim(), 1);
+        assert!(!held.exists());
+    }
+
+    fn section(source: &'static str, start: &str, end: &str) -> &'static str {
+        let from = source.find(start).expect(start);
+        let to = from + source[from..].find(end).expect(end);
+        &source[from..to]
+    }
+
+    /// The commands run against the machine's task store, so their wiring is
+    /// pinned in the source: the listing reclaims orphans, a registration
+    /// reads the file its task names before it replaces it, and a deletion
+    /// removes the file the task named.
+    #[test]
+    fn the_commands_follow_each_task_s_action_file() {
+        let source = include_str!("scheduler.rs");
+        let listing = section(source, "pub async fn list_scheduled_runs", "let out = match run(");
+        assert!(listing.contains("reclaim_orphaned_actions(&dir);"));
+        assert!(listing.contains("reclaim_legacy_action_stages(&dir, SystemTime::now());"));
+        let create = section(
+            source,
+            "pub async fn create_scheduled_run",
+            "Ok(task_path(&profile.name))",
+        );
+        assert!(create.contains("Ok(dir) => registered_action(dir, &profile.name),"));
+        assert!(create.contains("register_with_action(&mut profile, json, dir, current, |profile| {"));
+        let delete = section(source, "pub async fn delete_scheduled_run", "#[tauri::command]");
+        assert!(delete.contains(".and_then(|dir| registered_action(&dir, &name).ok().flatten());"));
+        assert!(delete.contains("delete_with(named, || {"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_a_file_this_account_created_is_ours() {
+        let dir = tempfile::tempdir().unwrap();
+        let mine = dir.path().join("mine.json");
+        std::fs::write(&mine, b"{}").unwrap();
+        assert!(owned_by_this_account(&mine));
+        let windir = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap();
+        assert!(!owned_by_this_account(&windir.join("System32").join("kernel32.dll")));
+        assert!(!owned_by_this_account(&dir.path().join("absent.json")));
+    }
+
+    #[test]
+    fn a_registration_action_is_held_until_its_outcome_and_abandoning_removes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let written = RegistrationAction::write(dir.path(), "Nightly Strip", "{\"steps\":[]}").unwrap();
+        assert_eq!(std::fs::read(&written.path).unwrap(), b"{\"steps\":[]}");
+        #[cfg(windows)]
+        assert!(crate::staging::held_open(&written.path));
+        let path = written.path.clone();
+        written.abandon();
+        assert!(!path.exists());
+
+        let kept = RegistrationAction::write(dir.path(), "Nightly Strip", "{}").unwrap();
+        let path = kept.path.clone();
+        kept.release();
+        #[cfg(windows)]
+        assert!(!crate::staging::held_open(&path));
+        assert!(path.exists());
+    }
+
+    /// The Task Scheduler reads, against the real store: what a registration
+    /// names reads back through the definition, and absence is not an error.
+    /// Uses a probe folder of its own, deleted at the end.
+    #[test]
+    #[ignore]
+    fn com_definitions_read_back_the_action_a_registration_names() {
+        let nanos = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let folder = format!("Spectra PDF Probe {}-{nanos}", std::process::id());
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = action_profile();
+        p.name = "ZZ Actions DELETE ME".into();
+        let action = dir.path().join(registration_action_name(&p.name, 4300, "0a1b2c3d"));
+        p.action_file = action.to_string_lossy().to_string();
+        let full = format!("\\{folder}\\{}", p.name);
+        let xml = build_task_xml(r"C:\Windows\System32\cmd.exe", &p, None).unwrap();
+
+        let registered = register_task_com(full.clone(), xml, String::new(), None);
+        let definition = registered_task_definition(full.clone());
+        let listed = folder_task_definitions(format!("\\{folder}"));
+        let absent_task = registered_task_definition(format!("\\{folder}\\ZZ Absent"));
+        let absent_folder = folder_task_definitions(format!("\\{folder} Absent"));
+
+        let _ = run(schtasks().args(["/Delete", "/F", "/TN", &full]));
+        delete_task_folder(&folder);
+
+        registered.expect("registration failed");
+        let definition = definition.unwrap().expect("the registered task reads back");
+        assert_eq!(named_action(dir.path(), &p.name, &definition), Some(action.clone()));
+        let listed = listed.unwrap();
+        assert_eq!(listed.len(), 1);
+        let name = action.file_name().unwrap().to_str().unwrap();
+        assert!(mentioned(&listed, name));
+        assert_eq!(absent_task.unwrap(), None);
+        assert!(absent_folder.unwrap().is_empty());
+    }
+
+    /// The whole replace against the real store, in a probe folder: after two
+    /// registrations the task names the second file, which holds the second
+    /// action, and the first file is gone.
+    #[test]
+    #[ignore]
+    fn com_a_replaced_schedule_names_its_own_complete_action() {
+        let nanos = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let folder = format!("Spectra PDF Probe {}-{nanos}", std::process::id());
+        let dir = tempfile::tempdir().unwrap();
+        let task = "ZZ Replace DELETE ME";
+        let full = format!("\\{folder}\\{task}");
+        let register = |p: &ScheduleProfile| {
+            let xml = build_task_xml(r"C:\Windows\System32\cmd.exe", p, None)?;
+            register_task_com(full.clone(), xml, String::new(), None)
+        };
+        let current = || {
+            registered_task_definition(full.clone())
+                .map(|found| found.and_then(|d| named_action(dir.path(), task, &d)))
+        };
+        let mut outcome = Vec::new();
+        for steps in ["[\"first\"]", "[\"second\"]"] {
+            let mut p = action_profile();
+            p.name = task.into();
+            let json = format!("{{\"steps\":{steps}}}");
+            outcome.push(register_with_action(
+                &mut p,
+                Some(&json),
+                Ok(dir.path().to_path_buf()),
+                current(),
+                &register,
+            ));
+        }
+        let named = current();
+
+        let _ = run(schtasks().args(["/Delete", "/F", "/TN", &full]));
+        delete_task_folder(&folder);
+
+        for registered in outcome {
+            registered.expect("registration failed");
+        }
+        let named = named.unwrap().expect("the task names an action file");
+        assert_eq!(std::fs::read(&named).unwrap(), b"{\"steps\":[\"second\"]}");
+        assert_eq!(
+            listing(dir.path()),
+            [named.file_name().unwrap().to_str().unwrap().to_string()].into()
+        );
     }
 
     #[test]

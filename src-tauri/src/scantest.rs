@@ -1671,7 +1671,7 @@ fn attach(pages: &[String], out: &Path, row: &str, console: &dyn Console) -> Vec
         let to = dir.join(name);
         // A report from an earlier run in this folder names the scan it
         // replaces, so the scan is replaced whole or not at all.
-        match crate::staging::copy_record(from, &to) {
+        match crate::staging::export_copy(from, &to) {
             Ok(_) => saved.push(to.to_string_lossy().to_string()),
             Err(e) => console.say(&format!("  Could not copy {}: {e}", from.display())),
         }
@@ -2296,9 +2296,9 @@ pub fn write_report(report: &Report, out: &Path) -> Result<(PathBuf, PathBuf), S
     let json_path = out.join("scan-test-report.json");
     let text_path = out.join("scan-test-report.txt");
     let json = serde_json::to_string_pretty(report).map_err(|e| e.to_string())?;
-    crate::staging::write_record(&json_path, json.as_bytes())
+    crate::staging::export_record(&json_path, json.as_bytes())
         .map_err(|e| format!("Could not write the report: {e}"))?;
-    crate::staging::write_record(&text_path, report.to_text().as_bytes())
+    crate::staging::export_record(&text_path, report.to_text().as_bytes())
         .map_err(|e| format!("Could not write the report: {e}"))?;
     Ok((json_path, text_path))
 }
@@ -3076,7 +3076,21 @@ mod tests {
             "1",
             &ScriptedConsole::eof(),
         );
-        let report = Report {
+        let report = empty_report();
+        let (json, text) = write_report(&report, out.path()).expect("the report");
+
+        let copied = scans.join("page-0000.bmp");
+        assert_eq!(saved, vec![copied.to_string_lossy().to_string()]);
+        assert_eq!(std::fs::read(&copied).expect("the scan"), b"BM this run's page");
+        assert!(orphans.iter().all(|orphan| !orphan.exists()));
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(json).expect("json")).expect("parses");
+        assert_eq!(parsed["device_name"], "Test Scanner");
+        assert_eq!(std::fs::read_to_string(text).expect("text"), report.to_text());
+    }
+
+    fn empty_report() -> Report {
+        Report {
             schema: REPORT_SCHEMA,
             tool: "spectrapdf scan-test".to_string(),
             app_version: "1.0.0".to_string(),
@@ -3091,16 +3105,45 @@ mod tests {
             skipped: 0,
             not_run: 0,
             privacy: PRIVACY_NOTE.to_string(),
-        };
-        let (json, text) = write_report(&report, out.path()).expect("the report");
+        }
+    }
 
-        let copied = scans.join("page-0000.bmp");
-        assert_eq!(saved, vec![copied.to_string_lossy().to_string()]);
-        assert_eq!(std::fs::read(&copied).expect("the scan"), b"BM this run's page");
-        assert!(orphans.iter().all(|orphan| !orphan.exists()));
+    /// A rerun into a folder that lets the tester change the earlier report
+    /// and scans but not create a file replaces them in place.
+    #[cfg(windows)]
+    #[test]
+    fn a_rerun_replaces_the_report_where_the_folder_refuses_new_files() {
+        let out = tempfile::tempdir().expect("a temp dir");
+        let scans = out.path().join("scan-test-scans").join("row-1");
+        std::fs::create_dir_all(&scans).expect("the scans folder");
+        let json = out.path().join("scan-test-report.json");
+        let text = out.path().join("scan-test-report.txt");
+        let scan = scans.join("page-0000.bmp");
+        for earlier in [&json, &text, &scan] {
+            std::fs::write(earlier, b"an earlier run, longer than this one").expect("old");
+        }
+        let elsewhere = tempfile::tempdir().expect("a temp dir");
+        let page = elsewhere.path().join("page-0000.bmp");
+        std::fs::write(&page, b"BM this run's page").expect("a page");
+        let report = empty_report();
+
+        let saved = {
+            let _out = crate::staging::Denied::create(out.path(), &[&json, &text]);
+            let _scans = crate::staging::Denied::create(&scans, &[&scan]);
+            write_report(&report, out.path()).expect("the report");
+            attach(
+                &[page.to_string_lossy().to_string()],
+                out.path(),
+                "1",
+                &ScriptedConsole::eof(),
+            )
+        };
+
+        assert_eq!(saved, vec![scan.to_string_lossy().to_string()]);
+        assert_eq!(std::fs::read(&scan).expect("the scan"), b"BM this run's page");
+        assert_eq!(std::fs::read_to_string(&text).expect("text"), report.to_text());
         let parsed: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(json).expect("json")).expect("parses");
+            serde_json::from_slice(&std::fs::read(&json).expect("json")).expect("parses");
         assert_eq!(parsed["device_name"], "Test Scanner");
-        assert_eq!(std::fs::read_to_string(text).expect("text"), report.to_text());
     }
 }

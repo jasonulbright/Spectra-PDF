@@ -34,7 +34,7 @@
 
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -595,17 +595,17 @@ pub fn safe_stem(hint: Option<&str>) -> String {
     }
 }
 
-/// Where a response lands: the app's own temp tree, never beside a user file.
-fn response_path(stem: &str, extension: &str) -> Result<std::path::PathBuf, String> {
-    let dir = std::env::temp_dir().join("spectrapdf").join("net");
-    std::fs::create_dir_all(&dir)
+/// Where a payload or a response lands: the network scratch folder `dir` of
+/// the app's own temp tree, never beside a user file, under a name that
+/// carries this process's id (see `scratch`).
+fn response_path(dir: &Path, stem: &str, extension: &str) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir)
         .map_err(|e| format!("Cannot create the download scratch folder: {e}"))?;
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let unique = uuid::Uuid::new_v4().simple().to_string();
-    Ok(dir.join(format!("{stem}-{stamp}-{}.{extension}", &unique[..8])))
+    Ok(dir.join(crate::scratch::net_file_name(
+        stem,
+        std::process::id(),
+        extension,
+    )))
 }
 
 /// Perform one request, following same-origin redirects, and write the
@@ -615,10 +615,34 @@ fn response_path(stem: &str, extension: &str) -> Result<std::path::PathBuf, Stri
 /// `env_allows_private`); `fetch_with_policy` takes it explicitly so tests can
 /// pin either side without touching process env.
 pub async fn fetch(request: &NetRequest) -> Result<NetResponse, String> {
-    fetch_with_policy(request, env_allows_private()).await
+    transmit(request, env_allows_private(), &crate::scratch::net_dir()).await
 }
 
+/// [`fetch_into`], then the removal of the payload it read when that payload
+/// is a file of the scratch folder: a submission leaves no copy of its form
+/// data behind once its request has completed, whatever the outcome.
+async fn transmit(
+    request: &NetRequest,
+    allow_private: bool,
+    scratch: &Path,
+) -> Result<NetResponse, String> {
+    let outcome = fetch_into(request, allow_private, scratch).await;
+    if let Some(body) = request.body_path.as_deref() {
+        crate::scratch::release_net_file(Path::new(body), scratch);
+    }
+    outcome
+}
+
+#[cfg(test)]
 async fn fetch_with_policy(request: &NetRequest, allow_private: bool) -> Result<NetResponse, String> {
+    fetch_into(request, allow_private, &crate::scratch::net_dir()).await
+}
+
+async fn fetch_into(
+    request: &NetRequest,
+    allow_private: bool,
+    scratch: &Path,
+) -> Result<NetResponse, String> {
     let (start, scheme, authority) = validate_http_url(&request.url)?;
     let method = request.method.to_ascii_lowercase();
     if method != "get" && method != "post" {
@@ -775,6 +799,7 @@ async fn fetch_with_policy(request: &NetRequest, allow_private: bool) -> Result<
             .trim()
             .to_ascii_lowercase();
         let path = response_path(
+            scratch,
             &safe_stem(request.file_name.as_deref()),
             extension_for(&content_type),
         )?;
@@ -845,7 +870,7 @@ pub fn net_payload_path(stem: Option<String>, extension: Option<String>) -> Resu
         .take(8)
         .collect();
     let ext = if ext.is_empty() { "bin".to_string() } else { ext };
-    Ok(response_path(&safe_stem(stem.as_deref()), &ext)?
+    Ok(response_path(&crate::scratch::net_dir(), &safe_stem(stem.as_deref()), &ext)?
         .to_string_lossy()
         .to_string())
 }
@@ -1420,6 +1445,75 @@ mod tests {
         let error = fetch_with_policy(&request, false).await.unwrap_err();
         assert!(error.contains("192.168.1.5"), "{error}");
         assert!(error.contains("private-network"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_payload_is_removed_when_its_request_completes() {
+        let server = TestServer::start(vec![body_reply("application/vnd.fdf", "%FDF-1.2 ok")]);
+        let scratch = tempfile::tempdir().unwrap();
+        let post = |url: String, body: &Path| NetRequest {
+            url,
+            method: "post".to_string(),
+            body_path: Some(body.to_string_lossy().to_string()),
+            content_type: Some("application/vnd.fdf".to_string()),
+            file_name: Some("form-reply".to_string()),
+            refuse_private: true,
+        };
+        let payload = response_path(scratch.path(), "form-submission", "fdf").unwrap();
+        std::fs::write(&payload, b"%FDF-1.2 sent").unwrap();
+
+        let response = transmit(&post(server.url("/submit"), &payload), true, scratch.path())
+            .await
+            .unwrap();
+        assert!(!payload.exists(), "the sent payload stayed in the scratch folder");
+        assert!(server.requests()[0].contains("%FDF-1.2 sent"));
+        assert_eq!(std::fs::read_to_string(&response.path).unwrap(), "%FDF-1.2 ok");
+
+        let refused = response_path(scratch.path(), "form-submission", "fdf").unwrap();
+        std::fs::write(&refused, b"%FDF-1.2 never sent").unwrap();
+        let private = post("http://192.168.1.5/submit".to_string(), &refused);
+        assert!(transmit(&private, false, scratch.path()).await.is_err());
+        assert!(!refused.exists(), "a refused request left its payload");
+
+        let elsewhere = tempfile::tempdir().unwrap();
+        let theirs = elsewhere.path().join(refused.file_name().unwrap());
+        std::fs::write(&theirs, b"%FDF-1.2 a file of the user's").unwrap();
+        transmit(&post(server.url("/submit"), &theirs), true, scratch.path())
+            .await
+            .unwrap();
+        assert!(theirs.exists());
+    }
+
+    /// The command itself: a payload the renderer built in the scratch folder
+    /// is gone once the request is over, here refused before any byte left.
+    #[tokio::test]
+    async fn a_payload_leaves_the_scratch_folder_whatever_the_request_s_outcome() {
+        let payload = PathBuf::from(
+            net_payload_path(Some("wiring-submission".into()), Some("fdf".into())).unwrap(),
+        );
+        std::fs::write(&payload, b"%FDF-1.2 never sent").unwrap();
+        let request = NetRequest {
+            url: "http://127.0.0.1:1/submit".to_string(),
+            method: "post".to_string(),
+            body_path: Some(payload.to_string_lossy().to_string()),
+            content_type: Some("application/vnd.fdf".to_string()),
+            file_name: None,
+            refuse_private: true,
+        };
+        assert!(net_request(request).await.is_err());
+        assert!(!payload.exists(), "the payload outlived its request");
+    }
+
+    #[test]
+    fn a_payload_path_carries_this_process_in_the_scratch_folder() {
+        let path = PathBuf::from(
+            net_payload_path(Some("form/../submission".into()), Some("f.d:f".into())).unwrap(),
+        );
+        assert_eq!(path.parent().unwrap(), crate::scratch::net_dir());
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with("formsubmission-"), "{name}");
+        assert!(name.ends_with(".fdf"), "{name}");
+        assert_eq!(crate::scratch::net_file_owner(name), Some(std::process::id()));
     }
 
     #[test]
