@@ -231,8 +231,10 @@ pub fn save_snapshot_png(request: Request<'_>) -> Result<String, String> {
 }
 
 /// The body must carry the PNG signature and the path must name a `.png`.
-/// The file is published through a checked sibling stage, so an existing file
-/// the save dialog offered to overwrite stays whole until the new one lands.
+/// The file is published as an export (see
+/// [`crate::file_publication::export_bytes`]): an existing file the save
+/// dialog offered to overwrite stays whole until the new one lands, except in
+/// a folder that refuses the stage a new file.
 fn write_png(body: &[u8], path: impl FnOnce() -> Result<String, String>) -> Result<String, String> {
     if body.len() < PNG_SIGNATURE.len() || body[..PNG_SIGNATURE.len()] != PNG_SIGNATURE {
         return Err("snapshot body is not a PNG".to_string());
@@ -244,7 +246,7 @@ fn write_png(body: &[u8], path: impl FnOnce() -> Result<String, String>) -> Resu
     {
         return Err(format!("a snapshot is saved as a .png file, not {path}"));
     }
-    crate::file_publication::replace_bytes(body, std::path::Path::new(&path))
+    crate::file_publication::export_bytes(body, std::path::Path::new(&path))
         .map_err(|e| format!("Could not write {path}: {e}"))?;
     Ok(path)
 }
@@ -340,5 +342,28 @@ mod tests {
         write_png(&png(b"a shot"), || Ok(path)).unwrap();
 
         assert!(!orphan.exists());
+    }
+
+    /// A folder that lets the user change the chosen picture but not create a
+    /// file beside it: the snapshot is written into the picture in place.
+    #[cfg(windows)]
+    #[test]
+    fn a_snapshot_is_rewritten_where_the_folder_refuses_a_new_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("shot.png");
+        std::fs::write(&target, png(b"the previous shot, longer than the new one")).unwrap();
+        let path = target.to_string_lossy().to_string();
+
+        {
+            let _denied = crate::staging::Denied::create(dir.path(), &[&target]);
+            assert_eq!(write_png(&png(b"a new shot"), || Ok(path.clone())).unwrap(), path);
+        }
+
+        assert_eq!(std::fs::read(&target).unwrap(), png(b"a new shot"));
+        let beside: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(beside, vec![std::ffi::OsString::from("shot.png")]);
     }
 }

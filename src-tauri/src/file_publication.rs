@@ -1,7 +1,9 @@
 //! Checked sibling staging for single-file Save/restore, for writes to a path
 //! the user chose, and for unique undo copies.
 //! A copy/sync/verification failure never touches the existing destination.
-//! Publication is one same-volume rename, never a copy into the live file.
+//! Publication is one same-volume rename, never a copy into the live file,
+//! except for an export whose folder refuses the stage or the rename: see
+//! [`export_bytes`].
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -164,33 +166,85 @@ pub(crate) fn snapshot(source: &Path) -> io::Result<PathBuf> {
     stage.retain()
 }
 
+/// Publish a document at `destination`. A folder that refuses the stage, or
+/// the rename over an existing document, refuses the Save: a document
+/// rewritten in place is torn by any failure part way through the write.
 pub(crate) fn replace_copy(source: &Path, destination: &Path) -> io::Result<()> {
     replace_with(source, destination, &|a, b| fs::copy(a, b))
 }
 
-/// Publish `bytes` at `destination` through the same checked stage as a Save.
-pub(crate) fn replace_bytes(bytes: &[u8], destination: &Path) -> io::Result<()> {
-    publish_at(destination, None, &|stage| {
-        let mut file = stage.file().as_file();
-        file.write_all(bytes)?;
-        file.sync_all()
-    })
+/// Publish an export (a report, a profile, an action, a picture) at
+/// `destination` through the same checked stage as a Save.
+///
+/// A folder can let a user change a file and still refuse to create one
+/// beside it, or refuse to replace it by a rename. When `destination` exists
+/// and passed the write check, and the folder refuses the stage for the first
+/// reason or the replacement for the second, the bytes are written into it in
+/// place. No other refusal, and no absent destination, takes that path.
+pub(crate) fn export_bytes(bytes: &[u8], destination: &Path) -> io::Result<()> {
+    publish_at(
+        destination,
+        None,
+        &|stage| {
+            let mut file = stage.file().as_file();
+            file.write_all(bytes)?;
+            file.sync_all()
+        },
+        Some(&|existing: &File| rewrite_in_place(existing, bytes)),
+    )
+}
+
+/// Replace every byte of `file` with `bytes` and flush them to the disk.
+/// `file` is a handle nothing has read or written, so it writes from the
+/// start.
+fn rewrite_in_place(mut file: &File, bytes: &[u8]) -> io::Result<()> {
+    file.set_len(0)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 fn replace_with(source: &Path, destination: &Path, copy: &Copier<'_>) -> io::Result<()> {
     let source = dunce::canonicalize(source)?;
     let _source = source_guard(&source)?;
-    publish_at(destination, Some(&source), &|stage| {
-        checked_copy(&source, stage, copy)
-    })
+    publish_at(
+        destination,
+        Some(&source),
+        &|stage| checked_copy(&source, stage, copy),
+        None,
+    )
 }
 
 type Filler<'a> = dyn Fn(&Stage) -> io::Result<()> + 'a;
+type InPlace<'a> = dyn Fn(&File) -> io::Result<()> + 'a;
+
+/// What a stage that could not be created in `dir` leaves: the refusal, or an
+/// in-place write through the handle the destination check opened. Only a
+/// folder that denies a new file (see [`crate::staging::refused_for_create`]),
+/// an existing destination and a caller that allows it take the in-place write.
+fn after_refused_stage(
+    refused: io::Error,
+    dir: &Path,
+    existing: Option<&File>,
+    in_place: Option<&InPlace<'_>>,
+) -> io::Result<()> {
+    match (in_place, existing) {
+        (Some(write), Some(file)) if crate::staging::refused_for_create(&refused, dir) => {
+            write(file)
+        }
+        _ => Err(refused),
+    }
+}
 
 /// Fill a stage beside `destination` and rename it over the destination.
 /// `source` is the file the bytes come from, when there is one: a destination
-/// that is that same file is already what it would become.
-fn publish_at(destination: &Path, source: Option<&Path>, fill: &Filler<'_>) -> io::Result<()> {
+/// that is that same file is already what it would become. `in_place` is the
+/// write [`after_refused_stage`] may use when the folder refuses the stage.
+fn publish_at(
+    destination: &Path,
+    source: Option<&Path>,
+    fill: &Filler<'_>,
+    in_place: Option<&InPlace<'_>>,
+) -> io::Result<()> {
     // Resolve an existing symlink to its target; do not replace the link itself.
     // Only a genuinely absent leaf permits a new destination. Permission and
     // broken-link errors must not be converted into absence.
@@ -233,11 +287,28 @@ fn publish_at(destination: &Path, source: Option<&Path>, fill: &Filler<'_>) -> i
         Err(e) if e.kind() == io::ErrorKind::NotFound => None,
         Err(e) => return Err(e),
     };
-    let stage = Stage::new(
-        destination
-            .parent()
-            .ok_or_else(|| io::Error::other("missing parent"))?,
-    )?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| io::Error::other("missing parent"))?;
+    // Asked before any stage exists: a stage takes the destination's access
+    // list, so where that list and the folder refuse deleting the destination,
+    // they refuse removing the stage too, and a refused rename would leave it
+    // beside the document for good.
+    if let Some(file) = existing.as_ref() {
+        if crate::staging::replace_denied(&destination) {
+            return match in_place {
+                Some(write) => write(file),
+                None => Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "the folder does not let this file be replaced",
+                )),
+            };
+        }
+    }
+    let stage = match Stage::new(parent) {
+        Ok(stage) => stage,
+        Err(refused) => return after_refused_stage(refused, parent, existing.as_ref(), in_place),
+    };
     if let Some(original) = &existing {
         #[cfg(windows)]
         {
@@ -535,9 +606,9 @@ mod tests {
     fn bytes_publish_whole_and_a_refusal_keeps_the_existing_file() {
         let root = tempfile::tempdir().unwrap();
         let dest = root.path().join("report.html");
-        replace_bytes(b"<p>first</p>", &dest).unwrap();
+        export_bytes(b"<p>first</p>", &dest).unwrap();
         assert_eq!(fs::read(&dest).unwrap(), b"<p>first</p>");
-        replace_bytes(b"<p>second</p>", &dest).unwrap();
+        export_bytes(b"<p>second</p>", &dest).unwrap();
         assert_eq!(fs::read(&dest).unwrap(), b"<p>second</p>");
         let only: std::collections::BTreeSet<String> = ["report.html"].map(String::from).into();
         assert_eq!(names(root.path()), only);
@@ -545,11 +616,118 @@ mod tests {
         let mut perms = fs::metadata(&dest).unwrap().permissions();
         perms.set_readonly(true);
         fs::set_permissions(&dest, perms.clone()).unwrap();
-        assert!(replace_bytes(b"<p>third</p>", &dest).is_err());
+        assert!(export_bytes(b"<p>third</p>", &dest).is_err());
         assert_eq!(fs::read(&dest).unwrap(), b"<p>second</p>");
         assert_eq!(names(root.path()), only);
         perms.set_readonly(false);
         fs::set_permissions(&dest, perms).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_refused_stage_writes_in_place_only_over_an_existing_file_where_new_files_are_denied() {
+        let root = tempfile::tempdir().unwrap();
+        let open = root.path().join("open");
+        let closed = root.path().join("closed");
+        fs::create_dir(&open).unwrap();
+        fs::create_dir(&closed).unwrap();
+        let earlier = b"the earlier export, longer than the new one";
+        let open_dest = open.join("report.html");
+        let closed_dest = closed.join("report.html");
+        fs::write(&open_dest, earlier).unwrap();
+        fs::write(&closed_dest, earlier).unwrap();
+        let _denied = crate::staging::Denied::create(&closed, &[&closed_dest]);
+        let handle = |path: &Path| OpenOptions::new().write(true).open(path).unwrap();
+        let rewrite = |file: &File| rewrite_in_place(file, b"new export");
+        let access = || io::Error::from(io::ErrorKind::PermissionDenied);
+
+        let file = handle(&open_dest);
+        assert!(after_refused_stage(access(), &open, Some(&file), Some(&rewrite)).is_err());
+        drop(file);
+        assert_eq!(fs::read(&open_dest).unwrap(), earlier);
+
+        let file = handle(&closed_dest);
+        let other = io::Error::from(io::ErrorKind::NotFound);
+        let refused = after_refused_stage(other, &closed, Some(&file), Some(&rewrite));
+        assert_eq!(refused.unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert!(after_refused_stage(access(), &closed, None, Some(&rewrite)).is_err());
+        assert!(after_refused_stage(access(), &closed, Some(&file), None).is_err());
+        drop(file);
+        assert_eq!(fs::read(&closed_dest).unwrap(), earlier);
+
+        let file = handle(&closed_dest);
+        after_refused_stage(access(), &closed, Some(&file), Some(&rewrite)).unwrap();
+        drop(file);
+        assert_eq!(fs::read(&closed_dest).unwrap(), b"new export");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn where_new_files_are_denied_an_export_is_rewritten_and_a_document_save_refuses() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("shared");
+        fs::create_dir(&dir).unwrap();
+        let report = dir.join("report.html");
+        let document = dir.join("document.pdf");
+        fs::write(&report, b"<p>the earlier and longer report</p>").unwrap();
+        fs::write(&document, b"%PDF-1.7 the saved document").unwrap();
+        let working = root.path().join("working.pdf");
+        fs::write(&working, b"%PDF-1.7 edited").unwrap();
+
+        {
+            let _denied = crate::staging::Denied::create(&dir, &[&report, &document]);
+            export_bytes(b"<p>new</p>", &report).unwrap();
+            assert!(export_bytes(b"<p>new</p>", &dir.join("absent.html")).is_err());
+            assert!(replace_copy(&working, &document).is_err());
+        }
+
+        assert_eq!(fs::read(&report).unwrap(), b"<p>new</p>");
+        assert_eq!(fs::read(&document).unwrap(), b"%PDF-1.7 the saved document");
+        let left: std::collections::BTreeSet<String> =
+            ["document.pdf", "report.html"].map(String::from).into();
+        assert_eq!(names(&dir), left);
+    }
+
+    /// A folder that allows new files and writes but refuses deleting the
+    /// existing files: no rename can replace them. The export is written in
+    /// place (the same file), the Save refuses, and no stage is left behind.
+    /// In an open folder the same export lands through the stage (a new file).
+    #[cfg(windows)]
+    #[test]
+    fn where_replacement_is_denied_an_export_is_rewritten_and_a_document_save_refuses() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("shared");
+        let open = root.path().join("open");
+        fs::create_dir(&dir).unwrap();
+        fs::create_dir(&open).unwrap();
+        let report = dir.join("report.html");
+        let document = dir.join("document.pdf");
+        let control = open.join("report.html");
+        for path in [&report, &control] {
+            fs::write(path, b"<p>the earlier and longer report</p>").unwrap();
+        }
+        fs::write(&document, b"%PDF-1.7 the saved document").unwrap();
+        let working = root.path().join("working.pdf");
+        fs::write(&working, b"%PDF-1.7 edited").unwrap();
+        let identity = crate::staging::file_id;
+        let (report_file, control_file) = (identity(&report), identity(&control));
+
+        {
+            let _report = crate::staging::Denied::replace(&dir, &report);
+            let _document = crate::staging::Denied::only(&document, "(DE)");
+            export_bytes(b"<p>new</p>", &report).unwrap();
+            assert!(replace_copy(&working, &document).is_err());
+        }
+        export_bytes(b"<p>new</p>", &control).unwrap();
+
+        assert_eq!(fs::read(&report).unwrap(), b"<p>new</p>");
+        assert_eq!(identity(&report), report_file, "the export did not land in place");
+        assert_eq!(fs::read(&control).unwrap(), b"<p>new</p>");
+        assert_ne!(identity(&control), control_file, "an open folder's export went in place");
+        assert_eq!(fs::read(&document).unwrap(), b"%PDF-1.7 the saved document");
+        let left: std::collections::BTreeSet<String> =
+            ["document.pdf", "report.html"].map(String::from).into();
+        assert_eq!(names(&dir), left);
     }
 
     #[test]

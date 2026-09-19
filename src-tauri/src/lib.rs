@@ -8,6 +8,7 @@ mod send_to;
 mod snapshot;
 mod page_commit;
 mod file_publication;
+mod scratch;
 mod staging;
 mod watchers;
 mod web_capture;
@@ -291,6 +292,10 @@ pub fn run() {
             portable::record_icc_assent,
         ])
         .setup(move |app| {
+            // Off the main thread: the tree can hold thousands of folders,
+            // and nothing here waits on the pass.
+            std::thread::spawn(scratch::reclaim_at_startup);
+
             // The battery's fallback spec launches with
             // SPECTRAPDF_E2E_FORCE_OPAQUE=1 so the opaque presentation runs
             // live on a machine where Mica would compose (spec 94; the RDP/
@@ -488,6 +493,20 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{backdrop_supported, wants_backdrop};
+
+    /// The setup cannot run without a window system, so the call is pinned in
+    /// the setup's source: removing it leaves every killed session's working
+    /// copies and network scratch in the temp tree for good.
+    #[test]
+    fn every_launch_reclaims_the_temp_tree_off_the_main_thread() {
+        let source = include_str!("lib.rs");
+        let start = source.find(".setup(move |app| {").expect("the setup");
+        let length = source[start..]
+            .find(".on_window_event(")
+            .expect("the window events");
+        let setup = &source[start..start + length];
+        assert!(setup.contains("std::thread::spawn(scratch::reclaim_at_startup);"));
+    }
 
     #[test]
     fn backdrop_gate_is_the_win11_floor() {

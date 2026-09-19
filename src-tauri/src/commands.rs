@@ -3,7 +3,6 @@ use std::fs;
 use std::path::Path;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
-use uuid::Uuid;
 
 // ── Path canonicalization (the path-identity gate) ───────────────────────
 //
@@ -789,7 +788,7 @@ pub async fn write_report_file(path: String, contents: String) -> Result<String,
     if !ext_ok {
         return Err(format!("not a report file name: {path}"));
     }
-    crate::file_publication::replace_bytes(contents.as_bytes(), Path::new(&path))
+    crate::file_publication::export_bytes(contents.as_bytes(), Path::new(&path))
         .map_err(|e| format!("Failed to write the report: {}", e))?;
     Ok(path)
 }
@@ -810,7 +809,7 @@ pub async fn write_profile_file(path: String, contents: String) -> Result<String
     if !ext_ok {
         return Err(format!("not a profile file name: {path}"));
     }
-    crate::file_publication::replace_bytes(contents.as_bytes(), Path::new(&path))
+    crate::file_publication::export_bytes(contents.as_bytes(), Path::new(&path))
         .map_err(|e| format!("Failed to write the profile: {}", e))?;
     Ok(path)
 }
@@ -831,7 +830,7 @@ pub async fn write_action_file(path: String, contents: String) -> Result<String,
     if !ext_ok {
         return Err(format!("not an action file name: {path}"));
     }
-    crate::file_publication::replace_bytes(contents.as_bytes(), Path::new(&path))
+    crate::file_publication::export_bytes(contents.as_bytes(), Path::new(&path))
         .map_err(|e| format!("Failed to write the action: {}", e))?;
     Ok(path)
 }
@@ -1110,17 +1109,22 @@ pub async fn ensure_parent_dirs(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn create_working_copy(file_path: String) -> Result<String, String> {
-    let work_dir = std::env::temp_dir()
-        .join("spectrapdf")
-        .join(Uuid::new_v4().to_string());
+    working_copy_in(&crate::scratch::root(), &file_path)
+}
+
+/// Copy `file_path` into a new working folder under `root`. The folder's name
+/// carries this process's id, which is what lets a later launch remove it
+/// once this process has stopped (see `scratch`).
+fn working_copy_in(root: &Path, file_path: &str) -> Result<String, String> {
+    let work_dir = root.join(crate::scratch::working_folder_name(std::process::id()));
     fs::create_dir_all(&work_dir)
         .map_err(|e| format!("Failed to create temp dir: {}", e))?;
 
-    let filename = Path::new(&file_path)
+    let filename = Path::new(file_path)
         .file_name()
         .ok_or("Invalid filename")?;
     let dest = work_dir.join(filename);
-    fs::copy(&file_path, &dest)
+    fs::copy(file_path, &dest)
         .map_err(|e| format!("Failed to copy: {}", e))?;
 
     Ok(dest.to_string_lossy().to_string())
@@ -2198,9 +2202,9 @@ mod tests {
     use super::{
         append_line_at, classify_recent_paths, copy_file_creating_dirs, is_batch_log_name,
         is_managed_member_path, move_file_creating_dirs, read_startup_flag_at,
-        reclaim_batch_log_stages, run_key_action, select_argument, write_action_file,
-        write_batch_log_at, write_profile_file, write_report_file, write_startup_flag_at,
-        PathStatus, RunKeyAction, CLASSIFY_MAX_BATCH,
+        reclaim_batch_log_stages, run_key_action, save_as, select_argument, working_copy_in,
+        write_action_file, write_batch_log_at, write_profile_file, write_report_file,
+        write_startup_flag_at, PathStatus, RunKeyAction, CLASSIFY_MAX_BATCH,
     };
     use std::path::Path;
 
@@ -2621,6 +2625,74 @@ mod tests {
             ["action.json", "profile.json", "report.html"].map(String::from).into()
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_working_copy_lands_in_a_folder_named_for_this_process() {
+        let root = scratch("working-copy");
+        let source = root.join("source").join("Sample File.pdf");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, b"%PDF-1.7 source").unwrap();
+        let tree = root.join("tree");
+
+        let working =
+            std::path::PathBuf::from(working_copy_in(&tree, &source.to_string_lossy()).unwrap());
+
+        assert_eq!(std::fs::read(&working).unwrap(), b"%PDF-1.7 source");
+        assert_eq!(working.file_name().unwrap(), "Sample File.pdf");
+        let folder = working.parent().unwrap();
+        assert_eq!(folder.parent().unwrap(), tree);
+        let name = folder.file_name().unwrap().to_str().unwrap();
+        assert_eq!(
+            crate::scratch::working_folder_owner(name),
+            Some(std::process::id())
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A folder that lets the user change an existing file but not create one:
+    /// each export is rewritten in place, and a Save of a document refuses and
+    /// leaves the document whole.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn exports_are_rewritten_where_the_folder_refuses_a_new_file() {
+        let root = scratch("export-create-denied");
+        let dir = root.join("shared");
+        std::fs::create_dir_all(&dir).unwrap();
+        let report = dir.join("report.html");
+        let profile = dir.join("profile.json");
+        let action = dir.join("action.json");
+        let document = dir.join("document.pdf");
+        for path in [&report, &profile, &action] {
+            std::fs::write(path, b"the previous export, longer than the new one").unwrap();
+        }
+        std::fs::write(&document, b"%PDF-1.7 the saved document").unwrap();
+        let working = root.join("working.pdf");
+        std::fs::write(&working, b"%PDF-1.7 edited").unwrap();
+        let path = |p: &Path| p.to_string_lossy().to_string();
+
+        {
+            let _denied = crate::staging::Denied::create(
+                &dir,
+                &[&report, &profile, &action, &document],
+            );
+            write_report_file(path(&report), "<p>report</p>".into()).await.unwrap();
+            write_profile_file(path(&profile), "{\"profile\":1}".into()).await.unwrap();
+            write_action_file(path(&action), "{\"steps\":[]}".into()).await.unwrap();
+            assert!(save_as(path(&working), path(&document)).await.is_err());
+        }
+
+        assert_eq!(std::fs::read(&report).unwrap(), b"<p>report</p>");
+        assert_eq!(std::fs::read(&profile).unwrap(), b"{\"profile\":1}");
+        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[]}");
+        assert_eq!(std::fs::read(&document).unwrap(), b"%PDF-1.7 the saved document");
+        assert_eq!(
+            listing(&dir),
+            ["action.json", "document.pdf", "profile.json", "report.html"]
+                .map(String::from)
+                .into()
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[tokio::test]
