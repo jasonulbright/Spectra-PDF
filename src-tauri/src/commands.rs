@@ -789,7 +789,8 @@ pub async fn write_report_file(path: String, contents: String) -> Result<String,
     if !ext_ok {
         return Err(format!("not a report file name: {path}"));
     }
-    fs::write(&path, contents).map_err(|e| format!("Failed to write the report: {}", e))?;
+    crate::file_publication::replace_bytes(contents.as_bytes(), Path::new(&path))
+        .map_err(|e| format!("Failed to write the report: {}", e))?;
     Ok(path)
 }
 
@@ -809,7 +810,8 @@ pub async fn write_profile_file(path: String, contents: String) -> Result<String
     if !ext_ok {
         return Err(format!("not a profile file name: {path}"));
     }
-    fs::write(&path, contents).map_err(|e| format!("Failed to write the profile: {}", e))?;
+    crate::file_publication::replace_bytes(contents.as_bytes(), Path::new(&path))
+        .map_err(|e| format!("Failed to write the profile: {}", e))?;
     Ok(path)
 }
 
@@ -829,7 +831,8 @@ pub async fn write_action_file(path: String, contents: String) -> Result<String,
     if !ext_ok {
         return Err(format!("not an action file name: {path}"));
     }
-    fs::write(&path, contents).map_err(|e| format!("Failed to write the action: {}", e))?;
+    crate::file_publication::replace_bytes(contents.as_bytes(), Path::new(&path))
+        .map_err(|e| format!("Failed to write the action: {}", e))?;
     Ok(path)
 }
 
@@ -895,16 +898,18 @@ pub async fn paths_same_file(a: String, b: String) -> Result<bool, String> {
 }
 
 /// Copy `src` to `dest`, creating `dest`'s parent directories — the batch
-/// mirror's pass-through for already-searchable PDFs. Plain fs::copy: no PDF
-/// logic in Rust. Two guards:
+/// mirror's pass-through for already-searchable PDFs. A staged `fs::copy`
+/// renamed over `dest`, so a run killed mid-copy leaves the previous mirror
+/// file or none, never a truncated PDF under the final name. No PDF logic in
+/// Rust. Two guards:
 /// - REFUSES when dest already exists and IS src (true file identity — a
-///   string-alias geometry the dialog's root check couldn't see would
-///   otherwise truncate the user's original: CopyFileExW opens dest for
-///   write while reading the identical file).
+///   string-alias geometry the dialog's root check couldn't see points the
+///   mirror at the user's original, which the landing rename would replace).
 /// - Clears a read-only attribute on an existing dest before overwriting
 ///   (fs::copy propagates attributes, so a read-only SOURCE makes a
-///   read-only mirror file on run 1 that would fail run 2's promised
-///   overwrite with a bare access-denied).
+///   read-only mirror file on run 1, and a rename cannot replace a read-only
+///   file, which would fail run 2's promised overwrite with a bare
+///   access-denied).
 #[tauri::command]
 pub async fn copy_file_creating_dirs(src: String, dest: String) -> Result<(), String> {
     let dest_path = Path::new(&dest);
@@ -925,7 +930,8 @@ pub async fn copy_file_creating_dirs(src: String, dest: String) -> Result<(), St
                 .map_err(|e| format!("Destination is read-only and could not be made writable: {}", e))?;
         }
     }
-    fs::copy(&src, &dest).map_err(|e| format!("Copy failed {} -> {}: {}", src, dest, e))?;
+    crate::staging::copy_record(Path::new(&src), dest_path)
+        .map_err(|e| format!("Copy failed {} -> {}: {}", src, dest, e))?;
     Ok(())
 }
 
@@ -940,17 +946,21 @@ pub async fn copy_file_creating_dirs(src: String, dest: String) -> Result<(), St
 ///   no-op, but the cross-volume fallback below is copy-then-delete, and
 ///   copy-then-delete onto itself DELETES THE FILE. String comparison cannot
 ///   see a UNC-vs-mapped-letter alias; `same_file` can.
-/// - **Rename first.** Within a volume `fs::rename` is atomic, so an
-///   interrupted move leaves the file at one end or the other — never neither.
+/// - **Rename first.** Within a volume a rename is atomic, so an interrupted
+///   move leaves the file at one end or the other — never neither.
 /// - **Copy-then-delete only across volumes**, where rename cannot work
 ///   (Windows: ERROR_NOT_SAME_DEVICE). That is the shape files get lost in, so
-///   the copy's length is verified BEFORE the original is removed, and a failed
-///   delete is reported rather than swallowed: a file present in both places is
-///   a mess the user can fix, a file present in neither is not.
+///   the copy is staged beside the target and its length is verified BEFORE it
+///   takes the target's name and BEFORE the original is removed. A run killed
+///   mid-copy leaves a stage the next move to that name reclaims, never a
+///   truncated file under the name of a moved original. A failed delete is
+///   reported rather than swallowed: a file present in both places is a mess
+///   the user can fix, a file present in neither is not.
 /// - **Never overwrites.** A colliding destination takes a ` (2)` suffix and
-///   the chosen name comes back to the caller. The mirror may legitimately
-///   contain a same-named file from an earlier run, and silently replacing a
-///   previously-moved ORIGINAL would be unreported data loss.
+///   the chosen name comes back to the caller, and both the rename and the
+///   staged copy land only where no file has that name. The mirror may
+///   legitimately contain a same-named file from an earlier run, and silently
+///   replacing a previously-moved ORIGINAL would be unreported data loss.
 #[tauri::command]
 pub async fn move_file_creating_dirs(src: String, dest: String) -> Result<String, String> {
     let src_path = Path::new(&src);
@@ -967,22 +977,33 @@ pub async fn move_file_creating_dirs(src: String, dest: String) -> Result<String
     }
     let target = unique_destination(dest_path);
     // Same volume: atomic.
-    if fs::rename(src_path, &target).is_ok() {
+    if crate::staging::rename_no_clobber(src_path, &target).is_ok() {
         return Ok(target.to_string_lossy().to_string());
     }
     // Different volume: copy, VERIFY, then delete.
-    let copied = fs::copy(src_path, &target)
-        .map_err(|e| format!("Move failed {} -> {}: {}", src, target.display(), e))?;
-    let original = fs::metadata(src_path).map(|m| m.len()).unwrap_or(0);
-    if copied != original {
-        // Do not delete the original on a short write — take the litter.
-        let _ = fs::remove_file(&target);
-        return Err(format!(
-            "Move aborted: copied {} of {} bytes to {} — the original was left in place",
-            copied,
-            original,
-            target.display()
-        ));
+    let short = std::cell::Cell::new(None);
+    let landed = crate::staging::create_record(&target, |staged| {
+        let (copied, held) = crate::staging::copy_to_stage(src_path, staged)?;
+        let original = fs::metadata(src_path)?.len();
+        if copied != original {
+            short.set(Some((copied, original)));
+            return Err(std::io::Error::other("short copy"));
+        }
+        Ok(held)
+    });
+    match (landed, short.get()) {
+        (Ok(()), _) => {}
+        (Err(_), Some((copied, original))) => {
+            return Err(format!(
+                "Move aborted: copied {} of {} bytes to {} — the original was left in place",
+                copied,
+                original,
+                target.display()
+            ))
+        }
+        (Err(e), None) => {
+            return Err(format!("Move failed {} -> {}: {}", src, target.display(), e))
+        }
     }
     fs::remove_file(src_path).map_err(|e| {
         format!(
@@ -1390,17 +1411,24 @@ pub async fn get_window_backdrop(
 
 #[tauri::command]
 pub async fn append_operation_log(app: AppHandle, line: String) -> Result<(), String> {
-    use std::io::Write;
     let app_data = crate::portable::data_root(&app)?;
     fs::create_dir_all(&app_data).ok();
-    let log_path = app_data.join("operations.log");
+    append_line_at(&app_data.join("operations.log"), &line)
+}
+
+/// Append `line` and its newline in one write. Every window appends to the
+/// same log, and an append is placed whole at the end of the file only when
+/// it is a single write: a line written in two parts can have another
+/// window's line land between them.
+fn append_line_at(log_path: &Path, line: &str) -> Result<(), String> {
+    use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&log_path)
+        .open(log_path)
         .map_err(|e| format!("Failed to open log: {}", e))?;
-    writeln!(f, "{}", line).map_err(|e| format!("Failed to write log: {}", e))?;
-    Ok(())
+    f.write_all(format!("{line}\n").as_bytes())
+        .map_err(|e| format!("Failed to write log: {}", e))
 }
 
 // ── Batch run logs ───────────────────────────────────────────────────────
@@ -1476,9 +1504,30 @@ pub async fn write_batch_log(
     if !is_batch_log_name(&name) {
         return Err(format!("not a batch log name: {name}"));
     }
-    let path = batch_log_dir(&app, dir.as_deref())?.join(&name);
-    fs::write(&path, contents).map_err(|e| format!("Failed to write log: {}", e))?;
+    write_batch_log_at(&batch_log_dir(&app, dir.as_deref())?, &name, &contents)
+}
+
+fn write_batch_log_at(dir: &Path, name: &str, contents: &str) -> Result<String, String> {
+    reclaim_batch_log_stages(dir, std::process::id(), crate::staging::process_running);
+    let path = dir.join(name);
+    crate::staging::write_record(&path, contents.as_bytes())
+        .map_err(|e| format!("Failed to write log: {}", e))?;
     Ok(path.to_string_lossy().to_string())
+}
+
+/// Remove the stages of batch logs that stopped writers left in `dir`. Every
+/// run's log has a name of its own, so no later write of that name would ever
+/// reclaim its stage.
+fn reclaim_batch_log_stages(dir: &Path, own: u32, running: impl Fn(u32) -> bool) -> usize {
+    crate::staging::reclaim(
+        dir,
+        own,
+        |entry| {
+            crate::staging::split_stage(entry)
+                .and_then(|(log, pid)| is_batch_log_name(log).then_some(pid))
+        },
+        running,
+    )
 }
 
 /// Delete batch logs older than `retention_days`. Returns how many went.
@@ -1816,6 +1865,10 @@ pub async fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
 
 const STARTUP_CONFIG_FILE: &str = "startup.json";
 
+/// Held across each read-modify-write of the startup config. Two flags saved
+/// together would otherwise each write back the other's previous value.
+static STARTUP_CONFIG_EDIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Set one flag in the startup config, keeping the others.
 ///
 /// Read-modify-write rather than a fresh object per setting: the file carries
@@ -1824,20 +1877,41 @@ const STARTUP_CONFIG_FILE: &str = "startup.json";
 fn write_startup_flag(app: &AppHandle, key: &str, value: bool) -> Result<(), String> {
     let app_data = crate::portable::data_root(app)?;
     fs::create_dir_all(&app_data).ok();
-    let config_path = app_data.join(STARTUP_CONFIG_FILE);
-    let mut json = fs::read_to_string(&config_path)
-        .ok()
-        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-        .filter(|v| v.is_object())
-        .unwrap_or_else(|| serde_json::json!({}));
+    write_startup_flag_at(&app_data.join(STARTUP_CONFIG_FILE), key, value)
+}
+
+/// A config that cannot be read refuses the write, since its flags are
+/// unknown. One that reads but is not a JSON object is set aside first, so
+/// the flags it held are kept rather than written over with defaults.
+fn write_startup_flag_at(config_path: &Path, key: &str, value: bool) -> Result<(), String> {
+    let _editing = STARTUP_CONFIG_EDIT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let existing = crate::staging::read_record(config_path)
+        .map_err(|e| format!("Cannot read {}: {e}", config_path.display()))?;
+    let mut json = match existing {
+        None => serde_json::json!({}),
+        Some(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+            Ok(object) if object.is_object() => object,
+            _ => {
+                crate::staging::set_aside(config_path).map_err(|e| {
+                    format!(
+                        "Cannot set aside the unreadable {}: {e}",
+                        config_path.display()
+                    )
+                })?;
+                serde_json::json!({})
+            }
+        },
+    };
     json[key] = serde_json::Value::Bool(value);
-    fs::write(&config_path, json.to_string())
-        .map_err(|e| format!("Failed to write startup config: {}", e))?;
-    Ok(())
+    crate::staging::write_record(config_path, json.to_string().as_bytes())
+        .map_err(|e| format!("Failed to write startup config: {}", e))
 }
 
 /// Read one flag from the startup config. Anything unreadable, unparseable or
-/// absent reads as the default, which is what a first run gets.
+/// absent reads as the default, which is what a first run gets. Nothing here
+/// writes back: the next saved flag sets an unparseable file aside.
 fn read_startup_flag<R: tauri::Runtime, M: tauri::Manager<R>>(
     app: &M,
     key: &str,
@@ -1846,11 +1920,14 @@ fn read_startup_flag<R: tauri::Runtime, M: tauri::Manager<R>>(
     let Ok(app_data) = crate::portable::data_root(app) else {
         return default;
     };
-    let config_path = app_data.join(STARTUP_CONFIG_FILE);
-    let Ok(contents) = fs::read_to_string(&config_path) else {
+    read_startup_flag_at(&app_data.join(STARTUP_CONFIG_FILE), key, default)
+}
+
+fn read_startup_flag_at(config_path: &Path, key: &str, default: bool) -> bool {
+    let Ok(Some(bytes)) = crate::staging::read_record(config_path) else {
         return default;
     };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) else {
+    let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
         return default;
     };
     json.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
@@ -2119,8 +2196,11 @@ pub async fn set_startup_enabled(
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_recent_paths, is_batch_log_name, is_managed_member_path, run_key_action,
-        select_argument, PathStatus, RunKeyAction, CLASSIFY_MAX_BATCH,
+        append_line_at, classify_recent_paths, copy_file_creating_dirs, is_batch_log_name,
+        is_managed_member_path, move_file_creating_dirs, read_startup_flag_at,
+        reclaim_batch_log_stages, run_key_action, select_argument, write_action_file,
+        write_batch_log_at, write_profile_file, write_report_file, write_startup_flag_at,
+        PathStatus, RunKeyAction, CLASSIFY_MAX_BATCH,
     };
     use std::path::Path;
 
@@ -2397,5 +2477,311 @@ mod tests {
             Path::new(r"C:\Users\u\AppData\Roaming\app\other\notes.txt")
         ));
         assert!(!is_managed_member_path(base, Path::new(r"C:\Windows\System32\cmd.exe")));
+    }
+
+    fn listing(dir: &Path) -> std::collections::BTreeSet<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect()
+    }
+
+    fn startup(path: &Path) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_startup_flag_is_saved_beside_the_others_it_does_not_name() {
+        let dir = scratch("startup-keep");
+        let path = dir.join("startup.json");
+        write_startup_flag_at(&path, "startMinimized", true).unwrap();
+        write_startup_flag_at(&path, "restoreWindowsOnLaunch", true).unwrap();
+        write_startup_flag_at(&path, "startMinimized", false).unwrap();
+        assert_eq!(
+            startup(&path),
+            serde_json::json!({"startMinimized": false, "restoreWindowsOnLaunch": true})
+        );
+        assert_eq!(listing(&dir), ["startup.json".to_string()].into());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_startup_config_that_does_not_parse_is_set_aside_not_overwritten() {
+        let dir = scratch("startup-aside");
+        let path = dir.join("startup.json");
+        let unparseables: [&[u8]; 2] = [b"{\"startMinimized\":tr", b"[true]"];
+        for (n, unparseable) in unparseables.into_iter().enumerate() {
+            std::fs::write(&path, unparseable).unwrap();
+            write_startup_flag_at(&path, "restoreWindowsOnLaunch", true).unwrap();
+            assert_eq!(startup(&path), serde_json::json!({"restoreWindowsOnLaunch": true}));
+            let aside = if n == 0 {
+                dir.join("startup.json.unreadable")
+            } else {
+                dir.join("startup.json.unreadable-2")
+            };
+            assert_eq!(std::fs::read(aside).unwrap(), unparseable);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_startup_config_that_cannot_be_read_refuses_the_save() {
+        let dir = scratch("startup-unreadable");
+        let path = dir.join("startup.json");
+        std::fs::create_dir(&path).unwrap();
+        assert!(write_startup_flag_at(&path, "startMinimized", true).is_err());
+        assert!(path.is_dir());
+        assert_eq!(listing(&dir), ["startup.json".to_string()].into());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A holder that shares only deletion refuses the read but not a rename
+    /// over the file: the save must refuse on the read, not land defaults.
+    #[cfg(windows)]
+    #[test]
+    fn a_startup_config_held_from_reading_is_not_written_over() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = scratch("startup-held");
+        let path = dir.join("startup.json");
+        std::fs::write(&path, b"{\"startMinimized\":true}").unwrap();
+        let holder = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(4) // FILE_SHARE_DELETE
+            .open(&path)
+            .unwrap();
+
+        assert!(write_startup_flag_at(&path, "restoreWindowsOnLaunch", true).is_err());
+
+        drop(holder);
+        assert_eq!(startup(&path), serde_json::json!({"startMinimized": true}));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn startup_flags_saved_together_are_all_kept() {
+        let dir = scratch("startup-together");
+        let path = std::sync::Arc::new(dir.join("startup.json"));
+        let savers: Vec<_> = (0..8)
+            .map(|n| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for k in 0..4 {
+                        write_startup_flag_at(&path, &format!("flag{n}-{k}"), true).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for saver in savers {
+            saver.join().unwrap();
+        }
+        let saved = startup(&path);
+        for n in 0..8 {
+            for k in 0..4 {
+                assert_eq!(saved[format!("flag{n}-{k}")], serde_json::json!(true), "flag{n}-{k}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_startup_flag_reads_its_default_unless_the_file_says_otherwise() {
+        let dir = scratch("startup-read");
+        let path = dir.join("startup.json");
+        assert!(read_startup_flag_at(&path, "startMinimized", true));
+        assert!(!read_startup_flag_at(&path, "startMinimized", false));
+        std::fs::write(&path, b"{\"startMinimized\":tr").unwrap();
+        assert!(!read_startup_flag_at(&path, "startMinimized", false));
+        std::fs::write(&path, b"{\"startMinimized\":\"yes\"}").unwrap();
+        assert!(!read_startup_flag_at(&path, "startMinimized", false));
+        std::fs::write(&path, b"{\"startMinimized\":true}").unwrap();
+        assert!(read_startup_flag_at(&path, "startMinimized", false));
+        // Reading never sets anything aside.
+        assert_eq!(listing(&dir), ["startup.json".to_string()].into());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn an_export_replaces_the_chosen_file_whole() {
+        let dir = scratch("export-replace");
+        let report = dir.join("report.html");
+        let profile = dir.join("profile.json");
+        let action = dir.join("action.json");
+        for path in [&report, &profile, &action] {
+            std::fs::write(path, b"the previous export").unwrap();
+        }
+        let path = |p: &Path| p.to_string_lossy().to_string();
+        write_report_file(path(&report), "<p>report</p>".into()).await.unwrap();
+        write_profile_file(path(&profile), "{\"profile\":1}".into()).await.unwrap();
+        write_action_file(path(&action), "{\"steps\":[]}".into()).await.unwrap();
+        assert_eq!(std::fs::read(&report).unwrap(), b"<p>report</p>");
+        assert_eq!(std::fs::read(&profile).unwrap(), b"{\"profile\":1}");
+        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[]}");
+        assert_eq!(
+            listing(&dir),
+            ["action.json", "profile.json", "report.html"].map(String::from).into()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_mirror_copy_replaces_a_read_only_copy_and_leaves_no_stage() {
+        let dir = scratch("mirror-copy");
+        let source = dir.join("in").join("scan.pdf");
+        let mirror = dir.join("out").join("nested").join("scan.pdf");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, b"%PDF-1.7 run one").unwrap();
+        let path = |p: &Path| p.to_string_lossy().to_string();
+
+        copy_file_creating_dirs(path(&source), path(&mirror)).await.unwrap();
+        assert_eq!(std::fs::read(&mirror).unwrap(), b"%PDF-1.7 run one");
+        let mut permissions = std::fs::metadata(&mirror).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&mirror, permissions).unwrap();
+
+        std::fs::write(&source, b"%PDF-1.7 run two, longer").unwrap();
+        copy_file_creating_dirs(path(&source), path(&mirror)).await.unwrap();
+        assert_eq!(std::fs::read(&mirror).unwrap(), b"%PDF-1.7 run two, longer");
+        assert_eq!(listing(mirror.parent().unwrap()), ["scan.pdf".to_string()].into());
+
+        assert!(copy_file_creating_dirs(path(&source), path(&source)).await.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_move_takes_a_free_name_and_never_replaces_a_moved_original() {
+        let dir = scratch("move-free");
+        let moved = dir.join("moved");
+        std::fs::create_dir_all(&moved).unwrap();
+        std::fs::write(moved.join("a.pdf"), b"moved earlier").unwrap();
+        let source = dir.join("a.pdf");
+        std::fs::write(&source, b"moved now").unwrap();
+        let path = |p: &Path| p.to_string_lossy().to_string();
+
+        let landed = move_file_creating_dirs(path(&source), path(&moved.join("a.pdf")))
+            .await
+            .unwrap();
+        assert_eq!(landed, path(&moved.join("a (2).pdf")));
+        assert_eq!(std::fs::read(moved.join("a.pdf")).unwrap(), b"moved earlier");
+        assert_eq!(std::fs::read(moved.join("a (2).pdf")).unwrap(), b"moved now");
+        assert!(!source.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lines_appended_together_never_interleave() {
+        let dir = scratch("operation-log");
+        let log = std::sync::Arc::new(dir.join("operations.log"));
+        let appenders: Vec<_> = (0..8)
+            .map(|n| {
+                let log = log.clone();
+                std::thread::spawn(move || {
+                    let line = format!("{n}:{}", "x".repeat(4096));
+                    for _ in 0..50 {
+                        append_line_at(&log, &line).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for appender in appenders {
+            appender.join().unwrap();
+        }
+        let text = std::fs::read_to_string(&*log).unwrap();
+        let body = "x".repeat(4096);
+        let mut counts = [0usize; 8];
+        for line in text.lines() {
+            let (n, rest) = line.split_once(':').expect("a whole line");
+            assert_eq!(rest, body, "a line holds exactly one append");
+            counts[n.parse::<usize>().unwrap()] += 1;
+        }
+        assert_eq!(counts, [50; 8]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A process id that no running process holds while the returned child is
+    /// alive: the child has exited, and its handle keeps the id from reuse.
+    #[cfg(windows)]
+    fn stopped_process() -> (std::process::Child, u32) {
+        let mut child = std::process::Command::new("cmd")
+            .args(["/C", "exit 0"])
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        let pid = child.id();
+        (child, pid)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_run_log_lands_whole_and_takes_the_log_stages_stopped_writers_left() {
+        let dir = scratch("log-stages");
+        let (_child, dead) = stopped_process();
+        let own = std::process::id();
+        let names = [
+            format!("batch-ocr-2026-01-02_030405.log.{dead}.tmp"),
+            format!("batch-ocr-2026-01-02_030406.log.{own}.tmp"),
+            format!("notes.txt.{dead}.tmp"),
+            "batch-ocr-2026-01-02_030405.log".to_string(),
+        ];
+        for name in &names {
+            std::fs::write(dir.join(name), b"log").unwrap();
+        }
+
+        let written = write_batch_log_at(&dir, "action-run-2026-01-02_030407.log", "whole log")
+            .unwrap();
+
+        assert_eq!(std::fs::read(&written).unwrap(), b"whole log");
+        let mut kept: std::collections::BTreeSet<String> = names.into_iter().collect();
+        kept.remove(&format!("batch-ocr-2026-01-02_030405.log.{dead}.tmp"));
+        kept.insert("action-run-2026-01-02_030407.log".to_string());
+        assert_eq!(listing(&dir), kept);
+        assert_eq!(
+            reclaim_batch_log_stages(&dir, own, crate::staging::process_running),
+            0
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Each save goes through a staged writer, which is also what reclaims the
+    /// stage a writer killed mid-save left beside the file.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn every_rewritten_file_lands_through_a_staged_writer() {
+        let dir = scratch("staged-wiring");
+        let (_child, dead) = stopped_process();
+        let path = |p: &Path| p.to_string_lossy().to_string();
+
+        let startup_json = dir.join("startup.json");
+        let source = dir.join("scan.pdf");
+        std::fs::write(&source, b"%PDF-1.7").unwrap();
+        let mirror = dir.join("mirror").join("scan.pdf");
+        let [report, profile, action] = ["report.txt", "profile.json", "action.json"]
+            .map(|name| dir.join(name.replace('.', "-")).join(name));
+        let mut orphans = vec![
+            crate::staging::stage_path(&startup_json, dead),
+            crate::staging::stage_path(&mirror, dead),
+        ];
+        for export in [&report, &profile, &action] {
+            orphans.push(
+                export
+                    .parent()
+                    .unwrap()
+                    .join(format!("document-stage-{dead}-abc123.pdf")),
+            );
+        }
+        for orphan in &orphans {
+            std::fs::create_dir_all(orphan.parent().unwrap()).unwrap();
+            std::fs::write(orphan, b"a killed writer's stage").unwrap();
+        }
+
+        write_startup_flag_at(&startup_json, "startMinimized", true).unwrap();
+        copy_file_creating_dirs(path(&source), path(&mirror)).await.unwrap();
+        write_report_file(path(&report), "report".into()).await.unwrap();
+        write_profile_file(path(&profile), "{}".into()).await.unwrap();
+        write_action_file(path(&action), "{}".into()).await.unwrap();
+
+        for orphan in &orphans {
+            assert!(!orphan.exists(), "{}", orphan.display());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

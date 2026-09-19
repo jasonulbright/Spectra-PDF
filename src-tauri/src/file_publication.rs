@@ -1,9 +1,10 @@
-//! Checked sibling staging for single-file Save/restore and unique undo copies.
+//! Checked sibling staging for single-file Save/restore, for writes to a path
+//! the user chose, and for unique undo copies.
 //! A copy/sync/verification failure never touches the existing destination.
 //! Publication is one same-volume rename, never a copy into the live file.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 pub(crate) fn equal_files(a: &Path, b: &Path) -> io::Result<bool> {
@@ -60,6 +61,18 @@ fn reclaim_stages(dir: &Path, own: u32, running: impl Fn(u32) -> bool) -> usize 
     crate::staging::reclaim(dir, own, stage_owner, running)
 }
 
+/// A stage named the way versions without a process id in the name named
+/// them: `document-stage-`, the six ASCII letters and digits `tempfile`
+/// draws, `.pdf`.
+fn legacy_stage(entry: &str) -> bool {
+    entry
+        .strip_prefix(STAGE_PREFIX)
+        .and_then(|rest| rest.strip_suffix(STAGE_SUFFIX))
+        .is_some_and(|random| {
+            random.len() == 6 && random.bytes().all(|b| b.is_ascii_alphanumeric())
+        })
+}
+
 struct Stage(Option<tempfile::NamedTempFile>);
 impl Stage {
     fn file(&self) -> &tempfile::NamedTempFile {
@@ -68,10 +81,17 @@ impl Stage {
     /// A process killed between creating a stage and publishing it cannot
     /// remove it, and a Save As puts that stage beside the user's document.
     /// Each new stage first removes the ones left in the same folder by
-    /// processes that no longer run.
+    /// processes that no longer run, and the ones without a process id once
+    /// they are older than any stage can legitimately live.
     fn new(parent: &Path) -> io::Result<Self> {
         let own = std::process::id();
         reclaim_stages(parent, own, crate::staging::process_running);
+        crate::staging::reclaim_aged(
+            parent,
+            legacy_stage,
+            crate::staging::LEGACY_STAGE_AGE,
+            std::time::SystemTime::now(),
+        );
         Ok(Self(Some(
             tempfile::Builder::new()
                 .prefix(&format!("{STAGE_PREFIX}{own}-"))
@@ -148,9 +168,29 @@ pub(crate) fn replace_copy(source: &Path, destination: &Path) -> io::Result<()> 
     replace_with(source, destination, &|a, b| fs::copy(a, b))
 }
 
+/// Publish `bytes` at `destination` through the same checked stage as a Save.
+pub(crate) fn replace_bytes(bytes: &[u8], destination: &Path) -> io::Result<()> {
+    publish_at(destination, None, &|stage| {
+        let mut file = stage.file().as_file();
+        file.write_all(bytes)?;
+        file.sync_all()
+    })
+}
+
 fn replace_with(source: &Path, destination: &Path, copy: &Copier<'_>) -> io::Result<()> {
     let source = dunce::canonicalize(source)?;
     let _source = source_guard(&source)?;
+    publish_at(destination, Some(&source), &|stage| {
+        checked_copy(&source, stage, copy)
+    })
+}
+
+type Filler<'a> = dyn Fn(&Stage) -> io::Result<()> + 'a;
+
+/// Fill a stage beside `destination` and rename it over the destination.
+/// `source` is the file the bytes come from, when there is one: a destination
+/// that is that same file is already what it would become.
+fn publish_at(destination: &Path, source: Option<&Path>, fill: &Filler<'_>) -> io::Result<()> {
     // Resolve an existing symlink to its target; do not replace the link itself.
     // Only a genuinely absent leaf permits a new destination. Permission and
     // broken-link errors must not be converted into absence.
@@ -174,8 +214,10 @@ fn replace_with(source: &Path, destination: &Path, copy: &Copier<'_>) -> io::Res
             if !meta.is_file() {
                 return Err(io::Error::other("destination is not a regular file"));
             }
-            if same_file::is_same_file(&source, &destination)? {
-                return Ok(());
+            if let Some(source) = source {
+                if same_file::is_same_file(source, &destination)? {
+                    return Ok(());
+                }
             }
             if meta.permissions().readonly() {
                 return Err(io::Error::other("destination is read-only"));
@@ -219,7 +261,7 @@ fn replace_with(source: &Path, destination: &Path, copy: &Copier<'_>) -> io::Res
             }
         }
     }
-    checked_copy(&source, &stage, copy)?;
+    fill(&stage)?;
     if let Some(original) = &existing {
         preserve_access(original, stage.file())
             .map_err(|e| io::Error::other(format!("preserve access: {e}")))?;
@@ -422,6 +464,92 @@ mod tests {
         let expected: std::collections::BTreeSet<String> =
             ["out.pdf", "working.pdf"].map(String::from).into();
         assert_eq!(names(root.path()), expected);
+    }
+
+    #[test]
+    fn only_the_six_character_tempfile_name_is_a_legacy_stage() {
+        for legacy in [
+            "document-stage-abc123.pdf",
+            "document-stage-AB12cd.pdf",
+            "document-stage-000000.pdf",
+        ] {
+            assert!(legacy_stage(legacy), "{legacy}");
+        }
+        for other in [
+            "document-stage-4300-abc123.pdf",
+            "document-stage-abc12.pdf",
+            "document-stage-abc1234.pdf",
+            "document-stage-abc_12.pdf",
+            "document-stage-abc-12.pdf",
+            "document-stage-\u{e1}bc12.pdf",
+            "document-stage-abc123.PDF",
+            "Document-stage-abc123.pdf",
+            "document-stage-abc123.pdf.bak",
+            "document-stage-.pdf",
+            "report-abc123.pdf",
+        ] {
+            assert!(!legacy_stage(other), "{other}");
+        }
+    }
+
+    #[cfg(windows)]
+    fn created_long_ago(path: &Path) {
+        use std::os::windows::fs::FileTimesExt;
+        let past = std::time::SystemTime::now()
+            - crate::staging::LEGACY_STAGE_AGE
+            - std::time::Duration::from_secs(3600);
+        OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_created(past))
+            .unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_save_reclaims_an_aged_legacy_stage_and_nothing_else() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("working.pdf");
+        let dest = root.path().join("out.pdf");
+        fs::write(&source, b"new").unwrap();
+        fs::write(&dest, b"original").unwrap();
+        let aged_legacy = root.path().join("document-stage-abc123.pdf");
+        let young_legacy = root.path().join("document-stage-XYZ789.pdf");
+        let aged_document = root.path().join("draft-abc123.pdf");
+        for path in [&aged_legacy, &young_legacy, &aged_document] {
+            fs::write(path, b"%PDF").unwrap();
+        }
+        created_long_ago(&aged_legacy);
+        created_long_ago(&aged_document);
+
+        replace_copy(&source, &dest).unwrap();
+
+        assert!(!aged_legacy.exists());
+        assert!(young_legacy.exists(), "a legacy stage may still be in flight");
+        assert!(aged_document.exists());
+        assert_eq!(fs::read(&dest).unwrap(), b"new");
+    }
+
+    #[test]
+    fn bytes_publish_whole_and_a_refusal_keeps_the_existing_file() {
+        let root = tempfile::tempdir().unwrap();
+        let dest = root.path().join("report.html");
+        replace_bytes(b"<p>first</p>", &dest).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"<p>first</p>");
+        replace_bytes(b"<p>second</p>", &dest).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"<p>second</p>");
+        let only: std::collections::BTreeSet<String> = ["report.html"].map(String::from).into();
+        assert_eq!(names(root.path()), only);
+
+        let mut perms = fs::metadata(&dest).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&dest, perms.clone()).unwrap();
+        assert!(replace_bytes(b"<p>third</p>", &dest).is_err());
+        assert_eq!(fs::read(&dest).unwrap(), b"<p>second</p>");
+        assert_eq!(names(root.path()), only);
+        perms.set_readonly(false);
+        fs::set_permissions(&dest, perms).unwrap();
     }
 
     #[test]

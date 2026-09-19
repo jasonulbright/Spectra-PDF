@@ -15,7 +15,6 @@
 //! display scaling.
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex};
@@ -773,70 +772,34 @@ pub fn load(app: &AppHandle) -> Session {
         .unwrap_or_default()
 }
 
-/// Read the record, first removing the staging files that killed writers left
-/// beside it.
+/// Read the record, first removing the stages that killed writers left beside
+/// it.
+///
+/// A record that exists but cannot be read or parsed is set aside. Every write
+/// that follows replaces the file whole, so a launch that cannot restore from
+/// those bytes would otherwise also destroy them.
 fn load_from(path: &Path, own: u32, running: impl Fn(u32) -> bool) -> Session {
-    reclaim_staging(path, own, running);
-    let Ok(contents) = std::fs::read_to_string(path) else {
-        return Session::default();
+    crate::staging::reclaim_record_stages(path, own, running);
+    let failure = match crate::staging::read_record(path) {
+        Ok(None) => return Session::default(),
+        Ok(Some(bytes)) => match serde_json::from_slice(&bytes) {
+            Ok(session) => return session,
+            Err(e) => e.to_string(),
+        },
+        Err(e) => e.to_string(),
     };
-    serde_json::from_str(&contents).unwrap_or_default()
-}
-
-/// Where a write stages its bytes: beside the file, so landing them is a
-/// directory-entry swap on one volume rather than a copy. Per process, because
-/// two processes writing the same record must not share a staging name.
-fn staging_path(path: &Path) -> PathBuf {
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(SESSION_FILE);
-    path.with_file_name(format!("{}.{}.tmp", name, std::process::id()))
-}
-
-/// The process whose `staging_path` produced `entry` beside the record named
-/// `record`.
-fn staging_owner(record: &str, entry: &str) -> Option<u32> {
-    let pid = entry
-        .strip_prefix(record)?
-        .strip_prefix('.')?
-        .strip_suffix(".tmp")?;
-    crate::staging::decimal_pid(pid)
-}
-
-/// Remove each staging file beside the record whose process is neither this
-/// one nor still running.
-///
-/// A process killed between creating its staging file and renaming it leaves
-/// the file under its own id, and no later write uses that name.
-fn reclaim_staging(path: &Path, own: u32, running: impl Fn(u32) -> bool) -> usize {
-    let (Some(dir), Some(record)) = (path.parent(), path.file_name().and_then(|n| n.to_str()))
-    else {
-        return 0;
-    };
-    crate::staging::reclaim(dir, own, |entry| staging_owner(record, entry), running)
-}
-
-/// Replace the record in one step.
-///
-/// A write straight over the file has a window in which the file is neither
-/// the old session nor the new one, and a death inside it loses both. The bytes
-/// go to a staging name, are flushed, and take the file's name by rename — so
-/// the file is only ever one whole record or the other. A failure takes the
-/// staged bytes with it rather than leaving them beside the record.
-fn write_staged(path: &Path, json: &str) -> std::io::Result<()> {
-    let staged = staging_path(path);
-    let landed = (|| {
-        let mut file = std::fs::File::create(&staged)?;
-        file.write_all(json.as_bytes())?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&staged, path)
-    })();
-    if landed.is_err() {
-        let _ = std::fs::remove_file(&staged);
+    match crate::staging::set_aside(path) {
+        Ok(aside) => eprintln!(
+            "session: {} is unreadable ({failure}); kept as {}",
+            path.display(),
+            aside.display()
+        ),
+        Err(e) => eprintln!(
+            "session: {} is unreadable ({failure}) and could not be set aside: {e}",
+            path.display()
+        ),
     }
-    landed
+    Session::default()
 }
 
 fn write(app: &AppHandle, session: &Session) -> std::io::Result<()> {
@@ -846,9 +809,13 @@ fn write(app: &AppHandle, session: &Session) -> std::io::Result<()> {
             "no app data directory",
         ));
     };
+    write_at(&path, session)
+}
+
+fn write_at(path: &Path, session: &Session) -> std::io::Result<()> {
     let json = serde_json::to_string(session)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    write_staged(&path, &json)
+    crate::staging::write_record(path, json.as_bytes())
 }
 
 fn write_now(app: &AppHandle, gone: Option<&str>) -> WriteOutcome {
@@ -2039,16 +2006,20 @@ mod tests {
 
     // ── The file itself ───────────────────────────────────────────────────
 
+    fn staging_path(path: &Path) -> PathBuf {
+        crate::staging::stage_path(path, std::process::id())
+    }
+
     #[test]
     fn a_record_replaces_the_one_before_it_whole() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(SESSION_FILE);
 
-        write_staged(&path, "{\"version\":1}").unwrap();
+        crate::staging::write_record(&path, b"{\"version\":1}").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"version\":1}");
         // A second write lands over the first: the swap replaces an existing
         // destination rather than refusing it.
-        write_staged(&path, "{\"version\":2}").unwrap();
+        crate::staging::write_record(&path, b"{\"version\":2}").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"version\":2}");
         // And nothing is left beside the record.
         assert!(!staging_path(&path).exists());
@@ -2058,13 +2029,60 @@ mod tests {
     fn a_write_that_fails_leaves_the_previous_record_readable() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(SESSION_FILE);
-        write_staged(&path, "{\"version\":1}").unwrap();
+        crate::staging::write_record(&path, b"{\"version\":1}").unwrap();
 
         // Staging cannot be created. A write straight over the record would
         // have truncated it first and left neither session on disk.
         std::fs::create_dir(staging_path(&path)).unwrap();
-        assert!(write_staged(&path, "{\"version\":2}").is_err());
+        assert!(crate::staging::write_record(&path, b"{\"version\":2}").is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"version\":1}");
+    }
+
+    /// The session lands through the staged writer, which is also what
+    /// reclaims the stage a writer killed mid-write left beside it.
+    #[cfg(windows)]
+    #[test]
+    fn a_session_write_lands_whole_through_the_staged_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SESSION_FILE);
+        let mut writer = std::process::Command::new("cmd")
+            .args(["/C", "exit 0"])
+            .spawn()
+            .unwrap();
+        writer.wait().unwrap();
+        let orphan = crate::staging::stage_path(&path, writer.id());
+        std::fs::write(&orphan, "{\"version\":1,\"win").unwrap();
+
+        write_at(&path, &saved_session()).unwrap();
+
+        assert!(!orphan.exists());
+        assert_eq!(load_from(&path, std::process::id(), |_| false), saved_session());
+    }
+
+    #[test]
+    fn a_launch_sets_an_unreadable_record_aside_rather_than_losing_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SESSION_FILE);
+        let torn = b"{\"version\":1,\"windows\":[{\"labelKi";
+        std::fs::write(&path, torn).unwrap();
+
+        assert_eq!(load_from(&path, 4100, |_| false), Session::default());
+
+        // The next write lands on a free name; the unread bytes survive it.
+        assert!(!path.exists());
+        let aside = dir.path().join(format!("{SESSION_FILE}.unreadable"));
+        assert_eq!(std::fs::read(&aside).unwrap(), torn);
+
+        // No record at all is a first run, and nothing is set aside for it.
+        assert_eq!(load_from(&path, 4100, |_| false), Session::default());
+        let left: std::collections::BTreeSet<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(
+            left,
+            std::collections::BTreeSet::from([format!("{SESSION_FILE}.unreadable")])
+        );
     }
 
     #[test]
@@ -2106,7 +2124,10 @@ mod tests {
         let path = Path::new("C:\\data").join(SESSION_FILE);
         let staged = staging_path(&path);
         let name = staged.file_name().unwrap().to_str().unwrap();
-        assert_eq!(staging_owner(SESSION_FILE, name), Some(std::process::id()));
+        assert_eq!(
+            crate::staging::stage_owner(SESSION_FILE, name),
+            Some(std::process::id())
+        );
         for other in [
             SESSION_FILE,
             "session.json.bak",
@@ -2118,7 +2139,11 @@ mod tests {
             "session.json4300.tmp",
             "other.json.4300.tmp",
         ] {
-            assert_eq!(staging_owner(SESSION_FILE, other), None, "{other}");
+            assert_eq!(
+                crate::staging::stage_owner(SESSION_FILE, other),
+                None,
+                "{other}"
+            );
         }
     }
 

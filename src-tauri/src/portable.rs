@@ -194,7 +194,8 @@ pub fn record_icc_assent_at(dir: &Path, accepted: bool) -> Result<(), String> {
         .map_err(|e| format!("Cannot create {}: {}", root.display(), e))?;
     let body = format!("{{\n  \"{ACCEPTED_KEY}\": {accepted}\n}}\n");
     let path = root.join(ICC_ASSENT_FILE);
-    std::fs::write(&path, body).map_err(|e| format!("Cannot write {}: {}", path.display(), e))
+    crate::staging::write_record(&path, body.as_bytes())
+        .map_err(|e| format!("Cannot write {}: {}", path.display(), e))
 }
 
 /// What the engine subprocess is told, as an environment value.
@@ -564,6 +565,35 @@ mod tests {
         record_icc_assent_at(&dir, true).unwrap();
         assert_eq!(icc_assent_at(&dir), IccAssent::Accepted);
         assert_eq!(assent_env_value(icc_assent_at(&dir)), "1");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The answer lands through the staged writer, which is also what reclaims
+    /// the stage a writer killed mid-answer left beside the record.
+    #[cfg(windows)]
+    #[test]
+    fn an_answer_replaces_a_torn_record_whole() {
+        let dir = scratch("portable-assent-torn");
+        let record = dir.join(PORTABLE_DATA_DIR).join(ICC_ASSENT_FILE);
+        std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+        std::fs::write(&record, "{\n  \"adobeIccEulaAcc").unwrap();
+        assert_eq!(icc_assent_at(&dir), IccAssent::Unrecorded);
+        let mut writer = std::process::Command::new("cmd")
+            .args(["/C", "exit 0"])
+            .spawn()
+            .unwrap();
+        writer.wait().unwrap();
+        let orphan = crate::staging::stage_path(&record, writer.id());
+        std::fs::write(&orphan, "{\n  \"adobeIccEulaAccepted\": tr").unwrap();
+
+        record_icc_assent_at(&dir, true).unwrap();
+
+        assert_eq!(icc_assent_at(&dir), IccAssent::Accepted);
+        let beside: Vec<_> = std::fs::read_dir(record.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(beside, vec![std::ffi::OsString::from(ICC_ASSENT_FILE)]);
         std::fs::remove_dir_all(&dir).ok();
     }
 

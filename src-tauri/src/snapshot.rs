@@ -220,22 +220,32 @@ pub fn save_snapshot_png(request: Request<'_>) -> Result<String, String> {
         InvokeBody::Raw(bytes) => bytes,
         InvokeBody::Json(_) => return Err("snapshot image must be sent as a raw body".to_string()),
     };
+    write_png(body, || {
+        let encoded = request
+            .headers()
+            .get("snapshot-path")
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| "snapshot request is missing its snapshot-path header".to_string())?;
+        percent_decode(encoded)
+    })
+}
+
+/// The body must carry the PNG signature and the path must name a `.png`.
+/// The file is published through a checked sibling stage, so an existing file
+/// the save dialog offered to overwrite stays whole until the new one lands.
+fn write_png(body: &[u8], path: impl FnOnce() -> Result<String, String>) -> Result<String, String> {
     if body.len() < PNG_SIGNATURE.len() || body[..PNG_SIGNATURE.len()] != PNG_SIGNATURE {
         return Err("snapshot body is not a PNG".to_string());
     }
-    let encoded = request
-        .headers()
-        .get("snapshot-path")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| "snapshot request is missing its snapshot-path header".to_string())?;
-    let path = percent_decode(encoded)?;
+    let path = path()?;
     if !std::path::Path::new(&path)
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("png"))
     {
         return Err(format!("a snapshot is saved as a .png file, not {path}"));
     }
-    std::fs::write(&path, body).map_err(|e| format!("Could not write {path}: {e}"))?;
+    crate::file_publication::replace_bytes(body, std::path::Path::new(&path))
+        .map_err(|e| format!("Could not write {path}: {e}"))?;
     Ok(path)
 }
 
@@ -264,4 +274,71 @@ fn percent_decode(value: &str) -> Result<String, String> {
         }
     }
     String::from_utf8(out).map_err(|_| "snapshot-path header is not valid UTF-8".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn png(tail: &[u8]) -> Vec<u8> {
+        let mut bytes = PNG_SIGNATURE.to_vec();
+        bytes.extend_from_slice(tail);
+        bytes
+    }
+
+    #[test]
+    fn a_snapshot_replaces_the_chosen_file_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("shot.png");
+        std::fs::write(&target, png(b"the previous shot")).unwrap();
+        let path = target.to_string_lossy().to_string();
+
+        assert_eq!(write_png(&png(b"a new shot"), || Ok(path.clone())).unwrap(), path);
+
+        assert_eq!(std::fs::read(&target).unwrap(), png(b"a new shot"));
+        let beside: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(beside, vec![std::ffi::OsString::from("shot.png")]);
+    }
+
+    /// The refusals come before the path is even read, in the order the
+    /// request is checked, and none of them touches an existing file.
+    #[test]
+    fn a_refused_snapshot_leaves_the_chosen_file_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("shot.png");
+        std::fs::write(&target, png(b"the previous shot")).unwrap();
+        let path = target.to_string_lossy().to_string();
+
+        let not_png = write_png(b"GIF89a", || panic!("the path is read after the body"));
+        assert_eq!(not_png.unwrap_err(), "snapshot body is not a PNG");
+        let jpg = dir.path().join("shot.jpg").to_string_lossy().to_string();
+        assert!(write_png(&png(b"x"), || Ok(jpg)).unwrap_err().contains(".png file"));
+        assert!(write_png(&png(b"x"), || Err("no header".to_string())).is_err());
+
+        assert_eq!(std::fs::read(&target).unwrap(), png(b"the previous shot"));
+        assert!(write_png(&png(b"x"), || Ok(path)).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_snapshot_lands_through_the_checked_stage() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut writer = std::process::Command::new("cmd")
+            .args(["/C", "exit 0"])
+            .spawn()
+            .unwrap();
+        writer.wait().unwrap();
+        let orphan = dir
+            .path()
+            .join(format!("document-stage-{}-abc123.pdf", writer.id()));
+        std::fs::write(&orphan, b"a killed save's stage").unwrap();
+        let path = dir.path().join("shot.png").to_string_lossy().to_string();
+
+        write_png(&png(b"a shot"), || Ok(path)).unwrap();
+
+        assert!(!orphan.exists());
+    }
 }
