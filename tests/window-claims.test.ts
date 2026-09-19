@@ -85,6 +85,90 @@ describe('releasePaths', () => {
   });
 });
 
+// Close releases a path without awaiting the release; a reopen claims the
+// same path. The arbiter's claim is idempotent per window and its release
+// drops the window's claim whatever came before, so a release processed after
+// the reopen's claim leaves the reopened document open with no claim at all.
+// Both calls are async commands, and nothing orders two of them by arrival.
+describe('claims on one path from one window', () => {
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  };
+
+  function arbiter() {
+    const held = new Set<string>();
+    const arrived: { kind: 'claim' | 'release'; path: string; process: () => void }[] = [];
+    claim.mockImplementation((path: string) => new Promise((resolve) => {
+      arrived.push({ kind: 'claim', path, process: () => { held.add(path); resolve({ granted: true, owner: '' }); } });
+    }));
+    release.mockImplementation((path: string) => new Promise<void>((resolve) => {
+      arrived.push({ kind: 'release', path, process: () => { held.delete(path); resolve(); } });
+    }));
+    /** Process what has arrived, newest first: the order a busy runtime may pick. */
+    const drain = async (): Promise<string[]> => {
+      const order: string[] = [];
+      await flush();
+      while (arrived.length > 0) {
+        const call = arrived.pop()!;
+        order.push(`${call.kind} ${call.path}`);
+        call.process();
+        await flush();
+      }
+      return order;
+    };
+    return { held, drain };
+  }
+
+  it('a reopen claim is sent only after the close release of the same path answered', async () => {
+    const { held, drain } = arbiter();
+    held.add('P');
+    const closing = releasePaths(['P']);
+    const reopening = claimPaths(['P'], 'write');
+    const order = await drain();
+    await Promise.all([closing, reopening]);
+    expect(order).toEqual(['release P', 'claim P']);
+    expect(held.has('P')).toBe(true);
+  });
+
+  it('a close of several paths puts every release ahead of a reopen of any of them', async () => {
+    const { held, drain } = arbiter();
+    held.add('A');
+    held.add('P');
+    const closing = releasePaths(['A', 'P']);
+    const reopening = claimPaths(['P'], 'write');
+    const order = await drain();
+    await Promise.all([closing, reopening]);
+    expect(order.indexOf('release P')).toBeLessThan(order.indexOf('claim P'));
+    expect([...held]).toEqual(['P']);
+  });
+
+  it('a close after an open waits for the claim, so the close has the last word', async () => {
+    const { held, drain } = arbiter();
+    const opening = claimPaths(['P'], 'write');
+    const closing = releasePaths(['P']);
+    const order = await drain();
+    await Promise.all([opening, closing]);
+    expect(order).toEqual(['claim P', 'release P']);
+    expect(held.has('P')).toBe(false);
+  });
+
+  it('calls on different paths do not wait for each other', async () => {
+    const { drain } = arbiter();
+    const closing = releasePaths(['A']);
+    const opening = claimPaths(['B'], 'write');
+    // Both are in flight together; the newest (the claim of B) answers first.
+    expect(await drain()).toEqual(['claim B', 'release A']);
+    await Promise.all([closing, opening]);
+  });
+
+  it('a failed release does not hold the next claim of that path back', async () => {
+    release.mockRejectedValueOnce(new Error('window gone'));
+    claim.mockResolvedValueOnce({ granted: true, owner: '' });
+    await releasePaths(['P']);
+    await expect(claimPaths(['P'], 'write')).resolves.toEqual({ granted: ['P'], refused: [] });
+  });
+});
+
 describe('scopedKeyFor', () => {
   it('leaves the primary window on the unsuffixed key', () => {
     expect(scopedKeyFor('workbench-ui', PRIMARY_WINDOW_LABEL)).toBe('workbench-ui');

@@ -3,7 +3,8 @@ import { buildPdf, buildPdfx, stripExtension } from './pdfx-format';
 import { carriesManifest } from './doc-names';
 import { baseName } from './create-pdf';
 import type { ExportPage } from './pdfx-format';
-import type { AppAction, OpenDocument, OpenFile, PdfBuffer, Workspace } from '../state/types';
+import type { AppAction, OpenDocument, OpenFile, PageTierStacks, PdfBuffer, Workspace } from '../state/types';
+import { editsSincePlan } from '../state/page-tier';
 // Refusals here that reach the user resolve through
 // the catalog (the concurrent-entry throw below is an internal invariant —
 // a programming error nobody is meant to read, so it stays English).
@@ -276,6 +277,11 @@ interface CommitDeps {
   workspace: Workspace;
   files: Map<string, OpenFile>;
   dirtyPaths: string[];
+  /** The stacks read with `workspace`, and a live read of them. Edits pushed
+   *  on top of the planned stacks while the commit runs stay pending; any
+   *  other change to the stacks refuses publication, because the landing
+   *  could no longer tell which edits the commit contains. */
+  tier: { planned: PageTierStacks; current: () => PageTierStacks };
   dispatch: (action: AppAction) => void;
   transaction: PageCommitIo;
   writeBuffer: (filePath: string, bytes: Uint8Array) => Promise<unknown>;
@@ -323,6 +329,7 @@ export async function commitPageEdits({
   workspace,
   files,
   dirtyPaths,
+  tier,
   dispatch,
   transaction,
   writeBuffer,
@@ -431,6 +438,11 @@ export async function commitPageEdits({
       await publishPageCommit(transaction,
         plans.map((p, i) => ({ workingPath: p.workingPath, stagedPath: staged[i] })),
         snapshots => {
+          // Thrown before the dispatch, so the transaction rolls the files
+          // back and every edit stays pending for the next commit.
+          if (editsSincePlan(tier.current(), tier.planned) === null) {
+            throw new Error(tChrome('app.history.changed'));
+          }
           for (let i = 0; i < plans.length; i++) updates.push({
             path: plans[i].path,
             pageCount: plans[i].pageCount,
@@ -441,7 +453,7 @@ export async function commitPageEdits({
               documents: plans[i].authoredDocuments,
             },
           });
-          dispatch({ type: 'COMMIT_PAGE_EDITS', updates });
+          dispatch({ type: 'COMMIT_PAGE_EDITS', updates, planned: tier.planned });
         },
         async () => { await Promise.all(staged.map(tmp => Promise.resolve(remove(tmp)).catch(() => {}))); },
       );

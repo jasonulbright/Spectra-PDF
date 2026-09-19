@@ -17,6 +17,7 @@ import {
   evictExcept,
   getDocumentProxy,
   requestDocumentProxy,
+  subscribeProxyEvictions,
 } from '../src/renderer/lib/pdfDocCache';
 
 const loadDocumentMock = vi.mocked(loadDocument);
@@ -77,6 +78,41 @@ describe('getDocumentProxy', () => {
     await flush();
     await expect(getDocumentProxy('C:/a.pdf', buf)).resolves.toBe(proxy);
     expect(loadDocumentMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+// A holder mid-read on a destroyed proxy hangs; the notice is how it learns to
+// start over.
+describe('subscribeProxyEvictions', () => {
+  it('names the path and the buffer of every destroyed entry, and nothing else', async () => {
+    const heard: [string, unknown][] = [];
+    const stop = subscribeProxyEvictions((path, buffer) => heard.push([path, buffer]));
+    try {
+      const bufA = new Uint8Array([1]);
+      const bufB = new Uint8Array([2]);
+      loadDocumentMock
+        .mockResolvedValueOnce(makeProxy().proxy)
+        .mockResolvedValueOnce(makeProxy().proxy)
+        .mockRejectedValueOnce(new Error('load failed'));
+      await getDocumentProxy('C:/a.pdf', bufA);
+      await getDocumentProxy('C:/a.pdf', bufA); // a hit destroys nothing
+      expect(heard).toEqual([]);
+      await getDocumentProxy('C:/a.pdf', bufB); // a replacement destroys A
+      expect(heard).toEqual([['C:/a.pdf', bufA]]);
+      const bufC = new Uint8Array([3]);
+      await expect(getDocumentProxy('C:/c.pdf', bufC)).rejects.toThrow('load failed');
+      await flush();
+      expect(heard).toHaveLength(1); // a failed load held no proxy
+      evictExcept(new Set()); // a close destroys B
+      expect(heard).toEqual([['C:/a.pdf', bufA], ['C:/a.pdf', bufB]]);
+    } finally {
+      stop();
+    }
+    // An unsubscribed listener hears nothing more.
+    loadDocumentMock.mockResolvedValueOnce(makeProxy().proxy);
+    await getDocumentProxy('C:/d.pdf', new Uint8Array([4]));
+    evictExcept(new Set());
+    expect(heard).toHaveLength(2);
   });
 });
 

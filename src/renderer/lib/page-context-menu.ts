@@ -59,11 +59,12 @@ export function buildPageContextMenu(deps: PageMenuDeps): MenuItem[] {
     return false;
   };
 
+  // A turn, never an absolute angle: the gate awaits before the dispatch, and
+  // an angle computed from this menu's documents would be stale if a reindex
+  // re-derived the page's rotation meanwhile (a committed turn reads 0 once
+  // baked into the file).
   const rotateSingle = (delta: 90 | 270): void => {
-    const page = doc.pages.find((p) => p.id === pageId);
-    if (!page) return;
-    const rotation = ((((page.rotation + delta) % 360) + 360) % 360) as 0 | 90 | 180 | 270;
-    dispatch({ type: 'ROTATE_PAGE_REF', docId, pageId, rotation });
+    dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: [pageId], delta });
   };
 
   /** The FILES a menu action touches — this page's file for a single-target

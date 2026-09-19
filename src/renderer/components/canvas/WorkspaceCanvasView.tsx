@@ -180,7 +180,7 @@ import type { Mat } from '../../lib/image-transform';
 import { workspacePageNumber } from '../../lib/workspace-commit';
 import { runCommitGate } from '../../lib/commit-gate';
 
-import { buildMergedPageRefs, pathBlockedFromClose } from '../../lib/merge-docs';
+import { buildMergedPageRefs, mergedPageSources, pathBlockedFromClose } from '../../lib/merge-docs';
 import { useWorkspaceForms } from '../../hooks/useWorkspaceForms';
 import { useFieldScripts } from '../../hooks/useFieldScripts';
 import { useFieldScriptsAllowed } from '../../hooks/useFieldScriptsAllowed';
@@ -6810,9 +6810,10 @@ export function WorkspaceCanvasView({
         toDocId: to.id,
         toIndex: to.pages.length,
         pages: buildMergedPageRefs(from),
+        sources: mergedPageSources(docs, state.files, from),
       });
     },
-    [dispatch, docs],
+    [dispatch, docs, state.files],
   );
 
   const onRemoveDoc = useCallback(

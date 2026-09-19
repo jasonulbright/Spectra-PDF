@@ -243,7 +243,10 @@ describe('dispatchKeyEvent', () => {
     expect(e.defaultPrevented).toBe(true);
     expect(undo).not.toHaveBeenCalled();
     // With page-tier history the command is enabled and runs.
-    wire({ ...uiState({}), pageUndoStack: [{ documents: [], dirtyPaths: [] }] });
+    wire({
+      ...uiState({}),
+      pageUndoStack: [{ documents: [], dirtyPaths: [], action: { type: 'REMOVE_DOC', docId: 'a' } }],
+    });
     registerAppCommandHandlers({
       openFiles: vi.fn(), save: vi.fn(), saveAs: vi.fn(), closeFile: vi.fn(), closeAll: vi.fn(),
       undo, redo: vi.fn(), applyPageEdits: vi.fn(), openPreferences: vi.fn(),

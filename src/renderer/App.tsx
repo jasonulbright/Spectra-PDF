@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { AppStateProvider, useAppState, useAppDispatch, useReadAppState } from './state/AppStateProvider';
+import { AppStateProvider, useAppState, useAppDispatch, useReadAppState, useSubscribeAppState } from './state/AppStateProvider';
 import { restoreHistory } from './lib/disk-history';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
 import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/workspace-publication';
@@ -104,6 +104,7 @@ import { PresentationView } from './components/canvas/PresentationView';
 import { usePdfProxies } from './hooks/usePdfProxies';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
+import { awaitSettledWorkspace } from './lib/workspace-settle';
 import { hasPendingPageCommit, recoverPendingPageCommit } from './lib/page-commit-transaction';
 import { pageEditDecision, type PageDelta } from './lib/page-edit-gate';
 import { sequenceEditClass, type OpMethod } from './lib/op-edit-class';
@@ -281,6 +282,7 @@ function AppContent(): React.ReactElement {
   const state = useAppState();
   const dispatch = useAppDispatch();
   const readState = useReadAppState();
+  const subscribeState = useSubscribeAppState();
   // The tab model lives in the ui slice so the command registry,
   // menus, and tab strip all read it. focusedTab replaces the old `view`.
   const focusedTab = state.ui.focusedTab;
@@ -678,6 +680,17 @@ function AppContent(): React.ReactElement {
   // natural place to report, so failures surface here.
   const [commitError, setCommitError] = useState<string | null>(null);
   const historyRetry = useRef<'undo' | 'redo' | null>(null);
+  // A page edit the reducer could not carry onto re-derived documents is
+  // refused there, where no surface exists; every increase of the count owes
+  // the user one notice. Kept apart from `commitError`, which a later
+  // successful commit clears.
+  const [pageEditRefused, setPageEditRefused] = useState(false);
+  const refusalsSeen = useRef(state.pageEditRefusals);
+  useEffect(() => {
+    if (state.pageEditRefusals === refusalsSeen.current) return;
+    refusalsSeen.current = state.pageEditRefusals;
+    setPageEditRefused(true);
+  }, [state.pageEditRefusals]);
 
   // Signed files whose commit could not be appended, waiting to be said out
   // loud. Queued rather than awaited inside the commit: the commit's promise
@@ -730,6 +743,9 @@ function AppContent(): React.ReactElement {
     const run = serializeWorkspacePublication(async () => {
       try {
         await recoverPendingPageCommit();
+        // A plan read from superseded documents writes superseded pages; the
+        // pending reindex also replays the edits this commit is about to take.
+        await awaitSettledWorkspace(readState, subscribeState);
         const expected = readState();
         const outcome = await withFileLock(Array.from(expected.files.values(), f => f.workingPath), async () => {
           const state = readState();
@@ -742,6 +758,10 @@ function AppContent(): React.ReactElement {
           workspace: state.workspace,
           files: state.files,
           dirtyPaths: state.pageDirtyPaths,
+          tier: {
+            planned: { pageUndoStack: state.pageUndoStack, pageRedoStack: state.pageRedoStack },
+            current: readState,
+          },
           dispatch,
           transaction: pageCommit,
           writeBuffer: file.writeBuffer,
@@ -776,6 +796,7 @@ function AppContent(): React.ReactElement {
     return run;
   }, [
     readState,
+    subscribeState,
     dispatch,
     callRaw,
     reportPreserveRefusals,
@@ -1214,11 +1235,17 @@ function AppContent(): React.ReactElement {
         buffer: PdfBuffer;
       }[] = [];
       const allPages: PageRef[] = [];
+      const sources: { path: string; buffer: PdfBuffer }[] = [];
       // Paths this window already held before the import: releasing one would
-      // drop the WRITE claim on a document that is still open here.
-      const unused = new Set(filePaths.filter((p) => !state.files.has(p)));
+      // drop the WRITE claim on a document that is still open here. Read from
+      // the store, not the render: a file opened or committed since the render
+      // holds other bytes, and pages indexed from the render's bytes name
+      // other pages of the file (the import is then refused), while indexing a
+      // superseded buffer destroys the proxy the workspace indexer is reading.
+      const held = readState().files;
+      const unused = new Set(filePaths.filter((p) => !held.has(p)));
       for (const filePath of filePaths) {
-        const existing = state.files.get(filePath);
+        const existing = readState().files.get(filePath);
         let src: { workingPath: string; name: string; buffer: PdfBuffer; pageCount: number };
         if (existing?.buffer) {
           src = {
@@ -1245,6 +1272,7 @@ function AppContent(): React.ReactElement {
           importOnly: true,
         });
         for (const d of docs) allPages.push(...d.pages);
+        sources.push({ path: filePath, buffer: src.buffer });
         unused.delete(filePath);
       }
       if (allPages.length === 0) {
@@ -1252,12 +1280,12 @@ function AppContent(): React.ReactElement {
         return;
       }
       for (const reg of toRegister) dispatch({ type: 'REGISTER_IMPORT_SOURCE', ...reg });
-      dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages });
+      dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages, sources });
       if (unused.size > 0) void releasePaths([...unused]);
     },
     [
-      state.files,
       state.workspace.documents,
+      readState,
       dispatch,
       prepareFileBytes,
       reportClaimRefusal,
@@ -3372,6 +3400,22 @@ function AppContent(): React.ReactElement {
           </button>
           <button
             onClick={() => setCommitError(null)}
+            className="text-red-300 hover:text-red-100 text-xs"
+          >
+            {tChrome('app.commit.dismiss')}
+          </button>
+        </div>
+      )}
+
+      {pageEditRefused && (
+        <div
+          data-testid="page-edit-refused-bar"
+          role="alert"
+          className="app-banner flex items-center gap-3 px-4 py-2 bg-red-600/20 border-b border-red-500/40 text-sm text-red-200 shrink-0"
+        >
+          <span className="flex-1">{tChrome('app.history.changed')}</span>
+          <button
+            onClick={() => setPageEditRefused(false)}
             className="text-red-300 hover:text-red-100 text-xs"
           >
             {tChrome('app.commit.dismiss')}

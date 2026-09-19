@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { indexOpenFile } from '../lib/workspace';
-import { evictExcept } from '../lib/pdfDocCache';
-import type { PdfBuffer } from '../state/types';
+import { evictExcept, subscribeProxyEvictions } from '../lib/pdfDocCache';
+import { createIndexRuns } from '../lib/index-runs';
+import { clearIndexFailure, recordIndexFailure } from '../lib/workspace-settle';
 
 // Keeps AppState.workspace in sync with AppState.files. Whenever a file's
 // buffer changes (open, whole-file op, undo/redo), its workspace documents are
@@ -12,9 +13,20 @@ import type { PdfBuffer } from '../state/types';
 export function useWorkspaceIndexer(): void {
   const state = useAppState();
   const dispatch = useAppDispatch();
-  // path -> buffer an index run was started for, so a buffer is indexed once
-  // even while the run is still in flight
-  const inFlight = useRef(new Map<string, PdfBuffer>());
+  // One live run per path, so a buffer is indexed once even while its run is
+  // still in flight, and only the live run lands.
+  const runs = useRef(createIndexRuns());
+  // A destroyed proxy abandons the run reading it; this re-runs the pass that
+  // starts it again.
+  const [restarts, setRestarts] = useState(0);
+
+  useEffect(
+    () =>
+      subscribeProxyEvictions((path, buffer) => {
+        if (runs.current.abandon(path, buffer)) setRestarts((n) => n + 1);
+      }),
+    [],
+  );
 
   useEffect(() => {
     evictExcept(new Set(state.files.keys()));
@@ -26,18 +38,20 @@ export function useWorkspaceIndexer(): void {
       if (f.importOnly) continue;
       const current = state.workspace.documents.find((d) => d.path === path);
       if (current && current.buffer === buffer) continue;
-      if (inFlight.current.get(path) === buffer) continue;
-      inFlight.current.set(path, buffer);
+      const token = runs.current.begin(path, buffer);
+      if (token === null) continue;
+      clearIndexFailure(buffer);
       indexOpenFile(f)
-        .then((documents) => dispatch({ type: 'SET_WORKSPACE_DOCUMENTS', path, documents }))
+        .then((documents) => {
+          if (runs.current.live(path, token)) dispatch({ type: 'SET_WORKSPACE_DOCUMENTS', path, documents });
+        })
         .catch(() => {
           // Unindexable buffer (shouldn't happen for a file that opened) —
-          // leave the workspace entry absent/stale rather than surfacing an
-          // error for state no UI reads yet.
+          // the workspace entry stays absent or superseded. A commit waiting
+          // for this landing is released with a refusal instead of waiting on.
+          if (runs.current.live(path, token)) recordIndexFailure(buffer);
         })
-        .finally(() => {
-          if (inFlight.current.get(path) === buffer) inFlight.current.delete(path);
-        });
+        .finally(() => runs.current.end(path, token));
     }
-  }, [state.files, state.workspace, dispatch]);
+  }, [state.files, state.workspace, dispatch, restarts]);
 }

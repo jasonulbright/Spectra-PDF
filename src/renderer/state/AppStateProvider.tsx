@@ -18,6 +18,7 @@ import { consumeDrawnLink, consumePickedLink, subscribeDrawnLink, subscribePicke
 const StateContext = createContext<AppState>(initialState);
 const DispatchContext = createContext<Dispatch<AppAction>>(() => {});
 const ReadContext = createContext<() => AppState>(() => initialState);
+const SubscribeContext = createContext<(listener: () => void) => () => void>(() => () => {});
 const ArticleDraftContext = createContext<ArticleDrafts | null>(null);
 const LinkDraftContext = createContext<LinkDrafts | null>(null);
 const FormDraftContext = createContext<FormDrafts | null>(null);
@@ -105,7 +106,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }): R
                 <BookmarkDraftContext.Provider value={bookmarkDrafts}>
                   <PageLabelDraftContext.Provider value={pageLabelDrafts}>
                     <DocumentJsDraftContext.Provider value={documentJsDrafts}>
-                      <LayerSessionContext.Provider value={layerSessions}>{children}</LayerSessionContext.Provider>
+                      <LayerSessionContext.Provider value={layerSessions}>
+                        <SubscribeContext.Provider value={store.subscribe}>{children}</SubscribeContext.Provider>
+                      </LayerSessionContext.Provider>
                     </DocumentJsDraftContext.Provider>
                   </PageLabelDraftContext.Provider>
                 </BookmarkDraftContext.Provider>
@@ -141,6 +144,11 @@ export function usePageLabelDrafts(): PageLabelDrafts {
 
 export function useReadAppState(): () => AppState {
   return useContext(ReadContext);
+}
+
+/** Subscribe to every settled dispatch, outside React's render schedule. */
+export function useSubscribeAppState(): (listener: () => void) => () => void {
+  return useContext(SubscribeContext);
 }
 export function useDocumentJsDrafts(): DocumentJsDrafts {
   const drafts = useContext(DocumentJsDraftContext);

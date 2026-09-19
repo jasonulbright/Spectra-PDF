@@ -556,6 +556,7 @@ describe('COMMIT_PAGE_EDITS', () => {
           authored: { pages: ['b#p0', 'b#p1', 'a#p1'], documents: [{ id: 'b#0', name: 'b' }] },
         },
       ],
+      planned: { pageUndoStack: edited.pageUndoStack, pageRedoStack: edited.pageRedoStack },
     });
     expect(next.files.get('a.pdf')).toMatchObject({ pageCount: 2, dirty: true, undoStack: ['snapA'] });
     expect(next.files.get('b.pdf')).toMatchObject({ pageCount: 3, dirty: true, undoStack: ['snapB'] });
@@ -1266,15 +1267,22 @@ describe('REGISTER_IMPORT_SOURCE (byte-only import source)', () => {
 });
 
 describe('IMPORT_PAGES (import-into-doc)', () => {
+  const byteSource = (path: string, pages: number): OpenFile => ({
+    ...makeFile(path, pages),
+    importOnly: true,
+  });
+
   it('splices foreign-sourced page refs into the target at the index, one undo step', () => {
     const a = makeFile('a.pdf', 2);
+    const x = byteSource('x.pdf', 2);
     const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
     const imported = makePages('x.pdf', 2); // sourceDocId = x.pdf (a byte-only source)
-    const next = appReducer(stateWith([a], [doc]), {
+    const next = appReducer(stateWith([a, x], [doc]), {
       type: 'IMPORT_PAGES',
       toDocId: 'a.pdf#0',
       toIndex: 1,
       pages: imported,
+      sources: [{ path: 'x.pdf', buffer: x.buffer! }],
     });
     expect(pageIds(next.workspace.documents[0])).toEqual([
       'a.pdf#p0',
@@ -1290,10 +1298,16 @@ describe('IMPORT_PAGES (import-into-doc)', () => {
 
   it('clamps the insertion index and rejects empty pages / unknown target', () => {
     const a = makeFile('a.pdf', 2);
-    const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2))]);
-    expect(appReducer(state, { type: 'IMPORT_PAGES', toDocId: 'a.pdf#0', toIndex: 0, pages: [] })).toBe(state);
+    const x = byteSource('x.pdf', 1);
+    const sources = [{ path: 'x.pdf', buffer: x.buffer! }];
+    const state = stateWith([a, x], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2))]);
     expect(
-      appReducer(state, { type: 'IMPORT_PAGES', toDocId: 'nope', toIndex: 0, pages: makePages('x.pdf', 1) }),
+      appReducer(state, { type: 'IMPORT_PAGES', toDocId: 'a.pdf#0', toIndex: 0, pages: [], sources }),
+    ).toBe(state);
+    expect(
+      appReducer(state, {
+        type: 'IMPORT_PAGES', toDocId: 'nope', toIndex: 0, pages: makePages('x.pdf', 1), sources,
+      }),
     ).toBe(state);
     // toIndex past the end clamps to append.
     const appended = appReducer(state, {
@@ -1301,8 +1315,33 @@ describe('IMPORT_PAGES (import-into-doc)', () => {
       toDocId: 'a.pdf#0',
       toIndex: 99,
       pages: makePages('x.pdf', 1),
+      sources,
     });
     expect(pageIds(appended.workspace.documents[0])).toEqual(['a.pdf#p0', 'a.pdf#p1', 'x.pdf#p0']);
+  });
+
+  // A page index names a page only in the buffer it was read from; the
+  // commit resolves it against whatever buffer the source holds then.
+  it('refuses, and counts, pages whose indexes were read from a buffer the source no longer holds', () => {
+    const a = makeFile('a.pdf', 2);
+    const x = byteSource('x.pdf', 1);
+    const state = stateWith([a, x], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2))]);
+    const stale = appReducer(state, {
+      type: 'IMPORT_PAGES',
+      toDocId: 'a.pdf#0',
+      toIndex: 0,
+      pages: makePages('x.pdf', 1),
+      sources: [{ path: 'x.pdf', buffer: [4, 5, 6] }],
+    });
+    expect(stale.workspace).toBe(state.workspace);
+    expect(stale.pageUndoStack).toBe(state.pageUndoStack);
+    expect(stale.pageEditRefusals).toBe(state.pageEditRefusals + 1);
+    // A page whose source is not named at all is refused the same way.
+    const unnamed = appReducer(state, {
+      type: 'IMPORT_PAGES', toDocId: 'a.pdf#0', toIndex: 0, pages: makePages('x.pdf', 1), sources: [],
+    });
+    expect(unnamed.workspace).toBe(state.workspace);
+    expect(unnamed.pageEditRefusals).toBe(state.pageEditRefusals + 1);
   });
 });
 
@@ -1343,15 +1382,24 @@ describe('import-source eviction on reindex', () => {
 
   it('keeps an import source while the page tier is non-empty (undoable/redoable import)', () => {
     const a = makeFile('a.pdf', 3);
-    const state = {
-      ...stateWith([a, importSource('x.pdf', 2)], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))]),
-      pageUndoStack: [{ documents: [], dirtyPaths: [] }],
-    };
-    const next = appReducer(state, {
+    const x = importSource('x.pdf', 2);
+    const imported = appReducer(
+      stateWith([a, x], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))]),
+      {
+        type: 'IMPORT_PAGES',
+        toDocId: 'a.pdf#0',
+        toIndex: 3,
+        pages: makePages('x.pdf', 1),
+        sources: [{ path: 'x.pdf', buffer: x.buffer! }],
+      },
+    );
+    const undone = appReducer(imported, { type: 'UNDO_PAGE_OP' });
+    const next = appReducer(undone, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'a.pdf',
       documents: [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))],
     });
+    expect(next.pageRedoStack).toHaveLength(1); // the import is still redoable
     expect(next.files.has('x.pdf')).toBe(true); // pending edit could still need it
   });
 });

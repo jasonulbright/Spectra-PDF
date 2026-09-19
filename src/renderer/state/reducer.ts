@@ -1,4 +1,5 @@
-import { AppState, AppAction, CanvasTool, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState, isDocTab, NAV_PANE_MIN_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_DEFAULT_WIDTH, TOOL_DOCK_MIN_WIDTH, TOOL_DOCK_MAX_WIDTH, TOOL_DOCK_DEFAULT_WIDTH } from './types';
+import { AppState, AppAction, CanvasTool, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageEditAction, PageRef, PdfBuffer, UiState, isDocTab, NAV_PANE_MIN_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_DEFAULT_WIDTH, TOOL_DOCK_MIN_WIDTH, TOOL_DOCK_MAX_WIDTH, TOOL_DOCK_DEFAULT_WIDTH } from './types';
+import { editsSincePlan } from './page-tier';
 import { carriesManifest } from '../lib/doc-names';
 import { NO_OVERRIDES } from '../lib/toolbar-layout';
 // Safe from the reducer: commands/tools has type-only imports, so it carries no
@@ -167,6 +168,7 @@ export const initialState: AppState = {
   pageUndoStack: [],
   pageRedoStack: [],
   pageDirtyPaths: [],
+  pageEditRefusals: 0,
 };
 
 // Selection holds positional PageRef ids (`path#pN`) that the indexer
@@ -245,7 +247,12 @@ function mapDocument(
 // onto the page-edit undo tier, clear redo, and mark the touched files dirty
 // for the commit bridge. Callers return the current documents array unchanged
 // (by reference) to signal a rejected/no-op edit.
-function applyPageEdit(state: AppState, documents: OpenDocument[], touchedPaths: string[]): AppState {
+function applyPageEdit(
+  state: AppState,
+  documents: OpenDocument[],
+  touchedPaths: string[],
+  action: PageEditAction,
+): AppState {
   if (documents === state.workspace.documents) return state;
   const pageDirtyPaths = [
     ...state.pageDirtyPaths,
@@ -256,10 +263,114 @@ function applyPageEdit(state: AppState, documents: OpenDocument[], touchedPaths:
     workspace: { documents },
     pageUndoStack: [
       ...state.pageUndoStack,
-      { documents: state.workspace.documents, dirtyPaths: state.pageDirtyPaths },
+      { documents: state.workspace.documents, dirtyPaths: state.pageDirtyPaths, action },
     ],
     pageRedoStack: [],
     pageDirtyPaths,
+  };
+}
+
+/** `documents` with `path`'s documents replaced by `incoming`.
+ *
+ * When the incoming ids are the outgoing ids in the same order (an adopted
+ * reindex), each document keeps its own slot, so an arrangement interleaved
+ * with other files survives and a replayed positional edit (a document move,
+ * an insert at a document index) lands where it first landed. Otherwise the
+ * incoming block takes the first outgoing slot, and a new file appends. */
+function placeDocuments(
+  documents: OpenDocument[],
+  path: string,
+  incoming: OpenDocument[],
+): OpenDocument[] {
+  const outgoing = documents.filter((d) => d.path === path);
+  if (
+    outgoing.length > 0 &&
+    outgoing.length === incoming.length &&
+    outgoing.every((d, i) => d.id === incoming[i].id)
+  ) {
+    let next = 0;
+    return documents.map((d) => (d.path === path ? incoming[next++] : d));
+  }
+  const firstIndex = documents.findIndex((d) => d.path === path);
+  const kept = documents.filter((d) => d.path !== path);
+  const insertAt = firstIndex === -1
+    ? kept.length
+    : documents.slice(0, firstIndex).filter((d) => d.path !== path).length;
+  return [...kept.slice(0, insertAt), ...incoming, ...kept.slice(insertAt)];
+}
+
+type PageTier = Pick<AppState, 'workspace' | 'pageUndoStack' | 'pageRedoStack' | 'pageDirtyPaths'>;
+
+/** Replay recorded page edits onto `base` and rebuild both stacks from them.
+ *
+ * The first `undoDepth` actions end on the undo stack and the rest on the redo
+ * stack, in their original order. The replay runs through this reducer, so an
+ * action whose ids the base no longer carries is rejected exactly as a live
+ * dispatch would be; `refused` counts those. Only the tier fields come back:
+ * a replayed placement must not disarm the live tool a second time. */
+function replayPageTier(
+  state: AppState,
+  base: OpenDocument[],
+  baseDirty: string[],
+  actions: readonly PageEditAction[],
+  undoDepth: number,
+): { tier: PageTier; refused: number } {
+  let tier: AppState = {
+    ...state,
+    workspace: { documents: base },
+    pageUndoStack: [],
+    pageRedoStack: [],
+    pageDirtyPaths: baseDirty,
+  };
+  let applied = 0;
+  let kept = 0;
+  let refused = 0;
+  actions.forEach((action, i) => {
+    const next = appReducer(tier, action);
+    if (next.pageUndoStack.length !== tier.pageUndoStack.length + 1) {
+      refused += 1;
+      return;
+    }
+    tier = {
+      ...tier,
+      workspace: next.workspace,
+      pageUndoStack: next.pageUndoStack,
+      pageRedoStack: next.pageRedoStack,
+      pageDirtyPaths: next.pageDirtyPaths,
+    };
+    applied += 1;
+    if (i < undoDepth) kept += 1;
+  });
+  for (let n = applied; n > kept; n--) tier = appReducer(tier, { type: 'UNDO_PAGE_OP' });
+  return {
+    tier: {
+      workspace: tier.workspace,
+      pageUndoStack: tier.pageUndoStack,
+      pageRedoStack: tier.pageRedoStack,
+      pageDirtyPaths: tier.pageDirtyPaths,
+    },
+    refused,
+  };
+}
+
+/** The whole recorded history as one forward sequence: undo entries bottom to
+ * top, then redo entries top to bottom. The base is the composition under the
+ * first undo entry, or the live composition when nothing is undoable. */
+function recordedHistory(state: AppState): {
+  base: OpenDocument[];
+  baseDirty: string[];
+  actions: PageEditAction[];
+  undoDepth: number;
+} {
+  const undo = state.pageUndoStack;
+  return {
+    base: undo.length > 0 ? undo[0].documents : state.workspace.documents,
+    baseDirty: undo.length > 0 ? undo[0].dirtyPaths : state.pageDirtyPaths,
+    actions: [
+      ...undo.map((e) => e.action),
+      ...state.pageRedoStack.map((e) => e.action).reverse(),
+    ],
+    undoDepth: undo.length,
   };
 }
 
@@ -668,28 +779,55 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
     case 'COMMIT_PAGE_EDITS': {
       // The commit bridge's atomic landing: every rebuilt file joins the
-      // snapshot undo chain and the page-edit tier resets in one step. The
-      // workspace is left alone — the indexer re-derives each updated path
-      // from its new buffer.
+      // snapshot undo chain and the edits the commit contains leave the
+      // page-edit tier in one step. The workspace is left alone — the indexer
+      // re-derives each updated path from its new buffer, and that landing
+      // replays whatever is still pending onto the re-derived documents.
       //
-      // Selection is NOT cleared here anymore. This is the
-      // AUTHORED path — the update carries the identity record, the
-      // reindex ADOPTS the selected pages' ids, and the survive-or-prune
-      // pass at SET_WORKSPACE_DOCUMENTS keeps exactly the pages that
-      // still exist. (Non-authored buffer changes — UPDATE_FILE,
-      // REFRESH_BUFFER — still clear eagerly: their reindex mints a
-      // fresh generation, nothing could survive the prune, and clearing
-      // early keeps the async window inert.)
+      // Selection is not cleared here: the update carries the identity
+      // record, the reindex adopts the selected pages' ids, and the
+      // survive-or-prune pass at SET_WORKSPACE_DOCUMENTS keeps exactly the
+      // pages that still exist. (Non-authored buffer changes — UPDATE_FILE,
+      // REFRESH_BUFFER — clear eagerly: their reindex mints a fresh
+      // generation, nothing could survive the prune, and clearing early keeps
+      // the async window inert.)
       let files = state.files;
       for (const update of action.updates) {
         files = applyFileUpdate(files, update);
       }
-      return {
+      const committed: AppState = {
         ...state,
         files,
         pageUndoStack: [],
         pageRedoStack: [],
         pageDirtyPaths: [],
+      };
+      // Edits made while the commit was built and published are not in it.
+      // Their base is the committed composition, which is the composition under
+      // the first of them, with nothing dirty; replaying them there keeps each
+      // one pending, undoable, and dirtying exactly the paths it touches.
+      const since = editsSincePlan(state, action.planned);
+      if (since === null) {
+        // The live stacks no longer show which edits the plan contained.
+        // Everything still dirty stays dirty, and one refusal is counted.
+        return {
+          ...committed,
+          pageDirtyPaths: state.pageDirtyPaths,
+          pageEditRefusals: state.pageEditRefusals + 1,
+        };
+      }
+      if (since.length === 0) return committed;
+      const replayed = replayPageTier(
+        committed,
+        since[0].documents,
+        [],
+        since.map((e) => e.action),
+        since.length,
+      );
+      return {
+        ...committed,
+        ...replayed.tier,
+        pageEditRefusals: state.pageEditRefusals + replayed.refused,
       };
     }
     case 'RESTORE_HISTORY': {
@@ -753,67 +891,73 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
     case 'SET_WORKSPACE_DOCUMENTS': {
       // Indexing is async — the file may have been closed while it ran.
-      if (!state.files.has(action.path)) return state;
+      const indexed = state.files.get(action.path);
+      if (!indexed) return state;
+      // An index of a buffer the file no longer holds describes superseded
+      // bytes; the index of the current buffer lands on its own.
+      if (action.documents.some((d) => d.buffer !== indexed.buffer)) return state;
       const prev = state.workspace.documents;
-      const firstIndex = prev.findIndex((d) => d.path === action.path);
-      const kept = prev.filter((d) => d.path !== action.path);
-      // Replace this file's documents in place; new files append at the end.
-      const insertAt = firstIndex === -1
-        ? kept.length
-        : prev.slice(0, firstIndex).filter((d) => d.path !== action.path).length;
-      const documents = [...kept.slice(0, insertAt), ...action.documents, ...kept.slice(insertAt)];
+      let tier: PageTier = {
+        workspace: { documents: placeDocuments(prev, action.path, action.documents) },
+        pageUndoStack: state.pageUndoStack,
+        pageRedoStack: state.pageRedoStack,
+        pageDirtyPaths: state.pageDirtyPaths,
+      };
+      let refused = 0;
+      // Pending edits address the outgoing documents by id. The incoming ones
+      // carry the same ids when the commit authored them, so the recorded
+      // edits replay onto them; an edit whose ids are gone is refused.
+      const tierLive =
+        state.pageUndoStack.length > 0 ||
+        state.pageRedoStack.length > 0 ||
+        state.pageDirtyPaths.length > 0;
+      if (tierLive && prev.some((d) => d.path === action.path)) {
+        const history = recordedHistory(state);
+        // Dirt already present under the recorded history has no action to
+        // replay: the incoming documents drop it, so it counts as refused.
+        const unrecorded = history.baseDirty.includes(action.path);
+        const replayed = replayPageTier(
+          state,
+          placeDocuments(history.base, action.path, action.documents),
+          history.baseDirty.filter((p) => p !== action.path),
+          history.actions,
+          history.undoDepth,
+        );
+        tier = replayed.tier;
+        refused = replayed.refused + (unrecorded ? 1 : 0);
+      }
+      const documents = tier.workspace.documents;
       // Reindexing bakes any just-committed imports into the target's own pages,
       // so their byte-only sources may now be unreferenced — evict them (gated
       // on an empty page tier).
       const files = evictUnreferencedImportSources(
         state.files,
         documents,
-        state.pageUndoStack,
-        state.pageRedoStack,
+        tier.pageUndoStack,
+        tier.pageRedoStack,
       );
-      // SURVIVE-OR-PRUNE (this block used
-      // to hard-clear, and its old essay explained why: positional ids
-      // were REUSED, so a surviving focus/selection could silently
-      // re-bind to different content, and comparing content was proven
-      // UNSOUND (equal-count partition swaps re-derive bit-identical id
-      // arrays — regression). Both hazards are now structurally dead:
-      // positional ids are GENERATION-TAGGED (a rebuild mints ids no
-      // stale holder can match), and an id that DOES come back is the
-      // authored-adoption case, where the same id IS the same logical
-      // page/partition by construction. So the correct rule became
-      // "keep exactly what the incoming documents still contain":
-      //  - authored commit → adopted ids survive → focus/selection/
-      //    reading position hold across the rebuild;
-      //  - engine op / undo / external bytes → fresh generation →
-      //    everything owned by this path prunes to nothing — the OLD
-      //    behavior, now enforced by id impossibility instead of by
-      //    every consumer remembering to clear.
-      // Ownership is still tested against the real documents, never a
-      // string prefix (paths may contain '#' — regression).
-      const incomingDocIds = new Set(action.documents.map((d) => d.id));
-      const incomingPageIds = new Set(
-        action.documents.flatMap((d) => d.pages.map((p) => p.id)),
-      );
+      // SURVIVE-OR-PRUNE: focus, reading position and selection keep exactly
+      // the ids the resulting documents still contain. Positional ids are
+      // generation-tagged, so a rebuild mints ids no stale holder can match;
+      // an id that comes back is an adopted one and names the same logical
+      // page or partition. A page id no document held before this landing is
+      // left alone: it names a page still to arrive. (A focused document id
+      // always named a document when it was set.) Membership is tested
+      // against the real documents, never a string prefix (paths may contain
+      // '#').
+      const hadPageIds = new Set(prev.flatMap((d) => d.pages.map((p) => p.id)));
+      const keptDocIds = new Set(documents.map((d) => d.id));
+      const keptPageIds = new Set(documents.flatMap((d) => d.pages.map((p) => p.id)));
+      const pageGone = (id: string): boolean => hadPageIds.has(id) && !keptPageIds.has(id);
       const focusedId = state.ui.focusedDocId;
-      const dropFocus =
-        !!focusedId &&
-        prev.some((d) => d.id === focusedId && d.path === action.path) &&
-        !incomingDocIds.has(focusedId);
+      const dropFocus = !!focusedId && !keptDocIds.has(focusedId);
       const currentId = state.ui.currentPageId;
-      const dropCurrent =
-        !!currentId &&
-        prev.some((d) => d.path === action.path && d.pages.some((p) => p.id === currentId)) &&
-        !incomingPageIds.has(currentId);
-      const ownedPage = (id: string): boolean =>
-        prev.some((d) => d.path === action.path && d.pages.some((p) => p.id === id));
+      const dropCurrent = !!currentId && pageGone(currentId);
       const prunedSelection = new Set(
-        [...state.ui.selectedPageIds].filter((id) => !ownedPage(id) || incomingPageIds.has(id)),
+        [...state.ui.selectedPageIds].filter((id) => !pageGone(id)),
       );
       const selectionChanged = prunedSelection.size !== state.ui.selectedPageIds.size;
-      const anchorPruned =
-        !!state.ui.selectionAnchor &&
-        ownedPage(state.ui.selectionAnchor) &&
-        !incomingPageIds.has(state.ui.selectionAnchor);
+      const anchorPruned = !!state.ui.selectionAnchor && pageGone(state.ui.selectionAnchor);
       const ui =
         dropFocus || dropCurrent || selectionChanged || anchorPruned
           ? {
@@ -824,7 +968,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
               selectionAnchor: anchorPruned ? null : state.ui.selectionAnchor,
             }
           : state.ui;
-      return { ...state, files, ui, workspace: { documents } };
+      return {
+        ...state,
+        files,
+        ui,
+        ...tier,
+        pageEditRefusals: state.pageEditRefusals + refused,
+      };
     }
     case 'REORDER_PAGES': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
@@ -839,7 +989,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...d,
         pages: action.order.map((id) => byId.get(id)!),
       }));
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'MOVE_PAGE': {
       const from = state.workspace.documents.find((d) => d.id === action.fromDocId);
@@ -865,7 +1015,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }
       if (pagesForPath(documents, from.path) === 0) return state; // would empty the file
       documents = pruneEmptyDocs(documents);
-      return applyPageEdit(state, documents, from.path === to.path ? [from.path] : [from.path, to.path]);
+      return applyPageEdit(state, documents, from.path === to.path ? [from.path] : [from.path, to.path], action);
     }
     case 'MOVE_PAGE_TO_NEW_DOC': {
       const sourceIndex = state.workspace.documents.findIndex((d) => d.id === action.fromDocId);
@@ -894,7 +1044,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         pageCount: 1,
       };
       next = [...next.slice(0, insertAt), newDoc, ...next.slice(insertAt)];
-      return applyPageEdit(state, next, [source.path]);
+      return applyPageEdit(state, next, [source.path], action);
     }
     case 'MOVE_PAGES': {
       if (action.pageIds.length === 0) return state;
@@ -946,7 +1096,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         if (pagesForPath(documents, path) === 0) return state; // would empty a file
       }
       documents = pruneEmptyDocs(documents);
-      return applyPageEdit(state, documents, [...touched]);
+      return applyPageEdit(state, documents, [...touched], action);
     }
     case 'MOVE_PAGES_TO_NEW_DOC': {
       if (action.pageIds.length === 0) return state;
@@ -989,12 +1139,19 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       for (const path of touched) {
         if (pagesForPath(documents, path) === 0) return state; // would empty a file
       }
-      return applyPageEdit(state, documents, [...touched]);
+      return applyPageEdit(state, documents, [...touched], action);
     }
     case 'IMPORT_PAGES': {
       if (action.pages.length === 0) return state;
       const to = state.workspace.documents.find((d) => d.id === action.toDocId);
       if (!to) return state;
+      // A page index read from a buffer its source no longer holds names a
+      // different page at commit. Such an import cannot be carried.
+      const indexesCurrent = action.pages.every((p) => {
+        const source = action.sources.find((s) => s.path === p.sourceDocId);
+        return !!source && state.files.get(p.sourceDocId)?.buffer === source.buffer;
+      });
+      if (!indexesCurrent) return { ...state, pageEditRefusals: state.pageEditRefusals + 1 };
       // Splice the imported page refs into the target at the clamped index.
       // Their sourceDocId points at a REGISTER_IMPORT_SOURCE byte-only file, so
       // they render (usePdfProxies) and commit (bytesFor) like any other page.
@@ -1003,7 +1160,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         const pages = [...d.pages.slice(0, at), ...action.pages, ...d.pages.slice(at)];
         return { ...d, pages, pageCount: pages.length };
       });
-      return applyPageEdit(state, documents, [to.path]);
+      return applyPageEdit(state, documents, [to.path], action);
     }
     case 'DELETE_PAGE_REF': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
@@ -1018,7 +1175,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           return { ...d, pages, pageCount: pages.length };
         }),
       );
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'DELETE_PAGE_REFS': {
       if (action.pageIds.length === 0) return state;
@@ -1050,7 +1207,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         if (pagesForPath(stripped, path) === 0) return state;
       }
       const documents = pruneEmptyDocs(stripped);
-      return applyPageEdit(state, documents, [...touched]);
+      return applyPageEdit(state, documents, [...touched], action);
     }
     case 'SPLIT_DOC': {
       const index = state.workspace.documents.findIndex((d) => d.id === action.docId);
@@ -1065,7 +1222,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         { ...doc, pages: head, pageCount: head.length },
         { ...doc, id: action.newDocId, name: action.newName, pages: tail, pageCount: tail.length },
       );
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'ADD_ANNOTATION': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
@@ -1097,7 +1254,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             : p,
         ),
       }));
-      const placed = applyPageEdit(state, documents, [doc.path]);
+      const placed = applyPageEdit(state, documents, [doc.path], action);
       return { ...placed, ui: afterPlacement(placed.ui) };
     }
     case 'REGROUP_COUNT_MARKS': {
@@ -1143,7 +1300,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             : p,
         ),
       }));
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'UPDATE_ANNOTATION': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
@@ -1163,7 +1320,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             : p,
         ),
       }));
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'RECOLOR_ANNOTATION': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
@@ -1183,7 +1340,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             : p,
         ),
       }));
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'REMOVE_ANNOTATION': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
@@ -1209,7 +1366,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             : p,
         ),
       }));
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'TRANSFORM_ANNOTATIONS': {
       // Geometry edits, batch-shaped (one gesture = one undo step). Kind
@@ -1272,7 +1429,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         }),
       }));
       if (!changed) return state;
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'REORDER_ANNOTATIONS': {
       // Z-order within the page's annotation array — array order IS both the
@@ -1319,7 +1476,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...d,
         pages: d.pages.map((p) => (p.id === action.pageId ? { ...p, annotations } : p)),
       }));
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'RESTYLE_ANNOTATIONS': {
       // Shared style edit, one undo step. Property applicability is
@@ -1379,7 +1536,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ),
       }));
       if (!changed) return state;
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'RECALIBRATE_ANNOTATION': {
       // Rung 3: one measurement's recorded scale is overridden — the /Measure
@@ -1416,7 +1573,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             : p,
         ),
       }));
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'RECOLOR_ANNOTATIONS': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
@@ -1440,7 +1597,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ),
       }));
       if (!changed) return state;
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'REMOVE_ANNOTATIONS': {
       // Batch remove = one undo step. Same fingerprint-tombstone rule as the
@@ -1475,7 +1632,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             : p,
         ),
       }));
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'ROTATE_PAGE_REF': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
@@ -1494,7 +1651,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             : p,
         ),
       }));
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], {
+        type: 'ROTATE_PAGE_REFS',
+        pageIds: [action.pageId],
+        delta: delta as 90 | 180 | 270,
+      });
     }
     case 'ROTATE_PAGE_REFS': {
       if (action.pageIds.length === 0) return state;
@@ -1523,7 +1684,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       });
       // found === idSet.size (checked above) guarantees at least one match, so
       // `documents` always carries a real change here.
-      return applyPageEdit(state, documents, [...touched]);
+      return applyPageEdit(state, documents, [...touched], action);
     }
     case 'REORDER_DOCS': {
       const index = state.workspace.documents.findIndex((d) => d.id === action.docId);
@@ -1534,7 +1695,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // Cross-file strip order is view-only; swapping two partitions of the
       // same file changes that file's page order and must be committed.
       const samePath = documents[index].path === documents[target].path;
-      return applyPageEdit(state, documents, samePath ? [documents[index].path] : []);
+      return applyPageEdit(state, documents, samePath ? [documents[index].path] : [], action);
     }
     case 'RENAME_DOC': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
@@ -1551,7 +1712,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const partitionCount = state.workspace.documents.filter((d) => d.path === doc.path).length;
       const fileName = state.files.get(doc.path)?.name ?? doc.name;
       const persists = carriesManifest(fileName, partitionCount);
-      return applyPageEdit(state, documents, persists ? [doc.path] : []);
+      return applyPageEdit(state, documents, persists ? [doc.path] : [], action);
     }
     case 'REMOVE_DOC': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
@@ -1559,7 +1720,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const siblings = state.workspace.documents.filter((d) => d.path === doc.path);
       if (siblings.length === 1) return state; // last document of a file — close the file instead
       const documents = state.workspace.documents.filter((d) => d.id !== action.docId);
-      return applyPageEdit(state, documents, [doc.path]);
+      return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'UNDO_PAGE_OP': {
       const last = state.pageUndoStack[state.pageUndoStack.length - 1];
@@ -1571,7 +1732,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         pageUndoStack: state.pageUndoStack.slice(0, -1),
         pageRedoStack: [
           ...state.pageRedoStack,
-          { documents: state.workspace.documents, dirtyPaths: state.pageDirtyPaths },
+          { documents: state.workspace.documents, dirtyPaths: state.pageDirtyPaths, action: last.action },
         ],
       };
     }
@@ -1585,7 +1746,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         pageRedoStack: state.pageRedoStack.slice(0, -1),
         pageUndoStack: [
           ...state.pageUndoStack,
-          { documents: state.workspace.documents, dirtyPaths: state.pageDirtyPaths },
+          { documents: state.workspace.documents, dirtyPaths: state.pageDirtyPaths, action: next.action },
         ],
       };
     }
