@@ -8,7 +8,7 @@
 //
 // Nothing here is a warning: the product is fully usable without Ghostscript,
 // and the copy says so rather than implying a broken install. Declining is a
-// legitimate answer, and "Don't ask again" makes it permanent; Settings ▸
+// legitimate answer, and "Don't ask again" makes it permanent; Preferences ▸
 // Engine stays the always-open door either way.
 import React from 'react';
 import { useTranslation } from 'react-i18next';

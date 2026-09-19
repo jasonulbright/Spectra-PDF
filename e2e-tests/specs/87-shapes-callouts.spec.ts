@@ -1,4 +1,4 @@
-// Rung 2 — drawing shapes + callouts: real creation gestures per figure
+// Drawing shapes + callouts: real creation gestures per figure
 // (band, two-point drag, vertex clicks), vertex editing, the properties-bar
 // restyle, commit into REAL subtypes (CLI truth), and the reimport
 // round-trip — reopening the saved file brings the shapes back as editable

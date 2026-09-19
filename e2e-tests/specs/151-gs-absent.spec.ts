@@ -32,7 +32,7 @@ import {
 // still works, Create PDF still builds from images, Export still offers Word
 // and text. The walk samples one surface per MECHANISM (a rendered notice, a
 // gated command, a disabled mode inside a working panel, a refused source
-// class inside a working dialog), drives Settings ▸ Engine, then lifts the
+// class inside a working dialog), drives Preferences ▸ Engine, then lifts the
 // pin and asserts a surface lights up with no restart.
 
 const FIXTURES = resolve(process.cwd(), 'fixtures');
@@ -224,7 +224,7 @@ describe('the Ghostscript-absent axis', () => {
     expect(await $('[data-testid="create-pdf-convert"]').isEnabled()).toBe(false);
   });
 
-  // ── Settings ▸ Engine: the surface where the answer changes ────────────
+  // ── Preferences ▸ Engine: the surface where the answer changes ─────────
 
   it('reports the engine as not set up', async () => {
     await openEngineSettings();

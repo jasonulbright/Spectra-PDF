@@ -1,4 +1,4 @@
-// Rung 4 — XFDF through the shipped binary: annotations authored in the app,
+// XFDF through the shipped binary: annotations authored in the app,
 // committed, exported to XFDF via the CLI, imported into a fresh PDF via the
 // CLI, and verified by the CLI's own listing. The interchange loop, end to
 // end, on real files.

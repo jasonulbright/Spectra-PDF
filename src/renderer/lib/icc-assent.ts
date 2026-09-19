@@ -162,7 +162,7 @@ export function iccNeedsAssent(state: IccAssentState = current): boolean {
 
 // ── The reconsider affordance ────────────────────────────────────────────
 //
-// The module-level slot idiom `gs-capability.ts` uses for Settings ▸ Engine:
+// The module-level slot idiom `gs-capability.ts` uses for Preferences ▸ Engine:
 // App registers the opener while it is mounted, and every disabled surface
 // calls one function rather than each holding its own route to the dialog.
 

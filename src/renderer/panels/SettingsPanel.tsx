@@ -187,7 +187,7 @@ function useForcedColors(): boolean {
 }
 
 /**
- * Settings ▸ Engine ▸ Ghostscript — the authority surface for a prerequisite
+ * Preferences ▸ Engine ▸ Ghostscript — the authority surface for a prerequisite
  * the product does not ship.
  *
  * What it replaces: a Built-in/External pair of buttons over a bundled copy,

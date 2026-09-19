@@ -24,7 +24,7 @@ describe('menu bar', () => {
   });
 
   it('drives a command through a menu item (Document ▸ Watermark)', async () => {
-    // Slice C: a doc-targeted panel item with NO document runs the
+    // A doc-targeted panel item with NO document runs the
     // picker-first flow (a native dialog no test can drive) — so exercise the
     // documented flow: with a doc open, the item docks its panel beside it.
     await openByPaths([SAMPLE_PDF]);
@@ -46,7 +46,7 @@ describe('menu bar', () => {
       { timeout: 15_000, timeoutMsg: 'the Document menu never opened' },
     );
     await $('[data-testid="menuitem-document-watermark"]').click();
-    // Slice C: tools.panel.watermark opens the DOCK on the doc tab with the
+    // tools.panel.watermark opens the DOCK on the doc tab with the
     // watermark op armed — the document never leaves the screen.
     await $('[data-testid="tool-dock"]').waitForDisplayed({
       timeout: 10_000,

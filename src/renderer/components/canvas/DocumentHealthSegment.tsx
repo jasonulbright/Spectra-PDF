@@ -18,9 +18,9 @@ import {
 //
 // ASK-FIRST, and that is the whole design: a glyph in the status bar that says
 // only what state the document is in, and a panel that says the rest ONLY once
-// the reader opens it. No toast, no auto-open, nothing said unprompted — the
-// audit that registered this work found the opens are already silent, and the
-// point is to make them auditable without making them noisy.
+// the reader opens it. No toast, no auto-open, nothing said unprompted — an
+// open stays silent, and the point is to make opens auditable without making
+// them noisy.
 //
 // OBSERVABILITY ONLY. Nothing on this surface changes the document; the one
 // sentence about repair names the Repair tool and does not run it.

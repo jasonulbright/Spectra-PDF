@@ -88,7 +88,7 @@ function circle(cx: number, cy: number, r: number): SymbolPart {
 
 // ── The built-in sets ────────────────────────────────────────────────────
 
-/** The slice-C count markers, re-presented as a set. Same geometry object —
+/** The count markers, re-presented as a set. Same geometry object —
  * the marker a count group draws and the symbol the palette offers are one
  * registry, which is the point. */
 const MARKER_NAMES: Record<string, string> = {

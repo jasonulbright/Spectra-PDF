@@ -123,7 +123,7 @@ export interface SecondaryToolbarProps {
   measureLeaveMarkup: boolean;
   onToggleMeasureLeaveMarkup: () => void;
   measureResult: string | null;
-  /** Rung 3: the calibration drag span (PDF points) awaiting its value. */
+  /** The calibration drag span (PDF points) awaiting its value. */
   calibration: number | null;
   onApplyCalibration: (value: number, unit: MeasureUnit) => void;
   onCancelCalibration: () => void;
@@ -206,7 +206,7 @@ function alignTitleKey(
   return `canvas.edit.align${mode.charAt(0).toUpperCase()}${mode.slice(1)}` as CanvasStringKey;
 }
 
-/** Rung 3: "Measured N pt = [value][unit] Apply" — the calibration drag's
+/** "Measured N pt = [value][unit] Apply" — the calibration drag's
  * follow-up. Local state per pending span (keyed remount on lengthPts). */
 function CalibrationApplyRow({
   lengthPts,

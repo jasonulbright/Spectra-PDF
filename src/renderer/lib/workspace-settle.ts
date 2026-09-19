@@ -73,33 +73,86 @@ export function pathDescribesCurrentBytes(state: WorkspaceState, path: string): 
   return !!buffer && own.length > 0 && own.every((d) => d.buffer === buffer);
 }
 
-// Buffers whose last index run failed. The indexer retries on its next pass
-// and clears the mark when it does, so the mark means "no index is coming".
-const failed = new WeakSet<object>();
+// Buffers whose last index run failed, with the error it failed with. The
+// indexer retries on its next pass and clears the mark when it does, so the
+// mark means "no index is coming".
+const failed = new WeakMap<object, unknown>();
+// The same verdicts, kept through a retry until a run reads the buffer: a
+// retry that fails again must not take the notice away while it runs.
+const unreadable = new WeakSet<object>();
 const failureListeners = new Set<() => void>();
 
-export function recordIndexFailure(buffer: PdfBuffer): void {
-  failed.add(buffer);
+/** The index verdicts as of the last change. A new object for each change,
+ * so a subscriber can tell that one happened. */
+export interface IndexVerdicts {
+  unreadable(buffer: PdfBuffer): boolean;
+}
+
+function verdictSnapshot(): IndexVerdicts {
+  return { unreadable: (buffer) => unreadable.has(buffer) };
+}
+
+let verdicts = verdictSnapshot();
+
+function notify(verdictChanged: boolean): void {
+  if (verdictChanged) verdicts = verdictSnapshot();
   for (const listener of [...failureListeners]) listener();
+}
+
+export function recordIndexFailure(buffer: PdfBuffer, error: unknown): void {
+  failed.set(buffer, error);
+  const known = unreadable.has(buffer);
+  unreadable.add(buffer);
+  notify(!known);
 }
 
 export function clearIndexFailure(buffer: PdfBuffer): void {
   failed.delete(buffer);
 }
 
-/** Whether a document not read from its file's current bytes waits on a
- * buffer whose index failed. */
-function awaitsFailedIndex(state: WorkspaceState): boolean {
-  return state.workspace.documents.some((d) => {
+/** A run read `buffer`: its pages are readable. */
+export function recordIndexSuccess(buffer: PdfBuffer): void {
+  if (unreadable.delete(buffer)) notify(true);
+}
+
+/** Subscribe to index verdicts, read with `indexVerdicts`. */
+export function subscribeIndexVerdicts(listener: () => void): () => void {
+  failureListeners.add(listener);
+  return () => {
+    failureListeners.delete(listener);
+  };
+}
+
+export function indexVerdicts(): IndexVerdicts {
+  return verdicts;
+}
+
+/**
+ * Whether `file` shows no pages because pdf.js could not read the pages of
+ * the bytes it holds: it has no documents of those bytes, and their index
+ * failed. pdf.js may load such bytes and still fail on a page.
+ */
+export function pagesUnreadable(state: WorkspaceState, file: OpenFile, known: IndexVerdicts): boolean {
+  return !!file.buffer && known.unreadable(file.buffer) && needsIndex(state, file.path);
+}
+
+/** The failed index a document not read from its file's current bytes waits
+ * on, or null. */
+function awaitedFailure(state: WorkspaceState): { error: unknown } | null {
+  for (const d of state.workspace.documents) {
     const current = state.files.get(d.path)?.buffer;
-    return !!current && !readFromCurrentBytes(state, d) && failed.has(current);
-  });
+    if (current && !readFromCurrentBytes(state, d) && failed.has(current)) {
+      return { error: failed.get(current) };
+    }
+  }
+  return null;
 }
 
 /**
  * Resolve once the workspace is settled. Reject when a document not read from
  * its file's current bytes waits on a buffer whose index failed: no landing is
- * coming, and waiting on would hold the commit forever.
+ * coming, and waiting on would hold the commit forever. The refusal carries
+ * the index's own error as its `cause`.
  */
 export function awaitSettledWorkspace(
   getState: () => WorkspaceState,
@@ -119,13 +172,23 @@ export function awaitSettledWorkspace(
       if (workspaceSettled(state)) {
         finish();
         resolve();
-      } else if (awaitsFailedIndex(state)) {
+        return;
+      }
+      const failure = awaitedFailure(state);
+      if (failure) {
         finish();
-        reject(new Error(tChrome('app.history.changed')));
+        reject(new Error(tChrome('app.history.changed'), { cause: failure.error }));
       }
     }
     unsubscribe = subscribe(check);
     failureListeners.add(check);
     check();
   });
+}
+
+/** The error the awaited index failed with: the cause of an
+ * `awaitSettledWorkspace` refusal, else the refusal itself. */
+export function indexError(refusal: unknown): Error {
+  const cause = refusal instanceof Error && refusal.cause !== undefined ? refusal.cause : refusal;
+  return cause instanceof Error ? cause : new Error(String(cause));
 }

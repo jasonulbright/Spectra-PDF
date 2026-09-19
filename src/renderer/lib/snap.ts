@@ -86,14 +86,14 @@ export interface SnapPath {
   closed: readonly boolean[];
 }
 
-/** A slice-B guide line, kept here because its CANDIDATE math belongs with
+/** A guide line, kept here because its CANDIDATE math belongs with
  * the rest: an `x` guide is a vertical line at that normalized x. */
 export interface SnapGuide {
   axis: 'x' | 'y';
   pos: number;
 }
 
-/** A slice-B grid. Spacing and origin are display-normalized; the caller
+/** A grid. Spacing and origin are display-normalized; the caller
  * converts from paper or real-world units. Non-positive spacing yields no
  * candidates rather than dividing by zero. */
 export interface SnapGrid {

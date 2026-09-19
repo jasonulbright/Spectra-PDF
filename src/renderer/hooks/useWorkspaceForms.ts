@@ -131,7 +131,7 @@ export function useWorkspaceForms(
               failsRef.current.delete(path);
             } catch {
               // A failed re-read keeps the PREVIOUS good read published
-              // (review note: publishing empty fields here would make the
+              // (publishing empty fields here would make the
               // pending-value pruning wipe values over a transient hiccup —
               // the same hazard stale-while-revalidate exists to prevent).
               // CRITICALLY it must NOT cache the old info under the NEW

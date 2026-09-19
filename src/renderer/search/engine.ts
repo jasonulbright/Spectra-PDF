@@ -140,7 +140,7 @@ export function createSearchEngine({
   // running against the PRE-mutation raster; its result is discarded if the
   // generation moved on — otherwise a stale pass (e.g. the pre-redaction
   // image) could overwrite the fresh one and get persisted as an invisible
-  // searchable layer, re-embedding just-removed text. (Review-caught.)
+  // searchable layer, re-embedding just-removed text.
   const sourceGen = new Map<string, number>();
   const genOf = (key: string): number => sourceGen.get(key) ?? 0;
 

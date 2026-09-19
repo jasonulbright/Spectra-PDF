@@ -7,7 +7,7 @@ import React, {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { useAppState, useAppDispatch, useReadAppState, useReadLinkDrafts } from '../../state/AppStateProvider';
+import { useAppState, useAppDispatch, useReadAppState, useReadLinkDrafts, useSubscribeAppState } from '../../state/AppStateProvider';
 import { usePdfProxyState } from '../../hooks/usePdfProxies';
 import { isUnrenderable } from '../../lib/render-health';
 import { showableFile, tabFiles } from '../../state/selectors';
@@ -34,8 +34,23 @@ import {
   sanitizePageEntry,
 } from '../../lib/page-labels';
 import { getDocumentProxy, requestDocumentProxy } from '../../lib/pdfDocCache';
-import { buildRedactionRegions, pageForFilePageNumber, withSeededMarks } from '../../lib/redaction';
-import { drawingTarget, pathDescribesCurrentBytes } from '../../lib/workspace-settle';
+import {
+  EMPTY_MARK_LEDGER,
+  buildRedactionRegions,
+  marksAcross,
+  marksAfterRun,
+  marksInRun,
+  pageForFilePageNumber,
+  withSeededMarks,
+  type MarkLedger,
+} from '../../lib/redaction';
+import {
+  drawingTarget,
+  indexVerdicts,
+  pagesUnreadable,
+  pathDescribesCurrentBytes,
+  subscribeIndexVerdicts,
+} from '../../lib/workspace-settle';
 import { displayRectToPdf, pdfRectToDisplay } from '../../lib/pdfx-build';
 import { sameRegion } from '../../lib/search-redact';
 import {
@@ -265,12 +280,14 @@ interface WorkspaceCanvasViewProps {
   // Run the engine's redact on one file — App routes this through
   // performOperation, so the commit gate flushes pending page edits, a
   // snapshot lands on the undo chain, and the buffer reloads after. Resolves
-  // FALSE when the document's own signature policy declined the edit, which
-  // is not a failure and must not clear the marks it did not apply.
+  // whether new bytes were written: FALSE when the document's own signature
+  // policy declined the edit, which is not a failure and must not clear the
+  // marks it did not apply.
   onRedactFile: (path: string, regions: RedactionRegion[]) => Promise<boolean>;
   // Persist the pending marks as the file's /Redact annotation set
-  // (same performOperation shape — undoable; the reload re-seeds).
-  onSaveRedactionMarks: (path: string, regions: RedactionRegion[]) => Promise<void>;
+  // (same performOperation shape — undoable; the reload re-seeds). Resolves
+  // whether new bytes were written, as onRedactFile does.
+  onSaveRedactionMarks: (path: string, regions: RedactionRegion[]) => Promise<boolean>;
   // A widget's data action, fired by the gesture the document authored it on
   // (a pushbutton's `/A` on a click, the `/AA` triggers on theirs).
   onWidgetAction: (
@@ -481,7 +498,7 @@ const NO_ANNOTATIONS: readonly PageAnnotation[] = [];
 const NO_LINK_REGIONS: readonly LinkRegion[] = [];
 const NO_ANNOTATION_IDS: readonly string[] = [];
 
-// Rung 3: the right-click recalibrate popover — "this measures X unit" with
+// The right-click recalibrate popover — "this measures X unit" with
 // two outcomes: set the toolbar scale for FUTURE measurements, or override
 // THIS measurement's recorded factors (undoable edit).
 function RecalibratePopover({
@@ -632,6 +649,7 @@ export function WorkspaceCanvasView({
   useTranslation();
   const state = useAppState();
   const readState = useReadAppState();
+  const subscribeState = useSubscribeAppState();
   const linkDrafts = useReadLinkDrafts();
   const dispatch = useAppDispatch();
   const docs = state.workspace.documents;
@@ -657,14 +675,17 @@ export function WorkspaceCanvasView({
   // Read off `files`, NOT the workspace documents: indexing goes through the
   // same pdf.js load, so a document the renderer refused has no workspace
   // entry to name it. The file does — it is the tab the user is looking at.
+  // pdf.js can also load bytes and then fail on a page: the index fails, and
+  // the file shows no pages either.
+  const knownIndexes = useSyncExternalStore(subscribeIndexVerdicts, indexVerdicts);
   const unrenderableNames = useMemo(() => {
     const names: string[] = [];
     for (const f of tabFiles(state)) {
-      if (!isUnrenderable(renderHealth, f.path, f.buffer)) continue;
+      if (!isUnrenderable(renderHealth, f.path, f.buffer) && !pagesUnreadable(state, f, knownIndexes)) continue;
       if (!names.includes(f.name)) names.push(f.name);
     }
     return names;
-  }, [state, renderHealth]);
+  }, [state, renderHealth, knownIndexes]);
   const layout = useMemo(() => computeLayout(docs), [docs]);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -918,7 +939,7 @@ export function WorkspaceCanvasView({
   const [measureScale, setMeasureScale] = useState<MeasureScale>(DEFAULT_MEASURE_SCALE);
   const [measureLeaveMarkup, setMeasureLeaveMarkup] = useState(true);
   const [measureResult, setMeasureResult] = useState<string | null>(null);
-  // Rung 3 — calibration: the dragged span (PDF points) awaiting its real
+  // Calibration: the dragged span (PDF points) awaiting its real
   // value in the toolbar; and the right-click recalibrate popover's target.
   const [calibration, setCalibration] = useState<number | null>(null);
   const [recalTarget, setRecalTarget] = useState<{
@@ -943,12 +964,36 @@ export function WorkspaceCanvasView({
   } | null>(null);
   // Pending redaction marks — transient view state, deliberately NOT the
   // page-edit tier (see lib/redaction.ts for why). They survive tool
-  // switches and in-memory page edits, and die when their file's buffer
-  // changes underneath them or the canvas unmounts.
-  const [marks, setMarks] = useState<RedactionMark[]>([]);
-  // Detected field candidates — the redaction-mark lifetime exactly: transient,
-  // never the page tier, and invalidated on buffer identity. Nothing here has
-  // touched the document; accepting a candidate is what does.
+  // switches, in-memory page edits and the page-tier commit, and die with
+  // their page or when the canvas unmounts. The ledger also counts the
+  // unsaved marks that died with their page, for the notice.
+  const [markLedger, setMarkLedger] = useState<MarkLedger>(EMPTY_MARK_LEDGER);
+  const marks = markLedger.marks;
+  const setMarks = useCallback(
+    (update: RedactionMark[] | ((prev: RedactionMark[]) => RedactionMark[])) =>
+      setMarkLedger((ledger) => {
+        const next = typeof update === 'function' ? update(ledger.marks) : update;
+        return next === ledger.marks ? ledger : { ...ledger, marks: next };
+      }),
+    [],
+  );
+  // The count of cleared marks the user has dismissed the notice for.
+  const [marksClearedSeen, setMarksClearedSeen] = useState(0);
+  // Every dispatch, one at a time: a commit rebases a mark by the rotation it
+  // wrote, which only the state just before that dispatch shows. A render can
+  // fold several dispatches into one.
+  useEffect(() => {
+    let before = readState();
+    return subscribeState(() => {
+      const after = readState();
+      const was = before;
+      before = after;
+      setMarkLedger((ledger) => marksAcross(ledger, was, after));
+    });
+  }, [readState, subscribeState]);
+  // Detected field candidates — transient, never the page tier, and
+  // invalidated on buffer identity. Nothing here has touched the document;
+  // accepting a candidate is what does.
   const [fieldCandidates, setFieldCandidates] = useState<FieldCandidate[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   // Detected tables under review. Same lifetime as the candidates above and
@@ -964,8 +1009,8 @@ export function WorkspaceCanvasView({
   const [confirmRedact, setConfirmRedact] = useState(false);
   const [redacting, setRedacting] = useState(false);
   const [redactError, setRedactError] = useState<string | null>(null);
-  // Pending visible-signature placement — single, transient, same lifecycle
-  // as redaction marks (see lib/signature-placement.ts).
+  // Pending visible-signature placement — single, transient, invalidated on
+  // buffer identity (see lib/signature-placement.ts).
   const [sigPlacement, setSigPlacement] = useState<SignaturePlacement | null>(null);
   // Sign-into-an-existing-field target — mutually exclusive with the
   // rubber-band placement; same transient lifecycle.
@@ -2741,7 +2786,7 @@ export function WorkspaceCanvasView({
     },
     [resolvedAnnots, dispatch],
   );
-  // ── Rung 3: calibration + per-measurement recalibration ──────────────
+  // ── Calibration + per-measurement recalibration ──────────────────────
   const onCalibrate = useCallback((lengthPts: number) => setCalibration(lengthPts), []);
   const onMeasureContextMenu = useCallback(
     (docId: string, pageId: string, annotationId: string, x: number, y: number) =>
@@ -3127,19 +3172,19 @@ export function WorkspaceCanvasView({
         },
       ]);
     },
-    [acceptDrawing],
+    [acceptDrawing, setMarks],
   );
 
   const onRemoveRedactionMark = useCallback(
     (markId: string) => setMarks((prev) => prev.filter((m) => m.id !== markId)),
-    [],
+    [setMarks],
   );
 
   // ── Ruler guides ──────────────────────────────────────────────────────
-  // Per-document view state with the redaction-mark lifetime: never written
-  // into the file, invalidated on buffer
-  // identity, and pruned to pages that still exist so a dead generation-tagged
-  // id can never be offered to a gesture (the id-holder rule).
+  // Per-document view state: never written into the file, invalidated on
+  // buffer identity, and pruned to pages that still exist so a dead
+  // generation-tagged id can never be offered to a gesture (the id-holder
+  // rule).
   const [guides, setGuides] = useState<PageGuide[]>(NO_GUIDES);
   const liveGuides = useMemo(() => {
     if (guides.length === 0) return NO_GUIDES;
@@ -3282,18 +3327,14 @@ export function WorkspaceCanvasView({
     };
   }, [sigTargetPath, state.files, engineCall]);
 
-  // Invalidate marks when their file's bytes change underneath them (commit,
-  // whole-file op, undo, reopen) or the file closes. PageRef ids are
-  // positional (`path#pN`), so after a reindex a surviving mark could bind to
-  // a DIFFERENT physical page — for a destructive tool, dropping the marks is
-  // the only safe answer. Buffer identity is exactly what the indexer keys
-  // on, so this fires precisely when the workspace is about to be rebuilt.
-  // Re-seed: a file's stored /Redact set loads back into transient
-  // marks whenever its buffer SETTLES (open, commit, whole-file op, undo —
-  // the very moments the invalidation below clears them). Marks and file
-  // agree by construction: the transient set is always a projection of the
-  // stored one plus this session's unsaved drawing. The internal read uses
-  // the file lock, but no commit gate or operation-queue entry.
+  // Re-seed: a file's stored /Redact set loads back into transient marks
+  // whenever its buffer SETTLES (open, commit, whole-file op, undo). New
+  // bytes that a page-tier commit did not compose take new page ids, so the
+  // seeded marks of the previous bytes die with their pages (marksAcross).
+  // Marks and file agree by construction: the transient set is always a
+  // projection of the stored one plus this session's unsaved drawing. The
+  // internal read uses the file lock, but no commit gate or operation-queue
+  // entry.
   const seedSeqRef = useRef(new Map<string, number>());
   const pendingSeedRef = useRef<Set<string>>(new Set());
 
@@ -3380,10 +3421,12 @@ export function WorkspaceCanvasView({
         // A listing of bytes the file no longer holds counts other pages; the
         // change that replaced them queued the seed of the new ones.
         if (readState().files.get(path)?.buffer !== f.buffer) return;
-        if (!listed.marks?.length) return;
-        const { marks: seeded, orphaned, buffer } = await marksFromFileRects(path, listed.marks);
+        // An empty listing still lands: a seeded mark a page-tier commit
+        // carried over gives way to what the new bytes store, even to nothing.
+        const stored = listed.marks ?? [];
+        const { marks: seeded, orphaned, buffer } = await marksFromFileRects(path, stored);
         if (seedSeqRef.current.get(path) !== seq || buffer !== f.buffer) return;
-        markPathsEverRef.current.add(path);
+        if (stored.length > 0) markPathsEverRef.current.add(path);
         setMarks((prev) => withSeededMarks(prev, path, seeded));
         if (orphaned > 0) {
           setRedactError(
@@ -3406,7 +3449,7 @@ export function WorkspaceCanvasView({
         );
       }
     },
-    [engineCall, marksFromFileRects, readState],
+    [engineCall, marksFromFileRects, readState, setMarks],
   );
 
   // --- Link regions on the page ----------------------------------------
@@ -3541,14 +3584,15 @@ export function WorkspaceCanvasView({
       }
     }
     if (invalidated.size > 0) {
-      setMarks((prevMarks) => prevMarks.filter((m) => !invalidated.has(m.path)));
+      // Redaction marks are not cleared here: they follow their pages
+      // (marksAcross), and one that dies unsaved is owed a notice.
       // A candidate names a region of bytes that no longer exist. After a
       // create the whole list is stale by construction, so it goes rather than
       // pointing at a document that no longer matches it.
       setFieldCandidates((prev) => prev.filter((c) => !invalidated.has(c.path)));
-      // Guides share the mark's lifetime exactly — same invalidation, same
-      // reason (a rebuilt file's pages are new objects; a guide bound to a
-      // dead page id is a guide pointing at nothing).
+      // Guides go with their file's bytes: a rebuilt file's pages are new
+      // objects, and a guide bound to a dead page id is a guide pointing at
+      // nothing.
       setGuides((prev) => {
         const kept = withoutPaths(prev, invalidated);
         return kept.length === prev.length ? prev : kept;
@@ -5375,7 +5419,7 @@ export function WorkspaceCanvasView({
           subpaths: p.subpaths.map((sp) => [...sp]),
           closed: [...p.closed],
         })),
-      // Slice B: the live guide list, in the STORED frame. The e2e drag off a
+      // The live guide list, in the STORED frame. The e2e drag off a
       // ruler is real (the strips are ordinary chrome at known coordinates),
       // so this is a READ-back, not a placement shortcut — a spec that placed
       // guides through the harness would never exercise the gesture.
@@ -5561,8 +5605,8 @@ export function WorkspaceCanvasView({
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasForms({
       setFieldValue: (path, fieldName, value) => {
-        // Mirror exactly what the overlay controls can produce (review note:
-        // a looser harness could "pass" scenarios no real user can trigger):
+        // Mirror exactly what the overlay controls can produce (a looser
+        // harness could "pass" scenarios no real user can trigger):
         // right shape for the type, and choice values within the options.
         const info = workspaceFormsRef.current.get(path);
         const field = info?.fields.find((f) => f.name === fieldName);
@@ -5729,11 +5773,12 @@ export function WorkspaceCanvasView({
       });
       const failures: string[] = [];
       for (const payload of payloads) {
+        // The run's marks leave with the bytes it writes; that is no loss.
+        const run = crypto.randomUUID();
+        let wrote = false;
+        setMarkLedger((ledger) => marksInRun(ledger, payload.markIds, run));
         try {
-          if (await onRedactFile(payload.path, payload.regions)) {
-            const applied = new Set(payload.markIds);
-            setMarks((prev) => prev.filter((m) => !applied.has(m.id)));
-          }
+          wrote = await onRedactFile(payload.path, payload.regions);
         } catch (err) {
           const name = payload.path.split(/[\\/]/).pop() || payload.path;
           failures.push(
@@ -5742,6 +5787,8 @@ export function WorkspaceCanvasView({
               message: err instanceof Error ? err.message : String(err),
             }),
           );
+        } finally {
+          setMarkLedger((ledger) => marksAfterRun(ledger, run, wrote));
         }
       }
       if (failures.length > 0) {
@@ -5797,8 +5844,12 @@ export function WorkspaceCanvasView({
       const marked = new Set(payloads.map((p) => p.path));
       const failures: string[] = [];
       for (const payload of payloads) {
+        // The file stores the run's marks, and the seed shows them again.
+        const run = crypto.randomUUID();
+        let wrote = false;
+        setMarkLedger((ledger) => marksInRun(ledger, payload.markIds, run));
         try {
-          await onSaveRedactionMarks(payload.path, payload.regions);
+          wrote = await onSaveRedactionMarks(payload.path, payload.regions);
         } catch (err) {
           const name = payload.path.split(/[\\/]/).pop() || payload.path;
           failures.push(
@@ -5807,6 +5858,8 @@ export function WorkspaceCanvasView({
               message: err instanceof Error ? err.message : String(err),
             }),
           );
+        } finally {
+          setMarkLedger((ledger) => marksAfterRun(ledger, run, wrote));
         }
       }
       for (const path of [...markPathsEverRef.current]) {
@@ -5930,7 +5983,7 @@ export function WorkspaceCanvasView({
       if (fresh.length > 0) setMarks((prev) => [...prev, ...fresh]);
       return { added: fresh.length, duplicates, skipped };
     },
-    [markedRects, marksFromFileRects, readState],
+    [markedRects, marksFromFileRects, readState, setMarks],
   );
 
   const searchOcrPage = useCallback(
@@ -6521,7 +6574,7 @@ export function WorkspaceCanvasView({
       count: () => liveMarksRef.current.length,
     });
     return () => registerCanvasRedaction(null);
-  }, []);
+  }, [setMarks]);
 
   // Same bridge for the visible-signature placement (rubber band + native
   // dialogs aren't WebDriver-drivable). The harness places on the first page
@@ -8413,18 +8466,39 @@ export function WorkspaceCanvasView({
         </div>
       )}
 
-      {redactError && (
-        <div
-          data-testid="redact-error"
-          className="absolute bottom-16 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
-        >
-          <span className="flex-1">{redactError}</span>
-          <button
-            onClick={() => setRedactError(null)}
-            className="text-red-300 hover:text-red-100"
-          >
-            ×
-          </button>
+      {(redactError || markLedger.cleared > marksClearedSeen) && (
+        <div className="absolute bottom-16 end-4 z-30 max-w-md flex flex-col gap-2">
+          {markLedger.cleared > marksClearedSeen && (
+            <div
+              data-testid="redact-marks-cleared"
+              role="status"
+              className="flex items-start gap-2 px-3 py-2 bg-amber-500/15 border border-amber-500/40 rounded text-xs text-amber-200 shadow-lg"
+            >
+              <span className="flex-1">
+                {tChromeCount('canvas.redact.marksCleared', markLedger.cleared - marksClearedSeen)}
+              </span>
+              <button
+                onClick={() => setMarksClearedSeen(markLedger.cleared)}
+                className="text-amber-300 hover:text-amber-100"
+              >
+                ×
+              </button>
+            </div>
+          )}
+          {redactError && (
+            <div
+              data-testid="redact-error"
+              className="flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+            >
+              <span className="flex-1">{redactError}</span>
+              <button
+                onClick={() => setRedactError(null)}
+                className="text-red-300 hover:text-red-100"
+              >
+                ×
+              </button>
+            </div>
+          )}
         </div>
       )}
 

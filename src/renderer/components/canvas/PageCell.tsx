@@ -965,7 +965,7 @@ interface PageCellProps {
   onMergeParagraphPrev?: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
   onMergeParagraphNext?: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
   // Pending visible-signature placement, when it sits on THIS page (transient
-  // view state with mark lifecycle — see lib/signature-placement.ts).
+  // view state — see lib/signature-placement.ts).
   signaturePlacement?: SignaturePlacement | null;
   // Find: this page matches the active query. OCR'd pages additionally
   // get per-word highlight boxes (display-normalized at the page's BAKED
@@ -1107,10 +1107,10 @@ interface PageCellProps {
   ) => void;
   // One gesture = one dispatch = one undo step (move, resize, nudge, align).
   onTransformAnnotations: (docId: string, edits: AnnotationTransform[]) => void;
-  // Rung 3: the calibration drag's measured span (PDF points) — the toolbar
+  // The calibration drag's measured span (PDF points) — the toolbar
   // turns it into a ratio once the user states the real value.
   onCalibrate: (lengthPts: number) => void;
-  // Rung 3: right-click on a measurement body (Select tool) — the view opens
+  // Right-click on a measurement body (Select tool) — the view opens
   // the recalibrate popover at the screen point.
   onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   // Ctrl-marquee result — the view decides how it merges into the selection.
@@ -3593,7 +3593,7 @@ function PageCellImpl({
           onContextMenu={
             tool === 'select' && a.kind === 'measure'
               ? (e) => {
-                  // Rung 3: right-click a dimension → the recalibrate popover.
+                  // Right-click a dimension → the recalibrate popover.
                   e.preventDefault();
                   e.stopPropagation();
                   onMeasureContextMenu(docId, page.id, a.id, e.clientX, e.clientY);

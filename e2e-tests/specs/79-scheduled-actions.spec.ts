@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import {
   copyFileSync,
   existsSync,
@@ -32,12 +32,14 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 const TASK_NAME = 'E2E Action Schedule';
-const FROZEN = resolve(
+const ACTIONS_DIR = resolve(
   process.env.ProgramData ?? 'C:\\ProgramData',
   'Spectra PDF',
   'scheduled-actions',
-  `${TASK_NAME}.json`,
 );
+/** One registration's action file: `<task>@<pid>-<8 hex>.json`. */
+const FROZEN_NAME = /^E2E Action Schedule@\d+-[0-9a-f]{8}\.json$/;
+let frozen = '';
 
 function taskExists(name: string): boolean {
   try {
@@ -97,7 +99,11 @@ describe('scheduled guided actions', () => {
   after(async () => {
     forceDelete(TASK_NAME);
     try {
-      rmSync(FROZEN, { force: true });
+      for (const name of readdirSync(ACTIONS_DIR)) {
+        if (FROZEN_NAME.test(name) || name === `${TASK_NAME}.json`) {
+          rmSync(resolve(ACTIONS_DIR, name), { force: true });
+        }
+      }
     } catch {
       /* fine */
     }
@@ -136,19 +142,21 @@ describe('scheduled guided actions', () => {
     expect(taskExists(TASK_NAME)).toBe(true);
     // The frozen copy is machine-scoped (readable by whatever account the
     // task runs as) and carries exactly the sanitized shape we handed over.
-    expect(existsSync(FROZEN)).toBe(true);
-    const frozen = JSON.parse(readFileSync(FROZEN, 'utf-8')) as {
-      name: string;
-      steps: { op: string }[];
-    };
-    expect(frozen.name).toBe('Nightly Strip');
-    expect(frozen.steps.map((s) => s.op)).toEqual(['strip_metadata']);
-
-    // The list reads the run-action command line back off the task itself.
+    // The list reads the run-action command line back off the task itself,
+    // and the file it names is this registration's own frozen copy.
     const row = (await scheduleList()).find((r) => r.name === TASK_NAME);
     expect(row).toBeTruthy();
     expect(row!.profile?.runType).toBe('action');
-    expect(row!.profile?.actionFile).toBe(FROZEN);
+    frozen = row!.profile?.actionFile ?? '';
+    expect(resolve(frozen, '..').toLowerCase()).toBe(ACTIONS_DIR.toLowerCase());
+    expect(basename(frozen)).toMatch(FROZEN_NAME);
+    expect(existsSync(frozen)).toBe(true);
+    const copy = JSON.parse(readFileSync(frozen, 'utf-8')) as {
+      name: string;
+      steps: { op: string }[];
+    };
+    expect(copy.name).toBe('Nightly Strip');
+    expect(copy.steps.map((s) => s.op)).toEqual(['strip_metadata']);
     expect(row!.actionName).toBe('Nightly Strip');
     expect(row!.actionSteps).toEqual(['strip_metadata']);
     expect(row!.actionMissing).toBe(false);
@@ -209,7 +217,7 @@ describe('scheduled guided actions', () => {
   it('deleting removes the task AND its frozen action file', async () => {
     await scheduleRemove(TASK_NAME);
     expect(taskExists(TASK_NAME)).toBe(false);
-    expect(existsSync(FROZEN)).toBe(false);
+    expect(existsSync(frozen)).toBe(false);
     const runs = await scheduleList();
     expect(runs.find((r) => r.name === TASK_NAME)).toBeUndefined();
   });

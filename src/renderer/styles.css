@@ -62,7 +62,7 @@
    The workbench CHROME themes via semantic vars (--bar-bg etc.); panel
    BODIES deliberately kept their utility classes when they were ported, so
    this remap is their theming mechanism and deleting it would delete the
-   light theme. Audited class-by-class; a NEW dark utility class used on a
+   light theme. Each class has its remap; a NEW dark utility class used on a
    panel must add its light remap here in the same change.
    Selector specificity ([data-theme] .class) beats a bare Tailwind class.
    ──────────────────────────────────────────────────────────────────────── */
@@ -4374,7 +4374,7 @@ input:not([type]) {
 .text-selection-error { align-self: center; padding: 0 4px; font-size: 11px; color: #f87171; }
 [data-theme="light"] .text-selection-url { border-color: #d1d5db; background: #ffffff; color: #111827; }
 
-/* Rung 3 — the recalibrate popover (right-click a measurement). */
+/* The recalibrate popover (right-click a measurement). */
 .recal-popover {
   position: fixed;
   z-index: 60;

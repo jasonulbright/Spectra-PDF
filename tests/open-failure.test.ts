@@ -1,6 +1,8 @@
 // A failed open must say something, and what it says must name the file
 // the user chose. Both halves are pure: the translation away from the temp
 // working copy, and the collapse of a batch's outcomes into ONE notice.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   summarizeOpenOutcomes,
@@ -124,5 +126,47 @@ describe('summarizeOpenOutcomes', () => {
     if (summary.kind !== 'batch') return;
     expect(summary.openedCount).toBe(0);
     expect(summary.totalCount).toBe(2);
+  });
+});
+
+// A restored session reopens its tabs by path through the one open funnel. A
+// tab that showed a web download from an earlier run names a file in the
+// network scratch folder, which the launch cleanup removes: the working copy
+// cannot be made, and the open must say so, like any other open that fails.
+describe('a restored tab whose downloaded file is gone', () => {
+  const GONE = 'C:\\Users\\someone\\AppData\\Local\\Temp\\spectrapdf\\net\\invoice-1712.4242.pdf';
+  // What the working-copy command answers for a source that is not there.
+  const MISSING = 'Failed to copy: The system cannot find the file specified. (os error 2)';
+
+  it('fails the open with a reason that names no temp path', () => {
+    const reason = translateOpenFailure(MISSING, { name: 'invoice.pdf', path: GONE });
+    expect(reason).toBe(MISSING);
+    expect(summarizeOpenOutcomes([{ name: 'invoice.pdf', reason }])).toEqual({
+      kind: 'single',
+      name: 'invoice.pdf',
+      reason: MISSING,
+    });
+    // A reason that names the scratch path names the file instead.
+    expect(translateOpenFailure(`${GONE}: not found`, { name: 'invoice.pdf', path: GONE })).toBe('not found');
+  });
+
+  // The funnel and the queue drain have no DOM test environment: they are
+  // pinned as source text.
+  const app = readFileSync(resolve(__dirname, '../src/renderer/App.tsx'), 'utf8').replace(/\r\n/g, '\n');
+
+  it('reaches the notice from the queued opens a restore delivers', () => {
+    expect(app).toContain(
+      'for (const pending of await app.takePendingOpens()) {\n        if (cancelled) return;',
+    );
+    expect(app).toContain(
+      'await openByPaths(\n          pending.files,\n          pending.index === null ? undefined : { index: pending.index },\n        );',
+    );
+    expect(app).toContain('if (opts?.reportFailures !== false) void reportOpenSummary(summary);');
+  });
+
+  it('turns a working copy that cannot be made into that file’s outcome, not a thrown batch', () => {
+    expect(app).toContain(
+      'try {\n              prepared = await prepareFileBytes(filePath);\n            } catch (err) {\n              outcomes.push({',
+    );
   });
 });

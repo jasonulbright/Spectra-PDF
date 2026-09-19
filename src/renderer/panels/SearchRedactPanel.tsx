@@ -35,7 +35,7 @@ import { RedactionPropertiesFields } from '../components/RedactionPropertiesFiel
 // → display conversion, shared with the mark seed, and from there the
 // SHIPPED path takes over: the status bar's apply / save marks / clear,
 // `buildRedactionRegions`, the commit gate and `performOperation`'s undo
-// chain. That is what keeps the review-hardened destructive path the ONLY
+// chain. That is what keeps the canvas's destructive path the ONLY
 // destructive path, and it is also what gives the user a review step for free
 // — marks are visible, movable, removable and undoable before anything is
 // destroyed, which is how a redaction job is actually done.

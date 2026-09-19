@@ -2354,9 +2354,7 @@ export const PANEL_STRINGS = {
   'panel.portfolio.saving': 'Saving…',
   'panel.portfolio.updating': 'Updating…',
   'panel.portfolio.removing': 'Removing…',
-  // The DONE lines. The slice-B sweep threaded the …ing
-  // states but not these six, because each was a `${}` TEMPLATE rather than
-  // a bare literal; the attribute/literal regexes never saw them. Each is
+  // The DONE lines. Each is
   // one interpolated key ({{name}} is an attachment's own file name and
   // stays verbatim), never "Added " + name.
   'panel.portfolio.added': 'Added {{name}}',

@@ -4,7 +4,7 @@
 // wordings: a disabled control that explains itself differently in the
 // Compress panel and in the Print dialog is 25 chances to say something the
 // product does not mean, and the set-up route would be re-invented in each.
-// The affordance opens Settings ▸ Engine, which is where the answer changes.
+// The affordance opens Preferences ▸ Engine, which is where the answer changes.
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';

@@ -151,7 +151,7 @@ describe('secondary toolbar', () => {
     // `invokeCommand` no-ops silently on a failed `when`, so an ungated tile is
     // a dead click that looks exactly like a live one. The menu bar already
     // greyed these; the grid invokes the SAME command and must agree.
-    // (Slice C: the grid lives on HOME now — the Tools tab is gone. Ops tools
+    // (The grid lives on HOME; there is no Tools tab. Ops tools
     // stay ENABLED docless: they run the picker-first flow.)
     await closeAllFiles();
     await focusTab('home');
@@ -172,7 +172,7 @@ describe('secondary toolbar', () => {
 
   it('an ops-less tool left open outlives its document without a dead end', async () => {
     // `activeToolId` deliberately outlives the document (Escape disarms the
-    // mode, not the tool). Slice C: with every document closed the app lands
+    // mode, not the tool). With every document closed the app lands
     // on Home — grid available, no fence, no stranded surface.
     await openByPaths([SAMPLE_PDF]);
     expect(await invokeAppCommand('tools.open.comment')).toBe(true);

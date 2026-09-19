@@ -58,7 +58,7 @@ describe('snap settings', () => {
   });
 
   it('gives an entry written before a field existed that field default', () => {
-    // Exactly what a slice-A install looks like to a slice-B build.
+    // Exactly what an entry saved by an earlier build looks like to a later one.
     stored({ enabled: false, radiusPx: 12, types: { endpoint: false } });
     const got = readSnapSettings();
     expect(got.enabled).toBe(false);

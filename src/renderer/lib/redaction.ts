@@ -2,15 +2,15 @@
 // payload. Marks are TRANSIENT VIEW STATE owned by WorkspaceCanvasView — they
 // are deliberately NOT PageAnnotations and never enter the page-edit tier:
 // the tier commits by rebuilding file bytes in the renderer, while redaction
-// is an engine (Python) operation, and a reindex after any commit rebuilds
-// PageRefs with POSITIONAL ids (`path#pN`), under which a surviving mark
-// could silently re-bind to a different physical page — unacceptable for a
-// destructive tool. Instead marks die with the canvas view and whenever their
-// file's buffer identity changes (see WorkspaceCanvasView's invalidation
-// effect); the apply path routes through App's performOperation so the
-// commit gate materializes pending page edits first and the result lands on
-// the snapshot undo chain.
+// is an engine (Python) operation. A mark is bound to a page id, and page ids
+// are generation-tagged: bytes that a page-tier commit did not compose take
+// new ids, so a mark can never re-bind to another physical page. A mark lives
+// while its page does (`marksAcross`) and dies with the canvas view; an
+// unsaved mark that dies with its page is counted for a notice. The apply
+// path routes through App's performOperation so the commit gate materializes
+// pending page edits first and the result lands on the snapshot undo chain.
 import { displayRectToPdf } from './pdfx-build';
+import { EDIT_DECLINED } from './edit-text';
 import { workspacePageNumber } from './workspace-commit';
 import { pathDescribesCurrentBytes } from './workspace-settle';
 import { propertiesPayload, type RedactionProperties } from './redaction-properties';
@@ -18,9 +18,10 @@ import type { AppState, OpenDocument, PageRef } from '../state/types';
 
 export interface RedactionMark {
   id: string;
-  // File path at draw time — used only to invalidate marks when that file's
-  // buffer changes underneath them. Page resolution goes by pageId so a mark
-  // follows its page through in-memory moves.
+  // The file whose bytes the mark was drawn on: the holder of its page at draw
+  // time, or the file a page-tier commit wrote the page into since. Page
+  // resolution goes by pageId, so a mark follows its page through in-memory
+  // moves.
   path: string;
   pageId: string;
   // Display-normalized (0..1 of the page cell) in the orientation the page
@@ -41,30 +42,175 @@ export interface RedactionMark {
   // A projection of a /Redact annotation the file stores, not a mark drawn
   // this session.
   seeded?: true;
+  // The apply or save run that writes this mark into the file, while it runs.
+  consumedBy?: string;
 }
 
 /**
  * `marks` once the seed of `path`'s stored marks lands: the path's earlier
  * seeded marks give way to `seeded`, and every mark drawn on the path since
  * its bytes changed stays. The seed reads the file after its bytes change,
- * and anything drawn meanwhile is not in the file.
+ * and anything drawn meanwhile is not in the file. An empty `seeded` is a
+ * file that stores no marks.
  */
 export function withSeededMarks(
-  marks: readonly RedactionMark[],
+  marks: RedactionMark[],
   path: string,
   seeded: readonly RedactionMark[],
 ): RedactionMark[] {
+  if (seeded.length === 0 && !marks.some((m) => m.path === path && m.seeded)) return marks;
   return [
     ...marks.filter((m) => m.path !== path || !m.seeded),
     ...seeded.map((m): RedactionMark => ({ ...m, seeded: true })),
   ];
 }
 
+/** A canvas's marks, and the unsaved ones it lost. */
+export interface MarkLedger {
+  marks: RedactionMark[];
+  /** Unsaved marks whose page is gone for good. Monotonic: each increase is
+   * owed a notice. */
+  cleared: number;
+  /** Per apply or save run, how many of its marks left with their page while
+   * it ran. The run's outcome decides whether the file took them. */
+  awaiting: Readonly<Record<string, number>>;
+}
+
+export const EMPTY_MARK_LEDGER: MarkLedger = { marks: [], cleared: 0, awaiting: {} };
+
+type MarkWorld = Pick<AppState, 'files' | 'workspace' | 'pageUndoStack' | 'pageRedoStack'>;
+
+/** Each page, with the path of the document holding it. */
+function pagesById(documents: readonly OpenDocument[]): Map<string, { page: PageRef; holder: string }> {
+  return new Map(documents.flatMap((d) => d.pages.map((page) => [page.id, { page, holder: d.path }] as const)));
+}
+
+/** The pages a page-tier undo or redo can bring back. */
+function stackedPageIds(world: MarkWorld): Set<string> {
+  const ids = new Set<string>();
+  for (const entry of [...world.pageUndoStack, ...world.pageRedoStack]) {
+    for (const d of entry.documents) for (const p of d.pages) ids.add(p.id);
+  }
+  return ids;
+}
+
+function quarterTurn(degrees: number): 0 | 90 | 180 | 270 {
+  return (((degrees % 360) + 360) % 360) as 0 | 90 | 180 | 270;
+}
+
+/**
+ * `mark` on `now`, the page it was on as `was`. Where the page reads from
+ * other bytes, a page-tier commit wrote it: the pending rotation went into
+ * the page, so the frame the mark was drawn in is that much less turned
+ * relative to the new bytes, and the mark belongs to the file now holding it.
+ */
+function carriedMark(
+  mark: RedactionMark,
+  was: PageRef | undefined,
+  now: PageRef,
+  before: MarkWorld,
+  after: MarkWorld,
+): RedactionMark {
+  if (!was) return mark;
+  if (before.files.get(was.sourceDocId)?.buffer === after.files.get(now.sourceDocId)?.buffer) return mark;
+  return {
+    ...mark,
+    path: now.sourceDocId,
+    rotationAtDraw: quarterTurn(mark.rotationAtDraw - (was.rotation - now.rotation)),
+  };
+}
+
+/**
+ * `ledger` once the workspace moves from `before` to `after` in one dispatch.
+ *
+ * A mark lives while the documents hold its page, or a page-tier undo or redo
+ * can bring the page back. Page ids are generation-tagged and a page-tier
+ * commit keeps them, so a page that keeps its id is the same page.
+ *
+ * A mark whose page is gone for good leaves. An unsaved one that was on a
+ * page of the documents just before is counted in `cleared`, except when the
+ * file whose document held the page, or the file the page came from, closed,
+ * or when an apply or save of it runs: that run's outcome decides
+ * (`marksAfterRun`). A mark whose page had already left the documents left
+ * view with it, by an edit the user made. A seeded mark leaves without a
+ * count: the seed of the new bytes brings back what the file stores.
+ */
+export function marksAcross(ledger: MarkLedger, before: MarkWorld, after: MarkWorld): MarkLedger {
+  if (ledger.marks.length === 0) return ledger;
+  if (
+    before.workspace === after.workspace &&
+    before.files === after.files &&
+    before.pageUndoStack === after.pageUndoStack &&
+    before.pageRedoStack === after.pageRedoStack
+  ) {
+    return ledger;
+  }
+  const was = pagesById(before.workspace.documents);
+  const now = pagesById(after.workspace.documents);
+  let restorable: Set<string> | undefined;
+  const marks: RedactionMark[] = [];
+  let cleared = ledger.cleared;
+  let awaiting = ledger.awaiting;
+  let changed = false;
+  for (const mark of ledger.marks) {
+    const held = now.get(mark.pageId);
+    if (held) {
+      const carried = carriedMark(mark, was.get(mark.pageId)?.page, held.page, before, after);
+      if (carried !== mark) changed = true;
+      marks.push(carried);
+      continue;
+    }
+    restorable ??= stackedPageIds(after);
+    if (restorable.has(mark.pageId)) {
+      marks.push(mark);
+      continue;
+    }
+    changed = true;
+    const last = was.get(mark.pageId);
+    if (mark.seeded || !last) continue;
+    if (!after.files.has(last.holder) || !after.files.has(last.page.sourceDocId)) continue;
+    if (mark.consumedBy !== undefined) {
+      awaiting = { ...awaiting, [mark.consumedBy]: (awaiting[mark.consumedBy] ?? 0) + 1 };
+      continue;
+    }
+    cleared += 1;
+  }
+  return changed ? { marks, cleared, awaiting } : ledger;
+}
+
+/** `ledger` with the marks `ids` taken by the apply or save run `run`. */
+export function marksInRun(ledger: MarkLedger, ids: readonly string[], run: string): MarkLedger {
+  const taken = new Set(ids);
+  if (!ledger.marks.some((m) => taken.has(m.id))) return ledger;
+  return {
+    ...ledger,
+    marks: ledger.marks.map((m) => (taken.has(m.id) ? { ...m, consumedBy: run } : m)),
+  };
+}
+
+/**
+ * `ledger` once the run `run` ends. A run that wrote into the file took its
+ * marks: those still here go, and those that left with their page were
+ * written, not lost. A run that wrote nothing leaves its marks pending, and
+ * those that left with their page meanwhile are lost.
+ */
+export function marksAfterRun(ledger: MarkLedger, run: string, wrote: boolean): MarkLedger {
+  const { [run]: owed = 0, ...awaiting } = ledger.awaiting;
+  const marks = wrote
+    ? ledger.marks.filter((m) => m.consumedBy !== run)
+    : ledger.marks.map((m) => {
+        if (m.consumedBy !== run) return m;
+        const { consumedBy: _run, ...pending } = m;
+        return pending;
+      });
+  return { marks, cleared: wrote ? ledger.cleared : ledger.cleared + owed, awaiting };
+}
+
 // Geometry of the page as it exists in the CURRENT file bytes, read from the
 // pdf.js proxy at apply time. `box` is page.view (the crop-intersected box —
-// the same box the annotation import/commit sides agreed on after the Phase
-// 2c.3c drift fix); `bakedRotate` is page.rotate, the /Rotate already in the
-// file, on top of which PageRef.rotation is a pending in-memory delta.
+// the same box the annotation import and commit sides use); `bakedRotate` is
+// page.rotate, the /Rotate already in the file, on top of which
+// PageRef.rotation is a pending in-memory delta.
 export interface PageGeometry {
   box: { x: number; y: number; width: number; height: number };
   bakedRotate: number;
@@ -231,4 +377,11 @@ export async function applyRedactions<R>(
   gsPath: () => Promise<string>,
 ): Promise<R> {
   return perform(path, 'redact', { regions, gs_path: await gsPath() });
+}
+
+/** Whether an operation wrote new bytes. An operation on a file that is no
+ * longer open answers null, and one the document's policy declined answers
+ * the decline. */
+export function wroteBytes<R extends object>(outcome: R | null | typeof EDIT_DECLINED): boolean {
+  return outcome !== null && outcome !== EDIT_DECLINED;
 }

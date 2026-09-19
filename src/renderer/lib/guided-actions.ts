@@ -24,7 +24,7 @@ import { pagesParam } from './page-scope';
 // on a non-text source means or about a horizontal stamp sending no key.
 import { writingParams, type WatermarkSource } from './watermark-writing';
 
-// Slice 2 grew the catalog: OCR (the batch pipeline's single-file arm),
+// The catalog includes OCR (the batch pipeline's single-file arm),
 // header/footer (one positioned text per step — several positions compose as
 // several steps), and ENCRYPT as a TERMINAL step that writes a NEW picked
 // file (an in-place encrypt would make the open working copy unreadable,

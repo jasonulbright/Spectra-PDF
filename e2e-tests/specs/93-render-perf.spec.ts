@@ -3,7 +3,7 @@
 // through the reading view and reports the distribution. Assertions are
 // SANITY bounds only (timings exist; nothing pathological) — absolute
 // thresholds flake across machines, so the BASELINE is the reported median,
-// recorded per milestone and compared by
+// recorded per build and compared by
 // humans (or a future trend job), never by a hard CI gate.
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';

@@ -54,8 +54,8 @@ import { SESSION_FILE } from '../support/app-data.js';
  * empty space puts the second window at a point of this spec's choosing, and
  * every later case aims at the strip that lands there.
  *
- * The caret case is the runtime cross-check the A2 probe could not finish on
- * this box: the offset Rust computes from its own registry is compared with
+ * The caret case is a runtime cross-check only a live run can make:
+ * the offset Rust computes from its own registry is compared with
  * where the TARGET window's DOM says its strip is. Scaled and mixed-DPI
  * equality of `scale_factor` and `devicePixelRatio` is assumed throughout this
  * feature; this is where that assumption fails loudly if it ever breaks.
@@ -570,13 +570,12 @@ describe('cross-window tab drag', () => {
   });
 
   it("the hover caret lands where the target window's own DOM says its strip is", async () => {
-    // The A2 cross-check. Rust hit-tests a rectangle it holds in physical
+    // The cross-check. Rust hit-tests a rectangle it holds in physical
     // screen pixels, anchored to `inner_position` and scaled by the publishing
     // window's device pixel ratio; the caret comes back as an offset the
     // target divides by ITS ratio. Aiming at a point computed from the
     // target's own DOM and requiring the caret to land on it is what proves
-    // those scales are the same number — the half of A2 no probe could run on
-    // this box.
+    // those scales are the same number, which only a live run can show.
     const INSET = 60;
     await browser.switchToWindow(secondHandle);
     const target = await readFrame();

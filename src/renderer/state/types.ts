@@ -43,7 +43,7 @@ export interface ImportedAnnotationFingerprint {
   subtype:
     | 'Square' | 'FreeText' | 'Ink' | 'Stamp' | 'Highlight' | 'Underline' | 'StrikeOut'
     | 'Squiggly' | 'Text'
-    // Rung 2 — the shape subtypes import as editable shapes/callouts.
+    // The shape subtypes import as editable shapes/callouts.
     | 'Circle' | 'Line' | 'Polygon' | 'PolyLine';
   rect: [number, number, number, number];
   contents?: string;
@@ -470,7 +470,7 @@ export function viewOf(tab: FocusedTab): ViewMode {
 
 // Left navigation pane. The panel-id union is the full
 // stable set; the runtime NAV_PANELS registry (components/navpane) only lists
-// the panels that actually exist at a given sub-slice, so an icon never
+// the panels that actually exist, so an icon never
 // appears without a working panel (completeness rule). Persisted under the
 // `workbench-ui` localStorage key (new keys don't extend `spectra-`).
 export type NavPanelId =
@@ -788,7 +788,7 @@ export type AppAction =
       direction: 'front' | 'back' | 'forward' | 'backward';
     }
   | { type: 'RECOLOR_ANNOTATIONS'; docId: string; pageId: string; annotationIds: string[]; color: string }
-  // Rung 3: override ONE measurement's recorded scale — new /Measure factors
+  // Override ONE measurement's recorded scale — new /Measure factors
   // + ratio + recomputed note, undoable like any edit. Geometry untouched.
   | {
       type: 'RECALIBRATE_ANNOTATION';

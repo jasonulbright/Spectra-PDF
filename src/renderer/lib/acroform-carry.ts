@@ -318,7 +318,7 @@ const SIMPLE_FONT_SUBTYPES = new Set([
 // "different" and gets renamed; claiming a wrong face — or a wrong glyph MAP
 // (regression: same-named Helvetica entries differing only in /Encoding,
 // e.g. a custom /Differences remap, were deduplicated onto the first
-// source's encoding) — is the failure mode the review flagged as HIGH.
+// source's encoding) — is the failure this comparison must never allow.
 function fontsEquivalent(output: PDFDocument, a: unknown, b: unknown): boolean {
   const da = asDict(output, a);
   const db = asDict(output, b);

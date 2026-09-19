@@ -287,7 +287,7 @@ interface CanvasStatusBarProps {
   /** The snap segment. Absent on the Organize board, which has
    * no drawing gestures to snap. */
   snap?: SnapSettings;
-  /** Slice B: the live measuring scale's reported unit, for the grid rows. */
+  /** The live measuring scale's reported unit, for the grid rows. */
   snapScaleUnit?: MeasureUnit;
   onSnapChange?: (next: SnapSettings) => void;
   /** The ask-first document-health indicator. Absent where there is no

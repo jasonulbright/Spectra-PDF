@@ -95,7 +95,7 @@ describe('guided actions — export/import as files', () => {
   it('exports an authored action as the CLI-shape file with NO password material', async () => {
     // Author through the REAL editor: a watermark + a terminal encrypt (the
     // step whose secrets make the no-password assertion meaningful).
-    await $('[data-testid="action-import"]').waitForDisplayed(); // slice-4 UI present
+    await $('[data-testid="action-import"]').waitForDisplayed(); // the file controls are present
     await $('[data-testid="action-new"]').click();
     await setReactInputValue('[data-testid="action-name"]', 'Travel Kit');
     await setReactSelectValue('[data-testid="action-add-op"]', 'watermark');

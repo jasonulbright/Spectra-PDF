@@ -11,7 +11,7 @@ import { getSymbolSets, subscribeSymbolSets, symbolParts } from '../lib/symbol-l
 // the symbol palette, and the comment list) and none of them should have to
 // import another surface to get it.
 //
-// Slice D widened the resolution rather than the API: an id is looked up in
+// The resolution is wide and the API is not: an id is looked up in
 // the whole symbol REGISTRY (built-in markers, the built-in AEC set, and every
 // imported set), and an explicit `parts` wins over any lookup — that is how an
 // annotation carrying its own geometry draws correctly on a machine that never

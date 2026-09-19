@@ -1062,7 +1062,7 @@ describe('segmentsToHtml (the rich surface renders ONE html string)', () => {
 });
 
 describe('Display seeds must NEVER leak into sent overrides', () => {
-  // The review repro: a paragraph of "Plain " (Helvetica) + "bold"
+  // The repro: a paragraph of "Plain " (Helvetica) + "bold"
   // (Helvetica-Bold). The listing seeds [6,10) bold. The user selects ONLY
   // "Plain " (0-6) and clicks Italic. Before the preserve/view split, the
   // whole composed view was written back as overrides, so the untouched

@@ -14,8 +14,8 @@ import {
 // second source of truth that would silently omit a new mode from the
 // orphan-ownership check below and quietly pass.
 import { CANVAS_MODES, COMMAND_IDS, SECONDARY_TOOLBAR_ACTIONS } from '../src/renderer/commands/registry';
-// The TYPE is still needed (the ownership map below is keyed by it) — what this
-// slice removed was the hand-listed copy of its MEMBERS, not the import.
+// The TYPE is needed (the ownership map below is keyed by it); its MEMBERS are
+// not copied here.
 import type { CanvasTool } from '../src/renderer/state/types';
 import { OPERATIONS, OPERATION_TITLES } from '../src/renderer/commands/operations';
 
