@@ -895,7 +895,7 @@ export function WorkspaceCanvasView({
   // tool creates the next annotation, across tool switches.
   const [toolColor, setToolColor] = useState<string | null>(null);
   const [stampPreset, setStampPreset] = useState<StampPreset | null>(null);
-  // Shape mode's figure picker (rung 2) — the stamp-preset pattern.
+  // Shape mode's figure picker — the stamp-preset pattern.
   const [shapeType, setShapeType] = useState<ShapeType>('rect');
   // Measure: the scale ratio the readouts apply, whether a
   // finished measurement lands as an ink markup, and the latest value shown
@@ -914,7 +914,7 @@ export function WorkspaceCanvasView({
     y: number;
   } | null>(null);
   // Click-selected annotations (Select tool) — the properties bar's subject
-  // and the manipulation group (rung 1). SAME-PAGE by design: align/
+  // and the manipulation group. SAME-PAGE by design: align/
   // distribute/z-order are page-geometry operations, and a cross-page
   // "formation move" has no meaning — a gesture on another page starts a new
   // selection there. Transient view state like redaction marks: resolved
@@ -2664,7 +2664,7 @@ export function WorkspaceCanvasView({
     });
   }, [selectedAnnot]);
 
-  // ── Group operations on the selection (rung 1) ───────────────────────
+  // ── Group operations on the selection ───────────────────────
   // Each is one dispatch = one undo step. The align/distribute/size math is
   // pure (lib/annotation-manipulation); measure notes recompute from their
   // captured factors inside sizeMatchEdits.

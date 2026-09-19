@@ -1,4 +1,4 @@
-// U8 — the engine opened it, pdf.js will not draw it. The verdict is keyed on
+// The engine opened it, pdf.js will not draw it. The verdict is keyed on
 // buffer identity so it dies with the bytes that earned it.
 import { describe, it, expect } from 'vitest';
 import {

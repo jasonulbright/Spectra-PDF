@@ -310,9 +310,9 @@ function LinkEditor({
           disabled={disabled}
           onChange={(e) => onAppearance({ ...appearance, width: Number(e.target.value) })}
         />
-        {/* N17: a DERIVED status of the width beside it, not a field of its
+        {/* A DERIVED status of the width beside it, not a field of its
             own. Standing alone above empty space in the label's own type and
-            colour, it read as a control that had failed to render. Inside the
+            colour, it reads as a control that failed to render. Inside the
             width label it reads as what it is: what width 0 means. */}
         {appearance.width === 0 && (
           <span className="text-xs text-neutral-500 italic" data-testid={`${slug}-invisible`}>

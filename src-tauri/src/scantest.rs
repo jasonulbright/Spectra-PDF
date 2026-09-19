@@ -1,6 +1,6 @@
 //! The guided scanner checklist runner behind `spectrapdf scan-test`.
 //!
-//! Doc 71 §7.3 is a checklist most of whose rows cannot be posed on a
+//! Most rows of the scanner checklist cannot be posed on a
 //! flatbed-only device. This module is what a tester with the missing
 //! hardware runs: the rows that can be judged from the staged pages are
 //! judged here, the rows that need a physical act (load the feeder, pull the
@@ -2386,7 +2386,7 @@ mod tests {
             assert!(row.minutes > 0, "row {} has no time estimate", row.id);
             assert!(super::row(row.id).is_some());
         }
-        // The rows the owner's flatbed could not close are all here: this is
+        // The rows a flatbed-only device cannot close are all here: this is
         // the reason the runner exists.
         for id in ["3", "4", "5", "6", "7", "8", "9", "10", "14"] {
             assert!(seen.contains(id), "row {id} is missing from the runner");

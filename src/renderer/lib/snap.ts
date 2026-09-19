@@ -131,7 +131,7 @@ interface IndexedSegment {
  * The per-page snap universe, built once when the geometry lands.
  *
  * The spatial index is a uniform grid over the NORMALIZED page rather than
- * over the search radius (the brief's phrasing). Same idea, one deviation
+ * over the search radius. Same idea, one deviation
  * with a reason: a radius-sized index would have to be rebuilt on every zoom
  * change, because the radius is a screen quantity. A fixed normalized grid is
  * zoom-independent, and a query still touches only the handful of cells the

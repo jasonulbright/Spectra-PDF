@@ -1,4 +1,4 @@
-// Raw /Annots style sidecar (rung 2). pdf.js's getAnnotations() hides the
+// Raw /Annots style sidecar. pdf.js's getAnnotations() hides the
 // entries faithful shape import needs — /IC interior color, /CA opacity,
 // /BE cloudy borders, /CL callout leaders, /RD text-box insets, /LE on
 // polylines, /Measure markers — so the workspace indexer reads them straight

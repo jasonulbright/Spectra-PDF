@@ -1,4 +1,4 @@
-// Toolbar visibility overrides (I.6 toolbar customization — the
+// Toolbar visibility overrides (toolbar customization — the
 // `spectra-toolbar` localStorage key). Lives in the ui slice so the toolbar
 // and the customize dialog render it reactively; App mirrors
 // ui.toolbarOverrides → localStorage in one effect (the recent-files

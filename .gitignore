@@ -66,10 +66,10 @@ resources/dictionaries/
 # tree is a build output). The profiles themselves, their end-user licence text
 # and the pinned manifest with every profile's sha256 live in git.
 resources/icc/
-# The owner-held bundler package the committed profiles were extracted from.
-# It is redistributable only under an agreement carrying an indemnity, so it
-# stays with its holder; the standalone-distribution grant is what the
-# committed profiles travel under.
+# The bundler package the committed profiles were extracted from. It is
+# redistributable only under an agreement carrying an indemnity, so it is
+# never committed; the standalone-distribution grant is what the committed
+# profiles travel under.
 AdobeICCProfilesCS4Win_bundler.zip
 
 # Test
@@ -136,9 +136,9 @@ scripts/license-audit*.tsv
 /processing-steps-corpus/
 *.local.*
 # ...and scratch DIRECTORIES, which the pattern above misses: it needs a dot
-# after "local", so `u1-shots.local/` was landing in git status as untracked.
+# after "local", so a directory such as `shots.local/` shows as untracked.
 *.local/
-# Owner's scratch input file (instructions dropped in for a session).
+# A scratch input file, never committed.
 userinput.md
 
 # LibreOffice runtime for Office export (assembled by scripts/bundle-libreoffice.ps1;

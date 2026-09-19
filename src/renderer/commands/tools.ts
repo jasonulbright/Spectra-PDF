@@ -98,7 +98,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     ops: ['comments'],
     // Six modes belong to one tool. 'shape' fans out through
     // the secondary toolbar's figure picker (rect/ellipse/line/arrow/polygon/
-    // polyline/cloud — rung 2); 'callout' is the leadered text box.
+    // polyline/cloud); 'callout' is the leadered text box.
     // 'inkhighlight' sits beside 'highlight' deliberately: text-selection
     // markup cannot mark an image-only scan at all, so the freehand pen is the
     // only highlighter such a page has. Both highlight, so both are here.

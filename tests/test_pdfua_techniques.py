@@ -13,7 +13,7 @@ checker saying it did not decide.
 **A covered FAIL file must be reported by the check that owns its defect.**
 `COVERAGE.json` names which check, and at which status. A technique testing
 something no check answers is recorded there as `uncovered` with its Matterhorn
-checkpoints — a list that feeds the register, never a silent drop.
+checkpoints — a recorded gap, never a silent drop.
 
 **A technique whose defect is not decidable is covered as a REVIEW, and says
 why.** Some of what these files test is a judgement about the content — whether

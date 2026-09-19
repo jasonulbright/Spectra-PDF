@@ -1452,7 +1452,7 @@
       ]
     }
   ],
-  "data_action_note": "The /AA and /A action kinds that carry no code. Each row's `authored` list is written by set_field_actions into a real document and `read` is what read_form_fields classifies back out of it, so the pair records what the writer and the reader actually agree on rather than what either intends. The renderer half additionally requires the properties-editor inverse: narrowing `read`, taking the authorable actions and re-serializing them reproduces `authored` exactly, so a field opened and applied unchanged rewrites what it already had. MEASURED by f23c-corpus-build.local.py.",
+  "data_action_note": "The /AA and /A action kinds that carry no code. Each row's `authored` list is written by set_field_actions into a real document and `read` is what read_form_fields classifies back out of it, so the pair records what the writer and the reader actually agree on rather than what either intends. The renderer half additionally requires the properties-editor inverse: narrowing `read`, taking the authorable actions and re-serializing them reproduces `authored` exactly, so a field opened and applied unchanged rewrites what it already had. MEASURED by scripts/gen-field-action-cases.py.",
   "data_action_cases": [
     {
       "name": "a button that goes to a page",

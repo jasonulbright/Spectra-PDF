@@ -429,7 +429,7 @@ class TestMongolianShaping:
         reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
     )
     def test_the_vert_map_is_read_from_gsub_and_covers_punctuation(self):
-        # Measured, not assumed (`vert-harvest.local.py`): neither Mongolian
+        # Measured, not assumed: neither Mongolian
         # face's `vert` touches a single LETTER — both cover only punctuation
         # and brackets. Harvesting the map from a second `ttb` SHAPING pass was
         # proposed on an observation that a letter

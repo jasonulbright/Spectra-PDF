@@ -1,10 +1,10 @@
 """Redaction properties: `/IC`, `/OverlayText`, `/Repeat`, `/Q`
 and the size/colour half of `/DA`, on BOTH the mark writer and the applier.
 
-Until this slice the fill was hard-coded `0 0 0 rg` in `redact.py` and
-hard-coded `[0,0,0]` in `redact_marks.py` — two copies of a decision the user
-never got to make, on a tool where the exemption code printed in the box is
-the whole point of the redaction for the person receiving the file.
+A fill hard-coded to black in both `redact.py` and `redact_marks.py` would be
+two copies of a decision the user never got to make, on a tool where the
+exemption code printed in the box is the whole point of the redaction for the
+person receiving the file.
 """
 
 import os

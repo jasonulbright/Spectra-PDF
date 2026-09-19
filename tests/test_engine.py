@@ -762,7 +762,7 @@ class TestRedact:
             assert [float(v) for v in annots[0].Rect] == [50, 20, 200, 60]
 
     def test_redact_cascades_to_linked_popup_annotations(self, tmp_dir):
-        # Review finding: removing a markup annotation whose /Popup sits at a
+        # Removing a markup annotation whose /Popup sits at a
         # non-overlapping /Rect must ALSO remove the popup — its /Parent keeps
         # the "removed" markup object (and its secret /Contents) reachable
         # otherwise. Verified by a full-object byte scan of the output.
@@ -794,7 +794,7 @@ class TestRedact:
                 assert contents is None or "TOPSECRETCOMMENT" not in str(contents)
 
     def test_redact_restores_font_size_across_q_q(self, tmp_dir):
-        # Review finding: text-state (font size / leading) is part of the
+        # Text-state (font size / leading) is part of the
         # graphics state and must be restored by Q. A transient small font
         # inside q..Q must not leave a stale size that under-sizes a later
         # bbox — that under-estimate is an under-redaction leak.
@@ -820,7 +820,7 @@ class TestRedact:
         assert "SECRETBIG" not in extract_text(out)["text"]
 
     def test_redact_survives_malformed_content_and_annots(self, tmp_dir):
-        # Review finding: adversarial/malformed input must not crash the
+        # Adversarial/malformed input must not crash the
         # whole operation. A 1-operand Td, a non-array TJ, and a null /Annots
         # entry are all tolerated; a valid region on the page still redacts.
         src = os.path.join(tmp_dir, "redact_malformed.pdf")
@@ -852,7 +852,7 @@ class TestRedact:
                 assert b"REALSECRET" not in data
 
     def test_redact_form_nesting_past_depth_cap_fails_closed(self, tmp_dir):
-        # Re-review finding: a Form chain deeper than MAX_FORM_DEPTH must
+        # A Form chain deeper than MAX_FORM_DEPTH must
         # NOT leave content intact — and the drop must be SIGNALLED so it isn't
         # silently reverted by an enclosing form bottoming out. A 20-wrapper
         # chain (deeper than the cap) around a secret, all placed inside the
@@ -893,7 +893,7 @@ class TestRedact:
                 assert b"DEEPSECRET" not in data
 
     def test_redact_accounts_for_horizontal_scaling(self, tmp_dir):
-        # Re-review finding: Tz (horizontal scaling) > 100 makes text WIDER
+        # Tz (horizontal scaling) > 100 makes text WIDER
         # than the flat width estimate; the bbox must fold it in so expanded
         # text that reaches into a region is still caught.
         src = os.path.join(tmp_dir, "redact_tz.pdf")
@@ -1345,7 +1345,7 @@ class TestRedactSplitsPartiallyCoveredRuns:
 
         after = _char_positions(out)
         assert len(after) == len(before) - len("John Smith")
-        # The brief's pin: every surviving character within 0.01 pt of where it
+        # The pin: every surviving character within 0.01 pt of where it
         # was. A TJ jump replaces the removed advance exactly, so nothing after
         # the redaction slides left into the hole.
         assert _worst_drift(before, after) < 0.01
@@ -1716,7 +1716,7 @@ class TestWatermark:
         # the /Rotate part of the turn into its own placement matrix, so
         # angle=0 is DRAWN at 0 and reads level in the displayed orientation.
         # Composing angle + /Rotate here turns the stamp twice and lays it on
-        # its side (proved by rendering: `rotprobe3.local.py`).
+        # its side (proved by rendering).
         src = os.path.join(tmp_dir, "wm_rot.pdf")
         out = os.path.join(tmp_dir, "wm_rot_out.pdf")
         _make_watermark_fixture(src, page_count=1, rotate=90)
@@ -1962,7 +1962,7 @@ class TestWatermark:
 
     def test_watermark_unicode_without_font_dir_refused(self, tmp_dir):
         # Without a fonts dir, a non-Latin-1 watermark is refused (not silently
-        # "?"-mapped) — the silent-degradation this slice closes.
+        # "?"-mapped) — a silent degradation.
         src = os.path.join(tmp_dir, "wn_in.pdf")
         out = os.path.join(tmp_dir, "wn_out.pdf")
         _make_watermark_fixture(src, page_count=1)
@@ -3583,7 +3583,7 @@ class TestPrintPdf:
         params = set(_inspect.signature(print_pdf).parameters)
         assert {
             "file", "printer", "gs_path", "pages", "copies", "fit",
-            # The O2 widening — every dialog control has a wire key.
+            # Every dialog control has a wire key.
             "scale_percent", "collate", "subset", "reverse", "duplex",
             "paper", "orientation", "color", "annots", "as_image",
             "image_dpi", "layout", "nup_rows", "nup_cols", "nup_order",
@@ -3603,7 +3603,7 @@ class TestPrintPdf:
 
     @pytest.mark.parametrize("bad", [0, -1, 1000, 2.5, "2", True])
     def test_refuses_bad_copies(self, sample_pdf, bad):
-        # 100 became legal when the cap moved to 999 (O4); 1000 is out.
+        # The cap is 999; 1000 is out.
         with pytest.raises(ValueError, match="[Cc]opies"):
             print_pdf(file=sample_pdf, printer="P", copies=bad)
 
@@ -3620,7 +3620,7 @@ class TestPrintPdf:
     def test_refuses_unknown_printer_without_running_gs(self, sample_pdf, monkeypatch):
         # THE fail-fast that matters: gs's mswinpr2, handed a name it can't
         # open, raises its own (invisible) printer dialog and hangs to the
-        # timeout — observed live at exactly 600s in the M-P e2e. The REAL
+        # timeout — observed live at exactly 600s in an e2e run. The REAL
         # winspool check must refuse before any subprocess exists.
         import engine.printer as printer_mod
 
@@ -3859,7 +3859,7 @@ class TestPrintFitSemantics:
 
 
 class TestPrintOrderMath:
-    """expand/subset/booklet/nup/placement/poster — the pure O2 math."""
+    """expand/subset/booklet/nup/placement/poster — the pure print-order math."""
 
     def test_expand_preserves_spec_order(self):
         assert expand_page_spec("", 3) == [0, 1, 2]

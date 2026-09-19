@@ -7119,7 +7119,7 @@ mod tests {
         }
     }
 
-    /// F2: one discovery answer. With nothing configured the resolver runs its
+    /// One discovery answer. With nothing configured the resolver runs its
     /// own search, and the path it finds is what the engine gets.
     #[test]
     fn an_optional_leg_takes_what_the_one_resolver_finds() {

@@ -2169,7 +2169,7 @@ WALK_DOORS = {
 
 #: Doors that DO accept writing over their input and have no case here yet —
 #: a recorded gap, not a disposition. Each would say what a case for it
-#: needs, so the next lane could pick one up; the guard fails if one is added
+#: needs; the guard fails if one is added
 #: and left uncased, or if one is cased and left behind. It is empty: every
 #: door the engine stages for is cased here, cased in the `finish_staged`
 #: family, walked (above), or excluded (below).

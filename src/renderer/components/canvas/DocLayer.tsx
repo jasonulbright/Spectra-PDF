@@ -205,7 +205,7 @@ interface DocLayerProps {
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
-  // Click-selection for the properties bar (I.6). null clears.
+  // Click-selection for the properties bar. null clears.
   selectedAnnotationIds: readonly string[];
   onSelectAnnotation: (
     docId: string,

@@ -667,13 +667,6 @@ export const file = {
 
 // ── App ───────────────────────────────────────────────────────────────────
 
-export interface GsInfo {
-  path: string;
-  version: string;
-  product: string;
-  vendor: string;
-}
-
 /** `src-tauri/src/gs.rs` `GsAnswer` — one validated answer about one path.
  * `reason` is a named code (`not-configured`, `not-executable`,
  * `probe-failed`, `version-below-minimum`), never a sentence to match on. */
@@ -828,8 +821,6 @@ export const app = {
    * the path to the managed portfolio-members directory. */
   openPortfolioMemberFile: (path: string) =>
     invoke<void>('open_portfolio_member_file', { path }),
-  getBundledGsInfo: () => invoke<GsInfo>('get_bundled_gs_info'),
-  detectExternalGs: () => invoke<GsInfo | null>('detect_external_gs'),
   /** The validated capability answer for `path`, or for discovery when it is
    * omitted. Cached in Rust per path + mtime + size. */
   gsCapability: (path?: string) => invoke<GsAnswer>('gs_capability', { path: path ?? null }),

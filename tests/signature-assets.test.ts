@@ -1,11 +1,11 @@
 // The personal-signature store and its geometry.
 //
-// There is no DOM test environment, so everything breakable about F31's
-// renderer half lives in lib/signature-assets and lib/signature-image and is
-// tested here: what survives a round trip through localStorage, what a raw
+// There is no DOM test environment, so everything breakable about the
+// personal signature's renderer half lives in lib/signature-assets and
+// lib/signature-image and is tested here: what survives a round trip through localStorage, what a raw
 // capture normalizes to, what smoothing is allowed to change (nothing about
 // the captured points), how a unit-box drawing lands in a placement rect, and
-// what the F30 accessor hands the stamp-appearance lane.
+// what the certificate-stamp accessor hands the stamp appearance.
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -237,7 +237,7 @@ describe('placement', () => {
   });
 });
 
-describe('the certificate-stamp face accessor (F30)', () => {
+describe('the certificate-stamp face accessor', () => {
   it('hands a drawn signature over as smoothed vector paths, never a raster', () => {
     const src = signatureFaceSource(ink({ strokes: [[0, 0, 0.5, 1, 1, 0]] }))!;
     expect(src.form).toBe('vector');

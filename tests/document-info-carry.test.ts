@@ -1,8 +1,8 @@
 // The document Info carry (lib/pdfx-build.ts carryDocumentInfo): the OWN
 // document's whole information dictionary survives the from-scratch commit
 // rebuild. Before it, only the dates travelled — a same-order rebuild
-// published a document whose title, author and private entries were gone
-// (BA-36) — and those dates went through pdf-lib's decode/re-encode, which
+// published a document whose title, author and private entries were gone —
+// and those dates went through pdf-lib's decode/re-encode, which
 // flattens a partial date to a full timestamp and rewrites any timezone
 // offset as UTC. ISO 32000-2 14.3.3 makes /Info optional, requires every
 // entry outside /CreationDate and /ModDate to be a text string, and Table 349

@@ -213,8 +213,6 @@ pub fn run() {
             commands::classify_recent_paths,
             commands::portfolio_member_dir,
             commands::open_portfolio_member_file,
-            commands::get_bundled_gs_info,
-            commands::detect_external_gs,
             commands::gs_capability,
             commands::refresh_gs_capability,
             commands::get_app_version,

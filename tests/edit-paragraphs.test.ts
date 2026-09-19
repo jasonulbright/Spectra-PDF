@@ -660,7 +660,7 @@ describe('seedSpanColors / styledSegments / spanColorsToStyles', () => {
 
 describe('mergeSpanColors overlap flattening', () => {
   it('resolves an overlap to disjoint runs, later-start wins (preview==commit)', () => {
-    // The lens repro: two same-extent ranges overlapping after a retype
+    // Two same-extent ranges overlapping after a retype
     // must flatten so the backdrop preview and the engine fold agree.
     const overlapping = [
       { start: 0, end: 17, color: '#ff0000' },

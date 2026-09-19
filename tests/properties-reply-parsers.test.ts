@@ -8,8 +8,7 @@
 //
 // The distinction the whole file is about: a value the engine writes to mean
 // "this document does not have one" must PASS, and a value the engine cannot
-// write must FAIL. A parser that treats the two alike is the defect BA-43
-// records.
+// write must FAIL. A parser that treats the two alike is a defect.
 import { describe, expect, it } from 'vitest';
 import {
   PropertiesReplyError,

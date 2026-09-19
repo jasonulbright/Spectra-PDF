@@ -1,7 +1,7 @@
 # Stages the bundled ICC colour profiles into resources/icc/.
 #
 # SOURCE: the committed copies under vendor/icc/. Nothing is fetched and no
-# network is touched. The profiles were extracted once from an owner-held
+# network is touched. The profiles were extracted once from a licensed bundler
 # package (AdobeICCProfilesCS4Win_bundler.zip, sha256
 # 396ea37eaa3f048df261f4c0e4595b91e52cf64f823e02d1d601e25ae8eee12f) and
 # committed, so a build machine that has never seen that package -- CI, a fresh

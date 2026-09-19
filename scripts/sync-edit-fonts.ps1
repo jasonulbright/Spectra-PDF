@@ -276,8 +276,8 @@ $RtlSources = @(
         # it cannot.
         #
         # Chosen on the same MEASUREMENT that chose IBM Plex over Noto Sans
-        # Arabic (`mongolian-measure.local.py`, run against this face and
-        # against Mongolian Baiti as the script's reference implementation):
+        # Arabic (run against this face and against Mongolian Baiti as the
+        # script's reference implementation):
         # every cluster has exactly ONE advancing glyph (ligating clusters
         # included), no `.notdef` across the corpus, and real per-glyph
         # horizontal advances of 284–1065 per 1000/em. It is embedded

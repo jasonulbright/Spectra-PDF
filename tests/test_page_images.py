@@ -1292,7 +1292,7 @@ class TestCropReEdit:
         assert len(_re_rects_in(_ops_in_page_stream(c2))) == 1
 
     def test_transform_on_disjoint_stack_carries_an_empty_clip(self, tmp_dir):
-        # Round 29 HIGH: a pre-tail DISJOINT crop stack intersects to an
+        # A pre-tail DISJOINT crop stack intersects to an
         # INVERTED rect, and PDF `re` normalizes negative extents — so the
         # raw carry clipped to the region BETWEEN the crops, un-hiding
         # content both crops hid. The carry must collapse the empty

@@ -5,9 +5,9 @@ document that must not. The second half is what keeps the checker from crying
 wolf, and a false failure on a conforming press file is what this inventory
 would be turned off over.
 
-`TestUnreadableIsNotAPass` is O15's regression guard, carried forward whole: a
-walk that could not read part of a document has not established the document
-is clean, and every one of its cases used to report `pass`.
+`TestUnreadableIsNotAPass` is a regression guard: a walk that could not read
+part of a document has not established the document is clean, so none of
+its cases may report `pass`.
 """
 
 import json
@@ -534,7 +534,7 @@ class TestProfileRefusals:
             load_profile_file(path)
 
 
-# ── O15's guard, carried forward ──────────────────────────────────────────
+# ── unreadable is not a pass ──────────────────────────────────────────
 
 
 class TestUnreadableIsNotAPass:
@@ -634,7 +634,7 @@ class TestCorpusGate:
 
     A verdict that moves on a document nobody edited is a regression, and this
     is what catches a check that starts crying wolf. Regenerate with
-    `f25-corpus-build.local.py` and review the diff.
+    `scripts/gen-preflight-corpus.py` and review the diff.
 
     Total area coverage is disabled here and pinned separately over
     constructed fixtures: running Ghostscript over every page of every
@@ -645,7 +645,7 @@ class TestCorpusGate:
     CORPUS = REPO / "tests" / "fixtures" / "preflight-corpus.json"
 
     def _pinned(self):
-        assert self.CORPUS.exists(), "run f25-corpus-build.local.py"
+        assert self.CORPUS.exists(), "run scripts/gen-preflight-corpus.py"
         return json.loads(self.CORPUS.read_text(encoding="utf8"))
 
     def test_the_corpus_is_pinned(self):

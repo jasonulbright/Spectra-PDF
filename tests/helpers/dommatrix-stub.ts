@@ -1,6 +1,6 @@
 // pdf.js's main entry point references `DOMMatrix` at module-evaluation time
 // (a class extends it), which does not exist in vitest's default `node`
-// environment. This project runs no DOM test environment (see CLAUDE.md), so
+// environment. This project runs no DOM test environment, so
 // rather than adding one for a single import, the smallest possible stub is
 // installed before `pdfjs-dist` is ever imported. This file must be the
 // FIRST import in any test that imports `../src/renderer/lib/doc-health-pdfjs`

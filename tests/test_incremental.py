@@ -1619,7 +1619,7 @@ class TestEmissionDeterminism:
     """The shipped emission path, pinned.
 
     A cross-version byte pin cannot live here — it needs the pre-change module,
-    which `o5b-byte-identity.local.py` loads out of git and compares against
+    loaded out of git and compared against
     (measured: identical for annotate / fill / insert-at-end / insert-in-middle
     / annotation-removal on an approval document). What pytest CAN hold is the
     property that made that comparison meaningful: the writer's only

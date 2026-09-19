@@ -29,7 +29,7 @@ export async function indexOpenFile(file: OpenFile): Promise<OpenDocument[]> {
   const doc = await getDocumentProxy(file.path, file.buffer);
   const manifest = await readManifest(doc);
   const partitions = partitionPages(manifest, doc.numPages, stripExtension(file.name));
-  // The raw-style sidecar (rung 2): pdf-lib reads the /Annots entries pdf.js
+  // The raw-style sidecar: pdf-lib reads the /Annots entries pdf.js
   // hides (/IC /CA /BE /CL /RD /LE), so shape/callout imports are faithful.
   // null (encrypted/unparseable) degrades those imports to untouched.
   const rawStyles = await readRawAnnotationStyles(file.buffer);

@@ -602,7 +602,7 @@ def test_an_authored_vertical_field_fills_as_a_column(tmp_path, script, which):
 
 @pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
 def test_the_authored_column_reproduces_the_pinned_geometry(tmp_path):
-    # The exact bytes T30 pinned for a 60x300 box: the auto fit caps at twice
+    # The exact bytes pinned for a 60x300 box: the auto fit caps at twice
     # the default size, and the pen lands half the column's own width in from
     # the stacking edge (60 - 2 - 24/2) at the reading axis' head (300 - 2).
     src = _blank(tmp_path / "in.pdf")
@@ -1020,7 +1020,7 @@ def test_a_winansi_only_list_needs_no_embedded_font(tmp_path):
 @pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
 @pytest.mark.parametrize("script", sorted(VERTICAL_PINS))
 def test_a_vertical_option_list_draws_its_options_as_columns(tmp_path, script):
-    # T31 x F28: a list bound to a vertical font routes its rows through the
+    # A list bound to a vertical font routes its rows through the
     # vertical emitter — the SAME door, one call, not a second one.
     labels = [VERTICAL_VALUES[script][0], "US"]
     src = _blank(tmp_path / "in.pdf")

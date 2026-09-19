@@ -6,9 +6,8 @@ read-only Total reached through /CO, an unrecognized script leaving its
 neighbours computing, and the closure a signed document's field lock has to be
 asked about.
 
-Authoring /AA and /CO is a later feature set, so these fixtures write them with
-pikepdf directly — which is also the honest shape of the row, since every form
-this slice serves was authored somewhere else.
+These fixtures write /AA and /CO with pikepdf directly — the honest shape,
+since every form this evaluator serves was authored somewhere else.
 """
 
 import pathlib

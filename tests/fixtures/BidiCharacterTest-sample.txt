@@ -1,9 +1,8 @@
 # Deterministic sample of the Unicode BidiCharacterTest.txt conformance suite.
 # Source: https://www.unicode.org/Public/UCD/latest/ucd/BidiCharacterTest.txt
 # (Unicode 17.0.0, 91707 cases). Kept here: the first 120 hand-written UAX #9
-# examples plus every 37th generated case — 2595 cases. The FULL file is what
-# engine/bidi.py was developed against (bidi-conformance.local.py runs it and
-# reports 0 failures across all 91707); this sample is the committed gate.
+# examples plus every 37th generated case — 2595 cases. engine/bidi.py passes
+# all 91707 cases of the FULL file; this sample is the committed gate.
 # Terms of use: https://www.unicode.org/terms_of_use.html
 #
 # Field 0: code points; 1: paragraph direction (0=LTR 1=RTL 2=auto);

@@ -21,7 +21,7 @@ sha2 = "0.10"
 # Optional in-app W3C WebDriver server, so e2e needs no
 # msedgedriver, no tauri-driver, and no WebView2 remote-debugging port -- which
 # is the only way past the v150 elevated-host hardening that keeps CI's e2e job
-# disabled (see .github/workflows/ci.yml and DECISIONS).
+# disabled (see .github/workflows/ci.yml).
 #
 # A FEATURE, not `cfg(debug_assertions)`: this is excluded from a release build
 # at COMPILE time, so the automation server cannot ship even by accident. The

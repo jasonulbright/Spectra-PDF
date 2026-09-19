@@ -451,9 +451,9 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     const startedAt = new Date();
     // Recognition is a subprocess in the ENGINE now, so there is no worker to
     // construct (and no `new Worker` that could throw synchronously and strand
-    // the dialog in an unclosable modal — the review finding that shaped this
-    // block). Cancellation is the driver's `isCancelled` poll: an in-flight
-    // engine call finishes, then the loop stops.
+    // the dialog in an unclosable modal). Cancellation is the driver's
+    // `isCancelled` poll: an in-flight engine call finishes, then the loop
+    // stops.
     const lang = toTesseractLang(langs);
     try {
       cancelOcrRef.current = null;
@@ -1386,10 +1386,10 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
           <h3 className="text-sm font-semibold">{tChrome('dialog.batch.title')}</h3>
-          {/* N12: the header slot is a dismiss GLYPH, as it is on every panel.
-              Spelling it "Close" put two controls reading "Close" in one
-              dialog — the header's and the footer's primary button — with no
-              way to tell which one ends the run. */}
+          {/* The header slot is a dismiss GLYPH, as it is on every panel.
+              Spelled "Close", it would put two controls reading "Close" in
+              one dialog — the header's and the footer's primary button — with
+              no way to tell which one ends the run. */}
           <button
             data-testid="batch-ocr-x"
             onClick={onClose}

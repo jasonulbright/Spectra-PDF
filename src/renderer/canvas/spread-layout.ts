@@ -1,4 +1,4 @@
-// Two-up spread layout math (I.6 view-mode tail) — PURE, because the reading
+// Two-up spread layout math — PURE, because the reading
 // column's virtualizer/jump/current-page machinery is the most regression-prone
 // surface in the app and every mapping here must be testable without a DOM.
 //

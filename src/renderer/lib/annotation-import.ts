@@ -12,7 +12,7 @@
 // pdf.js hides (/IC /CA /BE /CL /RD /LE), because importing one blind and
 // re-committing it would silently strip those. Faithful-or-untouched: no
 // sidecar entry, or a line-ending outside the set we author, and the
-// annotation stays raster-only exactly like before rung 2. Dimension lines
+// annotation stays raster-only. Dimension lines
 // (/Measure or /IT LineDimension) always stay untouched — the measure
 // class's own no-degradation rule.
 import type { PDFPageProxy } from 'pdfjs-dist';

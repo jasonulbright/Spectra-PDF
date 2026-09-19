@@ -1,4 +1,4 @@
-// F36 — the freehand highlighter and tool locking.
+// The freehand highlighter and tool locking.
 //
 // Two halves, tested where each one actually lives:
 //

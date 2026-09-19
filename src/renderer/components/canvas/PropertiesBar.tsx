@@ -21,7 +21,7 @@ const fillable = (a: PageAnnotation): boolean => a.kind === 'shape' || a.kind ==
 // The Properties Bar is a contextual strip under the
 // secondary toolbar. With ONE annotation selected (click, Select tool) it
 // shows that annotation's properties with quick controls (recolor, delete,
-// z-order); with SEVERAL selected (ctrl-click / ctrl-marquee, rung 1) it
+// z-order); with SEVERAL selected (ctrl-click / ctrl-marquee) it
 // becomes the group bar — align, distribute, match size, z-order, recolor
 // all, delete all; with a comment mode armed and nothing selected it shows
 // the tool's new-annotation color (the same toolColor the secondary toolbar
@@ -53,7 +53,7 @@ interface PropertiesBarProps {
   onReorder: (direction: 'front' | 'back' | 'forward' | 'backward') => void;
   onRecolorGroup: (color: string) => void;
   onRemoveGroup: () => void;
-  /** Shared style edit (rung 2 + the sheets) — the reducer applies each
+  /** Shared style edit (and the sheets) — the reducer applies each
    * field only to kinds that carry it. */
   onRestyle: (style: {
     strokeWidth?: number;
@@ -185,7 +185,7 @@ export function PropertiesBar({
       ))}
     </span>
   );
-  // Style controls (rung 2): shown when the selection carries any styleable
+  // Style controls: shown when the selection carries any styleable
   // kind. Values seed from the FIRST styleable member; edits apply to all.
   const styleRef = selectedGroup.find(styleable) ?? null;
   const anyFillable = selectedGroup.some(fillable);

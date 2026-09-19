@@ -40,7 +40,7 @@ export const CANVAS_STRINGS = {
   'canvas.toolbar.lockHint':
     'Keep the selected tool ready after each mark, so you can mark page after page without picking it again.',
 
-  // Shape mode options (rung 2).
+  // Shape mode options.
   'canvas.toolbar.shapeGroup': 'Shape',
   'canvas.shape.rect': 'Rectangle',
   'canvas.shape.ellipse': 'Ellipse',
@@ -205,8 +205,8 @@ export const CANVAS_STRINGS = {
   'canvas.pbar.lineStart': 'Line start',
   'canvas.pbar.lineEnd': 'Line end',
   // One key per (ending, end) PAIR: "Open arrow" + " start" is two fragments
-  // whose order differs per language, which is the concatenation the brief
-  // bans. The VALUE stays the PDF's /LE name.
+  // whose order differs per language, and concatenation is banned. The VALUE
+  // stays the PDF's /LE name.
   'canvas.pbar.endingStart.None': 'Plain start',
   'canvas.pbar.endingStart.OpenArrow': 'Open arrow start',
   'canvas.pbar.endingStart.ClosedArrow': 'Closed arrow start',

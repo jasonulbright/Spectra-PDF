@@ -2,6 +2,7 @@
 per-file isolation, logs — plus the encrypt/decrypt in-place pins the runner
 forced (the same latent CLI bug class fixed for five other ops)."""
 
+import importlib.util
 import inspect
 import json
 import os
@@ -660,13 +661,21 @@ class TestCatalogPin:
     `enhance_scan` drift this test exists for). What a step needs from
     Ghostscript is not in the file: the window and the command line ask the
     engine's own evaluator through `run_action(plan=True)`.
+    `scripts/gen-guided-step-catalog.py` writes the file.
     """
 
-    FIXTURE = json.loads(
-        (pathlib.Path(__file__).parent / "fixtures" / "guided-step-catalog.json").read_text(
-            encoding="utf-8"
+    FIXTURE_PATH = pathlib.Path(__file__).parent / "fixtures" / "guided-step-catalog.json"
+    GENERATOR = pathlib.Path(__file__).parent.parent / "scripts" / "gen-guided-step-catalog.py"
+    FIXTURE = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+    def test_the_fixture_is_what_the_tracked_generator_writes(self):
+        spec = importlib.util.spec_from_file_location("gen_guided_step_catalog", self.GENERATOR)
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        assert generator.render() == self.FIXTURE_PATH.read_text(encoding="utf-8"), (
+            "run `.venv/Scripts/python.exe scripts/gen-guided-step-catalog.py` "
+            "and review the diff"
         )
-    )
 
     def test_the_op_names_match_the_fixture_in_both_directions(self):
         assert set(_STEPS) == set(self.FIXTURE["steps"])

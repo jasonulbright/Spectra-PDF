@@ -152,7 +152,7 @@ export interface PageAnnotation {
   // embedded image instead of the bordered label; `note` still carries the
   // stamp's display name for the comment sidebar and /Contents.
   imageData?: string;
-  // stamp only: a TYPED personal signature (F31's "type" door). The id of the
+  // stamp only: a TYPED personal signature (the "type" door). The id of the
   // app-bundled script face — see lib/signature-fonts, whose faces are
   // outside the font-resolution ladder and named only by an asset. `note`
   // carries the name itself and lands in /Contents like any stamp's label;
@@ -337,19 +337,19 @@ export type CanvasTool =
   | 'measuredist'
   | 'measureperim'
   | 'measurearea'
-  // Scale calibration (rung 3): drag a KNOWN length, then state its value —
+  // Scale calibration: drag a KNOWN length, then state its value —
   // the toolbar ratio derives from it. Commits nothing.
   | 'measurecal'
-  // Drawing shapes (rung 2) — ONE mode; the secondary toolbar's shape picker
+  // Drawing shapes — ONE mode; the secondary toolbar's shape picker
   // (like stamp's preset picker) chooses WHICH figure the gesture draws:
   // rect/ellipse band, line/arrow drag, polygon/polyline/cloud vertex clicks.
   | 'shape'
-  // Callout (rung 2): drag the text box; the leader lands pointing at the
+  // Callout: drag the text box; the leader lands pointing at the
   // drag origin, editable per-vertex afterward.
   | 'callout'
   // Sticky note: click places a native /Text note at the point and opens
-  // its editor. Comment's mode; the note keeps its fixed icon size (rung 1's
-  // kind rule) so placement is the only geometry.
+  // its editor. Comment's mode; the note keeps its fixed icon size (the
+  // manipulation kind rule) so placement is the only geometry.
   | 'note'
   // The ink eraser cuts stroke segments out of ink annotations. A mid-stroke
   // cut splits the
@@ -440,7 +440,7 @@ export interface NavPaneState {
 // tool; `View ▸ Organize All Documents` forces the board.
 export type DocViewMode = 'document' | 'organize';
 
-// Reading-view page layout (I.6): one page per row, or two-up facing spreads.
+// Reading-view page layout: one page per row, or two-up facing spreads.
 export type PageLayoutMode = 'single' | 'two';
 
 // Which way a two-up spread reads. Set from the open document's
@@ -500,13 +500,13 @@ export interface UiState {
   // Document-pane view mode. The board and the reading view are two
   // renders of the same per-page cells; commands/toolbar read this.
   docViewMode: DocViewMode;
-  // Reading-view page layout (I.6). `twoUpCover` = first page alone (the book
+  // Reading-view page layout. `twoUpCover` = first page alone (the book
   // convention); only meaningful while pageLayout === 'two'.
   pageLayout: PageLayoutMode;
   twoUpCover: boolean;
   // Facing-page order, from the open document's own reading direction.
   spreadDirection: SpreadDirection;
-  // Reading mode (I.6): collapse the app chrome (toolbar, tab strip, nav pane)
+  // Reading mode: collapse the app chrome (toolbar, tab strip, nav pane)
   // around the document. Menu bar stays (the discoverable exit); Esc/Ctrl+H
   // leave; leaving the doc tab clears it (chrome must exist on Home/Tools).
   readingMode: boolean;
@@ -524,7 +524,7 @@ export interface UiState {
   // organize board never splits
   // (one d3 world; both commands are document-mode-gated).
   splitView: 'off' | 'two' | 'quad';
-  // Toolbar customization (I.6): the user's show/hide overrides against the
+  // Toolbar customization: the user's show/hide overrides against the
   // toolbar catalog. Persisted — App mirrors it to localStorage, the
   // recent-files pattern (lib/toolbar-layout.ts).
   toolbarOverrides: ToolbarOverrides;
@@ -654,7 +654,7 @@ export type AppAction =
   | { type: 'UPDATE_ANNOTATION'; docId: string; pageId: string; annotationId: string; note: string }
   | { type: 'RECOLOR_ANNOTATION'; docId: string; pageId: string; annotationId: string; color: string }
   | { type: 'REMOVE_ANNOTATION'; docId: string; pageId: string; annotationId: string }
-  // Annotation manipulation (rung 1). One dispatch = one gesture = one undo
+  // Annotation manipulation. One dispatch = one gesture = one undo
   // step, so every action below is BATCH-shaped even when the UI sends one
   // entry. Geometry is display-normalized in the page.rotation frame (the
   // stored frame) — callers un-project view-frame gestures first.
@@ -677,7 +677,7 @@ export type AppAction =
         calloutBox?: [number, number, number, number]; // callout only
       }[];
     }
-  // Shared style edit (rung 2): stroke width / fill / opacity across the
+  // Shared style edit: stroke width / fill / opacity across the
   // selection, one undo step. The reducer applies each property only to
   // kinds that carry it (shape/callout; ink takes width+opacity, no fill).
   // `fillColor: null` clears the fill; undefined leaves it untouched.

@@ -90,7 +90,7 @@ export interface DocumentViewProps {
   doc: OpenDocument;
   /** Author link regions over a text selection (reading view only). */
   onCreateLinks?: (selection: PageQuads[], url: string) => Promise<void>;
-  /** Page layout (I.6): one page per row, or two-up facing spreads. */
+  /** Page layout: one page per row, or two-up facing spreads. */
   pageLayout?: PageLayout;
   /** Two-up only: show the first page alone (the book/cover convention). */
   twoUpCover?: boolean;
@@ -281,7 +281,7 @@ export interface DocumentViewProps {
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
-  // Click-selection for the properties bar (I.6). null clears.
+  // Click-selection for the properties bar. null clears.
   selectedAnnotationIds: readonly string[];
   onSelectAnnotation: (
     docId: string,
@@ -370,7 +370,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // The widest page's rendered width AT ZOOM 1 — a property of the document, so
   // memoised on the page list. Feeds BOTH the zoom ceiling (the spacer's width
   // can blow the element cap just as its height can) and the spacer's own width.
-  // Two-up (I.6): pages tile into uniform-height ROWS — one per page in
+  // Two-up: pages tile into uniform-height ROWS — one per page in
   // single layout (identity: every formula below reduces to the shipped
   // math), two facing pages per row in two-up. All row↔page mapping is the
   // pure, tested spread-layout module.

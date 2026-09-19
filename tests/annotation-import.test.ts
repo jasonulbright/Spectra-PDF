@@ -729,11 +729,12 @@ describe('Native /Text sticky notes', () => {
 });
 
 describe('the FreeText appearance carries the authored colour', () => {
-  // The other half of N4's pair. The on-page note measured 1.11:1 while the
-  // panel showed it at full contrast, which reads as a broken appearance
-  // stream; the stream was in fact correct and the overlay was painting over
-  // it (pinned in annotation-manipulation.test.ts). This pins the half that
-  // was proved innocent, so a later edit here cannot quietly become the cause.
+  // The other half of the note-contrast pair. The on-page note measured
+  // 1.11:1 while the panel showed it at full contrast, which reads as a
+  // broken appearance stream; the stream was in fact correct and the overlay
+  // was painting over it (pinned in annotation-manipulation.test.ts). This
+  // pins the half that was proved innocent, so a later edit here cannot
+  // quietly become the cause.
   it('strokes the border and fills the text in the note colour, not the ground', async () => {
     const doc = await PDFDocument.create();
     doc.addPage([612, 792]);
@@ -788,11 +789,12 @@ describe('the FreeText appearance carries the authored colour', () => {
 });
 
 describe('an imported annotation keeps the colour the file carries', () => {
-  // Found while verifying N4 against the shipped screenshot: every accent bar
-  // in the comment list was a SUBTYPE DEFAULT. A highlight authored `#f7c948`
-  // came back `#ffe14a` and an ink stroke authored `#e8503a` came back
-  // `#2f6fed`, while the page kept drawing the authored colours out of their
-  // appearance streams — so the list and the page disagreed about every mark.
+  // Found while verifying the note contrast against a screenshot: every
+  // accent bar in the comment list was a SUBTYPE DEFAULT. A highlight
+  // authored `#f7c948` came back `#ffe14a` and an ink stroke authored
+  // `#e8503a` came back `#2f6fed`, while the page kept drawing the authored
+  // colours out of their appearance streams — so the list and the page
+  // disagreed about every mark.
   //
   // Cause: pdf.js hands `/C` back as a **Uint8ClampedArray**, and
   // `Array.isArray` is false for one, so the reader returned null every time

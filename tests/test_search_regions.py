@@ -2,8 +2,8 @@
 
 The claim under test is a GEOMETRY claim, so it is checked against an
 authority outside our own content walk: pdfminer's per-character boxes on the
-same file. Horizontally the per-code slice is exact (the brief measured ±0.00
-pt and this suite pins 0.01); vertically the returned rect is the INK box —
+same file. Horizontally the per-code slice is exact (measured ±0.00 pt; this
+suite pins 0.01); vertically the returned rect is the INK box —
 the font's own descent and ascent, the `ink_extent_em` — so it must
 CONTAIN pdfminer's character box rather than equal it, which is the whole
 point: a rect that stopped at the baseline would leave the descenders of

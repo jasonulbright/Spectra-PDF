@@ -37,7 +37,7 @@ export const SUBMIT_EXTENSION: Record<SubmitFormat, string> = {
 };
 
 /** What the Rust client is handed. Mirrors `src-tauri/src/net.rs` `NetRequest`;
- * P39's open-from-web-address builds the same shape with no body. */
+ * the open-from-web-address request has the same shape with no body. */
 export interface SubmitRequest {
   url: string;
   method: 'get' | 'post';

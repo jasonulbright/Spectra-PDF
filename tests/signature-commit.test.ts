@@ -1,8 +1,8 @@
 // Placing a personal signature onto a page, through the commit that already
 // exists.
 //
-// F31 adds no new door: a drawn signature commits as an ordinary /Ink
-// annotation (vector paths, the route a freehand drawing already takes), an
+// A personal signature adds no new door: a drawn signature commits as an
+// ordinary /Ink annotation (vector paths, the route a freehand drawing already takes), an
 // imported one as an image /Stamp, and a typed one as a /Stamp whose
 // appearance draws the name in an EMBEDDED subset of an app-bundled script
 // face. What this file pins is that each of the three really lands that way —
