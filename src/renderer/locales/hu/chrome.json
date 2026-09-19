@@ -2328,6 +2328,7 @@
   "engine.outline.malformedOutlineActionPayload": "hibás vázlatművelet-adat",
   "engine.outline.outlineActionPayloadNested": "a vázlatművelet adata túl mélyen ágyazott",
   "engine.outline.outlineDeeperThanLevels": "a vázlat mélyebb, mint {{MAX_DEPTH}} szint",
+  "engine.outlines.pageDrawsTextFont": "A(z) {{page}}. oldal kiválasztott betűtípus nélkül rajzol szöveget.",
   "engine.outlines.pageDrawsTextThrough": "A(z) {{page}}. oldal a(z) {{name}} betűtípus-erőforráson keresztül rajzol szöveget, amelyet az oldal nem határoz meg.",
   "engine.outlines.pageDrawsZeroWidth": "A(z) {{page}}. oldal nulla vastagságú vonalat rajzol, amelynek nincs rögzített vastagsága a körvonallá alakításhoz.",
   "engine.outlines.pageNestsFormXobjects": "A(z) {{page}}. oldal {{cap}} szintnél mélyebben ágyaz egymásba űrlap-XObjecteket.",

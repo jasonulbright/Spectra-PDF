@@ -2313,6 +2313,7 @@
   "engine.outline.malformedOutlineActionPayload": "malformed outline action payload",
   "engine.outline.outlineActionPayloadNested": "outline action payload nested too deeply",
   "engine.outline.outlineDeeperThanLevels": "outline deeper than {{MAX_DEPTH}} levels",
+  "engine.outlines.pageDrawsTextFont": "Page {{page}} draws text with no font selected.",
   "engine.outlines.pageDrawsTextThrough": "Page {{page}} draws text through the font resource {{name}}, which the page does not define.",
   "engine.outlines.pageDrawsZeroWidth": "Page {{page}} draws a zero-width line, which has no fixed width to outline.",
   "engine.outlines.pageNestsFormXobjects": "Page {{page}} nests form XObjects deeper than {{cap}} levels.",

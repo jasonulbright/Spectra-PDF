@@ -2328,6 +2328,7 @@
   "engine.outline.malformedOutlineActionPayload": "virheellinen toiminnon hyötykuorma jäsennyksessä",
   "engine.outline.outlineActionPayloadNested": "jäsennyksen toimintohyötykuorma on sisäkkäin liian syvästi",
   "engine.outline.outlineDeeperThanLevels": "jäsennys on syvempi kuin {{MAX_DEPTH}} tasoa",
+  "engine.outlines.pageDrawsTextFont": "Sivu {{page}} piirtää tekstiä ilman valittua fonttia.",
   "engine.outlines.pageDrawsTextThrough": "Sivu {{page}} piirtää tekstiä fonttiresurssin {{name}} kautta, jota sivu ei määrittele.",
   "engine.outlines.pageDrawsZeroWidth": "Sivu {{page}} piirtää nollan levyisen viivan, jolla ei ole kiinteää leveyttä ääriviivaksi muunnettavaksi.",
   "engine.outlines.pageNestsFormXobjects": "Sivu {{page}} sisäkkäistää lomake-XObjecteja syvemmälle kuin {{cap}} tasoa.",

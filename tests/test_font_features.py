@@ -358,6 +358,7 @@ class TestExistingTextFeatures:
 
         m = _M()
         m.resources = resources
+        m.font = font
         face, glyph_for, tmp = _feature_source(
             FONTS_DIR, m, resources, "Hamburg", ("smcp", "c2sc"), 0, "regular"
         )

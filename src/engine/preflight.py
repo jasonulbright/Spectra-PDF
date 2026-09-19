@@ -278,6 +278,18 @@ def walk_page_resources(
                 try:
                     gs = eg[key]
                     on_extgstate(gs, origin)
+                    chosen = gs.get("/Font")
+                    if (
+                        isinstance(chosen, pikepdf.Array)
+                        and len(chosen) >= 1
+                        and isinstance(chosen[0], pikepdf.Dictionary)
+                    ):
+                        # A graphics state's /Font selects a font as `Tf`
+                        # does (ISO 32000-2 Table 57).
+                        try:
+                            on_font(chosen[0], origin)
+                        except Exception as exc:
+                            unreadable((FONT,), f"a font will not read: {exc}")
                     ca = gs.get("/ca")
                     caa = gs.get("/CA")
                     if (ca is not None and float(ca) < 1.0) or (caa is not None and float(caa) < 1.0):

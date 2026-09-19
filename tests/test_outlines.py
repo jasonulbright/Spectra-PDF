@@ -45,6 +45,7 @@ from engine.stroke_outline import (
 from outline_builders import (
     FONT_DIR,
     composite_text_pdf,
+    embed_truetype,
     embedded_text_pdf,
     escape,
     fonts_available,
@@ -56,6 +57,7 @@ from outline_builders import (
     type3_text_pdf,
     unembedded_text_pdf,
 )
+from text_state_shapes import SHAPES, TEXT, shape_pdf
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -471,3 +473,268 @@ def test_list_outlines_rejects_a_page_out_of_range(tmp_dir, font_dir):
     source = embedded_text_pdf(os.path.join(tmp_dir, "a.pdf"))
     with pytest.raises(ValueError, match="not in this document"):
         list_outlines(source, pages=[7], font_dir=font_dir)
+
+
+# ── the state a run and a form draw in ─────────────────────────────────────
+
+
+def _rgb_ink(gs_path, source, target, rows, cols):
+    """The mean colour of the inked pixels in one window of a 72 dpi render,
+    and how many there are."""
+    import numpy as np
+    from PIL import Image
+
+    subprocess.run(
+        [gs_path, "-dNOPAUSE", "-dBATCH", "-dSAFER", "-q", "-sDEVICE=png16m",
+         "-r72", "-o", str(target), str(source)],
+        check=True, stdin=subprocess.DEVNULL, capture_output=True,
+    )
+    with Image.open(target) as image:
+        window = np.asarray(image.convert("RGB")).astype(int)[rows, cols].reshape(-1, 3)
+    inked = window[(window < 200).any(axis=1)]
+    return (inked.mean(axis=0) if len(inked) else None), len(inked)
+
+
+def _direct(font):
+    """A direct copy of an indirect font dictionary: no object number of its
+    own, the way some producers write a resource."""
+    return pikepdf.Dictionary({key: font[key] for key in font.keys()})
+
+
+def _state_doc(label: str, sans, serif, pdf):
+    """Shapes A, A2 and B drawn in embedded faces: the text state's font is
+    the sans face at 24 pt, and the name the stream would resolve gives the
+    serif face (A2 at 1 pt)."""
+    text = b"(Hamburgefonstiv) Tj"
+    page = pdf.add_blank_page(page_size=(400.0, 200.0))
+    gs = pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, Font=pikepdf.Array([sans, 24]))
+    if label == "A":
+        page.Resources = pikepdf.Dictionary(ExtGState=pikepdf.Dictionary(GS1=gs))
+        page.Contents = pdf.make_stream(b"BT /GS1 gs 1 0 0 1 30 80 Tm " + text + b" ET")
+    elif label == "A2":
+        page.Resources = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(F2=serif), ExtGState=pikepdf.Dictionary(GS1=gs))
+        page.Contents = pdf.make_stream(
+            b"BT /F2 1 Tf /GS1 gs 1 0 0 1 30 80 Tm " + text + b" ET")
+    else:
+        form = pdf.make_stream(b"BT 1 0 0 1 30 80 Tm " + text + b" ET")
+        form["/Type"] = pikepdf.Name.XObject
+        form["/Subtype"] = pikepdf.Name.Form
+        form["/BBox"] = pikepdf.Array([0, 0, 400, 200])
+        form["/Resources"] = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=serif))
+        page.Resources = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(F1=sans),
+            XObject=pikepdf.Dictionary(Fm0=pdf.make_indirect(form)))
+        page.Contents = pdf.make_stream(b"BT /F1 24 Tf ET /Fm0 Do")
+
+
+class TestTheTextState:
+    """A run converts with the font the text state holds (ISO 32000-2
+    §9.3.1): the one an ExtGState /Font entry sets (Table 57), or the one a
+    form inherits from its Do (§8.10.1), whatever the form's own resources
+    call by that name. A form's strokes convert in the width and colour it
+    inherits, and it converts once per state it is drawn in."""
+
+    @pytest.mark.parametrize("label", SHAPES)
+    def test_the_shared_shapes_convert_with_the_drawn_font(self, tmp_dir, font_dir, label):
+        report = list_outlines(shape_pdf(tmp_dir, label), font_dir=font_dir)
+        assert report["refusals"] == []
+        page = report["pages"][0]
+        assert page["fonts"] == ["Wide"]
+        assert page["glyphs"] == len(TEXT.replace(b" ", b""))
+
+    @pytest.mark.parametrize("label", SHAPES)
+    def test_the_drawn_font_converts_and_renders_equivalently(
+        self, tmp_dir, font_dir, gs_path, label
+    ):
+        pytest.importorskip("numpy")
+        from outline_builders import SERIF
+
+        pdf = pikepdf.new()
+        _state_doc(label, embed_truetype(pdf), embed_truetype(pdf, SERIF, "/LibSerif"), pdf)
+        source = os.path.join(tmp_dir, f"{label}.pdf")
+        pdf.save(source)
+        pdf.close()
+        target = os.path.join(tmp_dir, f"{label}-out.pdf")
+        result = _convert_all(source, target, font_dir)[0]
+        assert result["fonts"] == ["LibSans"]
+        deep, delta = _compare(gs_path, tmp_dir, source, target, 300, label)
+        assert deep == 0
+        assert abs(delta) < 0.10
+        assert extract_text(target)["text"].strip("\n\x0c ") == ""
+
+    def test_two_direct_font_dictionaries_keep_their_own_glyphs(
+        self, tmp_dir, font_dir, gs_path
+    ):
+        pytest.importorskip("numpy")
+        from outline_builders import SERIF
+
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(400.0, 200.0))
+        page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(
+            F1=_direct(embed_truetype(pdf)),
+            F2=_direct(embed_truetype(pdf, SERIF, "/LibSerif"))))
+        page.Contents = pdf.make_stream(
+            b"BT /F1 24 Tf 1 0 0 1 30 130 Tm (Hamburg) Tj ET "
+            b"BT /F2 24 Tf 1 0 0 1 30 50 Tm (Hamburg) Tj ET")
+        source = os.path.join(tmp_dir, "direct.pdf")
+        pdf.save(source)
+        pdf.close()
+        target = os.path.join(tmp_dir, "direct-out.pdf")
+        result = _convert_all(source, target, font_dir)[0]
+        assert result["fonts"] == ["LibSans", "LibSerif"]
+        deep, _delta = _compare(gs_path, tmp_dir, source, target, 300, "direct")
+        assert deep == 0
+
+    def test_one_form_drawn_in_two_fonts_converts_once_for_each(
+        self, tmp_dir, font_dir, gs_path
+    ):
+        pytest.importorskip("numpy")
+        from outline_builders import SERIF
+
+        pdf = pikepdf.new()
+        form = pdf.make_stream(b"BT 1 0 0 1 20 20 Tm (Wave) Tj ET")
+        form["/Type"] = pikepdf.Name.XObject
+        form["/Subtype"] = pikepdf.Name.Form
+        form["/BBox"] = pikepdf.Array([0, 0, 400, 100])
+        form["/Resources"] = pikepdf.Dictionary()
+        page = pdf.add_blank_page(page_size=(400.0, 200.0))
+        page.Resources = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(F1=embed_truetype(pdf), F2=embed_truetype(pdf, SERIF, "/LibSerif")),
+            XObject=pikepdf.Dictionary(Fm0=pdf.make_indirect(form)))
+        page.Contents = pdf.make_stream(
+            b"BT /F1 24 Tf ET /Fm0 Do BT /F2 24 Tf ET q 1 0 0 1 0 100 cm /Fm0 Do Q")
+        source = os.path.join(tmp_dir, "twice.pdf")
+        pdf.save(source)
+        pdf.close()
+        target = os.path.join(tmp_dir, "twice-out.pdf")
+        result = _convert_all(source, target, font_dir)[0]
+        assert result["fonts"] == ["LibSans", "LibSerif"]
+        deep, _delta = _compare(gs_path, tmp_dir, source, target, 300, "twice")
+        assert deep == 0
+        with pikepdf.open(target) as out:
+            drawn = [str(i.operands[0]) for i in pikepdf.parse_content_stream(out.pages[0])
+                     if str(i.operator) == "Do"]
+            names = [str(name) for name in out.pages[0].Resources.XObject.keys()]
+        assert len(set(drawn)) == 2
+        # The converted page does not reach the unconverted form.
+        assert "/Fm0" not in names
+
+    def test_a_pattern_cell_in_a_form_draws_in_the_form_s_starting_state(
+        self, tmp_dir, font_dir
+    ):
+        # §8.7.3.1 b: the cell starts in the state in effect at the beginning
+        # of the stream that owns the pattern, here the form, which starts in
+        # the state of its Do.
+        pdf = pikepdf.new()
+        cell = pdf.make_stream(b"BT 1 0 0 1 10 40 Tm (Wave) Tj ET")
+        cell["/Type"] = pikepdf.Name.Pattern
+        cell["/PatternType"] = 1
+        cell["/PaintType"] = 1
+        cell["/TilingType"] = 1
+        cell["/BBox"] = pikepdf.Array([0, 0, 100, 100])
+        cell["/XStep"] = 100
+        cell["/YStep"] = 100
+        cell["/Resources"] = pikepdf.Dictionary()
+        form = pdf.make_stream(b"/Pattern cs /P0 scn 0 0 200 200 re f")
+        form["/Type"] = pikepdf.Name.XObject
+        form["/Subtype"] = pikepdf.Name.Form
+        form["/BBox"] = pikepdf.Array([0, 0, 200, 200])
+        form["/Resources"] = pikepdf.Dictionary(Pattern=pikepdf.Dictionary(P0=pdf.make_indirect(cell)))
+        page = pdf.add_blank_page(page_size=(200.0, 200.0))
+        page.Resources = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(F1=embed_truetype(pdf)),
+            XObject=pikepdf.Dictionary(Fm0=pdf.make_indirect(form)))
+        page.Contents = pdf.make_stream(b"BT /F1 24 Tf ET /Fm0 Do")
+        source = os.path.join(tmp_dir, "cell.pdf")
+        pdf.save(source)
+        pdf.close()
+        report = list_outlines(source, font_dir=font_dir)
+        assert report["refusals"] == []
+        assert report["pages"][0]["fonts"] == ["LibSans"]
+        assert report["pages"][0]["glyphs"] == 4
+
+    def test_text_drawn_before_any_font_refuses_by_name(self, tmp_dir, font_dir):
+        source = page_pdf(os.path.join(tmp_dir, "nofont.pdf"),
+                          b"BT 1 0 0 1 20 20 Tm (x) Tj ET")
+        report = list_outlines(source, font_dir=font_dir)
+        assert report["refusals"] == ["Page 1 draws text with no font selected."]
+
+    def test_the_default_stroke_colour_converts_black_under_any_fill(
+        self, tmp_dir, font_dir, gs_path
+    ):
+        pytest.importorskip("numpy")
+        source = page_pdf(os.path.join(tmp_dir, "black.pdf"),
+                          b"1 0 0 rg 10 w 50 200 m 350 200 l S")
+        target = os.path.join(tmp_dir, "black-out.pdf")
+        _convert_all(source, target, font_dir)
+        window = (slice(190, 211), slice(60, 340))
+        before, count = _rgb_ink(gs_path, source, os.path.join(tmp_dir, "b.png"), *window)
+        after, converted = _rgb_ink(gs_path, target, os.path.join(tmp_dir, "a.png"), *window)
+        assert count > 0 and converted > 0
+        assert list(before) == pytest.approx([0, 0, 0], abs=1)
+        assert list(after) == pytest.approx([0, 0, 0], abs=1)
+
+    def test_a_form_stroke_converts_in_the_width_and_colour_it_inherits(
+        self, tmp_dir, font_dir, gs_path
+    ):
+        pytest.importorskip("numpy")
+        pdf = pikepdf.new()
+        form = pdf.make_stream(b"50 200 m 350 200 l S")
+        form["/Type"] = pikepdf.Name.XObject
+        form["/Subtype"] = pikepdf.Name.Form
+        form["/BBox"] = pikepdf.Array([0, 0, 400, 400])
+        form["/Resources"] = pikepdf.Dictionary()
+        page = pdf.add_blank_page(page_size=(400.0, 400.0))
+        page.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Fm0=pdf.make_indirect(form)))
+        page.Contents = pdf.make_stream(b"20 w 1 0 0 RG 0 0 1 rg /Fm0 Do")
+        source = os.path.join(tmp_dir, "inherit.pdf")
+        pdf.save(source)
+        pdf.close()
+        target = os.path.join(tmp_dir, "inherit-out.pdf")
+        _convert_all(source, target, font_dir)
+        deep, _delta = _compare(gs_path, tmp_dir, source, target, 150, "inherit")
+        assert deep == 0
+        colour, count = _rgb_ink(gs_path, target, os.path.join(tmp_dir, "i.png"),
+                                 slice(185, 216), slice(60, 340))
+        assert count > 5000
+        assert list(colour) == pytest.approx([255, 0, 0], abs=1)
+
+    def test_one_form_drawn_under_one_name_in_two_fonts_converts_once_for_each(
+        self, tmp_dir, font_dir, gs_path
+    ):
+        # The page's /F1 is the sans face and the outer form's own /F1 the
+        # serif one: one name, two fonts, and the inner form draws in each.
+        pytest.importorskip("numpy")
+        from outline_builders import SERIF
+
+        pdf = pikepdf.new()
+
+        def form(content, resources):
+            stream = pdf.make_stream(content)
+            stream["/Type"] = pikepdf.Name.XObject
+            stream["/Subtype"] = pikepdf.Name.Form
+            stream["/BBox"] = pikepdf.Array([0, 0, 400, 200])
+            stream["/Resources"] = resources
+            return pdf.make_indirect(stream)
+
+        inner = form(b"BT 1 0 0 1 20 20 Tm (Wave) Tj ET", pikepdf.Dictionary())
+        outer = form(
+            b"BT /F1 24 Tf ET q 1 0 0 1 0 100 cm /Fm0 Do Q",
+            pikepdf.Dictionary(
+                Font=pikepdf.Dictionary(F1=embed_truetype(pdf, SERIF, "/LibSerif")),
+                XObject=pikepdf.Dictionary(Fm0=inner)),
+        )
+        page = pdf.add_blank_page(page_size=(400.0, 200.0))
+        page.Resources = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(F1=embed_truetype(pdf)),
+            XObject=pikepdf.Dictionary(Fm0=inner, Fo=outer))
+        page.Contents = pdf.make_stream(b"BT /F1 24 Tf ET /Fm0 Do /Fo Do")
+        source = os.path.join(tmp_dir, "one-name.pdf")
+        pdf.save(source)
+        pdf.close()
+        target = os.path.join(tmp_dir, "one-name-out.pdf")
+        result = _convert_all(source, target, font_dir)[0]
+        assert result["fonts"] == ["LibSans", "LibSerif"]
+        deep, _delta = _compare(gs_path, tmp_dir, source, target, 300, "one-name")
+        assert deep == 0

@@ -30,7 +30,7 @@ from pathlib import Path
 from . import budget
 
 import pikepdf
-from pdfminer.high_level import extract_text as pdfminer_extract
+from engine.extract_text import pdfminer_text as pdfminer_extract
 
 Name_Page = pikepdf.Name("/Page")
 Name_Pages = pikepdf.Name("/Pages")

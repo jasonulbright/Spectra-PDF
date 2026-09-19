@@ -2390,6 +2390,7 @@
   "engine.outline.malformedOutlineActionPayload": "charge utile d’action de signets incorrecte",
   "engine.outline.outlineActionPayloadNested": "charge utile d’action de signets imbriquée trop profondément",
   "engine.outline.outlineDeeperThanLevels": "arborescence de signets plus profonde que {{MAX_DEPTH}} niveaux",
+  "engine.outlines.pageDrawsTextFont": "La page {{page}} dessine du texte sans aucune police sélectionnée.",
   "engine.outlines.pageDrawsTextThrough": "La page {{page}} dessine du texte via la ressource de police {{name}}, que la page ne définit pas.",
   "engine.outlines.pageDrawsZeroWidth": "La page {{page}} dessine une ligne d’épaisseur nulle, qui n’a aucune épaisseur fixe à convertir en contour.",
   "engine.outlines.pageNestsFormXobjects": "La page {{page}} imbrique des XObjects de formulaire au-delà de {{cap}} niveaux.",

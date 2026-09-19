@@ -86,6 +86,7 @@ from engine.text_metrics import (
     _FontCache,
     _run_metrics,
     cluster_span,
+    ink_span,
     measurable,
     show_bytes,
     show_clusters,
@@ -232,18 +233,20 @@ def _span_bbox(
 
 def _run_bbox(
     combined: Matrix,
-    raw_width: float,
+    span: tuple[float, float],
     slack: float,
     vertical: bool,
     state: GraphicsTextState,
     ink: tuple[float, float],
 ) -> Rect:
-    """The whole run's box. `slack` grows it BACKWARD by however far an earlier
+    """The whole run's box over `span`, the pen positions its glyphs occupy
+    (`ink_span`). `slack` grows it BACKWARD by however far an earlier
     unmeasurable run on this line may have over-advanced (upward, vertically)."""
+    lo, hi = span
     if vertical:
-        return _span_bbox(combined, -slack, max(raw_width, 0.01), True, state, ink)
+        return _span_bbox(combined, lo - slack, hi, True, state, ink)
     return _span_bbox(
-        combined, -slack / max(state.h_scale, 1e-9), raw_width, False, state, ink
+        combined, lo - slack / max(state.h_scale, 1e-9), hi, False, state, ink
     )
 
 
@@ -860,14 +863,16 @@ def _walk(
             measured = measurable(cap, data)
             if measured:
                 _text, raw_width = _run_metrics(operator, operands, cap, state)
+                span = ink_span(show_items(operator, operands, cap, state))
             else:
                 raw_width = wide_width(operator, operands, cap, state)
+                span = (0.0, raw_width)
             # `writes_vertical`, not `vertical`: a REFUSED Identity-V font
             # still draws its column downward.
             vertical = bool(cap is not None and cap.writes_vertical)
             combined = _mat_mult(state.tm, state.ctm)
             ink = fonts.ink_extent_of(state.font)
-            bbox = _run_bbox(combined, raw_width, slack, vertical, state, ink)
+            bbox = _run_bbox(combined, span, slack, vertical, state, ink)
             if not _intersects_any(bbox, regions):
                 kept.append(instruction)
             else:
@@ -1057,9 +1062,11 @@ def _walk(
         cell_regions = _tile_regions(pattern, m_pat, regions, boxes)
         if not cell_regions:
             continue
+        # The cell starts in the state in effect at the start of this stream,
+        # the one this stream inherited (ISO 32000-2 §8.7.3.1 b).
         copy, sub = _redact_form(
             pdf, pattern, resources, cell_regions, m_pat, depth + 1,
-            name_counter, fonts, None, run=run, kept_keys=PATTERN_KEPT_KEYS,
+            name_counter, fonts, parent_state, run=run, kept_keys=PATTERN_KEPT_KEYS,
         )
         if copy is None:
             continue

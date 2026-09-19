@@ -7,6 +7,7 @@ import pytest
 
 from engine.read_aloud import read_aloud_page
 
+from text_state_shapes import INK_BOX, SHAPES, shape_pdf
 from derived_nav_builders import (
     attach,
     blank_pdf,
@@ -268,3 +269,24 @@ class TestRunListing:
         pdf.save(path)
         runs = list_text_runs(path, 1)["runs"]
         assert [r["artifact"] for r in runs] == [True, False]
+
+
+class TestTheFontTheTextStateHolds:
+    """A character's rectangle reaches as far below and above the baseline as
+    the font the text state holds inks (ISO 32000-2 §9.3.1): the one an
+    ExtGState sets, or the one a form inherits under a name its own resources
+    give to another font. The name alone finds a font with no ink extent, or
+    none at all, and the rectangle falls back to 0.3 em below and 1 em above."""
+
+    @pytest.mark.parametrize("label", SHAPES)
+    def test_the_characters_cover_the_drawn_font_s_ink(self, tmp_dir, label):
+        path = shape_pdf(tmp_dir, label)
+        (block,) = read_aloud_page(path, 1)["blocks"]
+        assert block["text"] == "PUBLIC SECRET WORDS"
+        chars = [rect for span in block["spans"] for rect in span["chars"]]
+        assert len(chars) == len(block["text"])
+        union = [
+            min(r[0] for r in chars), min(r[1] for r in chars),
+            max(r[2] for r in chars), max(r[3] for r in chars),
+        ]
+        assert union == pytest.approx(INK_BOX, abs=0.01)

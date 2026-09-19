@@ -2390,6 +2390,7 @@
   "engine.outline.malformedOutlineActionPayload": "מטען פעולת המתאר פגום",
   "engine.outline.outlineActionPayloadNested": "מטען פעולת המתאר מקונן לעומק רב מדי",
   "engine.outline.outlineDeeperThanLevels": "עומק המתאר עולה על {{MAX_DEPTH}} רמות",
+  "engine.outlines.pageDrawsTextFont": "עמוד {{page}} מצייר טקסט בלי שנבחר גופן.",
   "engine.outlines.pageDrawsTextThrough": "עמוד {{page}} מצייר טקסט דרך משאב הגופן {{name}}, שהעמוד אינו מגדיר.",
   "engine.outlines.pageDrawsZeroWidth": "עמוד {{page}} מצייר קו ברוחב אפס, שאין לו רוחב קבוע להמרה למתאר.",
   "engine.outlines.pageNestsFormXobjects": "עמוד {{page}} מקנן XObject של טפסים עמוק מ-{{cap}} רמות.",

@@ -54,17 +54,25 @@ from .color_spaces import build_resolver
 from .content_walk import (
     ClipTracker,
     DEFAULT_COLOR,
-    GraphicsTextState,
     IDENTITY,
     bbox_of_rect_under_matrix,
     mat_mult,
     transform_point,
 )
-from .flattener import _page_box, _placement, _text_rect, drop_dead_frames
+from .flattener import (
+    _line_width_of,
+    _page_box,
+    _placement,
+    drop_dead_frames,
+    show_rect,
+    text_paint,
+    without,
+)
 from .image_resolution import _measure
 from .redact import MAX_FORM_DEPTH, _as_matrix, _lookup_xobject, _resolve_resources
 from .separations import refuse_missing_plates
-from .text_metrics import _FontCache, _run_metrics
+from .text_metrics import _child_state, _FontCache
+from .text_runs import _resource_lookup
 from .validate import validate_pdf
 
 _CONSTRUCT = frozenset({"m", "l", "c", "v", "y", "re", "h"})
@@ -429,8 +437,8 @@ class _Walk:
             None,
             None,
             "",
-            DEFAULT_COLOR,
-            DEFAULT_COLOR,
+            None,
+            1.0,
         )
 
     def _emit(self, kind: str, rect, unit, colour: dict, *, nested: bool,
@@ -453,18 +461,21 @@ class _Walk:
         })
 
     def _stream(self, instructions, resources, fallback, base_ctm, depth,
-                base_clip, root_unit, form, base_fill, base_stroke) -> None:
-        state = GraphicsTextState(
-            base_ctm, fill_color=base_fill, stroke_color=base_stroke
-        )
+                base_clip, root_unit, form, parent_state, base_line_width) -> None:
+        # A form runs in the graphics state of the Do that invokes it (ISO
+        # 32000-2 §8.10.1): the font dictionary, the text parameters, the
+        # colours and the line width all carry in.
+        lookup = _resource_lookup(resources, fallback)
+        state = _child_state(base_ctm, parent_state, lookup=lookup)
         clips = ClipTracker(base_clip)
         construct: list[int] = []
         points: list[tuple[float, float]] = []
         has_clip = False
-        line_width = 1.0
+        line_width = base_line_width
         width_stack: list[float] = []
         text_open: int | None = None
         text_rect = None
+        text_shows: list[int] = []
         text_colour: dict | None = None
         nested = depth > 0
 
@@ -489,16 +500,18 @@ class _Walk:
             # would never see either one and every text block would go
             # unlisted.
             if operator == "BT":
-                text_open, text_rect, text_colour = idx, None, None
+                text_open, text_rect, text_shows, text_colour = idx, None, [], None
             elif operator == "ET" and text_open is not None:
                 if text_rect is not None:
                     self._emit(
-                        "text", text_rect, unit_for(range(text_open, idx + 1)),
+                        "text", text_rect, unit_for(text_shows),
                         text_colour if text_colour is not None
                         else _colour_of(DEFAULT_COLOR, resources),
                         nested=nested, form=form,
                     )
-                text_open, text_rect, text_colour = None, None, None
+                text_open, text_rect, text_shows, text_colour = None, None, [], None
+            if operator == "gs" and operands:
+                line_width = _line_width_of(lookup("/ExtGState", operands[0]), line_width)
             if state.feed(operator, operands):
                 continue
             if operator == "w":
@@ -508,20 +521,16 @@ class _Walk:
                     pass
                 continue
             if operator in _SHOW_OPS:
-                if operator in ("'", '"'):
-                    state.next_line()
-                cap = self.fonts.capability(resources, fallback, state.font_name)
-                _text, raw_width = _run_metrics(operator, operands, cap, state)
-                rect = _text_rect(state, cap, raw_width)
-                text_rect = rect if text_rect is None else _union(text_rect, rect)
-                if text_colour is None:
-                    stroked = state.render_mode in _STROKE_ONLY_TEXT
-                    text_colour = _colour_of(
-                        state.stroke_color if stroked else state.fill_color, resources
-                    )
-                state.advance_after_show(
-                    raw_width, bool(cap is not None and cap.vertical)
-                )
+                rect = show_rect(state, self.fonts, operator, operands, line_width)
+                if text_open is not None:
+                    text_shows.append(idx)
+                    if text_paint(state) and rect is not None:
+                        text_rect = rect if text_rect is None else _union(text_rect, rect)
+                        if text_colour is None:
+                            stroked = state.render_mode in _STROKE_ONLY_TEXT
+                            text_colour = _colour_of(
+                                state.stroke_color if stroked else state.fill_color, resources
+                            )
                 continue
             if operator in _CONSTRUCT:
                 construct.append(idx)
@@ -541,7 +550,7 @@ class _Walk:
             if operator == "Do" and operands:
                 self._do(
                     idx, str(operands[0]), state, clips, resources, fallback,
-                    depth, unit_for, nested, form, root_unit,
+                    depth, unit_for, nested, form, root_unit, line_width,
                 )
                 construct, points, has_clip = [], [], False
                 continue
@@ -582,7 +591,7 @@ class _Walk:
         )
 
     def _do(self, idx, name, state, clips, resources, fallback, depth,
-            unit_for, nested, form, root_unit) -> None:
+            unit_for, nested, form, root_unit, line_width) -> None:
         xobj = _lookup_xobject(name, resources, fallback)
         rect, subtype, reason = _placement(xobj, state.ctm)
         if reason:
@@ -637,8 +646,8 @@ class _Walk:
             clips.clip,
             unit if root_unit is None else root_unit,
             form or name,
-            state.fill_color,
-            state.stroke_color,
+            state,
+            line_width,
         )
 
     def _placement_entry(self, xobj, marked, rect, ctm, unit, resources,
@@ -826,9 +835,7 @@ def _isolation_pdf(pdf, page, units, wanted, tile, dest: Path) -> None:
     height = max(tile[3] - tile[1], 1e-3)
     for unit in wanted:
         drop = everything - set(unit)
-        kept = drop_dead_frames(
-            [ins for i, ins in enumerate(instructions) if i not in drop]
-        )
+        kept = drop_dead_frames(without(instructions, drop))
         try:
             body = pikepdf.unparse_content_stream(kept)
         except Exception as exc:

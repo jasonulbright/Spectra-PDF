@@ -2328,6 +2328,7 @@
   "engine.outline.malformedOutlineActionPayload": "forkert nyttelast i dispositionens handling",
   "engine.outline.outlineActionPayloadNested": "nyttelasten i dispositionens handling er indlejret for dybt",
   "engine.outline.outlineDeeperThanLevels": "dispositionen er dybere end {{MAX_DEPTH}} niveauer",
+  "engine.outlines.pageDrawsTextFont": "Side {{page}} tegner tekst, uden at der er valgt en skrifttype.",
   "engine.outlines.pageDrawsTextThrough": "Side {{page}} tegner tekst via skrifttyperessourcen {{name}}, som siden ikke definerer.",
   "engine.outlines.pageDrawsZeroWidth": "Side {{page}} tegner en linje uden bredde, som ikke har en fast bredde at konvertere til kontur.",
   "engine.outlines.pageNestsFormXobjects": "Side {{page}} indlejrer formular-XObjects dybere end {{cap}} niveauer.",

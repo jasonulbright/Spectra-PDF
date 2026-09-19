@@ -402,6 +402,7 @@ outline.bookmarkTargetsPage	pattern	outline	bookmark '{{title}}' targets page {{
 outline.malformedOutlineActionPayload	exact	outline	malformed outline action payload
 outline.outlineActionPayloadNested	exact	outline	outline action payload nested too deeply
 outline.outlineDeeperThanLevels	pattern	outline	outline deeper than {{MAX_DEPTH}} levels
+outlines.pageDrawsTextFont	pattern	outlines	Page {{page}} draws text with no font selected.
 outlines.pageDrawsTextThrough	pattern	outlines	Page {{page}} draws text through the font resource {{name}}, which the page does not define.
 outlines.pageDrawsZeroWidth	pattern	outlines	Page {{page}} draws a zero-width line, which has no fixed width to outline.
 outlines.pageNestsFormXobjects	pattern	flattener,outlines	Page {{page}} nests form XObjects deeper than {{cap}} levels.
@@ -866,7 +867,7 @@ text_paragraphs.splitPositionMustNumber	exact	text_paragraphs	split position mus
 text_paragraphs.verticalTextCannotConverted	exact	text_paragraphs,text_runs	vertical text cannot be converted to the fallback font
 text_paragraphs.verticalTextRaisedCharacters	exact	text_paragraphs	vertical text with raised characters does not reflow
 text_runs.colorMustRG	exact	text_runs	color must be [r, g, b] with components in 0..1
-text_runs.editCannotSelectText	exact	text_runs	an edit cannot select this text's font by name
+text_runs.editCannotSelectText	exact	text_paragraphs,text_runs	an edit cannot select this text's font by name
 text_runs.editDidApplyRun	exact	text_runs	edit did not apply (run not found)
 text_runs.fontActiveText	exact	text_runs	no font is active for this text
 text_runs.fontActiveTextRun	exact	text_runs	no font is active for this text run

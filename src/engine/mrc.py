@@ -218,17 +218,20 @@ def _page_box(page) -> tuple[float, float, float, float]:
     return min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
 
 
-def _has_other_visible_content(pdf, instructions, resources, fallback, depth=0) -> bool:
+def _has_other_visible_content(pdf, instructions, resources, fallback, depth=0,
+                               parent=None) -> bool:
     """True when the page draws anything besides the one image.
 
     Invisible text (`Tr 3` — an OCR layer) does not count, and annotations are
     not page content at all. Everything else — a signature stamp's vector art,
     a header the scanner's software drew, a second image — means the page is
-    not a plain scan and MRC has no business rewriting it.
+    not a plain scan and MRC has no business rewriting it. A form runs in the
+    state of the Do that draws it (ISO 32000-2 §8.10.1), so text a form draws
+    under the invoker's `3 Tr` is invisible too.
     """
-    from .content_walk import GraphicsTextState
+    from .text_metrics import _child_state
 
-    state = GraphicsTextState(IDENTITY)
+    state = _child_state(IDENTITY, parent)
     for instruction in list(instructions):
         op = str(instruction.operator)
         operands = list(instruction.operands)
@@ -260,6 +263,7 @@ def _has_other_visible_content(pdf, instructions, resources, fallback, depth=0) 
                     form_res if form_res is not None else resources,
                     resources,
                     depth + 1,
+                    parent=state,
                 ):
                     return True
                 continue

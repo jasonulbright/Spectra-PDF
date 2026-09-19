@@ -2390,6 +2390,7 @@
   "engine.outline.malformedOutlineActionPayload": "carga de acción del esquema mal formada",
   "engine.outline.outlineActionPayloadNested": "la carga de acción del esquema está anidada a demasiada profundidad",
   "engine.outline.outlineDeeperThanLevels": "el esquema supera los {{MAX_DEPTH}} niveles",
+  "engine.outlines.pageDrawsTextFont": "La página {{page}} dibuja texto sin ninguna fuente seleccionada.",
   "engine.outlines.pageDrawsTextThrough": "La página {{page}} dibuja texto mediante el recurso de fuente {{name}}, que la página no define.",
   "engine.outlines.pageDrawsZeroWidth": "La página {{page}} dibuja una línea de grosor cero, que no tiene un grosor fijo que convertir en contorno.",
   "engine.outlines.pageNestsFormXobjects": "La página {{page}} anida XObjects de formulario a más de {{cap}} niveles.",

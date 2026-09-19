@@ -2390,6 +2390,7 @@
   "engine.outline.malformedOutlineActionPayload": "payload de ação do sumário malformado",
   "engine.outline.outlineActionPayloadNested": "payload de ação do sumário aninhado em excesso",
   "engine.outline.outlineDeeperThanLevels": "sumário com mais de {{MAX_DEPTH}} níveis",
+  "engine.outlines.pageDrawsTextFont": "A página {{page}} desenha texto sem nenhuma fonte selecionada.",
   "engine.outlines.pageDrawsTextThrough": "A página {{page}} desenha texto pelo recurso de fonte {{name}}, que a página não define.",
   "engine.outlines.pageDrawsZeroWidth": "A página {{page}} desenha uma linha de espessura zero, que não tem espessura fixa para converter em contorno.",
   "engine.outlines.pageNestsFormXobjects": "A página {{page}} aninha XObjects de formulário além de {{cap}} níveis.",

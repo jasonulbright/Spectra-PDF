@@ -2452,6 +2452,7 @@
   "engine.outline.malformedOutlineActionPayload": "napačno oblikovana vsebina dejanja orisa",
   "engine.outline.outlineActionPayloadNested": "vsebina dejanja orisa je pregnezdena pregloboko",
   "engine.outline.outlineDeeperThanLevels": "oris je globlji od {{MAX_DEPTH}} ravni",
+  "engine.outlines.pageDrawsTextFont": "Stran {{page}} riše besedilo brez izbrane pisave.",
   "engine.outlines.pageDrawsTextThrough": "Stran {{page}} riše besedilo prek vira pisave {{name}}, ki ga stran ne določa.",
   "engine.outlines.pageDrawsZeroWidth": "Stran {{page}} riše črto z ničelno debelino, ki nima stalne debeline za pretvorbo v obris.",
   "engine.outlines.pageNestsFormXobjects": "Stran {{page}} gnezdi obrazčne XObject globlje kot {{cap}} ravni.",

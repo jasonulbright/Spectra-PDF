@@ -2328,6 +2328,7 @@
   "engine.outline.malformedOutlineActionPayload": "feil handlingsnyttelast i disposisjonen",
   "engine.outline.outlineActionPayloadNested": "handlingsnyttelasten i disposisjonen er nestet for dypt",
   "engine.outline.outlineDeeperThanLevels": "disposisjonen er dypere enn {{MAX_DEPTH}} nivåer",
+  "engine.outlines.pageDrawsTextFont": "Side {{page}} tegner tekst uten at noen skrift er valgt.",
   "engine.outlines.pageDrawsTextThrough": "Side {{page}} tegner tekst via skriftressursen {{name}}, som siden ikke definerer.",
   "engine.outlines.pageDrawsZeroWidth": "Side {{page}} tegner en linje uten bredde, som ikke har en fast bredde å konvertere til kontur.",
   "engine.outlines.pageNestsFormXobjects": "Side {{page}} nøster formular-XObjects dypere enn {{cap}} nivåer.",

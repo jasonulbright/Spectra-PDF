@@ -59,14 +59,15 @@ from engine.redact import (
 from engine.text_metrics import (
     _child_state,
     _FontCache,
-    _lookup_font,
     _run_metrics,
+    ink_span,
     measurable,
     show_bytes,
     show_clusters,
     show_items,
     wide_width,
 )
+from engine.text_runs import _resource_lookup
 
 SHOW_OPS = ("Tj", "'", '"', "TJ")
 
@@ -389,15 +390,9 @@ _CLIP_OPS = ("W", "W*")
 # ── graphics-state alpha ──────────────────────────────────────────────────
 
 
-def _gs_opacity(resources, name) -> Optional[dict]:
-    """The fill alpha, soft mask and blend mode an /ExtGState names, or None
-    when the resource cannot be resolved."""
-    if resources is None:
-        return None
-    egs = resources.get("/ExtGState")
-    if not isinstance(egs, pikepdf.Dictionary):
-        return None
-    entry = egs.get(Name(str(name)))
+def _gs_opacity(entry) -> Optional[dict]:
+    """The fill alpha, soft mask and blend mode of one /ExtGState dictionary,
+    or None when the name did not resolve to one."""
     if not isinstance(entry, pikepdf.Dictionary):
         return None
     out: dict = {}
@@ -486,10 +481,20 @@ def _walk_analysis(
     hidden_depth: int = 0,
     in_ocr_form: bool = False,
 ) -> None:
-    state = _child_state(base_ctm, parent_state)
+    # The text state holds the font DICTIONARY: the one `Tf` names in this
+    # stream's resources, an ExtGState /Font entry, or the invoking stream's,
+    # which a form inherits whatever its own resources call by that name
+    # (ISO 32000-2 §8.10.1, §9.3.1).
+    lookup = _resource_lookup(resources, fallback)
+    state = _child_state(base_ctm, parent_state, lookup=lookup)
     alpha = _AlphaState()
     path = _PathBox()
     pending_clip = False
+    # How far the pen may lag what is tracked since the last positioning
+    # operator: a run the font cannot measure advances by the wide estimate,
+    # so the text after it may sit up to this much further back, and its box
+    # grows back to cover that.
+    slack = 0.0
     # Nesting depth of marked-content sections, and the depth at which the
     # outermost HIDDEN optional-content section opened. A run is off-layer
     # while that marker stands.
@@ -505,7 +510,7 @@ def _walk_analysis(
         elif operator == "Q":
             alpha.pop()
         elif operator == "gs" and operands:
-            alpha.apply(_gs_opacity(resources, operands[0]))
+            alpha.apply(_gs_opacity(lookup("/ExtGState", operands[0])))
 
         if operator == "BDC" or operator == "BMC":
             mc_depth += 1
@@ -522,6 +527,9 @@ def _walk_analysis(
                 hidden_at = None
             mc_depth = max(0, mc_depth - 1)
             continue
+
+        if operator in ("Td", "TD", "Tm", "T*", "BT", "ET"):
+            slack = 0.0
 
         if state.feed(operator, operands):
             continue
@@ -569,25 +577,27 @@ def _walk_analysis(
         if operator in SHOW_OPS:
             if operator in ("'", '"'):
                 state.next_line()
+                slack = 0.0
                 if operator == '"' and len(operands) >= 2:
                     try:
                         state.word_spacing = float(operands[0])
                         state.char_spacing = float(operands[1])
                     except (TypeError, ValueError):
                         pass
-            cap = an.fonts.capability(resources, fallback, state.font_name)
+            cap = an.fonts.capability_of(state.font)
             data = show_bytes(operator, operands)
-            if measurable(cap, data):
+            measured = measurable(cap, data)
+            if measured:
                 text, raw_width = _run_metrics(operator, operands, cap, state)
+                lo, hi = ink_span(show_items(operator, operands, cap, state))
             else:
                 text, raw_width = "", wide_width(operator, operands, cap, state)
+                lo, hi = 0.0, raw_width
             vertical = bool(cap is not None and cap.writes_vertical)
             combined = mat_mult(state.tm, state.ctm)
-            ink = an.fonts.ink_extent(resources, fallback, state.font_name)
-            if vertical:
-                rect = _span_bbox(combined, 0.0, max(raw_width, MIN_EXTENT), True, state, ink)
-            else:
-                rect = _span_bbox(combined, 0.0, raw_width, False, state, ink)
+            ink = an.fonts.ink_extent_of(state.font)
+            behind = slack if vertical else slack / max(state.h_scale, 1e-9)
+            rect = _span_bbox(combined, lo - behind, hi, vertical, state, ink)
             an.events.append(
                 _Event(
                     "text",
@@ -607,7 +617,7 @@ def _walk_analysis(
                         # magnitude, so a run scaled by its matrix reports the
                         # size it is painted at.
                         "size": _rendered_size(state, combined),
-                        "font": _base_font(state.font_name, resources, fallback),
+                        "font": _base_font(state.font),
                         # The ink's own space and components, beside the sRGB
                         # above. A four-ink rich black and a K-only black
                         # resolve to the SAME sRGB and read identically on
@@ -619,6 +629,8 @@ def _walk_analysis(
             )
             an.run_index += 1
             state.advance_after_show(raw_width, vertical)
+            if not measured:
+                slack += raw_width if vertical else raw_width * state.h_scale
             continue
 
         if operator == "INLINE IMAGE":
@@ -672,14 +684,10 @@ def _note_scan(an: _Analysis, box: Rect) -> None:
     an.scan_cover = max(an.scan_cover, _area(box) / page_area)
 
 
-def _base_font(name, resources, fallback) -> str:
-    """The /BaseFont of the font a /Tf name resolves to, or "" — the weight the
-    large-text contrast threshold reads is spelled in that name, not in the
-    resource key."""
-    try:
-        font = _lookup_font(name, resources, fallback)
-    except Exception:
-        return ""
+def _base_font(font) -> str:
+    """The /BaseFont of the font dictionary the text state holds, or "" — the
+    weight the large-text contrast threshold reads is spelled in that name,
+    not in the resource key."""
     if font is None:
         return ""
     try:
@@ -1031,7 +1039,7 @@ def _rewrite_runs(
     """(kept, changed, new form copies). The walk mirrors the analysis walk's
     show-op counting exactly, so a target id addresses the run the analysis
     named."""
-    state = _child_state(base_ctm, parent_state)
+    state = _child_state(base_ctm, parent_state, lookup=_resource_lookup(resources, fallback))
     kept: list = []
     changed = False
     new_forms: dict = {}
@@ -1055,7 +1063,7 @@ def _rewrite_runs(
                         state.char_spacing = float(operands[1])
                     except (TypeError, ValueError):
                         pass
-            cap = removal.fonts.capability(resources, fallback, state.font_name)
+            cap = removal.fonts.capability_of(state.font)
             data = show_bytes(operator, operands)
             if measurable(cap, data):
                 _text, raw_width = _run_metrics(operator, operands, cap, state)

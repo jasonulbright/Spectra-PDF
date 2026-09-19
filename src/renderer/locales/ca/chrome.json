@@ -2390,6 +2390,7 @@
   "engine.outline.malformedOutlineActionPayload": "càrrega d'acció de l'esquema mal formada",
   "engine.outline.outlineActionPayloadNested": "la càrrega d'acció de l'esquema està imbricada massa profundament",
   "engine.outline.outlineDeeperThanLevels": "l'esquema té més de {{MAX_DEPTH}} nivells",
+  "engine.outlines.pageDrawsTextFont": "La pàgina {{page}} dibuixa text sense cap lletra seleccionada.",
   "engine.outlines.pageDrawsTextThrough": "La pàgina {{page}} dibuixa text mitjançant el recurs de lletra {{name}}, que la pàgina no defineix.",
   "engine.outlines.pageDrawsZeroWidth": "La pàgina {{page}} dibuixa una línia de gruix zero, que no té cap gruix fix per convertir en contorn.",
   "engine.outlines.pageNestsFormXobjects": "La pàgina {{page}} imbrica XObjects de formulari més enllà de {{cap}} nivells.",

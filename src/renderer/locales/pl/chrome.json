@@ -2452,6 +2452,7 @@
   "engine.outline.malformedOutlineActionPayload": "nieprawidłowy ładunek akcji konspektu",
   "engine.outline.outlineActionPayloadNested": "ładunek akcji konspektu zagnieżdżony zbyt głęboko",
   "engine.outline.outlineDeeperThanLevels": "konspekt głębszy niż {{MAX_DEPTH}} poziomów",
+  "engine.outlines.pageDrawsTextFont": "Strona {{page}} rysuje tekst bez wybranej czcionki.",
   "engine.outlines.pageDrawsTextThrough": "Strona {{page}} rysuje tekst przez zasób czcionki {{name}}, którego strona nie definiuje.",
   "engine.outlines.pageDrawsZeroWidth": "Strona {{page}} rysuje linię o zerowej grubości, która nie ma stałej grubości do zamiany na kontur.",
   "engine.outlines.pageNestsFormXobjects": "Strona {{page}} zagnieżdża XObjecty formularza głębiej niż {{cap}} poziomów.",

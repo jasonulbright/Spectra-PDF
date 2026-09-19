@@ -2328,6 +2328,7 @@
   "engine.outline.malformedOutlineActionPayload": "fehlerhafte Aktionsnutzlast der Gliederung",
   "engine.outline.outlineActionPayloadNested": "Aktionsnutzlast der Gliederung zu tief verschachtelt",
   "engine.outline.outlineDeeperThanLevels": "Gliederung tiefer als {{MAX_DEPTH}} Ebenen",
+  "engine.outlines.pageDrawsTextFont": "Seite {{page}} zeichnet Text, ohne dass eine Schrift ausgewählt ist.",
   "engine.outlines.pageDrawsTextThrough": "Seite {{page}} zeichnet Text über die Schriftressource {{name}}, die die Seite nicht definiert.",
   "engine.outlines.pageDrawsZeroWidth": "Seite {{page}} zeichnet eine Linie ohne Breite, die keine feste Breite zum Umwandeln in eine Kontur hat.",
   "engine.outlines.pageNestsFormXobjects": "Seite {{page}} verschachtelt Formular-XObjects tiefer als {{cap}} Ebenen.",

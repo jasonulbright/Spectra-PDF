@@ -33,6 +33,7 @@ from separation_builders import (
     CROPPED_OUTSIDE,
     cropped_page_pdf,
 )
+from text_state_shapes import INK_BOX, SHAPES, shape_pdf
 from inspector_builders import (
     IMAGE_PIXELS,
     SPOT_NAME,
@@ -737,3 +738,118 @@ class TestTheColourSpaceRow:
         assert walk.objects[0]["kind"] == "text"
         assert walk.objects[0]["colour"]["family"] == "DeviceRGB"
         assert walk.objects[0]["colour"]["components"] == pytest.approx([0.0, 0.0, 1.0])
+
+
+class TestTheTextState:
+    """A text candidate's box is the ink of the font the text state holds (ISO
+    32000-2 §9.3.1): the one `Tf` names, the one an ExtGState /Font entry sets
+    (Table 57), or the one a form inherits from its Do (§8.10.1), whatever the
+    form's own resources call by that name. A form inherits the line width
+    too, and an isolated object draws in the state the page put it in."""
+
+    @staticmethod
+    def _objects(pdf, page) -> list:
+        walk = _Walk(pdf, page)
+        walk.run()
+        return walk.objects
+
+    @pytest.mark.parametrize("label", SHAPES)
+    def test_the_text_candidate_covers_the_drawn_font_s_ink(self, tmp_path, label):
+        with pikepdf.open(shape_pdf(str(tmp_path), label)) as pdf:
+            objects = self._objects(pdf, pdf.pages[0])
+        (text,) = [o for o in objects if o["kind"] == "text"]
+        assert text["rect"] == pytest.approx(INK_BOX, abs=0.01)
+
+    def _page(self, tmp_path, content: bytes, form: bytes | None = None):
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(400.0, 400.0))
+        resources = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(F0=pdf.make_indirect(pikepdf.Dictionary(
+                Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1,
+                BaseFont=pikepdf.Name.Helvetica, Encoding=pikepdf.Name.WinAnsiEncoding))),
+            ExtGState=pikepdf.Dictionary(
+                GW=pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, LW=20)),
+        )
+        if form is not None:
+            stream = pdf.make_stream(form)
+            stream["/Type"] = pikepdf.Name.XObject
+            stream["/Subtype"] = pikepdf.Name.Form
+            stream["/BBox"] = pikepdf.Array([0, 0, 400, 400])
+            stream["/Resources"] = pikepdf.Dictionary()
+            resources["/XObject"] = pikepdf.Dictionary(Fm0=pdf.make_indirect(stream))
+        page.Resources = resources
+        page.Contents = pdf.make_stream(content)
+        path = tmp_path / "state.pdf"
+        pdf.save(path)
+        pdf.close()
+        return str(path)
+
+    def test_a_form_stroke_is_as_wide_as_the_line_width_it_inherits(self, tmp_path):
+        src = self._page(tmp_path, b"20 w /Fm0 Do", form=b"100 200 m 300 200 l S")
+        with pikepdf.open(src) as pdf:
+            objects = self._objects(pdf, pdf.pages[0])
+        (stroke,) = [o for o in objects if o["kind"] == "stroke"]
+        assert stroke["rect"] == pytest.approx([90.0, 190.0, 310.0, 210.0])
+
+    def test_an_extgstate_line_width_widens_the_stroke(self, tmp_path):
+        src = self._page(tmp_path, b"/GW gs 100 200 m 300 200 l S")
+        with pikepdf.open(src) as pdf:
+            objects = self._objects(pdf, pdf.pages[0])
+        (stroke,) = [o for o in objects if o["kind"] == "stroke"]
+        assert stroke["rect"] == pytest.approx([90.0, 190.0, 310.0, 210.0])
+
+    def test_a_stroked_glyph_reaches_half_the_line_width_past_its_outline(self, tmp_path):
+        filled = self._page(tmp_path, b"BT /F0 12 Tf 60 300 Td (AAA) Tj ET")
+        with pikepdf.open(filled) as pdf:
+            (plain,) = [o for o in self._objects(pdf, pdf.pages[0]) if o["kind"] == "text"]
+        stroked = self._page(tmp_path, b"6 w BT 1 Tr /F0 12 Tf 60 300 Td (AAA) Tj ET")
+        with pikepdf.open(stroked) as pdf:
+            (outlined,) = [o for o in self._objects(pdf, pdf.pages[0]) if o["kind"] == "text"]
+        grown = [plain["rect"][0] - 3, plain["rect"][1] - 3, plain["rect"][2] + 3, plain["rect"][3] + 3]
+        assert outlined["rect"] == pytest.approx(grown)
+
+    def test_an_isolated_run_draws_in_the_font_an_earlier_block_selected(
+        self, tmp_path, gs_path
+    ):
+        # Block two selects no font: it draws in block one's. An isolation
+        # that drops block one whole, Tf and all, leaves block two drawing
+        # nothing. The point is inside the stem of a 200-point "I".
+        src = self._page(
+            tmp_path,
+            b"BT /F0 200 Tf 200 200 Td (I) Tj ET BT 20 20 Td (I) Tj ET",
+        )
+        plates = render_separations(src, page=1, dpi=72, gs_path=gs_path, reuse=False)
+        result = inspect_point(src, page=1, x=48.0, y=90.0, plates=plates["plates"],
+                               plates_dir=plates["dir"], gs_path=gs_path)
+        assert [o["kind"] for o in result["objects"]] == ["text"]
+
+    def test_a_glyph_the_pen_moved_back_over_is_a_candidate(self, tmp_path):
+        # [(AB) 1200 (C)]: B draws x 67.2..74.4, past the net advance of 7.2.
+        from test_redact_text_state import _page as _state_doc_page, _simple_font
+
+        pdf = pikepdf.new()
+        _state_doc_page(
+            pdf,
+            pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=_simple_font(pdf, 600, "Wide"))),
+            b"BT /F1 12 Tf 60 300 Td [(AB) 1200 (C)] TJ ET",
+        )
+        (text,) = [o for o in self._objects(pdf, pdf.pages[0]) if o["kind"] == "text"]
+        assert text["rect"] == pytest.approx([60.0, 296.4, 74.4, 312.0], abs=0.01)
+        pdf.close()
+
+    def test_an_isolated_run_keeps_the_spacing_another_block_set(self, tmp_path, gs_path):
+        # Block one's `"` sets Tc 30 for good; block two's second "I" draws 30
+        # points further right because of it. The point is inside that I's stem.
+        src = self._page(
+            tmp_path,
+            b"BT /F0 200 Tf 220 TL 20 470 Td 0 30 (I) \" ET BT 20 20 Td (II) Tj ET",
+        )
+        plates = render_separations(src, page=1, dpi=72, gs_path=gs_path, reuse=False)
+        result = inspect_point(src, page=1, x=133.0, y=90.0, plates=plates["plates"],
+                               plates_dir=plates["dir"], gs_path=gs_path)
+        assert [o["kind"] for o in result["objects"]] == ["text"]
+
+    def test_a_block_of_invisible_text_is_no_candidate(self, tmp_path):
+        src = self._page(tmp_path, b"BT 3 Tr /F0 12 Tf 60 300 Td (recognized) Tj ET")
+        with pikepdf.open(src) as pdf:
+            assert self._objects(pdf, pdf.pages[0]) == []

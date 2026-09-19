@@ -554,6 +554,8 @@ PATTERNS: dict[str, PatternDef] = {
 
 PATTERN_IDS: list[str] = list(PATTERNS.keys())
 
+# Keys are PATTERNS' own ids: `compiled_pattern` refuses any other id before
+# it compiles, so the cache never holds more entries than the table has.
 _COMPILED: dict[str, "re.Pattern"] = {}
 
 

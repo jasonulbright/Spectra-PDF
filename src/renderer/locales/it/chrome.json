@@ -2390,6 +2390,7 @@
   "engine.outline.malformedOutlineActionPayload": "payload dell’azione della struttura malformato",
   "engine.outline.outlineActionPayloadNested": "payload dell’azione della struttura annidato troppo in profondità",
   "engine.outline.outlineDeeperThanLevels": "struttura più profonda di {{MAX_DEPTH}} livelli",
+  "engine.outlines.pageDrawsTextFont": "La pagina {{page}} disegna testo senza alcun carattere selezionato.",
   "engine.outlines.pageDrawsTextThrough": "La pagina {{page}} disegna testo tramite la risorsa di carattere {{name}}, che la pagina non definisce.",
   "engine.outlines.pageDrawsZeroWidth": "La pagina {{page}} disegna una linea di spessore zero, che non ha uno spessore fisso da convertire in tracciato.",
   "engine.outlines.pageNestsFormXobjects": "La pagina {{page}} annida XObject di modulo oltre {{cap}} livelli.",

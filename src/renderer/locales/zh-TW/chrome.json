@@ -2266,6 +2266,7 @@
   "engine.outline.malformedOutlineActionPayload": "大綱 action 內容格式錯誤",
   "engine.outline.outlineActionPayloadNested": "大綱 action 內容的巢狀層級過深",
   "engine.outline.outlineDeeperThanLevels": "大綱層級超過 {{MAX_DEPTH}} 層",
+  "engine.outlines.pageDrawsTextFont": "第 {{page}} 頁在未選取字型的情況下繪製文字。",
   "engine.outlines.pageDrawsTextThrough": "第 {{page}} 頁透過字型資源 {{name}} 繪製文字，而本頁並未定義該資源。",
   "engine.outlines.pageDrawsZeroWidth": "第 {{page}} 頁繪製了零寬度線條，沒有可轉換為外框的固定寬度。",
   "engine.outlines.pageNestsFormXobjects": "第 {{page}} 頁的表單 XObject 巢狀深度超過 {{cap}} 層。",

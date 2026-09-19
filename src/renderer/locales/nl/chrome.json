@@ -2328,6 +2328,7 @@
   "engine.outline.malformedOutlineActionPayload": "onjuiste actie-payload in de bladwijzerstructuur",
   "engine.outline.outlineActionPayloadNested": "de actie-payload in de bladwijzerstructuur is te diep genest",
   "engine.outline.outlineDeeperThanLevels": "de bladwijzerstructuur is dieper dan {{MAX_DEPTH}} niveaus",
+  "engine.outlines.pageDrawsTextFont": "Pagina {{page}} tekent tekst zonder dat er een lettertype is geselecteerd.",
   "engine.outlines.pageDrawsTextThrough": "Pagina {{page}} tekent tekst via de lettertypebron {{name}}, die de pagina niet definieert.",
   "engine.outlines.pageDrawsZeroWidth": "Pagina {{page}} tekent een lijn zonder dikte, die geen vaste dikte heeft om naar een contour om te zetten.",
   "engine.outlines.pageNestsFormXobjects": "Pagina {{page}} nest formulier-XObjects dieper dan {{cap}} niveaus.",

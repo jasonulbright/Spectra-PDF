@@ -28,11 +28,32 @@ callers never deal with a face's `unitsPerEm`.
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
+
+# The engine worker lives for the whole session, and every document it opens
+# can bring faces and programs it has not seen. Each cache keeps the most
+# recently used entries up to its limit and drops the least recently used.
+_KERN_LIMIT = 16
+_EMBEDDED_LIMIT = 16
 
 # path -> {(left_char, right_char): value in 1000ths of an em}. Faces are
 # re-read constantly during an edit; parsing a kern table per call is pure
 # waste (the _FontCache precedent).
-_KERN_CACHE: dict[tuple[str, float], dict[tuple[str, str], float]] = {}
+_KERN_CACHE: OrderedDict = OrderedDict()
+
+
+def _recall(cache: OrderedDict, key):
+    hit = cache.get(key)
+    if hit is not None:
+        cache.move_to_end(key)
+    return hit
+
+
+def _remember(cache: OrderedDict, key, value, limit: int) -> None:
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > max(limit, 0):
+        cache.popitem(last=False)
 
 
 def _cache_key(font_path: str) -> tuple[str, float]:
@@ -225,7 +246,7 @@ def kern_pairs(font_path: str) -> dict[tuple[str, str], float]:
     monospace box simply never kerns with no special case anywhere.
     """
     key = _cache_key(font_path)
-    hit = _KERN_CACHE.get(key)
+    hit = _recall(_KERN_CACHE, key)
     if hit is not None:
         return hit
 
@@ -254,7 +275,7 @@ def kern_pairs(font_path: str) -> dict[tuple[str, str], float]:
         # means no kerning, exactly like Mono.
         pairs = {}
 
-    _KERN_CACHE[key] = pairs
+    _remember(_KERN_CACHE, key, pairs, _KERN_LIMIT)
     return pairs
 
 
@@ -299,7 +320,7 @@ def kerned_width(pairs: dict[tuple[str, str], float], text: str) -> float:
 # a plain `Tj` after an edit. It did, which un-kerned text on every edit, so
 # the source of kern data has to be whatever font the text actually uses.
 
-_EMBEDDED_CACHE: dict[bytes, dict[tuple[str, str], float]] = {}
+_EMBEDDED_CACHE: OrderedDict = OrderedDict()
 
 
 def _pairs_from_program(raw: bytes) -> dict[tuple[str, str], float]:
@@ -309,7 +330,7 @@ def _pairs_from_program(raw: bytes) -> dict[tuple[str, str], float]:
     import hashlib
 
     key = hashlib.sha1(raw).digest()
-    hit = _EMBEDDED_CACHE.get(key)
+    hit = _recall(_EMBEDDED_CACHE, key)
     if hit is not None:
         return hit
     pairs: dict[tuple[str, str], float] = {}
@@ -336,7 +357,7 @@ def _pairs_from_program(raw: bytes) -> dict[tuple[str, str], float]:
         # broken edit. (Bare Type1C has no SFNT wrapper for fontTools; the
         # metric-twin fallback below covers those.)
         pairs = {}
-    _EMBEDDED_CACHE[key] = pairs
+    _remember(_EMBEDDED_CACHE, key, pairs, _EMBEDDED_LIMIT)
     return pairs
 
 

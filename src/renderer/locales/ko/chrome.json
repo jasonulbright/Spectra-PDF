@@ -2266,6 +2266,7 @@
   "engine.outline.malformedOutlineActionPayload": "잘못된 아웃라인 action 페이로드",
   "engine.outline.outlineActionPayloadNested": "아웃라인 action 페이로드가 너무 깊게 중첩되어 있습니다",
   "engine.outline.outlineDeeperThanLevels": "아웃라인이 {{MAX_DEPTH}}단계보다 깊습니다",
+  "engine.outlines.pageDrawsTextFont": "{{page}}페이지는 글꼴을 선택하지 않은 상태로 텍스트를 그립니다.",
   "engine.outlines.pageDrawsTextThrough": "{{page}}페이지는 페이지가 정의하지 않은 글꼴 리소스 {{name}}을(를) 통해 텍스트를 그립니다.",
   "engine.outlines.pageDrawsZeroWidth": "{{page}}페이지는 두께가 0인 선을 그리며, 윤곽선으로 변환할 고정 두께가 없습니다.",
   "engine.outlines.pageNestsFormXobjects": "{{page}}페이지는 양식 XObject를 {{cap}}단계보다 깊게 중첩합니다.",
