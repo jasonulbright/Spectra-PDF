@@ -63,6 +63,21 @@ export interface ClaimResult {
   owner: string;
 }
 
+/** A record the launch reads before any window exists, which it could not
+ * read. */
+export interface UnreadableRecord {
+  record: 'session' | 'startup';
+  /** Where the unread bytes were moved, or null when they are still under the
+   * record's own name. */
+  keptAs: string | null;
+}
+
+/** What claiming the folders of one run answered. `token` is a number exactly
+ * when `granted` is true. */
+export type RunClaimResult =
+  | { granted: true; owner: string; sameWindow: boolean; folder: string; token: number }
+  | { granted: false; owner: string; sameWindow: boolean; folder: string; token: null };
+
 /** What handing a document to another window did.
  *
  * `transferred` — the window named by `label` owns it and its open is queued.
@@ -179,8 +194,11 @@ export const claims = {
   claim: (path: string, mode: 'write' | 'read') =>
     invoke<ClaimResult>('claim_document', { path, mode }),
   release: (path: string) => invoke<void>('release_document', { path }),
-  claimOutputRoot: (path: string) => invoke<ClaimResult>('claim_output_root', { path }),
-  releaseOutputRoot: (path: string) => invoke<void>('release_output_root', { path }),
+  /** Claim every folder one run writes: all of them, or none. */
+  claimOutputRoots: (paths: string[]) =>
+    invoke<RunClaimResult>('claim_output_roots', { paths }),
+  /** Give back the folders of the run `token` names. */
+  releaseOutputRoots: (token: number) => invoke<void>('release_output_roots', { token }),
 };
 
 // ── File dialogs ──────────────────────────────────────────────────────────
@@ -859,6 +877,10 @@ export const app = {
    * Windows" entry left behind by a moved copy, or "" when there was none.
    * Reading it clears it, so one launch reports once. */
   startupEntryNotice: () => invoke<string>('startup_entry_notice'),
+
+  /** The records this launch could not read. Taking them clears them, so one
+   * launch reports once, in whichever window asks first. */
+  takeUnreadableRecords: () => invoke<UnreadableRecord[]>('take_unreadable_records'),
 
   /** Set or remove the "Start with Windows" registry entry. */
   setStartupEnabled: (enabled: boolean, startMinimized: boolean) =>

@@ -301,6 +301,10 @@ export const WORKBENCH_STRINGS = {
     'Pages cannot be imported from a file that is open in another window: {{names}}.',
   'app.window.folderBusy':
     'Another window is already writing to this folder: {{folder}}.',
+  // A run whose dialog was closed while it stopped still writes until its
+  // current file is done; a second run on that folder is refused until then.
+  'app.window.folderBusyHere':
+    'A run in this window is still writing to this folder: {{folder}}. Wait until it stops, then try again.',
   // Sentence case, like every other button in the product.
   'app.window.focusOther': 'Show that window',
 
@@ -355,6 +359,19 @@ export const WORKBENCH_STRINGS = {
   'app.startupEntry.staleTitle': 'Start with Windows needs attention',
   'app.startupEntry.stale':
     'This copy has moved since "Start with Windows" was switched on, and the entry could not be updated, so the application will not start with Windows. Switch the setting off and on again in Preferences. ({{detail}})',
+
+  // A record the launch reads before any window exists, and could not read.
+  // The unread file is moved aside when it can be; the path is where it went.
+  'app.unreadableRecord.sessionTitle': 'Last session not restored',
+  'app.unreadableRecord.session':
+    'The record of your last session could not be read, so the session was not restored. The unreadable file was moved to {{path}}.',
+  'app.unreadableRecord.sessionInPlace':
+    'The record of your last session could not be read, so the session was not restored.',
+  'app.unreadableRecord.startupTitle': 'Startup settings not applied',
+  'app.unreadableRecord.startup':
+    'The startup settings could not be read, so this launch used the default settings. The unreadable file was moved to {{path}}.',
+  'app.unreadableRecord.startupInPlace':
+    'The startup settings could not be read, so this launch used the default settings.',
 } as const;
 
 export type WorkbenchKey = keyof typeof WORKBENCH_STRINGS;

@@ -27,7 +27,7 @@ import {
   type FolderExportReport,
 } from '../lib/folder-export';
 import { createFolderExportIo } from '../lib/folder-export-io';
-import { claimOutputRoot } from '../lib/output-root-claim';
+import { claimOutputRoots } from '../lib/output-root-claim';
 import { folderExportLogFileName, formatFolderExportLog } from '../lib/folder-export-log';
 
 // Tools ▸ Export a Folder…: the folder scope of File ▸ Export.
@@ -194,7 +194,7 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
     if (!entries || entries.length === 0 || source === null || dest === null) return;
     // Two windows sweeping into one output tree overwrite each other file by
     // file, and neither the commit gate nor the per-file lock spans windows.
-    const root = await claimOutputRoot(dest);
+    const root = await claimOutputRoots([dest]);
     if (!root.granted) {
       setError(root.message);
       return;

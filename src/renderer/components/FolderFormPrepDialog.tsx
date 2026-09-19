@@ -29,7 +29,7 @@ import {
 } from '../lib/folder-prep';
 import { fileIsEligible, ineligibleReason, type SignedNote } from '../lib/folder-sweep';
 import { createFolderPrepIo } from '../lib/folder-prep-io';
-import { claimOutputRoot } from '../lib/output-root-claim';
+import { claimOutputRoots, writtenRoots } from '../lib/output-root-claim';
 import { formatPrepLog, prepLogFileName } from '../lib/folder-prep-log';
 
 // Tools ▸ Prepare Forms in a Folder…: the folder scope of Prepare Form.
@@ -246,10 +246,12 @@ export function FolderFormPrepDialog({
 
   const apply = useCallback(async (): Promise<void> => {
     if (!detectReport || selected.size === 0) return;
-    // Two windows sweeping into one output tree overwrite each other file by
-    // file, and neither the commit gate nor the per-file lock spans windows.
-    // An in-place run writes over its own sources and owns no output tree.
-    const root = await claimOutputRoot(inPlace ? '' : (dest ?? ''));
+    // Two runs sweeping into one tree overwrite each other file by file, and
+    // neither the commit gate nor the per-file lock spans windows. An in-place
+    // run writes its source tree.
+    const root = await claimOutputRoots(
+      writtenRoots({ source: source ?? '', dest: dest ?? '', inPlace }),
+    );
     if (!root.granted) {
       setError(root.message);
       return;
@@ -288,7 +290,7 @@ export function FolderFormPrepDialog({
     } finally {
       await root.release();
     }
-  }, [detectReport, selected, inPlace, dest, includeSigned, makeIo, writeLog, resetLog]);
+  }, [detectReport, selected, inPlace, source, dest, includeSigned, makeIo, writeLog, resetLog]);
 
   const stop = useCallback((): void => {
     setStopping(true);

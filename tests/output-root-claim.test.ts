@@ -1,186 +1,319 @@
-// The output-root claim of the folder runs (Batch OCR, disk redact, the four
-// folder tools). The arbiter's root claim is idempotent per window and its
-// release drops the window's claim whatever preceded it. A dialog shows its
-// finished phase before the run's release answers, so the next run's claim
-// must not be processed ahead of that release: the release would then drop
-// the claim the new run is writing under.
+// The output-folder claim of the folder runs (Batch OCR, disk redact, the four
+// folder tools, Guided Actions folder runs). The claim belongs to one RUN: the
+// arbiter refuses a second run of the same window on a conflicting folder, and
+// a release names its own run's token, so it can never free another run's
+// folders. What this module still owes is the order of one window's calls: a
+// finished run's release that has not answered still holds its folders, so the
+// next run's claim must not be processed ahead of it.
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { tChrome } from '../src/renderer/i18n';
 
-const claimRoot = vi.fn();
-const releaseRoot = vi.fn();
+const claimRoots = vi.fn();
+const releaseRoots = vi.fn();
 vi.mock('../src/renderer/lib/tauri-bridge', () => ({
   claims: {
     claim: vi.fn(),
     release: vi.fn(),
-    claimOutputRoot: (path: string) => claimRoot(path),
-    releaseOutputRoot: (path: string) => releaseRoot(path),
+    claimOutputRoots: (paths: string[]) => claimRoots(paths),
+    releaseOutputRoots: (token: number) => releaseRoots(token),
   },
 }));
 
-// A fresh module per test: its call order and its run holds are module state,
-// as they are per window in the app.
-let claimOutputRoot: typeof import('../src/renderer/lib/output-root-claim').claimOutputRoot;
+type ClaimModule = typeof import('../src/renderer/lib/output-root-claim');
+
+// A fresh module per test: its call order is module state, as it is per window
+// in the app.
+let claimOutputRoots: ClaimModule['claimOutputRoots'];
+let writtenRoots: ClaimModule['writtenRoots'];
 
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 10; i++) await Promise.resolve();
 };
 
-/** A runtime that answers the newest call first, the order a busy one may pick. */
-function arbiter() {
-  const held = new Set<string>();
-  const arrived: { name: string; process: () => void }[] = [];
-  claimRoot.mockImplementation((root: string) => new Promise((resolve) => {
-    arrived.push({ name: `claim ${root}`, process: () => { held.add(root); resolve({ granted: true, owner: '' }); } });
-  }));
-  releaseRoot.mockImplementation((root: string) => new Promise<void>((resolve) => {
-    arrived.push({ name: `release ${root}`, process: () => { held.delete(root); resolve(); } });
-  }));
-  const drain = async (): Promise<string[]> => {
-    const order: string[] = [];
-    await flush();
-    while (arrived.length > 0) {
-      const call = arrived.pop()!;
-      order.push(call.name);
-      call.process();
-      await flush();
-    }
-    return order;
-  };
-  return { held, drain };
-}
+const granted = (token: number) => ({
+  granted: true,
+  owner: '',
+  sameWindow: false,
+  folder: '',
+  token,
+});
+
+const refused = (owner: string, sameWindow: boolean, folder: string) => ({
+  granted: false,
+  owner,
+  sameWindow,
+  folder,
+  token: null,
+});
 
 beforeEach(async () => {
   vi.resetModules();
-  ({ claimOutputRoot } = await import('../src/renderer/lib/output-root-claim'));
-  claimRoot.mockReset();
-  releaseRoot.mockReset();
+  ({ claimOutputRoots, writtenRoots } = await import('../src/renderer/lib/output-root-claim'));
+  claimRoots.mockReset();
+  releaseRoots.mockReset();
 });
 
-describe('claimOutputRoot', () => {
-  it('a new run’s claim is sent only after the finished run’s release answered', async () => {
-    const { held, drain } = arbiter();
-    const first = claimOutputRoot('C:/out');
-    await drain();
-    const run = await first;
+describe('claimOutputRoots', () => {
+  it('claims every folder of one run in one call and skips empty entries', async () => {
+    claimRoots.mockResolvedValue(granted(1));
+    const run = await claimOutputRoots(['C:/out', '', 'C:/moved']);
     expect(run.granted).toBe(true);
-    // The dialog shows "done" with the release in flight; the user starts the
-    // next run before it answers.
-    const releasing = run.release();
-    await flush();
-    const next = claimOutputRoot('C:/out');
-    const order = await drain();
-    await releasing;
-    expect((await next).granted).toBe(true);
-    expect(order).toEqual(['release C:/out', 'claim C:/out']);
-    expect(held.has('C:/out')).toBe(true);
+    expect(claimRoots).toHaveBeenCalledTimes(1);
+    expect(claimRoots).toHaveBeenCalledWith(['C:/out', 'C:/moved']);
   });
 
-  it('a release whose turn comes after the next run started is not sent', async () => {
-    const { held, drain } = arbiter();
-    const first = claimOutputRoot('C:/out');
-    await drain();
-    const run = await first;
-    // The next run starts in the same turn as the release: it holds the root
-    // by the time the release would go out.
-    const releasing = run.release();
-    const next = claimOutputRoot('C:/out');
-    expect(await drain()).toEqual(['claim C:/out']);
-    await releasing;
-    expect((await next).granted).toBe(true);
-    expect(held.has('C:/out')).toBe(true);
+  it('a run with no folder to claim calls nothing, and neither does its release', async () => {
+    const run = await claimOutputRoots(['', '']);
+    expect(run.granted).toBe(true);
+    await run.release();
+    expect(claimRoots).not.toHaveBeenCalled();
+    expect(releaseRoots).not.toHaveBeenCalled();
   });
 
-  it('a claim is not sent while the release before it is unanswered', async () => {
+  it('a refusal by another window names the folder the arbiter reports', async () => {
+    claimRoots.mockResolvedValue(refused('doc-2', false, 'C:\\Out'));
+    const run = await claimOutputRoots(['c:/out']);
+    expect(run.granted).toBe(false);
+    expect(run.message).toBe(tChrome('app.window.folderBusy', { folder: 'C:\\Out' }));
+    await run.release();
+    expect(releaseRoots).not.toHaveBeenCalled();
+  });
+
+  it('a refusal by a run of this window says that a run here is still writing', async () => {
+    claimRoots.mockResolvedValue(refused('main', true, 'C:\\out\\sub'));
+    const run = await claimOutputRoots(['C:/out/sub']);
+    expect(run.granted).toBe(false);
+    expect(run.message).toBe(tChrome('app.window.folderBusyHere', { folder: 'C:\\out\\sub' }));
+    expect(run.message).not.toBe(tChrome('app.window.folderBusy', { folder: 'C:\\out\\sub' }));
+  });
+
+  it('a release gives back its own run by token, once', async () => {
+    claimRoots.mockResolvedValueOnce(granted(7)).mockResolvedValueOnce(granted(8));
+    releaseRoots.mockResolvedValue(undefined);
+    const first = await claimOutputRoots(['C:/a']);
+    const second = await claimOutputRoots(['C:/b']);
+    await first.release();
+    await first.release();
+    expect(releaseRoots).toHaveBeenCalledTimes(1);
+    expect(releaseRoots).toHaveBeenCalledWith(7);
+    await second.release();
+    expect(releaseRoots).toHaveBeenLastCalledWith(8);
+  });
+
+  it('a claim is not sent while an earlier release is unanswered, on the same folder', async () => {
     const sent: string[] = [];
     let answerRelease: () => void = () => {};
-    claimRoot.mockImplementation(async (root: string) => {
-      sent.push(`claim ${root}`);
-      return { granted: true, owner: '' };
+    claimRoots.mockImplementation(async (paths: string[]) => {
+      sent.push(`claim ${paths.join(',')}`);
+      return granted(sent.length);
     });
-    releaseRoot.mockImplementation((root: string) => new Promise<void>((resolve) => {
-      sent.push(`release ${root}`);
-      answerRelease = resolve;
-    }));
-    const run = await claimOutputRoot('C:/out');
+    releaseRoots.mockImplementation(
+      (token: number) =>
+        new Promise<void>((done) => {
+          sent.push(`release ${token}`);
+          answerRelease = done;
+        }),
+    );
+    const run = await claimOutputRoots(['C:/out']);
     sent.length = 0;
     const releasing = run.release();
     await flush();
-    const next = claimOutputRoot('C:/out');
+    const next = claimOutputRoots(['C:/out']);
     await flush();
-    expect(sent).toEqual(['release C:/out']);
+    expect(sent).toEqual(['release 1']);
     answerRelease();
     await releasing;
     expect((await next).granted).toBe(true);
-    expect(sent).toEqual(['release C:/out', 'claim C:/out']);
+    expect(sent).toEqual(['release 1', 'claim C:/out']);
   });
 
-  it('a run still stopping after its dialog closed does not take the next run’s claim with it', async () => {
-    const { held, drain } = arbiter();
-    const stopping = claimOutputRoot('C:/out');
-    await drain();
-    const first = await stopping;
-    // Another dialog of the same window starts a run on the same folder.
-    const starting = claimOutputRoot('C:/out');
-    await drain();
-    const second = await starting;
-    // The stopping run ends, twice over: its release is kept both times.
-    const ending = first.release();
-    const endingAgain = first.release();
-    expect(await drain()).toEqual([]);
-    await Promise.all([ending, endingAgain]);
-    expect(held.has('C:/out')).toBe(true);
-    const done = second.release();
-    expect(await drain()).toEqual(['release C:/out']);
-    await done;
-    expect(held.has('C:/out')).toBe(false);
+  it('a claim is not sent while an earlier release is unanswered, on a nested folder', async () => {
+    const sent: string[] = [];
+    let answerRelease: () => void = () => {};
+    claimRoots.mockImplementation(async (paths: string[]) => {
+      sent.push(`claim ${paths.join(',')}`);
+      return granted(sent.length);
+    });
+    releaseRoots.mockImplementation(
+      (token: number) =>
+        new Promise<void>((done) => {
+          sent.push(`release ${token}`);
+          answerRelease = done;
+        }),
+    );
+    const run = await claimOutputRoots(['C:/out']);
+    sent.length = 0;
+    const releasing = run.release();
+    await flush();
+    // Nested folders conflict, so a queue keyed by folder would let this pass.
+    const next = claimOutputRoots(['C:/out/sub']);
+    await flush();
+    expect(sent).toEqual(['release 1']);
+    answerRelease();
+    await releasing;
+    await next;
+    expect(sent).toEqual(['release 1', 'claim C:/out/sub']);
   });
 
-  it('calls on different roots do not wait for each other', async () => {
-    const { drain } = arbiter();
-    const a = claimOutputRoot('C:/a');
-    const b = claimOutputRoot('C:/b');
-    expect(await drain()).toEqual(['claim C:/b', 'claim C:/a']);
-    await Promise.all([a, b]);
+  it('a failed release is swallowed and does not hold the next claim back', async () => {
+    claimRoots.mockResolvedValue(granted(3));
+    releaseRoots.mockRejectedValueOnce(new Error('window gone'));
+    const run = await claimOutputRoots(['C:/out']);
+    await expect(run.release()).resolves.toBeUndefined();
+    await expect(claimOutputRoots(['C:/out'])).resolves.toMatchObject({ granted: true });
   });
 
-  it('a failed release does not hold the next claim of that root back', async () => {
-    claimRoot.mockResolvedValue({ granted: true, owner: '' });
-    releaseRoot.mockRejectedValueOnce(new Error('window gone'));
-    const run = await claimOutputRoot('C:/out');
-    await run.release();
-    await expect(claimOutputRoot('C:/out')).resolves.toMatchObject({ granted: true });
-  });
-
-  it('a refused claim names the folder and holds nothing to release', async () => {
-    claimRoot.mockResolvedValueOnce({ granted: false, owner: 'doc-2' });
-    const run = await claimOutputRoot('C:/out');
-    expect(run.granted).toBe(false);
-    expect(run.message).toContain('C:/out');
-    await run.release();
-    expect(releaseRoot).not.toHaveBeenCalled();
-    // Nor does it keep a later run's release from going out.
-    claimRoot.mockResolvedValueOnce({ granted: true, owner: '' });
-    releaseRoot.mockResolvedValue(undefined);
-    const later = await claimOutputRoot('C:/out');
+  it('a claim that fails rejects, and keeps no later claim waiting', async () => {
+    claimRoots.mockRejectedValueOnce(new Error('window gone'));
+    await expect(claimOutputRoots(['C:/out'])).rejects.toThrow('window gone');
+    claimRoots.mockResolvedValueOnce(granted(4));
+    releaseRoots.mockResolvedValue(undefined);
+    const later = await claimOutputRoots(['C:/out']);
     await later.release();
-    expect(releaseRoot).toHaveBeenCalledTimes(1);
+    expect(releaseRoots).toHaveBeenCalledWith(4);
+  });
+});
+
+describe('writtenRoots', () => {
+  it('a mirror run writes its destination', () => {
+    expect(writtenRoots({ source: 'C:/in', dest: 'C:/out', inPlace: false })).toEqual(['C:/out']);
   });
 
-  it('a claim that fails keeps no later run’s release from going out', async () => {
-    claimRoot.mockRejectedValueOnce(new Error('window gone'));
-    await expect(claimOutputRoot('C:/out')).rejects.toThrow('window gone');
-    claimRoot.mockResolvedValueOnce({ granted: true, owner: '' });
-    releaseRoot.mockResolvedValue(undefined);
-    const later = await claimOutputRoot('C:/out');
-    await later.release();
-    expect(releaseRoot).toHaveBeenCalledTimes(1);
+  it('an in-place run writes its source tree and has no destination', () => {
+    expect(writtenRoots({ source: 'C:/in', dest: 'C:/out', inPlace: true })).toEqual(['C:/in']);
+    expect(
+      writtenRoots({ source: 'C:/in', dest: '', inPlace: true, filing: ['C:/errors'] }),
+    ).toEqual(['C:/in', 'C:/errors']);
   });
 
-  it('an in-place run owns no root and calls nothing', async () => {
-    const run = await claimOutputRoot('');
-    expect(run.granted).toBe(true);
-    await run.release();
-    expect(claimRoot).not.toHaveBeenCalled();
-    expect(releaseRoot).not.toHaveBeenCalled();
+  it('a mirror run that moves or replaces originals writes its source tree too', () => {
+    expect(
+      writtenRoots({ source: 'C:/in', dest: 'C:/out', inPlace: false, changesSource: true }),
+    ).toEqual(['C:/out', 'C:/in']);
+  });
+
+  it('every folder originals move into is written, and empty ones are skipped', () => {
+    expect(
+      writtenRoots({
+        source: 'C:/in',
+        dest: 'C:/out',
+        inPlace: false,
+        filing: ['C:/moved', null, undefined, '', 'C:/errors'],
+        changesSource: true,
+      }),
+    ).toEqual(['C:/out', 'C:/in', 'C:/moved', 'C:/errors']);
+  });
+});
+
+describe('the folder runs claim what they write', () => {
+  const source = (path: string): string =>
+    readFileSync(resolve(__dirname, '../src/renderer', path), 'utf8').replace(/\r\n/g, '\n');
+
+  /** The text of one function, from its declaration to the next marker. */
+  const between = (text: string, from: string, to: string): string => {
+    const start = text.indexOf(from);
+    expect(start, `missing: ${from}`).toBeGreaterThanOrEqual(0);
+    const end = text.indexOf(to, start + from.length);
+    expect(end, `missing: ${to}`).toBeGreaterThan(start);
+    return text.slice(start, end);
+  };
+
+  // Reads every renderer source file; the default timeout fails it on a loaded
+  // machine.
+  it('no renderer file calls a single-folder claim or release', { timeout: 30_000 }, () => {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((name) => {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) return walk(path);
+        return /\.tsx?$/.test(name) ? [path] : [];
+      });
+    const stale = walk(resolve(__dirname, '../src/renderer')).filter((path) =>
+      /claimOutputRoot\(|releaseOutputRoot\(/.test(readFileSync(path, 'utf8')),
+    );
+    expect(stale).toEqual([]);
+  });
+
+  it('the mirror-only folder tools claim their destination', () => {
+    for (const dialog of ['components/FolderExportDialog.tsx', 'components/FolderCreatePdfDialog.tsx']) {
+      expect(source(dialog), dialog).toContain('const root = await claimOutputRoots([dest]);');
+    }
+  });
+
+  it('disk redact and form prep claim the source tree when they write in place', () => {
+    for (const dialog of ['components/DiskRedactDialog.tsx', 'components/FolderFormPrepDialog.tsx']) {
+      expect(source(dialog), dialog).toContain(
+        "writtenRoots({ source: source ?? '', dest: dest ?? '', inPlace }),",
+      );
+    }
+  });
+
+  it('a preflight fix that files originals claims the source tree and the filing folder', () => {
+    const run = between(source('components/FolderPreflightDialog.tsx'), 'const run = useCallback(', 'setPhase(\'running\');');
+    expect(run).toContain(
+      "const moving = settings.mode === 'fix' && !settings.inPlace && settings.movedRoot !== '';",
+    );
+    expect(run).toContain('inPlace: settings.inPlace,');
+    expect(run).toContain('filing: moving ? [settings.movedRoot] : [],');
+    expect(run).toContain('changesSource: moving,');
+  });
+
+  it('batch OCR claims before it writes, in place and mirrored, and releases after', () => {
+    const dialog = source('components/BatchOcrDialog.tsx');
+    const inPlace = between(dialog, 'const startInPlace = async', 'const start = async');
+    expect(inPlace.indexOf('claimOutputRoots(')).toBeGreaterThanOrEqual(0);
+    expect(inPlace.indexOf('claimOutputRoots(')).toBeLessThan(inPlace.indexOf("callRaw('batch_ocr'"));
+    expect(inPlace.indexOf('claimOutputRoots(')).toBeLessThan(inPlace.indexOf("setPhase('running')"));
+    expect(inPlace).toContain("writtenRoots({ source, dest: '', inPlace: true, filing: [errorRoot] })");
+    expect(inPlace).toMatch(/\} finally \{\n\s+await root\.release\(\);/);
+
+    const mirror = between(dialog, 'const start = async', 'const cancel = ');
+    expect(mirror).toContain('filing: [movedRoot, errorRoot],');
+    expect(mirror).toContain(
+      'changesSource: Boolean(movedRoot) || Boolean(errorRoot) || (repairDamaged && replaceRepaired),',
+    );
+    expect(mirror).toMatch(/\} finally \{\n\s+cancelOcrRef\.current = null;\n\s+await root\.release\(\);/);
+  });
+
+  it('a Guided Actions folder run claims before its engine call and releases after', () => {
+    const run = between(
+      source('panels/GuidedActionsPanel.tsx'),
+      'const executeFolderRun = useCallback(',
+      'const runActionOnFolder = useCallback(',
+    );
+    const claim = run.indexOf('root = await claimOutputRoots(writtenRoots({ source, dest, inPlace }));');
+    expect(claim).toBeGreaterThanOrEqual(0);
+    expect(claim).toBeLessThan(run.indexOf("callRaw('run_action'"));
+    expect(run).toContain('if (!root.granted) throw new Error(root.message);');
+    expect(run).toMatch(/\} finally \{\n\s+setRunning\(false\);\n\s+await root\?\.release\(\);/);
+  });
+});
+
+describe('the bridge sends what the arbiter declares', () => {
+  const read = (path: string): string =>
+    readFileSync(resolve(__dirname, '..', path), 'utf8').replace(/\r\n/g, '\n');
+
+  /** The parameter list of one Rust command. */
+  const parameters = (rust: string, command: string): string => {
+    const start = rust.indexOf(`pub async fn ${command}(`);
+    expect(start, `missing command: ${command}`).toBeGreaterThanOrEqual(0);
+    return rust.slice(start, rust.indexOf(') -> ', start));
+  };
+
+  it('the run-claim commands keep one name and one argument key on both sides', () => {
+    // An invoke whose name or argument key Rust does not declare rejects at
+    // run time only: a claim that cannot be sent stops every folder run, and a
+    // release that cannot be sent keeps its folders claimed until the window
+    // closes.
+    const bridge = read('src/renderer/lib/tauri-bridge.ts');
+    expect(bridge).toContain("invoke<RunClaimResult>('claim_output_roots', { paths })");
+    expect(bridge).toContain("invoke<void>('release_output_roots', { token })");
+    const arbiter = read('src-tauri/src/app_windows.rs');
+    expect(parameters(arbiter, 'claim_output_roots')).toContain('paths: Vec<String>,');
+    expect(parameters(arbiter, 'release_output_roots')).toContain('token: u64,');
+    const handlers = read('src-tauri/src/lib.rs');
+    expect(handlers).toContain('app_windows::claim_output_roots,');
+    expect(handlers).toContain('app_windows::release_output_roots,');
   });
 });

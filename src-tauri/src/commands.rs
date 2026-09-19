@@ -1913,28 +1913,65 @@ fn write_startup_flag_at(config_path: &Path, key: &str, value: bool) -> Result<(
         .map_err(|e| format!("Failed to write startup config: {}", e))
 }
 
-/// Read one flag from the startup config. Anything unreadable, unparseable or
-/// absent reads as the default, which is what a first run gets. Nothing here
-/// writes back: the next saved flag sets an unparseable file aside.
-fn read_startup_flag<R: tauri::Runtime, M: tauri::Manager<R>>(
-    app: &M,
-    key: &str,
-    default: bool,
-) -> bool {
-    let Ok(app_data) = crate::portable::data_root(app) else {
-        return default;
-    };
-    read_startup_flag_at(&app_data.join(STARTUP_CONFIG_FILE), key, default)
+/// The startup flags a launch acts on. Each defaults to off: a first run, and
+/// a launch that cannot read the record, do nothing the user did not ask for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StartupConfig {
+    pub start_minimized: bool,
+    pub restore_windows_on_launch: bool,
 }
 
-fn read_startup_flag_at(config_path: &Path, key: &str, default: bool) -> bool {
-    let Ok(Some(bytes)) = crate::staging::read_record(config_path) else {
-        return default;
+/// Read the startup config for this launch, reporting a record that could
+/// not be read.
+pub fn load_startup_config<R: tauri::Runtime, M: tauri::Manager<R>>(app: &M) -> StartupConfig {
+    let Ok(app_data) = crate::portable::data_root(app) else {
+        return StartupConfig::default();
     };
-    let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-        return default;
+    load_startup_config_at(
+        &app_data.join(STARTUP_CONFIG_FILE),
+        &app.state::<UnreadableRecords>(),
+    )
+}
+
+/// A record that reads but is not a JSON object is set aside, so the defaults
+/// this launch uses are never saved over it. One that cannot be read stays in
+/// place: its bytes may be sound, and every save refuses to write over it.
+fn load_startup_config_at(config_path: &Path, unreadable: &UnreadableRecords) -> StartupConfig {
+    // A save landing between the read and the set-aside would be the record
+    // set aside.
+    let _editing = STARTUP_CONFIG_EDIT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let bytes = match crate::staging::read_record(config_path) {
+        Ok(None) => return StartupConfig::default(),
+        Ok(Some(bytes)) => bytes,
+        Err(_) => {
+            unreadable.push(UnreadableRecord {
+                record: LaunchRecord::Startup,
+                kept_as: None,
+            });
+            return StartupConfig::default();
+        }
     };
-    json.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
+    match serde_json::from_slice::<serde_json::Value>(&bytes) {
+        Ok(json) if json.is_object() => {
+            let flag = |key: &str| json.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
+            StartupConfig {
+                start_minimized: flag("startMinimized"),
+                restore_windows_on_launch: flag("restoreWindowsOnLaunch"),
+            }
+        }
+        _ => {
+            let kept_as = crate::staging::set_aside(config_path)
+                .ok()
+                .map(|aside| aside.to_string_lossy().into_owned());
+            unreadable.push(UnreadableRecord {
+                record: LaunchRecord::Startup,
+                kept_as,
+            });
+            StartupConfig::default()
+        }
+    }
 }
 
 /// Mirror start-minimized into the file Rust reads before showing the window.
@@ -1953,14 +1990,65 @@ pub async fn set_restore_windows_on_launch(app: AppHandle, enabled: bool) -> Res
     write_startup_flag(&app, "restoreWindowsOnLaunch", enabled)
 }
 
-pub fn read_start_minimized<R: tauri::Runtime, M: tauri::Manager<R>>(app: &M) -> bool {
-    read_startup_flag(app, "startMinimized", false)
+// ── Records a launch could not read ──────────────────────────────────────
+
+/// A record the launch reads before any window exists.
+#[derive(serde::Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LaunchRecord {
+    /// `session.json`: the windows and documents the last run left open.
+    Session,
+    /// `startup.json`: the startup flags.
+    Startup,
 }
 
-/// Default OFF: a launch does nothing the user did not ask for, and reopening
-/// last week's documents is a surprise for anyone who quit to be rid of them.
-pub fn read_restore_windows_on_launch<R: tauri::Runtime, M: tauri::Manager<R>>(app: &M) -> bool {
-    read_startup_flag(app, "restoreWindowsOnLaunch", false)
+/// A launch record that could not be read.
+#[derive(serde::Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadableRecord {
+    pub record: LaunchRecord,
+    /// Where the unread bytes were moved. `None` when they are still under the
+    /// record's own name.
+    pub kept_as: Option<String>,
+}
+
+/// The records this launch could not read, until a renderer takes them.
+///
+/// In memory only: a record set aside no longer has its own name, so the next
+/// launch has nothing to report, and nothing on disk has to remember that the
+/// report was shown.
+pub struct UnreadableRecords(std::sync::Mutex<Vec<UnreadableRecord>>);
+
+impl UnreadableRecords {
+    pub fn new() -> Self {
+        Self(std::sync::Mutex::new(Vec::new()))
+    }
+
+    pub fn push(&self, record: UnreadableRecord) {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(record);
+    }
+
+    pub fn take(&self) -> Vec<UnreadableRecord> {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+}
+
+impl Default for UnreadableRecords {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The records this launch could not read. Taking them clears them, so one
+/// launch reports once, in whichever window asks first.
+#[tauri::command]
+pub async fn take_unreadable_records(
+    state: tauri::State<'_, UnreadableRecords>,
+) -> Result<Vec<UnreadableRecord>, String> {
+    Ok(state.take())
 }
 
 // ── Enterprise policy ─────────────────────────────────────────────────────
@@ -2201,10 +2289,11 @@ pub async fn set_startup_enabled(
 mod tests {
     use super::{
         append_line_at, classify_recent_paths, copy_file_creating_dirs, is_batch_log_name,
-        is_managed_member_path, move_file_creating_dirs, read_startup_flag_at,
+        is_managed_member_path, load_startup_config_at, move_file_creating_dirs,
         reclaim_batch_log_stages, run_key_action, save_as, select_argument, working_copy_in,
         write_action_file, write_batch_log_at, write_profile_file, write_report_file,
-        write_startup_flag_at, PathStatus, RunKeyAction, CLASSIFY_MAX_BATCH,
+        write_startup_flag_at, LaunchRecord, PathStatus, RunKeyAction, StartupConfig,
+        UnreadableRecord, UnreadableRecords, CLASSIFY_MAX_BATCH,
     };
     use std::path::Path;
 
@@ -2588,20 +2677,241 @@ mod tests {
     }
 
     #[test]
-    fn a_startup_flag_reads_its_default_unless_the_file_says_otherwise() {
-        let dir = scratch("startup-read");
+    fn a_launch_applies_the_startup_flags_the_record_holds() {
+        let dir = scratch("startup-load");
         let path = dir.join("startup.json");
-        assert!(read_startup_flag_at(&path, "startMinimized", true));
-        assert!(!read_startup_flag_at(&path, "startMinimized", false));
-        std::fs::write(&path, b"{\"startMinimized\":tr").unwrap();
-        assert!(!read_startup_flag_at(&path, "startMinimized", false));
-        std::fs::write(&path, b"{\"startMinimized\":\"yes\"}").unwrap();
-        assert!(!read_startup_flag_at(&path, "startMinimized", false));
-        std::fs::write(&path, b"{\"startMinimized\":true}").unwrap();
-        assert!(read_startup_flag_at(&path, "startMinimized", false));
-        // Reading never sets anything aside.
+        let unreadable = UnreadableRecords::new();
+
+        // No record is a first run.
+        assert_eq!(
+            load_startup_config_at(&path, &unreadable),
+            StartupConfig::default()
+        );
+
+        let both = br#"{"startMinimized":true,"restoreWindowsOnLaunch":true}"#;
+        std::fs::write(&path, both).unwrap();
+        assert_eq!(
+            load_startup_config_at(&path, &unreadable),
+            StartupConfig {
+                start_minimized: true,
+                restore_windows_on_launch: true,
+            }
+        );
+        std::fs::write(&path, br#"{"startMinimized":true}"#).unwrap();
+        assert_eq!(
+            load_startup_config_at(&path, &unreadable),
+            StartupConfig {
+                start_minimized: true,
+                restore_windows_on_launch: false,
+            }
+        );
+        std::fs::write(&path, br#"{"restoreWindowsOnLaunch":true}"#).unwrap();
+        assert_eq!(
+            load_startup_config_at(&path, &unreadable),
+            StartupConfig {
+                start_minimized: false,
+                restore_windows_on_launch: true,
+            }
+        );
+
+        // A flag of the wrong type reads as off; the object around it is still
+        // the user's record.
+        let mistyped = br#"{"startMinimized":"yes","restoreWindowsOnLaunch":true}"#;
+        std::fs::write(&path, mistyped).unwrap();
+        assert_eq!(
+            load_startup_config_at(&path, &unreadable),
+            StartupConfig {
+                start_minimized: false,
+                restore_windows_on_launch: true,
+            }
+        );
+
+        assert!(unreadable.take().is_empty());
         assert_eq!(listing(&dir), ["startup.json".to_string()].into());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_launch_sets_an_unparseable_startup_config_aside_and_reports_it_once() {
+        let dir = scratch("startup-load-aside");
+        let path = dir.join("startup.json");
+        let unreadable = UnreadableRecords::new();
+        let torn = b"{\"restoreWindowsOnLaunch\":tr";
+        std::fs::write(&path, torn).unwrap();
+
+        assert_eq!(
+            load_startup_config_at(&path, &unreadable),
+            StartupConfig::default()
+        );
+
+        let aside = dir.join("startup.json.unreadable");
+        assert_eq!(std::fs::read(&aside).unwrap(), torn);
+        assert!(!path.exists());
+        assert_eq!(
+            unreadable.take(),
+            vec![UnreadableRecord {
+                record: LaunchRecord::Startup,
+                kept_as: Some(aside.to_string_lossy().into_owned()),
+            }]
+        );
+
+        // The next launch finds no record: a first run, with nothing to report.
+        assert_eq!(
+            load_startup_config_at(&path, &unreadable),
+            StartupConfig::default()
+        );
+        assert!(unreadable.take().is_empty());
+
+        // JSON that is not an object holds no flags either, and gets the next
+        // free name.
+        std::fs::write(&path, b"[true]").unwrap();
+        assert_eq!(
+            load_startup_config_at(&path, &unreadable),
+            StartupConfig::default()
+        );
+        let second = dir.join("startup.json.unreadable-2");
+        assert_eq!(std::fs::read(&second).unwrap(), b"[true]");
+        assert_eq!(
+            unreadable.take(),
+            vec![UnreadableRecord {
+                record: LaunchRecord::Startup,
+                kept_as: Some(second.to_string_lossy().into_owned()),
+            }]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_startup_config_that_cannot_be_read_is_reported_and_left_in_place() {
+        let dir = scratch("startup-load-unreadable");
+        let path = dir.join("startup.json");
+        std::fs::create_dir(&path).unwrap();
+        let unreadable = UnreadableRecords::new();
+
+        assert_eq!(
+            load_startup_config_at(&path, &unreadable),
+            StartupConfig::default()
+        );
+
+        assert!(path.is_dir());
+        assert_eq!(listing(&dir), ["startup.json".to_string()].into());
+        assert_eq!(
+            unreadable.take(),
+            vec![UnreadableRecord {
+                record: LaunchRecord::Startup,
+                kept_as: None,
+            }]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A holder that shares only deletion refuses the read but not a rename:
+    /// the bytes may be sound, so the launch must not move them.
+    #[cfg(windows)]
+    #[test]
+    fn a_startup_config_held_from_reading_is_reported_and_not_moved() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = scratch("startup-load-held");
+        let path = dir.join("startup.json");
+        std::fs::write(&path, b"{\"startMinimized\":true}").unwrap();
+        let holder = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(4) // FILE_SHARE_DELETE
+            .open(&path)
+            .unwrap();
+        let unreadable = UnreadableRecords::new();
+
+        assert_eq!(
+            load_startup_config_at(&path, &unreadable),
+            StartupConfig::default()
+        );
+
+        drop(holder);
+        assert_eq!(startup(&path), serde_json::json!({"startMinimized": true}));
+        assert_eq!(listing(&dir), ["startup.json".to_string()].into());
+        assert_eq!(
+            unreadable.take(),
+            vec![UnreadableRecord {
+                record: LaunchRecord::Startup,
+                kept_as: None,
+            }]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A holder that shares reading but not deletion lets the record be read
+    /// and refuses the rename that would set it aside.
+    #[cfg(windows)]
+    #[test]
+    fn a_startup_config_that_cannot_be_set_aside_is_reported_where_it_stands() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = scratch("startup-load-pinned");
+        let path = dir.join("startup.json");
+        std::fs::write(&path, b"{\"startMin").unwrap();
+        let holder = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1) // FILE_SHARE_READ
+            .open(&path)
+            .unwrap();
+        let unreadable = UnreadableRecords::new();
+
+        assert_eq!(
+            load_startup_config_at(&path, &unreadable),
+            StartupConfig::default()
+        );
+
+        drop(holder);
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"startMin");
+        assert_eq!(listing(&dir), ["startup.json".to_string()].into());
+        assert_eq!(
+            unreadable.take(),
+            vec![UnreadableRecord {
+                record: LaunchRecord::Startup,
+                kept_as: None,
+            }]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unreadable_records_are_taken_once_in_the_order_found() {
+        let unreadable = UnreadableRecords::new();
+        assert!(unreadable.take().is_empty());
+        let startup = UnreadableRecord {
+            record: LaunchRecord::Startup,
+            kept_as: None,
+        };
+        let session = UnreadableRecord {
+            record: LaunchRecord::Session,
+            kept_as: Some("C:\\data\\session.json.unreadable".to_string()),
+        };
+        unreadable.push(startup.clone());
+        unreadable.push(session.clone());
+
+        assert_eq!(unreadable.take(), vec![startup, session]);
+        // A second window asking later reports nothing the first one showed.
+        assert!(unreadable.take().is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_record_crosses_the_wire_in_the_shape_the_renderer_reads() {
+        let records = vec![
+            UnreadableRecord {
+                record: LaunchRecord::Session,
+                kept_as: Some("C:\\data\\session.json.unreadable".to_string()),
+            },
+            UnreadableRecord {
+                record: LaunchRecord::Startup,
+                kept_as: None,
+            },
+        ];
+        assert_eq!(
+            serde_json::to_value(&records).unwrap(),
+            serde_json::json!([
+                {"record": "session", "keptAs": "C:\\data\\session.json.unreadable"},
+                {"record": "startup", "keptAs": null},
+            ])
+        );
     }
 
     #[tokio::test]

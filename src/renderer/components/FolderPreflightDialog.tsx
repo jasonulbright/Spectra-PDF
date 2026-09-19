@@ -35,7 +35,7 @@ import {
   type SweepRunReport,
 } from '../lib/folder-preflight';
 import { createFolderPreflightIo } from '../lib/folder-preflight-io';
-import { claimOutputRoot } from '../lib/output-root-claim';
+import { claimOutputRoots, writtenRoots } from '../lib/output-root-claim';
 
 // Tools ▸ Preflight a Folder…: a profile plus a folder — the droplet.
 //
@@ -204,10 +204,20 @@ export function FolderPreflightDialog({
 
   const run = useCallback(async (): Promise<void> => {
     if (!activeProfile || source === null) return;
-    // Two windows sweeping into one output tree overwrite each other file by
-    // file, and neither the commit gate nor the per-file lock spans windows.
-    // An in-place run writes over its own sources and owns no output tree.
-    const root = await claimOutputRoot(inPlace ? '' : (dest ?? ''));
+    // Two runs sweeping into one tree overwrite each other file by file, and
+    // neither the commit gate nor the per-file lock spans windows. A check
+    // writes only its reports into the destination; only a fix moves
+    // processed originals out of the source tree.
+    const moving = settings.mode === 'fix' && !settings.inPlace && settings.movedRoot !== '';
+    const root = await claimOutputRoots(
+      writtenRoots({
+        source: settings.source,
+        dest: settings.dest,
+        inPlace: settings.inPlace,
+        filing: moving ? [settings.movedRoot] : [],
+        changesSource: moving,
+      }),
+    );
     if (!root.granted) {
       setError(root.message);
       return;
@@ -254,7 +264,7 @@ export function FolderPreflightDialog({
     } finally {
       await root.release();
     }
-  }, [activeProfile, source, settings, shipped, writeLog, inPlace, dest, callRaw, setError]);
+  }, [activeProfile, source, settings, shipped, writeLog, callRaw, setError]);
 
   const runAnother = useCallback((): void => {
     setReport(null);

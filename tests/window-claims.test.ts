@@ -18,8 +18,8 @@ vi.mock('../src/renderer/lib/tauri-bridge', () => ({
   claims: {
     claim: (path: string, mode: string) => claim(path, mode),
     release: (path: string) => release(path),
-    claimOutputRoot: vi.fn(),
-    releaseOutputRoot: vi.fn(),
+    claimOutputRoots: vi.fn(),
+    releaseOutputRoots: vi.fn(),
   },
 }));
 
