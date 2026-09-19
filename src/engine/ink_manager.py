@@ -4,7 +4,10 @@
 NAME, so two `/Separation` spaces that name one ink land on one plate the
 moment they spell it the same way. The transform is element 1 of the
 `/Separation` array, the matching entry of a `/DeviceN` `/Names` array, and
-the key of its `/Attributes /Colorants` dictionary — nothing else.
+the key of its `/Attributes /Colorants` dictionary — nothing else. A colorant
+is the bytes of its name (ISO 32000-2 §7.3.5), so every match and every
+rewrite here is on those bytes; a caller names an ink by the text a listing
+shows or by its `key` (`separations.resolve_ink`).
 
 **Aliasing two spaces whose tint transforms disagree changes the document's
 appearance**, because the surviving name carries one transform and the
@@ -50,7 +53,8 @@ from pikepdf import Array, Dictionary, Name
 from engine.inplace import is_same_file, staged_write
 
 from .color_spaces import build_function
-from .separations import PROCESS_INKS, ink_kind, list_inks
+from .pdf_tree import name_bytes, name_label, name_object, name_text, token_text
+from .separations import PROCESS_INKS, entry_bytes, ink_kind, list_inks, resolve_ink
 from .validate import validate_pdf
 from engine.pdf_save import save_pdf
 
@@ -77,8 +81,13 @@ SHADING_NO_COMPOSE = "the shading's function cannot be composed with the tint tr
 
 
 def _name_text(obj) -> str:
-    text = str(obj)
+    text = name_text(obj)
     return text[1:] if text.startswith("/") else text
+
+
+def _colorant_bytes(obj) -> bytes:
+    raw = name_bytes(obj)
+    return raw if raw is not None else _name_text(obj).encode("utf-8")
 
 
 # ── the document write ─────────────────────────────────────────────────────
@@ -149,7 +158,7 @@ def _content_owners(pdf, annotations: bool = True):
                     continue
                 if not isinstance(obj, pikepdf.Stream) or not mark(obj):
                     continue
-                if key == "/XObject" and str(obj.get("/Subtype")) != "/Form":
+                if key == "/XObject" and token_text(obj.get("/Subtype")) != "/Form":
                     continue
                 out.append(obj)
                 visit(obj, obj.get("/Resources"), depth + 1)
@@ -265,7 +274,7 @@ def _images(pdf):
             obj = xobjects[key]
             if not isinstance(obj, pikepdf.Stream):
                 continue
-            if str(obj.get("/Subtype")) != "/Image":
+            if token_text(obj.get("/Subtype")) != "/Image":
                 continue
             ident = obj.objgen if getattr(obj, "is_indirect", False) else id(obj)
             if ident in seen:
@@ -285,15 +294,39 @@ def _is_devicen(cs) -> bool:
             and _name_text(cs[0]) == "DeviceN")
 
 
-def _colorant_names(cs) -> list[str]:
+def _colorant_names(cs) -> list[bytes]:
+    """The colorant name bytes a `/Separation` or `/DeviceN` space paints."""
     if _is_separation(cs):
-        return [_name_text(cs[1])]
+        return [_colorant_bytes(cs[1])]
     if _is_devicen(cs):
         try:
-            return [_name_text(n) for n in cs[1]]
+            return [_colorant_bytes(n) for n in cs[1]]
         except TypeError:
             return []
     return []
+
+
+def _document_colorants(pdf) -> set[bytes]:
+    """Every colorant name any colour space, image or shading in the document
+    paints, as bytes: what a caller's reference to an ink resolves against."""
+    found: set[bytes] = set()
+    for table in _colorspace_dicts(pdf):
+        for key in list(table.keys()):
+            try:
+                found.update(_colorant_names(table[key]))
+            except Exception:  # noqa: BLE001 — an unreadable entry names no ink
+                continue
+    for obj in _images(pdf) + _shading_dicts(pdf):
+        try:
+            found.update(_colorant_names(obj.get("/ColorSpace")))
+        except Exception:  # noqa: BLE001
+            continue
+    return found
+
+
+def _resolve(pdf, value, known: set | None = None) -> bytes:
+    """The colorant bytes a caller's reference to an ink means in `pdf`."""
+    return resolve_ink(value, _document_colorants(pdf) if known is None else known)
 
 
 # ── tint-transform comparison ──────────────────────────────────────────────
@@ -312,7 +345,7 @@ def _alternate_signature(cs) -> str:
     return _name_text(alt)
 
 
-def _first_space_named(pdf, name: str):
+def _first_space_named(pdf, name: bytes):
     """The first `/Separation` array in the document for this colorant.
 
     A colorant can appear as a `/Separation` of its own OR as a component of
@@ -323,13 +356,13 @@ def _first_space_named(pdf, name: str):
     for table in _colorspace_dicts(pdf):
         for key in list(table.keys()):
             cs = table[key]
-            if _is_separation(cs) and _name_text(cs[1]) == name:
+            if _is_separation(cs) and _colorant_bytes(cs[1]) == name:
                 return cs
             if _is_devicen(cs) and name in _colorant_names(cs) and len(cs) >= 5:
                 attrs = cs[4]
                 colorants = attrs.get("/Colorants") if attrs is not None else None
                 if colorants is not None:
-                    own = colorants.get(Name("/" + name))
+                    own = colorants.get(name_object(name))
                     if _is_separation(own):
                         fallback = fallback or own
     return fallback
@@ -340,7 +373,7 @@ def compare_tint_transforms(file: str, a: str, b: str) -> dict:
 
     Args:
         file: Input PDF path.
-        a: One colorant name.
+        a: One colorant, by its shown name or an entry carrying its `key`.
         b: The other.
 
     Compares the alternate spaces first, then the tint transforms at eleven
@@ -350,10 +383,14 @@ def compare_tint_transforms(file: str, a: str, b: str) -> dict:
     """
     validate_pdf(file)
     with pikepdf.open(file) as pdf:
-        space_a = _first_space_named(pdf, a)
-        space_b = _first_space_named(pdf, b)
-        for name, space in ((a, space_a), (b, space_b)):
+        known = _document_colorants(pdf)
+        raw_a = _resolve(pdf, a, known)
+        raw_b = _resolve(pdf, b, known)
+        space_a = _first_space_named(pdf, raw_a)
+        space_b = _first_space_named(pdf, raw_b)
+        for raw, space in ((raw_a, space_a), (raw_b, space_b)):
             if space is None:
+                name = name_label(raw)
                 raise ValueError(f'Ink "{name}" is not used in this document.')
         alt_a = _alternate_signature(space_a)
         alt_b = _alternate_signature(space_b)
@@ -410,8 +447,9 @@ def alias_ink(
     Args:
         file: Input PDF path.
         output: Output PDF path (may equal the input — stage and replace).
-        source: The colorant to rename.
-        target: The colorant it joins.
+        source: The colorant to rename, by its shown name or an entry
+            carrying its `key`.
+        target: The colorant it joins, named the same way.
         accept_target_transform: Consent to the appearance change when the
             two tint transforms disagree — the surviving name carries ONE
             transform and the document had two.
@@ -421,14 +459,19 @@ def alias_ink(
     it from the job.
     """
     validate_pdf(file)
-    source = str(source)
-    target = str(target)
-    if source == target:
+    with pikepdf.open(file) as pdf:
+        known = _document_colorants(pdf)
+        source_raw = _resolve(pdf, source, known)
+        target_raw = _resolve(pdf, target, known)
+    source = name_label(source_raw)
+    target = name_label(target_raw)
+    if source_raw == target_raw:
         raise ValueError(f'Ink "{source}" is not used in this document.')
     if ink_kind(source) == "process" and ink_kind(target) != "process":
         raise ValueError("Process inks cannot be aliased to a spot colour.")
 
-    comparison = compare_tint_transforms(file, source, target)
+    comparison = compare_tint_transforms(
+        file, {"key": source_raw.hex()}, {"key": target_raw.hex()})
     if not comparison["match"] and not accept_target_transform:
         raise ValueError(
             f'"{source}" and "{target}" describe different colours; '
@@ -440,21 +483,22 @@ def alias_ink(
         for table in _colorspace_dicts(pdf):
             for key in list(table.keys()):
                 cs = table[key]
-                if _is_separation(cs) and _name_text(cs[1]) == source:
-                    cs[1] = Name("/" + target)
+                if _is_separation(cs) and _colorant_bytes(cs[1]) == source_raw:
+                    cs[1] = name_object(target_raw)
                     renamed += 1
                 elif _is_devicen(cs):
                     names = cs[1]
                     for index in range(len(names)):
-                        if _name_text(names[index]) == source:
-                            names[index] = Name("/" + target)
+                        if _colorant_bytes(names[index]) == source_raw:
+                            names[index] = name_object(target_raw)
                             renamed += 1
                     if len(cs) >= 5:
                         attrs = cs[4]
                         colorants = attrs.get("/Colorants") if attrs is not None else None
-                        if colorants is not None and Name("/" + source) in colorants:
-                            colorants[Name("/" + target)] = colorants[Name("/" + source)]
-                            del colorants[Name("/" + source)]
+                        if colorants is not None and name_object(source_raw) in colorants:
+                            own = colorants[name_object(source_raw)]
+                            colorants[name_object(target_raw)] = own
+                            del colorants[name_object(source_raw)]
         if renamed == 0:
             raise ValueError(f'Ink "{source}" is not used in this document.')
         _save(pdf, file, output)
@@ -475,7 +519,7 @@ def _alternate_operand(alt):
     """How the alternate space is named in a `cs` operand, and how many
     components its `scn` takes."""
     if isinstance(alt, (pikepdf.Name, str)):
-        family = str(alt) if str(alt).startswith("/") else "/" + str(alt)
+        family = "/" + _name_text(alt)
         return family, _DEVICE_COMPONENTS.get(family)
     if isinstance(alt, pikepdf.Array) and len(alt) > 0:
         family = _name_text(alt[0])
@@ -547,10 +591,10 @@ def _numeric_operands(operands) -> list[float] | None:
 def _rewrite_stream(pdf, owner, targets: dict, alt_cache: dict) -> int:
     """Replace every selection-and-paint of a target space in one stream.
 
-    `targets` maps a resource key to (colour-space array, tint function,
-    alternate). A `cs` that selects a target arms the rewrite; the `scn` that
-    follows carries the tint through the transform and paints in the alternate
-    instead.
+    `targets` maps a resource key's bytes to (colour-space array, tint
+    function, alternate, the ink's shown name). A `cs` that selects a target
+    arms the rewrite; the `scn` that follows carries the tint through the
+    transform and paints in the alternate instead.
     """
     resources = owner.get("/Resources")
     if resources is None:
@@ -567,10 +611,10 @@ def _rewrite_stream(pdf, owner, targets: dict, alt_cache: dict) -> int:
     armed = {"fill": None, "stroke": None}
     changed = 0
     for instruction in instructions:
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
         if operator in ("cs", "CS") and operands:
-            key = str(operands[0])
+            key = name_bytes(operands[0])
             slot = "fill" if operator == "cs" else "stroke"
             target = targets.get(key)
             if target is not None:
@@ -617,7 +661,7 @@ def _rewrite_stream(pdf, owner, targets: dict, alt_cache: dict) -> int:
     return changed
 
 
-def _convert_images(pdf, target_names: set[str]) -> int:
+def _convert_images(pdf, target_names: set[bytes]) -> int:
     """Convert image samples out of a target space through its transform."""
     import numpy as np
 
@@ -731,7 +775,7 @@ def _compose_shading_function(pdf, shading, tint, out_components: int):
     )
 
 
-def _convert_shadings(pdf, target_names: set[str]):
+def _convert_shadings(pdf, target_names: set[bytes]):
     """(shadings converted, a record per shading left alone).
 
     A shading the composition cannot describe is left exactly as it was — the
@@ -745,7 +789,7 @@ def _convert_shadings(pdf, target_names: set[str]):
         cs = shading.get("/ColorSpace")
         if cs is None or not (_is_separation(cs) or _is_devicen(cs)):
             continue
-        colorants = sorted(set(_colorant_names(cs)) & target_names)
+        colorants = [name_label(raw) for raw in sorted(set(_colorant_names(cs)) & target_names)]
         if not colorants:
             continue
 
@@ -777,12 +821,12 @@ def _convert_shadings(pdf, target_names: set[str]):
     return converted, skipped
 
 
-def _names_selecting(resources, key: str) -> bool:
+def _names_selecting(resources, key: bytes) -> bool:
     """Does anything in these resources still SELECT this colour-space key by
     name? An image or a shading may carry `/ColorSpace /S2` rather than the
     array itself, and those two are converted by their own passes only where
     the array is inline — so a key one of them still names stays."""
-    wanted = pikepdf.Name("/" + key.lstrip("/"))
+    wanted = name_object(key)
     for group_key in ("/XObject", "/Shading", "/Pattern"):
         group = resources.get(group_key)
         if not isinstance(group, pikepdf.Dictionary):
@@ -813,7 +857,7 @@ def _drop_converted_spaces(resources, table, targets: dict) -> None:
         if _names_selecting(resources, key):
             continue
         try:
-            del table[pikepdf.Name("/" + key.lstrip("/"))]
+            del table[name_object(key)]
         except Exception:  # noqa: BLE001 — a key that will not delete stays
             continue
 
@@ -829,7 +873,8 @@ def spot_to_process(
     Args:
         file: Input PDF path.
         output: Output PDF path (may equal the input — stage and replace).
-        inks: Colorant names to convert.
+        inks: The colorants to convert, each by its shown name or an entry
+            carrying its `key`.
         pages: Accepted and reported; a colour space is a document-level
             object, so converting it on one page and not another would need
             two copies of it and is not what the caller asked for.
@@ -846,24 +891,28 @@ def spot_to_process(
     conversion from a partial one without reading the file back.
     """
     validate_pdf(file)
-    wanted = {str(name) for name in inks}
+    inventory = {entry_bytes(e): e for e in list_inks(file)["inks"]}
+    with pikepdf.open(file) as pdf:
+        known = set(inventory) | _document_colorants(pdf)
+        wanted = {_resolve(pdf, value, known) for value in inks}
     if not wanted:
         raise ValueError("Name at least one ink to convert.")
 
-    inventory = {e["name"]: e for e in list_inks(file)["inks"]}
-    for name in sorted(wanted):
-        if name not in inventory:
+    for raw in sorted(wanted):
+        if raw not in inventory:
+            name = name_label(raw)
             raise ValueError(f'Ink "{name}" is not used in this document.')
 
-    carried: set[str] = set()
+    carried: set[bytes] = set()
     converted_spaces = 0
     changed_paints = 0
 
     with pikepdf.open(file) as pdf:
         # Which resource keys, in which owner, select a space that must go.
-        for name in sorted(wanted):
-            space = _first_space_named(pdf, name)
+        for raw in sorted(wanted):
+            space = _first_space_named(pdf, raw)
             if space is not None and space[2] is None:
+                name = name_label(raw)
                 raise ValueError(f'Ink "{name}" declares no alternate colour space.')
 
         alt_cache: dict = {}
@@ -882,23 +931,24 @@ def spot_to_process(
                 names = _colorant_names(cs)
                 if not (set(names) & wanted):
                     continue
+                name = name_label(names[0])
                 alt = cs[2]
                 if alt is None:
                     raise ValueError(
-                        f'Ink "{names[0]}" declares no alternate colour space.'
+                        f'Ink "{name}" declares no alternate colour space.'
                     )
                 tint = build_function(cs[3])
                 if tint is None:
                     raise ValueError(
-                        f'Ink "{names[0]}" declares no alternate colour space.'
+                        f'Ink "{name}" declares no alternate colour space.'
                     )
                 _, out_components = _alternate_operand(alt)
                 if out_components is None:
                     raise ValueError(
-                        f'Ink "{names[0]}" declares no alternate colour space.'
+                        f'Ink "{name}" declares no alternate colour space.'
                     )
                 carried.update(set(names) - wanted)
-                targets[str(key)] = (cs, tint, alt, names[0])
+                targets[name_bytes(key)] = (cs, tint, alt, name)
                 converted_spaces += 1
             if targets:
                 changed_paints += _rewrite_stream(pdf, owner, targets, alt_cache)
@@ -910,8 +960,8 @@ def spot_to_process(
 
     return {
         "output": str(output),
-        "inks": sorted(wanted),
-        "carried": sorted(carried),
+        "inks": [name_label(raw) for raw in sorted(wanted)],
+        "carried": [name_label(raw) for raw in sorted(carried)],
         "spaces": converted_spaces,
         "paints": changed_paints,
         "images": changed_images,

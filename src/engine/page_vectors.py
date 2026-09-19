@@ -60,6 +60,7 @@ from engine.redact import (
     _lookup_xobject,
     _resolve_resources,
 )
+from engine.pdf_tree import key_text, token_text
 
 # Path-construction operators and how many (x, y) points each contributes.
 # `h` (close) adds no new point; `re` contributes its four corners.
@@ -366,7 +367,7 @@ def _walk_vectors(
     w_stack: list = []  # line width IS graphics state — q/Q-scoped like the rest
     q_meta: list = []  # Open-frame metadata for `sh` recognition
     for idx, instruction in enumerate(instructions):
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
         # Ambient clip fed with the CURRENT ctm BEFORE state.feed (which
         # consumes q/Q/cm). Its own path buffer is independent of `pts` below.
@@ -491,7 +492,7 @@ def _walk_vectors(
         # name ride down so a nested edit knows which form to copy and which
         # `Do` to swap.
         if operator == "Do" and pdf is not None and operands and depth < MAX_FORM_DEPTH:
-            fname = str(operands[0])
+            fname = key_text(operands[0])
             xobj = _lookup_xobject(fname, resources, resources)
             if geometry:
                 # An image's (or form's) placement QUAD is a snap target
@@ -504,7 +505,7 @@ def _walk_vectors(
             # copy away from the marker and fight the placement selection.
             if (
                 xobj is not None
-                and str(xobj.get("/Subtype", "")) == "/Form"
+                and token_text(xobj.get("/Subtype", "")) == "/Form"
                 and xobj.get("/SpectraVector") is None
             ):
                 fmatrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
@@ -544,7 +545,7 @@ def _walk_vectors(
                 and frame["clean"]
                 and not frame["saw_sh"]
                 and idx + 1 < len(instructions)
-                and str(instructions[idx + 1].operator) == "Q"
+                and token_text(instructions[idx + 1].operator) == "Q"
             )
             if frame is not None:
                 frame["saw_sh"] = True
@@ -570,7 +571,7 @@ def _walk_vectors(
                     "_do_chain": list(do_chain),
                     "_edit_depth": depth,
                     "_sh_frame": {"open": frame["idx"]} if recognized else None,
-                    "_sh_name": str(operands[0]) if operands else None,
+                    "_sh_name": key_text(operands[0]) if operands else None,
                     "clipped": clips.clips_away(tuple(rect)) if rect else False,
                 }
             )
@@ -711,8 +712,8 @@ def _sh_names_used(content_source, resources) -> set:
     def collect_stream(obj):
         try:
             for ins in pikepdf.parse_content_stream(obj):
-                if str(ins.operator) == "sh" and ins.operands:
-                    used.add(str(ins.operands[0]))
+                if token_text(ins.operator) == "sh" and ins.operands:
+                    used.add(key_text(ins.operands[0]))
         except Exception:
             pass
 
@@ -1168,15 +1169,15 @@ def restyle_page_vector(
             wrap_start = first
             old_setters: list = []
             j = first - 1
-            while j >= 0 and str(instrs[j].operator) in _SETTERS:
+            while j >= 0 and token_text(instrs[j].operator) in _SETTERS:
                 old_setters.insert(0, instrs[j])
                 j -= 1
             enclosed = (
                 old_setters
                 and j >= 0
-                and str(instrs[j].operator) == "q"
+                and token_text(instrs[j].operator) == "q"
                 and last + 1 < len(instrs)
-                and str(instrs[last + 1].operator) == "Q"
+                and token_text(instrs[last + 1].operator) == "Q"
             )
             if enclosed:
                 wrap_start = j  # the existing `q`

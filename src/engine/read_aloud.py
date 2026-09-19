@@ -28,6 +28,12 @@ Marked-content sections tagged `/Artifact` are excluded from both orders. The
 tag is the producer stating the content is a running header, a folio or a
 rule; speaking page furniture between every page is the defect it exists to
 prevent.
+
+A run no paragraph admits — text set at an angle, a column whose glyphs climb
+— is a block of its own, placed in layout order by its top edge: the
+paragraph lister leaving it on the run-box surface says it cannot be
+reflowed, not that it is not on the page. A run whose box has no area paints
+nothing and is not read.
 """
 
 from __future__ import annotations
@@ -41,6 +47,7 @@ from engine.text_metrics import _FontCache, measurable, show_items_from_segments
 from engine.text_paragraphs import _group
 from engine.text_runs import _walk_runs
 from engine.validate import validate_pdf
+from engine.pdf_tree import name_text
 
 # Depth cap for the structure walk — `struct_tree._MAX_DEPTH`'s value and its
 # reason: deep enough for any real document, and together with the visited set
@@ -117,7 +124,7 @@ def _struct_order(pdf, page_number: int) -> tuple:
         value = elem.get("/S")
         if value is not None:
             try:
-                own_tag = str(value).lstrip("/")
+                own_tag = name_text(value).lstrip("/")
             except Exception:
                 own_tag = tag
         own_page, mcids = _content_stream_mcids(elem, pages_by_og, inherited_page)
@@ -253,6 +260,65 @@ def _block_spans(paragraph, detail: list, fonts: _FontCache, run_rect) -> list:
     return out
 
 
+def _run_block(index: int, run: dict, detail: list, fonts: _FontCache, run_rect) -> list:
+    """The spans of a block that is one run, geometry as `_block_spans` gives
+    a paragraph's."""
+    text = run["text"]
+    drawn, rects = _char_rects(detail[index], fonts)
+    entry = {"s": 0, "e": len(text), "run": index}
+    if drawn is not None and drawn == text:
+        entry["exact"] = True
+        entry["chars"] = rects
+        entry["rect"] = _union(rects)
+    else:
+        entry["exact"] = False
+        entry["rect"] = run_rect(index)
+    return [entry]
+
+
+def _has_area(rect) -> bool:
+    return float(rect[2]) > float(rect[0]) and float(rect[3]) > float(rect[1])
+
+
+def _with_leftover_runs(paragraphs, local: list, detail: list, fonts: _FontCache,
+                        run_rect) -> list:
+    """(run indexes, text, box, spans) per block, in layout order.
+
+    The paragraphs keep the lister's order. Each run no paragraph holds is
+    placed before the first paragraph of its stream whose top edge is lower
+    than its own, so a paragraph is never moved. A run whose box has no area
+    is drawn through a text matrix that scales it to nothing, paints nothing,
+    and is not read.
+    """
+    grouped = {i for paragraph in paragraphs for i in paragraph.run_indexes}
+    leftovers = sorted(
+        (i for i, row in enumerate(local) if i not in grouped and row["text"].strip()
+         and _has_area(detail[i]["rect"])),
+        key=lambda i: (detail[i]["stream"], -float(detail[i]["rect"][3]),
+                       float(detail[i]["rect"][0])),
+    )
+    out: list = []
+    pending = list(leftovers)
+    for paragraph in paragraphs:
+        if not paragraph.text.strip():
+            continue
+        top = float(paragraph.box[3])
+        while pending and (
+            detail[pending[0]]["stream"] < paragraph.stream
+            or (detail[pending[0]]["stream"] == paragraph.stream
+                and float(detail[pending[0]]["rect"][3]) > top)
+        ):
+            index = pending.pop(0)
+            out.append(([index], local[index]["text"], detail[index]["rect"],
+                        _run_block(index, local[index], detail, fonts, run_rect)))
+        out.append((paragraph.run_indexes, paragraph.text, paragraph.box,
+                    _block_spans(paragraph, detail, fonts, run_rect)))
+    for index in pending:
+        out.append(([index], local[index]["text"], detail[index]["rect"],
+                    _run_block(index, local[index], detail, fonts, run_rect)))
+    return out
+
+
 def read_aloud_page(file: str, page: int) -> dict:
     """One page's reading blocks.
 
@@ -335,13 +401,10 @@ def read_aloud_page(file: str, page: int) -> dict:
             else:
                 order = "structure"
 
+        blocks_in_layout = _with_leftover_runs(paragraphs, local, local_detail, fonts, run_rect)
         entries = []
-        for paragraph in paragraphs:
-            text = paragraph.text
-            if not text.strip():
-                continue
-            spans = _block_spans(paragraph, local_detail, fonts, run_rect)
-            first = paragraph.run_indexes[0] if paragraph.run_indexes else 0
+        for run_indexes, text, box, spans in blocks_in_layout:
+            first = run_indexes[0] if run_indexes else 0
             mcid = runs[kept[first]].get("mcid") if first < len(kept) else None
             entries.append(
                 {
@@ -349,7 +412,7 @@ def read_aloud_page(file: str, page: int) -> dict:
                         min(
                             (
                                 position_by_mcid.get(int(runs[kept[i]]["mcid"]), 1 << 30)
-                                for i in paragraph.run_indexes
+                                for i in run_indexes
                                 if runs[kept[i]].get("mcid") is not None
                             ),
                             default=1 << 30,
@@ -360,7 +423,7 @@ def read_aloud_page(file: str, page: int) -> dict:
                     "block": {
                         "role": role_by_mcid.get(int(mcid)) if mcid is not None else None,
                         "text": text,
-                        "box": [round(float(v), 3) for v in paragraph.box],
+                        "box": [round(float(v), 3) for v in box],
                         "spans": spans,
                     },
                 }

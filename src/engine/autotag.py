@@ -48,6 +48,7 @@ from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 from engine.redact import _resolve_resources
 from engine.text_runs import _resource_lookup
+from engine.pdf_tree import key_text, token_text
 
 _H1_RATIO = 1.6
 _H2_RATIO = 1.25
@@ -145,7 +146,7 @@ def _segment_page(instructions, image_names, resources=None):
             current_ops = []
 
     for operands, operator in instructions:
-        op = str(operator)
+        op = token_text(operator)
         args = list(operands)
         if op in ("'", '"'):
             # The two show-and-advance operators move to the next line
@@ -172,7 +173,7 @@ def _segment_page(instructions, image_names, resources=None):
                 segments.append(_Segment("text", text_ops, max_size, chars, y_max, y_min))
                 text_ops = []
             continue
-        if op == "Do" and operands and str(operands[0]) in image_names:
+        if op == "Do" and operands and key_text(operands[0]) in image_names:
             flush_other()
             segments.append(_Segment("figure", [(operands, operator)]))
             continue

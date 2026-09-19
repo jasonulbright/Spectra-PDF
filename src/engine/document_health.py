@@ -70,6 +70,7 @@ from engine import xfa
 from engine.font_embedding import font_embedded
 from engine.font_inventory import walk_document_fonts
 from engine.pdf_fonts import name_str
+from engine.pdf_tree import token_text
 
 _IMAGE_SUBTYPE = "/Image"
 
@@ -402,8 +403,8 @@ def _filter_names(obj) -> list[str]:
     if entry is None:
         return []
     if isinstance(entry, pikepdf.Array):
-        return [str(item) for item in entry]
-    return [str(entry)]
+        return [token_text(item) for item in entry]
+    return [token_text(entry)]
 
 
 def _identity(obj):
@@ -594,7 +595,7 @@ def _visit_entry(entries, name, depth: int, walk: _Walk) -> None:
         if key in walk.visited:
             return
         walk.visited.add(key)
-        subtype = str(obj.get("/Subtype", ""))
+        subtype = token_text(obj.get("/Subtype", ""))
     except Exception as exc:
         _unreadable(walk, exc)
         return

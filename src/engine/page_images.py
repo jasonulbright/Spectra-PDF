@@ -68,6 +68,7 @@ from engine.redact import (
     _mat_mult,
     _resolve_resources,
 )
+from engine.pdf_tree import key_text, token_text
 
 # ── listing ───────────────────────────────────────────────────────────────
 
@@ -94,10 +95,10 @@ def _recognized_frames(instructions, t, enclosing):
     frames = []
     lo, hi = t, t  # input-index span of the current inner unit
     for a in reversed(enclosing):
-        prefix = tuple(str(instructions[k].operator) for k in range(a + 1, lo))
+        prefix = tuple(token_text(instructions[k].operator) for k in range(a + 1, lo))
         kind = _WRAP_SHAPES.get(prefix)
         b = hi + 1
-        if kind is None or b >= len(instructions) or str(instructions[b].operator) != "Q":
+        if kind is None or b >= len(instructions) or token_text(instructions[b].operator) != "Q":
             break
         frame = {"kind": kind, "open": a, "close": b}
         if kind == "crop":
@@ -157,16 +158,16 @@ def _image_facts(obj) -> dict:
         declared = obj.get("/Filter")
         if declared is not None:
             entries = declared if isinstance(declared, pikepdf.Array) else [declared]
-            filters = [str(entry) for entry in entries]
+            filters = [token_text(entry) for entry in entries]
     except Exception:
         filters = []
     family = ""
     try:
         cs = obj.get("/ColorSpace")
         if isinstance(cs, (pikepdf.Name, str)):
-            family = str(cs).lstrip("/")
+            family = token_text(cs).lstrip("/")
         elif isinstance(cs, pikepdf.Array) and len(cs) > 0:
-            family = str(cs[0]).lstrip("/")
+            family = token_text(cs[0]).lstrip("/")
     except Exception:
         family = ""
     return {"bpc": bpc, "filters": filters, "colour_family": family}
@@ -211,7 +212,7 @@ def _walk_placements(
     gs_stack: list[tuple[float, str, dict | None]] = []
     q_open: list[int] = []
     for idx, instruction in enumerate(instructions):
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
         # Fed with the CURRENT ctm BEFORE state.feed (which consumes q/Q/cm).
         clips.feed(operator, operands, state.ctm)
@@ -225,15 +226,15 @@ def _walk_placements(
             if q_open:
                 q_open.pop()
         elif operator == "gs" and operands:
-            gs_name = str(operands[0])
+            gs_name = key_text(operands[0])
             for res in (resources, fallback_resources):
                 if res is None:
                     continue
                 try:
                     egs = res.get("/ExtGState")
-                    if egs is None or Name(gs_name) not in egs:
+                    if egs is None or gs_name not in egs:
                         continue
-                    entry = egs[Name(gs_name)]
+                    entry = egs[gs_name]
                     ca = entry.get("/ca")
                     if ca is not None:
                         alpha = max(0.0, min(1.0, float(ca)))
@@ -242,7 +243,7 @@ def _walk_placements(
                         # /BM may be a name or an array of names (first wins).
                         try:
                             bm_name = (
-                                str(bm[0]) if isinstance(bm, pikepdf.Array) else str(bm)
+                                token_text(bm[0]) if isinstance(bm, pikepdf.Array) else token_text(bm)
                             )
                         except (IndexError, TypeError):
                             bm_name = ""
@@ -296,9 +297,9 @@ def _walk_placements(
             )
             continue
         if operator == "Do":
-            name = str(operands[0]) if operands else None
+            name = key_text(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback_resources)
-            subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
+            subtype = token_text(xobj.get("/Subtype", "")) if xobj is not None else ""
             vector_marker = (
                 xobj.get("/SpectraVector") if xobj is not None and subtype == "/Form" else None
             )
@@ -830,7 +831,7 @@ def _collapse_opacity_frames(kept, instructions, t, open_q, skip_q, resources, f
         if frame["kind"] != "opacity":
             continue
         try:
-            name = str(instructions[frame["open"] + 1].operands[0])
+            name = key_text(instructions[frame["open"] + 1].operands[0])
         except (IndexError, TypeError):
             break
         gs_state = _tool_gs_state(name, resources, fallback_resources)
@@ -871,7 +872,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
     open_q: list[tuple[int, int]] = []  # (input index, kept index) of open q's
     skip_q: set[int] = set()  # input indices of dropped crop frames' closing Q's
     for i, instruction in enumerate(instructions):
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         if operator == "q":
             kept.append(instruction)
             open_q.append((i, len(kept) - 1))
@@ -931,9 +932,9 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
         if operator != "Do" or state.done:
             kept.append(instruction)
             continue
-        name = str(operands[0]) if operands else None
+        name = key_text(operands[0]) if operands else None
         xobj = _lookup_xobject(name, resources, fallback_resources)
-        subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
+        subtype = token_text(xobj.get("/Subtype", "")) if xobj is not None else ""
         # Marked vector-graphic forms are LEAF placements — they
         # occupy a counted ordinal slot exactly as the lister counts them
         # (walker agreement), take every wrap-family edit, and are never
@@ -1138,8 +1139,8 @@ def _sweep_orphan_edit_gs(content_source, resources) -> None:
     def collect_stream(obj):
         try:
             for ins in pikepdf.parse_content_stream(obj):
-                if str(ins.operator) == "gs" and ins.operands:
-                    used.add(str(ins.operands[0]))
+                if token_text(ins.operator) == "gs" and ins.operands:
+                    used.add(key_text(ins.operands[0]))
         except Exception:
             pass
 
@@ -1177,7 +1178,7 @@ def _sweep_orphan_edit_gs(content_source, resources) -> None:
         return
     for k in [str(k) for k in egs.keys()]:
         if k.startswith("/EditGS") and k not in used:
-            del egs[Name(k)]
+            del egs[k]
 
 
 def _fresh_gs_name(resources, fallback_resources, reserved: set) -> str:
@@ -1231,8 +1232,8 @@ def _register_xobject(pdf, resources, name: str, obj) -> None:
 def _names_drawn(instructions) -> set:
     names = set()
     for instruction in instructions:
-        if str(instruction.operator) == "Do" and instruction.operands:
-            names.add(str(instruction.operands[0]))
+        if token_text(instruction.operator) == "Do" and instruction.operands:
+            names.add(key_text(instruction.operands[0]))
     return names
 
 
@@ -2145,14 +2146,14 @@ def extract_page_image(file: str, page: int, index: int, output_prefix: str) -> 
 
         def _collect(instructions, res, depth, fallback):
             for instruction in instructions:
-                if str(instruction.operator) == "INLINE IMAGE":
+                if token_text(instruction.operator) == "INLINE IMAGE":
                     holder.append(instruction.iimage)
                     continue
-                if str(instruction.operator) != "Do" or not instruction.operands:
+                if token_text(instruction.operator) != "Do" or not instruction.operands:
                     continue
-                nm = str(instruction.operands[0])
+                nm = key_text(instruction.operands[0])
                 xobj = _lookup_xobject(nm, res, fallback)
-                st = str(xobj.get("/Subtype", "")) if xobj is not None else ""
+                st = token_text(xobj.get("/Subtype", "")) if xobj is not None else ""
                 if xobj is not None and st == "/Image":
                     holder.append(xobj)
                 elif xobj is not None and st == "/Form":

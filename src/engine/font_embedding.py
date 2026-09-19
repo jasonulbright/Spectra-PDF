@@ -20,6 +20,7 @@ into either answer.
 """
 
 import pikepdf
+from engine.pdf_tree import token_text
 
 FONT_PROGRAM_KEYS = ("/FontFile", "/FontFile2", "/FontFile3")
 
@@ -32,7 +33,7 @@ def font_embedded(font):
     if not isinstance(font, pikepdf.Dictionary):
         return None
     try:
-        subtype = str(font.get("/Subtype"))
+        subtype = token_text(font.get("/Subtype"))
     except Exception:
         return None
     if subtype == "/Type0":

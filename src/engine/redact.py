@@ -68,7 +68,7 @@ from pikepdf import Name
 from engine import image_redact, redact_document, redact_fonts, vector_redact
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
-from engine.pdf_tree import walk_inheritable
+from engine.pdf_tree import token_text, walk_inheritable
 from engine.content_walk import (
     IDENTITY,
     ClipTracker,
@@ -709,7 +709,10 @@ def _walk(
         # A replacement text or a description spans the whole sequence, so it
         # names the redacted content too; it goes, and extraction falls back
         # to the glyphs that are still there.
-        cleaned = pikepdf.Dictionary({k: props[k] for k in props.keys() if k not in _DESCRIPTIONS})
+        cleaned = pikepdf.Dictionary()
+        for k in props.keys():
+            if k not in _DESCRIPTIONS:
+                cleaned[k] = props[k]
         tag = mc_operands[0]
         if isinstance(mc_operands[1], pikepdf.Name):
             new_name = _new_scoped_name("RdxMc", name_counter, taken_other["/Properties"])
@@ -720,7 +723,7 @@ def _walk(
             kept[index] = pikepdf.ContentStreamInstruction([tag, cleaned], pikepdf.Operator("BDC"))
 
     for instruction in instructions:
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
 
         # Clip bookkeeping rides alongside the shared state machine (fed with
@@ -818,9 +821,13 @@ def _walk(
                         name_counter, fonts, None, run=run,
                     )
                     if copy is not None:
-                        new_smask = pikepdf.Dictionary({k: smask[k] for k in smask.keys()})
+                        new_smask = pikepdf.Dictionary()
+                        for k in smask.keys():
+                            new_smask[k] = smask[k]
                         new_smask["/G"] = copy
-                        new_ext = pikepdf.Dictionary({k: ext[k] for k in ext.keys()})
+                        new_ext = pikepdf.Dictionary()
+                        for k in ext.keys():
+                            new_ext[k] = ext[k]
                         new_ext["/SMask"] = new_smask
                         new_name = _new_scoped_name("RdxGs", name_counter, taken_other["/ExtGState"])
                         new_resources["/ExtGState"][new_name] = pdf.make_indirect(new_ext)
@@ -962,7 +969,7 @@ def _walk(
         elif operator == "Do":
             name = _spelling(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback_resources)
-            subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
+            subtype = token_text(xobj.get("/Subtype", "")) if xobj is not None else ""
 
             if xobj is not None and subtype == "/Image":
                 bbox = _bbox_of_rect_under_matrix(state.ctm, 1.0, 1.0)
@@ -1115,7 +1122,7 @@ def _referenced_xobject_names(instructions) -> set:
     return {
         _spelling(ins.operands[0])
         for ins in instructions
-        if str(ins.operator) == "Do" and ins.operands
+        if token_text(ins.operator) == "Do" and ins.operands
     }
 
 
@@ -1125,7 +1132,7 @@ def _referenced_names(instructions, resources, depth: int = 0) -> dict:
     here, since it draws with this dictionary."""
     used: dict = {category: set() for category in _PRUNED_CATEGORIES}
     for ins in instructions:
-        op = str(ins.operator)
+        op = token_text(ins.operator)
         operands = list(ins.operands)
         if op == "Do" and operands:
             used["/XObject"].add(_spelling(operands[0]))

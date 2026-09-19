@@ -26,6 +26,8 @@ from urllib.parse import quote
 from xml.etree.ElementTree import Element, fromstring
 from xml.sax.saxutils import escape
 
+from engine.pdf_tree import name_label
+
 #: The XFDF namespace, shared with `engine.xfdf`'s annotation arm.
 XFDF_NS = "http://ns.adobe.com/xfdf/"
 
@@ -170,8 +172,10 @@ class _Lexer:
             self.pos += 1
         raw = data[start : self.pos]
         # '#xx' is the format's own escape for a byte a name cannot spell.
+        # The text is the label a form's own appearance-state names are shown
+        # by, so a value names the state it was exported from.
         decoded = re.sub(rb"#([0-9A-Fa-f]{2})", lambda m: bytes([int(m.group(1), 16)]), raw)
-        return _Name(decoded.decode("utf-8", "replace"))
+        return _Name(name_label(decoded))
 
     def _keyword(self) -> bytes:
         data = self.data

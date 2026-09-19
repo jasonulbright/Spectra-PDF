@@ -45,6 +45,7 @@ from pikepdf import Array, Dictionary, Name, String
 from engine.fieldactions import destination_page as _resolve_dest_page
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
+from engine.pdf_tree import token_text
 
 #: Border styles this module AUTHORS. Reading covers /B and /I (beveled,
 #: inset) because a document may carry them; writing does not, since no
@@ -120,7 +121,7 @@ def _file_spec(value) -> str:
         for key in ("/UF", "/F"):
             inner = value.get(key)
             if inner is not None:
-                return str(inner)
+                return token_text(inner)
     return ""
 
 
@@ -139,7 +140,7 @@ def _read_view(dest) -> dict:
     practice; it is reported as inherit, which is what a reader does with it."""
     if not isinstance(dest, pikepdf.Array) or len(dest) < 2:
         return {"mode": "inherit"}
-    mode = _MODE_BY_NAME.get(str(dest[1]))
+    mode = _MODE_BY_NAME.get(token_text(dest[1]))
     if mode is None:
         return {"mode": "inherit"}
     operands = _VIEW_OPERANDS[mode]
@@ -175,12 +176,12 @@ def _target_spec(pdf, annot) -> dict:
     a = annot.get("/A")
     if isinstance(a, Dictionary):
         try:
-            s = str(a.get("/S"))
+            s = token_text(a.get("/S"))
         except (TypeError, ValueError):
             s = ""
         if s == "/URI":
             uri = a.get("/URI")
-            return {"kind": "uri", "url": str(uri) if uri is not None else ""}
+            return {"kind": "uri", "url": token_text(uri) if uri is not None else ""}
         if s == "/Launch":
             return {"kind": "launch", "path": _file_spec(a.get("/F"))}
         if s in ("/GoToR", "/GoToE"):
@@ -201,7 +202,7 @@ def _target_spec(pdf, annot) -> dict:
     if dest is None:
         return {"kind": "none"}
     if isinstance(dest, (pikepdf.Name, pikepdf.String)):
-        return {"kind": "named", "name": str(dest).lstrip("/")}
+        return {"kind": "named", "name": token_text(dest).lstrip("/")}
     page = _resolve_dest_page(pdf, dest)
     return {
         "kind": "goto",
@@ -246,7 +247,7 @@ def _read_appearance(annot) -> dict:
     bs = annot.get("/BS")
     if isinstance(bs, Dictionary):
         width = _number(bs.get("/W"))
-        style = _STYLE_BY_NAME.get(str(bs.get("/S")) if bs.get("/S") is not None else "/S", "solid")
+        style = _STYLE_BY_NAME.get(token_text(bs.get("/S")) if bs.get("/S") is not None else "/S", "solid")
         raw = bs.get("/D")
         if isinstance(raw, Array):
             dashes = [v for v in (_number(x) for x in raw) if v is not None]
@@ -271,7 +272,7 @@ def _read_appearance(annot) -> dict:
     highlight = DEFAULT_HIGHLIGHT
     raw_h = annot.get("/H")
     if raw_h is not None:
-        highlight = _HIGHLIGHT_BY_NAME.get(str(raw_h), DEFAULT_HIGHLIGHT)
+        highlight = _HIGHLIGHT_BY_NAME.get(token_text(raw_h), DEFAULT_HIGHLIGHT)
     out = {
         "width": float(width or 0.0),
         "style": style,
@@ -345,7 +346,7 @@ def _named_destinations_of(pdf) -> list[dict]:
             if name in seen:
                 continue
             seen.add(name)
-            out.append({"name": name, "page": _page_of_dest(pdf, legacy.get(key))})
+            out.append({"name": name, "page": _page_of_dest(pdf, legacy[key])})
     out.sort(key=lambda d: d["name"])
     return out
 

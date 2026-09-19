@@ -21,6 +21,12 @@ decides the `/Trapped` DocInfo key: `/Unknown` unless someone asserts
 otherwise, and never `/True` on this path, because **no trap network is
 generated here**. Producing one is a trapping engine; what is produced is
 parameters for a downstream consumer.
+
+A per-colorant override is keyed by the colorant's name BYTES (ISO 32000-2
+§7.3.5): the document stores them as its own name objects, and the
+PostScript names them with the same bytes, so the RIP applies the override
+to the plate the document paints. A caller names a colorant by the text the
+ink list shows; the text resolves against the document's own inks.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
 from .page_images import _save
+from .pdf_tree import name_bytes, name_label, name_object, name_text, token_text
 from .validate import validate_pdf
 
 # The sixteen in-RIP trapping parameters, their types, their defaults and the
@@ -147,15 +154,18 @@ def _validate_field(field: str, value, spec: dict):
 
 
 def _validate_colorants(value) -> dict:
+    """The per-colorant overrides, each keyed as given: a colorant's bytes, or
+    the text a caller named it by."""
     if value is None:
         return {}
     if not isinstance(value, dict):
         raise ValueError("ColorantZoneDetails must name a colorant per entry.")
-    out: dict[str, dict] = {}
+    out: dict = {}
     for colorant, overrides in value.items():
-        name = str(colorant)
-        if not name:
+        key = colorant if isinstance(colorant, bytes) else str(colorant)
+        if not key:
             raise ValueError("ColorantZoneDetails must name a colorant per entry.")
+        name = name_label(key) if isinstance(key, bytes) else key
         if not isinstance(overrides, dict):
             raise ValueError(f"The overrides for {name} must be trapping parameters.")
         row: dict = {}
@@ -164,7 +174,7 @@ def _validate_colorants(value) -> dict:
             if field not in _COLORANT_FIELDS:
                 raise ValueError(f"{field} is not an In-RIP trapping parameter.")
             row[field] = _validate_field(field, entry, TRAP_FIELDS[field])
-        out[name] = row
+        out[key] = row
     return out
 
 
@@ -203,19 +213,31 @@ def _ps_number(value: float) -> str:
     return text if text else "0"
 
 
-def _ps_string(text: str) -> str:
-    escaped = str(text).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-    return f"({escaped})"
+def _ps_string(text) -> str:
+    """A PostScript string literal holding `text`'s UTF-8 bytes, or the bytes
+    themselves, written in ASCII: every byte outside printable ASCII is an
+    octal escape, as are the three the literal syntax reserves."""
+    raw = text if isinstance(text, bytes) else str(text).encode("utf-8")
+    out = []
+    for byte in raw:
+        if byte in b"\\()" or not 0x20 <= byte <= 0x7E:
+            out.append(f"\\{byte:03o}")
+        else:
+            out.append(chr(byte))
+    return "(" + "".join(out) + ")"
 
 
 # A PostScript name written literally must contain no whitespace and no
 # delimiter. Anything else is built from a string with `cvn`, which is exact
 # for every colorant name a document can carry.
-_PLAIN_NAME = re.compile(r"^[A-Za-z0-9_.\-+]+$")
+_PLAIN_NAME = re.compile(rb"^[A-Za-z0-9_.\-+]+$")
 
 
-def _ps_name(text: str) -> str:
-    return f"/{text}" if _PLAIN_NAME.match(str(text)) else f"{_ps_string(text)} cvn"
+def _ps_name(text) -> str:
+    """A PostScript name with exactly the bytes of `text`: a colorant's name
+    bytes, or text standing for its UTF-8 bytes."""
+    raw = text if isinstance(text, bytes) else str(text).encode("utf-8")
+    return "/" + raw.decode("ascii") if _PLAIN_NAME.match(raw) else f"{_ps_string(raw)} cvn"
 
 
 def _ps_value(field: str, value) -> str:
@@ -420,6 +442,8 @@ def export_postscript(
         raise RuntimeError(f"Ghostscript PostScript export failed: {detail}")
 
     carried = list_trap_presets(file)
+    with pikepdf.open(file) as pdf:
+        stored = _read_assignments(pdf)
     attached = 0
     if trapping and carried["assignments"]:
         if level != 3:
@@ -427,9 +451,10 @@ def export_postscript(
                 "In-RIP trapping is a LanguageLevel 3 facility and cannot be "
                 "written into LanguageLevel 2 PostScript."
             )
-        emitted = emit_trapping_setup(
-            str(target), assignments=carried["assignments"]
-        )
+        # The stored assignment, not the listing: its overrides are keyed by
+        # the colorant bytes the document paints, which the text a listing
+        # shows cannot always spell.
+        emitted = emit_trapping_setup(str(target), assignments=stored)
         attached = emitted["attached"]
     return {
         "output": str(target),
@@ -465,7 +490,7 @@ def _from_pdf(value):
     try:
         number = float(value)
     except (TypeError, ValueError):
-        return str(value)
+        return token_text(value)
     return int(number) if number.is_integer() and abs(number) < 1e15 else number
 
 
@@ -474,8 +499,55 @@ def _stored_fields(preset: dict) -> Dictionary:
     for field, value in preset["fields"].items():
         if value is None:
             continue
+        if field == "ColorantZoneDetails":
+            zones = Dictionary()
+            for colorant, overrides in value.items():
+                raw = colorant if isinstance(colorant, bytes) else colorant.encode("utf-8")
+                zones[name_object(raw)] = _to_pdf(overrides)
+            stored[Name("/" + field)] = zones
+            continue
         stored[Name("/" + field)] = _to_pdf(value)
     return stored
+
+
+def _resolved_zones(plan: list[dict], known: set) -> None:
+    """Key each preset's per-colorant overrides by the colorant bytes its
+    text names in this document (`separations.resolve_ink`)."""
+    from .separations import resolve_ink
+
+    for entry in plan:
+        fields = entry["preset"]["fields"]
+        zones = fields.get("ColorantZoneDetails") or {}
+        fields["ColorantZoneDetails"] = {
+            resolve_ink(colorant, known): overrides for colorant, overrides in zones.items()
+        }
+
+
+def _read_assignments(pdf) -> list[dict]:
+    """The document's stored assignments, each override keyed by the
+    colorant's name bytes."""
+    assignments: list[dict] = []
+    records = pdf.Root.get(Name(_ASSIGNMENT_KEY))
+    for record in list(records or []):
+        params = record.get("/Params", Dictionary())
+        fields = _from_pdf(params)
+        zones = params.get("/ColorantZoneDetails")
+        if isinstance(zones, Dictionary):
+            fields["ColorantZoneDetails"] = {
+                name_bytes(key): _from_pdf(zones[key]) for key in zones.keys()
+            }
+        merged = {name: spec["default"] for name, spec in TRAP_FIELDS.items()}
+        merged.update(fields)
+        # The shape is exactly what `assign_presets` and
+        # `emit_trapping_setup` take, so a document's own assignment can
+        # be handed straight back to either without a translation step.
+        assignments.append({
+            "first": int(record.get("/First", 1)),
+            "last": int(record.get("/Last", 1)),
+            "name": name_text(record.get("/Name", "")),
+            "preset": merged,
+        })
+    return assignments
 
 
 def assign_presets(
@@ -503,8 +575,12 @@ def assign_presets(
         allowed = ", ".join(TRAPPED_VALUES)
         raise ValueError(f"Trapped must be one of {allowed}.")
 
+    from .separations import entry_bytes, list_inks
+
+    known = {entry_bytes(entry) for entry in list_inks(file)["inks"]}
     with pikepdf.open(file) as pdf:
         plan = _normalized_assignments(assignments, len(pdf.pages))
+        _resolved_zones(plan, known)
         records = Array()
         for entry in plan:
             records.append(Dictionary(
@@ -541,33 +617,24 @@ def list_trap_presets(file: str) -> dict:
     job lacks a spot is a preset nobody can keep.
     """
     validate_pdf(file)
-    from .separations import list_inks
+    from .separations import entry_bytes, list_inks
 
-    known = {entry["name"] for entry in list_inks(file)["inks"]}
-    assignments: list[dict] = []
+    known = {entry_bytes(entry) for entry in list_inks(file)["inks"]}
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)
-        records = pdf.Root.get(Name(_ASSIGNMENT_KEY))
-        trapped = str(pdf.docinfo.get(Name("/Trapped"), "")).lstrip("/")
-        for record in list(records or []):
-            fields = _from_pdf(record.get("/Params", Dictionary()))
-            merged = {name: spec["default"] for name, spec in TRAP_FIELDS.items()}
-            merged.update(fields)
-            # The shape is exactly what `assign_presets` and
-            # `emit_trapping_setup` take, so a document's own assignment can
-            # be handed straight back to either without a translation step.
-            assignments.append({
-                "first": int(record.get("/First", 1)),
-                "last": int(record.get("/Last", 1)),
-                "name": str(record.get("/Name", "")),
-                "preset": merged,
-            })
+        assignments = _read_assignments(pdf)
+        trapped = name_text(pdf.docinfo.get(Name("/Trapped"), "")).lstrip("/")
     unused: list[str] = []
     for entry in assignments:
         zones = entry["preset"].get("ColorantZoneDetails") or {}
-        for colorant in zones:
-            if colorant not in known and colorant not in unused:
-                unused.append(colorant)
+        for raw in zones:
+            if raw not in known and name_label(raw) not in unused:
+                unused.append(name_label(raw))
+        # The listing is JSON: each override is keyed by the text the ink
+        # list shows, which `assign_presets` resolves back to the bytes.
+        entry["preset"]["ColorantZoneDetails"] = {
+            name_label(raw): overrides for raw, overrides in zones.items()
+        }
     return {
         "assignments": assignments,
         "trapped": trapped or DEFAULT_TRAPPED,

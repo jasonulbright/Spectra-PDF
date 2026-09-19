@@ -35,6 +35,9 @@ from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.pdf_utils.writer import copy_into_new_writer
 
 from engine.inplace import staged_write
+from engine.pdf_tree import exact_pyhanko_names
+
+exact_pyhanko_names()
 
 
 def _load_cert(path: str) -> asn1_x509.Certificate:

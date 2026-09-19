@@ -53,6 +53,7 @@ from engine.pdf_fonts import (
 )
 from engine.pdf_save import save_pdf
 from engine.system_fonts import _scan, read_face
+from engine.pdf_tree import token_text
 
 #: PDF simple-font advances are expressed in thousandths of the text space
 #: unit, so one unit at that scale is the tolerance the rule names.
@@ -419,7 +420,7 @@ def _composite_plan(font_obj, descendant, face: dict, tt, raw_name: str) -> tupl
     would have to re-derive, and a face that merely shares a name would draw
     different glyphs at the same codes.
     """
-    encoding = str(font_obj.get("/Encoding", "")).lstrip("/")
+    encoding = token_text(font_obj.get("/Encoding", "")).lstrip("/")
     if encoding not in ("Identity-H", "Identity-V"):
         return set(), (
             f"{raw_name}: its glyphs are addressed through the {encoding or 'built-in'} "
@@ -427,7 +428,7 @@ def _composite_plan(font_obj, descendant, face: dict, tt, raw_name: str) -> tupl
             "to number the same way"
         )
     cid_to_gid = descendant.get("/CIDToGIDMap")
-    if cid_to_gid is not None and str(cid_to_gid).lstrip("/") != "Identity":
+    if cid_to_gid is not None and token_text(cid_to_gid).lstrip("/") != "Identity":
         return set(), (
             f"{raw_name}: it carries its own glyph-id map, which only the font "
             "program it was built against can be read with"
@@ -523,7 +524,7 @@ def embed_missing_fonts(file: str, output: str, sources=("system",),
             # replace a font whose own program may be intact. A Type 3 is the
             # exception because no program can ever be written for it, so it
             # is named whatever its glyph procedures read as.
-            if state is None and str(font_obj.get("/Subtype", "")).lstrip("/") != "Type3":
+            if state is None and token_text(font_obj.get("/Subtype", "")).lstrip("/") != "Type3":
                 return
             targets.append(font_obj)
 
@@ -583,7 +584,7 @@ def _embed_one(pdf, font_obj, usable: list[dict], restricted: list[dict],
     """One font's program, or a `ValueError` naming why it has none."""
     from engine.font_fallback import classify_font_style
 
-    subtype = str(font_obj.get("/Subtype", "")).lstrip("/")
+    subtype = token_text(font_obj.get("/Subtype", "")).lstrip("/")
     if subtype == "Type3":
         # A Type3 font IS its glyph procedures; there is no program to write.
         raise ValueError(
@@ -613,7 +614,7 @@ def _embed_one(pdf, font_obj, usable: list[dict], restricted: list[dict],
             if not descendants:
                 raise ValueError(f"{display}: its descendant font is missing")
             descendant = descendants[0]
-            child = str(descendant.get("/Subtype", "")).lstrip("/")
+            child = token_text(descendant.get("/Subtype", "")).lstrip("/")
             if child != "CIDFontType2":
                 raise ValueError(
                     f"{display}: this engine embeds a glyph-indexed CID font, and "

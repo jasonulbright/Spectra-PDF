@@ -34,8 +34,8 @@ Editability taxonomy (every run is LISTED; refusal carries the reason):
     bar: text you can extract is text you can re-enter). Identity-V and
     Uni*-UCS2-V are their vertical twins: same 2-byte codes, same
     ToUnicode round-trip; the capability carries `vertical=True` and its
-    widths are the /W2//DW2 VERTICAL advances (|w1y|, 1000/em) — callers
-    apply the downward direction.
+    widths are the /W2//DW2 VERTICAL advances measured down the column
+    (-w1y, 1000/em), negative for a glyph that moves the pen up.
   - Type3 ("glyphs are procedures"), Type0 without ToUnicode or with a
     non-Identity CMap, and fonts with no resolvable encoding → refused,
     with that reason. These are the rare classes; the replacement-font
@@ -52,6 +52,7 @@ from pdfminer.cmapdb import CMapDB, CMapParser, FileUnicodeMap
 from pdfminer.encodingdb import EncodingDB
 from pdfminer.fontmetrics import FONT_METRICS
 from pdfminer.psparser import LIT
+from engine.pdf_tree import token_text
 
 DEFAULT_WIDTH = 500.0
 
@@ -549,9 +550,9 @@ class FontCapability:
         # can_encode stay the single-char conservative floor.
         self._sequences = sequences or {}
         # Vertical writing mode. When True, `widths`/`default_width`
-        # ARE the vertical advances (|w1y| from /W2//DW2, 1000/em), so
-        # char_width/text_width/decoded_width return the vertical advance
-        # magnitude unchanged — callers apply the downward direction.
+        # ARE the vertical advances measured down the column (-w1y from
+        # /W2//DW2, 1000/em), so char_width/text_width/decoded_width
+        # return them signed: negative where a glyph moves the pen up.
         # `vertical` describes the GEOMETRY THIS CAPABILITY COMPUTES, so a
         # refused vertical font reports False (the run listing's documented
         # contract — the field describes what was actually computed).
@@ -840,7 +841,7 @@ def _simple_encoding_map(font_obj) -> Optional[dict[int, str]]:
             if isinstance(enc, pikepdf.Dictionary):
                 be = enc.get("/BaseEncoding")
                 if be is not None:
-                    base = str(be).lstrip("/")
+                    base = token_text(be).lstrip("/")
                 diffs = enc.get("/Differences")
                 if diffs is not None:
                     differences = []
@@ -850,9 +851,9 @@ def _simple_encoding_map(font_obj) -> Optional[dict[int, str]]:
                         except (TypeError, ValueError):
                             # Glyph names MUST be PSLiteral for pdfminer —
                             # plain strings are silently skipped.
-                            differences.append(LIT(str(el).lstrip("/")))
+                            differences.append(LIT(token_text(el).lstrip("/")))
             else:
-                base = str(enc).lstrip("/")
+                base = token_text(enc).lstrip("/")
         except (TypeError, ValueError):
             return None
     try:
@@ -1518,7 +1519,7 @@ def _cid_to_unicode_map(font_obj, vertical: bool) -> dict[int, str]:
     if not gid2uni:
         return {}
     c2g = desc.get("/CIDToGIDMap")
-    if c2g is None or (not isinstance(c2g, pikepdf.Stream) and str(c2g) == "/Identity"):
+    if c2g is None or (not isinstance(c2g, pikepdf.Stream) and token_text(c2g) == "/Identity"):
         return dict(gid2uni)  # CID == GID
     if isinstance(c2g, pikepdf.Stream):
         try:
@@ -1571,19 +1572,23 @@ def _cid_widths(descendant) -> tuple[dict[int, float], float]:
 
 
 def _cid_vertical_advances(descendant) -> tuple[dict[int, float], float]:
-    """CID → |w1y| vertical advance (1000/em) from /W2 (both spec forms:
+    """CID → vertical advance (1000/em) from /W2 (both spec forms:
     `c [w1y vx vy …]` triplets and `cfirst clast w1y vx vy` — pdfminer's
     get_widths2 parses both), default from /DW2 (spec default [880 -1000] →
-    advance 1000). Magnitudes only — the walker applies the downward
-    direction; the vx/vy position vectors are approximated by the v1 rect
-    (vx = w/2 centering), not stored."""
+    advance 1000).
+
+    The advance is measured DOWN the column, so it is -w1y (ISO 32000-2
+    §9.7.4.3): the usual negative w1y moves the pen down and reads positive,
+    and a positive w1y moves it UP and reads negative. The vx/vy position
+    vectors are approximated by the v1 rect (vx = w/2 centering), not
+    stored."""
     from pdfminer.pdffont import get_widths2
 
     default = 1000.0
     try:
         dw2 = descendant.get("/DW2")
         if dw2 is not None and len(dw2) >= 2:
-            default = abs(float(dw2[1]))
+            default = -float(dw2[1])
     except (TypeError, ValueError):
         pass
     w2 = descendant.get("/W2")
@@ -1591,14 +1596,14 @@ def _cid_vertical_advances(descendant) -> tuple[dict[int, float], float]:
         return {}, default
     try:
         parsed = get_widths2(_plain(list(w2)))
-        return {int(k): abs(float(v[0])) for k, v in parsed.items()}, default
+        return {int(k): -float(v[0]) for k, v in parsed.items()}, default
     except Exception:
         return {}, default
 
 
 def font_capability(font_obj) -> FontCapability:
     """Build the capability for a pikepdf font dictionary."""
-    subtype = str(font_obj.get("/Subtype", "")).lstrip("/")
+    subtype = token_text(font_obj.get("/Subtype", "")).lstrip("/")
 
     if subtype == "Type3":
         # The GLYPHS are procedures (the renderer's concern — pdf.js

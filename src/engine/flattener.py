@@ -65,6 +65,7 @@ from .text_metrics import (
 from .text_runs import _resource_lookup
 from .validate import validate_pdf
 from engine.pdf_save import save_pdf
+from .pdf_tree import key_text, token_text
 
 # Path grammar, the same one the vector listing uses: a maximal run of
 # construction operators terminated by an operator that DRAWS it.
@@ -239,14 +240,14 @@ class _AlphaState:
         if blend is not None:
             if isinstance(blend, pikepdf.Array) and len(blend) > 0:
                 blend = blend[0]
-            self.blend = str(blend)
+            self.blend = token_text(blend)
         try:
             smask = ext_gstate.get("/SMask")
         except Exception:
             self.unknown = True
             return _UNKNOWN_GSTATE
         if smask is not None:
-            self.smask = str(smask) != "/None"
+            self.smask = token_text(smask) != "/None"
         return ""
 
     def transparent_for(self, kind: str) -> bool:
@@ -276,7 +277,7 @@ def _ext_gstate(resources, name: str):
     if table is None:
         return None, ""
     try:
-        return table.get(pikepdf.Name(name)), ""
+        return (table[name] if name in table else None), ""
     except Exception:
         return None, _UNKNOWN_GSTATE
 
@@ -290,7 +291,7 @@ def _form_is_group(xobj) -> str:
     if group is None:
         return NO
     try:
-        return YES if str(group.get("/S")) == "/Transparency" else NO
+        return YES if token_text(group.get("/S")) == "/Transparency" else NO
     except Exception:
         return UNKNOWN
 
@@ -321,7 +322,7 @@ def _placement(xobj, ctm):
     if xobj is None:
         return None, "", _UNKNOWN_READ
     try:
-        subtype = str(xobj.get("/Subtype", ""))
+        subtype = token_text(xobj.get("/Subtype", ""))
     except Exception:
         return None, "", _UNKNOWN_READ
     if subtype == "/Image":
@@ -415,7 +416,7 @@ def _form_transparency(xobj, depth: int = 0) -> tuple[str, str]:
         for key in names:
             try:
                 child = xobjects[key]
-                subtype = str(child.get("/Subtype", ""))
+                subtype = token_text(child.get("/Subtype", ""))
             except Exception:
                 return UNKNOWN, _UNKNOWN_READ
             if subtype == "/Image":
@@ -606,7 +607,7 @@ def page_objects(pdf, page) -> tuple[list[dict], list[str]]:
         })
 
     for idx, instruction in enumerate(instructions):
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
         clips.feed(operator, operands, state.ctm)
         if operator == "q":
@@ -620,14 +621,14 @@ def page_objects(pdf, page) -> tuple[list[dict], list[str]]:
                 fill_is_pattern = pattern_stack.pop()
             alpha.pop()
         if operator == "cs" and operands:
-            fill_is_pattern = str(operands[0]) == "/Pattern"
+            fill_is_pattern = key_text(operands[0]) == "/Pattern"
         elif operator in ("g", "rg", "k"):
             # A device fill colour leaves the pattern space, so the next fill
             # is not a pattern fill. Without this the flag survives the whole
             # stream and every later fill claims to expand a pattern.
             fill_is_pattern = False
         if operator == "gs" and operands:
-            ext_gstate, reason = _ext_gstate(resources, str(operands[0]))
+            ext_gstate, reason = _ext_gstate(resources, key_text(operands[0]))
             if reason:
                 alpha.unknown = True
                 note(reason)
@@ -698,7 +699,7 @@ def page_objects(pdf, page) -> tuple[list[dict], list[str]]:
             construct, points, has_clip = [], [], False
             continue
         if operator == "Do" and operands:
-            name = str(operands[0])
+            name = key_text(operands[0])
             xobj = _lookup_xobject(name, resources, resources)
             rect, subtype, reason = _placement(xobj, state.ctm)
             if reason:
@@ -1065,7 +1066,7 @@ def drop_dead_frames(instructions: list) -> list:
         painted: list[bool] = []
         dead: set[int] = set()
         for index, instruction in enumerate(current):
-            operator = str(instruction.operator)
+            operator = token_text(instruction.operator)
             if operator == "q":
                 opens.append(index)
                 painted.append(False)
@@ -1105,18 +1106,18 @@ def _prune_resources(pdf, page, kept: list, extra_names: set) -> None:
         "/Shading": set(), "/Pattern": set(),
     }
     for instruction in kept:
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = instruction.operands
         if not operands:
             continue
         if operator == "gs":
-            used["/ExtGState"].add(str(operands[0]))
+            used["/ExtGState"].add(key_text(operands[0]))
         elif operator == "Do":
-            used["/XObject"].add(str(operands[0]))
+            used["/XObject"].add(key_text(operands[0]))
         elif operator == "sh":
-            used["/Shading"].add(str(operands[0]))
+            used["/Shading"].add(key_text(operands[0]))
         elif operator in ("scn", "SCN"):
-            name = str(operands[-1])
+            name = key_text(operands[-1])
             if name.startswith("/"):
                 used["/Pattern"].add(name)
     for key, live in used.items():

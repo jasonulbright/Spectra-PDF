@@ -94,6 +94,9 @@ from .fieldmdp import locked_fields, locks_of_pdf
 from .inplace import is_same_file
 from .validate import validate_pdf
 from .pdf_version import effective_version
+from .pdf_tree import exact_pyhanko_names, key_text, token_text
+
+exact_pyhanko_names()
 
 MAX_FIELD_DEPTH = 32
 _NUM_EPS = 1e-6
@@ -346,6 +349,17 @@ def _is_num(obj) -> bool:
     return isinstance(obj, (int, float)) or type(obj).__name__ == "Decimal"
 
 
+def _entry(container, spelling):
+    """The value a `keys()` spelling indexes, or None.
+
+    `.get` refuses a spelling that holds a byte which is not UTF-8;
+    membership and indexing take it. A plain mapping answers `.get`.
+    """
+    if isinstance(container, pikepdf.Object):
+        return container[spelling] if spelling in container else None
+    return container.get(spelling)
+
+
 def _requires_correspondence(obj) -> bool:
     """Document-owned objects cannot be imported as anonymous new subtrees."""
     return isinstance(obj, pikepdf.Dictionary) and (
@@ -387,7 +401,7 @@ def _bisim(a, b, memo: set, skip: frozenset = frozenset(), depth: int = 0,
         if ka != kb:
             return False
         for k in ka:
-            if not _bisim(a.stream_dict.get(k), b.stream_dict.get(k), memo,
+            if not _bisim(_entry(a.stream_dict, k), _entry(b.stream_dict, k), memo,
                           depth=depth + 1, identities=identities):
                 return False
         try:
@@ -420,7 +434,8 @@ def _bisim(a, b, memo: set, skip: frozenset = frozenset(), depth: int = 0,
                 if (a.get(k) is None) != (b.get(k) is None):
                     return False
                 continue
-            if not _bisim(a.get(k), b.get(k), memo, depth=depth + 1, identities=identities):
+            if not _bisim(_entry(a, k), _entry(b, k), memo, depth=depth + 1,
+                          identities=identities):
                 return False
         return True
 
@@ -435,7 +450,7 @@ def _bisim(a, b, memo: set, skip: frozenset = frozenset(), depth: int = 0,
                    for i in range(len(a)))
 
     if isinstance(a, pikepdf.Name) or isinstance(b, pikepdf.Name):
-        return isinstance(a, pikepdf.Name) and isinstance(b, pikepdf.Name) and str(a) == str(b)
+        return isinstance(a, pikepdf.Name) and isinstance(b, pikepdf.Name) and bytes(a) == bytes(b)
     if isinstance(a, pikepdf.String) or isinstance(b, pikepdf.String):
         return (
             isinstance(a, pikepdf.String)
@@ -496,7 +511,7 @@ def _materialize_direct(obj, writer, memo, depth, skip=frozenset()):
             if ks == "/Length":
                 continue
             dict_data[generic.pdf_name(ks)] = _materialize(
-                obj.stream_dict.get(ks), writer, memo, depth + 1
+                _entry(obj.stream_dict, ks), writer, memo, depth + 1
             )
         return generic.StreamObject(
             dict_data=dict_data, encoded_data=obj.read_raw_bytes()
@@ -507,7 +522,7 @@ def _materialize_direct(obj, writer, memo, depth, skip=frozenset()):
             if str(k) in skip:
                 continue
             out[generic.pdf_name(str(k))] = _materialize(
-                obj.get(k), writer, memo, depth + 1
+                obj[k], writer, memo, depth + 1
             )
         return out
     if isinstance(obj, pikepdf.Array):
@@ -515,7 +530,7 @@ def _materialize_direct(obj, writer, memo, depth, skip=frozenset()):
             _materialize(item, writer, memo, depth + 1) for item in obj
         )
     if isinstance(obj, pikepdf.Name):
-        return generic.pdf_name(str(obj))
+        return generic.pdf_name(key_text(obj))
     if isinstance(obj, pikepdf.String):
         return generic.pdf_string(bytes(obj))
     if isinstance(obj, bool):
@@ -623,8 +638,8 @@ def _update_in_place(
             continue
         if only is not None and ks not in only:
             continue
-        orig_val = orig_obj.get(ks)
-        mod_val = mod_obj.get(ks)
+        orig_val = _entry(orig_obj, ks)
+        mod_val = _entry(mod_obj, ks)
         if orig_val is not None and memo.equal(orig_val, mod_val, reference=True):
             continue
         # Child fields/widgets have their own mapped update pass. Re-listing
@@ -953,7 +968,7 @@ def _field_index(acro):
             if key is not None and key in ancestors:
                 raise _TransplantRefusal("field-tree-cycle")
             t = node.get("/T")
-            name = (prefix + "." if prefix else "") + (str(t) if t is not None else "")
+            name = (prefix + "." if prefix else "") + (token_text(t) if t is not None else "")
             ft = _effective_ft(node, inherited_ft, depth)
             out.setdefault(name, []).append((node, ft))
             walk(node.get("/Kids"), name, ft, depth + 1,
@@ -1294,8 +1309,8 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
             ks = str(k)
             if ks in _ACRO_KEEP:
                 continue
-            ov = orig_acro.get(ks)
-            mv = mod_acro.get(ks)
+            ov = _entry(orig_acro, ks)
+            mv = _entry(mod_acro, ks)
             if ov is not None and memo_mat.equal(ov, mv, reference=True):
                 continue
             if ks == "/XFA":

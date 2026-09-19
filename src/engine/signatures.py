@@ -83,6 +83,9 @@ from pyhanko import stamp
 from pyhanko.keys import load_certs_from_pemder_data, load_private_key_from_pemder_data
 from pyhanko_certvalidator import ValidationContext
 from pyhanko_certvalidator.registry import SimpleCertificateStore
+from engine.pdf_tree import exact_pyhanko_names
+
+exact_pyhanko_names()
 
 
 # An explicit, empty, offline trust context. Empty trust_roots (NOT None) means

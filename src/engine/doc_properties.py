@@ -28,6 +28,7 @@ from .inplace import staged_write
 from engine.incremental import signature_policy, signed_edit_decision
 from engine.pdf_save import save_pdf
 from engine.pdf_version import version_facts
+from .pdf_tree import token_text
 
 
 def _save(pdf, file: str, output_path: Path, **kwargs) -> None:
@@ -150,7 +151,7 @@ def _resolve_named_destination(pdf, name):
     """
     if isinstance(name, pikepdf.Name):
         legacy = pdf.Root.get('/Dests')
-        return None if legacy is None else _dictionary(legacy).get(str(name))
+        return None if legacy is None else _dictionary(legacy).get(name)
     if not isinstance(name, pikepdf.String):
         raise _UnreadableProperty
     names = pdf.Root.get('/Names')
@@ -212,7 +213,7 @@ def _destination_array(pdf, dest):
         raise _UnreadableProperty
     lengths = {'/XYZ': 5, '/Fit': 2, '/FitH': 3, '/FitV': 3, '/FitR': 6,
                '/FitB': 2, '/FitBH': 3, '/FitBV': 3}
-    fit = str(result[1])
+    fit = token_text(result[1])
     if lengths.get(fit) != len(result) or _page_index_of(pdf, result[0]) is None:
         raise _UnreadableProperty
     for value in list(result)[2:]:
@@ -315,7 +316,10 @@ def _opening_action_copy(pdf, action):
         if identity not in clones:
             if len(clones) >= 10000:
                 raise _UnreadableProperty
-            copies = Dictionary({key: value for key, value in node.items() if key != '/Next'})
+            copies = Dictionary()
+            for key, value in node.items():
+                if key != '/Next':
+                    copies[key] = value
             clones[identity] = pdf.make_indirect(copies)
             # Direct dictionaries have no PDF object number. Keep their Python
             # wrappers alive until the whole traversal ends: id reuse must not

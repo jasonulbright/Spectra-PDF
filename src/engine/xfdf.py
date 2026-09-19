@@ -55,6 +55,7 @@ from engine.annotations import (
 )
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
+from engine.pdf_tree import token_text
 
 XFDF_NS = "http://ns.adobe.com/xfdf/"
 
@@ -224,7 +225,7 @@ def export_xfdf(file: str, output: str) -> dict:
                 continue
             for a in listed:
                 try:
-                    subtype = str(a.get("/Subtype"))
+                    subtype = token_text(a.get("/Subtype"))
                 except Exception:
                     found += 1
                     skipped.append({"page": page_index, "reason": _NO_SUBTYPE})
@@ -428,7 +429,7 @@ def export_xfdf(file: str, output: str) -> dict:
                         shape, readable = _read(be, "/S")
                         if not readable:
                             note("style")
-                        elif str(shape) == "/C":
+                        elif token_text(shape) == "/C":
                             attrs.append('style="cloudy"')
                             raw, readable = _read(be, "/I")
                             if not readable:

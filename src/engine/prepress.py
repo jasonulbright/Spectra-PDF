@@ -26,6 +26,7 @@ from pikepdf import Dictionary, Name
 from . import budget, icc_profiles, standards_report
 from .acroform import reattach_forms_file
 from .pdf_save import refuse_encrypted_source
+from .pdf_tree import name_bytes, token_text
 from .trapping import DEFAULT_TRAPPED, TRAPPED_VALUES
 from .validate import validate_pdf
 from .widget_faces import (IDENTITY, box_of, compose, face_box,
@@ -174,7 +175,7 @@ def _colorant_alternate(cs):
 def _needs_no_transform(alt) -> bool:
     """DeviceCMYK already describes the tint in the destination's own space,
     so the composed shading IS what the conversion would have produced."""
-    return isinstance(alt, pikepdf.Name) and str(alt) == "/DeviceCMYK"
+    return isinstance(alt, pikepdf.Name) and name_bytes(alt) == b"DeviceCMYK"
 
 
 def _carve_targets(pdf, annotations: bool):
@@ -291,7 +292,7 @@ def _bracket_owner(pdf, owner, ids) -> None:
         closes[index] = closes.get(index, 0) + 1
 
     for index, instruction in enumerate(instructions):
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         shading = _selected_shading(resources, operator, list(instruction.operands))
         ident = ids.get(_staged_key(shading))
         if ident is not None:
@@ -602,9 +603,10 @@ def _rebase_appearances(output: Path) -> None:
 
 
 def _ink_names(path: Path) -> list:
-    from .separations import list_inks
+    """The document's inks as the bytes of their names."""
+    from .separations import entry_bytes, list_inks
 
-    return [entry["name"] for entry in list_inks(str(path))["inks"]]
+    return [entry_bytes(entry) for entry in list_inks(str(path))["inks"]]
 
 
 def _colour_report(source_inks, output_path: Path, rasterized, *streams) -> dict:

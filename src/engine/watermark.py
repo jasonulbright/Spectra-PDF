@@ -59,7 +59,7 @@ from pikepdf import Dictionary, Name
 
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
-from engine.pdf_tree import walk_inheritable
+from engine.pdf_tree import token_text, walk_inheritable
 
 
 # Helvetica metrics moved to pdf_metrics.py (shared with forms.py);
@@ -536,7 +536,7 @@ def _appearance_ops(page: pikepdf.Page, resources: Dictionary) -> bytes:
     for index, annot in enumerate(annots):
         if not isinstance(annot, pikepdf.Dictionary):
             continue
-        if str(annot.get("/Subtype", "")) in ("/Popup", "/Link"):
+        if token_text(annot.get("/Subtype", "")) in ("/Popup", "/Link"):
             continue
         try:
             flags = int(annot.get("/F", 0))

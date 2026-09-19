@@ -35,6 +35,8 @@ from pathlib import Path
 
 import pikepdf
 
+from .pdf_tree import key_text, name_label, token_text
+
 #: Per-row detail entries kept; a row past this reports `detail_truncated`.
 DETAIL_CAP = 50
 
@@ -114,7 +116,7 @@ def _annotation_census(pdf) -> Counter:
     seen: Counter = Counter()
     for page in pdf.pages:
         for annot in page.get("/Annots", []) or []:
-            seen[str(annot.get("/Subtype", "/Unknown")).lstrip("/")] += 1
+            seen[token_text(annot.get("/Subtype", "/Unknown")).lstrip("/")] += 1
     return seen
 
 
@@ -142,7 +144,7 @@ def _attachment_names(pdf) -> list:
             continue
         entries = node.get("/Names", []) or []
         for i in range(0, len(entries) - 1, 2):
-            found.append(str(entries[i]))
+            found.append(token_text(entries[i]))
         stack.extend(node.get("/Kids", []) or [])
     return sorted(found)
 
@@ -153,7 +155,7 @@ def _has_document_scripts(pdf) -> bool:
         return True
     action = pdf.Root.get("/OpenAction")
     if isinstance(action, pikepdf.Dictionary):
-        return str(action.get("/S", "")) == "/JavaScript"
+        return token_text(action.get("/S", "")) == "/JavaScript"
     return False
 
 
@@ -162,7 +164,7 @@ def _tagging(pdf) -> dict:
     return {
         "struct_tree": "/StructTreeRoot" in root,
         "mark_info": "/MarkInfo" in root,
-        "lang": str(root.get("/Lang", "")),
+        "lang": token_text(root.get("/Lang", "")),
     }
 
 
@@ -184,7 +186,7 @@ def _marks_of(stream_owner, resources, visited: set, depth: int) -> set:
         return marks
     xobjects = resources.get("/XObject") if isinstance(resources, pikepdf.Dictionary) else None
     for instruction in pikepdf.parse_content_stream(stream_owner):
-        op = str(instruction.operator)
+        op = token_text(instruction.operator)
         if op in _TEXT_SHOWING:
             marks.add("text")
         elif op in _PATH_PAINTING:
@@ -192,11 +194,11 @@ def _marks_of(stream_owner, resources, visited: set, depth: int) -> set:
         elif op == "INLINE IMAGE" or op == "BI":
             marks.add("image")
         elif op == "Do" and isinstance(xobjects, pikepdf.Dictionary):
-            name = str(instruction.operands[0]) if instruction.operands else ""
-            target = xobjects.get(name)
+            name = key_text(instruction.operands[0]) if instruction.operands else ""
+            target = xobjects[name] if name and name in xobjects else None
             if not isinstance(target, pikepdf.Stream):
                 continue
-            subtype = str(target.get("/Subtype", ""))
+            subtype = token_text(target.get("/Subtype", ""))
             if subtype == "/Image":
                 marks.add("image")
             elif subtype == "/Form":
@@ -237,7 +239,7 @@ def _images_in(resources, visited: set, depth: int) -> int:
             if key in visited:
                 continue
             visited.add(key)
-        subtype = str(xobj.get("/Subtype", ""))
+        subtype = token_text(xobj.get("/Subtype", ""))
         if subtype == "/Image":
             total += 1
         elif subtype == "/Form":
@@ -421,6 +423,11 @@ def _compare_marks(before: list, after: list):
     return _row("page_content_rasterized", len(detail), detail)
 
 
+def _colorant_raw(name) -> bytes:
+    """A colorant name's bytes: `bytes` as they are, text as UTF-8."""
+    return name if isinstance(name, bytes) else str(name).encode("utf-8")
+
+
 def colorants_lost(before: list, after: list):
     """The plates a colour conversion did not carry through, by name.
 
@@ -428,12 +435,13 @@ def colorants_lost(before: list, after: list):
     removing a page, an annotation or an image: the marks stay, they simply
     print on process plates that a spot job does not run. Nothing in a
     producer's diagnostics says so, so the row is built from the two ink
-    lists.
+    lists. The lists compare by the names' bytes (ISO 32000-2 §7.3.5) and
+    the row shows their text.
     """
     lost = [name for name in before if name not in set(after)]
     if not lost:
         return None
-    return _row("colorants_removed", len(lost), [{"name": n} for n in lost])
+    return _row("colorants_removed", len(lost), [{"name": name_label(n)} for n in lost])
 
 
 def colorant_shadings_lost(colorants: list):
@@ -445,7 +453,7 @@ def colorant_shadings_lost(colorants: list):
     named here rather than left to the ink list alone: the colorant may still
     print elsewhere on the page.
     """
-    names = sorted({str(n) for n in colorants})
+    names = [name_label(raw) for raw in sorted({_colorant_raw(n) for n in colorants})]
     if not names:
         return None
     return _row("colorant_shadings_rasterized", len(names),

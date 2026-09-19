@@ -61,6 +61,7 @@ from . import budget, icc_profiles, soft_proof
 from .acroform import has_form_fields
 from .color_spaces import build_resolver
 from .pdf_save import save_pdf
+from .pdf_tree import name_bytes, name_label, name_object, name_text, token_text
 from .preflight import COLORSPACE, walk_page_resources
 from .processing_steps import hide_processing_steps, processing_step_only_colorants
 from .validate import validate_pdf
@@ -69,6 +70,7 @@ from .widget_faces import regenerate_appearances_file
 # The four exact spellings the separation device uses for process inks. A
 # colorant named anything else is a spot.
 PROCESS_INKS = ("Cyan", "Magenta", "Yellow", "Black")
+_PROCESS_BYTES = tuple(name.encode("ascii") for name in PROCESS_INKS)
 
 # The device's own spot ceiling. Past it, spots fold silently into process.
 MAX_SPOTS_CEILING = 60
@@ -105,17 +107,24 @@ _PREVIEW_DIR_NAME = "separation-preview"
 _MAX_CACHED_SETS = 24
 
 
-def plate_name_escape(name: str) -> str:
+def _colorant_raw(name) -> bytes:
+    """A colorant name's bytes: `bytes` as they are, text as UTF-8."""
+    return name if isinstance(name, bytes) else str(name).encode("utf-8")
+
+
+def plate_name_escape(name) -> str:
     """The device's plate-filename spelling of an ink name.
 
-    Every byte outside printable ASCII, and every byte in the reserved set, is
-    written `%XX`; the rest pass through. Measured over an adversarial name
-    set against the bundled device — and used to PREDICT the filename, never
-    to parse an ink name back out of one, because the convention is the
-    device's internal business and can move between versions.
+    The device names a plate by the colorant name's BYTES, so `name` is the
+    bytes, or text standing for its UTF-8 bytes. Every byte outside printable
+    ASCII, and every byte in the reserved set, is written `%XX`; the rest pass
+    through. Measured over an adversarial name set against the bundled device
+    — and used to PREDICT the filename, never to parse an ink name back out of
+    one, because the convention is the device's internal business and can move
+    between versions.
     """
     out: list[str] = []
-    for byte in name.encode("utf-8"):
+    for byte in _colorant_raw(name):
         if 32 <= byte <= 126 and byte not in _ESCAPED_BYTES:
             out.append(chr(byte))
         else:
@@ -123,19 +132,65 @@ def plate_name_escape(name: str) -> str:
     return "".join(out)
 
 
-def ink_kind(name: str) -> str:
-    """`process`, `all`, `none` or `spot`.
+def ink_kind(name) -> str:
+    """`process`, `all`, `none` or `spot`, for a name's bytes or its text.
 
     `/All` and `/None` are not inks: `/All` paints every plate and has none of
     its own, `/None` paints nothing. Neither is ever offered as a toggle.
     """
-    if name == "All":
+    raw = _colorant_raw(name)
+    if raw == b"All":
         return "all"
-    if name == "None":
+    if raw == b"None":
         return "none"
-    if name in PROCESS_INKS:
+    if raw in _PROCESS_BYTES:
         return "process"
     return "spot"
+
+
+def ink_key(raw: bytes) -> str:
+    """The `key` an ink carries across the engine boundary: its bytes in hex."""
+    return raw.hex()
+
+
+def entry_bytes(entry) -> bytes:
+    """The colorant bytes of an inventory or plate entry.
+
+    `key` holds them exactly; an entry without one names a UTF-8 colorant by
+    its text.
+    """
+    key = entry.get("key")
+    if key:
+        return bytes.fromhex(str(key))
+    return _colorant_raw(entry.get("name", ""))
+
+
+def resolve_ink(value, known) -> bytes:
+    """The colorant bytes a caller's reference means.
+
+    `value` is an ink as a listing shows it: its `name` text, or an entry
+    carrying `key`, the bytes in hex. A `key` is exact. A text names the one
+    colorant in `known` shown that way, and a text that no known colorant is
+    shown as is the name it spells. Two colorants can be shown alike — a
+    UTF-8 name can spell another name's escapes — and a text naming both
+    refuses rather than pick one.
+    """
+    if isinstance(value, dict):
+        if value.get("key"):
+            return entry_bytes(value)
+        value = value.get("name", "")
+    if isinstance(value, bytes):
+        return value
+    text = str(value)
+    matches = sorted({raw for raw in known if name_label(raw) == text})
+    if len(matches) > 1:
+        raise ValueError(
+            f'More than one ink in this document is shown as "{text}", '
+            "so the name cannot say which one is meant."
+        )
+    if matches:
+        return matches[0]
+    return text.encode("utf-8")
 
 
 def refuse_unknown_colorants(page: int, detail: str) -> None:
@@ -179,8 +234,15 @@ def unknown_colorant_message(page: int, detail: str) -> str:
 
 
 def _name_text(obj) -> str:
-    text = str(obj)
+    text = name_text(obj)
     return text[1:] if text.startswith("/") else text
+
+
+def _colorant_bytes(obj) -> bytes:
+    """The bytes of a colorant name object. A value that is not a name is
+    malformed; its text stands in, so the inventory still reports it."""
+    raw = name_bytes(obj)
+    return raw if raw is not None else _name_text(obj).encode("utf-8")
 
 
 def _rgb255(rgb) -> list[int]:
@@ -212,8 +274,7 @@ def _devicen_component_display(cs, resources, index: int, count: int) -> list[in
         colorants = None
     if colorants is not None:
         try:
-            name = _name_text(cs[1][index])
-            own = colorants.get(pikepdf.Name("/" + name))
+            own = colorants.get(name_object(_colorant_bytes(cs[1][index])))
         except Exception:
             own = None
         if own is not None:
@@ -330,6 +391,12 @@ def list_inks(file: str, pages=None, show_processing_steps: bool = False) -> dic
     display colour taken at full tint, the pages it appears on, and the
     resource categories it was reached through.
 
+    A colorant IS the bytes of its name (ISO 32000-2 §7.3.5, §8.6.6.4): the
+    device plates by them and two names that differ in one byte are two
+    inks. `key` carries those bytes, in hex, and is the identity a caller
+    hands back; `name` is their text, read as UTF-8 where they are UTF-8 and
+    escaped where they are not, and is for showing.
+
     `color_families` is every colour family the pages carry, resource spaces
     and inline device operators alike. It is what decides whether a soft
     proof has to colour-manage the page before separating it: a page made
@@ -346,7 +413,7 @@ def list_inks(file: str, pages=None, show_processing_steps: bool = False) -> dic
     "nothing else there".
     """
     validate_pdf(file)
-    found: dict[str, dict] = {}
+    found: dict[bytes, dict] = {}
     unknown: list[str] = []
     families: set = set()
 
@@ -365,18 +432,19 @@ def list_inks(file: str, pages=None, show_processing_steps: bool = False) -> dic
                 if message not in unknown:
                     unknown.append(message)
 
-            def record(name: str, kind: str, alternate: str, rgb, category: str) -> None:
-                entry = found.get(name)
+            def record(raw: bytes, alternate: str, rgb, category: str) -> None:
+                entry = found.get(raw)
                 if entry is None:
                     entry = {
-                        "name": name,
-                        "kind": kind,
+                        "name": name_label(raw),
+                        "key": ink_key(raw),
+                        "kind": ink_kind(raw),
                         "alternate": alternate,
                         "display_rgb": rgb,
                         "pages": [],
                         "used_in": [],
                     }
-                    found[name] = entry
+                    found[raw] = entry
                 if entry["display_rgb"] is None and rgb is not None:
                     entry["display_rgb"] = rgb
                 if number not in entry["pages"]:
@@ -396,16 +464,15 @@ def list_inks(file: str, pages=None, show_processing_steps: bool = False) -> dic
                 family = _name_text(cs[0])
                 families.add(family)
                 if family == "Separation" and len(cs) >= 4:
-                    name = _name_text(cs[1])
-                    record(name, ink_kind(name), _alternate_label(cs),
+                    record(_colorant_bytes(cs[1]), _alternate_label(cs),
                            _separation_display(cs, _res), category)
                 elif family == "DeviceN" and len(cs) >= 4:
                     try:
-                        names = [_name_text(n) for n in cs[1]]
+                        names = [_colorant_bytes(n) for n in cs[1]]
                     except Exception:
                         return
-                    for index, name in enumerate(names):
-                        record(name, ink_kind(name), _alternate_label(cs),
+                    for index, raw in enumerate(names):
+                        record(raw, _alternate_label(cs),
                                _devicen_component_display(cs, _res, index, len(names)),
                                category)
                 else:
@@ -439,16 +506,18 @@ def list_inks(file: str, pages=None, show_processing_steps: bool = False) -> dic
     # all: the panel names them as the special colorants they are, and a
     # panel that stopped naming `/All` would be hiding an ink that paints
     # every plate.
-    excluded = {name for name in excluded if ink_kind(name) == "spot"}
-    for name in sorted(excluded):
-        found.pop(name, None)
+    excluded = sorted(raw for raw in excluded if ink_kind(raw) == "spot")
+    for raw in excluded:
+        found.pop(raw, None)
 
-    inks = sorted(
-        found.values(),
-        key=lambda e: (("process", "spot", "all", "none").index(e["kind"]),
-                       PROCESS_INKS.index(e["name"]) if e["kind"] == "process" else 0,
-                       e["name"]),
-    )
+    inks = [
+        found[raw] for raw in sorted(
+            found,
+            key=lambda raw: (("process", "spot", "all", "none").index(ink_kind(raw)),
+                             _PROCESS_BYTES.index(raw) if ink_kind(raw) == "process" else 0,
+                             raw),
+        )
+    ]
     spots = [e for e in inks if e["kind"] == "spot"]
     return {
         "inks": inks,
@@ -459,7 +528,8 @@ def list_inks(file: str, pages=None, show_processing_steps: bool = False) -> dic
         # Named, not merely absent: a plate list one ink shorter than the
         # document declares has to say which ink and why, or it reads as a
         # document that never had it.
-        "processing_step_inks": sorted(excluded),
+        "processing_step_inks": [name_label(raw) for raw in excluded],
+        "processing_step_keys": [ink_key(raw) for raw in excluded],
     }
 
 
@@ -564,11 +634,11 @@ def _page_optional_content_groups(pdf) -> tuple[list, bool]:
             return
         if key != (0, 0):
             seen.add(key)
-        if str(obj.get("/Type", "")) == "/OCMD":
+        if token_text(obj.get("/Type", "")) == "/OCMD":
             for source in (obj.get("/OCGs"), obj.get("/VE")):
                 add_any(source)
             return
-        if str(obj.get("/Type", "")) != "/OCG":
+        if token_text(obj.get("/Type", "")) != "/OCG":
             return
         groups.append(obj)
 
@@ -834,8 +904,8 @@ def render_separations(
     # colorant. Those plates are EXPECTED-BUT-SUPPRESSED: dropped from the
     # set, never a refusal. Empty whenever the steps are being rastered.
     suppressed = {
-        f"s1({plate_name_escape(name)}).tif"
-        for name in inventory["processing_step_inks"]
+        f"s1({plate_name_escape(bytes.fromhex(key))}).tif"
+        for key in inventory["processing_step_keys"]
     }
     spots = [e["name"] for e in inks if e["kind"] == "spot"]
     n = len(spots)
@@ -946,7 +1016,7 @@ def render_separations(
     return described
 
 
-_MANIFEST_VERSION = 1
+_MANIFEST_VERSION = 2
 
 # The files a plate set cannot be rebuilt without. `staged.pdf`,
 # `noprocsteps.pdf` and `regenerated.pdf` are the coverage measurement's
@@ -957,12 +1027,27 @@ _SET_SIDECARS = ("staged.pdf", "noprocsteps.pdf", "regenerated.pdf")
 
 
 def _write_manifest(marker: Path, out_dir: Path, described: dict) -> None:
-    """Record what the set contains, so reuse can tell whole from decayed."""
+    """Record what the set contains, so reuse can tell whole from decayed.
+
+    `inks` pairs each plate's name with its colorant bytes, so a composite
+    asked for an ink by its shown name finds the plate those bytes wrote.
+    """
     marker.write_text(json.dumps({
         "version": _MANIFEST_VERSION,
         "plates": sorted(Path(p["file"]).name for p in described["plates"]),
         "sidecars": sorted(n for n in _SET_SIDECARS if (out_dir / n).is_file()),
+        "inks": [{"name": p["name"], "key": p["key"]} for p in described["plates"]],
     }), encoding="utf-8")
+
+
+def _recorded_inks(plate_dir: Path) -> set[bytes]:
+    """The colorant bytes a plate set was written with, or none on a set whose
+    manifest records none."""
+    try:
+        stored = json.loads((plate_dir / "plates.done").read_text(encoding="utf-8"))
+        return {bytes.fromhex(str(e["key"])) for e in stored.get("inks") or ()}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return set()
 
 
 def _set_is_whole(out_dir: Path, marker: Path) -> bool:
@@ -1015,17 +1100,18 @@ def _describe_set(out_dir: Path, inks: list[dict], file: str, page: int,
     written = {p.name: p for p in out_dir.glob("s1(*).tif")}
     for filename in (suppressed or ()):
         written.pop(filename, None)
-    expected: dict[str, dict] = {}
+    expected: dict[str, tuple[bytes, dict]] = {}
     for entry in inks:
         if entry["kind"] in ("all", "none"):
             continue
-        expected[f"s1({plate_name_escape(entry['name'])}).tif"] = entry
-    for name in PROCESS_INKS:
+        raw = entry_bytes(entry)
+        expected[f"s1({plate_name_escape(raw)}).tif"] = (raw, entry)
+    for name, raw in zip(PROCESS_INKS, _PROCESS_BYTES):
         filename = f"s1({name}).tif"
-        expected.setdefault(filename, {
+        expected.setdefault(filename, (raw, {
             "name": name, "kind": "process", "alternate": "DeviceCMYK",
             "display_rgb": None, "pages": [page], "used_in": [],
-        })
+        }))
 
     unexpected = sorted(set(written) - set(expected))
     if unexpected:
@@ -1035,20 +1121,21 @@ def _describe_set(out_dir: Path, inks: list[dict], file: str, page: int,
         )
 
     plates = []
-    for filename, entry in expected.items():
+    for filename, (raw, entry) in expected.items():
         path = written.get(filename)
         if path is None:
             continue
         plates.append({
-            "name": entry["name"],
+            "name": name_label(raw),
+            "key": ink_key(raw),
             "kind": entry["kind"],
             "display_rgb": entry["display_rgb"] or _default_display(entry["name"]),
             "file": str(path),
         })
     plates.sort(key=lambda p: (
         0 if p["kind"] == "process" else 1,
-        PROCESS_INKS.index(p["name"]) if p["kind"] == "process" else 0,
-        p["name"],
+        _PROCESS_BYTES.index(bytes.fromhex(p["key"])) if p["kind"] == "process" else 0,
+        bytes.fromhex(p["key"]),
     ))
     if not plates:
         raise ValueError(
@@ -1219,18 +1306,25 @@ def _statistics_of(total, limit_pct: float) -> dict:
     }
 
 
-def _ink_spec(entry) -> tuple[str, list[int] | None, float, str]:
-    """A requested ink as (name, display colour, density, the ink it is shown as).
+def _ink_spec(entry, known) -> tuple[bytes, str, list[int] | None, float, bytes]:
+    """A requested ink as (its bytes, the text it was asked for by, display
+    colour, density, the bytes of the ink it is shown as).
 
     A plate is found by its OWN name — that is the file the device wrote —
     but it takes the identity of the ink it is drawn as. Under the multiply
     model that identity is carried entirely by the display colour; under a
     press profile it also decides which channel of the CMYK buffer the
     coverage lands in, and a colour cannot answer that.
+
+    Both names resolve through `resolve_ink` against `known`, the colorants
+    the set was written with: `key` and `shown_as_key` are exact, and a
+    shown name finds the one colorant shown that way.
     """
     if isinstance(entry, str):
-        return entry, None, 1.0, entry
-    name = str(entry.get("name", ""))
+        raw = resolve_ink(entry, known)
+        return raw, entry, None, 1.0, raw
+    raw = resolve_ink(entry, known)
+    text = str(entry.get("name", ""))
     rgb = entry.get("display_rgb")
     if rgb is not None:
         try:
@@ -1243,7 +1337,13 @@ def _ink_spec(entry) -> tuple[str, list[int] | None, float, str]:
         density = float(entry.get("density", 1.0))
     except (TypeError, ValueError):
         density = 1.0
-    return name, rgb, max(0.0, min(4.0, density)), str(entry.get("shown_as") or name)
+    if entry.get("shown_as_key"):
+        shown = resolve_ink({"key": entry["shown_as_key"]}, known)
+    elif entry.get("shown_as"):
+        shown = resolve_ink(str(entry["shown_as"]), known)
+    else:
+        shown = raw
+    return raw, text, rgb, max(0.0, min(4.0, density)), shown
 
 
 def _read_source(plate_dir: Path) -> tuple[str, int]:
@@ -1326,15 +1426,16 @@ def _resolve_proof(plate_dir: Path, request, chosen, icc_dir: str):
         return soft_proof.empty_record(), None, {}
 
     shown = [shown_as for _n, _p, _c, _d, shown_as in chosen]
-    if not any(name in PROCESS_INKS for name in shown):
+    if not any(raw in _PROCESS_BYTES for raw in shown):
         return soft_proof.refused_record(soft_proof.no_process_plate_message()), None, {}
 
-    spots = sorted({name for name in shown if name not in PROCESS_INKS})
+    spots = sorted({raw for raw in shown if raw not in _PROCESS_BYTES})
     tables: dict = {}
     assumed: list = []
     if spots:
         tables, assumed, refusal = soft_proof.spot_tables(
-            spots, _cached_alternates(plate_dir), profile.path
+            [ink_key(raw) for raw in spots], _cached_alternates(plate_dir), profile.path,
+            labels={ink_key(raw): name_label(raw) for raw in spots},
         )
         if refusal:
             return soft_proof.refused_record(refusal), None, {}
@@ -1371,9 +1472,9 @@ def composite_separations(
 
     Args:
         dir: A plate-set directory `render_separations` produced.
-        inks: The inks to show — names, or entries carrying `name`,
-            `display_rgb`, `density` and `shown_as`. None shows every plate in
-            the set.
+        inks: The inks to show — names, or entries carrying `name` or
+            `key`, `display_rgb`, `density`, and `shown_as` or
+            `shown_as_key`. None shows every plate in the set.
         limit_pct: Total-ink limit the alarm measures against.
         alarm: True tints the over-limit pixels in the composite.
         output: PNG path to write. Empty writes `composite.png` beside the
@@ -1414,13 +1515,25 @@ def composite_separations(
     for path in plate_dir.glob("s1(*).tif"):
         available[path.name[len("s1("):-len(").tif")]] = path
 
-    requested = inks if inks is not None else sorted(available)
-    chosen: list[tuple[str, Path, list[int], float, str]] = []
+    known = _recorded_inks(plate_dir)
+    by_stem = {plate_name_escape(raw): raw for raw in known}
+    requested = inks if inks is not None else [
+        {"key": ink_key(by_stem[stem])} if stem in by_stem else stem
+        for stem in sorted(available)
+    ]
+    chosen: list[tuple[str, Path, list[int], float, bytes]] = []
     for entry in requested:
-        name, rgb, density, shown_as = _ink_spec(entry)
-        path = available.get(plate_name_escape(name)) or available.get(name)
+        raw, text, rgb, density, shown = _ink_spec(entry, known)
+        path = available.get(plate_name_escape(raw))
+        if path is None and text in available:
+            # A plate asked for by the device's own spelling of its name.
+            path = available[text]
+            if text in by_stem:
+                shown = by_stem[text] if shown == raw else shown
+                raw = by_stem[text]
         if path is not None:
-            chosen.append((name, path, rgb or _default_display(name), density, shown_as))
+            label = name_label(raw)
+            chosen.append((label, path, rgb or _default_display(label), density, shown))
 
     target = Path(output) if output else plate_dir / "composite.png"
     if not chosen:
@@ -1451,10 +1564,10 @@ def composite_separations(
             # clips before the transform: there is no ICC description of
             # 140 % cyan.
             tint = np.clip(layer * density, 0.0, 1.0)
-            if shown in PROCESS_INKS:
-                buffer[..., PROCESS_INKS.index(shown)] += tint
+            if shown in _PROCESS_BYTES:
+                buffer[..., _PROCESS_BYTES.index(shown)] += tint
             else:
-                table = spot_tables[shown]
+                table = spot_tables[ink_key(shown)]
                 index = np.clip(
                     tint * (soft_proof.TINT_STEPS - 1) + 0.5, 0, soft_proof.TINT_STEPS - 1
                 ).astype(np.uint8)

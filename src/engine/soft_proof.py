@@ -51,6 +51,7 @@ import pikepdf
 
 from . import icc_profiles
 from .color_spaces import build_function
+from .pdf_tree import name_bytes, name_object, name_text
 
 #: The plate names the separation device gives the process inks, in the
 #: channel order of a CMYK buffer.
@@ -500,7 +501,7 @@ def _devicen_entry(cs, index: int, total: int) -> dict | None:
         colorants = None
     if colorants is not None:
         try:
-            own = colorants.get(pikepdf.Name("/" + str(cs[1][index]).lstrip("/")))
+            own = colorants.get(name_object(_colorant_bytes(cs[1][index])))
         except Exception:  # noqa: BLE001
             own = None
         if own is not None:
@@ -536,6 +537,11 @@ def _devicen_entry(cs, index: int, total: int) -> dict | None:
     return entry
 
 
+def _colorant_bytes(obj) -> bytes:
+    raw = name_bytes(obj)
+    return raw if raw is not None else name_text(obj).lstrip("/").encode("utf-8")
+
+
 def page_alternates(file: str, page: int) -> dict:
     """Each colorant on one page as the space the DOCUMENT says it approximates.
 
@@ -544,6 +550,9 @@ def page_alternates(file: str, page: int) -> dict:
     is what the document itself declares the spot approximates. The proof
     reads it here, once per plate set, because it is a property of the
     document rather than of the profile.
+
+    Keyed by the colorant name's bytes in hex: two names that differ in one
+    byte are two inks (ISO 32000-2 §7.3.5), and the table is cached as JSON.
     """
     from .preflight import walk_page_resources
 
@@ -561,10 +570,10 @@ def page_alternates(file: str, page: int) -> dict:
             return
         family = str(cs[0]).lstrip("/")
         if family == "Separation":
-            record(str(cs[1]).lstrip("/"), _separation_entry(cs))
+            record(_colorant_bytes(cs[1]).hex(), _separation_entry(cs))
         elif family == "DeviceN":
             try:
-                names = [str(n).lstrip("/") for n in cs[1]]
+                names = [_colorant_bytes(n).hex() for n in cs[1]]
             except Exception:  # noqa: BLE001
                 return
             for index, name in enumerate(names):
@@ -695,8 +704,11 @@ def _lut_to_cmyk(entry: dict, profile_path: str):
     return converted.reshape(TINT_STEPS, 4).astype(np.float32) / 255.0, assumed, ""
 
 
-def spot_tables(names, alternates: dict, profile_path: str):
+def spot_tables(names, alternates: dict, profile_path: str, labels: dict | None = None):
     """(name → 256×4 CMYK table, what was assumed, the refusal).
+
+    `names` are the keys `alternates` is indexed by; `labels` maps each to
+    the text a refusal names it by, and a name with no label is its own text.
 
     A colorant whose alternate is itself a `/Separation` or `/DeviceN` — or
     one the document describes no reachable transform for — is refused by
@@ -707,12 +719,13 @@ def spot_tables(names, alternates: dict, profile_path: str):
     tables: dict = {}
     assumed: list[str] = []
     for name in names:
+        shown = (labels or {}).get(name, name)
         entry = alternates.get(name)
         if entry is None:
-            return {}, [], undescribable_alternate_message(name, "an unreadable space")
+            return {}, [], undescribable_alternate_message(shown, "an unreadable space")
         family = str(entry.get("family") or "")
         if family in ("Separation", "DeviceN"):
-            return {}, [], undescribable_alternate_message(name, family)
+            return {}, [], undescribable_alternate_message(shown, family)
         table, assumption, refusal = _lut_to_cmyk(entry, profile_path)
         if refusal:
             return {}, [], refusal
@@ -720,7 +733,7 @@ def spot_tables(names, alternates: dict, profile_path: str):
             # A family the transform never produced values for is not a
             # family this can name: it is a space that would not read.
             label = family if entry.get("lut") is not None and family else "an unreadable space"
-            return {}, [], undescribable_alternate_message(name, label)
+            return {}, [], undescribable_alternate_message(shown, label)
         tables[name] = table
         if assumption and assumption not in assumed:
             assumed.append(assumption)

@@ -68,6 +68,7 @@ import pikepdf
 from pikepdf import Array, Dictionary, Name, Stream
 
 from engine import image_redact, pdf_fonts, redact_document
+from engine.pdf_tree import token_text
 
 # ── limits ────────────────────────────────────────────────────────────────
 
@@ -2435,7 +2436,7 @@ def _type3_references(font, resources) -> dict:
         except Exception:
             _refuse(font, "a glyph procedure it keeps cannot be read")
         for ins in instructions:
-            op = str(ins.operator)
+            op = token_text(ins.operator)
             operands = ins.operands
             if op in _NAMED_BY:
                 category, index = _NAMED_BY[op]

@@ -34,7 +34,9 @@ growth downward). The one-line summary of every structural rule:
     pitch IS the leading, top-alignment IS left-alignment) and the
     emission's per-segment Tm anchor (T⁻¹(x', y') = (y', −x'); the
     linear part is untouched — glyphs stay upright, the walker's
-    vertical advance model owns the direction). Every grouping heuristic
+    vertical advance model owns the direction). A column whose glyphs
+    climb — a positive w1y — has no such frame and stays on the run-box
+    surface, as rotated text does. Every grouping heuristic
     between the boundaries applies unchanged. Modes never mix: the
     writing mode rides INSIDE lkey, which also makes the merge's
     lkey guard refuse cross-mode merges for free.
@@ -86,6 +88,7 @@ from engine.text_runs import (
     break_marker_count,
     break_marker_instruction,
 )
+from engine.pdf_tree import key_name, key_text, token_text
 
 # ── grouping constants (pinned by the fixture matrix, not spec) ───────────
 
@@ -614,6 +617,26 @@ def _draw_order_direction(bucket: list[dict]) -> str:
     return COLUMNS_RTL
 
 
+def _climbs(segments: list, cap) -> bool:
+    """Whether any glyph a vertical run draws moves the pen UP its column.
+
+    A vertical advance is measured down the column and is negative for a
+    glyph whose displacement points up (a positive w1y, ISO 32000-2
+    §9.7.4.3). Every column frame here reads down the page, so no frame
+    reads such a run, and it stays on the run-box surface, where its pen is
+    measured with its sign.
+    """
+    for seg in segments:
+        if isinstance(seg, float):
+            continue
+        offset = 0
+        for _code, n in cap.codes(seg):
+            if cap.decoded_width(seg[offset : offset + n]) < 0.0:
+                return True
+            offset += n
+    return False
+
+
 def _members_from(runs: list[dict], detail: list[dict], breaks=()) -> list[_Member]:
     # TWO passes, because a down-reading member's frame depends on
     # evidence that spans the members. Pass one classifies and measures
@@ -629,6 +652,8 @@ def _members_from(runs: list[dict], detail: list[dict], breaks=()) -> list[_Memb
             continue  # no active font: degenerate, run-box surface
         # `writes_vertical`: a refused Identity-V run still draws down a column.
         vertical = bool(cap.writes_vertical)
+        if vertical and _climbs(det["segments"], cap):
+            continue  # a column that climbs: the run-box surface
         # Admission is the shipped axis-alignment test, asked in the
         # member's OWN transposed frame instead of in page space. That one
         # move is the whole point: a 90°-rotated run of a horizontal font
@@ -4355,7 +4380,7 @@ class _Emission:
         else:
             font = s["font_name"]
         if font:
-            ops.append(("op", _instruction([Name(font), _f(s["size"])], "Tf"), None))
+            ops.append(("op", _instruction([key_name(font), _f(s["size"])], "Tf"), None))
         ops.append(("op", _instruction([_f(h_scale * 100.0)], "Tz"), None))
         ops.append(("op", _instruction([_f(s["char_spacing"])], "Tc"), None))
         ops.append(("op", _instruction([_f(s["word_spacing"])], "Tw"), None))
@@ -4532,7 +4557,7 @@ def _state_sync_instructions(orig: GraphicsTextState, emit: GraphicsTextState) -
         if orig.font is not None and not _names_its_font(orig):
             raise ValueError("an edit cannot select this text's font by name")
         if orig.font_name:
-            ops.append(_instruction([Name(orig.font_name), _f(orig.font_size)], "Tf"))
+            ops.append(_instruction([key_name(orig.font_name), _f(orig.font_size)], "Tf"))
     if abs(orig.h_scale - emit.h_scale) > 1e-9:
         ops.append(_instruction([_f(orig.h_scale * 100.0)], "Tz"))
     if abs(orig.char_spacing - emit.char_spacing) > 1e-9:
@@ -4736,13 +4761,13 @@ def _rewrite_paragraph_stream(
 
     instructions = list(instructions)
     for instruction_no, instruction in enumerate(instructions):
-        operator = str(instruction.operator)
+        operator = token_text(instruction.operator)
         operands = list(instruction.operands)
 
         if operator == "Do":
-            name = str(operands[0]) if operands else None
+            name = key_text(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback_res)
-            subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
+            subtype = token_text(xobj.get("/Subtype", "")) if xobj is not None else ""
             if xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
                 my_ordinal = form_ordinal
                 form_ordinal += 1
@@ -4837,7 +4862,7 @@ def _rewrite_paragraph_stream(
                 operator == "BDC"
                 and break_marker_count(operands, resources, fallback_res)
                 and instruction_no + 1 < len(instructions)
-                and str(instructions[instruction_no + 1].operator) == "EMC"
+                and token_text(instructions[instruction_no + 1].operator) == "EMC"
             ):
                 dropping_break = True
                 continue

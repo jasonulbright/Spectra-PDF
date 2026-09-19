@@ -42,6 +42,7 @@ from engine.inplace import is_same_file
 from engine.pdf_metrics import text_width_em
 from engine.pdf_save import save_pdf
 from engine.watermark import _escape_pdf_text, _n
+from engine.pdf_tree import token_text
 
 _PAGE_W = 612.0  # US Letter; the cover sheet is generated boilerplate
 _PAGE_H = 792.0
@@ -58,7 +59,7 @@ def get_portfolio(file: str) -> dict:
         view = ""
         if is_portfolio:
             raw = col.get("/View")
-            view = _VIEW_NAMES.get(str(raw), "custom") if raw is not None else "details"
+            view = _VIEW_NAMES.get(token_text(raw), "custom") if raw is not None else "details"
     members = list_attachments(file)["attachments"]
     return {
         "is_portfolio": bool(is_portfolio),

@@ -27,6 +27,7 @@ import pikepdf
 from .font_embedding import font_embedded
 from .font_fallback import classify_font_style, style_key
 from .pdf_fonts import _strip_subset_prefix, name_str
+from .pdf_tree import token_text
 
 # Resource dictionaries nest (a form inside a form inside a page). Real
 # documents are shallow; the cap stops a cyclic /Resources from walking
@@ -37,11 +38,11 @@ _MAX_DEPTH = 8
 def _font_type(font_obj) -> str:
     """The font's type as the tab names it. A /Type0 reports its DESCENDANT's
     CIDFont type, which is the fact that decides how its program is stored."""
-    subtype = str(font_obj.get("/Subtype", "")).lstrip("/")
+    subtype = token_text(font_obj.get("/Subtype", "")).lstrip("/")
     if subtype != "Type0":
         return subtype or "Unknown"
     for descendant in _descendants(font_obj):
-        child = str(descendant.get("/Subtype", "")).lstrip("/")
+        child = token_text(descendant.get("/Subtype", "")).lstrip("/")
         if child:
             return child
     return "Type0"
@@ -77,7 +78,7 @@ def _encoding_name(font_obj) -> str:
         if encoding.get("/Differences") is not None:
             return "Custom"
         if base is not None:
-            return str(base).lstrip("/")
+            return token_text(base).lstrip("/")
         return "Custom"
     if isinstance(encoding, pikepdf.Stream):
         # An embedded CMap stream — named by its own /CMapName when it has one.
@@ -85,8 +86,8 @@ def _encoding_name(font_obj) -> str:
             name = encoding.get("/CMapName")
         except (TypeError, ValueError, AttributeError):
             name = None
-        return str(name).lstrip("/") if name is not None else "Embedded CMap"
-    return str(encoding).lstrip("/")
+        return token_text(name).lstrip("/") if name is not None else "Embedded CMap"
+    return token_text(encoding).lstrip("/")
 
 
 def _substitute_face(font_obj, font_dir: str | None) -> str | None:

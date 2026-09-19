@@ -51,6 +51,7 @@ import pikepdf
 
 from engine.form_detect_vocab import is_date_label, is_signature_label
 from engine.page_vectors import _walk_vectors
+from engine.pdf_tree import token_text
 from engine.redact import _resolve_resources
 from engine.search_regions import (
     FALLBACK_SPACE_1000,
@@ -902,7 +903,7 @@ def _existing_field_names(pdf) -> set:
         except AttributeError:
             continue
         if title is not None:
-            names.add(str(title))
+            names.add(token_text(title))
     return names
 
 

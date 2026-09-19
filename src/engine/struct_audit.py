@@ -39,6 +39,7 @@ from engine.struct_nesting import (
     effective_parent,
 )
 from engine.struct_tree import _is_elem, _kids, _MAX_DEPTH, _page_map, _page_no
+from engine.pdf_tree import token_text
 
 # Table attributes, wherever they are spelled. The key is the PDF name; the
 # value is how the audit reports it.
@@ -167,7 +168,7 @@ def _attr_owners(elem) -> set:
         except Exception:
             continue
         if owner is not None:
-            out.add(str(owner))
+            out.add(token_text(owner))
     return out
 
 
@@ -269,7 +270,7 @@ def _scope_of(value) -> str:
     if value is None:
         return ""
     try:
-        return str(value).lstrip("/")
+        return token_text(value).lstrip("/")
     except Exception:
         return ""
 

@@ -24,6 +24,7 @@ from pikepdf import Array, Name
 from engine.inplace import is_same_file, staged_write
 from engine.processing_steps import read_processing_step
 from engine.pdf_save import save_pdf
+from engine.pdf_tree import token_text
 
 
 def _ocgs(pdf) -> list:
@@ -137,7 +138,7 @@ def list_layers(file: str, for_edit: bool = False) -> dict:
         steps = 0
         for i, ocg in enumerate(ocgs):
             try:
-                name = str(ocg.get("/Name")) if ocg.get("/Name") is not None else f"Layer {i + 1}"
+                name = token_text(ocg.get("/Name")) if ocg.get("/Name") is not None else f"Layer {i + 1}"
             except Exception:
                 name = f"Layer {i + 1}"
             step = read_processing_step(ocg)

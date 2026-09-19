@@ -23,6 +23,7 @@ from typing import Optional
 import pikepdf
 
 from engine.pdf_fonts import name_str
+from engine.pdf_tree import token_text
 
 # One subpath is a list of segments; a segment is ("m"|"l", (x, y)),
 # ("c", (p1, p2, p3)) or ("h",). Points are em-normalized, y up.
@@ -561,10 +562,10 @@ class GlyphSource:
                 f"program could not be read."
             ) from None
         self._cid_to_gid = _cid_to_gid(descendant)
-        self._vertical = str(font_obj.get("/Encoding", "")).endswith("-V")
+        self._vertical = token_text(font_obj.get("/Encoding", "")).endswith("-V")
         if self._vertical:
             self._origins = _vertical_origins(descendant)
-        encoding = str(font_obj.get("/Encoding", "")).lstrip("/")
+        encoding = token_text(font_obj.get("/Encoding", "")).lstrip("/")
         self._named_cmap = None
         if encoding not in ("Identity-H", "Identity-V"):
             try:

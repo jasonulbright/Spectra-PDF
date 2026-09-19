@@ -26,7 +26,10 @@ press operator nothing about registration. Colour bars are the deliberate
 exception — a patch exists to show ONE ink, so a process patch paints in
 DeviceCMYK and a spot patch in that spot's own `/Separation` space. A bar
 whose spot set could not be established refuses: this writes a document, and
-a printed sheet has no room to carry a caveat.
+a printed sheet has no room to carry a caveat. A spot is the bytes of its
+colorant name (ISO 32000-2 §7.3.5, §8.6.6.4): the patch paints the document's
+own space object, so the plate it reaches is the one those bytes name, and
+only the page-information line reads them as text.
 
 `/AcroForm` is not at risk here: this appends content to existing pages and
 copies no page, so no widget's field registration moves.
@@ -42,7 +45,7 @@ from pikepdf import Array, Dictionary, Name
 
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
-from engine.pdf_tree import walk_inheritable
+from engine.pdf_tree import name_bytes, name_label, name_object, token_text, walk_inheritable
 from engine.preflight import COLORSPACE, walk_page_resources
 from engine.separations import ink_kind, refuse_unknown_colorants
 from engine.validate import validate_pdf
@@ -246,8 +249,14 @@ def _name_text(obj) -> str:
     return text[1:] if text.startswith("/") else text
 
 
+def _colorant_bytes(obj) -> bytes:
+    raw = name_bytes(obj)
+    return raw if raw is not None else _name_text(obj).encode("utf-8")
+
+
 def _spot_spaces(targets) -> dict:
-    """{spot name: a colour space that paints THAT ink alone}, over (number, page).
+    """{spot name bytes: a colour space that paints THAT ink alone}, over
+    (number, page).
 
     A `/Separation` array paints its one colorant directly. A `/DeviceN`
     component does not — its components go through one shared transform — so
@@ -276,26 +285,26 @@ def _spot_spaces(targets) -> dict:
             return
         family = _name_text(cs[0])
         if family == "Separation":
-            name = _name_text(cs[1])
-            if ink_kind(name) == "spot":
-                spaces.setdefault(name, cs)
+            raw = _colorant_bytes(cs[1])
+            if ink_kind(raw) == "spot":
+                spaces.setdefault(raw, cs)
         elif family == "DeviceN" and len(cs) >= 5:
             try:
                 colorants = cs[4].get("/Colorants")
-                names = [_name_text(v) for v in cs[1]]
+                names = [_colorant_bytes(v) for v in cs[1]]
             except Exception:
                 return
             if colorants is None:
                 return
-            for name in names:
-                if ink_kind(name) != "spot":
+            for raw in names:
+                if ink_kind(raw) != "spot":
                     continue
                 try:
-                    own = colorants.get(Name("/" + name))
+                    own = colorants.get(name_object(raw))
                 except Exception:
                     own = None
                 if own is not None:
-                    spaces.setdefault(name, own)
+                    spaces.setdefault(raw, own)
 
     for number, page in targets:
         del skipped[:]
@@ -382,11 +391,11 @@ def _build_mark_form(pdf, page, trim, media, offset, length, weight, style,
     if "colorbars" in marks:
         runs = bar_runs(trim, offset, length)
         patches: list[tuple[str, object]] = [(name, comps) for name, comps in _process_patches()]
-        for index, (name, space) in enumerate(sorted(spot_spaces.items())):
+        for index, (raw, space) in enumerate(sorted(spot_spaces.items())):
             key = f"/Spot{index}"
             colorspaces[Name(key)] = space
             patches.append((key, None))
-            bar_names.append(name)
+            bar_names.append(name_label(raw))
         # Two overprint control patches: the second lays magenta over cyan
         # with overprint ON, so a plate that shows only magenta there proves
         # the overprint was honoured and one that shows both proves it was
@@ -515,17 +524,18 @@ def _strip_marks(pdf, page) -> None:
     kept: list = []
     instructions = list(pikepdf.parse_content_stream(page))
     drop: set = set()
+    mark = MARK_XOBJECT[1:].encode("ascii")
     for index, instruction in enumerate(instructions):
-        if str(instruction.operator) != "Do" or not instruction.operands:
+        if token_text(instruction.operator) != "Do" or not instruction.operands:
             continue
-        if str(instruction.operands[0]) != MARK_XOBJECT:
+        if name_bytes(instruction.operands[0]) != mark:
             continue
         drop.add(index)
         # The add draws the marks inside their own `q … Q`; dropping the frame
         # with the draw keeps the stream balanced.
-        if index > 0 and str(instructions[index - 1].operator) == "q":
+        if index > 0 and token_text(instructions[index - 1].operator) == "q":
             drop.add(index - 1)
-        if index + 1 < len(instructions) and str(instructions[index + 1].operator) == "Q":
+        if index + 1 < len(instructions) and token_text(instructions[index + 1].operator) == "Q":
             drop.add(index + 1)
     for index, instruction in enumerate(instructions):
         if index not in drop:
@@ -759,7 +769,7 @@ def add_printer_marks(
         "growth": margin,
         "marks": list(kinds),
         "style": style,
-        "spot_patches": sorted(spot_spaces),
+        "spot_patches": [name_label(raw) for raw in sorted(spot_spaces)],
         "pages": reports,
         "skipped": skipped,
     }

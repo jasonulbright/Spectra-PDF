@@ -33,6 +33,8 @@ from pathlib import Path
 
 import pikepdf
 
+from engine.pdf_tree import token_text
+
 # Report order, and the priority order that resolves an object reachable by two
 # paths: the earlier id wins. `overhead` is the residual and claims no object.
 CATEGORY_IDS = (
@@ -155,7 +157,7 @@ def _name(value) -> str:
     if value is None:
         return ""
     try:
-        return str(value)
+        return token_text(value)
     except Exception:
         return ""
 

@@ -7,6 +7,7 @@ import pikepdf
 from pikepdf import OutlineItem
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
+from engine.pdf_tree import key_name, key_text, name_object
 
 MAX_DEPTH = 32
 MAX_NODES = 10_000
@@ -21,15 +22,31 @@ class _Unserializable(Exception):
     pass
 
 
+def _is_utf8(spelling: str) -> bool:
+    try:
+        spelling.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def _serialize_obj(obj, depth: int = 0):
-    """pikepdf object → JSON-safe typed structure ({'n': name}, {'s': text},
-    {'b64': bytes}, {'a': [...]}, {'d': {...}}, or a plain number/bool).
+    """pikepdf object → JSON-safe typed structure ({'n': name}, {'nb64': name
+    bytes}, {'s': text}, {'b64': bytes}, {'a': [...]}, {'d': {...}},
+    {'dn': [[name, value], ...]}, or a plain number/bool).
+
+    A name is its bytes (ISO 32000-2 §7.3.5) and a response carries text: a
+    name whose bytes are not UTF-8 travels as base64, and a dictionary with
+    such a key as a list of pairs, so the round trip writes the same bytes.
     Raises _Unserializable for streams/cycles/over-deep payloads — the caller
     flags the item lossy instead of silently dropping it."""
     if depth > MAX_ACTION_DEPTH:
         raise _Unserializable("action nested too deeply")
     if isinstance(obj, pikepdf.Name):
-        return {"n": str(obj)}
+        spelling = key_text(obj)
+        if _is_utf8(spelling):
+            return {"n": spelling}
+        return {"nb64": base64.b64encode(bytes(obj)[1:]).decode("ascii")}
     if isinstance(obj, pikepdf.String):
         raw = bytes(obj)
         try:
@@ -55,10 +72,10 @@ def _serialize_obj(obj, depth: int = 0):
     if isinstance(obj, pikepdf.Array):
         return {"a": [_serialize_obj(v, depth + 1) for v in obj]}
     if isinstance(obj, pikepdf.Dictionary):
-        out = {}
-        for key, value in obj.items():
-            out[str(key)] = _serialize_obj(value, depth + 1)
-        return {"d": out}
+        pairs = [(key, _serialize_obj(value, depth + 1)) for key, value in obj.items()]
+        if all(_is_utf8(key) for key, _value in pairs):
+            return {"d": dict(pairs)}
+        return {"dn": [[_serialize_obj(key_name(key)), value] for key, value in pairs]}
     if isinstance(obj, float):
         return obj
     raise _Unserializable(f"unsupported object: {type(obj).__name__}")
@@ -75,6 +92,8 @@ def _deserialize_obj(data, depth: int = 0):
     if isinstance(data, dict):
         if "n" in data:
             return pikepdf.Name(data["n"])
+        if "nb64" in data:
+            return name_object(base64.b64decode(data["nb64"]))
         if "s" in data:
             return pikepdf.String(data["s"])
         if "b64" in data:
@@ -85,6 +104,14 @@ def _deserialize_obj(data, depth: int = 0):
             d = pikepdf.Dictionary()
             for key, value in data["d"].items():
                 d[key] = _deserialize_obj(value, depth + 1)
+            return d
+        if "dn" in data:
+            d = pikepdf.Dictionary()
+            for key, value in data["dn"]:
+                name = _deserialize_obj(key, depth + 1)
+                if not isinstance(name, pikepdf.Name):
+                    raise ValueError("malformed outline action payload")
+                d[key_text(name)] = _deserialize_obj(value, depth + 1)
             return d
     raise ValueError("malformed outline action payload")
 

@@ -102,3 +102,36 @@ def test_forms_winansi_check_holds_over_the_wire(tmp_dir):
     assert "error" not in by_id[2], by_id[2]
     values = {f["name"]: f["value"] for f in by_id[3]["result"]["fields"]}
     assert values["applicant.name"] == "José García"
+
+
+def test_a_result_naming_a_key_that_is_not_utf8_reaches_the_host_whole():
+    """pikepdf spells a dictionary key whose name is not UTF-8 with a lone
+    surrogate (ISO 32000-2 §7.3.5 lets a name hold any byte), and the host's
+    JSON reader rejects a line that carries one and drops it: the call would
+    never resolve. The line carries the name's #XX escape instead."""
+    import io
+
+    from engine.ipc import JsonRpcServer
+
+    def names():
+        return {"names": ["/Gr\udcfcn"], "/Gr\udcfcn": 1}
+
+    def refuses():
+        raise ValueError("Ink /Gr\udcfcn is not used")
+
+    server = JsonRpcServer()
+    server.register("names", names)
+    server.register("refuses", refuses)
+    requests = (
+        '{"jsonrpc": "2.0", "id": 7, "method": "names", "params": {}}\n'
+        '{"jsonrpc": "2.0", "id": 8, "method": "refuses", "params": {}}\n'
+    )
+    out = io.StringIO()
+    server.run(io.StringIO(requests), out)
+    lines = out.getvalue().splitlines()
+    assert len(lines) == 2
+    for line in lines:
+        assert "\\ud" not in line, line
+    first, second = (json.loads(line) for line in lines)
+    assert first["result"] == {"names": ["/Gr#FCn"], "/Gr#FCn": 1}
+    assert second["error"]["message"] == "Ink /Gr#FCn is not used"
