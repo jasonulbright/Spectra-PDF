@@ -286,14 +286,14 @@ class TestShippedDictionaries:
             assert entry["bcp47"] == entry["tag"].replace("_", "-")
             assert entry["origin"] == "bundled"
 
-    @pytest.mark.parametrize("tag", SHIPPED_TAGS)
+    @pytest.mark.parametrize("tag", SHIPPED_TAGS, scope="class")
     def test_ordinary_words_are_accepted(self, tag):
         _require(tag)
         dictionary = load_dictionary(tag, DICT_DIR)
         rejected = [w for w in WORDS[tag]["good"] if not check_word(dictionary, w, set())]
         assert rejected == []
 
-    @pytest.mark.parametrize("tag", SHIPPED_TAGS)
+    @pytest.mark.parametrize("tag", SHIPPED_TAGS, scope="class")
     def test_planted_misspellings_are_rejected(self, tag):
         _require(tag)
         dictionary = load_dictionary(tag, DICT_DIR)
@@ -377,7 +377,7 @@ def _decorate(word: str, marks: str) -> str:
 POINTED_TAGS = sorted(tag for tag in WORDS if "pointed" in WORDS[tag])
 
 
-@pytest.mark.parametrize("tag", POINTED_TAGS)
+@pytest.mark.parametrize("tag", POINTED_TAGS, scope="class")
 class TestOptionalDiacritics:
     def test_each_pointed_word_points_its_own_good_word(self, tag):
         # Without this the rest of the class could pass vacuously: a pointing
@@ -927,19 +927,19 @@ class TestDocumentWalkDecomposed:
             pdf.save()
         return src
 
-    @pytest.mark.parametrize("tag,good,bad", DECOMPOSED_LANGUAGES)
-    @pytest.mark.parametrize("form", ["NFC", "NFD"])
+    @pytest.mark.parametrize("tag,good,bad", DECOMPOSED_LANGUAGES, scope="class")
     def test_a_decomposed_document_reaches_the_same_verdict_as_a_composed_one(
-        self, tmp_dir, tag, good, bad, form
+        self, tmp_dir, tag, good, bad
     ):
         _require(tag)
-        text = unicodedata.normalize(form, f"{good} {bad}")
-        src = self._commented(tmp_dir, text, f"{tag}-{form}.pdf")
-        result = check_spelling(src, DICT_DIR, tag, sources=["comments"])
-        words = [unicodedata.normalize("NFC", i["word"]) for i in result["issues"]]
-        assert words == [unicodedata.normalize("NFC", bad)]
+        for form in ("NFC", "NFD"):
+            text = unicodedata.normalize(form, f"{good} {bad}")
+            src = self._commented(tmp_dir, text, f"{tag}-{form}.pdf")
+            result = check_spelling(src, DICT_DIR, tag, sources=["comments"])
+            words = [unicodedata.normalize("NFC", i["word"]) for i in result["issues"]]
+            assert words == [unicodedata.normalize("NFC", bad)], form
 
-    @pytest.mark.parametrize("tag,good,bad", DECOMPOSED_LANGUAGES)
+    @pytest.mark.parametrize("tag,good,bad", DECOMPOSED_LANGUAGES, scope="class")
     def test_a_hit_in_a_decomposed_document_addresses_its_own_text(
         self, tmp_dir, tag, good, bad
     ):
@@ -1166,3 +1166,76 @@ class TestVoikkoManifest:
         assert runtime
         for file in runtime:
             assert file in covered, file
+
+
+class TestTheLoadedDictionaryBound:
+    """The engine runs for the whole session, and one parsed word list holds
+    hundreds of megabytes: only the most recently used dictionaries stay
+    loaded."""
+
+    @staticmethod
+    def _pairs(root, *tags):
+        for tag in tags:
+            os.makedirs(os.path.join(root, tag))
+            with open(os.path.join(root, tag, f"{tag}.aff"), "w", encoding="utf-8") as f:
+                f.write("SET UTF-8\n")
+            with open(os.path.join(root, tag, f"{tag}.dic"), "w", encoding="utf-8") as f:
+                f.write(f"1\n{tag.split('_')[0]}word\n")
+
+    @staticmethod
+    def _loaded(spelling):
+        return [pathlib.Path(key).name for key in spelling._LOADED]
+
+    def test_the_least_recently_used_dictionary_is_released(self, tmp_dir, monkeypatch):
+        import gc
+        import weakref
+        from collections import OrderedDict
+
+        from engine import spelling
+
+        monkeypatch.setattr(spelling, "_LOADED", OrderedDict())
+        monkeypatch.setattr(spelling, "_LOADED_LIMIT", 2)
+        self._pairs(tmp_dir, "aa_AA", "bb_BB", "cc_CC")
+        first = load_dictionary("aa_AA", tmp_dir)
+        second = weakref.ref(load_dictionary("bb_BB", tmp_dir))
+        # A hit makes aa_AA the most recently used, so bb_BB goes first.
+        assert load_dictionary("aa_AA", tmp_dir) is first
+        load_dictionary("cc_CC", tmp_dir)
+        assert self._loaded(spelling) == ["aa_AA", "cc_CC"]
+        gc.collect()
+        assert second() is None
+        assert load_dictionary("aa_AA", tmp_dir) is first
+
+    def test_a_load_never_holds_more_than_the_bound(self, tmp_dir, monkeypatch):
+        from collections import OrderedDict
+
+        from spylls.hunspell import Dictionary
+
+        from engine import spelling
+
+        monkeypatch.setattr(spelling, "_LOADED", OrderedDict())
+        monkeypatch.setattr(spelling, "_LOADED_LIMIT", 1)
+        self._pairs(tmp_dir, "aa_AA", "bb_BB")
+        parse = Dictionary.from_files
+        held: list = []
+
+        def counting(path, *args, **kwargs):
+            held.append(self._loaded(spelling))
+            return parse(path, *args, **kwargs)
+
+        monkeypatch.setattr(Dictionary, "from_files", staticmethod(counting))
+        load_dictionary("aa_AA", tmp_dir)
+        load_dictionary("bb_BB", tmp_dir)
+        assert held == [[], []]
+        assert self._loaded(spelling) == ["bb_BB"]
+
+    def test_the_engine_keeps_at_most_two(self, tmp_dir, monkeypatch):
+        from collections import OrderedDict
+
+        from engine import spelling
+
+        monkeypatch.setattr(spelling, "_LOADED", OrderedDict())
+        self._pairs(tmp_dir, "aa_AA", "bb_BB", "cc_CC")
+        for tag in ("aa_AA", "bb_BB", "cc_CC"):
+            load_dictionary(tag, tmp_dir)
+        assert self._loaded(spelling) == ["bb_BB", "cc_CC"]

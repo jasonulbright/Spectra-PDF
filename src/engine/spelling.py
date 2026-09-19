@@ -33,6 +33,7 @@ from __future__ import annotations
 import re
 import shutil
 import unicodedata
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -271,15 +272,20 @@ class VoikkoDictionary:
 
 # ═══════════════════════════ dictionary discovery ══════════════════════════
 
-#: Loaded dictionaries, keyed by the `.aff`/`.dic` base path. A dictionary
-#: costs 0.1-2.7s to parse and is immutable once read, so the engine process
-#: keeps it.
+#: Loaded dictionaries, least recently used first, keyed by the `.aff`/`.dic`
+#: base path. A dictionary costs 0.1-2.7s to parse and is immutable once read,
+#: so the engine process keeps the `_LOADED_LIMIT` most recently used. The
+#: engine runs for the whole session and one parsed word list holds hundreds
+#: of megabytes, so an unbounded cache keeps every language a session ever
+#: checked. Every request reads exactly one dictionary; two keep a switch
+#: between two languages from parsing again.
 #:
 #: A cached `VoikkoDictionary` is NOT reentrant: one libvoikko handle must not
 #: be used from two threads at once. The engine answers one request at a time,
 #: which is what makes sharing the handle safe; a threaded caller would need a
 #: lock around it.
-_LOADED: dict[str, Any] = {}
+_LOADED: OrderedDict[str, Any] = OrderedDict()
+_LOADED_LIMIT = 2
 
 
 def _search_roots(dictionary_dir: str | None, user_dictionary_dir: str | None) -> list[tuple[Path, str]]:
@@ -388,7 +394,12 @@ def load_dictionary(
     base = _resolve_tag(language, dictionary_dir, user_dictionary_dir)
     key = str(base)
     if key in _LOADED:
+        _LOADED.move_to_end(key)
         return _LOADED[key]
+    # Eviction comes before the parse, so a load never holds more than the
+    # bound at once.
+    while _LOADED and len(_LOADED) >= _LOADED_LIMIT:
+        _LOADED.popitem(last=False)
     # Same precedence `_tags_in` uses, and for the same reason: a directory
     # holding both shapes is a word list, so a Voikko tree dropped beside a
     # user's own pair cannot become the engine that answers for that tag.
