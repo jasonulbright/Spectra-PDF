@@ -75,6 +75,9 @@ fn printed_dir() -> PathBuf {
     std::env::temp_dir().join("spectrapdf").join("printed")
 }
 
+/// How every name a job writes into the printed folder begins.
+const PRINTED_PREFIX: &str = "Printed ";
+
 fn timestamp_name() -> String {
     // Seconds precision keeps names sortable and human. Not unique; `claim`
     // guarantees that.
@@ -82,7 +85,51 @@ fn timestamp_name() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    format!("Printed {now}")
+    format!("{PRINTED_PREFIX}{now}")
+}
+
+/// Where the distiller writes before its output is renamed over the
+/// reservation.
+fn part_path(pdf_path: &Path) -> PathBuf {
+    let mut name = pdf_path.file_name().unwrap_or_default().to_os_string();
+    name.push(".part");
+    pdf_path.with_file_name(name)
+}
+
+/// Whether `name`, holding `len` bytes, is what a job leaves before it
+/// finishes: its staged PostScript, the distiller's output before the rename,
+/// or the name reservation before the rename fills it. A finished print is
+/// never empty.
+fn is_job_intermediate(name: &str, len: u64) -> bool {
+    let Some(rest) = name.strip_prefix(PRINTED_PREFIX) else {
+        return false;
+    };
+    rest.ends_with(".ps") || rest.ends_with(".pdf.part") || (rest.ends_with(".pdf") && len == 0)
+}
+
+/// Remove what the jobs of an earlier process left in the printed folder.
+///
+/// Runs once the port is bound and before any job is accepted. Only the
+/// process that holds the port runs jobs, so at that moment every
+/// intermediate in the folder belongs to a job that can no longer finish.
+fn reclaim_job_intermediates(dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let intermediate = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| is_job_intermediate(name, meta.len()));
+        if intermediate && std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// Create a path atomically, failing if anything is already there.
@@ -171,10 +218,7 @@ fn handle_job(app: &AppHandle, bytes: Vec<u8>) {
     };
     // Distil to a sibling and rename over the reservation, so a reader never
     // sees a half-written PDF at the final name.
-    let part_path = dir.join(format!(
-        "{}.part",
-        pdf_path.file_name().unwrap_or_default().to_string_lossy()
-    ));
+    let part_path = part_path(&pdf_path);
     let Ok(exe) = std::env::current_exe() else {
         let _ = std::fs::remove_file(&ps_path);
         let _ = std::fs::remove_file(&pdf_path);
@@ -247,6 +291,7 @@ pub fn start_listener(app: &AppHandle) {
                 return;
             }
         };
+        reclaim_job_intermediates(&printed_dir());
         if let Some(state) = handle.try_state::<PrinterState>() {
             *state.listener_status.lock().unwrap() = "listening".to_string();
         }
@@ -326,14 +371,35 @@ fn run_powershell(args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Where an elevation reads its script. Pid-suffixed: a fixed path executed
+/// under RunAs leaves a same-user swap window between write and read.
+fn elevated_script_path(dir: &Path, label: &str, pid: u32) -> PathBuf {
+    dir.join(format!("opdfs-printer-{label}-{pid}.ps1"))
+}
+
+/// The process whose `elevated_script_path` produced `entry`.
+fn elevated_script_owner(entry: &str) -> Option<u32> {
+    let (label, pid) = entry
+        .strip_prefix("opdfs-printer-")?
+        .strip_suffix(".ps1")?
+        .rsplit_once('-')?;
+    if label.is_empty() || !label.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return None;
+    }
+    crate::staging::decimal_pid(pid)
+}
+
+/// Remove the scripts of processes killed while their elevation was pending.
+fn reclaim_elevated_scripts(dir: &Path, own: u32, running: impl Fn(u32) -> bool) -> usize {
+    crate::staging::reclaim(dir, own, elevated_script_owner, running)
+}
+
 /// Stage a pure-ASCII script and run it through ONE visible UAC elevation.
 fn run_elevated_script(script_body: &str, label: &str) -> Result<(), String> {
-    // Pid-suffixed, as scheduler.rs stages its task XML: a fixed path executed
-    // under RunAs leaves a same-user swap window between write and read.
-    let path = std::env::temp_dir().join(format!(
-        "opdfs-printer-{label}-{}.ps1",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir();
+    let own = std::process::id();
+    reclaim_elevated_scripts(&dir, own, crate::staging::process_running);
+    let path = elevated_script_path(&dir, label, own);
     if !script_body.is_ascii() {
         return Err("internal: the printer script must be pure ASCII".to_string());
     }
@@ -455,6 +521,79 @@ mod tests {
             assert!(p.is_file(), "reservation not actually on disk: {p:?}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn names(dir: &Path) -> std::collections::BTreeSet<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_bound_listener_clears_only_what_unfinished_jobs_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let stem = timestamp_name();
+        let staged = claim_staging(dir.path(), &stem).unwrap();
+        std::fs::write(&staged, b"%!PS-Adobe-3.0").unwrap();
+        let reserved = reserve_pdf(dir.path(), &stem).unwrap();
+        let distilled = part_path(&reserved);
+        std::fs::write(&distilled, b"%PDF-1.7 unfinished").unwrap();
+        let finished = reserve_pdf(dir.path(), &stem).unwrap();
+        std::fs::write(&finished, b"%PDF-1.7 finished").unwrap();
+        let unrelated = [
+            ("notes.ps", &b"%!PS"[..]),
+            ("empty.pdf", &b""[..]),
+            ("document-stage-4300-abcdef.pdf", &b"%PDF"[..]),
+        ];
+        for (name, bytes) in unrelated {
+            std::fs::write(dir.path().join(name), bytes).unwrap();
+        }
+
+        assert_eq!(reclaim_job_intermediates(dir.path()), 3);
+
+        let mut kept: std::collections::BTreeSet<String> =
+            unrelated.iter().map(|(name, _)| name.to_string()).collect();
+        kept.insert(finished.file_name().unwrap().to_str().unwrap().to_string());
+        assert_eq!(names(dir.path()), kept);
+    }
+
+    #[test]
+    fn an_elevation_reclaims_only_the_scripts_of_stopped_processes() {
+        const OWN: u32 = 4100;
+        const LIVE: u32 = 4200;
+        const DEAD: u32 = 4300;
+        let dir = tempfile::tempdir().unwrap();
+        let script = |label: &str, pid: u32| {
+            elevated_script_path(dir.path(), label, pid)
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string()
+        };
+        let kept = [
+            script("install", OWN),
+            script("remove", LIVE),
+            "opdfs-printer-install-x.ps1".to_string(),
+            "opdfs-printer--4300.ps1".to_string(),
+            "opdfs-printer-re move-4300.ps1".to_string(),
+            "opdfs-printer-install-04300.ps1".to_string(),
+            "opdfs-printer-install-4300.ps1.bak".to_string(),
+            "other-install-4300.ps1".to_string(),
+        ];
+        let reclaimed = [script("install", DEAD), script("remove", DEAD)];
+        for name in kept.iter().chain(&reclaimed) {
+            std::fs::write(dir.path().join(name), "exit 0").unwrap();
+        }
+
+        assert_eq!(
+            reclaim_elevated_scripts(dir.path(), OWN, |pid| pid == LIVE),
+            2
+        );
+
+        let kept: std::collections::BTreeSet<String> = kept.into_iter().collect();
+        assert_eq!(names(dir.path()), kept);
     }
 
     #[test]

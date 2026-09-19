@@ -34,6 +34,12 @@ jobs:
       - name: Lint (ESLint — errors gate; advisory warnings are not CI noise)
         run: npm run lint -- --quiet
 
+      # ESLint does not type-check, and Vite strips types without checking
+      # them. Without this step a type error on main stays green until the
+      # release Verify job. Mirrored in scripts/ci-parity-gates.sh.
+      - name: Typecheck
+        run: npm run typecheck
+
       # The unit suite includes real Python process-ownership and incremental
       # append tests. A clean checkout has neither a dev venv nor its packages.
       - name: Setup Python for renderer integration tests

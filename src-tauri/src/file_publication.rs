@@ -39,16 +39,43 @@ fn source_guard(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
+const STAGE_PREFIX: &str = "document-stage-";
+const STAGE_SUFFIX: &str = ".pdf";
+
+/// The process a stage name was created under: `Stage::new` names each stage
+/// `document-stage-<pid>-<random>.pdf`.
+fn stage_owner(entry: &str) -> Option<u32> {
+    let (pid, random) = entry
+        .strip_prefix(STAGE_PREFIX)?
+        .strip_suffix(STAGE_SUFFIX)?
+        .split_once('-')?;
+    if random.is_empty() || !random.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return None;
+    }
+    crate::staging::decimal_pid(pid)
+}
+
+/// Remove the stages that processes killed mid-copy left in `dir`.
+fn reclaim_stages(dir: &Path, own: u32, running: impl Fn(u32) -> bool) -> usize {
+    crate::staging::reclaim(dir, own, stage_owner, running)
+}
+
 struct Stage(Option<tempfile::NamedTempFile>);
 impl Stage {
     fn file(&self) -> &tempfile::NamedTempFile {
         self.0.as_ref().unwrap()
     }
+    /// A process killed between creating a stage and publishing it cannot
+    /// remove it, and a Save As puts that stage beside the user's document.
+    /// Each new stage first removes the ones left in the same folder by
+    /// processes that no longer run.
     fn new(parent: &Path) -> io::Result<Self> {
+        let own = std::process::id();
+        reclaim_stages(parent, own, crate::staging::process_running);
         Ok(Self(Some(
             tempfile::Builder::new()
-                .prefix("document-stage-")
-                .suffix(".pdf")
+                .prefix(&format!("{STAGE_PREFIX}{own}-"))
+                .suffix(STAGE_SUFFIX)
                 .tempfile_in(parent)?,
         )))
     }
@@ -309,6 +336,94 @@ fn preserve_access(original: &File, replacement: &tempfile::NamedTempFile) -> io
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn names(dir: &Path) -> std::collections::BTreeSet<String> {
+        fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_stage_is_named_for_the_process_that_created_it() {
+        let root = tempfile::tempdir().unwrap();
+        let stage = Stage::new(root.path()).unwrap();
+        let name = stage
+            .file()
+            .path()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(stage_owner(&name), Some(std::process::id()));
+        for other in [
+            "document-stage-abc123.pdf",
+            "document-stage-4300-.pdf",
+            "document-stage-4300-ab_c12.pdf",
+            "document-stage-04300-abc123.pdf",
+            "document-stage-4300-abc123.PDF",
+            "document-stage-4300-abc123.pdf.bak",
+            "report-4300-abc123.pdf",
+        ] {
+            assert_eq!(stage_owner(other), None, "{other}");
+        }
+    }
+
+    #[test]
+    fn only_the_stages_of_stopped_processes_are_reclaimed() {
+        const OWN: u32 = 4100;
+        const LIVE: u32 = 4200;
+        let root = tempfile::tempdir().unwrap();
+        let kept = [
+            "document-stage-4100-abc123.pdf",
+            "document-stage-4200-abc123.pdf",
+            "document-stage-abc123.pdf",
+            "document-stage-4300-abc123.pdf.bak",
+            "report.pdf",
+        ];
+        let reclaimed = [
+            "document-stage-4300-abc123.pdf",
+            "document-stage-4304-XYZ789.pdf",
+        ];
+        for name in kept.iter().chain(&reclaimed) {
+            fs::write(root.path().join(name), b"%PDF").unwrap();
+        }
+        assert_eq!(reclaim_stages(root.path(), OWN, |pid| pid == LIVE), 2);
+        let kept: std::collections::BTreeSet<String> = kept.map(String::from).into();
+        assert_eq!(names(root.path()), kept);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_save_reclaims_the_stage_a_killed_save_left_beside_the_document() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("working.pdf");
+        let dest = root.path().join("out.pdf");
+        fs::write(&source, b"new").unwrap();
+        fs::write(&dest, b"original").unwrap();
+        let mut writer = std::process::Command::new("cmd")
+            .args(["/C", "exit 0"])
+            .spawn()
+            .unwrap();
+        writer.wait().unwrap();
+        // `writer` holds its handle, so its id stays unused while it is asked
+        // about.
+        let orphan = root.path().join(format!(
+            "{STAGE_PREFIX}{}-abc123{STAGE_SUFFIX}",
+            writer.id()
+        ));
+        fs::write(&orphan, b"a copy that never published").unwrap();
+
+        replace_copy(&source, &dest).unwrap();
+
+        assert!(!orphan.exists());
+        assert_eq!(fs::read(&dest).unwrap(), b"new");
+        let expected: std::collections::BTreeSet<String> =
+            ["out.pdf", "working.pdf"].map(String::from).into();
+        assert_eq!(names(root.path()), expected);
+    }
+
     #[test]
     fn a_new_destination_race_never_overwrites_the_arriving_file() {
         let root = tempfile::tempdir().unwrap();
