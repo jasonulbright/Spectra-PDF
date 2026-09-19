@@ -136,7 +136,7 @@ written source offer below.
 
 ## Embedded Python runtime
 
-- **CPython 3.14.5** — Python Software Foundation License (PSF) — <https://www.python.org/>
+- **CPython 3.14.7** — Python Software Foundation License (PSF) — <https://www.python.org/>
 
 Bundled Python packages (installed into the embedded runtime; exact versions are
 hash-pinned in `scripts/python-requirements.txt`, or in

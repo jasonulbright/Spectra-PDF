@@ -50,7 +50,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .node-version
+          check-latest: true
 
       # The tag IS the version claim. A tag that disagrees with the manifests
       # publishes an installer whose in-app version, updater manifest and
@@ -85,7 +86,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version-file: .python-version
 
       - name: Install Python dependencies (the SHIPPED, hash-pinned set)
         run: pip install --require-hashes -r scripts/python-requirements.txt
@@ -126,9 +127,10 @@ jobs:
       # `cargo check` never RUNS anything. The Rust tests cover the virtual
       # printer's job naming, the watched-folder validation and the scheduler --
       # all of which decide what lands on a user's disk. This is the STUB-ONLY
-      # Rust run: the resource stubs above are empty, so tests/cli_bytecode.rs
-      # and tests/cli_run_action.rs skip here; their provisioned run is in the
-      # `release` job after vendoring.
+      # Rust run: the resource stubs above are empty, so tests/cli_bytecode.rs,
+      # tests/cli_run_action.rs and the live half of tests/health_worker.rs
+      # skip here; their provisioned run is in the `release` job after
+      # vendoring.
       - name: Rust tests
         run: cd src-tauri && cargo test
 
@@ -330,7 +332,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .node-version
+          check-latest: true
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -426,10 +429,12 @@ jobs:
       # The live CLI against the runtime this job just vendored. The verify
       # job's Rust run sees empty stubs and these tests skip there; here the
       # skip is refused, so a release cannot go out without having launched
-      # the product's CLI, read the payload tree it left behind, and run guided
-      # actions with and without a Ghostscript.
+      # the product's CLI, read the payload tree it left behind, run guided
+      # actions without a Ghostscript, and killed and respawned the health
+      # worker. This job installs no Ghostscript, so the cases that need a
+      # working one return early here; CI's engine job runs them.
       - name: Live CLI tests against the provisioned runtime
-        run: cd src-tauri && cargo test --test cli_bytecode --test cli_run_action
+        run: cd src-tauri && cargo test --test cli_bytecode --test cli_run_action --test health_worker
         env:
           SPECTRAPDF_REQUIRE_LIVE_CLI: "1"
 
