@@ -25,7 +25,7 @@ Replacement (`replace_text_run`) rewrites exactly one show op:
     against the run's `encodable` set, so this is a belt);
   - ' and " targets are expanded to their spec equivalence (T* [+ Tw/Tc
     for "]) followed by a plain Tj, preserving their state side effects;
-  - the Δwidth anchor rule (the phase doc's design): text that FLOWS
+  - the Δwidth anchor rule: text that FLOWS
     (consecutive shows, no repositioning) shifts automatically via the tm
     advance; subsequent SAME-LINE Td/TD anchors (ty == 0) are absolute
     against the line matrix and are shifted by Δ explicitly — the
@@ -61,7 +61,6 @@ from engine.redact import (
     MAX_FORM_DEPTH,
     _as_matrix,
     _bbox_of_corners_under_matrix,
-    _bbox_of_rect_under_matrix,
     _copy_resources_for_write,
     _lookup_resource,
     _lookup_xobject,
@@ -81,7 +80,9 @@ from engine.text_metrics import (  # noqa: F401  (_operand_bytes is a re-export)
     _operand_bytes,
     _run_metrics,
     _show_segments,
-    _spaces_in,
+    ink_span,
+    show_items,
+    string_advance,
 )
 
 SHOW_OPS = ("Tj", "'", '"', "TJ")
@@ -270,6 +271,39 @@ def break_marker_count(operands: list, resources, fallback) -> int:
     return len(text)
 
 
+# Far below any distance a glyph is drawn at, far above the rounding between
+# two sums of the same advances in text-space units.
+_SUM_SLACK = 1e-9
+
+
+def _click_box(operator, operands, cap, state, combined, raw_width, vertical) -> tuple:
+    """The box the user clicks, in device space. Across the writing direction
+    it is the em box on the baseline that `Ts` raises (ISO 32000-2 §9.3.7:
+    rise moves the baseline in either writing mode). Along it, it runs from
+    the pen start to the pen end and covers every glyph the show draws: a TJ
+    number can move the pen back over glyphs already drawn, or behind the
+    start, so neither end of the pen's path bounds the glyphs."""
+    lo, hi = min(0.0, raw_width), max(0.0, raw_width)
+    if cap is not None:
+        glyph_lo, glyph_hi = ink_span(show_items(operator, operands, cap, state))
+        # The glyph span sums per code and the pen path per string, so the
+        # two round apart; only a glyph that leaves the path moves an edge.
+        if glyph_lo < lo - _SUM_SLACK:
+            lo = glyph_lo
+        if glyph_hi > hi + _SUM_SLACK:
+            hi = glyph_hi
+    size = max(state.font_size, 0.01)
+    if vertical:
+        # One em-wide column centred on the pen (the vx = w/2 default); the
+        # span runs DOWNWARD from the pen start.
+        hi = max(hi, lo + 0.01)
+        half = size / 2.0
+        return _bbox_of_corners_under_matrix(combined, -half, state.rise - hi, half, state.rise - lo)
+    lo, hi = sorted((lo * state.h_scale, hi * state.h_scale))
+    hi = max(hi, lo + 0.01)
+    return _bbox_of_corners_under_matrix(combined, lo, state.rise, hi, state.rise + size)
+
+
 def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nested, fonts, parent_state=None, detail=None, stream_path=(), base_clip=None, breaks=None):
     # Text is read and measured with the font DICTIONARY the text state holds:
     # the one a `Tf` names here, an ExtGState /Font entry sets, or the
@@ -351,19 +385,10 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
             cap = fonts.capability_of(state.font)
             text, raw_width = _run_metrics(operator, operands, cap, state)
             combined = _mat_mult(state.tm, state.ctm)
-            vertical = bool(cap is not None and cap.vertical)
-            if vertical:
-                # v1 rect: a vertical run occupies one em-wide column
-                # centered on the pen (the vx = w/2 default) and spans the
-                # advance sum DOWNWARD from the start point.
-                half = max(state.font_size, 0.01) / 2.0
-                x0, y0, x1, y1 = _bbox_of_corners_under_matrix(
-                    combined, -half, -max(raw_width, 0.01), half, 0.0
-                )
-            else:
-                x0, y0, x1, y1 = _bbox_of_rect_under_matrix(
-                    combined, max(raw_width * state.h_scale, 0.01), max(state.font_size, 0.01)
-                )
+            # `writes_vertical`, not `vertical`: a REFUSED Identity-V font
+            # still draws its column downward.
+            vertical = bool(cap is not None and cap.writes_vertical)
+            x0, y0, x1, y1 = _click_box(operator, operands, cap, state, combined, raw_width, vertical)
             named = _names_its_font(state)
             editable = bool(cap and cap.editable and text.strip() and named)
             reason = None
@@ -394,10 +419,10 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     # round-trip — the renderer's longest-match validation
                     # reads these next to `encodable`. [] when none/refused.
                     "sequences": cap.encodable_sequences() if (cap and cap.editable) else [],
-                    # Additive: True when this run's advances/rect
-                    # were computed in vertical-writing mode (the surface
-                    # reads it). A refused vertical font reports False —
-                    # the field describes the geometry actually computed.
+                    # Additive: True when this run's font writes vertically,
+                    # so its advances and rect run down a column (the surface
+                    # reads it). A refused vertical font reports True too:
+                    # the field describes the geometry computed.
                     "vertical": vertical,
                     # Additive: True when the run's bbox is fully
                     # outside the active clip (invisible). The renderer filters
@@ -525,9 +550,9 @@ class _TextEditState:
         # rewriter into the CORRECT resources (page, or the form COPY).
         self.pending_font: tuple[str, object] | None = None
         # Original form names superseded by edit copies — _finalize_page_
-        # rewrite drops them when unreferenced (review-measured: without
-        # this every nested edit left the prior copy fully embedded, and a
-        # convert stranded a whole font subset per orphan).
+        # rewrite drops them when unreferenced (without this every nested
+        # edit leaves the prior copy fully embedded, and a convert strands a
+        # whole font subset per orphan).
         self.superseded_forms: set = set()
 
 
@@ -562,9 +587,9 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
     global state across recursion levels would corrupt both the width math
     and the count agreement); applies the edit at the target and Δ-adjusts
     subsequent same-line Td/TD anchors within this stream. `base_ctm` is
-    form-matrix-composed like the lister's — nothing here READS ctm today
-    (all Δ math is text-space; review-verified inert), but a divergent ctm
-    is exactly the latent trap the next rewriter feature would fall into."""
+    form-matrix-composed like the lister's — nothing here READS ctm (all Δ
+    math is text-space), but a divergent ctm is exactly the latent trap the
+    next rewriter feature would fall into."""
     gts = _child_state(base_ctm, parent_state, lookup=_resource_lookup(resources, fallback))
     kept: list = []
     changed = False
@@ -667,10 +692,8 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                     eff_size = (
                         edit.style_size if edit.style_size is not None else gts.font_size
                     )
-                    new_raw = (
-                        cap.decoded_width(encoded) / 1000.0 * eff_size
-                        + gts.char_spacing * cap.code_count(encoded)
-                        + gts.word_spacing * _spaces_in(encoded, cap)
+                    new_raw = string_advance(
+                        cap, encoded, eff_size, gts.char_spacing, gts.word_spacing
                     )
                     styled = edit.style_size is not None or edit.style_color is not None
                     if styled:
@@ -710,7 +733,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                         pass
             cap = fonts.capability_of(gts.font)
             _text, raw = _run_metrics(operator, operands, cap, gts)
-            gts.advance_after_show(raw, bool(cap is not None and cap.vertical))
+            gts.advance_after_show(raw, bool(cap is not None and cap.writes_vertical))
             kept.append(instruction)
             edit.seen += 1
             continue

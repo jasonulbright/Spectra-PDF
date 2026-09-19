@@ -38,13 +38,13 @@ export const PANEL_STRINGS = {
   // three states a configured-but-unusable install can be in. Ghostscript is
   // a user-supplied prerequisite; nothing in the product ships it.
   'panel.common.gsRequired':
-    'This needs Ghostscript, which Spectra PDF does not include. Install it, then point Spectra PDF at it in Settings ▸ Engine.',
+    'This needs Ghostscript, which Spectra PDF does not include. Install it, then point Spectra PDF at it in Preferences ▸ Engine.',
   'panel.common.gsNotExecutable':
-    'The Ghostscript set in Settings ▸ Engine is not there any more. Choose the program again.',
+    'The Ghostscript set in Preferences ▸ Engine is not there any more. Choose the program again.',
   'panel.common.gsProbeFailed':
-    'The Ghostscript set in Settings ▸ Engine did not run. Check the install, then try again in Settings ▸ Engine.',
+    'The Ghostscript set in Preferences ▸ Engine did not run. Check the install, then try again in Preferences ▸ Engine.',
   'panel.common.gsTooOld':
-    'The Ghostscript set in Settings ▸ Engine is older than this version needs. Install a newer one.',
+    'The Ghostscript set in Preferences ▸ Engine is older than this version needs. Install a newer one.',
   'panel.common.gsSetUp': 'Set up Ghostscript',
   // The ONE explanation every bundled-colour-profile surface renders while the
   // profiles' separate licence is unaccepted. Three surfaces depend on them:

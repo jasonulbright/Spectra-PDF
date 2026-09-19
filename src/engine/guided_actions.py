@@ -182,7 +182,7 @@ _STEPS: dict[str, _Step] = {
                 "mrc_bg_div",
                 "mrc_fg_div",
                 "mrc_pdfa_safe",
-                # Slice E: the quality gate is a real switch on every surface
+                # The quality gate is a real switch on every surface
                 # `compress` reaches, watched folders and scheduled runs
                 # included — an unattended run is exactly where a silently
                 # degraded page would go unnoticed.

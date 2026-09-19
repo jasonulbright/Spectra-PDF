@@ -88,9 +88,10 @@ def _polygon_ops(polygons) -> list[str]:
     return ops
 
 
-def _contour_ops(contours, matrix, dx: float) -> list[str]:
-    """Em-normalized glyph contours, placed by `matrix` after a shift of `dx`
-    ems along the writing axis, as PDF path construction operators."""
+def _contour_ops(contours, matrix, shift: tuple[float, float]) -> list[str]:
+    """Em-normalized glyph contours, placed by `matrix` after a `shift` in
+    ems (`_glyph_shift`), as PDF path construction operators."""
+    dx, dy = shift
     ops: list[str] = []
     for contour in contours:
         for segment in contour:
@@ -99,12 +100,23 @@ def _contour_ops(contours, matrix, dx: float) -> list[str]:
                 ops.append("h")
                 continue
             if kind == "c":
-                points = [_apply(matrix, p[0] + dx, p[1]) for p in segment[1]]
+                points = [_apply(matrix, p[0] + dx, p[1] + dy) for p in segment[1]]
                 ops.append(" ".join(f"{_fmt(p[0])} {_fmt(p[1])}" for p in points) + " c")
                 continue
-            x, y = _apply(matrix, segment[1][0] + dx, segment[1][1])
+            x, y = _apply(matrix, segment[1][0] + dx, segment[1][1] + dy)
             ops.append(f"{_fmt(x)} {_fmt(y)} {'m' if kind == 'm' else 'l'}")
     return ops
+
+
+def _glyph_shift(source, capability, item, code: int, size: float) -> tuple[float, float]:
+    """Where one glyph of a show sits, in ems from the run's start: the pen
+    offset along the writing direction, and for vertical writing the glyph's
+    position vector too, which puts its vertical origin on the pen (ISO
+    32000-2 §9.7.4.3). Ems, because `matrix` applies the font size."""
+    if capability.writes_vertical:
+        origin = source.vertical_origin(code, item.data)
+        return (-origin[0], -origin[1] - item.x / size)
+    return (item.x / size, 0.0)
 
 
 def _colour_ops(capture) -> list[str]:
@@ -603,16 +615,8 @@ def _emit_text(out: list, operator: str, operands: list, state, strokes,
         if not contours:
             continue
         ctx.report.glyphs += 1
-        origin = source.vertical_origin(codes[0][0], item.data)
-        if capability.vertical:
-            ops.extend(_contour_ops(
-                contours,
-                mat_mult((1.0, 0.0, 0.0, 1.0, -origin[0] * size,
-                          (-origin[1] - item.x / size) * size), matrix),
-                0.0,
-            ))
-        else:
-            ops.extend(_contour_ops(contours, matrix, item.x / size))
+        ops.extend(_contour_ops(contours, matrix,
+                                _glyph_shift(source, capability, item, codes[0][0], size)))
 
     _advance(operator, operands, capability, state)
     if not ops:
@@ -647,6 +651,7 @@ def _contours_to_subpaths(source, matrix, operator, operands, capability, state)
         codes = capability.codes(item.data)
         if not codes:
             continue
+        dx, dy = _glyph_shift(source, capability, item, codes[0][0], size)
         for contour in source.contours(codes[0][0], item.data):
             built: list = []
             for segment in contour:
@@ -654,9 +659,9 @@ def _contours_to_subpaths(source, matrix, operator, operands, capability, state)
                     built.append(("h",))
                 elif segment[0] == "c":
                     built.append(("c", tuple(
-                        _apply(matrix, p[0] + item.x / size, p[1]) for p in segment[1])))
+                        _apply(matrix, p[0] + dx, p[1] + dy) for p in segment[1])))
                 else:
-                    point = _apply(matrix, segment[1][0] + item.x / size, segment[1][1])
+                    point = _apply(matrix, segment[1][0] + dx, segment[1][1] + dy)
                     built.append((segment[0], point))
             if built:
                 subpaths.append(built)
@@ -665,7 +670,7 @@ def _contours_to_subpaths(source, matrix, operator, operands, capability, state)
 
 def _advance(operator: str, operands: list, capability, state) -> None:
     _text, width = _run_metrics(operator, operands, capability, state)
-    state.advance_after_show(width, bool(capability.vertical))
+    state.advance_after_show(width, bool(capability.writes_vertical))
 
 
 # ── stream plumbing ────────────────────────────────────────────────────────

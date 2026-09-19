@@ -115,8 +115,8 @@ def _c(check: str, part: str, clause: str, coverage: str, params: dict,
 
 
 #: Preflight check → PDF/A clause. Every row here is a ``corpus`` citation:
-#: ISO 19005 is not held (see `docs/README.md`), so the clause is named and its
-#: text is not paraphrased.
+#: ISO 19005 is not held, so the clause is named and its text is not
+#: paraphrased.
 PREFLIGHT_CLAUSES: tuple[Citation, ...] = (
     _c("embedded_files", "PDF/A-1b", "6.1.11", FULL, {"allow": False},
        "The document carries no embedded file."),

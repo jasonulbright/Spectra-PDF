@@ -780,9 +780,8 @@ def _load_signer_from_pem(key_path: str, cert_path: str, password: str) -> "sign
     RAISING primitives (load_private_key_from_pemder_data /
     load_certs_from_pemder_data over bytes we read ourselves) with a directly
     constructed SimpleSigner — SimpleSigner.load has the SAME
-    swallow-and-log-return-None behavior load_pkcs12 had (confirmed in
-    source), which the slice-2 follow-up established as a stderr leak plus
-    dead error handling.
+    swallow-and-log-return-None behavior load_pkcs12 has (confirmed in
+    source): a stderr leak plus dead error handling.
 
     The signing certificate is the one whose public key MATCHES the private
     key — never positional. A PEM bundle has no structural key↔cert pairing

@@ -88,8 +88,8 @@ def run(cmd: list[str], *, what: str, budget: float, size_bytes: int = 0, pages:
         cwd: str | Path | None = None, text: bool = False) -> subprocess.CompletedProcess:
     """`subprocess.run` with a derived budget and an honest timeout message.
 
-    stdin is isolated: a bundled tool must never inherit the RPC pipe (the
-    distill review's finding, applied to every subprocess this module runs).
+    stdin is isolated for every subprocess this module runs: a bundled tool
+    that inherits the engine's RPC pipe can read the next request's bytes.
     `text` decodes stdout/stderr for the callers that read diagnostics as
     strings; the binary default is what a codec's stdout needs.
     """

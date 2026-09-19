@@ -195,7 +195,7 @@ def apply_ocr_layer(file: str, output: str, pages: list[dict]) -> dict:
             # attribute first — fs-level copies propagate attributes, so a
             # read-only SOURCE produces a read-only mirror file whose
             # promised refresh on the next run would otherwise fail with a
-            # bare access-denied (batch-mirror review finding).
+            # bare access-denied.
             if output_path.exists() and not os.access(output_path, os.W_OK):
                 os.chmod(output_path, stat.S_IWRITE)
             save_pdf(pdf, output_path)

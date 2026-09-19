@@ -973,13 +973,13 @@ def _identity_h_font(doc, widths: dict[int, int], default: int = 1000):
 
 
 class TestRedactMeasuresWithTheFont:
-    """Slice A. `redact.py` sized every show operator at a flat 0.5 em per
-    BYTE while `text_runs.py` computed the real advance in the same walk. The
-    guess ran NARROW on any face averaging more than half an em — every
-    monospace document, bold sans, and plain Helvetica by ~1.5 characters — so
-    text that a mark visibly covered fell outside the box the region was tested
-    against and SURVIVED, with `regions_applied: 1` reported as success. On a
-    2-byte CID font it ran 2× WIDE and deleted runs a mark never touched."""
+    """Redaction sizes each show operator by the real advance `text_runs.py`
+    computes in the same walk. A flat 0.5 em per BYTE runs NARROW on any face
+    averaging more than half an em — every monospace document, bold sans, and
+    plain Helvetica by ~1.5 characters — so text that a mark visibly covers
+    falls outside the box the region is tested against and SURVIVES, with
+    `regions_applied: 1` reported as success. On a 2-byte CID font it runs 2×
+    WIDE and deletes runs a mark never touches."""
 
     # face → (advance in 1000/em of the repeated glyph, the glyph)
     PIN_TABLE = {
@@ -1303,11 +1303,12 @@ def _cid_font(doc, widths: dict[int, int], mapping: dict[int, str],
 
 
 class TestRedactSplitsPartiallyCoveredRuns:
-    """Slice B. `redact.py` kept or dropped a WHOLE show operator, so a mark
-    on one name inside a line a generator emitted as a single `Tj` deleted the
-    line — the user got a word-sized black box over text that was no longer
-    there. Word-sized marks are exactly what a search produces, so this is the
-    dominant shape for the own feature, not an edge case."""
+    """Redaction splits a show operator rather than keeping or dropping it
+    WHOLE: a mark on one name inside a line a generator emitted as a single
+    `Tj` would otherwise delete the line, leaving a word-sized black box over
+    text that is no longer there. Word-sized marks are exactly what a search
+    produces, so this is the dominant shape for the own feature, not an edge
+    case."""
 
     LINE = "John Smith lives at 12 Oak Street Portland"
 

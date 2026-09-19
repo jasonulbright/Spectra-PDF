@@ -26,7 +26,7 @@ import pikepdf
 
 from .font_embedding import font_embedded
 from .font_fallback import classify_font_style, style_key
-from .pdf_fonts import _strip_subset_prefix
+from .pdf_fonts import _strip_subset_prefix, name_str
 
 # Resource dictionaries nest (a form inside a form inside a page). Real
 # documents are shallow; the cap stops a cyclic /Resources from walking
@@ -231,13 +231,17 @@ def _stream_resources(obj):
 
 
 def _record(font_obj, page_number: int, out: dict, font_dir: str | None) -> None:
-    """Fold one font into the grouped result. Identity is (raw name, type,
-    encoding, embedded) — one font referenced from forty pages is one row."""
-    raw_name = str(font_obj.get("/BaseFont", "")).lstrip("/")
+    """Fold one font into the grouped result. Identity is (the name's bytes,
+    type, encoding, embedded) — one font referenced from forty pages is one
+    row, and two names whose bytes differ are two rows even where they read
+    alike as text."""
+    base = font_obj.get("/BaseFont", "")
+    raw_name = name_str(base).lstrip("/")
     font_type = _font_type(font_obj)
     encoding = _encoding_name(font_obj)
     embedded = font_embedded(font_obj)
-    key = (raw_name, font_type, encoding, embedded)
+    identity = bytes(base) if isinstance(base, pikepdf.Name) else raw_name
+    key = (identity, font_type, encoding, embedded)
     entry = out.get(key)
     if entry is None:
         name = _strip_subset_prefix(raw_name) if raw_name else ""

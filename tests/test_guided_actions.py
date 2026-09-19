@@ -102,7 +102,7 @@ class TestValidateSteps:
                     "mrc_pdfa_safe": True,
                     "mrc_bg_div": 3,
                     "mrc_fg_div": 5,
-                    # Slice E — the quality gate is a real switch on every
+                    # The quality gate is a real switch on every
                     # surface `compress` reaches, watched folders and
                     # scheduled runs included.
                     "mrc_verify_text": True,

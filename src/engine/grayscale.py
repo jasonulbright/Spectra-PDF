@@ -70,12 +70,12 @@ def grayscale(
                 "-dQUIET",
                 "-dBATCH",
                 "-dSAFER",
-                f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % is a gs filename template char (distill review)
+                f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % is a gs filename template char
                 str(staged if staged is not None else forms_input),
             ]
 
             # Derived budget, not a fixed 300 s (budget.run isolates stdin —
-            # gs must never inherit the RPC pipe, the distill review's finding).
+            # gs must never inherit the RPC pipe).
             result = budget.gs(
                 cmd, what="Ghostscript (grayscale)", path=input_path, pages=info["pages"]
             )

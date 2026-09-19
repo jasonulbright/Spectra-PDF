@@ -211,7 +211,8 @@ def _span_bbox(
 
     Vertical: the run occupies one em-wide column centred on the pen
     and spans its advance sum DOWNWARD, the lister's convention; Tz never
-    applies vertically.
+    applies vertically. `Ts` lifts the column too: rise applies to the
+    vertical coordinate whatever the writing mode (ISO 32000-2 §9.3.7).
     """
     below, above = ink
     size = max(state.font_size, 0.01)
@@ -220,7 +221,9 @@ def _span_bbox(
         lo, hi = min(x0, x1), max(x0, x1)
         if hi - lo < 0.01:
             hi = lo + 0.01
-        return _bbox_of_corners_under_matrix(combined, -half, -hi, half, -lo)
+        return _bbox_of_corners_under_matrix(
+            combined, -half, state.rise - hi, half, state.rise - lo
+        )
     lo, hi = sorted((x0 * state.h_scale, x1 * state.h_scale))
     if hi - lo < 0.01:
         hi = lo + 0.01
@@ -289,6 +292,7 @@ def _split_instructions(
     clusters: list,
     removed: set,
     state: GraphicsTextState,
+    vertical: bool,
 ) -> list:
     """Re-emit a show operator with the marked clusters GONE and every
     surviving glyph still where it was.
@@ -297,6 +301,9 @@ def _split_instructions(
     contributed, so the pen arrives at the next surviving glyph at the same
     place it always did — `-N/1000 × Tfs` is the displacement a TJ number
     makes, and Tz multiplies that and the glyph advances alike, so it cancels.
+    The number subtracts from x, or from y for a font that writes vertically
+    (ISO 32000-2 Table 107), where the advance runs DOWN: the number that
+    carries a vertical advance has the opposite sign.
     Tc and Tw ride INSIDE the removed advance and are absorbed by the number;
     surviving glyphs keep their own because their own bytes are re-shown.
 
@@ -322,7 +329,7 @@ def _split_instructions(
     for index, cluster in enumerate(clusters):
         if index in removed:
             total = sum(items[i].advance for i in cluster)
-            parts.append(-total * 1000.0 / state.font_size)
+            parts.append((total if vertical else -total) * 1000.0 / state.font_size)
             continue
         for i in cluster:
             item = items[i]
@@ -894,7 +901,7 @@ def _walk(
                     if removed_clusters:
                         emitted = _split_instructions(
                             operator, operands, items, clusters,
-                            removed_clusters, state,
+                            removed_clusters, state, vertical,
                         )
                         if len(removed_clusters) < len(clusters):
                             text_runs_split += 1

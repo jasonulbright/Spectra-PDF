@@ -56,6 +56,20 @@ from pdfminer.psparser import LIT
 DEFAULT_WIDTH = 500.0
 
 
+def name_str(value) -> str:
+    """`str(value)`, with each byte of a name that is not UTF-8 read as U+FFFD.
+
+    A name is a sequence of bytes (ISO 32000-2 §7.3.5). Where a name is shown
+    as text, as a font's /BaseFont is, its bytes should be read as UTF-8, and a
+    producer can still write any other bytes there; `str` of a pikepdf name
+    decodes strictly and raises on those bytes. The text is for showing and
+    matching by eye: two names that differ only in such bytes read alike, so
+    identity stays with `bytes(value)`."""
+    if isinstance(value, pikepdf.Name):
+        return bytes(value).decode("utf-8", "replace")
+    return str(value)
+
+
 def _strip_subset_prefix(base_font: str) -> str:
     # "ABCDEF+Helvetica" → "Helvetica" (six uppercase letters + '+').
     if len(base_font) > 7 and base_font[6] == "+" and base_font[:6].isalpha() and base_font[:6].isupper():
@@ -726,8 +740,8 @@ def _refused(
 ) -> FontCapability:
     """A non-editable capability. `code_bytes` must still be RIGHT (2 for
     composite fonts): the run LISTER measures refused runs' widths for
-    their locked overlays, and 1-byte iteration over 2-byte CIDs doubled
-    every refused-Type0 rect (review-measured). A CMap's `code_space` and
+    their locked overlays, and 1-byte iteration over 2-byte CIDs doubles
+    every refused-Type0 rect. A CMap's `code_space` and
     `cid_of` stand in for it wherever the codes are not fixed-width.
 
     The WIDTHS are right too wherever the document declares them.
@@ -923,8 +937,8 @@ def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float], Opt
             td.charset = list(cffISOAdobeStrings[: td.numGlyphs])
         # cffLib hands back the STRING 'StandardEncoding'/'ExpertEncoding'
         # for the predefined encodings and a 256-list only for custom ones —
-        # enumerating the string mapped code 0→'S', 1→'t', … and ACCEPTED
-        # the garbage (pin-caught). Expand predefined names to their lists.
+        # enumerating the string maps code 0→'S', 1→'t', … and ACCEPTS
+        # the garbage. Expand predefined names to their lists.
         encoding = td.Encoding
         if isinstance(encoding, str):
             if encoding == "StandardEncoding":
@@ -1366,7 +1380,7 @@ def _simple_widths(font_obj, code2uni: dict[int, str]) -> tuple[dict[int, float]
     widths = _declared_simple_widths(font_obj)
     if widths:
         return widths, DEFAULT_WIDTH
-    base = _strip_subset_prefix(str(font_obj.get("/BaseFont", "")).lstrip("/"))
+    base = _strip_subset_prefix(name_str(font_obj.get("/BaseFont", "")).lstrip("/"))
     metrics = FONT_METRICS.get(base)
     if metrics is not None:
         _props, char_widths = metrics
@@ -1471,8 +1485,27 @@ def _cid_to_unicode_map(font_obj, vertical: bool) -> dict[int, str]:
 
         tt = TTFont(BytesIO(program.read_bytes()), fontNumber=0, lazy=True)
         best = tt.getBestCmap()  # {codepoint: glyphName}
+        top = tt["CFF "].cff.topDictIndex[0] if "CFF " in tt else None
     except Exception:
         return {}
+    if top is not None and hasattr(top, "ROS"):
+        # A CID-keyed CFF draws each CID through its own charset (ISO 32000-2
+        # §9.7.4.2), whatever the glyph's index; /CIDToGIDMap does not apply.
+        uni_of_name: dict[str, str] = {}
+        for cp, gname in sorted(best.items()):
+            uni_of_name.setdefault(gname, chr(cp))
+        out: dict[int, str] = {}
+        for gid, gname in enumerate(top.charset):
+            cid = gid
+            if gname.startswith("cid"):
+                try:
+                    cid = int(gname[3:])
+                except ValueError:
+                    cid = gid
+            ch = uni_of_name.get(gname)
+            if ch and gid != 0:
+                out.setdefault(cid, ch)
+        return out
     gid2uni: dict[int, str] = {}
     for cp, gname in best.items():
         try:
@@ -1583,8 +1616,8 @@ def font_capability(font_obj) -> FontCapability:
         if base_less_diffs is not None:
             # Build STRICTLY from the Differences names: pdfminer's merge
             # keeps the Standard-base value when a name fails to resolve
-            # (probe-caught — /qqz1 at 65 came back as 'A'), which would
-            # claim characters the font never defined.
+            # (/qqz1 at 65 reads as 'A'), which would claim characters the
+            # font never defined.
             from pdfminer.encodingdb import name2unicode
 
             code2uni = {}

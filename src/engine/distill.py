@@ -109,12 +109,12 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "") 
         raise ValueError(f"input file not found: {file}")
     # Resolve so the argv token can never start with '-' (a relative name
     # like `-r.ps` parses as a gs SWITCH — worst case a silently blank
-    # output that passes post-validation; review-reproduced), and so the
-    # same-file comparison below is honest.
+    # output that passes post-validation), and so the same-file comparison
+    # below is honest.
     input_path = input_path.resolve()
     if input_path == output_path.resolve():
         # ".ps in, .pdf out" is the contract; writing onto the source
-        # destroys it AND mis-reports input_size (review-reproduced).
+        # destroys it AND mis-reports input_size.
         raise ValueError("output must be a different file from the input")
 
     prefix = _read_prefix(input_path)
@@ -181,15 +181,14 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "") 
                 dst.write(chunk)
         gs_input = Path(stripped_tmp)
     # '%' is a TEMPLATE character in -sOutputFile (%d splits per page into
-    # renamed files while the literal name never appears — review-
-    # reproduced with the dialog's own default naming); escape it so the
-    # user's path is literal.
+    # renamed files while the literal name never appears, the dialog's own
+    # default naming included); escape it so the user's path is literal.
     cmd.extend([f"-sOutputFile={str(output_path).replace('%', '%%')}", str(gs_input)])
 
     # stdin=DEVNULL is LOAD-BEARING, not hygiene: without it gs inherits
     # the ENGINE'S JSON-RPC stdin pipe, and -dSAFER does not sandbox the
-    # standard streams — a hostile PostScript program read the next RPC
-    # request's bytes off the wire (review-PROVEN, exfiltrated via gs
+    # standard streams — a hostile PostScript program reads the next RPC
+    # request's bytes off the wire (and can write them out through gs
     # stderr), which both leaks data and permanently hangs that request's
     # caller. EOF from DEVNULL closes the class.
     # The budget is DERIVED from the input (budget.run keeps the

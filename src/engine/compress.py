@@ -165,12 +165,12 @@ def compress(
                 preset = QUALITY_PRESETS.get(quality, "/ebook")
                 cmd.append(f"-dPDFSETTINGS={preset}")
 
-            cmd.extend([f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % = gs template char (distill review)
+            cmd.extend([f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % = gs template char
                         str(staged if staged is not None else forms_input)])
 
             # The budget is DERIVED from the input, never the fixed 300 s that
             # a 50 MB scan died on. stdin isolation lives in budget.run — gs
-            # must never inherit the RPC pipe (distill review).
+            # must never inherit the RPC pipe.
             result = budget.gs(cmd, what="Ghostscript (compress)", path=input_path, pages=info["pages"])
             if result.returncode != 0:
                 raise RuntimeError(f"Ghostscript failed: {result.stderr}")

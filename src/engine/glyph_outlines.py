@@ -22,6 +22,8 @@ from typing import Optional
 
 import pikepdf
 
+from engine.pdf_fonts import name_str
+
 # One subpath is a list of segments; a segment is ("m"|"l", (x, y)),
 # ("c", (p1, p2, p3)) or ("h",). Points are em-normalized, y up.
 Segment = tuple
@@ -46,7 +48,7 @@ class OutlineRefusal(ValueError):
 
 def _base_font_name(font_obj) -> str:
     try:
-        name = str(font_obj.get("/BaseFont", "")).lstrip("/")
+        name = name_str(font_obj.get("/BaseFont", "")).lstrip("/")
     except Exception:
         name = ""
     if not name:
@@ -189,7 +191,9 @@ def _to_contours(value, upem: float) -> Contours:
 
 
 class _SfntProgram(_Program):
-    """TrueType or OpenType, keyed by glyph ID."""
+    """TrueType or OpenType, keyed by glyph ID — or, when its CFF table is
+    CID-keyed, by CID through that table's charset (ISO 32000-2 §9.7.4.2
+    reads an OpenType program's CFF as it reads a bare one)."""
 
     def __init__(self, raw: bytes):
         from fontTools.ttLib import TTFont
@@ -203,6 +207,20 @@ class _SfntProgram(_Program):
         super().__init__(upem)
         self.glyph_set = self.tt.getGlyphSet()
         self.order = self.tt.getGlyphOrder()
+        self.is_cid = False
+        self.by_cid: dict[int, str] = {}
+        try:
+            if "CFF " in self.tt:
+                top = self.tt["CFF "].cff.topDictIndex[0]
+                self.is_cid = hasattr(top, "ROS")
+                if self.is_cid:
+                    self.by_cid = _cids_of(top.charset)
+        except Exception:
+            self.is_cid = False
+            self.by_cid = {}
+
+    def name_for_cid(self, cid: int) -> Optional[str]:
+        return self.by_cid.get(cid) if self.is_cid else None
 
     def name_for_gid(self, gid: int) -> Optional[str]:
         if 0 <= gid < len(self.order):
@@ -244,6 +262,22 @@ class _SfntProgram(_Program):
         return _record(self.glyph_set[name].draw, self.glyph_set, self.upem)
 
 
+def _cids_of(charset) -> dict[int, str]:
+    """CID → glyph name from a CID-keyed CFF's charset, which lists the glyphs
+    in glyph order. fontTools names each such glyph `cid` + its CID; a name
+    that is not spelled that way keeps its glyph index."""
+    by_cid: dict[int, str] = {}
+    for gid, name in enumerate(charset):
+        cid = gid
+        if name.startswith("cid"):
+            try:
+                cid = int(name[3:])
+            except ValueError:
+                cid = gid
+        by_cid[cid] = name
+    return by_cid
+
+
 class _CffProgram(_Program):
     """Bare CFF (Type1C), keyed by glyph name — or, when the CFF is CID-keyed,
     by CID through its charset."""
@@ -261,18 +295,8 @@ class _CffProgram(_Program):
         self.is_cid = hasattr(self.top, "ROS")
         self.by_cid: dict[int, str] = {}
         if self.is_cid:
-            # A CID-keyed CFF's charset IS the CID→glyph-name table, in glyph
-            # order. `cidXXXXX` names are conventional but not guaranteed, so
-            # the charset is read rather than the name parsed.
             try:
-                for gid, name in enumerate(self.top.charset):
-                    cid = gid
-                    if name.startswith("cid"):
-                        try:
-                            cid = int(name[3:])
-                        except ValueError:
-                            cid = gid
-                    self.by_cid[cid] = name
+                self.by_cid = _cids_of(self.top.charset)
             except Exception:
                 self.by_cid = {}
 
@@ -621,10 +645,10 @@ class GlyphSource:
 
     def _key_for_composite(self, code: int, data: bytes) -> object:
         cid = self._cid_for(code, data)
+        if getattr(self.program, "is_cid", False):
+            name = self.program.name_for_cid(cid)
+            return name if name is not None else ".notdef"
         if isinstance(self.program, _CffProgram):
-            if self.program.is_cid:
-                name = self.program.name_for_cid(cid)
-                return name if name is not None else ".notdef"
             # A non-CID CFF inside a composite font is glyph-ordered, so the
             # CID indexes the charset directly.
             try:

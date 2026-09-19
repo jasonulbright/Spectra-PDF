@@ -1,6 +1,6 @@
 // The RENDERER's own refusal messages.
 //
-// Slice D localized the ENGINE's refusals at the bridge; these are the ones
+// The ENGINE's refusals are localized at the bridge; these are the ones
 // the renderer builds itself, in leaf libs that no component test can reach
 // (there is no DOM test environment). What is asserted here is the property
 // that matters at the display site: the message a user reads follows the UI

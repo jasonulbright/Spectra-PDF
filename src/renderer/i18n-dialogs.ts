@@ -94,7 +94,7 @@ export const DIALOG_STRINGS = {
   'dialog.gsMissing.usedFor':
     'Installing it adds Compress, Grayscale, PDF/A and PDF/X, printing, page rasterization and image export, visual comparison, OCR and scan enhancement, transparency flattening, Rebuild, and PostScript conversion.',
   'dialog.gsMissing.route':
-    'Choose OK to open Settings ▸ Engine ▸ Ghostscript, where you can point Spectra PDF at an installed copy.',
+    'Choose OK to open Preferences ▸ Engine ▸ Ghostscript, where you can point Spectra PDF at an installed copy.',
   'dialog.gsMissing.dontAsk': 'Don’t ask again',
 
   // The consent for an operation that cannot keep a document's protection

@@ -78,7 +78,7 @@ def convert_pdfa(
             # claim; policy 2 names itself an abort but still writes a complete
             # file and still exits 0, so it refuses nothing.
             "-dPDFACompatibilityPolicy=1",
-            f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % is a gs filename template char (distill review)
+            f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % is a gs filename template char
             str(input_path),
         ]
 

@@ -291,8 +291,8 @@ def changed_it(run: ShapedRun, word: str) -> bool:
     exactly one character?" rather than "does glyph i spell word[i]?". A
     right-to-left run comes back in visual order, so a positional comparison
     calls plain Hebrew a change, and the caller then draws a reversed word
-    that the reorder was already going to handle correctly (pin-caught:
-    `שלום` authored as `םולש`). What actually matters is whether any glyph
+    that the reorder was already going to handle correctly (`שלום` authored
+    as `םולש`). What actually matters is whether any glyph
     stands for more or fewer than one character."""
     if len(run.glyphs) != len(word):
         return True

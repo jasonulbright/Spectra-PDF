@@ -25,7 +25,7 @@ Two divergences it caught while being written, both fixed here:
     means. The lookaround form says what was meant — not preceded, and not
     followed, by a word character.
 
-The built-in pattern set (of the brief) lives here too, because a pattern
+The built-in pattern set lives here too, because a pattern
 is a query by another name. Each one is VALIDATED where its format carries a
 checksum: a "credit card" pattern that fires on every 16-digit number teaches
 the user to ignore it, which is worse than not shipping it.

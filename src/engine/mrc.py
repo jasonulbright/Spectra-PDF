@@ -94,8 +94,8 @@ from engine.pdf_save import save_pdf
 #:
 #: `verify_threshold` is the floor `mrc_verify_text` reverts below,
 #: and it is set to catch a SEGMENTATION FAILURE, not an OCR wobble. Measured
-#: over the matrix (`mrc-matrix.local.py`, six sources × three presets × three
-#: codecs): the WORST good page any preset produced scored 0.9781 (the
+#: over six sources × three presets × three codecs: the WORST good page any
+#: preset produced scored 0.9781 (the
 #: greyscale scan under archival), while the failure this gate exists for — a
 #: page thresholded for type that is not there — returns near-nothing, which
 #: is why a misjudged page scores in the low hundredths. The floors sit
@@ -187,7 +187,7 @@ FLAT_INK_CHROMA_VARIANCE = 8.0
 # its scanned pages and byte-identical output on the rest.
 DECISION_MRC = "mrc"
 DECISION_UNTOUCHED = "untouched"
-#: Slice E. The page WAS a scan, its layers WERE built, and the text check
+#: The page WAS a scan, its layers WERE built, and the text check
 #: rejected them — a distinct decision from "untouched" because the two mean
 #: different things to whoever reads the report: one page had nothing to
 #: separate, the other had its separation refused.
@@ -1178,7 +1178,7 @@ def mrc_compress(
 
             similarity: float | None = None
             if verify_text:
-                # Slice E. Reconstruct what a viewer will draw from the bytes
+                # Reconstruct what a viewer will draw from the bytes
                 # about to be embedded, recognise both rasters, and REFUSE the
                 # page if the words did not survive. This runs BEFORE any
                 # object is created or any content stream is touched, so a

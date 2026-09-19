@@ -1,4 +1,4 @@
-"""Paragraph grouping + reflow (the last content-editing slice).
+"""Paragraph grouping + reflow.
 
 Groups the text runs of a page into PARAGRAPH BOXES — the industry
 editor's model — and re-lays-out a paragraph's text inside its box on
@@ -70,6 +70,7 @@ from engine.redact import (
     _lookup_xobject,
     _resolve_resources,
 )
+from engine.text_metrics import writing_sign
 from engine.text_runs import (
     SHOW_OPS,
     _child_state,
@@ -465,9 +466,12 @@ def _ptext_and_gaps(det) -> tuple[str, list[float], list[str], list[float]]:
     stretch: list[float] = []
     space_1000 = _space_advance_1000(cap) or FALLBACK_SPACE_1000
     size = style["size"]
+    # A TJ number moves the pen ON by -N thousandths of an em, and Tw by +Tw,
+    # along the writing direction; both change sign in vertical writing.
+    sign = writing_sign(cap)
     # Tw displaces once per single-byte space code, in unscaled text units;
     # 1000ths of em is this channel's unit, so it converts by the size.
-    tw_1000 = (style["word_spacing"] / size * 1000.0) if size > 1e-9 else 0.0
+    tw_1000 = (sign * style["word_spacing"] / size * 1000.0) if size > 1e-9 else 0.0
     threshold = WORD_GAP_FRACTION * space_1000
     segments = det["segments"]
     pending = 0.0  # advance consumed by the word gap currently being formed
@@ -482,7 +486,7 @@ def _ptext_and_gaps(det) -> tuple[str, list[float], list[str], list[float]]:
 
     for i, seg in enumerate(segments):
         if isinstance(seg, float):
-            gap = -seg  # negative TJ numbers push the pen RIGHT
+            gap = -sign * seg
             # A forward jump that lands on a glyph SPELLING NOTHING is mark
             # positioning, not a word gap: a combining mark carries its
             # horizontal offset as exactly this shape — jump, draw a
@@ -623,7 +627,8 @@ def _members_from(runs: list[dict], detail: list[dict], breaks=()) -> list[_Memb
         cap = det["cap"]
         if cap is None:
             continue  # no active font: degenerate, run-box surface
-        vertical = bool(cap.vertical)
+        # `writes_vertical`: a refused Identity-V run still draws down a column.
+        vertical = bool(cap.writes_vertical)
         # Admission is the shipped axis-alignment test, asked in the
         # member's OWN transposed frame instead of in page space. That one
         # move is the whole point: a 90°-rotated run of a horizontal font
@@ -1891,7 +1896,7 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
                 "its text direction"
             )
         elif any(m.vertical and m.rise_user != 0.0 for m in p.members):
-            # review: a vertical member's rise_user
+            # A vertical member's rise_user
             # carries a REAL-X displacement (its transposed-y offset from
             # the column baseline — e.g. a ruby/superscript run attached
             # BESIDE the column), but Ts displaces along the advance axis
@@ -2009,10 +2014,9 @@ def _absorb_tate_chu_yoko(
     """Re-frame every ADMISSIBLE tate-chu-yoko block into its
     column, as ONE atomic member. Returns whether anything moved.
 
-    Slice B made the silent case loud: before it, the block's linear key
-    differed from the column's, so the column grouped WITHOUT it and a
-    reflow moved the CJK text over or past a date that never moved. This is
-    the step that makes it WORK — the block groups with its column, the
+    Without it the block's linear key differs from the column's, so the
+    column groups WITHOUT it and a reflow moves the CJK text over or past a
+    date that never moves. With it the block groups with its column, the
     paragraph's text carries the year where the year is, and the block moves
     as a unit.
 
@@ -2398,7 +2402,7 @@ def list_text_paragraphs(file: str, page: int) -> dict:
 # member's position, and RESYNCS every kept op after the divergence
 # against a parallel walk of the original stream — two GraphicsTextState
 # machines, injections whenever the emitted state would differ where the
-# original op reads state. See the module docstring + design doc §7.5.
+# original op reads state. See the module docstring.
 
 
 def _cjk(ch: str) -> bool:
@@ -3045,6 +3049,12 @@ class _KernSource:
         self._cache: dict = {}
 
     def pairs_for(self, st: "_StyleRef") -> dict:
+        if st.member.vertical:
+            # The pairs a face yields are HORIZONTAL adjustments (GPOS `kern`,
+            # the `kern` table). A vertical member takes none, as authored
+            # vertical text takes none: applied down a column, a pair's
+            # adjustment moves a glyph by an amount stated for horizontal text.
+            return {}
         key = (st.member.index, st.fallback)
         hit = self._cache.get(key)
         if hit is not None:
@@ -3104,25 +3114,24 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
         # as [-x_off, glyph, x_off + width - advance]: the pen moves x_off,
         # then the /W width, then back by the correction, netting `advance`.
         #
-        # fix: this used to sum the /W widths instead, on the reasoning
-        # that /W is what the viewer adds up. Per glyph it is — but the TJ
-        # correction is part of the same pen walk, so the DRAWN advance is
-        # the shaper's, and measuring by /W disagreed by exactly the GPOS
-        # advance deltas. Probe-caught before the Latin path could reach it,
-        # and it was already live: IBM Plex Sans Arabic carries `kern`, and
-        # `مرحبا` measured 40/1000 em narrower than it drew — a wrap and
-        # justify error on shipped RTL. Latin makes it unmissable (Liberation
-        # Sans kerns `AVATAR` by ~297/1000). Tc applies once per GLYPH, Tw
-        # never (no space inside a word).
+        # Not the /W widths: /W is what the viewer adds up per glyph, but
+        # the TJ correction is part of the same pen walk, so the DRAWN
+        # advance is the shaper's, and a /W sum differs by exactly the GPOS
+        # advance deltas. IBM Plex Sans Arabic carries `kern`, and by /W
+        # `مرحبا` measures 40/1000 em narrower than it draws — a wrap and
+        # justify error; Liberation Sans kerns `AVATAR` by ~297/1000. Tc
+        # applies once per GLYPH, Tw never (no space inside a word).
         w = (
             st.shaped.advance_1000 / 1000.0 * s["size"]
             + s["char_spacing"] * len(st.shaped.glyphs)
         )
         return w * (s["h_scale"] * m.adv)
+    # Tc and Tw move the pen back in a vertical writing mode (§9.3.2, §9.3.3).
+    sign = -1.0 if m.vertical else 1.0
     if st.fallback is not None:
         fb = fallbacks.get(st.fallback)
         w1000 = fb.width_1000(ch) if fb is not None else 0.0
-        w = w1000 / 1000.0 * s["size"] + s["char_spacing"]
+        w = w1000 / 1000.0 * s["size"] + sign * s["char_spacing"]
     elif ch == " " and not _draws_space(m.cap):
         # Synthetic gap — emitted as a TJ kern, so no Tc/Tw applies.
         w = median_gap_1000 / 1000.0 * s["size"]
@@ -3130,11 +3139,11 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
         # text_width longest-matches — a single char measures as
         # char_width; an atomic ligature entry measures as its ONE code's
         # width with ONE char_spacing (one rendered glyph).
-        w = m.cap.text_width(ch) / 1000.0 * s["size"] + s["char_spacing"]
+        w = m.cap.text_width(ch) / 1000.0 * s["size"] + sign * s["char_spacing"]
         if ch == " " and m.cap.single_byte_codes():
             try:
                 if m.cap.encode(" ") == b" ":
-                    w += s["word_spacing"]
+                    w += sign * s["word_spacing"]
             except ValueError:
                 pass
     # The pair kern with the PRECEDING character, when both render in
@@ -4382,7 +4391,7 @@ class _Emission:
             # buffer — cap.encode's greedy matcher on the join could form
             # a ligature ACROSS entry boundaries (two same-run singles
             # from adjacent spans), emitting the lig code where the width
-            # math summed singles (repro'd: 4.2pt drift at 12pt). Each
+            # math summed singles (4.2pt drift at 12pt). Each
             # styled entry already carries its identity: an atomic
             # sequence entry longest-matches to exactly its lig code; a
             # single entry to its single code. Per-entry encode makes
@@ -4398,16 +4407,17 @@ class _Emission:
 
         # Kern numbers and the raw advance convert at the
         # ADVANCE axis's user scale — the member's transposed `adv`, times
-        # h_scale unless the FONT is vertical (Tz never applies there). The
-        # kern SIGN convention is the mirror (negative pushes the pen
-        # along the advance) in every orientation.
+        # h_scale unless the FONT is vertical (Tz never applies there). A TJ
+        # number N moves the pen along the advance by -N thousandths, and by
+        # +N in a vertical writing mode, where the advance runs down (ISO
+        # 32000-2 Table 107): the number carries the member's writing sign.
         axis = m.adv * (1.0 if m.vertical else s["h_scale"])
+        sign = -1.0 if m.vertical else 1.0
         # A pair kern splits the buffer and emits its own TJ number,
-        # exactly like the synthetic-gap kerns below. The sign convention is
-        # this loop's existing one — `items.append(-kern_1000)` — so a
-        # tightening (negative) kern becomes a POSITIVE TJ number, which moves
-        # the next glyph left. Widths already carry the same kern via
-        # _char_width_user, so what is measured is what is drawn.
+        # exactly like the synthetic-gap kerns below: a tightening (negative)
+        # kern becomes a number that moves the next glyph back. Widths
+        # already carry the same kern via _char_width_user, so what is
+        # measured is what is drawn.
         prev_enc = None
         for item in seg["items"]:
             if item[0] == "ch":
@@ -4416,7 +4426,7 @@ class _Emission:
                     k = self.kerns.between(prev_enc, ch_txt[0] if ch_txt else "", st)
                     if k:
                         flush()
-                        items.append(-k)
+                        items.append(-sign * k)
                 buf.append(ch_txt)
                 prev_enc = ch_txt[-1] if ch_txt else prev_enc
             else:
@@ -4425,7 +4435,7 @@ class _Emission:
                 gap_user = item[2]
                 denom = axis * s["size"]
                 kern_1000 = gap_user / denom * 1000.0 if denom else 0.0
-                items.append(-kern_1000)
+                items.append(-sign * kern_1000)
         flush()
         raw = seg["width"] / axis if axis else 0.0
         if m.atomic:
@@ -4442,7 +4452,7 @@ class _Emission:
                 w1000 = self.fallbacks[st.fallback].width_1000(text)
             else:
                 w1000 = m.cap.text_width(text)
-            raw = w1000 / 1000.0 * s["size"] + s["char_spacing"] * len(text)
+            raw = w1000 / 1000.0 * s["size"] + sign * s["char_spacing"] * len(text)
         return items, raw
 
 
@@ -4451,8 +4461,8 @@ class _Emission:
 _PAINT_OPS = frozenset(("f", "F", "f*", "B", "B*", "b", "b*", "S", "s", "sh"))
 # Path OBJECTS begin with m or re; between path construction and the paint
 # only path/clip operators are legal — so the pre-paint state resync must
-# fire BEFORE construction starts, never between `re` and `f`
-# (self-caught: the first injection landed inside the path object).
+# fire BEFORE construction starts, never between `re` and `f`: an
+# injection there lands inside the path object.
 _PATH_START_OPS = frozenset(("m", "re"))
 _LINE_OPS = frozenset(("Td", "TD", "T*", "Tm"))
 
@@ -4461,9 +4471,9 @@ _LINE_OPS = frozenset(("Td", "TD", "T*", "Tm"))
 # color setters that existed to serve the removed members. Any LATER
 # reader is preceded by a resync that re-derives them from the original
 # machine, so dropping is exact — and without the drop, every multi-run
-# paragraph edit leaked the span's interior operators into the output and
-# REPEATED edits compounded without bound (review-measured: +17 ops per
-# identical re-edit). Deliberately NOT droppable: q/Q (stack balance),
+# paragraph edit leaks the span's interior operators into the output and
+# REPEATED edits compound without bound (+17 ops per identical
+# re-edit). Deliberately NOT droppable: q/Q (stack balance),
 # BT/ET (structure), cm (the ctm-identity invariant between the two
 # machines), Do and paint ops (real content — an icon or underline rule
 # between runs must survive, resynced), gs (opaque state we don't model).
@@ -4696,9 +4706,9 @@ def _rewrite_paragraph_stream(
     # Consecutive state/positioning setters directly BEFORE the first
     # member styled/positioned that member — buffered, and DISCARDED when
     # the member arrives (they'd be dead weight; without this, every
-    # re-edit kept the prior emission's pre-show cluster and streams
-    # compounded anyway — the between-members drop alone wasn't enough,
-    # self-caught by the fixed-point test). Any other op flushes first,
+    # re-edit keeps the prior emission's pre-show cluster and streams
+    # compound anyway — the between-members drop alone is not enough, as
+    # the fixed-point test shows). Any other op flushes first,
     # so the buffer never spans structure.
     pending_setters: list = []
 
@@ -4858,7 +4868,7 @@ def _rewrite_paragraph_stream(
             # the members-are-never-vertical boundary: the emission
             # feed below advances the emit machine on the PARAGRAPH's
             # axis, so its model matches the emitted shows too.)
-            vert = bool(cap is not None and cap.vertical)
+            vert = bool(cap is not None and cap.writes_vertical)
             if is_member:
                 if show_ordinal == tgt.first_ordinal:
                     # THIS stream's share of the emission, anchored at
@@ -5453,8 +5463,8 @@ def _prepare_styled(
                 # absent from /W and would fall to DW — and papering over
                 # that with TJ corrections put a forward jump between two
                 # real glyphs, which the word-gap heuristic then read as
-                # a SPACE INSIDE THE WORD (probe-caught: `ونص` came back
-                # `ون ص`). So the new gids take their PROGRAM advance
+                # a SPACE INSIDE THE WORD (`ونص` reads back as `ون ص`).
+                # So the new gids take their PROGRAM advance
                 # here, and `/W` itself is AUGMENTED with the same
                 # numbers after the edit — measured, drawn, and re-read
                 # all become the one number.

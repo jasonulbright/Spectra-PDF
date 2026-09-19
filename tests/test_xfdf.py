@@ -1,4 +1,4 @@
-"""Rung 4 — XFDF annotation interchange: export, import, the review thread,
+"""XFDF annotation interchange: export, import, the review thread,
 and the round trip."""
 
 import xml.etree.ElementTree as ET

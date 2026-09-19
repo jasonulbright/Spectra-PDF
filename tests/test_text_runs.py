@@ -264,7 +264,7 @@ class TestReplaceTextRun:
     def test_direct_font_dicts_never_serve_a_stale_capability(self, tmp_dir):
         """DIRECT (non-indirect) /Font entries: the capability cache keyed
         transient wrapper id()s and served the WRONG font's tables —
-        review-measured at 22.6% wrong lookups, and a replace would write
+        22.6% wrong lookups, and a replace would write
         the wrong font's bytes into the file. Alternating direct fonts
         across many runs pins the stable-key fix."""
         src = os.path.join(tmp_dir, "t.pdf")
@@ -1012,3 +1012,150 @@ class TestTheFontTheTextStateHolds:
             ]
         assert len(embedded) == 1
         assert "LiberationSerif" in embedded[0]
+
+
+def _wide_font(pdf) -> pikepdf.Object:
+    """Every code 0.6 em wide, and no descriptor: pdfminer boxes each glyph
+    from the baseline to one em above it, exactly the listed em box."""
+    return pdf.make_indirect(
+        Dictionary(
+            Type=Name("/Font"), Subtype=Name("/Type1"), BaseFont=Name("/Wide"),
+            FirstChar=32, LastChar=126, Widths=Array([600] * 95),
+            Encoding=Name("/WinAnsiEncoding"),
+        )
+    )
+
+
+def _glyph_boxes(path: str) -> list:
+    """pdfminer's box of every glyph on page 1: an independent reading of
+    where ISO 32000-2 §9.4.4 puts each one."""
+    boxes: list = []
+
+    def visit(obj) -> None:
+        if isinstance(obj, LTChar):
+            boxes.append((obj.get_text(), obj.x0, obj.y0, obj.x1, obj.y1))
+            return
+        for child in getattr(obj, "_objs", None) or []:
+            visit(child)
+
+    for layout in extract_pages(path):
+        visit(layout)
+    return boxes
+
+
+def _vertical_font(pdf, to_unicode: bool = True) -> pikepdf.Object:
+    """Identity-V, every glyph 1 em down the column (/DW2). Without a
+    /ToUnicode the font is refused for editing and still writes downward."""
+    from test_pdf_fonts import _tounicode_stream
+
+    descendant = pdf.make_indirect(
+        Dictionary(
+            Type=Name("/Font"), Subtype=Name("/CIDFontType2"), BaseFont=Name("/VertFace"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+            DW2=Array([880, -1000]), W=Array([3, 5, 1000]),
+        )
+    )
+    font = Dictionary(
+        Type=Name("/Font"), Subtype=Name("/Type0"), BaseFont=Name("/VertFace"),
+        Encoding=Name("/Identity-V"), DescendantFonts=Array([descendant]),
+    )
+    if to_unicode:
+        font["/ToUnicode"] = _tounicode_stream(pdf, {3: "あ", 4: "い", 5: "う"})
+    return pdf.make_indirect(font)
+
+
+class TestTheClickBoxCoversEveryGlyph:
+    """The listed rect is the box the user clicks, so every glyph the show
+    draws lies inside it. At 12 pt and 0.6 em per glyph each glyph is 7.2
+    wide, and a TJ number moves the pen back as readily as forward: in
+    `[(AB) 1200 (C)]` A draws x 60..67.2, B 67.2..74.4, and C draws over A,
+    so the net advance of 7.2 ends the pen short of B."""
+
+    # (show, the box: the pen's path from x 60 joined with every glyph's box)
+    SHAPES = [
+        pytest.param(b"[(AB) 1200 (C)] TJ", (60, 300, 74.4, 312), id="back-over-drawn-glyphs"),
+        pytest.param(b"[(A) 1800 (B)] TJ", (45.6, 300, 67.2, 312), id="back-past-the-start"),
+        pytest.param(b"[1200 (A)] TJ", (45.6, 300, 60, 312), id="back-at-the-start"),
+        pytest.param(b"[(AB) 1200] TJ", (60, 300, 74.4, 312), id="back-at-the-end"),
+        pytest.param(b"[(A) -1200 (B)] TJ", (60, 300, 88.8, 312), id="forward-inside"),
+        pytest.param(b"[-1200 (A)] TJ", (60, 300, 81.6, 312), id="forward-at-the-start"),
+        pytest.param(b"[(A) -1200] TJ", (60, 300, 81.6, 312), id="forward-at-the-end"),
+        pytest.param(b"50 Tz [(AB) 1200 (C)] TJ", (60, 300, 67.2, 312), id="back-under-Tz"),
+        pytest.param(b"20 Ts (A) Tj", (60, 320, 67.2, 332), id="raised"),
+        pytest.param(b"-20 Ts (A) Tj", (60, 280, 67.2, 292), id="lowered"),
+        pytest.param(b"-3 Tc (ABC) Tj", (60, 300, 75.6, 312), id="tight-tracking"),
+    ]
+
+    @pytest.mark.parametrize("show, box", SHAPES)
+    def test_every_glyph_lies_inside_the_run_rect(self, tmp_dir, show, box):
+        src = os.path.join(tmp_dir, "shape.pdf")
+        pdf = pikepdf.new()
+        _page(pdf, b"BT /F1 12 Tf 60 300 Td " + show + b" ET", {"/F1": _wide_font(pdf)})
+        pdf.save(src)
+        pdf.close()
+        (run,) = list_text_runs(src, 1)["runs"]
+        x0, y0, x1, y1 = run["rect"]
+        glyphs = _glyph_boxes(src)
+        assert glyphs
+        for ch, gx0, gy0, gx1, gy1 in glyphs:
+            assert x0 - 0.01 <= gx0 and gx1 <= x1 + 0.01, (ch, run["rect"])
+            assert y0 - 0.01 <= gy0 and gy1 <= y1 + 0.01, (ch, run["rect"])
+        assert run["rect"] == pytest.approx(list(box), abs=0.01)
+
+    def test_the_box_still_spans_the_pen_path(self, tmp_dir):
+        # A trailing forward jump draws nothing, and the caret after the run
+        # still belongs at the pen's end: the box keeps the whole path.
+        src = os.path.join(tmp_dir, "path.pdf")
+        pdf = pikepdf.new()
+        _page(pdf, b"BT /F1 12 Tf 60 300 Td [(A) -1200] TJ ET", {"/F1": _wide_font(pdf)})
+        pdf.save(src)
+        pdf.close()
+        (run,) = list_text_runs(src, 1)["runs"]
+        assert run["rect"] == pytest.approx([60.0, 300.0, 81.6, 312.0], abs=0.01)
+
+    @pytest.mark.parametrize(
+        "show, column",
+        [
+            # Size 10, 1 em per glyph. A positive number moves the next glyph
+            # DOWN in vertical writing (Table 107): あ 700..690, い 685..675.
+            pytest.param(b"[<0003> 500 <0004>] TJ", (675.0, 700.0), id="number-moves-down"),
+            # A negative number moves it up, here past the start: い 710..700.
+            pytest.param(b"[<0003> -2000 <0004>] TJ", (690.0, 710.0), id="number-moves-up"),
+            # A positive Tc moves the pen UP in vertical writing (§9.3.2):
+            # い starts 7 below あ and draws 10 down to 683.
+            pytest.param(b"3 Tc <00030004> Tj", (683.0, 700.0), id="spacing-moves-up"),
+            # Ts moves the baseline up in either writing mode (§9.3.7).
+            pytest.param(b"5 Ts <0003> Tj", (695.0, 705.0), id="raised"),
+        ],
+    )
+    def test_a_vertical_run_covers_its_column(self, tmp_dir, show, column):
+        src = os.path.join(tmp_dir, "column.pdf")
+        pdf = pikepdf.new()
+        _page(pdf, b"BT /F1 10 Tf 100 700 Td " + show + b" ET", {"/F1": _vertical_font(pdf)})
+        pdf.save(src)
+        pdf.close()
+        (run,) = list_text_runs(src, 1)["runs"]
+        assert run["vertical"] is True
+        assert run["rect"] == pytest.approx([95.0, column[0], 105.0, column[1]], abs=0.01)
+
+    def test_a_refused_vertical_run_is_boxed_as_the_column_it_draws(self, tmp_dir):
+        src = os.path.join(tmp_dir, "refused.pdf")
+        pdf = pikepdf.new()
+        _page(
+            pdf,
+            b"BT /F1 10 Tf 100 700 Td <00030004> Tj <0005> Tj ET",
+            {"/F1": _vertical_font(pdf, to_unicode=False)},
+        )
+        pdf.save(src)
+        pdf.close()
+        runs = list_text_runs(src, 1)["runs"]
+        assert [r["editable"] for r in runs] == [False, False]
+        assert [r["vertical"] for r in runs] == [True, True]
+        # The second show flows DOWN the column after the first.
+        assert runs[0]["rect"] == pytest.approx([95.0, 680.0, 105.0, 700.0], abs=0.01)
+        assert runs[1]["rect"] == pytest.approx([95.0, 670.0, 105.0, 680.0], abs=0.01)
+        centres = [((b[1] + b[3]) / 2, (b[2] + b[4]) / 2) for b in _glyph_boxes(src)]
+        assert len(centres) == 3
+        for cx, cy in centres:
+            assert any(r["rect"][0] <= cx <= r["rect"][2] and r["rect"][1] <= cy <= r["rect"][3]
+                       for r in runs), (cx, cy)

@@ -45,7 +45,7 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 > Features marked **(requires Ghostscript)** need a Ghostscript installation,
 > which you install separately — it is not part of this download and is
 > licensed to you by its own publisher. Point the app at it under
-> Settings ▸ Engine, or let it find one on your machine; every marked feature
+> Preferences ▸ Engine, or let it find one on your machine; every marked feature
 > then works exactly as described. Until then each one is disabled and says so
 > by name — nothing here is removed or silently degraded.
 

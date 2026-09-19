@@ -5,10 +5,9 @@ inheritable per the PDF spec: a page dict lacking its own entry takes it
 from the nearest ancestor /Pages node that has one — common output from
 generators that hoist a single shared dict onto the tree rather than
 duplicating it per page. ``page.obj.get`` alone only ever sees the page's
-OWN dict, which silently misreads such files (redaction's inherited-
-/Resources false negative was caught by review; watermark needs the same
-walk for /Rotate and the boxes). One implementation here so a future fix
-propagates to every consumer.
+OWN dict, which silently misreads such files (an inherited /Resources is a
+redaction false negative; watermark needs the same walk for /Rotate and the
+boxes). One implementation here so a future fix propagates to every consumer.
 """
 
 import pikepdf

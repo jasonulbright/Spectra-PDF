@@ -14,9 +14,9 @@ Formats:
 
 The user's own ``%`` characters in the output name are escaped (``%%``) before
 our ``%d`` is appended — gs treats ``%`` as a template character, and a name
-like "Q4 50% off.png" would otherwise silently splinter (the distill review's
-class). Page selection reuses the print dialog's strict ``parse_page_spec``
-(the lesson: a lax parse turns a typo into a whole-document run).
+like "Q4 50% off.png" would otherwise silently splinter. Page selection reuses
+the print dialog's strict ``parse_page_spec``: a lax parse turns a typo into a
+whole-document run.
 
 Every page is framed on its CropBox, which is the page the viewer shows. An
 image of the MediaBox of a cropped page is the wrong size and carries the

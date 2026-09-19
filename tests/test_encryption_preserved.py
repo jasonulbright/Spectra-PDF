@@ -542,6 +542,7 @@ DIRECT_SAVE_ALLOWED = {
     ("widget_faces.py", "regenerate_appearances_file", "pdf"),
     ("widget_faces.py", "stage_appearances_file", "pdf"),
     ("widget_faces.py", "harvest_appearances", "src"),
+    ("image_redact.py", "jbig2_bits", "scratch"),
     # An extracted single page staged for the profile conversion.
     ("separations.py", "_carry_off_configuration", "pdf"),
     # A rewrite of the renderer's own output, which the renderer produced

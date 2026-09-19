@@ -46,11 +46,11 @@ That method hands the WHOLE DOCUMENT to the provider. That is a different
 privacy posture from sending a digest, and it is deliberately not implemented
 here rather than being smuggled in behind the same configuration.
 
-Network posture (architecture doc 97)
--------------------------------------
-Doc 97 §2 assigns the HTTP client to Rust for ``/SubmitForm``, where the
-DESTINATION COMES FROM THE DOCUMENT and one audited client with an SSRF
-classifier is the answer. This client is categorically different: its
+Network posture
+---------------
+The HTTP client for ``/SubmitForm`` lives in Rust, where the DESTINATION
+COMES FROM THE DOCUMENT and one audited client with an SSRF classifier is the
+answer. This client is categorically different: its
 destination is user-configured and a document can neither name nor influence
 it. That is enforced structurally rather than by convention — **no method here
 accepts a URL**. Every endpoint is derived from the base URI held in

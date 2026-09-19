@@ -42,6 +42,7 @@ import pikepdf
 from pikepdf import Name  # noqa: F401  (re-exported for callers of the walk)
 
 from engine.font_embedding import font_embedded
+from engine.pdf_fonts import name_str
 from engine.pdf_version import parse_version, version_facts
 from engine.processing_steps import (
     CUSTOM,
@@ -337,7 +338,7 @@ def walk_page_resources(
 def _font_name(font) -> str:
     try:
         bf = font.get("/BaseFont")
-        return str(bf).lstrip("/") if bf is not None else "(unnamed)"
+        return name_str(bf).lstrip("/") if bf is not None else "(unnamed)"
     except Exception:
         return "(unnamed)"
 
@@ -532,8 +533,9 @@ def _annotation_rows(pdf) -> tuple:
 
 def _javascript_sites(pdf) -> list:
     """Every place a document carries JavaScript, not only the catalog name
-    tree. F16 measured four sites where the name tree reports one, and a
-    profile that forbids scripting has to be told about all of them."""
+    tree. A document can carry scripts in four sites where the name tree
+    reports one, and a profile that forbids scripting has to be told about
+    all of them."""
     sites: list = []
 
     def note(where: str, obj) -> None:
