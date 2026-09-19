@@ -76,6 +76,29 @@ FunctionEnd
   ${EndIf}
 !macroend
 
+; The install record is written whole under a staging name, flushed, and
+; renamed over the record in one step. A record torn by an interrupted install
+; still marks the copy as installed while it carries no acceptance, and the
+; application offers no way to record one in that state.
+!macro SPECTRA_WRITE_INSTALL_RECORD
+  Delete "$INSTDIR\install-record.json.tmp"
+  ClearErrors
+  FileOpen $0 "$INSTDIR\install-record.json.tmp" w
+  ${IfNot} ${Errors}
+    FileWrite $0 '{$\r$\n'
+    FileWrite $0 '  "installed": true,$\r$\n'
+    FileWrite $0 '  "adobeIccEulaAccepted": true$\r$\n'
+    FileWrite $0 '}$\r$\n'
+    System::Call 'kernel32::FlushFileBuffers(p r0)'
+    FileClose $0
+    ; 9 = MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
+    System::Call 'kernel32::MoveFileExW(w "$INSTDIR\install-record.json.tmp", w "$INSTDIR\install-record.json", i 9) i .r1'
+    ${If} $1 == 0
+      Delete "$INSTDIR\install-record.json.tmp"
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
   ; The install record. Its PRESENCE is how the application knows it was
   ; installed rather than unzipped -- the portable zip carries the same payload
@@ -90,15 +113,7 @@ FunctionEnd
   ; without. So an installed application never presents the in-app licence
   ; dialog; the portable container, which has no record, presents it on first
   ; run and writes its own.
-  ClearErrors
-  FileOpen $0 "$INSTDIR\install-record.json" w
-  ${IfNot} ${Errors}
-    FileWrite $0 '{$\r$\n'
-    FileWrite $0 '  "installed": true,$\r$\n'
-    FileWrite $0 '  "adobeIccEulaAccepted": true$\r$\n'
-    FileWrite $0 '}$\r$\n'
-    FileClose $0
-  ${EndIf}
+  !insertmacro SPECTRA_WRITE_INSTALL_RECORD
 
   ; Context menu: "Open with Spectra PDF"
   WriteRegStr HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Open" "" "Open with Spectra PDF"
@@ -150,6 +165,7 @@ FunctionEnd
   ; file cannot make a later portable copy in the same folder believe it was
   ; installed -- and believe its colour-profile licence was accepted.
   Delete "$INSTDIR\install-record.json"
+  Delete "$INSTDIR\install-record.json.tmp"
 
   ; Silent uninstall with /removeuserdata: set the checkbox state variable
   ; so Tauri's built-in post-uninstall logic handles the actual deletion.

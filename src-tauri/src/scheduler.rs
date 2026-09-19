@@ -169,6 +169,83 @@ fn reclaim_action_stages(dir: &Path, own: u32, running: impl Fn(u32) -> bool) ->
     crate::staging::reclaim(dir, own, action_staging_owner, running)
 }
 
+/// Whether `entry` in `dir` is a stage from a version that staged an action
+/// as `<task>.json.new`, with the task's action file beside it.
+///
+/// Those versions removed the action file before renaming the stage over it,
+/// so a kill between the two left the stage as the only copy of the action a
+/// registered task reads. A stage with no action file beside it is never
+/// taken.
+fn legacy_action_stage(dir: &Path, entry: &str) -> bool {
+    entry
+        .strip_suffix(".json.new")
+        .is_some_and(|task| valid_task_name(task) && dir.join(format!("{task}.json")).is_file())
+}
+
+/// Remove the legacy action stages that have outlived any registration.
+fn reclaim_legacy_action_stages(dir: &Path, now: std::time::SystemTime) -> usize {
+    crate::staging::reclaim_aged(
+        dir,
+        |entry| legacy_action_stage(dir, entry),
+        crate::staging::LEGACY_STAGE_AGE,
+        now,
+    )
+}
+
+/// A frozen action on its way to disk for one task registration.
+#[derive(Debug)]
+enum ActionWrite {
+    /// No action file existed, so the action is written in place before the
+    /// task is registered: a registered task never lacks its action. A
+    /// refused registration removes it again.
+    Placed(PathBuf),
+    /// An action file exists and a task may be reading it. The replacement
+    /// waits beside it, flushed, and takes its name in one rename once
+    /// Windows accepts the task.
+    Staged { stage: PathBuf, action: PathBuf },
+}
+
+impl ActionWrite {
+    fn begin(action: &Path, json: &str) -> Result<Self, String> {
+        let placed = crate::staging::create_record(action, |staged| {
+            crate::staging::write_stage(staged, json.as_bytes())
+        });
+        match placed {
+            Ok(()) => return Ok(Self::Placed(action.to_path_buf())),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("Could not write the action file: {e}")),
+        }
+        let stage = action_staging_path(action, std::process::id());
+        if let Err(e) = crate::staging::write_stage(&stage, json.as_bytes()) {
+            let _ = std::fs::remove_file(&stage);
+            return Err(format!("Could not write the action file: {e}"));
+        }
+        Ok(Self::Staged {
+            stage,
+            action: action.to_path_buf(),
+        })
+    }
+
+    /// Undo after Windows refused the task.
+    fn abandon(self) {
+        let written = match self {
+            Self::Placed(action) => action,
+            Self::Staged { stage, .. } => stage,
+        };
+        let _ = std::fs::remove_file(written);
+    }
+
+    /// Finish after Windows accepted the task.
+    fn land(self) -> std::io::Result<()> {
+        match self {
+            Self::Placed(_) => Ok(()),
+            Self::Staged { stage, action } => std::fs::rename(&stage, &action).inspect_err(|_| {
+                let _ = std::fs::remove_file(&stage);
+            }),
+        }
+    }
+}
+
 /// A task name we are willing to create or delete. Deliberately strict: this
 /// gates a `schtasks /Delete`, and the standing rule after a session wiped
 /// archived installers with a glob is that a destructive call names exactly
@@ -488,21 +565,17 @@ pub async fn create_scheduled_run(
         .to_string();
     let _ = app;
 
-    // Stage the frozen action beside its final name and swap it in only after
-    // Windows accepts the task: a failed registration must not clobber the
-    // file an EXISTING schedule of the same name is still reading.
-    let mut staged_action: Option<(PathBuf, PathBuf)> = None;
+    // A failed registration must not clobber the file an EXISTING schedule of
+    // the same name is still reading; see `ActionWrite`.
+    let mut staged_action: Option<ActionWrite> = None;
     if profile.run_type == "action" {
         if let Some(json) = action_json.as_deref().filter(|j| !j.trim().is_empty()) {
             let final_path = PathBuf::from(&profile.action_file);
-            let staging = action_staging_path(&final_path, std::process::id());
             if let Some(parent) = final_path.parent() {
                 std::fs::create_dir_all(parent)
                     .map_err(|e| format!("Could not create the scheduled-actions folder: {e}"))?;
             }
-            std::fs::write(&staging, json)
-                .map_err(|e| format!("Could not write the action file: {e}"))?;
-            staged_action = Some((staging, final_path));
+            staged_action = Some(ActionWrite::begin(&final_path, json)?);
         }
     }
 
@@ -522,8 +595,8 @@ pub async fn create_scheduled_run(
         password.clone(),
     );
     if outcome.is_err() {
-        if let Some((staging, _)) = &staged_action {
-            let _ = std::fs::remove_file(staging);
+        if let Some(write) = staged_action.take() {
+            write.abandon();
         }
     }
     outcome.map_err(|e| {
@@ -543,13 +616,8 @@ pub async fn create_scheduled_run(
             e
         }
     })?;
-    if let Some((staging, final_path)) = staged_action {
-        // Windows refuses a rename onto an existing file — clear the old
-        // frozen copy first (the replace case).
-        if final_path.is_file() {
-            let _ = std::fs::remove_file(&final_path);
-        }
-        std::fs::rename(&staging, &final_path).map_err(|e| {
+    if let Some(write) = staged_action {
+        write.land().map_err(|e| {
             format!(
                 "The schedule was created but its action file could not be placed: {e}\n\
                  Delete and recreate the schedule."
@@ -865,6 +933,7 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
     if let Ok(dir) = actions_dir() {
         reclaim_action_stages(&dir, std::process::id(), crate::staging::process_running);
+        reclaim_legacy_action_stages(&dir, std::time::SystemTime::now());
     }
     let out = match run(schtasks().args([
         "/Query",
@@ -1383,5 +1452,115 @@ mod tests {
             .to_str()
             .unwrap()
             .to_string()
+    }
+
+    fn listing(dir: &Path) -> std::collections::BTreeSet<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_new_schedule_s_action_is_on_disk_before_its_task_registers() {
+        let dir = tempfile::tempdir().unwrap();
+        let action = dir.path().join("Nightly.json");
+        let write = ActionWrite::begin(&action, "{\"steps\":[1]}").unwrap();
+        assert!(matches!(write, ActionWrite::Placed(_)), "{write:?}");
+        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[1]}");
+        write.land().unwrap();
+        assert_eq!(listing(dir.path()), ["Nightly.json".to_string()].into());
+
+        // A refused registration takes the placed file back out.
+        let refused = dir.path().join("Refused.json");
+        ActionWrite::begin(&refused, "{}").unwrap().abandon();
+        assert!(!refused.exists());
+    }
+
+    #[test]
+    fn a_replaced_action_stays_whole_until_its_task_is_accepted() {
+        let dir = tempfile::tempdir().unwrap();
+        let action = dir.path().join("Nightly.json");
+        std::fs::write(&action, b"{\"steps\":[\"old\"]}").unwrap();
+
+        let write = ActionWrite::begin(&action, "{\"steps\":[\"new\"]}").unwrap();
+        assert!(matches!(write, ActionWrite::Staged { .. }), "{write:?}");
+        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[\"old\"]}");
+        write.land().unwrap();
+        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[\"new\"]}");
+        assert_eq!(listing(dir.path()), ["Nightly.json".to_string()].into());
+
+        ActionWrite::begin(&action, "{\"steps\":[\"refused\"]}")
+            .unwrap()
+            .abandon();
+        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[\"new\"]}");
+        assert_eq!(listing(dir.path()), ["Nightly.json".to_string()].into());
+    }
+
+    #[test]
+    fn a_stage_that_cannot_be_written_or_landed_leaves_the_action_as_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let action = dir.path().join("Nightly.json");
+        std::fs::write(&action, b"{\"steps\":[\"old\"]}").unwrap();
+
+        let stage = action_staging_path(&action, std::process::id());
+        std::fs::create_dir(&stage).unwrap();
+        assert!(ActionWrite::begin(&action, "{\"steps\":[\"new\"]}").is_err());
+        std::fs::remove_dir(&stage).unwrap();
+
+        let write = ActionWrite::begin(&action, "{\"steps\":[\"new\"]}").unwrap();
+        let mut permissions = std::fs::metadata(&action).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&action, permissions.clone()).unwrap();
+        assert!(write.land().is_err());
+        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[\"old\"]}");
+        assert_eq!(listing(dir.path()), ["Nightly.json".to_string()].into());
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&action, permissions).unwrap();
+    }
+
+    #[test]
+    fn only_a_legacy_stage_beside_its_action_file_is_one_to_take() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Nightly v1.2.json"), "{}").unwrap();
+        // A name no schedule can carry, even with a file of that name beside it.
+        std::fs::write(dir.path().join("a+b.json"), "{}").unwrap();
+        assert!(legacy_action_stage(dir.path(), "Nightly v1.2.json.new"));
+        for other in [
+            "a+b.json.new",
+            // The only copy of a registered task's action.
+            "Orphaned.json.new",
+            "Nightly v1.2.json.4300.new",
+            "Nightly v1.2.json",
+            "Nightly v1.2.json.new.bak",
+            "Nightly v1.2.JSON.NEW",
+            "..\\Nightly v1.2.json.new",
+            ".json.new",
+        ] {
+            assert!(!legacy_action_stage(dir.path(), other), "{other}");
+        }
+    }
+
+    #[test]
+    fn a_listing_reclaims_a_legacy_stage_only_once_it_is_old_enough() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "Nightly.json",
+            "Nightly.json.new",
+            "Orphaned.json.new",
+            "Weekly.json",
+        ] {
+            std::fs::write(dir.path().join(name), "{}").unwrap();
+        }
+        let now = std::time::SystemTime::now();
+        assert_eq!(reclaim_legacy_action_stages(dir.path(), now), 0);
+        let later = now + crate::staging::LEGACY_STAGE_AGE + std::time::Duration::from_secs(60);
+        assert_eq!(reclaim_legacy_action_stages(dir.path(), later), 1);
+        assert_eq!(
+            listing(dir.path()),
+            ["Nightly.json", "Orphaned.json.new", "Weekly.json"]
+                .map(String::from)
+                .into()
+        );
     }
 }

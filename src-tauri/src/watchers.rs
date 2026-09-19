@@ -69,22 +69,53 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join(CONFIG_FILE))
 }
 
-fn read_config(app: &AppHandle) -> Result<Vec<WatchedFolder>, String> {
-    let path = config_path(app)?;
-    if !path.is_file() {
-        return Ok(vec![]);
+/// The folders the config at `path` lists. No file lists none. A file that
+/// exists but cannot be read or parsed is an error rather than an empty list,
+/// so no save can write a shorter list over folders nobody read.
+fn read_config_at(path: &Path) -> Result<Vec<WatchedFolder>, String> {
+    match crate::staging::read_record(path) {
+        Ok(None) => Ok(vec![]),
+        Ok(Some(bytes)) => serde_json::from_slice(&bytes)
+            .map_err(|e| format!("{} is not valid: {e}", path.display())),
+        Err(e) => Err(format!("Cannot read {}: {e}", path.display())),
     }
-    let raw = std::fs::read_to_string(&path).map_err(|e| format!("Cannot read {CONFIG_FILE}: {e}"))?;
-    serde_json::from_str(&raw).map_err(|e| format!("{CONFIG_FILE} is not valid: {e}"))
 }
 
-fn write_config(app: &AppHandle, folders: &[WatchedFolder]) -> Result<(), String> {
-    let path = config_path(app)?;
+fn write_config_at(path: &Path, folders: &[WatchedFolder]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create the config folder: {e}"))?;
     }
     let body = serde_json::to_string_pretty(folders).map_err(|e| e.to_string())?;
-    std::fs::write(&path, body).map_err(|e| format!("Cannot write {CONFIG_FILE}: {e}"))
+    crate::staging::write_record(path, body.as_bytes())
+        .map_err(|e| format!("Cannot write {}: {e}", path.display()))
+}
+
+fn read_config(app: &AppHandle) -> Result<Vec<WatchedFolder>, String> {
+    read_config_at(&config_path(app)?)
+}
+
+/// Held across each read-modify-write of the config. Two saves that each read
+/// the list and write it back would otherwise keep only the later change.
+static CONFIG_EDIT: Mutex<()> = Mutex::new(());
+
+/// Add `folder`, or replace the entry with its id, in the config at `path`.
+fn upsert_at(path: &Path, folder: &WatchedFolder) -> Result<(), String> {
+    let _editing = CONFIG_EDIT.lock().unwrap_or_else(|e| e.into_inner());
+    let mut folders = read_config_at(path)?;
+    if let Some(existing) = folders.iter_mut().find(|f| f.id == folder.id) {
+        *existing = folder.clone();
+    } else {
+        folders.push(folder.clone());
+    }
+    write_config_at(path, &folders)
+}
+
+/// Drop the entry with `id` from the config at `path`.
+fn remove_at(path: &Path, id: &str) -> Result<(), String> {
+    let _editing = CONFIG_EDIT.lock().unwrap_or_else(|e| e.into_inner());
+    let mut folders = read_config_at(path)?;
+    folders.retain(|f| f.id != id);
+    write_config_at(path, &folders)
 }
 
 /// Canonicalize as far as the path actually EXISTS, then re-append the rest.
@@ -233,6 +264,13 @@ fn action_file_for(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
     Ok(file)
 }
 
+/// Write the frozen action a watcher's runs read. A run the replaced watcher
+/// spawned may be reading the file while it is rewritten.
+fn freeze_action(action_file: &Path, action: &serde_json::Value) -> std::io::Result<()> {
+    let body = serde_json::to_string_pretty(action).map_err(std::io::Error::other)?;
+    crate::staging::write_record(action_file, body.as_bytes())
+}
+
 fn run_once(exe: &Path, folder: &WatchedFolder, action_file: &Path) {
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("run-action")
@@ -284,13 +322,11 @@ fn spawn_watcher(app: &AppHandle, folder: WatchedFolder) {
         return;
     };
     // Freeze the action beside the config (idempotent — upsert rewrites it).
-    if std::fs::write(
-        &action_file,
-        serde_json::to_string_pretty(&folder.action).unwrap_or_default(),
-    )
-    .is_err()
-    {
-        eprintln!("watched folder '{}': could not write its action file", folder.name);
+    if let Err(e) = freeze_action(&action_file, &folder.action) {
+        eprintln!(
+            "watched folder '{}': could not write its action file: {e}",
+            folder.name
+        );
         return;
     }
 
@@ -341,8 +377,17 @@ fn stop_watcher(app: &AppHandle, id: &str) {
 }
 
 /// Start every enabled watcher — the app-setup hook.
+///
+/// A config that cannot be read starts nothing and is left as it is; the
+/// dialog reports the same error when it lists the folders.
 pub fn start_all(app: &AppHandle) {
-    let Ok(folders) = read_config(app) else { return };
+    let folders = match read_config(app) {
+        Ok(folders) => folders,
+        Err(e) => {
+            eprintln!("watched folders: none started: {e}");
+            return;
+        }
+    };
     for folder in folders.into_iter().filter(|f| f.enabled) {
         if validate_folder(&folder).is_ok() {
             spawn_watcher(app, folder);
@@ -360,14 +405,8 @@ pub async fn list_watched_folders(app: AppHandle) -> Result<Vec<WatchedFolder>, 
 #[tauri::command]
 pub async fn upsert_watched_folder(app: AppHandle, folder: WatchedFolder) -> Result<(), String> {
     validate_folder(&folder)?;
-    let mut folders = read_config(&app)?;
+    upsert_at(&config_path(&app)?, &folder)?;
     stop_watcher(&app, &folder.id);
-    if let Some(existing) = folders.iter_mut().find(|f| f.id == folder.id) {
-        *existing = folder.clone();
-    } else {
-        folders.push(folder.clone());
-    }
-    write_config(&app, &folders)?;
     if folder.enabled {
         spawn_watcher(&app, folder);
     }
@@ -379,9 +418,7 @@ pub async fn delete_watched_folder(app: AppHandle, id: String) -> Result<(), Str
     // A renderer-supplied string otherwise reaches `remove_file` unchecked.
     validate_watcher_id(&id)?;
     stop_watcher(&app, &id);
-    let mut folders = read_config(&app)?;
-    folders.retain(|f| f.id != id);
-    write_config(&app, &folders)?;
+    remove_at(&config_path(&app)?, &id)?;
     if let Ok(file) = action_file_for(&app, &id) {
         let _ = std::fs::remove_file(file);
     }
@@ -500,5 +537,122 @@ mod tests {
         assert_eq!(scan.len(), 2);
         assert_eq!(scan.get("a.pdf"), Some(&5));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    fn entry(id: &str, name: &str) -> WatchedFolder {
+        let mut entry = folder("C:\\in", "C:\\out", "C:\\done");
+        entry.id = id.into();
+        entry.name = name.into();
+        entry
+    }
+
+    fn listed(path: &Path) -> Vec<(String, String)> {
+        read_config_at(path)
+            .unwrap()
+            .into_iter()
+            .map(|f| (f.id, f.name))
+            .collect()
+    }
+
+    #[test]
+    fn an_absent_config_lists_nothing_and_an_unreadable_one_refuses_every_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        assert!(read_config_at(&path).unwrap().is_empty());
+
+        let torn = b"[{\"id\":\"w1\",\"name\":\"Int";
+        std::fs::write(&path, torn).unwrap();
+        let refused = read_config_at(&path).unwrap_err();
+        assert!(refused.contains(&path.display().to_string()), "{refused}");
+        assert!(upsert_at(&path, &entry("w2", "Second")).is_err());
+        assert!(remove_at(&path, "w1").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), torn);
+
+        // A config that exists but cannot be opened is not an absent one.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(read_config_at(&path).is_err());
+        assert!(upsert_at(&path, &entry("w2", "Second")).is_err());
+    }
+
+    #[test]
+    fn a_save_replaces_the_config_whole_and_keeps_the_other_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config").join(CONFIG_FILE);
+        upsert_at(&path, &entry("a", "First")).unwrap();
+        upsert_at(&path, &entry("b", "Second")).unwrap();
+        upsert_at(&path, &entry("a", "Renamed")).unwrap();
+        assert_eq!(
+            listed(&path),
+            vec![
+                ("a".to_string(), "Renamed".to_string()),
+                ("b".to_string(), "Second".to_string())
+            ]
+        );
+        remove_at(&path, "a").unwrap();
+        assert_eq!(listed(&path), vec![("b".to_string(), "Second".to_string())]);
+        let beside: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(beside, vec![std::ffi::OsString::from(CONFIG_FILE)]);
+    }
+
+    /// Both records go through the staged writer, which is also what reclaims
+    /// the stage a writer killed mid-write left beside each of them.
+    #[cfg(windows)]
+    #[test]
+    fn the_config_and_the_frozen_action_land_through_the_staged_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join(CONFIG_FILE);
+        let action_file = dir.path().join("w1.json");
+        let mut writer = std::process::Command::new("cmd")
+            .args(["/C", "exit 0"])
+            .spawn()
+            .unwrap();
+        writer.wait().unwrap();
+        let orphans = [
+            crate::staging::stage_path(&config, writer.id()),
+            crate::staging::stage_path(&action_file, writer.id()),
+        ];
+        for orphan in &orphans {
+            std::fs::write(orphan, b"[{\"id\":\"w1\"").unwrap();
+        }
+
+        upsert_at(&config, &entry("w1", "Intake")).unwrap();
+        let action = serde_json::json!({"name": "Strip", "steps": [{"op": "strip_metadata"}]});
+        freeze_action(&action_file, &action).unwrap();
+
+        assert!(orphans.iter().all(|orphan| !orphan.exists()));
+        assert_eq!(listed(&config), vec![("w1".to_string(), "Intake".to_string())]);
+        let frozen: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&action_file).unwrap()).unwrap();
+        assert_eq!(frozen, action);
+    }
+
+    #[test]
+    fn saves_that_overlap_keep_every_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = Arc::new(dir.path().join(CONFIG_FILE));
+        let savers: Vec<_> = (0..8)
+            .map(|n| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for k in 0..4 {
+                        upsert_at(&path, &entry(&format!("w{n}-{k}"), "Intake")).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for saver in savers {
+            saver.join().unwrap();
+        }
+        let mut ids: Vec<String> = listed(&path).into_iter().map(|(id, _)| id).collect();
+        ids.sort();
+        let mut expected: Vec<String> = (0..8)
+            .flat_map(|n| (0..4).map(move |k| format!("w{n}-{k}")))
+            .collect();
+        expected.sort();
+        assert_eq!(ids, expected);
     }
 }
