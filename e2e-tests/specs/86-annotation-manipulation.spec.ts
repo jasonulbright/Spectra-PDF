@@ -1,4 +1,4 @@
-// Annotation manipulation (rung 1): move, resize, multi-select, align,
+// Annotation manipulation: move, resize, multi-select, align,
 // z-order, keyboard delete — real W3C pointer gestures through the
 // manipulation handlers' window-level listeners, geometry asserted in the
 // state harness, and the moved rect proven IN THE SAVED FILE via the CLI's

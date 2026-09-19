@@ -55,7 +55,10 @@ import { SESSION_FILE, STARTUP_FILE } from '../support/app-data.js';
  * side, and asking a renderer about it would only prove what the renderer
  * believes. The staging file beside it is read the same way — a write that
  * lands by rename leaves nothing behind, and the check is that nothing is
- * there.
+ * there. The data root outlives every session of the suite, and the harness
+ * ends a session by terminating the app, which can land between a staged
+ * write and its rename. A staging file whose process is gone is therefore
+ * removed before this spec's first check: it is not a write this spec drove.
  */
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
@@ -92,6 +95,29 @@ function appIsRunning(): boolean {
     encoding: 'utf-8',
   });
   return out.toLowerCase().includes('spectrapdf.exe');
+}
+
+/** The PIDs of every running app process. */
+function runningAppPids(): Set<number> {
+  const out = execFileSync('tasklist', ['/FI', 'IMAGENAME eq spectrapdf.exe', '/FO', 'CSV', '/NH'], {
+    encoding: 'utf-8',
+  });
+  const pids = new Set<number>();
+  for (const line of out.split(/\r?\n/)) {
+    const row = /^"spectrapdf\.exe","(\d+)"/i.exec(line.trim());
+    if (row) pids.add(Number(row[1]));
+  }
+  return pids;
+}
+
+/** Remove the staging files of processes that no longer run. A running
+ * process's file is its write in flight and stays. */
+function removeOrphanedStaging(): void {
+  const live = runningAppPids();
+  for (const name of stagingLeftovers()) {
+    const pid = Number(/^session\.json\.(\d+)\.tmp$/i.exec(name)?.[1]);
+    if (!live.has(pid)) rmSync(resolve(dirname(SESSION_FILE), name), { force: true });
+  }
 }
 
 /** Wait for the process to go, off the driver entirely: the session dies with
@@ -157,6 +183,7 @@ describe('app exit and the launch that reads its record', () => {
   let survivorDoc = '';
 
   before(() => {
+    removeOrphanedStaging();
     tmp = mkdtempSync(resolve(tmpdir(), 'exit-session-'));
     mainDoc = resolve(tmp, 'main-window.pdf');
     secondDoc = resolve(tmp, 'second-window.pdf');

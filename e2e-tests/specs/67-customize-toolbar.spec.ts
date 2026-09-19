@@ -1,10 +1,10 @@
 import { expect } from '@wdio/globals';
 import { waitForHarness, invokeAppCommand } from '../support/harness.js';
 
-// Toolbar customization (I.6): per-item show/hide over the toolbar catalog,
+// Toolbar customization: per-item show/hide over the toolbar catalog,
 // applied live and persisted (spectra-toolbar). The dialog opens from
 // View ▸ Customize Toolbar… (also the toolbar's right-click menu).
-describe('customize toolbar (I.6)', () => {
+describe('customize toolbar', () => {
   before(async () => {
     await waitForHarness();
   });

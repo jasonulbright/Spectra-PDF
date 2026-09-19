@@ -1,5 +1,5 @@
 /**
- * P34 — link authoring, end to end.
+ * Link authoring, end to end.
  *
  * The band is driven as a REAL pointer gesture rather than through a harness
  * seam: the commit callback is a prop, and a render path that forgets to pass

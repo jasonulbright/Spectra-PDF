@@ -268,7 +268,7 @@ describe('on-canvas form filling', () => {
   });
 
   it('creates an option list with non-Latin labels and selects one', async () => {
-    // F28 end to end through the real create chain: pdf-lib authors the field
+    // End to end through the real create chain: pdf-lib authors the field
     // with its appearance suppressed to the box, the engine door draws every
     // row, the fill re-draws them with the band moved. What the reopened file
     // must show is the VALUE and every LABEL — a list that dropped the rows it

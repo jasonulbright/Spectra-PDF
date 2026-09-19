@@ -41,7 +41,7 @@ async function create() {
 describe('link draft ownership in the live workspace', () => {
   let a: string, b: string, aw: string;
   beforeEach(async () => {
-    const dir = mkdtempSync(resolve(__dirname, '../../docs/audit/link-drafts.local.d-'));
+    const dir = mkdtempSync(resolve(__dirname, '../../link-drafts.local.d-'));
     a = resolve(dir, 'A.pdf'); b = resolve(dir, 'B.pdf');
     const pdf = await PDFDocument.create(); pdf.addPage([600, 800]); pdf.addPage([600, 800]);
     const bytes = await pdf.save(); writeFileSync(a, bytes); writeFileSync(b, bytes);

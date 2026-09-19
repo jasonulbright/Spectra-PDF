@@ -1,4 +1,4 @@
-"""Build `derived-nav.pdf` — the P29 end-to-end fixture.
+"""Build `derived-nav.pdf` — the derived-navigation end-to-end fixture.
 
 Two pages, both tagged. Page 1 carries an H1 and an H2 with real marked
 content; page 2 carries an H1 and a line of prose with a web address and an

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFRef, PDFString } from 'pdf-lib';
 import { buildPdf } from '../src/renderer/lib/pdfx-build';
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
@@ -40,29 +40,62 @@ const propsOf = (doc: PDFDocument) => doc.catalog.lookup(N('OCProperties'), PDFD
 const exportPage = (bytes: Uint8Array, sourceKey = 'own') => ({ bytes, sourceKey, pageIndex: 0 });
 
 describe('optional content through the publication builder', () => {
-  it.each(['ON', 'OFF', 'omitted', 'alternate'])('keeps a signed layer declaration append-safe (%s)', async (mode) => {
-    const f = await fixture();
-    if (mode === 'OFF') f.config.set(N('BaseState'), N('OFF'));
-    if (mode === 'omitted') f.config.delete(N('BaseState'));
-    if (mode === 'alternate') f.props.set(N('Configs'), f.ctx.obj([{ Name: PDFString.of('Alternate'), BaseState: 'ON', ON: [f.group] }]));
+  const MODES = ['ON', 'OFF', 'omitted', 'alternate'] as const;
+  /** Per mode: the signed bytes and the incremental append the engine made
+   * over the builder's rebuild of them. */
+  const appended = new Map<string, { signed: Uint8Array; report: unknown; output: Uint8Array }>();
+
+  // Every mode is signed in one engine run and appended in one more: the
+  // engine's start-up is the cost of this case, not its documents.
+  beforeAll(async () => {
     const directory = mkdtempSync(resolve('optional-content-signed.local.d-'));
-    const input = resolve(directory, 'input.pdf'), signed = resolve(directory, 'signed.pdf');
-    const modified = resolve(directory, 'modified.pdf'), output = resolve(directory, 'output.pdf');
-    const python = (code: string, args: string[]) => execFileSync(testPython(), ['-B', '-c', code, ...args], {
+    const interpreter = testPython();
+    const python = (code: string, args: string[]) => execFileSync(interpreter, ['-B', '-c', code, ...args], {
       env: { ...process.env, PYTHONPATH: resolve('src'), PYTHONDONTWRITEBYTECODE: '1' }, encoding: 'utf8', timeout: 30000,
     });
-    writeFileSync(input, await f.doc.save());
-    python('import sys; from engine.signatures import sign_pdf; sign_pdf(sys.argv[1],sys.argv[2],pfx_path=sys.argv[3],password="testpw")',
-      [input, signed, resolve('e2e-tests/fixtures/test-signer.pfx')]);
-    const bytes = new Uint8Array(readFileSync(signed));
-    writeFileSync(modified, await buildPdf([{ bytes, sourceKey: signed, pageIndex: 0, rotation: 90 }], bytes, signed));
-    const report = JSON.parse(python('import json,sys; from engine.incremental import transplant_incremental; print(json.dumps(transplant_incremental(*sys.argv[1:])))', [signed, modified, output]));
+    const files = MODES.map(mode => ({
+      mode,
+      input: resolve(directory, `input-${mode}.pdf`),
+      signed: resolve(directory, `signed-${mode}.pdf`),
+      modified: resolve(directory, `modified-${mode}.pdf`),
+      output: resolve(directory, `output-${mode}.pdf`),
+    }));
+    for (const { mode, input } of files) {
+      const f = await fixture();
+      if (mode === 'OFF') f.config.set(N('BaseState'), N('OFF'));
+      if (mode === 'omitted') f.config.delete(N('BaseState'));
+      if (mode === 'alternate') f.props.set(N('Configs'), f.ctx.obj([{ Name: PDFString.of('Alternate'), BaseState: 'ON', ON: [f.group] }]));
+      writeFileSync(input, await f.doc.save());
+    }
+    python([
+      'import sys',
+      'from engine.signatures import sign_pdf',
+      'pfx, pairs = sys.argv[1], sys.argv[2:]',
+      'for i in range(0, len(pairs), 2): sign_pdf(pairs[i], pairs[i + 1], pfx_path=pfx, password="testpw")',
+    ].join('\n'), [resolve('e2e-tests/fixtures/test-signer.pfx'), ...files.flatMap(f => [f.input, f.signed])]);
+    for (const { signed, modified } of files) {
+      const bytes = new Uint8Array(readFileSync(signed));
+      writeFileSync(modified, await buildPdf([{ bytes, sourceKey: signed, pageIndex: 0, rotation: 90 }], bytes, signed));
+    }
+    const reports = JSON.parse(python([
+      'import json, sys',
+      'from engine.incremental import transplant_incremental',
+      'args = sys.argv[1:]',
+      'print(json.dumps([transplant_incremental(*args[i:i + 3]) for i in range(0, len(args), 3)]))',
+    ].join('\n'), files.flatMap(f => [f.signed, f.modified, f.output]))) as unknown[];
+    files.forEach(({ mode, signed, output }, i) => appended.set(mode, {
+      signed: new Uint8Array(readFileSync(signed)), report: reports[i], output: new Uint8Array(readFileSync(output)),
+    }));
+  }, 70000);
+
+  it.each(MODES)('keeps a signed layer declaration append-safe (%s)', async (mode) => {
+    const { signed, report, output } = appended.get(mode)!;
     expect(report).toMatchObject({ applied: true });
-    expect(readFileSync(output).subarray(0, bytes.length)).toEqual(Buffer.from(bytes));
-    const result = await load(readFileSync(output));
+    expect(Buffer.from(output.subarray(0, signed.length))).toEqual(Buffer.from(signed));
+    const result = await load(output);
     expect(propsOf(result).lookup(N('D'), PDFDict).lookup(N('OFF'), PDFArray).asArray()).toContainEqual(renderedGroup(result));
     expect(result.getPage(0).getRotation().angle).toBe(90);
-  }, 70000);
+  });
   it('binds a document layer action to the actual group in a nested Form', async () => {
     const f = await fixture(true);
     f.doc.catalog.set(N('OpenAction'), f.ctx.obj({ S: 'SetOCGState', State: ['ON', f.group] }));

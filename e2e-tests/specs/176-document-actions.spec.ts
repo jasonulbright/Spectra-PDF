@@ -24,7 +24,7 @@ async function assertActions(path: string) {
 describe('Document action preservation through actual page commits', () => {
   let dir: string, source: string, work: string, before: Buffer;
   beforeEach(async () => {
-    dir = mkdtempSync(resolve(__dirname, '../../docs/audit/document-actions-live.local.d-')); source = resolve(dir, 'source.pdf');
+    dir = mkdtempSync(resolve(__dirname, '../../document-actions-live.local.d-')); source = resolve(dir, 'source.pdf');
     const pdf = await PDFDocument.create(); pdf.addPage([600, 800]); pdf.addPage([610, 800]);
     const action = pdf.context.obj({ S: 'JavaScript', JS: PDFString.of('// retained; never executed') }), ref = pdf.context.register(action);
     action.set(N('Next'), pdf.context.obj([{ S: 'GoTo', D: [pdf.getPage(1).ref, 'Fit'] }, ref]));

@@ -20,7 +20,7 @@ import {
 // https://example.com/spec and editor@example.org.
 const FIXTURE = resolve(__dirname, '..', 'fixtures', 'derived-nav.pdf');
 
-// P29 — navigation DERIVED from the document's own content, end to end
+// Navigation DERIVED from the document's own content, end to end
 // through the real binary: bookmarks from the structure tree, links from the
 // addresses in the text, and an article thread authored and persisted.
 

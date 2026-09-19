@@ -1,12 +1,11 @@
 #!/bin/sh
 # ci-parity-gates.sh — run LOCALLY before every push, so CI's gates fail on
-# this machine (seconds) instead of on the runner (an hour, tokens, a red tag).
+# this machine instead of on the runner.
 #
-# WHY THIS EXISTS: an audit of 22 CI/Release failures (2026-08-25) found ~86%
-# were catchable locally — the top buckets were the two dependency audits, the
-# test-axis provisioning gate, and the tag/version-consistency check, none of
-# which the old local battery ran. Six hours of runner time in two days went to
-# failures a five-second local check would have caught.
+# WHY THIS EXISTS: most CI and release failures are catchable locally. The
+# largest classes are the two dependency audits, the test-axis provisioning
+# gate and the tag/version-consistency check, which the full battery does not
+# run.
 #
 # This is NOT the full battery (tsc/lint/vitest/pytest — run those too). This
 # is the set of CI gates the battery historically OMITTED. Run BOTH.
@@ -89,8 +88,8 @@ gate engine-payload "$R/.venv/Scripts/python.exe" scripts/check-engine-payload.p
 
 # --- CI/Release gate: the shipped renderer carries no e2e test harness. The
 #     harness is compiled out by VITE_E2E; dist/renderer on this machine may be
-#     an e2e build, so the mirror scans a fresh plain build in a scratch tree
-#     (a renderer build is ~10 s), exactly what the release job embeds. ---
+#     an e2e build, so the mirror scans a fresh plain build in a scratch tree,
+#     exactly what the release job embeds. ---
 gate release-bundle sh -c 'env -u VITE_E2E npx vite build --config vite.config.mts --outDir "$0/release-bundle-check.local.out" && "$0/.venv/Scripts/python.exe" scripts/check-release-bundle.py release-bundle-check.local.out' "$R"
 
 # --- Corpus provisioning contract: a test axis with no CI provisioning is the
@@ -104,7 +103,7 @@ done
 
 # --- Release job: the release body is the changelog section for the version
 #     the four surfaces carry. A missing, empty, or banned-term section fails
-#     the release run AFTER a full build; here it is a millisecond. ---
+#     the release run AFTER a full build; here it fails before any build. ---
 gate release-notes "$R/.venv/Scripts/python.exe" - <<'PY'
 import json, pathlib, subprocess, sys
 version = json.loads(pathlib.Path("package.json").read_text())["version"]
@@ -123,11 +122,11 @@ PY
 gate sign-script-noop "$R/.venv/Scripts/python.exe" -m pytest   "tests/test_ci_capability_setup.py::test_the_sign_script_does_nothing_outside_ci" -q
 
 # --- Workflow-contract tests: the only local reader of .github/workflows/*.
-#     A workflow edit that breaks the contract otherwise surfaces on the runner
-#     (CI #144: the Ghostscript step moved into a script and the contract test's
-#     substring lookup raised). Also carries the publish-order contract: both
-#     release publishers upload to a draft, gate the uploaded assets, and
-#     undraft as the LAST step. Cheap enough to run on every push. ---
+#     A workflow edit that breaks the contract otherwise surfaces on the runner,
+#     for example a step moved into a script past a contract test's substring
+#     lookup. Also carries the publish-order contract: both release publishers
+#     upload to a draft, gate the uploaded assets, and undraft as the LAST
+#     step. ---
 #     This run cannot detect a tagless checkout: a developer clone carries the
 #     released tags by construction, so the runner's shallow, tagless checkout
 #     is guarded by the workflow contract inside this file's test instead
@@ -136,16 +135,16 @@ gate workflow-contract "$R/.venv/Scripts/python.exe" -m pytest \
   tests/test_ci_capability_setup.py -q
 
 # --- corpus-pin-vs-index: a tracked PDF added anywhere in the repo joins the
-#     preflight corpus universe; committing one without regenerating the pin
-#     fails only on the runner's full suite (~40 min). Recurred twice
-#     (xfa fixtures, truncated.pdf). Sub-second locally. ---
+#     preflight and accessibility corpus universes; committing one without
+#     regenerating their pins otherwise fails only in the runner's full
+#     suite. ---
 gate corpus-pin "$R/.venv/Scripts/python.exe" -m pytest \
-  "tests/test_preflight.py::TestCorpusGate::test_the_corpus_is_the_git_index_not_a_glob" -q
+  "tests/test_preflight.py::TestCorpusGate::test_the_corpus_is_the_git_index_not_a_glob" \
+  "tests/test_accessibility.py::TestCorpusGate::test_the_corpus_is_the_git_index_not_a_glob" -q
 
-# --- CI job: Verify runs the Rust suite. Warm it is a few seconds, and the
-#     Rust tests exercise process-, handle-, and window-level behaviour whose
-#     failures are runner-timing sensitive — the class that only ever appeared
-#     on CI. Cheap enough to belong here. ---
+# --- CI job: Verify runs the Rust suite. The Rust tests exercise process-,
+#     handle-, and window-level behaviour whose failures are runner-timing
+#     sensitive — the class that only ever appeared on CI. ---
 gate cargo-test sh -c 'cd src-tauri && cargo test'
 
 # --- CI/Release gate: the live runtime tests. The CLI leaves no bytecode in

@@ -37,13 +37,9 @@ async function loadPdf(path: string) {
 describe('annotations survive the commit round trip', () => {
   let tmp: string;
   let dest: string;
-  // Two distinct SOURCE paths, not just two destinations: OPEN_FILE resets
-  // state.files for a path but does NOT clear state.workspace.documents for
-  // it (that's the async indexer's job, via SET_WORKSPACE_DOCUMENTS) — so
-  // reopening the SAME path mid-session can briefly serve the stale,
-  // already-annotated workspace document instead of a fresh one from disk.
-  // Real gap, but out of scope for this slice; sidestepped here by giving
-  // each test its own source file so there's nothing stale to reuse.
+  // Two distinct SOURCE paths, not just two destinations: each test opens a
+  // file no earlier test has opened or annotated, so what it reads back can
+  // only be its own annotation.
   let samplePdfA: string;
   let samplePdfB: string;
   let samplePdfC: string;

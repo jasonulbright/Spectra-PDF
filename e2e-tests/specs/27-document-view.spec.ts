@@ -181,7 +181,7 @@ describe('reading view: a Find match in another open file', () => {
   });
 });
 
-describe('two-up spread layout (I.6 page display)', () => {
+describe('two-up spread layout (page display)', () => {
   const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
   before(async () => {
@@ -356,7 +356,7 @@ describe('two-up spread layout (I.6 page display)', () => {
   });
 });
 
-describe('reading mode (I.6 chrome collapse)', () => {
+describe('reading mode (chrome collapse)', () => {
   const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
   before(async () => {
@@ -401,7 +401,7 @@ describe('reading mode (I.6 chrome collapse)', () => {
   });
 });
 
-describe('presentation mode (I.6 full-screen view)', () => {
+describe('presentation mode (full-screen view)', () => {
   const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
   before(async () => {

@@ -20,7 +20,7 @@ import {
   waitForHarness,
 } from '../support/harness.js';
 
-// F30 — the certificate stamp's APPEARANCE, on both signing surfaces.
+// The certificate stamp's APPEARANCE, on both signing surfaces.
 //
 // ONE APPEARANCE AUTHOR is the claim: the preview is the engine painting the
 // same style into a one-page PDF, and the signature carries the drawing the
@@ -90,7 +90,7 @@ let logoPath = '';
  * the Form XObjects each one draws, recursively.
  *
  * The nesting is not incidental: `beside` layouts and the personal face
- * compose as SIDECAR XObjects (doc 94 § F30), so the widget's own stream holds
+ * compose as SIDECAR XObjects, so the widget's own stream holds
  * only a `/Sidecar0 Do` and the ink lives one level down. A reader that
  * stopped at the widget would conclude the face never travelled.
  */
@@ -325,7 +325,7 @@ describe('the certificate stamp appearance', () => {
     // Outlines, not an embedded face: the typed face is drawn as glyph paths
     // so two runs of one request stay byte-identical (the recalcTimestamp
     // invariant, which pyHanko's font engine cannot honour). A `/ToUnicode`
-    // here would mean the deviation recorded in doc 94 had been undone.
+    // here would mean the face had been embedded as a font again.
     expect(ap).toContain('f');
     const verified = cliJson<{ signatures: { valid: boolean }[] }>(['verify-signatures', out]);
     expect(verified.signatures[0].valid).toBe(true);
@@ -411,7 +411,7 @@ describe('the certificate stamp appearance', () => {
     // The panel's preview box is a fixed 220x70 the section states for itself,
     // so a PLACEMENT rect never reaches it — the fit rule is therefore proven
     // where a real box exists, at the engine, which is the same author that
-    // draws the preview (doc 94 § F30: one appearance author). A refusal here
+    // draws the preview (one appearance author). A refusal here
     // is the same sentence the preview would render.
     const out = join(SCRATCH, 'too-small.pdf');
     let refusal = '';

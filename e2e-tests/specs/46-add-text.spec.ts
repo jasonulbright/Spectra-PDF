@@ -160,19 +160,14 @@ describe('add text', () => {
     // Rotate rides the same authored-op path; the engine wraps
     // the block in one rotation frame.
     //
-    // INVERSION (the spec-42 / test_rotated_text_never_groups
-    // precedent — the capability this pinned is deliberately replaced).
-    // This case used to require the phrase on the RUN-BOX layer with NO
-    // paragraph carrying it. Neither half survives the orientation model, and the probe
-    // (`probe-rot90.local.ts`) shows why: admission now runs in the
-    // member's OWN transposed frame, so a quarter-turned run is an
+    // The pin is the PARAGRAPH layer, not the run-box layer: admission runs
+    // in the member's OWN transposed frame, so a quarter-turned run is an
     // ordinary axis-aligned member there and GROUPS. Once it groups the
-    // run-box layer is empty — and it is empty for the 0° control too,
-    // so "on the run layer" was never the authoring proof it read as,
-    // and the old undo check (an always-empty runs list) was vacuous.
-    // The honest pin is the paragraph layer, including the ORIENTATION,
-    // which is the whole point. Off-quarter angles still refuse
-    // — that boundary is retained and the 37° case below is its pin.
+    // run-box layer is empty — and it is empty for the 0° control too, so a
+    // run-layer check proves no authoring, and an undo check against the
+    // always-empty runs list is vacuous. The paragraph layer carries the
+    // ORIENTATION, which is the whole point. Off-quarter angles still refuse;
+    // the 37° case below pins that boundary.
     await commitAddText({ text: phrase, size: 14, rotate: 90 });
 
     expect(await invokeAppCommand('tools.edit')).toBe(true);

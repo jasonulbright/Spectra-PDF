@@ -18,11 +18,14 @@ const headerVersion = (doc: PDFDocument): string => {
   return match[1];
 };
 
-interface Budget { objects: number; bytes: number }
+export interface FormatDeclarationLimits { readonly objects: number; readonly bytes: number }
+export const FORMAT_DECLARATION_LIMITS: FormatDeclarationLimits = Object.freeze({ objects: 8000, bytes: 1024 * 1024 });
+
+interface Budget { objects: number; bytes: number; readonly limits: FormatDeclarationLimits }
 function charge(budget: Budget, bytes = 0) {
   budget.objects++;
   budget.bytes += bytes;
-  if (budget.objects > 8000 || budget.bytes > 1024 * 1024) throw refuse();
+  if (budget.objects > budget.limits.objects || budget.bytes > budget.limits.bytes) throw refuse();
 }
 
 // Extensions and every descendant must be direct objects. This intentionally
@@ -84,10 +87,15 @@ function identity(value: PDFObject): string {
 }
 
 /** Invoke after the actual page/root carriers. Sources must include the owner
- * even with zero remaining own pages, and every source contributing pages. */
-export function carryFormatDeclarations(output: PDFDocument, sources: readonly PDFDocument[]): void {
+ * even with zero remaining own pages, and every source contributing pages.
+ * Production callers omit `limits`. */
+export function carryFormatDeclarations(
+  output: PDFDocument,
+  sources: readonly PDFDocument[],
+  limits: FormatDeclarationLimits = FORMAT_DECLARATION_LIMITS,
+): void {
   let requiredVersion = '1.7'; // pinned writer's baseline, never downgraded
-  const budget = { objects: 0, bytes: 0 };
+  const budget: Budget = { objects: 0, bytes: 0, limits };
   const extensions = PDFDict.withContext(output.context);
   const byPrefix = new Map<string, { key: PDFName; entries: PDFDict[]; wasArray: boolean; identities: Map<string, string> }>();
   let hadExtensions = false, hadType = false, hadCatalogVersion = false;

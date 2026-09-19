@@ -70,9 +70,16 @@ import {
 
 const N = PDFName.of.bind(PDFName);
 
+export interface StructLimits {
+  readonly objects: number;
+  readonly bytes: number;
+}
+
 // Bounds, not predictions. Every phase spends from one pair of counters.
-const MAX_OBJECTS = 200_000;
-const MAX_BYTES = 64 * 1024 * 1024;
+export const STRUCT_LIMITS: StructLimits = Object.freeze({
+  objects: 200_000,
+  bytes: 64 * 1024 * 1024,
+});
 const MAX_TREE_DEPTH = 256;
 /** An MCID becomes an index into a ParentTree array, so a sparse maximum
  * decides an allocation. Past this the rebuild refuses instead of reserving
@@ -944,23 +951,41 @@ function mergeMarkInfo(output: PDFDocument, sources: CarriedSourcePages[]): void
   output.catalog.set(N('MarkInfo'), info);
 }
 
+/** The two budgets one carry spends. The sweep walks the OUTPUT copies of
+ * the same page graphs the occurrence maps walk in the sources; one shared
+ * budget would charge that graph twice. Each budget serves one call. */
+export interface StructBudgets {
+  readonly sweep: Budget;
+  readonly tree: Budget;
+}
+
+export function structBudgets(limits: StructLimits = STRUCT_LIMITS): StructBudgets {
+  const budget = (): Budget => ({
+    objects: 0,
+    bytes: 0,
+    limitObjects: limits.objects,
+    limitBytes: limits.bytes,
+    fail: refuse,
+  });
+  return { sweep: budget(), tree: budget() };
+}
+
 /**
  * Rebuild the output /StructTreeRoot from every contributing source's
  * surviving tags. Call AFTER all pages are added, with the SAME loaded
  * source instances the builder copied from.
+ *
+ * Production callers omit `budgets`; a caller that passes them reads the
+ * spend from them afterwards.
  */
-export function carryStructTree(output: PDFDocument, sources: CarriedSourcePages[]): Map<PDFDocument, ObjectMap> {
+export function carryStructTree(
+  output: PDFDocument,
+  sources: CarriedSourcePages[],
+  budgets: StructBudgets = structBudgets(),
+): Map<PDFDocument, ObjectMap> {
   const structureMaps = new Map<PDFDocument, ObjectMap>();
-  const budget: Budget = {
-    objects: 0,
-    bytes: 0,
-    limitObjects: MAX_OBJECTS,
-    limitBytes: MAX_BYTES,
-    fail: refuse,
-  };
-  // The sweep walks the OUTPUT copies of the same page graphs the occurrence
-  // maps walk in the sources; one shared budget would charge that graph twice.
-  sweepStaleKeys(output, { ...budget });
+  const budget = budgets.tree;
+  sweepStaleKeys(output, budgets.sweep);
 
   const tagged = sources.filter((s) => s.doc.catalog.lookupMaybe(N('StructTreeRoot'), PDFDict));
   if (tagged.length === 0) return structureMaps;

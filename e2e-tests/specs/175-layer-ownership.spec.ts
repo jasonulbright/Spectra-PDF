@@ -16,7 +16,7 @@ const history = () => browser.execute(() => (window as any).__SPECTRA_TEST__.get
 describe('Layers revision and session ownership', () => {
   let dir: string, a: string, b: string, aw: string;
   beforeEach(async () => {
-    dir = mkdtempSync(resolve(__dirname, '../../docs/audit/layer-ownership.local.d-')); a = resolve(dir, 'A.pdf'); b = resolve(dir, 'B.pdf');
+    dir = mkdtempSync(resolve(__dirname, '../../layer-ownership.local.d-')); a = resolve(dir, 'A.pdf'); b = resolve(dir, 'B.pdf');
     for (const path of [a, b]) {
       const pdf = await PDFDocument.create(), groups = [0, 1, 2].map(() => pdf.context.register(pdf.context.obj({ Type: 'OCG', Name: PDFString.of('Same') })));
       for (const group of groups) { const page = pdf.addPage(); page.node.set(N('Resources'), pdf.context.obj({ Properties: { Group: group } }));

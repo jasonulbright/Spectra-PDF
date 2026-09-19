@@ -30,7 +30,7 @@ async function saved(path: string, title: string) { await browser.waitUntil(asyn
 describe('bookmark draft sessions and destination identity', () => {
   let a: string, b: string, aw: string;
   beforeEach(async () => {
-    const dir = mkdtempSync(resolve(__dirname, '../../docs/audit/bookmark-drafts.local.d-'));
+    const dir = mkdtempSync(resolve(__dirname, '../../bookmark-drafts.local.d-'));
     a = resolve(dir, 'A.pdf'); b = resolve(dir, 'B.pdf');
     for (const [path, title] of [[a, 'Original A'], [b, 'Original B']]) {
       const pdf = await PDFDocument.create(); for (const width of [600, 610, 620]) pdf.addPage([width, 800]);

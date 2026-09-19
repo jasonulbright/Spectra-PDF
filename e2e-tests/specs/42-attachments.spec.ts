@@ -19,7 +19,7 @@ async function makeFixtureWithAttachment(path: string): Promise<void> {
   writeFileSync(path, await doc.save());
 }
 
-describe('attachments panel (I.6)', () => {
+describe('attachments panel', () => {
   let tmp: string;
   let source: string;
 

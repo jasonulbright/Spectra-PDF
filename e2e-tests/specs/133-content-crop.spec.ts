@@ -1,5 +1,5 @@
 /**
- * P27 — content-aware crop, end to end.
+ * Content-aware crop, end to end.
  *
  * The measurement has exact pytest coverage; what this proves is the path a
  * reader takes: open the Crop tool's panel, measure, see the counts, commit,

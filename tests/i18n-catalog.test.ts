@@ -313,24 +313,24 @@ describe('i18n catalogs', () => {
   // key) cannot regress them silently. A dropped `{{name}}` is the worst
   // class of translation bug: the sentence still reads, and the value it was
   // supposed to name simply vanishes.
-  // Sweeps every key of every shipped catalog; runtime grows with the locale
-  // count and outruns vitest's 5s default on slower machines.
-  it('every locale carries EXACTLY en\'s interpolation placeholders per key', { timeout: 30000 }, () => {
+  // Every key of every catalog is checked and every divergence is listed; one
+  // assertion per key would cost more than the comparison it reports.
+  it('every locale carries EXACTLY en\'s interpolation placeholders per key', () => {
     const en = JSON.parse(readFileSync(EN_PATH, 'utf8')) as Record<string, string>;
     const placeholders = (s: string): string =>
       [...s.matchAll(/\{\{([^}]*)\}\}/g)].map((m) => m[1].trim()).sort().join(',');
+    const diverging: string[] = [];
     for (const locale of SHIPPED_LOCALES) {
       if (locale === 'en') continue;
       const p = resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`);
       const cat = JSON.parse(readFileSync(p, 'utf8')) as Record<string, string>;
       for (const [k, v] of Object.entries(cat)) {
         const src = enCounterpart(k, en);
-        expect(src, `${locale}:${k} has no en counterpart`).toBeDefined();
-        expect(placeholders(v), `${locale}:${k} placeholders diverge from en`).toBe(
-          placeholders(src ?? ''),
-        );
+        if (src === undefined) diverging.push(`${locale}:${k} has no en counterpart`);
+        else if (placeholders(v) !== placeholders(src)) diverging.push(`${locale}:${k} placeholders diverge from en`);
       }
     }
+    expect(diverging).toEqual([]);
   });
 
   it("every plural form its locale's rules select is authored, and obeys the policy", { timeout: 30000 }, () => {
@@ -441,13 +441,15 @@ describe('i18n catalogs', () => {
     expect(declared).not.toContain('qqq');
   });
 
-  it('no catalog value is empty', { timeout: 30000 }, () => {
+  it('no catalog value is empty', () => {
+    const empty: string[] = [];
     for (const locale of SHIPPED_LOCALES) {
       const p = resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`);
       const cat = JSON.parse(readFileSync(p, 'utf8')) as Record<string, string>;
       for (const [k, v] of Object.entries(cat)) {
-        expect(typeof v === 'string' && v.length > 0, `${locale}:${k} is empty`).toBe(true);
+        if (!(typeof v === 'string' && v.length > 0)) empty.push(`${locale}:${k}`);
       }
     }
+    expect(empty).toEqual([]);
   });
 });

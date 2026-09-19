@@ -17,7 +17,7 @@ import {
   waitForHarness,
 } from '../support/harness.js';
 
-// F31 — THE PERSONAL SIGNATURE, all three capture doors and both consumers.
+// THE PERSONAL SIGNATURE, all three capture doors and both consumers.
 //
 // The claim under test is that a personal signature reaches a page through the
 // machinery that was already there: a drawn one is an ordinary `ink`

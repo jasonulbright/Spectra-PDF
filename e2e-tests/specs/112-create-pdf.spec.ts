@@ -22,7 +22,7 @@ import {
 // the harness injects the source LIST — the same `addPaths` the picker's
 // result goes through, so an injected run and a clicked one cannot diverge.
 //
-// The three assertions the brief names:
+// The three assertions:
 //   * create-from-image is DPI-HONEST — a 300-dpi raster becomes a Letter
 //     page, not a 25-inch one;
 //   * create-from-docx is TEXT-EXTRACTABLE — the source's sentinel token
@@ -296,7 +296,7 @@ describe('Create PDF from any file', () => {
     expect(pdf.pages).toBe(form.pages + 2 + 1);
     // The spreadsheet really converted — its sentinel token comes back out.
     expect(pdf.text).toContain(TOKEN);
-    // The standing risk the brief names: assembly goes through the SHIPPED
+    // The standing risk: assembly goes through the SHIPPED
     // merge, so the form member's fields are still registered and fillable.
     expect(form.fields.length).toBeGreaterThan(0);
     expect(pdf.fields).toEqual(form.fields);

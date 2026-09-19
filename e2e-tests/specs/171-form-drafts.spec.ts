@@ -24,7 +24,7 @@ async function save(path: string, text: string) {
 describe('Forms-panel draft ownership in the live workspace', () => {
   let a: string, b: string, aw: string;
   beforeEach(async () => {
-    const dir = mkdtempSync(resolve(__dirname, '../../docs/audit/form-drafts.local.d-'));
+    const dir = mkdtempSync(resolve(__dirname, '../../form-drafts.local.d-'));
     a = resolve(dir, 'A.pdf'); b = resolve(dir, 'B.pdf');
     for (const [path, label] of [[a, 'Original A'], [b, 'Original B']]) {
       const pdf = await PDFDocument.create(), page = pdf.addPage([600, 800]); pdf.addPage([600, 800]);

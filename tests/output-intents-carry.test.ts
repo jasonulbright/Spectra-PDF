@@ -2,12 +2,12 @@
 // intents and their ICC profile bytes survive a from-scratch rebuild. The
 // rebuild copies page subtrees only, so the catalog's /OutputIntents — and the
 // profile defining the production condition the colours were prepared for —
-// were gone from the output entirely (BA-38).
+// were gone from the output entirely.
 //
 // Field shapes follow ISO 32000-2 14.11.5, Tables 401 and 402. Fixtures are
 // synthetic: an ICC profile is bytes to this copier, so no provisioned
 // resource is needed to prove the bytes travel.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   PDFArray,
   PDFBool,
@@ -24,7 +24,11 @@ import {
   decodePDFRawStream,
 } from 'pdf-lib';
 
-import { copyOutputIntents } from '../src/renderer/lib/output-intents-carry';
+import {
+  OUTPUT_INTENT_LIMITS,
+  copyOutputIntents,
+  type OutputIntentLimits,
+} from '../src/renderer/lib/output-intents-carry';
 
 const N = PDFName.of.bind(PDFName);
 type Fields = NonNullable<Parameters<PDFDocument['context']['stream']>[1]>;
@@ -909,6 +913,8 @@ describe('copyOutputIntents — the supplied root keeps its identity', () => {
 });
 
 describe('copyOutputIntents — budgets', () => {
+  type Limit = keyof OutputIntentLimits;
+
   const build = async (extra: (doc: PDFDocument) => Fields) =>
     source((doc) =>
       doc.context.obj([
@@ -916,132 +922,152 @@ describe('copyOutputIntents — budgets', () => {
       ]),
     );
 
-  it('refuses a graph deeper than the depth bound', async () => {
-    const built = await build((doc) => {
+  /** Whether the copy succeeds under `limits`, into a fresh output. */
+  const fits = async (built: Built, limits: OutputIntentLimits): Promise<boolean> => {
+    const output = await empty();
+    try {
+      copyOutputIntents(output, built.doc, built.raw, limits);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** The charge of one kind: the smallest value of that limit at which the
+   * copy succeeds, with every other limit at its production value. A larger
+   * limit never turns a success into a refusal, so a bisection finds it. */
+  const charge = async (built: Built, kind: Limit): Promise<number> => {
+    expect(await fits(built, OUTPUT_INTENT_LIMITS)).toBe(true);
+    let low = 0;
+    let high = OUTPUT_INTENT_LIMITS[kind];
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (await fits(built, { ...OUTPUT_INTENT_LIMITS, [kind]: mid })) high = mid;
+      else low = mid + 1;
+    }
+    return low;
+  };
+
+  const chain = (levels: number) =>
+    build((doc) => {
       let node = doc.context.obj({ Leaf: PDFString.of('deep') });
-      for (let i = 0; i < 80; i++) node = doc.context.obj({ Down: node });
+      for (let i = 0; i < levels; i++) node = doc.context.obj({ Down: node });
       return { Vendor: node };
     });
-    const output = await empty();
-    expect(() => copyOutputIntents(output, built.doc, built.raw)).toThrow();
+
+  const wide = (count: number) =>
+    build((doc) => ({ Vendor: doc.context.obj(Array.from({ length: count }, (_, i) => PDFNumber.of(i))) }));
+
+  it('keeps the production bounds: 5,000 edges, 64 levels and 32 MiB', () => {
+    expect(OUTPUT_INTENT_LIMITS).toEqual({ objects: 5_000, depth: 64, bytes: 32 * 1024 * 1024 });
+    expect(Object.isFrozen(OUTPUT_INTENT_LIMITS)).toBe(true);
   });
 
-  it('accepts a graph inside the depth bound', async () => {
-    const built = await build((doc) => {
-      let node = doc.context.obj({ Leaf: PDFString.of('deep') });
-      for (let i = 0; i < 20; i++) node = doc.context.obj({ Down: node });
-      return { Vendor: node };
-    });
-    const { copied } = await carry(built);
-    expect(copied!.size()).toBe(1);
+  it('charges one level per level of nesting and refuses one level past the bound', async () => {
+    const depth = await charge(await chain(3), 'depth');
+    expect(await charge(await chain(4), 'depth')).toBe(depth + 1);
+    const limits = { ...OUTPUT_INTENT_LIMITS, depth };
+    expect(await fits(await chain(3), limits)).toBe(true);
+    expect(await fits(await chain(4), limits)).toBe(false);
   });
 
-  it('refuses a graph wider than the object bound', async () => {
-    const built = await build((doc) => ({
-      Vendor: doc.context.obj(Array.from({ length: 6_000 }, (_, i) => PDFNumber.of(i))),
-    }));
-    const output = await empty();
-    expect(() => copyOutputIntents(output, built.doc, built.raw)).toThrow();
+  it('charges one edge per array element and refuses one element past the bound', async () => {
+    const objects = await charge(await wide(4), 'objects');
+    expect(await charge(await wide(5), 'objects')).toBe(objects + 1);
+    const limits = { ...OUTPUT_INTENT_LIMITS, objects };
+    expect(await fits(await wide(4), limits)).toBe(true);
+    expect(await fits(await wide(5), limits)).toBe(false);
   });
 
-  it('accepts a graph inside the object bound', async () => {
-    const built = await build((doc) => ({
-      Vendor: doc.context.obj(Array.from({ length: 500 }, (_, i) => PDFNumber.of(i))),
-    }));
-    const { copied } = await carry(built);
-    expect(intentAt(copied!, 0).lookup(N('Vendor'), PDFArray).size()).toBe(500);
+  it('applies the production edge and depth bounds when no limits are passed', async () => {
+    const edges = OUTPUT_INTENT_LIMITS.objects - (await charge(await wide(0), 'objects'));
+    const levels = OUTPUT_INTENT_LIMITS.depth - (await charge(await chain(0), 'depth'));
+    for (const [atBound, past] of [
+      [await wide(edges), await wide(edges + 1)],
+      [await chain(levels), await chain(levels + 1)],
+    ]) {
+      expect(copyOutputIntents(await empty(), atBound.doc, atBound.raw)).toBeInstanceOf(PDFArray);
+      const target = await empty();
+      expect(() => copyOutputIntents(target, past.doc, past.raw)).toThrow();
+    }
   });
 
-  it('refuses when the aggregate stream bytes pass the byte bound', async () => {
-    // Incompressible bytes, so the stored length is the length that counts.
-    const chunk = new Uint8Array(9 * 1024 * 1024);
-    for (let i = 0; i < chunk.length; i++) chunk[i] = (i * 2654435761) & 0xff;
-    const built = await source((doc) =>
-      doc.context.obj(
-        Array.from({ length: 4 }, (_, i) =>
-          doc.context.obj({
-            S: 'GTS_PDFX',
-            OutputConditionIdentifier: PDFString.of(`c${i}`),
-            DestOutputProfile: doc.context.register(doc.context.stream(chunk, { N: 4 })),
-          }),
+  it('refuses the aggregate of stream bytes although each profile fits alone', async () => {
+    const profiles = (count: number) =>
+      source((doc) =>
+        doc.context.obj(
+          Array.from({ length: count }, (_, i) =>
+            doc.context.obj({
+              S: 'GTS_PDFX',
+              OutputConditionIdentifier: PDFString.of(`c${i}`),
+              DestOutputProfile: doc.context.register(doc.context.stream(new Uint8Array(9), { N: 4 })),
+            }),
+          ),
         ),
-      ),
-    );
-    const output = await empty();
-    expect(() => copyOutputIntents(output, built.doc, built.raw)).toThrow();
+      );
+    const one = await charge(await profiles(1), 'bytes');
+    const two = await charge(await profiles(2), 'bytes');
+    // Each 9-byte profile adds at least its own bytes: a sum, not a maximum.
+    expect(two - one).toBeGreaterThanOrEqual(9);
+    const four = await profiles(4);
+    const bytes = (await charge(four, 'bytes')) - 1;
+    expect(one).toBeLessThanOrEqual(bytes);
+    expect(await fits(four, { ...OUTPUT_INTENT_LIMITS, bytes })).toBe(false);
   });
 
-  it('counts string bytes toward the same aggregate bound as streams', async () => {
-    const built = await build(() => ({ Extension: PDFString.of('x'.repeat(33 * 1024 * 1024)) }));
-    const output = await empty();
-    expect(() => copyOutputIntents(output, built.doc, built.raw)).toThrow();
+  it('charges each string byte, literal or hex, as one byte of the bound', async () => {
+    const literal = (length: number) => build(() => ({ Extension: PDFString.of('x'.repeat(length)) }));
+    const hex = (length: number) => build(() => ({ Extension: PDFHexString.of('ab'.repeat(length)) }));
+    const bytes = await charge(await literal(7), 'bytes');
+    expect(await charge(await literal(8), 'bytes')).toBe(bytes + 1);
+    expect(await fits(await literal(8), { ...OUTPUT_INTENT_LIMITS, bytes })).toBe(false);
+    // A hex string is charged as the text it is stored as: two digits a byte.
+    expect(await charge(await hex(8), 'bytes')).toBe((await charge(await hex(7), 'bytes')) + 2);
   });
 
-  it('counts hex string bytes toward the bound', async () => {
-    const built = await build(() => ({ Extension: PDFHexString.of('ab'.repeat(17 * 1024 * 1024)) }));
-    const output = await empty();
-    expect(() => copyOutputIntents(output, built.doc, built.raw)).toThrow();
+  it('counts a profile stream and a string in one aggregate', async () => {
+    const profile = (doc: PDFDocument) => doc.context.register(doc.context.stream(new Uint8Array(16), { N: 4 }));
+    const both = await build((doc) => ({ DestOutputProfile: profile(doc), Extension: PDFString.of('x'.repeat(16)) }));
+    const bytes = (await charge(both, 'bytes')) - 1;
+    const limits = { ...OUTPUT_INTENT_LIMITS, bytes };
+    // Neither alone passes the bound; together they do.
+    expect(await fits(await build((doc) => ({ DestOutputProfile: profile(doc) })), limits)).toBe(true);
+    expect(await fits(await build(() => ({ Extension: PDFString.of('x'.repeat(16)) })), limits)).toBe(true);
+    expect(await fits(both, limits)).toBe(false);
   });
 
-  it('counts a profile stream and a large string together', async () => {
-    // Neither alone exceeds the bound; together they do.
-    const built = await source((doc) =>
-      doc.context.obj([
-        doc.context.obj({
-          S: 'GTS_PDFX',
-          OutputConditionIdentifier: PDFString.of('c'),
-          DestOutputProfile: doc.context.register(doc.context.stream(new Uint8Array(20 * 1024 * 1024), { N: 4 })),
-          Extension: PDFString.of('x'.repeat(20 * 1024 * 1024)),
-        }),
-      ]),
-    );
-    const output = await empty();
-    expect(() => copyOutputIntents(output, built.doc, built.raw)).toThrow();
+  it('charges name spellings and dictionary keys byte for byte', async () => {
+    const keyed = (length: number) => build((doc) => ({ Extension: doc.context.obj({ ['k'.repeat(length)]: 1 }) }));
+    const named = (length: number) => build(() => ({ Extension: N('v'.repeat(length)) }));
+    const key = await charge(await keyed(5), 'bytes');
+    expect(await charge(await keyed(6), 'bytes')).toBe(key + 1);
+    expect(await fits(await keyed(6), { ...OUTPUT_INTENT_LIMITS, bytes: key })).toBe(false);
+    const name = await charge(await named(5), 'bytes');
+    expect(await charge(await named(6), 'bytes')).toBe(name + 1);
+    expect(await fits(await named(6), { ...OUTPUT_INTENT_LIMITS, bytes: name })).toBe(false);
   });
 
-  it('counts name spellings and dictionary keys toward the bound', async () => {
-    const long = 'k'.repeat(200_000);
-    const built = await build((doc) => {
-      const vendor = doc.context.obj({});
-      for (let i = 0; i < 200; i++) vendor.set(N(`${long}${i}`), N(`${long}${i}`));
-      return { Extension: vendor };
-    });
-    const output = await empty();
-    expect(() => copyOutputIntents(output, built.doc, built.raw)).toThrow();
-  });
-
-  it('bounds a wide SpectralData dictionary during validation, before any copy', async () => {
-    const built = await source((doc) => {
+  // Validation walks every entry of a wide dictionary or array before the
+  // copy starts. The lookup count is the work done: a refusal that arrives
+  // only in the copy phase has already looked up all of them.
+  it.each([
+    ['SpectralData dictionary', (doc: PDFDocument): Fields => {
       const spectral = doc.context.obj({});
       const stream = doc.context.register(doc.context.stream('x'));
-      for (let i = 0; i < 6_000; i++) spectral.set(N(`Spot${i}`), stream);
-      return doc.context.obj([
-        doc.context.obj({ S: 'GTS_PDFX', OutputConditionIdentifier: PDFString.of('c'), SpectralData: spectral }),
-      ]);
-    });
-    const output = await empty();
-    expect(() => copyOutputIntents(output, built.doc, built.raw)).toThrow();
-    expect(output.catalog.get(N('OutputIntents'))).toBeUndefined();
-  });
-
-  it('bounds a wide ColorantTable during validation', async () => {
-    const built = await source((doc) =>
-      doc.context.obj([
-        doc.context.obj({
-          S: 'GTS_PDFX',
-          OutputConditionIdentifier: PDFString.of('c'),
-          DestOutputProfileRef: { ColorantTable: Array.from({ length: 6_000 }, (_, i) => N(`Spot${i}`)) },
-        }),
-      ]),
-    );
-    const output = await empty();
-    expect(() => copyOutputIntents(output, built.doc, built.raw)).toThrow();
-  });
-
-  it('accepts a profile comfortably inside the byte bound', async () => {
-    const icc = iccBytes(512 * 1024);
-    const built = await source((doc) => doc.context.obj([intentWithProfile(doc, icc)]));
-    const { copied } = await carry(built);
-    expect(decodePDFRawStream(streamOf(intentAt(copied!, 0))).decode()).toEqual(icc);
+      for (let i = 0; i < 1_000; i++) spectral.set(N(`Spot${i}`), stream);
+      return { SpectralData: spectral };
+    }],
+    ['ColorantTable', (doc: PDFDocument): Fields => {
+      const name = doc.context.register(N('Spot'));
+      return { DestOutputProfileRef: { ColorantTable: Array.from({ length: 1_000 }, () => name) } };
+    }],
+  ])('bounds the validation of a wide %s before any copy', async (_label, extra) => {
+    const built = await build(extra);
+    const lookups = vi.spyOn(built.doc.context, 'lookup');
+    const target = await empty();
+    const before = target.context.enumerateIndirectObjects().length;
+    expect(() => copyOutputIntents(target, built.doc, built.raw, { ...OUTPUT_INTENT_LIMITS, objects: 50 })).toThrow();
+    expect(lookups.mock.calls.length).toBeLessThan(200);
+    expect(target.context.enumerateIndirectObjects()).toHaveLength(before);
   });
 });

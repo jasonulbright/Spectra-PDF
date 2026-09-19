@@ -1,4 +1,4 @@
-"""Build the F1a end-to-end fixtures: `xfa-static.pdf` and `xfa-dynamic.pdf`.
+"""Build the XFA end-to-end fixtures: `xfa-static.pdf` and `xfa-dynamic.pdf`.
 
 Both are HYBRID documents in the shape the wild population uses — real page
 content, a complete AcroForm field shadow, and an `/XFA` array carrying the
@@ -9,8 +9,8 @@ so the spec drives the relaxed SOM walk and the byte-splice editor rather than
 a tree that happens to match.
 
 `name1` carries a value in the datasets packet and NO `/V` on its field
-object: that is the F34 class — a value a reader that understands XFA shows
-and this app used to report blank.
+object: a reader that understands XFA shows the value, and a reader that
+reads only `/V` reports the field blank.
 
 The dynamic one differs only by the catalog's `NeedsRendering` (ISO 32000-2
 Table 29), which is what classification actually keys on.

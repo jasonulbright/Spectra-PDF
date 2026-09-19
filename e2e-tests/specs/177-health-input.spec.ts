@@ -20,7 +20,7 @@ describe('private background health input', () => {
     await waitForHarness();
     await closeAllFiles();
     const oldFiles = new Set(healthFiles());
-    const dir = mkdtempSync(resolve(__dirname, '../../docs/audit/health-input.local.d-'));
+    const dir = mkdtempSync(resolve(__dirname, '../../health-input.local.d-'));
     const path = resolve(dir, 'clean.pdf');
     const pdf = await PDFDocument.create();
     pdf.addPage([200, 200]);

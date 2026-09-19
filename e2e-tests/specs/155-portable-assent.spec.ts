@@ -17,7 +17,7 @@ import {
   waitForHarness,
 } from '../support/harness.js';
 
-// P37 — the PORTABLE container: the colour-profile licence presented in-app,
+// The PORTABLE container: the colour-profile licence presented in-app,
 // and the app's data living beside the executable.
 //
 // The suite's harness binary runs from a folder with no `install-record.json`

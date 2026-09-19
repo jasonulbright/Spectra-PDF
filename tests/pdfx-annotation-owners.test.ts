@@ -45,19 +45,32 @@ describe('rebuilt annotation owner identity', () => {
     const source = resolve('e2e-tests/fixtures/signed.pdf');
     const original = new Uint8Array(readFileSync(source));
     const directory = mkdtempSync(resolve('annotation-owners.local.d-'));
-    const python = testPython();
-    for (const kind of ['comment', 'rotate'] as const) {
-      const modified = resolve(directory, `${kind}.pdf`); const output = resolve(directory, `${kind}-out.pdf`);
+    const files = (['comment', 'rotate'] as const).map(kind => ({
+      kind, modified: resolve(directory, `${kind}.pdf`), output: resolve(directory, `${kind}-out.pdf`),
+    }));
+    for (const { kind, modified } of files) {
       const pages = [{ bytes: original, sourceKey: source, pageIndex: 0,
         ...(kind === 'rotate' ? { rotation: 90 as const } : { annotations: [{ kind: 'highlight' as const, x: .2, y: .2, w: .3, h: .1, color: '#ffd54f' }] }) }];
       writeFileSync(modified, await buildPdf(pages, original, source));
-      const report = JSON.parse(execFileSync(python, ['-B', '-c',
-        'import json,sys; from engine.incremental import transplant_incremental; print(json.dumps(transplant_incremental(*sys.argv[1:])))', source, modified, output],
-      { env: { ...process.env, PYTHONPATH: resolve('src'), PYTHONDONTWRITEBYTECODE: '1' }, encoding: 'utf8', timeout: 15_000 }));
-      expect(report, kind).toMatchObject({ applied: true });
-      expect(readFileSync(output).subarray(0, original.length).equals(Buffer.from(original))).toBe(true);
     }
-  // Two cold Python/crypto imports exceeded the unit-test default on hosted
-  // runners. Keep each child bounded and allow both real append checks to finish.
-  }, 40_000);
+    // One engine run appends both rebuilds: its start-up is the cost here.
+    const reports = JSON.parse(execFileSync(testPython(), ['-B', '-c',
+      'import json,sys; from engine.incremental import transplant_incremental; a = sys.argv[1:]; '
+        + 'print(json.dumps([transplant_incremental(a[0], a[i], a[i + 1]) for i in range(1, len(a), 2)]))',
+      source, ...files.flatMap(f => [f.modified, f.output])],
+    { env: { ...process.env, PYTHONPATH: resolve('src'), PYTHONDONTWRITEBYTECODE: '1' }, encoding: 'utf8', timeout: 15_000 })) as unknown[];
+    for (const [i, { kind, output }] of files.entries()) {
+      expect(reports[i], kind).toMatchObject({ applied: true });
+      const bytes = readFileSync(output);
+      expect(bytes.subarray(0, original.length).equals(Buffer.from(original))).toBe(true);
+      // Each output carries its own rebuild's change, not the other one's.
+      const page = (await PDFDocument.load(bytes, { updateMetadata: false })).getPage(0);
+      const subtypes = (page.node.lookupMaybe(PDFName.of('Annots'), PDFArray)?.asArray() ?? [])
+        .map(ref => page.doc.context.lookup(ref, PDFDict).get(PDFName.of('Subtype'))?.toString());
+      expect(page.getRotation().angle, kind).toBe(kind === 'rotate' ? 90 : 0);
+      expect(subtypes.includes('/Highlight'), kind).toBe(kind === 'comment');
+    }
+  // A cold Python/crypto import on a hosted runner can pass the unit-test
+  // default; the child itself stays bounded.
+  }, 20_000);
 });

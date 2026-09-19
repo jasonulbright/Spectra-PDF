@@ -1,11 +1,11 @@
 /**
- * F1a — static XFA forms, end to end through the shipped app.
+ * Static XFA forms, end to end through the shipped app.
  *
  * `tests/test_xfa.py` pins the engine over synthesized fixtures. What only the
  * built binary can prove is the part that crosses every boundary at once: the
  * bundled Python runtime classifying a real file, the Forms panel discharging
  * ISO 32000-2 Annex K's "shall clearly indicate", a value that exists ONLY in
- * the datasets packet reaching a control the user can read (F34), and a fill
+ * the datasets packet reaching a control the user can read, and a fill
  * landing in `/V` and the XML leaf together while the packets the fill must
  * not touch stay byte-identical.
  *
@@ -183,9 +183,9 @@ describe('static XFA forms: indicated, back-filled, dual-written', () => {
       expect(await present('[data-testid="forms-xfa-calculations"]')).toBe(true);
     });
 
-    it('DISPLAYS a value that exists only in the datasets packet (F34)', async () => {
-      // The field object carries no `/V` at all: reporting the field blank was
-      // the silent wrong read this round fixes. Both the shallow-bound leaf
+    it('DISPLAYS a value that exists only in the datasets packet', async () => {
+      // The field object carries no `/V` at all: reporting the field blank is
+      // the silent wrong read. Both the shallow-bound leaf
       // and the one under a data group are asserted, because they resolve
       // through different halves of the SOM walk.
       expect(original.values[NAME1]).toBe(null);

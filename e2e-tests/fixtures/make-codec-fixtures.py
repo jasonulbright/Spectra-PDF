@@ -8,7 +8,7 @@ the rendered canvas carries ink in a recorded band.
 
 The band matters more than "non-blank": a stencil written with the wrong
 polarity renders 100% BLACK, which passes any not-blank check while being
-exactly as wrong (rule 2 of the brief — polarity is a MEASUREMENT). So
+exactly as wrong (polarity is a MEASUREMENT). So
 each fixture is drawn from one synthetic pattern whose ink fraction is known
 by construction, and this generator DECODES ITS OWN OUTPUT with the bundled
 Ghostscript and refuses to write a fixture whose coverage is off.

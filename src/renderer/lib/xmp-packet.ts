@@ -19,11 +19,20 @@ const XMP_META_NS = 'adobe:ns:meta/';
 
 const X_DEFAULT = 'x-default';
 
+export interface XmpLimits {
+  readonly chars: number;
+  /** Nodes and attributes together. */
+  readonly nodes: number;
+  readonly depth: number;
+}
+
 // Bounds, not predictions: a packet past any of these is refused rather than
 // walked. Real document packets are orders of magnitude smaller.
-const MAX_INPUT_CHARS = 2 * 1024 * 1024;
-const MAX_NODES = 50_000;
-const MAX_DEPTH = 100;
+export const XMP_LIMITS: XmpLimits = Object.freeze({
+  chars: 2 * 1024 * 1024,
+  nodes: 50_000,
+  depth: 100,
+});
 
 /** Property names registered as aliases of dc:title, from the XMP Toolkit's
  * own RegisterStandardAliases (XMPCore/source/XMPMeta.cpp) with the namespace
@@ -73,11 +82,13 @@ interface Packet {
  * supplied value the packet already carries. An empty string is a supplied
  * value and sets the field empty; `undefined` leaves the field alone and never
  * removes it. Throws the unverified-operation refusal for a packet this cannot
- * transform provably. */
-export function transformXmpXml(xml: string, overrides: XmpOverrides): string {
-  if (typeof xml !== 'string' || xml.length === 0 || xml.length > MAX_INPUT_CHARS) throw refuse();
+ * transform provably.
+ *
+ * Production callers omit `limits`. */
+export function transformXmpXml(xml: string, overrides: XmpOverrides, limits: XmpLimits = XMP_LIMITS): string {
+  if (typeof xml !== 'string' || xml.length === 0 || xml.length > limits.chars) throw refuse();
 
-  const doc = parsePacket(xml);
+  const doc = parsePacket(xml, limits);
   const rdf = rdfRoot(doc);
   const packet: Packet = { doc, rdf, descriptions: documentDescriptions(rdf) };
 
@@ -93,7 +104,7 @@ export function transformXmpXml(xml: string, overrides: XmpOverrides): string {
   }
 }
 
-function parsePacket(xml: string): Document {
+function parsePacket(xml: string, limits: XmpLimits): Document {
   let doc: Document;
   try {
     doc = new DOMParser({
@@ -113,7 +124,7 @@ function parsePacket(xml: string): Document {
   // not extended from an internal subset, and it resolves nothing externally.
   if (doc.doctype) throw refuse();
   if (!doc.documentElement) throw refuse();
-  auditTree(doc);
+  auditTree(doc, limits);
   return doc;
 }
 
@@ -121,12 +132,12 @@ function parsePacket(xml: string): Document {
  * deep packet is refused rather than overflowing the stack on the way.
  * Attributes count: they are tree the transform walks and the serializer
  * writes, so an element with thousands of them is not a cheap element. */
-function auditTree(doc: Document): void {
+function auditTree(doc: Document, limits: XmpLimits): void {
   let nodes = 0;
   const stack: { node: Node; depth: number }[] = [{ node: doc, depth: 0 }];
   while (stack.length > 0) {
     const { node, depth } = stack.pop()!;
-    if (++nodes > MAX_NODES || depth > MAX_DEPTH) throw refuse();
+    if (++nodes > limits.nodes || depth > limits.depth) throw refuse();
     if (
       node.nodeType === Node.ENTITY_REFERENCE_NODE ||
       node.nodeType === Node.ENTITY_NODE ||
@@ -136,7 +147,7 @@ function auditTree(doc: Document): void {
     }
     if (node.nodeType === Node.ELEMENT_NODE) {
       nodes += (node as Element).attributes.length;
-      if (nodes > MAX_NODES) throw refuse();
+      if (nodes > limits.nodes) throw refuse();
     }
     for (let child = node.firstChild; child; child = child.nextSibling) {
       stack.push({ node: child, depth: depth + 1 });
