@@ -2778,6 +2778,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "dikey metin yedek yazı tipine dönüştürülemez",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "yükseltilmiş karakterler içeren dikey metin yeniden akmaz",
   "engine.text_runs.colorMustRG": "color, bileşenleri 0..1 aralığında [r, g, b] olmalıdır",
+  "engine.text_runs.editCannotSelectText": "bir düzenleme bu metnin yazı tipini adıyla seçemez",
   "engine.text_runs.editDidApplyRun": "düzenleme uygulanmadı (dizi bulunamadı)",
   "engine.text_runs.fontActiveText": "bu metin için etkin bir yazı tipi yok",
   "engine.text_runs.fontActiveTextRun": "bu metin dizisi için etkin bir yazı tipi yok",

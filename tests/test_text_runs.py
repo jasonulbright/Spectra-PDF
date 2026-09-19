@@ -9,7 +9,7 @@ from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTChar
 
 from engine.extract_text import extract_text
-from engine.text_runs import list_text_runs, replace_text_run
+from engine.text_runs import UNNAMED_FONT, list_text_runs, replace_text_run
 
 
 def _helv(pdf) -> pikepdf.Object:
@@ -863,3 +863,153 @@ class TestRestyleTextRun:
             restyle_text_run(src, out, 1, 0, size=0)
         with pytest.raises(ValueError, match="color must be"):
             restyle_text_run(src, out, 1, 0, color=[2, 0, 0])
+
+
+class TestTheFontTheTextStateHolds:
+    """A run is read and measured with the font DICTIONARY the text state
+    holds (ISO 32000-2 §9.3.1). An edit writes through a `Tf` that names a
+    resource of the run's own stream, so a run whose font no such name selects
+    is listed, read and measured, and not offered for editing."""
+
+    def test_an_extgstate_font_after_a_tf_of_another_font_measures_and_is_not_edited(self, tmp_dir):
+        from test_redact_text_state import _gs_font_doc
+
+        src = os.path.join(tmp_dir, "gs.pdf")
+        doc = _gs_font_doc(b"/F2 1 Tf ")
+        doc.save(src)
+        doc.close()
+        (run,) = list_text_runs(src, 1)["runs"]
+        assert run["text"] == "PUBLIC SECRET WORDS"
+        # 19 characters at 0.6 em and 12 pt: the ExtGState font and size.
+        assert run["rect"][2] - run["rect"][0] == pytest.approx(19 * 7.2, abs=0.01)
+        assert run["font_size"] == 12
+        assert run["editable"] is False
+        assert run["reason"] == UNNAMED_FONT
+        with pytest.raises(ValueError) as caught:
+            replace_text_run(src, os.path.join(tmp_dir, "out.pdf"), 1, 0, "PUBLIC")
+        assert str(caught.value) == UNNAMED_FONT
+
+    def test_a_form_that_inherits_a_font_its_resources_rename_is_not_edited(self, tmp_dir):
+        from test_redact_text_state import _form_doc
+
+        src = os.path.join(tmp_dir, "form.pdf")
+        doc = _form_doc()
+        doc.save(src)
+        doc.close()
+        (run,) = list_text_runs(src, 1)["runs"]
+        assert run["nested"] is True
+        assert run["rect"][2] - run["rect"][0] == pytest.approx(19 * 7.2, abs=0.01)
+        assert run["editable"] is False
+        assert run["reason"] == UNNAMED_FONT
+
+    @pytest.mark.parametrize("form_width, editable", [(600, True), (50, False)])
+    def test_direct_font_dictionaries_compare_by_value(self, tmp_dir, form_width, editable):
+        # Both fonts are direct objects: the form's /F1 selects the font the
+        # page's /F1 set only when the two dictionaries are equal.
+        def direct_font(width):
+            return Dictionary(
+                Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Face"),
+                FirstChar=32, LastChar=126, Widths=Array([width] * 95),
+                Encoding=Name.WinAnsiEncoding,
+            )
+
+        src = os.path.join(tmp_dir, "direct.pdf")
+        pdf = pikepdf.new()
+        form = pdf.make_stream(b"BT 72 700 Td (Hello) Tj ET")
+        form["/Type"] = Name.XObject
+        form["/Subtype"] = Name.Form
+        form["/BBox"] = Array([0, 0, 612, 792])
+        form["/Resources"] = Dictionary(Font=Dictionary(F1=direct_font(form_width)))
+        page = _page(pdf, b"BT /F1 12 Tf ET /Fm0 Do", {"/F1": direct_font(600)})
+        page.obj.Resources["/XObject"] = Dictionary(Fm0=pdf.make_indirect(form))
+        pdf.save(src)
+        pdf.close()
+        (run,) = list_text_runs(src, 1)["runs"]
+        assert run["editable"] is editable
+        assert run["reason"] == (None if editable else UNNAMED_FONT)
+
+    def test_a_run_an_edit_cannot_select_still_reads_for_accessibility(self, tmp_dir):
+        # The text maps to Unicode; only the edit is refused, so the
+        # character-encoding check finds nothing to report.
+        from test_redact_text_state import _gs_font_doc
+
+        from engine.accessibility import check_accessibility
+
+        src = os.path.join(tmp_dir, "gs.pdf")
+        doc = _gs_font_doc(b"/F2 1 Tf ")
+        doc.save(src)
+        doc.close()
+        (check,) = [c for c in check_accessibility(src)["checks"] if c["id"] == "character_encoding"]
+        assert check["status"] == "pass"
+        assert check["findings"] == []
+
+    def test_a_form_that_inherits_a_font_its_resources_do_not_name_stays_editable(self, tmp_dir):
+        # The form's own resources lack /F1, so /F1 resolves through the
+        # invoking page to the very font the page selected.
+        src = os.path.join(tmp_dir, "inherits.pdf")
+        pdf = pikepdf.new()
+        form = pdf.make_stream(b"BT 72 700 Td (Hello) Tj ET")
+        form["/Type"] = Name.XObject
+        form["/Subtype"] = Name.Form
+        form["/BBox"] = Array([0, 0, 612, 792])
+        form["/Resources"] = Dictionary()
+        page = _page(pdf, b"BT /F1 12 Tf ET /Fm0 Do", {"/F1": _helv(pdf)})
+        page.obj.Resources["/XObject"] = Dictionary(Fm0=pdf.make_indirect(form))
+        pdf.save(src)
+        pdf.close()
+        (run,) = list_text_runs(src, 1)["runs"]
+        assert run["editable"] is True
+        out = os.path.join(tmp_dir, "out.pdf")
+        replace_text_run(src, out, 1, 0, "Hi")
+        assert list_text_runs(out, 1)["runs"][0]["text"] == "Hi"
+
+    @pytest.mark.skipif(
+        not all(
+            os.path.isfile(os.path.join(os.path.dirname(_EDIT_FONT), face))
+            for face in ("LiberationSerif-Regular.ttf", "LiberationSans-Regular.ttf")
+        ),
+        reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
+    )
+    def test_a_converted_run_takes_the_face_family_of_the_font_it_was_drawn_in(self, tmp_dir):
+        from engine.text_runs import convert_text_run
+
+        # The inner form names /F1 and its resources lack it: the outer form
+        # supplies it, which a lookup through the page alone never reaches.
+        src = os.path.join(tmp_dir, "nested.pdf")
+        pdf = pikepdf.new()
+        times = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type1"),
+                BaseFont=Name("/Times-Roman"),
+                Encoding=Name("/WinAnsiEncoding"),
+            )
+        )
+        inner = pdf.make_stream(b"BT /F1 12 Tf 72 700 Td (Hello) Tj ET")
+        inner["/Type"] = Name.XObject
+        inner["/Subtype"] = Name.Form
+        inner["/BBox"] = Array([0, 0, 612, 792])
+        inner["/Resources"] = Dictionary()
+        outer = pdf.make_stream(b"/Fm1 Do")
+        outer["/Type"] = Name.XObject
+        outer["/Subtype"] = Name.Form
+        outer["/BBox"] = Array([0, 0, 612, 792])
+        outer["/Resources"] = Dictionary(
+            Font=Dictionary(F1=times), XObject=Dictionary(Fm1=pdf.make_indirect(inner))
+        )
+        page = _page(pdf, b"/Fm0 Do", {})
+        page.obj.Resources["/XObject"] = Dictionary(Fm0=pdf.make_indirect(outer))
+        pdf.save(src)
+        pdf.close()
+        (run,) = list_text_runs(src, 1)["runs"]
+        assert run["editable"] is True
+        out = os.path.join(tmp_dir, "out.pdf")
+        convert_text_run(src, out, 1, 0, "Hi", os.path.dirname(_EDIT_FONT))
+        with pikepdf.open(out) as opened:
+            embedded = [
+                str(obj.get("/BaseFont"))
+                for obj in opened.objects
+                if isinstance(obj, Dictionary) and obj.get("/Subtype") == Name.Type0
+            ]
+        assert len(embedded) == 1
+        assert "LiberationSerif" in embedded[0]

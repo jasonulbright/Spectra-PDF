@@ -2778,6 +2778,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "a függőleges szöveg nem alakítható át a tartalék betűtípusra",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "a megemelt karaktereket tartalmazó függőleges szöveg nem tördelődik újra",
   "engine.text_runs.colorMustRG": "a color [r, g, b] alakú, 0..1 közötti összetevőkkel kell legyen",
+  "engine.text_runs.editCannotSelectText": "a szerkesztés nem tudja név szerint kiválasztani ennek a szövegnek a betűkészletét",
   "engine.text_runs.editDidApplyRun": "a szerkesztés nem érvényesült (a futam nem található)",
   "engine.text_runs.fontActiveText": "ehhez a szöveghez nincs aktív betűkészlet",
   "engine.text_runs.fontActiveTextRun": "ehhez a szövegfutamhoz nincs aktív betűtípus",

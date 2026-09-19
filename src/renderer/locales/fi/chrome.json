@@ -2778,6 +2778,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "pystytekstiä ei voi muuntaa varafontille",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "pystyteksti, jossa on korotettuja merkkejä, ei rivity uudelleen",
   "engine.text_runs.colorMustRG": "color on oltava [r, g, b] komponenteilla välillä 0..1",
+  "engine.text_runs.editCannotSelectText": "muokkaus ei voi valita tämän tekstin fonttia nimen perusteella",
   "engine.text_runs.editDidApplyRun": "muokkausta ei otettu käyttöön (jaksoa ei löytynyt)",
   "engine.text_runs.fontActiveText": "tälle tekstille ei ole aktiivista fonttia",
   "engine.text_runs.fontActiveTextRun": "tälle tekstijaksolle ei ole aktiivista fonttia",

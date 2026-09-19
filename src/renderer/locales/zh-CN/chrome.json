@@ -2716,6 +2716,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "竖排文本无法转换为后备字体",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "带升高字符的竖排文本不会重排",
   "engine.text_runs.colorMustRG": "color 必须是 [r, g, b]，各分量取值 0..1",
+  "engine.text_runs.editCannotSelectText": "编辑无法按名称选择此文本的字体",
   "engine.text_runs.editDidApplyRun": "编辑未生效（找不到该文本串）",
   "engine.text_runs.fontActiveText": "此文本没有活动字体",
   "engine.text_runs.fontActiveTextRun": "该文本串没有生效的字体",

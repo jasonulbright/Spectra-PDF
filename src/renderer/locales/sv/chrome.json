@@ -2778,6 +2778,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "lodrät text kan inte konverteras till reservtypsnittet",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "lodrät text med upphöjda tecken flödar inte om",
   "engine.text_runs.colorMustRG": "color måste vara [r, g, b] med komponenter i 0..1",
+  "engine.text_runs.editCannotSelectText": "en redigering kan inte välja teckensnittet för den här texten efter namn",
   "engine.text_runs.editDidApplyRun": "redigeringen tillämpades inte (följden hittades inte)",
   "engine.text_runs.fontActiveText": "inget teckensnitt är aktivt för den här texten",
   "engine.text_runs.fontActiveTextRun": "inget typsnitt är aktivt för den här textföljden",

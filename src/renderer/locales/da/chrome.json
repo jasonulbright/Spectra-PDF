@@ -2778,6 +2778,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "lodret tekst kan ikke konverteres til reserveskriften",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "lodret tekst med hævede tegn ombrydes ikke",
   "engine.text_runs.colorMustRG": "color skal være [r, g, b] med komponenter i 0..1",
+  "engine.text_runs.editCannotSelectText": "en redigering kan ikke vælge skrifttypen til denne tekst ud fra navnet",
   "engine.text_runs.editDidApplyRun": "redigeringen blev ikke anvendt (forløbet blev ikke fundet)",
   "engine.text_runs.fontActiveText": "der er ingen aktiv skrifttype til denne tekst",
   "engine.text_runs.fontActiveTextRun": "der er ingen aktiv skrift til dette tekstforløb",

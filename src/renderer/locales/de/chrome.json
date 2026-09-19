@@ -2778,6 +2778,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "vertikaler Text lässt sich nicht in die Ersatzschrift konvertieren",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "vertikaler Text mit hochgestellten Zeichen fließt nicht um",
   "engine.text_runs.colorMustRG": "color muss [r, g, b] mit Komponenten in 0..1 sein",
+  "engine.text_runs.editCannotSelectText": "eine Bearbeitung kann die Schrift dieses Textes nicht über ihren Namen auswählen",
   "engine.text_runs.editDidApplyRun": "die Bearbeitung wurde nicht angewendet (Textlauf nicht gefunden)",
   "engine.text_runs.fontActiveText": "für diesen Text ist keine Schrift aktiv",
   "engine.text_runs.fontActiveTextRun": "für diesen Textlauf ist keine Schrift aktiv",

@@ -2840,6 +2840,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "el texto vertical no se puede convertir a la fuente de reserva",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "el texto vertical con caracteres elevados no se reajusta",
   "engine.text_runs.colorMustRG": "color debe ser [r, g, b] con componentes en 0..1",
+  "engine.text_runs.editCannotSelectText": "una edición no puede seleccionar por nombre la fuente de este texto",
   "engine.text_runs.editDidApplyRun": "la edición no se aplicó (tirada no encontrada)",
   "engine.text_runs.fontActiveText": "no hay ninguna fuente activa para este texto",
   "engine.text_runs.fontActiveTextRun": "no hay ninguna fuente activa para esta tirada de texto",

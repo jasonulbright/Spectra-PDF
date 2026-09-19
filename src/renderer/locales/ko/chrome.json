@@ -2716,6 +2716,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "세로쓰기 텍스트는 대체 글꼴로 변환할 수 없습니다",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "올림 문자가 있는 세로 텍스트는 다시 흐르지 않습니다",
   "engine.text_runs.colorMustRG": "color는 0..1 범위의 구성 요소를 가진 [r, g, b] 형식이어야 합니다",
+  "engine.text_runs.editCannotSelectText": "편집에서 이 텍스트의 글꼴을 이름으로 선택할 수 없습니다",
   "engine.text_runs.editDidApplyRun": "편집이 적용되지 않았습니다(런을 찾을 수 없음)",
   "engine.text_runs.fontActiveText": "이 텍스트에 활성 글꼴이 없습니다",
   "engine.text_runs.fontActiveTextRun": "이 텍스트 런에 활성 글꼴이 없습니다",

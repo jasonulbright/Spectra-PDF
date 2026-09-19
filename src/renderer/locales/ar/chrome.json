@@ -3026,6 +3026,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "لا يمكن تحويل النص الرأسي إلى الخط الاحتياطي",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "النص العمودي ذو الحروف المرفوعة لا يعاد تدفقه",
   "engine.text_runs.colorMustRG": "يجب أن يكون اللون بالصيغة [r, g, b] بمكوّنات ضمن المدى 0..1",
+  "engine.text_runs.editCannotSelectText": "لا يمكن للتحرير تحديد خط هذا النص باسمه",
   "engine.text_runs.editDidApplyRun": "تعذّر تطبيق التعديل (لم يُعثر على التتابع)",
   "engine.text_runs.fontActiveText": "لا يوجد خط نشط لهذا النص",
   "engine.text_runs.fontActiveTextRun": "لا يوجد خط نشط لهذا التتابع النصي",

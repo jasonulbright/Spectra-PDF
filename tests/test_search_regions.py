@@ -15,7 +15,7 @@ import os
 
 import pikepdf
 import pytest
-from pikepdf import Dictionary, Name
+from pikepdf import Array, Dictionary, Name
 
 from engine.search_regions import search_text_regions
 
@@ -516,3 +516,87 @@ class TestClippedRunsAreNotOffered:
             b"q 0 0 10 10 re W n BT /F1 12 Tf 300 700 Td (Smith) Tj ET Q",
         )
         assert search_text_regions(file=src, query="Smith")["hits"] == []
+
+
+# ── the font the text state holds ─────────────────────────────────────────
+
+
+class TestTheFontTheTextStateHolds:
+    """A hit sits where a reader draws the text, and that takes the font the
+    text state holds (ISO 32000-2 §9.3.1): the one an ExtGState /Font entry
+    sets, or the one a form inherits under a name its own resources give to
+    another font (§8.10.1); and a composite font's codes read through its
+    CMap's codespace (§9.7.6.2).
+
+    The shapes are the redaction walker's: "PUBLIC SECRET WORDS" from
+    x = 60 at 12 pt, 0.6 em per character, so "SECRET" spans x 110.4 to 153.6.
+    Search & Redact then removes exactly that span, on the saved bytes."""
+
+    def _check(self, tmp_dir, doc, name: str):
+        from test_redact_text_state import SURVIVORS, _shows
+
+        from engine.search_redact import search_and_redact
+
+        src = os.path.join(tmp_dir, f"{name}.pdf")
+        doc.save(src)
+        doc.close()
+        hits = search_text_regions(file=src, query="SECRET")["hits"]
+        assert len(hits) == 1
+        (entry,) = hits[0]["rects"]
+        assert entry["imprecise"] is False
+        assert entry["rect"][0] == pytest.approx(110.4, abs=0.01)
+        assert entry["rect"][2] == pytest.approx(153.6, abs=0.01)
+        out = os.path.join(tmp_dir, f"{name}_out.pdf")
+        search_and_redact(src, out, query="SECRET")
+        assert _shows(out) == SURVIVORS
+
+    def test_an_extgstate_font_with_no_tf(self, tmp_dir):
+        from test_redact_text_state import _gs_font_doc
+
+        self._check(tmp_dir, _gs_font_doc(), "gs")
+
+    def test_an_extgstate_font_after_a_tf_of_another_font_and_size(self, tmp_dir):
+        from test_redact_text_state import _gs_font_doc
+
+        self._check(tmp_dir, _gs_font_doc(b"/F2 1 Tf "), "gs_after_tf")
+
+    def test_the_hit_reaches_as_high_and_as_low_as_the_extgstate_font_inks(self, tmp_dir):
+        from test_redact_text_state import _gs_font_doc
+
+        doc = _gs_font_doc(b"/F2 1 Tf ")
+        wide = doc.pages[0].Resources.ExtGState.GS1.Font[0]
+        wide["/FontDescriptor"] = doc.make_indirect(
+            Dictionary(
+                Type=Name.FontDescriptor, FontName=Name("/Wide"), Flags=32,
+                FontBBox=Array([0, -200, 600, 700]), ItalicAngle=0,
+                Ascent=700, Descent=-200, CapHeight=700, StemV=80,
+            )
+        )
+        src = os.path.join(tmp_dir, "gs_ink.pdf")
+        doc.save(src)
+        doc.close()
+        (hit,) = search_text_regions(file=src, query="SECRET")["hits"]
+        (entry,) = hit["rects"]
+        # Baseline 300 at 12 pt: 0.2 em below it and 0.7 em above it.
+        assert entry["rect"][1] == pytest.approx(297.6, abs=0.01)
+        assert entry["rect"][3] == pytest.approx(308.4, abs=0.01)
+
+    def test_a_form_that_inherits_the_font_its_resources_rename(self, tmp_dir):
+        from test_redact_text_state import _form_doc
+
+        self._check(tmp_dir, _form_doc(), "form")
+
+    def test_a_composite_font_whose_embedded_cmap_reads_one_byte_codes(self, tmp_dir):
+        from test_redact_text_state import TEXT, _one_byte_cmap_font, _page
+
+        doc = pikepdf.new()
+        font = _one_byte_cmap_font(doc)
+        pairs = b"".join(b"<%02X> <%04X>\n" % (code, code) for code in range(0x20, 0x7F))
+        font["/ToUnicode"] = doc.make_stream(
+            b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n"
+            b"1 begincodespacerange <00> <FF> endcodespacerange\n"
+            b"95 beginbfchar\n" + pairs + b"endbfchar\n"
+            b"endcmap CMapName currentdict /CMap defineresource pop end end\n"
+        )
+        _page(doc, Dictionary(Font=Dictionary(F1=font)), b"BT /F1 12 Tf 60 300 Td (" + TEXT + b") Tj ET")
+        self._check(tmp_dir, doc, "cmap")

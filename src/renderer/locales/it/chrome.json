@@ -2840,6 +2840,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "il testo verticale non può essere convertito nel carattere di ripiego",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "il testo verticale con caratteri rialzati non si ridispone",
   "engine.text_runs.colorMustRG": "color deve essere [r, g, b] con componenti in 0..1",
+  "engine.text_runs.editCannotSelectText": "una modifica non può selezionare per nome il font di questo testo",
   "engine.text_runs.editDidApplyRun": "la modifica non è stata applicata (blocco di testo non trovato)",
   "engine.text_runs.fontActiveText": "nessun font è attivo per questo testo",
   "engine.text_runs.fontActiveTextRun": "nessun carattere è attivo per questo blocco di testo",
