@@ -33,8 +33,9 @@ import {
   resolvePageEntry,
   sanitizePageEntry,
 } from '../../lib/page-labels';
-import { getDocumentProxy } from '../../lib/pdfDocCache';
-import { buildRedactionRegions } from '../../lib/redaction';
+import { getDocumentProxy, requestDocumentProxy } from '../../lib/pdfDocCache';
+import { buildRedactionRegions, pageForFilePageNumber } from '../../lib/redaction';
+import { pathDescribesCurrentBytes } from '../../lib/workspace-settle';
 import { displayRectToPdf, pdfRectToDisplay } from '../../lib/pdfx-build';
 import { sameRegion } from '../../lib/search-redact';
 import {
@@ -3318,20 +3319,25 @@ export function WorkspaceCanvasView({
         page: number;
         rect: [number, number, number, number];
       })[],
-    ): Promise<{ marks: RedactionMark[]; orphaned: number }> => {
-      const f = filesRef.current.get(path);
-      if (!f?.buffer) return { marks: [], orphaned: entries.length };
-      const pages = docsRef.current.filter((d) => d.path === path).flatMap((d) => d.pages);
+    ): Promise<{ marks: RedactionMark[]; orphaned: number; buffer: PdfBuffer | null }> => {
+      const current = readState();
+      const buffer = current.files.get(path)?.buffer ?? null;
+      if (!buffer) return { marks: [], orphaned: entries.length, buffer };
+      // Every page is read from `buffer`. When the file takes other bytes
+      // meanwhile, nothing converted from these ones is kept.
+      const stillCurrent = (): boolean => readState().files.get(path)?.buffer === buffer;
+      const stale = { marks: [], orphaned: entries.length, buffer: null };
       const marks: RedactionMark[] = [];
       let orphaned = 0;
       for (const entry of entries) {
-        const pageRef = pages[entry.page - 1];
+        const pageRef = pageForFilePageNumber(current, path, entry.page);
         if (!pageRef) {
           orphaned += 1;
           continue;
         }
-        const proxy = await getDocumentProxy(pageRef.sourceDocId, f.buffer);
-        const p = await proxy.getPage(pageRef.sourcePageIndex + 1);
+        const request = requestDocumentProxy(pageRef.sourceDocId, buffer, stillCurrent);
+        if (!request) return stale;
+        const p = await (await request).getPage(pageRef.sourcePageIndex + 1);
         const [vx0, vy0, vx1, vy1] = p.view;
         const composed = ((p.rotate + pageRef.rotation) % 360) as 0 | 90 | 180 | 270;
         const rect = pdfRectToDisplay(
@@ -3353,14 +3359,14 @@ export function WorkspaceCanvasView({
           props: propertiesFromPayload(entry as Record<string, unknown>),
         });
       }
-      return { marks, orphaned };
+      return stillCurrent() ? { marks, orphaned, buffer } : stale;
     },
-    [],
+    [readState],
   );
 
   const seedMarksFromFile = useCallback(
     async (path: string) => {
-      const f = filesRef.current.get(path);
+      const f = readState().files.get(path);
       if (!f?.buffer) return;
       const seq = (seedSeqRef.current.get(path) ?? 0) + 1;
       seedSeqRef.current.set(path, seq);
@@ -3378,9 +3384,12 @@ export function WorkspaceCanvasView({
           })[];
         };
         if (seedSeqRef.current.get(path) !== seq) return; // superseded
+        // A listing of bytes the file no longer holds counts other pages; the
+        // change that replaced them queued the seed of the new ones.
+        if (readState().files.get(path)?.buffer !== f.buffer) return;
         if (!listed.marks?.length) return;
-        const { marks: seeded, orphaned } = await marksFromFileRects(path, listed.marks);
-        if (seedSeqRef.current.get(path) !== seq) return;
+        const { marks: seeded, orphaned, buffer } = await marksFromFileRects(path, listed.marks);
+        if (seedSeqRef.current.get(path) !== seq || buffer !== f.buffer) return;
         markPathsEverRef.current.add(path);
         setMarks((prev) => [...prev.filter((m) => m.path !== path), ...seeded]);
         if (orphaned > 0) {
@@ -3404,7 +3413,7 @@ export function WorkspaceCanvasView({
         );
       }
     },
-    [engineCall, marksFromFileRects],
+    [engineCall, marksFromFileRects, readState],
   );
 
   // --- Link regions on the page ----------------------------------------
@@ -3580,28 +3589,27 @@ export function WorkspaceCanvasView({
     }
   }, [state.files]);
 
-  // drain: run queued mark seeds once the workspace's docs reflect the
-  // settled buffer (the reindex is async — seeding earlier would bind marks
-  // to PageRefs a rebuild is about to kill).
+  // drain: run queued mark seeds once the path's documents describe the bytes
+  // it holds (the reindex is async — seeding against the previous documents
+  // binds marks to page indexes of the previous bytes, or to PageRefs a
+  // rebuild is about to kill).
   useEffect(() => {
     if (pendingSeedRef.current.size === 0) return;
-    const present = new Set(docs.map((d) => d.path));
     for (const path of [...pendingSeedRef.current]) {
-      if (!present.has(path)) continue;
+      if (!pathDescribesCurrentBytes(state, path)) continue;
       pendingSeedRef.current.delete(path);
       void seedMarksFromFile(path);
     }
-  }, [docs, seedMarksFromFile]);
+  }, [state, seedMarksFromFile]);
 
   useEffect(() => {
     if (pendingLinkSeedRef.current.size === 0) return;
-    const present = new Set(docs.map((d) => d.path));
     for (const path of [...pendingLinkSeedRef.current]) {
-      if (!present.has(path)) continue;
+      if (!pathDescribesCurrentBytes(state, path)) continue;
       pendingLinkSeedRef.current.delete(path);
       void seedLinksFromFile(path);
     }
-  }, [docs, seedLinksFromFile]);
+  }, [state, seedLinksFromFile]);
 
   // Find overlays: matching pages, and per-word boxes where OCR words exist.
   const findMatchPageIds = find.active ? find.result.pageIds : NO_PAGE_IDS;
@@ -5908,17 +5916,27 @@ export function WorkspaceCanvasView({
         pending.push({ page: request.page, rect: request.rect, ...current });
         byPath.set(request.path, pending);
       }
+      const converted: { path: string; buffer: PdfBuffer | null; marks: RedactionMark[]; entries: number }[] = [];
+      for (const [path, entries] of byPath) {
+        const { marks: made, orphaned, buffer } = await marksFromFileRects(path, entries);
+        converted.push({ path, buffer, marks: made, entries: made.length + orphaned });
+      }
+      // A file that took other bytes after its conversion keeps none of its
+      // marks: their geometry describes the previous bytes.
       const fresh: RedactionMark[] = [];
       let skipped = 0;
-      for (const [path, entries] of byPath) {
-        const { marks: made, orphaned } = await marksFromFileRects(path, entries);
-        fresh.push(...made);
-        skipped += orphaned;
+      for (const batch of converted) {
+        if (readState().files.get(batch.path)?.buffer === batch.buffer) {
+          fresh.push(...batch.marks);
+          skipped += batch.entries - batch.marks.length;
+        } else {
+          skipped += batch.entries;
+        }
       }
       if (fresh.length > 0) setMarks((prev) => [...prev, ...fresh]);
       return { added: fresh.length, duplicates, skipped };
     },
-    [markedRects, marksFromFileRects],
+    [markedRects, marksFromFileRects, readState],
   );
 
   const searchOcrPage = useCallback(
@@ -5933,8 +5951,7 @@ export function WorkspaceCanvasView({
       // it and holds word boxes. They convert to page space through the same
       // machinery "Make searchable" uses, so a scanned page's marks and an
       // OCR layer's words land in the same coordinates.
-      const pages = docsRef.current.filter((d) => d.path === path).flatMap((d) => d.pages);
-      const pageRef = pages[page - 1];
+      const pageRef = pageForFilePageNumber(readState(), path, page);
       if (!pageRef) return [];
       const words = searchIndexRef.current.getOcrWords(sourceKeyOf(pageRef));
       if (!words || words.length === 0) return [];
@@ -5946,7 +5963,7 @@ export function WorkspaceCanvasView({
         rect: displayRectToPdf(word, geometry.box, geometry.bakedRotate),
       }));
     },
-    [geometryForPage],
+    [geometryForPage, readState],
   );
 
   // Listeners so the panel's already-marked state stays live while the user

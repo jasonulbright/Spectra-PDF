@@ -23,7 +23,9 @@ vi.mock('../src/renderer/lib/tauri-bridge', () => ({
   },
 }));
 
-import { claimPaths, releasePaths, soleOwner } from '../src/renderer/lib/window-claims';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { claimPaths, createClaimHolds, releasePaths, soleOwner } from '../src/renderer/lib/window-claims';
 import { mergeRecent, sameRecent, type RecentEntry } from '../src/renderer/lib/recent-files';
 import { scopedKeyFor, PRIMARY_WINDOW_LABEL } from '../src/renderer/lib/window-label';
 
@@ -166,6 +168,112 @@ describe('claims on one path from one window', () => {
     claim.mockResolvedValueOnce({ granted: true, owner: '' });
     await releasePaths(['P']);
     await expect(claimPaths(['P'], 'write')).resolves.toEqual({ granted: ['P'], refused: [] });
+  });
+
+  it('a release is not sent for a path this window uses when the release’s turn comes', async () => {
+    const { held, drain } = arbiter();
+    const holds = createClaimHolds();
+    const inUse = (path: string): boolean => holds.held(path);
+    // An open of P that is cancelled, and an import of P that runs meanwhile:
+    // both flows of one window, one claim between them.
+    holds.hold(['P']);
+    const opening = claimPaths(['P'], 'write');
+    holds.hold(['P']);
+    const importing = claimPaths(['P'], 'read');
+    await drain();
+    await Promise.all([opening, importing]);
+    holds.drop(['P']); // the open is cancelled
+    const cancelled = releasePaths(['P'], inUse);
+    expect(await drain()).toEqual([]);
+    await cancelled;
+    expect(held.has('P')).toBe(true);
+    holds.drop(['P']); // the import ends without using it
+    const ended = releasePaths(['P'], inUse);
+    expect(await drain()).toEqual(['release P']);
+    await ended;
+    expect(held.has('P')).toBe(false);
+  });
+
+  it('asks whether the path is in use at the release’s turn, not at its call', async () => {
+    const { held, drain } = arbiter();
+    held.add('P');
+    let used = false;
+    const claiming = claimPaths(['P'], 'write');
+    const releasing = releasePaths(['P'], () => used);
+    // A flow takes the path while the claim ahead of the release is unanswered.
+    used = true;
+    expect(await drain()).toEqual(['claim P']);
+    await Promise.all([claiming, releasing]);
+    expect(held.has('P')).toBe(true);
+  });
+
+  it('a third call waits for the second even after the first answered', async () => {
+    const sent: string[] = [];
+    const answers: (() => void)[] = [];
+    release.mockImplementation((path: string) => new Promise<void>((resolve) => {
+      sent.push(`release ${path}`);
+      answers.push(resolve);
+    }));
+    claim.mockImplementation((path: string) => new Promise((resolve) => {
+      sent.push(`claim ${path}`);
+      answers.push(() => resolve({ granted: true, owner: '' }));
+    }));
+    const first = releasePaths(['P']);
+    const second = claimPaths(['P'], 'write');
+    await flush();
+    answers.shift()!();
+    await first;
+    await flush();
+    expect(sent).toEqual(['release P', 'claim P']);
+    // The claim is in flight: a close now must wait for its answer.
+    const third = releasePaths(['P']);
+    await flush();
+    expect(sent).toEqual(['release P', 'claim P']);
+    answers.shift()!();
+    await second;
+    await flush();
+    expect(sent).toEqual(['release P', 'claim P', 'release P']);
+    answers.shift()!();
+    await third;
+  });
+});
+
+describe('createClaimHolds', () => {
+  it('counts every flow that holds a path', () => {
+    const holds = createClaimHolds();
+    holds.hold(['A', 'B']);
+    holds.hold(['A']);
+    holds.drop(['A']);
+    expect(holds.held('A')).toBe(true);
+    holds.drop(['A', 'B']);
+    expect(holds.held('A')).toBe(false);
+    expect(holds.held('B')).toBe(false);
+    // A drop without a hold does not go below nothing.
+    holds.drop(['C']);
+    holds.hold(['C']);
+    expect(holds.held('C')).toBe(true);
+  });
+});
+
+// App has no DOM test environment: its claim flows are pinned to the rules
+// above as source text.
+describe('the window’s claim flows', () => {
+  const app = readFileSync(resolve(__dirname, '../src/renderer/App.tsx'), 'utf8');
+
+  it('hold their paths from before the claim until they finish', () => {
+    expect(app).toContain('claimHolds.current.hold(holding);');
+    expect(app).toContain('claimHolds.current.drop(holding);');
+    expect(app).toContain('claimHolds.current.hold(canonicalImports);');
+    expect(app).toContain('claimHolds.current.drop(canonicalImports);');
+    expect(app).toContain('claimHolds.current.hold([dest]);');
+    expect(app).toContain('claimHolds.current.drop([dest]);');
+  });
+
+  it('release only through the in-use check', () => {
+    expect(app).toContain('(path: string): boolean => readState().files.has(path) || claimHolds.current.held(path),');
+    const releases = app.match(/releasePaths\([^;]*\);/g) ?? [];
+    expect(releases.length).toBeGreaterThanOrEqual(6);
+    expect(releases.filter((call) => !call.includes('pathInUse'))).toEqual([]);
   });
 });
 

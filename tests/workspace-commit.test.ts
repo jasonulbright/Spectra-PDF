@@ -8,6 +8,7 @@ import {
   planCommit,
   buildCommitBytes,
   commitPageEdits,
+  committedDocuments,
   carriesLiveSignature,
 } from '../src/renderer/lib/workspace-commit';
 import { rotateAnnotationRect } from '../src/renderer/state/reducer';
@@ -193,6 +194,106 @@ describe('planCommit', () => {
       documents: [makeDoc('a#0', a, 'a', [pageRef('a.pdf', 0)])],
     };
     expect(planCommit(workspace, files, [])).toEqual([]);
+  });
+});
+
+describe('committedDocuments', () => {
+  it('reads every page from the new bytes at its written position, across partitions', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const docs = [
+      makeDoc('a#0', a, 'Front', [pageRef('a.pdf', 2), { ...pageRef('b.pdf', 1), width: 30, height: 40 }]),
+      makeDoc('a#1', a, 'Back', [{ ...pageRef('a.pdf', 0, 270), width: 10, height: 20 }]),
+    ];
+    const buffer = new Uint8Array([9]);
+    const committed = committedDocuments(docs, buffer);
+    expect(committed.map((d) => [d.id, d.name, d.path, d.buffer, d.pageCount, d.provisional])).toEqual([
+      ['a#0', 'Front', 'a.pdf', buffer, 2, true],
+      ['a#1', 'Back', 'a.pdf', buffer, 1, true],
+    ]);
+    expect(committed.flatMap((d) => d.pages)).toEqual([
+      { id: 'a.pdf#p2', sourceDocId: 'a.pdf', sourcePageIndex: 0, rotation: 0, width: 0, height: 0 },
+      // A page moved in from another file is this file's page now.
+      { id: 'b.pdf#p1', sourceDocId: 'a.pdf', sourcePageIndex: 1, rotation: 0, width: 30, height: 40 },
+      // The written quarter turn swaps the viewport size.
+      { id: 'a.pdf#p0', sourceDocId: 'a.pdf', sourcePageIndex: 2, rotation: 0, width: 20, height: 10 },
+    ]);
+  });
+
+  it('keeps the size for a half turn', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const [doc] = committedDocuments(
+      [makeDoc('a#0', a, 'a', [{ ...pageRef('a.pdf', 0, 180), width: 10, height: 20 }])],
+      new Uint8Array([9]),
+    );
+    expect([doc.pages[0].width, doc.pages[0].height]).toEqual([10, 20]);
+  });
+
+  it('bakes every annotation and drops the fingerprints of the originals the commit replaced', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const fingerprint = { subtype: 'Square' as const, rect: [1, 2, 3, 4] as [number, number, number, number], color: '#ff0000', hasAppearance: true };
+    const page = {
+      ...pageRef('a.pdf', 0),
+      annotations: [
+        { id: 'new', kind: 'note' as const, x: 0.1, y: 0.1, w: 0.1, h: 0.1, color: '#ffd54a', note: 'n' },
+        { id: 'old', kind: 'shape' as const, shapeType: 'rect' as const, x: 0.2, y: 0.2, w: 0.1, h: 0.1, color: '#ff0000',
+          importedOriginal: fingerprint, geometryDiverged: true },
+      ],
+      removedImportedOriginals: [fingerprint],
+    };
+    const [doc] = committedDocuments([makeDoc('a#0', a, 'a', [page])], new Uint8Array([9]));
+    expect(doc.pages[0].removedImportedOriginals).toBeUndefined();
+    expect(doc.pages[0].annotations).toEqual([
+      { id: 'new', kind: 'note', x: 0.1, y: 0.1, w: 0.1, h: 0.1, color: '#ffd54a', note: 'n', baked: true },
+      { id: 'old', kind: 'shape', shapeType: 'rect', x: 0.2, y: 0.2, w: 0.1, h: 0.1, color: '#ff0000', baked: true },
+    ]);
+    // The planned documents are not touched.
+    expect(page.annotations[1].importedOriginal).toBe(fingerprint);
+  });
+});
+
+describe('a baked annotation', () => {
+  it('is not authored again: the copied page carries it', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const note = { id: 'n1', kind: 'highlight' as const, x: 0.1, y: 0.2, w: 0.3, h: 0.15, color: '#ffd54a', note: 'once' };
+    const first = { documents: [makeDoc('a#0', a, 'a', [{ ...pageRef('a.pdf', 0), annotations: [note] }])] };
+    const [plan] = planCommit(first, files, ['a.pdf']);
+    const bytes = await buildCommitBytes(plan);
+    // A second commit from the documents the first one composed, one more
+    // annotation added, the page turned.
+    const composed = committedDocuments(first.documents, bytes);
+    const added = { ...note, id: 'n2', note: 'twice' };
+    const second = {
+      documents: [{
+        ...composed[0],
+        pages: [{ ...composed[0].pages[0], rotation: 90 as const, annotations: [...composed[0].pages[0].annotations!, added] }],
+      }],
+    };
+    const nextFiles = new Map(files).set('a.pdf', { ...a, buffer: bytes, pageCount: 1 });
+    const [again] = planCommit(second, nextFiles, ['a.pdf']);
+    expect(again.documents[0].pages[0].annotations?.map((x) => x.note)).toEqual(['twice']);
+    const pdf = await loadPdf(await buildCommitBytes(again));
+    const annots = (await (await pdf.getPage(1)).getAnnotations()) as { subtype: string; contentsObj?: { str: string } }[];
+    expect(annots.map((x) => [x.subtype, x.contentsObj?.str])).toEqual([
+      ['Highlight', 'once'],
+      ['Highlight', 'twice'],
+    ]);
+    await pdf.loadingTask.destroy();
+  });
+
+  it('leaves a page with only baked annotations with nothing to author', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const baked = { id: 'n1', kind: 'note' as const, x: 0.1, y: 0.1, w: 0.1, h: 0.1, color: '#ffd54a', baked: true as const };
+    const [plan] = planCommit(
+      { documents: [makeDoc('a#0', a, 'a', [{ ...pageRef('a.pdf', 0), annotations: [baked] }])] },
+      files,
+      ['a.pdf'],
+    );
+    expect(plan.documents[0].pages[0].annotations).toBeUndefined();
   });
 });
 
@@ -579,6 +680,13 @@ describe('commitPageEdits (transactional)', () => {
         ['b.pdf', 3],
       ]);
       expect(action.updates.every((u) => u.snapshotPath.endsWith('.snap'))).toBe(true);
+      // Each update carries the documents its own bytes hold.
+      for (const u of action.updates) {
+        expect(u.documents).toEqual(
+          committedDocuments(workspace.documents.filter((d) => d.path === u.path), u.buffer),
+        );
+        expect(u.documents.every((d) => d.buffer === u.buffer)).toBe(true);
+      }
     }
   });
 

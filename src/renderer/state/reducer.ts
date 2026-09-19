@@ -243,6 +243,12 @@ function mapDocument(
   return documents.map((d) => (d.id === docId ? update(d) : d));
 }
 
+// An edit the page tier cannot take: nothing changes, and one more notice is
+// owed.
+function refuseEdit(state: AppState): AppState {
+  return { ...state, pageEditRefusals: state.pageEditRefusals + 1 };
+}
+
 // Every in-memory page mutation goes through here: push the previous state
 // onto the page-edit undo tier, clear redo, and mark the touched files dirty
 // for the commit bridge. Callers return the current documents array unchanged
@@ -371,6 +377,36 @@ function recordedHistory(state: AppState): {
       ...state.pageRedoStack.map((e) => e.action).reverse(),
     ],
     undoDepth: undo.length,
+  };
+}
+
+/** SURVIVE-OR-PRUNE: focus, reading position and selection keep exactly the
+ * ids `documents` still contain after `prev` is replaced. Positional ids are
+ * generation-tagged, so a rebuild mints ids no stale holder can match; an id
+ * that comes back is an adopted one and names the same logical page or
+ * partition. A page id `prev` did not hold is left alone: it names a page
+ * still to arrive. (A focused document id always named a document when it was
+ * set.) Membership is tested against the real documents, never a string
+ * prefix (paths may contain '#'). */
+function survivingUi(ui: UiState, prev: OpenDocument[], documents: OpenDocument[]): UiState {
+  const hadPageIds = new Set(prev.flatMap((d) => d.pages.map((p) => p.id)));
+  const keptDocIds = new Set(documents.map((d) => d.id));
+  const keptPageIds = new Set(documents.flatMap((d) => d.pages.map((p) => p.id)));
+  const pageGone = (id: string): boolean => hadPageIds.has(id) && !keptPageIds.has(id);
+  const focusedId = ui.focusedDocId;
+  const dropFocus = !!focusedId && !keptDocIds.has(focusedId);
+  const currentId = ui.currentPageId;
+  const dropCurrent = !!currentId && pageGone(currentId);
+  const prunedSelection = new Set([...ui.selectedPageIds].filter((id) => !pageGone(id)));
+  const selectionChanged = prunedSelection.size !== ui.selectedPageIds.size;
+  const anchorPruned = !!ui.selectionAnchor && pageGone(ui.selectionAnchor);
+  if (!dropFocus && !dropCurrent && !selectionChanged && !anchorPruned) return ui;
+  return {
+    ...ui,
+    focusedDocId: dropFocus ? null : ui.focusedDocId,
+    currentPageId: dropCurrent ? null : ui.currentPageId,
+    selectedPageIds: selectionChanged ? prunedSelection : ui.selectedPageIds,
+    selectionAnchor: anchorPruned ? null : ui.selectionAnchor,
   };
 }
 
@@ -779,56 +815,82 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
     case 'COMMIT_PAGE_EDITS': {
       // The commit bridge's atomic landing: every rebuilt file joins the
-      // snapshot undo chain and the edits the commit contains leave the
-      // page-edit tier in one step. The workspace is left alone — the indexer
-      // re-derives each updated path from its new buffer, and that landing
-      // replays whatever is still pending onto the re-derived documents.
+      // snapshot undo chain, its documents become the ones its new bytes hold,
+      // and the edits the commit contains leave the page-edit tier, in one
+      // step. The previous documents address the previous bytes: read against
+      // the new ones, a moved page shows another page and a written rotation
+      // turns twice. The reindex of the new bytes then replaces the committed
+      // documents with the read-back and replays whatever is still pending.
       //
-      // Selection is not cleared here: the update carries the identity
-      // record, the reindex adopts the selected pages' ids, and the
-      // survive-or-prune pass at SET_WORKSPACE_DOCUMENTS keeps exactly the
-      // pages that still exist. (Non-authored buffer changes — UPDATE_FILE,
-      // REFRESH_BUFFER — clear eagerly: their reindex mints a fresh
-      // generation, nothing could survive the prune, and clearing early keeps
-      // the async window inert.)
+      // Selection is not cleared here: the committed documents keep the
+      // planned ids, the reindex adopts them, and the survive-or-prune pass
+      // keeps exactly the pages that still exist. (Non-authored buffer changes
+      // — UPDATE_FILE, REFRESH_BUFFER — clear eagerly: their reindex mints a
+      // fresh generation, nothing could survive the prune, and clearing early
+      // keeps the async window inert.)
       let files = state.files;
       for (const update of action.updates) {
         files = applyFileUpdate(files, update);
       }
-      const committed: AppState = {
-        ...state,
-        files,
-        pageUndoStack: [],
-        pageRedoStack: [],
-        pageDirtyPaths: [],
-      };
+      const landed = action.updates.filter((u) => files.has(u.path));
+      const withCommitted = (documents: OpenDocument[]): OpenDocument[] =>
+        landed.reduce((docs, u) => placeDocuments(docs, u.path, u.documents), documents);
       // Edits made while the commit was built and published are not in it.
-      // Their base is the committed composition, which is the composition under
-      // the first of them, with nothing dirty; replaying them there keeps each
-      // one pending, undoable, and dirtying exactly the paths it touches.
+      // Their base is the composition under the first of them with the
+      // committed documents in place and nothing dirty; replaying them there
+      // keeps each one pending, undoable, and dirtying exactly the paths it
+      // touches.
       const since = editsSincePlan(state, action.planned);
+      let next: AppState;
       if (since === null) {
-        // The live stacks no longer show which edits the plan contained.
-        // Everything still dirty stays dirty, and one refusal is counted.
-        return {
-          ...committed,
-          pageDirtyPaths: state.pageDirtyPaths,
+        // The live stacks no longer show which edits the plan contained, so no
+        // pending edit can be told apart from the committed ones. The
+        // committed paths show their bytes. Every other dirty path may hold a
+        // page moved to or from them, so its documents are dropped for the
+        // indexer to re-derive from its own bytes, as for a bypass of the
+        // commit gate, and one refusal is counted.
+        const committedPaths = new Set(landed.map((u) => u.path));
+        const unknown = new Set(state.pageDirtyPaths.filter((p) => !committedPaths.has(p)));
+        next = {
+          ...state,
+          files,
+          workspace: {
+            documents: withCommitted(state.workspace.documents).filter((d) => !unknown.has(d.path)),
+          },
+          pageUndoStack: [],
+          pageRedoStack: [],
+          pageDirtyPaths: [],
           pageEditRefusals: state.pageEditRefusals + 1,
         };
+      } else {
+        const base = withCommitted(since.length > 0 ? since[0].documents : state.workspace.documents);
+        const committed: AppState = {
+          ...state,
+          files,
+          workspace: { documents: base },
+          pageUndoStack: [],
+          pageRedoStack: [],
+          pageDirtyPaths: [],
+        };
+        if (since.length === 0) {
+          next = committed;
+        } else {
+          const replayed = replayPageTier(
+            committed,
+            base,
+            [],
+            since.map((e) => e.action),
+            since.length,
+          );
+          next = {
+            ...committed,
+            ...replayed.tier,
+            pageEditRefusals: state.pageEditRefusals + replayed.refused,
+          };
+        }
       }
-      if (since.length === 0) return committed;
-      const replayed = replayPageTier(
-        committed,
-        since[0].documents,
-        [],
-        since.map((e) => e.action),
-        since.length,
-      );
-      return {
-        ...committed,
-        ...replayed.tier,
-        pageEditRefusals: state.pageEditRefusals + replayed.refused,
-      };
+      const ui = survivingUi(state.ui, state.workspace.documents, next.workspace.documents);
+      return ui === next.ui ? next : { ...next, ui };
     }
     case 'RESTORE_HISTORY': {
       const existing = state.files.get(action.path);
@@ -936,42 +998,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         tier.pageUndoStack,
         tier.pageRedoStack,
       );
-      // SURVIVE-OR-PRUNE: focus, reading position and selection keep exactly
-      // the ids the resulting documents still contain. Positional ids are
-      // generation-tagged, so a rebuild mints ids no stale holder can match;
-      // an id that comes back is an adopted one and names the same logical
-      // page or partition. A page id no document held before this landing is
-      // left alone: it names a page still to arrive. (A focused document id
-      // always named a document when it was set.) Membership is tested
-      // against the real documents, never a string prefix (paths may contain
-      // '#').
-      const hadPageIds = new Set(prev.flatMap((d) => d.pages.map((p) => p.id)));
-      const keptDocIds = new Set(documents.map((d) => d.id));
-      const keptPageIds = new Set(documents.flatMap((d) => d.pages.map((p) => p.id)));
-      const pageGone = (id: string): boolean => hadPageIds.has(id) && !keptPageIds.has(id);
-      const focusedId = state.ui.focusedDocId;
-      const dropFocus = !!focusedId && !keptDocIds.has(focusedId);
-      const currentId = state.ui.currentPageId;
-      const dropCurrent = !!currentId && pageGone(currentId);
-      const prunedSelection = new Set(
-        [...state.ui.selectedPageIds].filter((id) => !pageGone(id)),
-      );
-      const selectionChanged = prunedSelection.size !== state.ui.selectedPageIds.size;
-      const anchorPruned = !!state.ui.selectionAnchor && pageGone(state.ui.selectionAnchor);
-      const ui =
-        dropFocus || dropCurrent || selectionChanged || anchorPruned
-          ? {
-              ...state.ui,
-              focusedDocId: dropFocus ? null : state.ui.focusedDocId,
-              currentPageId: dropCurrent ? null : state.ui.currentPageId,
-              selectedPageIds: selectionChanged ? prunedSelection : state.ui.selectedPageIds,
-              selectionAnchor: anchorPruned ? null : state.ui.selectionAnchor,
-            }
-          : state.ui;
       return {
         ...state,
         files,
-        ui,
+        ui: survivingUi(state.ui, prev, documents),
         ...tier,
         pageEditRefusals: state.pageEditRefusals + refused,
       };
@@ -1151,7 +1181,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         const source = action.sources.find((s) => s.path === p.sourceDocId);
         return !!source && state.files.get(p.sourceDocId)?.buffer === source.buffer;
       });
-      if (!indexesCurrent) return { ...state, pageEditRefusals: state.pageEditRefusals + 1 };
+      if (!indexesCurrent) return refuseEdit(state);
+      // A copy of a baked annotation has no fingerprint of the object it
+      // copies, so it could never be edited or removed where it lands; the
+      // read-back of the source's bytes brings one.
+      if (action.pages.some((p) => p.annotations?.some((a) => a.baked))) return refuseEdit(state);
       // Splice the imported page refs into the target at the clamped index.
       // Their sourceDocId points at a REGISTER_IMPORT_SOURCE byte-only file, so
       // they render (usePdfProxies) and commit (bytesFor) like any other page.
@@ -1270,6 +1304,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         (a) => chosen.has(a.id) && a.kind === 'count' && groupOf(a) !== action.group,
       );
       if (moving.length === 0) return state;
+      if (moving.some((a) => a.baked)) return refuseEdit(state);
       const all = doc.pages.flatMap((p) => countMarksOf(p.annotations));
       let seq = nextSequence(all, action.group);
       const renumbered = new Map<string, { seq: number; note: string }>();
@@ -1307,6 +1342,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const page = doc?.pages.find((p) => p.id === action.pageId);
       const existing = page?.annotations?.find((a) => a.id === action.annotationId);
       if (!doc || !existing || existing.note === action.note) return state;
+      if (existing.baked) return refuseEdit(state);
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
         pages: d.pages.map((p) =>
@@ -1327,6 +1363,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const page = doc?.pages.find((p) => p.id === action.pageId);
       const existing = page?.annotations?.find((a) => a.id === action.annotationId);
       if (!doc || !existing || existing.color === action.color) return state;
+      if (existing.baked) return refuseEdit(state);
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
         pages: d.pages.map((p) =>
@@ -1347,6 +1384,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const page = doc?.pages.find((p) => p.id === action.pageId);
       const removed = page?.annotations?.find((a) => a.id === action.annotationId);
       if (!doc || !removed) return state;
+      if (removed.baked) return refuseEdit(state);
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
         pages: d.pages.map((p) =>
@@ -1383,6 +1421,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         else byPage.set(e.pageId, [e]);
       }
       let changed = false;
+      let touchesBaked = false;
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
         pages: d.pages.map((p) => {
@@ -1420,6 +1459,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
               next.calloutBox === a.calloutBox
             )
               return a;
+            if (a.baked) touchesBaked = true;
             pageChanged = true;
             return next;
           });
@@ -1428,6 +1468,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           return { ...p, annotations };
         }),
       }));
+      if (touchesBaked) return refuseEdit(state);
       if (!changed) return state;
       return applyPageEdit(state, documents, [doc.path], action);
     }
@@ -1472,6 +1513,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         }
       }
       if (annotations.every((a, i) => a === all[i])) return state;
+      if (selected.some((a) => a.baked)) return refuseEdit(state);
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
         pages: d.pages.map((p) => (p.id === action.pageId ? { ...p, annotations } : p)),
@@ -1489,6 +1531,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const chosen = new Set(action.annotationIds);
       const { strokeWidth, fillColor, opacity, lineEndings, cloudIntensity } = action.style;
       let changed = false;
+      let touchesBaked = false;
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
         pages: d.pages.map((p) =>
@@ -1528,6 +1571,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
                     next.cloudIntensity === a.cloudIntensity
                   )
                     return a;
+                  if (a.baked) touchesBaked = true;
                   changed = true;
                   return next;
                 }),
@@ -1535,6 +1579,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             : p,
         ),
       }));
+      if (touchesBaked) return refuseEdit(state);
       if (!changed) return state;
       return applyPageEdit(state, documents, [doc.path], action);
     }
@@ -1551,6 +1596,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         existing.note === action.note
       )
         return state;
+      if (existing.baked) return refuseEdit(state);
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
         pages: d.pages.map((p) =>
@@ -1581,6 +1627,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       if (!doc || !page?.annotations?.length) return state;
       const chosen = new Set(action.annotationIds);
       let changed = false;
+      let touchesBaked = false;
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
         pages: d.pages.map((p) =>
@@ -1589,6 +1636,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
                 ...p,
                 annotations: p.annotations!.map((a) => {
                   if (!chosen.has(a.id) || a.color === action.color) return a;
+                  if (a.baked) touchesBaked = true;
                   changed = true;
                   return { ...a, color: action.color };
                 }),
@@ -1596,6 +1644,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             : p,
         ),
       }));
+      if (touchesBaked) return refuseEdit(state);
       if (!changed) return state;
       return applyPageEdit(state, documents, [doc.path], action);
     }
@@ -1610,6 +1659,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const chosen = new Set(action.annotationIds);
       const removed = page.annotations.filter((a) => chosen.has(a.id));
       if (removed.length === 0) return state;
+      if (removed.some((a) => a.baked)) return refuseEdit(state);
       const tombstones = removed
         .map((a) => a.importedOriginal)
         .filter((f): f is NonNullable<PageAnnotation['importedOriginal']> => !!f);

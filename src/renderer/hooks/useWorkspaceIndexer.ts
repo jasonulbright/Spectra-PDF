@@ -3,7 +3,7 @@ import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { indexOpenFile } from '../lib/workspace';
 import { evictExcept, subscribeProxyEvictions } from '../lib/pdfDocCache';
 import { createIndexRuns } from '../lib/index-runs';
-import { clearIndexFailure, recordIndexFailure } from '../lib/workspace-settle';
+import { clearIndexFailure, needsIndex, recordIndexFailure } from '../lib/workspace-settle';
 
 // Keeps AppState.workspace in sync with AppState.files. Whenever a file's
 // buffer changes (open, whole-file op, undo/redo), its workspace documents are
@@ -29,6 +29,7 @@ export function useWorkspaceIndexer(): void {
   );
 
   useEffect(() => {
+    const indexed = { files: state.files, workspace: state.workspace };
     evictExcept(new Set(state.files.keys()));
     for (const [path, f] of state.files) {
       const buffer = f.buffer;
@@ -36,8 +37,7 @@ export function useWorkspaceIndexer(): void {
       // Byte-only import sources provide bytes for rendering/commit only
       // — never a strip. evictExcept above still keeps their proxy alive.
       if (f.importOnly) continue;
-      const current = state.workspace.documents.find((d) => d.path === path);
-      if (current && current.buffer === buffer) continue;
+      if (!needsIndex(indexed, path)) continue;
       const token = runs.current.begin(path, buffer);
       if (token === null) continue;
       clearIndexFailure(buffer);

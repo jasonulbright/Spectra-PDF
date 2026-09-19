@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { appReducer, initialState, rotateAnnotationRect } from '../src/renderer/state/reducer';
+import { committedDocuments } from '../src/renderer/lib/workspace-commit';
 import type { AppState, OpenDocument, OpenFile, PageAnnotation, PageRef } from '../src/renderer/state/types';
 
 function makeFile(path: string, pageCount: number, name?: string): OpenFile {
@@ -544,16 +545,21 @@ describe('COMMIT_PAGE_EDITS', () => {
       pageId: 'a.pdf#p1',
       toIndex: 0,
     });
+    const bufferA = [1];
+    const bufferB = [2];
+    const planned = (path: string) => edited.workspace.documents.filter((d) => d.path === path);
     const next = appReducer(edited, {
       type: 'COMMIT_PAGE_EDITS',
       updates: [
         {
-          path: 'a.pdf', pageCount: 2, buffer: [1], snapshotPath: 'snapA',
+          path: 'a.pdf', pageCount: 2, buffer: bufferA, snapshotPath: 'snapA',
           authored: { pages: ['a#pA', 'a#pB'], documents: [{ id: 'a#0', name: 'a' }] },
+          documents: committedDocuments(planned('a.pdf'), bufferA),
         },
         {
-          path: 'b.pdf', pageCount: 3, buffer: [2], snapshotPath: 'snapB',
+          path: 'b.pdf', pageCount: 3, buffer: bufferB, snapshotPath: 'snapB',
           authored: { pages: ['b#p0', 'b#p1', 'a#p1'], documents: [{ id: 'b#0', name: 'b' }] },
+          documents: committedDocuments(planned('b.pdf'), bufferB),
         },
       ],
       planned: { pageUndoStack: edited.pageUndoStack, pageRedoStack: edited.pageRedoStack },
@@ -574,8 +580,18 @@ describe('COMMIT_PAGE_EDITS', () => {
     expect(next.pageUndoStack).toEqual([]);
     expect(next.pageRedoStack).toEqual([]);
     expect(next.pageDirtyPaths).toEqual([]);
-    // Workspace untouched — the indexer re-derives from the new buffers.
-    expect(next.workspace.documents).toBe(edited.workspace.documents);
+    // The workspace holds what the new bytes hold, in the same step: every
+    // page reads from its own file's new buffer at its written position, and
+    // the moved page belongs to b.pdf now.
+    expect(next.workspace.documents.map((d) => [d.id, d.buffer, d.provisional])).toEqual([
+      ['a.pdf#0', bufferA, true],
+      ['b.pdf#0', bufferB, true],
+    ]);
+    expect(next.workspace.documents[1].pages.map((p) => [p.id, p.sourceDocId, p.sourcePageIndex])).toEqual([
+      ['a.pdf#p1', 'b.pdf', 0],
+      ['b.pdf#p0', 'b.pdf', 1],
+      ['b.pdf#p1', 'b.pdf', 2],
+    ]);
   });
 });
 

@@ -1,4 +1,6 @@
+import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { getDocumentProxy } from './pdfDocCache';
+import { loadDocument } from './pdfRenderer';
 import { readManifest, partitionPages, stripExtension } from './pdfx-format';
 import { importPageAnnotations } from './annotation-import';
 import { readRawAnnotationStyles } from './annotation-raw-style';
@@ -8,7 +10,7 @@ import {
   positionalDocId,
   positionalPageId,
 } from './durable-identity';
-import type { OpenDocument, OpenFile, PageAnnotation, PageRef } from '../state/types';
+import type { OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer } from '../state/types';
 
 // Derives the workspace's page-level view of an open file: reads the .pdfx
 // manifest (if present) to recover document boundaries, and captures per-page
@@ -26,13 +28,35 @@ export async function indexOpenFile(file: OpenFile): Promise<OpenDocument[]> {
   if (!file.buffer) return [];
   // The proxy is shared with the canvas renderers via pdfDocCache — it stays
   // alive until the buffer changes or the file closes.
-  const doc = await getDocumentProxy(file.path, file.buffer);
+  return indexDocument(file, file.buffer, await getDocumentProxy(file.path, file.buffer));
+}
+
+// The pages of a file being imported into another document, read through a
+// pdf.js document of their own. The shared proxy of an open file is destroyed
+// the moment the file takes new bytes (a commit, an operation), and the cache
+// destroys the proxy of a path that is not open yet on the next workspace
+// change. A request on a destroyed proxy never settles in the worker, so an
+// import reading the shared proxy could wait forever. The pages index
+// `file.buffer`; the import is refused when the file no longer holds it.
+export async function indexImportSource(file: OpenFile): Promise<OpenDocument[]> {
+  if (!file.buffer) return [];
+  const doc = await loadDocument(file.buffer);
+  try {
+    return await indexDocument(file, file.buffer, doc);
+  } finally {
+    void Promise.resolve()
+      .then(() => doc.loadingTask.destroy())
+      .catch(() => {});
+  }
+}
+
+async function indexDocument(file: OpenFile, buffer: PdfBuffer, doc: PDFDocumentProxy): Promise<OpenDocument[]> {
   const manifest = await readManifest(doc);
   const partitions = partitionPages(manifest, doc.numPages, stripExtension(file.name));
   // The raw-style sidecar: pdf-lib reads the /Annots entries pdf.js
   // hides (/IC /CA /BE /CL /RD /LE), so shape/callout imports are faithful.
   // null (encrypted/unparseable) degrades those imports to untouched.
-  const rawStyles = await readRawAnnotationStyles(file.buffer);
+  const rawStyles = await readRawAnnotationStyles(buffer);
   const dims: { width: number; height: number }[] = [];
   const annotations: PageAnnotation[][] = [];
   for (let i = 1; i <= doc.numPages; i++) {
@@ -59,5 +83,5 @@ export async function indexOpenFile(file: OpenFile): Promise<OpenDocument[]> {
       }),
     ),
   }));
-  return adoptAuthoredIdentity(positional, file.authoredIdentity, file.buffer);
+  return adoptAuthoredIdentity(positional, file.authoredIdentity, buffer);
 }

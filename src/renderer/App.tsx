@@ -94,7 +94,7 @@ import { DocumentJsPanel } from './panels/DocumentJsPanel';
 import { PrepressPanel } from './panels/PrepressPanel';
 import { useEngine } from './hooks/useEngine';
 import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
-import { indexOpenFile } from './lib/workspace';
+import { indexImportSource } from './lib/workspace';
 import type { PageRef, PdfBuffer } from './state/types';
 import { isDocTab, viewOf } from './state/types';
 import { showableDoc, showableDocuments, tabFiles } from './state/selectors';
@@ -183,7 +183,8 @@ import {
   sameRecent,
   sweepDeadRecents,
 } from './lib/recent-files';
-import { claimPaths, releasePaths, soleOwner, type ClaimRefusal } from './lib/window-claims';
+import { claimPaths, createClaimHolds, releasePaths, soleOwner, type ClaimRefusal } from './lib/window-claims';
+import { createOpenFlights, openPathOnce } from './lib/open-flights';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
 import type { TestStateSnapshot } from './testHarness';
@@ -1025,6 +1026,15 @@ function AppContent(): React.ReactElement {
   // in its own surface (Open from Web Address, beside the address it typed).
   // Everything else gets the notice, because the alternative is the defect
   // this exists to close: the user picked a file and nothing happened.
+  const openFlights = useRef(createOpenFlights());
+  const claimHolds = useRef(createClaimHolds());
+  // Whether this window still uses `path`: a document or import source of it,
+  // or an open or import of it that has not finished. A release is sent only
+  // when this answers false at the release's turn.
+  const pathInUse = useCallback(
+    (path: string): boolean => readState().files.has(path) || claimHolds.current.held(path),
+    [readState],
+  );
   const openByPaths = useCallback(async (
     paths: string[],
     opts?: { focus?: boolean; index?: number; webOrigin?: string; reportFailures?: boolean },
@@ -1038,10 +1048,15 @@ function AppContent(): React.ReactElement {
     // The file that was really OPENED (not re-activated) and became the
     // landing tab. Only a fresh open applies an initial view: re-activating a
     // tab must not undo a layout the user chose while it was open.
-    let freshlyOpened: { path: string; workingPath: string } | null = null;
+    // Asserted, not annotated: the open steps assign it inside callbacks, which
+    // the compiler's flow narrowing does not follow.
+    let freshlyOpened = null as { path: string; workingPath: string } | null;
     let changed = false;
     // Claimed but not yet accounted for — released in the finally.
     let unopened = new Set<string>();
+    // Held from before the claim is sent until the finally: no release by
+    // another flow of this window drops the claim this open works under.
+    let holding: string[] = [];
     try {
       // THE PATH-IDENTITY GATE. File identity is the raw path string
       // app-wide (`state.files` keys, tabs, recents, activeFileId,
@@ -1081,16 +1096,8 @@ function AppContent(): React.ReactElement {
       //
       // The same path twice in one batch is one open. Nothing upstream
       // dedupes: `spectrapdf.exe a.pdf a.pdf` really arrives as two
-      // entries — and post-gate, `a.pdf A.PDF` collapses here too.
-      //
-      // This can't be left to the already-open check below: that reads state
-      // React hasn't flushed yet. The loop only awaits BEFORE each dispatch,
-      // never after, so the next iteration's read runs in the same tick as the
-      // previous OPEN_FILE and still sees the file as absent — `stateRef` is as
-      // stale as the closure was for this particular read. A duplicate would
-      // open twice, leaking the first working copy (`create_working_copy` mints
-      // a fresh temp dir per call and nothing purges them) and prompting twice
-      // for an encrypted file's password.
+      // entries — and post-gate, `a.pdf A.PDF` collapses here too. One entry
+      // per path is one claim and one outcome in the batch's report.
       // THE OWNERSHIP GATE. A path is live in at most one window, and the
       // claim is taken before any bytes are read: `create_working_copy` mints
       // a fresh temp directory per call, so a second window opening the same
@@ -1098,81 +1105,89 @@ function AppContent(): React.ReactElement {
       // are reconciled by whichever bare `save_as` copy lands last. The claim
       // sits here rather than at commit time because by commit time both
       // sessions exist and one of them has to be thrown away.
-      const { granted, refused } = await claimPaths([...new Set(canonical)], 'write');
+      holding = canonicalSet;
+      claimHolds.current.hold(holding);
+      const { granted, refused } = await claimPaths(canonicalSet, 'write');
       if (refused.length > 0) void reportClaimRefusal(refused, 'window');
       unopened = new Set(granted);
       for (const filePath of granted) {
-        // Already open as a real DOCUMENT → just re-activate it. A byte-only
-        // import source doesn't count: it has an entry in `files` but no tab,
-        // nothing ever upgrades the flag, and `focusTab` rejects a doc tab for
-        // it — so treating it as "already open" made File ▸ Open on a file you
-        // had previously imported pages FROM a permanent no-op with no
-        // feedback. Fall through and open it properly instead.
-        // Off the ref, not the closure: the closure's `state.files` is stale for
-        // the whole call (the same reason `recent` is threaded above), so a
-        // file opened by an earlier, separate openByPaths call would be missed.
-        // The ref is current as of the last completed render — which is enough
-        // here precisely because the dedupe above already handles the one case
-        // it can't see (a duplicate within this batch, dispatched but not yet
-        // flushed).
         const fileName = filePath.split(/[\\/]/).pop() || filePath;
-        const existing = stateRef.current.files.get(filePath);
-        if (existing && !existing.importOnly) {
-          outcomes.push({ name: fileName, reason: null });
-          dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
-          recent = await recordRecentOpen(recent, filePath, Date.now(), originFor(filePath)); // only on success — a cancel/throw
-          lastOpened = filePath;                  // must not pollute Recent (regression)
-          freshlyOpened = null;
-          changed = true;
-          unopened.delete(filePath);
-          continue;
-        }
-        if (existing?.importOnly) {
-          // Upgrading a ghost REPLACES bytes that other documents' pending
-          // pages still point into (`PageRef.sourceDocId` + a positional
-          // `sourcePageIndex`, resolved at commit by `bytesFor`). If the file
-          // changed on disk since the import, those indices now mean something
-          // else — a silent wrong page, or a throw at commit. Flush first, so
-          // the imported pages are materialized into their own files and
-          // nothing references these bytes any more. `prepareFileBytes` can't
-          // be relied on for this: its only engine call is `check_encrypted`,
-          // which is an INTERNAL_METHOD and so deliberately ungated.
-          await runCommitGate();
-        }
-        // THE REFUSAL SEAM. `prepareFileBytes` mints the working copy and runs
-        // the engine's first reads; anything the file is too broken for throws
-        // HERE, and used to propagate out of the funnel into a rejection
-        // nobody caught. A throw is one file's verdict, never the batch's: the
-        // loop continues, the claim on this path is released by the finally,
-        // and the batch reports every outcome once at the end.
-        let prepared: Awaited<ReturnType<typeof prepareFileBytes>>;
-        try {
-          prepared = await prepareFileBytes(filePath);
-        } catch (err) {
-          outcomes.push({
-            name: fileName,
-            reason: translateOpenFailure(err instanceof Error ? err.message : String(err), {
-              name: fileName,
+        // An open of this path already in flight (another call of this funnel)
+        // is waited for, and its verdict stands: one path, one open.
+        const step = await openPathOnce(openFlights.current, filePath, {
+          // Already open as a real DOCUMENT → just re-activate it. A byte-only
+          // import source doesn't count: it has an entry in `files` but no
+          // tab, nothing ever upgrades the flag, and `focusTab` rejects a doc
+          // tab for it — so treating it as "already open" made File ▸ Open on
+          // a file you had previously imported pages FROM a permanent no-op
+          // with no feedback. Fall through and open it properly instead. Read
+          // from the store, which every dispatch settles synchronously.
+          isOpen: () => {
+            const existing = readState().files.get(filePath);
+            return !!existing && !existing.importOnly;
+          },
+          reactivate: async () => {
+            outcomes.push({ name: fileName, reason: null });
+            dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
+            recent = await recordRecentOpen(recent, filePath, Date.now(), originFor(filePath)); // only on success — a cancel/throw
+            lastOpened = filePath;                  // must not pollute Recent (regression)
+            freshlyOpened = null;
+            changed = true;
+          },
+          open: async () => {
+            if (readState().files.get(filePath)?.importOnly) {
+              // Upgrading a ghost REPLACES bytes that other documents' pending
+              // pages still point into (`PageRef.sourceDocId` + a positional
+              // `sourcePageIndex`, resolved at commit by `bytesFor`). If the
+              // file changed on disk since the import, those indices now mean
+              // something else — a silent wrong page, or a throw at commit.
+              // Flush first, so the imported pages are materialized into their
+              // own files and nothing references these bytes any more.
+              // `prepareFileBytes` can't be relied on for this: its only
+              // engine call is `check_encrypted`, which is an INTERNAL_METHOD
+              // and so deliberately ungated.
+              await runCommitGate();
+            }
+            // THE REFUSAL SEAM. `prepareFileBytes` mints the working copy and
+            // runs the engine's first reads; anything the file is too broken
+            // for throws HERE, and used to propagate out of the funnel into a
+            // rejection nobody caught. A throw is one file's verdict, never
+            // the batch's: the loop continues, the claim on this path is
+            // released by the finally, and the batch reports every outcome
+            // once at the end.
+            let prepared: Awaited<ReturnType<typeof prepareFileBytes>>;
+            try {
+              prepared = await prepareFileBytes(filePath);
+            } catch (err) {
+              outcomes.push({
+                name: fileName,
+                reason: translateOpenFailure(err instanceof Error ? err.message : String(err), {
+                  name: fileName,
+                  path: filePath,
+                }),
+              });
+              return false;
+            }
+            if (!prepared) return false; // cancelled encrypted file
+            outcomes.push({ name: fileName, reason: null });
+            dispatch({
+              type: 'OPEN_FILE',
               path: filePath,
-            }),
-          });
-          continue;
-        }
-        if (!prepared) continue; // cancelled encrypted file
-        outcomes.push({ name: fileName, reason: null });
-        dispatch({
-          type: 'OPEN_FILE',
-          path: filePath,
-          ...prepared,
-          index: opts?.index === undefined ? undefined : opts.index + inserted,
-          webOrigin: originFor(filePath),
+              ...prepared,
+              index: opts?.index === undefined ? undefined : opts.index + inserted,
+              webOrigin: originFor(filePath),
+            });
+            inserted += 1;
+            recent = await recordRecentOpen(recent, filePath, Date.now(), originFor(filePath));
+            lastOpened = filePath;
+            freshlyOpened = { path: filePath, workingPath: prepared.workingPath };
+            changed = true;
+            return true;
+          },
         });
-        inserted += 1;
-        recent = await recordRecentOpen(recent, filePath, Date.now(), originFor(filePath));
-        lastOpened = filePath;
-        freshlyOpened = { path: filePath, workingPath: prepared.workingPath };
-        changed = true;
-        unopened.delete(filePath);
+        // A document holds the claim now; any other path is released in the
+        // finally unless this window uses it by then.
+        if (step === 'opened' || step === 'reactivated') unopened.delete(filePath);
       }
     } finally {
       // Flush whatever succeeded even if a later file threw (a malformed PDF
@@ -1182,7 +1197,8 @@ function AppContent(): React.ReactElement {
       // A claim outlives only what it protects: a cancelled password prompt or
       // a file that threw mid-batch must not leave this window holding a path
       // it never opened.
-      if (unopened.size > 0) void releasePaths([...unopened]);
+      claimHolds.current.drop(holding);
+      if (unopened.size > 0) void releasePaths([...unopened], pathInUse);
     }
     // Outside the finally: an initial view is a courtesy on top of a
     // completed open, never a reason for the open itself to report a failure.
@@ -1195,7 +1211,7 @@ function AppContent(): React.ReactElement {
     // can must not stay pending until they get to it.
     if (opts?.reportFailures !== false) void reportOpenSummary(summary);
     return summary;
-  }, [dispatch, prepareFileBytes, applyInitialView, reportClaimRefusal, reportOpenSummary]);
+  }, [dispatch, readState, pathInUse, prepareFileBytes, applyInitialView, reportClaimRefusal, reportOpenSummary]);
 
   // Import one or more files' pages INTO an existing document at an index (the
   // add-page ghost and per-position drops). Each file is registered
@@ -1224,69 +1240,78 @@ function AppContent(): React.ReactElement {
       // flush can fix it. Two readers coexist; nobody rewrites through a read
       // claim.
       const canonicalImports = [...new Set(await app.canonicalizePaths(rawPaths))];
-      const claimed = await claimPaths(canonicalImports, 'read');
-      if (claimed.refused.length > 0) void reportClaimRefusal(claimed.refused, 'import');
-      const filePaths = claimed.granted;
-      const toRegister: {
-        path: string;
-        workingPath: string;
-        name: string;
-        pageCount: number;
-        buffer: PdfBuffer;
-      }[] = [];
-      const allPages: PageRef[] = [];
-      const sources: { path: string; buffer: PdfBuffer }[] = [];
-      // Paths this window already held before the import: releasing one would
-      // drop the WRITE claim on a document that is still open here. Read from
-      // the store, not the render: a file opened or committed since the render
-      // holds other bytes, and pages indexed from the render's bytes name
-      // other pages of the file (the import is then refused), while indexing a
-      // superseded buffer destroys the proxy the workspace indexer is reading.
-      const held = readState().files;
-      const unused = new Set(filePaths.filter((p) => !held.has(p)));
-      for (const filePath of filePaths) {
-        const existing = readState().files.get(filePath);
-        let src: { workingPath: string; name: string; buffer: PdfBuffer; pageCount: number };
-        if (existing?.buffer) {
-          src = {
-            workingPath: existing.workingPath,
-            name: existing.name,
-            buffer: existing.buffer,
-            pageCount: existing.pageCount,
-          };
-        } else {
-          const prepared = await prepareFileBytes(filePath);
-          if (!prepared) continue;
-          toRegister.push({ path: filePath, ...prepared });
-          src = prepared;
+      // Held from before the claim is sent until the finally: no release by
+      // another flow of this window (a cancelled open of the same file) drops
+      // the claim this import reads under.
+      claimHolds.current.hold(canonicalImports);
+      let filePaths: string[] = [];
+      try {
+        const claimed = await claimPaths(canonicalImports, 'read');
+        if (claimed.refused.length > 0) void reportClaimRefusal(claimed.refused, 'import');
+        filePaths = claimed.granted;
+        const toRegister: {
+          path: string;
+          workingPath: string;
+          name: string;
+          pageCount: number;
+          buffer: PdfBuffer;
+        }[] = [];
+        const allPages: PageRef[] = [];
+        const sources: { path: string; buffer: PdfBuffer }[] = [];
+        for (const filePath of filePaths) {
+          // A file being opened meanwhile is read once: the import takes the
+          // opened document's bytes instead of preparing the file a second time.
+          await openFlights.current.pending(filePath);
+          // Read from the store, not the render: a file opened or committed
+          // since the render holds other bytes, and pages indexed from the
+          // render's bytes name other pages of the file (the import is then
+          // refused).
+          const existing = readState().files.get(filePath);
+          let src: { workingPath: string; name: string; buffer: PdfBuffer; pageCount: number };
+          if (existing?.buffer) {
+            src = {
+              workingPath: existing.workingPath,
+              name: existing.name,
+              buffer: existing.buffer,
+              pageCount: existing.pageCount,
+            };
+          } else {
+            const prepared = await prepareFileBytes(filePath);
+            if (!prepared) continue;
+            toRegister.push({ path: filePath, ...prepared });
+            src = prepared;
+          }
+          const docs = await indexImportSource({
+            path: filePath,
+            workingPath: src.workingPath,
+            name: src.name,
+            pageCount: src.pageCount,
+            buffer: src.buffer,
+            dirty: false,
+            undoStack: [],
+            redoStack: [],
+            importOnly: true,
+          });
+          for (const d of docs) allPages.push(...d.pages);
+          sources.push({ path: filePath, buffer: src.buffer });
         }
-        const docs = await indexOpenFile({
-          path: filePath,
-          workingPath: src.workingPath,
-          name: src.name,
-          pageCount: src.pageCount,
-          buffer: src.buffer,
-          dirty: false,
-          undoStack: [],
-          redoStack: [],
-          importOnly: true,
-        });
-        for (const d of docs) allPages.push(...d.pages);
-        sources.push({ path: filePath, buffer: src.buffer });
-        unused.delete(filePath);
+        if (allPages.length === 0) return;
+        for (const reg of toRegister) dispatch({ type: 'REGISTER_IMPORT_SOURCE', ...reg });
+        dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages, sources });
+      } finally {
+        claimHolds.current.drop(canonicalImports);
+        // A claim outlives only what it protects. A path this window uses by
+        // its release's turn keeps it: a document open here (releasing it would
+        // drop the WRITE claim of a document still open), a source this import
+        // registered, an open or another import of it in flight.
+        if (filePaths.length > 0) void releasePaths(filePaths, pathInUse);
       }
-      if (allPages.length === 0) {
-        if (unused.size > 0) void releasePaths([...unused]);
-        return;
-      }
-      for (const reg of toRegister) dispatch({ type: 'REGISTER_IMPORT_SOURCE', ...reg });
-      dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages, sources });
-      if (unused.size > 0) void releasePaths([...unused]);
     },
     [
       state.workspace.documents,
       readState,
       dispatch,
+      pathInUse,
       prepareFileBytes,
       reportClaimRefusal,
       confirmPageEdit,
@@ -2512,20 +2537,26 @@ function AppContent(): React.ReactElement {
     // a file another window has open replaces the bytes under a live document
     // that has no idea, so the destination is claimed like any other path and
     // released again — Save As does not take ownership of what it wrote.
-    const { granted, refused } = await claimPaths([dest], 'write');
-    if (refused.length > 0) {
-      await reportClaimRefusal(refused, 'window');
-      return;
-    }
+    // Held until the copy is written: no release by another flow of this
+    // window drops the claim the copy is written under.
+    claimHolds.current.hold([dest]);
+    let granted: string[] = [];
     try {
+      const claim = await claimPaths([dest], 'write');
+      if (claim.refused.length > 0) {
+        await reportClaimRefusal(claim.refused, 'window');
+        return;
+      }
+      granted = claim.granted;
       if (!(await commitOrAbort())) return;
       await file.saveAs(activeFile.workingPath, dest);
       dispatch({ type: 'MARK_SAVED', path: activeFile.path });
     } finally {
-      const held = stateRef.current.files;
-      void releasePaths(granted.filter((p) => !held.has(p)));
+      claimHolds.current.drop([dest]);
+      // A document of this window open at `dest` keeps the claim.
+      if (granted.length > 0) void releasePaths(granted, pathInUse);
     }
-  }, [activeFile, saveFile, dispatch, commitOrAbort, reportClaimRefusal]);
+  }, [activeFile, saveFile, dispatch, commitOrAbort, reportClaimRefusal, pathInUse]);
 
   // Save routes INTO Save As for a downloaded document, and Save As is
   // declared after it. One implementation either way — a second copy of the
@@ -2586,8 +2617,8 @@ function AppContent(): React.ReactElement {
       }
     }
     dispatch({ type: 'CLOSE_FILE', path: filePath });
-    void releasePaths([filePath]);
-  }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort]);
+    void releasePaths([filePath], pathInUse);
+  }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort, pathInUse]);
 
   // Close all open files with unsaved changes prompt
   const handleCloseAll = useCallback(async () => {
@@ -2607,8 +2638,8 @@ function AppContent(): React.ReactElement {
     for (const f of allOpen) {
       dispatch({ type: 'CLOSE_FILE', path: f.path });
     }
-    void releasePaths(allOpen.map((f) => f.path));
-  }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort]);
+    void releasePaths(allOpen.map((f) => f.path), pathInUse);
+  }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort, pathInUse]);
 
   // Exit the app (File ▸ Exit / Ctrl+Q) — always quits when clean; the
   // tray-minimize setting governs the window × (below), not an explicit Exit.
@@ -3335,11 +3366,18 @@ function AppContent(): React.ReactElement {
         dispatch({ type: 'RECOLOR_ANNOTATION', docId, pageId, annotationId, color }),
       dispatchRemoveAnnotation: (docId, pageId, annotationId) =>
         dispatch({ type: 'REMOVE_ANNOTATION', docId, pageId, annotationId }),
-      commitPendingEdits: () => commitRef.current(),
+      // Returns once the read-back of what the commit wrote has landed, so a
+      // spec reads and edits the imports it became: an edit to a baked
+      // annotation is refused until then. A failed index is left for the next
+      // commit to refuse.
+      commitPendingEdits: async () => {
+        await commitRef.current();
+        await awaitSettledWorkspace(readState, subscribeState).catch(() => {});
+      },
       closeAllFiles: () => {
         const paths = [...filesRef.current.values()].map((f) => f.path);
         for (const path of paths) dispatch({ type: 'CLOSE_FILE', path });
-        void releasePaths(paths);
+        void releasePaths(paths, pathInUse);
       },
       importPagesIntoDoc: (filePath, toDocId, toIndex) =>
         importFilesIntoDoc([filePath], toDocId, toIndex),
@@ -3359,7 +3397,7 @@ function AppContent(): React.ReactElement {
         });
       },
     });
-  }, [openByPaths, dispatch, importFilesIntoDoc, harnessSetView, setActiveOp, call, readState]);
+  }, [openByPaths, dispatch, importFilesIntoDoc, harnessSetView, setActiveOp, call, readState, subscribeState, pathInUse]);
 
   // Notify harness subscribers on every state-relevant change.
   useEffect(() => {

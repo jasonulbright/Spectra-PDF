@@ -3469,12 +3469,15 @@ function PageCellImpl({
         // diverges from the importedOriginal snapshot is the file on disk
         // stale relative to the edit, and the overlay must take over
         // (same as any brand-new, uncommitted annotation always does).
+        // A baked annotation is in the loaded bytes with the appearance the
+        // commit wrote, and no edit reaches it until its read-back.
         const pristineImport =
-          !!a.importedOriginal &&
-          a.importedOriginal.hasAppearance && // else pdf.js draws nothing to avoid duplicating
-          !a.geometryDiverged &&
-          a.color === a.importedOriginal.color &&
-          (a.note ?? '') === (a.importedOriginal.contents ?? '');
+          (!!a.baked && !a.geometryDiverged) ||
+          (!!a.importedOriginal &&
+            a.importedOriginal.hasAppearance && // else pdf.js draws nothing to avoid duplicating
+            !a.geometryDiverged &&
+            a.color === a.importedOriginal.color &&
+            (a.note ?? '') === (a.importedOriginal.contents ?? ''));
         // Rotate View: stored geometry lives in the page.rotation
         // frame; the cell displays the view-rotated frame. Project here —
         // the capture path un-projects, so the pair is identity when flat.

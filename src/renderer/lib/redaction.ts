@@ -12,8 +12,9 @@
 // the snapshot undo chain.
 import { displayRectToPdf } from './pdfx-build';
 import { workspacePageNumber } from './workspace-commit';
+import { pathDescribesCurrentBytes } from './workspace-settle';
 import { propertiesPayload, type RedactionProperties } from './redaction-properties';
-import type { OpenDocument, PageRef } from '../state/types';
+import type { AppState, OpenDocument, PageRef } from '../state/types';
 
 export interface RedactionMark {
   id: string;
@@ -113,6 +114,29 @@ export function rotateNormalizedPoints(points: number[], delta: number): number[
     out.push(p.x, p.y);
   }
   return out;
+}
+
+/**
+ * The page that shows page `pageNumber` (1-based) of the bytes `path` holds
+ * now, wherever a pending edit moved it, or null.
+ *
+ * A page number read from the file (a stored /Redact mark, a search hit)
+ * counts the file's own page order, which a pending reorder does not change.
+ * It resolves only while `path`'s documents describe the current bytes: the
+ * page indexes of superseded documents name pages of the previous bytes.
+ */
+export function pageForFilePageNumber(
+  state: Pick<AppState, 'files' | 'workspace'>,
+  path: string,
+  pageNumber: number,
+): PageRef | null {
+  if (!pathDescribesCurrentBytes(state, path)) return null;
+  for (const d of state.workspace.documents) {
+    for (const p of d.pages) {
+      if (p.sourceDocId === path && p.sourcePageIndex === pageNumber - 1) return p;
+    }
+  }
+  return null;
 }
 
 // Where a mark should render on a page whose in-memory rotation has changed
