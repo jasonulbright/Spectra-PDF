@@ -193,7 +193,7 @@ def _collect_runs(pdf, page) -> tuple[list[_Run], list[dict]]:
         # Identity-V font still draws its column downward, and a refused font
         # is precisely the unmeasurable case. Slice A's rule, one module over.
         vertical = bool(cap is not None and cap.writes_vertical)
-        ink = fonts.ink_extent(det["resources"], det["fallback"], style["font_name"])
+        ink = fonts.ink_extent_of(det["font"])
         combined = det["combined"]
         raw_width = (
             det["raw_width"]

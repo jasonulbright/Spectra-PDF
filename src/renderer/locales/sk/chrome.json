@@ -2902,6 +2902,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "zvislý text sa nedá previesť na náhradné písmo",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "zvislý text so zvýšenými znakmi sa nepreteká",
   "engine.text_runs.colorMustRG": "color musí byť [r, g, b] so zložkami v rozsahu 0..1",
+  "engine.text_runs.editCannotSelectText": "úprava nemôže vybrať písmo tohto textu podľa názvu",
   "engine.text_runs.editDidApplyRun": "úprava sa nepoužila (beh sa nenašiel)",
   "engine.text_runs.fontActiveText": "pre tento text nie je aktívne žiadne písmo",
   "engine.text_runs.fontActiveTextRun": "pre tento textový beh nie je nastavené žiadne písmo",

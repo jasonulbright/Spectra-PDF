@@ -2840,6 +2840,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "o texto vertical não pode ser convertido para a fonte alternativa",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "texto vertical com caracteres elevados não reflui",
   "engine.text_runs.colorMustRG": "color precisa ser [r, g, b] com componentes em 0..1",
+  "engine.text_runs.editCannotSelectText": "uma edição não pode selecionar pelo nome a fonte deste texto",
   "engine.text_runs.editDidApplyRun": "a edição não foi aplicada (sequência não encontrada)",
   "engine.text_runs.fontActiveText": "nenhuma fonte está ativa para este texto",
   "engine.text_runs.fontActiveTextRun": "nenhuma fonte está ativa para esta sequência de texto",

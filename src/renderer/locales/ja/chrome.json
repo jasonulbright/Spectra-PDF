@@ -2716,6 +2716,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "縦組みのテキストは代替フォントに変換できません",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "上付き文字を含む縦書きテキストは再流し込みできません",
   "engine.text_runs.colorMustRG": "color は各成分が 0..1 の [r, g, b] にしてください",
+  "engine.text_runs.editCannotSelectText": "編集ではこのテキストのフォントを名前で選択できません",
   "engine.text_runs.editDidApplyRun": "編集は適用されませんでした（ランが見つかりません）",
   "engine.text_runs.fontActiveText": "このテキストに有効なフォントがありません",
   "engine.text_runs.fontActiveTextRun": "このテキストランに有効なフォントがありません",

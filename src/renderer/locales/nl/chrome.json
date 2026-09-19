@@ -2778,6 +2778,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "verticale tekst kan niet naar het terugvallettertype worden geconverteerd",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "verticale tekst met verhoogde tekens loopt niet opnieuw door",
   "engine.text_runs.colorMustRG": "color moet [r, g, b] zijn met componenten in 0..1",
+  "engine.text_runs.editCannotSelectText": "een bewerking kan het lettertype van deze tekst niet op naam selecteren",
   "engine.text_runs.editDidApplyRun": "de bewerking is niet toegepast (reeks niet gevonden)",
   "engine.text_runs.fontActiveText": "er is geen lettertype actief voor deze tekst",
   "engine.text_runs.fontActiveTextRun": "er is geen lettertype actief voor deze tekstreeks",

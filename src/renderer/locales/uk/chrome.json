@@ -2902,6 +2902,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "вертикальний текст не можна перетворити на резервний шрифт",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "вертикальний текст із піднятими знаками не переверстується",
   "engine.text_runs.colorMustRG": "color має бути [r, g, b] зі значеннями в діапазоні 0..1",
+  "engine.text_runs.editCannotSelectText": "під час редагування не можна вибрати шрифт цього тексту за назвою",
   "engine.text_runs.editDidApplyRun": "правку не застосовано (прогін не знайдено)",
   "engine.text_runs.fontActiveText": "для цього тексту немає активного шрифту",
   "engine.text_runs.fontActiveTextRun": "для цього текстового прогону не задано шрифту",

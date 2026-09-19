@@ -2840,6 +2840,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "textul vertical nu poate fi convertit la fontul de rezervă",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "textul vertical cu caractere ridicate nu se reformatează",
   "engine.text_runs.colorMustRG": "culoarea trebuie să fie [r, g, b] cu componente în 0..1",
+  "engine.text_runs.editCannotSelectText": "o editare nu poate selecta după nume fontul acestui text",
   "engine.text_runs.editDidApplyRun": "editarea nu s-a aplicat (secvența nu a fost găsită)",
   "engine.text_runs.fontActiveText": "niciun font nu este activ pentru acest text",
   "engine.text_runs.fontActiveTextRun": "niciun font nu este activ pentru această secvență de text",

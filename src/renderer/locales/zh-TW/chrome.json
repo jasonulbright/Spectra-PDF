@@ -2716,6 +2716,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "直排文字無法轉換為替代字型",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "帶升高字元的直排文字不會重排",
   "engine.text_runs.colorMustRG": "color 必須是 [r, g, b]，各分量介於 0..1",
+  "engine.text_runs.editCannotSelectText": "編輯無法依名稱選取此文字的字型",
   "engine.text_runs.editDidApplyRun": "編輯未套用（找不到文字串）",
   "engine.text_runs.fontActiveText": "此文字沒有作用中的字型",
   "engine.text_runs.fontActiveTextRun": "這段文字串沒有作用中的字型",

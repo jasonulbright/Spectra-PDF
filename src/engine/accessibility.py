@@ -66,7 +66,7 @@ from engine.struct_audit import (
     span_of,
 )
 from engine.text_metrics import _FontCache
-from engine.text_runs import NOTHING_TO_EDIT, _walk_runs
+from engine.text_runs import NOTHING_TO_EDIT, UNNAMED_FONT, _walk_runs
 
 PASS = "pass"
 FAIL = "fail"
@@ -1542,7 +1542,9 @@ def _check_character_encoding(check, pages):
             if reason == NOTHING_TO_EDIT:
                 continue
             counted += 1
-            if run.get("editable"):
+            # A run whose font an edit cannot select by name still decodes:
+            # its text maps, and only the edit is refused.
+            if run.get("editable") or reason == UNNAMED_FONT:
                 continue
             key = (page_no, str(run.get("font_name") or ""), reason)
             if key in seen_fonts:

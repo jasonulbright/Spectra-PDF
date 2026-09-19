@@ -2902,6 +2902,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "navpičnega besedila ni mogoče pretvoriti v nadomestno pisavo",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "navpično besedilo z dvignjenimi znaki se ne prelije",
   "engine.text_runs.colorMustRG": "barva mora biti [r, g, b] s komponentami v 0..1",
+  "engine.text_runs.editCannotSelectText": "urejanje ne more izbrati pisave tega besedila po imenu",
   "engine.text_runs.editDidApplyRun": "urejanje ni bilo uveljavljeno (niza ni mogoče najti)",
   "engine.text_runs.fontActiveText": "za to besedilo ni aktivne pisave",
   "engine.text_runs.fontActiveTextRun": "za ta besedilni niz ni dejavna nobena pisava",

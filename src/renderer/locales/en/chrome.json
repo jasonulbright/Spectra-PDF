@@ -2777,6 +2777,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "vertical text cannot be converted to the fallback font",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "vertical text with raised characters does not reflow",
   "engine.text_runs.colorMustRG": "color must be [r, g, b] with components in 0..1",
+  "engine.text_runs.editCannotSelectText": "an edit cannot select this text's font by name",
   "engine.text_runs.editDidApplyRun": "edit did not apply (run not found)",
   "engine.text_runs.fontActiveText": "no font is active for this text",
   "engine.text_runs.fontActiveTextRun": "no font is active for this text run",

@@ -2902,6 +2902,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "tekstu pionowego nie da się przekonwertować na czcionkę zastępczą",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "tekst pionowy ze znakami podniesionymi nie jest przelewany",
   "engine.text_runs.colorMustRG": "color musi mieć postać [r, g, b] ze składowymi w zakresie 0..1",
+  "engine.text_runs.editCannotSelectText": "edycja nie może wybrać czcionki tego tekstu według nazwy",
   "engine.text_runs.editDidApplyRun": "zmiana nie została zastosowana (nie znaleziono przebiegu)",
   "engine.text_runs.fontActiveText": "dla tego tekstu nie jest aktywna żadna czcionka",
   "engine.text_runs.fontActiveTextRun": "dla tego przebiegu tekstu nie ustawiono czcionki",

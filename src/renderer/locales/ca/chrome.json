@@ -2840,6 +2840,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "el text vertical no es pot convertir al tipus de lletra alternatiu",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "el text vertical amb caràcters elevats no es reajusta",
   "engine.text_runs.colorMustRG": "el color ha de ser [r, g, b] amb components dins de 0..1",
+  "engine.text_runs.editCannotSelectText": "una edició no pot seleccionar pel nom la lletra d'aquest text",
   "engine.text_runs.editDidApplyRun": "l'edició no s'ha aplicat (no s'ha trobat la seqüència)",
   "engine.text_runs.fontActiveText": "no hi ha cap lletra activa per a aquest text",
   "engine.text_runs.fontActiveTextRun": "no hi ha cap tipus de lletra actiu per a aquesta seqüència de text",

@@ -2840,6 +2840,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "לא ניתן להמיר טקסט אנכי לגופן החלופה",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "טקסט אנכי עם תווים מורמים אינו נשפך מחדש",
   "engine.text_runs.colorMustRG": "צבע חייב להיות [r, g, b] כאשר הרכיבים בתחום 0..1",
+  "engine.text_runs.editCannotSelectText": "עריכה אינה יכולה לבחור את הגופן של טקסט זה לפי שמו",
   "engine.text_runs.editDidApplyRun": "העריכה לא הוחלה (הרצף לא נמצא)",
   "engine.text_runs.fontActiveText": "אין גופן פעיל עבור טקסט זה",
   "engine.text_runs.fontActiveTextRun": "אין גופן פעיל עבור רצף טקסט זה",

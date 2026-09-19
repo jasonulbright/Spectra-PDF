@@ -2778,6 +2778,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "το κατακόρυφο κείμενο δεν μπορεί να μετατραπεί στην εφεδρική γραμματοσειρά",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "το κατακόρυφο κείμενο με ανυψωμένους χαρακτήρες δεν αναδιατάσσεται",
   "engine.text_runs.colorMustRG": "το χρώμα πρέπει να είναι [r, g, b] με συνιστώσες στο 0..1",
+  "engine.text_runs.editCannotSelectText": "μια επεξεργασία δεν μπορεί να επιλέξει με το όνομα τη γραμματοσειρά αυτού του κειμένου",
   "engine.text_runs.editDidApplyRun": "η επεξεργασία δεν εφαρμόστηκε (η ακολουθία δεν βρέθηκε)",
   "engine.text_runs.fontActiveText": "καμία γραμματοσειρά δεν είναι ενεργή για αυτό το κείμενο",
   "engine.text_runs.fontActiveTextRun": "καμία γραμματοσειρά δεν είναι ενεργή για αυτή την ακολουθία κειμένου",

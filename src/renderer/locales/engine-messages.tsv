@@ -866,6 +866,7 @@ text_paragraphs.splitPositionMustNumber	exact	text_paragraphs	split position mus
 text_paragraphs.verticalTextCannotConverted	exact	text_paragraphs,text_runs	vertical text cannot be converted to the fallback font
 text_paragraphs.verticalTextRaisedCharacters	exact	text_paragraphs	vertical text with raised characters does not reflow
 text_runs.colorMustRG	exact	text_runs	color must be [r, g, b] with components in 0..1
+text_runs.editCannotSelectText	exact	text_runs	an edit cannot select this text's font by name
 text_runs.editDidApplyRun	exact	text_runs	edit did not apply (run not found)
 text_runs.fontActiveText	exact	text_runs	no font is active for this text
 text_runs.fontActiveTextRun	exact	text_runs	no font is active for this text run

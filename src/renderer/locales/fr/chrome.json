@@ -2840,6 +2840,7 @@
   "engine.text_paragraphs.verticalTextCannotConverted": "le texte vertical ne peut pas être converti vers la police de repli",
   "engine.text_paragraphs.verticalTextRaisedCharacters": "le texte vertical avec des caractères surélevés ne se réajuste pas",
   "engine.text_runs.colorMustRG": "color doit être [r, g, b] avec des composantes dans 0..1",
+  "engine.text_runs.editCannotSelectText": "une modification ne peut pas sélectionner par son nom la police de ce texte",
   "engine.text_runs.editDidApplyRun": "la modification n’a pas été appliquée (bloc de texte introuvable)",
   "engine.text_runs.fontActiveText": "aucune police n'est active pour ce texte",
   "engine.text_runs.fontActiveTextRun": "aucune police n’est active pour ce bloc de texte",
