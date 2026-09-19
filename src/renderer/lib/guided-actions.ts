@@ -23,10 +23,6 @@ import { pagesParam } from './page-scope';
 // Watermark panel uses, so the two surfaces cannot disagree about what a mode
 // on a non-text source means or about a horizontal stamp sending no key.
 import { writingParams, type WatermarkSource } from './watermark-writing';
-// The engine's step table as the committed catalog mirrors it. The Python
-// suite pins the file to `engine/guided_actions.py::_STEPS` in both
-// directions; each step's Ghostscript demand is read from it, not restated.
-import { steps as ENGINE_STEPS } from '../../../tests/fixtures/guided-step-catalog.json';
 
 // Slice 2 grew the catalog: OCR (the batch pipeline's single-file arm),
 // header/footer (one positioned text per step — several positions compose as
@@ -99,14 +95,6 @@ export interface StepDef {
    * step ids to `run_action`, whose `_STEPS` table binds the callables
    * itself. Absent means the step id IS the method name. */
   engineMethod?: string;
-  /** The step's engine call takes gs_path and cannot run without it. Set from
-   * the engine's step table (`ENGINE_STEPS`), never written in a catalog
-   * entry. */
-  needsGs?: boolean;
-  /** The step's engine call takes gs_path when a Ghostscript is configured
-   * and runs without one, so a plan without Ghostscript is not blocked. Set
-   * from the engine's step table; exclusive with `needsGs`. */
-  optionalGs?: boolean;
   /** The step's engine call takes font_dir (Unicode text faces). */
   needsFontDir?: boolean;
   /** The step's engine call takes tesseract_path (OCR). */
@@ -140,7 +128,7 @@ export interface StepDef {
   params: readonly StepParamDef[];
 }
 
-const STEP_DEFS: readonly Omit<StepDef, 'needsGs' | 'optionalGs'>[] = [
+export const STEP_CATALOG: readonly StepDef[] = [
   {
     op: 'compress',
     title: 'Compress',
@@ -1109,25 +1097,6 @@ const STEP_DEFS: readonly Omit<StepDef, 'needsGs' | 'optionalGs'>[] = [
   },
 ];
 
-interface EngineStepRow {
-  tools: readonly string[];
-  optional_tools: readonly string[];
-}
-
-/** The Ghostscript flags the engine's step table gives `op`: a step handed
- * gs_path needs it unless the table lists gs_path among the tool paths the
- * step runs without. */
-function engineGsFlags(op: GuidedStepOp): Pick<StepDef, 'needsGs' | 'optionalGs'> {
-  const row: EngineStepRow = ENGINE_STEPS[op];
-  if (!row.tools.includes('gs_path')) return {};
-  return row.optional_tools.includes('gs_path') ? { optionalGs: true } : { needsGs: true };
-}
-
-export const STEP_CATALOG: readonly StepDef[] = STEP_DEFS.map((def) => ({
-  ...def,
-  ...engineGsFlags(def.op),
-}));
-
 /** The source a watermark step stamps from. Exactly one of the three fields
  * carries a value (`requireOneOf`), so a named picture or PDF IS the source
  * and everything else is text. */
@@ -1368,20 +1337,79 @@ export function openDocumentBlocker(action: GuidedAction): string | null {
 }
 
 /**
- * The steps in this action that need Ghostscript — the PLAN-time answer.
+ * What a step, or a whole run, needs from Ghostscript. The engine's one
+ * evaluator (`engine/guided_actions.py::step_gs_need`) answers it through
+ * `run_action(plan=True)`, and the command line asks the same plan, so no
+ * rule about which step needs Ghostscript is written here.
+ */
+export type GsNeed = 'never' | 'optional' | 'required' | 'undecided';
+
+/** The engine's plan: the run's need and each step's, in step order. */
+export interface GsPlan {
+  gs: GsNeed;
+  steps: { op: GuidedStepOp; gs: GsNeed }[];
+}
+
+/** The collected ask-at-run values, by step index. */
+export type StepValues = Record<number, Record<string, string | number>>;
+
+/** Sends one `run_action` request to the engine and returns its answer. */
+export type PlanRequest = (params: Record<string, unknown>) => Promise<unknown>;
+
+/**
+ * The steps a plan is asked about. Before a run collects its values, the keys
+ * it will ask travel as `ask`, and a need they decide stays undecided; with
+ * the collected `values`, every value is known.
+ */
+export function planSteps(action: GuidedAction, values?: StepValues): Record<string, unknown>[] {
+  return action.steps.map((step, i) =>
+    values === undefined
+      ? { op: step.op, params: buildStepParams(step), ask: askedParamKeys(step) }
+      : { op: step.op, params: buildStepParams(step, values[i]) },
+  );
+}
+
+/**
+ * The engine's plan for a run of `action`. Over a picked `source` folder the
+ * engine walks it, so a step that converts files is decided from the files.
+ */
+export async function planAction(
+  request: PlanRequest,
+  action: GuidedAction,
+  values?: StepValues,
+  source = '',
+): Promise<GsPlan> {
+  const plan = await request({ source, dest: '', steps: planSteps(action, values), plan: true });
+  return plan as GsPlan;
+}
+
+/** The steps a plan says cannot run without Ghostscript, once each, in order. */
+export function gsRequiredSteps(plan: GsPlan): GuidedStepOp[] {
+  const blocked: GuidedStepOp[] = [];
+  for (const step of plan.steps) {
+    if (step.gs === 'required' && !blocked.includes(step.op)) blocked.push(step.op);
+  }
+  return blocked;
+}
+
+/**
+ * Why a planned run cannot start without Ghostscript, or null when it can.
  *
  * A saved action is a promise about a whole sequence, so a run that dies at
  * step four because the fourth step needed an interpreter has already
- * rewritten the document three times. The `needsGs` flags, set from the
- * engine's step table, are the roster: a new step the engine hands gs_path is
- * refused here unless that table says the step runs without one.
+ * rewritten the document three times: the answer is taken from the plan.
+ * `available` is the capability answer; the caller holds it so this stays
+ * synchronous and testable. A plan not answered yet blocks nothing here; the
+ * run asks again before it starts.
  */
-export function gsBlockedSteps(action: GuidedAction): GuidedStepOp[] {
-  const blocked: GuidedStepOp[] = [];
-  for (const step of action.steps) {
-    if (stepDefFor(step.op).needsGs && !blocked.includes(step.op)) blocked.push(step.op);
-  }
-  return blocked;
+export function gsBlocker(plan: GsPlan | null, available: boolean): string | null {
+  if (available || plan === null || plan.gs !== 'required') return null;
+  const blocked = gsRequiredSteps(plan);
+  const steps = blocked.map((op) => tStepTitle(op, stepDefFor(op).title)).join(', ');
+  return tChrome(
+    blocked.length === 1 ? 'refusal.action.needsGhostscriptOne' : 'refusal.action.needsGhostscript',
+    { steps },
+  );
 }
 
 /** How a run finds Ghostscript: the refusing lookup and the one that
@@ -1391,32 +1419,15 @@ export interface GsLookup {
   ifAvailable: () => Promise<string>;
 }
 
-/** The gs_path one step's engine call is handed, or undefined when the step
- * takes none. */
-export async function stepGsPath(def: StepDef, lookup: GsLookup): Promise<string | undefined> {
-  if (def.needsGs) return lookup.require();
-  if (def.optionalGs) return lookup.ifAvailable();
-  return undefined;
-}
-
-/** The gs_path a folder run hands the engine for every step at once: the
- * refusing lookup only when some step cannot run without Ghostscript. */
-export async function actionGsPath(action: GuidedAction, lookup: GsLookup): Promise<string> {
-  return gsBlockedSteps(action).length > 0 ? lookup.require() : lookup.ifAvailable();
-}
-
-/** Why this action cannot run without a Ghostscript, or null when it can.
- * `available` is the capability answer; the caller holds it so this stays
- * synchronous and testable. */
-export function gsBlocker(action: GuidedAction, available: boolean): string | null {
-  if (available) return null;
-  const blocked = gsBlockedSteps(action);
-  if (blocked.length === 0) return null;
-  const steps = blocked.map((op) => tStepTitle(op, stepDefFor(op).title)).join(', ');
-  return tChrome(
-    blocked.length === 1 ? 'refusal.action.needsGhostscriptOne' : 'refusal.action.needsGhostscript',
-    { steps },
-  );
+/**
+ * The gs_path a planned need hands the engine, or undefined for work that
+ * never reaches Ghostscript. A required need takes the refusing lookup; any
+ * other takes what is usable, and the engine refuses by name the one input
+ * whose content needs a Ghostscript it was not given.
+ */
+export async function gsPathFor(need: GsNeed, lookup: GsLookup): Promise<string | undefined> {
+  if (need === 'never') return undefined;
+  return need === 'required' ? lookup.require() : lookup.ifAvailable();
 }
 
 /** Why this action cannot REPLACE the originals, or null. Mirrors the

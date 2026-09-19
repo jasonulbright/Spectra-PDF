@@ -12,7 +12,7 @@ import { createOwnedOperationRuns } from '../src/renderer/lib/owned-operation-ru
 import { inspectOperationInput } from '../src/renderer/lib/operation-input';
 import { EDIT_DECLINED } from '../src/renderer/lib/edit-text';
 import { isOpMethod, sequenceEditClass } from '../src/renderer/lib/op-edit-class';
-import { STEP_CATALOG, stepDefFor, stepGsPath, engineMethodFor, buildStepParams, newStep } from '../src/renderer/lib/guided-actions';
+import { STEP_CATALOG, stepDefFor, engineMethodFor, buildStepParams, newStep, planAction, gsBlocker, gsPathFor } from '../src/renderer/lib/guided-actions';
 import { replaceRange, wordAt } from '../src/renderer/lib/spellcheck';
 import { createArticleDrafts } from '../src/renderer/lib/article-drafts';
 import { emptyArticle } from '../src/renderer/lib/article-beads';
@@ -145,7 +145,10 @@ async function fixture() {
     running: false, setRunning: () => {}, setView: () => {},
     setRunStatuses: (value: unknown[] | ((s: unknown[]) => unknown[])) => { result.statuses = typeof value === 'function' ? value(result.statuses) : value; },
     stepDefFor, engineMethodFor, buildStepParams, saveFile: async () => 'export', terminalOutputName: () => 'export',
-    stepGsPath, GS_LOOKUP: { require: async () => 'gs', ifAvailable: async () => 'gs' },
+    planAction, gsBlocker, gsPathFor, gsBlocked: () => false, gsRef: { current: null },
+    planRequest: async (params: { steps: { op: string }[] }) =>
+      ({ gs: 'never', steps: params.steps.map((s) => ({ op: s.op, gs: 'never' })) }),
+    GS_LOOKUP: { require: async () => 'gs', ifAvailable: async () => 'gs' },
     editing: { page: 1, index: 0 }, editProblem: null,
     editTarget: { kind: 'uri', url: 'https://new.example/' }, editAppearance: { width: 2 },
     targetPayload: (v: unknown) => v, appearancePayload: (v: unknown) => v,
@@ -239,6 +242,60 @@ describe('actual panel publication callbacks', () => {
     await actual('panels/GuidedActionsPanel.tsx', 'executeRun', f.panelEnv)({ name: 'export', steps: [newStep('encrypt')] }, {}, 'export');
     expect(f.disk.has('export')).toBe(true); expect(f.disk.get('work')).toEqual(f.original);
     expect(f.store.getState().files.get('source')).toBe(f.open); expect(f.result.statuses).toEqual(['done']);
+  });
+  it('Guided Actions refuses a step that needs Ghostscript before the first step runs', async () => {
+    const f = await fixture();
+    const planRequest = async () => ({ gs: 'required', steps: [
+      { op: 'strip_metadata', gs: 'never' }, { op: 'grayscale', gs: 'required' }] });
+    await actual('panels/GuidedActionsPanel.tsx', 'executeRun', { ...f.panelEnv, planRequest, gsBlocked: () => true })(
+      { name: 'gs', steps: [newStep('strip_metadata'), newStep('grayscale')] }, {});
+    expect(f.result.statuses).toEqual(['pending', { error: expect.stringContaining('Ghostscript') }]);
+    expect(f.calls).toEqual([]); expect(f.disk.get('work')).toEqual(f.original);
+  });
+  it('Guided Actions hands each step the Ghostscript its planned need takes', async () => {
+    const f = await fixture();
+    const planRequest = async () => ({ gs: 'required', steps: [{ op: 'strip_metadata', gs: 'never' },
+      { op: 'search_redact', gs: 'optional' }, { op: 'grayscale', gs: 'required' }] });
+    const GS_LOOKUP = { require: async () => 'required-gs', ifAvailable: async () => 'usable-gs' };
+    const steps = [newStep('strip_metadata'), newStep('search_redact'), newStep('grayscale')];
+    await actual('panels/GuidedActionsPanel.tsx', 'executeRun', { ...f.panelEnv, planRequest, GS_LOOKUP })(
+      { name: 'gs', steps }, {});
+    expect(f.result.statuses).toEqual(['done', 'done', 'done']);
+    const methods = steps.map((s) => engineMethodFor(s.op));
+    expect(f.calls.filter((c) => methods.includes(c.method)).map((c) => c.params.gs_path))
+      .toEqual([undefined, 'usable-gs', 'required-gs']);
+  });
+  it('Guided Actions plans a folder run over the picked folder before it starts', async () => {
+    const f = await fixture(); const views: { error?: string | null }[] = [];
+    const sent: Record<string, unknown>[] = [];
+    let plan = { gs: 'required', steps: [{ op: 'create_pdf', gs: 'required' }] };
+    const env = { ...f.panelEnv, gsBlocked: () => true, setView: (v: { error?: string | null }) => { views.push(v); },
+      planRequest: async (params: Record<string, unknown>) => { sent.push(params); return plan; },
+      getSettings: () => ({ batchLogEnabled: false, batchLogRetentionDays: 0, batchLogDir: '' }),
+      batch: { logDir: async () => '', pruneLogs: async () => 0 },
+      app: { getEditFontPath: async () => 'fonts', getTesseractPath: async () => 'tess', getSofficePath: async () => 'soffice' } };
+    const action = { name: 'create', steps: [newStep('create_pdf')] };
+    const run = actual('panels/GuidedActionsPanel.tsx', 'executeFolderRun', env);
+    await run(action, {}, 'C:/in', 'C:/out');
+    expect(sent).toEqual([{ source: 'C:/in', dest: '', steps: [{ op: 'create_pdf', params: buildStepParams(action.steps[0]) }], plan: true }]);
+    expect(views.at(-1)?.error).toContain('Ghostscript');
+    expect(f.calls).toEqual([]);
+    plan = { gs: 'optional', steps: [{ op: 'create_pdf', gs: 'optional' }] };
+    await run(action, {}, 'C:/in', 'C:/out');
+    expect(f.calls.find((c) => c.method === 'run_action')?.params.gs_path).toBe('gs');
+    plan = { gs: 'never', steps: [{ op: 'create_pdf', gs: 'never' }] };
+    f.calls.length = 0; await run(action, {}, 'C:/in', 'C:/out');
+    expect(f.calls.find((c) => c.method === 'run_action')?.params.gs_path).toBe('');
+  });
+  it.each(['runAction', 'runActionOnFolder', 'runActionInPlace'])('Guided Actions %s opens nothing for an action its plan blocks', async (name) => {
+    const f = await fixture(); const opened: unknown[] = [];
+    const env = { ...f.panelEnv, activeFile: f.open, running: false, plansRef: { current: new Map() },
+      openDocumentBlocker: () => null, inPlaceBlocker: () => null, listedGsBlocker: () => 'blocked', askedParamKeys: () => [],
+      gsBlocked: () => true, setView: (v: unknown) => { opened.push(v); },
+      executeRun: async () => { opened.push('run'); }, executeFolderRun: async () => { opened.push('folder run'); },
+      dialog: { pickFolder: async () => { opened.push('picker'); return 'C:/in'; } } };
+    await actual('panels/GuidedActionsPanel.tsx', name, env)({ name: 'gs', steps: [newStep('grayscale')] });
+    expect(opened).toEqual([]);
   });
   it.each(['forms', 'bookmarks', 'articles', 'pageLabels'])('%s does not update another tab after publication', async surface => {
     const f = await fixture(); f.fault.after = () => { f.activeFileRef.current = { ...f.open, path: 'other', workingPath: 'other-work' }; f.result.status = 'Other'; };

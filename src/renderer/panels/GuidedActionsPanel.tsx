@@ -15,26 +15,29 @@ import { TEST_HARNESS_ENABLED, registerGuidedActionsHandlers } from '../testHarn
 import {
   STEP_CATALOG,
   actionFileJson,
-  actionGsPath,
   askedParamKeys,
   buildStepParams,
   editorParams,
   engineMethodFor,
   gsBlocker,
+  gsPathFor,
   inPlaceBlocker,
   loadGuidedActions,
   newStep,
   openDocumentBlocker,
   parseActionFile,
+  planAction,
+  planSteps,
   saveGuidedActions,
   stepConfigCue,
   stepDefFor,
-  stepGsPath,
   terminalOutputName,
   validateAction,
   validateRunValues,
+  type GsPlan,
   type GuidedAction,
   type GuidedStepOp,
+  type PlanRequest,
 } from '../lib/guided-actions';
 import { useTranslation } from 'react-i18next';
 import {
@@ -57,6 +60,17 @@ import {
 type RunValues = Record<number, Record<string, string | number>>;
 
 const GS_LOOKUP = { require: requireGsPath, ifAvailable: gsPathIfAvailable };
+
+/** One saved action's plan key: the steps it asks the engine to plan. */
+const planKey = (action: GuidedAction): string => JSON.stringify(planSteps(action));
+
+/** The list's refusal for `action`, from the plan made before any value is
+ * collected. */
+const listedGsBlocker = (
+  plans: ReadonlyMap<string, GsPlan>,
+  action: GuidedAction,
+  available: boolean,
+): string | null => gsBlocker(plans.get(planKey(action)) ?? null, available);
 
 interface FolderReport {
   total: number;
@@ -85,7 +99,7 @@ export function GuidedActionsPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
-  const { call, callRaw, saveFile } = useEngine();
+  const { call, callRaw, saveFile, ready } = useEngine();
   const { performOperation } = useOperations();
   const [actions, setActions] = useState<GuidedAction[]>(() => loadGuidedActions());
   const [view, setView] = useState<PanelView>({ kind: 'list' });
@@ -99,6 +113,42 @@ export function GuidedActionsPanel(): React.ReactElement {
   // handler depend on it.
   const gsRef = useRef(gs);
   gsRef.current = gs;
+  const planRequest = useCallback<PlanRequest>(
+    (params) => callRaw('run_action', params),
+    [callRaw],
+  );
+
+  // What each saved action needs from Ghostscript before any value is
+  // collected, keyed by the steps it plans, so an edited action is planned
+  // again. A run asks once more, with its values, before its first step.
+  const [plans, setPlans] = useState<ReadonlyMap<string, GsPlan>>(() => new Map());
+  const plansRef = useRef(plans);
+  plansRef.current = plans;
+  const planned = useRef(new Set<string>());
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    // A plan asked before the engine has started fails, and a failed key is
+    // asked again only when the actions change.
+    if (!ready) return;
+    for (const action of actions) {
+      const key = planKey(action);
+      if (planned.current.has(key)) continue;
+      planned.current.add(key);
+      planAction(planRequest, action)
+        .then((plan) => {
+          if (mounted.current) setPlans((prev) => new Map(prev).set(key, plan));
+        })
+        .catch(() => {
+          planned.current.delete(key);
+        });
+    }
+  }, [actions, planRequest, ready]);
 
   const persist = (list: GuidedAction[]): void => {
     setActions(list);
@@ -125,13 +175,30 @@ export function GuidedActionsPanel(): React.ReactElement {
       setRunStatuses(action.steps.map(() => 'pending'));
       setRunning(true);
       try {
+        // Every step's Ghostscript is settled before the first step runs: a
+        // step that needs one refuses before the steps ahead of it have
+        // rewritten the document. The refusal is shown on that step.
+        let gsPaths: (string | undefined)[];
+        let refusedAt = 0;
+        try {
+          const plan = await planAction(planRequest, action, values);
+          refusedAt = Math.max(0, plan.steps.findIndex((s) => s.gs === 'required'));
+          const blocked = gsBlocker(plan, !gsBlocked(gsRef.current));
+          if (blocked !== null) throw new Error(blocked);
+          gsPaths = [];
+          for (const step of plan.steps) gsPaths.push(await gsPathFor(step.gs, GS_LOOKUP));
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          setRunStatuses((s) => s.map((v, j) => (j === refusedAt ? { error: msg } : v)));
+          return;
+        }
         for (let i = 0; i < action.steps.length; i++) {
           const step = action.steps[i];
           setRunStatuses((s) => s.map((v, j) => (j === i ? 'running' : v)));
           try {
             const def = stepDefFor(step.op);
             const extras: Record<string, string> = {};
-            const gsPath = await stepGsPath(def, GS_LOOKUP);
+            const gsPath = gsPaths[i];
             if (gsPath !== undefined) extras.gs_path = gsPath;
             if (def.needsFontDir) extras.font_dir = await app.getEditFontPath();
             if (def.needsTesseract) extras.tesseract_path = await app.getTesseractPath();
@@ -166,7 +233,7 @@ export function GuidedActionsPanel(): React.ReactElement {
         setRunning(false);
       }
     },
-    [activeFile, running, call, performOperation, saveFile],
+    [activeFile, running, call, performOperation, saveFile, planRequest],
   );
 
   /** Run entry: collect ask-at-run values first when any step wants them. */
@@ -181,7 +248,7 @@ export function GuidedActionsPanel(): React.ReactElement {
       // PLAN time, not mid-run: a sequence whose fourth step needs an
       // interpreter must refuse before its first step has rewritten the
       // document three times.
-      if (gsBlocker(action, !gsBlocked(gsRef.current)) !== null) return;
+      if (listedGsBlocker(plansRef.current, action, !gsBlocked(gsRef.current)) !== null) return;
       const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
       if (anyAsked) {
         setView({ kind: 'prerun', action, values: {}, error: null });
@@ -208,6 +275,14 @@ export function GuidedActionsPanel(): React.ReactElement {
       setView({ kind: 'folderrun', action, report: null, error: null });
       setRunning(true);
       try {
+        // Planned over the picked folder, so a step that converts files is
+        // decided from the files: when every file needs Ghostscript the run
+        // refuses here, and when only some do, those refuse by name in the
+        // report.
+        const plan = await planAction(planRequest, action, values, source);
+        const blocked = gsBlocker(plan, !gsBlocked(gsRef.current));
+        if (blocked !== null) throw new Error(blocked);
+        const gsPath = (await gsPathFor(plan.gs, GS_LOOKUP)) ?? '';
         const settings = getSettings();
         const logDir = settings.batchLogEnabled ? await batch.logDir(settings.batchLogDir) : '';
         if (settings.batchLogEnabled && settings.batchLogRetentionDays > 0) {
@@ -222,7 +297,7 @@ export function GuidedActionsPanel(): React.ReactElement {
           dest: inPlace ? '' : dest,
           steps,
           action_name: action.name,
-          gs_path: await actionGsPath(action, GS_LOOKUP),
+          gs_path: gsPath,
           tesseract_path: await app.getTesseractPath(),
           // A folder run may START with a create_pdf step, so
           // the LibreOffice arm has to be reachable from here too.
@@ -240,13 +315,13 @@ export function GuidedActionsPanel(): React.ReactElement {
         setRunning(false);
       }
     },
-    [running, callRaw],
+    [running, callRaw, planRequest],
   );
 
   const runActionOnFolder = useCallback(
     async (action: GuidedAction) => {
       if (running) return;
-      if (gsBlocker(action, !gsBlocked(gsRef.current)) !== null) return;
+      if (listedGsBlocker(plansRef.current, action, !gsBlocked(gsRef.current)) !== null) return;
       const source = await dialog.pickFolder(tChrome('panel.ga.pickSource'));
       if (!source) return;
       const dest = await dialog.pickFolder(tChrome('panel.ga.pickDest'));
@@ -270,7 +345,7 @@ export function GuidedActionsPanel(): React.ReactElement {
       // The engine refuses this too; refusing here means no folder picker
       // opens for a run that cannot happen.
       if (inPlaceBlocker(action) !== null) return;
-      if (gsBlocker(action, !gsBlocked(gsRef.current)) !== null) return;
+      if (listedGsBlocker(plansRef.current, action, !gsBlocked(gsRef.current)) !== null) return;
       const source = await dialog.pickFolder(tChrome('panel.ga.pickInPlace'));
       if (!source) return;
       const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
@@ -872,7 +947,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             // engine after a folder picker.
             const openBlocked = openDocumentBlocker(a);
             const inPlaceBlocked = inPlaceBlocker(a);
-            const gsBlockedMsg = gsBlocker(a, !gsBlocked(gs));
+            const gsBlockedMsg = listedGsBlocker(plans, a, !gsBlocked(gs));
             return (
             <div
               key={a.id}

@@ -57,8 +57,10 @@ def search_and_redact(
     `marks_only` writes `/Redact` annotations and removes nothing -- the
     interchange format, for a sweep whose output a person reviews and applies.
     `properties` carries the redaction appearance keys onto every region.
-    `gs_path` is the user's Ghostscript, which a hit over part of a JBIG2 scan
-    needs to decode it; without one that image refuses by name.
+    `gs_path` is the configured Ghostscript, or "" when none is configured.
+    Only a hit over part of a JBIG2 scan needs one, to decode it. A configured
+    path is the only one that decode uses, and "" lets the capability
+    authority search; with no usable Ghostscript that image refuses by name.
 
     A document whose own signatures forbid the edit REFUSES; one they merely
     make invalid refuses unless `allow_signed` says the caller accepted that.

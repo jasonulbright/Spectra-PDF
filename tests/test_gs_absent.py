@@ -189,6 +189,17 @@ def _grayscale(b: Bench) -> object:
     return grayscale(b.pdf, b.target("out.pdf"))
 
 
+def _guided_actions(b: Bench) -> object:
+    # A run whose step cannot work without Ghostscript refuses before its
+    # first row, so the mirror is never started.
+    from engine.guided_actions import run_action
+
+    source = Path(b.pdf).parent / "guided"
+    source.mkdir(exist_ok=True)
+    shutil.copy2(b.pdf, source / "work.pdf")
+    return run_action(str(source), b.target("mirror"), [{"op": "grayscale"}], write_log=False)
+
+
 def _image_export(b: Bench) -> object:
     from engine.image_export import export_images
 
@@ -302,6 +313,7 @@ ROSTER: dict[str, Callable[[Bench], object]] = {
     "distill": _distill,
     "flattener": _flattener,
     "grayscale": _grayscale,
+    "guided_actions": _guided_actions,
     "image_export": _image_export,
     "image_redact": _image_redact,
     "mrc": _mrc,

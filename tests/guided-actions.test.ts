@@ -599,10 +599,7 @@ describe('the two step catalogs are pinned against each other', () => {
   const fixture = JSON.parse(
     readFileSync(resolve(__dirname, 'fixtures/guided-step-catalog.json'), 'utf8'),
   ) as {
-    steps: Record<
-      string,
-      { method: string; params: string[]; tools: string[]; optional_tools: string[] }
-    >;
+    steps: Record<string, { method: string; params: string[]; tools: string[] }>;
   };
 
   it('offers exactly the ops the engine dispatches, in both directions', () => {
@@ -637,11 +634,10 @@ describe('the two step catalogs are pinned against each other', () => {
     // mojibake baked into the page.
     // `jbig2_path` is the one engine tool path with no flag: the panel
     // never resolves it, so the MRC arm of a guided compress takes the
-    // encoder the engine finds for itself.
+    // encoder the engine finds for itself. `gs_path` has no flag either: the
+    // runner hands it wherever the engine's plan names a need other than
+    // `never`, and the engine suite ties that need to this same tool list.
     const FLAGS: Record<string, (d: StepDef) => boolean> = {
-      // Required or optional, the path reaches the engine the same way; the
-      // two differ only in whether a plan without Ghostscript may run.
-      gs_path: (d) => d.needsGs === true || d.optionalGs === true,
       font_dir: (d) => d.needsFontDir === true,
       tesseract_path: (d) => d.needsTesseract === true,
       soffice_path: (d) => d.needsSoffice === true,
@@ -652,20 +648,9 @@ describe('the two step catalogs are pinned against each other', () => {
         expect(flagged(def), `${def.op}.${tool}`).toBe(tools.has(tool));
       }
       expect(
-        fixture.steps[def.op].tools.filter((t) => !(t in FLAGS)),
+        fixture.steps[def.op].tools.filter((t) => !(t in FLAGS) && t !== 'gs_path'),
         `${def.op} takes a tool path the editor has no flag for`,
       ).toEqual(def.op === 'compress' ? ['jbig2_path'] : []);
-    }
-  });
-
-  it('needs Ghostscript exactly where the engine table does not list it as optional', () => {
-    // A plan refuses a step with `needsGs` when no Ghostscript is configured
-    // and runs one with `optionalGs`, so the split must be the engine's.
-    for (const def of STEP_CATALOG) {
-      const handed = fixture.steps[def.op].tools.includes('gs_path');
-      const optional = fixture.steps[def.op].optional_tools.includes('gs_path');
-      expect(def.needsGs === true, `${def.op}.needsGs`).toBe(handed && !optional);
-      expect(def.optionalGs === true, `${def.op}.optionalGs`).toBe(handed && optional);
     }
   });
 

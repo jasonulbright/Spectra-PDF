@@ -155,6 +155,86 @@ describe('the refusal', () => {
   });
 });
 
+// A configured path is the whole answer: the engine searches only on '', so a
+// partial door that handed '' for a Preferences path that does not run would
+// let the engine decode with a Ghostscript the user never named.
+describe('a partial door and the configured path', () => {
+  const chosen = 'D:\\gs\\bin\\gswin64c.exe';
+  const configure = (gsPath: string) =>
+    store.set('spectra-settings', JSON.stringify({ gsPath }));
+
+  it('hands the engine a configured path that does not resolve', async () => {
+    configure(chosen);
+    for (const reason of [GS_NOT_EXECUTABLE, GS_PROBE_FAILED, GS_VERSION_BELOW_MINIMUM]) {
+      resetGsCapability();
+      probe.mockResolvedValue({ ...absent, reason, path: chosen });
+      expect(await gsPathIfAvailable()).toBe(chosen);
+    }
+    expect(probe).toHaveBeenLastCalledWith(chosen);
+  });
+
+  it('hands it trimmed, the way the probe was asked', async () => {
+    configure(`  ${chosen}  `);
+    probe.mockResolvedValue({ ...absent, reason: GS_NOT_EXECUTABLE, path: chosen });
+    expect(await gsPathIfAvailable()).toBe(chosen);
+  });
+
+  it('still refuses a FULL door on that path, by the probe reason', async () => {
+    configure(chosen);
+    probe.mockResolvedValue({ ...absent, reason: GS_NOT_EXECUTABLE, path: chosen });
+    await expect(requireGsPath()).rejects.toMatchObject({ reason: GS_NOT_EXECUTABLE });
+  });
+
+  it("hands '' when nothing is configured, even past a failing discovered candidate", async () => {
+    probe.mockResolvedValue({
+      ...absent,
+      reason: GS_VERSION_BELOW_MINIMUM,
+      path: 'C:\\Program Files\\gs\\gs9.50\\bin\\gswin64c.exe',
+      version: '9.50',
+    });
+    expect(await gsPathIfAvailable()).toBe('');
+  });
+
+  it("reads a blank setting as nothing configured", async () => {
+    configure('   ');
+    probe.mockResolvedValue(absent);
+    expect(await gsPathIfAvailable()).toBe('');
+    expect(probe).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it('hands the PROBED path when the configured one resolves', async () => {
+    // A bare name resolves through PATH; the engine gets what was probed.
+    configure('gswin64c');
+    probe.mockResolvedValue(ready);
+    expect(await gsPathIfAvailable()).toBe(ready.path);
+  });
+
+  it('hands the configured path while no probe has landed', async () => {
+    configure(chosen);
+    probe.mockRejectedValue(new Error('ipc died'));
+    expect(await gsPathIfAvailable()).toBe(chosen);
+    store.clear();
+    resetGsCapability();
+    expect(await gsPathIfAvailable()).toBe('');
+  });
+
+  it('probes again before handing the engine its narrower search', async () => {
+    // Nothing configured, and the first probe never reached the resolver.
+    // The resolver's discovery reads the registry; the engine's on '' does
+    // not, so a registry-only install is found only through a second probe.
+    const registered = { ...ready, path: 'C:\\Program Files\\gs\\gs10.08.0\\bin\\gswin64c.exe' };
+    probe.mockRejectedValueOnce(new Error('ipc hiccup')).mockResolvedValueOnce(registered);
+    expect(await gsPathIfAvailable()).toBe(registered.path);
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks once when the first probe lands', async () => {
+    probe.mockResolvedValue(absent);
+    expect(await gsPathIfAvailable()).toBe('');
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('the answer is LIVE', () => {
   it('a refresh publishes to every subscriber — no restart', async () => {
     probe.mockResolvedValue(absent);
