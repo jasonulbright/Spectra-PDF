@@ -10,9 +10,13 @@ import {
   awaitSettledWorkspace,
   clearIndexFailure,
   indexError,
+  indexFailed,
   needsIndex,
   pathDescribesCurrentBytes,
   recordIndexFailure,
+  recordIndexSuccess,
+  retryFailedIndexes,
+  subscribeIndexRetries,
   workspaceSettled,
 } from '../src/renderer/lib/workspace-settle';
 import type { AppState, OpenDocument, OpenFile } from '../src/renderer/state/types';
@@ -139,7 +143,7 @@ describe('awaitSettledWorkspace', () => {
     expect(await pending(wait)).toBe('pending');
     const failure = new Error('Invalid page request.');
     recordIndexFailure(current, failure);
-    await expect(wait).rejects.toThrow('The document or history changed. Try again.');
+    await expect(wait).rejects.toThrow('a.pdf: Invalid page request.');
     // The refusal carries the index's own error.
     await expect(wait).rejects.toHaveProperty('cause', failure);
     expect(indexError(await wait.catch((refusal: unknown) => refusal))).toBe(failure);
@@ -154,7 +158,7 @@ describe('awaitSettledWorkspace', () => {
     const wait = awaitSettledWorkspace(store.getState, store.subscribe);
     expect(await pending(wait)).toBe('pending');
     recordIndexFailure(current, 'read-back failed');
-    await expect(wait).rejects.toThrow('The document or history changed. Try again.');
+    await expect(wait).rejects.toThrow('a.pdf: read-back failed');
     // An error that is not an Error still names itself.
     expect(indexError(await wait.catch((refusal: unknown) => refusal)).message).toBe('read-back failed');
     clearIndexFailure(current);
@@ -169,5 +173,44 @@ describe('awaitSettledWorkspace', () => {
     const current = store.getState().files.get('a.pdf')!;
     store.dispatch({ type: 'SET_WORKSPACE_DOCUMENTS', path: 'a.pdf', documents: [indexed(current)] });
     expect(await pending(wait)).toBe('resolved');
+  });
+});
+
+describe('failed index retry', () => {
+  it('retries only requested current bytes and releases a waiting commit on success', async () => {
+    const store = createAppStore(composed());
+    const current = store.getState().files.get('a.pdf')!;
+    recordIndexFailure(current.buffer!, new Error('transient read error'));
+    expect(indexFailed(current.buffer!)).toBe(true);
+    // Unrelated updates leave the failed buffer stopped.
+    store.dispatch({ type: 'UI_SET_RECENT_FILES', files: [] });
+    expect(indexFailed(current.buffer!)).toBe(true);
+    const attempts: string[] = [];
+    const unsubscribe = subscribeIndexRetries((path, buffer) => {
+      expect(buffer).toBe(current.buffer);
+      attempts.push(path);
+    });
+    retryFailedIndexes(store.getState());
+    retryFailedIndexes(store.getState());
+    expect(attempts).toEqual(['a.pdf']);
+    expect(indexFailed(current.buffer!)).toBe(false);
+    const wait = awaitSettledWorkspace(store.getState, store.subscribe);
+    expect(await pending(wait)).toBe('pending');
+    recordIndexSuccess(current.buffer!);
+    store.dispatch({ type: 'SET_WORKSPACE_DOCUMENTS', path: 'a.pdf', documents: [indexed(current)] });
+    await expect(wait).resolves.toBeUndefined();
+    unsubscribe();
+  });
+
+  it('a retry that fails again reports its real error without an automatic loop', async () => {
+    const store = createAppStore(composed());
+    const buffer = store.getState().files.get('a.pdf')!.buffer!;
+    recordIndexFailure(buffer, 'first failure');
+    retryFailedIndexes(store.getState());
+    const wait = awaitSettledWorkspace(store.getState, store.subscribe);
+    recordIndexFailure(buffer, 'second failure');
+    await expect(wait).rejects.toThrow('second failure');
+    expect(indexFailed(buffer)).toBe(true);
+    expect(indexFailed([2])).toBe(false);
   });
 });

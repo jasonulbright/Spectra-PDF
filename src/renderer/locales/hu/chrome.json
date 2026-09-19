@@ -121,7 +121,7 @@
   "app.unreadableRecord.startupTitle": "Az indítási beállítások nem lettek alkalmazva",
   "app.window.claimTitle": "Másik ablakban van megnyitva",
   "app.window.focusOther": "Az adott ablak megjelenítése",
-  "app.window.folderBusy": "Egy másik ablak már ír ebbe a mappába: {{folder}}.",
+  "app.window.folderBusy": "Egy másik futtatás már ír ebbe a mappába: {{folder}}.",
   "app.window.folderBusyHere": "Ennek az ablaknak egy futtatása még mindig ebbe a mappába ír: {{folder}}. Várja meg, amíg leáll, majd próbálja újra.",
   "app.window.importElsewhere": "Másik ablakban megnyitott fájlból nem lehet oldalakat importálni: {{names}}.",
   "app.window.openElsewhere": "Már meg van nyitva egy másik ablakban: {{names}}. Egy fájl egyszerre csak egy ablakban szerkeszthető.",
@@ -5977,5 +5977,8 @@
   "toolbar.group.zoom": "Nagyítás",
   "tools.heading": "Eszközök",
   "tools.openFirst": "Előbb nyisson meg egy PDF-et",
-  "tools.sub": "Válassza ki, mit szeretne tenni a dokumentumával."
+  "tools.sub": "Válassza ki, mit szeretne tenni a dokumentumával.",
+  "engine.redact.pageContainsMalformedDrawing": "Az oldal hibás rajzolási útvonalat tartalmaz. A kitakarás nem történt meg.",
+  "engine.redact_document.documentStructureTooComplex": "A dokumentum szerkezete túl összetett a biztonságos kitakaráshoz.",
+  "refusal.scan.pageUnreadable": "A beolvasott oldal nem olvasható: {{folder}}."
 }

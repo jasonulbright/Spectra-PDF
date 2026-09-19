@@ -121,7 +121,7 @@
   "app.unreadableRecord.startupTitle": "Starteinstellungen nicht angewendet",
   "app.window.claimTitle": "In einem anderen Fenster geöffnet",
   "app.window.focusOther": "Dieses Fenster anzeigen",
-  "app.window.folderBusy": "Ein anderes Fenster schreibt bereits in diesen Ordner: {{folder}}.",
+  "app.window.folderBusy": "Ein anderer Vorgang schreibt bereits in diesen Ordner: {{folder}}.",
   "app.window.folderBusyHere": "Ein Lauf in diesem Fenster schreibt noch in diesen Ordner: {{folder}}. Warten Sie, bis er anhält, und versuchen Sie es dann erneut.",
   "app.window.importElsewhere": "Aus einer Datei, die in einem anderen Fenster geöffnet ist, können keine Seiten importiert werden: {{names}}.",
   "app.window.openElsewhere": "Bereits in einem anderen Fenster geöffnet: {{names}}. Eine Datei kann jeweils nur in einem Fenster bearbeitet werden.",
@@ -5977,5 +5977,8 @@
   "toolbar.group.zoom": "Zoom",
   "tools.heading": "Werkzeuge",
   "tools.openFirst": "Öffnen Sie zuerst ein PDF",
-  "tools.sub": "Wählen Sie, was Sie mit Ihrem Dokument tun möchten."
+  "tools.sub": "Wählen Sie, was Sie mit Ihrem Dokument tun möchten.",
+  "engine.redact.pageContainsMalformedDrawing": "Die Seite enthält einen fehlerhaften Zeichenpfad. Die Schwärzung wurde nicht angewendet.",
+  "engine.redact_document.documentStructureTooComplex": "Die Dokumentstruktur ist zu komplex für eine sichere Schwärzung.",
+  "refusal.scan.pageUnreadable": "Die gescannte Seite konnte nicht gelesen werden: {{folder}}."
 }

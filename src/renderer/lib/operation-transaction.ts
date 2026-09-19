@@ -22,6 +22,9 @@ export interface OperationOptions {
   expectedWorkingPath?: string;
   /** Revision-derived parameters must not survive a gate rebuild. */
   expectedBuffer?: PdfBuffer;
+  /** Derive page addresses from the accepted post-commit revision, inside
+   * the publication/file lock. Any concurrent edit still aborts the write. */
+  prepareParams?: (state: AppState) => Promise<Record<string, unknown>>;
   structuralConsent?: boolean;
   /** One user edit that needs several engine calls: all run on the same private
    * stage and publish together. Not Guided Actions' deliberate per-step undo. */
@@ -64,7 +67,8 @@ export async function executeWorkspaceOperation(path: string, method: OpMethod,
           || (answer as Record<string, unknown>).output !== stage) throw unverified();
       return { ...answer, output: initial.workingPath } as EngineResult;
     };
-    const reports = [await runStep(method, requested)];
+    const prepared = options.prepareParams ? await options.prepareParams(getState()) : {};
+    const reports = [await runStep(method, { ...requested, ...prepared })];
     for (const step of following) reports.push(await runStep(step.method, step.params));
     // Keep operation-specific counts/refusals/warnings. The public output is
     // the stable working path, never the now-retired private stage.

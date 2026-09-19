@@ -45,12 +45,16 @@ live in a document. This module is that pass, run once after every page:
 
 from __future__ import annotations
 
-import re
-
 import pikepdf
 from pikepdf import Name
+from lxml import etree
+
+from engine.pdf_fonts import bounded_read
 
 _CONTENT_DESCRIPTIONS = ("/Alt", "/ActualText", "/E")
+MAX_STRUCTURE_ELEMENTS = 100_000
+MAX_METADATA_BYTES = 8 * 1024 * 1024
+MAX_METADATA_ELEMENTS = 100_000
 
 
 def _key(obj):
@@ -121,6 +125,8 @@ def _elements(root):
         if not isinstance(node, pikepdf.Dictionary):
             continue
         out.append(node)
+        if len(out) > MAX_STRUCTURE_ELEMENTS:
+            raise ValueError("The document structure is too complex to redact safely.")
         kids = node.get("/K")
         if kids is None:
             continue
@@ -154,6 +160,8 @@ def _elements_on_pages(root):
         if own is not None:
             page = _key(own)
         out.append((node, page))
+        if len(out) > MAX_STRUCTURE_ELEMENTS:
+            raise ValueError("The document structure is too complex to redact safely.")
         kids = node.get("/K")
         if kids is None:
             continue
@@ -233,7 +241,9 @@ def rebind_structure(pdf, run, live: set) -> None:
     for original, copies in run.copies_of.items():
         owners[original] = None if original in live else (copies[0] if copies else None)
 
-    for element in _elements(root):
+    elements = _elements(root)
+    parents: dict = {}
+    for element in elements:
         kids = element.get("/K")
         if kids is None:
             continue
@@ -241,6 +251,8 @@ def rebind_structure(pdf, run, live: set) -> None:
         kept: list = []
         changed = False
         for item in items:
+            if isinstance(item, pikepdf.Dictionary) and item.get("/Type") not in (Name("/OBJR"), Name("/MCR")):
+                parents.setdefault(_key(item) or id(item), []).append(element)
             if isinstance(item, pikepdf.Dictionary) and item.get("/Type") in (Name("/OBJR"), Name("/MCR")):
                 slot = "/Obj" if item.get("/Type") == Name("/OBJR") else "/Stm"
                 target = item.get(slot)
@@ -279,10 +291,28 @@ def rebind_structure(pdf, run, live: set) -> None:
             if "/StructParent" in copy:
                 del copy["/StructParent"]
 
-    for element in touched_elements.values():
+    # Descriptions apply to the whole enclosed subtree, including content
+    # owned by descendants (ISO 32000-2 14.9.3-14.9.5). Follow both directions
+    # of the structure links so a missing or stale /P cannot retain a trace.
+    pending = list(touched_elements.values())
+    cleared: set = set()
+    while pending:
+        element = pending.pop()
+        if not isinstance(element, pikepdf.Dictionary):
+            continue
+        ident = _key(element) or id(element)
+        if ident in cleared:
+            continue
+        cleared.add(ident)
+        if len(cleared) > MAX_STRUCTURE_ELEMENTS:
+            raise ValueError("The document structure is too complex to redact safely.")
         for key in _CONTENT_DESCRIPTIONS:
             if key in element:
                 del element[key]
+        pending.extend(parents.get(ident, []))
+        parent = element.get("/P")
+        if parent is not None:
+            pending.append(parent)
 
 
 # ── shared resources on /Pages nodes ──────────────────────────────────────
@@ -557,7 +587,35 @@ def convert_jbig2_sharers(pdf, run) -> None:
 
 # ── document derivatives ──────────────────────────────────────────────────
 
-_THUMBNAILS = re.compile(rb"<(?P<p>[A-Za-z_][\w.-]*):Thumbnails\b.*?</(?P=p):Thumbnails\s*>", re.S)
+_THUMBNAILS = "{http://ns.adobe.com/xap/1.0/}Thumbnails"
+
+
+def _without_thumbnails(body: bytes) -> bytes | None:
+    parser = etree.XMLPullParser(
+        events=("start",), resolve_entities=False, load_dtd=False,
+        no_network=True, recover=False, huge_tree=False,
+    )
+    count = 0
+    for offset in range(0, len(body), 4096):
+        parser.feed(body[offset:offset + 4096])
+        count += sum(1 for _ in parser.read_events())
+        if count > MAX_METADATA_ELEMENTS:
+            raise ValueError
+    root = parser.close()
+    tree = root.getroottree()
+    if tree.docinfo.doctype or root.tag == _THUMBNAILS:
+        raise ValueError
+    changed = False
+    for node in list(root.iter()):
+        if isinstance(node, etree._Entity):
+            raise ValueError
+        if node.tag == _THUMBNAILS:
+            node.getparent().remove(node)
+            changed = True
+        if _THUMBNAILS in node.attrib:
+            del node.attrib[_THUMBNAILS]
+            changed = True
+    return etree.tostring(tree, encoding="utf-8", xml_declaration=True) if changed else None
 
 
 def strip_document_derivatives(pdf) -> None:
@@ -566,12 +624,14 @@ def strip_document_derivatives(pdf) -> None:
     metadata = pdf.Root.get("/Metadata")
     if isinstance(metadata, pikepdf.Stream):
         try:
-            body = bytes(metadata.read_bytes())
+            body, _too_large = bounded_read(metadata, MAX_METADATA_BYTES)
+            if body is None:
+                raise ValueError
+            stripped = _without_thumbnails(body)
         except Exception:
             del pdf.Root["/Metadata"]
             return
-        stripped = _THUMBNAILS.sub(b"", body)
-        if stripped != body:
+        if stripped is not None:
             metadata.write(stripped)
 
 

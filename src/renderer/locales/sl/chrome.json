@@ -125,7 +125,7 @@
   "app.unreadableRecord.startupTitle": "Nastavitve zagona niso bile uporabljene",
   "app.window.claimTitle": "Odprto v drugem oknu",
   "app.window.focusOther": "Pokaži to okno",
-  "app.window.folderBusy": "V to mapo že piše drugo okno: {{folder}}.",
+  "app.window.folderBusy": "Drugo izvajanje že zapisuje v to mapo: {{folder}}.",
   "app.window.folderBusyHere": "Zagon v tem oknu še vedno piše v to mapo: {{folder}}. Počakajte, da se ustavi, in poskusite znova.",
   "app.window.importElsewhere": "Iz datoteke, odprte v drugem oknu, ni mogoče uvoziti strani: {{names}}.",
   "app.window.openElsewhere": "Že odprto v drugem oknu: {{names}}. Datoteko je mogoče urejati le v enem oknu hkrati.",
@@ -6249,5 +6249,8 @@
   "toolbar.group.zoom": "Povečava",
   "tools.heading": "Orodja",
   "tools.openFirst": "Najprej odprite PDF",
-  "tools.sub": "Izberite, kaj želite narediti s svojim dokumentom."
+  "tools.sub": "Izberite, kaj želite narediti s svojim dokumentom.",
+  "engine.redact.pageContainsMalformedDrawing": "Stran vsebuje nepravilno risalno pot. Prekrivanje ni bilo izvedeno.",
+  "engine.redact_document.documentStructureTooComplex": "Struktura dokumenta je prezapletena za varno prekrivanje.",
+  "refusal.scan.pageUnreadable": "Optično prebrane strani ni bilo mogoče prebrati: {{folder}}."
 }

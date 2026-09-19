@@ -123,7 +123,7 @@
   "app.unreadableRecord.startupTitle": "הגדרות ההפעלה לא הוחלו",
   "app.window.claimTitle": "פתוח בחלון אחר",
   "app.window.focusOther": "הצגת החלון הזה",
-  "app.window.folderBusy": "חלון אחר כבר כותב לתיקייה הזאת: {{folder}}.",
+  "app.window.folderBusy": "תהליך אחר כבר כותב לתיקייה זו: {{folder}}.",
   "app.window.folderBusyHere": "הרצה בחלון הזה עדיין כותבת לתיקייה הזאת: {{folder}}. יש להמתין עד שתיעצר ולנסות שוב.",
   "app.window.importElsewhere": "לא ניתן לייבא עמודים מקובץ שפתוח בחלון אחר: {{names}}.",
   "app.window.openElsewhere": "כבר פתוח בחלון אחר: {{names}}. אפשר לערוך קובץ בחלון אחד בכל פעם.",
@@ -6113,5 +6113,8 @@
   "toolbar.group.zoom": "זום",
   "tools.heading": "כלים",
   "tools.openFirst": "פתח תחילה קובץ PDF",
-  "tools.sub": "בחר מה ברצונך לעשות עם המסמך שלך."
+  "tools.sub": "בחר מה ברצונך לעשות עם המסמך שלך.",
+  "engine.redact.pageContainsMalformedDrawing": "העמוד מכיל נתיב ציור פגום. ההשחרה לא הוחלה.",
+  "engine.redact_document.documentStructureTooComplex": "מבנה המסמך מורכב מדי לביצוע השחרה בטוחה.",
+  "refusal.scan.pageUnreadable": "לא ניתן לקרוא את הדף שנסרק: {{folder}}."
 }

@@ -13,6 +13,7 @@ interface CertUnlockDialogProps {
   open: boolean;
   fileName: string;
   error?: string;
+  initialPfx?: string;
   onResult: (result: CertUnlockResult) => void;
 }
 
@@ -20,11 +21,12 @@ export function CertUnlockDialog({
   open,
   fileName,
   error,
+  initialPfx,
   onResult,
 }: CertUnlockDialogProps): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const [pfx, setPfx] = useState<string | null>(null);
+  const [pfx, setPfx] = useState<string | null>(initialPfx ?? null);
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
 

@@ -121,7 +121,7 @@
   "app.unreadableRecord.startupTitle": "Oppstartsinnstillingene ble ikke brukt",
   "app.window.claimTitle": "Åpen i et annet vindu",
   "app.window.focusOther": "Vis det vinduet",
-  "app.window.folderBusy": "Et annet vindu skriver allerede til denne mappen: {{folder}}.",
+  "app.window.folderBusy": "En annen kjøring skriver allerede til denne mappen: {{folder}}.",
   "app.window.folderBusyHere": "En kjøring i dette vinduet skriver fortsatt til denne mappen: {{folder}}. Vent til den stopper, og prøv igjen.",
   "app.window.importElsewhere": "Kan ikke importere sider fra en fil som er åpen i et annet vindu: {{names}}.",
   "app.window.openElsewhere": "Allerede åpen i et annet vindu: {{names}}. En fil kan bare redigeres i ett vindu om gangen.",
@@ -5977,5 +5977,8 @@
   "toolbar.group.zoom": "Zoom",
   "tools.heading": "Verktøy",
   "tools.openFirst": "Åpne en PDF først",
-  "tools.sub": "Velg hva du vil gjøre med dokumentet ditt."
+  "tools.sub": "Velg hva du vil gjøre med dokumentet ditt.",
+  "engine.redact.pageContainsMalformedDrawing": "Siden inneholder en ugyldig tegnesti. Sladding ble ikke utført.",
+  "engine.redact_document.documentStructureTooComplex": "Dokumentstrukturen er for kompleks til å sladdes trygt.",
+  "refusal.scan.pageUnreadable": "Den skannede siden kunne ikke leses: {{folder}}."
 }

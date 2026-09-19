@@ -365,20 +365,6 @@ export async function buildRedactionRegions(
   return { files: [...byPath.values()], skippedMarkIds };
 }
 
-/**
- * The one engine call a document's marks become. The user's Ghostscript
- * travels with it when one is configured: a mark over part of a JBIG2 image
- * decodes that image through it, and without one that image refuses by name.
- */
-export async function applyRedactions<R>(
-  perform: (path: string, method: 'redact', params: Record<string, unknown>) => Promise<R>,
-  path: string,
-  regions: readonly RedactionRegion[],
-  gsPath: () => Promise<string>,
-): Promise<R> {
-  return perform(path, 'redact', { regions, gs_path: await gsPath() });
-}
-
 /** Whether an operation wrote new bytes. An operation on a file that is no
  * longer open answers null, and one the document's policy declined answers
  * the decline. */

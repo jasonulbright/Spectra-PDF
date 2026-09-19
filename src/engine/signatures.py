@@ -71,7 +71,7 @@ from pyhanko.sign.validation import validate_pdf_signature
 from engine import eutl, msctl, os_trust, stamp_appearance, wincert
 from engine.acroform import form_field_forest
 from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
-from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification
+from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification, UnjudgeableModification
 from engine.inplace import is_same_file
 from engine.signature_size import raw_signature_size
 from engine.fieldmdp import (
@@ -476,6 +476,8 @@ def _policy_report(status, certification: dict) -> dict:
 
     A verdict that CANNOT be made is reported as unmade — never as a pass and
     never as a failure."""
+    if isinstance(getattr(status, "diff_result", None), UnjudgeableModification):
+        return {**_unjudged(None), "error": str(status.diff_result)}
     level = status.modification_level
     modification_level = level.name if level is not None else None
     if not certification["certified"]:

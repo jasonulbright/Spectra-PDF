@@ -14,7 +14,9 @@ import {
 } from './lib/image-replace';
 import { editWorkspaceImage, type ImageEdit } from './lib/image-edit-transaction';
 import { EDIT_DECLINED } from './lib/edit-text';
-import { applyRedactions, wroteBytes } from './lib/redaction';
+import type { RedactionMark } from './lib/redaction';
+import { writeRedactionMarks } from './lib/redaction-write';
+import { getDocumentProxy } from './lib/pdfDocCache';
 import {
   lockNeedsFields,
   signedEditDecision,
@@ -43,9 +45,10 @@ import type { EditImageMaskParam } from './lib/edit-images';
 import type { ParagraphEditOpts } from './lib/edit-paragraphs';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
 import { createConfirmQueue } from './lib/confirm-queue';
+import { createUnlockPrompts, type UnlockPrompt } from './lib/unlock-prompts';
 import { reportLaunch } from './lib/launch-notices';
-import { PasswordDialog, PasswordResult } from './components/PasswordDialog';
-import { CertUnlockDialog, CertUnlockResult } from './components/CertUnlockDialog';
+import { PasswordDialog } from './components/PasswordDialog';
+import { CertUnlockDialog } from './components/CertUnlockDialog';
 import { SplitPanel } from './panels/SplitPanel';
 import { RotatePanel } from './panels/RotatePanel';
 import { DeletePanel } from './panels/DeletePanel';
@@ -89,7 +92,7 @@ import { PrepressPanel } from './panels/PrepressPanel';
 import { useEngine } from './hooks/useEngine';
 import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
 import { indexImportSource, readPublishedBytes } from './lib/workspace';
-import type { PageRef, PdfBuffer } from './state/types';
+import type { AppState, PageRef, PdfBuffer } from './state/types';
 import { isDocTab, viewOf } from './state/types';
 import { showableDoc, showableDocuments, tabFiles } from './state/selectors';
 import type { CanvasTool } from './state/types';
@@ -98,7 +101,7 @@ import { PresentationView } from './components/canvas/PresentationView';
 import { usePdfProxies } from './hooks/usePdfProxies';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
-import { awaitSettledWorkspace, indexError } from './lib/workspace-settle';
+import { awaitSettledWorkspace, indexError, retryFailedIndexes, workspaceSettled } from './lib/workspace-settle';
 import { hasPendingPageCommit, recoverPendingPageCommit } from './lib/page-commit-transaction';
 import { pageEditDecision, type PageDelta } from './lib/page-edit-gate';
 import { sequenceEditClass, type OpMethod } from './lib/op-edit-class';
@@ -405,51 +408,10 @@ function AppContent(): React.ReactElement {
     [confirmQueue],
   );
 
-  // Password prompt dialog state
-  const [passwordState, setPasswordState] = useState<{
-    fileName: string;
-    error?: string;
-    resolve: (result: PasswordResult) => void;
-  } | null>(null);
-
-  const showPasswordPrompt = useCallback((fileName: string, error?: string): Promise<PasswordResult> => {
-    return new Promise((resolve) => {
-      setPasswordState({ fileName, error, resolve });
-    });
-  }, []);
-
-  const handlePasswordResult = useCallback((result: PasswordResult) => {
-    if (passwordState) {
-      passwordState.resolve(result);
-      setPasswordState(null);
-    }
-  }, [passwordState]);
-
-  // Certificate-unlock prompt — the pubkey sibling of the password one.
-  const [certUnlockState, setCertUnlockState] = useState<{
-    fileName: string;
-    error?: string;
-    resolve: (result: CertUnlockResult) => void;
-  } | null>(null);
-
-  const showCertUnlockPrompt = useCallback(
-    (fileName: string, error?: string): Promise<CertUnlockResult> => {
-      return new Promise((resolve) => {
-        setCertUnlockState({ fileName, error, resolve });
-      });
-    },
-    [],
-  );
-
-  const handleCertUnlockResult = useCallback(
-    (result: CertUnlockResult) => {
-      if (certUnlockState) {
-        certUnlockState.resolve(result);
-        setCertUnlockState(null);
-      }
-    },
-    [certUnlockState],
-  );
+  const [unlockState, setUnlockState] = useState<UnlockPrompt | null>(null);
+  const [unlockPrompts] = useState(() => createUnlockPrompts(setUnlockState));
+  const showPasswordPrompt = unlockPrompts.password;
+  const showCertUnlockPrompt = unlockPrompts.certificate;
 
   const showConfirm = useCallback((message: string): Promise<ConfirmResult> => {
     return new Promise((resolve) => {
@@ -738,53 +700,60 @@ function AppContent(): React.ReactElement {
   const inflightCommit = useRef<Promise<void> | null>(null);
   const commitIfNeeded = useCallback((): Promise<void> => {
     if (inflightCommit.current) return inflightCommit.current;
-    if (readState().pageDirtyPaths.length === 0 && !hasPendingPageCommit() && !hasWorkspacePublication()) return Promise.resolve();
+    if (readState().pageDirtyPaths.length === 0 && !hasPendingPageCommit() && !hasWorkspacePublication()
+        && workspaceSettled(readState())) return Promise.resolve();
     const run = serializeWorkspacePublication(async () => {
       try {
         await recoverPendingPageCommit();
         // A plan read from superseded documents writes superseded pages; the
         // pending reindex also replays the edits this commit is about to take.
-        await awaitSettledWorkspace(readState, subscribeState);
-        const expected = readState();
-        const outcome = await withFileLock(Array.from(expected.files.values(), f => f.workingPath), async () => {
-          const state = readState();
-          if (state.files !== expected.files || state.pageDirtyPaths !== expected.pageDirtyPaths
-              || state.pageUndoStack !== expected.pageUndoStack || state.pageRedoStack !== expected.pageRedoStack) {
-            throw new Error(tChrome('app.history.changed'));
-          }
-          if (!state.pageDirtyPaths.length) return { signatureRefusals: [] };
-          return commitPageEdits({
-          workspace: state.workspace,
-          files: state.files,
-          dirtyPaths: state.pageDirtyPaths,
-          tier: {
-            planned: { pageUndoStack: state.pageUndoStack, pageRedoStack: state.pageRedoStack },
-            current: readState,
-          },
-          dispatch,
-          transaction: pageCommit,
-          writeBuffer: file.writeBuffer,
-          remove: file.remove,
-          // callRaw, deliberately — this runs INSIDE the commit, so
-          // the gated `call` would re-enter commitPageEdits (loud throw).
-          // The gate's guarantee ("engine reads bytes matching what the
-          // user sees") holds by construction here: we ARE the commit,
-          // reading the working copy plus the temp this very run staged.
-          // The engine's OUTCOME travels, not a boolean: `applied: false`
-          // covers an unsigned file and a refused append equally, and the
-          // reason is the only thing that separates the standing behaviour
-          // from a signature the user just lost.
-          preserveSignatures: async (workingPath, stagedPath) => {
-            const r = (await callRaw('transplant_incremental', {
-              original: workingPath,
-              modified: stagedPath,
-              output: stagedPath,
-            })) as unknown as PreserveOutcome;
-            return r; // the commit boundary validates the actual wire types
-          },
-          readBack: batch.readFileBuffer,
+        // A file may publish while we wait for the lock. Re-plan the gate
+        // against the settled revision; callers fence their own edit intent.
+        let outcome: { signatureRefusals: PreserveRefusal[] } | null = null;
+        for (let attempt = 0; attempt < 3 && outcome === null; attempt++) {
+          await awaitSettledWorkspace(readState, subscribeState);
+          const expected = readState();
+          outcome = await withFileLock(Array.from(expected.files.values(), f => f.workingPath), async () => {
+            const state = readState();
+            if (state.files !== expected.files || state.pageDirtyPaths !== expected.pageDirtyPaths
+                || state.pageUndoStack !== expected.pageUndoStack || state.pageRedoStack !== expected.pageRedoStack) {
+              return null;
+            }
+            if (!state.pageDirtyPaths.length) return { signatureRefusals: [] };
+            return commitPageEdits({
+              workspace: state.workspace,
+              files: state.files,
+              dirtyPaths: state.pageDirtyPaths,
+              tier: {
+                planned: { pageUndoStack: state.pageUndoStack, pageRedoStack: state.pageRedoStack },
+                current: readState,
+              },
+              dispatch,
+              transaction: pageCommit,
+              writeBuffer: file.writeBuffer,
+              remove: file.remove,
+              // callRaw, deliberately — this runs INSIDE the commit, so
+              // the gated `call` would re-enter commitPageEdits (loud throw).
+              // The gate's guarantee ("engine reads bytes matching what the
+              // user sees") holds by construction here: we ARE the commit,
+              // reading the working copy plus the temp this very run staged.
+              // The engine's OUTCOME travels, not a boolean: `applied: false`
+              // covers an unsigned file and a refused append equally, and the
+              // reason is the only thing that separates the standing behaviour
+              // from a signature the user just lost.
+              preserveSignatures: async (workingPath, stagedPath) => {
+                const r = (await callRaw('transplant_incremental', {
+                  original: workingPath,
+                  modified: stagedPath,
+                  output: stagedPath,
+                })) as unknown as PreserveOutcome;
+                return r; // the commit boundary validates the actual wire types
+              },
+              readBack: batch.readFileBuffer,
+            });
           });
-        });
+        }
+        if (!outcome) throw new Error(tChrome('app.history.changed'));
         setCommitError(null);
         reportPreserveRefusals(outcome.signatureRefusals);
       } finally {
@@ -845,14 +814,16 @@ function AppContent(): React.ReactElement {
       if (encStatus.encrypted) {
         let unlocked = false;
         let error: string | undefined;
+        let unlockPfx: string | undefined;
         while (!unlocked) {
           if (encStatus.kind === 'pubkey') {
             // Certificate-encrypted (Adobe.PubSec) — unlock with the
             // user's PKCS#12 key. The engine's refusals are already honest
             // ("does not match any recipient" / "check the file and its
             // password"), so they surface verbatim.
-            const result = await showCertUnlockPrompt(name, error);
+            const result = await showCertUnlockPrompt(name, error, unlockPfx);
             if (result === 'cancel') return null;
+            unlockPfx = result.pfx;
             try {
               await call('decrypt_pubkey', {
                 file: workingPath,
@@ -1551,35 +1522,25 @@ function AppContent(): React.ReactElement {
     }, options));
   }, [readState, callRaw, dispatch, confirmEditOfSignedDoc, trackOperation]);
 
-  // Applying redactions REWRITES the page content, so it is a structural-class
-  // edit however small the band: the append tier cannot carry it, every byte
-  // range breaks, and a certification that forbids the change is refused
-  // rather than warned about. Returns whether the redaction wrote new bytes —
-  // the caller clears the applied marks, and clearing them after a declined
-  // edit would lose the user's markup with nothing to show for it.
+  const redactionGeometry = useCallback(async (page: PageRef, accepted: AppState) => {
+    const buffer = accepted.files.get(page.sourceDocId)?.buffer;
+    if (!buffer) throw new Error(tChrome('refusal.file.noLongerOpen'));
+    const proxy = await getDocumentProxy(page.sourceDocId, buffer);
+    const source = await proxy.getPage(page.sourcePageIndex + 1);
+    const [x0, y0, x1, y1] = source.view;
+    return { box: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, bakedRotate: source.rotate };
+  }, []);
+
   const handleRedactFile = useCallback(
-    async (path: string, regions: { page: number; rect: [number, number, number, number] }[]): Promise<boolean> => {
-      const f = state.files.get(path);
-      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      return wroteBytes(await applyRedactions(performOperation, path, regions, gsPathIfAvailable));
-    },
-    [state.files, performOperation],
+    (path: string, marks: readonly RedactionMark[], seen: AppState): Promise<boolean> =>
+      writeRedactionMarks(path, marks, seen, 'redact', readState, performOperation, redactionGeometry, gsPathIfAvailable),
+    [readState, performOperation, redactionGeometry],
   );
 
-  // Persist the pending marks as the file's /Redact set — undoable,
-  // same snapshot→engine→reload shape as apply. The reload's new page ids
-  // retire the transient marks and the re-seed loads them back from the
-  // file, so state and file agree by construction. Returns whether new bytes
-  // were written, as handleRedactFile does.
   const handleSaveRedactionMarks = useCallback(
-    async (path: string, regions: { page: number; rect: [number, number, number, number] }[]): Promise<boolean> => {
-      const f = state.files.get(path);
-      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      // Saving marks writes /Redact annotations and removes nothing yet, so
-      // it is annotate-class in the roster; applying them is the content change.
-      return wroteBytes(await performOperation(path, 'save_redaction_marks', { regions }));
-    },
-    [state.files, performOperation],
+    (path: string, marks: readonly RedactionMark[], seen: AppState): Promise<boolean> =>
+      writeRedactionMarks(path, marks, seen, 'save_redaction_marks', readState, performOperation, redactionGeometry, gsPathIfAvailable),
+    [readState, performOperation, redactionGeometry],
   );
 
   // An address this app will not open is still an address the user wants.
@@ -3322,6 +3283,7 @@ function AppContent(): React.ReactElement {
           <span className="flex-1">{commitError}</span>
           <button
             onClick={() => {
+              retryFailedIndexes(readState());
               if (historyRetry.current) void handleHistory(historyRetry.current);
               else void commitAndReport();
             }}
@@ -3596,18 +3558,25 @@ function AppContent(): React.ReactElement {
         affirmLabel={confirmState?.affirmLabel}
         onResult={handleConfirmResult}
       />
-      <PasswordDialog
-        open={passwordState !== null}
-        fileName={passwordState?.fileName ?? ''}
-        error={passwordState?.error}
-        onResult={handlePasswordResult}
-      />
-      <CertUnlockDialog
-        open={certUnlockState !== null}
-        fileName={certUnlockState?.fileName ?? ''}
-        error={certUnlockState?.error}
-        onResult={handleCertUnlockResult}
-      />
+      {unlockState?.kind === 'password' && (
+        <PasswordDialog
+          key={unlockState.id}
+          open
+          fileName={unlockState.fileName}
+          error={unlockState.error}
+          onResult={(answer) => unlockPrompts.answer(unlockState, answer)}
+        />
+      )}
+      {unlockState?.kind === 'certificate' && (
+        <CertUnlockDialog
+          key={unlockState.id}
+          open
+          fileName={unlockState.fileName}
+          error={unlockState.error}
+          initialPfx={unlockState.pfx}
+          onResult={(answer) => unlockPrompts.answer(unlockState, answer)}
+        />
+      )}
       {submitConsentState ? (
         <SubmitConsentDialog
           fieldName={submitConsentState.fieldName}

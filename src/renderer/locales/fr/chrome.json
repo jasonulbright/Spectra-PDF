@@ -123,7 +123,7 @@
   "app.unreadableRecord.startupTitle": "Paramètres de démarrage non appliqués",
   "app.window.claimTitle": "Ouvert dans une autre fenêtre",
   "app.window.focusOther": "Afficher cette fenêtre",
-  "app.window.folderBusy": "Une autre fenêtre écrit déjà dans ce dossier : {{folder}}.",
+  "app.window.folderBusy": "Une autre exécution écrit déjà dans ce dossier : {{folder}}.",
   "app.window.folderBusyHere": "Une exécution de cette fenêtre écrit encore dans ce dossier : {{folder}}. Attendez qu’elle s’arrête, puis réessayez.",
   "app.window.importElsewhere": "Impossible d’importer des pages depuis un fichier ouvert dans une autre fenêtre : {{names}}.",
   "app.window.openElsewhere": "Déjà ouvert dans une autre fenêtre : {{names}}. Un fichier ne peut être modifié que dans une seule fenêtre à la fois.",
@@ -6113,5 +6113,8 @@
   "toolbar.group.zoom": "Zoom",
   "tools.heading": "Outils",
   "tools.openFirst": "Ouvrez d’abord un PDF",
-  "tools.sub": "Choisissez ce que vous voulez faire avec votre document."
+  "tools.sub": "Choisissez ce que vous voulez faire avec votre document.",
+  "engine.redact.pageContainsMalformedDrawing": "La page contient un tracé de dessin mal formé. Le caviardage n’a pas été appliqué.",
+  "engine.redact_document.documentStructureTooComplex": "La structure du document est trop complexe pour être caviardée en toute sécurité.",
+  "refusal.scan.pageUnreadable": "La page numérisée n’a pas pu être lue : {{folder}}."
 }

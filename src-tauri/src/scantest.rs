@@ -355,6 +355,7 @@ pub fn page_evidence(path: &Path) -> PageEvidence {
             format!("truncated ({actual} of {declared} bytes)")
         }
         crate::scanner::PageIntegrity::Unverifiable => "unverifiable".to_string(),
+        crate::scanner::PageIntegrity::Unreadable { error } => format!("unreadable: {error}"),
     };
     let mut evidence = PageEvidence {
         file,

@@ -70,3 +70,11 @@ export function evictExcept(openPaths: ReadonlySet<string>): void {
     destroyEntry(path, entry);
   }
 }
+
+/** A deliberate retry must discard a proxy that cached a failed page read. */
+export function evictDocumentProxy(path: string, buffer: PdfBuffer): void {
+  const entry = cache.get(path);
+  if (!entry || entry.buffer !== buffer) return;
+  cache.delete(path);
+  destroyEntry(path, entry);
+}

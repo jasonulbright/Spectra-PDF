@@ -420,7 +420,7 @@ def _detect_javascript(pdf, page_numbers):
             rows.append({"site": "open_action", "where": "open action"})
     catalog_aa = pdf.Root.get("/AA")
     if isinstance(catalog_aa, pikepdf.Dictionary):
-        for key in catalog_aa.keys():
+        for key in sorted(catalog_aa.keys()):
             for action in _action_chain(catalog_aa[key]):
                 if _is_js_action(action):
                     rows.append(
@@ -430,7 +430,7 @@ def _detect_javascript(pdf, page_numbers):
         page = pdf.pages[n - 1].obj
         page_aa = page.get("/AA")
         if isinstance(page_aa, pikepdf.Dictionary):
-            for key in page_aa.keys():
+            for key in sorted(page_aa.keys()):
                 for action in _action_chain(page_aa[key]):
                     if _is_js_action(action):
                         rows.append(
@@ -449,7 +449,7 @@ def _detect_javascript(pdf, page_numbers):
             label = _text_of(annot.get("/T")) or token_text(annot.get("/Subtype", "")).lstrip("/")
             annot_aa = annot.get("/AA")
             if isinstance(annot_aa, pikepdf.Dictionary):
-                for key in annot_aa.keys():
+                for key in sorted(annot_aa.keys()):
                     for action in _action_chain(annot_aa[key]):
                         if _is_js_action(action):
                             rows.append(
@@ -552,7 +552,7 @@ def _detect_links_and_actions(pdf, page_numbers):
                         )
         page_aa = page.get("/AA")
         if isinstance(page_aa, pikepdf.Dictionary):
-            for key in page_aa.keys():
+            for key in sorted(page_aa.keys()):
                 for action in _action_chain(page_aa[key]):
                     kind = token_text(action.get("/S", ""))
                     if kind in NON_LINK_ACTIONS:
@@ -576,7 +576,7 @@ def _detect_links_and_actions(pdf, page_numbers):
             )
     catalog_aa = pdf.Root.get("/AA")
     if isinstance(catalog_aa, pikepdf.Dictionary):
-        for key in catalog_aa.keys():
+        for key in sorted(catalog_aa.keys()):
             for action in _action_chain(catalog_aa[key]):
                 kind = token_text(action.get("/S", ""))
                 if kind in NON_LINK_ACTIONS:

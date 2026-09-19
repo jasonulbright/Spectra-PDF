@@ -119,7 +119,7 @@
   "app.unreadableRecord.startupTitle": "起動設定が適用されませんでした",
   "app.window.claimTitle": "別のウィンドウで開いています",
   "app.window.focusOther": "そのウィンドウを表示",
-  "app.window.folderBusy": "別のウィンドウがこのフォルダーに書き込み中です: {{folder}}。",
+  "app.window.folderBusy": "別の処理がこのフォルダーに書き込み中です: {{folder}}。",
   "app.window.folderBusyHere": "このウィンドウの実行がまだこのフォルダーに書き込み中です: {{folder}}。停止するまで待ってから、もう一度お試しください。",
   "app.window.importElsewhere": "別のウィンドウで開いているファイルからはページを読み込めません: {{names}}。",
   "app.window.openElsewhere": "別のウィンドウで既に開いています: {{names}}。1 つのファイルを編集できるウィンドウは一度に 1 つだけです。",
@@ -5841,5 +5841,8 @@
   "toolbar.group.zoom": "ズーム",
   "tools.heading": "ツール",
   "tools.openFirst": "先に PDF を開いてください",
-  "tools.sub": "文書に対して行いたい操作を選んでください。"
+  "tools.sub": "文書に対して行いたい操作を選んでください。",
+  "engine.redact.pageContainsMalformedDrawing": "ページに不正な描画パスが含まれています。墨消しは適用されませんでした。",
+  "engine.redact_document.documentStructureTooComplex": "文書の構造が複雑すぎるため、安全に墨消しできません。",
+  "refusal.scan.pageUnreadable": "スキャンしたページを読み取れませんでした: {{folder}}。"
 }

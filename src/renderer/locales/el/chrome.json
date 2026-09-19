@@ -121,7 +121,7 @@
   "app.unreadableRecord.startupTitle": "Οι ρυθμίσεις εκκίνησης δεν εφαρμόστηκαν",
   "app.window.claimTitle": "Ανοιχτό σε άλλο παράθυρο",
   "app.window.focusOther": "Εμφάνιση εκείνου του παραθύρου",
-  "app.window.folderBusy": "Ένα άλλο παράθυρο γράφει ήδη σε αυτόν τον φάκελο: {{folder}}.",
+  "app.window.folderBusy": "Μια άλλη εκτέλεση γράφει ήδη σε αυτόν τον φάκελο: {{folder}}.",
   "app.window.folderBusyHere": "Μια εκτέλεση σε αυτό το παράθυρο γράφει ακόμη σε αυτόν τον φάκελο: {{folder}}. Περιμένετε μέχρι να σταματήσει και δοκιμάστε ξανά.",
   "app.window.importElsewhere": "Δεν είναι δυνατή η εισαγωγή σελίδων από αρχείο που είναι ανοιχτό σε άλλο παράθυρο: {{names}}.",
   "app.window.openElsewhere": "Ήδη ανοιχτό σε άλλο παράθυρο: {{names}}. Ένα αρχείο μπορεί να επεξεργαστεί σε ένα μόνο παράθυρο κάθε φορά.",
@@ -5977,5 +5977,8 @@
   "toolbar.group.zoom": "Ζουμ",
   "tools.heading": "Εργαλεία",
   "tools.openFirst": "Ανοίξτε πρώτα ένα PDF",
-  "tools.sub": "Επιλέξτε τι θέλετε να κάνετε με το έγγραφό σας."
+  "tools.sub": "Επιλέξτε τι θέλετε να κάνετε με το έγγραφό σας.",
+  "engine.redact.pageContainsMalformedDrawing": "Η σελίδα περιέχει μια εσφαλμένη διαδρομή σχεδίασης. Η απόκρυψη δεν εφαρμόστηκε.",
+  "engine.redact_document.documentStructureTooComplex": "Η δομή του εγγράφου είναι υπερβολικά σύνθετη για ασφαλή απόκρυψη.",
+  "refusal.scan.pageUnreadable": "Δεν ήταν δυνατή η ανάγνωση της σαρωμένης σελίδας: {{folder}}."
 }

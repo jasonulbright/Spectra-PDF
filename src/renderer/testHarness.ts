@@ -10,6 +10,7 @@
  * scriptable remote control over the public IPC surface.
  */
 import { app, dialog, file, engine, pinStoreCertificates, scanner as scannerBridge, type StoreCertificateAnswer } from './lib/tauri-bridge';
+import { runCommitGate } from './lib/commit-gate';
 import { windowLabel } from './lib/window-label';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
 import {
@@ -2557,6 +2558,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       try {
+        await runCommitGate();
         await file.saveAs(snap.activeFile.workingPath, destPath);
       } catch (err) {
         captureError('saveActiveAs', err);

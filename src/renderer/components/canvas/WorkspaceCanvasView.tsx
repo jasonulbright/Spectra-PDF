@@ -49,6 +49,7 @@ import {
   indexVerdicts,
   pagesUnreadable,
   pathDescribesCurrentBytes,
+  retryFailedIndexes,
   subscribeIndexVerdicts,
 } from '../../lib/workspace-settle';
 import { displayRectToPdf, pdfRectToDisplay } from '../../lib/pdfx-build';
@@ -59,7 +60,8 @@ import {
   propertiesPayload,
 } from '../../lib/redaction-properties';
 import { buildLinkPayloads, type PageQuads } from '../../lib/text-selection-markup';
-import type { PageGeometry, RedactionMark, RedactionRegion } from '../../lib/redaction';
+import type { PageGeometry, RedactionMark } from '../../lib/redaction';
+import { groupRedactionMarks } from '../../lib/redaction-write';
 import {
   buildFieldSpecs,
   candidatesFromDetection,
@@ -98,7 +100,7 @@ import {
   type PlaceableFinding,
 } from '../../lib/a11y-findings';
 import type { ExportDocumentResult } from '../../lib/export-targets';
-import type { OpenDocument, PageRef } from '../../state/types';
+import type { AppState, OpenDocument, PageRef } from '../../state/types';
 import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import { captureSnapshot, type SnapshotPlacement } from '../../lib/snapshot-capture';
@@ -283,11 +285,11 @@ interface WorkspaceCanvasViewProps {
   // whether new bytes were written: FALSE when the document's own signature
   // policy declined the edit, which is not a failure and must not clear the
   // marks it did not apply.
-  onRedactFile: (path: string, regions: RedactionRegion[]) => Promise<boolean>;
+  onRedactFile: (path: string, marks: readonly RedactionMark[], seen: AppState) => Promise<boolean>;
   // Persist the pending marks as the file's /Redact annotation set
   // (same performOperation shape — undoable; the reload re-seeds). Resolves
   // whether new bytes were written, as onRedactFile does.
-  onSaveRedactionMarks: (path: string, regions: RedactionRegion[]) => Promise<boolean>;
+  onSaveRedactionMarks: (path: string, marks: readonly RedactionMark[], seen: AppState) => Promise<boolean>;
   // A widget's data action, fired by the gesture the document authored it on
   // (a pushbutton's `/A` on a click, the `/AA` triggers on theirs).
   onWidgetAction: (
@@ -5706,17 +5708,6 @@ export function WorkspaceCanvasView({
     return () => registerCanvasOcr(null);
   }, []);
 
-  // Convert every live mark into engine regions and redact file by file.
-  // Geometry (crop-intersected box + baked /Rotate) is read from the CURRENT
-  // buffer's pdf.js proxy — the same bytes the marks were drawn against; the
-  // commit gate then materializes pending page edits before the engine reads
-  // the file, so workspace page numbers and composed rotations line up with
-  // what lands on disk. Resolves with per-file failure messages (empty =
-  // success) — the confirm button surfaces them in the error banner, the test
-  // harness rethrows them.
-  // Ref, not just state: two clicks in the same tick both read a stale
-  // `redacting === false` (same failure mode as the commit-race double-click,
-  // the same reentrancy class).
   // Selection -> link regions. Geometry comes from the CURRENT buffer's proxy
   // (the same contract as applyMarks), and the engine call is commit-gated, so
   // the page numbers and user space line up with what lands on disk.
@@ -5753,6 +5744,8 @@ export function WorkspaceCanvasView({
   );
 
   const applyingRef = useRef(false);
+  // Capture marks at the gesture. The write derives their engine regions
+  // after committing page edits, inside the operation's revision guard.
   const applyMarks = useCallback(async (): Promise<string[]> => {
     const toApply = liveMarks;
     if (toApply.length === 0 || applyingRef.current) return [];
@@ -5760,17 +5753,7 @@ export function WorkspaceCanvasView({
     setRedacting(true);
     setRedactError(null);
     try {
-      const { files: payloads } = await buildRedactionRegions(docs, toApply, async (page) => {
-        const f = state.files.get(page.sourceDocId);
-        if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
-        const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
-        const p = await proxy.getPage(page.sourcePageIndex + 1);
-        const [vx0, vy0, vx1, vy1] = p.view;
-        return {
-          box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
-          bakedRotate: p.rotate,
-        };
-      });
+      const payloads = groupRedactionMarks(state, toApply);
       const failures: string[] = [];
       for (const payload of payloads) {
         // The run's marks leave with the bytes it writes; that is no loss.
@@ -5778,7 +5761,7 @@ export function WorkspaceCanvasView({
         let wrote = false;
         setMarkLedger((ledger) => marksInRun(ledger, payload.markIds, run));
         try {
-          wrote = await onRedactFile(payload.path, payload.regions);
+          wrote = await onRedactFile(payload.path, payload.marks, state);
         } catch (err) {
           const name = payload.path.split(/[\\/]/).pop() || payload.path;
           failures.push(
@@ -5803,7 +5786,7 @@ export function WorkspaceCanvasView({
       applyingRef.current = false;
       setRedacting(false);
     }
-  }, [liveMarks, docs, state.files, onRedactFile]);
+  }, [liveMarks, state, onRedactFile]);
 
   // Persist the marks into the file(s) as /Redact annotations — the
   // SAME geometry pipeline as apply, so save and apply cannot disagree
@@ -5826,17 +5809,7 @@ export function WorkspaceCanvasView({
     setSavingMarks(true);
     setRedactError(null);
     try {
-      const { files: payloads } = await buildRedactionRegions(docs, toSave, async (page) => {
-        const f = state.files.get(page.sourceDocId);
-        if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
-        const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
-        const p = await proxy.getPage(page.sourcePageIndex + 1);
-        const [vx0, vy0, vx1, vy1] = p.view;
-        return {
-          box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
-          bakedRotate: p.rotate,
-        };
-      });
+      const payloads = groupRedactionMarks(state, toSave);
       // Save is a REPLACE, and "no marks" is a set: a file whose marks
       // (drawn or seeded) were all deleted this view lifetime gets its
       // stored set cleared — markPathsEverRef remembers which files those
@@ -5849,7 +5822,7 @@ export function WorkspaceCanvasView({
         let wrote = false;
         setMarkLedger((ledger) => marksInRun(ledger, payload.markIds, run));
         try {
-          wrote = await onSaveRedactionMarks(payload.path, payload.regions);
+          wrote = await onSaveRedactionMarks(payload.path, payload.marks, state);
         } catch (err) {
           const name = payload.path.split(/[\\/]/).pop() || payload.path;
           failures.push(
@@ -5866,9 +5839,12 @@ export function WorkspaceCanvasView({
         if (marked.has(path)) continue;
         if (!state.files.has(path)) continue; // closed — nothing to clear
         try {
-          await onSaveRedactionMarks(path, []);
-        } catch {
-          // clearing an already-clear file is best-effort
+          await onSaveRedactionMarks(path, [], state);
+        } catch (err) {
+          const name = path.split(/[\\/]/).pop() || path;
+          failures.push(tChrome('canvas.common.fileFailure', {
+            name, message: err instanceof Error ? err.message : String(err),
+          }));
         }
       }
       if (failures.length > 0) {
@@ -5883,7 +5859,7 @@ export function WorkspaceCanvasView({
       savingRef.current = false;
       setSavingMarks(false);
     }
-  }, [liveMarks, docs, state.files, onSaveRedactionMarks]);
+  }, [liveMarks, state, onSaveRedactionMarks]);
 
   // ── the Search & Redact panel's seam ─────────────────────────────────────
   //
@@ -6957,6 +6933,13 @@ export function WorkspaceCanvasView({
         className="shrink-0 border-b border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-200"
       >
         {tChrome('canvas.unrenderable', { names: unrenderableNames.join(', ') })}
+        <button
+          type="button"
+          className="ms-3 rounded bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-500"
+          onClick={() => retryFailedIndexes(readState())}
+        >
+          {tChrome('app.commit.retry')}
+        </button>
       </div>
     ) : null;
 

@@ -377,10 +377,17 @@ describe('add text', () => {
       timeout: 30_000,
       timeoutMsg: 'undo did not take back the reflow',
     });
+    const undoCountBeforeAuthorUndo = await browser.execute(() =>
+      (window as any).__SPECTRA_TEST__.getHistoryState().undo.length as number);
     expect(await invokeAppCommand('edit.undo')).toBe(true);
     await browser.waitUntil(async () => (await authoredParagraph('日本語')) === null, {
       timeout: 30_000,
       timeoutMsg: 'undo did not remove the authored column',
+    });
+    await browser.waitUntil(async () => await browser.execute(() =>
+      (window as any).__SPECTRA_TEST__.getHistoryState().undo.length as number) < undoCountBeforeAuthorUndo, {
+      timeout: 30_000,
+      timeoutMsg: 'the authored column undo did not finish publishing',
     });
   });
 

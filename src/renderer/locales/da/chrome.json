@@ -121,7 +121,7 @@
   "app.unreadableRecord.startupTitle": "Opstartsindstillingerne blev ikke anvendt",
   "app.window.claimTitle": "Åben i et andet vindue",
   "app.window.focusOther": "Vis det vindue",
-  "app.window.folderBusy": "Et andet vindue skriver allerede til denne mappe: {{folder}}.",
+  "app.window.folderBusy": "En anden kørsel skriver allerede til denne mappe: {{folder}}.",
   "app.window.folderBusyHere": "En kørsel i dette vindue skriver stadig til denne mappe: {{folder}}. Vent, til den stopper, og prøv så igen.",
   "app.window.importElsewhere": "Der kan ikke importeres sider fra en fil, der er åben i et andet vindue: {{names}}.",
   "app.window.openElsewhere": "Allerede åben i et andet vindue: {{names}}. En fil kan kun redigeres i ét vindue ad gangen.",
@@ -5977,5 +5977,8 @@
   "toolbar.group.zoom": "Zoom",
   "tools.heading": "Værktøjer",
   "tools.openFirst": "Åbn først en PDF",
-  "tools.sub": "Vælg, hvad du vil gøre med dit dokument."
+  "tools.sub": "Vælg, hvad du vil gøre med dit dokument.",
+  "engine.redact.pageContainsMalformedDrawing": "Siden indeholder en ugyldig tegnesti. Overstregning blev ikke anvendt.",
+  "engine.redact_document.documentStructureTooComplex": "Dokumentets struktur er for kompleks til sikker overstregning.",
+  "refusal.scan.pageUnreadable": "Den scannede side kunne ikke læses: {{folder}}."
 }

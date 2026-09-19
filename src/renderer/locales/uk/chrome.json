@@ -125,7 +125,7 @@
   "app.unreadableRecord.startupTitle": "Параметри запуску не застосовано",
   "app.window.claimTitle": "Відкрито в іншому вікні",
   "app.window.focusOther": "Показати те вікно",
-  "app.window.folderBusy": "Інше вікно вже виконує запис до цієї теки: {{folder}}.",
+  "app.window.folderBusy": "Інший процес уже записує дані в цю папку: {{folder}}.",
   "app.window.folderBusyHere": "Запуск у цьому вікні ще виконує запис до цієї теки: {{folder}}. Дочекайтеся його зупинки та спробуйте ще раз.",
   "app.window.importElsewhere": "Не можна імпортувати сторінки з файлу, відкритого в іншому вікні: {{names}}.",
   "app.window.openElsewhere": "Уже відкрито в іншому вікні: {{names}}. Файл можна редагувати лише в одному вікні водночас.",
@@ -6249,5 +6249,8 @@
   "toolbar.group.zoom": "Масштаб",
   "tools.heading": "Інструменти",
   "tools.openFirst": "Спочатку відкрийте PDF",
-  "tools.sub": "Виберіть, що ви хочете зробити з документом."
+  "tools.sub": "Виберіть, що ви хочете зробити з документом.",
+  "engine.redact.pageContainsMalformedDrawing": "Сторінка містить некоректний контур малювання. Вилучення конфіденційних даних не виконано.",
+  "engine.redact_document.documentStructureTooComplex": "Структура документа надто складна для безпечного вилучення конфіденційних даних.",
+  "refusal.scan.pageUnreadable": "Не вдалося прочитати відскановану сторінку: {{folder}}."
 }

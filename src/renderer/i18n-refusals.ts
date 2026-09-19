@@ -188,6 +188,7 @@ export const REFUSAL_STRINGS = {
   'refusal.scan.notResponding': 'The scanner stopped responding.',
   'refusal.scan.paperJam': 'Clear the paper jam, then scan again.',
   'refusal.scan.paperProblem': 'Check the paper in the feeder.',
+  'refusal.scan.pageUnreadable': 'The scanned page could not be read: {{folder}}.',
   'refusal.scan.scratchFull':
     'Too many scans are still open. Close some, or remove the folders in {{folder}}, then try again.',
   'refusal.scan.settingRejected': 'The scanner rejected one of the requested settings.',

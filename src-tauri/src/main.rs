@@ -76,6 +76,8 @@ fn attach_parent_console() {
             h_template_file: *const u8,
         ) -> isize;
         fn SetStdHandle(n_std_handle: u32, h_handle: isize) -> i32;
+        fn GetStdHandle(n_std_handle: u32) -> isize;
+        fn GetFileType(h_file: isize) -> u32;
     }
 
     const ATTACH_PARENT_PROCESS: u32 = 0xFFFFFFFF;
@@ -85,8 +87,22 @@ fn attach_parent_console() {
     const STD_OUTPUT_HANDLE: u32 = 0xFFFFFFF5u32; // -11 as u32
     const STD_ERROR_HANDLE: u32 = 0xFFFFFFF4u32; // -12 as u32
     const INVALID_HANDLE_VALUE: isize = -1;
+    const FILE_TYPE_DISK: u32 = 1;
+    const FILE_TYPE_PIPE: u32 = 3;
 
     unsafe {
+        // A release GUI-subsystem executable can still inherit redirected
+        // stdout/stderr from a CLI caller. Keep those handles: replacing them
+        // with CONOUT$ makes `spectrapdf check ... > report.json` lose output.
+        let stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+        let stderr = GetStdHandle(STD_ERROR_HANDLE);
+        if [stdout, stderr].into_iter().any(|handle| {
+            handle != 0
+                && handle != INVALID_HANDLE_VALUE
+                && matches!(GetFileType(handle), FILE_TYPE_DISK | FILE_TYPE_PIPE)
+        }) {
+            return;
+        }
         if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
             return; // No parent console (e.g., double-clicked)
         }

@@ -121,7 +121,7 @@
   "app.unreadableRecord.startupTitle": "Startinställningarna tillämpades inte",
   "app.window.claimTitle": "Öppen i ett annat fönster",
   "app.window.focusOther": "Visa det fönstret",
-  "app.window.folderBusy": "Ett annat fönster skriver redan till den här mappen: {{folder}}.",
+  "app.window.folderBusy": "En annan körning skriver redan till den här mappen: {{folder}}.",
   "app.window.folderBusyHere": "En körning i det här fönstret skriver fortfarande till den här mappen: {{folder}}. Vänta tills den har stoppats och försök sedan igen.",
   "app.window.importElsewhere": "Det går inte att importera sidor från en fil som är öppen i ett annat fönster: {{names}}.",
   "app.window.openElsewhere": "Redan öppen i ett annat fönster: {{names}}. En fil kan bara redigeras i ett fönster i taget.",
@@ -5977,5 +5977,8 @@
   "toolbar.group.zoom": "Zooma",
   "tools.heading": "Verktyg",
   "tools.openFirst": "Öppna en PDF först",
-  "tools.sub": "Välj vad du vill göra med ditt dokument."
+  "tools.sub": "Välj vad du vill göra med ditt dokument.",
+  "engine.redact.pageContainsMalformedDrawing": "Sidan innehåller en felaktig ritbana. Maskeringen tillämpades inte.",
+  "engine.redact_document.documentStructureTooComplex": "Dokumentstrukturen är för komplex för säker maskering.",
+  "refusal.scan.pageUnreadable": "Den skannade sidan kunde inte läsas: {{folder}}."
 }

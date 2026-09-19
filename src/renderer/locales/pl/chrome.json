@@ -125,7 +125,7 @@
   "app.unreadableRecord.startupTitle": "Nie zastosowano ustawień uruchamiania",
   "app.window.claimTitle": "Otwarty w innym oknie",
   "app.window.focusOther": "Pokaż to okno",
-  "app.window.folderBusy": "Inne okno już zapisuje do tego folderu: {{folder}}.",
+  "app.window.folderBusy": "Inne zadanie już zapisuje dane w tym folderze: {{folder}}.",
   "app.window.folderBusyHere": "Przebieg w tym oknie nadal zapisuje do tego folderu: {{folder}}. Poczekaj, aż się zatrzyma, a potem spróbuj ponownie.",
   "app.window.importElsewhere": "Nie można zaimportować stron z pliku otwartego w innym oknie: {{names}}.",
   "app.window.openElsewhere": "Już otwarty w innym oknie: {{names}}. Plik można edytować tylko w jednym oknie naraz.",
@@ -6249,5 +6249,8 @@
   "toolbar.group.zoom": "Powiększenie",
   "tools.heading": "Narzędzia",
   "tools.openFirst": "Najpierw otwórz plik PDF",
-  "tools.sub": "Wybierz, co chcesz zrobić z dokumentem."
+  "tools.sub": "Wybierz, co chcesz zrobić z dokumentem.",
+  "engine.redact.pageContainsMalformedDrawing": "Strona zawiera nieprawidłową ścieżkę rysowania. Redakcja nie została zastosowana.",
+  "engine.redact_document.documentStructureTooComplex": "Struktura dokumentu jest zbyt złożona, aby bezpiecznie przeprowadzić redakcję.",
+  "refusal.scan.pageUnreadable": "Nie można odczytać zeskanowanej strony: {{folder}}."
 }

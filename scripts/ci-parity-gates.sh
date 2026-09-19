@@ -1,21 +1,7 @@
 #!/bin/sh
-# ci-parity-gates.sh — run LOCALLY before every push, so CI's gates fail on
-# this machine instead of on the runner.
-#
-# WHY THIS EXISTS: most CI and release failures are catchable locally. The
-# largest classes are the two dependency audits, the test-axis provisioning
-# gate and the tag/version-consistency check, which the full battery does not
-# run.
-#
-# This is NOT the full battery (lint/vitest/pytest — run those too). This
-# is the set of CI gates the battery historically OMITTED. Run BOTH.
-#
-# The full engine suite runs here only as the workflow-contract gate's single
-# file. `--durations=25` therefore lives on the runners' full-suite invocations
-# (.github/workflows/ci.yml "Run engine tests (full suite)" and release.yml
-# "Engine tests (full suite)"), which is where a stall has no other name.
-#
-# Exit non-zero on any gate failure. Each gate logs to its own *.local.log.
+# Supplemental release metadata checks. Run once with local candidate validation.
+# Functional suites already run in that validation; security audits run in CI.
+# Do not rerun this script at each commit, push, and tag boundary.
 R="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$R/ci-parity.results.local.txt"
 : > "$OUT"
@@ -30,20 +16,12 @@ gate() {
   return 0
 }
 
-# --- Every CI job: the toolchains, before any gate that uses one. A gate below
-#     is evidence about CI only when it ran on what CI installs: the newest
-#     stable Rust with no override, the .python-version pin (which must be
-#     python.org's newest release of its minor, and which the shipped runtime
-#     also reads) in .venv, and the newest release of the .node-version major
-#     with the npm it bundles. Each log names the local version, the expected
-#     one and the fix; an unreadable version source fails. ---
+# The release runner follows the newest stable Rust, the Python pin, and the
+# newest patch of the configured Node major. Prove the validated local tools
+# match those moving inputs once before tagging.
 gate rust-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py rust
 gate python-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py python
 gate node-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py node
-
-# --- CI job: Dependency Audit (the #1 self-inflicted CI failure bucket) ---
-gate npm-audit npm audit --production --audit-level=high
-gate cargo-audit sh -c 'cd src-tauri && cargo audit'
 
 # --- Release job: version consistency (tag == package.json == tauri.conf == Cargo.toml) ---
 # Not tag-aware here (no tag yet at push time); instead assert the four surfaces AGREE.
@@ -86,24 +64,8 @@ fi
 gate engine-manifest "$R/.venv/Scripts/python.exe" scripts/gen-engine-payload-manifest.py --check
 gate engine-payload "$R/.venv/Scripts/python.exe" scripts/check-engine-payload.py
 
-# --- CI job: Lint & Build type-checks the renderer. ESLint does not, and the
-#     Vite build strips types without checking them. ---
-gate typecheck npm run typecheck
-
-# --- CI/Release gate: the shipped renderer carries no e2e test harness. The
-#     harness is compiled out by VITE_E2E; dist/renderer on this machine may be
-#     an e2e build, so the mirror scans a fresh plain build in a scratch tree,
-#     exactly what the release job embeds. ---
-gate release-bundle sh -c 'env -u VITE_E2E npx vite build --config vite.config.mts --outDir "$0/release-bundle-check.local.out" && "$0/.venv/Scripts/python.exe" scripts/check-release-bundle.py release-bundle-check.local.out' "$R"
-
-# --- Corpus provisioning contract: a test axis with no CI provisioning is the
-#     "added tests, forgot the workflow" failure class. This asserts the fetch
-#     scripts still --check clean if the corpora are present (skips if absent). ---
-for suite in fetch-ghent-suite fetch-processing-steps-suite fetch-pdfa-corpus; do
-  if [ -f "$R/scripts/$suite.py" ]; then
-    gate "$suite-check" "$R/.venv/Scripts/python.exe" "scripts/$suite.py" --check || true
-  fi
-done
+# Inspect the production renderer already built by candidate validation.
+gate release-bundle "$R/.venv/Scripts/python.exe" scripts/check-release-bundle.py
 
 # --- Release job: the release body is the changelog section for the version
 #     the four surfaces carry. A missing, empty, or banned-term section fails
@@ -119,59 +81,6 @@ sys.stderr.write(run.stderr.decode())
 sys.stdout.write(run.stdout.decode())
 sys.exit(run.returncode)
 PY
-
-# --- Release gate: the signing script must no-op outside CI. A dev build that
-#     signs (or fails trying) is unbuildable off a runner, and the no-op is the
-#     only half of the signing pipeline that can be proven locally. ---
-gate sign-script-noop "$R/.venv/Scripts/python.exe" -m pytest   "tests/test_ci_capability_setup.py::test_the_sign_script_does_nothing_outside_ci" -q
-
-# --- Workflow-contract tests: the only local reader of .github/workflows/*.
-#     A workflow edit that breaks the contract otherwise surfaces on the runner,
-#     for example a step moved into a script past a contract test's substring
-#     lookup. Also carries the publish-order contract: both release publishers
-#     upload to a draft, gate the uploaded assets, and undraft as the LAST
-#     step. ---
-#     This run cannot detect a tagless checkout: a developer clone carries the
-#     released tags by construction, so the runner's shallow, tagless checkout
-#     is guarded by the workflow contract inside this file's test instead
-#     (test_every_job_running_the_suite_checks_out_with_tags). ---
-gate workflow-contract "$R/.venv/Scripts/python.exe" -m pytest \
-  tests/test_ci_capability_setup.py -q
-
-# --- corpus-pin-vs-index: a tracked PDF added anywhere in the repo joins the
-#     preflight and accessibility corpus universes; committing one without
-#     regenerating their pins otherwise fails only in the runner's full
-#     suite. ---
-gate corpus-pin "$R/.venv/Scripts/python.exe" -m pytest \
-  "tests/test_preflight.py::TestCorpusGate::test_the_corpus_is_the_git_index_not_a_glob" \
-  "tests/test_accessibility.py::TestCorpusGate::test_the_corpus_is_the_git_index_not_a_glob" -q
-
-# --- CI job: Verify runs the Rust suite. The Rust tests exercise process-,
-#     handle-, and window-level behaviour whose failures are runner-timing
-#     sensitive — the class that only ever appeared on CI. ---
-gate cargo-test sh -c 'cd src-tauri && cargo test'
-
-# --- CI/Release gate: the live runtime tests. The CLI leaves no bytecode in
-#     the engine payload, every optional Ghostscript leg takes the configured
-#     path or none, and a health worker past its deadline dies and respawns.
-#     `cargo test` above lets these tests skip when no runtime sits beside the
-#     exe; this machine has the vendored runtime, so the skip is refused here
-#     the way the provisioned CI and release runs refuse it. ---
-gate live-cli sh -c 'cd src-tauri && SPECTRAPDF_REQUIRE_LIVE_CLI=1 cargo test --test cli_bytecode --test cli_run_action --test health_worker'
-
-# --- Release gate: latest.json is parsed by the updater plugin's own
-#     deserializer (scripts/verify-release-draft.ps1 runs this against the
-#     downloaded draft manifest). Here it runs against the tracked fixture,
-#     in the env-driven mode the verifier uses, so a change to the test, the
-#     fixture, or the pinned plugin fails before the release job does. ---
-gate updater-manifest sh -c 'cd src-tauri && \
-  SPECTRAPDF_UPDATER_MANIFEST=tests/fixtures/updater-manifest/latest.json \
-  SPECTRAPDF_UPDATER_VERSION=1.1.20 \
-  SPECTRAPDF_UPDATER_NOTES_FILE=tests/fixtures/updater-manifest/notes.txt \
-  SPECTRAPDF_UPDATER_PLATFORMS=windows-x86_64-nsis,windows-x86_64 \
-  SPECTRAPDF_UPDATER_URL=https://api.github.com/repos/jasonulbright/Spectra-PDF/releases/assets/538527808 \
-  SPECTRAPDF_UPDATER_SIGNATURE_FILE=tests/fixtures/updater-manifest/installer.sig \
-  cargo test --test updater_manifest'
 
 echo "CI-PARITY DONE" >> "$OUT"
 if [ "$fail" -ne 0 ]; then

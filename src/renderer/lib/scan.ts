@@ -207,6 +207,7 @@ export const SCAN_REFUSAL_KEYS: readonly string[] = [
   'scan.notResponding',
   'scan.paperJam',
   'scan.paperProblem',
+  'scan.pageUnreadable',
   'scan.scratchFull',
   'scan.settingRejected',
 ];

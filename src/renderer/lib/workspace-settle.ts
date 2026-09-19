@@ -73,10 +73,9 @@ export function pathDescribesCurrentBytes(state: WorkspaceState, path: string): 
   return !!buffer && own.length > 0 && own.every((d) => d.buffer === buffer);
 }
 
-// Buffers whose last index run failed, with the error it failed with. The
-// indexer retries on its next pass and clears the mark when it does, so the
-// mark means "no index is coming".
+// A failed buffer stays failed until its bytes change or the user retries.
 const failed = new WeakMap<object, unknown>();
+const retryListeners = new Set<(path: string, buffer: PdfBuffer) => void>();
 // The same verdicts, kept through a retry until a run reads the buffer: a
 // retry that fails again must not take the notice away while it runs.
 const unreadable = new WeakSet<object>();
@@ -110,8 +109,28 @@ export function clearIndexFailure(buffer: PdfBuffer): void {
   failed.delete(buffer);
 }
 
+export function indexFailed(buffer: PdfBuffer): boolean {
+  return failed.has(buffer);
+}
+
+export function subscribeIndexRetries(listener: (path: string, buffer: PdfBuffer) => void): () => void {
+  retryListeners.add(listener);
+  return () => { retryListeners.delete(listener); };
+}
+
+/** Retry the current failed bytes once, leaving the failure notice visible
+ * until they have actually been read. Unrelated state changes do not retry. */
+export function retryFailedIndexes(state: WorkspaceState): void {
+  for (const [path, file] of state.files) {
+    if (file.importOnly || !file.buffer || !failed.has(file.buffer)) continue;
+    failed.delete(file.buffer);
+    for (const listener of [...retryListeners]) listener(path, file.buffer);
+  }
+}
+
 /** A run read `buffer`: its pages are readable. */
 export function recordIndexSuccess(buffer: PdfBuffer): void {
+  failed.delete(buffer);
   if (unreadable.delete(buffer)) notify(true);
 }
 
@@ -138,11 +157,11 @@ export function pagesUnreadable(state: WorkspaceState, file: OpenFile, known: In
 
 /** The failed index a document not read from its file's current bytes waits
  * on, or null. */
-function awaitedFailure(state: WorkspaceState): { error: unknown } | null {
+function awaitedFailure(state: WorkspaceState): { error: unknown; name: string } | null {
   for (const d of state.workspace.documents) {
     const current = state.files.get(d.path)?.buffer;
     if (current && !readFromCurrentBytes(state, d) && failed.has(current)) {
-      return { error: failed.get(current) };
+      return { error: failed.get(current), name: state.files.get(d.path)!.name };
     }
   }
   return null;
@@ -177,7 +196,8 @@ export function awaitSettledWorkspace(
       const failure = awaitedFailure(state);
       if (failure) {
         finish();
-        reject(new Error(tChrome('app.history.changed'), { cause: failure.error }));
+        const detail = indexError(failure.error).message;
+        reject(new Error(tChrome('canvas.common.fileFailure', { name: failure.name, message: detail }), { cause: failure.error }));
       }
     }
     unsubscribe = subscribe(check);

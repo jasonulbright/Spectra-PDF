@@ -1835,7 +1835,7 @@ class TestType1EexecTrailerRecovery:
             "the Adobe Glyph List maps"
         )
 
-    # ── the completion appends no separator (decided on the reviewer's data) ─
+    # ── the completion appends no separator ────────────────────────────────
 
     def test_completion_appends_the_fixed_content_with_no_separator(self, parses):
         # Dropping the leading newline is never worse on the corpus and

@@ -89,6 +89,8 @@ describe('owned writers preserve page scope and mixed-source spelling', () => {
     await $('[data-testid="spelling-change-all"]').click();
     await browser.waitUntil(async () => !(await $('[data-testid="spelling-word-definately"]').isExisting())
       && await $('[data-testid="spelling-check"]').isEnabled(), { timeout: 90000, timeoutMsg: 'Spelling correction/recheck did not finish' });
+    await $('[data-testid="spelling-report"]').waitForDisplayed({ timeout: 20_000 });
+    expect(await $('[data-testid="spelling-status"]').isExisting()).toBe(false);
     const dest = await save(), texts = await textPages(dest), pdf = await PDFDocument.load(readFileSync(dest));
     expect(texts[1]).toContain('definitely definitely');
     expect(pdf.getForm().getTextField('Notes').getText()).toBe('definitely definitely');

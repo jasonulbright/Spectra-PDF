@@ -66,6 +66,32 @@ async function fixture() {
 }
 
 describe('whole-file operation publication', () => {
+  it('derives parameters after the gate and refuses an edit while derivation awaits', async () => {
+    const f = await fixture();
+    let committed = false;
+    f.io.commit = async () => { committed = true; };
+    await expect(executeWorkspaceOperation('source', 'redact', {}, f.store.getState,
+      f.store.dispatch, f.io, {
+        prepareParams: async accepted => {
+          expect(committed).toBe(true);
+          expect(accepted.files.get('source')!.buffer).toBe(f.file.buffer);
+          await Promise.resolve();
+          f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1, documents: [] });
+          return { regions: [{ page: 1, rect: [0, 0, 10, 10] }] };
+        },
+      })).rejects.toThrow('document or history changed');
+    expect(f.io.callStaged).not.toHaveBeenCalled();
+    expect(f.io.transaction.publish).not.toHaveBeenCalled();
+    expect(f.disk.get('work')).toEqual(f.original);
+  });
+
+  it('passes the accepted derived parameters to the engine', async () => {
+    const f = await fixture();
+    const regions = [{ page: 1, rect: [1, 2, 3, 4] }];
+    await executeWorkspaceOperation('source', 'redact', { gs_path: 'gs' }, f.store.getState,
+      f.store.dispatch, f.io, { prepareParams: async () => ({ regions }) });
+    expect(f.io.callStaged).toHaveBeenCalledWith('redact', expect.objectContaining({ regions, gs_path: 'gs' }));
+  });
   it.each(['reopen', 'revision', 'pending'])('gesture captured before prerequisites refuses %s before consent or staging', async boundary => {
     const f = await fixture();
     const intent = captureOperationIntent(f.store.getState(), f.file);

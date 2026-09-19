@@ -22,7 +22,7 @@ from typing import Optional
 
 import pikepdf
 
-from engine.pdf_fonts import name_str
+from engine.pdf_fonts import _CharStringBudget, _CharStringWork, name_str
 from engine.pdf_tree import token_text
 
 # One subpath is a list of segments; a segment is ("m"|"l", (x, y)),
@@ -108,12 +108,16 @@ class _Program:
     def __init__(self, upem: float):
         self.upem = float(upem) or 1000.0
         self._cache: dict = {}
+        self._charstring_work = _CharStringWork()
 
     def outline(self, key) -> Contours:
         if key in self._cache:
             return self._cache[key]
         try:
-            value = self._draw(key)
+            with self._charstring_work.guard():
+                value = self._draw(key)
+        except _CharStringBudget:
+            raise
         except OutlineRefusal:
             raise
         except Exception:
@@ -684,7 +688,13 @@ class GlyphSource:
             else:
                 cached = self._key_for_composite(code, data)
             self._resolve_cache[code] = cached
-        return self.program.outline(cached)
+        try:
+            return self.program.outline(cached)
+        except _CharStringBudget:
+            raise OutlineRefusal(
+                f"Page {self.page} draws text in {self.name}, whose embedded font "
+                f"program could not be read."
+            ) from None
 
 
 def _vertical_origins(descendant):

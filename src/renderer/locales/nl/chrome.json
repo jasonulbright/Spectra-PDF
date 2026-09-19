@@ -121,7 +121,7 @@
   "app.unreadableRecord.startupTitle": "Opstartinstellingen niet toegepast",
   "app.window.claimTitle": "Geopend in een ander venster",
   "app.window.focusOther": "Dat venster tonen",
-  "app.window.folderBusy": "Een ander venster schrijft al naar deze map: {{folder}}.",
+  "app.window.folderBusy": "Een andere uitvoering schrijft al naar deze map: {{folder}}.",
   "app.window.folderBusyHere": "Een uitvoering in dit venster schrijft nog naar deze map: {{folder}}. Wacht tot die stopt en probeer het dan opnieuw.",
   "app.window.importElsewhere": "Er kunnen geen pagina’s worden geïmporteerd uit een bestand dat in een ander venster is geopend: {{names}}.",
   "app.window.openElsewhere": "Al geopend in een ander venster: {{names}}. Een bestand kan in één venster tegelijk worden bewerkt.",
@@ -5977,5 +5977,8 @@
   "toolbar.group.zoom": "Zoomen",
   "tools.heading": "Gereedschappen",
   "tools.openFirst": "Open eerst een PDF",
-  "tools.sub": "Kies wat u met uw document wilt doen."
+  "tools.sub": "Kies wat u met uw document wilt doen.",
+  "engine.redact.pageContainsMalformedDrawing": "De pagina bevat een ongeldig tekenpad. Het zwartlakken is niet toegepast.",
+  "engine.redact_document.documentStructureTooComplex": "De documentstructuur is te complex om veilig zwart te lakken.",
+  "refusal.scan.pageUnreadable": "De gescande pagina kon niet worden gelezen: {{folder}}."
 }

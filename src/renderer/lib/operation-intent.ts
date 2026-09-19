@@ -14,8 +14,13 @@ export interface OperationIntent {
 function changed(): Error { return new Error(tChrome('app.history.changed')); }
 
 export function captureOperationIntent(state: AppState, source: OpenFile): OperationIntent {
-  if (!source.buffer || source.importOnly || state.activeFileId !== source.path
-      || state.files.get(source.path) !== source) throw changed();
+  if (state.activeFileId !== source.path) throw changed();
+  return captureFileOperationIntent(state, source);
+}
+
+/** A canvas batch can deliberately target several visible files. */
+export function captureFileOperationIntent(state: AppState, source: OpenFile): OperationIntent {
+  if (!source.buffer || source.importOnly || state.files.get(source.path) !== source) throw changed();
   // The pending page tier, including every partition, is what the gesture
   // names. The stored OpenFile count describes the older on-disk revision.
   const pageCount = state.pageDirtyPaths.includes(source.path)
