@@ -34,8 +34,8 @@ export interface Settings {
    *
    * Default ON. Ghostscript is a user-supplied prerequisite the distribution
    * ships none of, so a copy that has never had one gated ten features
-   * silently until the user opened Settings ▸ Engine on their own. The
-   * dialog's "Don't ask again" clears this; Settings ▸ Engine is the way
+   * silently until the user opened Preferences ▸ Engine on their own. The
+   * dialog's "Don't ask again" clears this; Preferences ▸ Engine is the way
    * back. Off changes nothing else — the per-surface notices still name the
    * prerequisite where it is needed. */
   promptGhostscriptOnLaunch: boolean;

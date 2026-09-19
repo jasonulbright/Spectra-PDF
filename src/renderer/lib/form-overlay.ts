@@ -9,8 +9,8 @@
 // module), and PageCell re-projects by the in-memory rotation at render via
 // rotateNormalizedRect — exactly the Find-word recipe.
 //
-// Pending values are name-keyed per file — deliberately NOT the positional-id
-// lifecycle of redaction marks/selection: a field NAME is stable across page
+// Pending values are name-keyed per file — deliberately NOT the page-id
+// lifecycle of redaction marks and selection: a field NAME is stable across page
 // edits, commits, and unrelated whole-file ops, so half-typed values survive
 // an Apply-changes (dropping them would punish routine edits). They are
 // PRUNED against each re-read of the file's fields (name gone, no longer

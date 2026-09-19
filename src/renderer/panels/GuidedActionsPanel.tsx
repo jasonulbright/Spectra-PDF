@@ -53,9 +53,7 @@ import {
 // authored in a compact editor and
 // run over the OPEN document. Each step goes through the standard
 // snapshot → call → reload shape, so a run is undoable step-by-step and
-// stops on the first failure with the step named. Later slices (ledger):
-// catalog growth (OCR, header/footer), ask-at-run params, folder mode,
-// export/import as files.
+// stops on the first failure with the step named.
 
 type RunValues = Record<number, Record<string, string | number>>;
 
@@ -365,7 +363,7 @@ export function GuidedActionsPanel(): React.ReactElement {
   );
   const [confirmInPlace, setConfirmInPlace] = useState<string | null>(null);
 
-  // Slice 4: actions travel as FILES — the `{name, steps}` shape the CLI
+  // Actions travel as FILES — the `{name, steps}` shape the CLI
   // consumes (`run-action --action file.json`). Export strips secrets by the
   // same construction as the persist path (an exported file can never carry
   // a password); import validates against the catalog BY NAME and mints a

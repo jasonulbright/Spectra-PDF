@@ -174,8 +174,8 @@ export class GsUnavailableError extends Error {
  * use the catalog key (`panel.common.gsRequired`); this is what reaches a
  * caller that can only show `String(error)`. */
 export const GS_REQUIRED_MESSAGE =
-  'This feature needs Ghostscript, which Spectra does not include. ' +
-  'Install it and point Spectra at it in Settings ▸ Engine.';
+  'This feature needs Ghostscript, which Spectra PDF does not include. ' +
+  'Install it and point Spectra PDF at it in Preferences ▸ Engine.';
 
 /**
  * The gs path for a call that cannot proceed without one.
@@ -246,7 +246,7 @@ export function gsStateKey(capability: GsCapability = current): string | null {
 // ── The launch offer ────────────────────────────────────────────────────
 //
 // A copy with no Ghostscript anywhere gates ten features, and nothing said
-// so until the user opened Settings ▸ Engine unprompted. The offer is made
+// so until the user opened Preferences ▸ Engine unprompted. The offer is made
 // ONCE per launch and only where resolution failed EVERYWHERE — a path the
 // user chose themselves is an answer they already know about, and re-asking
 // about it would be arguing with a decision rather than reporting a gap.
@@ -294,7 +294,7 @@ export function registerGsSetupOpener(opener: SetupOpener | null): void {
   setupOpener = opener;
 }
 
-/** Open Settings ▸ Engine. A no-op before App mounts, which is not
+/** Open Preferences ▸ Engine. A no-op before App mounts, which is not
  * reachable from a rendered control. */
 export function openGsSetup(): void {
   setupOpener?.();

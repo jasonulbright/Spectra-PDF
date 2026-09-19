@@ -256,7 +256,7 @@ function fileName(path: unknown): string {
  * What a queue line SAYS, as data rather than as a finished
  * English sentence. The queue stores this descriptor and renders it at the
  * current language on every paint, while the operation LOG renders the same
- * descriptor pinned to English (a diagnostic sink — the slice-D boundary).
+ * descriptor pinned to English (a diagnostic sink).
  *
  * SECURITY, strengthened here: the descriptor is a WHITELIST of the few
  * values a label needs (a base file name, a page list, a count, a format).

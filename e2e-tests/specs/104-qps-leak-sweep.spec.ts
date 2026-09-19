@@ -36,7 +36,7 @@ const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 //     47 names per locale is 47 chances to be wrong when every locale's ICU
 //     data already spells them.
 //   • Document CONTENT — file names, page labels, signer names, bookmark
-//     titles, and the ENGINE's own refusal text (the slice-D boundary).
+//     titles, and the ENGINE's own refusal text, which passes through verbatim.
 //     None of it is ours to bracket.
 //   • NOTATION: the align/z-order GLYPHS, the find-mode toggles (Aa, ab, .*),
 //     measure UNIT symbols, PDF blend-mode VALUES, bundled FACE NAMES
@@ -579,7 +579,7 @@ describe('qps pseudo-locale leak sweep', () => {
     );
   });
 
-  // Slice E's own tail: the refusals the RENDERER builds in its leaf libs.
+  // The refusals the RENDERER builds in its leaf libs.
   // They never render as chrome — they arrive as a thrown message — so no
   // container sweep can see them; each is driven to its throw and the
   // MESSAGE is checked for the pseudo-locale marker.

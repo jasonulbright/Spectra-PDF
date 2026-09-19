@@ -291,10 +291,9 @@ describe('runBatchOcr', () => {
         calls += 1;
         // Flip on the SECOND call so the FIRST recognize is genuinely in
         // flight when cancellation is observed — both workers must then
-        // settle before destroy. (The original version flipped on call one,
-        // so the sibling worker never started a recognition and the test
-        // passed under a Promise.all mutant that destroys mid-flight —
-        // proven by mutation during review.)
+        // settle before destroy. (Flipping on call one would leave the
+        // sibling worker without a recognition, and the test would pass
+        // under a Promise.all mutant that destroys mid-flight.)
         if (calls === 2) cancelled = true;
         await new Promise((r) => setTimeout(r, 5));
         events.push(`end:${i}`);

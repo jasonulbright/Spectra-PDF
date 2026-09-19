@@ -14,7 +14,7 @@ export interface QueueItem {
    * paint. The operation log renders the same descriptor in English. */
   label: QueueLabel;
   status: 'running' | 'done' | 'error';
-  /** Failure text from the engine (slice-D boundary — passed through as the
+  /** Failure text from the engine (passed through as the
    * engine wrote it). Empty for running and completed operations, whose
    * wording is the queue's own. */
   message: string;

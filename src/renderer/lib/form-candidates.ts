@@ -1,8 +1,8 @@
 // Detected field candidates — the review model, pure over data.
 //
-// A candidate is a SUGGESTION with the redaction-mark lifetime: transient view
-// state bound to a page id, invalidated when its file's bytes change, and
-// carrying nothing into the document until the user accepts it. That is what
+// A candidate is a SUGGESTION: transient view state bound to a page id,
+// invalidated when its file's bytes change, and carrying nothing into the
+// document until the user accepts it. That is what
 // makes a heuristic safe to run over someone's form.
 //
 // Geometry is stored display-normalized with the rotation it was detected at,

@@ -277,7 +277,7 @@ function stripImportedOriginals(
     const subtype = dict.lookupMaybe(PDFName.of('Subtype'), PDFName)?.decodeText();
     const STRIPPABLE = new Set([
       'Square', 'FreeText', 'Ink', 'Stamp', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly', 'Text',
-      // Rung 2 — the imported drawing shapes re-append like everything else.
+      // The imported drawing shapes re-append like everything else.
       'Circle', 'Line', 'Polygon', 'PolyLine',
     ]);
     if (!subtype || !STRIPPABLE.has(subtype)) continue;
@@ -424,8 +424,8 @@ function addAnnotations(
       annot.set(PDFName.of('DA'), PDFString.of(`${r} ${g} ${b} rg /Helv ${FREETEXT_FONT_SIZE} Tf`));
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(text));
     } else if (a.kind === 'ink') {
-      // Rung 2's shared style edit reaches ink too: width + opacity (default
-      // 2 / opaque — byte-identical to the pre-rung-2 output when unset).
+      // The shared style edit reaches ink too: width + opacity (unset: width
+      // 2, opaque).
       // One /InkList entry AND one AP sub-path per stroke — a signature
       // of several pen lifts round-trips as exactly its strokes.
       const strokeW = a.strokeWidth ?? 2;
@@ -563,7 +563,7 @@ function addAnnotations(
       }
       if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
     } else if (a.kind === 'shape') {
-      // Rung 2: a drawing shape commits as its REAL subtype with a faithful
+      // A drawing shape commits as its REAL subtype with a faithful
       // appearance. /BS is ALWAYS written — its presence is what tells the
       // importer a /Square is a rectangle and not a highlight box.
       const strokeW = a.strokeWidth ?? 2;
@@ -695,7 +695,7 @@ function addAnnotations(
       if (a.opacity !== undefined && a.opacity < 1) annot.set(PDFName.of('CA'), context.obj(a.opacity));
       if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
     } else if (a.kind === 'callout') {
-      // Rung 2: /FreeText + /IT /FreeTextCallout + /CL. The whole appearance
+      // A callout is /FreeText + /IT /FreeTextCallout + /CL. The whole appearance
       // (text box + leader) is authored in DISPLAY space and counter-rotated
       // by the AP matrix like freetext; /CL itself is page-space semantic
       // data for other editors.

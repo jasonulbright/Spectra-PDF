@@ -91,11 +91,6 @@ export const initialUiState: UiState = {
   // strips board is the tool you switch to when you want to REARRANGE it — which
   // is also why the board survives untouched as an equal, one-click peer rather
   // than being replaced.
-  //
-  // The flip was deliberately held until every § "gates before the default flip"
-  // item closed (cross-document Find, text selection, zoom presets, Pages-panel
-  // sync, horizontal reach, e2e) — the flip is the moment the reading view
-  // becomes the experience, so the completeness rule binds here at the latest.
   docViewMode: 'document',
   pageLayout: 'single',
   twoUpCover: true,
@@ -1666,7 +1661,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return applyPageEdit(state, documents, [doc.path], action);
     }
     case 'RECALIBRATE_ANNOTATION': {
-      // Rung 3: one measurement's recorded scale is overridden — the /Measure
+      // One measurement's recorded scale is overridden — the /Measure
       // factors, ratio, and reported note rewrite together; geometry stays.
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
       const page = doc?.pages.find((p) => p.id === action.pageId);

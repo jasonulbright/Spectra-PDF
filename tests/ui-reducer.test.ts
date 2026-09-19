@@ -401,8 +401,7 @@ describe('ui tab/tool actions', () => {
 
   // A document OPENS in the reading view (a PDF is something you
   // read; the board is the tool you switch to when you want to rearrange it).
-  // Pinned so the flip can't be silently reverted: it was held back until every
-  // default-flip gate closed, and un-flipping would quietly undo that milestone.
+  // Pinned so the default can't be silently reverted.
   it('opens in the READING view by default', () => {
     expect(initialState.ui.docViewMode).toBe('document');
   });
@@ -617,7 +616,7 @@ describe('selection invalidation on buffer-identity changes (per-path prune)', (
     });
   }
 
-  // The phantom-id class (regression, both lenses): CLOSE_FILE
+  // The phantom-id class (regression): CLOSE_FILE
   // removes pages by CONTAINMENT (the path's documents, wholesale) AND by
   // SOURCE (its pages stripped out of other documents) — the prune must
   // cover the same union, or a dead id survives in the selection forever

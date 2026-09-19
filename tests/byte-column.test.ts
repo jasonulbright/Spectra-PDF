@@ -1,7 +1,7 @@
 // A column of byte counts is written in ONE unit, chosen for the column.
 //
 // Per-value formatting is right for a lone figure and wrong for a table: the
-// space audit shipped a size column reading 6.0 KB / 1.1 KB / 280 bytes /
+// size column formatted per value reads 6.0 KB / 1.1 KB / 280 bytes /
 // 128 bytes / 70 bytes / 0 bytes, which cannot be scanned or ranked without
 // converting every row by hand — the one job a size column has.
 import { describe, it, expect, vi } from 'vitest';

@@ -1,5 +1,5 @@
 // The nav-pane component registry. Maps each AVAILABLE panel id
-// (commands/navpanels — grows per sub-slice) to its icon + component. Must
+// (commands/navpanels) to its icon + component. Must
 // cover exactly NAV_PANEL_IDS; a `satisfies` check keeps them in lockstep so
 // an icon-strip button never renders without a component (completeness rule).
 import type { NavPanelDef } from './types';

@@ -29,7 +29,7 @@ import type { PageAnnotation } from '../state/types';
 // SVG in a `0 0 1 1` viewBox, and `pdfx-build` as `m`/`l`/`c` operators
 // scaled by the appearance BBox. One geometry, two renderers, no drift.
 //
-// Slice D generalizes this into the stamp library's third (vector) species;
+// The stamp library's third (vector) species generalizes this;
 // the shape here is the shape that generalizes — an id plus parts.
 
 export type SymbolPart =

@@ -1063,9 +1063,9 @@ export interface GuidedActionsHandlers {
     dest: string,
     inPlace?: boolean,
   ) => Promise<void>;
-  /** Slice 4: write one action to `path` (the `{name, steps}` file shape). */
+  /** Write one action to `path` (the `{name, steps}` file shape). */
   exportToPath: (actionId: string, path: string) => Promise<void>;
-  /** Slice 4: import an action file; rejects with the named refusal. */
+  /** Import an action file; rejects with the named refusal. */
   importFromPath: (path: string) => Promise<void>;
 }
 

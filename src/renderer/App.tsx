@@ -14,7 +14,7 @@ import {
 } from './lib/image-replace';
 import { editWorkspaceImage, type ImageEdit } from './lib/image-edit-transaction';
 import { EDIT_DECLINED } from './lib/edit-text';
-import { applyRedactions } from './lib/redaction';
+import { applyRedactions, wroteBytes } from './lib/redaction';
 import {
   lockNeedsFields,
   signedEditDecision,
@@ -32,15 +32,8 @@ import {
   type SubmitFormat,
   type WidgetAction,
 } from './lib/field-actions';
-import {
-  SUBMIT_EXTENSION as SUBMIT_PAYLOAD_EXTENSION,
-  destinationRefusal,
-  payloadPreview,
-  responseRoute,
-  statusAccepted,
-  submitRequest,
-  type PayloadPreview,
-} from './lib/form-submit';
+import type { PayloadPreview } from './lib/form-submit';
+import { runSubmission } from './lib/form-submission';
 import {
   SubmitConsentDialog,
   type SubmitConsentAnswer,
@@ -103,7 +96,7 @@ import { PresentationView } from './components/canvas/PresentationView';
 import { usePdfProxies } from './hooks/usePdfProxies';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
-import { awaitSettledWorkspace } from './lib/workspace-settle';
+import { awaitSettledWorkspace, indexError } from './lib/workspace-settle';
 import { hasPendingPageCommit, recoverPendingPageCommit } from './lib/page-commit-transaction';
 import { pageEditDecision, type PageDelta } from './lib/page-edit-gate';
 import { sequenceEditClass, type OpMethod } from './lib/op-edit-class';
@@ -268,12 +261,6 @@ const panels: Record<Operation, React.ComponentType> = {
   scanenhance: ScanEnhancePanel,
   spelling: SpellingPanel,
 };
-
-/** What a built submission is saved as — one table, in `lib/form-submit.ts`
- * beside the content types it pairs with. `html` is
- * `application/x-www-form-urlencoded` text, which has no extension of its own,
- * so it takes the one a text editor will open. */
-const SUBMIT_EXTENSION = SUBMIT_PAYLOAD_EXTENSION;
 
 function AppContent(): React.ReactElement {
   // Re-render on language change; the banner's buttons and every
@@ -1555,29 +1542,30 @@ function AppContent(): React.ReactElement {
   // Applying redactions REWRITES the page content, so it is a structural-class
   // edit however small the band: the append tier cannot carry it, every byte
   // range breaks, and a certification that forbids the change is refused
-  // rather than warned about. Returns whether the redaction ran — the caller
-  // clears the applied marks, and clearing them after a declined edit would
-  // lose the user's markup with nothing to show for it.
+  // rather than warned about. Returns whether the redaction wrote new bytes —
+  // the caller clears the applied marks, and clearing them after a declined
+  // edit would lose the user's markup with nothing to show for it.
   const handleRedactFile = useCallback(
     async (path: string, regions: { page: number; rect: [number, number, number, number] }[]): Promise<boolean> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      return (await applyRedactions(performOperation, path, regions, gsPathIfAvailable)) !== EDIT_DECLINED;
+      return wroteBytes(await applyRedactions(performOperation, path, regions, gsPathIfAvailable));
     },
     [state.files, performOperation],
   );
 
   // Persist the pending marks as the file's /Redact set — undoable,
-  // same snapshot→engine→reload shape as apply. The reload's buffer change
-  // clears the transient marks and the re-seed loads them back from the
-  // file, so state and file agree by construction.
+  // same snapshot→engine→reload shape as apply. The reload's new page ids
+  // retire the transient marks and the re-seed loads them back from the
+  // file, so state and file agree by construction. Returns whether new bytes
+  // were written, as handleRedactFile does.
   const handleSaveRedactionMarks = useCallback(
-    async (path: string, regions: { page: number; rect: [number, number, number, number] }[]) => {
+    async (path: string, regions: { page: number; rect: [number, number, number, number] }[]): Promise<boolean> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       // Saving marks writes /Redact annotations and removes nothing yet, so
       // it is annotate-class in the roster; applying them is the content change.
-      await performOperation(path, 'save_redaction_marks', { regions });
+      return wroteBytes(await performOperation(path, 'save_redaction_marks', { regions }));
     },
     [state.files, performOperation],
   );
@@ -1692,170 +1680,45 @@ function AppContent(): React.ReactElement {
         case 'submit': {
           const f = state.files.get(path);
           if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-          const stem = (f.name || 'form').replace(/\.pdf$/i, '');
-          // A destination this app has no transport for — an empty address, a
-          // `mailto:`, anything that is not http(s). The payload is still
-          // built and can still be saved: the refusal is about the transport,
-          // never about the submission.
-          const refusalKey = destinationRefusal(action.url);
-          const proceed = await showProceedConfirm(
-            tChrome('app.formButton.submitTitle'),
-            refusalKey
-              ? tChrome(refusalKey, { field: fieldName })
-              : tChrome('app.formButton.submit', {
-                  field: fieldName,
-                  url: action.url,
+          // Read-only against the document: the payload is built with the gated
+          // call beside it, never through performOperation, which would replace
+          // the file with its own submission.
+          await runSubmission(
+            {
+              confirm: showProceedConfirm,
+              notice: showNotice,
+              consent: (ask) =>
+                showSubmitConsent(ask.field, ask.url, ask.format, ask.method, ask.preview, ask.fieldCount),
+              payloadPath: (stem, extension) => app.netPayloadPath(stem, extension),
+              buildPayload: async (output) =>
+                (await call('export_form_data', {
+                  file: f.workingPath,
+                  output,
                   format: action.format,
-                }),
+                  ...(action.fields ? { fields: action.fields, exclude: action.exclude } : {}),
+                  include_empty: action.includeEmpty,
+                })) as unknown as { count?: number },
+              payloadBytes: (payload) => app.netPayloadBytes(payload),
+              send: (request) => app.netRequest(request),
+              saveTarget: (suggested) => dialog.saveFormDataFile(suggested),
+              copyFile: (from, to) => batch.copyFile(from, to),
+              copyToClipboard,
+              importFormData: async (data) => {
+                await performOperation(path, 'import_form_data', {
+                  data,
+                  font_dir: await app.getEditFontPath(),
+                });
+              },
+              openDocument: async (reply) => {
+                await openByPaths([reply]);
+                const [opened] = await app.canonicalizePaths([reply]);
+                return !!readState().files.get(opened) && !readState().files.get(opened)?.importOnly;
+              },
+              remove: (scratch) => file.remove(scratch),
+            },
+            { field: fieldName, stem: (f.name || 'form').replace(/\.pdf$/i, ''), action },
           );
-          if (!proceed) return;
-          // The payload is built to the app's own temp tree FIRST, because the
-          // consent dialog shows that file's bytes: a preview assembled from
-          // anything else would be a second answer to what gets transmitted.
-          //
-          // Read-only against the document, so it takes the gated call and
-          // writes its payload beside — never through performOperation, which
-          // would replace the file with its own submission.
-          const payloadPath = await app.netPayloadPath(
-            `${stem}-submission`,
-            SUBMIT_EXTENSION[action.format].slice(1),
-          );
-          const built = (await call('export_form_data', {
-            file: f.workingPath,
-            output: payloadPath,
-            format: action.format,
-            ...(action.fields ? { fields: action.fields, exclude: action.exclude } : {}),
-            include_empty: action.includeEmpty,
-          })) as unknown as { count?: number };
-
-          /** The pre-transmit behaviour, kept: the built submission handed
-           * over as a file, with its destination offered to the clipboard. */
-          const saveBuiltCopy = async (): Promise<void> => {
-            const target = await dialog.saveFormDataFile(
-              `${stem}${SUBMIT_EXTENSION[action.format]}`,
-            );
-            if (!target) return;
-            await batch.copyFile(payloadPath, target);
-            const copy = await showProceedConfirm(
-              tChrome('app.formButton.submitBuiltTitle'),
-              tChrome('app.formButton.submitBuilt', { file: target, url: action.url }),
-            );
-            if (copy) await copyToClipboard(action.url);
-          };
-
-          if (refusalKey) {
-            await saveBuiltCopy();
-            return;
-          }
-
-          const answer = await showSubmitConsent(
-            fieldName,
-            action.url,
-            action.format,
-            action.method,
-            payloadPreview(action.format, await app.netPayloadBytes(payloadPath)),
-            built.count ?? 0,
-          );
-          if (answer === 'cancel') return;
-          if (answer === 'save') {
-            await saveBuiltCopy();
-            return;
-          }
-
-          let response;
-          try {
-            response = await app.netRequest(
-              submitRequest(action, payloadPath, `${stem}-reply`),
-            );
-          } catch (error) {
-            await showNotice(
-              tChrome('app.formButton.submitFailedTitle'),
-              tChrome('app.formButton.submitFailed', {
-                url: action.url,
-                detail: String(error),
-              }),
-            );
-            return;
-          }
-
-          /** The reply as a file the user keeps — the door that interprets
-           * nothing. An HTML reply always lands here: this app never renders a
-           * page it was sent. */
-          const saveReply = async (): Promise<void> => {
-            const suffix = response.path.slice(response.path.lastIndexOf('.'));
-            const target = await dialog.saveFormDataFile(`${stem}-reply${suffix}`);
-            if (!target) return;
-            await batch.copyFile(response.path, target);
-            await showNotice(
-              tChrome('app.formButton.submitSentTitle'),
-              tChrome('app.formButton.submitReplySaved', { file: target }),
-            );
-          };
-
-          if (!statusAccepted(response.status)) {
-            await showNotice(
-              tChrome('app.formButton.submitFailedTitle'),
-              tChrome('app.formButton.submitRejected', {
-                url: action.url,
-                status: response.status,
-              }),
-            );
-            if (response.bytes > 0) await saveReply();
-            return;
-          }
-          if (response.bytes === 0) {
-            await showNotice(
-              tChrome('app.formButton.submitSentTitle'),
-              tChrome('app.formButton.submitEmptyReply', { url: action.url }),
-            );
-            return;
-          }
-          // Everything below routes UNTRUSTED bytes into a door this app
-          // already has, and every door asks first. Nothing executes.
-          switch (responseRoute(response.contentType)) {
-            case 'formData': {
-              const importIt = await showProceedConfirm(
-                tChrome('app.formButton.submitSentTitle'),
-                tChrome('app.formButton.submitFormDataReply', {
-                  url: action.url,
-                  bytes: response.bytes,
-                }),
-              );
-              if (!importIt) return;
-              await performOperation(path, 'import_form_data', {
-                data: response.path,
-                font_dir: await app.getEditFontPath(),
-              });
-              return;
-            }
-            case 'document': {
-              const openIt = await showProceedConfirm(
-                tChrome('app.formButton.submitSentTitle'),
-                tChrome('app.formButton.submitDocumentReply', {
-                  url: action.url,
-                  bytes: response.bytes,
-                }),
-              );
-              if (!openIt) return;
-              await openByPaths([response.path]);
-              return;
-            }
-            default: {
-              const saveIt = await showProceedConfirm(
-                tChrome('app.formButton.submitSentTitle'),
-                tChrome('app.formButton.submitFileReply', {
-                  url: action.url,
-                  bytes: response.bytes,
-                  type:
-                    response.contentType ||
-                    tChrome('app.formButton.submitFileReplyUnknown'),
-                }),
-              );
-              if (!saveIt) return;
-              await saveReply();
-              return;
-            }
-          }
+          return;
         }
         case 'uri': {
           const copy = await showProceedConfirm(
@@ -1902,6 +1765,7 @@ function AppContent(): React.ReactElement {
       showSubmitConsent,
       openByPaths,
       copyToClipboard,
+      readState,
     ],
   );
 
@@ -2584,8 +2448,8 @@ function AppContent(): React.ReactElement {
       const staged = await app.stageSendCopy(activeFile.workingPath, activeFile.name);
       await app.sendByEmail(staged);
     } catch (e: unknown) {
-      // The engine/OS failure text itself stays verbatim (the slice-D
-      // boundary); only the notice's TITLE is ours to translate.
+      // The engine/OS failure text itself stays verbatim; only the notice's
+      // TITLE is ours to translate.
       await showNotice(
         tChrome('app.sendEmail.title'),
         e instanceof Error ? e.message : String(e),
@@ -3381,11 +3245,15 @@ function AppContent(): React.ReactElement {
         dispatch({ type: 'REMOVE_ANNOTATION', docId, pageId, annotationId }),
       // Returns once the read-back of what the commit wrote has landed, so a
       // spec reads and edits the imports it became: an edit to a baked
-      // annotation is refused until then. A failed index is left for the next
-      // commit to refuse.
+      // annotation is refused until then. A read-back that fails rejects with
+      // the index's own error: a spec must not go on over the documents the
+      // commit composed.
       commitPendingEdits: async () => {
         await commitRef.current();
-        await awaitSettledWorkspace(readState, subscribeState).catch(() => {});
+        await awaitSettledWorkspace(readState, subscribeState).catch((refusal: unknown) => {
+          const cause = indexError(refusal);
+          throw new Error(`commitPendingEdits: the read-back of the committed bytes failed: ${cause.message}`, { cause });
+        });
       },
       closeAllFiles: () => {
         const paths = [...filesRef.current.values()].map((f) => f.path);

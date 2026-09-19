@@ -308,8 +308,7 @@ describe('i18n catalogs', () => {
     }
   });
 
-  // The locale-QA gates. The catalog review ran both of these
-  // over the es catalog by hand; they are tests so a future locale (or a new
+  // The locale-QA gates. They are tests so that a future locale (or a new
   // key) cannot regress them silently. A dropped `{{name}}` is the worst
   // class of translation bug: the sentence still reads, and the value it was
   // supposed to name simply vanishes.

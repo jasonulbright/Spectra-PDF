@@ -322,7 +322,7 @@ describe('symbol palettes', () => {
 
   it('a BUILT-IN marker carries no geometry — the id already names it', async () => {
     // A FRESH group name, deliberately: the FILE is the authority on how a
-    // group it already carries looks (the slice-C rule), so re-seeding
+    // group it already carries looks, so re-seeding
     // "Outlets" with a built-in marker would still place the imported one the
     // sheet is already drawn with.
     await takeoffSetGroups([FIXTURES], FIXTURES.name);

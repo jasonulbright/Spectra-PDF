@@ -11,11 +11,13 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// Working copies land in %TEMP%/spectrapdf/<uuid>/ — one dir per
-// create_working_copy call (src-tauri/src/commands.rs), never reused.
-function countWorkDirs(): number {
+// Working copies land in %TEMP%/spectrapdf/<uuid>.<pid>/ — one dir per
+// create_working_copy call (src-tauri/src/commands.rs), never reused. Each
+// launch removes, on a background thread, the dirs of processes that no longer
+// run, so an entry can leave while a spec counts: the spec compares names.
+function workDirs(): Set<string> {
   const dir = join(tmpdir(), 'spectrapdf');
-  return existsSync(dir) ? readdirSync(dir).length : 0;
+  return new Set(existsSync(dir) ? readdirSync(dir) : []);
 }
 
 describe('open valid PDF', () => {
@@ -59,14 +61,15 @@ describe('open valid PDF', () => {
 
     // `fileCount` can NEVER show this: `files` is a Map keyed by path, so a
     // double-open just overwrites the entry. The observable is the WORKING
-    // COPY — `create_working_copy` mints a fresh uuid temp dir per call and
-    // nothing purges them — so count those instead.
-    const before = countWorkDirs();
+    // COPY — `create_working_copy` mints a fresh temp dir per call — so count
+    // the dirs this open added.
+    const before = workDirs();
     await openByPaths([SAMPLE_PDF, SAMPLE_PDF]);
     const state = await getState();
     expect(state.fileCount).toBe(1);
     expect(state.activeFile!.path).toBe(SAMPLE_PDF);
-    expect(countWorkDirs() - before).toBe(1); // not 2
+    const added = [...workDirs()].filter((name) => !before.has(name));
+    expect(added.length).toBe(1); // not 2
     // One tab, not two stacked on the same file.
     await expect($('[data-testid="tab-doc-0"]')).toBeDisplayed();
     await expect($('[data-testid="tab-doc-1"]')).not.toBeExisting();

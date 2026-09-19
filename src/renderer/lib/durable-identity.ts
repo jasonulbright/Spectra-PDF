@@ -92,7 +92,7 @@ export function adoptAuthoredIdentity(
  * `${path}#p${n-1}` had by accident: mint-time source index, invariant
  * to in-memory rearrangement. Counting the live array order instead
  * resolved a bookmark to the WRONG page while a reorder was pending
- * (regression, both lenses independently). */
+ * (regression). */
 export function pageIdAtSourceIndex(
   docs: OpenDocument[],
   path: string,

@@ -13,7 +13,7 @@ const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 // The op list mirrors commands/operations.ts OPERATIONS — specs can't import
 // renderer modules, but drift self-checks: a renamed/removed op makes
 // invokeAppCommand throw on the unknown tools.panel id, and a NEW op that's
-// missing here shows up in the next audit sweep of this list.
+// missing here is not measured until it is added to this list.
 const OPS = [
   'split', 'rotate', 'delete',
   'compress', 'grayscale', 'optimize', 'pdfa', 'pdf_version',

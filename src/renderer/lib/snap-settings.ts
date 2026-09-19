@@ -168,7 +168,7 @@ export function toggleSnapping(): void {
   setSnapSettings({ ...s, enabled: !s.enabled });
 }
 
-// The slice-B View-menu mirrors. Same argument as `toggleSnapping`: a
+// The View-menu mirrors. Same argument as `toggleSnapping`: a
 // registered command's `run` gets state + dispatch, not the canvas view, and
 // these are persisted PREFERENCES rather than workspace state.
 export function toggleRulers(): void {

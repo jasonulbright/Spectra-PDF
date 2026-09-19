@@ -1,4 +1,4 @@
-// Rung 3 — measure scale calibration: drag a known length, state its value,
+// Measure scale calibration: drag a known length, state its value,
 // and future measurements follow; right-click an existing measurement to
 // override its recorded value (exact note rewrite, undoable).
 import { copyFileSync, mkdtempSync } from 'node:fs';

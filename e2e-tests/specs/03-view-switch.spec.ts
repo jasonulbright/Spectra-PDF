@@ -28,7 +28,7 @@ describe('tab navigation', () => {
   });
 
   it('cycles tabs with the Next/Previous Tab commands (Ctrl+Tab)', async () => {
-    // Slice C: the Tools pseudo-tab is gone — the order is Home + one tab per
+    // There is no Tools pseudo-tab: the order is Home + one tab per
     // document. From the doc tab, Next wraps to Home; Next again returns to
     // the document; Previous goes back to Home.
     await $('[data-testid="tab-doc-0"]').click();

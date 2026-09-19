@@ -12,7 +12,7 @@ import {
   setReactInputValue,
 } from '../support/harness.js';
 
-// The 1,000-page checkpoint: virtualized window
+// One thousand pages: virtualized window
 // over the existing raster pipeline — smooth scroll, bounded DOM, first
 // paint not held for the tail. Wall-clock numbers vary per box, so the
 // STRUCTURAL claims carry the gate (the render window stays bounded no

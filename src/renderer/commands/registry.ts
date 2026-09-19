@@ -367,8 +367,7 @@ function openThenSeat(ctx: CommandContext, op: Operation): Promise<void> {
  * answer is "nothing" — rather than silently getting an empty one.
  *
  * Modes are NOT listed here: they come from `canvasTools`, which already
- * declares them. Listing them again would be a second copy to keep in step,
- * and this milestone has spent enough on those.
+ * declares them. Listing them again would be a second copy to keep in step.
  *
  * Deliberately absent: the pending-state buttons ("Fill 3 fields", "Redact 2
  * regions"). They aren't tool options — they report queued work, and the canvas

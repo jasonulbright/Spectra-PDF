@@ -629,6 +629,7 @@ search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a posit
 search_regions.pagesMustListPage	exact	enhance_scan,form_detect,headers,search_regions,slide_export,table_export,text_export	pages must be a list of page numbers or "all"
 separations.ghostscriptFoldedSpotColours	pattern	separations	Ghostscript folded {{n}} spot colours into process; raise the spot limit or reduce the document's spots.
 separations.ghostscriptSeparationRenderFailed	pattern	separations	Ghostscript separation render failed: {{v0}}
+separations.moreThanOneInk	pattern	separations	More than one ink in this document is shown as "{{text}}", so the name cannot say which one is meant.
 separations.pageDocument	pattern	flattener,object_inspector,outlines,separations	Page {{number}} is not in this document.
 separations.pageUsesColourSpace	pattern	separations	Page {{page}} uses a colour space this engine cannot read, so the inks on it cannot all be established: {{detail}}
 separations.pageUsesSpotColours	pattern	separations	This page uses {{n}} spot colours; separation preview supports {{limit}}.

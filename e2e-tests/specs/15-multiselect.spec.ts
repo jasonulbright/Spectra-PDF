@@ -24,7 +24,7 @@ import {
 } from '../support/harness.js';
 
 // sample.pdf is a 5-page PDF (empty content streams — page COUNT is all this
-// slice needs; multi-select operates on pages, not their content).
+// spec needs; multi-select operates on pages, not their content).
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
 const require = createRequire(import.meta.url);

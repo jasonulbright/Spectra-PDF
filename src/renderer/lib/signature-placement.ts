@@ -1,10 +1,10 @@
 // Pending visible-signature placement and its conversion into the engine's
 // `sign_pdf` appearance payload. A placement is TRANSIENT VIEW STATE owned by
-// WorkspaceCanvasView with exactly the redaction-mark lifecycle (see
-// lib/redaction.ts for the full rationale): it never enters the page-edit
-// tier, dies when its file's buffer identity changes or the canvas unmounts,
-// and resolves its page by pageId so it follows in-memory moves. Unlike
-// redaction marks there is at most ONE placement — drawing again replaces it.
+// WorkspaceCanvasView (see lib/redaction.ts for why such state stays out of
+// the page-edit tier): it never enters the page-edit tier, dies when its
+// file's buffer identity changes or the canvas unmounts, and resolves its page
+// by pageId so it follows in-memory moves. Unlike redaction marks there is at
+// most ONE placement — drawing again replaces it.
 import { displayRectToPdf } from './pdfx-build';
 import { workspacePageNumber } from './workspace-commit';
 import type { PageGeometry } from './redaction';

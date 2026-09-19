@@ -2,7 +2,7 @@
 // buffer-identity watcher
 // invalidates a file's cached text/OCR whenever its bytes change underneath
 // (commit, whole-file op, undo, OCR-apply itself) — the same invalidation
-// signal redaction marks and signature placements key on.
+// signal signature placements key on.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createSearchEngine, type SearchEngine, type SearchResult } from './engine';
 import { useEngine } from '../hooks/useEngine';

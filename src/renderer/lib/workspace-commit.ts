@@ -137,7 +137,7 @@ export function planCommit(
                     measureRatio,
                     measureUnitsPerPt,
                     measureUnit,
-                    // Rung 2 — the shape/callout fields the builder reads.
+                    // The shape/callout fields the builder reads.
                     shapeType,
                     strokeWidth,
                     fillColor,

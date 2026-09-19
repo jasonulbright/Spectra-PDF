@@ -291,7 +291,7 @@ describe('anchorHolds — a jump wins until the user scrolls away', () => {
     expect(anchorHolds(a, m, pagesAt(reordered, a))).toBe(false);
   });
 
-  // Documented, intended degradation (review). A commit rebuilds the
+  // Documented, intended degradation. A commit rebuilds the
   // file and the async reindex reassigns every id positionally from the new
   // buffer (lib/workspace.ts), so an anchor taken while an earlier in-memory
   // delete had "gapped" the ids can't match afterwards — and NO field survives a

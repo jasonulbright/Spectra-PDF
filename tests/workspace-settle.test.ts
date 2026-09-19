@@ -9,6 +9,7 @@ import { initialState } from '../src/renderer/state/reducer';
 import {
   awaitSettledWorkspace,
   clearIndexFailure,
+  indexError,
   needsIndex,
   pathDescribesCurrentBytes,
   recordIndexFailure,
@@ -79,10 +80,19 @@ describe('needsIndex', () => {
 });
 
 describe('the harness commit', () => {
+  const app = readFileSync(resolve(__dirname, '../src/renderer/App.tsx'), 'utf8').replace(/\r\n/g, '\n');
+
   it('returns once the read-back of the committed bytes has landed', () => {
-    const app = readFileSync(resolve(__dirname, '../src/renderer/App.tsx'), 'utf8');
     expect(app).toMatch(
-      /commitPendingEdits: async \(\) => \{\s*await commitRef\.current\(\);\s*await awaitSettledWorkspace\(readState, subscribeState\)\.catch\(\(\) => \{\}\);/,
+      /commitPendingEdits: async \(\) => \{\s*await commitRef\.current\(\);\s*await awaitSettledWorkspace\(readState, subscribeState\)\.catch\(\(refusal: unknown\) => \{/,
+    );
+  });
+
+  it('fails with the error of a read-back that failed, and never goes on without it', () => {
+    expect(app).not.toContain('await awaitSettledWorkspace(readState, subscribeState).catch(() => {});');
+    expect(app).toContain('const cause = indexError(refusal);');
+    expect(app).toContain(
+      'throw new Error(`commitPendingEdits: the read-back of the committed bytes failed: ${cause.message}`, { cause });',
     );
   });
 });
@@ -127,8 +137,12 @@ describe('awaitSettledWorkspace', () => {
     const current = store.getState().files.get('a.pdf')!.buffer!;
     const wait = awaitSettledWorkspace(store.getState, store.subscribe);
     expect(await pending(wait)).toBe('pending');
-    recordIndexFailure(current);
+    const failure = new Error('Invalid page request.');
+    recordIndexFailure(current, failure);
     await expect(wait).rejects.toThrow('The document or history changed. Try again.');
+    // The refusal carries the index's own error.
+    await expect(wait).rejects.toHaveProperty('cause', failure);
+    expect(indexError(await wait.catch((refusal: unknown) => refusal))).toBe(failure);
     // A retried index clears the mark, and the next wait waits for it.
     clearIndexFailure(current);
     expect(await pending(awaitSettledWorkspace(store.getState, store.subscribe))).toBe('pending');
@@ -139,15 +153,17 @@ describe('awaitSettledWorkspace', () => {
     const current = store.getState().files.get('a.pdf')!.buffer!;
     const wait = awaitSettledWorkspace(store.getState, store.subscribe);
     expect(await pending(wait)).toBe('pending');
-    recordIndexFailure(current);
+    recordIndexFailure(current, 'read-back failed');
     await expect(wait).rejects.toThrow('The document or history changed. Try again.');
+    // An error that is not an Error still names itself.
+    expect(indexError(await wait.catch((refusal: unknown) => refusal)).message).toBe('read-back failed');
     clearIndexFailure(current);
   });
 
   it('ignores a failed index of a buffer nothing waits on', async () => {
     const store = createAppStore(superseded());
     // The superseded documents' own buffer: nothing indexes it any more.
-    recordIndexFailure(store.getState().workspace.documents[0].buffer!);
+    recordIndexFailure(store.getState().workspace.documents[0].buffer!, new Error('superseded'));
     const wait = awaitSettledWorkspace(store.getState, store.subscribe);
     expect(await pending(wait)).toBe('pending');
     const current = store.getState().files.get('a.pdf')!;

@@ -1,4 +1,4 @@
-// The nav panels that EXIST at this sub-slice. This list is the
+// The nav panels that EXIST. This list is the
 // single source of truth for which icon-strip buttons, commands, and menu
 // items appear — it grows as each panel lands (pages, bookmarks,
 // signatures, search), so an icon/command never appears without a

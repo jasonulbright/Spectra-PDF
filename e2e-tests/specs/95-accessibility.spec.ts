@@ -8,7 +8,7 @@
 // are recorded in the report file for review but do not gate — an
 // undecidable is not a defect finding.
 //
-// The full inventory of every run is written to a11y-report.local.json
+// The full inventory of every run is written to REPORT_PATH
 // (gitignored) so a failure can be worked from the data instead of re-run.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';

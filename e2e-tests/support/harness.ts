@@ -3634,7 +3634,7 @@ export interface GsAnswer {
  * needs one — so absence cannot be arranged from outside the app: discovery
  * reads the registry and the environment as well as PATH. The pin sits on the
  * renderer's one answer, so the disabled panels, the gated menu commands, the
- * partial legs and Settings ▸ Engine all read it.
+ * partial legs and Preferences ▸ Engine all read it.
  *
  * `reason` selects which absent state renders; the default is the
  * fresh-install one.
@@ -3660,7 +3660,7 @@ export async function gsAnswer(): Promise<GsAnswer> {
   }) as Promise<GsAnswer>;
 }
 
-/** Answer the next native "pick any file" dialog (Settings ▸ Engine ▸
+/** Answer the next native "pick any file" dialog (Preferences ▸ Engine ▸
  * Browse) with this path, or with `null` for a cancelled dialog. */
 export async function answerAnyFilePicker(path: string | null): Promise<void> {
   await browser.execute(function (p: string | null) {

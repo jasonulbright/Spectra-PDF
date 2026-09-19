@@ -3,7 +3,7 @@ import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { indexOpenFile } from '../lib/workspace';
 import { evictExcept, subscribeProxyEvictions } from '../lib/pdfDocCache';
 import { createIndexRuns } from '../lib/index-runs';
-import { clearIndexFailure, needsIndex, recordIndexFailure } from '../lib/workspace-settle';
+import { clearIndexFailure, needsIndex, recordIndexFailure, recordIndexSuccess } from '../lib/workspace-settle';
 
 // Keeps AppState.workspace in sync with AppState.files. Whenever a file's
 // buffer changes (open, whole-file op, undo/redo), its workspace documents are
@@ -43,13 +43,17 @@ export function useWorkspaceIndexer(): void {
       clearIndexFailure(buffer);
       indexOpenFile(f)
         .then((documents) => {
-          if (runs.current.live(path, token)) dispatch({ type: 'SET_WORKSPACE_DOCUMENTS', path, documents });
+          if (!runs.current.live(path, token)) return;
+          recordIndexSuccess(buffer);
+          dispatch({ type: 'SET_WORKSPACE_DOCUMENTS', path, documents });
         })
-        .catch(() => {
-          // Unindexable buffer (shouldn't happen for a file that opened) —
-          // the workspace entry stays absent or superseded. A commit waiting
-          // for this landing is released with a refusal instead of waiting on.
-          if (runs.current.live(path, token)) recordIndexFailure(buffer);
+        .catch((error: unknown) => {
+          // Bytes pdf.js cannot load, or whose pages it cannot read, even
+          // where the engine opened them: the workspace entry stays absent or
+          // superseded. The canvas says so in place of the pages, and a commit
+          // waiting for this landing is released with a refusal that carries
+          // this error instead of waiting on.
+          if (runs.current.live(path, token)) recordIndexFailure(buffer, error);
         })
         .finally(() => runs.current.end(path, token));
     }

@@ -460,7 +460,7 @@ export function tDate(iso: string): string {
 /** Translate an OPERATION QUEUE op name by its engine method id (the
  * FRIENDLY_NAMES table — a data table, so its keys are generated from it
  * like the command titles). `lng` pins a language: the operation LOG is
- * written in English (a diagnostic sink, the slice-D boundary) while the
+ * written in English (a diagnostic sink) while the
  * queue itself renders in the user's locale. */
 export function tQueueOp(method: string, englishName: string, lng?: string): string {
   return i18next.t(`opqueue.op.${method}`, {
