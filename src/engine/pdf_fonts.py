@@ -42,11 +42,13 @@ Editability taxonomy (every run is LISTED; refusal carries the reason):
     fallback lifts coverage refusals for the editable ones.
 """
 
+import re
+import zlib
 from io import BytesIO
-from typing import Optional
+from typing import Callable, Optional
 
 import pikepdf
-from pdfminer.cmapdb import CMapParser, FileUnicodeMap
+from pdfminer.cmapdb import CMapDB, CMapParser, FileUnicodeMap
 from pdfminer.encodingdb import EncodingDB
 from pdfminer.fontmetrics import FONT_METRICS
 from pdfminer.psparser import LIT
@@ -133,41 +135,316 @@ def _code_lengths(trie: dict) -> dict[int, int]:
     return out
 
 
-def _split_codes(data: bytes, trie: dict) -> list[tuple[int, int]]:
-    """[(code integer, byte length)] for `data` under a CMap trie.
+# ── composite-font codes (ISO 32000-2 §9.7.6) ─────────────────────────────
 
-    A byte sequence that falls off the trie is emitted as a ONE-BYTE code —
-    the same recovery pdfminer makes, and the honest one: the alternative is
-    to resynchronize by guessing a length, which silently shifts every later
-    code in the string."""
-    out: list[tuple[int, int]] = []
-    i = 0
-    n = len(data)
-    while i < n:
-        node = trie
-        code = 0
-        length = 0
-        matched = None
-        j = i
-        while j < n:
-            value = node.get(data[j])
-            code = (code << 8) | data[j]
-            length += 1
-            j += 1
+
+class CodeSpace:
+    """Where each code of a composite font's string begins, and whether it is
+    a valid code (ISO 32000-2 §9.7.6.2).
+
+    A code matches a codespace range of its own length when each of its bytes
+    lies between the range's bounds at that position, and a string is read one
+    byte longer at a time until the code matches a range. A code that matches
+    none is consumed by §9.7.6.3's partial match: the range whose leading
+    bytes the most bytes fit, the one of the shortest codes on a tie, and the
+    shortest codes of all when not even the first byte fits a range. Readers
+    differ on an invalid code, so callers that must agree with every reader
+    treat one as unmeasurable."""
+
+    def __init__(self, ranges) -> None:
+        self.ranges = [
+            (bytes(low), bytes(high))
+            for low, high in ranges
+            if low and len(low) == len(high) and len(low) <= 4
+        ]
+        self.lengths = sorted({len(low) for low, _high in self.ranges})
+        self.shortest = self.lengths[0] if self.lengths else 1
+
+    def read(self, data: bytes, pos: int) -> tuple[int, bool]:
+        """`(byte length, valid)` of the code that starts at `pos`."""
+        for size in self.lengths:
+            if pos + size > len(data):
+                break
+            for low, high in self.ranges:
+                if len(low) == size and all(
+                    low[i] <= data[pos + i] <= high[i] for i in range(size)
+                ):
+                    return size, True
+        best, size = 0, self.shortest
+        for low, high in self.ranges:
+            fit = 0
+            while (
+                fit < len(low)
+                and pos + fit < len(data)
+                and low[fit] <= data[pos + fit] <= high[fit]
+            ):
+                fit += 1
+            if fit > best or (fit == best and fit and len(low) < size):
+                best, size = fit, len(low)
+        return max(1, min(size, len(data) - pos)), False
+
+    def split(self, data: bytes) -> list[tuple[int, int, bool]]:
+        """`[(code integer, byte length, valid)]` for every code of `data`."""
+        out: list[tuple[int, int, bool]] = []
+        pos = 0
+        while pos < len(data):
+            size, valid = self.read(data, pos)
+            out.append((int.from_bytes(data[pos : pos + size], "big"), size, valid))
+            pos += size
+        return out
+
+
+class TrieCodeSpace(CodeSpace):
+    """A predefined CMap's code space, read off its bundled code-to-CID trie,
+    which carries no codespace ranges. A code the trie maps is valid, at its
+    own length. A code that leaves the trie is consumed as §9.7.6.3 consumes
+    it, the codes under the trie node it reached standing for the ranges it
+    partly matched; it counts as invalid, since a real range may cover codes
+    the trie leaves unmapped."""
+
+    def __init__(self, trie: dict) -> None:
+        self.trie = trie
+        self.ranges = []
+        self._shortest: dict[int, int] = {}
+        self.shortest = self._shortest_under(trie)
+        self.lengths = [self.shortest]
+
+    def _shortest_under(self, node: dict) -> int:
+        """The fewest bytes that complete a code below `node`."""
+        key = id(node)
+        found = self._shortest.get(key)
+        if found is None:
+            found = 1 + min(
+                (self._shortest_under(value) if isinstance(value, dict) else 0)
+                for value in node.values()
+            ) if node else 1
+            self._shortest[key] = found
+        return found
+
+    def read(self, data: bytes, pos: int) -> tuple[int, bool]:
+        node = self.trie
+        depth = 0
+        while pos + depth < len(data):
+            value = node.get(data[pos + depth])
             if value is None:
                 break
-            if isinstance(value, dict):
-                node = value
-                continue
-            matched = (code, length)
-            break
-        if matched is None:
-            out.append((data[i], 1))
-            i += 1
+            depth += 1
+            if not isinstance(value, dict):
+                return depth, True
+            node = value
+        size = depth + self._shortest_under(node) if node else max(depth, 1)
+        return max(1, min(size, len(data) - pos)), False
+
+
+_TRIE_SPACES: dict[int, TrieCodeSpace] = {}
+
+
+def trie_code_space(trie: dict) -> TrieCodeSpace:
+    """The code space of a bundled CMap's trie, built once per trie."""
+    space = _TRIE_SPACES.get(id(trie))
+    if space is None or space.trie is not trie:
+        space = _TRIE_SPACES[id(trie)] = TrieCodeSpace(trie)
+    return space
+
+
+def _trie_cid(trie: dict):
+    """code bytes → CID through a bundled CMap's trie; 0 for a code it does
+    not map (§9.7.6.3: the glyph for CID 0 stands in)."""
+
+    def cid_of(code: bytes) -> int:
+        node = trie
+        for byte in code:
+            node = node.get(byte) if isinstance(node, dict) else None
+            if node is None:
+                return 0
+        return node if isinstance(node, int) else 0
+
+    return cid_of
+
+
+# The PostScript subset an embedded CMap is written in.
+_PS_TOKEN = re.compile(
+    rb"[ \t\r\n\f\x00]*(?:(%[^\r\n]*)|(<<|>>|[\[\]{}])|(<[0-9A-Fa-f \t\r\n\f]*>)|(\()"
+    rb"|(/[^ \t\r\n\f\x00/\[\]{}()<>%]*)|([^ \t\r\n\f\x00/\[\]{}()<>%]+))"
+)
+
+#: The most bytes of an embedded CMap read. A CMap that maps every one of
+#: 65,536 two-byte codes on its own line is under 1.3 MB.
+MAX_CMAP_BYTES = 8 * 1024 * 1024
+
+
+def _ps_tokens(data: bytes):
+    """(kind, value) for the PostScript subset a CMap is written in."""
+    pos = 0
+    while pos < len(data):
+        match = _PS_TOKEN.match(data, pos)
+        if match is None or match.end() == pos:
+            return
+        pos = match.end()
+        comment, delimiter, hexa, paren, name, word = match.groups()
+        if comment is not None:
+            continue
+        if delimiter is not None:
+            yield "delim", delimiter
+        elif hexa is not None:
+            digits = re.sub(rb"[ \t\r\n\f]", b"", hexa[1:-1])
+            if len(digits) % 2:
+                digits += b"0"
+            yield "hex", bytes.fromhex(digits.decode("ascii"))
+        elif paren is not None:
+            depth, start = 1, pos
+            while pos < len(data) and depth:
+                ch = data[pos : pos + 1]
+                if ch == b"\\":
+                    pos += 2
+                    continue
+                depth += {b"(": 1, b")": -1}.get(ch, 0)
+                pos += 1
+            yield "string", data[start : pos - 1]
+        elif name is not None:
+            yield "name", name[1:].decode("latin-1")
         else:
-            out.append(matched)
-            i += matched[1]
-    return out
+            yield "word", word
+
+
+def _is_int(value) -> bool:
+    return isinstance(value, bytes) and re.fullmatch(rb"-?\d+", value) is not None
+
+
+class _NoCodespace(Exception):
+    """An embedded CMap whose codes no codespace range bounds."""
+
+
+class EmbeddedCMap:
+    """An embedded CMap program (ISO 32000-2 §9.7.5.3): its codespace ranges,
+    its code-to-CID mappings and notdef mappings, the CMap it builds on
+    (`usecmap`) and its writing mode. A CMap that states no codespace range of
+    its own reads codes through the one it builds on (§9.7.6.2)."""
+
+    def __init__(self, data: bytes, use: Optional[str] = None):
+        self.spaces: list = []
+        self.chars: dict = {}
+        self.ranges: list = []
+        self.notdef_chars: dict = {}
+        self.notdef_ranges: list = []
+        self.base: Optional[str] = use
+        match = re.search(rb"/WMode[ \t\r\n]+(\d)", data)
+        self.wmode = int(match.group(1)) if match else None
+        stack: list = []
+        for kind, value in _ps_tokens(data):
+            if kind == "word" and not _is_int(value):
+                self._operator(value, stack)
+                stack = []
+            elif kind == "word":
+                stack.append(("int", int(value)))
+            else:
+                stack.append((kind, value))
+        self.code_space = self._code_space()
+        if self.code_space is None:
+            raise _NoCodespace
+
+    def _operator(self, op: bytes, stack: list) -> None:
+        items = [(kind, value) for kind, value in stack if kind in ("hex", "int")]
+        if op == b"endcodespacerange":
+            for (k1, low), (k2, high) in zip(items[0::2], items[1::2]):
+                if k1 == k2 == "hex" and low and len(low) == len(high):
+                    self.spaces.append((low, high))
+        elif op in (b"endcidchar", b"endnotdefchar"):
+            target = self.chars if op == b"endcidchar" else self.notdef_chars
+            for (k1, code), (k2, cid) in zip(items[0::2], items[1::2]):
+                if k1 == "hex" and k2 == "int" and code:
+                    target[code] = cid
+        elif op in (b"endcidrange", b"endnotdefrange"):
+            target = self.ranges if op == b"endcidrange" else self.notdef_ranges
+            for (k1, low), (k2, high), (k3, cid) in zip(items[0::3], items[1::3], items[2::3]):
+                if k1 == k2 == "hex" and k3 == "int" and low and len(low) == len(high):
+                    target.append((low, high, cid))
+        elif op == b"usecmap":
+            names = [value for kind, value in stack if kind == "name"]
+            self.base = names[-1] if names else self.base
+
+    def _base_trie(self) -> Optional[dict]:
+        if not self.base or self.base in ("Identity-H", "Identity-V"):
+            return None
+        try:
+            cmap = CMapDB.get_cmap(self.base)
+        except Exception:
+            return None
+        return getattr(cmap, "code2cid", None) or None
+
+    def _code_space(self) -> Optional[CodeSpace]:
+        if self.spaces:
+            return CodeSpace(self.spaces)
+        if self.base in ("Identity-H", "Identity-V"):
+            return CodeSpace([(b"\x00\x00", b"\xff\xff")])
+        trie = self._base_trie()
+        return trie_code_space(trie) if trie else None
+
+    def cid(self, code: bytes) -> int:
+        """The CID a code selects (§9.7.6.2, §9.7.6.3): its own mapping, the
+        base CMap's, a notdef mapping, else 0."""
+        if code in self.chars:
+            return self.chars[code]
+        value = int.from_bytes(code, "big")
+        for low, high, first in reversed(self.ranges):
+            if len(low) == len(code) and int.from_bytes(low, "big") <= value <= int.from_bytes(high, "big"):
+                return first + value - int.from_bytes(low, "big")
+        if self.base in ("Identity-H", "Identity-V") and len(code) == 2:
+            return value
+        trie = self._base_trie()
+        if trie is not None:
+            found = _trie_cid(trie)(code)
+            if found:
+                return found
+        if code in self.notdef_chars:
+            return self.notdef_chars[code]
+        for low, high, first in self.notdef_ranges:
+            if len(low) == len(code) and int.from_bytes(low, "big") <= value <= int.from_bytes(high, "big"):
+                return first
+        return 0
+
+
+def bounded_read(stream, limit: int) -> tuple[Optional[bytes], bool]:
+    """`(decoded bytes, False)`, `(None, True)` past `limit`, or `(None, False)`
+    when the stream cannot be decoded. A leading Flate layer is counted while
+    it inflates, so a small stream that expands without bound is never held."""
+    names = stream.get("/Filter")
+    first = names[0] if isinstance(names, pikepdf.Array) and len(names) else names
+    if isinstance(first, pikepdf.Name) and bytes(first) in (b"/FlateDecode", b"/Fl"):
+        decoder = zlib.decompressobj()
+        pending = bytes(stream.read_raw_bytes())
+        total = 0
+        try:
+            while pending:
+                total += len(decoder.decompress(pending, 1 << 20))
+                if total > limit:
+                    return None, True
+                pending = decoder.unconsumed_tail
+        except zlib.error:
+            pass
+    try:
+        data = bytes(stream.read_bytes())
+    except Exception:
+        return None, False
+    if len(data) > limit:
+        return None, True
+    return data, False
+
+
+def embedded_cmap(stream) -> Optional[EmbeddedCMap]:
+    """The CMap an embedded /Encoding stream holds, or None when it cannot be
+    read: past `MAX_CMAP_BYTES`, undecodable, without a codespace, or built on
+    another embedded CMap stream."""
+    use = stream.get("/UseCMap")
+    if use is not None and not isinstance(use, pikepdf.Name):
+        return None
+    data, _too_large = bounded_read(stream, MAX_CMAP_BYTES)
+    if data is None:
+        return None
+    try:
+        return EmbeddedCMap(data, bytes(use).decode("latin-1")[1:] if use is not None else None)
+    except Exception:
+        return None
 
 
 class FontCapability:
@@ -189,6 +466,9 @@ class FontCapability:
         writes_vertical: Optional[bool] = None,
         reader_limit: bool = False,
         diagnostic: Optional[str] = None,
+        code_space: Optional[CodeSpace] = None,
+        cid_of: Optional[Callable[[bytes], int]] = None,
+        cid_widths: Optional[dict[int, float]] = None,
     ):
         self.editable = editable
         self.reason = reason
@@ -238,6 +518,17 @@ class FontCapability:
         self._code_len: dict[int, int] = {}
         if code_trie is not None:
             self._code_len = _code_lengths(code_trie)
+        # Where a composite font's codes begin (§9.7.6.2): a predefined CMap's
+        # trie, or an embedded CMap's own ranges. None keeps the fixed-width
+        # walk of every simple font and every Identity-H/V one.
+        if code_space is None and code_trie is not None:
+            code_space = trie_code_space(code_trie)
+        self._code_space = code_space
+        # A composite font's advances are CID-keyed (/W, /W2): with a CMap
+        # between code and CID, each drawn code is measured through its own
+        # CID, whether or not any ToUnicode entry names it.
+        self._cid_of = cid_of
+        self._cid_widths = cid_widths or {}
         # Multi-char sequence → its single ligature code (len 2..4,
         # unambiguous inverse, encode-guard-filtered — see _ligatures).
         # encode()/text_width() match these longest-first; encodable()/
@@ -274,8 +565,8 @@ class FontCapability:
         """[(code integer, byte length)] — the ONE place the codespace is
         interpreted, so every measure/decode/count path agrees about where a
         code begins."""
-        if self._code_trie is not None:
-            return _split_codes(data, self._code_trie)
+        if self._code_space is not None:
+            return [(code, n) for code, n, _valid in self._code_space.split(data)]
         if self._code_bytes == 1:
             return [(b, 1) for b in data]
         return [
@@ -285,15 +576,25 @@ class FontCapability:
     def code_count(self, data: bytes) -> int:
         """How many GLYPHS `data` draws — what `Tc` multiplies. A fixed-width
         font can divide; a variable-width one has to walk."""
-        if self._code_trie is None:
+        if self._code_space is None:
             return len(data) if self._code_bytes == 1 else len(data) // 2
-        return len(self.codes(data))
+        return len(self._code_space.split(data))
+
+    def reads_every_code(self, data: bytes) -> bool:
+        """Whether every code of `data` is a valid code of the font. Readers
+        differ on where an invalid code ends (§9.7.6.3), and a fixed two-byte
+        font's odd last byte is drawn by some and dropped by others, so such
+        a string has no single width."""
+        if self._code_space is not None:
+            return all(valid for _code, _n, valid in self._code_space.split(data))
+        return self._code_bytes == 1 or len(data) % 2 == 0
 
     def single_byte_codes(self) -> bool:
-        """Whether code 32 in the byte stream is the SPACE `Tw` applies to.
-        Spec: word spacing applies to the single-byte code 32 only — never a
-        CID font, and never a multi-byte code that happens to contain 0x20."""
-        return self._code_trie is None and self._code_bytes == 1
+        """Whether EVERY code is one byte, so that each 0x20 byte is the
+        space `Tw` applies to. A composite font can still hold a single-byte
+        code 32 among longer codes; `show_items` and `_spaces_in` find those
+        through `codes()` (§9.3.3)."""
+        return self._code_space is None and self._code_bytes == 1
 
     def decode(self, data: bytes) -> str:
         return "".join(self.decode_units(data))
@@ -382,6 +683,13 @@ class FontCapability:
         """Advance of already-encoded bytes — by CODE, so it works even for
         codes with no unicode mapping."""
         total = 0.0
+        if self._cid_of is not None:
+            pos = 0
+            for _code, n in self.codes(data):
+                cid = self._cid_of(data[pos : pos + n])
+                total += self._cid_widths.get(cid, self._default_width)
+                pos += n
+            return total
         for code, _n in self.codes(data):
             total += self._widths.get(code, self._default_width)
         return total
@@ -393,6 +701,8 @@ class FontCapability:
         the tail of every monospace line unprotected. A composite font's /DW is
         a real declaration and answers for every code its /W omits; a simple
         font's placeholder answers for none."""
+        if not self.reads_every_code(data):
+            return False
         if self._default_declared:
             return True
         if not self._widths:
@@ -409,11 +719,16 @@ def _refused(
     writes_vertical: bool = False,
     reader_limit: bool = False,
     diagnostic: Optional[str] = None,
+    code_space: Optional[CodeSpace] = None,
+    cid_of: Optional[Callable[[bytes], int]] = None,
+    cid_widths: Optional[dict[int, float]] = None,
+    code2uni: Optional[dict[int, str]] = None,
 ) -> FontCapability:
     """A non-editable capability. `code_bytes` must still be RIGHT (2 for
     composite fonts): the run LISTER measures refused runs' widths for
     their locked overlays, and 1-byte iteration over 2-byte CIDs doubled
-    every refused-Type0 rect (review-measured).
+    every refused-Type0 rect (review-measured). A CMap's `code_space` and
+    `cid_of` stand in for it wherever the codes are not fixed-width.
 
     The WIDTHS are right too wherever the document declares them.
     Whether text can be DECODED and how wide it is are independent questions —
@@ -423,11 +738,12 @@ def _refused(
     negative the flat estimate was (narrow) or its over-removing mirror
     (2× on an Identity-H subset of Latin glyphs). Callers pass them wherever
     the codespace is known; where it is not, the placeholder stands and the
-    caller falls wide."""
+    caller falls wide. `code2uni` reads its text where a map names it; no
+    character encodes."""
     return FontCapability(
         False,
         reason,
-        {},
+        code2uni or {},
         {},
         widths or {},
         default_width,
@@ -436,6 +752,9 @@ def _refused(
         writes_vertical=writes_vertical,
         reader_limit=reader_limit,
         diagnostic=diagnostic,
+        code_space=code_space,
+        cid_of=cid_of,
+        cid_widths=cid_widths,
     )
 
 
@@ -1320,10 +1639,11 @@ def font_capability(font_obj) -> FontCapability:
         # empty name, so the refusal says "embedded CMap" as it was written to.
         _encoding = font_obj.get("/Encoding")
         enc = (
-            ""
-            if _encoding is None or isinstance(_encoding, pikepdf.Stream)
-            else str(_encoding).lstrip("/")
+            bytes(_encoding).decode("latin-1").lstrip("/")
+            if isinstance(_encoding, pikepdf.Name)
+            else ""
         )
+        embedded = embedded_cmap(_encoding) if isinstance(_encoding, pikepdf.Stream) else None
         # Identity-H (code == CID) OR a predefined UNICODE horizontal CMap
         # (Uni*-H — the modern CJK majority), plus their vertical
         # twins Identity-V / Uni*-UCS2-V — same 2-byte codes, same
@@ -1333,35 +1653,72 @@ def font_capability(font_obj) -> FontCapability:
         # (its code->CID differs from Identity); non-Unicode legacy
         # encodings stay refused with a reason.
         named_cmap = None
-        vertical = enc.endswith("-V")
+        if embedded is not None:
+            wmode = _encoding.get("/WMode")
+            try:
+                vertical = int(wmode) == 1 if wmode is not None else embedded.wmode == 1
+            except (TypeError, ValueError):
+                vertical = embedded.wmode == 1
+        else:
+            vertical = enc.endswith("-V")
 
         def _refuse_composite(reason: str, *, reader_limit: bool = False) -> FontCapability:
-            """A composite refusal carrying whatever the document DECLARES
-            Under Identity-H/V the byte code IS the CID, so /W (or
-            /W2) is code-keyed as it stands and /DW answers for the rest —
-            real advances, available with no /ToUnicode in sight. Under a
-            named CMap the codes would have to be remapped through the whole
-            trie to be code-keyed, which is neither cheap nor needed here, so
-            only the WRITING MODE and the 2-byte codespace ride along and a
-            measuring caller falls wide."""
+            """A composite refusal carrying whatever the document DECLARES.
+            /W (or /W2) is CID-keyed and /DW answers for the rest — real
+            advances, available with no /ToUnicode in sight. Under
+            Identity-H/V the byte code IS the CID; under a predefined or an
+            embedded CMap each code reaches its CID through the CMap, read
+            through the CMap's own codespace. An encoding this reader does
+            not hold leaves where each code begins unknown, so its count is
+            the most codes the bytes can hold and a measuring caller falls
+            wide. Text through an embedded CMap is not re-entered, but its
+            /ToUnicode, when present, still reads it."""
+            descendants_r = font_obj.get("/DescendantFonts")
+            kid = descendants_r[0] if descendants_r is not None and len(descendants_r) > 0 else None
             widths_r: dict[int, float] = {}
             default_r = DEFAULT_WIDTH
-            declared_r = False
-            descendants_r = font_obj.get("/DescendantFonts")
-            if named_cmap is None and descendants_r is not None and len(descendants_r) > 0:
+            if kid is not None:
                 if vertical:
-                    widths_r, default_r = _cid_vertical_advances(descendants_r[0])
+                    widths_r, default_r = _cid_vertical_advances(kid)
                 else:
-                    widths_r, default_r = _cid_widths(descendants_r[0])
-                declared_r = True
+                    widths_r, default_r = _cid_widths(kid)
+            if embedded is not None or named_cmap is not None:
+                read: dict[int, str] = {}
+                if embedded is not None:
+                    space, cid_of = embedded.code_space, embedded.cid
+                    tou_r = font_obj.get("/ToUnicode")
+                    if isinstance(tou_r, pikepdf.Stream):
+                        try:
+                            read = _parse_tounicode(tou_r.read_bytes())
+                        except Exception:
+                            read = {}
+                else:
+                    trie = named_cmap.code2cid
+                    space, cid_of = trie_code_space(trie), _trie_cid(trie)
+                return _refused(
+                    reason,
+                    code_bytes=2,
+                    default_width=default_r,
+                    default_declared=kid is not None,
+                    writes_vertical=vertical,
+                    reader_limit=reader_limit,
+                    code_space=space,
+                    cid_of=cid_of,
+                    cid_widths=widths_r,
+                    code2uni=read,
+                )
+            if enc in ("Identity-H", "Identity-V"):
+                return _refused(
+                    reason,
+                    code_bytes=2,
+                    widths=widths_r,
+                    default_width=default_r,
+                    default_declared=kid is not None,
+                    writes_vertical=vertical,
+                    reader_limit=reader_limit,
+                )
             return _refused(
-                reason,
-                code_bytes=2,
-                widths=widths_r,
-                default_width=default_r,
-                default_declared=declared_r,
-                writes_vertical=vertical,
-                reader_limit=reader_limit,
+                reason, code_bytes=1, writes_vertical=vertical, reader_limit=reader_limit
             )
 
         if enc not in ("Identity-H", "Identity-V"):
@@ -1375,13 +1732,11 @@ def font_capability(font_obj) -> FontCapability:
             # truncated codes on encode). The pipeline now reads the CMap's
             # own code→CID TRIE, which is the authoritative statement of
             # where each code begins, so the width of a code stopped being
-            # something this gate has to promise. What remains refused is a
-            # CMap the tables do not carry (an embedded CMap stream), which
-            # is an absence, not a width.
+            # something this gate has to promise. What remains refused for
+            # editing is a CMap the tables do not carry and an embedded CMap
+            # stream; one that reads is still measured through its own codes.
             try:
-                from pdfminer.cmapdb import CMapDB
-
-                cm = CMapDB.get_cmap(enc) if enc else None
+                cm = CMapDB.get_cmap(enc) if enc and embedded is None else None
             except Exception:
                 cm = None
             # The loaded CMap's own writing mode must AGREE with
@@ -1389,8 +1744,8 @@ def font_capability(font_obj) -> FontCapability:
             # for -H names this is the is_vertical() gate unchanged.
             if cm is None or getattr(cm, "code2cid", None) is None:
                 # The bundled CMap tables do not carry this encoding, or it is
-                # an embedded CMap stream this build does not parse. The
-                # document may be perfectly well formed; we cannot read it.
+                # an embedded CMap stream. The document may be perfectly well
+                # formed; this reader does not re-enter text through it.
                 return _refuse_composite(
                     f"unsupported composite-font encoding ({enc or 'embedded CMap'})",
                     reader_limit=True,
@@ -1482,6 +1837,8 @@ def font_capability(font_obj) -> FontCapability:
             # /DW (or its spec default of 1000) declares the advance of
             # every CID /W omits, so this default is measured, not guessed.
             default_declared=True,
+            cid_of=_trie_cid(named_cmap.code2cid) if named_cmap else None,
+            cid_widths=cid_widths if named_cmap else None,
         )
 
     # Simple fonts (Type1, MMType1, TrueType).

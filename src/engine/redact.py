@@ -120,6 +120,26 @@ def _intersects_any(bbox: Rect, regions: list[Rect]) -> bool:
     return any(_intersects(bbox, r) for r in regions)
 
 
+def _spelling(name) -> str:
+    """A name as `keys()` spells a dictionary key: its bytes decoded as UTF-8,
+    every other byte escaped to a surrogate. A name need not be UTF-8 (ISO
+    32000-2 §7.3.5); a dictionary is indexed by this spelling, never through
+    `Name()`, which takes UTF-8 text only."""
+    if isinstance(name, pikepdf.Name):
+        return bytes(name).decode("utf-8", "surrogateescape")
+    return str(name)
+
+
+def _entry(table, name: str):
+    """`table[name]`, or None when the table does not hold it."""
+    if not isinstance(table, pikepdf.Dictionary) or not name:
+        return None
+    try:
+        return table[name] if name in table else None
+    except Exception:
+        return None
+
+
 def _lookup_xobject(name, resources, fallback_resources):
     """Resolve a /Do XObject name against this stream's resources, then the
     invoker's resources as a lenient per-name fallback (a form whose own
@@ -129,11 +149,9 @@ def _lookup_xobject(name, resources, fallback_resources):
     for res in (resources, fallback_resources):
         if res is None:
             continue
-        xod = res.get("/XObject")
-        if xod is not None:
-            obj = xod.get(Name(name))
-            if obj is not None:
-                return obj
+        obj = _entry(res.get("/XObject"), name)
+        if obj is not None:
+            return obj
     return None
 
 
@@ -151,11 +169,9 @@ def _colorspace_resolver(resources, fallback_resources):
             if res is None:
                 continue
             try:
-                table = res.get("/ColorSpace")
-                if table is not None:
-                    found = table.get(Name(name))
-                    if found is not None:
-                        return found
+                found = _entry(res.get("/ColorSpace"), _spelling(name))
+                if found is not None:
+                    return found
             except Exception:
                 continue
         return None
@@ -456,29 +472,28 @@ def _new_image_name(name_counter: list, taken: set) -> str:
 
 
 def _lookup_resource(resources, fallback_resources, category: str, name):
-    if not name:
+    if not isinstance(name, (str, pikepdf.Name)):
         return None
+    key = _spelling(name)
     for res in (resources, fallback_resources):
         if res is None:
             continue
-        table = res.get(category)
-        if isinstance(table, pikepdf.Dictionary):
-            found = table.get(Name(str(name)))
-            if found is not None:
-                return found
+        found = _entry(res.get(category), key)
+        if found is not None:
+            return found
     return None
 
 
 def _is_pattern_space(operand, resources, fallback_resources) -> bool:
     if not isinstance(operand, pikepdf.Name):
         return False
-    if str(operand) == "/Pattern":
+    if operand == Name.Pattern:
         return True
     space = _lookup_resource(resources, fallback_resources, "/ColorSpace", operand)
     if isinstance(space, pikepdf.Name):
-        return str(space) == "/Pattern"
+        return space == Name.Pattern
     if isinstance(space, pikepdf.Array) and len(space):
-        return str(space[0]) == "/Pattern"
+        return space[0] == Name.Pattern
     return False
 
 
@@ -595,7 +610,12 @@ def _walk(
     # one-interpreter consolidation): q/Q save/restore CTM AND text-state
     # parameters; restoring only the CTM left a stale font size after
     # `q .. Tf .. Q`, under-sizing a later bbox — an under-redaction leak.
-    state = _child_state(base_ctm, parent_state)
+    # Text is measured with the font DICTIONARY the state holds: the one a
+    # `Tf` named here, an ExtGState /Font entry set, or the invoker's.
+    def lookup(category, name):
+        return _lookup_resource(resources, fallback_resources, category, name)
+
+    state = _child_state(base_ctm, parent_state, lookup=lookup)
 
     # `sh` paints the CURRENT CLIP, so bounding it needs the clip. FRESH per
     # stream (base_clip None = unbounded): a form's `sh` then "covers
@@ -684,7 +704,7 @@ def _walk(
         if isinstance(mc_operands[1], pikepdf.Name):
             new_name = _new_scoped_name("RdxMc", name_counter, taken_other["/Properties"])
             new_resources["/Properties"][new_name] = pdf.make_indirect(cleaned)
-            replaced_resources["/Properties"].add(str(mc_operands[1]))
+            replaced_resources["/Properties"].add(_spelling(mc_operands[1]))
             kept[index] = pikepdf.ContentStreamInstruction([tag, Name(new_name)], pikepdf.Operator("BDC"))
         else:
             kept[index] = pikepdf.ContentStreamInstruction([tag, cleaned], pikepdf.Operator("BDC"))
@@ -766,12 +786,12 @@ def _walk(
                 stroke_pattern = None
             elif operator == "scn":
                 has_name = bool(operands) and isinstance(operands[-1], pikepdf.Name)
-                fill_pattern = (len(kept) - 1, str(operands[-1])) if fill_is_pattern and has_name else None
+                fill_pattern = (len(kept) - 1, _spelling(operands[-1])) if fill_is_pattern and has_name else None
             elif operator == "SCN":
                 has_name = bool(operands) and isinstance(operands[-1], pikepdf.Name)
-                stroke_pattern = (len(kept) - 1, str(operands[-1])) if stroke_is_pattern and has_name else None
+                stroke_pattern = (len(kept) - 1, _spelling(operands[-1])) if stroke_is_pattern and has_name else None
         elif operator == "gs":
-            name = str(operands[0]) if operands else ""
+            name = _spelling(operands[0]) if operands else ""
             ext = _lookup_resource(resources, fallback_resources, "/ExtGState", name)
             if isinstance(ext, pikepdf.Dictionary):
                 stroke = _style_from_extgstate(stroke, ext)
@@ -835,7 +855,7 @@ def _walk(
                         state.char_spacing = float(operands[1])
                     except (TypeError, ValueError):
                         pass
-            cap = fonts.capability(resources, fallback_resources, state.font_name)
+            cap = fonts.capability_of(state.font)
             data = show_bytes(operator, operands)
             measured = measurable(cap, data)
             if measured:
@@ -846,7 +866,7 @@ def _walk(
             # still draws its column downward.
             vertical = bool(cap is not None and cap.writes_vertical)
             combined = _mat_mult(state.tm, state.ctm)
-            ink = fonts.ink_extent(resources, fallback_resources, state.font_name)
+            ink = fonts.ink_extent_of(state.font)
             bbox = _run_bbox(combined, raw_width, slack, vertical, state, ink)
             if not _intersects_any(bbox, regions):
                 kept.append(instruction)
@@ -928,7 +948,7 @@ def _walk(
                 if placement.widened:
                     run.context.widened.add(identity)
         elif operator == "Do":
-            name = str(operands[0]) if operands else None
+            name = _spelling(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback_resources)
             subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
 
@@ -1079,7 +1099,7 @@ def _walk(
 
 def _referenced_xobject_names(instructions) -> set:
     return {
-        str(ins.operands[0])
+        _spelling(ins.operands[0])
         for ins in instructions
         if str(ins.operator) == "Do" and ins.operands
     }
@@ -1094,19 +1114,19 @@ def _referenced_names(instructions, resources, depth: int = 0) -> dict:
         op = str(ins.operator)
         operands = list(ins.operands)
         if op == "Do" and operands:
-            used["/XObject"].add(str(operands[0]))
+            used["/XObject"].add(_spelling(operands[0]))
         elif op == "gs" and operands:
-            used["/ExtGState"].add(str(operands[0]))
+            used["/ExtGState"].add(_spelling(operands[0]))
         elif op == "sh" and operands:
-            used["/Shading"].add(str(operands[0]))
+            used["/Shading"].add(_spelling(operands[0]))
         elif op in ("scn", "SCN") and operands and isinstance(operands[-1], pikepdf.Name):
-            used["/Pattern"].add(str(operands[-1]))
+            used["/Pattern"].add(_spelling(operands[-1]))
         elif op == "BDC" and len(operands) >= 2 and isinstance(operands[1], pikepdf.Name):
-            used["/Properties"].add(str(operands[1]))
+            used["/Properties"].add(_spelling(operands[1]))
     if depth < MAX_FORM_DEPTH:
         table = resources.get("/XObject") if resources is not None else None
         for name in list(used["/XObject"]):
-            form = table.get(Name(name)) if isinstance(table, pikepdf.Dictionary) else None
+            form = _entry(table, name)
             if (
                 isinstance(form, pikepdf.Stream)
                 and form.get("/Subtype") == Name("/Form")
@@ -1136,7 +1156,7 @@ def _prune_to_references(resources, instructions) -> None:
             continue
         for name in [str(k) for k in table.keys()]:
             if name not in used[category]:
-                del table[Name(name)]
+                del table[name]
 
 
 def _drop_replaced_forms(xobjects, referenced: set, replaced: set) -> None:
@@ -1145,8 +1165,8 @@ def _drop_replaced_forms(xobjects, referenced: set, replaced: set) -> None:
     if xobjects is None:
         return
     for nm in replaced:
-        if nm not in referenced and Name(nm) in xobjects:
-            del xobjects[Name(nm)]
+        if nm not in referenced and nm in xobjects:
+            del xobjects[nm]
 
 
 def _copy_resources_for_write(pdf: "pikepdf.Pdf", resources):

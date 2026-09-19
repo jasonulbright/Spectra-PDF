@@ -45,12 +45,13 @@ Programs (ISO 32000-2 §9.9, Table 124):
 Every cut program is parsed back, and each kept glyph's outline compared with
 the original's, before the file is written.
 
-Tables: /Widths keeps its length and every code the survivors do not draw gets
-width 0; /Encoding /Differences, /ToUnicode and an embedded CMap keep only the
-codes the survivors draw; CID /W and /W2 only their CIDs; /CIDToGIDMap sends
-every other CID to glyph 0; /CIDSet and /CharSet list only what the program
-still holds. A table several fonts share keeps the union of their survivors.
-/FirstChar and /LastChar are kept, and so is each descriptor's /FontBBox.
+Tables: /Widths runs from the lowest code the survivors draw to the highest,
+/FirstChar and /LastChar bounding it, and every code in that range the
+survivors do not draw gets width 0; /Encoding /Differences, /ToUnicode and an
+embedded CMap keep only the codes the survivors draw; CID /W and /W2 only their
+CIDs; /CIDToGIDMap sends every other CID to glyph 0; /CIDSet and /CharSet list
+only what the program still holds. A table several fonts share keeps the union
+of their survivors. Each descriptor's /FontBBox is kept.
 
 A font that cannot be cut safely refuses the redaction by name through
 `image_redact.refuse`, before anything is written.
@@ -58,9 +59,9 @@ A font that cannot be cut safely refuses the redaction by name through
 
 from __future__ import annotations
 
+import hashlib
 import io
 import re
-import zlib
 from typing import Optional
 
 import pikepdf
@@ -75,8 +76,8 @@ from engine import image_redact, pdf_fonts, redact_document
 #: A larger program refuses by name before it is parsed.
 MAX_FONT_PROGRAM_BYTES = 64 * 1024 * 1024
 
-#: The largest ToUnicode or embedded CMap read. A two-byte ToUnicode written
-#: as one `bfchar` line for each of its 65,536 codes is under 1.3 MB.
+#: The largest ToUnicode map read. A two-byte map written as one `bfchar`
+#: line for each of its 65,536 codes is under 1.3 MB.
 MAX_MAP_BYTES = 8 * 1024 * 1024
 
 #: Content operators one scan interprets, counting only the operators it reads
@@ -85,6 +86,11 @@ MAX_MAP_BYTES = 8 * 1024 * 1024
 #: them. Past this count the redaction refuses rather than cut a font on an
 #: incomplete count.
 MAX_SCAN_OPERATORS = 20_000_000
+
+#: Operators the scan keeps, once read, for the scan after the page walk to
+#: read again without a second parse. The 1,023 pages of the ISO 32000-2 text
+#: keep 1,002,287. Past this count, the content read later is read again.
+MAX_KEPT_OPERATORS = 2_000_000
 
 #: Nesting of forms, patterns, soft masks and Type 3 glyph procedures one scan
 #: follows. A cycle stops at its first repeat, so only a chain of this many
@@ -108,6 +114,8 @@ _CAPTIONS = ("/CA", "/RC", "/AC")
 _MAP_BLOCK = 100
 _SFNT_TAGS = (b"\x00\x01\x00\x00", b"OTTO", b"true", b"typ1")
 _ANY = object()
+_STRING = pikepdf.ObjectType.string
+_ARRAY = pikepdf.ObjectType.array
 
 
 # ── identity and naming ───────────────────────────────────────────────────
@@ -244,47 +252,17 @@ def _parts(font) -> list:
 # ── bounded reads ─────────────────────────────────────────────────────────
 
 
-def _filters(stream) -> tuple:
-    value = stream.get("/Filter")
-    if isinstance(value, Name):
-        return (_text(value),)
-    if isinstance(value, Array):
-        return tuple(_text(item) if isinstance(item, Name) else "" for item in value)
-    return ()
-
-
 class _Oversize(Exception):
     """A stream that decodes past the bound it is read under."""
 
 
 def _read(stream, limit: int, strict: bool = False) -> Optional[bytes]:
-    """The stream's decoded bytes; None when they cannot be decoded, and past
-    `limit` None too, or `_Oversize` when `strict`. A leading Flate layer is
-    counted while it inflates, so a small stream that expands without bound is
-    never held."""
-    filters = _filters(stream)
-    if filters and filters[0] in ("/FlateDecode", "/Fl"):
-        decoder = zlib.decompressobj()
-        pending = bytes(stream.read_raw_bytes())
-        total = 0
-        try:
-            while pending:
-                total += len(decoder.decompress(pending, 1 << 20))
-                if total > limit:
-                    if strict:
-                        raise _Oversize
-                    return None
-                pending = decoder.unconsumed_tail
-        except zlib.error:
-            pass
-    try:
-        data = bytes(stream.read_bytes())
-    except Exception:
-        return None
-    if len(data) > limit:
-        if strict:
-            raise _Oversize
-        return None
+    """The stream's decoded bytes (`pdf_fonts.bounded_read`); None when they
+    cannot be decoded, and past `limit` None too, or `_Oversize` when
+    `strict`."""
+    data, too_large = pdf_fonts.bounded_read(stream, limit)
+    if too_large and strict:
+        raise _Oversize
     return data
 
 
@@ -498,197 +476,45 @@ def _type3_table(font) -> dict:
 
 
 class _Codespace:
-    """How a font's show strings split into codes, and the CID of each: a
-    fixed width (a simple font, Identity-H/V), a predefined CMap's code trie,
-    or an embedded CMap read by `_CMap`."""
+    """How a font's show strings split into codes, and the CID of each: one
+    byte per code for a simple font, two for Identity-H/V, or a CMap's code
+    space (`pdf_fonts.CodeSpace`) for any other composite font."""
 
-    def __init__(self, width: int = 0, trie: Optional[dict] = None, cmap=None):
+    def __init__(self, width: int = 0, space=None, cid=None):
         self.width = width
-        self.trie = trie
-        self.cmap = cmap
+        self.space = space
+        self._cid = cid
 
     def split(self, data: bytes) -> list:
-        if self.cmap is not None:
-            return self.cmap.split(data)
+        """Every code a reader can draw from `data`. Readers differ on where
+        an invalid code ends (§9.7.6.3): a string holding one also yields the
+        codes a reader that reads it as one byte finds."""
         if self.width == 1:
             return [data[i : i + 1] for i in range(len(data))]
         if self.width == 2:
             return [data[i : i + 2] for i in range(0, len(data) - 1, 2)]
         out = []
-        offset = 0
-        for _code, length in pdf_fonts._split_codes(data, self.trie or {}):
-            out.append(data[offset : offset + length])
-            offset += length
+        pos = 0
+        valid = True
+        for _code, size, ok in self.space.split(data):
+            out.append(data[pos : pos + size])
+            pos += size
+            valid = valid and ok
+        if not valid:
+            pos = 0
+            while pos < len(data):
+                size, ok = self.space.read(data, pos)
+                size = size if ok else 1
+                out.append(data[pos : pos + size])
+                pos += size
         return out
 
     def cid(self, code: bytes) -> Optional[int]:
-        if self.cmap is not None:
-            return self.cmap.cid(code)
         if self.width == 2:
             return int.from_bytes(code, "big")
         if self.width == 1:
             return code[0] if code else None
-        node = self.trie or {}
-        for byte in code:
-            node = node.get(byte) if isinstance(node, dict) else None
-            if node is None:
-                return None
-        return node if isinstance(node, int) else None
-
-
-_PS_TOKEN = re.compile(
-    rb"[ \t\r\n\f\x00]*(?:(%[^\r\n]*)|(<<|>>|[\[\]{}])|(<[0-9A-Fa-f \t\r\n\f]*>)|(\()"
-    rb"|(/[^ \t\r\n\f\x00/\[\]{}()<>%]*)|([^ \t\r\n\f\x00/\[\]{}()<>%]+))"
-)
-
-
-def _ps_tokens(data: bytes):
-    """(kind, value) for the PostScript subset a CMap is written in."""
-    pos = 0
-    while pos < len(data):
-        match = _PS_TOKEN.match(data, pos)
-        if match is None or match.end() == pos:
-            return
-        pos = match.end()
-        comment, delimiter, hexa, paren, name, word = match.groups()
-        if comment is not None:
-            continue
-        if delimiter is not None:
-            yield "delim", delimiter
-        elif hexa is not None:
-            digits = re.sub(rb"[ \t\r\n\f]", b"", hexa[1:-1])
-            if len(digits) % 2:
-                digits += b"0"
-            yield "hex", bytes.fromhex(digits.decode("ascii"))
-        elif paren is not None:
-            depth, start = 1, pos
-            while pos < len(data) and depth:
-                ch = data[pos : pos + 1]
-                if ch == b"\\":
-                    pos += 2
-                    continue
-                depth += {b"(": 1, b")": -1}.get(ch, 0)
-                pos += 1
-            yield "string", data[start : pos - 1]
-        elif name is not None:
-            yield "name", name[1:].decode("latin-1")
-        else:
-            yield "word", word
-
-
-class _CMap:
-    """An embedded CMap's codespace and code-to-CID mappings (§9.7.5.3,
-    §9.7.6.2). A code is split off the way the renderer splits it: the
-    shortest prefix, up to four bytes, that falls in a codespace range of its
-    length; a byte sequence in none is a one-byte code."""
-
-    def __init__(self, data: bytes):
-        self.spaces: list = []
-        self.chars: dict = {}
-        self.ranges: list = []
-        self.notdef_chars: dict = {}
-        self.notdef_ranges: list = []
-        self.base: Optional[str] = None
-        match = re.search(rb"/WMode[ \t\r\n]+(\d)", data)
-        self.wmode = int(match.group(1)) if match else None
-        stack: list = []
-        for kind, value in _ps_tokens(data):
-            if kind == "word" and not _is_int(value):
-                self._operator(value, stack)
-                stack = []
-            elif kind == "word":
-                stack.append(("int", int(value)))
-            else:
-                stack.append((kind, value))
-        if not self.spaces:
-            raise _Unreadable
-
-    def _operator(self, op: bytes, stack: list) -> None:
-        items = [(kind, value) for kind, value in stack if kind in ("hex", "int")]
-        if op == b"endcodespacerange":
-            for (k1, lo), (k2, hi) in zip(items[0::2], items[1::2]):
-                if k1 == k2 == "hex" and lo and len(lo) == len(hi):
-                    self.spaces.append((lo, hi))
-        elif op in (b"endcidchar", b"endnotdefchar"):
-            target = self.chars if op == b"endcidchar" else self.notdef_chars
-            for (k1, code), (k2, cid) in zip(items[0::2], items[1::2]):
-                if k1 == "hex" and k2 == "int" and code:
-                    target[code] = cid
-        elif op in (b"endcidrange", b"endnotdefrange"):
-            target = self.ranges if op == b"endcidrange" else self.notdef_ranges
-            for (k1, lo), (k2, hi), (k3, cid) in zip(items[0::3], items[1::3], items[2::3]):
-                if k1 == k2 == "hex" and k3 == "int" and lo and len(lo) == len(hi):
-                    target.append((lo, hi, cid))
-        elif op == b"usecmap":
-            names = [value for kind, value in stack if kind == "name"]
-            self.base = names[-1] if names else None
-
-    def split(self, data: bytes) -> list:
-        out = []
-        pos = 0
-        while pos < len(data):
-            length = 1
-            for size in range(1, 5):
-                if pos + size > len(data):
-                    break
-                value = int.from_bytes(data[pos : pos + size], "big")
-                if any(
-                    len(lo) == size and int.from_bytes(lo, "big") <= value <= int.from_bytes(hi, "big")
-                    for lo, hi in self.spaces
-                ):
-                    length = size
-                    break
-            out.append(data[pos : pos + length])
-            pos += length
-        return out
-
-    def cid(self, code: bytes) -> Optional[int]:
-        if code in self.chars:
-            return self.chars[code]
-        value = int.from_bytes(code, "big")
-        for lo, hi, first in reversed(self.ranges):
-            if len(lo) == len(code) and int.from_bytes(lo, "big") <= value <= int.from_bytes(hi, "big"):
-                return first + value - int.from_bytes(lo, "big")
-        if self.base in ("Identity-H", "Identity-V") and len(code) == 2:
-            return value
-        if self.base:
-            space = _named_codespace(self.base)
-            found = space.cid(code) if space is not None else None
-            if found is not None:
-                return found
-        if code in self.notdef_chars:
-            return self.notdef_chars[code]
-        for lo, hi, first in self.notdef_ranges:
-            if len(lo) == len(code) and int.from_bytes(lo, "big") <= value <= int.from_bytes(hi, "big"):
-                return first
-        return 0
-
-
-def _is_int(value) -> bool:
-    return isinstance(value, bytes) and re.fullmatch(rb"-?\d+", value) is not None
-
-
-def _named_codespace(name: str) -> Optional[_Codespace]:
-    if name in ("Identity-H", "Identity-V"):
-        return _Codespace(width=2)
-    try:
-        from pdfminer.cmapdb import CMapDB
-
-        cmap = CMapDB.get_cmap(name)
-    except Exception:
-        return None
-    trie = getattr(cmap, "code2cid", None)
-    return _Codespace(trie=trie) if trie else None
-
-
-def _embedded_cmap(stream) -> Optional[_CMap]:
-    data = _read(stream, MAX_MAP_BYTES)
-    if data is None or stream.get("/UseCMap") is not None:
-        return None
-    try:
-        return _CMap(data)
-    except Exception:
-        return None
+        return self._cid(code)
 
 
 def _codespace(font) -> Optional[_Codespace]:
@@ -697,10 +523,21 @@ def _codespace(font) -> Optional[_Codespace]:
         return _Codespace(width=1)
     encoding = font.get("/Encoding")
     if isinstance(encoding, Name):
-        return _named_codespace(_text(encoding)[1:])
+        name = _text(encoding)[1:]
+        if name in ("Identity-H", "Identity-V"):
+            return _Codespace(width=2)
+        try:
+            from pdfminer.cmapdb import CMapDB
+
+            trie = getattr(CMapDB.get_cmap(name), "code2cid", None)
+        except Exception:
+            return None
+        if not trie:
+            return None
+        return _Codespace(space=pdf_fonts.trie_code_space(trie), cid=pdf_fonts._trie_cid(trie))
     if isinstance(encoding, Stream):
-        cmap = _embedded_cmap(encoding)
-        return _Codespace(cmap=cmap) if cmap is not None else None
+        cmap = pdf_fonts.embedded_cmap(encoding)
+        return _Codespace(space=cmap.code_space, cid=cmap.cid) if cmap is not None else None
     return None
 
 
@@ -889,18 +726,78 @@ def _segments(operands) -> list:
     extra operand), so every string operand and every string in an array
     operand counts. A name or a number draws nothing, and `bytes()` of a name
     is its spelling, not codes. The parser hands numbers over as Python
-    numbers, which the identity check skips before the slower type test."""
+    numbers, never as pikepdf objects."""
     out = []
     for operand in operands:
         if type(operand) is not pikepdf.Object:
             continue
-        if isinstance(operand, pikepdf.String):
+        kind = operand._type_code
+        if kind == _STRING:
             out.append(bytes(operand))
-        elif isinstance(operand, Array):
-            for item in operand:
-                if type(item) is pikepdf.Object and isinstance(item, pikepdf.String):
+        elif kind == _ARRAY:
+            for index in range(len(operand)):
+                item = operand[index]
+                if type(item) is pikepdf.Object and item._type_code == _STRING:
                     out.append(bytes(item))
     return out
+
+
+def _content_key(obj) -> Optional[tuple]:
+    """What a content stream, or a page's /Contents, holds: each stream's
+    object number and a digest of its raw bytes and filters. A stream written
+    over in place gets a new key; a direct stream gets none."""
+    contents = obj if isinstance(obj, Stream) else obj.get("/Contents")
+    if isinstance(contents, Stream):
+        streams = [contents]
+    elif isinstance(contents, Array):
+        streams = list(contents)
+    else:
+        return None
+    parts = []
+    try:
+        for stream in streams:
+            if not isinstance(stream, Stream) or not stream.is_indirect:
+                return None
+            digest = hashlib.blake2b(bytes(stream.read_raw_bytes()), digest_size=16)
+            for slot in ("/Filter", "/DecodeParms"):
+                value = stream.get(slot)
+                digest.update(value.unparse(resolved=True) if value is not None else b"-")
+            parts.append((tuple(stream.objgen), digest.digest()))
+    except Exception:
+        return None
+    return tuple(parts)
+
+
+_OTHER, _PUSH, _POP, _TF, _SHOW, _GS, _DO, _SCN = range(8)
+_OPCODES = {"q": _PUSH, "Q": _POP, "Tf": _TF, "gs": _GS, "Do": _DO, "scn": _SCN, "SCN": _SCN}
+for _op in _SHOW_OPERATORS:
+    _OPCODES[_op] = _SHOW
+
+
+def _compact(instructions, names: dict) -> tuple:
+    """The operators the scan reads, as `(opcodes, operands)`: one byte per
+    operator, and beside it the name a `Tf`, `gs`, `Do` or pattern selection
+    names (one object per spelling, shared through `names`), the strings a
+    show operator draws, or None."""
+    codes = bytearray()
+    values: list = []
+    for instruction in instructions:
+        code = _OPCODES.get(str(instruction.operator), _OTHER)
+        codes.append(code)
+        if code == _SHOW:
+            segments = _segments(instruction.operands)
+            values.append(segments[0] if len(segments) == 1 else tuple(segments))
+        elif code == _TF or code == _GS or code == _DO or code == _SCN:
+            operands = instruction.operands
+            name = operands[-1 if code == _SCN else 0] if len(operands) else None
+            if isinstance(name, Name):
+                name = names.setdefault(bytes(name), name)
+            else:
+                name = None
+            values.append(name)
+        else:
+            values.append(None)
+    return bytes(codes), values
 
 
 class _Face:
@@ -940,10 +837,16 @@ class _Scan:
     lack — and once for all of them when it neither draws with an inherited
     font nor falls back."""
 
-    def __init__(self, pdf, scope: set, label: str):
+    def __init__(self, pdf, scope: set, label: str, contents: Optional[dict] = None):
         self.pdf = pdf
         self.scope = scope
         self.label = label
+        # `_content_key` to `_compact` of that content: the scan after the
+        # page walk reads every stream the walk left alone from the scan
+        # before it, not from a second parse, up to `MAX_KEPT_OPERATORS`.
+        self.contents: dict = contents if contents is not None else {}
+        self.kept = sum(len(codes) for codes, _values in self.contents.values())
+        self.names: dict = {}
         self.codes: dict = {}
         self.raw: dict = {}
         self.spaces: dict = {}
@@ -1053,7 +956,7 @@ class _Scan:
         if stream_key is not None:
             self.walked.add(stream_key)
         try:
-            instructions = pikepdf.parse_content_stream(stream, _SCANNED_OPERATORS)
+            instructions = self._instructions(stream)
         except Exception:
             if (
                 inherited_key in self.scope
@@ -1069,38 +972,47 @@ class _Scan:
         entry[2] = ctx["inherited"]
         return ctx["inherited"]
 
+    def _instructions(self, stream) -> tuple:
+        key = _content_key(stream)
+        found = self.contents.get(key) if key is not None else None
+        if found is None:
+            found = _compact(pikepdf.parse_content_stream(stream, _SCANNED_OPERATORS), self.names)
+            if key is not None and self.kept + len(found[0]) <= MAX_KEPT_OPERATORS:
+                self.contents[key] = found
+                self.kept += len(found[0])
+        return found
+
     def _interpret(self, instructions, res, res_key, fallback, fallback_key, inherited, depth, ctx):
         font = inherited
         own = False
         stack = []
         scope = self.scope
-        for instruction in instructions:
-            self.ops_left -= 1
-            if self.ops_left < 0:
-                self._refuse(
-                    f"the document holds more than {MAX_SCAN_OPERATORS} content operators to check"
-                )
-            op = str(instruction.operator)
-            if op == "q":
+        codes, values = instructions
+        self.ops_left -= len(codes)
+        if self.ops_left < 0:
+            self._refuse(
+                f"the document holds more than {MAX_SCAN_OPERATORS} content operators to check"
+            )
+        for op, value in zip(codes, values):
+            if op == _OTHER:
+                continue
+            if op == _PUSH:
                 stack.append((font, own))
                 continue
-            if op == "Q":
+            if op == _POP:
                 if stack:
                     font, own = stack.pop()
                 continue
-            operands = instruction.operands
-            if op == "Tf":
-                name = operands[0] if len(operands) else None
-                font = self._font(name, res, res_key, fallback, fallback_key, ctx)
+            if op == _TF:
+                font = self._font(value, res, res_key, fallback, fallback_key, ctx)
                 own = True
-            elif op in _SHOW_OPERATORS:
+            elif op == _SHOW:
                 if not own:
                     ctx["inherited"] = True
                 if font is not None and (font.type3 or font.key in scope):
-                    self._show(font, _segments(operands), res, res_key, depth)
-            elif op == "gs":
-                name = operands[0] if len(operands) else None
-                state = self._lookup("/ExtGState", name, res, fallback, ctx)
+                    self._show(font, value if type(value) is tuple else (value,), res, res_key, depth)
+            elif op == _GS:
+                state = self._lookup("/ExtGState", value, res, fallback, ctx)
                 if not isinstance(state, Dictionary):
                     continue
                 chosen = state.get("/Font")
@@ -1112,14 +1024,13 @@ class _Scan:
                 if isinstance(group, Stream) and self._invoke(group, res, res_key, font, depth):
                     if not own:
                         ctx["inherited"] = True
-            elif op == "Do":
-                name = operands[0] if len(operands) else None
-                xobject = self._lookup("/XObject", name, res, fallback, ctx)
+            elif op == _DO:
+                xobject = self._lookup("/XObject", value, res, fallback, ctx)
                 if isinstance(xobject, Stream) and _subtype(xobject) == "/Form":
                     if self._invoke(xobject, res, res_key, font, depth) and not own:
                         ctx["inherited"] = True
-            elif op in ("scn", "SCN") and len(operands) and isinstance(operands[-1], Name):
-                pattern = self._lookup("/Pattern", operands[-1], res, fallback, ctx)
+            elif op == _SCN and value is not None:
+                pattern = self._lookup("/Pattern", value, res, fallback, ctx)
                 if isinstance(pattern, Stream):
                     self._invoke(pattern, res, res_key, None, depth)
 
@@ -1166,7 +1077,9 @@ class _Scan:
 
     def _page(self, page_obj) -> None:
         res, res_key = _page_resources(page_obj)
-        if page_obj.get("/Contents") is not None:
+        # A page reaches a font only through its resources: one whose
+        # resources name no font in scope draws none, and is not read.
+        if page_obj.get("/Contents") is not None and self._mentions(res, res_key):
             self.walk(page_obj, res, res_key, None, None, None, 0)
         annots = page_obj.get("/Annots")
         if isinstance(annots, Array):
@@ -1271,13 +1184,14 @@ class _Scan:
 
 class FontBaseline:
     """The codes the document drew with every font in reach of the marks,
-    taken before the page walk changed anything."""
+    taken before the page walk changed anything, and the content it read."""
 
-    def __init__(self, scope: set, label: str, codes: dict, raw: dict):
+    def __init__(self, scope: set, label: str, codes: dict, raw: dict, contents: dict):
         self.scope = scope
         self.label = label
         self.codes = codes
         self.raw = raw
+        self.contents = contents
 
 
 def baseline(pdf, pages) -> Optional[FontBaseline]:
@@ -1294,7 +1208,7 @@ def baseline(pdf, pages) -> Optional[FontBaseline]:
     scope = {key for key, root in groups.items() if root in roots}
     label = sorted(_label(fonts[key]) for key in scope)[0]
     scan = _Scan(pdf, scope, label).run(reachable)
-    return FontBaseline(scope, label, scan.codes, scan.raw)
+    return FontBaseline(scope, label, scan.codes, scan.raw, scan.contents)
 
 
 def prune(pdf, before: Optional[FontBaseline]) -> None:
@@ -1303,7 +1217,7 @@ def prune(pdf, before: Optional[FontBaseline]) -> None:
     if before is None:
         return
     reachable = redact_document.reachable_from_trailer(pdf)
-    after = _Scan(pdf, before.scope, before.label).run(reachable)
+    after = _Scan(pdf, before.scope, before.label, before.contents).run(reachable)
     fonts = {}
     for key in before.scope:
         try:
@@ -1556,6 +1470,12 @@ class _Cut:
     # — simple-font tables —
 
     def _widths(self) -> None:
+        """/Widths runs from the lowest code the survivors draw to the highest,
+        each drawn code's width as it was and every other code's 0, and
+        /FirstChar and /LastChar bound that range. An array fonts share is cut
+        to the union of their codes, each font's range moving with it. With
+        no drawn code inside the range, one entry of width 0 remains, at the
+        lowest code no survivor draws."""
         arrays: dict = {}
         for font in self.fonts.values():
             array = font.get("/Widths")
@@ -1565,21 +1485,35 @@ class _Cut:
                 first = int(font.get("/FirstChar", 0))
             except (TypeError, ValueError):
                 first = 0
-            entry = arrays.setdefault(_owned_key(array, font, "/Widths"), [array, set(), []])
-            entry[1] |= {code - first for code in self.simple_codes(font)}
-            entry[2].append(font)
-        for array, indices, users in arrays.values():
-            if not self.touches(users):
+            entry = arrays.setdefault(
+                _owned_key(array, font, "/Widths"), [array, set(), [], set()]
+            )
+            codes = self.simple_codes(font)
+            entry[1] |= {code - first for code in codes}
+            entry[2].append((font, first))
+            entry[3] |= codes
+        for array, indices, users, drawn in arrays.values():
+            if not self.touches([font for font, _first in users]):
                 continue
-            for index in range(len(array)):
-                if index in indices:
-                    continue
-                try:
-                    zero = float(array[index]) == 0.0
-                except (TypeError, ValueError):
-                    zero = False
-                if not zero:
-                    array[index] = 0
+            values = list(array)
+            inside = sorted(index for index in indices if 0 <= index < len(values))
+            if inside:
+                low = inside[0]
+                kept = [values[i] if i in indices else 0 for i in range(low, inside[-1] + 1)]
+                spans = [(first + low, first + low + len(kept) - 1) for _font, first in users]
+            else:
+                free = 0
+                while free in drawn:
+                    free += 1
+                kept = [0]
+                spans = [(free, free) for _user in users]
+            new = Array(kept)
+            if array.is_indirect:
+                new = self.pdf.make_indirect(new)
+            for (font, _first), (first_char, last_char) in zip(users, spans):
+                font["/Widths"] = new
+                font["/FirstChar"] = first_char
+                font["/LastChar"] = last_char
 
     def _encodings(self) -> None:
         encodings: dict = {}
@@ -2694,8 +2628,15 @@ def _rewrite_embedded_cmap(font, stream, codes: set) -> None:
     """An embedded CMap mapping the survivors' codes and nothing else: the same
     codespace, each survivor to the CID it resolved to (§9.7.5.3). Every other
     code falls to CID 0, which no surviving text draws."""
-    cmap = _embedded_cmap(stream)
+    cmap = pdf_fonts.embedded_cmap(stream)
     if cmap is None:
+        _refuse(font, "its character map cannot be read")
+    spaces = cmap.spaces
+    if not spaces and cmap.base in ("Identity-H", "Identity-V"):
+        spaces = [(b"\x00\x00", b"\xff\xff")]
+    if not spaces:
+        # The codes read through a predefined CMap's codespace, which the
+        # bundled tables do not state as ranges.
         _refuse(font, "its character map cannot be read")
     entries = sorted((code, cmap.cid(code)) for code in codes if code)
     if (
@@ -2738,8 +2679,8 @@ def _rewrite_embedded_cmap(font, stream, codes: set) -> None:
     ]
     if wmode is not None:
         lines.append(b"/WMode %d def" % wmode)
-    lines.append(b"%d begincodespacerange" % len(cmap.spaces))
-    lines += [_hex(low) + b" " + _hex(high) for low, high in cmap.spaces]
+    lines.append(b"%d begincodespacerange" % len(spaces))
+    lines += [_hex(low) + b" " + _hex(high) for low, high in spaces]
     lines.append(b"endcodespacerange")
     for start in range(0, len(entries), _MAP_BLOCK):
         block = entries[start : start + _MAP_BLOCK]
@@ -2753,3 +2694,7 @@ def _rewrite_embedded_cmap(font, stream, codes: set) -> None:
         b"end",
     ]
     stream.write(b"\n".join(lines) + b"\n")
+    if "/UseCMap" in stream:
+        # Every surviving code is mapped in full above; the CMap no longer
+        # builds on another.
+        del stream["/UseCMap"]

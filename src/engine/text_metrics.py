@@ -76,6 +76,7 @@ class _FontCache:
     def __init__(self):
         self._by_key: dict = {}
         self._ink: dict = {}
+        self._held: list = []
 
     @staticmethod
     def _key(font_obj, resources, fallback_resources, name):
@@ -112,6 +113,49 @@ class _FontCache:
                     False, f"unreadable font ({exc})", {}, {}, {}, 500.0, 1
                 )
         return self._by_key[key]
+
+    def _object_key(self, font_obj):
+        # A direct font's wrapper is a fresh object per access, and its id is
+        # reused once it is collected: the cache holds every wrapper it keys
+        # by id.
+        try:
+            if font_obj.is_indirect:
+                return ("obj", font_obj.objgen)
+        except AttributeError:
+            return None
+        return ("held", id(font_obj))
+
+    def capability_of(self, font_obj) -> Optional[FontCapability]:
+        """The capability of the font DICTIONARY a text state holds."""
+        if font_obj is None:
+            return None
+        key = self._object_key(font_obj)
+        if key is None:
+            return None
+        if key not in self._by_key:
+            if key[0] == "held":
+                self._held.append(font_obj)
+            try:
+                self._by_key[key] = font_capability(font_obj)
+            except Exception as exc:  # a malformed font dict refuses, never crashes
+                self._by_key[key] = FontCapability(
+                    False, f"unreadable font ({exc})", {}, {}, {}, 500.0, 1
+                )
+        return self._by_key[key]
+
+    def ink_extent_of(self, font_obj) -> tuple[float, float]:
+        """`ink_extent` for the font dictionary a text state holds."""
+        key = self._object_key(font_obj) if font_obj is not None else None
+        if key is None:
+            return (FALLBACK_BELOW_EM, FALLBACK_ABOVE_EM)
+        if key not in self._ink:
+            if key[0] == "held":
+                self._held.append(font_obj)
+            try:
+                self._ink[key] = ink_extent_em(font_obj)
+            except Exception:
+                self._ink[key] = (FALLBACK_BELOW_EM, FALLBACK_ABOVE_EM)
+        return self._ink[key]
 
     def ink_extent(self, resources, fallback_resources, name) -> tuple[float, float]:
         """(below_em, above_em) for the named font — the run's real vertical
@@ -238,13 +282,12 @@ def show_bytes(operator: str, operands: list) -> bytes:
 
 
 def _spaces_in(data: bytes, cap: FontCapability) -> int:
-    # Tw applies to the SINGLE-BYTE code 32 only (spec) — never CID fonts,
-    # and never a multi-byte code that merely CONTAINS 0x20 (a
-    # Shift-JIS trail byte can be 0x20-adjacent, so counting raw bytes would
-    # invent word spacing mid-character).
-    if not cap.single_byte_codes():
-        return 0
-    return data.count(0x20)
+    # Tw applies to every SINGLE-BYTE code 32 (ISO 32000-2 §9.3.3): each 0x20
+    # byte of a simple font, a one-byte code 32 of a composite font whose
+    # CMap defines one, and never a 0x20 byte inside a longer code.
+    if cap.single_byte_codes():
+        return data.count(0x20)
+    return sum(1 for code, n in cap.codes(data) if n == 1 and code == 0x20)
 
 
 def _run_metrics(
@@ -312,7 +355,6 @@ def show_items_from_segments(
     """
     items: list[ShowItem] = []
     x = 0.0
-    tw_applies = cap.single_byte_codes()
     for seg in segments:
         if isinstance(seg, float):
             advance = -seg / 1000.0 * state.font_size
@@ -325,7 +367,8 @@ def show_items_from_segments(
             offset += n
             advance = cap.decoded_width(raw) / 1000.0 * state.font_size
             advance += state.char_spacing
-            if tw_applies and raw == b" ":
+            if raw == b" ":
+                # The single-byte code 32 (§9.3.3), whatever the font's kind.
                 advance += state.word_spacing
             items.append(ShowItem(False, raw, 0.0, advance, x))
             x += advance
@@ -435,15 +478,24 @@ def wide_width_from_segments(
 # ── form inheritance ──────────────────────────────────────────────────────
 
 
-def _child_state(base_ctm, parent: Optional[GraphicsTextState]) -> GraphicsTextState:
+def _child_state(
+    base_ctm, parent: Optional[GraphicsTextState], lookup=None
+) -> GraphicsTextState:
     """A form's stream starts with the INVOKING stream's text parameters —
     font, size, leading, Tz, Tc/Tw, Tr/Ts and colours are graphics
     state a form inherits at its Do (the _redact_form rule); tm/tlm reset
-    per stream."""
+    per stream. The font travels as the dictionary the invoker selected;
+    `lookup` resolves the names of the new stream's own resources."""
     if parent is None:
-        return GraphicsTextState(base_ctm)
+        return GraphicsTextState(base_ctm, lookup=lookup)
     child = GraphicsTextState(
-        base_ctm, parent.font_size, parent.leading, parent.h_scale, parent.font_name
+        base_ctm,
+        parent.font_size,
+        parent.leading,
+        parent.h_scale,
+        parent.font_name,
+        font=parent.font,
+        lookup=lookup,
     )
     child.char_spacing = parent.char_spacing
     child.word_spacing = parent.word_spacing

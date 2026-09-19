@@ -476,6 +476,156 @@ class TestAnEmbeddedCMapNamesItselfAndNothingElse:
         assert len(reason) < 80
 
 
+class TestCodesThroughTheCodespace:
+    """A composite font's codes are read through its CMap's codespace ranges
+    (ISO 32000-2 §9.7.6.2): each byte of a code lies between the range's
+    bounds at its position. A code that matches no range is consumed by the
+    partial match of §9.7.6.3 and counts as invalid; a string holding one has
+    no single width, so it does not measure."""
+
+    def test_a_code_matches_byte_by_byte_not_by_value(self):
+        from engine.pdf_fonts import CodeSpace
+
+        space = CodeSpace([(b"\x81\x40", b"\x9f\xfc")])
+        assert space.read(b"\x81\x40", 0) == (2, True)
+        # 0x81FF lies between 0x8140 and 0x9FFC as a number; its second byte
+        # lies outside 0x40..0xFC.
+        assert space.read(b"\x81\xff", 0) == (2, False)
+
+    def test_a_first_byte_no_range_starts_with_takes_the_shortest_codes(self):
+        from engine.pdf_fonts import CodeSpace
+
+        space = CodeSpace([(b"\x81\x40", b"\x9f\xfc"), (b"\xa1", b"\xdf")])
+        assert space.split(b"\x20\xa1") == [(0x20, 1, False), (0xA1, 1, True)]
+
+    def test_the_longest_partial_match_wins_and_a_tie_takes_the_shorter(self):
+        from engine.pdf_fonts import CodeSpace
+
+        space = CodeSpace(
+            [(b"\x81\x30\x81\x30", b"\xfe\x39\xfe\x39"), (b"\x81\x40", b"\xfe\xfe")]
+        )
+        # 0x81 starts both ranges and 0x20 continues neither: the tie goes to
+        # the two-byte codes.
+        assert space.read(b"\x81\x20\x20\x20", 0) == (2, False)
+        # 0x81 0x35 continues only the four-byte range.
+        assert space.read(b"\x81\x35\x20\x20", 0) == (4, False)
+
+    def _embedded(self, pdf, spaces: bytes, widths=None):
+        program = (
+            b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap "
+            + spaces
+            + b" 1 begincidrange <20> <7E> 32 endcidrange"
+            b" endcmap CMapName currentdict /CMap defineresource pop end end"
+        )
+        cmap = pdf.make_stream(program, Type=Name("/CMap"), CMapName=Name("/OneByte"))
+        kid = Dictionary(
+            Type=Name("/Font"), Subtype=Name("/CIDFontType2"), BaseFont=Name("/Embedded"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+            DW=600,
+        )
+        if widths is not None:
+            kid["/W"] = Array(widths)
+        return pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"), Subtype=Name("/Type0"), BaseFont=Name("/Embedded"),
+                Encoding=cmap, DescendantFonts=Array([pdf.make_indirect(kid)]),
+            )
+        )
+
+    def test_an_embedded_cmap_reads_its_own_one_byte_codes(self):
+        pdf = pikepdf.new()
+        cap = font_capability(
+            self._embedded(pdf, b"1 begincodespacerange <00> <FF> endcodespacerange", [0x51, Array([900])])
+        )
+        assert not cap.editable
+        assert cap.codes(b"PQ") == [(0x50, 1), (0x51, 1)]
+        # P is CID 0x50 at /DW; Q is CID 0x51 at its own /W entry.
+        assert cap.decoded_width(b"PQ") == 600 + 900
+        assert cap.measures(b"PQ")
+
+    def test_an_embedded_cmap_font_reads_through_its_tounicode_and_encodes_nothing(self):
+        pdf = pikepdf.new()
+        font = self._embedded(pdf, b"1 begincodespacerange <00> <FF> endcodespacerange")
+        font["/ToUnicode"] = _tounicode_stream(pdf, {0x50: "P", 0x51: "Q"})
+        cap = font_capability(font)
+        assert not cap.editable
+        assert cap.decode(b"PQ") == "PQ"
+        with pytest.raises(ValueError):
+            cap.encode("P")
+
+    def test_an_embedded_code_outside_every_range_does_not_measure(self):
+        pdf = pikepdf.new()
+        cap = font_capability(self._embedded(pdf, b"1 begincodespacerange <20> <7E> endcodespacerange"))
+        assert cap.measures(b"PQ")
+        assert not cap.measures(b"P\x01")
+
+    def test_an_embedded_cmap_built_on_identity_reads_its_two_byte_codes(self):
+        from engine.pdf_fonts import EmbeddedCMap
+
+        cmap = EmbeddedCMap(
+            b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap "
+            b"/Identity-H usecmap 1 begincidchar <0041> 7 endcidchar endcmap end end"
+        )
+        assert cmap.code_space.split(b"\x00\x41\x00\x42") == [(0x41, 2, True), (0x42, 2, True)]
+        assert (cmap.cid(b"\x00\x41"), cmap.cid(b"\x00\x42")) == (7, 0x42)
+
+    def test_a_fixed_two_byte_font_s_odd_last_byte_does_not_measure(self):
+        pdf = pikepdf.new()
+        kid = Dictionary(
+            Type=Name("/Font"), Subtype=Name("/CIDFontType2"), BaseFont=Name("/Identity"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0), DW=600,
+        )
+        cap = font_capability(
+            pdf.make_indirect(
+                Dictionary(
+                    Type=Name("/Font"), Subtype=Name("/Type0"), BaseFont=Name("/Identity"),
+                    Encoding=Name("/Identity-H"), DescendantFonts=Array([pdf.make_indirect(kid)]),
+                )
+            )
+        )
+        assert cap.measures(b"\x00\x41")
+        assert not cap.measures(b"\x00\x41\x00")
+
+    def test_an_unreadable_embedded_cmap_counts_every_byte_as_a_code(self):
+        pdf = pikepdf.new()
+        cap = font_capability(self._embedded(pdf, b""))
+        assert cap.code_count(b"PQ") == 2
+        assert not cap.measures(b"PQ")
+
+    def test_a_predefined_code_that_leaves_the_trie_is_consumed_whole(self):
+        pdf = pikepdf.new()
+        cap = font_capability(
+            TestPredefinedCjkCMaps()._cjk_font(pdf, {0x41: "A", 0x82A0: KANA}, "90ms-RKSJ-H")
+        )
+        # 0x81 leads a two-byte code; 0x81 0x20 is not one the CMap maps.
+        assert cap.codes(b"\x81\x20A") == [(0x8120, 2), (0x41, 1)]
+        assert not cap.measures(b"\x81\x20A")
+        assert cap.measures(b"A\x82\xa0")
+
+    def test_a_predefined_code_absent_from_tounicode_measures_through_its_cid(self):
+        from pdfminer.cmapdb import CMapDB
+
+        pdf = pikepdf.new()
+        cid = list(CMapDB.get_cmap("90ms-RKSJ-H").decode(b"\x82\xa0"))[0]
+        cap = font_capability(
+            TestPredefinedCjkCMaps()._cjk_font(
+                pdf, {0x41: "A"}, "90ms-RKSJ-H", cid_widths={cid: 880}, dw=500
+            )
+        )
+        assert cap.decoded_width(b"\x82\xa0") == 880
+
+    def test_word_spacing_finds_the_single_byte_space_of_a_cmap(self):
+        from engine.text_metrics import _spaces_in
+
+        pdf = pikepdf.new()
+        cap = font_capability(
+            TestPredefinedCjkCMaps()._cjk_font(pdf, {0x41: "A", 0x82A0: KANA}, "90ms-RKSJ-H")
+        )
+        assert _spaces_in(b"A \x82\xa0 A", cap) == 2
+        # 0x20 inside a two-byte code is not a space.
+        assert _spaces_in(b"\x81\x20", cap) == 0
+
+
 class TestPredefinedCjkCMaps:
     """Type0 fonts with a named Unicode horizontal CMap."""
 

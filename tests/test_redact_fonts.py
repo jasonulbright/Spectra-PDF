@@ -20,6 +20,7 @@ import io
 import os
 import re
 import subprocess
+import zlib
 
 import pikepdf
 import pytest
@@ -215,7 +216,9 @@ class TestTheProbeShape:
         assert KEPT in extract_text(out)
         assert not set(SECRET) & set(extract_text(out))
 
-    def test_widths_keep_their_length_and_name_only_what_survives(self, tmp_dir):
+    def test_widths_span_only_the_surviving_codes(self, tmp_dir):
+        # The range is the survivors' own: Q, X and Z sat at its top, and a
+        # range kept whole would still end at them.
         doc, _program = _truetype_doc([[(10, KEPT), (200, SECRET)]])
         src, out = _redact(tmp_dir, doc)
         with pikepdf.open(src) as pdf:
@@ -223,11 +226,13 @@ class TestTheProbeShape:
         pdf, font = _font(out)
         with pdf:
             after = [float(w) for w in font.Widths]
-            assert (int(font.FirstChar), int(font.LastChar)) == (32, 126)
-        assert len(after) == len(before)
+            first, last = int(font.FirstChar), int(font.LastChar)
+        assert (first, last) == (ord(min(KEPT)), ord(max(KEPT)))
+        assert len(after) == last - first + 1
         for index, width in enumerate(after):
-            char = chr(32 + index)
-            assert width == (before[index] if char in KEPT else 0), char
+            char = chr(first + index)
+            assert width == (before[first + index - 32] if char in KEPT else 0), char
+        assert _truetype_drawn(out, KEPT) == _truetype_drawn(src, KEPT)
 
     def test_a_glyf_program_embedded_as_opentype_is_cut_the_same_way(self, tmp_dir):
         doc, program = _truetype_doc([[(10, KEPT), (200, SECRET)]])
@@ -466,6 +471,24 @@ class TestTables:
         pdf, saved = _font(out)
         with pdf:
             assert list(saved.Encoding.Differences) == [98, Name("/b"), Name("/c")]
+        assert _truetype_drawn(out, KEPT) == _truetype_drawn(src, KEPT)
+
+    def test_a_widths_array_two_fonts_share_moves_both_ranges(self, tmp_dir):
+        doc, _program = _truetype_doc([[(10, KEPT), (200, SECRET)], [(10, "Quiz")]])
+        font = doc.pages[0].Resources.Font.F1
+        shared = doc.make_indirect(Array(list(font.Widths)))
+        font["/Widths"] = shared
+        twin = doc.make_indirect(Dictionary({key: font[key] for key in font.keys()}))
+        doc.pages[1].Resources = Dictionary(Font=Dictionary(F1=twin))
+        src, out = _redact(tmp_dir, doc)
+        with pikepdf.open(out) as pdf:
+            one = pdf.pages[0].Resources.Font.F1
+            two = pdf.pages[1].Resources.Font.F1
+            assert one.Widths.objgen == two.Widths.objgen
+            spans = [(int(f.FirstChar), int(f.LastChar)) for f in (one, two)]
+        survivors = set(KEPT) | set("Quiz")
+        assert spans == [(ord(min(survivors)), ord(max(survivors)))] * 2
+        assert _truetype_drawn(out, "Quiz", page=1) == _truetype_drawn(src, "Quiz", page=1)
         assert _truetype_drawn(out, KEPT) == _truetype_drawn(src, KEPT)
 
     def test_the_empty_name_survives_the_rebuilt_differences(self, tmp_dir):
@@ -888,13 +911,14 @@ class TestType3:
             resources = font.Resources
             images = list(resources.XObject.keys()) if "/XObject" in resources else []
             widths = [float(w) for w in font.Widths]
+            first = int(font.FirstChar)
         assert set(after) == set(KEPT) | {"X"}
         assert all(after[name] == before[name] for name in after)
         named = {str(item)[1:] for item in differences if isinstance(item, Name)}
         assert named == set(KEPT) | {"X"}
         assert set(tounicode.values()) == set(KEPT) | {"X"}
         assert images == []
-        assert {chr(32 + i) for i, w in enumerate(widths) if w} == set(KEPT) | {"X"}
+        assert {chr(first + i) for i, w in enumerate(widths) if w} == set(KEPT) | {"X"}
 
     def test_a_resource_a_kept_procedure_names_stays_by_its_bytes(self, tmp_dir):
         # §7.3.5: a name need not be UTF-8. Q's image goes with Q; p's stays.
@@ -1233,6 +1257,86 @@ class TestEmbeddedCMap:
         with pdf:
             assert _tounicode_map(saved) == {ord(ch): ch for ch in KEPT}
 
+    def test_a_cmap_built_on_identity_is_rewritten_on_its_own(self, tmp_dir):
+        # The CMap states no codespace; it reads two-byte codes through
+        # Identity-H, which its /UseCMap entry names.
+        text = KEPT + SECRET
+        program = _cut(SANS, text)
+        tt = TTFont(io.BytesIO(program))
+        order = tt.getGlyphOrder()
+        cids = {ch: order.index(tt.getBestCmap()[ord(ch)]) for ch in sorted(set(text))}
+        doc = pikepdf.new()
+        font = _type0(doc, "/CIDFontType2", "/FontFile2", doc.make_stream(program), cids, Name("/Identity"))
+        cmap = doc.make_stream(
+            b"\n".join(
+                [
+                    b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap",
+                    b"/CMapName /Test-Built-On def /CMapType 1 def",
+                    b"%d begincidchar" % len(cids),
+                    *[b"<%04X> %d" % (ord(ch), cid) for ch, cid in sorted(cids.items())],
+                    b"endcidchar endcmap CMapName currentdict /CMap defineresource pop end end",
+                ]
+            )
+        )
+        cmap["/Type"] = Name("/CMap")
+        cmap["/UseCMap"] = Name("/Identity-H")
+        font["/Encoding"] = cmap
+        font["/ToUnicode"] = _tounicode(doc, [(ord(ch).to_bytes(2, "big"), ch) for ch in sorted(cids)])
+        page = doc.add_blank_page(page_size=PAGE)
+        page.Resources = Dictionary(Font=Dictionary(F1=font))
+        codes = {ch: ord(ch) for ch in cids}
+        page.Contents = doc.make_stream(
+            _line("F1", 10, _show_cids(codes, KEPT)) + _line("F1", 200, _show_cids(codes, SECRET))
+        )
+        _src, out = _redact(tmp_dir, doc)
+        pdf, saved = _font(out)
+        with pdf:
+            assert "/UseCMap" not in saved.Encoding
+            body = bytes(saved.Encoding.read_bytes())
+            data = bytes(saved.DescendantFonts[0].FontDescriptor.FontFile2.read_bytes())
+        assert b"<0000> <FFFF>" in body
+        blocks = b"".join(re.findall(rb"begincidchar(.*?)endcidchar", body, re.S))
+        mapped = {int(code, 16) for code, _cid in re.findall(rb"<([0-9A-Fa-f]+)>\s+(\d+)", blocks)}
+        assert mapped == {ord(ch) for ch in KEPT}
+        assert not set(SECRET) & set(TTFont(io.BytesIO(data)).getGlyphOrder())
+
+    def test_a_code_readers_split_apart_keeps_every_glyph_they_draw(self, tmp_dir):
+        # 0x81 0x32 starts a two-byte range and ends outside it. By §9.7.6.3
+        # it is one invalid code; a reader that falls back to one byte draws
+        # 0x81 and then "2", so the glyph for "2" survives the cut.
+        text = "A2BQZ"
+        program = _cut(SANS, text)
+        tt = TTFont(io.BytesIO(program))
+        order = tt.getGlyphOrder()
+        cids = {ch: order.index(tt.getBestCmap()[ord(ch)]) for ch in text}
+        doc = pikepdf.new()
+        font = _type0(doc, "/CIDFontType2", "/FontFile2", doc.make_stream(program), cids, Name("/Identity"))
+        cmap = doc.make_stream(
+            b"\n".join(
+                [
+                    b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap",
+                    b"/CMapName /Test-Embedded def /CMapType 1 def",
+                    b"2 begincodespacerange <20> <7E> <8140> <9FFC> endcodespacerange",
+                    b"%d begincidchar" % len(cids),
+                    *[b"<%02X> %d" % (ord(ch), cid) for ch, cid in sorted(cids.items())],
+                    b"endcidchar endcmap CMapName currentdict /CMap defineresource pop end end",
+                ]
+            )
+        )
+        cmap["/Type"] = Name("/CMap")
+        font["/Encoding"] = cmap
+        font["/ToUnicode"] = _tounicode(doc, [(bytes([ord(ch)]), ch) for ch in sorted(cids)])
+        page = doc.add_blank_page(page_size=PAGE)
+        page.Resources = Dictionary(Font=Dictionary(F1=font))
+        page.Contents = doc.make_stream(_line("F1", 10, b"A\x812B") + _line("F1", 200, b"QZ"))
+        _src, out = _redact(tmp_dir, doc)
+        pdf, saved = _font(out)
+        with pdf:
+            data = bytes(saved.DescendantFonts[0].FontDescriptor.FontFile2.read_bytes())
+        names = set(TTFont(io.BytesIO(data)).getGlyphOrder())
+        assert {"A", "B", "two"} <= names
+        assert not {"Q", "Z"} & names
+
 
 class TestVerticalMetrics:
     def test_w2_keeps_only_the_survivors(self, tmp_dir):
@@ -1262,6 +1366,32 @@ class TestVerticalMetrics:
             covered |= set(range(int(w2[index]), int(w2[index + 1]) + 1))
             assert [float(v) for v in w2[index + 2 : index + 5]] == [-1000, 250, 880]
         assert covered == {cids[ch] for ch in KEPT}
+
+
+class TestTheScanReadsEachStreamOnce:
+    """The scan after the page walk reads again only the content the walk
+    changed: a stream it left alone is read from the scan before it."""
+
+    def test_content_written_over_in_place_is_read_again(self, tmp_dir):
+        doc, _program = _truetype_doc([[(10, KEPT), (200, SECRET)]])
+        src = _save(doc, os.path.join(tmp_dir, "in.pdf"))
+        with pikepdf.open(src) as pdf:
+            before = redact_fonts.baseline(pdf, [pdf.pages[0]])
+            contents = pdf.pages[0].Contents
+            assert contents.get("/Filter") == Name("/FlateDecode")
+            # Same object, same filter: only the bytes change.
+            contents.write(zlib.compress(_line("F1", 10, KEPT.encode())), filter=Name("/FlateDecode"))
+            redact_fonts.prune(pdf, before)
+            data = bytes(pdf.pages[0].Resources.Font.F1.FontDescriptor.FontFile2.read_bytes())
+        assert {chr(point) for point in TTFont(io.BytesIO(data)).getBestCmap()} == set(KEPT)
+
+    def test_past_the_kept_bound_the_content_is_read_again(self, tmp_dir, monkeypatch):
+        monkeypatch.setattr(redact_fonts, "MAX_KEPT_OPERATORS", 0)
+        doc, _program = _truetype_doc([[(10, KEPT), (200, SECRET)], [(10, "Quiz")]])
+        src, out = _redact(tmp_dir, doc)
+        assert _truetype_chars(out) == set(KEPT) | set("Quiz")
+        with pikepdf.open(src) as pdf:
+            assert redact_fonts.baseline(pdf, [pdf.pages[0]]).contents == {}
 
 
 class TestIdentityOfAFont:
@@ -1302,8 +1432,9 @@ class TestIdentityOfAFont:
             listed = pdf.Root.AcroForm.DR.Font.F1
             data = bytes(listed.FontDescriptor.FontFile2.read_bytes())
             widths = [float(w) for w in listed.Widths]
+            span = (int(listed.FirstChar), int(listed.LastChar))
         assert TTFont(io.BytesIO(data)).getGlyphOrder() == [".notdef"]
-        assert not any(widths)
+        assert widths == [0] and span == (0, 0)
 
 
 class TestSymbolicTrueType:

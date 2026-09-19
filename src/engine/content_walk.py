@@ -3,7 +3,7 @@
 One interpreter, two clients, no drift: redaction (`redact.py`), image editing (`page_images.py`), and text
 editing all walk content streams tracking the same PDF graphics state —
 CTM (q/Q/cm), text matrices (BT, Tm/Td/TD/T*), and text parameters
-(Tf size + RESOURCE NAME, TL leading, Tz horizontal scale). Before this
+(Tf or ExtGState font and size, TL leading, Tz horizontal scale). Before this
 module each walker re-derived the tracking; a divergence between them is
 exactly the class of bug that edits the wrong thing.
 
@@ -18,7 +18,9 @@ against the refactored `_walk`: the security-critical client is the
 regression harness for the seam.
 """
 
-from typing import NamedTuple, Optional
+from typing import Callable, NamedTuple, Optional
+
+import pikepdf
 
 Matrix = tuple[float, float, float, float, float, float]
 Rect = tuple[float, float, float, float]
@@ -86,11 +88,13 @@ class TextStateSnapshot(NamedTuple):
     leading: float
     h_scale: float
     font_name: Optional[str]
+    font: object = None
 
 
 # One captured color-setting instruction, normalized for comparison and
 # replay: (operator, (operand, ...)) with numeric operands as floats and
-# anything else (pattern/colorspace names) as strings.
+# anything else (pattern/colorspace names) as strings, or as the name object
+# where the name is not UTF-8.
 ColorOp = tuple[str, tuple]
 # A color state: (space-selecting op | None, value-setting op | None).
 # g/rg/k select their device space implicitly, so they stand alone with no
@@ -120,7 +124,12 @@ def _color_operands(operands: list) -> tuple:
         try:
             out.append(float(el))
         except (TypeError, ValueError):
-            out.append(str(el))
+            try:
+                out.append(str(el))
+            except UnicodeDecodeError:
+                # A name need not be UTF-8 (ISO 32000-2 §7.3.5): it rides as
+                # the name object itself, which replays byte for byte.
+                out.append(el)
     return tuple(out)
 
 
@@ -130,13 +139,21 @@ class GraphicsTextState:
     `feed(operator, operands)` applies a state-bearing operator and
     returns True; anything else (shows, Do, paints…) returns False and
     the CALLER decides what to do with it, reading `ctm`, `tm`,
-    `font_size`, `leading`, `h_scale`, `font_name` and using
+    `font_size`, `leading`, `h_scale`, `font_name`, `font` and using
     `next_line()` (the '/" implicit advance) and `advance_after_show()`.
 
     q/Q save/restore the CTM AND the text parameters — all elements of
     the PDF graphics state; restoring only the CTM left a stale font
     size after `q .. Tf .. Q` (the under-redaction leak redact.py's
-    comment records). `font_name` rides the same stack.
+    comment records). `font_name` and `font` ride the same stack.
+
+    `font` is the font DICTIONARY the text state holds (ISO 32000-2 §9.3.1),
+    tracked when the caller gives `lookup`, its stream's resource resolver
+    `(category, name object) -> object or None`. `Tf` resolves its name there;
+    a `gs` whose ExtGState has a /Font entry sets the font and the size as
+    `Tf` does (Table 57) and still returns False, its other parameters being
+    the caller's. A form inherits the dictionary, not the name: the form's
+    own resources may give that name to another font.
     """
 
     def __init__(
@@ -148,6 +165,8 @@ class GraphicsTextState:
         font_name: Optional[str] = None,
         fill_color: ColorState = DEFAULT_COLOR,
         stroke_color: ColorState = DEFAULT_COLOR,
+        font=None,
+        lookup: Optional[Callable] = None,
     ):
         self.ctm: Matrix = base_ctm
         self.tm: Matrix = IDENTITY
@@ -156,6 +175,8 @@ class GraphicsTextState:
         self.leading = leading
         self.h_scale = h_scale
         self.font_name = font_name
+        self.font = font
+        self.lookup = lookup
         # Tc/Tw (char/word spacing) — tracked for the text-editing walkers'
         # REAL width math; redaction's estimate never needed them.
         self.char_spacing = 0.0
@@ -177,7 +198,17 @@ class GraphicsTextState:
         self._stack: list = []
 
     def snapshot(self) -> TextStateSnapshot:
-        return TextStateSnapshot(self.font_size, self.leading, self.h_scale, self.font_name)
+        return TextStateSnapshot(
+            self.font_size, self.leading, self.h_scale, self.font_name, self.font
+        )
+
+    def _resolve(self, category: str, name):
+        if self.lookup is None or not isinstance(name, pikepdf.Name):
+            return None
+        try:
+            return self.lookup(category, name)
+        except Exception:
+            return None
 
     def next_line(self) -> None:
         self.tlm = mat_mult((1, 0, 0, 1, 0, -self.leading), self.tlm)
@@ -205,6 +236,7 @@ class GraphicsTextState:
                     self.leading,
                     self.h_scale,
                     self.font_name,
+                    self.font,
                     self.char_spacing,
                     self.word_spacing,
                     self.render_mode,
@@ -222,6 +254,7 @@ class GraphicsTextState:
                     self.leading,
                     self.h_scale,
                     self.font_name,
+                    self.font,
                     self.char_spacing,
                     self.word_spacing,
                     self.render_mode,
@@ -288,8 +321,27 @@ class GraphicsTextState:
                 try:
                     self.font_name = str(operands[0])
                 except (TypeError, ValueError):
-                    pass
+                    self.font_name = None
+            found = self._resolve("/Font", operands[0] if operands else None)
+            self.font = found if isinstance(found, pikepdf.Dictionary) else None
             return True
+        if operator == "gs":
+            state = self._resolve("/ExtGState", operands[0] if operands else None)
+            chosen = state.get("/Font") if isinstance(state, pikepdf.Dictionary) else None
+            if (
+                isinstance(chosen, pikepdf.Array)
+                and len(chosen) >= 2
+                and isinstance(chosen[0], pikepdf.Dictionary)
+            ):
+                try:
+                    size = float(chosen[1])
+                except (TypeError, ValueError):
+                    size = None
+                if size is not None:
+                    self.font = chosen[0]
+                    self.font_size = size
+                    self.font_name = None
+            return False
         if operator == "TL":
             try:
                 self.leading = float(operands[0])
