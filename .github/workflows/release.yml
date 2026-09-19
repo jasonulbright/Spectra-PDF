@@ -28,9 +28,11 @@ jobs:
   # The gate for `release`. A tag can be pushed at any commit, so CI running on
   # push/PR does not establish that the tagged commit passed anything.
   #
-  # Self-contained rather than keyed off CI's status: a workflow that reads
-  # another workflow's conclusion is one API shape away from silently passing,
-  # and re-running the suites costs minutes on a job that already takes ~35.
+  # Every gate runs here except the engine suite, which is reused from CI only
+  # on proof: CI's own run of ci.yml for this exact commit, triggered by the
+  # push of main, completed with success. Reading another workflow's verdict
+  # is one API shape away from silently passing, so the check accepts one
+  # shape of success and treats every other answer as "run the suite here".
   #
   # E2E is not here and must not be faked: it is blocked upstream (see
   # ci.yml). The full local suite on the built binary is the release gate, a
@@ -39,6 +41,11 @@ jobs:
     name: Verify (gates + version consistency)
     runs-on: windows-latest
     timeout-minutes: 150
+    # actions: read is for the one query of ci.yml's runs below. Nothing in
+    # this job writes, so contents is read-only.
+    permissions:
+      contents: read
+      actions: read
     steps:
       # The suite's redo-regime tests enumerate released tags. The default
       # checkout is shallow and tagless, which made those tests unrunnable on
@@ -141,6 +148,45 @@ jobs:
       - name: Rust COM scheduler tests (fresh task store)
         run: cd src-tauri && cargo test scheduler -- --ignored
 
+      # ci.yml runs the same engine suite, with the same provisioning and the
+      # same zero-skip gate, on every push of main, so a tag cut on a main
+      # commit after its push finds that run. The steps from here through
+      # "Engine tests (full suite)" are skipped only when EVERY push run of
+      # ci.yml for this exact commit completed with success, and at least one
+      # exists. No run yet, a run in progress, a cancelled or failed run, a
+      # query error or an answer of any other shape runs them as before. The
+      # step itself cannot fail the job: without its output the suite runs.
+      - name: Reuse CI's engine suite result for this commit
+        id: ci
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          function Test-CiPassed([string] $Json, [string] $Sha) {
+              if ($Sha -cnotmatch '^[0-9a-f]{40}$') { return $false }
+              try { $page = $Json | ConvertFrom-Json -ErrorAction Stop } catch { return $false }
+              $runs = @($page.workflow_runs | Where-Object {
+                  $_.head_sha -ceq $Sha -and $_.event -ceq 'push' -and $_.path -ceq '.github/workflows/ci.yml'
+              })
+              if ($runs.Count -eq 0) { return $false }
+              foreach ($run in $runs) {
+                  if ($run.status -cne 'completed' -or $run.conclusion -cne 'success') { return $false }
+              }
+              return $true
+          }
+          $sha = "$(git rev-parse HEAD)".Trim()
+          $answer = gh api "repos/$env:REPO/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&per_page=100"
+          $passed = ($LASTEXITCODE -eq 0) -and (Test-CiPassed -Json ($answer -join "`n") -Sha $sha)
+          if ($passed) {
+              "passed=true" >> $env:GITHUB_OUTPUT
+              Write-Host "ci.yml passed on $sha; the engine suite steps are skipped"
+          } else {
+              Write-Host "no proof that ci.yml passed on $sha; the engine suite steps run"
+          }
+          exit 0
+
       # One install per step. The default shell on windows runners reports the
       # step's verdict as the LAST command's exit status, and a native command's
       # non-zero exit does not abort the block, so a failed install in a
@@ -150,12 +196,15 @@ jobs:
       # The rest of the shipped set: the wheels committed under vendor/wheels/,
       # which no index is asked for. Without this the HEIF corpus cannot decode.
       - name: Install the vendored wheels (the rest of the shipped set)
+        if: steps.ci.outputs.passed != 'true'
         run: powershell -ExecutionPolicy Bypass -File scripts/install-vendored-wheels.ps1
 
       - name: Install pytest
+        if: steps.ci.outputs.passed != 'true'
         run: pip install pytest
 
       - name: Stage the committed ICC colour profiles for engine tests
+        if: steps.ci.outputs.passed != 'true'
         # The verify job is a clean checkout and runs the engine before the
         # build job vendors resources. Use the release bundler here too so the
         # tested bytes and the installer bytes are governed by the same hashes.
@@ -163,6 +212,7 @@ jobs:
         shell: pwsh
 
       - name: Stage the shipped edit fonts for engine tests
+        if: steps.ci.outputs.passed != 'true'
         run: powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1
         shell: pwsh
 
@@ -172,40 +222,48 @@ jobs:
       # the pin falls through to a download instead of poisoning the tree.
       - name: Cache the pinned LibreOffice msi
         id: libreoffice-msi-cache
+        if: steps.ci.outputs.passed != 'true'
         uses: actions/cache@v6
         with:
           path: .lo-msi-cache
           key: ${{ runner.os }}-libreoffice-msi-${{ hashFiles('scripts/bundle-libreoffice.ps1') }}
 
       - name: Stage the shipped LibreOffice runtime for engine tests
+        if: steps.ci.outputs.passed != 'true'
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1
         shell: pwsh
         env:
           SPECTRAPDF_LO_MSI_CACHE: .lo-msi-cache
 
       - name: Stage the shipped native Tesseract runtime for engine tests
+        if: steps.ci.outputs.passed != 'true'
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
         shell: pwsh
 
       - name: Stage the shipped JBIG2 encoder for engine tests
+        if: steps.ci.outputs.passed != 'true'
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1
         shell: pwsh
 
       - name: Stage the shipped spelling dictionaries for engine tests
+        if: steps.ci.outputs.passed != 'true'
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-dictionaries.ps1
         shell: pwsh
 
       - name: Stage the shipped Finnish spelling runtime for engine tests
+        if: steps.ci.outputs.passed != 'true'
         # Must follow dictionaries and Tesseract for the same dependency order
         # the release build itself uses below.
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-voikko.ps1
         shell: pwsh
 
       - name: Stage the shipped OCR language models for engine tests
+        if: steps.ci.outputs.passed != 'true'
         run: node scripts/sync-ocr-assets.mjs
         shell: pwsh
 
       - name: Stage test-only SoftHSM for PKCS#11 engine tests
+        if: steps.ci.outputs.passed != 'true'
         # This is a pinned test fixture, not part of the published installer.
         run: powershell -ExecutionPolicy Bypass -File scripts/setup-test-softhsm.ps1
         shell: pwsh
@@ -218,16 +276,18 @@ jobs:
       # both paths re-verify the extracted tree against the per-file manifest.
       - name: Cache the Ghent PDF Output Suite corpus
         id: ghent-cache
+        if: steps.ci.outputs.passed != 'true'
         uses: actions/cache@v6
         with:
           path: ghent-corpus
           key: ${{ runner.os }}-ghent-suite-${{ hashFiles('scripts/fetch-ghent-suite.py') }}
 
       - name: Fetch the Ghent PDF Output Suite corpus
-        if: steps.ghent-cache.outputs.cache-hit != 'true'
+        if: steps.ghent-cache.outputs.cache-hit != 'true' && steps.ci.outputs.passed != 'true'
         run: python scripts/fetch-ghent-suite.py
 
       - name: Verify the Ghent corpus against its manifest
+        if: steps.ci.outputs.passed != 'true'
         run: python scripts/fetch-ghent-suite.py --check
 
       # The GWG Processing Steps Test Suite, same posture and same reasoning
@@ -236,16 +296,18 @@ jobs:
       # archive digest pin.
       - name: Cache the GWG Processing Steps Test Suite corpus
         id: processing-steps-cache
+        if: steps.ci.outputs.passed != 'true'
         uses: actions/cache@v6
         with:
           path: processing-steps-corpus
           key: ${{ runner.os }}-processing-steps-suite-${{ hashFiles('scripts/fetch-processing-steps-suite.py') }}
 
       - name: Fetch the GWG Processing Steps Test Suite corpus
-        if: steps.processing-steps-cache.outputs.cache-hit != 'true'
+        if: steps.processing-steps-cache.outputs.cache-hit != 'true' && steps.ci.outputs.passed != 'true'
         run: python scripts/fetch-processing-steps-suite.py
 
       - name: Verify the Processing Steps corpus against its manifest
+        if: steps.ci.outputs.passed != 'true'
         run: python scripts/fetch-processing-steps-suite.py --check
 
       # The PDF/A conformance corpus (bfocom + veraPDF): fetched, never
@@ -256,22 +318,26 @@ jobs:
       # fetch script, which is where the commit SHA pins live.
       - name: Cache the PDF/A conformance corpus
         id: pdfa-corpus-cache
+        if: steps.ci.outputs.passed != 'true'
         uses: actions/cache@v6
         with:
           path: pdfa-corpus
           key: ${{ runner.os }}-pdfa-corpus-${{ hashFiles('scripts/fetch-pdfa-corpus.py') }}
 
       - name: Fetch the PDF/A conformance corpus
-        if: steps.pdfa-corpus-cache.outputs.cache-hit != 'true'
+        if: steps.pdfa-corpus-cache.outputs.cache-hit != 'true' && steps.ci.outputs.passed != 'true'
         run: python scripts/fetch-pdfa-corpus.py
 
       - name: Build the PDF/A clause index
+        if: steps.ci.outputs.passed != 'true'
         run: python scripts/pdfa-clause-index.py
 
       - name: Verify the PDF/A corpus and its clause index
+        if: steps.ci.outputs.passed != 'true'
         run: python scripts/fetch-pdfa-corpus.py --check
 
       - name: Install Ghostscript as a TEST TOOL (capability-present axis)
+        if: steps.ci.outputs.passed != 'true'
         # Ghostscript remains user-installed and absent from the installer.
         # This unpinned test install proves the minimum-version capability path
         # against the current package available to a Windows user.
@@ -281,6 +347,7 @@ jobs:
         timeout-minutes: 30
 
       - name: Export the test Ghostscript path
+        if: steps.ci.outputs.passed != 'true'
         run: |
           $candidates = @(Get-ChildItem "${env:ProgramFiles}\gs\gs*\bin\gswin64c.exe" -File -ErrorAction Stop)
           if ($candidates.Count -eq 0) { throw "No installed Ghostscript found" }
@@ -291,6 +358,7 @@ jobs:
       # --durations names the slowest tests in the log: a stall in this
       # suite is otherwise a silent 30 minutes with no test named.
       - name: Engine tests (full suite)
+        if: steps.ci.outputs.passed != 'true'
         run: python -m pytest tests/ -q --durations=25
         env:
           SPECTRAPDF_REQUIRE_ZERO_SKIPS: "1"
@@ -377,7 +445,7 @@ jobs:
           path: .lo-msi-cache
           key: ${{ runner.os }}-libreoffice-msi-${{ hashFiles('scripts/bundle-libreoffice.ps1') }}
 
-      - name: Vendor LibreOffice (O1 export runtime, MPL-2.0)
+      - name: Vendor LibreOffice (Office export runtime, MPL-2.0)
         # Self-sufficient: the runner has no LibreOffice, so the script downloads
         # its PINNED, checksum-verified stable .msi (the default in the script).
         # No repo variable, no manual setup. To bump the version, edit
@@ -387,13 +455,13 @@ jobs:
           SPECTRAPDF_LO_MSI_CACHE: .lo-msi-cache
 
       - name: Vendor native Tesseract
-        # Phase 12: recognition is native Tesseract as a subprocess (the GUI, the
+        # Recognition is native Tesseract as a subprocess (the GUI, the
         # CLI and every scheduled run share it). Pinned + SHA-256 verified in the
         # script; extracted from the NSIS installer with 7-Zip, never run.
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
 
       - name: Vendor jbig2enc (MRC mask codec, Apache-2.0)
-        # O8: the JBIG2 encoder for MRC's 1-bit text stencil. Official prebuilt
+        # The JBIG2 encoder for MRC's 1-bit text stencil. Official prebuilt
         # Windows x64 MSVC release asset, SHA-256 pinned in the script, driven
         # as a subprocess (the Ghostscript pattern). The script REFUSES to ship
         # if any statically-linked component named in upstream's depmf.json
@@ -401,7 +469,7 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1
 
       - name: Vendor spelling dictionaries
-        # P32: 35 Hunspell .aff/.dic pairs from LibreOffice/dictionaries at the
+        # 35 Hunspell .aff/.dic pairs from LibreOffice/dictionaries at the
         # commit pinned in the script, each file SHA-256 verified against
         # scripts/dictionaries.tsv. The script REFUSES to write the tree if any
         # tag ships a dictionary with no notice row (the jbig2enc precedent).
@@ -409,7 +477,7 @@ jobs:
         shell: pwsh
 
       - name: Vendor the Finnish morphological analyser
-        # N18: Finnish words are generated, not listed, so the fi tag ships
+        # Finnish words are generated, not listed, so the fi tag ships
         # libvoikko plus the voikko-fi transducer instead of an .aff/.dic pair.
         # Two pinned archives, SHA-256 verified before extraction and every
         # extracted file again against scripts/voikko.tsv. Must run AFTER the

@@ -189,7 +189,7 @@ jobs:
           path: .lo-msi-cache
           key: ${{ runner.os }}-libreoffice-msi-${{ hashFiles('scripts/bundle-libreoffice.ps1') }}
 
-      - name: Vendor LibreOffice (O1 export runtime, MPL-2.0)
+      - name: Vendor LibreOffice (Office export runtime, MPL-2.0)
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1
         env:
           SPECTRAPDF_LO_MSI_CACHE: .lo-msi-cache

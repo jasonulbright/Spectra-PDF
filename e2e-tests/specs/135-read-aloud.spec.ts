@@ -1,5 +1,5 @@
 /**
- * P30 — Read Out Loud, end to end.
+ * Read Out Loud, end to end.
  *
  * WHAT THIS SPEC CANNOT ASSERT, stated up front: audio. Nothing available to a
  * WebDriver session can hear the machine, and no API reports what came out of

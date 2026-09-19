@@ -31,7 +31,7 @@ async function saved(path: string, text: string) { await browser.waitUntil(async
 describe('Document JavaScripts working-session drafts', () => {
   let dir: string, a: string, b: string, aw: string;
   beforeEach(async () => {
-    dir = mkdtempSync(resolve(__dirname, '../../docs/audit/document-js-drafts.local.d-')); a = resolve(dir, 'A.pdf'); b = resolve(dir, 'B.pdf');
+    dir = mkdtempSync(resolve(__dirname, '../../document-js-drafts.local.d-')); a = resolve(dir, 'A.pdf'); b = resolve(dir, 'B.pdf');
     for (const [path, label] of [[a, 'A'], [b, 'B']]) {
       const pdf = await PDFDocument.create(); pdf.addPage(); pdf.addPage();
       pdf.catalog.set(PDFName.of('Names'), pdf.context.obj({ JavaScript: { Names: [PDFString.of(' Shared name '),

@@ -45,7 +45,7 @@ function matrixClose(a: number[] | undefined, b: number[], eps = 0.5): boolean {
  * rotation, and the fresh listing is a per-page engine round-trip behind. So
  * "the page has no placements" and "the fresh listing hasn't landed" are the
  * same reading, and an assertion that accepts it passes over an op that did
- * NOTHING — which is exactly what hid the stale-binding defect this round.
+ * NOTHING — which is exactly how a stale-binding defect hides.
  * Every wait below therefore reads only a SETTLED listing.
  */
 async function waitForMatrices(targets: number[][], msg: string): Promise<string> {
@@ -161,7 +161,7 @@ describe('image multi-select', () => {
     // The previous test's undo commits in TWO passes (bytes, then the
     // reindex's regenerated page ids). Bind the selection to a SETTLED
     // listing — a mid-pass reading names a page whose id is already dead,
-    // and the delete would then refuse (silently, before this round).
+    // and the delete would then refuse.
     const pageId = await waitForMatrices(
       [
         [100, 0, 0, 80, 40, 60],

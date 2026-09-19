@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { DOMParser, NAMESPACE, XMLSerializer } from '@xmldom/xmldom';
 
-import { transformXmpXml } from '../src/renderer/lib/xmp-packet';
+import { XMP_LIMITS, transformXmpXml, type XmpLimits } from '../src/renderer/lib/xmp-packet';
 
 const RDF_NS = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const PDF_NS = 'http://ns.adobe.com/pdf/1.3/';
@@ -650,28 +650,76 @@ describe('transformXmpXml — registered title aliases', () => {
 });
 
 describe('transformXmpXml — limits', () => {
-  it('refuses input past the character bound', () => {
-    const body = `<pdf:Producer>${'x'.repeat(2 * 1024 * 1024)}</pdf:Producer>`;
-    expect(() => transformXmpXml(packet(body), { producer: 'Spectra PDF' })).toThrow();
+  const PRODUCER = { producer: 'Spectra PDF' };
+  const fits = (xml: string, limits: XmpLimits) => {
+    try {
+      transformXmpXml(xml, PRODUCER, limits);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  /** The smallest value of one limit that accepts `xml`; a larger limit never
+   * turns an acceptance into a refusal, so a bisection finds it. */
+  const least = (xml: string, kind: keyof XmpLimits): number => {
+    expect(fits(xml, XMP_LIMITS)).toBe(true);
+    let low = 0, high = XMP_LIMITS[kind];
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (fits(xml, { ...XMP_LIMITS, [kind]: mid })) high = mid;
+      else low = mid + 1;
+    }
+    return low;
+  };
+  const items = (count: number) => packet(`<pdf:Producer>Old</pdf:Producer><pdf:Trapped>${'<rdf:li/>'.repeat(count)}</pdf:Trapped>`);
+  const nested = (depth: number) =>
+    packet(`<pdf:Producer>Old</pdf:Producer><pdf:Trapped>${'<rdf:li>'.repeat(depth)}deep${'</rdf:li>'.repeat(depth)}</pdf:Trapped>`);
+  const attributed = (count: number) =>
+    packet(`<pdf:Producer>Old</pdf:Producer><pdf:Trapped${Array.from({ length: count }, (_, i) => ` a${i}="v"`).join('')}>x</pdf:Trapped>`);
+
+  it('keeps the production bounds: 2 MiB, 50,000 nodes and 100 levels', () => {
+    expect(XMP_LIMITS).toEqual({ chars: 2 * 1024 * 1024, nodes: 50_000, depth: 100 });
+    expect(Object.isFrozen(XMP_LIMITS)).toBe(true);
   });
 
-  it('refuses a tree past the node bound', () => {
-    // One node per self-closing element, so this clears the 50,000 bound.
-    const body = `<pdf:Producer>Old</pdf:Producer><pdf:Trapped>${'<rdf:li/>'.repeat(50_100)}</pdf:Trapped>`;
-    expect(() => transformXmpXml(packet(body), { producer: 'Spectra PDF' })).toThrow();
+  it('refuses input one character past the character bound', () => {
+    const xml = items(1);
+    expect(fits(xml, { ...XMP_LIMITS, chars: xml.length })).toBe(true);
+    expect(fits(xml, { ...XMP_LIMITS, chars: xml.length - 1 })).toBe(false);
   });
 
-  it('refuses a tree past the depth bound', () => {
-    const depth = 120;
-    const body = `<pdf:Producer>Old</pdf:Producer><pdf:Trapped>${'<rdf:li>'.repeat(depth)}deep${'</rdf:li>'.repeat(depth)}</pdf:Trapped>`;
-    expect(() => transformXmpXml(packet(body), { producer: 'Spectra PDF' })).toThrow();
+  it('refuses a tree one node past the node bound', () => {
+    const nodes = least(items(3), 'nodes');
+    expect(least(items(4), 'nodes')).toBe(nodes + 1);
+    expect(fits(items(4), { ...XMP_LIMITS, nodes })).toBe(false);
+  });
+
+  it('refuses a tree one level past the depth bound', () => {
+    const depth = least(nested(3), 'depth');
+    expect(least(nested(4), 'depth')).toBe(depth + 1);
+    expect(fits(nested(4), { ...XMP_LIMITS, depth })).toBe(false);
+  });
+
+  it('counts text and comment nodes toward the node bound, even as the last nodes walked', () => {
+    // The walk visits a first child's subtree last, so these comments come
+    // after every element: only the per-node check can count them.
+    const trailing = (count: number) =>
+      packet(`<pdf:Trapped>x${'<!--c-->'.repeat(count)}</pdf:Trapped><pdf:Producer>Old</pdf:Producer>`);
+    const nodes = least(trailing(3), 'nodes');
+    expect(least(trailing(4), 'nodes')).toBe(nodes + 1);
+    expect(fits(trailing(4), { ...XMP_LIMITS, nodes })).toBe(false);
   });
 
   it('counts attributes toward the node bound', () => {
-    // 60,000 attributes on one element, which has only a handful of nodes.
-    const attrs = Array.from({ length: 60_000 }, (_, i) => ` a${i}="v"`).join('');
-    const body = `<pdf:Producer>Old</pdf:Producer><pdf:Trapped${attrs}>x</pdf:Trapped>`;
-    expect(() => transformXmpXml(packet(body), { producer: 'Spectra PDF' })).toThrow();
+    const nodes = least(attributed(3), 'nodes');
+    expect(least(attributed(4), 'nodes')).toBe(nodes + 1);
+    expect(fits(attributed(4), { ...XMP_LIMITS, nodes })).toBe(false);
+  });
+
+  it('applies the production depth bound when no limits are passed', () => {
+    const levels = XMP_LIMITS.depth - least(nested(0), 'depth');
+    expect(textAt(transformXmpXml(nested(levels), PRODUCER), PDF_NS, 'Producer')).toBe('Spectra PDF');
+    expect(() => transformXmpXml(nested(levels + 1), PRODUCER)).toThrow();
   });
 
   it('accepts a packet inside the bounds', () => {

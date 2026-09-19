@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { PDFArray, PDFDict, PDFDocument, PDFHeader, PDFHexString, PDFName, PDFNull, PDFNumber, PDFRef, PDFString } from 'pdf-lib';
-import { carryFormatDeclarations, saveWithFormatDeclarations } from '../src/renderer/lib/format-declarations';
+import {
+  FORMAT_DECLARATION_LIMITS,
+  carryFormatDeclarations,
+  saveWithFormatDeclarations,
+  type FormatDeclarationLimits,
+} from '../src/renderer/lib/format-declarations';
 const N = PDFName.of;
 async function document(header = '1.7', catalog?: string) {
   const doc = await PDFDocument.create({ updateMetadata: false }); doc.addPage();
@@ -108,10 +113,34 @@ describe('format declarations are source requirements, not donor metadata', () =
       expect((await saved([], output)).output.catalog.get(N('Version'))).toBe(N('2.0'));
     }
   });
-  it('bounds direct data before canonicalizing identities', async () => {
+  it.each([
+    ['byte', 'bytes'],
+    ['object', 'objects'],
+  ] as const)('bounds direct data one %s past the bound', async (_label, kind) => {
     const source = await document(), item = extension(source);
-    item.set(N('Private'), PDFString.of('x'.repeat(1024 * 1024 + 1)));
-    await expect(saved([source])).rejects.toThrow();
+    const fits = async (limits: FormatDeclarationLimits) => {
+      try {
+        carryFormatDeclarations(await document(), [source], limits);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    // A string grows the byte charge by one per character; an array grows the
+    // object charge by one per element.
+    const grow = (size: number) => item.set(N('Private'), kind === 'bytes'
+      ? PDFString.of('x'.repeat(size))
+      : source.context.obj(Array.from({ length: size }, (_, i) => i)));
+    grow(8);
+    let limit = 0;
+    while (!(await fits({ ...FORMAT_DECLARATION_LIMITS, [kind]: limit }))) limit++;
+    grow(9);
+    expect(await fits({ ...FORMAT_DECLARATION_LIMITS, [kind]: limit })).toBe(false);
+    expect(await fits({ ...FORMAT_DECLARATION_LIMITS, [kind]: limit + 1 })).toBe(true);
+  });
+  it('keeps the production bounds: 8,000 objects and 1 MiB', () => {
+    expect(FORMAT_DECLARATION_LIMITS).toEqual({ objects: 8000, bytes: 1024 * 1024 });
+    expect(Object.isFrozen(FORMAT_DECLARATION_LIMITS)).toBe(true);
   });
   it('does not exponentially encode nested strings when comparing declarations', async () => {
     const a = await document(), b = await document();

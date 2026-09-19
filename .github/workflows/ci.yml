@@ -453,8 +453,8 @@ jobs:
     #
     # Do NOT pin a Fixed Version 149 runtime: users are evergreen on 150,
     # where the app works (the regression only gates elevated debugger
-    # attach), so a pinned CI runtime tests what nobody runs and rots (see
-    # CLAUDE.md's never-pin rule).
+    # attach), so a pinned CI runtime tests what nobody runs and rots. A
+    # webview runtime is never pinned to an exact version; a minimum is.
     #
     # The open options are a SELF-HOSTED runner running as a normal user
     # (the local suite proves the stack is fine non-elevated), or leaving
@@ -537,7 +537,7 @@ jobs:
       # multi-command block would be masked by the staging command's exit
       # status and reported as success.
       - name: Vendor native Tesseract
-        # Phase 12 made recognition native and engine-side, so 14-ocr-find and
+        # Recognition is native and engine-side, so 14-ocr-find and
         # 40-batch-ocr now need the real tesseract.exe and real traineddata —
         # a stub would fail them for a reason that has nothing to do with the
         # WebView2 experiment this job is testing.

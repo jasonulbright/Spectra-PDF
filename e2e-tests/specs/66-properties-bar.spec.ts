@@ -16,7 +16,7 @@ const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 // delete. Selection is Select-tool click on the annotation body — new
 // interaction surface, so the spec drives the REAL click path, not a harness
 // shortcut.
-describe('properties bar (I.6)', () => {
+describe('properties bar', () => {
   before(async () => {
     await waitForHarness();
     await openByPaths([SAMPLE]);

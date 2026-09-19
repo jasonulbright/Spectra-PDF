@@ -1883,7 +1883,7 @@ fn verifies_the_manifest_named_by_the_environment() {}
 """
 
 
-#: The reviewer's probe, verbatim in shape: an explicit `[[test]]` claiming
+#: A probe in this shape: an explicit `[[test]]` claiming
 #: the name the verifier once staged under, pathed at a tag-local accepting
 #: source. Cargo runs the explicit target over the inferred `tests/<name>.rs`.
 EXPLICIT_TEST_REDIRECT = """
@@ -2411,6 +2411,158 @@ def test_ci_stages_both_engine_capabilities() -> None:
 
 def test_release_verification_stages_both_engine_capabilities() -> None:
     _assert_capabilities_precede_engine_tests("release.yml")
+
+
+# --- Verify reuses CI's engine suite result only on proof ---
+
+CI_REUSE_STEP = "Reuse CI's engine suite result for this commit"
+CI_REUSE_GUARD = "steps.ci.outputs.passed != 'true'"
+#: The first and last of the verify job's engine-suite steps: its provisioning
+#: and the run itself. ci.yml's test-engine job runs the same suite on every
+#: push of main, which is the run the check reads.
+VERIFY_ENGINE_SUITE = (
+    "Install the vendored wheels (the rest of the shipped set)",
+    "Engine tests (full suite)",
+)
+
+
+def _step_condition(text: str) -> str:
+    for line in text.splitlines():
+        if line.startswith("        if: "):
+            return line.split("if:", 1)[1].strip()
+    return ""
+
+
+def _run_block(text: str) -> str:
+    """A step's `run: |` block, dedented to the script itself."""
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "run: |")
+    body: list[str] = []
+    for line in lines[start + 1:]:
+        if line.strip() and not line.startswith(" " * 10):
+            break
+        body.append(line[10:])
+    return "\n".join(body).strip("\n")
+
+
+def test_verify_skips_exactly_the_engine_suite_on_ci_proof() -> None:
+    """Lint, typecheck, the unit suite, the renderer build and the Rust suites
+    stay unconditional; the guard covers the engine suite and nothing else."""
+    steps = _job_steps("release.yml", "verify")
+    names = [name for name, _ in steps]
+    check = names.index(CI_REUSE_STEP)
+    first, last = (names.index(name) for name in VERIFY_ENGINE_SUITE)
+    assert check < first < last
+    for index, (name, text) in enumerate(steps):
+        assert (CI_REUSE_GUARD in _step_condition(text)) == (first <= index <= last), name
+    # A cache-miss fetch keeps its own condition beside the guard.
+    for cache_id in ("ghent-cache", "processing-steps-cache", "pdfa-corpus-cache"):
+        assert any(
+            _step_condition(text) == f"steps.{cache_id}.outputs.cache-hit != 'true' && {CI_REUSE_GUARD}"
+            for _name, text in steps
+        ), cache_id
+
+
+def test_the_ci_reuse_check_cannot_fail_the_job_or_skip_by_default() -> None:
+    text = dict(_job_steps("release.yml", "verify"))[CI_REUSE_STEP]
+    assert "        id: ci\n" in text
+    assert "        continue-on-error: true\n" in text
+    assert "GH_TOKEN: ${{ github.token }}" in text
+    script = _run_block(text)
+    assert "actions/workflows/ci.yml/runs?head_sha=$sha&event=push" in script
+    assert '$sha = "$(git rev-parse HEAD)".Trim()' in script
+    # The skip is written in exactly one place, behind a proven success of
+    # both the query and the decision; everything else leaves no output.
+    assert script.count("passed=true") == 1
+    assert "$passed = ($LASTEXITCODE -eq 0) -and (Test-CiPassed" in script
+    assert re.search(r'if \(\$passed\) \{\s*"passed=true" >> \$env:GITHUB_OUTPUT', script)
+    assert script.endswith("exit 0")
+
+
+def test_only_verify_reads_actions_and_it_writes_nothing() -> None:
+    header = _job_header("release.yml", "verify").splitlines()
+    at = header.index("    permissions:")
+    assert header[at + 1:at + 3] == ["      contents: read", "      actions: read"]
+    grants = [
+        (workflow, line.strip())
+        for workflow in sorted(p.name for p in (ROOT / ".github" / "workflows").glob("*.yml"))
+        for line in (ROOT / ".github" / "workflows" / workflow).read_text().splitlines()
+        if re.fullmatch(r"\s+actions:\s*(read|write)\s*", line)
+    ]
+    assert grants == [("release.yml", "actions: read")]
+
+
+def test_the_reused_run_is_the_same_suite_on_every_push_of_main() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    assert "on:\n  push:\n    branches: [main, master]\n" in ci
+    assert not any(line.strip().startswith("if:") for line in _job_header("ci.yml", "test-engine").splitlines())
+    ci_run = dict(_job_steps("ci.yml", "test-engine"))["Run engine tests (full suite)"]
+    verify_run = dict(_job_steps("release.yml", "verify"))["Engine tests (full suite)"]
+    assert _step_condition(ci_run) == ""
+    for text in (ci_run, verify_run):
+        assert f"run: {PYTEST_SUITE_RUN} -q --durations=25\n" in text + "\n"
+        assert 'SPECTRAPDF_REQUIRE_ZERO_SKIPS: "1"' in text
+
+
+CI_REUSE_SHA = "0123456789abcdef0123456789abcdef01234567"
+CI_REUSE_RUN = {
+    "head_sha": CI_REUSE_SHA,
+    "event": "push",
+    "path": ".github/workflows/ci.yml",
+    "status": "completed",
+    "conclusion": "success",
+}
+
+
+def _ci_answer(*runs: dict) -> str:
+    return json.dumps({"total_count": len(runs), "workflow_runs": [{**CI_REUSE_RUN, **run} for run in runs]})
+
+
+#: (label, API answer, commit, expected decision). Only the first two skip.
+CI_REUSE_CASES = (
+    ("one successful push run", _ci_answer({}), CI_REUSE_SHA, True),
+    ("the commit pushed twice, both runs successful", _ci_answer({}, {}), CI_REUSE_SHA, True),
+    ("no run yet", _ci_answer(), CI_REUSE_SHA, False),
+    ("queued", _ci_answer({"status": "queued", "conclusion": None}), CI_REUSE_SHA, False),
+    ("in progress", _ci_answer({"status": "in_progress", "conclusion": None}), CI_REUSE_SHA, False),
+    ("cancelled", _ci_answer({"conclusion": "cancelled"}), CI_REUSE_SHA, False),
+    ("failed", _ci_answer({"conclusion": "failure"}), CI_REUSE_SHA, False),
+    ("timed out", _ci_answer({"conclusion": "timed_out"}), CI_REUSE_SHA, False),
+    ("skipped", _ci_answer({"conclusion": "skipped"}), CI_REUSE_SHA, False),
+    ("a success beside a failed run", _ci_answer({}, {"conclusion": "failure"}), CI_REUSE_SHA, False),
+    ("a success beside a running one", _ci_answer({}, {"status": "in_progress", "conclusion": None}), CI_REUSE_SHA, False),
+    ("another commit's run", _ci_answer({"head_sha": "f" * 40}), CI_REUSE_SHA, False),
+    ("a pull request run", _ci_answer({"event": "pull_request"}), CI_REUSE_SHA, False),
+    ("another workflow's run", _ci_answer({"path": ".github/workflows/release.yml"}), CI_REUSE_SHA, False),
+    ("a success spelled differently", _ci_answer({"conclusion": "Success"}), CI_REUSE_SHA, False),
+    ("an unreadable answer", "<html>rate limited</html>", CI_REUSE_SHA, False),
+    ("a null answer", "null", CI_REUSE_SHA, False),
+    ("an answer without runs", "{}", CI_REUSE_SHA, False),
+    ("no commit", _ci_answer({}), "", False),
+    ("an abbreviated commit", _ci_answer({"head_sha": CI_REUSE_SHA[:12]}), CI_REUSE_SHA[:12], False),
+)
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_the_ci_reuse_decision_skips_only_on_proven_success() -> None:
+    """The workflow's own decision function, run over every answer shape."""
+    script = _run_block(dict(_job_steps("release.yml", "verify"))[CI_REUSE_STEP])
+    function = re.search(r"^function Test-CiPassed.*?^\}$", script, re.S | re.M)
+    assert function, "Test-CiPassed is gone from the check step"
+    quote = lambda s: "'" + s.replace("'", "''") + "'"  # noqa: E731
+    probe = function.group(0) + "\n" + "\n".join(
+        f"Write-Output ('' + (Test-CiPassed -Json {quote(answer)} -Sha {quote(sha)}) + {quote(f'|{expected}|{label}')})"
+        for label, answer, sha, expected in CI_REUSE_CASES
+    )
+    out = subprocess.run(
+        ["pwsh", "-NoProfile", "-NonInteractive", "-Command", probe],
+        capture_output=True, text=True, cwd=ROOT,
+    )
+    assert out.returncode == 0, out.stderr
+    rows = [line.split("|", 2) for line in out.stdout.splitlines() if line.count("|") >= 2]
+    assert len(rows) == len(CI_REUSE_CASES), out.stdout + out.stderr
+    for actual, expected, label in rows:
+        assert actual == expected, f"{label}: decided {actual}, expected {expected}"
 
 
 # --- Release notes come from the changelog, not from a workflow literal ---

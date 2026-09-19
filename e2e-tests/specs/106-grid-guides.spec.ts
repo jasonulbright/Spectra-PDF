@@ -2,8 +2,8 @@
 // the built binary.
 //
 // The fixture is a BLANK 400×400 page on purpose: with no drawn geometry the
-// only snap candidates in existence are the ones this slice adds, so a landed
-// point can only have come from a guide or the grid. (Spec 105 covers the
+// only snap candidates in existence are the guides and the grid, so a landed
+// point can only have come from one of them. (Spec 105 covers the
 // geometric types on a page that has geometry.)
 //
 // As in 105, the assertion for "did it snap?" is EXACTNESS — a snapped

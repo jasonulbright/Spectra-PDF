@@ -25,7 +25,7 @@ async function saved(path: string, value: string) { await browser.waitUntil(asyn
 describe('page-label drafts and physical-page semantics', () => {
   let dir: string, a: string, b: string, aw: string;
   beforeEach(async () => {
-    dir = mkdtempSync(resolve(__dirname, '../../docs/audit/page-label-drafts.local.d-')); a = resolve(dir, 'A.pdf'); b = resolve(dir, 'B.pdf');
+    dir = mkdtempSync(resolve(__dirname, '../../page-label-drafts.local.d-')); a = resolve(dir, 'A.pdf'); b = resolve(dir, 'B.pdf');
     for (const [path, name] of [[a, 'A-'], [b, 'B-']]) {
       const pdf = await PDFDocument.create(); for (const width of [600, 610, 620]) pdf.addPage([width, 800]);
       pdf.catalog.set(PDFName.of('PageLabels'), pdf.context.obj({ Nums: [0, { S: 'D', P: PDFString.of(name), St: 5 }] }));

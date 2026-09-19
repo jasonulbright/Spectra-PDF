@@ -24,7 +24,12 @@ import {
   PDFString,
 } from 'pdf-lib';
 
-import { carryOptionalContent } from '../src/renderer/lib/optional-content-carry';
+import {
+  OPTIONAL_CONTENT_LIMITS,
+  carryOptionalContent,
+  optionalContentBudget,
+  type OptionalContentBudget,
+} from '../src/renderer/lib/optional-content-carry';
 import type { CarriedSourcePages } from '../src/renderer/lib/catalog-carry';
 
 const N = PDFName.of.bind(PDFName);
@@ -146,6 +151,7 @@ async function layered(options: LayerOptions = {}): Promise<Built> {
 async function rebuild(
   plan: { bytes: Uint8Array; indices: number[] }[],
   ownIndex = 0,
+  budget?: OptionalContentBudget,
 ): Promise<{ out: PDFDocument; ownMap: Map<string, PDFRef[]> | undefined }> {
   const output = await blank();
   const sources: CarriedSourcePages[] = [];
@@ -159,7 +165,7 @@ async function rebuild(
   }
   if (output.getPageCount() === 0) output.addPage([300, 700]);
   const own = sources[ownIndex];
-  const carry = carryOptionalContent(output, sources, own);
+  const carry = carryOptionalContent(output, sources, own, budget);
   // The carrier installs nothing; publishing is the caller's step.
   expect(output.catalog.get(N('OCProperties'))).toBeUndefined();
   if (carry.properties) {
@@ -1280,42 +1286,60 @@ describe('carryOptionalContent — refusals', () => {
     await expect(rebuild([{ bytes: source.bytes, indices: [0] }])).rejects.toThrow();
   });
 
-  // Building and serializing a registry this wide is itself slow, so the case
-  // gets room; the assertion is still that the carrier refuses it.
-  it('refuses a registry wider than the work bound', async () => {
-    const doc = await blank();
-    const ctx = doc.context;
-    const page = doc.addPage([300, 700]);
-    const groups = Array.from({ length: 120_000 }, (_, i) =>
-      ctx.register(ctx.obj({ Type: 'OCG', Name: PDFString.of(`L${i}`) })),
-    );
-    page.node.set(N('Resources'), ctx.obj({ Properties: { Layer: groups[0] } }));
-    page.node.set(N('Contents'), ctx.register(ctx.stream('/OC /Layer BDC 0 0 1 1 re f EMC')));
-    doc.catalog.set(N('OCProperties'), ctx.obj({ OCGs: groups, D: { Order: [] } }));
-    const bytes = await doc.save();
-    await expect(rebuild([{ bytes, indices: [0] }])).rejects.toThrow();
-  }, 120_000);
+  it('refuses a registry one group wider than an injected work bound', async () => {
+    const registry = async (count: number) => {
+      const doc = await blank();
+      const ctx = doc.context;
+      const page = doc.addPage([300, 700]);
+      const groups = Array.from({ length: count }, (_, i) =>
+        ctx.register(ctx.obj({ Type: 'OCG', Name: PDFString.of(`L${i}`) })),
+      );
+      page.node.set(N('Resources'), ctx.obj({ Properties: { Layer: groups[0] } }));
+      page.node.set(N('Contents'), ctx.register(ctx.stream('/OC /Layer BDC 0 0 1 1 re f EMC')));
+      doc.catalog.set(N('OCProperties'), ctx.obj({ OCGs: groups, D: { Order: [] } }));
+      return [{ bytes: await doc.save(), indices: [0] }];
+    };
+    const [three, four] = await Promise.all([registry(3), registry(4)]);
+    const [spentThree, spentFour] = [optionalContentBudget(), optionalContentBudget()];
+    await rebuild(three, 0, spentThree);
+    await rebuild(four, 0, spentFour);
+    // A registered group is work whether or not a page renders it.
+    expect(spentFour.objects).toBeGreaterThan(spentThree.objects);
+    const limits = { ...OPTIONAL_CONTENT_LIMITS, objects: spentThree.objects };
+    await expect(rebuild(three, 0, optionalContentBudget(limits))).resolves.toBeDefined();
+    await expect(rebuild(four, 0, optionalContentBudget(limits))).rejects.toThrow();
+  });
 
-  it('refuses a registry-only group whose payload exceeds the byte bound', async () => {
+  it('refuses a registry-only group whose payload is one byte past an injected byte bound', async () => {
     // A group the pages render rides the page copy, so its own bytes are the
     // page copier's work. A registry-only group is copied HERE, and that is
     // the payload this budget answers for.
-    const doc = await blank();
-    const ctx = doc.context;
-    const page = doc.addPage([300, 700]);
-    const ocg = ctx.register(
-      ctx.obj({
-        Type: 'OCG',
-        Name: PDFString.of('Huge'),
-        VendorBlob: PDFString.of('x'.repeat(65 * 1024 * 1024)),
-      }),
-    );
-    page.node.set(N('Resources'), ctx.obj({}));
-    page.node.set(N('Contents'), ctx.register(ctx.stream('0 0 1 1 re f')));
-    doc.catalog.set(N('OCProperties'), ctx.obj({ OCGs: [ocg], D: { Order: [ocg] } }));
-    const bytes = await doc.save();
-    await expect(rebuild([{ bytes, indices: [0] }])).rejects.toThrow();
-  }, 120_000);
+    const blob = async (length: number) => {
+      const doc = await blank();
+      const ctx = doc.context;
+      const page = doc.addPage([300, 700]);
+      const ocg = ctx.register(
+        ctx.obj({ Type: 'OCG', Name: PDFString.of('Huge'), VendorBlob: PDFString.of('x'.repeat(length)) }),
+      );
+      page.node.set(N('Resources'), ctx.obj({}));
+      page.node.set(N('Contents'), ctx.register(ctx.stream('0 0 1 1 re f')));
+      doc.catalog.set(N('OCProperties'), ctx.obj({ OCGs: [ocg], D: { Order: [ocg] } }));
+      return [{ bytes: await doc.save(), indices: [0] }];
+    };
+    const [eight, nine] = await Promise.all([blob(8), blob(9)]);
+    const [spentEight, spentNine] = [optionalContentBudget(), optionalContentBudget()];
+    await rebuild(eight, 0, spentEight);
+    await rebuild(nine, 0, spentNine);
+    expect(spentNine.bytes).toBeGreaterThan(spentEight.bytes);
+    const limits = { ...OPTIONAL_CONTENT_LIMITS, bytes: spentEight.bytes };
+    await expect(rebuild(eight, 0, optionalContentBudget(limits))).resolves.toBeDefined();
+    await expect(rebuild(nine, 0, optionalContentBudget(limits))).rejects.toThrow();
+  });
+
+  it('keeps the production work bounds: 200,000 objects and 64 MiB', () => {
+    expect(OPTIONAL_CONTENT_LIMITS).toEqual({ objects: 200_000, bytes: 64 * 1024 * 1024 });
+    expect(Object.isFrozen(OPTIONAL_CONTENT_LIMITS)).toBe(true);
+  });
 });
 
 describe('carryOptionalContent — the source is not mutated', () => {

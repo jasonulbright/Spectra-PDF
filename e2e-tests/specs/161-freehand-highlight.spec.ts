@@ -1,8 +1,9 @@
-// F36 — the field flow, end to end, on the document that motivated it.
+// The freehand highlighter and the tool lock, end to end, on an image-only
+// scan.
 //
-// The report: an image-only scan cannot be highlighted at all, because
-// text-markup highlight needs text to select and there is none; and marking
-// section after section costs one tool pick per mark. So this spec runs
+// An image-only scan cannot take a text-markup highlight, because there is no
+// text to select; and marking section after section costs one tool pick per
+// mark. So this spec runs
 // EXACTLY that: open an image-only PDF, arm the freehand highlighter ONCE,
 // confirm the lock is on, drag across several pages without re-arming, save,
 // reopen, and check the marks are there and translucent over the image.

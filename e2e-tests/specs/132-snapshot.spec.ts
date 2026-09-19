@@ -1,5 +1,5 @@
 /**
- * P31 — the snapshot tool, end to end.
+ * The snapshot tool, end to end.
  *
  * Driven as a REAL pointer gesture rather than through a harness seam: the
  * band's commit callback is a prop, and a render path that forgets to pass it

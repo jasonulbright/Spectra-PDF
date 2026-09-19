@@ -58,10 +58,17 @@ import type { CarriedSourcePages } from './catalog-carry';
 
 const N = PDFName.of.bind(PDFName);
 
+export interface OptionalContentLimits {
+  readonly objects: number;
+  readonly bytes: number;
+}
+
 // Bounds, not predictions. Discovery, mapping, validation and copying all
 // spend from one pair of counters; no phase runs unbounded ahead of another.
-const MAX_OBJECTS = 200_000;
-const MAX_BYTES = 64 * 1024 * 1024;
+export const OPTIONAL_CONTENT_LIMITS: OptionalContentLimits = Object.freeze({
+  objects: 200_000,
+  bytes: 64 * 1024 * 1024,
+});
 const MAX_DEPTH = 64;
 
 /** Table 96: an optional content group. */
@@ -101,14 +108,21 @@ const ACTION_TYPES = new Set([
 
 const refuse = (): Error => new Error(tChrome('app.operation.unverified'));
 
-interface Budget {
+/** What one carry spends. A budget serves one call: an object charged to it
+ * is never charged to it again, so a second call would under-count. */
+export interface OptionalContentBudget {
   objects: number;
   bytes: number;
+  readonly limits: OptionalContentLimits;
 }
+type Budget = OptionalContentBudget;
+
+export const optionalContentBudget = (limits: OptionalContentLimits = OPTIONAL_CONTENT_LIMITS): Budget =>
+  ({ objects: 0, bytes: 0, limits });
 
 function spend(budget: Budget, count = 1): void {
   budget.objects += count;
-  if (budget.objects > MAX_OBJECTS) throw refuse();
+  if (budget.objects > budget.limits.objects) throw refuse();
 }
 
 /** A page graph walk charges each distinct source object once per build: a
@@ -135,7 +149,7 @@ function spendOnce(budget: Budget, doc: PDFDocument, value: PDFObject | undefine
 
 function spendBytes(budget: Budget, count: number): void {
   budget.bytes += count;
-  if (budget.bytes > MAX_BYTES) throw refuse();
+  if (budget.bytes > budget.limits.bytes) throw refuse();
 }
 
 const isText = (v: PDFObject | undefined): v is PDFString | PDFHexString =>
@@ -219,13 +233,16 @@ interface SourceContent {
  *
  * Returns the composed dictionary and the source-to-output group identities.
  * It installs nothing: the caller decides where the result belongs.
+ *
+ * Production callers omit `budget`; a caller that passes one reads the spend
+ * from it afterwards.
  */
 export function carryOptionalContent(
   output: PDFDocument,
   sources: CarriedSourcePages[],
   ownSource?: CarriedSourcePages,
+  budget: Budget = optionalContentBudget(),
 ): OptionalContentCarry {
-  const budget: Budget = { objects: 0, bytes: 0 };
   const identities = new Map<PDFDocument, Map<string, PDFRef[]>>();
 
   // The own document contributes its configuration even with no page kept.

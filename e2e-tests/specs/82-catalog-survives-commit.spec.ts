@@ -199,7 +199,7 @@ describe('catalog state survives committed page edits', () => {
     expect(readFileSync(path).equals(original)).toBe(true);
   });
   for (const keepOwn of [true, false]) it(`keeps document language, preferences and dates with ${keepOwn ? 'one original page' : 'only imported pages'}`, async () => {
-    const dir = mkdtempSync(resolve(__dirname, '../../docs/audit/catalog-owner-live.local.d-'));
+    const dir = mkdtempSync(resolve(__dirname, '../../catalog-owner-live.local.d-'));
     const own = resolve(dir, 'own.pdf'), donor = resolve(dir, 'donor.pdf'), N = PDFName.of;
     for (const [path, language, count] of [[own, 'de-DE', 2], [donor, 'fr-FR', 1]] as const) {
       const pdf = await PDFDocument.create(); for (let i = 0; i < count; i++) pdf.addPage([600 + i * 10, 800]);

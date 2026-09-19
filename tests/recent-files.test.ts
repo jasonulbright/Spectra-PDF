@@ -489,6 +489,9 @@ describe('the tombstone store', () => {
   });
 
   it('reads a malformed or wrong-shaped value as no tombstones', async () => {
+    // readRecent reads storage on every call, so one fresh window serves
+    // every shape.
+    const A = await newWindow();
     for (const raw of [
       '{not json',
       '{}',
@@ -504,8 +507,7 @@ describe('the tombstone store', () => {
       vi.stubGlobal('localStorage', fakeStorage());
       localStorage.setItem('spectra-recent', JSON.stringify([{ path: 'a.pdf', openedAt: 1 }]));
       localStorage.setItem(REMOVED_KEY, raw);
-      const A = await newWindow();
-      expect(A.readRecent()).toEqual([{ path: 'a.pdf', openedAt: 1 }]);
+      expect(A.readRecent(), raw).toEqual([{ path: 'a.pdf', openedAt: 1 }]);
     }
   });
 

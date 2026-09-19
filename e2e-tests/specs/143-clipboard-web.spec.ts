@@ -1,5 +1,5 @@
 /**
- * P35 — Create PDF from the clipboard, and from a web page.
+ * Create PDF from the clipboard, and from a web page.
  *
  * The clipboard image is seeded by the PRODUCT'S OWN WRITE PATH: spec 132
  * drives the snapshot tool, which publishes `CF_DIB` + `PNG` in one clipboard

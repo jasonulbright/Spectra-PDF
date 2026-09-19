@@ -23,7 +23,7 @@ async function makeCommentedPdf(path: string): Promise<void> {
   writeFileSync(path, await doc.save());
 }
 
-describe('comments overview (I.2/I.6)', () => {
+describe('comments overview', () => {
   let tmp: string;
   let source: string;
 

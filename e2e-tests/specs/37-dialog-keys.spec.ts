@@ -87,7 +87,7 @@ describe('dialog keyboard model', () => {
 
   it('reload keys never reach the webview — the app state SURVIVES F5 and Ctrl+R', async () => {
     expect((await getState()).fileCount).toBe(1);
-    // F5 is Presentation now (I.6) — with a document open it opens the
+    // F5 is Presentation — with a document open it opens the
     // overlay INSTEAD of reloading. Survival + the overlay appearing are
     // both part of the contract; Escape puts the view back.
     await browser.keys(['F5']);
@@ -105,10 +105,10 @@ describe('dialog keyboard model', () => {
   });
 
   it('…and survives F5 pressed while a MENU is open (the step-aside path)', async () => {
-    // The Radix-menu branch stepped aside without suppression — F5 over an
-    // open File menu reloaded the whole app (regression). Post-I.6
-    // the suppressed key DISPATCHES (presentation opens); the reload-survival
-    // discriminator is unchanged.
+    // The failure mode: a menu branch that steps aside without suppression
+    // lets F5 over an open File menu reload the whole app. The suppressed key
+    // DISPATCHES (presentation opens); the reload-survival discriminator is
+    // unchanged.
     await $('[data-testid="menu-file"]').click();
     await $('[data-testid="menuitem-file-open"]').waitForDisplayed();
     await browser.keys(['F5']);

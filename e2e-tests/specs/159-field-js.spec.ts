@@ -247,8 +247,8 @@ describe('field JavaScript: off by default, real when switched on', () => {
         timeout: 20_000,
         timeoutMsg: 'the off-state script list never appeared',
       });
-      // The refusal list is the F23 wording, unchanged, plus the one line that
-      // says which switch decides.
+      // The refusal list is the scripts-off wording, unchanged, plus the one
+      // line that says which switch decides.
       expect(await textOf('[data-testid="forms-scripts-switch"]')).not.toBe('');
       expect(await present('[data-testid="forms-scripts-running"]')).toBe(false);
       await setView('canvas');

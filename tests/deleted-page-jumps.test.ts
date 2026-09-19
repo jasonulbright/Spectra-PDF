@@ -76,19 +76,22 @@ describe.each(['pdf', 'pdfx'] as const)('document state pointing at a page place
 });
 
 describe('page reference binding on a heavily annotated page', () => {
-  it('builds 5,000 annotations with /P over 10,000 resource objects without refusing', async () => {
+  // page-edit-scale.test.ts proves by charge counts that 5,000 annotations
+  // over 10,000 resources fit the work bounds; this case proves every /P
+  // rebinds.
+  it('binds every annotation /P over a shared resource graph to the placed page', async () => {
     const out = await rebuildAs('pdf', [0, 2], pdf => {
       const ctx = pdf.context, states = ctx.obj({});
-      for (let i = 0; i < 10000; i++) states.set(N(`GS${i}`), ctx.register(ctx.obj({ Type: 'ExtGState', CA: 1 })));
+      for (let i = 0; i < 40; i++) states.set(N(`GS${i}`), ctx.register(ctx.obj({ Type: 'ExtGState', CA: 1 })));
       pdf.getPage(0).node.set(N('Resources'), ctx.obj({ ExtGState: states }));
-      const annots = Array.from({ length: 5000 }, (_, i) => ctx.register(ctx.obj({
+      const annots = Array.from({ length: 20 }, (_, i) => ctx.register(ctx.obj({
         Type: 'Annot', Subtype: 'Square', Rect: [i % 200, 0, i % 200 + 5, 5], P: pdf.getPage(0).ref })));
       pdf.getPage(0).node.set(N('Annots'), ctx.obj(annots));
     });
     const annots = out.getPage(0).node.lookup(N('Annots'), PDFArray);
-    expect(annots.size()).toBe(5000);
-    expect(annots.lookup(4999, PDFDict).get(N('P'))).toEqual(out.getPage(0).ref);
-  }, 120000);
+    expect(annots.size()).toBe(20);
+    for (let i = 0; i < 20; i++) expect(annots.lookup(i, PDFDict).get(N('P'))).toEqual(out.getPage(0).ref);
+  });
 
   it.each(['pdf', 'pdfx'] as const)('builds a long chain of page-to-page links without refusing (%s)', async format => {
     const order = Array.from({ length: 100 }, (_, i) => i).filter(i => i !== 49);

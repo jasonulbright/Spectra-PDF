@@ -42,12 +42,28 @@ import { tChrome } from '../i18n';
 
 const N = PDFName.of.bind(PDFName);
 
+export interface OutputIntentLimits {
+  /** Edges visited, repeated references included. */
+  readonly objects: number;
+  readonly depth: number;
+  /** Stream, string, name and key bytes, aggregated over the whole graph. */
+  readonly bytes: number;
+}
+
 // Bounds, not predictions. Every stage — identity discovery, shape validation
 // and the copy itself — spends from the same two counters, so no phase can do
 // unbounded work ahead of the others.
-const MAX_OBJECTS = 5_000;
-const MAX_DEPTH = 64;
-const MAX_BYTES = 32 * 1024 * 1024;
+export const OUTPUT_INTENT_LIMITS: OutputIntentLimits = Object.freeze({
+  objects: 5_000,
+  depth: 64,
+  bytes: 32 * 1024 * 1024,
+});
+
+interface Budget {
+  objects: number;
+  bytes: number;
+  readonly limits: OutputIntentLimits;
+}
 
 /** These explicit types prove a non-data role. Some are optional (notably
  * StructElem and Action); their absence alone never proves a data role. */
@@ -132,18 +148,21 @@ const isText = (value: PDFObject | undefined): boolean =>
  * that array already exists, `output.context.getObjectRef` finds it.
  *
  * On refusal some objects may already be allocated in `output`'s context; they
- * are unreachable because no root is published, which is the caller's step. */
+ * are unreachable because no root is published, which is the caller's step.
+ *
+ * Production callers omit `limits`. */
 export function copyOutputIntents(
   output: PDFDocument,
   source: PDFDocument,
   raw: PDFObject | undefined,
+  limits: OutputIntentLimits = OUTPUT_INTENT_LIMITS,
 ): PDFArray | undefined {
   if (raw === undefined) return undefined;
   const root = source.context.lookup(raw);
   if (root === undefined || root === PDFNull) return undefined;
   if (!(root instanceof PDFArray)) throw refuse();
 
-  const budget = { objects: 0, bytes: 0 };
+  const budget: Budget = { objects: 0, bytes: 0, limits };
   const forbidden = forbiddenRefs(source, budget);
   if (raw instanceof PDFRef && forbidden.has(raw.tag)) throw refuse();
 
@@ -165,13 +184,13 @@ export function copyOutputIntents(
   return copied;
 }
 
-function spend(budget: { objects: number; bytes: number }): void {
-  if (++budget.objects > MAX_OBJECTS) throw refuse();
+function spend(budget: Budget): void {
+  if (++budget.objects > budget.limits.objects) throw refuse();
 }
 
-function spendBytes(budget: { objects: number; bytes: number }, count: number): void {
+function spendBytes(budget: Budget, count: number): void {
   budget.bytes += count;
-  if (budget.bytes > MAX_BYTES) throw refuse();
+  if (budget.bytes > budget.limits.bytes) throw refuse();
 }
 
 /** One reader for every known field. An entry that is absent, directly null,
@@ -183,7 +202,7 @@ function field(
   source: PDFDocument,
   dict: PDFDict,
   key: string,
-  budget: { objects: number; bytes: number },
+  budget: Budget,
 ): PDFObject | undefined {
   spend(budget);
   const declared = dict.get(N(key), true);
@@ -202,7 +221,7 @@ function field(
 function validateIntent(
   source: PDFDocument,
   intent: PDFDict,
-  budget: { objects: number; bytes: number },
+  budget: Budget,
 ): void {
   const read = (key: string) => field(source, intent, key, budget);
 
@@ -242,7 +261,7 @@ function validateIntent(
 function validateProfileRef(
   source: PDFDocument,
   profileRef: PDFDict,
-  budget: { objects: number; bytes: number },
+  budget: Budget,
 ): void {
   const read = (key: string) => field(source, profileRef, key, budget);
 
@@ -273,7 +292,7 @@ function validateProfileRef(
  * than data. Discovery is a single pass over the catalog's own entries —
  * no page-tree walk. Required page/catalog types identify descendants, while
  * a typeless structure element's parent chain reaches this known root. */
-function forbiddenRefs(source: PDFDocument, budget: { objects: number; bytes: number }): Set<string> {
+function forbiddenRefs(source: PDFDocument, budget: Budget): Set<string> {
   const refs = new Set<string>();
   const add = (value: PDFObject | undefined) => {
     spend(budget);
@@ -294,7 +313,7 @@ function copyGraph(
   root: PDFArray,
   forbidden: Set<string>,
   roots: Set<PDFDict>,
-  budget: { objects: number; bytes: number },
+  budget: Budget,
 ): PDFObject {
   const mapped = new Map<string, PDFRef>();
 
@@ -308,7 +327,7 @@ function copyGraph(
   }
 
   const copy = (value: PDFObject, depth: number): PDFObject => {
-    if (depth > MAX_DEPTH) throw refuse();
+    if (depth > budget.limits.depth) throw refuse();
     // Charge every edge, including a reference already copied. Otherwise an
     // arbitrarily wide array of one shared reference bypasses the work bound.
     spend(budget);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNull, PDFNumber, PDFRawStream, PDFRef, PDFString } from 'pdf-lib';
-import { copyOutputIntents } from '../src/renderer/lib/output-intents-carry';
+import { OUTPUT_INTENT_LIMITS, copyOutputIntents } from '../src/renderer/lib/output-intents-carry';
 const N = PDFName.of;
 async function fixture() {
   const source = await PDFDocument.create({ updateMetadata: false }), output = await PDFDocument.create({ updateMetadata: false });
@@ -9,6 +9,21 @@ async function fixture() {
   const root = source.context.obj([source.context.register(item)]), ref = source.context.register(root);
   source.catalog.set(N('OutputIntents'), ref);
   return { source, output, item, root, ref };
+}
+type Limits = typeof OUTPUT_INTENT_LIMITS;
+/** Copies the source's intents into a fresh output under `limits`. */
+const copier = (source: PDFDocument, ref: PDFRef) => async (limits: Limits) =>
+  copyOutputIntents(await PDFDocument.create({ updateMetadata: false }), source, ref, limits);
+/** The smallest value of one limit at which `copy` succeeds; a larger limit
+ * never turns a success into a refusal, so a bisection finds it. */
+async function least(kind: keyof Limits, copy: (limits: Limits) => Promise<unknown>): Promise<number> {
+  let low = 0, high = OUTPUT_INTENT_LIMITS[kind];
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (await copy({ ...OUTPUT_INTENT_LIMITS, [kind]: mid }).then(() => true, () => false)) high = mid;
+    else low = mid + 1;
+  }
+  return low;
 }
 describe('independent output-intent graph boundaries', () => {
   it('does not interpret arbitrary spectral colourant names as action keys', async () => {
@@ -39,8 +54,14 @@ describe('independent output-intent graph boundaries', () => {
     expect(copyOutputIntents(output, source, ref)!.lookup(0, PDFDict).lookup(N('ExtensionMetadata'))).toBeInstanceOf(PDFRawStream);
   });
   it('bounds aggregate string bytes as well as streams', async () => {
-    const { source, output, item, ref } = await fixture(); item.set(N('Extension'), PDFString.of('x'.repeat(33 * 1024 * 1024)));
-    expect(() => copyOutputIntents(output, source, ref)).toThrow();
+    const { source, item, ref } = await fixture(), copy = copier(source, ref);
+    item.set(N('Profile'), source.context.register(source.context.stream(new Uint8Array(8))));
+    item.set(N('Extension'), PDFString.of(''));
+    const bytes = await least('bytes', copy);
+    // One string byte on top of the profile's charge passes the same bound.
+    item.set(N('Extension'), PDFString.of('x'));
+    await expect(copy({ ...OUTPUT_INTENT_LIMITS, bytes })).rejects.toThrow();
+    await expect(copy({ ...OUTPUT_INTENT_LIMITS, bytes: bytes + 1 })).resolves.toBeInstanceOf(PDFArray);
   });
   it('preserves a cycle returning to the supplied root array without forking it', async () => {
     const { source, output, item, ref } = await fixture(); item.set(N('IntentSet'), ref);
@@ -64,10 +85,14 @@ describe('independent output-intent graph boundaries', () => {
     for (const key of ['Type', 'Info', 'DestOutputProfile', 'MixingHints', 'SpectralData', 'DestOutputProfileRef']) expect(intent.lookup(N(key))).toBeUndefined();
   });
   it('counts repeated reference edges against the work bound, not only unique objects', async () => {
-    const { source, output, item, ref } = await fixture();
+    const { source, item, ref } = await fixture(), copy = copier(source, ref);
     const shared = source.context.register(PDFString.of('one allocation'));
-    item.set(N('Extension'), source.context.obj(Array.from({ length: 6000 }, () => shared)));
-    expect(() => copyOutputIntents(output, source, ref)).toThrow();
+    item.set(N('Extension'), source.context.obj([shared, shared, shared]));
+    const objects = await least('objects', copy);
+    // A fourth edge to the same object needs one more unit of the bound.
+    item.set(N('Extension'), source.context.obj([shared, shared, shared, shared]));
+    await expect(copy({ ...OUTPUT_INTENT_LIMITS, objects })).rejects.toThrow();
+    await expect(copy({ ...OUTPUT_INTENT_LIMITS, objects: objects + 1 })).resolves.toBeInstanceOf(PDFArray);
   });
   it('control: a bounded repeated-reference array preserves sharing', async () => {
     const { source, output, item, ref } = await fixture();

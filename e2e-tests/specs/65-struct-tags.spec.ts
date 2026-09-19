@@ -123,7 +123,7 @@ async function applyAndSave(dest: string): Promise<void> {
   expect(existsSync(dest)).toBe(true);
 }
 
-describe('structure tags + reading order (I.6)', () => {
+describe('structure tags + reading order', () => {
   let tmp: string;
   // One source per test: re-opening an already-open path focuses the live
   // working copy WITH its edits (correct app behavior), so a shared source

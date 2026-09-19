@@ -10,12 +10,10 @@ const history = () => browser.execute(() => (window as any).__SPECTRA_TEST__.get
 
 describe('disk history publication', () => {
   let directory: string;
-  let source: string;
   let working: string;
+  let opened = 0;
   before(() => {
     directory = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-history-'));
-    source = resolve(directory, 'history.pdf');
-    copyFileSync(resolve(__dirname, '..', 'fixtures', 'sample.pdf'), source);
   });
   after(async () => {
     await closeAllFiles();
@@ -24,9 +22,22 @@ describe('disk history publication', () => {
   beforeEach(async () => {
     await waitForHarness();
     await closeAllFiles();
+    // Each test opens its own copy. Reopening the path the previous test just
+    // closed races that close: the open funnel's already-open check reads the
+    // last rendered state, and the claim release is not awaited.
+    const source = resolve(directory, `history-${++opened}.pdf`);
+    copyFileSync(resolve(__dirname, '..', 'fixtures', 'sample.pdf'), source);
     await openByPaths([source]);
     await setView('canvas');
-    await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 5);
+    try {
+      await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 5);
+    } catch (error) {
+      // Whether the copy opened at all separates an open that did nothing
+      // from an index that did not finish.
+      const state = await getState();
+      throw new Error(`${String(error)}; files=${state.fileCount} active=${state.activeFile?.path ?? 'none'} ` +
+        `pages=${(await getWorkspacePageIds()).length}`);
+    }
     working = (await getState()).activeFile!.workingPath;
     for (let turn = 1; turn <= 2; turn++) {
       const [first] = await getWorkspacePageIds();

@@ -695,8 +695,8 @@ describe('recent files: removing an entry, and the launch that prunes dead ones'
       // A second process is not available to ask: msedgedriver hands every
       // driver session a fresh WebView2 profile, so an app relaunched through
       // `reloadSession` hydrates an EMPTY list and has nothing to sweep. That is
-      // measured, not assumed — `probe-recent-relaunch.local.ts` reports it —
-      // and it is the same reason `149-exit-session` reads the Rust-side
+      // measured, not assumed, and it is the same reason `149-exit-session`
+      // reads the Rust-side
       // `session.json` rather than anything the renderer stored.
       await browser.refresh();
       await waitForHarness(30_000);

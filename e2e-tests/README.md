@@ -103,7 +103,7 @@ The run's own output is also saved to `logs/last-run.log` (gitignored), and any
 saved log can be re-scanned without re-running the suite:
 
 ```powershell
-npm run scan:log -- ..\battery-v1031.local.log
+npm run scan:log -- logs\last-run.log
 ```
 
 ## What's covered
