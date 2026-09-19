@@ -1,4 +1,4 @@
-"""Page-image editing (the first Edit slice).
+"""Page-image editing.
 
 Lists, deletes, replaces, and extracts IMAGE XObject placements on a page.
 A "placement" is one `Do` draw of an image — the unit the user clicks. Ids
@@ -16,8 +16,8 @@ Edit semantics are strictly PER-PLACEMENT:
   - replace registers the new image under a NEW name and renames only that
     `Do` — other placements of the original keep the original. The
     placement CTM is preserved exactly: the new image draws into the old
-    box (a different aspect ratio stretches; that is the documented v1
-    behavior, matching the phase doc's "reuse the original placement CTM").
+    box (a different aspect ratio stretches: the replacement reuses the
+    original placement CTM).
   - a placement INSIDE a Form XObject is edited on a COPY of that form
     (registered under a fresh name, only that draw's `Do` rewritten) — the
     `_redact_form` copy-on-edit pattern — so a form stamped on ten pages
@@ -41,10 +41,8 @@ the unit square under the live CTM. REPLACE and EXTRACT refuse inline
 targets with named reasons (delete + add covers the workflow; the bytes
 live in the stream, so a deleted inline draw needs no GC).
 
-Text-run editing will consolidate this walker and redact.py's into
-one shared interpreter; for this slice the graphics-state tracking is
-deliberately duplicated (~40 lines, helpers imported) rather than churning
-the security-critical redactor.
+The graphics-state tracking here duplicates redact.py's (~40 lines,
+helpers imported) rather than sharing the security-critical redactor's walk.
 """
 
 import os
@@ -1292,8 +1290,8 @@ def delete_page_images(file: str, output: str, page: int, indexes: list) -> dict
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        # Copy-on-write a page-LOCAL /Resources (the review fix, applied to
-        # every page-level image op): qpdf flattens inherited /Resources onto
+        # Copy-on-write a page-LOCAL /Resources (every page-level image op
+        # does): qpdf flattens inherited /Resources onto
         # each page's own dict BY REFERENCE, so registering an edit's new
         # XObject / form copies on the resolved dict would leak them into every
         # sibling page sharing it. `_copy_resources_for_write` gives a fresh
@@ -1371,8 +1369,8 @@ def transform_page_images(file: str, output: str, page: int, targets: list) -> d
         p = pdf.pages[int(page) - 1]
         # Copy-on-write a page-LOCAL /Resources — nested-placement transforms
         # register a form COPY, which on a shared (qpdf-flattened) /Resources
-        # would leak into sibling pages (the review fix, uniform across the
-        # page-level image ops).
+        # would leak into sibling pages (uniform across the page-level image
+        # ops).
         resources = _copy_resources_for_write(pdf, _resolve_resources(p))
         p.obj["/Resources"] = resources
         placements = _walk_placements(
@@ -1772,8 +1770,8 @@ def replace_page_image(
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        # Copy-on-write a page-LOCAL /Resources (the review fix, applied to
-        # every page-level image op): qpdf flattens inherited /Resources onto
+        # Copy-on-write a page-LOCAL /Resources (every page-level image op
+        # does): qpdf flattens inherited /Resources onto
         # each page's own dict BY REFERENCE, so registering an edit's new
         # XObject / form copies on the resolved dict would leak them into every
         # sibling page sharing it. `_copy_resources_for_write` gives a fresh

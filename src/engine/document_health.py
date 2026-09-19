@@ -69,6 +69,7 @@ import pikepdf
 from engine import xfa
 from engine.font_embedding import font_embedded
 from engine.font_inventory import walk_document_fonts
+from engine.pdf_fonts import name_str
 
 _IMAGE_SUBTYPE = "/Image"
 
@@ -244,7 +245,7 @@ def _font_label(font_obj, resource_name) -> str:
     try:
         base = font_obj.get("/BaseFont")
         if base is not None:
-            return str(base).lstrip("/")
+            return name_str(base).lstrip("/")
     except Exception:
         pass
     return str(resource_name)

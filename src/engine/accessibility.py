@@ -53,6 +53,7 @@ import pikepdf
 from engine import struct_audit, struct_nesting
 from engine.contrast import page_contrast
 from engine.extract_text import extract_text
+from engine.pdf_fonts import name_str
 from engine.redact import IDENTITY, _lookup_xobject, _resolve_resources
 from engine.sanitize_content import SCAN_COVERAGE, off_ocg_set, page_events
 from engine.struct_audit import (
@@ -3947,7 +3948,7 @@ def _is_embedded(descriptor) -> bool:
 
 def _base_font(font_obj) -> str:
     try:
-        return str(font_obj.get("/BaseFont") or "").lstrip("/")
+        return name_str(font_obj.get("/BaseFont") or "").lstrip("/")
     except Exception:
         return ""
 

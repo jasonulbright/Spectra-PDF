@@ -56,6 +56,7 @@ from engine.redact import (
     _split_instructions,
     _state_only_instructions,
 )
+from engine.pdf_fonts import name_str
 from engine.text_metrics import (
     _child_state,
     _FontCache,
@@ -692,7 +693,7 @@ def _base_font(font) -> str:
         return ""
     try:
         base = font.get("/BaseFont")
-        return str(base) if base is not None else ""
+        return name_str(base) if base is not None else ""
     except Exception:
         return ""
 
@@ -1029,7 +1030,8 @@ def _remove_show(operator: str, operands: list, cap, state, removal: _Removal) -
         removal.whole += 1
         return _state_only_instructions(operator, operands)
     return _split_instructions(
-        operator, operands, items, clusters, set(range(len(clusters))), state
+        operator, operands, items, clusters, set(range(len(clusters))), state,
+        bool(cap.writes_vertical),
     )
 
 

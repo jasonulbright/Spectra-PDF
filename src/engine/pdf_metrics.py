@@ -42,8 +42,8 @@ GLYPH_HEIGHT_EM = HELVETICA_ASCENT_EM + HELVETICA_DESCENT_EM  # 0.925
 # keeps-newline class (a false positive -- C0 minus 0x0A IS 0x00-0x09 plus
 # 0x0B-0x1F -- but removing the construct beats maintaining the exception).
 # Integer codepoints avoid both failure modes. Do not replace them with regex
-# ranges or literal control characters; prove-metrics-equiv.local.py verifies
-# equivalence over U+0000..U+2FFF.
+# ranges or literal control characters; the tables are equivalent to the
+# regex classes over U+0000..U+2FFF.
 #
 # CR (0x0D) is in the tables deliberately -- flatten_control_chars normalises
 # CRLF and CR to LF BEFORE translating, so no CR ever reaches the table and

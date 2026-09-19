@@ -57,7 +57,7 @@ def rebuild(
         "-dPDFSETTINGS=/prepress",
         "-dAutoRotatePages=/None",
         "-dPreserveAnnots=true",
-        f"-sOutputFile={str(output_path).replace('%', '%%')}",  # % is a gs filename template char (distill review)
+        f"-sOutputFile={str(output_path).replace('%', '%%')}",  # % is a gs filename template char
         str(input_path),
     ]
 

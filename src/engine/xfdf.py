@@ -1,4 +1,4 @@
-"""XFDF annotation interchange (rung 4 — ISO 19444-1's annots arm).
+"""XFDF annotation interchange (ISO 19444-1's annots arm).
 
 Exports a document's markup annotations to XFDF and imports an XFDF file's
 annotations into a document. Geometry, colors, border width, opacity, author, dates,

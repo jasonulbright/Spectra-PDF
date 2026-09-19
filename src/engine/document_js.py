@@ -6,8 +6,8 @@ and rewrites the `/Root /Names /JavaScript` name tree and nothing else. No
 eval, no JavaScript engine, no sandbox runs in this process — a script reaching
 the engine is bytes, whatever it says.
 
-Execution, where it happens at all, is the renderer's and is off by default
-(`docs/architecture/98-f26-field-js.md`). The listing here is the read that
+Execution, where it happens at all, is the renderer's and is off by default.
+The listing here is the read that
 feeds it; this module gains no interpreter from that and must not acquire one,
 because the CLI, the guided actions and the batch arms all run through here.
 

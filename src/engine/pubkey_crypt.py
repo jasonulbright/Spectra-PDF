@@ -116,7 +116,7 @@ def classify_encryption(file: str) -> str:
         with open(file, "rb") as f:
             reader = PdfFileReader(f)
             # INDEXING resolves indirect references; .get() hands back the
-            # raw IndirectObject wrapper (probe-caught).
+            # raw IndirectObject wrapper.
             enc = reader.trailer_view["/Encrypt"]
             if str(enc["/Filter"]) == "/Adobe.PubSec":
                 return "pubkey"

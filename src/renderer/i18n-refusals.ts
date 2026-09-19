@@ -47,9 +47,9 @@ export const REFUSAL_STRINGS = {
   'refusal.action.runParamOneOf': '{{step}}: set {{params}} — exactly one of them.',
   'refusal.action.encryptNeedsPassword': 'Encrypt: set an open or an owner password.',
   'refusal.action.needsGhostscript':
-    '{{steps}} need Ghostscript, which Spectra PDF does not include. Install it and point Spectra PDF at it in Settings ▸ Engine, or take those steps out of this action.',
+    '{{steps}} need Ghostscript, which Spectra PDF does not include. Install it and point Spectra PDF at it in Preferences ▸ Engine, or take those steps out of this action.',
   'refusal.action.needsGhostscriptOne':
-    '{{steps}} needs Ghostscript, which Spectra PDF does not include. Install it and point Spectra PDF at it in Settings ▸ Engine, or take that step out of this action.',
+    '{{steps}} needs Ghostscript, which Spectra PDF does not include. Install it and point Spectra PDF at it in Preferences ▸ Engine, or take that step out of this action.',
 
   // ── Guided actions: importing an action FILE ─────────────────────────
   'refusal.actionFile.notJson': 'Not a valid JSON file.',

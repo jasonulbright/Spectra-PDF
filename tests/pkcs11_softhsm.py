@@ -2,7 +2,7 @@
 
 python-pkcs11 deliberately omits C_InitToken, and SoftHSM's own
 softhsm2-util in the portable Windows build fails to load its module
-(missing dependent DLLs — probe-caught), so BOTH provisioning steps run
+(missing dependent DLLs), so BOTH provisioning steps run
 in-process here: ``init_token`` binds the PKCS#11 C ABI directly for
 C_InitToken/C_InitPIN, and ``provision_identity`` stores a
 cryptography-generated RSA key + self-signed cert through python-pkcs11.
@@ -32,7 +32,7 @@ class _FunctionList(ctypes.Structure):
     # handful used here are called. Windows cryptoki.h mandates
     # #pragma pack(1); without _pack_ the default 8-byte alignment pads
     # after the 2-byte version and every pointer reads garbage
-    # (probe-caught access violation).
+    # (an access violation).
     _pack_ = 1
     _fields_ = [("version", ctypes.c_ushort)] + [
         (name, c_void_p)
@@ -205,7 +205,7 @@ def provision_identity(
             Attribute.CERTIFICATE_TYPE: CertificateType.X_509,
             Attribute.VALUE: cert.public_bytes(serialization.Encoding.DER),
             # SoftHSM requires CKA_SUBJECT on X.509 cert objects
-            # (TemplateIncomplete otherwise — probe-caught).
+            # (TemplateIncomplete otherwise).
             Attribute.SUBJECT: cert.subject.public_bytes(),
             Attribute.LABEL: cert_label,
             Attribute.ID: obj_id,

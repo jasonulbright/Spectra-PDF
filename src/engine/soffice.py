@@ -21,6 +21,7 @@ from xml.etree import ElementTree as ET
 import pikepdf
 
 from engine import budget
+from engine.pdf_fonts import name_str
 from engine.system_fonts import installed_families
 
 # Allow for LibreOffice's cold profile build and a bridged second launch.
@@ -143,8 +144,8 @@ def run_convert(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            # soffice must never inherit the engine's JSON-RPC stdin (the
-            # distill review's lesson — a subprocess reading the RPC pipe).
+            # soffice must never inherit the engine's JSON-RPC stdin: a
+            # subprocess that reads the RPC pipe consumes the next request.
             stdin=subprocess.DEVNULL,
             text=True,
         )
@@ -332,11 +333,11 @@ def embedded_faces(pdf_path: str | Path) -> set[str]:
             for _key, font in (resources.get("/Font") or {}).items():
                 base = font.get("/BaseFont")
                 if base is not None:
-                    faces.add(_normalise_face(str(base)))
+                    faces.add(_normalise_face(name_str(base)))
                 for descendant in font.get("/DescendantFonts") or []:
                     base = descendant.get("/BaseFont")
                     if base is not None:
-                        faces.add(_normalise_face(str(base)))
+                        faces.add(_normalise_face(name_str(base)))
     faces.discard("")
     return faces
 

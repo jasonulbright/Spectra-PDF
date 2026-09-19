@@ -33,6 +33,8 @@ from pikepdf import Array, Dictionary, Name
 from fontTools import subset as ft_subset
 from fontTools.ttLib import TTFont
 
+from engine.pdf_fonts import name_str
+
 # The vendored fallback family (scripts/sync-edit-fonts.ps1); the engine
 # picks the face matching the run's own font so a serif document's
 # converted text stays serif, and the face
@@ -124,7 +126,7 @@ def classify_font_family(font_dict) -> str:
     if flags & _FLAG_SERIF:
         return "serif"
 
-    name = str(font_dict.get("/BaseFont", "")).lstrip("/").lower()
+    name = name_str(font_dict.get("/BaseFont", "")).lstrip("/").lower()
     if any(h in name for h in _MONO_HINTS):
         return "mono"
     if any(h in name for h in _SERIF_HINTS):
@@ -154,7 +156,7 @@ def classify_font_style(font_dict) -> tuple[bool, bool]:
                 italic = True
         except (TypeError, ValueError, AttributeError):
             pass
-    name = str(font_dict.get("/BaseFont", "")).lstrip("/").lower()
+    name = name_str(font_dict.get("/BaseFont", "")).lstrip("/").lower()
     if any(h in name for h in _BOLD_HINTS):
         bold = True
     if any(h in name for h in _ITALIC_HINTS):
@@ -239,9 +241,9 @@ _RTL_FACES = {
 # sync-edit-fonts.ps1). ONE face, Regular only, so the style map degrades
 # exactly as the CJK map does for italic.
 #
-# Chosen on the SAME measurement that chose IBM Plex over Noto Sans Arabic
-# (`mongolian-measure.local.py`, run against this face and against Mongolian
-# Baiti as the script's reference implementation):
+# Chosen on the SAME measurement that chose IBM Plex over Noto Sans Arabic,
+# run against this face and against Mongolian Baiti as the script's reference
+# implementation:
 #   * every cluster has exactly ONE advancing glyph — ligating clusters
 #     included — so a per-code /ToUnicode can spell the text back and a
 #     shaped edit is not a one-way trip;
@@ -537,6 +539,31 @@ def _font_metrics(font: "TTFont") -> dict:
     }
 
 
+def _cff_cids(font: "TTFont") -> dict | None:
+    """{glyph name: CID} for a program whose CFF Top DICT uses CIDFont
+    operators, else None.
+
+    A reader maps each CID such a program draws to a glyph through the
+    program's own charset (ISO 32000-2 §9.7.4.2), and a subset that renumbers
+    the glyphs keeps each glyph's CID: under Identity-H, where the code IS the
+    CID, the code a show writes is the glyph's CID, never its new index."""
+    if "CFF " not in font:
+        return None
+    top = font["CFF "].cff.topDictIndex[0]
+    if not hasattr(top, "ROS"):
+        return None
+    cids: dict = {}
+    for gid, name in enumerate(top.charset):
+        cid = gid
+        if name.startswith("cid"):
+            try:
+                cid = int(name[3:])
+            except ValueError:
+                cid = gid
+        cids[name] = cid
+    return cids
+
+
 def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for=None):
     """Embed a subset of the fallback font for `text`. Returns
     (font_dict [indirect], encode(str)->bytes, width_1000(str)->float).
@@ -576,22 +603,23 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for
     scale = metrics["scale"]
     glyph_order = font.getGlyphOrder()
     gid_of = {name: i for i, name in enumerate(glyph_order)}
+    cid_of = _cff_cids(font)
 
-    used: dict[str, int] = {}  # char -> gid
-    widths: dict[int, float] = {}  # gid -> width (1000/em)
+    used: dict[str, int] = {}  # char -> code
+    widths: dict[int, float] = {}  # code -> width (1000/em)
     for ch in sorted(set(text)):
         glyph_name = glyph_of_char[ch]
-        gid = gid_of[glyph_name]
-        used[ch] = gid
-        widths[gid] = round(hmtx[glyph_name][0] * scale, 2)
+        code = cid_of[glyph_name] if cid_of is not None else gid_of[glyph_name]
+        used[ch] = code
+        widths[code] = round(hmtx[glyph_name][0] * scale, 2)
 
     def encode(s: str) -> bytes:
         out = bytearray()
         for ch in s:
-            gid = used.get(ch)
-            if gid is None:
+            code = used.get(ch)
+            if code is None:
                 raise ValueError(f"the fallback font cannot express {ch!r}")
-            out += bytes(((gid >> 8) & 0xFF, gid & 0xFF))
+            out += bytes(((code >> 8) & 0xFF, code & 0xFF))
         return bytes(out)
 
     def width_1000(s: str) -> float:
@@ -599,7 +627,7 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for
 
     return _embed_identity_h(
         pdf, ttf_bytes, font, font_path, metrics, widths,
-        sorted(((gid, ch) for ch, gid in used.items())),
+        sorted(((code, ch) for ch, code in used.items())),
     ) + (encode, width_1000)
 
 
@@ -622,9 +650,9 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
     if stem.endswith("-Regular"):
         stem = stem[: -len("-Regular")]
     base_name = f"ABCDEF+{stem or 'FallbackFont'}"
-    # The face may be CFF-flavoured (an .otf). That matters because the
-    # OpenType FEATURES this slice exists for live only in the OTF builds of
-    # some families — Libertinus ships `smcp`/`salt` in its .otf faces and
+    # The face may be CFF-flavoured (an .otf). That matters because some
+    # families carry their OpenType FEATURES only in their OTF builds —
+    # Libertinus ships `smcp`/`salt` in its .otf faces and
     # strips them from its .ttf ones — so a TrueType-only embedder would make
     # a small-caps toggle that silently did nothing.
     #
@@ -655,11 +683,11 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
             }
         )
     )
-    # /W: one [gid [w]] pair per used glyph — compact enough at edit scale.
+    # /W: one [code [w]] pair per used glyph — compact enough at edit scale.
     w_array = []
-    for gid in sorted(widths):
-        w_array.append(gid)
-        w_array.append(Array([widths[gid]]))
+    for code in sorted(widths):
+        w_array.append(code)
+        w_array.append(Array([widths[code]]))
     descendant = pdf.make_indirect(
         Dictionary(
             Type=Name("/Font"),
@@ -680,11 +708,11 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
                     "W2": Array(
                         [
                             item
-                            for gid in sorted(vertical_advances)
+                            for code in sorted(vertical_advances)
                             for item in (
-                                gid,
+                                code,
                                 Array([
-                                    -vertical_advances[gid],
+                                    -vertical_advances[code],
                                     round(metrics["bbox"][2] / 2.0, 2),
                                     round(metrics["ascent"], 2),
                                 ]),
@@ -722,7 +750,7 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
     # Liberation is BMP-only so the coverage refusal fires first, but a
     # future supplementary-plane fallback font must not ship this).
     entries = "\n".join(
-        f"<{gid:04x}> <{ch.encode('utf-16-be').hex()}>" for gid, ch in tounicode_pairs
+        f"<{code:04x}> <{ch.encode('utf-16-be').hex()}>" for code, ch in tounicode_pairs
     )
     tounicode = (
         "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
@@ -798,20 +826,21 @@ def build_vertical_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
     want = {name for name, _adv in per_char.values()}
     ttf_bytes, font = _subset_font(font_path, "".join(drawn), glyphs=want, retain_gids=True)
     metrics = _font_metrics(font)
+    cid_of = _cff_cids(font)
     used: dict[str, int] = {}
     advances: dict[int, float] = {}
     for ch, (name, advance) in per_char.items():
-        gid = full_gid_of[name]
-        used[ch] = gid
-        advances[gid] = round(abs(advance), 2)
+        code = cid_of[name] if cid_of is not None else full_gid_of[name]
+        used[ch] = code
+        advances[code] = round(abs(advance), 2)
 
     def encode(s: str) -> bytes:
         out = bytearray()
         for ch in s:
-            gid = used.get(ch)
-            if gid is None:
+            code = used.get(ch)
+            if code is None:
                 raise ValueError(f"the fallback font cannot express {ch!r}")
-            out += bytes(((gid >> 8) & 0xFF, gid & 0xFF))
+            out += bytes(((code >> 8) & 0xFF, code & 0xFF))
         return bytes(out)
 
     def width_1000(s: str) -> float:
@@ -821,7 +850,7 @@ def build_vertical_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
 
     return _embed_identity_h(
         pdf, ttf_bytes, font, font_path, metrics, {},
-        sorted((gid, ch) for ch, gid in used.items()),
+        sorted((code, ch) for ch, code in used.items()),
         vertical_advances=advances,
     ) + (encode, width_1000)
 
@@ -877,14 +906,16 @@ def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
     # A CFF descendant is a CIDFontType0, and /CIDToGIDMap is defined for
     # CIDFontType2 ONLY — `_embed_identity_h` correctly refuses to write one,
     # which means the indirection this function is built on DOES NOT EXIST
-    # for a CFF face and the CID must simply BE the glyph index (exactly the
-    # scheme `build_fallback_font` already ships for both flavours).
+    # for a CFF face: the code must be what selects the glyph by itself, the
+    # glyph index for a CFF without CIDFont operators and the glyph's CID for
+    # a CID-keyed one (`_cff_cids`), exactly as `build_fallback_font` writes.
     #
     # CFF faces must retain their mapping; otherwise they draw whatever glyph
     # the arbitrary code happened to hit. Libertinus and Noto Sans CJK — the
     # two bundled faces that actually carry `liga` — are both OTF, so the
     # ligature capability was landing on precisely the fonts this broke.
     is_cff = getattr(font, "sfntVersion", "") == "OTTO"
+    cid_of = _cff_cids(font) if is_cff else None
 
     def gid_width(g: int) -> float:
         if g >= len(sub_order):
@@ -911,7 +942,7 @@ def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
             # spelling rule, which is why a fatha does not come back a sukun.
             # The caller drops to the unshaped path, whose output is correct
             # (just without the ligature), never to wrong glyphs.
-            code = g
+            code = cid_of[name] if cid_of is not None else g
             prior = unicode_of.get(code)
             if prior is not None and prior != spells:
                 raise ValueError(

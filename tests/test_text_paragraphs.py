@@ -1035,8 +1035,8 @@ class TestReplaceParagraphText:
         assert _paras(out)[0]["line_count"] == 1
 
     def test_repeated_edits_do_not_compound_stream_growth(self, tmp_dir):
-        # Review-measured HIGH: interior operators of the removed member
-        # span leaked into the output and every re-edit added ~17 ops.
+        # Without the in-span drop rule, interior operators of the removed
+        # member span leak into the output and every re-edit adds ~17 ops.
         # The in-span drop rule makes repeated identical edits reach a
         # fixed point.
         src = _build(
@@ -2341,16 +2341,18 @@ class TestVerticalParagraphs:
         assert after[1]["rect"] == pytest.approx([276, 620, 296, 700], abs=0.05)
 
     def test_vertical_word_gap_round_trips_under_scaled_ctm(self, tmp_dir):
-        # A TJ word gap (−500 at size 10 → a synthetic space) in the
-        # scaled (d=4) + Tz 50 column: the gap must MEASURE and RE-EMIT
-        # at the d scale — the gap-median denominator, the synthetic-
-        # space width, and the emitted kern number all pin here (an
-        # h_scale·a model re-emits the kern 4× too large and the
-        # re-listed column's rect stretches accordingly).
+        # A TJ word gap (+500 at size 10 → a synthetic space: in vertical
+        # writing a positive number moves the next glyph DOWN, ISO 32000-2
+        # Table 107) in the scaled (d=4) + Tz 50 column: the gap must
+        # MEASURE and RE-EMIT at the d scale — the gap-median
+        # denominator, the synthetic-space width, and the emitted kern
+        # number all pin here (an h_scale·a model re-emits the kern 4×
+        # too large and the re-listed column's rect stretches
+        # accordingly).
         src = _vpage(
             tmp_dir,
             b"q 2 0 0 4 0 0 cm BT /FV 10 Tf 50 Tz 150 175 Td"
-            b" [<0003> -500 <0004>] TJ ET Q",
+            b" [<0003> 500 <0004>] TJ ET Q",
         )
         para = _paras(src)[0]
         assert para["text"] == "あ い"
@@ -3185,7 +3187,7 @@ class TestOrientations:
         # frame sends to +y' — the perpendicular, exactly where the
         # horizontal model puts a rise. So this reflows, and the emission
         # writes the Ts. (Dividing the rise by the member's page `d`, which
-        # is ZERO at a quarter turn, silently flattened it — probe-caught.)
+        # is ZERO at a quarter turn, silently flattens it.)
         src = _vpage(
             tmp_dir,
             b"BT /F1 12 Tf 0 -1 1 0 300 700 Tm (Base) Tj"
@@ -4738,9 +4740,9 @@ class TestMongolianColumns:
 class TestTateChuYoko:
     """Tate-chu-yoko becomes an atomic editable unit.
 
-    Slice B made the silent case LOUD (the column grouped without the block,
-    so a reflow moved the CJK text over a date that never moved). This is
-    the step that makes it work: the block joins its column as ONE member,
+    Without the absorption the column groups without the block, so a reflow
+    moves the CJK text over a date that never moves. With it the block joins
+    its column as ONE member,
     the paragraph's text carries the year where the year is, and the block
     moves as a unit. Positions are HAND-COMPUTED, the discipline.
 

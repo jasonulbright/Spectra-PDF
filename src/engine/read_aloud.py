@@ -173,7 +173,7 @@ def _char_rects(run_detail: dict, fonts: _FontCache) -> tuple:
         text = cap.decode(item.data)
         if not text:
             continue
-        step = item.advance / len(text)
+        step = item.width / len(text)
         for i, ch in enumerate(text):
             x0 = item.x + step * i
             rects.append(

@@ -303,7 +303,7 @@ def _run_jobs(args: list[str], jobs: int) -> None:
                 text=True,
                 timeout=JOB_TIMEOUT_S,
                 # stdin isolation: gs must never inherit the RPC pipe
-                # (distill review; -dSAFER does not sandbox std streams).
+                # (-dSAFER does not sandbox std streams).
                 stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired:

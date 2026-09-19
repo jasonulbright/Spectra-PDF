@@ -49,6 +49,7 @@ from engine.pdf_fonts import (
     _simple_encoding_map,
     _simple_widths,
     _strip_subset_prefix,
+    name_str,
 )
 from engine.pdf_save import save_pdf
 from engine.system_fonts import _scan, read_face
@@ -530,7 +531,7 @@ def embed_missing_fonts(file: str, output: str, sources=("system",),
 
         raised: dict = {}
         for font_obj in targets:
-            raw_name = str(font_obj.get("/BaseFont", "")).lstrip("/")
+            raw_name = name_str(font_obj.get("/BaseFont", "")).lstrip("/")
             display = _strip_subset_prefix(raw_name) or raw_name or "(unnamed font)"
             try:
                 outcome = _embed_one(pdf, font_obj, usable, restricted, display,
@@ -589,7 +590,7 @@ def _embed_one(pdf, font_obj, usable: list[dict], restricted: list[dict],
             f"{display}: a Type 3 font carries its glyphs as drawings and has no "
             "program to embed"
         )
-    raw_name = str(font_obj.get("/BaseFont", "")).lstrip("/")
+    raw_name = name_str(font_obj.get("/BaseFont", "")).lstrip("/")
     bold, italic = classify_font_style(font_obj)
     face = _match(usable, raw_name, bold, italic)
     substitute = False

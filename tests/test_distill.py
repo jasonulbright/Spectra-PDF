@@ -114,9 +114,9 @@ class TestDistill:
     # ── Additional pins ─────────────────────────────────────────────
 
     def test_percent_in_output_name_is_literal(self, tmp_dir, gs_path):
-        # '%d' in -sOutputFile is a per-page TEMPLATE: unescaped, gs wrote
-        # 'report 1 2024.pdf' and the requested name never existed
-        # (review-reproduced via the dialog's own default naming).
+        # '%d' in -sOutputFile is a per-page TEMPLATE: unescaped, gs writes
+        # 'report 1 2024.pdf' and the requested name never exists (the
+        # dialog's own default naming included).
         src = _write(tmp_dir, "report %d 2024.ps", PS_FIXTURE)
         out = os.path.join(tmp_dir, "report %d 2024.pdf")
         r = distill(src, out, gs_path=gs_path)
@@ -134,7 +134,7 @@ class TestDistill:
 
     def test_dash_leading_relative_input_still_converts(self, tmp_dir, gs_path):
         # Unresolved, `-r.ps` parses as a gs SWITCH (silently blank output
-        # in the -d/-s cases — review-reproduced); resolution makes the
+        # in the -d/-s cases); resolution makes the
         # argv token absolute.
         cwd = os.getcwd()
         os.chdir(tmp_dir)

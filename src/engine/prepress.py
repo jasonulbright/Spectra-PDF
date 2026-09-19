@@ -696,14 +696,14 @@ def convert_cmyk(
             "-dQUIET",
             "-dBATCH",
             "-dSAFER",
-            # % is a gs filename template char (distill review).
+            # % is a gs filename template char.
             f"-sOutputFile={str(output_path).replace('%', '%%')}",
             str(source),
         ]
 
     def run(source: Path):
         # Derived budget (budget.run keeps the stdin isolation — gs must
-        # never inherit the RPC pipe, the distill review's finding).
+        # never inherit the RPC pipe).
         outcome = budget.gs(command(source), what="Ghostscript (CMYK conversion)",
                             path=input_path, pages=info["pages"])
         if outcome.returncode != 0:

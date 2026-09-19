@@ -44,7 +44,7 @@ from pdfminer.fontmetrics import FONT_METRICS
 from pikepdf import Name
 
 from engine.content_walk import GraphicsTextState
-from engine.pdf_fonts import FontCapability, _strip_subset_prefix, font_capability
+from engine.pdf_fonts import FontCapability, _strip_subset_prefix, font_capability, name_str
 
 # Vertical extent used when the font declares neither /Ascent//Descent nor a
 # /FontBBox and is not one of the base-14 faces. Deliberately WIDER than any
@@ -82,9 +82,9 @@ class _FontCache:
     def _key(font_obj, resources, fallback_resources, name):
         # Key on stable identity ONLY. `objgen` is value-based for indirect
         # fonts; a DIRECT font dict's wrapper is a fresh pikepdf object per
-        # access, so id(font_obj) recycles across GC and served a STALE
-        # OTHER FONT's capability — review-measured at 22.6% wrong lookups
-        # in an alternating-font walk, and on replace it would encode the
+        # access, so id(font_obj) recycles across GC and serves a STALE
+        # OTHER FONT's capability — 22.6% wrong lookups in an
+        # alternating-font walk, and on replace it would encode the
         # user's text with the wrong font's table into the saved file. The
         # resources dicts are stable Python references for the whole walk
         # scope, so (resources ids + name) is a sound direct-font key.
@@ -231,7 +231,7 @@ def ink_extent_em(font_obj) -> tuple[float, float]:
             desc.get("/Ascent"), desc.get("/Descent"), desc.get("/FontBBox")
         )
     if below is None or above is None:
-        base = _strip_subset_prefix(str(font_obj.get("/BaseFont", "")).lstrip("/"))
+        base = _strip_subset_prefix(name_str(font_obj.get("/BaseFont", "")).lstrip("/"))
         metrics = FONT_METRICS.get(base)
         if metrics is not None:
             props = metrics[0]
@@ -290,23 +290,50 @@ def _spaces_in(data: bytes, cap: FontCapability) -> int:
     return sum(1 for code, n in cap.codes(data) if n == 1 and code == 0x20)
 
 
+def writing_sign(cap: Optional[FontCapability]) -> float:
+    """+1 for a font that writes horizontally, -1 for one that writes
+    vertically: the factor that turns the displacement a TJ number, `Tc` or
+    `Tw` adds to the text matrix into a distance ALONG the writing direction,
+    which runs rightward, or downward in vertical writing.
+
+    ISO 32000-2 §9.4.4 gives tx = ((w0 - Tj/1000) × Tfs + Tc + Tw) × Th and
+    ty = (w1 - Tj/1000) × Tfs + Tc + Tw. Measured downward the vertical terms
+    change sign: a positive TJ number moves the next glyph down (Table 107),
+    and a positive `Tc` or `Tw` moves it up (§9.3.2, §9.3.3)."""
+    return -1.0 if cap is not None and cap.writes_vertical else 1.0
+
+
+def string_advance(cap: FontCapability, data: bytes, size: float, char_spacing: float,
+                   word_spacing: float, start: float = 0.0) -> float:
+    """`start` plus what one string of a show operator adds along the writing
+    direction, in text-space units before Tz: its glyphs' advances, plus `Tc`
+    per code and `Tw` per single-byte space, each signed by `writing_sign`.
+    Each term adds onto `start` in that order, so a run summed string by string
+    rounds exactly as a sum of every term in drawing order does."""
+    sign = writing_sign(cap)
+    width = start + cap.decoded_width(data) / 1000.0 * size
+    width += sign * char_spacing * cap.code_count(data)
+    width += sign * word_spacing * _spaces_in(data, cap)
+    return width
+
+
 def _run_metrics(
     operator: str, operands: list, cap: Optional[FontCapability], state: GraphicsTextState
 ) -> tuple[str, float]:
-    """(decoded_text, raw_width) where raw_width is in TEXT-SPACE units
-    BEFORE Tz (advance_after_show applies h_scale)."""
+    """(decoded_text, raw_width) where raw_width is the distance the show
+    moves the pen along the writing direction (`writing_sign`), in TEXT-SPACE
+    units BEFORE Tz (advance_after_show applies h_scale)."""
     text_parts: list[str] = []
     width = 0.0
+    sign = writing_sign(cap)
     for seg in _show_segments(operator, operands):
         if isinstance(seg, float):
-            width -= seg / 1000.0 * state.font_size
+            width -= sign * seg / 1000.0 * state.font_size
             continue
         if cap is not None:
             text_parts.append(cap.decode(seg))
-            width += cap.decoded_width(seg) / 1000.0 * state.font_size
-            n_codes = cap.code_count(seg)
-            width += state.char_spacing * n_codes
-            width += state.word_spacing * _spaces_in(seg, cap)
+            width = string_advance(cap, seg, state.font_size, state.char_spacing,
+                                   state.word_spacing, width)
         else:
             width += len(seg) * state.font_size * 0.5  # no font: a bare guess
     return "".join(text_parts), width
@@ -316,8 +343,14 @@ class ShowItem(NamedTuple):
     """One indivisible piece of a show operator: a drawn CODE, or a TJ number.
 
     `x` is the pen offset at the piece's start and `advance` what it adds, both
-    in TEXT-SPACE units before Tz — the same space `_run_metrics` sums in, so
+    along the writing direction (`writing_sign`) in TEXT-SPACE units before
+    Tz — the same space `_run_metrics` sums in, so
     `sum(item.advance for item in show_items(...))` equals its width.
+
+    `width` is the glyph's own advance, `Tc` and `Tw` left out: the extent its
+    ink is taken to occupy, from `x`. Spacing moves the NEXT glyph and draws
+    nothing, so a negative `Tc` puts the pen end inside the glyph just drawn.
+    A kern draws nothing and has no width.
     """
 
     kern: bool
@@ -325,6 +358,7 @@ class ShowItem(NamedTuple):
     number: float  # the TJ number; 0.0 for a code
     advance: float
     x: float
+    width: float = 0.0
 
 
 def show_items(
@@ -355,9 +389,10 @@ def show_items_from_segments(
     """
     items: list[ShowItem] = []
     x = 0.0
+    sign = writing_sign(cap)
     for seg in segments:
         if isinstance(seg, float):
-            advance = -seg / 1000.0 * state.font_size
+            advance = -sign * seg / 1000.0 * state.font_size
             items.append(ShowItem(True, b"", float(seg), advance, x))
             x += advance
             continue
@@ -365,12 +400,12 @@ def show_items_from_segments(
         for _code, n in cap.codes(seg):
             raw = seg[offset : offset + n]
             offset += n
-            advance = cap.decoded_width(raw) / 1000.0 * state.font_size
-            advance += state.char_spacing
+            own = cap.decoded_width(raw) / 1000.0 * state.font_size
+            advance = own + sign * state.char_spacing
             if raw == b" ":
                 # The single-byte code 32 (§9.3.3), whatever the font's kind.
-                advance += state.word_spacing
-            items.append(ShowItem(False, raw, 0.0, advance, x))
+                advance += sign * state.word_spacing
+            items.append(ShowItem(False, raw, 0.0, advance, x, own))
             x += advance
     return items
 
@@ -384,6 +419,8 @@ def show_clusters(items: list[ShowItem]) -> list[list[int]]:
     between a base and its mark would strand the mark on the wrong side of the
     redaction — and the jump routinely exceeds half a space, which is why the
     grouping is by ADVANCE rather than by any notion of what the codes spell.
+    The advance is the glyph's own (`width`): `Tc` moves the pen after a mark
+    as after any glyph, and the mark still sits on its base.
     """
     clusters: list[list[int]] = []
     i = 0
@@ -405,7 +442,7 @@ def show_clusters(items: list[ShowItem]) -> list[list[int]]:
             j = i
             while j < n and items[j].kern:
                 j += 1
-            if j < n and not items[j].kern and items[j].advance == 0.0:
+            if j < n and not items[j].kern and items[j].width == 0.0:
                 i = j + 1  # a zero-advance mark: same cluster, with its kerns
                 while i < n and items[i].kern:
                     i += 1  # …and the jump BACK that pairs with the jump out
@@ -416,16 +453,17 @@ def show_clusters(items: list[ShowItem]) -> list[list[int]]:
 
 
 def cluster_span(items: list[ShowItem], cluster: list[int]) -> tuple[float, float]:
-    """(x0, x1) of the ink a cluster draws, in pre-Tz text space. Kerns move
-    the pen but draw nothing, so only glyph items contribute — a cluster whose
-    mark sits 400/1000 em to the left of its base spans both."""
+    """(x0, x1) of the ink a cluster draws, in pre-Tz text space: each glyph
+    from its `x` over its own `width`. Kerns move the pen but draw nothing, so
+    only glyph items contribute — a cluster whose mark sits 400/1000 em to the
+    left of its base spans both."""
     xs: list[float] = []
     for index in cluster:
         item = items[index]
         if item.kern:
             continue
         xs.append(item.x)
-        xs.append(item.x + item.advance)
+        xs.append(item.x + item.width)
     if not xs:
         anchor = items[cluster[0]].x if cluster else 0.0
         return (anchor, anchor)
@@ -434,14 +472,15 @@ def cluster_span(items: list[ShowItem], cluster: list[int]) -> tuple[float, floa
 
 def ink_span(items: list[ShowItem]) -> tuple[float, float]:
     """(lo, hi) of the pen positions a show's GLYPHS occupy, in pre-Tz text
-    space: each glyph from its own `x` to `x + advance`. A TJ number can move
-    the pen back over glyphs already drawn, so the span from the pen start to
-    the net advance can leave a glyph outside it. (0, 0) when no glyph draws."""
+    space: each glyph from its own `x` over its own `width`. A TJ number can
+    move the pen back over glyphs already drawn, and a negative `Tc` ends the
+    pen inside the last glyph, so the span from the pen start to the net
+    advance can leave a glyph outside it. (0, 0) when no glyph draws."""
     lo = hi = None
     for item in items:
         if item.kern:
             continue
-        a, b = sorted((item.x, item.x + item.advance))
+        a, b = sorted((item.x, item.x + item.width))
         lo = a if lo is None else min(lo, a)
         hi = b if hi is None else max(hi, b)
     return (0.0, 0.0) if lo is None else (lo, hi)
@@ -464,12 +503,13 @@ def wide_width(
 ) -> float:
     """A deliberately-generous advance for a run whose font cannot measure it.
 
-    1 em per CODE (an upper bound for real faces), plus positive Tc/Tw only —
-    a NEGATIVE spacing narrows the real run, and ignoring it keeps the estimate
-    on the over-covering side. Forward TJ jumps (negative numbers) push the
-    run's right edge out and ARE counted; backward ones are ignored for the
-    same reason. This is the fail-closed direction: for a redaction tool the
-    tolerable error is removing too much."""
+    1 em per CODE (an upper bound for real faces), plus Tc/Tw only where they
+    move the pen forward along the writing direction (`writing_sign`) — a
+    spacing that moves it back narrows the real run, and ignoring it keeps the
+    estimate on the over-covering side. Forward TJ jumps push the run's far
+    edge out and ARE counted; backward ones are ignored for the same reason.
+    This is the fail-closed direction: for a redaction tool the tolerable
+    error is removing too much."""
     return wide_width_from_segments(_show_segments(operator, operands), cap, state)
 
 
@@ -478,15 +518,16 @@ def wide_width_from_segments(
 ) -> float:
     """`wide_width` for a caller holding the lister's detached segments."""
     width = 0.0
+    sign = writing_sign(cap)
     for seg in segments:
         if isinstance(seg, float):
-            width += max(-seg / 1000.0 * state.font_size, 0.0)
+            width += max(-sign * seg / 1000.0 * state.font_size, 0.0)
             continue
         n_codes = cap.code_count(seg) if cap is not None else len(seg)
         width += n_codes * state.font_size * UNMEASURED_ADVANCE_EM
-        width += max(state.char_spacing, 0.0) * n_codes
+        width += max(sign * state.char_spacing, 0.0) * n_codes
         spaces = _spaces_in(seg, cap) if cap is not None else seg.count(0x20)
-        width += max(state.word_spacing, 0.0) * spaces
+        width += max(sign * state.word_spacing, 0.0) * spaces
     return width
 
 

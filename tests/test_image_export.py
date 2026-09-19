@@ -76,7 +76,7 @@ def test_jpeg_and_range(tmp_dir, gs_path):
 
 
 def test_percent_in_name_stays_literal(tmp_dir, gs_path):
-    # gs treats % as a per-page template char — the distill review's class.
+    # gs treats % as a per-page template char.
     src = os.path.join(tmp_dir, "s.pdf")
     _pdf(src, pages=1)
     out = os.path.join(tmp_dir, "Q4 50% off.png")

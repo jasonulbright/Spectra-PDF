@@ -808,8 +808,8 @@ def _layout_box_spans(
     def resolve_face(b: bool, i: bool, tcy: bool):
         skey = style_key(b, i)
         if vertical and not tcy:
-            # One vertical face serves the whole column (T4's recorded
-            # position — no vertical serif is vendored), so the style axes
+            # One vertical face serves the whole column (no vertical serif
+            # is vendored), so the style axes
             # resolve through the vertical ladder rather than the bundled
             # family map.
             return vertical_face(font_path, family, skey, body, columns)[0]
@@ -843,7 +843,7 @@ def _layout_box_spans(
         # Every style that draws anything also draws the JOIN SPACE — the
         # wrap synthesizes inter-word spaces styled by the preceding word,
         # whose own body positions may never have contained one
-        # (pin-caught: encode(' ') refused on a word-only span).
+        # (encode(' ') refuses on a word-only span otherwise).
         style_chars = drawn_by_style.get(idx, set())
         if style_chars:
             style_chars = set(style_chars) | {" "}

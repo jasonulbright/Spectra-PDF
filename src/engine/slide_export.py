@@ -27,6 +27,7 @@ import pikepdf
 
 from engine import bidi, budget
 from engine.form_detect import _crop_box, _page_rotate, _page_segments
+from engine.pdf_fonts import name_str
 from engine.soffice import _normalise_face
 
 # What the background raster is rendered at. Matches the image export's own
@@ -83,11 +84,7 @@ def _base_font(font) -> str:
         if base is None:
             descendants = font.get("/DescendantFonts") or []
             base = descendants[0].get("/BaseFont") if len(descendants) else None
-        if isinstance(base, pikepdf.Name):
-            # `str` of a name decodes its bytes as strict UTF-8 and raises on
-            # any other byte; such a byte reads as U+FFFD here.
-            return bytes(base).decode("utf-8", "replace")
-        return str(base) if base is not None else ""
+        return name_str(base) if base is not None else ""
     except (AttributeError, TypeError, IndexError):
         return ""
 

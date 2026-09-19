@@ -1,9 +1,8 @@
-"""Page-VECTOR editing (the first vector slice).
+"""Page-VECTOR editing.
 
 Lists, selects (via a bbox), and deletes VECTOR path objects on a page — the
 drawn rules, boxes, underlines, dividers, and logos that the raster
-tools can't touch (the phase-open ceiling: "Vector objects aren't
-addressable"). A "vector object" is ONE maximal run of path-CONSTRUCTION
+tools can't touch. A "vector object" is ONE maximal run of path-CONSTRUCTION
 operators (`m l c v y re h`) terminated by a path-PAINTING operator that
 DRAWS it (`f F f* S s B B* b b*`). It is the unit the user clicks.
 

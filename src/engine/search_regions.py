@@ -191,9 +191,8 @@ def _collect_runs(pdf, page) -> tuple[list[_Run], list[dict]]:
         items = (
             show_items_from_segments(det["segments"], cap, state) if measured else []
         )
-        # `writes_vertical`, not the listing's `vertical`: a REFUSED
-        # Identity-V font still draws its column downward, and a refused font
-        # is precisely the unmeasurable case. Slice A's rule, one module over.
+        # `writes_vertical`: a REFUSED Identity-V font still draws its column
+        # downward, and a refused font is precisely the unmeasurable case.
         vertical = bool(cap is not None and cap.writes_vertical)
         ink = fonts.ink_extent_of(det["font"])
         combined = det["combined"]
@@ -456,15 +455,16 @@ def _rects_for_span(
 
 
 def _slice_rect(run: _Run, first: int, last: int) -> list[float]:
-    """The device rect of codes [first…last] of a run — the per-code advance
-    slice, given the font's own ink extent above and below the baseline."""
+    """The device rect of codes [first…last] of a run — each code's own
+    advance box, `Tc` and `Tw` left out, given the font's own ink extent above
+    and below the baseline."""
     xs: list[float] = []
     for index in range(first, min(last, len(run.items) - 1) + 1):
         item = run.items[index]
         if item.kern:
             continue
         xs.append(item.x)
-        xs.append(item.x + item.advance)
+        xs.append(item.x + item.width)
     if not xs:
         return list(run.full_rect)
     x0, x1 = min(xs), max(xs)

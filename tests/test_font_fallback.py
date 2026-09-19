@@ -274,8 +274,8 @@ class TestConvertTextRun:
             convert_text_run(src, os.path.join(tmp_dir, "o.pdf"), 1, 0, "漢", FONT)
 
     def test_nested_edits_leave_no_orphaned_copies(self, tmp_dir):
-        """Resource hygiene (review-MEASURED: every nested edit left the
-        prior form copy embedded; converts stranded a font subset each).
+        """Resource hygiene (without it every nested edit leaves the prior
+        form copy embedded, and each convert strands a font subset).
         A single-draw form edited twice: the superseded entries and their
         subtrees must be GONE from the saved file."""
         src = os.path.join(tmp_dir, "t.pdf")
