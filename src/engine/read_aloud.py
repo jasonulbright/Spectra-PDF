@@ -163,7 +163,7 @@ def _char_rects(run_detail: dict, fonts: _FontCache) -> tuple:
     state.rise = style["rise"]
     items = show_items_from_segments(segments, cap, state)
     vertical = bool(cap.writes_vertical)
-    ink = fonts.ink_extent(run_detail["resources"], run_detail["fallback"], style["font_name"])
+    ink = fonts.ink_extent_of(run_detail["font"])
     combined = run_detail["combined"]
     text_parts: list = []
     rects: list = []

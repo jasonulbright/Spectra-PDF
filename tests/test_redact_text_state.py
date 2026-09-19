@@ -329,3 +329,53 @@ class TestAnEmbeddedCMap:
         )
         _src, out = _redacted(tmp_dir, doc, "cmap_invalid")
         assert _drawn(_shows(out)) == b""
+
+
+# ── a pen that moves back over its own glyphs ─────────────────────────────
+
+
+class TestAPenThatMovesBack:
+    """A TJ number moves the pen back as readily as forward (§9.4.3). In
+    `[(AB) 1200 (C)] TJ` at 12 pt and 0.6 em per glyph, A draws x 60..67.2,
+    B 67.2..74.4, the pen returns to x 60 and C draws over A. The net advance
+    is 7.2, and a run box from the pen start to it misses B: a mark over B
+    kept the whole run."""
+
+    def test_a_mark_over_the_glyph_behind_the_pen_removes_it(self, tmp_dir):
+        doc = pikepdf.new()
+        _page(
+            doc,
+            Dictionary(Font=Dictionary(F1=_simple_font(doc, ADVANCE, "Wide"))),
+            b"BT /F1 12 Tf 60 300 Td [(AB) 1200 (C)] TJ ET",
+        )
+        _src, out = _redacted(tmp_dir, doc, "back", mark=[68, 290, 73, 320])
+        # B's own advance stands in for it, so C still lands on A.
+        assert _shows(out) == [[b"A", 600.0, b"C"]]
+
+    def test_a_line_redaction_found_by_search_takes_every_glyph(self, tmp_dir):
+        # Search & Redact's "line" expansion marks the whole run's box.
+        from engine.search_redact import search_and_redact
+
+        doc = pikepdf.new()
+        _page(
+            doc,
+            Dictionary(Font=Dictionary(F1=_simple_font(doc, ADVANCE, "Wide"))),
+            b"BT /F1 12 Tf 60 300 Td [(AB) 1200 (C)] TJ ET",
+        )
+        src = _save(doc, tmp_dir, "back_line")
+        out = os.path.join(tmp_dir, "back_line_out.pdf")
+        search_and_redact(src, out, query="ABC", expand="line")
+        assert _drawn(_shows(out)) == b""
+
+    def test_a_mark_over_a_glyph_behind_the_pen_start_removes_it(self, tmp_dir):
+        # [(A) 1800 (B)]: after A the pen moves back 21.6, so B draws x
+        # 45.6..52.8, left of where the run starts.
+        doc = pikepdf.new()
+        _page(
+            doc,
+            Dictionary(Font=Dictionary(F1=_simple_font(doc, ADVANCE, "Wide"))),
+            b"BT /F1 12 Tf 60 300 Td [(A) 1800 (B)] TJ ET",
+        )
+        _src, out = _redacted(tmp_dir, doc, "behind_start", mark=[46, 290, 50, 320])
+        assert b"B" not in _drawn(_shows(out))
+        assert b"A" in _drawn(_shows(out))

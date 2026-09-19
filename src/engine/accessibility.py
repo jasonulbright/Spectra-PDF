@@ -53,7 +53,7 @@ import pikepdf
 from engine import struct_audit, struct_nesting
 from engine.contrast import page_contrast
 from engine.extract_text import extract_text
-from engine.redact import IDENTITY, _resolve_resources
+from engine.redact import IDENTITY, _lookup_xobject, _resolve_resources
 from engine.sanitize_content import SCAN_COVERAGE, off_ocg_set, page_events
 from engine.struct_audit import (
     CELLS,
@@ -65,8 +65,8 @@ from engine.struct_audit import (
     scope,
     span_of,
 )
-from engine.text_metrics import _FontCache
-from engine.text_runs import NOTHING_TO_EDIT, UNNAMED_FONT, _walk_runs
+from engine.text_metrics import _child_state, _FontCache
+from engine.text_runs import NOTHING_TO_EDIT, UNNAMED_FONT, _resource_lookup, _walk_runs
 
 PASS = "pass"
 FAIL = "fail"
@@ -496,6 +496,7 @@ class _Pages:
             page_no = i + 1
             try:
                 runs: list = []
+                detail: list = []
                 _walk_runs(
                     pdf,
                     pikepdf.parse_content_stream(page),
@@ -506,7 +507,10 @@ class _Pages:
                     runs,
                     False,
                     _FontCache(),
+                    detail=detail,
                 )
+                for row, det in zip(runs, detail):
+                    row["font_key"] = _font_identity(det.get("font"))
                 self.runs[page_no] = runs
             except Exception as exc:
                 self.unreadable.append({"page": page_no, "stage": "text", "reason": str(exc)})
@@ -1516,6 +1520,20 @@ def _check_tab_order(check, pdf, annots, cropboxes):
     _verdict(check, len(pages_with_annots), findings)
 
 
+def _font_identity(font) -> tuple:
+    """One key per font DICTIONARY: its object number, or for a direct
+    dictionary its own bytes. Two fonts a page and a form both call /F1 are two
+    fonts, and a font an ExtGState sets has no name at all."""
+    if font is None:
+        return ("none",)
+    try:
+        if font.is_indirect:
+            return ("obj", font.objgen)
+        return ("direct", bytes(font.unparse()))
+    except Exception:
+        return ("unreadable", id(font))
+
+
 def _check_character_encoding(check, pages):
     """A run whose bytes cannot be mapped to Unicode reads as nothing.
 
@@ -1546,7 +1564,7 @@ def _check_character_encoding(check, pages):
             # its text maps, and only the edit is refused.
             if run.get("editable") or reason == UNNAMED_FONT:
                 continue
-            key = (page_no, str(run.get("font_name") or ""), reason)
+            key = (page_no, run.get("font_key"), reason)
             if key in seen_fonts:
                 continue
             seen_fonts.add(key)
@@ -3773,7 +3791,7 @@ _TRUETYPE_ENCODINGS = frozenset({"/MacRomanEncoding", "/WinAnsiEncoding"})
 
 
 def _rendered_fonts(pdf) -> tuple:
-    """objgen → the font dictionary of every font a text-showing operator
+    """identity → the font dictionary of every font a text-showing operator
     actually draws with, plus the streams that would not parse.
 
     ISO 14289-1 cl. 7.21.4.1 defines a font as USED when at least one of its
@@ -3784,14 +3802,24 @@ def _rendered_fonts(pdf) -> tuple:
     with is not a font this clause governs, and reporting it would be a false
     failure on a conforming file.
 
-    `q`/`Q` save and restore the selected font and the rendering mode with the
-    rest of the graphics state (ISO 32000-2 8.4.2, Table 51), so both travel
-    on the stack here rather than being read as if a stream were flat.
+    The font is the DICTIONARY the text state holds (ISO 32000-2 §9.3.1): the
+    one `Tf` names, the one an ExtGState /Font entry sets (Table 57), or the
+    one a form inherits from its Do together with the rendering mode
+    (§8.10.1), whatever the form's own resources call by that name. A form is
+    walked once per font and visibility it is drawn in.
     """
     out: dict = {}
     unread: list = []
 
-    def walk(owner, resources, page_no: int, depth: int, seen: set) -> None:
+    def remember(font) -> None:
+        try:
+            key = ("obj", font.objgen) if font.is_indirect else ("held", id(font))
+        except Exception:
+            return
+        out[key] = font
+
+    def walk(owner, resources, fallback, page_no: int, depth: int, seen: set,
+             parent=None) -> None:
         if depth > _CONTENT_DEPTH:
             return
         try:
@@ -3799,45 +3827,18 @@ def _rendered_fonts(pdf) -> tuple:
         except Exception as exc:
             unread.append({"page": page_no, "reason": str(exc)})
             return
-        fonts = None
-        xobjects = None
-        if isinstance(resources, pikepdf.Dictionary):
-            try:
-                fonts = resources.get("/Font")
-                xobjects = resources.get("/XObject")
-            except Exception as exc:
-                unread.append({"page": page_no, "reason": str(exc)})
-        mode = 0
-        font = None
-        stack: list = []
+        state = _child_state(IDENTITY, parent, lookup=_resource_lookup(resources, fallback))
         for operands, operator in operations:
             name = str(operator)
-            if name == "q":
-                stack.append((mode, font))
-            elif name == "Q":
-                if stack:
-                    mode, font = stack.pop()
-            elif name == "Tf" and operands:
-                font = None
-                if isinstance(fonts, pikepdf.Dictionary):
-                    try:
-                        font = fonts.get(str(operands[0]))
-                    except Exception:
-                        font = None
-            elif name == "Tr" and operands:
+            operands = list(operands)
+            if state.feed(name, operands):
+                continue
+            if name in _TEXT_SHOWING:
+                if state.render_mode != _INVISIBLE_TEXT and isinstance(state.font, pikepdf.Dictionary):
+                    remember(state.font)
+            elif name == "Do" and operands:
                 try:
-                    mode = int(operands[0])
-                except Exception:
-                    mode = 0
-            elif name in _TEXT_SHOWING:
-                if mode != _INVISIBLE_TEXT and isinstance(font, pikepdf.Dictionary):
-                    try:
-                        out[font.objgen] = font
-                    except Exception:
-                        pass
-            elif name == "Do" and operands and isinstance(xobjects, pikepdf.Dictionary):
-                try:
-                    xobj = xobjects.get(str(operands[0]))
+                    xobj = _lookup_xobject(str(operands[0]), resources, fallback)
                 except Exception:
                     continue
                 if not isinstance(xobj, pikepdf.Stream):
@@ -3850,11 +3851,17 @@ def _rendered_fonts(pdf) -> tuple:
                 except Exception as exc:
                     unread.append({"page": page_no, "reason": str(exc)})
                     continue
-                if og in seen:
+                try:
+                    font_key = (state.font.objgen if state.font.is_indirect else id(state.font)) \
+                        if state.font is not None else None
+                except Exception:
+                    font_key = None
+                key = (og, font_key, state.render_mode == _INVISIBLE_TEXT)
+                if key in seen:
                     continue
-                seen.add(og)
-                walk(xobj, nested if nested is not None else resources,
-                     page_no, depth + 1, seen)
+                seen.add(key)
+                walk(xobj, nested if nested is not None else resources, resources,
+                     page_no, depth + 1, seen, parent=state)
 
     for i, page in enumerate(pdf.pages):
         page_no = i + 1
@@ -3866,7 +3873,7 @@ def _rendered_fonts(pdf) -> tuple:
             except Exception as exc:
                 unread.append({"page": page_no, "reason": str(exc)})
                 continue
-        walk(page, resources, page_no, 0, set())
+        walk(page, resources, None, page_no, 0, set())
         # An appearance stream renders too: the glyphs in a widget's `/AP /N`
         # are on the page as much as the ones in its content stream.
         try:
@@ -3893,7 +3900,7 @@ def _rendered_fonts(pdf) -> tuple:
                     nested = stream.get("/Resources")
                 except Exception:
                     nested = None
-                walk(stream, nested, page_no, 1, set())
+                walk(stream, nested, None, page_no, 1, set())
     return out, unread
 
 

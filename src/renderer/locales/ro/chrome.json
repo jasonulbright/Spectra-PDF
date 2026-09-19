@@ -2390,6 +2390,7 @@
   "engine.outline.malformedOutlineActionPayload": "încărcătură de acțiune de schiță malformată",
   "engine.outline.outlineActionPayloadNested": "încărcătura de acțiune de schiță este imbricată prea adânc",
   "engine.outline.outlineDeeperThanLevels": "schița este mai adâncă de {{MAX_DEPTH}} niveluri",
+  "engine.outlines.pageDrawsTextFont": "Pagina {{page}} desenează text fără niciun font selectat.",
   "engine.outlines.pageDrawsTextThrough": "Pagina {{page}} desenează text prin resursa de font {{name}}, pe care pagina nu o definește.",
   "engine.outlines.pageDrawsZeroWidth": "Pagina {{page}} desenează o linie cu grosime zero, care nu are o grosime fixă de convertit în contur.",
   "engine.outlines.pageNestsFormXobjects": "Pagina {{page}} imbrichează XObiecte de formular mai adânc de {{cap}} niveluri.",

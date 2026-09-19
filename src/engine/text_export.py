@@ -17,8 +17,10 @@ from pathlib import Path
 import pikepdf
 from pdfminer.converter import TextConverter
 from pdfminer.layout import LAParams
-from pdfminer.pdfinterp import PDFPageInterpreter, PDFResourceManager
+from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfpage import PDFPage
+
+from engine.extract_text import TextStateInterpreter
 
 LAYOUTS = ("reading", "layout")
 PAGE_BREAK = "\f"
@@ -68,7 +70,7 @@ def page_texts(file: str, wanted: list[int], layout: str) -> list[tuple[int, str
     manager = PDFResourceManager()
     sink = io.StringIO()
     device = TextConverter(manager, sink, laparams=_laparams(layout))
-    interpreter = PDFPageInterpreter(manager, device)
+    interpreter = TextStateInterpreter(manager, device)
     out: list[tuple[int, str]] = []
     try:
         with open(file, "rb") as handle:

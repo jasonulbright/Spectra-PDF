@@ -2328,6 +2328,7 @@
   "engine.outline.malformedOutlineActionPayload": "felaktig åtgärdsnyttolast i dispositionen",
   "engine.outline.outlineActionPayloadNested": "åtgärdsnyttolasten i dispositionen är för djupt nästlad",
   "engine.outline.outlineDeeperThanLevels": "dispositionen är djupare än {{MAX_DEPTH}} nivåer",
+  "engine.outlines.pageDrawsTextFont": "Sidan {{page}} ritar text utan att något teckensnitt är valt.",
   "engine.outlines.pageDrawsTextThrough": "Sidan {{page}} ritar text via teckensnittsresursen {{name}}, som sidan inte definierar.",
   "engine.outlines.pageDrawsZeroWidth": "Sidan {{page}} ritar en linje utan bredd, som inte har någon fast bredd att konvertera till kontur.",
   "engine.outlines.pageNestsFormXobjects": "Sidan {{page}} nästlar formulär-XObject djupare än {{cap}} nivåer.",

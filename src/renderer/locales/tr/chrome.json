@@ -2328,6 +2328,7 @@
   "engine.outline.malformedOutlineActionPayload": "bozuk ana hat eylem yükü",
   "engine.outline.outlineActionPayloadNested": "ana hat eylem yükü çok derin iç içe geçmiş",
   "engine.outline.outlineDeeperThanLevels": "ana hat {{MAX_DEPTH}} düzeyden daha derin",
+  "engine.outlines.pageDrawsTextFont": "{{page}}. sayfa, hiçbir yazı tipi seçilmeden metin çiziyor.",
   "engine.outlines.pageDrawsTextThrough": "{{page}}. sayfa, sayfanın tanımlamadığı {{name}} yazı tipi kaynağı üzerinden metin çiziyor.",
   "engine.outlines.pageDrawsZeroWidth": "{{page}}. sayfa, ana hatta dönüştürülecek sabit bir kalınlığı olmayan sıfır kalınlıkta bir çizgi çiziyor.",
   "engine.outlines.pageNestsFormXobjects": "{{page}}. sayfa form XObject’lerini {{cap}} düzeyden daha derin iç içe yerleştiriyor.",

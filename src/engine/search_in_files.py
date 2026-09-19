@@ -20,8 +20,7 @@ pages per file are returned, and any truncation or per-file extraction failure
 
 import re
 
-from pdfminer.high_level import extract_pages
-from pdfminer.layout import LTTextContainer
+from engine.extract_text import layout_text, pdfminer_pages
 
 # The compile half moved to `text_match.py` so this module, the
 # new `search_regions` door and the renderer's `compileMatcher` are ONE
@@ -36,12 +35,8 @@ _SNIPPET_RADIUS = 40
 
 def _page_texts(path: str):
     """Yield (1-based page number, whitespace-collapsed text) for each page."""
-    for i, layout in enumerate(extract_pages(path)):
-        parts = []
-        for element in layout:
-            if isinstance(element, LTTextContainer):
-                parts.append(element.get_text())
-        yield i + 1, _collapse_ws("".join(parts))
+    for i, layout in enumerate(pdfminer_pages(path)):
+        yield i + 1, _collapse_ws(layout_text(layout))
 
 
 def _snippet(text: str, match: re.Match) -> str:

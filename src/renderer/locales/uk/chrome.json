@@ -2452,6 +2452,7 @@
   "engine.outline.malformedOutlineActionPayload": "некоректне корисне навантаження дії структури",
   "engine.outline.outlineActionPayloadNested": "корисне навантаження дії структури вкладено надто глибоко",
   "engine.outline.outlineDeeperThanLevels": "структура глибша за {{MAX_DEPTH}} рівнів",
+  "engine.outlines.pageDrawsTextFont": "На сторінці {{page}} текст намальовано без вибраного шрифту.",
   "engine.outlines.pageDrawsTextThrough": "На сторінці {{page}} текст намальовано через ресурс шрифту {{name}}, якого сторінка не визначає.",
   "engine.outlines.pageDrawsZeroWidth": "На сторінці {{page}} намальовано лінію нульової товщини, яка не має сталої товщини для перетворення на контур.",
   "engine.outlines.pageNestsFormXobjects": "На сторінці {{page}} XObject форми вкладено глибше ніж на {{cap}} рівнів.",

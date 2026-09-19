@@ -76,8 +76,11 @@ from engine.text_runs import (
     _FontCache,
     _fresh_font_name,
     _instruction,
+    _names_its_font,
     _register_font,
+    _resource_lookup,
     _run_metrics,
+    _same_font,
     _walk_runs,
     break_marker_count,
     break_marker_instruction,
@@ -209,6 +212,9 @@ class _Member:
         "lkey",
         "resources",
         "fallback",
+        # The font DICTIONARY the text state held for this run: the one its
+        # `Tf` named, an ExtGState /Font entry, or the one a form inherited.
+        "font",
         "vertical",
         "clipped",
     )
@@ -751,6 +757,7 @@ def _members_from(runs: list[dict], detail: list[dict], breaks=()) -> list[_Memb
         # form's font is not in page resources.
         mem.resources = det.get("resources")
         mem.fallback = det.get("fallback")
+        mem.font = det.get("font")
         members.append(mem)
     by_index = {m.index: m for m in members}
     for brk in breaks:
@@ -2361,20 +2368,14 @@ def list_text_paragraphs(file: str, page: int) -> dict:
         paragraphs = _group(runs, detail, breaks)
 
         # Seed the style toggles from each paragraph's dominant
-        # member's OWN font (stream-scoped resources — the discipline).
+        # member's OWN font: the dictionary its run was drawn in.
         from engine.font_fallback import classify_font_family, classify_font_style
-        from engine.text_runs import _lookup_font
 
         def style_of(member: _Member) -> tuple[bool, bool, str | None]:
             """(bold, italic, family) of a member's OWN font. The family is a
             DISPLAY seed only — it names what the member already
             is, never a substitution request."""
-            try:
-                fd = _lookup_font(
-                    member.style["font_name"], member.resources or resources, resources
-                )
-            except Exception:
-                fd = None
+            fd = member.font
             if fd is None:
                 return (False, False, None)
             try:
@@ -2564,12 +2565,11 @@ def _feature_source(font_path, member, resources, chars, feats, alt, style):
     from engine.font_fallback import resolve_feature_font
     from engine.font_features import available_features, resolve_glyphs
     from engine.font_kerning import _embedded_program
-    from engine.text_runs import _lookup_font
 
     raw = None
     if member is not None:
         try:
-            fd = _lookup_font(member.style["font_name"], member.resources or resources, resources)
+            fd = member.font
             raw = _embedded_program(fd) if fd is not None else None
         except Exception:
             raw = None
@@ -3066,13 +3066,7 @@ class _KernSource:
                     if face:
                         pairs = kern_pairs(str(face))
             else:
-                from engine.text_runs import _lookup_font
-
-                fd = _lookup_font(
-                    st.member.style["font_name"],
-                    st.member.resources or self._resources,
-                    self._resources,
-                )
+                fd = st.member.font
                 if fd is not None:
                     pairs = kern_pairs_for_font(fd, self._font_dir)
         except Exception:
@@ -4487,9 +4481,18 @@ def _mats_close(m1, m2) -> bool:
     return all(abs(a - b) <= 1e-6 for a, b in zip(m1, m2))
 
 
+def _same_text_font(orig: GraphicsTextState, emit: GraphicsTextState) -> bool:
+    """Whether both machines draw with one font. The dictionary decides where
+    both hold one; a name the stream does not define yet (a fallback face the
+    edit registers afterwards) resolves to none, and then the names decide."""
+    if orig.font is not None and emit.font is not None:
+        return _same_font(orig.font, emit.font)
+    return orig.font is None and emit.font is None and orig.font_name == emit.font_name
+
+
 def _states_equal(orig: GraphicsTextState, emit: GraphicsTextState) -> bool:
     return (
-        orig.font_name == emit.font_name
+        _same_text_font(orig, emit)
         and abs(orig.font_size - emit.font_size) <= 1e-9
         and abs(orig.h_scale - emit.h_scale) <= 1e-9
         and abs(orig.char_spacing - emit.char_spacing) <= 1e-9
@@ -4507,12 +4510,19 @@ def _states_equal(orig: GraphicsTextState, emit: GraphicsTextState) -> bool:
 def _state_sync_instructions(orig: GraphicsTextState, emit: GraphicsTextState) -> list:
     """Ops that bring `emit`'s text/color state to `orig`'s (position is
     injected separately — Tm is only legal inside BT). Only differing
-    fields emit anything."""
+    fields emit anything.
+
+    The font is restored by the name `orig` last selected it with, and only
+    when that name still selects the dictionary `orig` draws with: a font an
+    ExtGState set, or one a form inherited under a name its own resources
+    give to another font, has no name here, and the edit refuses rather than
+    redraw the kept text in another font."""
     ops: list = []
-    if (
-        orig.font_name != emit.font_name or abs(orig.font_size - emit.font_size) > 1e-9
-    ) and orig.font_name:
-        ops.append(_instruction([Name(orig.font_name), _f(orig.font_size)], "Tf"))
+    if not _same_text_font(orig, emit) or abs(orig.font_size - emit.font_size) > 1e-9:
+        if orig.font is not None and not _names_its_font(orig):
+            raise ValueError("an edit cannot select this text's font by name")
+        if orig.font_name:
+            ops.append(_instruction([Name(orig.font_name), _f(orig.font_size)], "Tf"))
     if abs(orig.h_scale - emit.h_scale) > 1e-9:
         ops.append(_instruction([_f(orig.h_scale * 100.0)], "Tz"))
     if abs(orig.char_spacing - emit.char_spacing) > 1e-9:
@@ -4669,8 +4679,12 @@ def _rewrite_paragraph_stream(
     target stream can itself host a deeper target's Do."""
     tgt = edit.targets.get(path)
     in_target = tgt is not None
-    orig = _child_state(base_ctm, parent_state)
-    emit = _child_state(base_ctm, parent_state) if in_target else None
+    # Both machines resolve `Tf` and `gs` in this stream's resources, the
+    # invoker's after them, so each holds the font DICTIONARY a reader draws
+    # with (ISO 32000-2 §9.3.1, Table 57, §8.10.1).
+    lookup = _resource_lookup(resources, fallback_res)
+    orig = _child_state(base_ctm, parent_state, lookup=lookup)
+    emit = _child_state(base_ctm, parent_state, lookup=lookup) if in_target else None
     kept: list = []
     changed = False
     new_forms: dict = {}
@@ -4836,7 +4850,7 @@ def _rewrite_paragraph_stream(
                         orig.char_spacing = float(operands[1])
                     except (TypeError, ValueError):
                         pass
-            cap = fonts.capability(resources, fallback_res, orig.font_name)
+            cap = fonts.capability_of(orig.font)
             _text, raw = _run_metrics(operator, operands, cap, orig)
             # A KEPT vertical run advances the parallel walks
             # downward — the model's tm must match reality or the next
@@ -5263,17 +5277,15 @@ def _prepare_styled(
     # Each member's OWN classified family, so a
     # per-span face with no explicit family lands on that member's family
     # (a bolded mono word in a serif paragraph → mono-bold). Only needed
-    # when per-span faces are present; the font is looked up in the
-    # member's own stream resources (form-scoped when nested), page
-    # resources as fallback.
+    # when per-span faces are present; the font is the dictionary the
+    # member's run was drawn in.
     member_family = None
     if face_by_pos is not None:
         from engine.font_fallback import classify_font_family
-        from engine.text_runs import _lookup_font
 
         member_family = {}
         for m in para.members:
-            fd = _lookup_font(m.style["font_name"], m.resources or resources, resources)
+            fd = m.font
             member_family[m.index] = classify_font_family(fd) if fd is not None else "sans"
     # A paragraph that reorders may carry a cursively joining
     # script, which has to be SHAPED into a face that still knows how.
@@ -5297,11 +5309,10 @@ def _prepare_styled(
         or _shaping_needed(str(new_text))
     ):
         from engine.font_fallback import classify_font_style
-        from engine.text_runs import _lookup_font
 
         rtl_style = {}
         for m in para.members:
-            fd = _lookup_font(m.style["font_name"], m.resources or resources, resources)
+            fd = m.font
             try:
                 rtl_style[m.index] = classify_font_style(fd) if fd is not None else (False, False)
             except Exception:
@@ -5313,8 +5324,9 @@ def _prepare_styled(
     # preference:
     #   - no substitution/feature request and no per-span face — asking
     #     for bold IS asking to leave the document font;
-    #   - ONE font across the members — a per-member split would seam a
-    #     word at a member boundary;
+    #   - ONE font across the members, the same dictionary under the same
+    #     name — a per-member split would seam a word at a member boundary,
+    #     and the emission selects the font by that name in every stream;
     #   - the PDF-side shape (Identity-H + Identity CIDToGIDMap: a glyph
     #     id IS the code) and the program-side one (cmap + GSUB still
     #     present) both hold — `in_place_face` checks them;
@@ -5333,12 +5345,12 @@ def _prepare_styled(
         and not substituting
         and font_path
         and len({m.style["font_name"] for m in para.members}) == 1
+        and all(_same_font(m.font, para.members[0].font) for m in para.members)
     ):
         from engine import shaping as _shaping
-        from engine.text_runs import _lookup_font as _lf
 
         first_m = min(para.members, key=lambda m: m.index)
-        fd0 = _lf(first_m.style["font_name"], first_m.resources or resources, resources)
+        fd0 = first_m.font
         candidate = _shaping.in_place_face(fd0) if fd0 is not None else None
         if candidate is not None:
             cap0 = first_m.cap
@@ -5399,7 +5411,6 @@ def _prepare_styled(
             style_key,
             synthetic_family_font,
         )
-        from engine.text_runs import _lookup_font
 
         if not font_path:
             raise ValueError("fallback font path is required to convert")
@@ -5607,9 +5618,7 @@ def _prepare_styled(
             if fam is not None:
                 original = synthetic_family_font(fam)
             else:
-                original = _lookup_font(
-                    first.style["font_name"], first.resources or resources, resources
-                )
+                original = first.font
             face = resolve_fallback_font(
                 str(font_path), original, style=style_key(kbold, kitalic), text=chars
             )

@@ -2266,6 +2266,7 @@
   "engine.outline.malformedOutlineActionPayload": "大纲的动作数据格式错误",
   "engine.outline.outlineActionPayloadNested": "大纲的动作数据嵌套过深",
   "engine.outline.outlineDeeperThanLevels": "大纲层级超过 {{MAX_DEPTH}} 层",
+  "engine.outlines.pageDrawsTextFont": "第 {{page}} 页在未选择字体的情况下绘制文本。",
   "engine.outlines.pageDrawsTextThrough": "第 {{page}} 页通过字体资源 {{name}} 绘制文本，而本页并未定义该资源。",
   "engine.outlines.pageDrawsZeroWidth": "第 {{page}} 页绘制了零宽度线条，没有可转换为轮廓的固定宽度。",
   "engine.outlines.pageNestsFormXobjects": "第 {{page}} 页的表单 XObject 嵌套深度超过 {{cap}} 层。",

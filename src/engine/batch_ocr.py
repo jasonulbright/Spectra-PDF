@@ -167,20 +167,14 @@ def _document_page_text(path: str, page_count: int) -> dict[int, str]:
     """{0-based page index: text}. A parse failure yields no text, not an error --
     the caller then falls back to the image check, which is the safe direction
     (it can only cause a page to be OCR'd, never to be silently skipped)."""
-    from pdfminer.high_level import extract_pages
-    from pdfminer.layout import LTTextContainer
+    from engine.extract_text import layout_text, pdfminer_pages
 
     out: dict[int, str] = {}
     try:
-        for i, layout in enumerate(extract_pages(path)):
+        for i, layout in enumerate(pdfminer_pages(path)):
             if i >= page_count:
                 break
-            parts = [
-                element.get_text()
-                for element in layout
-                if isinstance(element, LTTextContainer)
-            ]
-            out[i] = "".join(parts)
+            out[i] = layout_text(layout)
     except Exception:
         return {}
     return out

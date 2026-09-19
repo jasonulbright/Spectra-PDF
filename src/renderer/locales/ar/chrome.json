@@ -2576,6 +2576,7 @@
   "engine.outline.malformedOutlineActionPayload": "حمولة إجراء المخطط التفصيلي مشوَّهة",
   "engine.outline.outlineActionPayloadNested": "حمولة إجراء المخطط التفصيلي متداخلة بعمق مفرط",
   "engine.outline.outlineDeeperThanLevels": "المخطط التفصيلي أعمق من {{MAX_DEPTH}} مستويات",
+  "engine.outlines.pageDrawsTextFont": "الصفحة {{page}} ترسم نصًا دون تحديد أي خط.",
   "engine.outlines.pageDrawsTextThrough": "الصفحة {{page}} ترسم نصًا عبر مورد الخط {{name}} الذي لا تعرّفه الصفحة.",
   "engine.outlines.pageDrawsZeroWidth": "الصفحة {{page}} ترسم خطًا بعرض صفري، وليس له عرض ثابت يمكن تحويله إلى مسار.",
   "engine.outlines.pageNestsFormXobjects": "الصفحة {{page}} تضمّن كائنات XObject للنماذج بعمق يتجاوز {{cap}} مستويات.",

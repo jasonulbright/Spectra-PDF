@@ -210,3 +210,23 @@ class TestPatterns:
         assert "passport" in str(exc.value)
         for known in PATTERN_IDS:
             assert known in str(exc.value)
+
+
+class TestTheCompiledPatternCache:
+    """The cache of compiled built-in patterns holds one entry per id of the
+    pattern table and nothing else: an id outside the table is refused before
+    anything is compiled. The table is injected at two entries here."""
+
+    def test_it_never_outgrows_the_pattern_table(self, monkeypatch):
+        from engine import text_match
+
+        small = {key: PATTERNS[key] for key in ("email", "phone")}
+        monkeypatch.setattr(text_match, "PATTERNS", small)
+        monkeypatch.setattr(text_match, "PATTERN_IDS", list(small))
+        monkeypatch.setattr(text_match, "_COMPILED", {})
+        for pattern_id in ("email", "phone", "email", "ssn", "url", "phone"):
+            try:
+                text_match.compiled_pattern(pattern_id)
+            except ValueError:
+                pass
+        assert sorted(text_match._COMPILED) == ["email", "phone"]

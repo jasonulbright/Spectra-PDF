@@ -1030,9 +1030,12 @@ class _Scan:
                     if self._invoke(xobject, res, res_key, font, depth) and not own:
                         ctx["inherited"] = True
             elif op == _SCN and value is not None:
+                # A pattern cell starts in the state in effect at the start of
+                # the stream that owns it (ISO 32000-2 §8.7.3.1 b), so it
+                # draws with this stream's inherited face, not the current one.
                 pattern = self._lookup("/Pattern", value, res, fallback, ctx)
-                if isinstance(pattern, Stream):
-                    self._invoke(pattern, res, res_key, None, depth)
+                if isinstance(pattern, Stream) and self._invoke(pattern, res, res_key, inherited, depth):
+                    ctx["inherited"] = True
 
     def _invoke(self, stream, res, res_key, font, depth) -> bool:
         own = stream.get("/Resources")

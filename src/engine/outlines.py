@@ -24,11 +24,12 @@ import math
 
 import pikepdf
 
-from .content_walk import GraphicsTextState, mat_mult
+from .content_walk import DEFAULT_COLOR, IDENTITY, as_matrix, mat_mult
 from .glyph_outlines import GlyphSource, OutlineRefusal
-from .redact import IDENTITY, MAX_FORM_DEPTH, _resolve_resources
+from .redact import MAX_FORM_DEPTH, _lookup_xobject, _resolve_resources
 from .stroke_outline import stroke_outline
-from .text_metrics import _FontCache, _run_metrics, show_items
+from .text_metrics import _child_state, _FontCache, _run_metrics, show_items
+from .text_runs import _resource_lookup
 from .validate import validate_pdf
 
 _CONSTRUCT = frozenset({"m", "l", "c", "v", "y", "re", "h"})
@@ -108,7 +109,10 @@ def _contour_ops(contours, matrix, dx: float) -> list[str]:
 
 def _colour_ops(capture) -> list[str]:
     """A `GraphicsTextState` colour capture replayed as operators, translated
-    from the stroking space into the filling one."""
+    from the stroking space into the filling one. The untouched default is
+    device-gray black (ISO 32000-2 §8.6.4.1), whatever the fill colour is."""
+    if capture == DEFAULT_COLOR:
+        return ["0 g"]
     ops: list[str] = []
     for part in capture:
         if part is None:
@@ -134,14 +138,20 @@ class _StrokeState:
     what a stroke covers. `GraphicsTextState` does not track them, and they are
     graphics state like any other, so they save and restore with q/Q."""
 
-    def __init__(self) -> None:
+    def __init__(self, parent: "_StrokeState | None" = None) -> None:
         self.width = 1.0
         self.cap = 0
         self.join = 0
         self.miter = 10.0
         self.dash: tuple = ()
         self.phase = 0.0
+        if parent is not None:
+            (self.width, self.cap, self.join, self.miter, self.dash,
+             self.phase) = parent.values()
         self._stack: list = []
+
+    def values(self) -> tuple:
+        return (self.width, self.cap, self.join, self.miter, self.dash, self.phase)
 
     def push(self) -> None:
         self._stack.append(
@@ -220,22 +230,34 @@ class _Context:
         self.report = report
         self.fonts = _FontCache()
         self._sources: dict = {}
+        # A rewritten form per (form, the state its Do hands it): the same
+        # form drawn in two states converts to two different drawings.
+        self.forms: dict = {}
+        self._held: list = []
 
-    def source(self, resources, name: str) -> GlyphSource:
-        font_obj = _lookup_font(name, resources)
+    def font_key(self, font_obj):
+        """A key that names one font dictionary for the life of the page. A
+        direct dictionary has no object number, and its wrapper's id is reused
+        once the wrapper is collected, so the wrapper is held."""
         if font_obj is None:
-            page = self.number
-            raise OutlineRefusal(
-                f"Page {page} draws text through the font resource {name}, "
-                f"which the page does not define."
-            )
-        key = _font_key(font_obj)
+            return None
+        try:
+            if font_obj.is_indirect:
+                return ("obj", font_obj.objgen)
+        except AttributeError:
+            return None
+        self._held.append(font_obj)
+        return ("held", id(font_obj))
+
+    def source(self, font_obj) -> GlyphSource:
+        """The glyph source of the font dictionary the text state holds."""
+        key = self.font_key(font_obj)
         cached = self._sources.get(key)
         if cached is not None:
             if isinstance(cached, OutlineRefusal):
                 raise cached
             return cached
-        capability = self.fonts.capability(resources, resources, name)
+        capability = self.fonts.capability_of(font_obj)
         try:
             source = GlyphSource(font_obj, capability, self.font_dir, self.number)
         except OutlineRefusal as exc:
@@ -248,42 +270,34 @@ class _Context:
         return source
 
 
-def _font_key(font_obj):
-    try:
-        return font_obj.objgen
-    except Exception:
-        return id(font_obj)
-
-
-def _lookup_font(name, resources):
-    if resources is None or not name:
-        return None
-    try:
-        table = resources.get("/Font")
-        if table is None:
-            return None
-        return table.get(pikepdf.Name(name))
-    except Exception:
-        return None
-
-
-def _ext_gstate(resources, name: str):
-    if resources is None:
-        return None
-    try:
-        table = resources.get("/ExtGState")
-        return None if table is None else table.get(pikepdf.Name(name))
-    except Exception:
-        return None
+def _inherited(ctx: _Context, state, strokes: _StrokeState, ctm) -> tuple:
+    """Everything a form's rewrite reads from the Do that invokes it: the text
+    parameters, the stroke colour and parameters, and the scale its curves
+    flatten at."""
+    return (
+        ctx.font_key(state.font), state.font_name, state.font_size, state.leading,
+        state.h_scale, state.char_spacing, state.word_spacing, state.render_mode,
+        state.rise, repr(state.stroke_color), strokes.values(), _matrix_scale(ctm),
+    )
 
 
 # ── the rewriter ───────────────────────────────────────────────────────────
 
 
-def rewrite_instructions(instructions, resources, ctx: _Context, base_ctm=IDENTITY):
-    """One content stream rewritten, or None when nothing in it changed."""
-    state = GraphicsTextState(base_ctm)
-    strokes = _StrokeState()
+def rewrite_instructions(instructions, resources, ctx: _Context, base_ctm=IDENTITY,
+                         fallback=None, parent_state=None, parent_strokes=None,
+                         depth: int = 0):
+    """One content stream rewritten, or None when nothing in it changed.
+
+    `parent_state` and `parent_strokes` are the graphics state the stream
+    starts in, None for a page. `resources` is this stream's own forked
+    dictionary: a converted form registers there under a fresh name, and a
+    name no kept Do draws any more leaves it, so the unconverted form is not
+    reachable from the converted stream.
+    """
+    lookup = _resource_lookup(resources, fallback)
+    state = _child_state(base_ctm, parent_state, lookup=lookup)
+    strokes = _StrokeState(parent_strokes)
     out: list[bytes] = []
     changed = False
 
@@ -293,6 +307,8 @@ def rewrite_instructions(instructions, resources, ctx: _Context, base_ctm=IDENTI
     clip_pending = False
     in_text = False
     clip_ops: list[str] = []
+    replaced: set = set()
+    drawn: set = set()
 
     def keep(instruction) -> None:
         out.append(pikepdf.unparse_content_stream([instruction]))
@@ -323,7 +339,7 @@ def rewrite_instructions(instructions, resources, ctx: _Context, base_ctm=IDENTI
         elif operator in ("w", "J", "j", "M", "d"):
             strokes.feed(operator, operands)
         elif operator == "gs" and operands:
-            strokes.apply_ext_gstate(_ext_gstate(resources, str(operands[0])))
+            strokes.apply_ext_gstate(lookup("/ExtGState", operands[0]))
 
         if in_text:
             if operator in _TEXT_STATE_OPS:
@@ -331,8 +347,7 @@ def rewrite_instructions(instructions, resources, ctx: _Context, base_ctm=IDENTI
                 continue
             if operator in _SHOW_OPS:
                 changed = True
-                clip_ops.extend(_emit_text(out, operator, operands, state, strokes,
-                                           resources, ctx))
+                clip_ops.extend(_emit_text(out, operator, operands, state, strokes, ctx))
                 continue
             if operator == "ET":
                 if clip_ops:
@@ -385,10 +400,69 @@ def rewrite_instructions(instructions, resources, ctx: _Context, base_ctm=IDENTI
                 reset_path()
                 continue
 
+        if operator == "Do" and operands:
+            name = _placed_form(operands[0], resources, fallback, state, strokes, ctx, depth)
+            if name is not None:
+                changed = True
+                replaced.add(str(operands[0]))
+                drawn.add(str(name))
+                keep(pikepdf.ContentStreamInstruction([name], pikepdf.Operator("Do")))
+                continue
+            drawn.add(str(operands[0]))
+
         state.feed(operator, operands)
         keep(instruction)
 
+    table = resources.get("/XObject") if resources is not None else None
+    if table is not None:
+        for name in replaced - drawn:
+            if pikepdf.Name(name) in table:
+                del table[pikepdf.Name(name)]
     return (out if changed else None)
+
+
+def _placed_form(name, resources, fallback, state, strokes, ctx: _Context, depth: int):
+    """The name a converted copy of the form this Do draws is registered
+    under in `resources`, or None when the Do draws something else or the
+    form converts to nothing different.
+
+    The form runs in the graphics state of its Do (ISO 32000-2 §8.10.1): its
+    text draws in the font the invoker selected, whatever its own resources
+    call by that name, and its strokes in the invoker's width and colour. So
+    it converts once per state it is drawn in, never once for every state.
+    """
+    form = _lookup_xobject(name, resources, fallback)
+    try:
+        if not isinstance(form, pikepdf.Stream) or str(form.get("/Subtype", "")) != "/Form":
+            return None
+        ctm = mat_mult(as_matrix(form.get("/Matrix")) or IDENTITY, state.ctm)
+    except Exception:
+        return None
+    key = (form.objgen, _inherited(ctx, state, strokes, ctm))
+    if key not in ctx.forms:
+        ctx.forms[key] = _rewrite_child(
+            ctx.pdf, form, resources, ctx, depth + 1, ctm, state, strokes,
+        )
+    copy = ctx.forms[key]
+    if copy is None:
+        return None
+    table = resources.get("/XObject")
+    if table is None:
+        table = pikepdf.Dictionary()
+        resources["/XObject"] = table
+    for existing in table.keys():
+        try:
+            if table[existing].objgen == copy.objgen:
+                return pikepdf.Name(str(existing))
+        except Exception:
+            continue
+    taken = {str(k) for k in table.keys()}
+    index = 0
+    while f"/OlFm{index}" in taken:
+        index += 1
+    fresh = pikepdf.Name(f"/OlFm{index}")
+    table[fresh] = copy
+    return fresh
 
 
 def _feed_construction(construct: list, operator: str, operands: list) -> None:
@@ -484,7 +558,7 @@ def _path_ops_from(subpaths) -> list[str]:
 
 
 def _emit_text(out: list, operator: str, operands: list, state, strokes,
-               resources, ctx: _Context) -> list[str]:
+               ctx: _Context) -> list[str]:
     """One show operator as paths. Returns the clip contribution, if any."""
     if operator == '"':
         try:
@@ -495,14 +569,16 @@ def _emit_text(out: list, operator: str, operands: list, state, strokes,
     if operator in ("'", '"'):
         state.next_line()
 
-    capability = ctx.fonts.capability(resources, resources, state.font_name)
+    capability = ctx.fonts.capability_of(state.font)
     if capability is None:
-        page, resource = ctx.number, state.font_name
-        raise OutlineRefusal(
-            f"Page {page} draws text through the font resource {resource}, "
-            f"which the page does not define."
-        )
-    source = ctx.source(resources, state.font_name)
+        page, name = ctx.number, state.font_name
+        if name:
+            raise OutlineRefusal(
+                f"Page {page} draws text through the font resource {name}, "
+                f"which the page does not define."
+            )
+        raise OutlineRefusal(f"Page {page} draws text with no font selected.")
+    source = ctx.source(state.font)
 
     size = float(state.font_size)
     scale = float(state.h_scale)
@@ -621,42 +697,51 @@ def _fork_resources(pdf, resources):
     return new
 
 
-def _rewrite_nested(pdf, resources, ctx: _Context, depth: int) -> bool:
-    """Rewrite every Form XObject and tiling Pattern the resources name, onto
-    COPIES registered in this (already forked) resources dictionary."""
+def _rewrite_patterns(pdf, resources, ctx: _Context, depth: int, base_ctm,
+                      parent_state=None, parent_strokes=None) -> bool:
+    """Rewrite every tiling Pattern the resources name, onto COPIES registered
+    in this (already forked) resources dictionary.
+
+    A pattern cell draws in the graphics state in effect at the BEGINNING of
+    the stream that owns it as a resource, with the pattern matrix applied to
+    that stream's initial CTM (ISO 32000-2 §8.7.2, §8.7.3.1): `base_ctm`,
+    `parent_state` and `parent_strokes` are that stream's own starting state,
+    not the state at the operator that paints with the pattern."""
     if resources is None:
         return False
+    try:
+        table = resources.get("/Pattern")
+    except Exception:
+        table = None
+    if table is None:
+        return False
     changed = False
-    for key in ("/XObject", "/Pattern"):
+    for name in list(table.keys()):
         try:
-            table = resources.get(key)
-        except Exception:
-            table = None
-        if table is None:
-            continue
-        for name in list(table.keys()):
-            try:
-                obj = table[name]
-                if not isinstance(obj, pikepdf.Stream):
-                    continue
-                if key == "/XObject":
-                    if str(obj.get("/Subtype", "")) != "/Form":
-                        continue
-                else:
-                    kind = obj.get("/PatternType")
-                    if kind is None or int(kind) != 1:
-                        continue
-            except Exception:
+            obj = table[name]
+            if not isinstance(obj, pikepdf.Stream):
                 continue
-            replacement = _rewrite_child(pdf, obj, resources, ctx, depth + 1)
-            if replacement is not None:
-                table[name] = replacement
-                changed = True
+            kind = obj.get("/PatternType")
+            if kind is None or int(kind) != 1:
+                continue
+            ctm = mat_mult(as_matrix(obj.get("/Matrix")) or IDENTITY, base_ctm)
+        except Exception:
+            continue
+        replacement = _rewrite_child(
+            pdf, obj, resources, ctx, depth + 1, ctm, parent_state, parent_strokes,
+        )
+        if replacement is not None:
+            table[name] = replacement
+            changed = True
     return changed
 
 
-def _rewrite_child(pdf, obj, parent_resources, ctx: _Context, depth: int):
-    """A rewritten COPY of one nested stream, or None when nothing changed."""
+def _rewrite_child(pdf, obj, parent_resources, ctx: _Context, depth: int, base_ctm,
+                   parent_state=None, parent_strokes=None):
+    """A rewritten COPY of one nested stream, or None when nothing changed.
+    `base_ctm`, `parent_state` and `parent_strokes` are the state the stream
+    starts in: a form's is the state at its Do, a pattern cell's the starting
+    state of the stream that owns it."""
     if depth > MAX_FORM_DEPTH:
         page, cap = ctx.number, MAX_FORM_DEPTH
         raise OutlineRefusal(
@@ -671,8 +756,13 @@ def _rewrite_child(pdf, obj, parent_resources, ctx: _Context, depth: int):
     except Exception:
         return None
     resources = _fork_resources(pdf, own if own is not None else parent_resources)
-    nested = _rewrite_nested(pdf, resources, ctx, depth)
-    rewritten = rewrite_instructions(instructions, resources, ctx)
+    nested = _rewrite_patterns(
+        pdf, resources, ctx, depth, base_ctm, parent_state, parent_strokes,
+    )
+    rewritten = rewrite_instructions(
+        instructions, resources, ctx, base_ctm, parent_resources,
+        parent_state, parent_strokes, depth,
+    )
     if rewritten is None and not nested:
         return None
     body = (b"\n".join(rewritten) if rewritten is not None
@@ -682,8 +772,7 @@ def _rewrite_child(pdf, obj, parent_resources, ctx: _Context, depth: int):
         if str(key) in _STREAM_ENCODING_KEYS:
             continue
         copy[key] = obj[key]
-    if own is not None or nested:
-        copy["/Resources"] = resources
+    copy["/Resources"] = resources
     return copy
 
 
@@ -694,9 +783,9 @@ def outline_page(pdf, page, number: int, font_dir: str, outline_text: bool,
     ctx = _Context(pdf, number, font_dir, outline_text, outline_strokes, report)
     resources = _fork_resources(pdf, _resolve_resources(page))
     page.obj["/Resources"] = resources
-    nested = _rewrite_nested(pdf, resources, ctx, 1)
+    nested = _rewrite_patterns(pdf, resources, ctx, 1, IDENTITY)
     instructions = list(pikepdf.parse_content_stream(page))
-    rewritten = rewrite_instructions(instructions, resources, ctx)
+    rewritten = rewrite_instructions(instructions, resources, ctx, depth=1)
     if rewritten is not None:
         page.Contents = pdf.make_stream(b"\n".join(rewritten))
     return {

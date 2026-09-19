@@ -29,8 +29,10 @@ heading and one folio has a three-way tie — and a tie broken toward the
 smallest size elects the folio as the body, which turns the actual body copy
 into a heading. Characters are what "most of the document" means.
 
-Honest limits (documented, not silent): font size is the raw `Tf` operand and
-block position is the raw text-matrix translation (neither composes the CTM),
+Honest limits (documented, not silent): font size is the raw size the text
+state holds at each show — the `Tf` operand or an ExtGState /Font entry's,
+carried across text objects as ISO 32000-2 §9.3.1 carries it — and block
+position is the raw text-matrix translation (neither composes the CTM),
 Form-XObject interiors are not descended into, and an ALREADY-TAGGED file is
 refused — retagging is the Tags panel's judgment call, not a batch
 heuristic's. Autotag names no figure: `/Alt` cannot be invented, and a figure
@@ -41,8 +43,11 @@ from pathlib import Path
 
 import pikepdf
 
+from engine.content_walk import IDENTITY, GraphicsTextState
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
+from engine.redact import _resolve_resources
+from engine.text_runs import _resource_lookup
 
 _H1_RATIO = 1.6
 _H2_RATIO = 1.25
@@ -112,21 +117,24 @@ def _shown_chars(operands) -> int:
     return total
 
 
-def _segment_page(instructions, image_names):
-    """Split a page's operators into taggable segments."""
+def _segment_page(instructions, image_names, resources=None):
+    """Split a page's operators into taggable segments.
+
+    The size and position read at each show are the text state's: `Tf`, `TL`
+    and an ExtGState /Font entry outlive the text object that sets them."""
     segments: list = []
     current_ops: list = []
     in_text = False
     text_ops: list = []
     max_size = 0.0
     chars = 0
-    ty = 0.0
-    leading = 0.0
     y_min = None
     y_max = None
+    state = GraphicsTextState(IDENTITY, lookup=_resource_lookup(resources, None))
 
     def note_y():
         nonlocal y_min, y_max
+        ty = state.tm[5]
         y_min = ty if y_min is None else min(y_min, ty)
         y_max = ty if y_max is None else max(y_max, ty)
 
@@ -136,41 +144,27 @@ def _segment_page(instructions, image_names):
             segments.append(_Segment("other", current_ops))
             current_ops = []
 
-    def number(value) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return 0.0
-
     for operands, operator in instructions:
         op = str(operator)
+        args = list(operands)
+        if op in ("'", '"'):
+            # The two show-and-advance operators move to the next line
+            # before they paint, exactly as T* does.
+            state.next_line()
+        elif op not in _SHOW_OPS:
+            state.feed(op, args)
         if op == "BT":
             flush_other()
             in_text = True
             text_ops = [(operands, operator)]
             max_size = 0.0
             chars = 0
-            ty = 0.0
-            leading = 0.0
             y_min = y_max = None
             continue
         if in_text:
             text_ops.append((operands, operator))
-            if op == "Tf" and len(operands) >= 2:
-                max_size = max(max_size, number(operands[1]))
-            elif op == "Tm" and len(operands) >= 6:
-                ty = number(operands[5])
-            elif op in ("Td", "TD") and len(operands) >= 2:
-                ty += number(operands[1])
-                if op == "TD":
-                    leading = -number(operands[1])
-            elif op == "TL" and operands:
-                leading = number(operands[0])
-            elif op in ("T*", "'", '"'):
-                # The two show-and-advance operators move to the next line
-                # before they paint, exactly as T* does.
-                ty -= leading
             if op in _SHOW_OPS:
+                max_size = max(max_size, state.font_size)
                 chars += _shown_chars(operands)
                 note_y()
             if op == "ET":
@@ -248,7 +242,7 @@ def autotag(file: str, output: str) -> dict:
         for page in pdf.pages:
             image_names = _image_xobject_names(page.obj)
             instructions = pikepdf.parse_content_stream(page)
-            segments = _segment_page(instructions, image_names)
+            segments = _segment_page(instructions, image_names, _resolve_resources(page))
             per_page.append(segments)
             for segment in segments:
                 if segment.kind == "text" and segment.size > 0 and segment.chars > 0:

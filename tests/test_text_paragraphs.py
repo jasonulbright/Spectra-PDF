@@ -2,7 +2,7 @@
 
 Fixtures are hand-built content streams (the test_text_runs discipline);
 every heuristic threshold in text_paragraphs.py is pinned by a case here —
-the tests own the numbers, the design doc owns the intent.
+the tests own the numbers.
 
 The rewrite half's core guarantee is PROPERTY-TESTED: after any paragraph
 edit, every kept (non-member) show op renders at an identical composed
@@ -673,9 +673,9 @@ class TestReplaceParagraphText:
         # vertical column FLOWING (no Td) between two members of one
         # paragraph, and a further vertical run flowing after the second
         # member; editing the paragraph must leave the tail at its
-        # hand-computed spec position (lens-repro'd drift: ~9pt x-jump
-        # with the flag dropped).
-        # The exposing shape (lens blueprint): `0 0 Td` before the column
+        # hand-computed spec position (with the flag dropped the tail
+        # drifts by a ~9pt x-jump).
+        # The exposing shape: `0 0 Td` before the column
         # + a LONG replacement lets the resync CLOSE divergence before
         # the tail show — routing it through the kept-already-resynced
         # else branch, the one site every other test misses.
@@ -704,7 +704,7 @@ class TestReplaceParagraphText:
         after = list_text_runs(out, 1)["runs"]
         tail_after = [r for r in after if r["vertical"]][-1]["rect"]
         # With the else-branch advance's `vert` flag dropped, this tail
-        # jumps sideways (lens mutation repro); correct axis = unmoved.
+        # jumps sideways; correct axis = unmoved.
         assert tail_after == pytest.approx(tail_before, abs=0.05), (
             f"tail moved: {tail_after} vs {tail_before}"
         )
@@ -2801,7 +2801,7 @@ class TestVerticalParagraphs:
             assert (members[0].x0, members[0].y) == pytest.approx((72, 700))
 
     def test_vertical_rise_attach_refuses_to_edit(self, tmp_dir):
-        # Round 28 HIGH: a markedly-smaller vertical run BESIDE a column
+        # A markedly-smaller vertical run BESIDE a column
         # rise-attaches (the shipped superscript heuristic, mode-blind),
         # and its rise_user then carries a REAL-X displacement — which Ts
         # (a real-Y displacement for vertical text) structurally cannot
@@ -2840,9 +2840,9 @@ class TestVerticalParagraphs:
         assert not os.path.exists(out)
 
     def test_mixed_page_lists_in_reading_order(self, tmp_dir):
-        # Round 28 MEDIUM: the sort key compared real Y (horizontal)
-        # against real X (vertical) — a mid-page vertical column at high
-        # x outsorted the page-top header. The key is now the box top
+        # A sort key comparing real Y (horizontal) against real X
+        # (vertical) lets a mid-page vertical column at high x outsort the
+        # page-top header. The key is the box top
         # (real-page space in both modes), per-mode tiebreak.
         src = os.path.join(tmp_dir, "mixed.pdf")
         pdf = pikepdf.new()
@@ -5608,3 +5608,63 @@ class TestHardBreakDurability:
         rebuild(broken, rebuilt, gs_path=gs_path)
         assert _break_markers(rebuilt) == 1
         assert _paras(rebuilt)[0]["text"] == want
+
+
+class TestTheFontTheTextStateHolds:
+    """The paragraph layer reads a run's font as the dictionary the text state
+    held (ISO 32000-2 §9.3.1): the one an ExtGState /Font entry sets (Table
+    57), or the one a form inherits under a name its own resources give to
+    another font (§8.10.1)."""
+
+    def test_an_edit_leaves_a_later_extgstate_run_in_its_own_font(self, tmp_dir):
+        # The edit changes the size, so the re-emitted text leaves the page in
+        # another state and the resync restores it before the kept block. A
+        # resync that restores the last Tf AFTER the block's own gs redraws the
+        # Courier 20 pt run in Helvetica 12 pt.
+        pdf = pikepdf.new()
+        courier = pdf.make_indirect(Dictionary(
+            Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Courier,
+            Encoding=Name.WinAnsiEncoding))
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            Font=Dictionary(F1=_helv(pdf)),
+            ExtGState=Dictionary(GS1=Dictionary(Type=Name.ExtGState, Font=Array([courier, 20]))),
+        )
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 72 700 Td (Hello world) Tj ET\n"
+            b"BT /GS1 gs 72 500 Td (AAA) Tj (BBB) Tj ET\n"
+        )
+        src = os.path.join(tmp_dir, "gs.pdf")
+        pdf.save(src)
+        pdf.close()
+        para = next(p for p in _paras(src) if p["text"] == "Hello world")
+        out = os.path.join(tmp_dir, "gs-out.pdf")
+        _apply(src, out, para, "Hello there", size=14)
+        before = {r["text"]: r for r in list_text_runs(src, 1)["runs"]}
+        after = {r["text"]: r for r in list_text_runs(out, 1)["runs"]}
+        for text in ("AAA", "BBB"):
+            assert after[text]["font_size"] == before[text]["font_size"] == 20
+            assert after[text]["rect"] == pytest.approx(before[text]["rect"])
+
+    def test_the_listing_seeds_the_style_of_the_inherited_font(self, tmp_dir):
+        # The form's own /F1 is Times-Roman; its text draws in the page's
+        # /F1, Helvetica-Bold, which the Do hands it.
+        pdf = pikepdf.new()
+        bold = pdf.make_indirect(Dictionary(
+            Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Helvetica-Bold"),
+            Encoding=Name.WinAnsiEncoding))
+        times = pdf.make_indirect(Dictionary(
+            Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Times-Roman"),
+            Encoding=Name.WinAnsiEncoding))
+        form = pdf.make_stream(b"BT 72 700 Td (Inherited words) Tj ET")
+        form["/Type"] = Name.XObject
+        form["/Subtype"] = Name.Form
+        form["/BBox"] = Array([0, 0, 612, 792])
+        form["/Resources"] = Dictionary(Font=Dictionary(F1=times))
+        _page(pdf, b"BT /F1 12 Tf ET /Fm0 Do", {"/F1": bold}, {"/Fm0": pdf.make_indirect(form)})
+        src = os.path.join(tmp_dir, "inherited.pdf")
+        pdf.save(src)
+        pdf.close()
+        (para,) = _paras(src)
+        assert para["bold"] is True
+        assert [span.get("family") for span in para["spans"]] == ["sans"]

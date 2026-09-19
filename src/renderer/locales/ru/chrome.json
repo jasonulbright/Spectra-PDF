@@ -2452,6 +2452,7 @@
   "engine.outline.malformedOutlineActionPayload": "некорректная полезная нагрузка действия структуры",
   "engine.outline.outlineActionPayloadNested": "полезная нагрузка действия структуры вложена слишком глубоко",
   "engine.outline.outlineDeeperThanLevels": "структура глубже {{MAX_DEPTH}} уровней",
+  "engine.outlines.pageDrawsTextFont": "На странице {{page}} текст нарисован без выбранного шрифта.",
   "engine.outlines.pageDrawsTextThrough": "На странице {{page}} текст нарисован через ресурс шрифта {{name}}, который страница не определяет.",
   "engine.outlines.pageDrawsZeroWidth": "На странице {{page}} нарисована линия нулевой толщины, у которой нет фиксированной толщины для преобразования в контур.",
   "engine.outlines.pageNestsFormXobjects": "На странице {{page}} XObject формы вложены глубже {{cap}} уровней.",

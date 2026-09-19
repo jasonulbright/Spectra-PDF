@@ -27,7 +27,6 @@ import pikepdf
 
 from engine import bidi, budget
 from engine.form_detect import _crop_box, _page_rotate, _page_segments
-from engine.redact import _resolve_resources
 from engine.soffice import _normalise_face
 
 # What the background raster is rendered at. Matches the image export's own
@@ -65,28 +64,32 @@ def _family(base_font: str) -> tuple[str, bool, bool]:
     style = name
     name = re.split(r"[-,]", name, maxsplit=1)[0]
     key = _normalise_face(name)
-    family = _STANDARD_FAMILIES.get(key, name or FALLBACK_FAMILY)
+    # A name whose bytes are not UTF-8 is no text (ISO 32000-2 §7.3.5) and
+    # names no installed face.
+    named = name if name and "\ufffd" not in name else FALLBACK_FAMILY
+    family = _STANDARD_FAMILIES.get(key, named)
     return family, bool(_BOLD.search(style)), bool(_ITALIC.search(style))
 
 
-def _base_fonts(page) -> dict:
-    """Resource name -> base font name, for the fonts this page selects."""
-    out: dict[str, str] = {}
+def _base_font(font) -> str:
+    """The base font name of the font dictionary a segment was drawn in, or ""
+    — the dictionary itself, never a name looked up in the page's resources: a
+    form's own /F1 and the page's /F1 are two fonts, and a font an ExtGState
+    sets has no name at all."""
+    if font is None:
+        return ""
     try:
-        fonts = (_resolve_resources(page) or {}).get("/Font") or {}
-    except (AttributeError, TypeError, KeyError):
-        return out
-    for key, font in fonts.items():
-        try:
-            base = font.get("/BaseFont")
-            if base is None:
-                descendants = font.get("/DescendantFonts") or []
-                base = descendants[0].get("/BaseFont") if len(descendants) else None
-            if base is not None:
-                out[str(key)] = str(base)
-        except (AttributeError, TypeError, IndexError):
-            continue
-    return out
+        base = font.get("/BaseFont")
+        if base is None:
+            descendants = font.get("/DescendantFonts") or []
+            base = descendants[0].get("/BaseFont") if len(descendants) else None
+        if isinstance(base, pikepdf.Name):
+            # `str` of a name decodes its bytes as strict UTF-8 and raises on
+            # any other byte; such a byte reads as U+FFFD here.
+            return bytes(base).decode("utf-8", "replace")
+        return str(base) if base is not None else ""
+    except (AttributeError, TypeError, IndexError):
+        return ""
 
 
 def _render_background(file: str, page_number: int, gs_path: str, out_png: Path) -> None:
@@ -215,7 +218,7 @@ def _slide_points(sizing: str, first: tuple) -> tuple:
     return (width * scale, height * scale)
 
 
-def _add_text(slide, segment, base_fonts, page_box, rotate, scale, offset) -> None:
+def _add_text(slide, segment, page_box, rotate, scale, offset) -> None:
     from pptx.enum.text import MSO_AUTO_SIZE
     from pptx.util import Emu, Pt
 
@@ -249,7 +252,7 @@ def _add_text(slide, segment, base_fonts, page_box, rotate, scale, offset) -> No
         paragraph._p.get_or_add_pPr().set("rtl", "1")
     run = paragraph.add_run()
     run.text = text
-    family, bold, italic = _family(base_fonts.get(segment.font_name, ""))
+    family, bold, italic = _family(_base_font(segment.font))
     run.font.size = Pt(max(segment.size, 1.0) * scale)
     run.font.name = family
     run.font.bold = bold
@@ -324,9 +327,8 @@ def export_slides(
                         height=Emu(int(size[1] * scale * EMU_PER_POINT)),
                     )
                     rasterized += 1
-                base_fonts = _base_fonts(page)
                 for segment in _page_segments(pdf, page):
-                    _add_text(slide, segment, base_fonts, box, rotate, scale, offset)
+                    _add_text(slide, segment, box, rotate, scale, offset)
                     text_boxes += 1
 
         out_path = Path(output)

@@ -18,6 +18,8 @@ import pytest
 from pikepdf import Array, Dictionary, Name, String
 
 from engine.sanitize import audit_hidden_information, sanitize_pdf
+from test_redact_text_state import _shows
+from text_state_shapes import INK_BOX, SHAPES, TEXT, shape_pdf
 
 CONTENT = """
 BT /F1 12 Tf 72 720 Td (Visible paragraph one.) Tj ET
@@ -956,3 +958,141 @@ class TestInPlaceOutput:
         result = sanitize_pdf(hidden_pdf, hidden_pdf, categories=["thumbnails"])
         assert result["output"] == hidden_pdf
         assert counts(audit_hidden_information(hidden_pdf))["thumbnails"] == 0
+
+
+class TestTheFontTheTextStateHolds:
+    """The hidden-text walk reads and measures a run with the font the text
+    state holds (ISO 32000-2 §9.3.1): the one an ExtGState sets, or the one a
+    form inherits under a name its own resources give to another font.
+
+    By the name alone the run in A reads as nothing and is never classified,
+    and the runs in A2 and B shrink to their first few points, so a cover over
+    those points claims text a reader sees. Both directions are pinned on the
+    saved bytes: visible text survives, and text a cover hides goes with the
+    pen left where the run ended."""
+
+    @pytest.mark.parametrize("label", SHAPES)
+    def test_the_run_is_read_and_measured_with_the_drawn_font(self, tmp_dir, label):
+        from engine.sanitize_content import page_events
+
+        path = shape_pdf(tmp_dir, label)
+        with pikepdf.open(path) as pdf:
+            events = page_events(pdf, pdf.pages[0], set()).events
+        (run,) = [event for event in events if event.kind == "text"]
+        assert run.payload["text"] == TEXT.decode("ascii")
+        assert run.rect == pytest.approx(INK_BOX, abs=0.01)
+        assert run.payload["size"] == pytest.approx(12.0)
+        assert run.payload["font"] == "/Wide"
+
+    @pytest.mark.parametrize("label", SHAPES)
+    def test_visible_text_beside_a_small_cover_survives(self, tmp_dir, label):
+        # White over x 55..80: it hides the first three letters, not the run.
+        path = shape_pdf(tmp_dir, label, b"1 g 55 295 25 20 re f")
+        detail = row(audit_hidden_information(path), "hidden_text")["detail"]
+        assert [d["kind"] for d in detail] == ["partially_covered"]
+        out, result = sanitized(path, tmp_dir, ["hidden_text"], name=f"small-{label}.pdf")
+        assert removed_counts(result)["hidden_text"] == 0
+        assert _shows(out) == [[TEXT]]
+
+    @pytest.mark.parametrize("label", SHAPES)
+    def test_text_under_a_whole_cover_goes_and_the_pen_stays(self, tmp_dir, label):
+        path = shape_pdf(tmp_dir, label, b"1 g 50 290 160 25 re f")
+        detail = row(audit_hidden_information(path), "hidden_text")["detail"]
+        assert [d["kind"] for d in detail] == ["covered"]
+        out, result = sanitized(path, tmp_dir, ["hidden_text"], name=f"whole-{label}.pdf")
+        assert removed_counts(result)["hidden_text"] == 1
+        # One TJ number carries the run's whole advance, 19 codes of 0.6 em.
+        assert _shows(out) == [[-19 * 600.0]]
+
+
+class TestAPenThatMovesBack:
+    """`[(AB) 1200 (C)] TJ` at 12 pt, 0.6 em per glyph: A draws x 60..67.2, B
+    67.2..74.4, and C returns to draw over A. A box from the pen start to the
+    net advance (x 60..67.2) misses B, so a cover over A and C alone claimed
+    the whole run and deleted the visible B."""
+
+    def _page(self, tmp_dir, cover: bytes) -> str:
+        from test_redact_text_state import _page, _simple_font
+
+        doc = pikepdf.new()
+        _page(
+            doc,
+            Dictionary(Font=Dictionary(F1=_simple_font(doc, 600, "Wide"))),
+            b"BT /F1 12 Tf 60 300 Td [(AB) 1200 (C)] TJ ET " + cover,
+        )
+        path = os.path.join(tmp_dir, "back.pdf")
+        doc.save(path)
+        doc.close()
+        return path
+
+    def test_a_cover_over_the_front_glyphs_leaves_the_run(self, tmp_dir):
+        path = self._page(tmp_dir, b"1 g 58 295 10 20 re f")
+        detail = row(audit_hidden_information(path), "hidden_text")["detail"]
+        assert [d["kind"] for d in detail] == ["partially_covered"]
+        out, _result = sanitized(path, tmp_dir, ["hidden_text"], name="back-kept.pdf")
+        assert _shows(out) == [[b"AB", 1200.0, b"C"]]
+
+    def test_a_cover_over_every_glyph_removes_the_run(self, tmp_dir):
+        path = self._page(tmp_dir, b"1 g 58 295 18 20 re f")
+        out, result = sanitized(path, tmp_dir, ["hidden_text"], name="back-gone.pdf")
+        assert removed_counts(result)["hidden_text"] == 1
+        assert _drawn_text(out) == b""
+
+
+def _drawn_text(path: str) -> bytes:
+    return b"".join(part for show in _shows(path) for part in show if isinstance(part, bytes))
+
+
+class TestAFormReadsItsGraphicsStatesAsItsFontsAreRead:
+    def test_a_translucent_fill_named_only_by_the_invoker_covers_nothing(self, tmp_dir):
+        # The form's own resources lack /GA; the name resolves in the
+        # invoker's, as a `Tf` or `Do` name does, so the white fill over the
+        # page text is half-transparent and hides nothing.
+        from test_redact_text_state import _simple_font
+
+        doc = pikepdf.new()
+        form = doc.make_stream(b"/GA gs 1 g 50 290 160 25 re f")
+        form["/Type"] = Name.XObject
+        form["/Subtype"] = Name.Form
+        form["/BBox"] = Array([0, 0, 400, 400])
+        form["/Resources"] = Dictionary()
+        page = doc.add_blank_page(page_size=(400, 400))
+        page.Resources = Dictionary(
+            Font=Dictionary(F1=_simple_font(doc, 600, "Wide")),
+            ExtGState=Dictionary(GA=Dictionary(Type=Name.ExtGState, ca=0.5)),
+            XObject=Dictionary(Fm0=doc.make_indirect(form)),
+        )
+        page.Contents = doc.make_stream(b"BT /F1 12 Tf 60 300 Td (" + TEXT + b") Tj ET /Fm0 Do")
+        path = os.path.join(tmp_dir, "translucent.pdf")
+        doc.save(path)
+        doc.close()
+        assert row(audit_hidden_information(path), "hidden_text")["detail"] == []
+
+
+class TestTextAfterARunTheFontCannotMeasure:
+    def test_a_cover_over_where_the_estimate_puts_the_text_leaves_it(self, tmp_dir):
+        # /F1 declares no widths, so its run advances by the wide estimate of
+        # 1 em per code, 48 pt, and a reader's own face draws it narrower.
+        # "VISIBLE" then starts somewhere in x 60..108; the white box covers
+        # only x 105..165, where the estimate puts it, and hides none of it
+        # for certain.
+        doc = pikepdf.new()
+        unknown = doc.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Unknowable"))
+        )
+        helvetica = doc.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica,
+                       Encoding=Name.WinAnsiEncoding)
+        )
+        page = doc.add_blank_page(page_size=(400, 400))
+        page.Resources = Dictionary(Font=Dictionary(F1=unknown, F2=helvetica))
+        page.Contents = doc.make_stream(
+            b"BT /F1 12 Tf 60 300 Td (XXXX) Tj /F2 12 Tf (VISIBLE) Tj ET 1 g 105 295 60 20 re f"
+        )
+        path = os.path.join(tmp_dir, "estimate.pdf")
+        doc.save(path)
+        doc.close()
+        detail = row(audit_hidden_information(path), "hidden_text")["detail"]
+        assert [d["kind"] for d in detail if d["text"] == "VISIBLE"] == ["partially_covered"]
+        out, _result = sanitized(path, tmp_dir, ["hidden_text"], name="estimate-out.pdf")
+        assert b"VISIBLE" in _drawn_text(out)

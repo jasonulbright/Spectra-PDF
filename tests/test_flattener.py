@@ -25,6 +25,7 @@ from engine.flattener import (
     page_objects,
     snap_to_pixel,
 )
+from text_state_shapes import INK_BOX, shape_pdf
 from transparency_builders import (
     blend_mode_pdf,
     no_bbox_form_pdf,
@@ -465,3 +466,189 @@ class TestUnjudgeableObjects:
         assert report["unknown_pages"] == []
         assert report["pages"][0]["counts"]["unknown"] == 0
         assert all(o["unknown"] is False for o in report["pages"][0]["objects"])
+
+
+# ── the text state ─────────────────────────────────────────────────────────
+
+
+def _state_page(path, content: bytes, extra_resources=None) -> str:
+    """One 400 x 400 page with Helvetica as /F0, a half-transparent /GA, an
+    opaque /GO and a 20-point line width /GW, drawing `content`."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(400.0, 400.0))
+    resources = pikepdf.Dictionary(
+        Font=pikepdf.Dictionary(F0=pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1,
+            BaseFont=pikepdf.Name.Helvetica, Encoding=pikepdf.Name.WinAnsiEncoding))),
+        ExtGState=pikepdf.Dictionary(
+            GA=pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, ca=0.5, CA=0.5),
+            GO=pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, ca=1.0, CA=1.0),
+            GW=pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, LW=20),
+        ),
+    )
+    for key, value in (extra_resources or {}).items():
+        resources[key] = value
+    page.Resources = resources
+    page.Contents = pdf.make_stream(content)
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
+class TestTheTextState:
+    """A text block's box is the ink of the font the text state holds (ISO
+    32000-2 §9.3.1): the one `Tf` names, or the one an ExtGState /Font entry
+    sets (Table 57), measured to that font's own ascent and descent. Shape B's
+    page has one text block, and it draws nothing."""
+
+    @pytest.mark.parametrize("label", ("A", "A2"))
+    def test_the_text_block_covers_the_drawn_font_s_ink(self, tmp_dir, label):
+        page = _page(list_transparency(shape_pdf(tmp_dir, label)))
+        (text,) = [o for o in page["objects"] if o["kind"] == "text"]
+        assert text["rect"] == pytest.approx(INK_BOX, abs=0.01)
+
+    def test_a_text_block_that_draws_nothing_is_no_object(self, tmp_dir):
+        page = _page(list_transparency(shape_pdf(tmp_dir, "B")))
+        assert [o["kind"] for o in page["objects"]] == ["form"]
+
+    def test_a_block_that_selects_a_font_claims_no_area(self, tmp_dir):
+        # An empty block that claims the page box makes every region absorb
+        # it and grow to the whole page, taking the live line with it.
+        source = _state_page(
+            os.path.join(tmp_dir, "empty.pdf"),
+            b"BT /F0 12 Tf ET q /GA gs 1 0 0 rg 300 300 50 50 re f Q "
+            b"BT /F0 12 Tf 60 100 Td (LIVE) Tj ET",
+        )
+        page = _page(list_transparency(source))
+        assert page["whole_page"] is False
+        (region,) = page["regions"]
+        assert region[0] >= 299.0 and region[1] >= 299.0
+        assert page["counts"]["outlined_text"] == 0
+
+    def test_the_font_an_absorbed_block_selects_still_draws_the_text_after_it(
+        self, tmp_dir, gs_path
+    ):
+        pytest.importorskip("numpy")
+        # Block one sits under the square and is absorbed; block two lies far
+        # from it and draws with the font block one selected.
+        source = _state_page(
+            os.path.join(tmp_dir, "state.pdf"),
+            b"BT /F0 12 Tf 60 300 Td (AAA) Tj ET "
+            b"q /GA gs 1 0 0 rg 55 295 40 20 re f Q "
+            b"BT 60 100 Td (BBB) Tj ET",
+        )
+        output = os.path.join(tmp_dir, "flat.pdf")
+        result = flatten_transparency(source, output, balance=0.0, gs_path=gs_path)
+        assert result["regions"] == 1
+        before, after = os.path.join(tmp_dir, "b.png"), os.path.join(tmp_dir, "a.png")
+        _render(gs_path, source, before, dpi=72)
+        _render(gs_path, output, after, dpi=72)
+        delta = _raster_delta(before, after)
+        # Rows 280..310 from the top are y 90..120 on the page: the live line.
+        assert int(delta[280:310, 40:120].max()) == 0
+        from PIL import Image
+        import numpy as np
+
+        with Image.open(after) as image:
+            line = np.asarray(image.convert("L"))[280:310, 40:120]
+        assert int((line < 128).sum()) > 0
+
+    def test_alpha_set_and_reset_inside_a_text_block_is_transparency(self, tmp_dir):
+        # The run draws at half alpha; the ExtGState after it restores full
+        # alpha before ET, which is where the old walk looked.
+        source = _state_page(
+            os.path.join(tmp_dir, "alpha.pdf"),
+            b"BT /F0 12 Tf /GA gs 60 300 Td (AAA) Tj /GO gs ET",
+        )
+        page = _page(list_transparency(source))
+        (text,) = [o for o in page["objects"] if o["kind"] == "text"]
+        assert text["transparent"] is True
+        assert len(page["regions"]) == 1
+
+    def test_an_extgstate_line_width_widens_the_stroke(self, tmp_dir):
+        source = _state_page(os.path.join(tmp_dir, "lw.pdf"), b"q /GW gs 100 200 m 300 200 l S Q")
+        page = _page(list_transparency(source))
+        (stroke,) = [o for o in page["objects"] if o["kind"] == "stroke"]
+        assert stroke["rect"] == pytest.approx([90.0, 190.0, 310.0, 210.0])
+
+    def test_a_vertical_run_is_a_column(self, tmp_dir):
+        from test_search_regions import _cid_font
+
+        pdf = pikepdf.new()
+        font = _cid_font(
+            pdf, {1: 1000, 2: 1000, 3: 1000, 4: 1000}, {1: "上", 2: "下", 3: "左", 4: "右"},
+            encoding="Identity-V", vertical_advances={1: 1000, 2: 1000, 3: 1000, 4: 1000},
+        )
+        page = pdf.add_blank_page(page_size=(400.0, 400.0))
+        page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=font))
+        page.Contents = pdf.make_stream(b"BT /F1 20 Tf 200 300 Td <0001000200030004> Tj ET")
+        source = os.path.join(tmp_dir, "vertical.pdf")
+        pdf.save(source)
+        pdf.close()
+        (text,) = [o for o in _page(list_transparency(source))["objects"] if o["kind"] == "text"]
+        # Four 20-point glyphs down from y 300, one em wide around x 200.
+        assert text["rect"] == pytest.approx([190.0, 220.0, 210.0, 300.0], abs=0.01)
+
+    def test_a_glyph_the_pen_moved_back_over_is_inside_the_box(self, tmp_dir):
+        # [(AB) 1200 (C)]: B draws x 67.2..74.4, past the net advance of 7.2.
+        from test_redact_text_state import _page as _state_doc_page, _simple_font
+
+        pdf = pikepdf.new()
+        _state_doc_page(
+            pdf,
+            pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=_simple_font(pdf, 600, "Wide"))),
+            b"BT /F1 12 Tf 60 300 Td [(AB) 1200 (C)] TJ ET",
+        )
+        source = os.path.join(tmp_dir, "back.pdf")
+        pdf.save(source)
+        pdf.close()
+        (text,) = [o for o in _page(list_transparency(source))["objects"] if o["kind"] == "text"]
+        assert text["rect"] == pytest.approx([60.0, 296.4, 74.4, 312.0], abs=0.01)
+
+    def test_a_show_that_draws_no_glyph_is_no_object(self, tmp_dir):
+        source = _state_page(os.path.join(tmp_dir, "kern.pdf"), b"BT /F0 12 Tf 60 300 Td [-500] TJ ET")
+        assert _page(list_transparency(source))["objects"] == []
+
+    def test_the_spacing_an_absorbed_quote_operator_sets_still_spaces_the_text_after_it(
+        self, tmp_dir, gs_path
+    ):
+        pytest.importorskip("numpy")
+        # `aw ac string "` sets Tw and Tc for good. Block one is absorbed;
+        # block two lies far from the square and spaces its characters by the
+        # 20 units of Tc block one set.
+        source = _state_page(
+            os.path.join(tmp_dir, "quote.pdf"),
+            b"BT /F0 12 Tf 14 TL 60 314 Td 0 20 (AAA) \" ET "
+            b"q /GA gs 1 0 0 rg 55 295 40 20 re f Q "
+            b"BT 60 100 Td (B B) Tj ET",
+        )
+        output = os.path.join(tmp_dir, "flat.pdf")
+        flatten_transparency(source, output, balance=0.0, gs_path=gs_path)
+        before, after = os.path.join(tmp_dir, "b.png"), os.path.join(tmp_dir, "a.png")
+        _render(gs_path, source, before, dpi=72)
+        _render(gs_path, output, after, dpi=72)
+        assert int(_raster_delta(before, after)[280:310, 40:200].max()) == 0
+
+    def test_alpha_on_any_painted_run_makes_the_block_transparent(self, tmp_dir):
+        source = _state_page(
+            os.path.join(tmp_dir, "alpha-two.pdf"),
+            b"BT /F0 12 Tf /GA gs 60 300 Td (AAA) Tj /GO gs (BBB) Tj ET",
+        )
+        (text,) = [o for o in _page(list_transparency(source))["objects"] if o["kind"] == "text"]
+        assert text["transparent"] is True
+
+    def test_a_block_of_invisible_text_is_no_object_and_survives_the_flatten(
+        self, tmp_dir, gs_path
+    ):
+        # A recognition layer draws in mode 3. It paints nothing, so no region
+        # absorbs it and it stays searchable under the raster.
+        source = _state_page(
+            os.path.join(tmp_dir, "ocr.pdf"),
+            b"BT 3 Tr /F0 12 Tf 60 300 Td (recognized words) Tj ET "
+            b"q /GA gs 1 0 0 rg 55 295 60 20 re f Q",
+        )
+        page = _page(list_transparency(source))
+        assert [o["kind"] for o in page["objects"]] == ["fill"]
+        output = os.path.join(tmp_dir, "flat.pdf")
+        flatten_transparency(source, output, balance=0.0, gs_path=gs_path)
+        assert b"(recognized words) Tj" in _content(output)

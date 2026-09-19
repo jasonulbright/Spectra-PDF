@@ -432,6 +432,21 @@ def cluster_span(items: list[ShowItem], cluster: list[int]) -> tuple[float, floa
     return (min(xs), max(xs))
 
 
+def ink_span(items: list[ShowItem]) -> tuple[float, float]:
+    """(lo, hi) of the pen positions a show's GLYPHS occupy, in pre-Tz text
+    space: each glyph from its own `x` to `x + advance`. A TJ number can move
+    the pen back over glyphs already drawn, so the span from the pen start to
+    the net advance can leave a glyph outside it. (0, 0) when no glyph draws."""
+    lo = hi = None
+    for item in items:
+        if item.kern:
+            continue
+        a, b = sorted((item.x, item.x + item.advance))
+        lo = a if lo is None else min(lo, a)
+        hi = b if hi is None else max(hi, b)
+    return (0.0, 0.0) if lo is None else (lo, hi)
+
+
 def measurable(cap: Optional[FontCapability], data: bytes) -> bool:
     """Can this run's advances be taken from the font rather than guessed?
 

@@ -2452,6 +2452,7 @@
   "engine.outline.malformedOutlineActionPayload": "chybný náklad akce osnovy",
   "engine.outline.outlineActionPayloadNested": "náklad akce osnovy je vnořen příliš hluboko",
   "engine.outline.outlineDeeperThanLevels": "osnova hlubší než {{MAX_DEPTH}} úrovní",
+  "engine.outlines.pageDrawsTextFont": "Stránka {{page}} kreslí text bez vybraného písma.",
   "engine.outlines.pageDrawsTextThrough": "Stránka {{page}} kreslí text přes prostředek písma {{name}}, který stránka nedefinuje.",
   "engine.outlines.pageDrawsZeroWidth": "Stránka {{page}} kreslí čáru nulové tloušťky, která nemá pevnou tloušťku k převodu na obrys.",
   "engine.outlines.pageNestsFormXobjects": "Stránka {{page}} vnořuje formulářové XObjecty hlouběji než {{cap}} úrovní.",

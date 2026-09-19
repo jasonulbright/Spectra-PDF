@@ -2328,6 +2328,7 @@
   "engine.outline.malformedOutlineActionPayload": "κακοσχηματισμένο ωφέλιμο φορτίο ενέργειας διάρθρωσης",
   "engine.outline.outlineActionPayloadNested": "το ωφέλιμο φορτίο ενέργειας διάρθρωσης είναι υπερβολικά βαθιά ένθετο",
   "engine.outline.outlineDeeperThanLevels": "η διάρθρωση είναι βαθύτερη από {{MAX_DEPTH}} επίπεδα",
+  "engine.outlines.pageDrawsTextFont": "Η σελίδα {{page}} σχεδιάζει κείμενο χωρίς επιλεγμένη γραμματοσειρά.",
   "engine.outlines.pageDrawsTextThrough": "Η σελίδα {{page}} σχεδιάζει κείμενο μέσω του πόρου γραμματοσειράς {{name}}, τον οποίο η σελίδα δεν ορίζει.",
   "engine.outlines.pageDrawsZeroWidth": "Η σελίδα {{page}} σχεδιάζει γραμμή μηδενικού πάχους, η οποία δεν έχει σταθερό πάχος για μετατροπή σε περίγραμμα.",
   "engine.outlines.pageNestsFormXobjects": "Η σελίδα {{page}} εμφωλεύει XObject φόρμας βαθύτερα από {{cap}} επίπεδα.",

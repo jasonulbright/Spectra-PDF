@@ -115,8 +115,10 @@ def _walk_fonts(resources, page_number: int, seen_resources: set, on_font,
                 on_unreadable, depth: int) -> None:
     """Walk one resource dictionary, handing every font dictionary it reaches
     to `on_font(font_obj, page_number, resource_name)` and descending into the
-    nested resources of its Form XObjects, patterns and Type3 glyph
-    procedures.
+    nested resources of its Form XObjects, patterns, soft-mask groups and
+    Type3 glyph procedures. A graphics state's /Font entry selects a font as
+    `Tf` does (ISO 32000-2 Table 57); its `resource_name` is the graphics
+    state's own name, because the font has none.
 
     The listing, the checker and the embedder share this traversal rather than
     each keeping one: a font reachable by one and not the other would be a
@@ -144,6 +146,20 @@ def _walk_fonts(resources, page_number: int, seen_resources: set, on_font,
             return
         seen_resources.add(key)
 
+    def reach(font_obj, resource_name: str) -> None:
+        on_font(font_obj, page_number, resource_name)
+        char_procs = font_obj.get("/CharProcs")
+        if isinstance(char_procs, pikepdf.Dictionary):
+            for proc in char_procs.values():
+                _walk_fonts(
+                    _stream_resources(proc), page_number, seen_resources,
+                    on_font, on_unreadable, depth + 1,
+                )
+        _walk_fonts(
+            font_obj.get("/Resources"), page_number, seen_resources,
+            on_font, on_unreadable, depth + 1,
+        )
+
     fonts = resources.get("/Font")
     if fonts is not None and not isinstance(fonts, pikepdf.Dictionary):
         on_unreadable(page_number, None, "the /Font resources are not a dictionary")
@@ -159,18 +175,36 @@ def _walk_fonts(resources, page_number: int, seen_resources: set, on_font,
                 on_unreadable(page_number, str(resource_name),
                               "the font resource is not a font dictionary")
                 continue
-            on_font(font_obj, page_number, str(resource_name))
-            char_procs = font_obj.get("/CharProcs")
-            if isinstance(char_procs, pikepdf.Dictionary):
-                for proc in char_procs.values():
-                    _walk_fonts(
-                        _stream_resources(proc), page_number, seen_resources,
-                        on_font, on_unreadable, depth + 1,
-                    )
-            _walk_fonts(
-                font_obj.get("/Resources"), page_number, seen_resources,
-                on_font, on_unreadable, depth + 1,
-            )
+            reach(font_obj, str(resource_name))
+
+    states = resources.get("/ExtGState")
+    if isinstance(states, pikepdf.Dictionary):
+        try:
+            named_states = list(states.items())
+        except Exception as exc:
+            on_unreadable(page_number, None,
+                          f"the /ExtGState resources will not read: {exc}")
+            named_states = []
+        for state_name, state in named_states:
+            if not isinstance(state, pikepdf.Dictionary):
+                continue
+            chosen = state.get("/Font")
+            if chosen is not None:
+                if (
+                    isinstance(chosen, pikepdf.Array)
+                    and len(chosen) >= 1
+                    and isinstance(chosen[0], pikepdf.Dictionary)
+                ):
+                    reach(chosen[0], str(state_name))
+                else:
+                    on_unreadable(page_number, str(state_name),
+                                  "the graphics state's font is not a font dictionary")
+            smask = state.get("/SMask")
+            if isinstance(smask, pikepdf.Dictionary):
+                _walk_fonts(
+                    _stream_resources(smask.get("/G")), page_number, seen_resources,
+                    on_font, on_unreadable, depth + 1,
+                )
 
     xobjects = resources.get("/XObject")
     if isinstance(xobjects, pikepdf.Dictionary):
