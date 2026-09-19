@@ -810,7 +810,7 @@ function armImagePicker(path: string | null): void {
 }
 
 /**
- * The native "pick any file" dialog — the Settings ▸ Engine browse control's
+ * The native "pick any file" dialog — the Preferences ▸ Engine browse control's
  * first step, and OS-modal like every other native picker.
  *
  * Answered at the DIALOG so the browse handler runs unchanged: the picked

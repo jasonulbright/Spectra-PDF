@@ -38,6 +38,26 @@ export interface RedactionMark {
   // pass, and one global setting at apply time could not express that.
   // Absent = the plain black box a mark with no properties carries.
   props?: RedactionProperties;
+  // A projection of a /Redact annotation the file stores, not a mark drawn
+  // this session.
+  seeded?: true;
+}
+
+/**
+ * `marks` once the seed of `path`'s stored marks lands: the path's earlier
+ * seeded marks give way to `seeded`, and every mark drawn on the path since
+ * its bytes changed stays. The seed reads the file after its bytes change,
+ * and anything drawn meanwhile is not in the file.
+ */
+export function withSeededMarks(
+  marks: readonly RedactionMark[],
+  path: string,
+  seeded: readonly RedactionMark[],
+): RedactionMark[] {
+  return [
+    ...marks.filter((m) => m.path !== path || !m.seeded),
+    ...seeded.map((m): RedactionMark => ({ ...m, seeded: true })),
+  ];
 }
 
 // Geometry of the page as it exists in the CURRENT file bytes, read from the

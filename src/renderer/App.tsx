@@ -4,7 +4,6 @@ import { restoreHistory } from './lib/disk-history';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
 import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/workspace-publication';
 import { withFileLock } from './lib/engine-lock';
-import { getPageCount } from './lib/pdfRenderer';
 import { file, app, dialog, batch, tabDrag, pageCommit } from './lib/tauri-bridge';
 import type { PhysicalScreenPoint, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
 import { flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
@@ -94,7 +93,7 @@ import { DocumentJsPanel } from './panels/DocumentJsPanel';
 import { PrepressPanel } from './panels/PrepressPanel';
 import { useEngine } from './hooks/useEngine';
 import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
-import { indexImportSource } from './lib/workspace';
+import { indexImportSource, readPublishedBytes } from './lib/workspace';
 import type { PageRef, PdfBuffer } from './state/types';
 import { isDocTab, viewOf } from './state/types';
 import { showableDoc, showableDocuments, tabFiles } from './state/selectors';
@@ -183,7 +182,7 @@ import {
   sameRecent,
   sweepDeadRecents,
 } from './lib/recent-files';
-import { claimPaths, createClaimHolds, releasePaths, soleOwner, type ClaimRefusal } from './lib/window-claims';
+import { claimPaths, createClaimHolds, departedImportSources, releasePaths, soleOwner, type ClaimRefusal } from './lib/window-claims';
 import { createOpenFlights, openPathOnce } from './lib/open-flights';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
@@ -1035,6 +1034,14 @@ function AppContent(): React.ReactElement {
     (path: string): boolean => readState().files.has(path) || claimHolds.current.held(path),
     [readState],
   );
+  // An import source leaves `files` once no page references it; its read claim
+  // goes with it.
+  const filesSeen = useRef(state.files);
+  useEffect(() => {
+    const departed = departedImportSources(filesSeen.current, state.files);
+    filesSeen.current = state.files;
+    if (departed.length > 0) void releasePaths(departed, pathInUse);
+  }, [state.files, pathInUse]);
   const openByPaths = useCallback(async (
     paths: string[],
     opts?: { focus?: boolean; index?: number; webOrigin?: string; reportFailures?: boolean },
@@ -1539,7 +1546,7 @@ function AppContent(): React.ReactElement {
     return trackInteractive(() => executeWorkspaceOperation(filePath, method, params, readState, dispatch, {
       confirm: (path, working) => editClass === 'none' ? Promise.resolve(true) : confirmEditOfSignedDoc(path, working, editClass),
       commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
-      remove: file.remove, countPages: getPageCount, transaction: pageCommit,
+      remove: file.remove, index: readPublishedBytes, transaction: pageCommit,
       callStaged: callRaw,
       track: async (name, values, run) => isTrackableMethod(name) ? await trackOperation(name, values, run) as Awaited<ReturnType<typeof run>> : run(),
     }, options));
@@ -1925,7 +1932,7 @@ function AppContent(): React.ReactElement {
       const filled = await trackInteractive(() => fillFormValues(path, values, readState, dispatch, {
         confirm: (source, policyPath, targets, typed, flatten) => confirmEditOfSignedDoc(source, policyPath, flatten ? 'structural' : 'form-fill', targets, typed),
         commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
-        remove: file.remove, countPages: getPageCount, fontDirectory: app.getEditFontPath,
+        remove: file.remove, index: readPublishedBytes, fontDirectory: app.getEditFontPath,
         callStaged: callRaw, transaction: pageCommit,
         track: async run => { await trackOperation('fill_form_fields', { file: readState().files.get(path)?.workingPath }, run); },
       }, options));
@@ -1941,7 +1948,7 @@ function AppContent(): React.ReactElement {
       const created = await createFormFields(path, specs, readState, dispatch, {
         confirm: (source, working) => confirmEditOfSignedDoc(source, working, 'structural'),
         commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
-        remove: file.remove, countPages: getPageCount, fontDirectory: app.getEditFontPath,
+        remove: file.remove, index: readPublishedBytes, fontDirectory: app.getEditFontPath,
         // Private staging, within the already gated/locked transaction. A
         // normal call would recursively enter the workspace publication lane.
         callStaged: callRaw, transaction: pageCommit,
@@ -2339,7 +2346,7 @@ function AppContent(): React.ReactElement {
     editWorkspaceImage(path, edit, readState, dispatch, {
       confirm: (source, working) => confirmEditOfSignedDoc(source, working, 'structural'),
       commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
-      remove: file.remove, countPages: getPageCount, transaction: pageCommit, callStaged: callRaw,
+      remove: file.remove, index: readPublishedBytes, transaction: pageCommit, callStaged: callRaw,
       pick: dialog.pickImageFile, readSource: batch.readFileBuffer, decode: decodeToRawSource,
       track: async (method, working, run) => { await trackOperation(method, { file: working }, run); },
     })), [readState, dispatch, confirmEditOfSignedDoc, callRaw, trackOperation]);
@@ -2482,7 +2489,7 @@ function AppContent(): React.ReactElement {
     try {
       await restoreHistory(direction, readState, dispatch, {
         read: file.readBuffer, write: file.writeBuffer, remove: file.remove,
-        countPages: getPageCount, transaction: pageCommit,
+        index: readPublishedBytes, transaction: pageCommit,
       });
       historyRetry.current = null;
       setCommitError(null);
@@ -3227,9 +3234,12 @@ function AppContent(): React.ReactElement {
       : null,
   });
 
+  // The harness hands out ids from the store, never from the last render: an
+  // id the store no longer holds is refused when a spec edits through it.
   const harnessFirstPageRef = useRef<() => { docId: string; pageId: string } | null>(() => null);
   harnessFirstPageRef.current = () => {
-    const doc = state.workspace.documents.find((d) => d.path === state.activeFileId);
+    const now = readState();
+    const doc = now.workspace.documents.find((d) => d.path === now.activeFileId);
     const page = doc?.pages[0];
     return doc && page ? { docId: doc.id, pageId: page.id } : null;
   };
@@ -3249,7 +3259,8 @@ function AppContent(): React.ReactElement {
     } | null
   >(() => null);
   harnessFirstAnnotationRef.current = () => {
-    const doc = state.workspace.documents.find((d) => d.path === state.activeFileId);
+    const now = readState();
+    const doc = now.workspace.documents.find((d) => d.path === now.activeFileId);
     const page = doc?.pages[0];
     const annotation = page?.annotations?.[0];
     return doc && page && annotation
@@ -3314,13 +3325,15 @@ function AppContent(): React.ReactElement {
         return () => harnessListenersRef.current.delete(listener);
       },
       getFirstPage: () => harnessFirstPageRef.current(),
-      getActiveDocPages: () =>
-        stateRef.current.workspace.documents
-          .filter((d) => d.path === stateRef.current.activeFileId)
-          .flatMap((d) => d.pages.map((p) => ({ id: p.id, width: p.width, height: p.height }))),
+      getActiveDocPages: () => {
+        const now = readState();
+        return now.workspace.documents
+          .filter((d) => d.path === now.activeFileId)
+          .flatMap((d) => d.pages.map((p) => ({ id: p.id, width: p.width, height: p.height })));
+      },
       getFirstPageAnnotation: () => harnessFirstAnnotationRef.current(),
       getPageAnnotations: (docId, pageId) => {
-        const d = stateRef.current.workspace.documents.find((x) => x.id === docId);
+        const d = readState().workspace.documents.find((x) => x.id === docId);
         const p = d?.pages.find((x) => x.id === pageId);
         return (p?.annotations ?? []).map((a) => ({
           id: a.id,

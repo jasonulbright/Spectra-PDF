@@ -11,6 +11,7 @@ import type { AppAction, OpenFile } from '../src/renderer/state/types';
 import { hasPendingPageCommit, recoverPendingPageCommit } from '../src/renderer/lib/page-commit-transaction';
 import { withFileLock } from '../src/renderer/lib/engine-lock';
 import { captureOperationIntent } from '../src/renderer/lib/operation-intent';
+import { readingWith } from './helpers/published-bytes';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function fixture() {
@@ -27,7 +28,7 @@ async function fixture() {
     read: vi.fn(async path => { events.push('read'); return disk.get(path)!.slice(); }),
     write: vi.fn(async (path, bytes) => { events.push('write'); disk.set(path, bytes.slice()); }),
     remove: async path => { events.push('cleanup'); disk.delete(path); },
-    countPages: vi.fn(async bytes => { events.push('count'); return (await PDFDocument.load(bytes)).getPageCount(); }),
+    index: vi.fn(readingWith(async bytes => { events.push('count'); return (await PDFDocument.load(bytes)).getPageCount(); })),
     track: vi.fn(async (_method, params, run) => {
       expect(params.file).toBe('work'); expect(params.output).toBe('work'); events.push('track');
       try { const result = await run(); events.push('done'); return result; }
@@ -69,7 +70,7 @@ describe('whole-file operation publication', () => {
     const f = await fixture();
     const intent = captureOperationIntent(f.store.getState(), f.file);
     if (boundary === 'reopen') f.store.dispatch({ type: 'OPEN_FILE', path: 'source', workingPath: 'new-work', name: 'source', buffer: f.original.slice(), pageCount: 1 });
-    if (boundary === 'revision') f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1 });
+    if (boundary === 'revision') f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1, documents: [] });
     const read = () => boundary === 'pending' ? { ...f.store.getState(), pageUndoStack: [] } : f.store.getState();
     await expect(executeWorkspaceOperation('source', 'rotate', { pages: 'all', angle: 90 }, read,
       f.store.dispatch, f.io, { intent })).rejects.toThrow();
@@ -89,7 +90,7 @@ describe('whole-file operation publication', () => {
   });
   it('a fresh buffer without authored gate evidence cannot become the gesture source', async () => {
     const f = await fixture(); const intent = captureOperationIntent(f.store.getState(), f.file);
-    f.io.commit = async () => { f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1 }); };
+    f.io.commit = async () => { f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1, documents: [] }); };
     await expect(executeWorkspaceOperation('source', 'rotate', { pages: 'all', angle: 90 }, f.store.getState,
       f.store.dispatch, f.io, { intent })).rejects.toThrow();
     expect(f.io.callStaged).not.toHaveBeenCalled(); expect(f.disk.get('work')).toEqual(f.original);
@@ -112,7 +113,7 @@ describe('whole-file operation publication', () => {
   });
   it.each(['before', 'gate', 'pending'])('revision-derived parameters refuse drift at %s', async boundary => {
     const f = await fixture();
-    const updated = () => f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1 });
+    const updated = () => f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1, documents: [] });
     if (boundary === 'before') updated();
     if (boundary === 'gate') f.io.commit = async () => { updated(); };
     const read = () => boundary === 'pending' ? { ...f.store.getState(), pageDirtyPaths: ['source'] } : f.store.getState();
@@ -163,7 +164,7 @@ describe('whole-file operation publication', () => {
   it.each(['read', 'count', 'stage', 'engine', 'publish'])('%s failure preserves disk/buffer/history and never reports done', async where => {
     const f = await fixture(); const fail = async () => { throw new Error(`injected ${where}`); };
     if (where === 'read') f.io.read = fail;
-    if (where === 'count') f.io.countPages = fail;
+    if (where === 'count') f.io.index = readingWith(fail);
     if (where === 'stage') f.io.write = fail;
     if (where === 'publish') f.io.transaction.publish = fail;
     if (where === 'engine') { const call = f.io.callStaged; f.io.callStaged = async (m, p) => { await call(m, p); return fail(); }; }
@@ -176,7 +177,7 @@ describe('whole-file operation publication', () => {
     await expect(f.run()).rejects.toThrow('could not be verified'); f.unchanged();
   });
   it.each([0, -1, 1.5, NaN, Infinity])('refuses an invalid final page count %s', async count => {
-    const f = await fixture(); f.io.countPages = async () => count;
+    const f = await fixture(); f.io.index = readingWith(async () => count);
     await expect(f.run()).rejects.toThrow('could not be verified'); f.unchanged();
   });
   it('keeps operation reports, native original snapshot, and one final publication', async () => {
@@ -220,7 +221,7 @@ describe('whole-file operation publication', () => {
   it('rechecks consent for committed bytes and freezes requested parameters', async () => {
     const f = await fixture(); const params = { angle: 90, pages: [1] };
     f.io.commit = async () => { params.angle = 180; params.pages.push(2);
-      f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: f.original.slice(), pageCount: 1, snapshotPath: 'page-snapshot' }); };
+      f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: f.original.slice(), pageCount: 1, snapshotPath: 'page-snapshot', documents: [] }); };
     await f.run('rotate', params);
     expect(f.io.confirm).toHaveBeenCalledTimes(2);
     expect(f.io.callStaged).toHaveBeenCalledWith('rotate', expect.objectContaining({ angle: 90, pages: [1] }));

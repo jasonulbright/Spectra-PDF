@@ -3,6 +3,7 @@ import { tChrome } from '../i18n';
 import { withFileLock } from './engine-lock';
 import { serializeWorkspacePublication } from './workspace-publication';
 import { hasPendingPageCommit, publishPageCommit, recoverPendingPageCommit, type PageCommitIo } from './page-commit-transaction';
+import type { ReadPublishedBytes } from './workspace-settle';
 
 export interface WorkspaceRewriteIo {
   confirm: (path: string, workingPath: string) => Promise<boolean>;
@@ -10,7 +11,8 @@ export interface WorkspaceRewriteIo {
   write: (path: string, bytes: Uint8Array) => Promise<void>;
   read: (path: string) => Promise<Uint8Array>;
   remove: (path: string) => Promise<void>;
-  countPages: (bytes: Uint8Array) => Promise<number>;
+  /** The page count and the documents of the staged bytes, placed with them. */
+  index: ReadPublishedBytes;
   transaction: PageCommitIo;
 }
 function copy(value: PdfBuffer): Uint8Array<ArrayBuffer> {
@@ -65,16 +67,18 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
     try {
       const value = await build(stage, original, requireCurrent);
       const buffer = (await io.read(stage)).slice();
-      const pageCount = await io.countPages(buffer.slice());
+      // The reading runs on a copy; the documents describe the object dispatched.
+      const { pageCount, documents: read } = await io.index(current, buffer.slice());
       if (!Number.isSafeInteger(pageCount) || pageCount < 1
           || options.preservePageCount && pageCount !== current.pageCount) throw options.unverified();
+      const documents = read.map(d => ({ ...d, buffer }));
       const expectedStagedSha256 = await digest(buffer);
       requireCurrent();
       await publishPageCommit(io.transaction,
         [{ workingPath: current.workingPath, stagedPath: stage, expectedWorkingSha256, expectedStagedSha256 }],
         snapshots => {
           requireCurrent();
-          dispatch({ type: 'UPDATE_FILE', path, buffer, pageCount, snapshotPath: snapshots[0] });
+          dispatch({ type: 'UPDATE_FILE', path, buffer, pageCount, snapshotPath: snapshots[0], documents });
           if (getState().files.get(path)?.buffer !== buffer) throw changed();
           publication = getState().files.get(path)!;
         }, cleanup);

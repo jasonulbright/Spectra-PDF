@@ -9,6 +9,7 @@ import { initialState } from '../src/renderer/state/reducer';
 import type { AppAction, OpenFile } from '../src/renderer/state/types';
 import { hasPendingPageCommit, recoverPendingPageCommit } from '../src/renderer/lib/page-commit-transaction';
 import { withFileLock } from '../src/renderer/lib/engine-lock';
+import { readingWith } from './helpers/published-bytes';
 
 const ordinary: NewFieldSpec = { type: 'text', name: 'plain', pageIndex: 0, rect: [50, 700, 250, 724] };
 const vertical: NewFieldSpec = { ...ordinary, name: 'column', writingMode: 'vertical', script: 'japanese' };
@@ -31,7 +32,7 @@ async function fixture() {
     write: vi.fn(async (path, bytes) => { events.push('write'); disk.set(path, bytes.slice()); }),
     remove: async path => { events.push('cleanup'); disk.delete(path); },
     fontDirectory: vi.fn(async () => { events.push('font'); return 'fonts'; }),
-    countPages: vi.fn(async bytes => { events.push('count'); return (await PDFDocument.load(bytes)).getPageCount(); }),
+    index: vi.fn(readingWith(async bytes => { events.push('count'); return (await PDFDocument.load(bytes)).getPageCount(); })),
     callStaged: vi.fn(async (method, params) => {
       events.push(method);
       expect(params.file).not.toBe('work'); expect(params.output).toBe(params.file);
@@ -83,7 +84,7 @@ describe('form creation publication', () => {
     const fail = async () => { throw new Error(`injected ${where}`); };
     if (where === 'font') f.io.fontDirectory = fail;
     if (where === 'read') f.io.read = fail;
-    if (where === 'count') f.io.countPages = fail;
+    if (where === 'count') f.io.index = readingWith(fail);
     if (where === 'stage') f.io.write = async path => { f.disk.set(path, new Uint8Array([1])); return fail(); };
     if (where === 'publish') f.io.transaction.publish = fail;
     let binds = 0;
@@ -105,7 +106,7 @@ describe('form creation publication', () => {
     await expect(f.run([list])).rejects.toThrow('could not be verified'); f.unchanged();
   });
   it.each([0, -1, NaN, Infinity, 1.5, 2])('refuses invalid or changed page count %s', async count => {
-    const f = await fixture(); f.io.countPages = async () => count;
+    const f = await fixture(); f.io.index = readingWith(async () => count);
     await expect(f.run()).rejects.toThrow('could not be verified'); f.unchanged();
   });
   it('single and multi-field batches publish one complete PDF and one original snapshot', async () => {
@@ -135,7 +136,7 @@ describe('form creation publication', () => {
     const f = await fixture();
     const change = () => f.store.dispatch({ type: 'MARK_SAVED', path: 'source' });
     if (when === 'consent') f.io.confirm = async () => { change(); return true; };
-    if (when === 'build') f.io.countPages = async () => { change(); return 1; };
+    if (when === 'build') f.io.index = readingWith(async () => { change(); return 1; });
     if (when === 'publish') {
       const publish = f.io.transaction.publish;
       f.io.transaction.publish = async (id, entries) => { const r = await publish(id, entries); change(); return r; };
@@ -145,7 +146,7 @@ describe('form creation publication', () => {
   });
   it('rechecks policy after the commit changes bytes, before any form stage', async () => {
     const f = await fixture();
-    f.io.commit = async () => f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: f.original.slice(), pageCount: 1, snapshotPath: 'page-snapshot' });
+    f.io.commit = async () => f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: f.original.slice(), pageCount: 1, snapshotPath: 'page-snapshot', documents: [] });
     let confirmations = 0; f.io.confirm = async () => ++confirmations === 1;
     await expect(f.run()).resolves.toBe(false); expect(confirmations).toBe(2);
     expect(f.io.write).not.toHaveBeenCalled(); expect(f.actions).toEqual([]);
@@ -199,7 +200,7 @@ describe('form creation publication', () => {
   });
   it('native revision checks retain an independently changed working file', async () => {
     const f = await fixture(); const other = new Uint8Array([9, 8, 7]);
-    f.io.countPages = async () => { f.disk.set('work', other); return 1; };
+    f.io.index = readingWith(async () => { f.disk.set('work', other); return 1; });
     await expect(f.run()).rejects.toThrow('revision mismatch');
     expect(f.disk.get('work')).toEqual(other); expect(f.actions).toEqual([]);
   });

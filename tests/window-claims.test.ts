@@ -25,7 +25,8 @@ vi.mock('../src/renderer/lib/tauri-bridge', () => ({
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { claimPaths, createClaimHolds, releasePaths, soleOwner } from '../src/renderer/lib/window-claims';
+import { claimPaths, createClaimHolds, departedImportSources, releasePaths, soleOwner } from '../src/renderer/lib/window-claims';
+import type { OpenFile } from '../src/renderer/state/types';
 import { mergeRecent, sameRecent, type RecentEntry } from '../src/renderer/lib/recent-files';
 import { scopedKeyFor, PRIMARY_WINDOW_LABEL } from '../src/renderer/lib/window-label';
 
@@ -255,6 +256,25 @@ describe('createClaimHolds', () => {
   });
 });
 
+describe('departedImportSources', () => {
+  const entry = (path: string, importOnly?: true): [string, OpenFile] => [path, {
+    path, workingPath: `${path}.w`, name: path, pageCount: 1, buffer: [1],
+    dirty: false, undoStack: [], redoStack: [], ...(importOnly ? { importOnly } : {}),
+  }];
+
+  it('names an import source no longer in the files, and nothing else', () => {
+    const previous = new Map([entry('doc.pdf'), entry('gone.pdf', true), entry('kept.pdf', true), entry('closed.pdf')]);
+    const next = new Map([entry('doc.pdf'), entry('kept.pdf', true)]);
+    expect(departedImportSources(previous, next)).toEqual(['gone.pdf']);
+  });
+
+  it('does not name a source that became an open document', () => {
+    const previous = new Map([entry('x.pdf', true)]);
+    const next = new Map([entry('x.pdf')]);
+    expect(departedImportSources(previous, next)).toEqual([]);
+  });
+});
+
 // App has no DOM test environment: its claim flows are pinned to the rules
 // above as source text.
 describe('the window’s claim flows', () => {
@@ -267,6 +287,11 @@ describe('the window’s claim flows', () => {
     expect(app).toContain('claimHolds.current.drop(canonicalImports);');
     expect(app).toContain('claimHolds.current.hold([dest]);');
     expect(app).toContain('claimHolds.current.drop([dest]);');
+  });
+
+  it('release the read claim of an import source that left the files', () => {
+    expect(app).toContain('const departed = departedImportSources(filesSeen.current, state.files);');
+    expect(app).toContain('if (departed.length > 0) void releasePaths(departed, pathInUse);');
   });
 
   it('release only through the in-use check', () => {

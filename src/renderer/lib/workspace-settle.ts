@@ -1,19 +1,52 @@
 // The workspace is SETTLED when every document was indexed from the buffer
-// its file holds now. Between a buffer change and the landing of its reindex
-// the documents are superseded: their page indexes and rotations describe the
-// previous bytes, while every reader of `files` already sees the new ones. A
-// commit planned from superseded documents writes the wrong page for a moved
-// index, applies a baked rotation a second time, and authors a baked
-// annotation again beside itself — so a commit plans only once settled.
-// A page-tier commit's own documents are composed for its bytes (provisional)
-// and describe them exactly, but they carry no fingerprint of what the commit
-// wrote, so they wait for the read-back too.
+// its file holds now. Documents that were not would be superseded: their page
+// indexes and rotations describe the previous bytes, while every reader of
+// `files` already sees the new ones. A commit planned from superseded
+// documents writes the wrong page for a moved index, applies a baked rotation
+// a second time, and authors a baked annotation again beside itself — so a
+// commit plans only once settled. Every byte replacement places, in the same
+// step, documents that describe its bytes — read from them (an operation, a
+// disk undo or redo) or composed for them (a page-tier commit) — or none (an
+// open, which the indexer reads). A page-tier commit's composed documents
+// (provisional) carry no fingerprint of what it wrote, so they wait for the
+// read-back.
 //
 // DOM-free and pdf.js-free, so the rule tests in Node.
-import type { AppState, OpenDocument, PdfBuffer } from '../state/types';
+import type { AppState, OpenDocument, OpenFile, PageRef, PdfBuffer } from '../state/types';
 import { tChrome } from '../i18n';
 
 type WorkspaceState = Pick<AppState, 'files' | 'workspace'>;
+
+/** What a publication reads from the bytes it is about to place: their page
+ * count, and the documents they hold. No documents leaves the path to the
+ * workspace indexer. */
+export interface PublishedBytes {
+  pageCount: number;
+  documents: OpenDocument[];
+}
+
+/** Reads the bytes a publication is about to place, as documents of `file`. */
+export type ReadPublishedBytes = (file: OpenFile, buffer: PdfBuffer) => Promise<PublishedBytes>;
+
+/**
+ * The document and page a drawing lands on, or null.
+ *
+ * `seen` is the page as the gesture's render showed it: its document, the
+ * bytes that document described, and the page's rotation. A drawing is
+ * display-normalized in that frame and bound to that page id, so it lands
+ * only while the workspace holds the page in that document, over the same
+ * bytes, which are still its file's bytes, turned the same way.
+ */
+export function drawingTarget(
+  state: WorkspaceState,
+  seen: { docId: string; pageId: string; buffer: PdfBuffer | null; rotation: number },
+): { doc: OpenDocument; page: PageRef } | null {
+  const doc = state.workspace.documents.find((d) => d.id === seen.docId);
+  const page = doc?.pages.find((p) => p.id === seen.pageId);
+  if (!doc || !page) return null;
+  if (doc.buffer !== seen.buffer || state.files.get(doc.path)?.buffer !== doc.buffer) return null;
+  return page.rotation === seen.rotation ? { doc, page } : null;
+}
 
 /** Whether `doc` was read from the bytes its file holds now. */
 function readFromCurrentBytes(state: WorkspaceState, doc: OpenDocument): boolean {

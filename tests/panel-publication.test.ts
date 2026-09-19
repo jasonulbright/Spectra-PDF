@@ -23,6 +23,7 @@ import { createBookmarkDrafts } from '../src/renderer/lib/bookmark-drafts';
 import { createPageLabelDrafts } from '../src/renderer/lib/page-label-drafts';
 import { createDocumentJsDrafts } from '../src/renderer/lib/document-js-drafts';
 import { createLayerSessions } from '../src/renderer/lib/layer-session';
+import { readingWith } from './helpers/published-bytes';
 
 /** Execute the actual component callbacks and actual App adapters, without
  * replacing the publication boundary with a mock that simply promises success. */
@@ -113,7 +114,7 @@ async function fixture() {
     isTrackableMethod: () => true, sequenceEditClass, isOpMethod,
     commitRef: { current: async () => {} }, confirmEditOfSignedDoc: async () => fault.allow,
     callRaw: call, call, pageCommit: transaction,
-    getPageCount: async (b: Uint8Array) => (await PDFDocument.load(b)).getPageCount(),
+    readPublishedBytes: readingWith(async (b: Uint8Array) => (await PDFDocument.load(b)).getPageCount()),
     file: { writeBuffer: async (p: string, b: Uint8Array) => { disk.set(p, b.slice()); },
       readBuffer: async (p: string) => {
         if (fault.read || ++fault.reads === fault.failReadAt) throw new Error('injected read');

@@ -11,6 +11,7 @@ import type { AppAction, OpenFile } from '../src/renderer/state/types';
 import { hasPendingPageCommit, recoverPendingPageCommit } from '../src/renderer/lib/page-commit-transaction';
 import { captureOperationIntent } from '../src/renderer/lib/operation-intent';
 import { createOwnedOperationRuns } from '../src/renderer/lib/owned-operation-run';
+import { readingWith } from './helpers/published-bytes';
 
 const hash = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 async function fixture() {
@@ -29,7 +30,7 @@ async function fixture() {
     write: vi.fn(async (p, b) => { disk.set(p, b.slice()); }),
     read: vi.fn(async p => { events.push('reload'); return disk.get(p)!.slice(); }),
     remove: async p => { disk.delete(p); },
-    countPages: vi.fn(async b => { events.push('count'); return (await PDFDocument.load(b)).getPageCount(); }),
+    index: vi.fn(readingWith(async b => { events.push('count'); return (await PDFDocument.load(b)).getPageCount(); })),
     fontDirectory: async () => 'fonts',
     track: vi.fn(async run => { events.push('tracking'); await run(); events.push('success'); }),
     callStaged: vi.fn(async (method, params = {}) => {
@@ -96,7 +97,7 @@ describe('form fill publication', () => {
   });
   it('an owned fill cannot adopt an unrelated same-path replacement during the page gate', async () => {
     const f = await fixture(), intent = captureOperationIntent(f.store.getState(), f.file);
-    f.io.commit = async () => f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1 });
+    f.io.commit = async () => f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1, documents: [] });
     await expect(fillFormValues('source', { name: 'Changed' }, f.store.getState, f.dispatch, f.io,
       { intent })).rejects.toThrow('changed');
     expect(f.disk.get('work')).toEqual(f.original); expect(f.io.transaction.publish).not.toHaveBeenCalled();
@@ -120,10 +121,10 @@ describe('form fill publication', () => {
   });
   it.each(['before', 'pending', 'gate'])('a draft revision is checked %s', async phase => {
     const f = await fixture();
-    if (phase === 'before') f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1 });
+    if (phase === 'before') f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1, documents: [] });
     if (phase === 'pending') f.store.getState().pageDirtyPaths.push('source');
     if (phase === 'gate') f.io.commit = async () => {
-      f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1 });
+      f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1, documents: [] });
     };
     await expect(fillFormValues('source', { name: 'Changed' }, f.store.getState, f.dispatch, f.io,
       { expectedBuffer: f.original })).rejects.toThrow('changed');
@@ -151,7 +152,7 @@ describe('form fill publication', () => {
       field.acroField.setPartialName('name+1');
       if (when === 'after gate') field.setText('Changed elsewhere');
       const b = await pdf.save(); f.disk.set('work', b);
-      f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: b, pageCount: 1, snapshotPath: 'gate' });
+      f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: b, pageCount: 1, snapshotPath: 'gate', documents: [] });
     };
     const run = fillFormValues('source', { name: 'Correction' }, f.store.getState, f.dispatch, f.io,
       { expectedValues: { name: when === 'before' ? 'Stale value' : 'Original' }, changedMessage: 'moved' });
@@ -179,7 +180,7 @@ describe('form fill publication', () => {
     if (where === 'gate') f.io.commit = fail;
     if (where === 'font') f.io.fontDirectory = fail;
     if (where === 'reload') f.io.read = fail;
-    if (where === 'count') f.io.countPages = fail;
+    if (where === 'count') f.io.index = readingWith(fail);
     if (where === 'publish') f.io.transaction.publish = fail;
     const write = f.io.write, call = f.io.callStaged;
     f.io.write = async (p, b) => {
@@ -240,7 +241,7 @@ describe('form fill publication', () => {
     const post = await PDFDocument.load(f.original); post.getForm().getTextField('name').acroField.setPartialName('name+1');
     const committed = await post.save();
     f.io.commit = async () => {
-      f.disk.set('work', committed); f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: committed, pageCount: 1, snapshotPath: 'page-backup' });
+      f.disk.set('work', committed); f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: committed, pageCount: 1, snapshotPath: 'page-backup', documents: [] });
     };
     const seen: string[][] = [];
     f.io.confirm = async (_p, _inspection, targets, typed) => { seen.push([...typed]); expect(targets).toEqual(typed); return seen.length === 1 || allow; };

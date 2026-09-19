@@ -3,12 +3,14 @@ import { tChrome } from '../i18n';
 import { withFileLock } from './engine-lock';
 import { serializeWorkspacePublication } from './workspace-publication';
 import { hasPendingPageCommit, publishPageCommit, recoverPendingPageCommit, type PageCommitIo } from './page-commit-transaction';
+import type { ReadPublishedBytes } from './workspace-settle';
 
 export interface HistoryIo {
   read: (path: string) => Promise<Uint8Array>;
   write: (path: string, bytes: Uint8Array) => Promise<void>;
   remove: (path: string) => Promise<void>;
-  countPages: (bytes: Uint8Array) => Promise<number>;
+  /** The page count and the documents of the restored bytes, placed with them. */
+  index: ReadPublishedBytes;
   transaction: PageCommitIo;
 }
 
@@ -55,10 +57,12 @@ export function restoreHistory(direction: 'undo' | 'redo', getState: () => AppSt
           && now.pageRedoStack === expected.pageRedoStack && now.pageDirtyPaths === expected.pageDirtyPaths;
       };
       // Read and validate the exact retained bytes BEFORE touching the working
-      // file. Count them, not a later read of the mutable working path.
+      // file. Count them, not a later read of the mutable working path. The
+      // reading runs on a copy; the documents describe the object dispatched.
       const buffer = (await io.read(snapshotPath)).slice();
-      const pageCount = await io.countPages(buffer.slice());
+      const { pageCount, documents: read } = await io.index(current, buffer.slice());
       if (!Number.isSafeInteger(pageCount) || pageCount < 1) throw new Error(tChrome('app.history.invalid'));
+      const documents = read.map(d => ({ ...d, buffer }));
       const expectedWorkingSha256 = await digest(current.buffer);
       const expectedStagedSha256 = await digest(buffer);
       if (!isCurrent()) throw changed();
@@ -72,7 +76,7 @@ export function restoreHistory(direction: 'undo' | 'redo', getState: () => AppSt
           snapshots => {
             if (!isCurrent()) throw changed();
             dispatch({ type: 'RESTORE_HISTORY', direction, expected, path, snapshotPath,
-              counterpart: snapshots[0], buffer, pageCount });
+              counterpart: snapshots[0], buffer, pageCount, documents });
             // A refused reducer update must abort native publication, not
             // acknowledge a changed file with old history still displayed.
             if (getState().files.get(path)?.buffer !== buffer) throw changed();

@@ -584,17 +584,22 @@ describe('UI_SELECT_ALL_PAGES / UI_CLEAR_SELECTION', () => {
 
 describe('selection invalidation on buffer-identity changes (per-path prune)', () => {
   // Non-authored buffer changes prune ONLY the touched path's
-  // selection ids (their reindex mints a fresh generation — nothing could
-  // survive) and LEAVE other files' selection intact; the authored commit
-  // defers entirely to the SET_WORKSPACE_DOCUMENTS survive-or-prune pass
-  // (adoption lets its ids live).
+  // selection ids (the documents read from their bytes carry a fresh
+  // generation — nothing could survive) and LEAVE other files' selection
+  // intact; the authored commit defers entirely to the SET_WORKSPACE_DOCUMENTS
+  // survive-or-prune pass (adoption lets its ids live).
+  const readA = (buffer: number[]): OpenDocument[] =>
+    [makeDoc({ ...makeFile('a.pdf', 3), buffer }, 'a.pdf#g9#0',
+      makePages('a.pdf', 3).map((p, i) => ({ ...p, id: `a.pdf#g9#p${i}` })))];
   const cases: [string, (s: AppState) => AppAction][] = [
-    ['UPDATE_FILE', () => ({
-      type: 'UPDATE_FILE', path: 'a.pdf', pageCount: 3, buffer: [9], snapshotPath: 'snap',
-    })],
-    ['REFRESH_BUFFER', () => ({
-      type: 'REFRESH_BUFFER', path: 'a.pdf', pageCount: 3, buffer: [9],
-    })],
+    ['UPDATE_FILE', () => {
+      const buffer = [9];
+      return { type: 'UPDATE_FILE', path: 'a.pdf', pageCount: 3, buffer, snapshotPath: 'snap', documents: readA(buffer) };
+    }],
+    ['REFRESH_BUFFER', () => {
+      const buffer = [9];
+      return { type: 'REFRESH_BUFFER', path: 'a.pdf', pageCount: 3, buffer, documents: readA(buffer) };
+    }],
     ['CLOSE_FILE', () => ({ type: 'CLOSE_FILE', path: 'a.pdf' })],
   ];
   for (const [name, make] of cases) {

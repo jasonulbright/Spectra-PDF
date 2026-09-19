@@ -1,4 +1,4 @@
-// Rung 2 — drawing shapes + callouts: real-subtype emits through the commit
+// Drawing shapes + callouts: real-subtype emits through the commit
 // rebuild, the raw-style sidecar round-trip, the faithful-or-untouched
 // import gates, the RESTYLE reducer rules, and the vertex-edit geometry.
 import { describe, expect, it } from 'vitest';

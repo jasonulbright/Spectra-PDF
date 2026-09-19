@@ -249,6 +249,78 @@ function refuseEdit(state: AppState): AppState {
   return { ...state, pageEditRefusals: state.pageEditRefusals + 1 };
 }
 
+/** The documents a page edit writes into, null when a document or page it
+ * names is not in the workspace, or undefined for any other action.
+ *
+ * Ids are positional and generation-tagged: new bytes that were not composed
+ * by a page-tier commit take new ids, so an edit whose gesture began on the
+ * previous documents names ids that are gone. */
+function editedDocuments(state: AppState, action: AppAction): OpenDocument[] | null | undefined {
+  const documents = state.workspace.documents;
+  const byId = (id: string): OpenDocument | undefined => documents.find((d) => d.id === id);
+  let holders: Map<string, OpenDocument> | undefined;
+  const holding = (pageId: string): OpenDocument | undefined => {
+    holders ??= new Map(documents.flatMap((d) => d.pages.map((p) => [p.id, d] as const)));
+    return holders.get(pageId);
+  };
+  const within = (docId: string, pageId: string): OpenDocument | undefined => {
+    const doc = byId(docId);
+    return doc?.pages.some((p) => p.id === pageId) ? doc : undefined;
+  };
+  let named: (OpenDocument | undefined)[];
+  switch (action.type) {
+    case 'REORDER_PAGES':
+    case 'SPLIT_DOC':
+    case 'REORDER_DOCS':
+    case 'RENAME_DOC':
+    case 'REMOVE_DOC':
+      named = [byId(action.docId)];
+      break;
+    case 'IMPORT_PAGES':
+      named = [byId(action.toDocId)];
+      break;
+    case 'MOVE_PAGE':
+      named = [within(action.fromDocId, action.pageId), byId(action.toDocId)];
+      break;
+    case 'MOVE_PAGE_TO_NEW_DOC':
+      named = [within(action.fromDocId, action.pageId)];
+      break;
+    case 'MOVE_PAGES':
+      named = [byId(action.toDocId), ...action.pageIds.map(holding)];
+      break;
+    case 'MOVE_PAGES_TO_NEW_DOC':
+    case 'DELETE_PAGE_REFS':
+    case 'ROTATE_PAGE_REFS':
+      named = action.pageIds.map(holding);
+      break;
+    case 'DELETE_PAGE_REF':
+    case 'ROTATE_PAGE_REF':
+    case 'ADD_ANNOTATION':
+    case 'REGROUP_COUNT_MARKS':
+    case 'UPDATE_ANNOTATION':
+    case 'RECOLOR_ANNOTATION':
+    case 'REMOVE_ANNOTATION':
+    case 'REORDER_ANNOTATIONS':
+    case 'RESTYLE_ANNOTATIONS':
+    case 'RECALIBRATE_ANNOTATION':
+    case 'RECOLOR_ANNOTATIONS':
+    case 'REMOVE_ANNOTATIONS':
+      named = [within(action.docId, action.pageId)];
+      break;
+    case 'TRANSFORM_ANNOTATIONS':
+      named = [byId(action.docId), ...action.edits.map((e) => within(action.docId, e.pageId))];
+      break;
+    default:
+      return undefined;
+  }
+  return named.every((d): d is OpenDocument => d !== undefined) ? named : null;
+}
+
+/** Whether `documents` were read from `buffer`, the bytes `path` takes. */
+function readFrom(documents: readonly OpenDocument[], path: string, buffer: PdfBuffer): boolean {
+  return documents.every((d) => d.path === path && d.buffer === buffer && !d.provisional);
+}
+
 // Every in-memory page mutation goes through here: push the previous state
 // onto the page-edit undo tier, clear redo, and mark the touched files dirty
 // for the commit bridge. Callers return the current documents array unchanged
@@ -501,6 +573,54 @@ function applyFileUpdate(
   return next;
 }
 
+/** `state` with `path` holding new bytes (`files`) and its documents replaced
+ * by `documents`, read from those bytes, in the same step: the previous
+ * documents address the previous bytes, and read against the new ones they
+ * show and take edits on other pages.
+ *
+ * The bytes' own ids are new, so selection, focus and reading position keep
+ * nothing of the path. Other files' survive. Pending page edits are committed
+ * before any byte replacement; a pending edit still here means a caller
+ * bypassed the commit gate. It addresses the previous bytes, and cross-file
+ * moves entangle every dirty path, so the whole tier resets and the other
+ * dirty paths' documents are dropped for the indexer to re-derive from their
+ * own bytes. */
+function withNewBytes(
+  state: AppState,
+  files: Map<string, OpenFile>,
+  path: string,
+  documents: OpenDocument[],
+): AppState {
+  const tierEmpty =
+    state.pageUndoStack.length === 0 &&
+    state.pageRedoStack.length === 0 &&
+    state.pageDirtyPaths.length === 0;
+  const base = pruneSelectionForPaths(
+    state,
+    tierEmpty ? [path] : [path, ...state.pageDirtyPaths],
+    false,
+  );
+  const dropped = new Set(tierEmpty ? [] : state.pageDirtyPaths.filter((p) => p !== path));
+  const placed = placeDocuments(
+    state.workspace.documents.filter((d) => !dropped.has(d.path)),
+    path,
+    documents,
+  );
+  const pageUndoStack = tierEmpty ? state.pageUndoStack : [];
+  const pageRedoStack = tierEmpty ? state.pageRedoStack : [];
+  return {
+    ...base,
+    // A byte-only import source no page references any more goes, as after
+    // any reindex.
+    files: evictUnreferencedImportSources(files, placed, pageUndoStack, pageRedoStack),
+    ui: survivingUi(base.ui, state.workspace.documents, placed),
+    workspace: { documents: placed },
+    pageUndoStack,
+    pageRedoStack,
+    pageDirtyPaths: tierEmpty ? state.pageDirtyPaths : [],
+  };
+}
+
 /**
  * Open (or close, with null) a Tools-tab tool, and put the canvas mode where
  * that tool says it belongs.
@@ -586,6 +706,13 @@ function canvasModeAfterOpening(ui: UiState, owner: ToolDef | undefined): Canvas
 }
 
 export function appReducer(state: AppState, action: AppAction): AppState {
+  // A page edit lands only on documents that are still there and still
+  // describe their file's bytes. Anything else is refused out loud: a
+  // gesture that began before new bytes landed must not vanish without a word.
+  const edited = editedDocuments(state, action);
+  if (edited === null || edited?.some((d) => state.files.get(d.path)?.buffer !== d.buffer)) {
+    return refuseEdit(state);
+  }
   switch (action.type) {
     case 'OPEN_FILE': {
       // A REOPEN replaces the path's buffer — ITS selection ids die (fresh
@@ -779,39 +906,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
     case 'UPDATE_FILE': {
+      // Documents not read from these bytes address other pages of them. The
+      // publication sees the refusal and rolls the file back.
+      if (!readFrom(action.documents, action.path, action.buffer)) return state;
       const files = applyFileUpdate(state.files, action);
       if (files === state.files) return state;
-      const tierEmpty =
-        state.pageUndoStack.length === 0 &&
-        state.pageRedoStack.length === 0 &&
-        state.pageDirtyPaths.length === 0;
-      // Buffer replaced (engine op) — this path's ids die at its reindex
-      // (fresh generation); other files' selection survives. The
-      // defensive gate-bypass branch below invalidates EVERY dirty path's
-      // docs, so its prune spans the same set (regression).
-      const base = pruneSelectionForPaths(
-        state,
-        tierEmpty ? [action.path] : [action.path, ...state.pageDirtyPaths],
-        false,
-      );
-      if (tierEmpty) return { ...base, files };
-      // Defense-in-depth: the file's bytes were replaced while page edits
-      // were pending — a caller bypassed the commit gate. In-memory history
-      // and dirty compositions now reference stale buffers (cross-file moves
-      // entangle every dirty path with each other), so the whole tier resets
-      // and the dirty paths' documents are dropped for the indexer to
-      // re-derive from the current buffers.
-      const invalidated = new Set([...state.pageDirtyPaths, action.path]);
-      return {
-        ...base,
-        files,
-        workspace: {
-          documents: state.workspace.documents.filter((d) => !invalidated.has(d.path)),
-        },
-        pageUndoStack: [],
-        pageRedoStack: [],
-        pageDirtyPaths: [],
-      };
+      return withNewBytes(state, files, action.path, action.documents);
     }
     case 'COMMIT_PAGE_EDITS': {
       // The commit bridge's atomic landing: every rebuilt file joins the
@@ -825,9 +925,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // Selection is not cleared here: the committed documents keep the
       // planned ids, the reindex adopts them, and the survive-or-prune pass
       // keeps exactly the pages that still exist. (Non-authored buffer changes
-      // — UPDATE_FILE, REFRESH_BUFFER — clear eagerly: their reindex mints a
-      // fresh generation, nothing could survive the prune, and clearing early
-      // keeps the async window inert.)
+      // — UPDATE_FILE, REFRESH_BUFFER — place documents read from their bytes,
+      // under a fresh generation: nothing of the path survives the prune.)
       let files = state.files;
       for (const update of action.updates) {
         files = applyFileUpdate(files, update);
@@ -900,10 +999,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           || state.pageRedoStack !== action.expected.pageRedoStack
           || state.pageDirtyPaths !== action.expected.pageDirtyPaths
           || (undo ? existing.undoStack : existing.redoStack).at(-1) !== action.snapshotPath
-          || !Number.isSafeInteger(action.pageCount) || action.pageCount < 1) return state;
+          || !Number.isSafeInteger(action.pageCount) || action.pageCount < 1
+          || !readFrom(action.documents, action.path, action.buffer)) return state;
       // Reuse the non-authored identity invalidation, within THIS reducer turn.
       const refreshed = appReducer(state, { type: 'REFRESH_BUFFER', path: action.path,
-        buffer: action.buffer, pageCount: action.pageCount });
+        buffer: action.buffer, pageCount: action.pageCount, documents: action.documents });
       const files = new Map(refreshed.files);
       files.set(action.path, {
         ...files.get(action.path)!,
@@ -915,34 +1015,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
     case 'REFRESH_BUFFER': {
       // Buffer/pageCount swap that leaves undo/redo history alone — used
-      // after an undo/redo restore. Callers drain the page tier first, but if
-      // one ever doesn't, invalidate it like UPDATE_FILE does.
+      // after an undo/redo restore. The documents land exactly as for
+      // UPDATE_FILE.
       const existing = state.files.get(action.path);
-      if (!existing) return state;
+      if (!existing || !readFrom(action.documents, action.path, action.buffer)) return state;
       const files = new Map(state.files);
       files.set(action.path, { ...existing, pageCount: action.pageCount, buffer: action.buffer });
-      const tierEmpty =
-        state.pageUndoStack.length === 0 &&
-        state.pageRedoStack.length === 0 &&
-        state.pageDirtyPaths.length === 0;
-      // Same identity rule as UPDATE_FILE (incl. the defensive multi-path span).
-      const base = pruneSelectionForPaths(
-        state,
-        tierEmpty ? [action.path] : [action.path, ...state.pageDirtyPaths],
-        false,
-      );
-      if (tierEmpty) return { ...base, files };
-      const invalidated = new Set([...state.pageDirtyPaths, action.path]);
-      return {
-        ...base,
-        files,
-        workspace: {
-          documents: state.workspace.documents.filter((d) => !invalidated.has(d.path)),
-        },
-        pageUndoStack: [],
-        pageRedoStack: [],
-        pageDirtyPaths: [],
-      };
+      return withNewBytes(state, files, action.path, action.documents);
     }
     case 'MARK_SAVED': {
       const files = new Map(state.files);
@@ -1010,11 +1089,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
       if (!doc) return state;
       const byId = new Map(doc.pages.map((p) => [p.id, p]));
-      const valid =
+      // An order read from other pages than the document holds now: pages
+      // arrived or left while the gesture ran.
+      const permutation =
         action.order.length === doc.pages.length &&
-        action.order.every((id) => byId.has(id)) &&
-        action.order.some((id, i) => doc.pages[i].id !== id);
-      if (!valid) return state;
+        new Set(action.order).size === action.order.length &&
+        action.order.every((id) => byId.has(id));
+      if (!permutation) return refuseEdit(state);
+      if (action.order.every((id, i) => doc.pages[i].id === id)) return state;
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
         pages: action.order.map((id) => byId.get(id)!),
@@ -1804,6 +1886,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // The commit bridge just materialized the edits to disk; the workspace
       // itself is left alone — the indexer re-derives it from the new buffers.
       return { ...state, pageUndoStack: [], pageRedoStack: [], pageDirtyPaths: [] };
+    case 'NOTE_EDIT_REFUSED':
+      return refuseEdit(state);
     case 'UI_FOCUS_TAB':
       return focusTab(state, action.tab);
     case 'UI_SET_RECENT_FILES':

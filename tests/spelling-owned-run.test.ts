@@ -42,17 +42,15 @@ function fixture(attack: 'none' | 'late-publication' | 'read-reopen' = 'none') {
   let text = 'helo helo', field = 'helo helo', serial = 1;
   let indexed = { ...file, id: 'd', pages: [page] };
   const publish = () => {
-    store.dispatch({ type: 'REFRESH_BUFFER', path: 'A', buffer: new Uint8Array([++serial]), pageCount: 1 });
-    const next = store.getState().files.get('A')!;
-    // The indexer republishes the document AFTER the buffer lands, never with
-    // it, and the pages it comes back with carry a fresh generation: an edit
-    // made against the index left behind does not survive the republish.
+    // A publication places the documents read from its bytes in the same
+    // step, and their pages carry a fresh generation: an edit made against
+    // the previous documents does not survive it.
+    const buffer = new Uint8Array([++serial]);
     const current = store.getState().workspace.documents.find(doc => doc.id === 'd') ?? indexed;
-    indexed = { ...current, ...next, id: 'd',
+    indexed = { ...current, buffer, id: 'd',
       pages: current.pages.map(page => ({ ...page, id: `p#g${serial}` })) };
-    const settled = indexed;
-    setTimeout(() => store.dispatch({ type: 'SET_WORKSPACE_DOCUMENTS', path: 'A', documents: [settled] }), 60);
-    return next;
+    store.dispatch({ type: 'REFRESH_BUFFER', path: 'A', buffer, pageCount: 1, documents: [indexed] });
+    return store.getState().files.get('A')!;
   };
   const check = vi.fn(async () => {}), status = vi.fn(), busy = vi.fn();
   const bindings: Record<string, unknown> = {
@@ -100,9 +98,6 @@ describe('actual Spelling panel correction sequence', () => {
     const f = fixture();
     await f.run([issue('comments', 5), issue('text', 5), issue('fields', 5),
       issue('comments', 0), issue('text', 0), issue('fields', 0)], 'helo');
-    // Read after the lagged republish has landed: an edit made against the
-    // index the writes left behind does not survive it.
-    await new Promise<void>(resolve => { setTimeout(resolve, 200); });
     expect(f.contents()).toEqual({ text: 'hello hello', field: 'hello hello', note: 'hello hello' });
     expect(f.events).toEqual(['text', 'field', 'text', 'field']);
     expect(f.status).toHaveBeenCalledWith('panel.spelling.changed:6');

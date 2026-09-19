@@ -8,6 +8,7 @@ import { withFileLock } from '../src/renderer/lib/engine-lock';
 import { createAppStore } from '../src/renderer/state/store';
 import { initialState, appReducer } from '../src/renderer/state/reducer';
 import type { AppAction, AppState, OpenFile } from '../src/renderer/state/types';
+import { readingWith } from './helpers/published-bytes';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 function fixture() {
@@ -21,7 +22,7 @@ function fixture() {
   const retained = new Map<string, { prior: Uint8Array; snapshot: string; entry: PageCommitEntry }>();
   const io: HistoryIo = {
     read: async path => { events.push('read'); return disk.get(path)!.slice(); },
-    countPages: async data => { events.push('validate'); return data[0] + 1; },
+    index: readingWith(async data => { events.push('validate'); return data[0] + 1; }),
     write: async (path, bytes) => { events.push('stage'); disk.set(path, bytes.slice()); },
     remove: async path => { events.push('cleanup'); disk.delete(path); },
     transaction: {
@@ -59,7 +60,7 @@ describe('atomic disk history', () => {
     const before = f.store.getState();
     const fail = async () => { throw new Error(`injected ${where}`); };
     if (where === 'read') f.io.read = fail;
-    else if (where === 'validate') f.io.countPages = fail;
+    else if (where === 'validate') f.io.index = readingWith(fail);
     else f.io.write = async (path) => { f.disk.set(path, new Uint8Array([99])); return fail(); };
     await expect(f.run()).rejects.toThrow(`injected ${where}`);
     expect(f.store.getState()).toBe(before);
@@ -69,7 +70,7 @@ describe('atomic disk history', () => {
   });
   it.each([0, -1, NaN, Infinity, 1.5, undefined, '2'])('invalid page count %s refuses before mutation', async count => {
     const f = fixture();
-    f.io.countPages = async () => count as number;
+    f.io.index = readingWith(async () => count as number);
     await expect(f.run()).rejects.toThrow('non-empty PDF');
     expect(f.disk.get('work')).toEqual(f.file.buffer);
     expect(f.actions).toEqual([]);
@@ -149,7 +150,7 @@ describe('atomic disk history', () => {
       await waiting;
       f.disk.set('work', new Uint8Array([3]));
       f.disk.set('s3', new Uint8Array([2]));
-      f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: new Uint8Array([3]), pageCount: 4, snapshotPath: 's3' });
+      f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: new Uint8Array([3]), pageCount: 4, snapshotPath: 's3', documents: [] });
     });
     const undo = f.run();
     expect(f.events).toEqual([]);
@@ -160,14 +161,14 @@ describe('atomic disk history', () => {
   });
   it('source history and validation inputs cannot alter the bytes eventually published', async () => {
     const f = fixture();
-    f.io.countPages = async data => { data.fill(99); f.disk.set('s2', new Uint8Array([88])); return 2; };
+    f.io.index = readingWith(async data => { data.fill(99); f.disk.set('s2', new Uint8Array([88])); return 2; });
     await f.run();
     expect(f.disk.get('work')).toEqual(new Uint8Array([1]));
     expect(f.store.getState().files.get('source')!.buffer).toEqual(new Uint8Array([1]));
   });
   it('a file change during validation refuses before native publication', async () => {
     const f = fixture();
-    f.io.countPages = async () => { f.store.dispatch({ type: 'MARK_SAVED', path: 'source' }); return 2; };
+    f.io.index = readingWith(async () => { f.store.dispatch({ type: 'MARK_SAVED', path: 'source' }); return 2; });
     await expect(f.run()).rejects.toThrow('changed');
     expect(f.events).not.toContain('publish');
     expect(f.disk.get('work')).toEqual(f.file.buffer);
@@ -188,7 +189,7 @@ describe('atomic disk history', () => {
       await wait;
       f.disk.set('work', new Uint8Array([3]));
       f.disk.set('s3', new Uint8Array([2]));
-      f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', pageCount: 4, buffer: new Uint8Array([3]), snapshotPath: 's3' });
+      f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', pageCount: 4, buffer: new Uint8Array([3]), snapshotPath: 's3', documents: [] });
     });
     const undo = f.run();
     expect(f.events).toEqual([]);
@@ -203,7 +204,7 @@ describe('atomic disk history', () => {
     f.store.dispatch({ type: 'MARK_SAVED', path: 'source' });
     const changed = f.store.getState();
     const next = appReducer(changed, { type: 'RESTORE_HISTORY', direction: 'undo', path: 'source',
-      expected, snapshotPath: 's2', counterpart: 'opposite', buffer: [9], pageCount: 1 });
+      expected, snapshotPath: 's2', counterpart: 'opposite', buffer: [9], pageCount: 1, documents: [] });
     expect(next).toBe(changed);
   });
   it('current queued actions are visible before subscriber rendering', () => {
