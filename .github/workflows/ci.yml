@@ -25,7 +25,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .node-version
+          check-latest: true
 
       - name: Install Node dependencies
         run: npm ci
@@ -38,7 +39,7 @@ jobs:
       - name: Setup Python for renderer integration tests
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version-file: .python-version
 
       - name: Install Python dependencies for renderer integration tests
         run: python -m pip install --require-hashes -r scripts/python-requirements.txt
@@ -103,9 +104,9 @@ jobs:
       # the tests, so the printer, watched-folder and scheduler assertions never
       # execute here. `cargo test` compiles too, so it supersedes the check.
       # This is the STUB-ONLY Rust run: the stubs above are empty directories,
-      # so tests/cli_bytecode.rs and tests/cli_run_action.rs skip here. Their
-      # provisioned run is in the test-engine job, after the embedded runtime
-      # is vendored.
+      # so tests/cli_bytecode.rs, tests/cli_run_action.rs and the live half of
+      # tests/health_worker.rs skip here. Their provisioned run is in the
+      # test-engine job, after the embedded runtime is vendored.
       - name: Rust tests
         run: cd src-tauri && cargo test
 
@@ -149,12 +150,13 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version-file: .python-version
 
       - name: Setup Node.js for staged OCR models
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .node-version
+          check-latest: true
 
       - name: Install Node dependencies for staged OCR models
         run: npm ci
@@ -238,9 +240,11 @@ jobs:
       # The live CLI against the SHIPPED runtime. This job is the one that
       # assembles every resource the bundle declares; with the embedded Python
       # vendored beside them, `cargo test` stages the engine payload and lays
-      # the runtime next to the test binary, and tests/cli_bytecode.rs and
-      # tests/cli_run_action.rs launch the product's CLI for real. The skip
-      # that lint-and-build's stub-only run takes is refused here.
+      # the runtime next to the test binary, tests/cli_bytecode.rs and
+      # tests/cli_run_action.rs launch the product's CLI for real, and
+      # tests/health_worker.rs kills and respawns the real health worker. The
+      # skip that lint-and-build's stub-only run takes is refused in the live
+      # step below.
       - name: Provision embedded Python (vendored, for the live CLI test)
         run: powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1
         shell: pwsh
@@ -256,11 +260,6 @@ jobs:
             ~/.cargo/git
             src-tauri/target
           key: ${{ runner.os }}-cargo-live-cli-${{ hashFiles('src-tauri/Cargo.lock') }}
-
-      - name: Live CLI tests against the provisioned runtime
-        run: cd src-tauri && cargo test --test cli_bytecode --test cli_run_action
-        env:
-          SPECTRAPDF_REQUIRE_LIVE_CLI: "1"
 
       - name: Stage test-only SoftHSM (PKCS#11 capability axis)
         # Not an application dependency: this pinned software token gives the
@@ -353,6 +352,13 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTRAPDF_GS_PATH=$($selected.FullName)" -Encoding utf8
         shell: pwsh
 
+      # After the Ghostscript test tool and its exported path: the live cases
+      # that need a working Ghostscript return early on a machine without one.
+      - name: Live CLI tests against the provisioned runtime
+        run: cd src-tauri && cargo test --test cli_bytecode --test cli_run_action --test health_worker
+        env:
+          SPECTRAPDF_REQUIRE_LIVE_CLI: "1"
+
       # --durations names the slowest tests in the log: a stall in this
       # suite is otherwise a silent 30 minutes with no test named.
       - name: Run engine tests (full suite)
@@ -369,7 +375,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .node-version
+          check-latest: true
 
       - name: Install dependencies
         run: npm ci
@@ -395,7 +402,7 @@ jobs:
       - name: Setup Python (for pip-audit)
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version-file: .python-version
 
       - name: Install pip-audit
         run: pip install pip-audit
@@ -467,7 +474,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .node-version
+          check-latest: true
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

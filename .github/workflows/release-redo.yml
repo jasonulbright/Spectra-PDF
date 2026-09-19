@@ -142,10 +142,14 @@ jobs:
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File scripts/install-signing-tools.ps1 -SkipWinget
 
+      # A toolchain, not product bytes: the Node major is the one pin the
+      # workflow's revision carries. verifier/ is a sparse cone checkout, and a
+      # cone checkout always carries the repository's root files.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: verifier/.node-version
+          check-latest: true
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

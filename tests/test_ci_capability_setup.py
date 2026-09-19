@@ -616,11 +616,12 @@ def test_the_payload_gates_are_mirrored_locally() -> None:
 
 LIVE_CLI_ENV = "SPECTRAPDF_REQUIRE_LIVE_CLI"
 LIVE_CLI_STEP = "Live CLI tests against the provisioned runtime"
-#: The Rust tests that launch the product binary and refuse to skip under the
-#: live env, run as one command. `test_every_live_cli_test_runs_in_the_provisioned_step`
-#: derives the same list from the test sources, so a live CLI test that no gate
+#: The Rust tests that carry the live guard -- they refuse to skip under the
+#: live env, whether they launch the product binary or drive the engine worker
+#: -- run as one command. `test_every_guarded_rust_test_runs_in_the_provisioned_step`
+#: derives the same list from the test sources, so a guarded test that no gate
 #: runs cannot land.
-LIVE_CLI_TESTS = ("cli_bytecode", "cli_run_action")
+LIVE_CLI_TESTS = ("cli_bytecode", "cli_run_action", "health_worker")
 LIVE_CLI_COMMAND = "cargo test " + " ".join(f"--test {name}" for name in LIVE_CLI_TESTS)
 
 
@@ -655,19 +656,424 @@ def test_the_live_cli_test_runs_against_a_provisioned_runtime(
         assert "std::env::var_os(REQUIRE_LIVE)" in rust, name
 
 
-def test_every_live_cli_test_runs_in_the_provisioned_step() -> None:
-    """A Rust test that launches the product binary and refuses to skip under
-    the live env is a live CLI test, and every one of them is in the command
-    the provisioned steps run."""
-    declared = []
-    for path in (ROOT / "src-tauri" / "tests").glob("*.rs"):
-        source = path.read_text(encoding="utf-8")
-        if (
-            f'const REQUIRE_LIVE: &str = "{LIVE_CLI_ENV}";' in source
-            and 'env!("CARGO_BIN_EXE_spectrapdf")' in source
-        ):
-            declared.append(path.stem)
+def test_every_guarded_rust_test_runs_in_the_provisioned_step() -> None:
+    """A Rust test that names the live env carries the guard that turns its
+    skip into a failure, and the guard binds only where a step sets the env.
+    Every guarded integration test, whether it launches the CLI or not, is in
+    the command the provisioned steps run. A guarded unit test could never be
+    named by that command, so none may exist."""
+    tests = ROOT / "src-tauri" / "tests"
+    declared = [
+        path.stem if path.name != "main.rs" else path.parent.name
+        for path in [*tests.glob("*.rs"), *tests.glob("*/main.rs")]
+        if LIVE_CLI_ENV in path.read_text(encoding="utf-8")
+    ]
     assert sorted(declared) == sorted(LIVE_CLI_TESTS)
+    units = [
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "src-tauri" / "src").rglob("*.rs")
+        if LIVE_CLI_ENV in path.read_text(encoding="utf-8")
+    ]
+    assert units == []
+
+
+def test_the_ci_live_step_runs_where_a_ghostscript_is_installed() -> None:
+    """The live cases that need a working Ghostscript return early on a
+    machine without one. CI's engine job installs one as a test tool and
+    exports its path, so its live step runs after both and those cases run."""
+    steps = _job_steps("ci.yml", "test-engine")
+    names = [name for name, _ in steps]
+    install = [i for i, (_n, t) in enumerate(steps) if GS_TEST_TOOL_SCRIPT in t]
+    export = [i for i, (_n, t) in enumerate(steps) if "SPECTRAPDF_GS_PATH=" in t]
+    assert install and export
+    assert max(install) < min(export)
+    assert max(export) < names.index(LIVE_CLI_STEP)
+
+
+# ── Toolchain parity: what runs here is what CI installs ──────────────────
+#
+# CI installs the newest stable Rust, the `.python-version` pin and the newest
+# release of the `.node-version` major on every run. The local parity run
+# checks this machine against the same sources before any gate uses a
+# toolchain, and these pins hold the workflows to those sources.
+
+TOOLCHAIN_CHECK = "scripts/check-toolchains.py"
+TOOLCHAINS = ("rust", "python", "node")
+EMBED_SCRIPT = "scripts/setup-python-embed.ps1"
+
+
+_TOOLCHAIN_MODULE: list = []
+
+
+def _toolchains():
+    """The checker, loaded once from its script path (it is not a package)."""
+    if not _TOOLCHAIN_MODULE:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("check_toolchains", ROOT / TOOLCHAIN_CHECK)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        _TOOLCHAIN_MODULE.append(module)
+    return _TOOLCHAIN_MODULE[0]
+
+
+def _workflow_steps() -> list[tuple[str, str]]:
+    """(workflow, step text) for every step of every job in every workflow."""
+    found = []
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        lines = path.read_text().splitlines()
+        jobs = lines.index("jobs:")
+        for line in lines[jobs + 1:]:
+            job = re.fullmatch(r"  ([A-Za-z][\w-]*):", line)
+            if job:
+                found += [(path.name, text) for _name, text in _job_steps(path.name, job[1])]
+    return found
+
+
+def test_the_parity_script_checks_every_toolchain_before_any_gate_uses_one() -> None:
+    lines = (ROOT / "scripts" / "ci-parity-gates.sh").read_text().splitlines()
+    gates = [i for i, line in enumerate(lines) if line.startswith("gate ")]
+    checks = []
+    for name in TOOLCHAINS:
+        line = f'gate {name}-toolchain "$R/.venv/Scripts/python.exe" {TOOLCHAIN_CHECK} {name}'
+        assert line in lines, name
+        checks.append(lines.index(line))
+    others = [i for i in gates if i not in checks]
+    assert others and max(checks) < min(others)
+
+
+def test_every_rust_toolchain_step_installs_stable() -> None:
+    """The Rust check compares this machine with the newest stable. A pinned
+    toolchain in a workflow or a toolchain file makes that the wrong target,
+    and this pin fails until the check changes with it."""
+    steps = [(w, t) for w, t in _workflow_steps() if "rust-toolchain" in t]
+    assert steps
+    for workflow, text in steps:
+        assert re.search(r"uses: dtolnay/rust-toolchain@stable$", text, re.M), (workflow, text)
+        assert "toolchain:" not in text, (workflow, text)
+    for path in (ROOT / ".github" / "workflows").glob("*.yml"):
+        text = path.read_text()
+        assert "RUSTUP_TOOLCHAIN" not in text, path.name
+        assert not re.search(r"rustup (?:default|override|toolchain install)", text), path.name
+    assert _git(
+        "ls-files", "--", "rust-toolchain", "rust-toolchain.toml",
+        "src-tauri/rust-toolchain", "src-tauri/rust-toolchain.toml",
+    ) == ""
+
+
+def test_every_setup_python_and_setup_node_step_reads_the_one_pin() -> None:
+    """One source per toolchain: `.python-version`, which the shipped runtime
+    also reads, and `.node-version` with check-latest. The redo builds a tag
+    that may predate the file, so it reads the workflow revision's copy from
+    `verifier/`, a cone checkout that always carries the root files."""
+    python = [(w, t) for w, t in _workflow_steps() if "uses: actions/setup-python@" in t]
+    node = [(w, t) for w, t in _workflow_steps() if "uses: actions/setup-node@" in t]
+    assert python and node
+    for workflow, text in python:
+        assert re.search(r"^\s+python-version-file: \.python-version$", text, re.M), workflow
+    for workflow, text in node:
+        pin = "verifier/.node-version" if workflow == "release-redo.yml" else ".node-version"
+        assert re.search(rf"^\s+node-version-file: {re.escape(pin)}$", text, re.M), workflow
+        assert re.search(r"^\s+check-latest: true$", text, re.M), workflow
+    redo = _job_steps("release-redo.yml", "release")
+    names = [name for name, _ in redo]
+    verifier = names.index(REDO_VERIFIER_STEP)
+    assert "sparse-checkout-cone-mode" not in dict(redo)[REDO_VERIFIER_STEP]
+    assert verifier < min(i for i, (_n, t) in enumerate(redo) if "setup-node@" in t)
+    embed = (ROOT / EMBED_SCRIPT).read_text(encoding="utf-8-sig")
+    assert 'Join-Path $PSScriptRoot "..\\.python-version"' in embed
+    assert not re.search(r"\$PythonVersion\s*=\s*[\"']\d", embed)
+
+
+def test_no_workflow_names_a_node_or_python_version() -> None:
+    literal = re.compile(
+        r"^\s+(?:node|python)-version:"
+        r"|\b(?:nvm|fnm|volta|pyenv|uv python) (?:install|use|pin)\b"
+        r"|\b(?:choco|winget|scoop) install\b[^\n]*\b(?:node|python)"
+        r"|\bpy -\d|\bpython\d\.\d",
+        re.M | re.I,
+    )
+    for path in (ROOT / ".github" / "workflows").glob("*.yml"):
+        hits = literal.findall(path.read_text())
+        assert not hits, (path.name, hits)
+
+
+def test_the_pins_are_exact_and_the_notice_names_the_shipped_python() -> None:
+    python = (ROOT / ".python-version").read_text().split()
+    node = (ROOT / ".node-version").read_text().split()
+    assert len(python) == 1 and re.fullmatch(r"\d+\.\d+\.\d+", python[0])
+    assert len(node) == 1 and re.fullmatch(r"\d+", node[0])
+    notices = (ROOT / "THIRD-PARTY-LICENSES.md").read_text(encoding="utf-8")
+    assert re.findall(r"\*\*CPython (\S+)\*\*", notices) == python
+
+
+def _answer(stdout: str = "", status: int = 0, stderr: str = ""):
+    return _toolchains().Answer(status, stdout, stderr)
+
+
+RUSTC_1_98 = (
+    "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\n"
+    "commit-hash: 48a229cea0000000000000000000000000000000\ncommit-date: 2026-09-01\n"
+    "host: x86_64-pc-windows-msvc\nrelease: 1.98.1\nLLVM version: 21.1.8\n"
+)
+RUSTC_1_94 = RUSTC_1_98.replace("1.98.1 (48a229cea 2026-09-01)", "1.94.1 (e408947bf 2026-03-25)")
+ACTIVE_STABLE = "stable-x86_64-pc-windows-msvc (default)\n"
+STABLE_CURRENT = "stable-x86_64-pc-windows-msvc - up to date: 1.98.1 (48a229cea 2026-09-01)\n"
+STABLE_STALE = (
+    "stable-x86_64-pc-windows-msvc - update available: "
+    "1.97.0 (1d3b2a5c0 2026-07-30) -> 1.98.1 (48a229cea 2026-09-01)\n"
+)
+
+
+def _rust(active=ACTIVE_STABLE, rustc=RUSTC_1_98, check=STABLE_CURRENT, status=0,
+          active_status=0, rustc_status=0):
+    return _toolchains().rust_verdict(
+        _answer(active, active_status), _answer(rustc, rustc_status), _answer(check, status)
+    )
+
+
+def test_the_rust_check_passes_the_newest_stable() -> None:
+    passed, lines = _rust()
+    assert passed, lines
+    other_channels = STABLE_CURRENT + (
+        "nightly-x86_64-pc-windows-msvc - update available: "
+        "1.100.0-nightly (0a1b2c3d4 2026-09-17) -> 1.100.0-nightly (5e6f7a8b9 2026-09-18)\n"
+    )
+    passed, lines = _rust(check=other_channels, status=100)
+    assert passed, lines
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "overridden by environment variable RUSTUP_TOOLCHAIN",
+        r"directory override for 'C:\projects\spectra-studio\src-tauri'",
+        r"overridden by 'C:\projects\spectra-studio\rust-toolchain.toml'",
+    ],
+)
+def test_the_rust_check_refuses_a_toolchain_other_than_stable(reason: str) -> None:
+    passed, lines = _rust(active=f"1.94.1-x86_64-pc-windows-msvc ({reason})\n", rustc=RUSTC_1_94)
+    assert not passed
+    text = "\n".join(lines)
+    assert reason in text
+    assert "Local version: rustc 1.94.1 (e408947bf 2026-03-25)" in lines
+    assert "Expected version: 1.98.1 (48a229cea 2026-09-01)" in lines
+    assert "rustup update stable" in lines[-1]
+
+
+def test_the_rust_check_refuses_a_stale_stable() -> None:
+    rustc = RUSTC_1_98.replace("1.98.1 (48a229cea 2026-09-01)", "1.97.0 (1d3b2a5c0 2026-07-30)")
+    passed, lines = _rust(rustc=rustc, check=STABLE_STALE, status=100)
+    assert not passed
+    assert "Local version: rustc 1.97.0 (1d3b2a5c0 2026-07-30)" in lines
+    assert "Expected version: 1.98.1 (48a229cea 2026-09-01)" in lines
+    assert lines[-1] == "Fix: rustup update stable"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["no line", "cannot identify", "unknown form", "error exit", "no toolchain", "no rustc"],
+)
+def test_the_rust_check_fails_closed(case: str) -> None:
+    kwargs, cause = {
+        "no line": (
+            {"check": "beta-x86_64-pc-windows-msvc - up to date: 1.99.0 (x 2026-09-10)\n"},
+            "no recognizable line",
+        ),
+        "cannot identify": (
+            {"check": "stable-x86_64-pc-windows-msvc - "
+                      "cannot identify installed or update versions\n"},
+            "no recognizable line",
+        ),
+        "unknown form": (
+            {"check": "stable-x86_64-pc-windows-msvc - newer: 1.98.1\n"}, "no recognizable line"
+        ),
+        "error exit": ({"status": 1}, "no recognizable line"),
+        "no toolchain": ({"active_status": 1}, "named no toolchain"),
+        "no rustc": ({"rustc_status": 1}, "reported no host"),
+    }[case]
+    passed, lines = _rust(**kwargs)
+    assert not passed, case
+    assert cause in lines[0], lines
+    assert lines[-1].endswith("rustup update stable"), lines
+
+
+def _python_releases(*names: str, pre: tuple = (), unpublished: tuple = ()) -> object:
+    rows = [
+        {"name": name, "is_published": name not in unpublished, "pre_release": name in pre}
+        for name in names
+    ]
+    return _toolchains().Fetched(rows)
+
+
+PYTHON_314 = ("Python 3.14.5rc1", "Python 3.14.5", "Python 3.14.6", "Python 3.14.7")
+
+
+def _python(pin="3.14.7", venv="3.14.7\n", releases=None, venv_status=0):
+    module = _toolchains()
+    return module.python_verdict(
+        module.Fetched(pin) if pin is not None else module.Fetched(error=".python-version: missing"),
+        _answer(venv, venv_status),
+        releases if releases is not None else _python_releases(*PYTHON_314, pre=("Python 3.14.5rc1",)),
+    )
+
+
+def test_the_python_check_passes_the_newest_pin_in_the_venv() -> None:
+    passed, lines = _python()
+    assert passed, lines
+    newer_elsewhere = _python_releases(
+        *PYTHON_314, "Python 3.14.8rc1", "Python 3.14.8", "Python 3.14.9", "Python 3.15.1",
+        pre=("Python 3.14.5rc1", "Python 3.14.8rc1", "Python 3.14.8"),
+        unpublished=("Python 3.14.9",),
+    )
+    passed, lines = _python(releases=newer_elsewhere)
+    assert passed, lines
+
+
+def test_the_python_check_refuses_a_pin_behind_python_org() -> None:
+    passed, lines = _python(pin="3.14.5", venv="3.14.5\n")
+    assert not passed
+    assert "Local version: 3.14.5" in lines
+    assert "Expected version: 3.14.7" in lines
+    assert ".python-version" in lines[-1] and EMBED_SCRIPT in lines[-1]
+
+
+def test_the_python_check_refuses_a_venv_off_the_pin() -> None:
+    passed, lines = _python(venv="3.14.3\n")
+    assert not passed
+    assert "Local version: 3.14.3" in lines
+    assert "Expected version: 3.14.7" in lines
+    assert "-m venv --clear .venv" in lines[-1]
+
+
+@pytest.mark.parametrize("case", ["no pin", "inexact pin", "no releases", "no venv"])
+def test_the_python_check_fails_closed(case: str) -> None:
+    module = _toolchains()
+    kwargs, cause = {
+        "no pin": ({"pin": None}, ".python-version: missing"),
+        "inexact pin": ({"pin": "3.14"}, "not major.minor.patch"),
+        "no releases": (
+            {"releases": module.Fetched(error="python.org: timed out")}, "python.org: timed out"
+        ),
+        "no venv": ({"venv_status": 1}, "did not report its version"),
+    }[case]
+    passed, lines = _python(**kwargs)
+    assert not passed, case
+    assert cause in "\n".join(lines[:-3]), lines
+    assert lines[-3].startswith("Local version: ") and lines[-1].startswith("Fix: ")
+
+
+NODE_INDEX = [
+    {"version": "v26.9.0", "npm": "11.19.1"},
+    {"version": "v24.20.0", "npm": "11.18.0"},
+    {"version": "v24.21.0", "npm": "11.19.0"},
+    {"version": "v22.23.2", "npm": "10.9.8"},
+]
+
+
+def _node(pin="24", node="v24.21.0\n", npm="11.19.0\n", index=None, node_status=0, npm_status=0):
+    module = _toolchains()
+    return module.node_verdict(
+        module.Fetched(pin) if pin is not None else module.Fetched(error=".node-version: missing"),
+        _answer(node, node_status),
+        _answer(npm, npm_status),
+        index if index is not None else module.Fetched(NODE_INDEX),
+    )
+
+
+def test_the_node_check_passes_the_newest_release_of_the_major() -> None:
+    passed, lines = _node()
+    assert passed, lines
+
+
+@pytest.mark.parametrize(
+    "local,npm", [("v22.23.2\n", "10.9.8\n"), ("v24.20.0\n", "11.18.0\n")]
+)
+def test_the_node_check_refuses_another_major_or_an_older_patch(local: str, npm: str) -> None:
+    passed, lines = _node(node=local, npm=npm)
+    assert not passed
+    assert f"Local version: {local.strip()}" in lines
+    assert "Expected version: v24.21.0" in lines
+    assert "Fix: install Node.js v24.21.0 from https://nodejs.org/dist/v24.21.0/node-v24.21.0-x64.msi" in lines
+    assert "Fix: npm install --global npm@11.19.0" in lines
+
+
+def test_the_node_check_refuses_an_npm_the_release_does_not_bundle() -> None:
+    passed, lines = _node(npm="11.20.0\n")
+    assert not passed
+    assert lines == [
+        "FAIL: local npm is 11.20.0; Node.js v24.21.0 bundles npm 11.19.0, which CI runs.",
+        "Local version: 11.20.0",
+        "Expected version: 11.19.0",
+        "Fix: npm install --global npm@11.19.0",
+    ]
+
+
+@pytest.mark.parametrize(
+    "case", ["no pin", "not a major", "no index", "no release", "no node", "no npm"]
+)
+def test_the_node_check_fails_closed(case: str) -> None:
+    module = _toolchains()
+    kwargs, cause = {
+        "no pin": ({"pin": None}, ".node-version: missing"),
+        "not a major": ({"pin": "24.21"}, "not a major version"),
+        "no index": (
+            {"index": module.Fetched(error="nodejs.org: timed out")}, "nodejs.org: timed out"
+        ),
+        "no release": ({"pin": "99"}, "lists no v99 release"),
+        "no node": ({"node_status": 1}, "node --version did not answer"),
+        "no npm": ({"npm_status": 1}, "npm --version did not answer"),
+    }[case]
+    passed, lines = _node(**kwargs)
+    assert not passed, case
+    assert cause in "\n".join(lines[:-3]), lines
+    assert lines[-3].startswith("Local version: ") and lines[-1].startswith("Fix: ")
+
+
+def test_each_check_asks_the_sources_ci_reads(monkeypatch) -> None:
+    module = _toolchains()
+    ran, fetched = [], []
+
+    def run(*args, cwd=module.ROOT):
+        ran.append((args, cwd))
+        return module.Answer(1, "")
+
+    monkeypatch.setattr(module, "run", run)
+    monkeypatch.setattr(module, "fetch_json", lambda url: fetched.append(url) or module.Fetched())
+    for name in TOOLCHAINS:
+        assert module.main([name]) == 1
+    assert (("rustup", "show", "active-toolchain"), module.CRATE) in ran
+    assert (("rustc", "-vV"), module.CRATE) in ran
+    assert (("rustup", "check", "--no-self-update"), module.CRATE) in ran
+    assert (("node", "--version"), module.ROOT) in ran
+    assert (("npm", "--version"), module.ROOT) in ran
+    venv = [args for args, _cwd in ran if args[0].endswith(("python.exe", "python"))]
+    assert venv and Path(venv[0][0]).parent.parent == module.ROOT / ".venv"
+    assert fetched == [
+        "https://www.python.org/api/v2/downloads/release/?is_published=true",
+        "https://nodejs.org/dist/index.json",
+    ]
+    assert module.PYTHON_PIN == ROOT / ".python-version"
+    assert module.NODE_PIN == ROOT / ".node-version"
+    assert module.main([]) == 2
+    monkeypatch.setitem(module.CHECKS, "rust", lambda: (True, ["OK: stub"]))
+    assert module.main(["rust"]) == 0
+
+
+def test_a_check_never_installs_a_toolchain_or_colours_its_output(monkeypatch) -> None:
+    module = _toolchains()
+    seen = {}
+
+    def fake(args, **kwargs):
+        seen.update(kwargs["env"])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(module.subprocess, "run", fake)
+    module.run("rustup", "show", "active-toolchain")
+    assert seen["RUSTUP_AUTO_INSTALL"] == "0"
+    assert seen["RUSTUP_TERM_COLOR"] == "never"
 
 
 @pytest.mark.parametrize(

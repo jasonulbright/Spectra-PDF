@@ -31,6 +31,17 @@ gate() {
   return 0
 }
 
+# --- Every CI job: the toolchains, before any gate that uses one. A gate below
+#     is evidence about CI only when it ran on what CI installs: the newest
+#     stable Rust with no override, the .python-version pin (which must be
+#     python.org's newest release of its minor, and which the shipped runtime
+#     also reads) in .venv, and the newest release of the .node-version major
+#     with the npm it bundles. Each log names the local version, the expected
+#     one and the fix; an unreadable version source fails. ---
+gate rust-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py rust
+gate python-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py python
+gate node-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py node
+
 # --- CI job: Dependency Audit (the #1 self-inflicted CI failure bucket) ---
 gate npm-audit npm audit --production --audit-level=high
 gate cargo-audit sh -c 'cd src-tauri && cargo audit'
@@ -137,12 +148,13 @@ gate corpus-pin "$R/.venv/Scripts/python.exe" -m pytest \
 #     on CI. Cheap enough to belong here. ---
 gate cargo-test sh -c 'cd src-tauri && cargo test'
 
-# --- CI/Release gate: the live CLI tests. The CLI leaves no bytecode in the
-#     engine payload, and run-action asks for Ghostscript only when a step
-#     needs it. `cargo test` above lets these tests skip when no runtime sits
-#     beside the exe; this machine has the vendored runtime, so the skip is
-#     refused here the way the provisioned CI and release runs refuse it. ---
-gate live-cli sh -c 'cd src-tauri && SPECTRAPDF_REQUIRE_LIVE_CLI=1 cargo test --test cli_bytecode --test cli_run_action'
+# --- CI/Release gate: the live runtime tests. The CLI leaves no bytecode in
+#     the engine payload, every optional Ghostscript leg takes the configured
+#     path or none, and a health worker past its deadline dies and respawns.
+#     `cargo test` above lets these tests skip when no runtime sits beside the
+#     exe; this machine has the vendored runtime, so the skip is refused here
+#     the way the provisioned CI and release runs refuse it. ---
+gate live-cli sh -c 'cd src-tauri && SPECTRAPDF_REQUIRE_LIVE_CLI=1 cargo test --test cli_bytecode --test cli_run_action --test health_worker'
 
 # --- Release gate: latest.json is parsed by the updater plugin's own
 #     deserializer (scripts/verify-release-draft.ps1 runs this against the

@@ -397,7 +397,7 @@ Ghostscript **10.0 or newer** is a separately installed requirement for these fe
 
 | Requirement | Version |
 |-------------|---------|
-| Node.js | 22 LTS (or 20.19+) |
+| Node.js | The newest release of the major version in `.node-version` |
 | Rust | Stable toolchain |
 | Ghostscript | 10.0+; optional except for the end-user features listed above. Not vendored or shipped; install it separately to use those features and to run the capability-present half of the test suite |
 
