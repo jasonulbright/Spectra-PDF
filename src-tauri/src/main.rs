@@ -96,11 +96,14 @@ fn attach_parent_console() {
         // with CONOUT$ makes `spectrapdf check ... > report.json` lose output.
         let stdout = GetStdHandle(STD_OUTPUT_HANDLE);
         let stderr = GetStdHandle(STD_ERROR_HANDLE);
-        if [stdout, stderr].into_iter().any(|handle| {
+        let is_redirected = |handle| {
             handle != 0
                 && handle != INVALID_HANDLE_VALUE
                 && matches!(GetFileType(handle), FILE_TYPE_DISK | FILE_TYPE_PIPE)
-        }) {
+        };
+        let stdout_redirected = is_redirected(stdout);
+        let stderr_redirected = is_redirected(stderr);
+        if stdout_redirected && stderr_redirected {
             return;
         }
         if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
@@ -123,8 +126,16 @@ fn attach_parent_console() {
             ptr::null(),
         );
 
-        if handle != INVALID_HANDLE_VALUE {
+        // AttachConsole may replace standard handles. Restore each caller's
+        // redirect independently even if opening the console device fails.
+        if stdout_redirected {
+            SetStdHandle(STD_OUTPUT_HANDLE, stdout);
+        } else if handle != INVALID_HANDLE_VALUE {
             SetStdHandle(STD_OUTPUT_HANDLE, handle);
+        }
+        if stderr_redirected {
+            SetStdHandle(STD_ERROR_HANDLE, stderr);
+        } else if handle != INVALID_HANDLE_VALUE {
             SetStdHandle(STD_ERROR_HANDLE, handle);
         }
     }
