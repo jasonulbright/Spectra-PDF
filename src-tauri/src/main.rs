@@ -78,6 +78,7 @@ fn attach_parent_console() {
         fn SetStdHandle(n_std_handle: u32, h_handle: isize) -> i32;
         fn GetStdHandle(n_std_handle: u32) -> isize;
         fn GetFileType(h_file: isize) -> u32;
+        fn GetConsoleMode(h_console_handle: isize, lp_mode: *mut u32) -> i32;
     }
 
     const ATTACH_PARENT_PROCESS: u32 = 0xFFFFFFFF;
@@ -88,6 +89,7 @@ fn attach_parent_console() {
     const STD_ERROR_HANDLE: u32 = 0xFFFFFFF4u32; // -12 as u32
     const INVALID_HANDLE_VALUE: isize = -1;
     const FILE_TYPE_DISK: u32 = 1;
+    const FILE_TYPE_CHAR: u32 = 2;
     const FILE_TYPE_PIPE: u32 = 3;
 
     unsafe {
@@ -97,9 +99,19 @@ fn attach_parent_console() {
         let stdout = GetStdHandle(STD_OUTPUT_HANDLE);
         let stderr = GetStdHandle(STD_ERROR_HANDLE);
         let is_redirected = |handle| {
-            handle != 0
-                && handle != INVALID_HANDLE_VALUE
-                && matches!(GetFileType(handle), FILE_TYPE_DISK | FILE_TYPE_PIPE)
+            if handle == 0 || handle == INVALID_HANDLE_VALUE {
+                return false;
+            }
+            match GetFileType(handle) {
+                FILE_TYPE_DISK | FILE_TYPE_PIPE => true,
+                FILE_TYPE_CHAR => {
+                    // NUL is a character device too. Only an actual console
+                    // should be replaced by CONOUT$ after attaching.
+                    let mut mode = 0;
+                    GetConsoleMode(handle, &mut mode) == 0
+                }
+                _ => false,
+            }
         };
         let stdout_redirected = is_redirected(stdout);
         let stderr_redirected = is_redirected(stderr);
