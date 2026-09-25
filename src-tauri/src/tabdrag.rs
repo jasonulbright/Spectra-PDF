@@ -37,8 +37,15 @@ pub struct StripRect {
 
 impl StripRect {
     /// Half-open on the far edges, so two strips that abut share no point.
+    /// Widened so a box whose far edge passes `i32::MAX` neither panics nor
+    /// wraps into a box on the other side of the desktop.
     fn contains(&self, x: i32, y: i32) -> bool {
-        x >= self.x && x < self.x + self.width && y >= self.y && y < self.y + self.height
+        let (x, y) = (i64::from(x), i64::from(y));
+        let (left, top) = (i64::from(self.x), i64::from(self.y));
+        x >= left
+            && x < left + i64::from(self.width)
+            && y >= top
+            && y < top + i64::from(self.height)
     }
 }
 
@@ -53,8 +60,8 @@ struct StripEntry {
 impl StripEntry {
     fn screen(&self) -> StripRect {
         StripRect {
-            x: self.origin.0 + self.local.x,
-            y: self.origin.1 + self.local.y,
+            x: self.origin.0.saturating_add(self.local.x),
+            y: self.origin.1.saturating_add(self.local.y),
             width: self.local.width,
             height: self.local.height,
         }
@@ -1078,6 +1085,15 @@ pub async fn tabdrag_release(
 mod tests {
     use super::*;
     use crate::app_windows::ClaimMode;
+
+    #[test]
+    fn a_strip_at_the_coordinate_limit_neither_panics_nor_wraps() {
+        let edge = StripRect { x: i32::MAX - 1, y: i32::MAX - 1, width: 100, height: 100 };
+        assert!(edge.contains(i32::MAX, i32::MAX));
+        assert!(!edge.contains(i32::MIN, i32::MIN));
+        let entry = StripEntry { local: edge, origin: (10, 10) };
+        assert_eq!(entry.screen().x, i32::MAX);
+    }
 
     fn strip(label: &str, x: i32, y: i32, width: i32, height: i32) -> (String, StripRect) {
         (

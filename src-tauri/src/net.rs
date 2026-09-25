@@ -654,10 +654,16 @@ async fn fetch_into(
     // encodes it into the query here, because GetMethod puts the field data on
     // the URL — a POST body attached to a GET would leave the server with none.
     let mut current = start;
+    // A payload is only ever a file `net_payload_path` minted: the consent
+    // dialog shows that file's bytes, so a body read from anywhere else would
+    // transmit a local file the user never saw.
     let body = match request.body_path.as_deref() {
-        Some(path) => Some(
-            std::fs::read(path).map_err(|e| format!("Cannot read the payload to send: {e}"))?,
-        ),
+        Some(path) => {
+            if !crate::scratch::is_net_file_in(Path::new(path), scratch) {
+                return Err("The payload to send is not a prepared submission file. Nothing was sent.".to_string());
+            }
+            Some(std::fs::read(path).map_err(|e| format!("Cannot read the payload to send: {e}"))?)
+        }
         None => None,
     };
     if !post {
@@ -1478,10 +1484,12 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
         let theirs = elsewhere.path().join(refused.file_name().unwrap());
         std::fs::write(&theirs, b"%FDF-1.2 a file of the user's").unwrap();
-        transmit(&post(server.url("/submit"), &theirs), true, scratch.path())
+        let error = transmit(&post(server.url("/submit"), &theirs), true, scratch.path())
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(error.contains("Nothing was sent"), "{error}");
         assert!(theirs.exists());
+        assert_eq!(server.requests().len(), 1, "a file outside the scratch folder was transmitted");
     }
 
     /// The command itself: a payload the renderer built in the scratch folder
@@ -1527,9 +1535,7 @@ mod tests {
     #[tokio::test]
     async fn a_post_sends_the_payload_and_keeps_the_response() {
         let server = TestServer::start(vec![body_reply("application/vnd.fdf", "%FDF-1.2 ok")]);
-        let dir = std::env::temp_dir().join("spectrapdf-net-test");
-        std::fs::create_dir_all(&dir).unwrap();
-        let payload = dir.join("payload.fdf");
+        let payload = response_path(&crate::scratch::net_dir(), "probe-payload", "fdf").unwrap();
         std::fs::write(&payload, b"%FDF-1.2 sent").unwrap();
 
         let response = fetch_with_policy(
@@ -1585,9 +1591,7 @@ mod tests {
         // The built HTML payload is already `key=val&key=val`; it lands in the
         // query and no body is sent.
         let server = TestServer::start(vec![body_reply("text/plain", "ok")]);
-        let dir = std::env::temp_dir().join("spectrapdf-net-test-get");
-        std::fs::create_dir_all(&dir).unwrap();
-        let payload = dir.join("payload.txt");
+        let payload = response_path(&crate::scratch::net_dir(), "probe-payload", "txt").unwrap();
         std::fs::write(&payload, b"name=Ada&city=London").unwrap();
 
         let response = fetch_with_policy(
@@ -1619,9 +1623,7 @@ mod tests {
     async fn a_get_submit_of_a_non_urlencoded_format_refuses_by_name() {
         // FDF/XFDF/PDF have no GET query encoding: sending an empty GET while
         // reporting success is the defect, so this refuses instead of sending.
-        let dir = std::env::temp_dir().join("spectrapdf-net-test-getfdf");
-        std::fs::create_dir_all(&dir).unwrap();
-        let payload = dir.join("payload.fdf");
+        let payload = response_path(&crate::scratch::net_dir(), "probe-payload", "fdf").unwrap();
         std::fs::write(&payload, b"%FDF-1.2 data").unwrap();
         let error = fetch_with_policy(
             &NetRequest {
