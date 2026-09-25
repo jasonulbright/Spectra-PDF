@@ -6,7 +6,7 @@ import type { ExportAnnotation, ExportDocument, ExportPage, PdfxManifest } from 
 import { carryAcroForm, prepareSourceForms, sourceHasXfa } from './acroform-carry';
 import type { FormContribution } from './acroform-carry';
 import { carryEmbeddedFiles } from './embedded-files-carry';
-import { carryDocumentCatalog, jumpsToRemovedPage, namedDestinationResolver } from './catalog-carry';
+import { actionSettler, carryDocumentCatalog, namedDestinationResolver, settleActionEntry } from './catalog-carry';
 import { carryOptionalContent } from './optional-content-carry';
 import { carryDocumentMetadata } from './metadata-carry';
 import { copyOutputIntents } from './output-intents-carry';
@@ -1371,15 +1371,16 @@ function dropJumpsToRemovedPages(doc: PDFDocument, keptIndices: number[]): void 
     };
     walk(raw, 0);
   };
+  const settle = actionSettler(doc.context, removed);
   const dropTriggers = (owner: PDFDict) => {
     const triggers = doc.context.lookup(owner.get(PDFName.of('AA')));
     if (!(triggers instanceof PDFDict)) return;
-    for (const [key, action] of triggers.entries()) {
-      if (jumpsToRemovedPage(doc.context, action, removed)) triggers.delete(key);
-    }
+    for (const [key] of triggers.entries()) settleActionEntry(triggers, key, settle);
   };
   for (const index of new Set(keptIndices)) {
     if (!pages[index]) continue;
+    const pageTriggers = doc.context.lookup(pages[index].node.get(PDFName.of('AA')));
+    if (pageTriggers instanceof PDFDict) for (const [, action] of pageTriggers.entries()) resolveActions(action);
     dropTriggers(pages[index].node);
     const annots = doc.context.lookup(pages[index].node.get(PDFName.of('Annots')));
     if (!(annots instanceof PDFArray)) continue;
@@ -1393,7 +1394,7 @@ function dropJumpsToRemovedPages(doc: PDFDocument, keptIndices: number[]): void 
       if (triggers instanceof PDFDict) for (const [, action] of triggers.entries()) resolveActions(action);
       const dest = annot.get(PDFName.of('Dest'));
       if (annot.lookup(PDFName.of('Subtype')) === PDFName.of('Link') && dest !== undefined && removed(dest)) annot.delete(PDFName.of('Dest'));
-      if (jumpsToRemovedPage(doc.context, annot.get(PDFName.of('A')), removed)) annot.delete(PDFName.of('A'));
+      settleActionEntry(annot, PDFName.of('A'), settle);
       dropTriggers(annot);
       if (onRemovedPage(annot.get(PDFName.of('Popup')))) annot.delete(PDFName.of('Popup'));
       if (onRemovedPage(annot.get(PDFName.of('IRT')))) { annot.delete(PDFName.of('IRT')); annot.delete(PDFName.of('RT')); }

@@ -360,15 +360,17 @@ function carryOutlines(output: PDFDocument, source: CarriedSourcePages, copier: 
         if (!hasValue(name)) continue;
         if (name === 'Dest') {
           // An item whose jump target was removed keeps its title, children
-          // and styling and loses only the jump: the /Dest here, the whole /A
-          // below — a chain is dropped entire, never pruned action by action.
+          // and styling and loses only the jump: the /Dest here, and in /A
+          // only the dangling GoTo actions (actionSettler).
           // A destination that cannot be resolved at all still refuses.
           if (!copier.removedDestination(value)) dict.set(key, copier.copyDestination(value));
           continue;
         }
         if (name === 'A') {
           if (!(ctx.lookup(value) instanceof PDFDict)) throw fail();
-          if (copier.jumpsToRemovedPage(value)) continue;
+          const settled = copier.settle(value);
+          if (settled !== undefined) dict.set(key, copier.copy(settled));
+          continue;
         }
         if (name === 'SE') {
           dict.set(key, copier.structure(value));
@@ -535,6 +537,58 @@ function carryThreads(output: PDFDocument, source: CarriedSourcePages, objectMap
 
 // ── document actions and scripts ──────────────────────────────────────────
 
+/** A jump to a removed page loses that jump and nothing else. Only a GoTo
+ * whose OWN destination `removed` accepts leaves its chain; when the head
+ * GoTo dangles, its surviving /Next actions take its place in execution
+ * order (ISO 32000-2 12.6.2/Table 196). Every other action kind is kept.
+ * Returns the settled head, or undefined when nothing survives. Chains are
+ * rewritten in place in the source graph, once per action: a shared action
+ * settled twice would append its predecessor's remainder twice. */
+export function actionSettler(context: PDFContext, removed: (destination: PDFObject) => boolean) {
+  const settled = new Map<PDFDict, PDFObject | undefined>(), active = new Set<PDFDict>();
+  let steps = 0;
+  const settle = (raw: PDFObject | undefined, depth = 0): PDFObject | undefined => {
+    if (++steps > 100000 || depth > 128) throw new Error(tChrome('app.operation.unverified'));
+    const action = context.lookup(raw);
+    if (raw === undefined || !(action instanceof PDFDict)) return raw;
+    if (settled.has(action)) return settled.get(action) === action ? raw : settled.get(action);
+    if (active.has(action)) return raw;
+    active.add(action);
+    const nextRaw = action.get(N('Next')), next = context.lookup(nextRaw);
+    const chain = next instanceof PDFArray ? next.asArray() : nextRaw !== undefined ? [nextRaw] : [];
+    const results = chain.map(item => settle(item, depth + 1));
+    const survivors = results.filter((item): item is PDFObject => item !== undefined);
+    const goTo = action.get(N('D'));
+    let result: PDFObject | undefined = raw;
+    if (action.lookup(N('S')) === N('GoTo') && goTo !== undefined && removed(goTo)) {
+      result = survivors[0];
+      const head = context.lookup(result);
+      if (head instanceof PDFDict && survivors.length > 1) {
+        const ownRaw = head.get(N('Next')), own = context.lookup(ownRaw);
+        const ownList = own instanceof PDFArray ? own.asArray() : ownRaw !== undefined ? [ownRaw] : [];
+        head.set(N('Next'), context.obj([...ownList, ...survivors.slice(1)]));
+      }
+    } else if (results.some((item, i) => item !== chain[i])) {
+      if (survivors.length === 0) action.delete(N('Next'));
+      else if (survivors.length === 1 && !(next instanceof PDFArray)) action.set(N('Next'), survivors[0]);
+      else action.set(N('Next'), context.obj(survivors));
+    }
+    active.delete(action);
+    settled.set(action, result === raw ? action : result);
+    return result;
+  };
+  return settle;
+}
+
+/** Settle the action stored at `owner[key]`: remove it when nothing survives. */
+export function settleActionEntry(owner: PDFDict, key: PDFName, settle: (raw: PDFObject | undefined) => PDFObject | undefined): void {
+  const value = owner.get(key);
+  if (value === undefined) return;
+  const result = settle(value);
+  if (result === undefined) owner.delete(key);
+  else if (result !== value) owner.set(key, result);
+}
+
 /** Whether an action chain holds a GoTo whose destination `removed` accepts.
  * /Next is a single action or an ordered array (ISO 32000-2 12.6.2/Table 196)
  * and may legally rejoin itself, so the walk is bounded and cycle-safe. Each
@@ -577,11 +631,12 @@ interface CatalogObjectCopy {
   jumpsToRemovedPage(raw: PDFObject | undefined): boolean;
   /** Retain every name-tree and legacy /Dests entry whose target page is kept. */
   carryNamedDestinations(): void;
+  /** actionSettler bound to this source and its removed pages. */
+  settle(raw: PDFObject | undefined): PDFObject | undefined;
 }
 
 function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, objectMap: ObjectMap,
   structureMap: ObjectMap = new Map(), layerMap: Map<string, PDFRef[]> = new Map()): CatalogObjectCopy {
-  const names = source.doc.catalog.lookupMaybe(N('Names'), PDFDict);
   const fail = () => new Error(tChrome('app.operation.unverified'));
   const structure = (raw: PDFObject | undefined): PDFRef => {
     if (!(raw instanceof PDFRef)) throw fail();
@@ -768,7 +823,8 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
   };
   const kept = new Set(source.pairs.map(pair => source.doc.getPage(pair.srcIndex).ref.tag));
   const removedDestination = (raw: PDFObject | undefined): boolean => !kept.has((destination(raw).get(0) as PDFRef).tag);
-  return { copy, destination, copyDestination, structure, removedDestination, carryNamedDestinations,
+  const settle = actionSettler(source.doc.context, removedDestination);
+  return { copy, destination, copyDestination, structure, removedDestination, carryNamedDestinations, settle,
     jumpsToRemovedPage: raw => jumpsToRemovedPage(source.doc.context, raw, removedDestination), bind: (sourceRef, outputRef) => {
     const previous = refs.get(sourceRef.tag);
     if (previous && previous !== outputRef) throw fail();
@@ -783,8 +839,31 @@ export function carryDocumentBehavior(output: PDFDocument, source: CarriedSource
   if (tree === undefined && aa === undefined && open === undefined) return;
   if (aa !== undefined && !(source.doc.context.lookup(aa) instanceof PDFDict)) throw new Error(tChrome('app.operation.unverified'));
   const { copy, copyDestination } = copier, ctx = source.doc.context, fail = () => new Error(tChrome('app.operation.unverified'));
-  // A trigger, script entry or opening view whose chain jumps to a removed
-  // page is omitted whole; everything else carries through the one copier.
+  // Dangling GoTo actions leave their chains first (actionSettler); a trigger,
+  // script entry or opening action is omitted only when nothing survives.
+  const settleTree = (raw: PDFObject | undefined, depth: number, seen: Set<PDFDict>) => {
+    if (depth > 64) throw fail();
+    const node = ctx.lookup(raw);
+    if (!(node instanceof PDFDict) || seen.has(node)) return;
+    seen.add(node);
+    const entries = node.lookup(N('Names'));
+    if (entries instanceof PDFArray) for (let i = 0; i + 1 < entries.size(); i += 2) {
+      const value = entries.get(i + 1), result = copier.settle(value);
+      if (result !== undefined && result !== value) entries.set(i + 1, result);
+    }
+    const kids = node.lookup(N('Kids'));
+    if (kids instanceof PDFArray) for (const kid of kids.asArray()) settleTree(kid, depth + 1, seen);
+  };
+  if (tree !== undefined) settleTree(tree, 0, new Set());
+  if (aa !== undefined) {
+    const triggers = ctx.lookup(aa, PDFDict);
+    for (const [key, value] of triggers.entries()) {
+      const result = copier.settle(value);
+      if (result !== undefined && result !== value) triggers.set(key, result);
+    }
+  }
+  let opening = open;
+  if (open !== undefined && ctx.lookup(open) instanceof PDFDict) opening = copier.settle(open) ?? open;
   if (tree !== undefined) {
     let visits = 0;
     const seen = new Set<PDFDict>();
@@ -857,11 +936,11 @@ export function carryDocumentBehavior(output: PDFDocument, source: CarriedSource
       for (const [key, value] of kept) result.set(key, copy(value));
     }
   }
-  if (open !== undefined) {
-    const value = ctx.lookup(open);
+  if (opening !== undefined) {
+    const value = ctx.lookup(opening);
     if (value instanceof PDFDict) {
-      if (!copier.jumpsToRemovedPage(open)) output.catalog.set(N('OpenAction'), copy(open));
-    } else if (!copier.removedDestination(open)) output.catalog.set(N('OpenAction'), copyDestination(open));
+      if (!copier.jumpsToRemovedPage(opening)) output.catalog.set(N('OpenAction'), copy(opening));
+    } else if (!copier.removedDestination(opening)) output.catalog.set(N('OpenAction'), copyDestination(opening));
   }
 }
 

@@ -63,14 +63,16 @@ describe('outline payload preservation', () => {
     expect(out.lookup(N('F'), PDFNumber).asNumber()).toBe(3); expect(numbers(out.lookup(N('C'), PDFArray))).toEqual([1, 0.25, 0]);
     expect(out.lookup(N('Private'), PDFString).decodeText()).toBe('preserved');
   });
-  it('keeps a bookmark whose GoTo action page was removed, dropping the chain entire', async () => {
+  it('keeps a bookmark whose GoTo action page was removed, promoting the surviving chained action', async () => {
     const { doc, item } = await fixture();
     const action = doc.context.obj({ S: 'GoTo', D: [doc.getPage(1).ref, 'Fit'] });
     action.set(N('Next'), doc.context.obj({ S: 'URI', URI: PDFString.of('https://example.invalid/two') }));
     item.set(N('A'), action); item.set(N('F'), PDFNumber.of(2));
     const out = first(await rebuild(doc, [0, 2]));
     expect(out.lookup(N('Title'), PDFHexString).toString()).toBe(item.lookup(N('Title'), PDFHexString).toString());
-    expect(out.get(N('A'))).toBeUndefined(); expect(out.get(N('Dest'))).toBeUndefined();
+    const survivor = out.lookup(N('A'), PDFDict);
+    expect(survivor.lookup(N('S'))).toBe(N('URI')); expect(survivor.get(N('Next'))).toBeUndefined();
+    expect(out.get(N('Dest'))).toBeUndefined();
     expect(out.lookup(N('F'), PDFNumber).asNumber()).toBe(2);
   });
   it('keeps document-owned external bookmarks with only donor pages', async () => {
