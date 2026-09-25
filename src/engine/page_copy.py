@@ -10,9 +10,7 @@ from collections import Counter
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name
-# Reuse the pinned library's destination migration rather than implement a
-# second name-tree/collision policy. Tests cover this private API boundary.
-from pikepdf._page_copy import _migrate_named_destinations
+from engine.catalog_carry import carry_catalog
 from engine.optional_content import OptionalContentCarry, read_optional_content
 from engine.output_intents import (
     PAGE_LEVEL_VERSION, OutputIntentCarry, read_output_intents,
@@ -205,7 +203,7 @@ def copy_pages_with_forms(dst, src, pages=None):
     refresh_sig_flags(dst)
     carry_doc_form_extras(dst, src, renamed)
     dst.acroform.invalidate_cache()
-    added, dest_renames, dropped = _migrate_named_destinations(dst, src, src_pages, start)
+    added, dest_renames, dropped = carry_catalog(dst, src, src_pages, start)
     content.add(dst, optional_source)
     if optional_source is not None:
         versions.require(optional_source.minimum_version)
