@@ -113,6 +113,7 @@ import type { FormFieldValue } from './lib/forms';
 import { fillFormValues } from './lib/form-fill-transaction';
 import { createFormFields } from './lib/form-create-transaction';
 import { executeWorkspaceOperation } from './lib/operation-transaction';
+import { assertOperationGateResult, captureFileOperationIntent } from './lib/operation-intent';
 import { trackInteractive } from './lib/engine-idle-lane';
 import type { NewFieldSpec } from './lib/form-authoring';
 import { DropZone } from './components/DropZone';
@@ -1522,6 +1523,15 @@ function AppContent(): React.ReactElement {
     }, options));
   }, [readState, callRaw, dispatch, confirmEditOfSignedDoc, trackOperation]);
 
+  // Captured synchronously by the gesture, before any font, picker or confirm
+  // await: a write dispatched by path alone lands in whichever session holds
+  // that path when the await returns, including a reopened one.
+  const gestureIntent = useCallback((path: string) => {
+    const now = readState(), source = now.files.get(path);
+    if (!source) throw new Error(tChrome('refusal.file.noLongerOpen'));
+    return captureFileOperationIntent(now, source);
+  }, [readState]);
+
   const redactionGeometry = useCallback(async (page: PageRef, accepted: AppState) => {
     const buffer = accepted.files.get(page.sourceDocId)?.buffer;
     if (!buffer) throw new Error(tChrome('refusal.file.noLongerOpen'));
@@ -1612,11 +1622,12 @@ function AppContent(): React.ReactElement {
           return;
         }
         case 'reset': {
+          const intent = gestureIntent(path);
           const params: Record<string, unknown> = {};
           if (action.fields) params.fields = action.fields;
           if (action.exclude) params.exclude = true;
           params.font_dir = await app.getEditFontPath();
-          await performOperation(path, 'reset_form_fields', params);
+          await performOperation(path, 'reset_form_fields', params, { intent });
           return;
         }
         case 'hide': {
@@ -1634,6 +1645,7 @@ function AppContent(): React.ReactElement {
           // The action names a file; this app asks the user instead, so a
           // document can never make it read a path nobody chose. The authored
           // name is shown so the user can find the right file.
+          const intent = gestureIntent(path);
           const proceed = await showProceedConfirm(
             tChrome('app.formButton.importTitle'),
             tChrome('app.formButton.import', {
@@ -1647,12 +1659,15 @@ function AppContent(): React.ReactElement {
           await performOperation(path, 'import_form_data', {
             data: chosen,
             font_dir: await app.getEditFontPath(),
-          });
+          }, { intent });
           return;
         }
         case 'submit': {
           const f = state.files.get(path);
           if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+          // The reply imports into the session that submitted, at whatever
+          // revision it has reached; never into a session reopened meanwhile.
+          const session = f.workingPath;
           // Read-only against the document: the payload is built with the gated
           // call beside it, never through performOperation, which would replace
           // the file with its own submission.
@@ -1680,7 +1695,7 @@ function AppContent(): React.ReactElement {
                 await performOperation(path, 'import_form_data', {
                   data,
                   font_dir: await app.getEditFontPath(),
-                });
+                }, { expectedWorkingPath: session });
               },
               openDocument: async (reply) => {
                 await openByPaths([reply]);
@@ -1733,6 +1748,7 @@ function AppContent(): React.ReactElement {
       state.files,
       call,
       performOperation,
+      gestureIntent,
       showNotice,
       showProceedConfirm,
       showSubmitConsent,
@@ -1811,8 +1827,7 @@ function AppContent(): React.ReactElement {
   // job it exists for.
   const handleSanitizeDocument = useCallback(
     async (path: string, request: SanitizeRequest): Promise<boolean> => {
-      const f = state.files.get(path);
-      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      const intent = gestureIntent(path);
       const signed = request.signatures.count + request.signatures.document_timestamps;
       if (signed > 0) {
         const certified = request.signatures.certification !== null;
@@ -1826,10 +1841,10 @@ function AppContent(): React.ReactElement {
         categories: request.categories,
         form_fields_mode: request.formFieldsMode,
         hidden_text_ocr: request.includeOcrLayer,
-      });
+      }, { intent });
       return true;
     },
-    [state.files, performOperation, showProceedConfirm],
+    [gestureIntent, performOperation, showProceedConfirm],
   );
 
   // The preparer's half of field locking: the seed an UNSIGNED signature field
@@ -1904,8 +1919,7 @@ function AppContent(): React.ReactElement {
       newText: string,
       opts?: { convert?: boolean },
     ): Promise<string | void> => {
-      const f = state.files.get(path);
-      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      const intent = gestureIntent(path);
       if (opts?.convert) {
         // Render the replacement in the bundled fallback
         // font FAMILY — getEditFontPath returns the fonts DIRECTORY and
@@ -1918,14 +1932,14 @@ function AppContent(): React.ReactElement {
           index,
           new_text: newText,
           font_path: fontPath,
-        });
+        }, { intent });
         if (converted === EDIT_DECLINED) return EDIT_DECLINED;
         return;
       }
-      const r = await performOperation(path, 'replace_text_run', { page, index, new_text: newText });
+      const r = await performOperation(path, 'replace_text_run', { page, index, new_text: newText }, { intent });
       if (r === EDIT_DECLINED) return EDIT_DECLINED;
     },
-    [state.files, performOperation],
+    [gestureIntent, performOperation],
   );
 
   // Run-scoped size/color restyle — same signed-doc gate, text unchanged.
@@ -1958,8 +1972,7 @@ function AppContent(): React.ReactElement {
       spans: { start: number; end: number; run: number }[],
       opts?: ParagraphEditOpts,
     ): Promise<string | void> => {
-      const f = state.files.get(path);
-      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      const intent = gestureIntent(path);
       // The fingerprint (member runs + logical text) makes the engine
       // re-derive its grouping and REFUSE if the page changed underneath —
       // a heuristic must never silently retarget.
@@ -2006,10 +2019,10 @@ function AppContent(): React.ReactElement {
       // the metric twin in that directory. Gating this on substitution would
       // kern some documents and silently not others.
       params.font_path = await app.getEditFontPath();
-      const r = await performOperation(path, 'replace_paragraph_text', params);
+      const r = await performOperation(path, 'replace_paragraph_text', params, { intent });
       if (r === EDIT_DECLINED) return EDIT_DECLINED;
     },
-    [state.files, performOperation],
+    [gestureIntent, performOperation],
   );
 
   // merge: one engine op, one undo step; both fingerprints ride so the
@@ -2031,8 +2044,7 @@ function AppContent(): React.ReactElement {
         restyle?: import('./lib/edit-paragraphs').MergeRestyle;
       },
     ): Promise<string | void> => {
-      const f = state.files.get(path);
-      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      const intent = gestureIntent(path);
       const r = await performOperation(path, 'merge_paragraph_with_previous', {
         page,
         // The engine addresses the SELECTED paragraph: for the shipped
@@ -2060,10 +2072,10 @@ function AppContent(): React.ReactElement {
         // A merge re-lays-out text too, so it needs the same kern
         // source an edit gets.
         font_path: await app.getEditFontPath(),
-      });
+      }, { intent });
       if (r === EDIT_DECLINED) return EDIT_DECLINED;
     },
-    [state.files, performOperation],
+    [gestureIntent, performOperation],
   );
 
   // Add Text: author a NEW text object at `rect` (PDF user-space points,
@@ -2108,8 +2120,7 @@ function AppContent(): React.ReactElement {
         writingMode?: 'horizontal' | 'vertical' | 'vertical-rl' | 'vertical-lr';
       },
     ): Promise<string | void> => {
-      const f = state.files.get(path);
-      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      const intent = gestureIntent(path);
       const params: Record<string, unknown> = {
         page,
         rect,
@@ -2129,10 +2140,10 @@ function AppContent(): React.ReactElement {
       if (opts?.writingMode !== undefined && opts.writingMode !== 'horizontal') {
         params.writing_mode = opts.writingMode;
       }
-      const r = await performOperation(path, 'add_text_box', params);
+      const r = await performOperation(path, 'add_text_box', params, { intent });
       if (r === EDIT_DECLINED) return EDIT_DECLINED;
     },
-    [state.files, performOperation],
+    [gestureIntent, performOperation],
   );
 
   // Delete, transform (move/resize/rotate), or restyle (recolour /
@@ -2262,16 +2273,25 @@ function AppContent(): React.ReactElement {
 
       if (kind === 'extract') {
         // The listing indexes must describe COMMITTED bytes (extract is not
-        // a trackable op, so gate explicitly — the PrintDialog rule).
+        // a trackable op, so gate explicitly — the PrintDialog rule). The
+        // page/index address the gesture's revision: only its own authored
+        // commit may replace it, and nothing may replace it during the picker.
+        const intent = gestureIntent(path);
         await runCommitGate();
+        const committed = readState().files.get(path);
+        if (!committed || readState().pageDirtyPaths.includes(path)) throw new Error(tChrome('app.history.changed'));
+        assertOperationGateResult(committed, intent);
         let prefix = opts?.outputPrefix ?? null;
         if (!prefix) {
           const dest = await dialog.saveImageFile('image');
           if (!dest) return;
           prefix = dest.replace(/\.(png|jpe?g|tiff?|bmp)$/i, '');
         }
+        if (readState().files.get(path) !== committed || readState().pageDirtyPaths.includes(path)) {
+          throw new Error(tChrome('app.history.changed'));
+        }
         const r = await call('extract_page_image', {
-          file: f.workingPath,
+          file: committed.workingPath,
           page,
           index,
           output_prefix: prefix,
@@ -2283,7 +2303,7 @@ function AppContent(): React.ReactElement {
         return out ? `Saved ${out.split(/[\\/]/).pop()}` : undefined;
       }
     },
-    [state.files, call, performOperation, performImageEdit],
+    [state.files, call, performOperation, performImageEdit, gestureIntent, readState],
   );
 
   // Multi-select: group transform/delete over N placements on one page —

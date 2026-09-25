@@ -127,6 +127,88 @@ function carryLang(output: PDFDocument, srcCatalog: PDFDict): void {
   }
 }
 
+// ISO 32000-2 7.7.2/Table 29: /PageLayout and /PageMode are catalog names;
+// Table 206: the /URI dictionary's only entry is the /Base string.
+function carryPresentation(output: PDFDocument, srcCatalog: PDFDict): void {
+  for (const key of [N('PageLayout'), N('PageMode')]) {
+    const value = srcCatalog.lookup(key);
+    if (value instanceof PDFName) output.catalog.set(key, value);
+  }
+  const base = srcCatalog.lookupMaybe(N('URI'), PDFDict)?.lookup(N('Base'));
+  if (base instanceof PDFString || base instanceof PDFHexString) {
+    output.catalog.set(N('URI'), output.context.obj({ Base: base.clone() }));
+  }
+}
+
+export type NamedDestinationKey = PDFName | PDFString | PDFHexString;
+
+/** Identity of a destination name: a legacy /Dests key is a name object and a
+ * name-tree key is a byte string (ISO 32000-2 12.3.2.4), so they never alias. */
+export function destinationNameKey(value: NamedDestinationKey): string {
+  return value instanceof PDFName ? `name:${value.decodeText()}`
+    : `string:${Array.from(value.asBytes(), b => b.toString(16).padStart(2, '0')).join('')}`;
+}
+
+const NAMED_DESTINATION_LIMIT = 100000;
+
+/** The one reader of a document's named destinations: the /Names /Dests tree
+ * (7.9.6: each node has exactly one of /Names or /Kids, keys are strings, no
+ * key repeats) plus the legacy catalog /Dests dictionary. The table is
+ * returned only when the whole structure validates within the node and entry
+ * limit; otherwise it throws the operation refusal and nothing is carried. */
+export function readNamedDestinations(doc: PDFDocument): Map<string, { key: NamedDestinationKey; value: PDFObject }> {
+  const fail = () => new Error(tChrome('app.operation.unverified'));
+  const table = new Map<string, { key: NamedDestinationKey; value: PDFObject }>();
+  const add = (key: NamedDestinationKey, value: PDFObject) => {
+    const tag = destinationNameKey(key);
+    if (table.has(tag)) throw fail();
+    table.set(tag, { key, value });
+  };
+  let count = 0;
+  const seen = new Set<PDFDict>();
+  const walk = (node: PDFObject, depth: number) => {
+    if (++count > NAMED_DESTINATION_LIMIT || depth > 64) throw fail();
+    const dict = doc.context.lookup(node);
+    if (!(dict instanceof PDFDict) || seen.has(dict)) throw fail();
+    seen.add(dict);
+    const entries = dict.lookupMaybe(N('Names'), PDFArray), kids = dict.lookupMaybe(N('Kids'), PDFArray);
+    if ((entries && kids) || (!entries && !kids)) throw fail();
+    if (entries) {
+      if (entries.size() % 2 !== 0) throw fail();
+      for (let i = 0; i < entries.size(); i += 2) {
+        if (++count > NAMED_DESTINATION_LIMIT) throw fail();
+        const key = entries.lookup(i);
+        if (!(key instanceof PDFString || key instanceof PDFHexString)) throw fail();
+        add(key, entries.get(i + 1));
+      }
+    }
+    if (kids) for (const child of kids.asArray()) walk(child, depth + 1);
+  };
+  const tree = doc.catalog.lookupMaybe(N('Names'), PDFDict)?.get(N('Dests'));
+  if (tree !== undefined) walk(tree, 0);
+  const legacy = doc.catalog.lookupMaybe(N('Dests'), PDFDict);
+  if (legacy) for (const [key, value] of legacy.entries()) {
+    if (++count > NAMED_DESTINATION_LIMIT) throw fail();
+    add(key, value);
+  }
+  return table;
+}
+
+/** Resolves a named destination to its explicit destination array through
+ * readNamedDestinations. An unknown name resolves to undefined (it navigates
+ * nowhere in the source either); an invalid table refuses. */
+export function namedDestinationResolver(doc: PDFDocument): (raw: PDFObject | undefined) => PDFArray | undefined {
+  let table: ReturnType<typeof readNamedDestinations> | undefined;
+  return raw => {
+    const name = doc.context.lookup(raw);
+    if (!(name instanceof PDFName || name instanceof PDFString || name instanceof PDFHexString)) return undefined;
+    table ??= readNamedDestinations(doc);
+    const hit = doc.context.lookup(table.get(destinationNameKey(name))?.value);
+    const dest = hit instanceof PDFDict ? hit.lookup(N('D')) : hit;
+    return dest instanceof PDFArray && dest.size() >= 2 && dest.get(0) instanceof PDFRef ? dest : undefined;
+  };
+}
+
 function carryViewerPreferences(output: PDFDocument, source: CarriedSourcePages): void {
   const raw = source.doc.catalog.get(N('ViewerPreferences'));
   if (raw === undefined || raw === PDFNull) return;
@@ -493,6 +575,8 @@ interface CatalogObjectCopy {
   /** The destination resolves to a source page absent from the output. */
   removedDestination(raw: PDFObject | undefined): boolean;
   jumpsToRemovedPage(raw: PDFObject | undefined): boolean;
+  /** Retain every name-tree and legacy /Dests entry whose target page is kept. */
+  carryNamedDestinations(): void;
 }
 
 function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, objectMap: ObjectMap,
@@ -511,9 +595,8 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
   };
   // Resolve named local destinations in their source namespace. Only the
   // resolved array travels: donor destinations cannot shadow the source name.
-  const nameKey = (value: PDFName | PDFString | PDFHexString) => value instanceof PDFName
-    ? `name:${value.decodeText()}` : `string:${Array.from(value.asBytes(), b => b.toString(16).padStart(2, '0')).join('')}`;
-  let named: Map<string, PDFObject> | undefined;
+  const nameKey = destinationNameKey;
+  let named: ReturnType<typeof readNamedDestinations> | undefined;
   const explicit = (value: PDFObject | undefined, isStructure = false): PDFArray => {
     if (!(value instanceof PDFArray) || value.size() < 2) throw fail();
     const target = value.get(0), mode = value.lookup(1);
@@ -532,33 +615,8 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
     return value;
   };
   const namedValue = (raw: PDFName | PDFString | PDFHexString): PDFObject => {
-    if (!named) {
-      named = new Map(); let count = 0;
-      const seen = new Set<PDFDict>();
-      const add = (key: string, child: PDFObject) => { if (named!.has(key)) throw fail(); named!.set(key, child); };
-      const walk = (node: PDFObject, depth = 0) => {
-        if (++count > 10000 || depth > 64) throw fail();
-        const dict = source.doc.context.lookup(node);
-        if (!(dict instanceof PDFDict) || seen.has(dict)) throw fail(); seen.add(dict);
-        const entries = dict.lookupMaybe(N('Names'), PDFArray), kids = dict.lookupMaybe(N('Kids'), PDFArray);
-        if ((entries && kids) || (!entries && !kids)) throw fail();
-        if (entries) {
-          if (entries.size() % 2 !== 0) throw fail();
-          for (let i = 0; i < entries.size(); i += 2) {
-            if (++count > 10000) throw fail(); const key = entries.lookup(i);
-            if (!(key instanceof PDFString || key instanceof PDFHexString)) throw fail();
-            add(nameKey(key), entries.get(i + 1));
-          }
-        }
-        if (kids) for (const child of kids.asArray()) walk(child, depth + 1);
-      };
-      const dests = names?.get(N('Dests')); if (dests !== undefined) walk(dests);
-      const legacy = source.doc.catalog.lookupMaybe(N('Dests'), PDFDict);
-      if (legacy) for (const [key, child] of legacy.entries()) {
-        if (++count > 10000) throw fail(); add(nameKey(key), child);
-      }
-    }
-    const hit = source.doc.context.lookup(named.get(nameKey(raw)));
+    named ??= readNamedDestinations(source.doc);
+    const hit = source.doc.context.lookup(named.get(nameKey(raw))?.value);
     if (!hit) throw fail();
     return hit;
   };
@@ -650,6 +708,25 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
   };
   const retainedNames = new Map<string, { key: PDFString | PDFHexString; value: PDFObject }>();
   const copiedNames = new Set<string>();
+  const retainName = (key: PDFName | PDFString | PDFHexString, value: PDFObject) => {
+    if (key instanceof PDFName) {
+      const dict = output.catalog.lookupMaybe(N('Dests'), PDFDict) ?? output.context.obj({});
+      dict.set(key, value); output.catalog.set(N('Dests'), dict);
+      return;
+    }
+    retainedNames.set(nameKey(key), { key, value });
+  };
+  // ISO 32000-2 7.9.6: name-tree keys in byte order; nameKey's hex form sorts
+  // identically. Written once, after every retained name is known.
+  const writeRetainedNames = () => {
+    if (retainedNames.size === 0) return;
+    const values = output.context.obj([]);
+    for (const [, entry] of [...retainedNames.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+      values.push(entry.key.clone()); values.push(entry.value);
+    }
+    const dict = output.catalog.lookupMaybe(N('Names'), PDFDict) ?? output.context.obj({});
+    dict.set(N('Dests'), output.context.obj({ Names: values })); output.catalog.set(N('Names'), dict);
+  };
   const copyDestination = (raw: PDFObject, depth = 0): PDFObject => {
     const dest = destination(raw), key = source.doc.context.lookup(raw);
     if (key instanceof PDFName || key instanceof PDFString || key instanceof PDFHexString) {
@@ -661,27 +738,37 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
         const tag = nameKey(key);
         if (!copiedNames.has(tag)) {
           copiedNames.add(tag);
-          const value = copy(hit, depth + 1);
-          if (key instanceof PDFName) {
-            const dict = output.catalog.lookupMaybe(N('Dests'), PDFDict) ?? output.context.obj({});
-            dict.set(key, value); output.catalog.set(N('Dests'), dict);
-          } else {
-            retainedNames.set(tag, { key, value });
-            const entries = [...retainedNames.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
-            const values = output.context.obj([]);
-            for (const [, entry] of entries) { values.push(entry.key.clone()); values.push(entry.value); }
-            const dict = output.catalog.lookupMaybe(N('Names'), PDFDict) ?? output.context.obj({});
-            dict.set(N('Dests'), output.context.obj({ Names: values })); output.catalog.set(N('Names'), dict);
-          }
+          retainName(key, copy(hit, depth + 1));
         }
         return key.clone();
       }
     }
     return copy(dest, depth + 1);
   };
+  // Every named destination whose target page is kept stays addressable by
+  // name: external file#name links and GoToR actions resolve through it. An
+  // invalid table refuses (readNamedDestinations). Within a valid table, an
+  // entry targeting a removed page, or whose own destination is malformed and
+  // so navigates nowhere in the source, is not carried.
+  const carryNamedDestinations = () => {
+    named ??= readNamedDestinations(source.doc);
+    for (const [tag, { key }] of named) {
+      if (copiedNames.has(tag)) continue;
+      let hit: PDFObject;
+      try {
+        const dest = destination(key);
+        if (!kept.has((dest.get(0) as PDFRef).tag)) continue;
+        hit = namedValue(key);
+        if (hit instanceof PDFDict && hit.has(N('SD'))) explicit(hit.lookup(N('SD')), true);
+      } catch { continue; }
+      copiedNames.add(tag);
+      retainName(key, copy(hit));
+    }
+    writeRetainedNames();
+  };
   const kept = new Set(source.pairs.map(pair => source.doc.getPage(pair.srcIndex).ref.tag));
   const removedDestination = (raw: PDFObject | undefined): boolean => !kept.has((destination(raw).get(0) as PDFRef).tag);
-  return { copy, destination, copyDestination, structure, removedDestination,
+  return { copy, destination, copyDestination, structure, removedDestination, carryNamedDestinations,
     jumpsToRemovedPage: raw => jumpsToRemovedPage(source.doc.context, raw, removedDestination), bind: (sourceRef, outputRef) => {
     const previous = refs.get(sourceRef.tag);
     if (previous && previous !== outputRef) throw fail();
@@ -789,9 +876,11 @@ export function carryDocumentCatalog(output: PDFDocument, source: CarriedSourceP
   const objectMap = buildInPageObjectMap(source, output);
   const copier = catalogObjectCopier(output, source, objectMap, structureMap, layerMap);
   carryLang(output, srcCatalog);
+  carryPresentation(output, srcCatalog);
   carryViewerPreferences(output, source);
   carryOutlines(output, source, copier);
   carryPageLabels(output, source);
   carryThreads(output, source, objectMap);
   carryDocumentBehavior(output, source, objectMap, copier);
+  copier.carryNamedDestinations();
 }

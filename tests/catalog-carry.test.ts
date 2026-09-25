@@ -655,3 +655,96 @@ describe('catalog carry — outline jumps written as GoTo actions', () => {
     expect(src).toEqual(before);
   });
 });
+
+describe('catalog carry — presentation entries and named destinations', () => {
+  async function namedSource(): Promise<Uint8Array> {
+    const doc = await PDFDocument.create({ updateMetadata: false });
+    const pages = [300, 400, 500].map(width => doc.addPage([width, 600]));
+    doc.catalog.set(N('PageMode'), N('UseOutlines'));
+    doc.catalog.set(N('PageLayout'), N('TwoColumnLeft'));
+    doc.catalog.set(N('URI'), doc.context.obj({ Base: PDFString.of('https://example.invalid/base/') }));
+    doc.catalog.set(N('Names'), doc.context.obj({ Dests: doc.context.obj({
+      Names: [PDFString.of('chap3'), doc.context.obj([pages[2].ref, N('Fit')])] }) }));
+    const link = doc.context.obj({ Type: 'Annot', Subtype: 'Link', Rect: [0, 0, 50, 50], Dest: PDFString.of('chap3') });
+    const action = doc.context.obj({ Type: 'Annot', Subtype: 'Link', Rect: [60, 0, 110, 50], A: { S: 'GoTo', D: PDFString.of('chap3') } });
+    pages[0].node.set(N('Annots'), doc.context.obj([doc.context.register(link), doc.context.register(action)]));
+    return doc.save();
+  }
+  const own = (bytes: Uint8Array, order: number[], key = 'own') => order.map(pageIndex => ({ sourceKey: key, bytes, pageIndex }));
+  const load = async (bytes: Uint8Array) => PDFDocument.load(bytes, { updateMetadata: false });
+  function namedTarget(doc: PDFDocument, name: string): string | undefined {
+    const values = doc.catalog.lookupMaybe(N('Names'), PDFDict)?.lookupMaybe(N('Dests'), PDFDict)?.lookupMaybe(N('Names'), PDFArray);
+    for (let i = 0; values && i < values.size(); i += 2) {
+      if (values.lookup(i, PDFString).decodeText() === name) return (doc.context.lookup(values.get(i + 1), PDFArray).get(0) as PDFRef).tag;
+    }
+    return undefined;
+  }
+  function linkTargets(doc: PDFDocument, index: number): (string | undefined)[] {
+    return (doc.getPage(index).node.lookupMaybe(N('Annots'), PDFArray)?.asArray() ?? []).map(raw => {
+      const annot = doc.context.lookup(raw, PDFDict);
+      const dest = doc.context.lookup(annot.get(N('Dest')) ?? annot.lookupMaybe(N('A'), PDFDict)?.get(N('D')));
+      return dest instanceof PDFArray ? (dest.get(0) as PDFRef).tag : undefined;
+    });
+  }
+
+  it('carries PageMode, PageLayout and the URI base', async () => {
+    const bytes = await namedSource();
+    const out = await load(await buildPdf(own(bytes, [1, 0, 2]), bytes, 'own'));
+    expect(out.catalog.get(N('PageMode'))).toBe(N('UseOutlines'));
+    expect(out.catalog.get(N('PageLayout'))).toBe(N('TwoColumnLeft'));
+    expect(out.catalog.lookup(N('URI'), PDFDict).lookup(N('Base'), PDFString).decodeText()).toBe('https://example.invalid/base/');
+  });
+
+  it('keeps named destinations and page links bound to the same physical page', async () => {
+    const bytes = await namedSource();
+    const out = await load(await buildPdf(own(bytes, [2, 0, 1]), bytes, 'own'));
+    const target = out.getPage(0).ref.tag;
+    expect(namedTarget(out, 'chap3')).toBe(target);
+    expect(linkTargets(out, 1)).toEqual([target, target]);
+  });
+
+  it('omits the name and the jump when the target page is removed', async () => {
+    const bytes = await namedSource();
+    const out = await load(await buildPdf(own(bytes, [0, 1]), bytes, 'own'));
+    expect(namedTarget(out, 'chap3')).toBeUndefined();
+    expect(linkTargets(out, 0)).toEqual([undefined, undefined]);
+  });
+
+  it('carries a large name tree whole', async () => {
+    const doc = await PDFDocument.create({ updateMetadata: false });
+    const pages = [0, 1, 2].map(() => doc.addPage([300, 300]));
+    const kids = [];
+    for (let k = 0; k < 24; k++) {
+      const values = [];
+      for (let i = 0; i < 500; i++) {
+        const n = k * 500 + i;
+        values.push(PDFString.of(`n${String(n).padStart(6, '0')}`), doc.context.obj([pages[n % 3].ref, N('Fit')]));
+      }
+      kids.push(doc.context.register(doc.context.obj({ Names: values, Limits: [values[0], values[values.length - 2]] })));
+    }
+    doc.catalog.set(N('Names'), doc.context.obj({ Dests: doc.context.obj({ Kids: kids }) }));
+    const bytes = await doc.save();
+    const out = await load(await buildPdf(own(bytes, [1, 0, 2]), bytes, 'own'));
+    expect(out.catalog.lookup(N('Names'), PDFDict).lookup(N('Dests'), PDFDict).lookup(N('Names'), PDFArray).size()).toBe(24000);
+  });
+
+  it('refuses the rebuild when the name tree repeats a key', async () => {
+    const doc = await PDFDocument.create({ updateMetadata: false });
+    const page = doc.addPage([300, 300]);
+    doc.catalog.set(N('Names'), doc.context.obj({ Dests: doc.context.obj({
+      Names: [PDFString.of('a'), doc.context.obj([page.ref, N('Fit')]), PDFString.of('a'), doc.context.obj([page.ref, N('Fit')])] }) }));
+    const bytes = await doc.save();
+    await expect(buildPdf(own(bytes, [0]), bytes, 'own')).rejects.toThrow();
+  });
+
+  it('resolves donor page links in the donor namespace', async () => {
+    const owner = await PDFDocument.create({ updateMetadata: false });
+    const ownerPages = [owner.addPage([200, 200]), owner.addPage([210, 200])];
+    owner.catalog.set(N('Names'), owner.context.obj({ Dests: owner.context.obj({
+      Names: [PDFString.of('chap3'), owner.context.obj([ownerPages[0].ref, N('Fit')])] }) }));
+    const ownerBytes = await owner.save(), donor = await namedSource();
+    const out = await load(await buildPdf([...own(ownerBytes, [0, 1]), ...own(donor, [0, 2], 'donor')], ownerBytes, 'own'));
+    expect(linkTargets(out, 2)).toEqual([out.getPage(3).ref.tag, out.getPage(3).ref.tag]);
+    expect(namedTarget(out, 'chap3')).toBe(out.getPage(0).ref.tag);
+  });
+});

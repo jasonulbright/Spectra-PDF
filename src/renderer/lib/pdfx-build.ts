@@ -6,7 +6,7 @@ import type { ExportAnnotation, ExportDocument, ExportPage, PdfxManifest } from 
 import { carryAcroForm, prepareSourceForms, sourceHasXfa } from './acroform-carry';
 import type { FormContribution } from './acroform-carry';
 import { carryEmbeddedFiles } from './embedded-files-carry';
-import { carryDocumentCatalog, jumpsToRemovedPage } from './catalog-carry';
+import { carryDocumentCatalog, jumpsToRemovedPage, namedDestinationResolver } from './catalog-carry';
 import { carryOptionalContent } from './optional-content-carry';
 import { carryDocumentMetadata } from './metadata-carry';
 import { copyOutputIntents } from './output-intents-carry';
@@ -1346,6 +1346,31 @@ function dropJumpsToRemovedPages(doc: PDFDocument, keptIndices: number[]): void 
     const target = doc.context.lookup(raw), page = target instanceof PDFDict ? target.get(PDFName.of('P')) : undefined;
     return page instanceof PDFRef && all.has(page.tag) && !kept.has(page.tag);
   };
+  // A copied page annotation names its destination in the SOURCE name tree,
+  // which the output does not share (a donor's names can collide with the
+  // owner's). Resolve names to explicit arrays before the copy so the page
+  // reference is rebound, or dropped when its page is removed, like any other.
+  const resolveName = namedDestinationResolver(doc);
+  const explicitCopy = (raw: PDFObject | undefined) => {
+    const dest = resolveName(raw);
+    return dest ? doc.context.obj(dest.asArray()) : undefined;
+  };
+  const resolveActions = (raw: PDFObject | undefined) => {
+    const seen = new Set<PDFDict>();
+    const walk = (value: PDFObject | undefined, depth: number): void => {
+      const action = doc.context.lookup(value);
+      if (!(action instanceof PDFDict) || seen.has(action) || depth > 128) return;
+      seen.add(action);
+      if (action.lookup(PDFName.of('S')) === PDFName.of('GoTo')) {
+        const dest = explicitCopy(action.get(PDFName.of('D')));
+        if (dest) action.set(PDFName.of('D'), dest);
+      }
+      const next = doc.context.lookup(action.get(PDFName.of('Next')));
+      if (next instanceof PDFArray) for (const child of next.asArray()) walk(child, depth + 1);
+      else walk(action.get(PDFName.of('Next')), depth + 1);
+    };
+    walk(raw, 0);
+  };
   const dropTriggers = (owner: PDFDict) => {
     const triggers = doc.context.lookup(owner.get(PDFName.of('AA')));
     if (!(triggers instanceof PDFDict)) return;
@@ -1361,6 +1386,11 @@ function dropJumpsToRemovedPages(doc: PDFDocument, keptIndices: number[]): void 
     for (const raw of annots.asArray()) {
       const annot = doc.context.lookup(raw);
       if (!(annot instanceof PDFDict)) continue;
+      const named = annot.lookup(PDFName.of('Subtype')) === PDFName.of('Link') ? explicitCopy(annot.get(PDFName.of('Dest'))) : undefined;
+      if (named) annot.set(PDFName.of('Dest'), named);
+      resolveActions(annot.get(PDFName.of('A')));
+      const triggers = doc.context.lookup(annot.get(PDFName.of('AA')));
+      if (triggers instanceof PDFDict) for (const [, action] of triggers.entries()) resolveActions(action);
       const dest = annot.get(PDFName.of('Dest'));
       if (annot.lookup(PDFName.of('Subtype')) === PDFName.of('Link') && dest !== undefined && removed(dest)) annot.delete(PDFName.of('Dest'));
       if (jumpsToRemovedPage(doc.context, annot.get(PDFName.of('A')), removed)) annot.delete(PDFName.of('A'));

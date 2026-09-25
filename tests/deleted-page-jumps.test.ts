@@ -142,7 +142,7 @@ describe.each(['pdf', 'pdfx'] as const)('a deleted page loses only the jumps int
     expect(scriptText(out.catalog.lookup(N('OpenAction'), PDFDict))).toBe('// open');
   });
 
-  it('strips explicit jumps to the deleted page from links and keeps every other link intact', async () => {
+  it('strips explicit and named jumps to the deleted page from links and keeps every other link intact', async () => {
     const out = await deletePageTwo(format, pdf => {
       pdf.catalog.set(N('Names'), pdf.context.obj({ Dests: { Names: [PDFString.of('two'), fit(pdf, 1)] } }));
       links(pdf, [
@@ -154,14 +154,13 @@ describe.each(['pdf', 'pdfx'] as const)('a deleted page loses only the jumps int
         { Dest: PDFString.of('two') },
       ]);
     });
-    for (const index of [0, 1, 2]) {
+    for (const index of [0, 1, 2, 5]) {
       const link = linkOut(out, index);
       expect(link.get(N('Dest'))).toBeUndefined(); expect(link.get(N('A'))).toBeUndefined();
       expect(link.lookup(N('Subtype'))).toBe(N('Link'));
     }
     expect(linkOut(out, 3).lookup(N('Dest'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
     expect(linkOut(out, 4).lookup(N('A'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
-    expect(linkOut(out, 5).lookup(N('Dest'), PDFString).decodeText()).toBe('two');
   });
 
   it('binds annotation page back-pointers and retained-page links to the inserted pages', async () => {
