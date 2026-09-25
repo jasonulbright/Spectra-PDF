@@ -95,7 +95,8 @@ export default function TableRegionOverlay({
       onSelect(id);
       let latest = base;
       const pointers = pointerScope(event.pointerId);
-      const move = (ev: PointerEvent): void => {
+      const move = (ev: PointerEvent): void => {
+
         const dx = (ev.clientX - startX) / bounds.width;
         const dy = (ev.clientY - startY) / bounds.height;
         if (corner === null) {
@@ -124,13 +125,15 @@ export default function TableRegionOverlay({
         dragging.current = false;
         setPreview(null);
       };
-      const up = (): void => {
+      const up = (): void => {
+
         detach();
         onMoveBounds(id, latest);
       };
       // A cancelled gesture discards the preview: committing it would place
       // the box wherever the pointer happened to be when the gesture died.
-      const cancel = (): void => {
+      const cancel = (): void => {
+
         detach();
       };
       pointers.add('pointermove', move);
@@ -159,7 +162,8 @@ export default function TableRegionOverlay({
       onSelect(id);
       let latest = drawn.at;
       const pointers = pointerScope(event.pointerId);
-      const move = (ev: PointerEvent): void => {
+      const move = (ev: PointerEvent): void => {
+
         const delta = ((axis === 'x' ? ev.clientX : ev.clientY) - start) / side;
         latest = Math.min(Math.max(drawn.at + delta, 0), 1);
         setColumnPreview({ index, at: latest });
@@ -171,11 +175,13 @@ export default function TableRegionOverlay({
         pointers.remove('blur', cancel);
         setColumnPreview(null);
       };
-      const up = (): void => {
+      const up = (): void => {
+
         detach();
         onMoveColumn(id, index, columnFractionAt(latest, rotation));
       };
-      const cancel = (): void => {
+      const cancel = (): void => {
+
         detach();
       };
       pointers.add('pointermove', move);
