@@ -1,0 +1,256 @@
+tree	container	component	version	source	evidence
+python	_bz2.pyd	bzip2	1.0.8	strings	strings: "<v>, <dd-Mon-yyyy>"
+python	_decimal.pyd	mpdecimal	4.0.0	runtime	python.exe -I: decimal.__libmpdec_version__
+python	_zstd.pyd	zstd	1.5.7	runtime	python.exe -I: compression.zstd.zstd_version
+python	Lib/site-packages/cffi-2.1.1.dist-info	cffi	2.1.1	manifest:Lib/site-packages/cffi-2.1.1.dist-info/METADATA	METADATA Version; RECORD native files: 1
+python	Lib/site-packages/charset_normalizer-3.5.1.dist-info	charset-normalizer	3.5.1	manifest:Lib/site-packages/charset_normalizer-3.5.1.dist-info/METADATA	METADATA Version; RECORD native files: 2
+python	Lib/site-packages/cryptography-50.0.1.dist-info	cryptography	50.0.1	manifest:Lib/site-packages/cryptography-50.0.1.dist-info/METADATA	METADATA Version; RECORD native files: 1
+python	Lib/site-packages/cryptography/hazmat/bindings/_rust.pyd	openssl	4.0.2	runtime	python.exe -I: cryptography backend.openssl_version_text()
+python	Lib/site-packages/cryptography/hazmat/bindings/_rust.pyd	openssl	4.0.2	strings	strings: "OpenSSL <v> <date>"
+python	Lib/site-packages/fonttools-4.63.0.dist-info	fonttools	4.63.0	manifest:Lib/site-packages/fonttools-4.63.0.dist-info/METADATA	METADATA Version; RECORD native files: 6
+python	Lib/site-packages/heif-876f3a80218b1a207d7419d7664b9497.dll	libheif	1.23.5	runtime	python.exe -I: pillow_heif.libheif_info()['libheif']
+python	Lib/site-packages/libde265-f4739cb4844efa5930bf0764c71d55e2.dll	libde265	1.1.3	runtime	python.exe -I: pillow_heif.libheif_info()['decoders']['libde265']
+python	Lib/site-packages/lxml-6.1.2.dist-info	lxml	6.1.2	manifest:Lib/site-packages/lxml-6.1.2.dist-info/METADATA	METADATA Version; RECORD native files: 7
+python	Lib/site-packages/lxml/etree.cp314-win_amd64.pyd	libxml2	2.11.9	runtime	python.exe -I: lxml.etree.LIBXML_VERSION
+python	Lib/site-packages/lxml/etree.cp314-win_amd64.pyd	libxslt	1.1.45	runtime	python.exe -I: lxml.etree.LIBXSLT_VERSION
+python	Lib/site-packages/lxml/etree.cp314-win_amd64.pyd	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
+python	Lib/site-packages/lxml/objectify.cp314-win_amd64.pyd	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
+python	Lib/site-packages/numpy-2.5.2.dist-info	numpy	2.5.2	manifest:Lib/site-packages/numpy-2.5.2.dist-info/METADATA	METADATA Version; RECORD native files: 21
+python	Lib/site-packages/numpy.libs/libscipy_openblas64_-327b2e0bcffce2882e0dc04cdeb4eaa6.dll	gcc-runtime	10.3.0	strings	strings: build path "gcc-<v>/"
+python	Lib/site-packages/numpy.libs/libscipy_openblas64_-327b2e0bcffce2882e0dc04cdeb4eaa6.dll	openblas	0.3.34.0.0	runtime	python.exe -I: numpy.show_config(mode='dicts') Build Dependencies blas.version
+python	Lib/site-packages/numpy.libs/msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll	msvc-runtime	14.40.33810.0	pe-version	VS_VERSIONINFO ProductVersion
+python	Lib/site-packages/pikepdf-10.11.0.dist-info	pikepdf	10.11.0	manifest:Lib/site-packages/pikepdf-10.11.0.dist-info/METADATA	METADATA Version; RECORD native files: 3
+python	Lib/site-packages/pikepdf.libs/msvcp140-0f885b509a685d2bbfa652fed26b5fb3.dll	msvc-runtime	14.44.35211.0	pe-version	VS_VERSIONINFO ProductVersion
+python	Lib/site-packages/pikepdf.libs/qpdf30-eca0c1670a8d0fd8a8bc678bfc22fc30.dll	qpdf	12.3.2	runtime	python.exe -I: pikepdf.__libqpdf_version__
+python	Lib/site-packages/pikepdf.libs/qpdf30-eca0c1670a8d0fd8a8bc678bfc22fc30.dll	zlib	1.3.1	strings	strings: "deflate <v> Copyright"
+python	Lib/site-packages/PIL/_avif.cp314-win_amd64.pyd	aom	3.14.1	runtime	python.exe -I: PIL._avif.codec_versions()
+python	Lib/site-packages/PIL/_avif.cp314-win_amd64.pyd	dav1d	1.5.3-0-gb546257	runtime	python.exe -I: PIL._avif.codec_versions()
+python	Lib/site-packages/PIL/_avif.cp314-win_amd64.pyd	libavif	1.4.2	runtime	python.exe -I: PIL.features.version('avif')
+python	Lib/site-packages/PIL/_imaging.cp314-win_amd64.pyd	libjpeg-turbo	3.1.4.1	runtime	python.exe -I: PIL.features.version('libjpeg_turbo')
+python	Lib/site-packages/PIL/_imaging.cp314-win_amd64.pyd	libjpeg-turbo	3.1.4.1	strings	strings: "libjpeg-turbo version <v>"
+python	Lib/site-packages/PIL/_imaging.cp314-win_amd64.pyd	libtiff	4.7.1	runtime	python.exe -I: PIL.features.version('libtiff')
+python	Lib/site-packages/PIL/_imaging.cp314-win_amd64.pyd	libtiff	4.7.1	strings	strings: "LIBTIFF, Version <v>"
+python	Lib/site-packages/PIL/_imaging.cp314-win_amd64.pyd	openjpeg	2.5.4	runtime	python.exe -I: PIL.features.version('jpg_2000')
+python	Lib/site-packages/PIL/_imaging.cp314-win_amd64.pyd	zlib	1.3.1	strings	strings: "deflate <v> Copyright"
+python	Lib/site-packages/PIL/_imaging.cp314-win_amd64.pyd	zlib-ng	2.3.3	runtime	python.exe -I: PIL.features.version('zlib_ng')
+python	Lib/site-packages/PIL/_imaging.cp314-win_amd64.pyd	zlib-ng-compat	1.3.1.zlib-ng	runtime	python.exe -I: PIL.features.version('zlib')
+python	Lib/site-packages/PIL/_imagingcms.cp314-win_amd64.pyd	littlecms	2.19	runtime	python.exe -I: PIL.features.version('littlecms2')
+python	Lib/site-packages/PIL/_imagingft.cp314-win_amd64.pyd	freetype	2.14.3	runtime	python.exe -I: PIL.features.version('freetype2')
+python	Lib/site-packages/PIL/_imagingft.cp314-win_amd64.pyd	zlib	1.3.1	strings	strings: "deflate <v> Copyright"
+python	Lib/site-packages/PIL/_webp.cp314-win_amd64.pyd	libwebp	1.6.0	runtime	python.exe -I: PIL.features.version('webp')
+python	Lib/site-packages/pillow-12.3.0.dist-info	pillow	12.3.0	manifest:Lib/site-packages/pillow-12.3.0.dist-info/METADATA	METADATA Version; RECORD native files: 8
+python	Lib/site-packages/pillow_heif-1.8.0+decode.2.dist-info	pillow-heif	1.8.0+decode.2	manifest:Lib/site-packages/pillow_heif-1.8.0+decode.2.dist-info/METADATA	METADATA Version; RECORD native files: 3
+python	Lib/site-packages/python_pkcs11-0.9.5.dist-info	python-pkcs11	0.9.5	manifest:Lib/site-packages/python_pkcs11-0.9.5.dist-info/METADATA	METADATA Version; RECORD native files: 1
+python	Lib/site-packages/uharfbuzz-0.56.0.dist-info	uharfbuzz	0.56.0	manifest:Lib/site-packages/uharfbuzz-0.56.0.dist-info/METADATA	METADATA Version; RECORD native files: 2
+python	Lib/site-packages/uharfbuzz/_harfbuzz.pyd	harfbuzz	14.3.0	runtime	python.exe -I: uharfbuzz.version_string()
+python	libcrypto-3.dll	openssl	3.5.7	pe-version	VS_VERSIONINFO ProductVersion
+python	libffi-8.dll	libffi	3.4.4	strings	strings: UTF-16 "libffi-<v>" (Authenticode program name)
+python	libssl-3.dll	openssl	3.5.7	pe-version	VS_VERSIONINFO ProductVersion
+python	libssl-3.dll	openssl	3.5.7	runtime	python.exe -I: ssl.OPENSSL_VERSION
+python	libtommath.dll	libtommath	unknown	strings	no version resource; no identifying string
+python	pyexpat.pyd	expat	2.8.2	runtime	python.exe -I: pyexpat.EXPAT_VERSION
+python	pyexpat.pyd	expat	2.8.2	strings	strings: "expat_<v>"
+python	python.exe	cpython	3.14.7	pe-version	VS_VERSIONINFO ProductVersion
+python	python.exe	cpython	3.14.7	runtime	python.exe -I: platform.python_version()
+python	python3.dll	cpython	3.14.7	pe-version	VS_VERSIONINFO ProductVersion
+python	python314.dll	cpython	3.14.7	pe-version	VS_VERSIONINFO ProductVersion
+python	python314.dll	zlib	1.3.1.zlib-ng	runtime	python.exe -I: zlib.ZLIB_RUNTIME_VERSION
+python	python314.dll	zlib-ng	2.2.4	runtime	python.exe -I: zlib.ZLIBNG_VERSION
+python	sqlite3.dll	sqlite	3.50.4.0	pe-version	VS_VERSIONINFO ProductVersion
+python	sqlite3.dll	sqlite	3.50.4	runtime	python.exe -I: sqlite3.sqlite_version
+python	vcruntime140.dll	msvc-runtime	14.51.36247.0	pe-version	VS_VERSIONINFO ProductVersion
+python	vcruntime140_1.dll	msvc-runtime	14.51.36247.0	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libarchive-13.dll	libarchive	3.8.8	strings	strings: "libarchive <v>"
+tesseract	libb2-1.dll	libb2	0.98.1	manifest:scripts/native-components-evidence.tsv	sha256 77bab532b5421d6c: bin/libb2-1.dll of MSYS2 package mingw-w64-x86_64-libb2-0.98.1-3-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libbrotlicommon.dll	brotli	1.2.0	manifest:scripts/native-components-evidence.tsv	sha256 ca7bc06ead802599: bin/libbrotlicommon.dll of MSYS2 package mingw-w64-x86_64-brotli-1.2.0-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libbrotlidec.dll	brotli	1.2.0	manifest:scripts/native-components-evidence.tsv	sha256 a142dc6cfa77cb90: bin/libbrotlidec.dll of MSYS2 package mingw-w64-x86_64-brotli-1.2.0-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libbz2-1.dll	bzip2	1.0.8	strings	strings: "<v>, <dd-Mon-yyyy>"
+tesseract	libcairo-2.dll	cairo	1.18.4	strings	strings: build path "cairo-<v>/"
+tesseract	libcurl-4.dll	curl	8.21.0	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libdatrie-1.dll	libdatrie	0.2.14	manifest:scripts/native-components-evidence.tsv	sha256 2f784872e6404e57: bin/libdatrie-1.dll of MSYS2 package mingw-w64-x86_64-libdatrie-0.2.14-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libdeflate.dll	libdeflate	1.25	manifest:scripts/native-components-evidence.tsv	sha256 3f3fc3a73bc3623d: bin/libdeflate.dll of MSYS2 package mingw-w64-x86_64-libdeflate-1.25-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libexpat-1.dll	expat	2.8.2.0	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libffi-8.dll	libffi	3.7.1	manifest:scripts/native-components-evidence.tsv	sha256 390e4bf8abd037ab: bin/libffi-8.dll of MSYS2 package mingw-w64-x86_64-libffi-3.7.1-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libfontconfig-1.dll	fontconfig	2.18.2	strings	strings: build path "fontconfig-<v>/"
+tesseract	libfreetype-6.dll	freetype	2.14.3	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libfribidi-0.dll	fribidi	1.0.16	strings	strings: "(GNU FriBidi) <v>"
+tesseract	libgcc_s_seh-1.dll	gcc-runtime	unknown	strings	no version resource; no identifying string; no GCC ident
+tesseract	libgif-7.dll	giflib	6.1.3	manifest:scripts/native-components-evidence.tsv	sha256 5b3d837ccaab8468: bin/libgif-7.dll of MSYS2 package mingw-w64-x86_64-giflib-6.1.3-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libgio-2.0-0.dll	glib	2.88.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libglib-2.0-0.dll	glib	2.88.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libgmodule-2.0-0.dll	glib	2.88.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libgobject-2.0-0.dll	glib	2.88.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libgraphite2.dll	graphite2	1.3.15	manifest:scripts/native-components-evidence.tsv	sha256 063a9ad34a5ec87d: bin/libgraphite2.dll of MSYS2 package mingw-w64-x86_64-graphite2-1.3.15-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libharfbuzz-0.dll	harfbuzz	14.2.1	strings	no version resource; strings: sole standalone version literal
+tesseract	libiconv-2.dll	libiconv	1.19	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libicudt78.dll	icu	78.3	manifest:scripts/native-components-evidence.tsv	sha256 47d19b605a28461d: bin/libicudt78.dll of MSYS2 package mingw-w64-x86_64-icu-78.3-3-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libicuin78.dll	icu	78.3	manifest:scripts/native-components-evidence.tsv	sha256 af3341827897a41a: bin/libicuin78.dll of MSYS2 package mingw-w64-x86_64-icu-78.3-3-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libicuuc78.dll	icu	78.3	strings	no version resource; strings: sole standalone version literal
+tesseract	libidn2-0.dll	libidn2	2.3.8	strings	no version resource; strings: sole standalone version literal
+tesseract	libintl-8.dll	gettext	1.0	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libjpeg-8.dll	libjpeg-turbo	3.2.0	strings	strings: "libjpeg-turbo version <v>"
+tesseract	libleptonica-6.dll	leptonica	1.87.0	manifest:scripts/native-components-evidence.tsv	sha256 1869b44e3d46fd83: bin/libleptonica-6.dll of MSYS2 package mingw-w64-x86_64-leptonica-1.87.0-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libLerc.dll	lerc	4.1.1	manifest:scripts/native-components-evidence.tsv	sha256 6887fb5aeabf382a: bin/libLerc.dll of MSYS2 package mingw-w64-x86_64-lerc-4.1.1-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	liblz4.dll	lz4	1.10.0.0	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	liblzma-5.dll	xz	5.8.3	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libopenjp2-7.dll	openjpeg	2.5.4	strings	no version resource; strings: sole standalone version literal
+tesseract	libpango-1.0-0.dll	pango	1.58.0	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libpangocairo-1.0-0.dll	pango	1.58.0	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libpangoft2-1.0-0.dll	pango	1.58.0	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libpangowin32-1.0-0.dll	pango	1.58.0	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libpcre2-8-0.dll	pcre2	10.47	manifest:scripts/native-components-evidence.tsv	sha256 a499fb8a7eff453d: bin/libpcre2-8-0.dll of MSYS2 package mingw-w64-x86_64-pcre2-10.47-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libpixman-1-0.dll	pixman	0.46.4	strings	strings: build path "pixman-<v>/"
+tesseract	libpng16-16.dll	libpng	1.6.58	strings	strings: "libpng version <v>"
+tesseract	libpsl-5.dll	libpsl	0.21.5	strings	strings: build path "libpsl-<v>/"
+tesseract	libsharpyuv-0.dll	libwebp	1.6.0	manifest:scripts/native-components-evidence.tsv	sha256 ab0c9f61dc69b6bc: bin/libsharpyuv-0.dll of MSYS2 package mingw-w64-x86_64-libwebp-1.6.0-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libssh2-1.dll	libssh2	1.11.1	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libstdc++-6.dll	gcc-runtime	unknown	strings	no version resource; no identifying string
+tesseract	libtesseract-5.dll	tesseract	5.5.3.20260724	strings	strings: "tesseract v<v>"
+tesseract	libthai-0.dll	libthai	0.1.30	manifest:scripts/native-components-evidence.tsv	sha256 5d741974fdec19e0: bin/libthai-0.dll of MSYS2 package mingw-w64-x86_64-libthai-0.1.30-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libtiff-6.dll	libtiff	4.7.2	strings	strings: "LIBTIFF, Version <v>"
+tesseract	libunistring-5.dll	libunistring	1.4.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libwebp-7.dll	libwebp	1.6.0	manifest:scripts/native-components-evidence.tsv	sha256 c6c21a10f8cfe132: bin/libwebp-7.dll of MSYS2 package mingw-w64-x86_64-libwebp-1.6.0-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libwebpmux-3.dll	libwebp	1.6.0	manifest:scripts/native-components-evidence.tsv	sha256 2c8a2e9d7901ec65: bin/libwebpmux-3.dll of MSYS2 package mingw-w64-x86_64-libwebp-1.6.0-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libwinpthread-1.dll	mingw-w64-winpthreads	1.0.0.0	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libzstd.dll	zstd	1.5.7	strings	no version resource; strings: sole standalone version literal
+tesseract	tesseract.exe	bzip2	1.0.8	runtime	tesseract.exe --version: "bz2lib/1.0.8"
+tesseract	tesseract.exe	giflib	5.2.2	runtime	tesseract.exe --version: "libgif 5.2.2"
+tesseract	tesseract.exe	leptonica	1.87.0	runtime	tesseract.exe --version: "leptonica-1.87.0"
+tesseract	tesseract.exe	libarchive	3.8.8	runtime	tesseract.exe --version: "libarchive 3.8.8"
+tesseract	tesseract.exe	libjpeg-turbo	3.1.3	runtime	tesseract.exe --version: "libjpeg-turbo 3.1.3"
+tesseract	tesseract.exe	libpng	1.6.58	runtime	tesseract.exe --version: "libpng 1.6.58"
+tesseract	tesseract.exe	libtiff	4.7.2	runtime	tesseract.exe --version: "libtiff 4.7.2"
+tesseract	tesseract.exe	libwebp	1.6.0	runtime	tesseract.exe --version: "libwebp 1.6.0"
+tesseract	tesseract.exe	lz4	1.10.0	runtime	tesseract.exe --version: "liblz4/1.10.0"
+tesseract	tesseract.exe	openjpeg	2.5.4	runtime	tesseract.exe --version: "libopenjp2 2.5.4"
+tesseract	tesseract.exe	tesseract	5.5.3.20260724	runtime	tesseract.exe --version: "tesseract v5.5.3.20260724"
+tesseract	tesseract.exe	xz	5.8.3	runtime	tesseract.exe --version: "liblzma/5.8.3"
+tesseract	tesseract.exe	zlib	1.3.1	runtime	tesseract.exe --version: "zlib 1.3.1"
+tesseract	tesseract.exe	zlib	1.3.2	runtime	tesseract.exe --version: "zlib/1.3.2"
+tesseract	tesseract.exe	zstd	1.5.7	runtime	tesseract.exe --version: "libzstd/1.5.7"
+tesseract	zlib1.dll	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
+libreoffice	program/Argon2OptDll.dll	argon2	unknown	strings	no version resource; no identifying string
+libreoffice	program/clucene.dll	clucene	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/clucene.dll	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
+libreoffice	program/CoinMP.dll	coinmp	1.8.4.0	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/Engine12.dll	firebird	3.0.7.33374	strings	strings: "-V<v> Firebird <major.minor>"
+libreoffice	program/epoxy.dll	libepoxy	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/etonyek.dll	libetonyek	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/etonyek.dll	zlib	1.3.2	strings	strings: "inflate <v> Copyright"
+libreoffice	program/freebl3.dll	nss	3.128	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/gpgme-w32spawn.exe	gpgme	unknown	strings	no version resource; no identifying string
+libreoffice	program/gpgmepp.dll	gpgme	1.24.3	strings	strings: "This is GPGME <v>"
+libreoffice	program/icudt78.dll	icu	78.3.0.0	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/icuin78.dll	icu	78.3.0.0	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/icuuc78.dll	icu	78.3.0.0	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/ifbclient.dll	firebird	3.0.7.33374	strings	strings: "-V<v> Firebird <major.minor>"
+libreoffice	program/intl/fbintl.dll	firebird	3.0.7.33374	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/lcms2.dll	littlecms	2.17.0.0	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/libcrypto-3.dll	openssl	3.5.7	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/libcurl.dll	curl	8.22.0	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/libexslt.dll	libxslt	unknown	strings	no version resource; no identifying string
+libreoffice	program/libpq.dll	postgresql-libpq	15.19	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/librdf.dll	redland-librdf	1.0.17	strings	VS_VERSIONINFO carries the LibreOffice release; strings: sole standalone version literal
+libreoffice	program/libssl-3.dll	openssl	3.5.7	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/libxml2.dll	libxml2	2.14.6	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/libxmlsec-mscng.dll	xmlsec	1.3.12	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/libxmlsec.dll	xmlsec	1.3.12	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/libxslt.dll	libxslt	unknown	strings	no version resource; no identifying string
+libreoffice	program/lpsolve55.dll	lp_solve	5.5.0.10	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/mergedlo.dll	expat	2.8.4	strings	strings: "expat_<v>"
+libreoffice	program/mergedlo.dll	libjpeg-turbo	3.1.0	strings	strings: "libjpeg-turbo version <v>"
+libreoffice	program/mergedlo.dll	libpng	1.6.58	strings	strings: "libpng version <v>"
+libreoffice	program/mergedlo.dll	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
+libreoffice	program/mwaw.dll	libmwaw	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/nspr4.dll	nspr	4.39	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/nss3.dll	nss	3.128	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/nssckbi.dll	nss-builtin-roots	2.90	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/nssdbm3.dll	nss	3.128	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/nssutil3.dll	nss	3.128	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/odfgen.dll	libodfgen	0.1.8	strings	VS_VERSIONINFO carries the LibreOffice release; strings: sole standalone version literal
+libreoffice	program/orcus-parser.dll	liborcus	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/orcus-parser.dll	zlib	1.3.2	strings	strings: "inflate <v> Copyright"
+libreoffice	program/orcus.dll	liborcus	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/orcus.dll	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
+libreoffice	program/pdfimportlo.dll	zlib	1.3.2	strings	strings: "inflate <v> Copyright"
+libreoffice	program/pdfiumlo.dll	libjpeg-turbo	3.1.0	strings	strings: "libjpeg-turbo version <v>"
+libreoffice	program/pdfiumlo.dll	pdfium	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/pdfiumlo.dll	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
+libreoffice	program/plc4.dll	nspr	4.39	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/plds4.dll	nspr	4.39	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python-core-3.12.14/bin/python.exe	cpython	3.12.14	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python-core-3.12.14/bin/pythonw.exe	cpython	3.12.14	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python-core-3.12.14/bin/venvlauncher.exe	cpython	3.12.14	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python-core-3.12.14/lib/_bz2.pyd	bzip2	1.0.8	strings	strings: "<v>, <dd-Mon-yyyy>"
+libreoffice	program/python-core-3.12.14/lib/libcrypto-3.dll	openssl	3.5.7	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python-core-3.12.14/lib/libffi-8.dll	libffi	3.5.2	strings	no version resource; strings: sole standalone version literal
+libreoffice	program/python-core-3.12.14/lib/libssl-3.dll	openssl	3.5.7	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python-core-3.12.14/lib/pip/_vendor/distlib/t32.exe	distlib-launcher	1.1.0.14	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python-core-3.12.14/lib/pip/_vendor/distlib/t64-arm.exe	distlib-launcher	1.1.0.14	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python-core-3.12.14/lib/pip/_vendor/distlib/t64.exe	distlib-launcher	1.1.0.14	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python-core-3.12.14/lib/pip/_vendor/distlib/w32.exe	distlib-launcher	1.1.0.14	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python-core-3.12.14/lib/pip/_vendor/distlib/w64-arm.exe	distlib-launcher	1.1.0.14	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python-core-3.12.14/lib/pip/_vendor/distlib/w64.exe	distlib-launcher	1.1.0.14	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python-core-3.12.14/lib/pyexpat.pyd	expat	2.8.3	strings	strings: "expat_<v>"
+libreoffice	program/python-core-3.12.14/lib/setuptools/cli-32.exe	setuptools	unknown	strings	no version resource; no identifying string
+libreoffice	program/python-core-3.12.14/lib/setuptools/cli-64.exe	setuptools	unknown	strings	no version resource; no identifying string
+libreoffice	program/python-core-3.12.14/lib/setuptools/cli-arm64.exe	setuptools	unknown	strings	no version resource; no identifying string
+libreoffice	program/python-core-3.12.14/lib/setuptools/cli.exe	setuptools	unknown	strings	no version resource; no identifying string
+libreoffice	program/python-core-3.12.14/lib/setuptools/gui-32.exe	setuptools	unknown	strings	no version resource; no identifying string
+libreoffice	program/python-core-3.12.14/lib/setuptools/gui-64.exe	setuptools	unknown	strings	no version resource; no identifying string
+libreoffice	program/python-core-3.12.14/lib/setuptools/gui-arm64.exe	setuptools	unknown	strings	no version resource; no identifying string
+libreoffice	program/python-core-3.12.14/lib/setuptools/gui.exe	setuptools	unknown	strings	no version resource; no identifying string
+libreoffice	program/python-core-3.12.14/lib/sqlite3.dll	sqlite	3.53.4	runtime	program/python.exe -I: ctypes sqlite3_libversion()
+libreoffice	program/python.exe	cpython	3.12.14	runtime	program/python.exe -I: platform.python_version()
+libreoffice	program/python.exe	expat	2.8.3	runtime	program/python.exe -I: pyexpat.EXPAT_VERSION
+libreoffice	program/python.exe	mpdecimal	2.5.1	runtime	program/python.exe -I: decimal.__libmpdec_version__
+libreoffice	program/python.exe	openssl	3.5.7	runtime	program/python.exe -I: ssl.OPENSSL_VERSION
+libreoffice	program/python.exe	sqlite	3.53.4	runtime	program/python.exe -I: sqlite3.sqlite_version
+libreoffice	program/python.exe	zlib	1.3.2	runtime	program/python.exe -I: zlib.ZLIB_RUNTIME_VERSION
+libreoffice	program/python3.dll	cpython	3.12.14	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/python312.dll	cpython	3.12.14	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/raptor2.dll	raptor	2.0.16	strings	VS_VERSIONINFO carries the LibreOffice release; strings: sole standalone version literal
+libreoffice	program/rasqal.dll	rasqal	0.9.33	strings	VS_VERSIONINFO carries the LibreOffice release; strings: sole standalone version literal
+libreoffice	program/revenge.dll	librevenge	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/shlxthdl/ooofilt.dll	expat	2.8.4	strings	strings: "expat_<v>"
+libreoffice	program/shlxthdl/ooofilt.dll	zlib	1.3.2	strings	strings: "inflate <v> Copyright"
+libreoffice	program/shlxthdl/propertyhdl.dll	expat	2.8.4	strings	strings: "expat_<v>"
+libreoffice	program/shlxthdl/propertyhdl.dll	zlib	1.3.2	strings	strings: "inflate <v> Copyright"
+libreoffice	program/shlxthdl/shlxthdl.dll	expat	2.8.4	strings	strings: "expat_<v>"
+libreoffice	program/shlxthdl/shlxthdl.dll	zlib	1.3.2	strings	strings: "inflate <v> Copyright"
+libreoffice	program/skialo.dll	libpng	1.6.58	strings	strings: "libpng version <v>"
+libreoffice	program/skialo.dll	skia	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/skialo.dll	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
+libreoffice	program/smime3.dll	nss	3.128	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/soffice.exe	libreoffice	26.2.6.3	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/softokn3.dll	nss	3.128	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/sqlite3.dll	sqlite	3.53.0	runtime	program/python.exe -I: ctypes sqlite3_libversion()
+libreoffice	program/ssl3.dll	nss	3.128	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/staroffice.dll	libstaroffice	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/version.ini	libreoffice-buildid	8221e31b3ac356a1623c672912a3d2b492f7e3d1	manifest:program/version.ini	version.ini buildid
+libreoffice	program/wpd.dll	libwpd	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/wpg.dll	libwpg	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/wps.dll	libwps	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/xpdfimport.exe	libjpeg-turbo	3.1.0	strings	strings: "libjpeg-turbo version <v>"
+libreoffice	program/xpdfimport.exe	poppler	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
+libreoffice	program/xpdfimport.exe	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
+jbig2enc	depmf.json	giflib	5.2.2	manifest:depmf.json	depmf.json projects.giflib.version
+jbig2enc	depmf.json	jbig2enc	0.32	manifest:depmf.json	depmf.json projects.jbig2enc.version
+jbig2enc	depmf.json	leptonica	1.87.0	manifest:depmf.json	depmf.json projects.leptonica.version
+jbig2enc	depmf.json	libjpeg-turbo	3.1.4.1	manifest:depmf.json	depmf.json projects.libjpeg-turbo.version
+jbig2enc	depmf.json	libpng	1.6.58	manifest:depmf.json	depmf.json projects.libpng.version
+jbig2enc	depmf.json	libtiff	4.7.1	manifest:depmf.json	depmf.json projects.tiff.version
+jbig2enc	depmf.json	libwebp	1.6.0	manifest:depmf.json	depmf.json projects.libwebp.version
+jbig2enc	depmf.json	openjpeg	2.5.4	manifest:depmf.json	depmf.json projects.openjp2.version
+jbig2enc	depmf.json	zlib-ng	2.3.3	manifest:depmf.json	depmf.json projects.zlib-ng.version
+jbig2enc	jbig2.exe	giflib	5.2.2	runtime	jbig2.exe --version: "libgif 5.2.2"
+jbig2enc	jbig2.exe	jbig2enc	0.32	runtime	jbig2.exe --version: "jbig2enc 0.32"
+jbig2enc	jbig2.exe	leptonica	1.87.0	runtime	jbig2.exe --version: "leptonica-1.87.0"
+jbig2enc	jbig2.exe	libjpeg-turbo	3.1.4.1	runtime	jbig2.exe --version: "libjpeg-turbo 3.1.4.1"
+jbig2enc	jbig2.exe	libjpeg-turbo	3.1.4.1	strings	strings: "libjpeg-turbo version <v>"
+jbig2enc	jbig2.exe	libpng	1.6.58	runtime	jbig2.exe --version: "libpng 1.6.58"
+jbig2enc	jbig2.exe	libtiff	4.7.1	runtime	jbig2.exe --version: "libtiff 4.7.1"
+jbig2enc	jbig2.exe	libtiff	4.7.1	strings	strings: "LIBTIFF, Version <v>"
+jbig2enc	jbig2.exe	libwebp	1.6.0	runtime	jbig2.exe --version: "libwebp 1.6.0"
+jbig2enc	jbig2.exe	openjpeg	2.5.4	runtime	jbig2.exe --version: "libopenjp2 2.5.4"
+jbig2enc	jbig2.exe	zlib	1.3.1.zlib-ng	runtime	jbig2.exe --version: "zlib 1.3.1.zlib-ng"
