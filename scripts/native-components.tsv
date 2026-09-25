@@ -60,75 +60,71 @@ python	sqlite3.dll	sqlite	3.50.4.0	pe-version	VS_VERSIONINFO ProductVersion
 python	sqlite3.dll	sqlite	3.50.4	runtime	python.exe -I: sqlite3.sqlite_version
 python	vcruntime140.dll	msvc-runtime	14.51.36247.0	pe-version	VS_VERSIONINFO ProductVersion
 python	vcruntime140_1.dll	msvc-runtime	14.51.36247.0	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libarchive-13.dll	libarchive	3.8.8	strings	strings: "libarchive <v>"
-tesseract	libb2-1.dll	libb2	0.98.1	manifest:scripts/native-components-evidence.tsv	sha256 77bab532b5421d6c: bin/libb2-1.dll of MSYS2 package mingw-w64-x86_64-libb2-0.98.1-3-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libbrotlicommon.dll	brotli	1.2.0	manifest:scripts/native-components-evidence.tsv	sha256 ca7bc06ead802599: bin/libbrotlicommon.dll of MSYS2 package mingw-w64-x86_64-brotli-1.2.0-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libbrotlidec.dll	brotli	1.2.0	manifest:scripts/native-components-evidence.tsv	sha256 a142dc6cfa77cb90: bin/libbrotlidec.dll of MSYS2 package mingw-w64-x86_64-brotli-1.2.0-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libarchive-13.dll	libarchive	3.7.4	strings	strings: "libarchive <v>"
+tesseract	libb2-1.dll	libb2	unknown	strings	no version resource; evidence row is for sha256 77bab532b5421d6c, shipped 7fb8418a1172042d; no identifying string
+tesseract	libbrotlicommon.dll	brotli	unknown	strings	no version resource; evidence row is for sha256 ca7bc06ead802599, shipped 62f363f6aac0d54c; no identifying string
+tesseract	libbrotlidec.dll	brotli	unknown	strings	no version resource; evidence row is for sha256 a142dc6cfa77cb90, shipped 7d6c0f954b6f2db1; no identifying string
 tesseract	libbz2-1.dll	bzip2	1.0.8	strings	strings: "<v>, <dd-Mon-yyyy>"
-tesseract	libcairo-2.dll	cairo	1.18.4	strings	strings: build path "cairo-<v>/"
-tesseract	libcurl-4.dll	curl	8.21.0	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libdatrie-1.dll	libdatrie	0.2.14	manifest:scripts/native-components-evidence.tsv	sha256 2f784872e6404e57: bin/libdatrie-1.dll of MSYS2 package mingw-w64-x86_64-libdatrie-0.2.14-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libdeflate.dll	libdeflate	1.25	manifest:scripts/native-components-evidence.tsv	sha256 3f3fc3a73bc3623d: bin/libdeflate.dll of MSYS2 package mingw-w64-x86_64-libdeflate-1.25-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libexpat-1.dll	expat	2.8.2.0	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libffi-8.dll	libffi	3.7.1	manifest:scripts/native-components-evidence.tsv	sha256 390e4bf8abd037ab: bin/libffi-8.dll of MSYS2 package mingw-w64-x86_64-libffi-3.7.1-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libfontconfig-1.dll	fontconfig	2.18.2	strings	strings: build path "fontconfig-<v>/"
-tesseract	libfreetype-6.dll	freetype	2.14.3	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libfribidi-0.dll	fribidi	1.0.16	strings	strings: "(GNU FriBidi) <v>"
-tesseract	libgcc_s_seh-1.dll	gcc-runtime	unknown	strings	no version resource; no identifying string; no GCC ident
-tesseract	libgif-7.dll	giflib	6.1.3	manifest:scripts/native-components-evidence.tsv	sha256 5b3d837ccaab8468: bin/libgif-7.dll of MSYS2 package mingw-w64-x86_64-giflib-6.1.3-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libgio-2.0-0.dll	glib	2.88.2	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libglib-2.0-0.dll	glib	2.88.2	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libgmodule-2.0-0.dll	glib	2.88.2	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libgobject-2.0-0.dll	glib	2.88.2	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libgraphite2.dll	graphite2	1.3.15	manifest:scripts/native-components-evidence.tsv	sha256 063a9ad34a5ec87d: bin/libgraphite2.dll of MSYS2 package mingw-w64-x86_64-graphite2-1.3.15-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libharfbuzz-0.dll	harfbuzz	14.2.1	strings	no version resource; strings: sole standalone version literal
-tesseract	libiconv-2.dll	libiconv	1.19	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libicudt78.dll	icu	78.3	manifest:scripts/native-components-evidence.tsv	sha256 47d19b605a28461d: bin/libicudt78.dll of MSYS2 package mingw-w64-x86_64-icu-78.3-3-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libicuin78.dll	icu	78.3	manifest:scripts/native-components-evidence.tsv	sha256 af3341827897a41a: bin/libicuin78.dll of MSYS2 package mingw-w64-x86_64-icu-78.3-3-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libicuuc78.dll	icu	78.3	strings	no version resource; strings: sole standalone version literal
-tesseract	libidn2-0.dll	libidn2	2.3.8	strings	no version resource; strings: sole standalone version literal
-tesseract	libintl-8.dll	gettext	1.0	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libjpeg-8.dll	libjpeg-turbo	3.2.0	strings	strings: "libjpeg-turbo version <v>"
-tesseract	libleptonica-6.dll	leptonica	1.87.0	manifest:scripts/native-components-evidence.tsv	sha256 1869b44e3d46fd83: bin/libleptonica-6.dll of MSYS2 package mingw-w64-x86_64-leptonica-1.87.0-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libLerc.dll	lerc	4.1.1	manifest:scripts/native-components-evidence.tsv	sha256 6887fb5aeabf382a: bin/libLerc.dll of MSYS2 package mingw-w64-x86_64-lerc-4.1.1-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	liblz4.dll	lz4	1.10.0.0	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	liblzma-5.dll	xz	5.8.3	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libopenjp2-7.dll	openjpeg	2.5.4	strings	no version resource; strings: sole standalone version literal
-tesseract	libpango-1.0-0.dll	pango	1.58.0	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libpangocairo-1.0-0.dll	pango	1.58.0	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libpangoft2-1.0-0.dll	pango	1.58.0	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libpangowin32-1.0-0.dll	pango	1.58.0	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libpcre2-8-0.dll	pcre2	10.47	manifest:scripts/native-components-evidence.tsv	sha256 a499fb8a7eff453d: bin/libpcre2-8-0.dll of MSYS2 package mingw-w64-x86_64-pcre2-10.47-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libpixman-1-0.dll	pixman	0.46.4	strings	strings: build path "pixman-<v>/"
-tesseract	libpng16-16.dll	libpng	1.6.58	strings	strings: "libpng version <v>"
-tesseract	libpsl-5.dll	libpsl	0.21.5	strings	strings: build path "libpsl-<v>/"
-tesseract	libsharpyuv-0.dll	libwebp	1.6.0	manifest:scripts/native-components-evidence.tsv	sha256 ab0c9f61dc69b6bc: bin/libsharpyuv-0.dll of MSYS2 package mingw-w64-x86_64-libwebp-1.6.0-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libssh2-1.dll	libssh2	1.11.1	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libstdc++-6.dll	gcc-runtime	unknown	strings	no version resource; no identifying string
-tesseract	libtesseract-5.dll	tesseract	5.5.3.20260724	strings	strings: "tesseract v<v>"
-tesseract	libthai-0.dll	libthai	0.1.30	manifest:scripts/native-components-evidence.tsv	sha256 5d741974fdec19e0: bin/libthai-0.dll of MSYS2 package mingw-w64-x86_64-libthai-0.1.30-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libtiff-6.dll	libtiff	4.7.2	strings	strings: "LIBTIFF, Version <v>"
-tesseract	libunistring-5.dll	libunistring	1.4.2	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libwebp-7.dll	libwebp	1.6.0	manifest:scripts/native-components-evidence.tsv	sha256 c6c21a10f8cfe132: bin/libwebp-7.dll of MSYS2 package mingw-w64-x86_64-libwebp-1.6.0-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
-tesseract	libwebpmux-3.dll	libwebp	1.6.0	manifest:scripts/native-components-evidence.tsv	sha256 2c8a2e9d7901ec65: bin/libwebpmux-3.dll of MSYS2 package mingw-w64-x86_64-libwebp-1.6.0-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libcairo-2.dll	cairo	1.18.0	strings	strings: build path "cairo-<v>/"
+tesseract	libcrypto-3-x64.dll	openssl	3.3.1	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libdatrie-1.dll	libdatrie	unknown	strings	no version resource; evidence row is for sha256 2f784872e6404e57, shipped f760aef8a31b7c36; no identifying string
+tesseract	libdeflate.dll	libdeflate	unknown	strings	no version resource; evidence row is for sha256 3f3fc3a73bc3623d, shipped b6ee7b31a23605d8; no identifying string
+tesseract	libexpat-1.dll	expat	2.6.2	strings	strings: "expat_<v>"
+tesseract	libffi-8.dll	libffi	unknown	strings	no version resource; evidence row is for sha256 390e4bf8abd037ab, shipped f1ed51652b3746c1; no identifying string
+tesseract	libfontconfig-1.dll	fontconfig	2.15.0	strings	strings: build path "fontconfig-<v>/"
+tesseract	libfreetype-6.dll	freetype	2.13.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libfribidi-0.dll	fribidi	1.0.14	strings	strings: "(GNU FriBidi) <v>"
+tesseract	libgcc_s_seh-1.dll	gcc-runtime	14.1.0	strings	no version resource; strings: dominant "GCC: (...) <v>" ident
+tesseract	libgif-7.dll	giflib	unknown	strings	no version resource; evidence row is for sha256 5b3d837ccaab8468, shipped a1a179853ae6fad8; no identifying string
+tesseract	libgio-2.0-0.dll	glib	2.80.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libglib-2.0-0.dll	glib	2.80.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libgmodule-2.0-0.dll	glib	2.80.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libgobject-2.0-0.dll	glib	2.80.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libgraphite2.dll	graphite2	unknown	strings	no version resource; evidence row is for sha256 063a9ad34a5ec87d, shipped f927efecd958f0e5; no identifying string
+tesseract	libharfbuzz-0.dll	harfbuzz	8.5.0	strings	strings: build path "harfbuzz-<v>/"
+tesseract	libiconv-2.dll	libiconv	1.17	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libicudt75.dll	icu	unknown	strings	no version resource; no identifying string
+tesseract	libicuin75.dll	icu	unknown	strings	no version resource; no identifying string
+tesseract	libicuuc75.dll	icu	75.1	strings	no version resource; strings: sole standalone version literal
+tesseract	libintl-8.dll	gettext	0.22.5	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libjpeg-8.dll	libjpeg-turbo	3.0.3	strings	strings: "libjpeg-turbo version <v>"
+tesseract	libleptonica-6.dll	leptonica	unknown	strings	no version resource; evidence row is for sha256 1869b44e3d46fd83, shipped 26861baff4d25446; no identifying string
+tesseract	libLerc.dll	lerc	unknown	strings	no version resource; evidence row is for sha256 6887fb5aeabf382a, shipped 4ab688c7c5c4afdf; no identifying string
+tesseract	liblz4.dll	lz4	1.9.4.0	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	liblzma-5.dll	xz	5.6.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libopenjp2-7.dll	openjpeg	2.5.2	strings	no version resource; strings: sole standalone version literal
+tesseract	libpango-1.0-0.dll	pango	1.52.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libpangocairo-1.0-0.dll	pango	1.52.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libpangoft2-1.0-0.dll	pango	1.52.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libpangowin32-1.0-0.dll	pango	1.52.2	pe-version	VS_VERSIONINFO ProductVersion
+tesseract	libpcre2-8-0.dll	pcre2	unknown	strings	no version resource; evidence row is for sha256 a499fb8a7eff453d, shipped 5ffa31709c275120; no identifying string
+tesseract	libpixman-1-0.dll	pixman	0.43.4	strings	strings: build path "pixman-<v>/"
+tesseract	libpng16-16.dll	libpng	1.6.43	strings	strings: "libpng version <v>"
+tesseract	libsharpyuv-0.dll	libwebp	unknown	strings	no version resource; evidence row is for sha256 ab0c9f61dc69b6bc, shipped 60bcc87ac64a834e; no identifying string
+tesseract	libstdc++-6.dll	gcc-runtime	14.1.0	strings	strings: build path "gcc-<v>/"
+tesseract	libtesseract-5.dll	tesseract	5.4.0.20240606	strings	strings: "tesseract v<v>"
+tesseract	libthai-0.dll	libthai	unknown	strings	no version resource; evidence row is for sha256 5d741974fdec19e0, shipped 420e08cedaf9daaa; no identifying string
+tesseract	libtiff-6.dll	libtiff	4.6.0	strings	strings: "LIBTIFF, Version <v>"
+tesseract	libwebp-7.dll	libwebp	unknown	strings	no version resource; evidence row is for sha256 c6c21a10f8cfe132, shipped 687b8859e1f739da; no identifying string
+tesseract	libwebpmux-3.dll	libwebp	unknown	strings	no version resource; evidence row is for sha256 2c8a2e9d7901ec65, shipped ad10bacecd37b44c; no identifying string
 tesseract	libwinpthread-1.dll	mingw-w64-winpthreads	1.0.0.0	pe-version	VS_VERSIONINFO ProductVersion
-tesseract	libzstd.dll	zstd	1.5.7	strings	no version resource; strings: sole standalone version literal
+tesseract	libzstd.dll	zstd	1.5.6	strings	no version resource; strings: sole standalone version literal
 tesseract	tesseract.exe	bzip2	1.0.8	runtime	tesseract.exe --version: "bz2lib/1.0.8"
-tesseract	tesseract.exe	giflib	5.2.2	runtime	tesseract.exe --version: "libgif 5.2.2"
-tesseract	tesseract.exe	leptonica	1.87.0	runtime	tesseract.exe --version: "leptonica-1.87.0"
-tesseract	tesseract.exe	libarchive	3.8.8	runtime	tesseract.exe --version: "libarchive 3.8.8"
-tesseract	tesseract.exe	libjpeg-turbo	3.1.3	runtime	tesseract.exe --version: "libjpeg-turbo 3.1.3"
-tesseract	tesseract.exe	libpng	1.6.58	runtime	tesseract.exe --version: "libpng 1.6.58"
-tesseract	tesseract.exe	libtiff	4.7.2	runtime	tesseract.exe --version: "libtiff 4.7.2"
-tesseract	tesseract.exe	libwebp	1.6.0	runtime	tesseract.exe --version: "libwebp 1.6.0"
-tesseract	tesseract.exe	lz4	1.10.0	runtime	tesseract.exe --version: "liblz4/1.10.0"
-tesseract	tesseract.exe	openjpeg	2.5.4	runtime	tesseract.exe --version: "libopenjp2 2.5.4"
-tesseract	tesseract.exe	tesseract	5.5.3.20260724	runtime	tesseract.exe --version: "tesseract v5.5.3.20260724"
-tesseract	tesseract.exe	xz	5.8.3	runtime	tesseract.exe --version: "liblzma/5.8.3"
-tesseract	tesseract.exe	zlib	1.3.1	runtime	tesseract.exe --version: "zlib 1.3.1"
-tesseract	tesseract.exe	zlib	1.3.2	runtime	tesseract.exe --version: "zlib/1.3.2"
-tesseract	tesseract.exe	zstd	1.5.7	runtime	tesseract.exe --version: "libzstd/1.5.7"
-tesseract	zlib1.dll	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
+tesseract	tesseract.exe	giflib	5.2.1	runtime	tesseract.exe --version: "libgif 5.2.1"
+tesseract	tesseract.exe	leptonica	1.84.1	runtime	tesseract.exe --version: "leptonica-1.84.1"
+tesseract	tesseract.exe	libarchive	3.7.4	runtime	tesseract.exe --version: "libarchive 3.7.4"
+tesseract	tesseract.exe	libjpeg-turbo	3.0.1	runtime	tesseract.exe --version: "libjpeg-turbo 3.0.1"
+tesseract	tesseract.exe	libpng	1.6.43	runtime	tesseract.exe --version: "libpng 1.6.43"
+tesseract	tesseract.exe	libtiff	4.6.0	runtime	tesseract.exe --version: "libtiff 4.6.0"
+tesseract	tesseract.exe	libwebp	1.4.0	runtime	tesseract.exe --version: "libwebp 1.4.0"
+tesseract	tesseract.exe	lz4	1.9.4	runtime	tesseract.exe --version: "liblz4/1.9.4"
+tesseract	tesseract.exe	openjpeg	2.5.2	runtime	tesseract.exe --version: "libopenjp2 2.5.2"
+tesseract	tesseract.exe	tesseract	5.4.0.20240606	runtime	tesseract.exe --version: "tesseract v5.4.0.20240606"
+tesseract	tesseract.exe	xz	5.6.1	runtime	tesseract.exe --version: "liblzma/5.6.1"
+tesseract	tesseract.exe	zlib	1.3	runtime	tesseract.exe --version: "zlib 1.3"
+tesseract	tesseract.exe	zlib	1.3.1	runtime	tesseract.exe --version: "zlib/1.3.1"
+tesseract	tesseract.exe	zstd	1.5.6	runtime	tesseract.exe --version: "libzstd/1.5.6"
+tesseract	zlib1.dll	zlib	1.3.1	strings	strings: "deflate <v> Copyright"
 libreoffice	program/Argon2OptDll.dll	argon2	unknown	strings	no version resource; no identifying string
 libreoffice	program/clucene.dll	clucene	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
 libreoffice	program/clucene.dll	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
