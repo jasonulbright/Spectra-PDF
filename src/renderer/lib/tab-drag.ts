@@ -396,6 +396,37 @@ export function planHandOff(reserved: boolean, dirty: boolean): HandOffPlan {
   return { hand: true, saveFirst: dirty };
 }
 
+/**
+ * The hand-offs this window has started and not yet finished.
+ *
+ * A dirty document's working copy is written over the user's path between the
+ * reservation and the commit. Destroying the origin in that gap delivers the
+ * queued open to the receiver at once, while the write is still running in the
+ * backend: the receiver reads the file before the stage is renamed over it and
+ * opens bytes older than the file, marked saved, and its next save overwrites
+ * the moved edits. A close therefore waits for every hand-off to settle.
+ */
+export class HandOffGate {
+  private readonly pending = new Set<Promise<void>>();
+
+  /** Run one hand-off, counted until it resolves or rejects. */
+  run<T>(work: () => Promise<T>): Promise<T> {
+    const result = work();
+    const settled = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.pending.add(settled);
+    void settled.then(() => this.pending.delete(settled));
+    return result;
+  }
+
+  /** Resolves once no hand-off is running, including any begun while waiting. */
+  async settled(): Promise<void> {
+    while (this.pending.size > 0) await Promise.all([...this.pending]);
+  }
+}
+
 // ── Ghost placement ───────────────────────────────────────────────────────
 
 /**
