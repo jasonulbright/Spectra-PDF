@@ -96,7 +96,7 @@ class TestHeifNotice:
         import zipfile
 
         wheel = os.path.join(
-            REPO, "vendor", "wheels", "pillow_heif-1.8.0+decode.1-cp314-cp314-win_amd64.whl"
+            REPO, "vendor", "wheels", "pillow_heif-1.8.0+decode.2-cp314-cp314-win_amd64.whl"
         )
         with zipfile.ZipFile(wheel) as zf:
             names = zf.namelist()
@@ -106,7 +106,7 @@ class TestHeifNotice:
         assert len(dlls) == 2
         dist_info = next(n.split("/", 1)[0] for n in names if n.endswith(".dist-info/METADATA"))
         version = dist_info[len("pillow_heif-"):-len(".dist-info")]
-        assert version == "1.8.0+decode.1"
+        assert version == "1.8.0+decode.2"
         for n in ("COPYING.libheif", "COPYING.libde265"):
             assert f"{dist_info}/licenses/{n}" in names
 
@@ -114,5 +114,5 @@ class TestHeifNotice:
         for dll in dlls:
             assert dll in text
         assert f"pillow_heif-{version}.dist-info" in text
-        assert "| libheif | 1.23.4 |" in text
+        assert "| libheif | 1.23.5 |" in text
         assert "| libde265 | 1.1.3 |" in text

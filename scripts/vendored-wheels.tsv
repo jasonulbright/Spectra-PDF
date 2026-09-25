@@ -25,11 +25,11 @@
 #
 # LOCAL BUILDS
 # A wheel built in this repository from its committed sdist carries a local
-# version label (`1.8.0+decode.1`): the bytes are not the index's, so they never
+# version label (`1.8.0+decode.2`): the bytes are not the index's, so they never
 # reuse the index's filename. Its sdist row carries the PUBLIC version, and the
 # install script pairs the two on the part before `+`. Its `upstream` field is
 # the repository script that builds it, which is allowed for `+label` wheels only;
 # every other row names an index URL.
 package	version	role	file	sha256	spdx	upstream
-pillow_heif	1.8.0+decode.1	wheel	pillow_heif-1.8.0+decode.1-cp314-cp314-win_amd64.whl	72ce867b3aced362b1432393ef89755ffad76907fece1de878ae434c41118199	BSD-3-Clause	scripts/build-pillow-heif-decode-only.ps1
+pillow_heif	1.8.0+decode.2	wheel	pillow_heif-1.8.0+decode.2-cp314-cp314-win_amd64.whl	3af6e836c5eadaa14fc1680cf223f58e3a18c9d065a4d7182b851800aca8322d	BSD-3-Clause	scripts/build-pillow-heif-decode-only.ps1
 pillow_heif	1.8.0	sdist	pillow_heif-1.8.0.tar.gz	e47c27432c6fd3d66c22f0de9f27fd379383b646c947520bc485854ce72060d0	BSD-3-Clause	https://files.pythonhosted.org/packages/bb/4c/d5319a1f276c70528ff97893afc42a300ff28029e27ca8de89bb3b271680/pillow_heif-1.8.0.tar.gz

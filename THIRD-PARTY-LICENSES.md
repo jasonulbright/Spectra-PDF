@@ -186,7 +186,7 @@ corresponding notices.
 ### HEIF decoding (pillow_heif)
 
 HEIC/HEIF camera images are decoded by **pillow_heif 1.8.0**, installed as the
-wheel `pillow_heif-1.8.0+decode.1`. That wheel is not the one the package index
+wheel `pillow_heif-1.8.0+decode.2`. That wheel is not the one the package index
 serves: `scripts/build-pillow-heif-decode-only.ps1` builds it from the binding's
 source distribution, which is committed to this repository at
 `vendor/wheels/pillow_heif-1.8.0.tar.gz`, and from the libheif and libde265
@@ -210,7 +210,7 @@ index wheel and is not the authority for this artifact:
 
 | Bundled library | Version | License | Corresponding source |
 |---|---|---|---|
-| libheif | 1.23.4 | LGPL-3.0-or-later | <https://github.com/strukturag/libheif/releases/download/v1.23.4/libheif-1.23.4.tar.gz> |
+| libheif | 1.23.5 | LGPL-3.0-or-later | <https://github.com/strukturag/libheif/releases/download/v1.23.5/libheif-1.23.5.tar.gz> |
 | libde265 | 1.1.3 | LGPL-3.0-or-later | <https://github.com/strukturag/libde265/releases/download/v1.1.3/libde265-1.1.3.tar.gz> |
 
 The run-time inventory reports one decoder (libde265) and no encoder other
@@ -221,7 +221,7 @@ libheif and libde265 are **LGPL-3.0** libraries combined with the application.
 The obligations that follow, and how each is met:
 
 - **Notice.** `COPYING.libheif` and `COPYING.libde265` ship in
-  `pillow_heif-1.8.0+decode.1.dist-info/licenses/` inside the installed
+  `pillow_heif-1.8.0+decode.2.dist-info/licenses/` inside the installed
   runtime, alongside this file. Each is the unmodified `COPYING` file of that
   library's pinned release archive: the LGPL-3.0 text followed by the GPL-3.0
   text it incorporates. The `LICENSES_bundled.txt` in the same directory is
@@ -231,7 +231,7 @@ The obligations that follow, and how each is met:
 - **Replacement.** Both libraries are ordinary DLLs loaded by the Windows
   loader from the site-packages directory, so a recipient may replace either
   with their own build. One practical condition: delvewheel renamed them with a
-  content hash (`heif-a76c6b4822ec6292c09cb85252f43034.dll` and
+  content hash (`heif-876f3a80218b1a207d7419d7664b9497.dll` and
   `libde265-f4739cb4844efa5930bf0764c71d55e2.dll`), and the importing modules
   bind to those exact names, so a replacement must be installed under the same
   filename. The wheel's `DELVEWHEEL` file records that the renaming happened
