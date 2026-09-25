@@ -26,6 +26,7 @@ readers, not about the document: what this module writes is the real
 structure, and the panel says plainly which readers will act on it.
 """
 
+import math
 from pathlib import Path
 
 import pikepdf
@@ -49,7 +50,7 @@ def _rect_of(bead) -> list[float] | None:
         raw = [float(v) for v in bead.get("/R")]
     except (TypeError, ValueError):
         return None
-    if len(raw) != 4:
+    if len(raw) != 4 or not all(math.isfinite(v) for v in raw):
         return None
     return [min(raw[0], raw[2]), min(raw[1], raw[3]), max(raw[0], raw[2]), max(raw[1], raw[3])]
 

@@ -45,6 +45,7 @@ The graphics-state tracking here duplicates redact.py's (~40 lines,
 helpers imported) rather than sharing the security-critical redactor's walk.
 """
 
+import math
 import os
 import stat
 import struct
@@ -379,6 +380,14 @@ def list_page_images(file: str, page: int) -> dict:
         _walk_placements(
             pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, placements, False
         )
+        # A placement whose matrix holds a real too large for a double has no
+        # extent and cannot be encoded. Its `index` came from the walk, which
+        # every mutator repeats, so omitting it leaves the other ids intact.
+        placements = [
+            entry
+            for entry in placements
+            if all(math.isfinite(float(v)) for v in (*entry["rect"], *entry["matrix"]))
+        ]
         return {"page": int(page), "images": placements}
 
 

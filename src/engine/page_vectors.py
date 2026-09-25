@@ -624,6 +624,8 @@ def list_page_vectors(file: str, page: int) -> dict:
         try:
             crop = p.obj.get("/CropBox", p.obj.get("/MediaBox"))
             bx = [float(v) for v in crop]
+            if not all(math.isfinite(v) for v in bx):
+                raise ValueError("page box value too large to read")
             page_box = [min(bx[0], bx[2]), min(bx[1], bx[3]), max(bx[0], bx[2]), max(bx[1], bx[3])]
         except (TypeError, ValueError):
             page_box = [0.0, 0.0, 612.0, 792.0]
@@ -632,7 +634,21 @@ def list_page_vectors(file: str, page: int) -> dict:
                 v["rect"] = list(page_box)
             for k in _INTERNAL:
                 v.pop(k, None)  # internal to the walk; the public listing omits them
+        # A real too large for a double makes a path's geometry infinite or
+        # NaN: it has no extent to select and cannot be encoded. Its `index`
+        # was assigned by the walk, so omitting it leaves every other id intact.
+        vectors = [v for v in vectors if _all_finite(v)]
         return {"page": int(page), "vectors": vectors}
+
+
+def _all_finite(value) -> bool:
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, dict):
+        return all(_all_finite(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return all(_all_finite(v) for v in value)
+    return True
 
 
 def list_page_geometry(file: str, page: int) -> dict:
@@ -684,6 +700,8 @@ def list_page_geometry(file: str, page: int) -> dict:
             for sub, is_closed in zip(subs, closed):
                 if len(sub) < 4:
                     continue  # a lone moveto draws nothing
+                if not all(math.isfinite(float(v)) for v in sub):
+                    continue
                 rounded.append([round(float(v), r) for v in sub])
                 keep_closed.append(bool(is_closed))
             if not rounded:

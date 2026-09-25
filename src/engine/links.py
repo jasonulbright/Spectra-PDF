@@ -37,6 +37,7 @@ links have always been written with, so a derived or selection-authored link
 is unchanged by this module gaining an appearance vocabulary.
 """
 
+import math
 import shutil
 from pathlib import Path
 
@@ -103,7 +104,7 @@ def _page_index_of(pdf, ref) -> int | None:
 def _rect(annot):
     try:
         r = [float(v) for v in annot.get("/Rect")]
-        if len(r) == 4:
+        if len(r) == 4 and all(math.isfinite(v) for v in r):
             return [min(r[0], r[2]), min(r[1], r[3]), max(r[0], r[2]), max(r[1], r[3])]
     except (TypeError, ValueError):
         pass
@@ -129,9 +130,10 @@ def _number(value) -> float | None:
     if value is None:
         return None
     try:
-        return float(value)
+        result = float(value)
     except (TypeError, ValueError):
         return None
+    return result if math.isfinite(result) else None
 
 
 def _read_view(dest) -> dict:

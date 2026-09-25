@@ -1,5 +1,6 @@
 """PDF inspection — page count, dimensions, info, encryption check."""
 
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -41,15 +42,26 @@ def unlock(file: str, password: str) -> dict:
     return {"unlocked": True}
 
 
+def _box_size(box) -> tuple[float | None, float | None]:
+    """Width and height of a page box, rounded for display, or None for a
+    dimension that does not read. A real too large for a double reads as
+    infinity and two of them subtract to NaN; neither is a size, and neither
+    can be encoded in a response. The page count stays answerable."""
+    w = float(box[2]) - float(box[0])
+    h = float(box[3]) - float(box[1])
+    return (
+        round(w, 1) if math.isfinite(w) else None,
+        round(h, 1) if math.isfinite(h) else None,
+    )
+
+
 def get_page_count(file: str) -> dict:
     """Return page count and page dimensions for a PDF."""
     with pikepdf.open(file) as pdf:
         page_sizes = []
         for page in pdf.pages:
-            box = page.trimbox or page.mediabox
-            w = float(box[2]) - float(box[0])
-            h = float(box[3]) - float(box[1])
-            page_sizes.append({"width": round(w, 1), "height": round(h, 1)})
+            w, h = _box_size(page.trimbox or page.mediabox)
+            page_sizes.append({"width": w, "height": h})
         return {
             "file": file,
             "pages": len(pdf.pages),
@@ -63,13 +75,11 @@ def get_page_info(file: str, page: int) -> dict:
         if page < 1 or page > len(pdf.pages):
             raise ValueError(f"Page {page} out of range (1-{len(pdf.pages)})")
         p = pdf.pages[page - 1]
-        box = p.trimbox or p.mediabox
-        w = float(box[2]) - float(box[0])
-        h = float(box[3]) - float(box[1])
+        w, h = _box_size(p.trimbox or p.mediabox)
         rotation = int(p.get("/Rotate", 0))
         return {
             "page": page,
-            "width": round(w, 1),
-            "height": round(h, 1),
+            "width": w,
+            "height": h,
             "rotation": rotation,
         }
