@@ -4335,11 +4335,13 @@ export function WorkspaceCanvasView({
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const pointers = pointerScope(e.pointerId);
-    const onMove = (ev: PointerEvent): void => {
+    const onMove = (ev: PointerEvent): void => {
+
       const r = (ev.clientY - rect.top) / Math.max(rect.height, 1);
       setSplitRatio(Math.min(0.85, Math.max(0.15, r)));
     };
-    const onUp = (): void => {
+    const onUp = (): void => {
+
       pointers.remove('pointermove', onMove);
       pointers.remove('pointerup', onUp);
       pointers.remove('pointercancel', onUp);
@@ -4358,7 +4360,8 @@ export function WorkspaceCanvasView({
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const pointers = pointerScope(e.pointerId);
-    const onMove = (ev: PointerEvent): void => {
+    const onMove = (ev: PointerEvent): void => {
+
       if (axis === 'row') {
         const r = (ev.clientY - rect.top) / Math.max(rect.height, 1);
         setSplitRatio(Math.min(0.85, Math.max(0.15, r)));
@@ -4367,7 +4370,8 @@ export function WorkspaceCanvasView({
         setQuadCol(Math.min(0.85, Math.max(0.15, c)));
       }
     };
-    const onUp = (): void => {
+    const onUp = (): void => {
+
       pointers.remove('pointermove', onMove);
       pointers.remove('pointerup', onUp);
       pointers.remove('pointercancel', onUp);
