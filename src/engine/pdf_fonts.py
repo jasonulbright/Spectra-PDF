@@ -42,6 +42,7 @@ Editability taxonomy (every run is LISTED; refusal carries the reason):
     fallback lifts coverage refusals for the editable ones.
 """
 
+import math
 import re
 import zlib
 from contextlib import contextmanager
@@ -511,7 +512,11 @@ class FontCapability:
         self.reader_limit = reader_limit
         self._code2uni = code2uni
         self._uni2code = uni2code
-        self._widths = widths
+        # A width that overflows a double is a missing width: an infinite
+        # advance turns every later pen position into inf or NaN.
+        self._widths = {c: w for c, w in widths.items() if math.isfinite(w)}
+        if not math.isfinite(default_width):
+            default_width, default_declared = DEFAULT_WIDTH, False
         self._default_width = default_width
         # Is `default_width` DECLARED by the document, or a placeholder?
         # A composite font's /DW (default 1000 per spec) genuinely states the
@@ -544,7 +549,7 @@ class FontCapability:
         # between code and CID, each drawn code is measured through its own
         # CID, whether or not any ToUnicode entry names it.
         self._cid_of = cid_of
-        self._cid_widths = cid_widths or {}
+        self._cid_widths = {c: w for c, w in (cid_widths or {}).items() if math.isfinite(w)}
         # Multi-char sequence → its single ligature code (len 2..4,
         # unambiguous inverse, encode-guard-filtered — see _ligatures).
         # encode()/text_width() match these longest-first; encodable()/

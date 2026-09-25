@@ -12,6 +12,7 @@ viewer show nothing). The box is written directly on each page object (not
 inherited), so a page keeps its box even if the file hoisted a shared one.
 """
 
+import math
 from pathlib import Path
 
 import pikepdf
@@ -50,6 +51,9 @@ def effective_box(page, key: str):
     try:
         x0, y0, x1, y1 = (float(v[i]) for i in range(4))
     except (TypeError, ValueError, IndexError):
+        return None
+    # A coordinate past about 309 digits reads as inf: the box is unreadable.
+    if not all(math.isfinite(c) for c in (x0, y0, x1, y1)):
         return None
     return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
 

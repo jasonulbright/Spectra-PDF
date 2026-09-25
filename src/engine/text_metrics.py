@@ -38,6 +38,7 @@ reason this module has a surface of its own:
     across the descenders of a line missed the bbox entirely.
 """
 
+import math
 from typing import NamedTuple, Optional
 
 from pdfminer.fontmetrics import FONT_METRICS
@@ -264,9 +265,14 @@ def _show_segments(operator: str, operands: list) -> list:
         try:
             for el in arr:
                 try:
-                    out.append(float(el))
+                    kern = float(el)
                 except (TypeError, ValueError):
                     out.append(_operand_bytes(el))
+                    continue
+                # An overflowing adjustment is unreadable and moves nothing;
+                # kept, it sends every later glyph to inf or NaN.
+                if math.isfinite(kern):
+                    out.append(kern)
         except TypeError:
             return []
         return out
