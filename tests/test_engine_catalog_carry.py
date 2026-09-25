@@ -96,7 +96,7 @@ def _assert_first_page_part(pdf):
     assert annots[4].A.S == Name.GoToR and bytes(annots[4].A.D) == b'beta'
     assert annots[5].A.S == Name.JavaScript
     assert '/Dest' not in annots[6]
-    assert '/A' not in annots[7]
+    assert bytes(annots[7].A.D) == b'alpha' and '/Next' not in annots[7].A
     assert list(annots[8].AA.keys()) == ['/X']
 
 
@@ -174,3 +174,79 @@ def test_merge_presentation_conflict_resolves_to_first_definer(tmp_path):
         assert pdf.Root.PageMode == Name.UseThumbs
         assert pdf.Root.PageLayout == Name.SinglePage
         assert bytes(pdf.Root.URI.Base) == b'http://b.test/'
+
+
+def _pages(count):
+    pdf = pikepdf.new()
+    for _ in range(count):
+        pdf.add_blank_page()
+    return pdf
+
+
+def _link(pdf, index, **keys):
+    annot = pdf.make_indirect(Dictionary(Type=Name.Annot, Subtype=Name.Link, Rect=[0, 0, 10, 10], **keys))
+    pdf.pages[index].obj.Annots = Array([annot])
+    return annot
+
+
+def test_only_the_dangling_goto_leaves_an_action_chain():
+    from engine.page_copy import copy_pages_with_forms
+    src = _pages(3)
+    far, near = src.pages[2].obj, src.pages[0].obj
+    _link(src, 0, AA=Dictionary(
+        E=Dictionary(S=Name.GoTo, D=Array([far, Name.Fit])),
+        D=Dictionary(S=Name.JavaScript, JS=String('1'), Next=Dictionary(S=Name.GoTo, D=Array([far, Name.Fit]))),
+        U=Dictionary(S=Name.GoTo, D=Array([far, Name.Fit]), Next=Array([
+            Dictionary(S=Name.JavaScript, JS=String('2')),
+            Dictionary(S=Name.GoTo, D=Array([near, Name.Fit]))]))))
+    dst = pikepdf.new()
+    copy_pages_with_forms(dst, src, pages=[0])
+    aa = dst.pages[0].Annots[0].AA
+    assert '/E' not in aa
+    assert aa.D.S == Name.JavaScript and '/Next' not in aa.D
+    assert aa.U.S == Name.JavaScript and bytes(aa.U.JS) == b'2'
+    assert [a.S for a in aa.U.Next] == [Name.GoTo] and aa.U.Next[0].D[0].objgen == dst.pages[0].obj.objgen
+
+
+def test_integer_page_destination_maps_through_its_own_source():
+    from engine.page_copy import copy_pages_with_forms
+    src = _pages(3)
+    _link(src, 0, Dest=Array([2, Name.Fit]))
+    _link(src, 1, Dest=Array([2, Name.Fit]))
+    src.Root.Dests = Dictionary(Third=Array([2, Name.Fit]))
+    dst = _pages(5)
+    copy_pages_with_forms(dst, src)
+    assert dst.pages[5].Annots[0].Dest[0].objgen == dst.pages[7].obj.objgen
+    assert dst.Root.Dests.Third.D[0].objgen == dst.pages[7].obj.objgen
+    part = pikepdf.new()
+    copy_pages_with_forms(part, src, pages=[0])
+    assert '/Dest' not in part.pages[0].Annots[0] and '/Dests' not in part.Root
+
+
+def test_utf16_name_collision_suffix_stays_utf16():
+    from engine.page_copy import copy_pages_with_forms
+    key = b'\xfe\xff\x00A'
+    dst = pikepdf.new()
+    results = []
+    for _ in range(2):
+        src = _pages(1)
+        src.Root.Names = Dictionary(Dests=Dictionary(Names=Array([String(key), Array([src.pages[0].obj, Name.Fit])])))
+        _link(src, 0, Dest=String(key))
+        results.append(copy_pages_with_forms(dst, src))
+    final = key + '.1'.encode('utf-16-be')
+    assert bytes(dst.pages[1].Annots[0].Dest) == final
+    assert str(String(final)) == 'A.1'
+    assert results[1].renamed_dests == {'A': 'A.1'}
+
+
+def test_structure_destination_loss_is_reported():
+    from engine.page_copy import copy_pages_with_forms
+    src = _pages(1)
+    element = src.make_indirect(Dictionary(Type=Name.StructElem, S=Name.P))
+    src.Root.Names = Dictionary(Dests=Dictionary(Names=Array([
+        String('s'), Dictionary(D=Array([src.pages[0].obj, Name.Fit]), SD=Array([element, Name.Fit]))])))
+    dst = pikepdf.new()
+    result = copy_pages_with_forms(dst, src)
+    entry = dst.Root.Names.Dests.Names[1]
+    assert entry.D[0].objgen == dst.pages[0].obj.objgen
+    assert result.dropped_dests == ['s /SD']
