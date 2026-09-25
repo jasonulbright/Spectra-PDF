@@ -1646,7 +1646,7 @@ pub async fn send_to_engine(
 ) -> Result<(), String> {
     let mut request = request;
     let state = app.state::<EngineState>();
-    let mut guard = state.child.lock().await;
+    let mut guard = engine::lock_started(&state.child, || engine::start(&app)).await?;
     if let Some(ref mut child) = *guard {
         let outer = engine::route_request(&app, window.label(), &mut request, child.child.pid())?;
         let unroute = |app: &AppHandle| {
