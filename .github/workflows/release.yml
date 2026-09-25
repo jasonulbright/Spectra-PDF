@@ -190,6 +190,13 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/stage-corresponding-source.ps1 -OutputDirectory release-sources
         shell: pwsh
 
+      # Every native library inside the provisioned trees, at the version the
+      # binary carries, must match scripts/native-components.tsv and clear its
+      # floor in scripts/native-advisories.tsv. Mirrored in scripts/ci-parity-gates.sh.
+      - name: Shipped native components match their pin and floors
+        run: python scripts/native-components.py --check
+        shell: bash
+
       # The release body and the updater manifest's `notes` are one string,
       # taken from the changelog section for this version. The extractor
       # refuses a missing or empty section, a `Remaining` heading, and the

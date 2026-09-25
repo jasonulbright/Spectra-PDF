@@ -1,0 +1,313 @@
+# Security advisory floors for the native components shipped under resources/.
+# Floors come from primary advisories (NVD, GitHub Security Advisories, upstream
+# security pages, OSV) checked on 2026-09-25 against the versions physically shipped.
+# The inventory gate refuses any shipped version of a component below a floor.
+# A floor is never lowered without a written exemption.
+# floor is the first fixed release. When it lists several comma-separated versions,
+# each applies to its own release branch (same major.minor); a version on no listed
+# branch is held to the lowest listed floor.
+# A row with floor "-" and advisory "none" records a component audited clean.
+# Reachability is recorded in the disposition; it never exempts a row.
+component	floor	advisory	disposition
+CPython	3.14.8	CVE-2026-15310	affects embedded 3.14.7; fixed on the 3.14 branch, no 3.14.8 release as of 2026-09-25; 3.12.14 not affected
+CPython	3.14.8	CVE-2026-19672	affects embedded 3.14.7; fixed on the 3.14 branch, no 3.14.8 release as of 2026-09-25; 3.12.14 not affected
+CPython	3.12.15,3.14.8	CVE-2026-15806	affects embedded 3.14.7 and LibreOffice-bundled 3.12.13; still open in 3.12.14; no fixed release as of 2026-09-25
+CPython	3.12.15,3.14.8	CVE-2026-17084	affects embedded 3.14.7 and LibreOffice-bundled 3.12.13; still open in 3.12.14; no fixed release as of 2026-09-25
+CPython	3.12.14,3.14.0	CVE-2025-13462	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-0864	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-11940	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-11972	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-12003	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-1502	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-15308	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-18503	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-2297	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-3087	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-3276	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-3298	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-3644	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-4224	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-4360	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-4519	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-4786	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-6100	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-6879	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-7210	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-7774	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-8328	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-9669	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+CPython	3.12.14,3.14.0	CVE-2026-3479	affects LibreOffice-bundled 3.12.13 only; fixed in 3.12.14, which LibreOffice 26.2.6 carries
+OpenSSL	3.5.8,4.0.2	CVE-2026-14456	affects 3.5.7 in embedded CPython and in LibreOffice; CPython 3.14 branch pins 3.5.8 (unreleased); no LibreOffice release carries 3.5.8
+OpenSSL	3.5.8,4.0.2	CVE-2026-14457	affects 3.5.7 in embedded CPython and in LibreOffice; CPython 3.14 branch pins 3.5.8 (unreleased); no LibreOffice release carries 3.5.8
+OpenSSL	3.5.8,4.0.2	CVE-2026-18798	affects 3.5.7 in embedded CPython and in LibreOffice; CPython 3.14 branch pins 3.5.8 (unreleased); no LibreOffice release carries 3.5.8
+OpenSSL	3.5.8,4.0.2	CVE-2026-54874	affects 3.5.7 in embedded CPython and in LibreOffice; CPython 3.14 branch pins 3.5.8 (unreleased); no LibreOffice release carries 3.5.8
+OpenSSL	3.5.8,4.0.2	CVE-2026-63072	affects 3.5.7 in embedded CPython and in LibreOffice; CPython 3.14 branch pins 3.5.8 (unreleased); no LibreOffice release carries 3.5.8
+OpenSSL	3.5.8,4.0.2	CVE-2026-63073	affects 3.5.7 in embedded CPython and in LibreOffice; CPython 3.14 branch pins 3.5.8 (unreleased); no LibreOffice release carries 3.5.8
+OpenSSL	3.5.8,4.0.2	CVE-2026-63074	affects 3.5.7 in embedded CPython and in LibreOffice; CPython 3.14 branch pins 3.5.8 (unreleased); no LibreOffice release carries 3.5.8
+OpenSSL	3.5.8,4.0.2	CVE-2026-63075	affects 3.5.7 in embedded CPython and in LibreOffice; CPython 3.14 branch pins 3.5.8 (unreleased); no LibreOffice release carries 3.5.8
+OpenSSL	3.5.8,4.0.2	CVE-2026-63076	affects 3.5.7 in embedded CPython and in LibreOffice; CPython 3.14 branch pins 3.5.8 (unreleased); no LibreOffice release carries 3.5.8
+OpenSSL	3.5.8,4.0.2	CVE-2026-75803	affects 3.5.7 in embedded CPython and in LibreOffice; CPython 3.14 branch pins 3.5.8 (unreleased); no LibreOffice release carries 3.5.8
+OpenSSL	3.3.2,3.5.0	CVE-2024-6119	affects 3.3.1 in the Tesseract tree
+OpenSSL	3.3.6,3.5.0	CVE-2025-15467	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.6,3.5.0	CVE-2025-15468	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.6,3.5.0	CVE-2025-66199	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.6,3.5.0	CVE-2025-68160	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.6,3.5.0	CVE-2025-69418	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.6,3.5.0	CVE-2025-69419	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.6,3.5.0	CVE-2025-69420	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.6,3.5.0	CVE-2025-69421	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.6,3.5.0	CVE-2026-22795	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.6,3.5.0	CVE-2026-22796	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.7,3.5.0	CVE-2026-28387	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.7,3.5.0	CVE-2026-28388	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.7,3.5.0	CVE-2026-28389	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.7,3.5.0	CVE-2026-28390	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.7,3.5.0	CVE-2026-31789	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+OpenSSL	3.3.7,3.5.0	CVE-2026-31790	affects 3.3.1 in the Tesseract tree; the 3.3 branch is end of life
+SQLite	3.53.2	CVE-2026-11822	affects 3.50.4 in embedded CPython and 3.53.0 in LibreOffice program/; needs attacker SQL with FTS5 and defensive mode off
+SQLite	3.53.2	CVE-2026-11824	affects 3.50.4 in embedded CPython and 3.53.0 in LibreOffice program/; needs attacker SQL with FTS5 and defensive mode off
+SQLite	3.52.0	CVE-2025-70873	affects 3.50.4 in embedded CPython; zipfile extension only
+Expat	2.6.3	CVE-2024-45490	affects 2.6.2 in the Tesseract tree
+Expat	2.6.3	CVE-2024-45491	affects 2.6.2 in the Tesseract tree
+Expat	2.6.3	CVE-2024-45492	affects 2.6.2 in the Tesseract tree
+Expat	2.6.4	CVE-2024-50602	affects 2.6.2 in the Tesseract tree
+Expat	2.7.2	CVE-2025-59375	affects 2.6.2 in the Tesseract tree
+Expat	2.7.4	CVE-2025-66382	affects 2.6.2 in the Tesseract tree
+Expat	2.7.4	CVE-2026-24515	affects 2.6.2 in the Tesseract tree
+Expat	2.7.4	CVE-2026-25210	affects 2.6.2 in the Tesseract tree
+Expat	2.7.5	CVE-2026-32776	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.7.5	CVE-2026-32777	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.7.5	CVE-2026-32778	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.0	CVE-2026-41080	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.1	CVE-2026-45186	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-50219	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-56131	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-56132	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-56403	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-56404	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-56405	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-56406	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-56407	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-56408	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-56409	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-56410	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-56411	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.2	CVE-2026-56412	affects 2.6.2 in the Tesseract tree and 2.7.4 in LibreOffice-bundled CPython
+Expat	2.8.3	CVE-2026-72522	affects every shipped copy: 2.8.2 (embedded CPython, LibreOffice), 2.7.4, 2.6.2
+Expat	2.8.4	CVE-2026-66046	affects every shipped copy
+Expat	2.8.4	CVE-2026-76641	affects every shipped copy
+Expat	2.8.4	CVE-2026-76956	affects every shipped copy; getentropy handling, not reached on Windows
+Expat	2.8.4	CVE-2026-76957	affects every shipped copy
+Expat	2.8.5	CVE-2026-93990	affects every shipped copy; CPython 3.14 branch carries 2.8.5 (unreleased)
+zlib	1.3.2	CVE-2026-27171	affects 1.3.1 zlib1.dll in the Tesseract tree and 1.3.1 linked into pikepdf qpdf30 dll
+zlib	1.3.2	CVE-2026-22184	affects 1.3.1 by version; contrib/untgz only, not compiled into the shipped library
+XZ Utils	5.8.3	CVE-2026-34743	affects 5.2.5 linked into CPython _lzma.pyd and 5.6.2 liblzma-5.dll in the Tesseract tree
+XZ Utils	5.8.1	CVE-2025-31115	affects 5.6.2 liblzma-5.dll in the Tesseract tree (range 5.3.3alpha to 5.8.0)
+XZ Utils	5.2.6	CVE-2020-22916	affects 5.2.5 in CPython _lzma.pyd by version; disputed by upstream
+XZ Utils	5.6.2	CVE-2024-3094	not affected: shipped liblzma-5.dll is 5.6.2; libarchive-13.dll embeds the compile-time string liblzma/5.6.1
+libxml2	2.12.10	CVE-2024-56171	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
+libxml2	2.12.10	CVE-2025-24928	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
+libxml2	2.12.10	CVE-2025-27113	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
+libxml2	2.13.8	CVE-2025-32414	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
+libxml2	2.13.8	CVE-2025-32415	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
+libxml2	2.14.4	CVE-2025-6021	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
+libxml2	2.15.2	CVE-2025-8732	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.15.2	CVE-2026-0989	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.15.2	CVE-2026-0990	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.15.2	CVE-2026-0992	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.15.3	CVE-2026-6732	affects 2.14.6 in LibreOffice
+libxml2	2.15.4	CVE-2026-11979	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.15.4	CVE-2026-86137	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.15.4	CVE-2026-86138	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.15.4	CVE-2026-86139	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.15.4	CVE-2026-86140	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.15.4	CVE-2026-86141	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.15.4	CVE-2026-86142	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.15.4	CVE-2026-86143	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.15.4	CVE-2026-86144	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libheif	1.23.5	GHSA-qfj5-c4pq-q998	affected the replaced 1.23.4; shipped 1.23.5 is fixed (pillow_heif decode-only build); AV1, JPEG 2000 and encoder paths are not compiled in; no CVE assigned
+libheif	1.23.5	GHSA-qwpf-5wf7-r996	affected the replaced 1.23.4; shipped 1.23.5 is fixed (pillow_heif decode-only build); AV1, JPEG 2000 and encoder paths are not compiled in; no CVE assigned
+libheif	1.23.5	GHSA-9c75-9g8r-4728	affected the replaced 1.23.4; shipped 1.23.5 is fixed (pillow_heif decode-only build); AV1, JPEG 2000 and encoder paths are not compiled in; no CVE assigned
+libheif	1.23.5	GHSA-r7gr-2xm2-23wf	affected the replaced 1.23.4; shipped 1.23.5 is fixed (pillow_heif decode-only build); AV1, JPEG 2000 and encoder paths are not compiled in; no CVE assigned
+libheif	1.23.5	GHSA-7pwf-qh74-p35w	affected the replaced 1.23.4; shipped 1.23.5 is fixed (pillow_heif decode-only build); AV1, JPEG 2000 and encoder paths are not compiled in; no CVE assigned
+libheif	1.23.5	GHSA-v8qw-hwjv-44hw	affected the replaced 1.23.4; shipped 1.23.5 is fixed (pillow_heif decode-only build); AV1, JPEG 2000 and encoder paths are not compiled in; no CVE assigned
+libheif	1.23.5	GHSA-q492-cfcm-895h	affected the replaced 1.23.4; shipped 1.23.5 is fixed (pillow_heif decode-only build); AV1, JPEG 2000 and encoder paths are not compiled in; no CVE assigned
+libheif	1.23.4	GHSA-rhgw-q5g8-xjh2	affected the replaced 1.23.0 only; shipped 1.23.5 is fixed
+libheif	1.23.4	GHSA-4rv4-953r-p24q	affected the replaced 1.23.0 only; shipped 1.23.5 is fixed
+libheif	1.23.4	GHSA-vg7w-rp49-4fc2	affected the replaced 1.23.0 only; shipped 1.23.5 is fixed
+libheif	1.23.4	GHSA-xrp2-63fq-jm8q	affected the replaced 1.23.0 only; shipped 1.23.5 is fixed
+libheif	1.23.4	GHSA-prgh-72vc-3xmc	affected the replaced 1.23.0 only; shipped 1.23.5 is fixed
+libde265	1.1.2	GHSA-mm7m-v26f-wf8x	affected the replaced 1.1.1 only; shipped 1.1.3 is fixed
+libde265	1.1.2	GHSA-xp3h-6f5r-8cxp	affected the replaced 1.1.1 only; shipped 1.1.3 is fixed
+libde265	1.1.3	GHSA-vm5w-mrw5-q329	affected the replaced 1.1.1 only; shipped 1.1.3 is fixed
+Tesseract	5.5.4	CVE-2026-88047	affects 5.4.0 and 5.5.3; patched in 5.5.4, not released as of 2026-09-25; model-file loader, product loads its own models
+Tesseract	5.5.4	CVE-2026-88051	affects 5.4.0 and 5.5.3; patched in 5.5.4, not released as of 2026-09-25; model-file loader, product loads its own models
+Tesseract	5.5.4	CVE-2026-88048	affects 5.4.0 and 5.5.3; upstream names no patched version; model-file loader, product loads its own models
+Tesseract	5.5.4	CVE-2026-88049	affects 5.4.0 and 5.5.3; upstream names no patched version; model-file loader, product loads its own models
+Tesseract	5.5.4	CVE-2026-88050	affects 5.4.0 and 5.5.3; upstream names no patched version; model-file loader, product loads its own models
+Tesseract	5.5.4	CVE-2026-88052	affects 5.4.0 and 5.5.3; upstream names no patched version; model-file loader, product loads its own models
+Tesseract	5.5.4	CVE-2026-88053	affects 5.4.0 and 5.5.3; upstream names no patched version; model-file loader, product loads its own models
+Tesseract	5.5.4	CVE-2026-88054	affects 5.4.0 and 5.5.3; upstream names no patched version; model-file loader, product loads its own models
+Tesseract	5.5.4	CVE-2026-73067	affects 5.4.0 and 5.5.3; upstream names no patched version; model-file loader, product loads its own models
+Tesseract	5.5.3	CVE-2026-73066	affects 5.4.0; fixed in 5.5.3
+giflib	5.2.2	CVE-2022-28506	affects 5.2.1 by version (libgif-7.dll in the Tesseract tree; micro version unverified); gif2rgb and getarg tools not shipped
+giflib	5.2.2	CVE-2023-39742	affects 5.2.1 by version (libgif-7.dll in the Tesseract tree; micro version unverified); gif2rgb and getarg tools not shipped
+giflib	5.2.2	CVE-2023-48161	affects 5.2.1 by version (libgif-7.dll in the Tesseract tree; micro version unverified); gif2rgb and getarg tools not shipped
+giflib	6.0.0	CVE-2024-45993	affects 5.2.2 in jbig2enc by version; gif2rgb tool not shipped
+giflib	6.1.2	CVE-2026-23868	affects every shipped giflib 5.x; upstream states tools only, not the library
+giflib	6.1.4	CVE-2026-26740	affects 5.2.2 in jbig2enc by version; fixed in the giflib repository head, no release as of 2026-09-25
+libpng	1.6.47	CVE-2025-28162	affects 1.6.43 in the Tesseract tree
+libpng	1.6.47	CVE-2025-28164	affects 1.6.43 in the Tesseract tree
+libpng	1.6.51	CVE-2025-64505	affects 1.6.43 in the Tesseract tree
+libpng	1.6.51	CVE-2025-64506	affects 1.6.43 in the Tesseract tree
+libpng	1.6.51	CVE-2025-64720	affects 1.6.43 in the Tesseract tree
+libpng	1.6.51	CVE-2025-65018	affects 1.6.43 in the Tesseract tree
+libpng	1.6.52	CVE-2025-66293	affects 1.6.43 in the Tesseract tree
+libpng	1.6.54	CVE-2026-22801	affects 1.6.43 in the Tesseract tree
+libpng	1.6.55	CVE-2026-25646	affects 1.6.43 in the Tesseract tree
+libpng	1.6.56	CVE-2026-33416	affects 1.6.43 in the Tesseract tree
+libpng	1.6.56	CVE-2026-33636	affects 1.6.43 in the Tesseract tree
+libpng	1.6.57	CVE-2026-34757	affects 1.6.43 in the Tesseract tree
+libtiff	4.7.0	CVE-2024-7006	affects 4.6.0 (JBIG-free rebuild) in the Tesseract tree
+libtiff	4.7.1	CVE-2024-13978	affects 4.6.0 (JBIG-free rebuild) in the Tesseract tree
+libtiff	4.7.1	CVE-2025-8176	affects 4.6.0 (JBIG-free rebuild) in the Tesseract tree
+libtiff	4.7.1	CVE-2025-8177	affects 4.6.0 (JBIG-free rebuild) in the Tesseract tree
+libtiff	4.7.0	CVE-2025-8534	affects 4.6.0 (JBIG-free rebuild) in the Tesseract tree
+libtiff	4.7.1	CVE-2025-61143	affects 4.6.0 (JBIG-free rebuild) in the Tesseract tree
+libtiff	4.7.1	CVE-2025-61144	affects 4.6.0 (JBIG-free rebuild) in the Tesseract tree
+libtiff	4.7.1	CVE-2025-61145	affects 4.6.0 (JBIG-free rebuild) in the Tesseract tree
+OpenJPEG	2.5.4	CVE-2025-54874	affects 2.5.2 in the Tesseract tree
+libarchive	3.7.5	CVE-2024-48957	affects 3.7.4 in the Tesseract tree
+libarchive	3.7.5	CVE-2024-48958	affects 3.7.4 in the Tesseract tree
+libarchive	3.7.7	CVE-2024-48615	affects 3.7.4 in the Tesseract tree
+libarchive	3.8.0	CVE-2025-1632	affects 3.7.4 in the Tesseract tree
+libarchive	3.8.0	CVE-2025-25724	affects 3.7.4 in the Tesseract tree
+libarchive	3.8.0	CVE-2025-5914	affects 3.7.4 in the Tesseract tree
+libarchive	3.8.0	CVE-2025-5915	affects 3.7.4 in the Tesseract tree
+libarchive	3.8.0	CVE-2025-5916	affects 3.7.4 in the Tesseract tree
+libarchive	3.8.0	CVE-2025-5917	affects 3.7.4 in the Tesseract tree
+libarchive	3.8.0	CVE-2025-5918	affects 3.7.4 in the Tesseract tree
+libarchive	3.8.2	CVE-2025-60753	affects 3.7.4 in the Tesseract tree
+libarchive	3.8.8	CVE-2026-45308	affects 3.7.4 in the Tesseract tree
+GLib	2.82.1	CVE-2024-52533	affects 2.80.2 in the Tesseract tree
+GLib	2.84.1	CVE-2025-4056	affects 2.80.2 in the Tesseract tree
+GLib	2.84.4	CVE-2025-6052	affects 2.80.2 in the Tesseract tree
+GLib	2.86.3	CVE-2025-13601	affects 2.80.2 in the Tesseract tree
+GLib	2.86.3	CVE-2025-14087	affects 2.80.2 in the Tesseract tree
+GLib	2.86.3	CVE-2025-14512	affects 2.80.2 in the Tesseract tree
+GLib	2.86.5	CVE-2026-58010	affects 2.80.2 in the Tesseract tree
+GLib	2.86.5	CVE-2026-58011	affects 2.80.2 in the Tesseract tree
+GLib	2.86.5	CVE-2026-58012	affects 2.80.2 in the Tesseract tree
+GLib	2.88.1	CVE-2026-58013	affects 2.80.2 in the Tesseract tree
+GLib	2.88.1	CVE-2026-58014	affects 2.80.2 in the Tesseract tree
+GLib	2.88.1	CVE-2026-58015	affects 2.80.2 in the Tesseract tree
+GLib	2.88.1	CVE-2026-58016	affects 2.80.2 in the Tesseract tree
+ICU	77.1	CVE-2025-5222	affects 75.1 in the Tesseract tree; genrb tool, not shipped
+PCRE2	10.48	CVE-2026-86145	affects 10.43 in the Tesseract tree; Tesseract 5.5.3 carries 10.47, also affected
+PCRE2	10.48	CVE-2026-89156	affects 10.43 in the Tesseract tree; Tesseract 5.5.3 carries 10.47, also affected
+PCRE2	10.48	CVE-2026-89157	affects 10.43 in the Tesseract tree; Tesseract 5.5.3 carries 10.47, also affected
+PCRE2	10.48	CVE-2026-89158	affects 10.43 in the Tesseract tree; Tesseract 5.5.3 carries 10.47, also affected
+PCRE2	10.48	CVE-2026-89160	affects 10.43 in the Tesseract tree; Tesseract 5.5.3 carries 10.47, also affected
+PCRE2	10.48	CVE-2026-89161	affects 10.43 in the Tesseract tree; Tesseract 5.5.3 carries 10.47, also affected
+FreeType	2.14.0	CVE-2026-23865	affects 2.13.2 in the Tesseract tree
+HarfBuzz	10.1.0	CVE-2024-56732	affects 8.5.0 in the Tesseract tree by version; hb-cairo code is not in the shipped DLL set
+HarfBuzz	12.3.0	CVE-2026-22693	affects 8.5.0 in the Tesseract tree
+HarfBuzz	14.0.0	GHSA-q4gc-p4hh-3765	affects 8.5.0 in the Tesseract tree and 12.3.2 in LibreOffice; no CVE assigned
+curl	8.22.0	CVE-2026-13608	affects libcurl 8.21.0 in LibreOffice; LibreOffice 26.2.6 and 26.8.0 still pin 8.21.0
+curl	8.22.0	CVE-2026-18924	affects libcurl 8.21.0 in LibreOffice; LibreOffice 26.2.6 and 26.8.0 still pin 8.21.0
+curl	8.22.0	CVE-2026-19931	affects libcurl 8.21.0 in LibreOffice; LibreOffice 26.2.6 and 26.8.0 still pin 8.21.0
+curl	8.22.0	CVE-2026-80229	affects libcurl 8.21.0 in LibreOffice; LibreOffice 26.2.6 and 26.8.0 still pin 8.21.0
+curl	8.22.0	CVE-2026-80230	affects libcurl 8.21.0 in LibreOffice; LibreOffice 26.2.6 and 26.8.0 still pin 8.21.0
+curl	8.22.0	CVE-2026-80231	affects libcurl 8.21.0 in LibreOffice; LibreOffice 26.2.6 and 26.8.0 still pin 8.21.0
+curl	8.22.0	CVE-2026-80255	affects libcurl 8.21.0 in LibreOffice; LibreOffice 26.2.6 and 26.8.0 still pin 8.21.0
+curl	8.22.0	CVE-2026-82208	affects libcurl 8.21.0 in LibreOffice; LibreOffice 26.2.6 and 26.8.0 still pin 8.21.0
+curl	8.22.0	CVE-2026-82209	affects libcurl 8.21.0 in LibreOffice; LibreOffice 26.2.6 and 26.8.0 still pin 8.21.0
+Firebird	3.0.13	CVE-2025-54989	affects 3.0.7 embedded in LibreOffice (Base database engine)
+Firebird	3.0.14	CVE-2025-65104	affects 3.0.7 embedded in LibreOffice (Base database engine); LibreOffice 26.8.0 carries 3.0.13, still affected
+Firebird	3.0.14	CVE-2026-27890	affects 3.0.7 embedded in LibreOffice (Base database engine); LibreOffice 26.8.0 carries 3.0.13, still affected
+Firebird	3.0.14	CVE-2026-28212	affects 3.0.7 embedded in LibreOffice (Base database engine); LibreOffice 26.8.0 carries 3.0.13, still affected
+Firebird	3.0.14	CVE-2026-28214	affects 3.0.7 embedded in LibreOffice (Base database engine); LibreOffice 26.8.0 carries 3.0.13, still affected
+Firebird	3.0.14	CVE-2026-28224	affects 3.0.7 embedded in LibreOffice (Base database engine); LibreOffice 26.8.0 carries 3.0.13, still affected
+Firebird	3.0.14	CVE-2026-33337	affects 3.0.7 embedded in LibreOffice (Base database engine); LibreOffice 26.8.0 carries 3.0.13, still affected
+Firebird	3.0.14	CVE-2026-34232	affects 3.0.7 embedded in LibreOffice (Base database engine); LibreOffice 26.8.0 carries 3.0.13, still affected
+Firebird	3.0.14	CVE-2026-35215	affects 3.0.7 embedded in LibreOffice (Base database engine); LibreOffice 26.8.0 carries 3.0.13, still affected
+Firebird	3.0.14	CVE-2026-40342	affects 3.0.7 embedded in LibreOffice (Base database engine); LibreOffice 26.8.0 carries 3.0.13, still affected
+PostgreSQL	15.19	CVE-2026-14662	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14663	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14664	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14666	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14668	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14669	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14670	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14671	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14672	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14673	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14677	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14678	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14679	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-14680	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-15741	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-15742	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-16238	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-16239	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-16241	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-18024	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-18408	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-19385	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-6464	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-6469	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-6470	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	15.19	CVE-2026-6471	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+Raptor	2.0.17	CVE-2024-57822	affects raptor2.dll 2.0.16 in LibreOffice; no fixed upstream release as of 2026-09-25
+Raptor	2.0.17	CVE-2024-57823	affects raptor2.dll 2.0.16 in LibreOffice; no fixed upstream release as of 2026-09-25
+Leptonica	-	none	no open advisory for 1.84.1 (Tesseract) and 1.87.0 (jbig2enc); checked 2026-09-25
+jbig2enc	-	none	no open advisory for 0.32; checked 2026-09-25
+libjpeg-turbo	-	none	no open advisory for 3.0.3 and 3.1.4.1; checked 2026-09-25
+libwebp	-	none	no open advisory for 1.4.0 and 1.6.0; checked 2026-09-25
+Little CMS	-	none	no open advisory for 2.19 and 2.19.1; checked 2026-09-25
+libavif	-	none	no open advisory for 1.4.2; checked 2026-09-25
+dav1d	-	none	no open advisory for 1.5.3; checked 2026-09-25
+libaom	-	none	no open advisory for 3.14.1; checked 2026-09-25
+zlib-ng	-	none	no open advisory for 2.2.4 and 2.3.3; checked 2026-09-25
+libffi	-	none	no open advisory for 3.4.4 and 3.5.2; checked 2026-09-25
+libtommath	-	none	no open advisory for 1.3.0; checked 2026-09-25
+bzip2	-	none	no open advisory for 1.0.8; checked 2026-09-25
+Zstandard	-	none	no open advisory for 1.5.6 and 1.5.7; checked 2026-09-25
+LZ4	-	none	no open advisory for 1.9.4; checked 2026-09-25
+Brotli	-	none	no open advisory for 1.1.0; checked 2026-09-25
+fontconfig	-	none	no open advisory for 2.15.0; checked 2026-09-25
+FriBidi	-	none	no open advisory for 1.0.14; checked 2026-09-25
+Graphite2	-	none	no open advisory for 1.3.14 and 1.3.15; checked 2026-09-25
+gettext	-	none	no open advisory for 0.22.5; checked 2026-09-25
+libiconv	-	none	no open advisory for 1.17; checked 2026-09-25
+Pixman	-	none	no open advisory for 0.43.4 and 0.46.4; checked 2026-09-25
+Cairo	-	none	no open advisory for 1.18.0 and 1.18.4; checked 2026-09-25
+Pango	-	none	no open advisory for 1.52.2; checked 2026-09-25
+GCC runtime	-	none	no open advisory for the MSYS2 GCC 14.1.0 build (CVE-2023-4039 is AArch64 only); checked 2026-09-25
+Pillow	-	none	no open advisory for 12.3.0; checked 2026-09-25
+lxml	-	none	no open advisory for 6.1.2; checked 2026-09-25
+libxslt	-	none	no open advisory for 1.1.45; checked 2026-09-25
+cryptography	-	none	no open advisory for 50.0.1 with static OpenSSL 4.0.2; checked 2026-09-25
+pikepdf	-	none	no open advisory for 10.11.0; checked 2026-09-25
+qpdf	-	none	no open advisory for 12.3.2; checked 2026-09-25
+NumPy	-	none	no open advisory for 2.5.2; checked 2026-09-25
+OpenBLAS	-	none	no open advisory for 0.3.34; checked 2026-09-25
+uharfbuzz	-	none	no open advisory for 0.56.0 with HarfBuzz 14.3.0; checked 2026-09-25
+pillow-heif	-	none	no open advisory for 1.8.0; checked 2026-09-25
+python-pkcs11	-	none	no open advisory for 0.9.5; checked 2026-09-25
+cffi	-	none	no open advisory for 2.1.1; checked 2026-09-25
+charset-normalizer	-	none	no open advisory for 3.5.1; checked 2026-09-25
+fontTools	-	none	no open advisory for 4.63.0; checked 2026-09-25
+LibreOffice	-	none	no open advisory for 26.2.5; checked 2026-09-25
+NSS	-	none	no open advisory for 3.124; checked 2026-09-25
+NSPR	-	none	no open advisory for 4.39; checked 2026-09-25
+Poppler	-	none	no open advisory for 26.06.0; checked 2026-09-25
+xmlsec	-	none	no open advisory for 1.3.12; checked 2026-09-25
+Boost	-	none	no open advisory for 1.89.0; checked 2026-09-25
+Hunspell	-	none	no open advisory for 1.7.3; checked 2026-09-25
+PDFium	-	none	no open advisory for 7471; checked 2026-09-25
+Skia	-	none	no open advisory for m142; checked 2026-09-25
+GPGME	-	none	no open advisory for 1.24.3; checked 2026-09-25
+Rasqal	-	none	no open advisory for 0.9.33; checked 2026-09-25
+Redland	-	none	no open advisory for 1.0.17; checked 2026-09-25
+MSVC runtime	-	none	no open advisory for 14.40, 14.44 and 14.51; checked 2026-09-25

@@ -63,6 +63,7 @@ fi
 #     change that did not regenerate it. ---
 gate engine-manifest "$R/.venv/Scripts/python.exe" scripts/gen-engine-payload-manifest.py --check
 gate engine-payload "$R/.venv/Scripts/python.exe" scripts/check-engine-payload.py
+gate native-components "$R/.venv/Scripts/python.exe" scripts/native-components.py --check
 
 # Inspect the production renderer already built by candidate validation.
 gate release-bundle "$R/.venv/Scripts/python.exe" scripts/check-release-bundle.py
