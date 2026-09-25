@@ -11,6 +11,7 @@ re-indexes afterward, so it never fights the inline annotation lifecycle.
 Form fields (/Widget) and links (/Link) are not comments and are kept.
 """
 
+import math
 import re
 from pathlib import Path
 from typing import NamedTuple
@@ -34,7 +35,7 @@ _SWEEP = _MARKUP | {"/Popup"}
 def _rect(annot):
     try:
         r = [float(v) for v in annot.get("/Rect")]
-        if len(r) == 4:
+        if len(r) == 4 and all(math.isfinite(v) for v in r):
             return [min(r[0], r[2]), min(r[1], r[3]), max(r[0], r[2]), max(r[1], r[3])]
     except (TypeError, ValueError):
         pass

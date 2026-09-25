@@ -1,6 +1,7 @@
 """PDF outline (bookmarks) read/write using pikepdf."""
 
 import base64
+import math
 from pathlib import Path
 
 import pikepdf
@@ -67,6 +68,8 @@ def _serialize_obj(obj, depth: int = 0):
             f = float(obj)
         except (TypeError, ValueError):
             raise _Unserializable(f"unsupported object: {type(obj).__name__}") from None
+        if not math.isfinite(f):
+            raise _Unserializable("number too large to read")
         return int(f) if f.is_integer() else f
     if isinstance(obj, pikepdf.Stream):
         raise _Unserializable("stream in action payload")
@@ -176,9 +179,10 @@ def _dest_view(dest) -> dict:
             view[key] = None
             continue
         try:
-            view[key] = float(raw)
+            value = float(raw)
         except (TypeError, ValueError):
-            view[key] = None
+            value = None
+        view[key] = value if value is not None and math.isfinite(value) else None
     return view
 
 

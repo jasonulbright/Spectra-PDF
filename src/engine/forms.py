@@ -30,6 +30,7 @@ Fail-closed: every edit is validated BEFORE any mutation (all problems
 reported at once); output is written only after the full fill succeeds.
 """
 
+import math
 import shutil
 from pathlib import Path
 
@@ -609,7 +610,7 @@ def _widget_geometry(
             r = [float(v) for v in w.get("/Rect")]
         except (TypeError, ValueError):
             continue
-        if len(r) != 4:
+        if len(r) != 4 or not all(math.isfinite(v) for v in r):
             continue
         page = None
         try:
