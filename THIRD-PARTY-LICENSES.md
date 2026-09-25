@@ -162,7 +162,7 @@ directory — license fields below were read from those wheels' METADATA):
 | pdfminer.six | MIT | <https://github.com/pdfminer/pdfminer.six> |
 | pikepdf | MPL-2.0 (source at the link) | <https://github.com/pikepdf/pikepdf> |
 | pillow | MIT-CMU | <https://github.com/python-pillow/Pillow> |
-| pi-heif | BSD-3-Clause (the wheel's bundled libraries are listed below) | <https://github.com/bigcat88/pillow_heif> |
+| pillow_heif | BSD-3-Clause (built decode-only; the wheel's bundled libraries are listed below) | <https://github.com/bigcat88/pillow_heif> |
 | pycparser | BSD-3-Clause | <https://github.com/eliben/pycparser> |
 | pyHanko | MIT | <https://github.com/MatthiasValvekens/pyHanko> |
 | pyhanko-certvalidator | MIT | <https://github.com/MatthiasValvekens/pyHanko/tree/master/pkgs/pyhanko-certvalidator> |
@@ -183,44 +183,56 @@ pikepdf's binary wheel embeds the **qpdf** library (Apache-2.0,
 `licenses-for-wheels.txt` (shipped in pikepdf's dist-info) carries the
 corresponding notices.
 
-### HEIF decoding (pi-heif)
+### HEIF decoding (pillow_heif)
 
-HEIC/HEIF camera images are decoded by **pi-heif 1.4.0**, the decode-only
-distribution of the same upstream project. Its wheel and the matching source
-distribution are committed to this repository under `vendor/wheels/` and pinned
-by SHA-256 in `scripts/vendored-wheels.tsv`; nothing about it is fetched at
-build time. It is decode-only deliberately: the encoder-carrying distribution
-of the same project links a **GPL-2.0** video encoder that is mapped into the
-engine process on every HEIF import, and nothing in Spectra PDF encodes HEIF.
+HEIC/HEIF camera images are decoded by **pillow_heif 1.8.0**, installed as the
+wheel `pillow_heif-1.8.0+decode.1`. That wheel is not the one the package index
+serves: `scripts/build-pillow-heif-decode-only.ps1` builds it from the binding's
+source distribution, which is committed to this repository at
+`vendor/wheels/pillow_heif-1.8.0.tar.gz`, and from the libheif and libde265
+release archives, each verified by SHA-256 before use. The built wheel and the
+source distribution are pinned by SHA-256 in `scripts/vendored-wheels.tsv`;
+nothing about either is fetched at build time.
 
-The wheel ships five prebuilt libraries. delvewheel installs `.data/platlib`
-content to the site-packages root, so they sit directly in
+The wheel is decode-only by construction. The index wheel links libheif against
+a **GPL-2.0** HEVC encoder (x265) that loads into the engine process on every
+HEIF import, and nothing in Spectra PDF encodes HEIF. The build compiles libheif
+with every encoder off, so no encoder library is present and libheif does not
+import one. libheif and libde265 are compiled with MSVC and the static C
+runtime; no MinGW runtime library ships.
+
+The wheel ships two libraries. delvewheel installs `.data/platlib` content to
+the site-packages root, so they sit directly in
 `resources/python/Lib/site-packages/`, not in a `.data` subdirectory. The
 versions below are the ones the shipped libraries **report at run time**;
-upstream's own `LICENSES_bundled.txt` in the wheel's dist-info names older ones
-and is not the authority for this artifact:
+upstream's own `LICENSES_bundled.txt` in the wheel's dist-info describes the
+index wheel and is not the authority for this artifact:
 
 | Bundled library | Version | License | Corresponding source |
 |---|---|---|---|
-| libheif | 1.23.0 | LGPL-3.0-or-later | <https://github.com/strukturag/libheif/releases/download/v1.23.0/libheif-1.23.0.tar.gz> |
-| libde265 | 1.1.1 | LGPL-3.0-or-later | <https://github.com/strukturag/libde265/releases/download/v1.1.1/libde265-1.1.1.tar.gz> |
-| libgcc / libstdc++ (MinGW-w64 GCC runtime) | – | GPL-3.0-or-later WITH GCC-exception-3.1 | <https://gcc.gnu.org/> |
-| libwinpthread (MinGW-w64) | – | MIT AND Zope-2.1 | <https://www.mingw-w64.org/> |
+| libheif | 1.23.4 | LGPL-3.0-or-later | <https://github.com/strukturag/libheif/releases/download/v1.23.4/libheif-1.23.4.tar.gz> |
+| libde265 | 1.1.3 | LGPL-3.0-or-later | <https://github.com/strukturag/libde265/releases/download/v1.1.3/libde265-1.1.3.tar.gz> |
 
-There is no x265 and no libaom in this wheel: the run-time inventory reports one
-decoder (libde265) and no encoder other than libheif's built-in `mask` stub.
+The run-time inventory reports one decoder (libde265) and no encoder other
+than libheif's built-in `mask` stub. AVIF files are decoded by Pillow itself,
+not by this wheel.
 
 libheif and libde265 are **LGPL-3.0** libraries combined with the application.
 The obligations that follow, and how each is met:
 
-- **Notice.** The LGPL-3.0 text and the GPL-3.0 text it incorporates ship in
-  the wheel's dist-info (`pi_heif-1.4.0.dist-info/licenses/`) inside the
-  installed runtime, alongside this file.
+- **Notice.** `COPYING.libheif` and `COPYING.libde265` ship in
+  `pillow_heif-1.8.0+decode.1.dist-info/licenses/` inside the installed
+  runtime, alongside this file. Each is the unmodified `COPYING` file of that
+  library's pinned release archive: the LGPL-3.0 text followed by the GPL-3.0
+  text it incorporates. The `LICENSES_bundled.txt` in the same directory is
+  upstream's, and describes upstream's general-purpose wheel (a GPLv2
+  classifier, x265 and the MinGW runtime); it does not describe this
+  decode-only build.
 - **Replacement.** Both libraries are ordinary DLLs loaded by the Windows
   loader from the site-packages directory, so a recipient may replace either
   with their own build. One practical condition: delvewheel renamed them with a
-  content hash — `libheif-75127e764628a95f6db9f5070bfc87cb.dll` and
-  `libde265-0-aa0625e0aec56a9d4310a2447674dd8a.dll` — and the importing modules
+  content hash (`heif-a76c6b4822ec6292c09cb85252f43034.dll` and
+  `libde265-f4739cb4844efa5930bf0764c71d55e2.dll`), and the importing modules
   bind to those exact names, so a replacement must be installed under the same
   filename. The wheel's `DELVEWHEEL` file records that the renaming happened
   and ships in the dist-info for the same reason.
@@ -229,8 +241,10 @@ The obligations that follow, and how each is met:
   installer it publishes with those two archives and the binding's own source
   distribution as release assets; `scripts/corresponding-source.tsv` pins all
   three by SHA-256 and `scripts/stage-corresponding-source.ps1` stages them.
-  They are also available from us on request. The binding source is committed
-  in this repository at `vendor/wheels/pi_heif-1.4.0.tar.gz`.
+  They are also available from us on request. The scripts used to control
+  compilation are `scripts/build-pillow-heif-decode-only.ps1` in this
+  repository, under this repository's MIT license; it records every build
+  option, and it reproduces the shipped wheel from the pinned archives.
 
 ### Written source offer
 

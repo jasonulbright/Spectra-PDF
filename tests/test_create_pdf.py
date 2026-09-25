@@ -290,6 +290,26 @@ HEIF_CASES = [
 ]
 
 
+# sha256 of Image.tobytes() after load(), first 16 hex digits. The previously
+# shipped decoder and the index wheel of the current binding decode to these
+# same bytes.
+HEIF_DECODE_DIGESTS = {
+    "exif-orient6.heic": "9ae26a4b26faf718",
+    "gray10.heic": "671a4128bda48047",
+    "gray8.heic": "60aa437f83f25d8d",
+    "grid-tiled.heic": "1f2f241555ac57e0",
+    "lossless.heic": "54695dc28869eb48",
+    "multi-3.heic": "b4c672fdd60047b5",
+    "multi-primary1.heic": "60ca2a3cda1b3345",
+    "odd-dims.heic": "9cc61e10f6466e62",
+    "rgb10.heic": "a112bdfad93707e0",
+    "rgb8-chroma444.heic": "ab544251974b7187",
+    "rgb8.heic": "b4c672fdd60047b5",
+    "rgba8.heic": "676d1e23565b0958",
+    "thumbnail.heic": "71d13a4bcdd2c9c2",
+}
+
+
 class TestHeif:
     def test_the_corpus_is_checked_in_and_complete(self):
         assert sorted(p.name for p in HEIF_CORPUS.glob("*.heic")) == sorted(
@@ -357,16 +377,108 @@ class TestHeif:
         assert set(HEIF_SUFFIXES) <= set(IMAGE_SUFFIXES)
 
     def test_the_decoder_carries_no_encoder(self):
-        # The plugin ships decode-only ON PURPOSE: the encoder-carrying build
-        # links a video encoder into the engine process on every HEIF import,
-        # and nothing in the product writes HEIF. A build that regained one
-        # would regain that, silently.
-        import pi_heif
+        # The plugin ships decode-only ON PURPOSE: the index wheel links a GPL
+        # video encoder into the engine process on every HEIF import, and
+        # nothing in the product writes HEIF. A build that regained one would
+        # regain that, silently.
+        import pillow_heif
 
-        info = pi_heif.libheif_info()
-        assert info["decoders"], "no HEVC decoder is present"
+        info = pillow_heif.libheif_info()
+        assert "libde265" in info["decoders"], "no HEVC decoder is present"
         # `mask` is libheif's built-in stub, not a codec library.
         assert set(info["encoders"]) <= {"mask"}
+        assert info["HEIF"] == ""
+
+    def test_libheif_is_at_or_above_the_advisory_floor(self):
+        # libheif releases below 1.23.2 fall inside a published advisory range
+        # reachable by decoding an untrusted file.
+        import pillow_heif
+
+        version = tuple(int(p) for p in pillow_heif.libheif_info()["libheif"].split("."))
+        assert version >= (1, 23, 2)
+
+    @pytest.mark.parametrize("name,digest", sorted(HEIF_DECODE_DIGESTS.items()))
+    def test_a_corpus_file_decodes_to_its_pinned_pixels(self, name, digest):
+        # A deliberate decoder bump that changes pixels updates these pins in
+        # the same change; an unexplained difference is a decoder regression.
+        import hashlib
+
+        assert create_pdf_mod._register_heif()
+        with Image.open(HEIF_CORPUS / name) as im:
+            im.load()
+            got = hashlib.sha256(im.tobytes()).hexdigest()[:16]
+        assert got == digest
+
+    def test_avif_still_opens_through_pillow_after_heif_registration(self, tmp_dir):
+        # Only the HEIF opener is registered; AVIF stays with Pillow's own
+        # plugin, since the HEIF wheel carries no AV1 decoder and would take
+        # the format over with nothing to decode it.
+        from PIL import features
+
+        if not features.check("avif"):
+            pytest.skip("this Pillow build has no AVIF support")
+        src = Path(tmp_dir) / "gradient.avif"
+        Image.linear_gradient("L").convert("RGB").resize((64, 48)).save(src, quality=90)
+        assert create_pdf_mod._register_heif()
+        with Image.open(src) as im:
+            assert im.format == "AVIF"
+            assert type(im).__module__ == "PIL.AvifImagePlugin"
+            im.load()
+            assert im.size == (64, 48)
+        report = image_to_pdf(src, Path(tmp_dir) / "gradient.pdf")
+        assert report["pages"] == 1
+
+
+SHIPPED_SITE = Path(__file__).resolve().parents[1] / "resources" / "python" / "Lib" / "site-packages"
+SHIPPED_PYTHON = SHIPPED_SITE.parents[1] / "python.exe"
+
+
+@pytest.mark.skipif(
+    not SHIPPED_PYTHON.is_file(),
+    reason="the embedded runtime is not provisioned",
+)
+class TestShippedHeifRuntime:
+    def test_the_runtime_carries_the_decode_only_build_and_nothing_it_replaced(self):
+        names = [p.name for p in SHIPPED_SITE.iterdir()]
+        assert "pillow_heif-1.8.0+decode.1.dist-info" in names
+        assert not [n for n in names if n.lower().startswith(("pi_heif", "_pi_heif"))]
+        assert not [
+            n
+            for n in names
+            if n.lower().startswith(("libgcc", "libstdc++", "libwinpthread", "libheif-", "libde265-0-"))
+        ]
+        assert not [p for p in SHIPPED_SITE.rglob("*") if "x265" in p.name.lower()]
+
+    def test_the_runtime_decodes_a_fixture_with_the_decode_only_library_set(self):
+        import json
+        import subprocess
+
+        probe = "\n".join(
+            [
+                "import hashlib, json, sys",
+                "from PIL import Image",
+                "import pillow_heif",
+                "pillow_heif.register_heif_opener()",
+                "im = Image.open(sys.argv[1])",
+                "im.load()",
+                "digest = hashlib.sha256(im.tobytes()).hexdigest()[:16]",
+                "print(json.dumps({'digest': digest, 'info': pillow_heif.libheif_info()}))",
+            ]
+        )
+        run = subprocess.run(
+            [str(SHIPPED_PYTHON), "-c", probe, str(HEIF_CORPUS / "rgb8.heic")],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert run.returncode == 0, run.stderr
+        result = json.loads(run.stdout)
+        assert result["digest"] == HEIF_DECODE_DIGESTS["rgb8.heic"]
+        info = result["info"]
+        assert info["libheif"] == "1.23.4"
+        assert info["decoders"] == {"libde265": "libde265 HEVC decoder, version 1.1.3"}
+        assert info["encoders"] == {"mask": "mask"}
+        assert info["HEIF"] == ""
 
 
 class TestRefusals:

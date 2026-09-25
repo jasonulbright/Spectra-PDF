@@ -10,7 +10,14 @@
 #
 # Every row is sha256-verified against scripts/vendored-wheels.tsv before pip
 # sees it, and a wheel with no matching sdist row refuses: a frozen artifact we
-# cannot rebuild is not a maintained pin.
+# cannot rebuild is not a maintained pin. A wheel built in this repository
+# carries a `+label` local version; it pairs with the sdist of its public
+# version, and its upstream is the repository script that builds it.
+#
+# After the install, the target site-packages is refused if it holds an x265
+# file, any binary importing an x265 DLL, or a surviving pi_heif distribution.
+# The import check runs scripts/pe_imports.py under the target interpreter
+# itself, so it works on the pip-less embedded runtime.
 
 param(
     [string]$Python = "python",
@@ -49,10 +56,21 @@ foreach ($r in $rows) {
     if (-not $r.sha256)   { $bad += "$($r.file): no sha256" }
     if (-not $r.spdx)     { $bad += "$($r.file): no SPDX expression" }
     if (-not $r.upstream) { $bad += "$($r.file): no upstream URL" }
+    $local = $r.version.Contains('+')
+    if ($local -and $r.role -ne 'wheel') { $bad += "$($r.file): a local version label on a non-wheel row" }
+    if ($r.upstream -and $r.upstream -notmatch '^https://') {
+        # A repository path is accepted only for a locally built wheel, and
+        # only when the script it names exists.
+        if (-not $local) { $bad += "$($r.file): upstream '$($r.upstream)' is not a URL" }
+        elseif (-not (Test-Path (Join-Path $PSScriptRoot "..\$($r.upstream)"))) {
+            $bad += "$($r.file): build script '$($r.upstream)' does not exist"
+        }
+    }
 }
 foreach ($w in ($rows | Where-Object { $_.role -eq 'wheel' })) {
-    $src = $rows | Where-Object { $_.role -eq 'sdist' -and $_.package -eq $w.package -and $_.version -eq $w.version }
-    if (-not $src) { $bad += "$($w.package) $($w.version): a wheel row with no sdist row" }
+    $public = ($w.version -split '\+')[0]
+    $src = $rows | Where-Object { $_.role -eq 'sdist' -and $_.package -eq $w.package -and $_.version -eq $public }
+    if (-not $src) { $bad += "$($w.package) $($w.version): a wheel row with no sdist row at $public" }
 }
 if ($bad) { throw "vendored-wheel gate refused:`n  " + ($bad -join "`n  ") }
 
@@ -67,4 +85,19 @@ $wheels = @($rows | Where-Object { $_.role -eq 'wheel' } | ForEach-Object { Join
 Write-Host "Installing $($wheels.Count) vendored wheel(s) into $Python..."
 & $Python -m pip install --no-index --no-deps --force-reinstall @wheels --no-warn-script-location
 if ($LASTEXITCODE -ne 0) { throw "vendored wheel install failed" }
+
+$site = (& $Python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])").Trim()
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $site)) { throw "could not resolve the site-packages of $Python" }
+$refusals = @()
+foreach ($f in (Get-ChildItem $site -Recurse -File -Filter "*x265*")) { $refusals += "x265 file: $($f.FullName)" }
+foreach ($d in (Get-ChildItem $site -Filter "*pi_heif*")) { $refusals += "pi_heif survives: $($d.FullName)" }
+$json = & $Python (Join-Path $PSScriptRoot "pe_imports.py") $site
+if ($LASTEXITCODE -ne 0) { throw "import inventory of $site failed" }
+$report = ($json | Out-String) | ConvertFrom-Json
+foreach ($p in $report.PSObject.Properties) {
+    foreach ($dll in (@($p.Value.imports) + @($p.Value.delay_imports))) {
+        if ($dll -match 'x265') { $refusals += "$($p.Name) imports $dll" }
+    }
+}
+if ($refusals) { throw "vendored-wheel runtime gate refused:`n  " + ($refusals -join "`n  ") }
 Write-Host "Done. Vendored wheels installed."

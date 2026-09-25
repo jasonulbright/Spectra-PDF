@@ -3,14 +3,15 @@
 Run it to regenerate; the resulting files are CHECKED IN beside it under
 `heif/` so a regeneration is reviewable as a git diff.
 
-    .venv/Scripts/python.exe tests/fixtures/make_heif_corpus.py
+    <python-with-index-pillow-heif> tests/fixtures/make_heif_corpus.py
 
-The generator needs a HEIF **encoder**, which the shipped runtime does not
-have and is not meant to have — the product decodes HEIF and never writes it.
-Any Python with `pillow-heif` installed (the encoder-carrying distribution)
-regenerates the set; the shipped runtime then only ever reads it. That
-asymmetry is the point of checking the files in: the corpus outlives whichever
-encoder produced it.
+The generator needs a HEIF **encoder**, which neither the shipped runtime nor
+the test venv has, and neither is meant to have — the product decodes HEIF
+and never writes it. A separate interpreter with the index wheel of
+`pillow-heif` installed (it carries an encoder; the repository's decode-only
+build does not) regenerates the set; the shipped runtime then only ever reads
+it. That asymmetry is the point of checking the files in: the corpus outlives
+whichever encoder produced it.
 
 Every fixture is a synthetic gradient computed here, so nothing in the tree
 carries third-party image provenance.
