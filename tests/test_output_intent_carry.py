@@ -4,12 +4,13 @@ Every assertion reads SAVED bytes: a condition composed in memory and lost at
 publication is the defect these cover.
 """
 import hashlib
+from pathlib import Path
 
 import pikepdf
 import pytest
 from pikepdf import Array, Dictionary, Name, String
 
-from engine.create_pdf import _subset
+from engine.create_pdf import _subset, create_pdf
 from engine.merge import merge
 from engine.page_copy import copy_pages_with_forms
 from engine.pdf_save import save_pdf
@@ -311,3 +312,198 @@ class TestExtensionDeclarations:
             BaseVersion=Name('/1.7'), ExtensionLevel=String('three'))))
         with pytest.raises(ValueError, match='version declarations'):
             merge([str(source)], str(output))
+
+
+ICC_DIR = Path(__file__).resolve().parents[1] / 'resources' / 'icc'
+
+
+def real_profile(name):
+    path = ICC_DIR / name
+    if path.is_file():
+        return path.read_bytes()
+    return name.encode() * 512
+
+
+SWOP = real_profile('USWebCoatedSWOP.icc')
+FOGRA = real_profile('CoatedFOGRA39.icc')
+
+
+def intents_file(path, entries, *, pages=2, where='catalog', version='1.4'):
+    """``entries`` is a list of (subtype, condition, profile bytes)."""
+    with pikepdf.Pdf.new() as pdf:
+        for _ in range(pages):
+            pdf.add_blank_page(page_size=(200, 200))
+        array = Array([pdf.make_indirect(Dictionary(
+            Type=Name.OutputIntent, S=Name('/' + subtype),
+            OutputConditionIdentifier=String(condition),
+            DestOutputProfile=pdf.make_stream(profile, N=4)))
+            for subtype, condition, profile in entries])
+        if where == 'page':
+            pdf.pages[0].OutputIntents = array
+        else:
+            pdf.Root.OutputIntents = array
+        pdf.save(path, min_version=version)
+
+
+def profile_copies(pdf, profile):
+    """Every saved stream whose decoded bytes are this profile."""
+    return [obj for obj in pdf.objects
+            if isinstance(obj, pikepdf.Stream) and obj.read_bytes() == profile]
+
+
+def conditions_of(pdf, index):
+    array = pdf.pages[index].get('/OutputIntents') or pdf.Root.get('/OutputIntents')
+    if array is None:
+        return None
+    return [(str(item.S), str(item.OutputConditionIdentifier),
+             hashlib.sha256(item.DestOutputProfile.read_bytes()).hexdigest())
+            for item in array]
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+class TestCreatePdfSubset:
+    def test_subset_carries_the_profile_exactly_once(self, tmp_path):
+        source, output = tmp_path / 'a.pdf', tmp_path / 'out.pdf'
+        intents_file(source, [('GTS_PDFX', 'SWOP', SWOP)], pages=4)
+        assert _subset(source, output, '1,3-4', 'a.pdf') == 3
+        with pikepdf.open(output) as pdf:
+            assert len(profile_copies(pdf, SWOP)) == 1
+            for index in range(3):
+                assert pdf.pages[index].get('/OutputIntents') is None
+                assert conditions_of(pdf, index) == [('/GTS_PDFX', 'SWOP', sha(SWOP))]
+
+    def test_subset_of_a_page_level_intent_declares_pdf_2_0(self, tmp_path):
+        source, output = tmp_path / 'a.pdf', tmp_path / 'out.pdf'
+        intents_file(source, [('GTS_PDFX', 'SWOP', SWOP)], pages=3, where='page', version='2.0')
+        assert _subset(source, output, '1', 'a.pdf') == 1
+        with pikepdf.open(output) as pdf:
+            assert conditions_of(pdf, 0) == [('/GTS_PDFX', 'SWOP', sha(SWOP))]
+            assert effective_version(pdf) >= (2, 0)
+            assert len(profile_copies(pdf, SWOP)) == 1
+
+    def test_subset_excluding_the_override_page_keeps_only_the_default(self, tmp_path):
+        source, output = tmp_path / 'a.pdf', tmp_path / 'out.pdf'
+        with pikepdf.Pdf.new() as pdf:
+            for _ in range(2):
+                pdf.add_blank_page(page_size=(200, 200))
+
+            def intent(condition, profile):
+                return Array([pdf.make_indirect(Dictionary(
+                    Type=Name.OutputIntent, S=Name.GTS_PDFX,
+                    OutputConditionIdentifier=String(condition),
+                    DestOutputProfile=pdf.make_stream(profile, N=4)))])
+            pdf.Root.OutputIntents = intent('SWOP', SWOP)
+            pdf.pages[0].OutputIntents = intent('FOGRA39', FOGRA)
+            pdf.Root.Version = Name('/2.0')
+            pdf.save(source)
+        assert _subset(source, output, '2', 'a.pdf') == 1
+        with pikepdf.open(output) as pdf:
+            assert conditions_of(pdf, 0) == [('/GTS_PDFX', 'SWOP', sha(SWOP))]
+            assert profile_copies(pdf, FOGRA) == []
+            assert len(profile_copies(pdf, SWOP)) == 1
+
+    @pytest.mark.parametrize('page_size', ['auto', 'a4'])
+    def test_create_pdf_with_a_range_keeps_intents_and_version(self, tmp_path, page_size):
+        plain, paged, output = tmp_path / 'a.pdf', tmp_path / 'b.pdf', tmp_path / 'out.pdf'
+        intents_file(plain, [('GTS_PDFX', 'SWOP', SWOP)], pages=3)
+        intents_file(paged, [('GTS_PDFX', 'FOGRA39', FOGRA)], pages=2, where='page',
+                     version='2.0')
+        create_pdf([{'path': str(plain), 'pages': '2-3'}, {'path': str(paged), 'pages': '1'}],
+                   str(output), page_size=page_size)
+        with pikepdf.open(output) as pdf:
+            assert len(pdf.pages) == 3
+            assert conditions_of(pdf, 0) == [('/GTS_PDFX', 'SWOP', sha(SWOP))]
+            assert conditions_of(pdf, 1) == [('/GTS_PDFX', 'SWOP', sha(SWOP))]
+            assert conditions_of(pdf, 2) == [('/GTS_PDFX', 'FOGRA39', sha(FOGRA))]
+            assert len(profile_copies(pdf, SWOP)) == 1
+            assert len(profile_copies(pdf, FOGRA)) == 1
+            assert effective_version(pdf) >= (2, 0)
+
+
+class TestMixedSourceConflicts:
+    def test_different_subtypes_on_one_profile_stay_with_their_pages(self, tmp_path):
+        first, second, output = tmp_path / 'a.pdf', tmp_path / 'b.pdf', tmp_path / 'out.pdf'
+        intents_file(first, [('GTS_PDFA1', 'SWOP', SWOP)])
+        intents_file(second, [('GTS_PDFX', 'SWOP', SWOP)])
+        merge([str(first), str(second)], str(output))
+        with pikepdf.open(output) as pdf:
+            assert pdf.Root.get('/OutputIntents') is None
+            for index in (0, 1):
+                assert conditions_of(pdf, index) == [('/GTS_PDFA1', 'SWOP', sha(SWOP))]
+            for index in (2, 3):
+                assert conditions_of(pdf, index) == [('/GTS_PDFX', 'SWOP', sha(SWOP))]
+            assert effective_version(pdf) >= (2, 0)
+
+    def test_different_profiles_are_each_stored_once(self, tmp_path):
+        first, second, output = tmp_path / 'a.pdf', tmp_path / 'b.pdf', tmp_path / 'out.pdf'
+        intents_file(first, [('GTS_PDFX', 'SWOP', SWOP)], pages=3)
+        intents_file(second, [('GTS_PDFX', 'FOGRA39', FOGRA)], pages=3)
+        merge([str(first), str(second)], str(output))
+        with pikepdf.open(output) as pdf:
+            assert len(profile_copies(pdf, SWOP)) == 1
+            assert len(profile_copies(pdf, FOGRA)) == 1
+            for index in range(3):
+                assert conditions_of(pdf, index) == [('/GTS_PDFX', 'SWOP', sha(SWOP))]
+                assert conditions_of(pdf, index + 3) == [('/GTS_PDFX', 'FOGRA39', sha(FOGRA))]
+
+    def test_a_multi_intent_array_keeps_every_entry_in_order(self, tmp_path):
+        first, second, output = tmp_path / 'a.pdf', tmp_path / 'b.pdf', tmp_path / 'out.pdf'
+        entries = [('GTS_PDFA1', 'SWOP', SWOP), ('GTS_PDFX', 'FOGRA39', FOGRA)]
+        intents_file(first, entries)
+        intents_file(second, entries)
+        merge([str(first), str(second)], str(output))
+        expected = [(f'/{subtype}', condition, sha(profile))
+                    for subtype, condition, profile in entries]
+        with pikepdf.open(output) as pdf:
+            assert pdf.Root.get('/OutputIntents') is not None
+            for index in range(4):
+                assert pdf.pages[index].get('/OutputIntents') is None
+                assert conditions_of(pdf, index) == expected
+            assert len(profile_copies(pdf, SWOP)) == 1
+            assert len(profile_copies(pdf, FOGRA)) == 1
+
+    def test_a_bare_source_between_equal_defaults_drops_no_intent(self, tmp_path):
+        paths = [tmp_path / f's{n}.pdf' for n in range(3)]
+        intents_file(paths[0], [('GTS_PDFX', 'SWOP', SWOP)])
+        conditioned(paths[1], where='none')
+        intents_file(paths[2], [('GTS_PDFX', 'SWOP', SWOP)])
+        output = tmp_path / 'out.pdf'
+        merge([str(path) for path in paths], str(output))
+        with pikepdf.open(output) as pdf:
+            assert pdf.Root.get('/OutputIntents') is None
+            for index in (0, 1, 4, 5):
+                assert conditions_of(pdf, index) == [('/GTS_PDFX', 'SWOP', sha(SWOP))]
+            assert conditions_of(pdf, 2) is None
+            assert conditions_of(pdf, 3) is None
+            referenced = {pdf.pages[index].OutputIntents[0].DestOutputProfile.objgen
+                          for index in (0, 1, 4, 5)}
+            # Recomposition leaves no stored profile that no page references.
+            assert {copy.objgen for copy in profile_copies(pdf, SWOP)} == referenced
+            assert len(referenced) <= 2
+            assert effective_version(pdf) >= (2, 0)
+
+    def test_a_split_part_of_a_merged_mixed_file_keeps_its_page_condition(self, tmp_path):
+        first, second, merged = tmp_path / 'a.pdf', tmp_path / 'b.pdf', tmp_path / 'm.pdf'
+        intents_file(first, [('GTS_PDFX', 'SWOP', SWOP)])
+        intents_file(second, [('GTS_PDFX', 'FOGRA39', FOGRA)])
+        merge([str(first), str(second)], str(merged))
+        result = split(str(merged), mode='ranges', ranges='3', output_dir=str(tmp_path / 'out'))
+        (part,) = result['outputs']
+        with pikepdf.open(part) as pdf:
+            assert conditions_of(pdf, 0) == [('/GTS_PDFX', 'FOGRA39', sha(FOGRA))]
+            assert profile_copies(pdf, SWOP) == []
+            assert effective_version(pdf) >= (2, 0)
+
+    @pytest.mark.parametrize('versions', [('1.3', '2.0'), ('2.0', '1.3'), ('1.4', '1.7')])
+    def test_the_effective_version_is_the_highest_requirement(self, tmp_path, versions):
+        first, second, output = tmp_path / 'a.pdf', tmp_path / 'b.pdf', tmp_path / 'out.pdf'
+        intents_file(first, [('GTS_PDFX', 'SWOP', SWOP)], version=versions[0])
+        intents_file(second, [('GTS_PDFX', 'SWOP', SWOP)], version=versions[1])
+        merge([str(first), str(second)], str(output))
+        with pikepdf.open(output) as pdf:
+            assert effective_version(pdf) == max(parse_version(v) for v in versions)
+            assert pdf.Root.get('/OutputIntents') is not None
+            assert len(profile_copies(pdf, SWOP)) == 1
