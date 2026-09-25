@@ -78,20 +78,15 @@ Write-Host "Installing hash-pinned dependencies from python-requirements.txt..."
 & $DestDir\python.exe -m pip install --require-hashes -r $LockFile --no-warn-script-location 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Hash-verified dependency install failed" }
 
-# The wheels committed under vendor/wheels/ (HEIF decode). Installed from the
-# repository with --no-index, so a package withdrawn from the index cannot
-# break a build. Runs BEFORE the cleanup below, which removes pip.
-& powershell -ExecutionPolicy Bypass -File "$PSScriptRoot\install-vendored-wheels.ps1" -Python "$DestDir\python.exe"
-if ($LASTEXITCODE -ne 0) { throw "Vendored wheel install failed" }
-
 # Remove anything installed that the SHIPPED set no longer names. A
 # re-provision over an existing tree skips the download (the version marker is
 # present) and installs only what the manifests list -- so a package dropped
-# from them survives, and the runtime keeps shipping it. That is not
-# hypothetical: pillow_heif was replaced by pi_heif, and without this an
-# incremental dev tree still carried the GPL wheel it was replaced to remove.
+# from them survives, and the runtime keeps shipping it together with any
+# native libraries it bundled, including ones a replacement exists to remove.
 # The shipped set is exactly the two manifests, so this is derived from them
-# rather than from a hand-kept list that could go stale the same way.
+# rather than from a hand-kept list that could go stale the same way. It runs
+# BEFORE the vendored install, whose gate refuses a surviving pi_heif
+# distribution.
 $Shipped = @{}
 foreach ($line in (Get-Content $LockFile)) {
     if ($line -match '^([A-Za-z0-9._-]+)\s*==') {
@@ -132,6 +127,13 @@ if ($stale) {
     })
     if ($left) { throw "stale packages survived the uninstall: $(($left | ForEach-Object Name) -join ', ')" }
 }
+
+# The wheels committed under vendor/wheels/ (HEIF decode). Installed from the
+# repository with --no-index, so a package withdrawn from the index cannot
+# break a build. Runs after the stale-package pruning above and BEFORE the
+# cleanup below, which removes pip.
+& powershell -ExecutionPolicy Bypass -File "$PSScriptRoot\install-vendored-wheels.ps1" -Python "$DestDir\python.exe"
+if ($LASTEXITCODE -ne 0) { throw "Vendored wheel install failed" }
 
 # Cleanup -- remove pip, caches, install bookkeeping. dist-info dirs are
 # PRUNED, not deleted: each wheel's METADATA (name/version/license fields)

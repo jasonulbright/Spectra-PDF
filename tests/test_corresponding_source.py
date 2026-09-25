@@ -31,7 +31,7 @@ def rows():
 class TestManifest:
     def test_it_names_the_complete_heif_source_set(self):
         assert {row["component"] for row in rows()} == {
-            "libheif", "libde265", "pi_heif"
+            "libheif", "libde265", "pillow_heif"
         }
 
     def test_every_archive_is_versioned_pinned_and_fetchable_by_one_route(self):
@@ -44,7 +44,7 @@ class TestManifest:
             )
 
     def test_the_committed_binding_source_matches_its_pin(self):
-        row = next(row for row in rows() if row["component"] == "pi_heif")
+        row = next(row for row in rows() if row["component"] == "pillow_heif")
         path = os.path.join(REPO, *row["source"].split("/"))
         with open(path, "rb") as fh:
             assert hashlib.sha256(fh.read()).hexdigest() == row["sha256"]
@@ -89,3 +89,30 @@ class TestReleaseContract:
         assert "For every GPL-2.0 or LGPL-2.1 component" in text
         assert "for at least three years" in text
         assert "preferred form for modifying these dictionaries" in text
+
+
+class TestHeifNotice:
+    def test_the_notice_names_what_the_committed_wheel_carries(self):
+        import zipfile
+
+        wheel = os.path.join(
+            REPO, "vendor", "wheels", "pillow_heif-1.8.0+decode.1-cp314-cp314-win_amd64.whl"
+        )
+        with zipfile.ZipFile(wheel) as zf:
+            names = zf.namelist()
+        dlls = sorted(
+            n.rsplit("/", 1)[1] for n in names if n.lower().endswith(".dll")
+        )
+        assert len(dlls) == 2
+        dist_info = next(n.split("/", 1)[0] for n in names if n.endswith(".dist-info/METADATA"))
+        version = dist_info[len("pillow_heif-"):-len(".dist-info")]
+        assert version == "1.8.0+decode.1"
+        for n in ("COPYING.libheif", "COPYING.libde265"):
+            assert f"{dist_info}/licenses/{n}" in names
+
+        text = open(NOTICE, encoding="utf-8").read()
+        for dll in dlls:
+            assert dll in text
+        assert f"pillow_heif-{version}.dist-info" in text
+        assert "| libheif | 1.23.4 |" in text
+        assert "| libde265 | 1.1.3 |" in text

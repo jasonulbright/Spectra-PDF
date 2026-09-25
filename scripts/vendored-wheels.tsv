@@ -11,7 +11,7 @@
 #  wheel  the binary artifact actually installed into an interpreter
 #  sdist  the same release's source distribution, committed so a fork is
 #         possible without the index. Every `wheel` row REQUIRES a matching
-#         `sdist` row at the same version; the install script refuses
+#         `sdist` row at the same public version; the install script refuses
 #         otherwise, because an artifact that cannot be rebuilt is not owned.
 #
 # Files live in vendor/wheels/. Bumping a row means replacing the files,
@@ -22,6 +22,14 @@
 # bundle native libraries carry their own additional terms; those are notice
 # rows in THIRD-PARTY-LICENSES.md, keyed to the measured library versions and
 # never to the wheel's own bundled-license file, which upstream lets go stale.
+#
+# LOCAL BUILDS
+# A wheel built in this repository from its committed sdist carries a local
+# version label (`1.8.0+decode.1`): the bytes are not the index's, so they never
+# reuse the index's filename. Its sdist row carries the PUBLIC version, and the
+# install script pairs the two on the part before `+`. Its `upstream` field is
+# the repository script that builds it, which is allowed for `+label` wheels only;
+# every other row names an index URL.
 package	version	role	file	sha256	spdx	upstream
-pi_heif	1.4.0	wheel	pi_heif-1.4.0-cp314-cp314-win_amd64.whl	743b971b9c0d35be8435702443596e3e9280084e68fc8d5c4de4b31fb12a1417	BSD-3-Clause	https://files.pythonhosted.org/packages/a6/67/1373582c4bfa3ca2092befd5555fc52d581fc34ad4a5cb0d8401d7f847b4/pi_heif-1.4.0-cp314-cp314-win_amd64.whl
-pi_heif	1.4.0	sdist	pi_heif-1.4.0.tar.gz	e1199d9d41d9ecc877cf3ae7322ff099f6404574f2e62da47590cd4ecb9ec554	BSD-3-Clause	https://files.pythonhosted.org/packages/6a/a2/70168b601b41bdf5726dfc8dc110eb4052a2e851fed9c9bdae95910e401d/pi_heif-1.4.0.tar.gz
+pillow_heif	1.8.0+decode.1	wheel	pillow_heif-1.8.0+decode.1-cp314-cp314-win_amd64.whl	72ce867b3aced362b1432393ef89755ffad76907fece1de878ae434c41118199	BSD-3-Clause	scripts/build-pillow-heif-decode-only.ps1
+pillow_heif	1.8.0	sdist	pillow_heif-1.8.0.tar.gz	e47c27432c6fd3d66c22f0de9f27fd379383b646c947520bc485854ce72060d0	BSD-3-Clause	https://files.pythonhosted.org/packages/bb/4c/d5319a1f276c70528ff97893afc42a300ff28029e27ca8de89bb3b271680/pillow_heif-1.8.0.tar.gz
