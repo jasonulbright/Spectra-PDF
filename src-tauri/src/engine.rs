@@ -498,6 +498,63 @@ pub async fn restart_for_assent(app: &AppHandle) {
     }
 }
 
+/// Locks the engine slot, starting an engine first when the slot is empty.
+///
+/// The renderer starts the engine once per window mount, so a slot emptied
+/// mid-session (assent restart, worker exit) stays empty unless the send path
+/// itself respawns; without this every later request fails "Engine not running".
+pub async fn lock_started<'a, T, F, Fut>(
+    slot: &'a Mutex<Option<T>>,
+    start: F,
+) -> Result<tokio::sync::MutexGuard<'a, Option<T>>, String>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    {
+        let guard = slot.lock().await;
+        if guard.is_some() {
+            return Ok(guard);
+        }
+    }
+    start().await?;
+    let guard = slot.lock().await;
+    if guard.is_none() {
+        return Err("Engine not running".to_string());
+    }
+    Ok(guard)
+}
+
+#[cfg(test)]
+mod start_tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    #[tokio::test]
+    async fn an_emptied_slot_is_refilled_before_the_send() {
+        let slot = Mutex::new(Some(1u32));
+        slot.lock().await.take();
+        let starts = AtomicUsize::new(0);
+        let guard = lock_started(&slot, || async {
+            starts.fetch_add(1, Ordering::SeqCst);
+            *slot.lock().await = Some(2);
+            Ok(())
+        }).await.unwrap();
+        assert_eq!(*guard, Some(2));
+        drop(guard);
+        let guard = lock_started(&slot, || async { panic!("a live engine is not restarted") }).await.unwrap();
+        assert_eq!(*guard, Some(2));
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_start_reports_the_start_error() {
+        let slot: Mutex<Option<u32>> = Mutex::new(None);
+        let err = lock_started(&slot, || async { Err("Failed to start engine: x".to_string()) }).await.unwrap_err();
+        assert_eq!(err, "Failed to start engine: x");
+    }
+}
+
 #[cfg(test)]
 mod lease_tests {
     use super::*;
