@@ -37,6 +37,7 @@ from engine.compress import compress
 # this module is a consumer like any other.
 from engine.create_pdf import IMAGE_SUFFIXES, image_to_pdf
 from engine.enhance_scan import enhance_scan
+from engine.inplace import publish_copy
 from engine.form_detect import _crop_box, _display_rect_to_pdf, _page_rotate
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
@@ -329,7 +330,7 @@ def _copy_file(src: Path, dest: Path) -> None:
         raise RuntimeError("source and destination are the same file")
     if dest.exists():
         dest.chmod(0o666)
-    shutil.copy2(src, dest)
+    publish_copy(src, dest)
 
 
 def ocr_file(
@@ -558,6 +559,9 @@ def batch_ocr(
         )
         result: dict | None = None
         scratch: Path | None = None
+        # An image's PDF wrapping is not a repair: `scratch` alone may replace
+        # the original, and an image original must never receive PDF bytes.
+        wrapped: Path | None = None
         # Enhancement's OWN staging, deliberately not `scratch`: the tail reads
         # `scratch is not None` as "this file was repaired" and may replace the
         # original from it, which an enhanced copy must never trigger.
@@ -582,12 +586,13 @@ def batch_ocr(
                 # An image becomes a PDF FIRST — one page per FRAME, so a
                 # multi-page fax TIFF OCRs whole — and everything after this
                 # line is the shipped PDF path with no branch.
-                scratch = out_path.parent / f".{out_path.stem}.image.tmp"
+                wrapped = out_path.parent / f".{out_path.stem}.image.tmp"
                 try:
-                    image_to_pdf(abs_path, scratch)
-                    source_for_open = scratch
+                    image_to_pdf(abs_path, wrapped)
+                    source_for_open = wrapped
                 except Exception as exc:
-                    scratch = None
+                    wrapped.unlink(missing_ok=True)
+                    wrapped = None
                     result = {"rel": rel, "status": "skipped",
                               "reason": f"unreadable image: {exc}"}
             if enhance and result is None:
@@ -644,7 +649,7 @@ def batch_ocr(
                     result = {"rel": rel, "status": "skipped", "reason": classification}
 
             if pdf is not None:
-                working = enhanced or scratch or abs_path
+                working = enhanced or scratch or wrapped or abs_path
                 expected_pages = len(pdf.pages)
                 needing = _pages_needing_ocr(str(working), pdf)
                 pdf.close()
@@ -714,7 +719,7 @@ def batch_ocr(
                 if in_place and result["status"] != "ocr" and not result.get("enhanceApplied"):
                     # Nothing was staged (the file needed no OCR), so MRC
                     # produces the staging itself, from the original.
-                    mrc_source = enhanced or scratch or abs_path
+                    mrc_source = enhanced or scratch or wrapped or abs_path
                 else:
                     mrc_source = out_path
                 applied_mrc, note = _mrc_step(
@@ -770,7 +775,7 @@ def batch_ocr(
                     result["repaired"] = True
                     if replace_repaired_originals and result["status"] != "skipped":
                         try:
-                            shutil.copy2(scratch, abs_path)
+                            publish_copy(scratch, abs_path)
                             result["repairedOriginalReplaced"] = True
                         except Exception as exc:
                             result["moveError"] = (
@@ -798,6 +803,8 @@ def batch_ocr(
                 pdf.close()
             if scratch is not None:
                 scratch.unlink(missing_ok=True)
+            if wrapped is not None:
+                wrapped.unlink(missing_ok=True)
             if enhanced is not None:
                 enhanced.unlink(missing_ok=True)
             if in_place:

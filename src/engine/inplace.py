@@ -10,6 +10,7 @@ overwrite an input while it is still being read.
 """
 
 import os
+import shutil
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -102,6 +103,18 @@ def staged_write(output: Path) -> Iterator[Path]:
     finally:
         if not landed:
             _discard(staged)
+
+
+def publish_copy(produced: Path, output: Path) -> None:
+    """Land a finished file from anywhere (another directory, another volume)
+    at ``output`` without ever writing into ``output`` itself.
+
+    A copy into an existing destination truncates it first, so a death or a
+    full disk part-way leaves a torn file where the previous one was. The copy
+    goes to a staging file beside ``output`` and lands with :func:`finish_staged`.
+    """
+    with staged_write(Path(output)) as staged:
+        shutil.copy2(str(produced), str(staged))
 
 
 @contextmanager
