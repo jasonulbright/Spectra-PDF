@@ -5,6 +5,7 @@ import { logRenderError } from './raster';
 import { ZOOM_SETTLE_MS } from '../../canvas/reading-page';
 import { tChrome } from '../../i18n';
 import { recognizeRaster, type RawEngineCall } from '../../lib/ocr-recognize';
+import { textLayerScaleVars } from '../../lib/text-layer-scale';
 import {
   peekSelectionCache,
   rasterScaleFor,
@@ -174,7 +175,9 @@ export function PageTextLayer({
         // pdf.js's span CSS is expressed in terms of --scale-factor; nothing
         // sets it for us because we construct TextLayer directly instead of
         // going through its viewer's setLayerDimensions.
-        container.style.setProperty('--scale-factor', String(scale));
+        for (const [name, value] of Object.entries(textLayerScaleVars(viewport))) {
+          container.style.setProperty(name, value);
+        }
         container.replaceChildren();
         layer = new TextLayer({
           textContentSource: page.streamTextContent(),

@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 import { dialog, file } from '../lib/tauri-bridge';
+import { pointerScope } from '../lib/pointer-scope';
 import {
   loadSignatureAssets,
   normalizeStrokes,
@@ -188,20 +189,21 @@ export function SignatureCaptureDialog({
       setStrokes([...committed, live]);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
-      window.removeEventListener('blur', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       cancelDraw.current = null;
       setStrokes(commit ? [...committed, live] : committed);
     };
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     cancelDraw.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('blur', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
 
   // ── Import ──────────────────────────────────────────────────────────

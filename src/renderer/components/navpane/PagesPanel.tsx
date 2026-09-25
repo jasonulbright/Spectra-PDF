@@ -21,6 +21,7 @@ import type { NavPanelComponentProps } from './types';
 import type { PageRef } from '../../state/types';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../../i18n';
+import { pointerScope } from '../../lib/pointer-scope';
 
 // Pages (thumbnails) panel. Small renders of the active
 // file's pages through the same pdf.js proxy the board uses (one per file via
@@ -359,22 +360,23 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
       };
       const onUp = (ev: PointerEvent) => finishDrag(ev.clientX, ev.clientY, true);
       const cancel = () => finishDrag(0, 0, false); // pointercancel / blur / Escape
-      window.addEventListener('pointermove', dragMove);
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', cancel);
+      const pointers = pointerScope(e.pointerId);
+      pointers.add('pointermove', dragMove);
+      pointers.add('pointerup', onUp);
+      pointers.add('pointercancel', cancel);
       // Match usePageDrag's safety nets: window blur and Escape abort the drag
       // (regression — otherwise a focus loss strands the window listeners
       // and a later unrelated click resolves the stale session).
-      window.addEventListener('blur', cancel);
+      pointers.add('blur', cancel);
       const unEscape = pushEscapeInterceptor(() => {
         cancel();
         return true;
       });
       detachRef.current = () => {
-        window.removeEventListener('pointermove', dragMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', cancel);
-        window.removeEventListener('blur', cancel);
+        pointers.remove('pointermove', dragMove);
+        pointers.remove('pointerup', onUp);
+        pointers.remove('pointercancel', cancel);
+        pointers.remove('blur', cancel);
         unEscape();
       };
     },

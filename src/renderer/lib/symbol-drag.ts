@@ -22,6 +22,7 @@
 // point, so a dropped symbol snaps exactly like a clicked one.
 
 import type { SymbolPart } from './count-marks';
+import { pointerScope } from './pointer-scope';
 
 export interface SymbolDragPayload {
   symbolId: string;
@@ -100,8 +101,10 @@ export function startSymbolDrag(
   payload: SymbolDragPayload,
   startX: number,
   startY: number,
+  pointerId: number,
   onEnd?: (dragged: boolean) => void,
 ): void {
+  const pointers = pointerScope(pointerId);
   let dragging = false;
   let ghost: HTMLDivElement | null = null;
   // Where the pointer last actually WAS. The drop uses this rather than the
@@ -127,9 +130,10 @@ export function startSymbolDrag(
   };
 
   const cleanup = (): void => {
-    window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', onUp);
-    window.removeEventListener('pointercancel', onCancel);
+    pointers.remove('pointermove', onMove);
+    pointers.remove('pointerup', onUp);
+    pointers.remove('pointercancel', onCancel);
+    pointers.remove('blur', onCancel);
     window.removeEventListener('keydown', onKey);
     ghost?.remove();
     ghost = null;
@@ -173,9 +177,10 @@ export function startSymbolDrag(
     onCancel();
   }
 
-  window.addEventListener('pointermove', onMove);
-  window.addEventListener('pointerup', onUp);
-  window.addEventListener('pointercancel', onCancel);
+  pointers.add('pointermove', onMove);
+  pointers.add('pointerup', onUp);
+  pointers.add('pointercancel', onCancel);
+  pointers.add('blur', onCancel);
   window.addEventListener('keydown', onKey, true);
 }
 

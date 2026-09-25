@@ -56,6 +56,7 @@ import type { GuideAxis, PageGuide } from '../../lib/guides';
 import { rulerTicks, type RulerTick } from '../../lib/rulers';
 import { DEFAULT_MEASURE_SCALE, measureUnitsPerPoint } from '../../lib/measure';
 import { tChrome, tNumber } from '../../i18n';
+import { pointerScope } from '../../lib/pointer-scope';
 
 // The continuous reading view: one document, a single
 // vertical column of the SAME PageCells the board uses (the reuse
@@ -639,10 +640,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       el.scrollTop = startTop - (ev.clientY - startY);
     };
     const teardown = (): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', teardown);
-      window.removeEventListener('pointercancel', teardown);
-      window.removeEventListener('blur', teardown);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', teardown);
+      pointers.remove('pointercancel', teardown);
+      pointers.remove('blur', teardown);
       popEscape();
       handDragTeardown.current = null;
       // Back to the steady-state grab — '' would also clear React's own
@@ -656,10 +657,11 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       teardown();
       return true;
     });
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', teardown);
-    window.addEventListener('pointercancel', teardown);
-    window.addEventListener('blur', teardown);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', teardown);
+    pointers.add('pointercancel', teardown);
+    pointers.add('blur', teardown);
   }, []);
 
   const actualSize = useCallback(() => {
@@ -916,10 +918,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       setGuideDraft({ axis, x: last.x - host.left, y: last.y - host.top });
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
-      window.removeEventListener('blur', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       guideDraftTeardown.current = null;
       setGuideDraft(null);
       if (!commit) return;
@@ -941,10 +943,11 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     guideDraftTeardown.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('blur', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
 
   // Rows are computed inline each render (PageCell is memo'd, so unchanged

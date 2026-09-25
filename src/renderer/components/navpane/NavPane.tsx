@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { tChrome, tNavPanelTitle } from '../../i18n';
 import { inlineExtent } from '../../lib/inline-direction';
 import { NAV_PANE_BOARD_RESERVE, NAV_PANE_MIN_WIDTH } from '../../state/types';
+import { pointerScope } from '../../lib/pointer-scope';
 
 // The navigation pane on the inline-start side: a thin, always-docked icon strip
 // (one button per AVAILABLE panel) + the active panel body at the persisted
@@ -53,13 +54,18 @@ export function NavPane(props: NavPaneProps): React.ReactElement {
         });
       };
       const detach = () => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
+        pointers.remove('pointermove', onMove);
+        pointers.remove('pointerup', onUp);
+        pointers.remove('pointercancel', onUp);
+        pointers.remove('blur', onUp);
         resizeCleanup.current = null;
       };
       const onUp = () => detach();
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
+      const pointers = pointerScope(e.pointerId);
+      pointers.add('pointermove', onMove);
+      pointers.add('pointerup', onUp);
+      pointers.add('pointercancel', onUp);
+      pointers.add('blur', onUp);
       resizeCleanup.current = detach;
     },
     [dispatch],
