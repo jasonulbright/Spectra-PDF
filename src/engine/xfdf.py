@@ -788,7 +788,7 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
         # in-place bug class). A signed input's landed bytes become an
         # incremental append, so importing a review file onto a signed
         # document keeps its signature verifiable.
-        from engine.incremental import finalize_preserving_signatures
+        from engine.incremental import finalize_preserving_signatures, signature_outcome
 
         in_path = Path(file)
         out_path = Path(output)
@@ -806,6 +806,5 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
         out["unresolved_replies"] = unresolved
     if dangling:
         out["dangling_reply_type"] = dangling
-    if preserved.get("preserved"):
-        out["signatures_preserved"] = True
+    out.update(signature_outcome(preserved))
     return out

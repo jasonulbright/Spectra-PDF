@@ -1026,6 +1026,46 @@ def _certification_refusals(file: str, certify: bool, certify_level: str | None)
     return existing
 
 
+def _raise_chain_refusal(exc: BaseException) -> None:
+    """Refuse by name when the signing failure is the signer's own chain.
+
+    Embedding validation material validates the signer's chain first, and the
+    library reports a failure there as the same exception type it uses for a
+    certification refusal. Keyed on the chained exception TYPE, never on its
+    text, so the policy message below is not given for a missing issuer."""
+    from pyhanko_certvalidator.errors import PathBuildingError, PathValidationError
+
+    cause = exc.__cause__ or exc.__context__
+    seen = 0
+    while cause is not None and seen < 8:
+        if isinstance(cause, PathBuildingError):
+            raise ValueError(
+                "The signing certificate's chain could not be built to a trusted "
+                "root: an issuing certificate is missing from the signer and could "
+                "not be retrieved. Add the intermediate certificate or its root."
+            ) from None
+        if isinstance(cause, PathValidationError):
+            raise ValueError(
+                "The signing certificate's chain did not validate, so validation "
+                "information for long-term validation could not be embedded."
+            ) from None
+        cause = cause.__cause__ or cause.__context__
+        seen += 1
+
+
+def _dss_counts(path: str) -> dict:
+    """What the written /DSS actually holds. An empty revocation count means
+    the long-term material carries certificates only."""
+    import pikepdf
+
+    with pikepdf.open(path) as pdf:
+        dss = pdf.Root.get("/DSS")
+        if not isinstance(dss, pikepdf.Dictionary):
+            return {"certs": 0, "crls": 0, "ocsps": 0}
+        return {"certs": len(dss.get("/Certs") or []), "crls": len(dss.get("/CRLs") or []),
+                "ocsps": len(dss.get("/OCSPs") or [])}
+
+
 def _raise_mapped_signing_refusal(certify: bool, existing: dict) -> None:
     """Re-raise the library's own certification enforcement as an engine refusal.
 
@@ -1654,7 +1694,8 @@ def sign_pdf(
                             else None
                         ),
                     )
-        except SigningError:
+        except SigningError as exc:
+            _raise_chain_refusal(exc)
             _raise_mapped_signing_refusal(certify, existing_certification)
     # Fail closed + atomic: write the signed bytes to a temp beside the output,
     # Self-verify the temporary file before replacement. This keeps the
@@ -1685,6 +1726,7 @@ def sign_pdf(
         # Read back out of the WRITTEN bytes, never echoed from the request —
         # the same discipline as the valid/intact fields beside it.
         written_certification = certification_of_file(tmp_name)
+        written_dss = _dss_counts(tmp_name) if embed_revocation else None
         os.replace(tmp_name, output_path)
     except BaseException:
         try:
@@ -1713,6 +1755,7 @@ def sign_pdf(
         # one was asked for.
         "lock": written_lock.get("action"),
         "lock_fields": written_lock.get("fields", []),
+        **({"validation_material": written_dss} if written_dss is not None else {}),
     }
 
 

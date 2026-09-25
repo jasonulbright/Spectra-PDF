@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pikepdf
 
-from .incremental import finalize_preserving_signatures
+from .incremental import finalize_preserving_signatures, signature_outcome
 from .inplace import is_same_file, staged_write
 from .redact import properties_of
 from .validate import validate_pdf
@@ -309,8 +309,7 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
             preserved = finalize_preserving_signatures(str(input_path), str(output_path))
 
     out = {"output": str(output_path), "saved": added, "removed_previous": removed}
-    if preserved.get("preserved"):
-        out["signatures_preserved"] = True
+    out.update(signature_outcome(preserved))
     return out
 
 

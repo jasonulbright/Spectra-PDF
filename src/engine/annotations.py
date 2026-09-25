@@ -226,7 +226,7 @@ def delete_all_annotations(file: str, output: str, subtypes: list | None = None,
     # On a signed input the landed bytes become an incremental append
     # (original verbatim + one revision), so sweeping comments never breaks
     # the signature. The staged/landed rewrite stands when not applicable.
-    from engine.incremental import finalize_preserving_signatures
+    from engine.incremental import finalize_preserving_signatures, signature_outcome
 
     wanted = _sweep_set(subtypes)
     removed = 0
@@ -280,6 +280,5 @@ def delete_all_annotations(file: str, output: str, subtypes: list | None = None,
             preserved = finalize_preserving_signatures(str(input_path), str(staged))
 
     out = {"output": str(output_path), "removed": removed}
-    if preserved.get("preserved"):
-        out["signatures_preserved"] = True
+    out.update(signature_outcome(preserved))
     return out

@@ -62,6 +62,9 @@ FF_PUSHBUTTON = 1 << 16
 FF_COMBO = 1 << 17
 FF_EDIT = 1 << 18
 FF_MULTISELECT = 1 << 21  # choice fields: a list box may select several items
+FF_PASSWORD = 1 << 13
+FF_FILE_SELECT = 1 << 20
+FF_COMB = 1 << 24
 
 # Sentinel: an EMPTY value on a choice field (radio/dropdown/optionlist) means
 # "clear the selection" (pdf-lib's field.clear()), NOT an invalid option — else
@@ -78,7 +81,7 @@ MIN_FONT_SIZE = 4.0
 DEFAULT_FONT_SIZE = 12.0
 LINE_SPACING = 1.2
 
-INHERITABLE_KEYS = ("/FT", "/Ff", "/V", "/DV", "/DA", "/Q", "/Opt")
+INHERITABLE_KEYS = ("/FT", "/Ff", "/V", "/DV", "/DA", "/Q", "/Opt", "/MaxLen")
 MAX_FIELD_DEPTH = 32
 
 
@@ -1095,6 +1098,26 @@ def _face_missing(face_path: str, text: str) -> list[str]:
     ]
 
 
+def _max_len(field) -> int | None:
+    value = field.attr("/MaxLen")
+    try:
+        n = int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+    return n if n is not None and n >= 0 else None
+
+
+def _comb_cells(field) -> int:
+    """The number of comb cells a text field divides into, or 0. ISO 32000-2
+    Table 231: the comb flag is meaningful only with /MaxLen and without the
+    multiline, password and file-select flags."""
+    if not field.flags & FF_COMB:
+        return 0
+    if field.flags & (FF_MULTILINE | FF_PASSWORD | FF_FILE_SELECT):
+        return 0
+    return _max_len(field) or 0
+
+
 def _text_appearance(
     pdf: pikepdf.Pdf,
     widget,
@@ -1103,6 +1126,7 @@ def _text_appearance(
     multiline: bool,
     quadding: int,
     font_dir: str = "",
+    comb: int = 0,
 ) -> bool:
     """Regenerate the widget's /AP /N form XObject for a text-ish value.
     Returns True when the /DA-requested font was missing from /DR and
@@ -1195,6 +1219,29 @@ def _text_appearance(
 
             def emit(line: str, _e=encode) -> bytes:
                 return b"<" + _e(line).hex().encode("ascii") + b"> Tj"
+
+    if comb and not multiline:
+        # One character per cell, centred in it; characters past the last
+        # cell are not drawn, matching the clip every other line gets.
+        chars = list(layout_value.replace("\n", " "))[:comb]
+        cell = w / comb
+        if size <= 0:
+            widest = max(chars, key=width_em, default="")
+            size = _fit_font_size(widest, False, cell + 2 * TEXT_PAD, h, width_em)
+        y = (h - size * GLYPH_HEIGHT_EM) / 2 + size * HELVETICA_DESCENT_EM
+        parts = [*_widget_chrome(widget, w, h), b"/Tx BMC", b"q",
+                 f"1 1 {_fmt(w - 2)} {_fmt(h - 2)} re W n".encode("ascii"), b"BT"]
+        parts.append(color.encode("ascii"))
+        parts.append(f"/{font_name} {_fmt(size)} Tf".encode("ascii"))
+        last_x = 0.0
+        for i, ch in enumerate(chars):
+            x = i * cell + (cell - width_em(ch) * size) / 2
+            parts.append(f"{_fmt(x - last_x)} {_fmt(y if i == 0 else 0)} Td".encode("ascii"))
+            parts.append(emit(ch))
+            last_x = x
+        parts.extend([b"ET", b"Q", b"EMC"])
+        _put_appearance(pdf, widget, parts, w, h, {("/" + font_name): font_obj}, rotation)
+        return substituted
 
     if size <= 0:
         # Single-line width is measured on the flattened text (no `\n`); the
@@ -1978,7 +2025,8 @@ def regenerate_missing_appearances(
                     _text_appearance(
                         pdf, widget, value, da,
                         ftype == "text" and bool(field.flags & FF_MULTILINE),
-                        quadding, font_dir)
+                        quadding, font_dir,
+                        _comb_cells(field) if ftype == "text" else 0)
             except (ValueError, OSError):
                 if field.name not in undrawn:
                     undrawn.append(field.name)
@@ -2407,7 +2455,7 @@ def fill_form_fields(
     # which the
     # transplant refuses by design; that path keeps today's rewrite (a
     # flatten inherently destroys what the signature covers).
-    from engine.incremental import finalize_preserving_signatures
+    from engine.incremental import finalize_preserving_signatures, signature_outcome
 
     with pikepdf.open(file) as pdf:
         if xfa.classify(pdf) == xfa.DYNAMIC:
@@ -2438,6 +2486,13 @@ def fill_form_fields(
                 continue
             if ftype == "text":
                 text = str(value)
+                limit = _max_len(field)
+                if limit is not None and len(text) > limit:
+                    problems.append(
+                        f"value for {name} is longer than the field's maximum "
+                        f"of {limit} characters"
+                    )
+                    continue
                 # Encodability is part of validation, not a mutation-time
                 # The "list all problems" contract includes every appearance
                 # encoding failure so multiple bad fields report together. A
@@ -2748,6 +2803,10 @@ def fill_form_fields(
                     # A fill that stored the formatted string would corrupt
                     # the value for the next calculation that reads it.
                     field.obj["/V"] = pikepdf.String(str(value))
+                    # A rich-text value left beside the new plain one is a
+                    # second answer for the same field (ISO 32000-2 12.7.4.3).
+                    if "/RV" in field.obj:
+                        del field.obj["/RV"]
                     appearance_text = display.get(field.name, str(value))
                     if "/I" in field.obj:
                         del field.obj["/I"]
@@ -2776,7 +2835,8 @@ def fill_form_fields(
                             )
                         else:
                             drew = _text_appearance(
-                                pdf, widget, appearance_text, da, multiline, quadding, font_dir
+                                pdf, widget, appearance_text, da, multiline, quadding,
+                                font_dir, _comb_cells(field) if ftype == "text" else 0,
                             )
                         if drew:
                             if field.name not in fonts_substituted:
@@ -2837,14 +2897,7 @@ def fill_form_fields(
         # Fields carrying a script this app does not run. Their /JS bytes are
         # untouched and every other field still calculated.
         result["scripts_not_run"] = scripts_not_run
-    if preserved.get("preserved"):
-        result["signatures_preserved"] = True
-    elif preserved.get("reason") != "not-signed":
-        # The rewrite stood over a signed original: every signature in the
-        # output reports as altered, and a caller with no pre-write decision
-        # of its own (a headless run) learns it only from this.
-        result["signatures_invalidated"] = True
-        result["signatures_invalidated_reason"] = preserved.get("reason", "unknown")
+    result.update(signature_outcome(preserved))
     return result
 
 

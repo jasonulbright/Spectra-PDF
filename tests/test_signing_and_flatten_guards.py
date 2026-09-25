@@ -155,3 +155,168 @@ def test_flatten_refuses_a_checked_box_with_no_appearance_by_name(tmp_path):
     with pytest.raises(ValueError, match="agree"):
         fill_form_fields(src, out, {}, flatten=True)
     assert not os.path.exists(out)
+
+
+def _annotated(path):
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(400, 400))
+    note = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Text,
+        Rect=[20, 20, 40, 40], Contents=pikepdf.String("note")))
+    page.obj.Annots = pdf.make_indirect(pikepdf.Array([note]))
+    pdf.save(path)
+    return path
+
+
+def _signed(tmp_path, level):
+    pfx = _pki(str(tmp_path), datetime.datetime(2000, 1, 1), datetime.datetime(2100, 1, 1))
+    src = _annotated(str(tmp_path / "annotated.pdf"))
+    out = str(tmp_path / f"signed-{level}.pdf")
+    kw = {"certify": True, "certify_level": level} if level else {}
+    sign_pdf(src, out, pfx_path=pfx, password="pw", **kw)
+    return src, out
+
+
+def _door(name, src, signed, out):
+    if name == "annotations":
+        from engine.annotations import delete_all_annotations
+        return delete_all_annotations(signed, out)
+    if name == "links":
+        from engine.links import add_links
+        return add_links(signed, out, [{"page": 1, "rect": [100, 100, 200, 120],
+                                         "url": "https://example.com"}])
+    if name == "redact_marks":
+        from engine.redact_marks import save_redaction_marks
+        return save_redaction_marks(signed, out, [{"page": 1, "rect": [100, 100, 200, 120]}])
+    from engine.xfdf import export_xfdf, import_xfdf
+    xfdf = out + ".xfdf"
+    export_xfdf(src, xfdf)
+    return import_xfdf(signed, xfdf, out)
+
+
+@pytest.mark.parametrize("door", ["annotations", "links", "redact_marks", "xfdf"])
+def test_each_annotation_door_says_when_it_breaks_a_signature(tmp_path, door):
+    src, signed = _signed(tmp_path, "none")
+    result = _door(door, src, signed, str(tmp_path / "out.pdf"))
+    assert result["signatures_invalidated"] is True
+    assert result["signatures_invalidated_reason"].startswith("certified-none-forbids-")
+    assert "signatures_preserved" not in result
+    assert verify_signatures(str(tmp_path / "out.pdf"))["signatures"][0]["intact"] is False
+
+
+@pytest.mark.parametrize("door", ["annotations", "links", "redact_marks", "xfdf"])
+def test_each_annotation_door_keeps_an_approval_signature(tmp_path, door):
+    src, signed = _signed(tmp_path, None)
+    result = _door(door, src, signed, str(tmp_path / "out.pdf"))
+    assert result.get("signatures_preserved") is True
+    assert "signatures_invalidated" not in result
+
+
+def _text_form(path, **extra):
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(400, 400))
+    font = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1, BaseFont=pikepdf.Name.Helvetica))
+    field = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Widget, FT=pikepdf.Name.Tx,
+        T=pikepdf.String("f"), Rect=[20, 350, 220, 370], F=4,
+        DA=pikepdf.String("/Helv 10 Tf 0 g"), **extra))
+    page.obj.Annots = pdf.make_indirect(pikepdf.Array([field]))
+    pdf.Root.AcroForm = pdf.make_indirect(pikepdf.Dictionary(
+        Fields=pikepdf.Array([field]), DA=pikepdf.String("/Helv 10 Tf 0 g"),
+        DR=pikepdf.Dictionary(Font=pikepdf.Dictionary(Helv=font))))
+    pdf.save(path)
+    return path
+
+
+def _shown(path):
+    with pikepdf.open(path) as pdf:
+        field = pdf.Root.AcroForm.Fields[0]
+        facts = {"has_rv": "/RV" in field, "value": str(field.get("/V"))}
+        return facts, field.AP.N.read_bytes()
+
+
+def test_a_comb_field_draws_one_character_per_cell(tmp_path):
+    src = _text_form(str(tmp_path / "in.pdf"), Ff=1 << 24, MaxLen=5)
+    out = str(tmp_path / "out.pdf")
+    fill_form_fields(src, out, {"f": "ABCDE"})
+    _field, stream = _shown(out)
+    assert stream.count(b"Tj") == 5
+    assert b"(ABCDE)" not in stream
+
+
+def test_a_value_longer_than_maxlen_refuses(tmp_path):
+    src = _text_form(str(tmp_path / "in.pdf"), MaxLen=3)
+    out = str(tmp_path / "out.pdf")
+    with pytest.raises(ValueError, match="maximum of 3"):
+        fill_form_fields(src, out, {"f": "ABCD"})
+    assert not os.path.exists(out)
+
+
+def test_filling_a_rich_text_field_drops_the_stale_rich_value(tmp_path):
+    src = _text_form(str(tmp_path / "in.pdf"), Ff=1 << 25,
+                     RV=pikepdf.String("<body><p>old</p></body>"))
+    out = str(tmp_path / "out.pdf")
+    fill_form_fields(src, out, {"f": "new"})
+    facts, stream = _shown(out)
+    assert not facts["has_rv"]
+    assert facts["value"] == "new" and b"(new)" in stream
+
+
+def _chain(tmp, include_intermediate):
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives.serialization import pkcs12
+    from cryptography.x509.oid import NameOID
+
+    def name(cn):
+        return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
+
+    def cert(subject, issuer, key, signing_key, ca):
+        b = (x509.CertificateBuilder().subject_name(name(subject)).issuer_name(name(issuer))
+             .public_key(key.public_key()).serial_number(x509.random_serial_number())
+             .not_valid_before(datetime.datetime(2000, 1, 1))
+             .not_valid_after(datetime.datetime(2100, 1, 1))
+             .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
+             .add_extension(x509.KeyUsage(
+                 digital_signature=not ca, content_commitment=not ca, key_encipherment=False,
+                 data_encipherment=False, key_agreement=False, key_cert_sign=ca,
+                 crl_sign=ca, encipher_only=False, decipher_only=False), critical=True))
+        return b.sign(signing_key, hashes.SHA256())
+
+    keys = [rsa.generate_private_key(public_exponent=65537, key_size=2048) for _ in range(3)]
+    root = cert("Root", "Root", keys[0], keys[0], True)
+    inter = cert("Inter", "Root", keys[1], keys[0], True)
+    leaf = cert("Leaf", "Inter", keys[2], keys[1], False)
+    root_pem = os.path.join(tmp, "root.pem")
+    with open(root_pem, "wb") as f:
+        f.write(root.public_bytes(serialization.Encoding.PEM))
+    bundle = [inter, root] if include_intermediate else [root]
+    pfx = os.path.join(tmp, "chain.pfx")
+    with open(pfx, "wb") as f:
+        f.write(pkcs12.serialize_key_and_certificates(
+            b"l", keys[2], leaf, bundle, serialization.BestAvailableEncryption(b"pw")))
+    return pfx, root_pem
+
+
+def test_a_missing_intermediate_refuses_by_name_not_as_a_policy(tmp_path):
+    pfx, root = _chain(str(tmp_path), include_intermediate=False)
+    src = _form(str(tmp_path / "in.pdf"))
+    out = str(tmp_path / "out.pdf")
+    with pytest.raises(ValueError, match="chain could not be built"):
+        sign_pdf(src, out, pfx_path=pfx, password="pw", pades=True,
+                 embed_revocation=True, trust_roots=[root])
+    assert not os.path.exists(out)
+
+
+def test_embedded_validation_material_is_reported_as_written(tmp_path):
+    pfx, root = _chain(str(tmp_path), include_intermediate=True)
+    src = _form(str(tmp_path / "in.pdf"))
+    out = str(tmp_path / "out.pdf")
+    result = sign_pdf(src, out, pfx_path=pfx, password="pw", pades=True,
+                      embed_revocation=True, trust_roots=[root])
+    # These certificates name no revocation source, so none can be embedded.
+    assert result["validation_material"] == {"certs": 3, "crls": 0, "ocsps": 0}
+    plain = sign_pdf(src, str(tmp_path / "plain.pdf"), pfx_path=pfx, password="pw", pades=True)
+    assert "validation_material" not in plain
