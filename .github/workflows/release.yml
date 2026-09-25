@@ -425,9 +425,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "failed to upload $($file.Name)" }
           }
 
-      # The installer is UNSIGNED, so a published checksum is the only way a
-      # cautious user can confirm the file they downloaded is the file this
-      # workflow built.
+      # The portable zip and the source archives carry no Authenticode
+      # signature, so the published checksum is how a user confirms a
+      # downloaded file is the file this workflow built.
       - name: Upload SHA-256 checksums to the draft
         shell: pwsh
         env:
@@ -439,9 +439,6 @@ jobs:
           if (-not $installers) { throw "no installer found in $bundle to checksum" }
           $sources = @(Get-ChildItem release-sources -File -ErrorAction Stop)
           if (-not $sources) { throw "no corresponding-source archives found to checksum" }
-          # The portable zip is unsigned for the same reason the installer is,
-          # so it needs its checksum for the same reason -- and it sits in the
-          # same file, beside the installer, rather than in one of its own.
           $portable = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -ErrorAction Stop)
           if ($portable.Count -ne 1) { throw "expected one portable zip to checksum, found $($portable.Count)" }
           $files = @($installers) + @($portable) + @($sources)
