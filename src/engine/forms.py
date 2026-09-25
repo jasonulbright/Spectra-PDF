@@ -2248,7 +2248,10 @@ def import_form_data(
         out["unknown"] = unknown
     if skipped:
         out["skipped"] = skipped
-    for key in ("calculated", "scripts_not_run", "signatures_preserved"):
+    for key in (
+        "calculated", "scripts_not_run", "signatures_preserved",
+        "signatures_invalidated", "signatures_invalidated_reason",
+    ):
         if result.get(key):
             out[key] = result[key]
     return out
@@ -2371,8 +2374,9 @@ def reset_form_fields(
     out = {"output": result["output"], "reset": result["filled"]}
     if skipped_bad_dv:
         out["skipped"] = skipped_bad_dv
-    if result.get("signatures_preserved"):
-        out["signatures_preserved"] = True
+    for key in ("signatures_preserved", "signatures_invalidated", "signatures_invalidated_reason"):
+        if result.get(key):
+            out[key] = result[key]
     return out
 
 
@@ -2792,6 +2796,13 @@ def fill_form_fields(
         flattened = False
         xfa_stripped = False
         if flatten:
+            _, undrawn = regenerate_missing_appearances(pdf, font_dir)
+            unstampable = sorted(set(undrawn) | set(_lookless_stated_fields(pdf)))
+            if unstampable:
+                raise ValueError(
+                    "Cannot flatten: no appearance can be drawn for "
+                    + ", ".join(unstampable)
+                )
             _flatten_fields(pdf)
             flattened = True
             xfa_stripped = xfa_kind != xfa.NONE and not _has_xfa(pdf)
@@ -2828,6 +2839,12 @@ def fill_form_fields(
         result["scripts_not_run"] = scripts_not_run
     if preserved.get("preserved"):
         result["signatures_preserved"] = True
+    elif preserved.get("reason") != "not-signed":
+        # The rewrite stood over a signed original: every signature in the
+        # output reports as altered, and a caller with no pre-write decision
+        # of its own (a headless run) learns it only from this.
+        result["signatures_invalidated"] = True
+        result["signatures_invalidated_reason"] = preserved.get("reason", "unknown")
     return result
 
 
@@ -2849,6 +2866,46 @@ def _effective_appearance(widget):
             return None
         return n.get(state)
     return n
+
+
+def _lookless_stated_fields(pdf: pikepdf.Pdf) -> list[str]:
+    """Visible check box or radio widgets that are ON yet carry no appearance.
+
+    Such a widget states a value it has no drawing for, so flattening it would
+    remove the value from the page with nothing left in its place."""
+    out: list[str] = []
+    for field in _all_fields(pdf):
+        if _classify(field) not in ("checkbox", "radio"):
+            continue
+        for widget in field.widgets:
+            try:
+                flags = int(widget.get("/F", 0))
+            except (TypeError, ValueError):
+                flags = 0
+            if flags & (AF_HIDDEN | AF_NOVIEW):
+                continue
+            state = widget.get("/AS")
+            if state is None or str(state) == "/Off":
+                continue
+            if _effective_appearance(widget) is None and field.name not in out:
+                out.append(field.name)
+    return out
+
+
+def _balanced_content(page) -> bytes:
+    """The page's content wrapped so none of its graphics state reaches what
+    is appended after it. An unmatched ``q`` in the original is closed too,
+    or the appended stamps would draw inside its leftover transform."""
+    ops = pikepdf.parse_content_stream(page)
+    depth = 0
+    for _operands, operator in ops:
+        op = str(operator)
+        if op == "q":
+            depth += 1
+        elif op == "Q" and depth > 0:
+            depth -= 1
+    body = pikepdf.unparse_content_stream(ops)
+    return b"q\n" + body + b"\n" + b"Q\n" * (depth + 1)
 
 
 def _flatten_fields(pdf: pikepdf.Pdf) -> None:
@@ -2914,8 +2971,7 @@ def _flatten_fields(pdf: pikepdf.Pdf) -> None:
                         "ascii"
                     )
                 )
-            existing = pikepdf.parse_content_stream(page)
-            new_content = pikepdf.unparse_content_stream(existing) + b"\n" + b"\n".join(ops)
+            new_content = _balanced_content(page) + b"\n".join(ops)
             page.Contents = pdf.make_stream(new_content)
         if keep:
             page.obj["/Annots"] = pikepdf.Array(keep)
