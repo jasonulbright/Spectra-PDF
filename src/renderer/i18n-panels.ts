@@ -181,6 +181,8 @@ export const PANEL_STRINGS = {
   'panel.repair.repairing': 'Repairing PDF (Tier 1: QPDF rewrite)…',
   'panel.repair.repaired':
     'Repaired: {{from}} KB -> {{to}} KB, {{pages}} pages. {{issues}} issue(s) addressed.',
+  'panel.repair.noDamage':
+    'No damage found. A rewritten copy was saved: {{from}} KB -> {{to}} KB, {{pages}} pages.',
   'panel.repair.checking': 'Checking…',
   'panel.repair.validateFirst': 'Validate First',
   'panel.repair.busy': 'Repairing…',

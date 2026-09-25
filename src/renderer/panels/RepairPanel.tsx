@@ -6,6 +6,7 @@ import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import { suffixedOutputName } from '../lib/output-names';
+import { repairStatus } from '../lib/repair-status';
 
 export function RepairPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -43,12 +44,7 @@ export function RepairPanel(): React.ReactElement {
     setBusy(true); setBusyOp('repair'); setStatus(tChrome('panel.repair.repairing'));
     try {
       const r = await call('repair', { file: activeFile.workingPath, output });
-      const issues = r.issues_found?.length || 0;
-      const orig = (r.original_size / 1024).toFixed(0);
-      const out = (r.repaired_size / 1024).toFixed(0);
-      setStatus(tChrome('panel.repair.repaired', {
-        from: orig, to: out, pages: r.pages, issues,
-      }));
+      setStatus(repairStatus(r));
     } catch (e: unknown) { setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) })); }
     finally { setBusy(false); setBusyOp(null); }
   }, [activeFile, call, saveFile]);

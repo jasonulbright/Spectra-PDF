@@ -378,3 +378,17 @@ class TestNonLatinStamps:
             add_header_footer(src, out, [{"position": "bc", "text": "第{page}頁"}],
                               font_dir="")
         assert not os.path.exists(out)
+
+
+@pytest.mark.parametrize(
+    "start,digits", [(-3, 6), (1.5, 6), (1, 0), (1, 13), (1, 2.0)]
+)
+def test_a_bates_counter_outside_its_range_refuses(tmp_path, start, digits):
+    src = str(tmp_path / "in.pdf")
+    _pdf(src, 2)
+    with pytest.raises(ValueError, match="Bates start must be a whole number"):
+        add_header_footer(
+            src, str(tmp_path / "out.pdf"), [{"position": "br", "text": "{bates}"}],
+            bates_start=start, bates_digits=digits,
+        )
+    assert not (tmp_path / "out.pdf").exists()

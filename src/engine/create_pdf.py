@@ -23,6 +23,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 import pikepdf
+from pikepdf import Name
 
 from engine import distill as distill_mod
 from engine import gs_capability
@@ -139,16 +140,142 @@ def _normalise(frame):
     return frame.convert("RGB")
 
 
-def _frame_pdf(frame, resolution: float) -> bytes:
-    """One normalised frame as a one-page PDF, sized by `resolution`.
+_JPEG_PASSTHROUGH_MODES = ("L", "RGB", "CMYK")
+_DEVICE_SPACE = {"1": "/DeviceGray", "L": "/DeviceGray", "RGB": "/DeviceRGB", "CMYK": "/DeviceCMYK"}
+_ICC_SPACE = {"L": b"GRAY", "RGB": b"RGB ", "CMYK": b"CMYK"}
+_EXIF_ORIENTATION = 0x0112
 
-    The frame object is saved EXACTLY ONCE and never reused — Pillow merges
-    into a stale `encoderinfo` and the stale value wins (measured), so a reused
-    image silently carries a previous call's resolution.
-    """
-    buf = io.BytesIO()
-    frame.save(buf, "PDF", resolution=resolution)
-    return buf.getvalue()
+
+def source_jpeg(im) -> bytes | None:
+    """The first picture's own JPEG bytes when the container is a JPEG, else
+    None. A camera MPO file is a JPEG followed by further pictures (a preview,
+    a second eye); its first picture spans the first `Size` bytes."""
+    fmt = getattr(im, "format", None)
+    if fmt not in ("JPEG", "MPO"):
+        return None
+    try:
+        im.fp.seek(0)
+        data = im.fp.read()
+    except (AttributeError, OSError, ValueError):
+        return None
+    if fmt == "MPO":
+        try:
+            size = int(im.mpinfo[0xB002][0]["Size"])
+        except (AttributeError, KeyError, IndexError, TypeError, ValueError):
+            return None
+        data = data[:size]
+    if not (data.startswith(b"\xff\xd8") and data.rstrip(b"\x00").endswith(b"\xff\xd9")):
+        return None
+    return data
+
+
+def frames_of(im):
+    """The frames that are pages: every frame, except that an MPO's further
+    pictures are not pages of the photograph."""
+    from PIL import ImageSequence  # noqa: PLC0415
+
+    if getattr(im, "format", None) == "MPO":
+        im.seek(0)
+        return [im]
+    return ImageSequence.Iterator(im)
+
+
+def orient(frame, orientation: int):
+    """The frame as it is meant to be seen: an EXIF orientation other than 1
+    stores the picture rotated or mirrored and asks the viewer to undo it."""
+    from PIL import Image  # noqa: PLC0415
+
+    method = {
+        2: Image.Transpose.FLIP_LEFT_RIGHT,
+        3: Image.Transpose.ROTATE_180,
+        4: Image.Transpose.FLIP_TOP_BOTTOM,
+        5: Image.Transpose.TRANSPOSE,
+        6: Image.Transpose.ROTATE_270,
+        7: Image.Transpose.TRANSVERSE,
+        8: Image.Transpose.ROTATE_90,
+    }.get(orientation)
+    return frame.transpose(method) if method is not None else frame
+
+
+def orientation_of(im) -> int:
+    try:
+        return int(im.getexif().get(_EXIF_ORIENTATION, 1) or 1)
+    except Exception:  # noqa: BLE001 - an unreadable EXIF block orients nothing
+        return 1
+
+
+def _colour_space(pdf, mode: str, icc: bytes | None):
+    device = Name(_DEVICE_SPACE[mode])
+    expected = _ICC_SPACE.get(mode)
+    if icc and expected and len(icc) >= 20 and icc[16:20] == expected:
+        profile = pdf.make_stream(icc)
+        profile.N = {"L": 1, "RGB": 3, "CMYK": 4}[mode]
+        profile.Alternate = device
+        return pikepdf.Array([Name.ICCBased, profile])
+    return device
+
+
+def _plain(value):
+    """A PDF value rebuilt from primitives, owned by no document, so it
+    outlives the wrapper it was read from."""
+    if isinstance(value, pikepdf.Array):
+        return pikepdf.Array([_plain(v) for v in value])
+    if isinstance(value, pikepdf.Dictionary):
+        return pikepdf.Dictionary({str(k): _plain(v) for k, v in value.items()})
+    if isinstance(value, pikepdf.Name):
+        return Name(str(value))
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float, pikepdf.Object)):
+        try:
+            return int(value) if float(value).is_integer() else float(value)
+        except (TypeError, ValueError):
+            return value
+    return value
+
+
+def image_xobject(pdf, frame, *, jpeg: bytes | None = None, adobe: bool = False,
+                  icc: bytes | None = None):
+    """One normalised frame as an Image XObject in `pdf`, without loss.
+
+    `jpeg` is the source's own JPEG stream for this very frame: it is embedded
+    as it is (DCTDecode), because decoding and re-encoding a JPEG loses detail
+    every time. Every other frame is embedded as its decoded samples under
+    FlateDecode, except a bilevel frame, which is CCITT Group 4. `adobe` marks
+    a CMYK JPEG written with an Adobe APP14 segment, whose samples are stored
+    inverted."""
+    import zlib  # noqa: PLC0415
+
+    mode = frame.mode
+    width, height = frame.size
+    if jpeg is not None and mode in _JPEG_PASSTHROUGH_MODES:
+        image = pdf.make_stream(jpeg)
+        image.Filter = Name.DCTDecode
+        image.BitsPerComponent = 8
+        if mode == "CMYK" and adobe:
+            image.Decode = pikepdf.Array([1, 0, 1, 0, 1, 0, 1, 0])
+    elif mode == "1":
+        buf = io.BytesIO()
+        frame.save(buf, "PDF", resolution=72.0)
+        with pikepdf.open(io.BytesIO(buf.getvalue())) as wrapper:
+            xobjects = wrapper.pages[0].obj.Resources.XObject
+            source = xobjects[list(xobjects.keys())[0]]
+            image = pdf.make_stream(source.read_raw_bytes())
+            for key in ("/Filter", "/DecodeParms", "/Decode"):
+                value = source.get(key)
+                if value is not None:
+                    image[key] = _plain(value)
+        image.BitsPerComponent = 1
+    else:
+        image = pdf.make_stream(zlib.compress(frame.tobytes(), 9))
+        image.Filter = Name.FlateDecode
+        image.BitsPerComponent = 8
+    image.Type = Name.XObject
+    image.Subtype = Name.Image
+    image.Width = width
+    image.Height = height
+    image.ColorSpace = _colour_space(pdf, mode, icc if mode != "1" else None)
+    return pdf.make_indirect(image)
 
 
 def image_to_pdf(src: str | Path, dest: str | Path, *, dpi_default: float = 200.0) -> dict:
@@ -162,7 +289,7 @@ def image_to_pdf(src: str | Path, dest: str | Path, *, dpi_default: float = 200.
     Returns a report: pages, the per-page DPI actually used, and the first
     page's size in points.
     """
-    from PIL import Image, ImageSequence, UnidentifiedImageError  # noqa: PLC0415
+    from PIL import Image, UnidentifiedImageError  # noqa: PLC0415
 
     src_path = Path(src)
     dest_path = Path(dest)
@@ -188,22 +315,37 @@ def image_to_pdf(src: str | Path, dest: str | Path, *, dpi_default: float = 200.
     # under a wrong extension still decode.
     _register_heif()
 
-    parts: list[bytes] = []
+    merged = pikepdf.Pdf.new()
     sizes: list[tuple[float, float]] = []
     resolutions: list[float] = []
     try:
         with Image.open(src_path) as im:
-            for raw in ImageSequence.Iterator(im):
+            orientation = orientation_of(im)
+            jpeg = source_jpeg(im) if orientation == 1 else None
+            adobe = "adobe" in (im.info or {})
+            for raw in frames_of(im):
                 resolution = _resolution(raw.info or im.info, default)
-                frame = _normalise(raw.copy())
-                parts.append(_frame_pdf(frame, resolution))
-                resolutions.append(resolution)
-                sizes.append(
-                    (
-                        frame.size[0] * 72.0 / resolution,
-                        frame.size[1] * 72.0 / resolution,
-                    )
+                icc = (raw.info or {}).get("icc_profile") or (im.info or {}).get("icc_profile")
+                frame = orient(_normalise(raw.copy()), orientation)
+                image = image_xobject(
+                    merged, frame,
+                    jpeg=jpeg if frame.mode == raw.mode else None,
+                    adobe=adobe, icc=icc,
                 )
+                jpeg = None
+                width = frame.size[0] * 72.0 / resolution
+                height = frame.size[1] * 72.0 / resolution
+                page = pikepdf.Dictionary(
+                    Type=Name.Page,
+                    MediaBox=pikepdf.Array([0, 0, width, height]),
+                    Resources=pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=image)),
+                    Contents=merged.make_stream(
+                        f"q {width:.4f} 0 0 {height:.4f} 0 0 cm /Im0 Do Q".encode("ascii")
+                    ),
+                )
+                merged.pages.append(pikepdf.Page(page))
+                resolutions.append(resolution)
+                sizes.append((width, height))
     except UnidentifiedImageError as exc:
         raise ValueError(f"unreadable image: {src_path} ({exc})") from None
     except (OSError, ValueError) as exc:
@@ -211,26 +353,15 @@ def image_to_pdf(src: str | Path, dest: str | Path, *, dpi_default: float = 200.
         # page set is not a success, so the whole source refuses.
         raise ValueError(f"unreadable image: {src_path} ({exc})") from None
 
-    if not parts:
+    if not sizes:
         raise ValueError(f"the image contains no frames: {src_path}")
 
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    if len(parts) == 1:
-        dest_path.write_bytes(parts[0])
-    else:
-        merged = pikepdf.Pdf.new()
-        with ExitStack() as stack:
-            for data in parts:
-                page_pdf = stack.enter_context(pikepdf.open(io.BytesIO(data)))
-                # add_pages_from, never `pages.extend` — the structural-page-ops
-                # invariant holds even where no source can carry a form, because
-                # the exception is what erodes.
-                merged.add_pages_from(page_pdf)
-            save_pdf(merged, str(dest_path))
+    save_pdf(merged, str(dest_path))
 
     return {
         "output": str(dest_path),
-        "pages": len(parts),
+        "pages": len(sizes),
         "dpi": [round(r, 2) for r in resolutions],
         "page_size": [round(sizes[0][0], 2), round(sizes[0][1], 2)],
     }

@@ -31,27 +31,20 @@ def repair(file: str, output: str) -> dict:
     original_size = input_path.stat().st_size
     issues_found = []
 
-    # Open with recovery mode -- pikepdf/QPDF will attempt to
-    # reconstruct broken xref tables and fix structural issues
-    # allow_overwriting_input=True lets us save back to the same file
+    # QPDF reconstructs a damaged xref, stream lengths and object streams at
+    # open and while objects resolve; each reconstruction is a warning, and the
+    # warnings are the only record of what the rewrite repaired.
     try:
         pdf = pikepdf.open(
-            file, suppress_warnings=False, allow_overwriting_input=True
+            file, suppress_warnings=True, allow_overwriting_input=True
         )
     except pikepdf.PasswordError:
         raise ValueError("PDF is encrypted -- decrypt before repairing")
-    except Exception as e:
-        # If normal open fails, the file is damaged. Try harder.
-        issues_found.append(f"Initial open failed: {e}")
-        try:
-            pdf = pikepdf.open(
-                file, suppress_warnings=False, allow_overwriting_input=True
-            )
-        except Exception as e2:
-            raise RuntimeError(
-                f"PDF is too damaged for Tier 1 repair: {e2}. "
-                "Try 'rebuild' (Tier 2) or 'recover' (Tier 3)."
-            )
+    except Exception as e2:
+        raise RuntimeError(
+            f"PDF is too damaged for Tier 1 repair: {e2}. "
+            "Try 'rebuild' (Tier 2) or 'recover' (Tier 3)."
+        )
 
     with pdf:
         page_count = len(pdf.pages)
@@ -83,6 +76,10 @@ def repair(file: str, output: str) -> dict:
             compress_streams=True,
             recompress_flate=True,
         )
+        for warning in pdf.get_warnings():
+            text = str(warning).strip()
+            if text and text not in issues_found:
+                issues_found.append(text)
 
     output_size = output_path.stat().st_size
 

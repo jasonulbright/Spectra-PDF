@@ -775,3 +775,97 @@ def test_check_reports_a_resources_read_failure(monkeypatch, sample_pdf):
     assert resource_issues, result["issues"]
     assert all(i["severity"] == "error" for i in resource_issues)
     assert result["valid"] is False
+
+
+def _two_page_pdf(path, **save):
+    pdf = pikepdf.new()
+    for _ in range(2):
+        pdf.add_blank_page()
+    for page in pdf.pages:
+        page.Contents = pdf.make_stream(b"0 0 1 rg 10 10 50 50 re f")
+    pdf.save(path, **save)
+    return path
+
+
+class TestHonestReports:
+    def test_repair_reports_what_the_reconstruction_found(self, tmp_dir):
+        clean = _two_page_pdf(
+            os.path.join(tmp_dir, "clean.pdf"),
+            object_stream_mode=pikepdf.ObjectStreamMode.disable,
+            compress_streams=False,
+        )
+        data = open(clean, "rb").read()
+        lying = os.path.join(tmp_dir, "lying.pdf")
+        with open(lying, "wb") as f:
+            f.write(data.replace(b"/Length 25", b"/Length 9999", 1))
+        assert repair(clean, os.path.join(tmp_dir, "c.out.pdf"))["issues_found"] == []
+        assert repair(lying, os.path.join(tmp_dir, "l.out.pdf"))["issues_found"]
+
+    def test_rebuild_refuses_an_output_that_lost_pages(self, tmp_dir, gs_path):
+        src = _two_page_pdf(
+            os.path.join(tmp_dir, "xs.pdf"),
+            object_stream_mode=pikepdf.ObjectStreamMode.generate,
+        )
+        data = open(src, "rb").read()
+        at = data.rfind(b"startxref")
+        offset = int(data[at + 9:].split()[0])
+        looped = os.path.join(tmp_dir, "looped.pdf")
+        with open(looped, "wb") as f:
+            f.write(data.replace(b"/Type /XRef", b"/Type /XRef /Prev %d" % offset, 1))
+        out = os.path.join(tmp_dir, "looped.out.pdf")
+        try:
+            result = rebuild(file=looped, output=out, gs_path=gs_path)
+        except RuntimeError as exc:
+            assert "of the document's 2 pages" in str(exc)
+            assert not os.path.exists(out)
+        else:
+            assert result["pages"] == 2
+
+
+class TestPdfaOutputIntent:
+    @pytest.mark.parametrize("level", ["1b", "2b"])
+    def test_the_output_carries_a_pdfa_output_intent(self, tmp_dir, gs_path, level):
+        from engine.pdfa import convert_pdfa
+
+        pdf = pikepdf.new()
+        pdf.add_blank_page()
+        pdf.pages[0].Contents = pdf.make_stream(b"1 0 0 rg 50 50 200 200 re f")
+        src = os.path.join(tmp_dir, "rgb.pdf")
+        pdf.save(src)
+        out = os.path.join(tmp_dir, f"rgb-{level}.pdf")
+        convert_pdfa(src, out, level=level, gs_path=gs_path)
+        with pikepdf.open(out) as done:
+            intents = done.Root.OutputIntents
+            assert intents[0].S == "/GTS_PDFA1"
+            profile = intents[0].DestOutputProfile.read_bytes()
+            assert profile[8] == 2 and profile[16:20] == b"RGB "
+
+
+class TestRebuildStagesItsOutput:
+    def test_a_refused_rebuild_leaves_the_old_output_intact(self, tmp_dir, gs_path):
+        src = _two_page_pdf(
+            os.path.join(tmp_dir, "xs.pdf"),
+            object_stream_mode=pikepdf.ObjectStreamMode.generate,
+        )
+        data = open(src, "rb").read()
+        at = data.rfind(b"startxref")
+        offset = int(data[at + 9:].split()[0])
+        looped = os.path.join(tmp_dir, "looped.pdf")
+        with open(looped, "wb") as f:
+            f.write(data.replace(b"/Type /XRef", b"/Type /XRef /Prev %d" % offset, 1))
+        out = os.path.join(tmp_dir, "existing.pdf")
+        _two_page_pdf(out)
+        before = open(out, "rb").read()
+        try:
+            rebuild(file=looped, output=out, gs_path=gs_path)
+        except RuntimeError:
+            assert open(out, "rb").read() == before
+            assert sorted(os.listdir(tmp_dir)) == ["existing.pdf", "looped.pdf", "xs.pdf"]
+        else:
+            pytest.skip("this Ghostscript kept every page of the looped file")
+
+    def test_a_rebuild_over_its_own_input_keeps_it_readable(self, tmp_dir, gs_path):
+        src = _two_page_pdf(os.path.join(tmp_dir, "self.pdf"))
+        assert rebuild(file=src, output=src, gs_path=gs_path)["pages"] == 2
+        with pikepdf.open(src) as pdf:
+            assert len(pdf.pages) == 2

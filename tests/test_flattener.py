@@ -652,3 +652,21 @@ class TestTheTextState:
         output = os.path.join(tmp_dir, "flat.pdf")
         flatten_transparency(source, output, balance=0.0, gs_path=gs_path)
         assert b"(recognized words) Tj" in _content(output)
+
+
+def test_the_placed_regions_do_not_inherit_the_kept_content_state(tmp_dir, gs_path):
+    # A `gs` that set constant alpha stays in the kept stream after the fill
+    # it governed is absorbed; a region placed after it was blended at that
+    # alpha a second time and still listed as transparent.
+    source = os.path.join(tmp_dir, "state.pdf")
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(300, 300))
+    page.Resources = pikepdf.Dictionary(
+        ExtGState=pikepdf.Dictionary(G=pikepdf.Dictionary(ca=0.5))
+    )
+    page.Contents = pdf.make_stream(b"/G gs 1 0 0 rg 50 50 100 100 re f")
+    pdf.save(source)
+    out = os.path.join(tmp_dir, "flat.pdf")
+    flatten_transparency(source, out, gs_path=gs_path)
+    after = _page(list_transparency(out))
+    assert [o for o in after["objects"] if o["transparent"]] == []

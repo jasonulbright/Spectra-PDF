@@ -180,7 +180,7 @@ class TestNormalisation:
         out = Path(tmp_dir) / "pal.pdf"
         image_to_pdf(src, out)
         filt, cs, _ = first_image(out)
-        assert filt == "/DCTDecode" and cs == "/DeviceRGB"
+        assert filt == "/FlateDecode" and cs == "/DeviceRGB"
 
     def test_transparency_composites_onto_white_not_onto_the_hidden_colour(self, tmp_dir):
         # A bare convert("RGB") of a fully transparent RED pixel yields opaque
@@ -1025,3 +1025,59 @@ class TestThePostScriptArmThroughTheDoor:
 def test_the_door_is_registered_as_one_ipc_method():
     main = (REPO / "src" / "engine" / "__main__.py").read_text(encoding="utf-8")
     assert 'server.register("create_pdf", create_pdf)' in main
+
+
+class TestLosslessWrap:
+    def _image(self, out):
+        with pikepdf.open(str(out)) as pdf:
+            xo = pdf.pages[0]["/Resources"]["/XObject"]
+            obj = xo[list(xo.keys())[0]]
+            return obj.read_raw_bytes(), str(obj.get("/Filter")), pikepdf.PdfImage(obj).as_pil_image().convert("RGB")
+
+    def test_a_png_keeps_every_pixel(self, tmp_dir):
+        src = Path(tmp_dir) / "sharp.png"
+        im = Image.new("RGB", (64, 32), (255, 0, 0))
+        im.putpixel((1, 1), (0, 0, 255))
+        im.save(src)
+        out = Path(tmp_dir) / "sharp.pdf"
+        image_to_pdf(src, out)
+        _raw, filt, pil = self._image(out)
+        assert filt == "/FlateDecode"
+        assert pil.getpixel((1, 1)) == (0, 0, 255) and pil.getpixel((5, 5)) == (255, 0, 0)
+
+    def test_a_jpeg_is_embedded_byte_for_byte(self, tmp_dir):
+        src = Path(tmp_dir) / "photo.jpg"
+        Image.new("RGB", (80, 40), (10, 120, 200)).save(src, quality=95)
+        out = Path(tmp_dir) / "photo.pdf"
+        image_to_pdf(src, out)
+        raw, filt, _pil = self._image(out)
+        assert filt == "/DCTDecode" and raw == src.read_bytes()
+
+    def test_exif_orientation_is_applied(self, tmp_dir):
+        src = Path(tmp_dir) / "turned.jpg"
+        exif = Image.Exif()
+        exif[0x0112] = 6
+        Image.new("RGB", (80, 40), (0, 255, 0)).save(src, exif=exif, dpi=(72, 72))
+        out = Path(tmp_dir) / "turned.pdf"
+        image_to_pdf(src, out)
+        assert boxes(out) == [[0.0, 0.0, 40.0, 80.0]]
+
+    def test_an_embedded_icc_profile_travels(self, tmp_dir):
+        from PIL import ImageCms
+        profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+        src = Path(tmp_dir) / "tagged.png"
+        Image.new("RGB", (20, 20), (10, 200, 30)).save(src, icc_profile=profile)
+        out = Path(tmp_dir) / "tagged.pdf"
+        image_to_pdf(src, out)
+        with pikepdf.open(str(out)) as pdf:
+            xo = pdf.pages[0]["/Resources"]["/XObject"]
+            cs = xo[list(xo.keys())[0]].ColorSpace
+            assert cs[0] == "/ICCBased" and cs[1].read_bytes() == profile
+
+    def test_a_camera_mpo_is_one_page(self, tmp_dir):
+        src = Path(tmp_dir) / "camera.jpg"
+        Image.new("RGB", (40, 20), (1, 2, 3)).save(
+            src, format="MPO", save_all=True, append_images=[Image.new("RGB", (10, 5))]
+        )
+        out = Path(tmp_dir) / "camera.pdf"
+        assert image_to_pdf(src, out)["pages"] == 1

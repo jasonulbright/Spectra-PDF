@@ -1251,3 +1251,22 @@ class TestOutputDirectoryIsNotScratch:
         assert sorted(p.name for p in outputs.iterdir()) == [
             victim.name, "x3.pdf",
         ]
+
+
+class TestInPlaceConversions:
+    """An output that names the input: Ghostscript reads the source while it
+    writes, so the result must land beside it and replace it only at the end."""
+
+    def test_pdfx_over_its_own_input_keeps_the_page(self, tmp_dir, gs_path, icc_dir):
+        from engine.prepress import convert_pdfx
+        src = _rgb_pdf(os.path.join(tmp_dir, "self.pdf"))
+        convert_pdfx(src, src, gs_path=gs_path, icc_dir=icc_dir)
+        assert b" k" in _content(src) or b"re" in _content(src)
+        assert sorted(os.listdir(tmp_dir)) == ["self.pdf"]
+
+    def test_cmyk_over_its_own_input_keeps_the_page(self, tmp_dir, gs_path, icc_dir):
+        src = _rgb_pdf(os.path.join(tmp_dir, "self.pdf"))
+        convert_cmyk(src, src, gs_path=gs_path, icc_dir=icc_dir)
+        body = _content(src)
+        assert b"re" in body and b" k" in body
+        assert sorted(os.listdir(tmp_dir)) == ["self.pdf"]

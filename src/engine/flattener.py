@@ -1287,8 +1287,12 @@ def flatten_transparency(
                         f"q 1 0 0 1 {_fmt(region[0])} {_fmt(region[1])} cm {name} Do Q"
                     )
                 body = pikepdf.unparse_content_stream(kept)
+                # The kept content can leave a graphics state set at its end
+                # (a constant alpha, a blend mode, a soft mask, a CTM); a region
+                # drawn under it would be blended again or moved. The q/Q pair
+                # returns the placements to the page's initial state.
                 page.Contents = pdf.make_stream(
-                    body + b"\n" + "\n".join(placements).encode("ascii")
+                    b"q\n" + body + b"\nQ\n" + "\n".join(placements).encode("ascii")
                 )
                 entry = {
                     "page": number,
