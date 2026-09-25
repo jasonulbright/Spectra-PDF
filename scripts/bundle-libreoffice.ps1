@@ -35,13 +35,13 @@ param(
     # Pinned default so a fresh CI box (no system LibreOffice) vendors a known,
     # integrity-checked build with zero manual setup. Override -MsiUrl (and
     # -ExpectedSha256, or "" to skip the check) only to bump the version.
-    [string]$Version = "26.2.5",
+    [string]$Version = "26.2.6",
     # The archive keeps releases under their four-part build version; the
     # redirector and the rsync mirrors expose the same bytes under the
     # three-part release. Both spellings name one build.
-    [string]$ArchiveVersion = "26.2.5.2",
+    [string]$ArchiveVersion = "26.2.6.3",
     [string]$MsiUrl = "",
-    [string]$ExpectedSha256 = "F15BA07BFCB0186986CF3171063506F5D207C11F8CC051BA0D135209E9E915F9",
+    [string]$ExpectedSha256 = "F9877032FD908BEB9C0DDF06DF4AF5C2E85F419C42E14876C4CCE5AAE5FB2660",
     # A directory holding an already-downloaded, checksum-verified .msi. A file
     # named for the pinned checksum is reused; a fresh download is written back
     # here after it verifies. Empty disables the cache.
