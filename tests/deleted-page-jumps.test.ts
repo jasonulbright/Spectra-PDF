@@ -124,12 +124,16 @@ describe.each(['pdf', 'pdfx'] as const)('a deleted page loses only the jumps int
     expect(out.catalog.get(N('OpenAction'))).toBeUndefined();
   });
 
-  it('omits a GoTo opening action, including one reached through a chain', async () => {
-    for (const chained of [false, true]) {
-      const out = await deletePageTwo(format, pdf => pdf.catalog.set(N('OpenAction'),
-        chained ? pdf.context.obj({ ...script('// first'), Next: [script('// second'), goTo(pdf, 1)] }) : goTo(pdf, 1)));
-      expect(out.catalog.get(N('OpenAction'))).toBeUndefined();
-    }
+  it('omits a GoTo opening action and drops only the GoTo from a chained one', async () => {
+    const bare = await deletePageTwo(format, pdf => pdf.catalog.set(N('OpenAction'), goTo(pdf, 1)));
+    expect(bare.catalog.get(N('OpenAction'))).toBeUndefined();
+    const out = await deletePageTwo(format, pdf => pdf.catalog.set(N('OpenAction'),
+      pdf.context.obj({ ...script('// first'), Next: [script('// second'), goTo(pdf, 1)] })));
+    const open = out.catalog.lookup(N('OpenAction'), PDFDict);
+    expect(scriptText(open)).toBe('// first');
+    const next = open.lookup(N('Next'), PDFArray);
+    expect(next.size()).toBe(1);
+    expect(scriptText(next.lookup(0, PDFDict))).toBe('// second');
   });
 
   it('keeps an opening view to a retained page, remapped', async () => {
@@ -154,11 +158,14 @@ describe.each(['pdf', 'pdfx'] as const)('a deleted page loses only the jumps int
         { Dest: PDFString.of('two') },
       ]);
     });
-    for (const index of [0, 1, 2, 5]) {
+    for (const index of [0, 1, 5]) {
       const link = linkOut(out, index);
       expect(link.get(N('Dest'))).toBeUndefined(); expect(link.get(N('A'))).toBeUndefined();
       expect(link.lookup(N('Subtype'))).toBe(N('Link'));
     }
+    const chained = linkOut(out, 2).lookup(N('A'), PDFDict);
+    expect(scriptText(chained)).toBe('// chained');
+    expect(chained.get(N('Next'))).toBeUndefined();
     expect(linkOut(out, 3).lookup(N('Dest'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
     expect(linkOut(out, 4).lookup(N('A'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
   });
@@ -266,14 +273,15 @@ describe.each(['pdf', 'pdfx'] as const)('a deleted page loses only the jumps int
     await expect(deletePageTwo(format, pdf => pdf.catalog.set(N('ViewerPreferences'), pdf.context.obj({ PrintPageRange: [2] })))).rejects.toThrow();
   });
 
-  it('omits a document trigger chaining to the deleted page and keeps the other triggers', async () => {
+  it('drops only the jump from a document trigger chaining to the deleted page and keeps the other triggers', async () => {
     const out = await deletePageTwo(format, pdf => pdf.catalog.set(N('AA'), pdf.context.register(pdf.context.obj({
       WC: { ...script('// close'), Next: goTo(pdf, 1) },
       WS: script('// save'),
       DP: goTo(pdf, 2),
     }))));
     const aa = out.catalog.lookup(N('AA'), PDFDict);
-    expect(aa.get(N('WC'))).toBeUndefined();
+    expect(scriptText(aa.lookup(N('WC'), PDFDict))).toBe('// close');
+    expect(aa.lookup(N('WC'), PDFDict).get(N('Next'))).toBeUndefined();
     expect(scriptText(aa.lookup(N('WS'), PDFDict))).toBe('// save');
     expect(aa.lookup(N('DP'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
   });
@@ -283,7 +291,7 @@ describe.each(['pdf', 'pdfx'] as const)('a deleted page loses only the jumps int
     expect(out.catalog.get(N('AA'))).toBeUndefined();
   });
 
-  it('omits a document script entry chaining to the deleted page, keeps the rest and fixes the limits', async () => {
+  it('keeps every document script entry and drops only the chained jump to the deleted page', async () => {
     const out = await deletePageTwo(format, pdf => {
       const leaf = (names: [string, PDFDict][]) => pdf.context.register(pdf.context.obj({
         Limits: [PDFString.of(names[0][0]), PDFString.of(names[names.length - 1][0])],
@@ -297,14 +305,15 @@ describe.each(['pdf', 'pdfx'] as const)('a deleted page loses only the jumps int
       ] } }));
     });
     const kids = out.catalog.lookup(N('Names'), PDFDict).lookup(N('JavaScript'), PDFDict).lookup(N('Kids'), PDFArray);
-    expect(kids.size()).toBe(2);
-    const first = kids.lookup(0, PDFDict), second = kids.lookup(1, PDFDict);
+    expect(kids.size()).toBe(3);
+    const first = kids.lookup(0, PDFDict), second = kids.lookup(1, PDFDict), third = kids.lookup(2, PDFDict);
     const strings = (arr: PDFArray) => arr.asArray().filter(v => v instanceof PDFString).map(v => (v as PDFString).decodeText());
-    expect(strings(first.lookup(N('Names'), PDFArray))).toEqual(['a']);
-    expect(strings(first.lookup(N('Limits'), PDFArray))).toEqual(['a', 'a']);
-    expect(scriptText(first.lookup(N('Names'), PDFArray).lookup(1, PDFDict))).toBe('// a');
-    expect(strings(second.lookup(N('Limits'), PDFArray))).toEqual(['d', 'd']);
-    const next = second.lookup(N('Names'), PDFArray).lookup(1, PDFDict).lookup(N('Next'), PDFDict);
+    expect(strings(first.lookup(N('Names'), PDFArray))).toEqual(['a', 'b']);
+    const b = first.lookup(N('Names'), PDFArray).lookup(3, PDFDict);
+    expect(scriptText(b)).toBe('// b'); expect(b.get(N('Next'))).toBeUndefined();
+    expect(scriptText(second.lookup(N('Names'), PDFArray).lookup(1, PDFDict))).toBe('// b');
+    expect(strings(third.lookup(N('Limits'), PDFArray))).toEqual(['d', 'd']);
+    const next = third.lookup(N('Names'), PDFArray).lookup(1, PDFDict).lookup(N('Next'), PDFDict);
     expect(next.lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
   });
 
@@ -317,5 +326,61 @@ describe.each(['pdf', 'pdfx'] as const)('a deleted page loses only the jumps int
     const bookmark = out.catalog.lookup(N('Outlines'), PDFDict).lookup(N('First'), PDFDict);
     expect(bookmark.lookup(N('Title'), PDFString).decodeText()).toBe('Two');
     expect(bookmark.get(N('Dest'))).toBeUndefined();
+  });
+});
+
+describe.each(['pdf', 'pdfx'] as const)('a jump to a deleted page loses the jump and nothing else (%s)', format => {
+  // Chain: script, GoTo(deleted), GoTo(kept). Expected: script -> GoTo(kept).
+  const chain = (pdf: PDFDocument) => pdf.context.obj({ ...script('// kept'), Next: [goTo(pdf, 1), goTo(pdf, 2)] });
+  // Head GoTo dangles: its surviving successors take its place in order.
+  const headless = (pdf: PDFDocument) => pdf.context.obj({ S: 'GoTo', D: fit(pdf, 1), Next: [script('// one'), script('// two')] });
+  const expectSettled = (out: PDFDocument, action: PDFDict) => {
+    expect(scriptText(action)).toBe('// kept');
+    const next = action.lookup(N('Next'), PDFArray);
+    expect(next.size()).toBe(1);
+    expect(next.lookup(0, PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
+  };
+  const expectPromoted = (action: PDFDict) => {
+    expect(scriptText(action)).toBe('// one');
+    const next = action.lookup(N('Next'));
+    const list = next instanceof PDFArray ? next.asArray().map(v => v as PDFDict) : [next as PDFDict];
+    expect(list.map(v => scriptText(v))).toEqual(['// two']);
+  };
+
+  it('link /A', async () => {
+    const out = await deletePageTwo(format, pdf => links(pdf, [{ A: chain(pdf) }, { A: headless(pdf) }]));
+    expectSettled(out, linkOut(out, 0).lookup(N('A'), PDFDict));
+    expectPromoted(linkOut(out, 1).lookup(N('A'), PDFDict));
+  });
+  it('annotation /AA', async () => {
+    const out = await deletePageTwo(format, pdf => links(pdf, [{ AA: { U: chain(pdf), D: headless(pdf) } }]));
+    const aa = linkOut(out, 0).lookup(N('AA'), PDFDict);
+    expectSettled(out, aa.lookup(N('U'), PDFDict));
+    expectPromoted(aa.lookup(N('D'), PDFDict));
+  });
+  it('page /AA', async () => {
+    const out = await deletePageTwo(format, pdf => pdf.getPage(0).node.set(N('AA'), pdf.context.obj({ O: chain(pdf), C: headless(pdf) })));
+    const aa = out.getPage(0).node.lookup(N('AA'), PDFDict);
+    expectSettled(out, aa.lookup(N('O'), PDFDict));
+    expectPromoted(aa.lookup(N('C'), PDFDict));
+  });
+  it('document /AA', async () => {
+    const out = await deletePageTwo(format, pdf => pdf.catalog.set(N('AA'), pdf.context.obj({ WC: chain(pdf), WS: headless(pdf) })));
+    const aa = out.catalog.lookup(N('AA'), PDFDict);
+    expectSettled(out, aa.lookup(N('WC'), PDFDict));
+    expectPromoted(aa.lookup(N('WS'), PDFDict));
+  });
+  it('/OpenAction', async () => {
+    const settled = await deletePageTwo(format, pdf => pdf.catalog.set(N('OpenAction'), chain(pdf)));
+    expectSettled(settled, settled.catalog.lookup(N('OpenAction'), PDFDict));
+    const promoted = await deletePageTwo(format, pdf => pdf.catalog.set(N('OpenAction'), headless(pdf)));
+    expectPromoted(promoted.catalog.lookup(N('OpenAction'), PDFDict));
+  });
+  it('JavaScript name tree', async () => {
+    const out = await deletePageTwo(format, pdf => pdf.catalog.set(N('Names'), pdf.context.obj({ JavaScript: {
+      Names: [PDFString.of('a'), pdf.context.register(chain(pdf)), PDFString.of('b'), pdf.context.register(headless(pdf))] } })));
+    const names = out.catalog.lookup(N('Names'), PDFDict).lookup(N('JavaScript'), PDFDict).lookup(N('Names'), PDFArray);
+    expectSettled(out, names.lookup(1, PDFDict));
+    expectPromoted(names.lookup(3, PDFDict));
   });
 });

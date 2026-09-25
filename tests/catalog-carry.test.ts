@@ -323,10 +323,12 @@ describe('catalog carry — document JavaScript name tree', () => {
     const pages = out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'));
     expect(pages).toHaveLength(2);
   });
-  it('omits a script entry whose chain jumps to a removed page without replacing source bytes', async () => {
+  it('keeps a script entry and drops only its chained jump to a removed page, without replacing source bytes', async () => {
     const src = await scriptSource('page'), before = src.slice();
     const out = await rebuild([pageOf(src, 1)]);
-    expect(out.catalog.lookupMaybe(N('Names'), PDFDict)?.get(N('JavaScript'))).toBeUndefined();
+    const kept = scriptAction(out).lookup(1, PDFDict);
+    expect(kept.lookup(N('S'))).toBe(N('JavaScript'));
+    expect(kept.get(N('Next'))).toBeUndefined();
     expect(out.getPageCount()).toBe(1);
     expect(out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'))).toHaveLength(1);
     expect(src).toEqual(before);
@@ -437,12 +439,14 @@ describe('catalog carry — complete document action graphs', () => {
     const out = await rebuild([pageOf(src, 0), pageOf(src, 1)]);
     expect(action(out).lookup(N('Next'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(1).ref);
   });
-  it('omits every trigger, script entry and opening action jumping to a removed page without altering source bytes', async () => {
+  it('keeps every trigger, script entry and opening script and drops only the jump to a removed page, without altering source bytes', async () => {
     const src = await fixture((pdf, act) => { act.set(N('Next'), pdf.context.obj({ S: 'GoTo', D: [pdf.getPage(0).ref, 'Fit'] })); });
     const before = src.slice(), out = await rebuild([pageOf(src, 1)]);
-    expect(out.catalog.get(N('AA'))).toBeUndefined();
-    expect(out.catalog.get(N('OpenAction'))).toBeUndefined();
-    expect(out.catalog.lookupMaybe(N('Names'), PDFDict)?.get(N('JavaScript'))).toBeUndefined();
+    const ref = out.catalog.lookup(N('AA'), PDFDict).get(N('WC'));
+    expect(action(out).lookup(N('S'))).toBe(N('JavaScript'));
+    expect(action(out).get(N('Next'))).toBeUndefined();
+    expect(out.catalog.get(N('OpenAction'))).toEqual(ref);
+    expect(out.catalog.lookup(N('Names'), PDFDict).lookup(N('JavaScript'), PDFDict).lookup(N('Names'), PDFArray).get(1)).toEqual(ref);
     expect(out.context.enumerateIndirectObjects().filter(([, obj]) => obj instanceof PDFDict && obj.get(N('Type')) === N('Page'))).toHaveLength(1);
     expect(src).toEqual(before);
   });
@@ -572,7 +576,7 @@ describe('catalog carry — outline jumps written as GoTo actions', () => {
     expect(src).toEqual(before);
   });
 
-  it('drops a whole action chain when its GoTo page was deleted', async () => {
+  it('replaces a dangling GoTo head with its surviving chained action', async () => {
     const src = await actionOutline({
       indirect: true,
       next: (pdf, index) => index === 1
@@ -582,7 +586,9 @@ describe('catalog carry — outline jumps written as GoTo actions', () => {
     const out = await build('pdf', src, [pageOf(src, 0)]);
     const { first, last } = tops(out);
     expect(text(last.lookup(N('Title')))).toBe('Page 2');
-    expect(last.get(N('A'))).toBeUndefined();
+    const survivor = last.lookup(N('A'), PDFDict);
+    expect(survivor.lookup(N('S'))).toBe(N('URI'));
+    expect(text(survivor.lookup(N('URI')))).toBe('https://example.invalid/two');
     expect(first.lookup(N('A'), PDFDict).lookup(N('D'), PDFArray).get(0)).toEqual(out.getPage(0).ref);
   });
 
