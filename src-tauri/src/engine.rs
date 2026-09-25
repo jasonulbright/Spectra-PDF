@@ -468,14 +468,9 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
         let mut guard = state.child.lock().await;
         if guard.as_ref().is_some_and(|current| current.child.pid() == pid) {
             guard.take(); // closes the job, including any surviving descendants
-            let routes = app_handle.state::<EngineRouter>().take_all();
+            let stopped = stopped_responses(&app_handle.state::<EngineRouter>());
             drop(guard);
-            for (_, label, inner) in routes {
-                let _ = app_handle.emit_to(label.as_str(), "engine:response", serde_json::json!({
-                    "id": inner, "error": { "message": "The document engine stopped before completing the operation." }
-                }));
-            }
-            publish_activity(&app_handle);
+            deliver_stopped(&app_handle, stopped);
         }
     });
 
@@ -493,9 +488,37 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
 pub async fn restart_for_assent(app: &AppHandle) {
     let state = app.state::<EngineState>();
     let mut guard = state.child.lock().await;
-    if let Some(child) = guard.take() {
+    let stopped = stop_and_drain(&mut guard, &app.state::<EngineRouter>(), |child| {
         let _ = child.child.kill();
+    });
+    drop(guard);
+    deliver_stopped(app, stopped);
+}
+
+/// Empties the slot and retires every routed request in one step under the
+/// slot lock. The killed child's monitor then finds the slot empty or holding
+/// another pid and skips its own drain, and `take_all` removes each route as it
+/// returns it, so a request is failed exactly once whichever path runs.
+fn stop_and_drain<T>(slot: &mut Option<T>, router: &EngineRouter, kill: impl FnOnce(T)) -> Vec<(String, serde_json::Value)> {
+    if let Some(child) = slot.take() {
+        kill(child);
     }
+    stopped_responses(router)
+}
+
+/// The "engine stopped" error for every request still routed, keyed by the
+/// window that asked. Dropping the routes also releases their leases.
+fn stopped_responses(router: &EngineRouter) -> Vec<(String, serde_json::Value)> {
+    router.take_all().into_iter().map(|(_, label, inner)| (label, serde_json::json!({
+        "id": inner, "error": { "message": "The document engine stopped before completing the operation." }
+    }))).collect()
+}
+
+fn deliver_stopped(app: &AppHandle, stopped: Vec<(String, serde_json::Value)>) {
+    for (label, payload) in stopped {
+        let _ = app.emit_to(label.as_str(), "engine:response", payload);
+    }
+    publish_activity(app);
 }
 
 /// Locks the engine slot, starting an engine first when the slot is empty.
@@ -545,6 +568,50 @@ mod start_tests {
         let guard = lock_started(&slot, || async { panic!("a live engine is not restarted") }).await.unwrap();
         assert_eq!(*guard, Some(2));
         assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn an_assent_restart_fails_each_pending_request_exactly_once() {
+        let router = EngineRouter::new();
+        let mut request = serde_json::json!({"id": 41});
+        route_with(&router, "main", &mut request).unwrap();
+        let mut slot = Some(7u32);
+        let mut killed = Vec::new();
+        let stopped = stop_and_drain(&mut slot, &router, |pid| killed.push(pid));
+        assert_eq!(killed, vec![7]);
+        assert!(slot.is_none());
+        assert_eq!(stopped.len(), 1);
+        assert_eq!(stopped[0].0, "main");
+        assert_eq!(stopped[0].1["id"], 41);
+        assert!(stopped[0].1["error"]["message"].as_str().unwrap().contains("stopped"));
+        assert!(router.outstanding().is_empty());
+        // The killed child's monitor drains after the restart; nothing is left.
+        assert!(stopped_responses(&router).is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_callers_on_an_empty_slot_spawn_once() {
+        let slot: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
+        let spawns = Arc::new(AtomicUsize::new(0));
+        let caller = |slot: Arc<Mutex<Option<u32>>>, spawns: Arc<AtomicUsize>| async move {
+            let start_slot = slot.clone();
+            let guard = lock_started(&slot, || async move {
+                let mut inner = start_slot.lock().await;
+                if inner.is_none() {
+                    tokio::task::yield_now().await;
+                    *inner = Some(spawns.fetch_add(1, Ordering::SeqCst) as u32 + 100);
+                }
+                Ok(())
+            }).await.unwrap();
+            *guard
+        };
+        let (a, b) = tokio::join!(
+            tokio::spawn(caller(slot.clone(), spawns.clone())),
+            tokio::spawn(caller(slot.clone(), spawns.clone())),
+        );
+        assert_eq!(spawns.load(Ordering::SeqCst), 1);
+        assert_eq!(a.unwrap(), Some(100));
+        assert_eq!(b.unwrap(), Some(100));
     }
 
     #[tokio::test]
