@@ -89,7 +89,7 @@ a maintenance tool run only when the pin moves.
 
 ## LibreOffice
 
-- **Version:** 26.2.5 (unmodified upstream; version- and sha256-pinned — vendored
+- **Version:** 26.2.6 (unmodified upstream; version- and sha256-pinned — vendored
   by `scripts/bundle-libreoffice.ps1`, which verifies the official installer's
   SHA-256 before extracting it)
 - **License:** Mozilla Public License v2.0 (MPL-2.0), except for the PDF-import
@@ -127,7 +127,7 @@ the permissive cMap tables alone do not restore it.
 Complete corresponding source for the helper's object code is the LibreOffice
 source release for the pinned version, which carries the poppler sources the
 build consumed:
-<https://download.documentfoundation.org/libreoffice/src/26.2.5/>. The upstream
+<https://download.documentfoundation.org/libreoffice/src/26.2.6/>. The upstream
 poppler and poppler-data version numbers are not recorded in the shipped files;
 the pin is the SHA-256 in `scripts/libreoffice-notices.tsv` together with that
 source release. `scripts/bundle-libreoffice.ps1` refuses to vendor a tree that

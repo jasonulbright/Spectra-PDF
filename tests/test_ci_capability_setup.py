@@ -156,7 +156,7 @@ def test_the_libreoffice_download_falls_back_across_tdf_hosts() -> None:
     assert positions == sorted(positions), (
         "the download sources must be ordered: " + ", ".join(hosts)
     )
-    assert '$ExpectedSha256 = "F15BA07BFCB0186986CF3171063506F5D207C11F8CC051BA0D135209E9E915F9"' in text
+    assert '$ExpectedSha256 = "F9877032FD908BEB9C0DDF06DF4AF5C2E85F419C42E14876C4CCE5AAE5FB2660"' in text
     # The verify gates extraction regardless of which source or cache answered.
     assert text.index("Test-PinnedMsi $Msi") < text.index("msiexec.exe")
 
@@ -1893,7 +1893,7 @@ def test_the_draft_verifier_refuses_a_package_that_disables_test_inference(
     args, _downloaded, package, env = tag_package
     manifest = package / "Cargo.toml"
     text = manifest.read_text(encoding="utf-8")
-    manifest.write_text(text.replace("[package]\n", "[package]\nautotests = false\n", 1))
+    manifest.write_text(text.replace("[package]\n", "[package]\nautotests = false\n", 1), encoding="utf-8")
     run = subprocess.run(args, capture_output=True, text=True, env=env)
     assert run.returncode != 0, run.stdout + run.stderr
     assert _verifier_says(run, "sets autotests = false")
@@ -1906,7 +1906,7 @@ def test_the_draft_verifier_refuses_duplicate_explicit_targets_under_the_reserve
     args, _downloaded, package, env = tag_package
     (package / "tests" / "accepting_verifier.local.rs").write_text(ACCEPTING_UPDATER_TEST)
     manifest = package / "Cargo.toml"
-    manifest.write_text(manifest.read_text(encoding="utf-8") + EXPLICIT_TEST_REDIRECT + EXPLICIT_TEST_REDIRECT)
+    manifest.write_text(manifest.read_text(encoding="utf-8") + EXPLICIT_TEST_REDIRECT + EXPLICIT_TEST_REDIRECT, encoding="utf-8")
     run = subprocess.run(args, capture_output=True, text=True, env=env)
     assert run.returncode != 0, run.stdout + run.stderr
     assert _verifier_says(run, "under the reserved 'verifier_' prefix")
@@ -1923,7 +1923,8 @@ def test_the_draft_verifier_refuses_an_explicit_target_pathed_under_the_reserved
     manifest = package / "Cargo.toml"
     manifest.write_text(
         manifest.read_text(encoding="utf-8")
-        + '\n[[test]]\nname = "manifest_check"\npath = "tests/verifier_planted.rs"\n'
+        + '\n[[test]]\nname = "manifest_check"\npath = "tests/verifier_planted.rs"\n',
+        encoding="utf-8",
     )
     run = subprocess.run(args, capture_output=True, text=True, env=env)
     assert run.returncode != 0, run.stdout + run.stderr
@@ -1956,7 +1957,8 @@ def test_the_draft_verifier_tolerates_an_explicit_target_outside_the_reserved_pr
     (package / "tests" / "product_check.rs").write_text("#[test]\nfn product() {}\n")
     manifest = package / "Cargo.toml"
     manifest.write_text(
-        manifest.read_text(encoding="utf-8") + '\n[[test]]\nname = "product_check"\npath = "tests/product_check.rs"\n'
+        manifest.read_text(encoding="utf-8") + '\n[[test]]\nname = "product_check"\npath = "tests/product_check.rs"\n',
+        encoding="utf-8",
     )
     run = subprocess.run(args, capture_output=True, text=True, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
@@ -1996,7 +1998,7 @@ def verifier_revision(tmp_path: Path):
 def _mutate_verifier_source(source: Path, old: str, new: str) -> None:
     text = source.read_text(encoding="utf-8")
     assert text.count(old) == 1, old
-    source.write_text(text.replace(old, new))
+    source.write_text(text.replace(old, new), encoding="utf-8")
 
 
 def _harness_lines(run: subprocess.CompletedProcess) -> list[str]:
