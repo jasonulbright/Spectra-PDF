@@ -58,6 +58,11 @@ export const DIALOG_STRINGS = {
 
   'dialog.update.checking': 'Checking for updates…',
   'dialog.update.upToDate': 'You’re up to date.',
+  'dialog.update.failedNetwork':
+    'Could not check for updates. The update server could not be reached.',
+  'dialog.update.failedSignature':
+    'Could not check for updates. The update information failed verification.',
+  'dialog.update.failedOther': 'Could not check for updates.',
   'dialog.update.managed': 'Updates are managed by your organization.',
   'dialog.update.available': 'Update available: v{{version}}',
   'dialog.update.viewRelease': 'View release',

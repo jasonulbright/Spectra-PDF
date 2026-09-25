@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { loadSettings } from '../lib/app-settings';
 import { isPrimaryWindow } from '../lib/window-label';
 import { tChrome } from '../i18n';
+import { runLaunchCheck, runManualCheck, type UpdateState } from '../lib/update-check';
 
 // Updates are notify-only. This bar tells the user a newer release exists and hands
 // you to the releases page. It NEVER downloads or installs anything.
@@ -19,7 +20,11 @@ import { tChrome } from '../i18n';
 // The check itself still goes through the updater plugin: it already does
 // signature verification and version comparison, and the result is used for
 // exactly one thing -- deciding whether to render this bar.
-type UpdateState = 'idle' | 'checking' | 'available' | 'uptodate' | 'disabled';
+const FAILED_KEYS = {
+  network: 'dialog.update.failedNetwork',
+  signature: 'dialog.update.failedSignature',
+  other: 'dialog.update.failedOther',
+} as const;
 
 interface UpdateBarProps {
   /** Bumped by Help ▸ Check for Updates to run a user-visible check. */
@@ -29,8 +34,8 @@ interface UpdateBarProps {
 export function UpdateBar({ checkSignal = 0 }: UpdateBarProps): React.ReactElement | null {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const [state, setState] = useState<UpdateState>('idle');
-  const [version, setVersion] = useState('');
+  const [state, setState] = useState<UpdateState>({ status: 'idle' });
+  const dismiss = () => setState({ status: 'idle' });
 
   // Launch check: opt-outable (Settings) and overridable machine-wide by the
   // enterprise DisableAutoUpdate policy, which wins over the preference.
@@ -46,15 +51,8 @@ export function UpdateBar({ checkSignal = 0 }: UpdateBarProps): React.ReactEleme
     void app.checkAutoUpdateDisabled().then((disabled) => {
       if (disabled || cancelled) return;
       setTimeout(async () => {
-        try {
-          const update = await check();
-          if (update && !cancelled) {
-            setVersion(update.version);
-            setState('available');
-          }
-        } catch (e) {
-          console.log('[updater] Check failed:', e);
-        }
+        const next = await runLaunchCheck(check);
+        if (next.status === 'available' && !cancelled) setState(next);
       }, 5000);
     });
     return () => {
@@ -71,72 +69,71 @@ export function UpdateBar({ checkSignal = 0 }: UpdateBarProps): React.ReactEleme
     lastSignal.current = checkSignal;
     let cancelled = false;
     void (async () => {
-      setState('checking');
-      try {
-        if (await app.checkAutoUpdateDisabled()) {
-          if (!cancelled) setState('disabled');
-          return;
-        }
-        const update = await check();
-        if (cancelled) return;
-        if (update) {
-          setVersion(update.version);
-          setState('available');
-        } else {
-          setState('uptodate');
-        }
-      } catch (e) {
-        console.error('[updater] Manual check failed:', e);
-        if (!cancelled) setState('uptodate');
-      }
+      setState({ status: 'checking' });
+      const next = await runManualCheck({ isDisabled: () => app.checkAutoUpdateDisabled(), check });
+      if (!cancelled) setState(next);
     })();
     return () => {
       cancelled = true;
     };
   }, [checkSignal]);
 
-  if (state === 'idle') return null;
+  if (state.status === 'idle') return null;
 
   return (
     <div
       data-testid="update-bar"
       className="app-banner flex items-center gap-3 px-4 py-1.5 bg-blue-900/60 border-b border-blue-800 text-sm shrink-0"
     >
-      {state === 'checking' && (
+      {state.status === 'checking' && (
         <span className="text-blue-200">{tChrome('dialog.update.checking')}</span>
       )}
-      {state === 'uptodate' && (
+      {state.status === 'uptodate' && (
         <>
           <span className="text-blue-200">{tChrome('dialog.update.upToDate')}</span>
           <button
             data-testid="update-dismiss"
-            onClick={() => setState('idle')}
+            onClick={dismiss}
             className="px-2 py-0.5 text-blue-400 hover:text-blue-200 text-xs"
           >
             {tChrome('dialog.update.dismiss')}
           </button>
         </>
       )}
-      {state === 'disabled' && (
+      {state.status === 'disabled' && (
         <>
           <span className="text-blue-200">{tChrome('dialog.update.managed')}</span>
           <button
             data-testid="update-dismiss"
-            onClick={() => setState('idle')}
+            onClick={dismiss}
             className="px-2 py-0.5 text-blue-400 hover:text-blue-200 text-xs"
           >
             {tChrome('dialog.update.dismiss')}
           </button>
         </>
       )}
-      {state === 'available' && (
+      {state.status === 'failed' && (
         <>
-          <span className="text-blue-200">{tChrome('dialog.update.available', { version })}</span>
+          <span data-testid="update-failed" data-kind={state.kind} className="text-blue-200">
+            {tChrome(FAILED_KEYS[state.kind])}
+          </span>
+          <button
+            data-testid="update-dismiss"
+            onClick={dismiss}
+            className="px-2 py-0.5 text-blue-400 hover:text-blue-200 text-xs"
+          >
+            {tChrome('dialog.update.dismiss')}
+          </button>
+        </>
+      )}
+      {state.status === 'available' && (
+        <>
+          <span className="text-blue-200">{tChrome('dialog.update.available', { version: state.version })}</span>
           <button
             data-testid="update-view-release"
             onClick={() => {
               void app.openReleasesPage().catch(() => {});
-              setState('idle');
+              dismiss();
             }}
             className="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 rounded text-xs font-medium"
           >
@@ -144,7 +141,7 @@ export function UpdateBar({ checkSignal = 0 }: UpdateBarProps): React.ReactEleme
           </button>
           <button
             data-testid="update-dismiss"
-            onClick={() => setState('idle')}
+            onClick={dismiss}
             className="px-2 py-0.5 text-blue-400 hover:text-blue-200 text-xs"
           >
             {tChrome('dialog.update.dismiss')}
