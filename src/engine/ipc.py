@@ -52,10 +52,17 @@ def encode_response(response: dict) -> str:
     the BMP as a surrogate PAIR, so a line without `\\ud` holds neither and
     is written as dumped.
     """
-    line = json.dumps(response)
+    line = json.dumps(response, allow_nan=False)
     if "\\ud" in line:
-        line = json.dumps(_json_safe(response))
+        line = json.dumps(_json_safe(response), allow_nan=False)
     return line
+
+
+def _representable_id(req_id: Any) -> Any:
+    """`req_id` when it can be written back as JSON, else None."""
+    if isinstance(req_id, bool) or not isinstance(req_id, (int, str)):
+        return None
+    return _json_safe(req_id)
 
 
 class JsonRpcServer:
@@ -74,19 +81,36 @@ class JsonRpcServer:
                 continue
             try:
                 request = json.loads(line)
-                response = self._handle(request)
-                if response is not None:
-                    output_stream.write(encode_response(response) + "\n")
-                    output_stream.flush()
             except json.JSONDecodeError:
                 self._write_error(output_stream, None, -32700, "Parse error")
+                continue
+            # An exception that escapes this loop ends the process, and every
+            # request any window has in flight with it.
+            if not isinstance(request, dict):
+                self._write_error(output_stream, None, -32600, "Invalid Request")
+                continue
+            response = self._handle(request)
+            try:
+                encoded = encode_response(response)
+            except (TypeError, ValueError) as exc:
+                # The host drops a line it cannot parse (NaN, Infinity), so
+                # the call would never resolve; an unrepresentable result is
+                # reported against its id instead.
+                encoded = encode_response({
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32603,
+                              "message": f"Result not representable as JSON: {exc}"},
+                    "id": _representable_id(response.get("id")),
+                })
+            output_stream.write(encoded + "\n")
+            output_stream.flush()
 
     def _handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
         req_id = request.get("id")
         method = request.get("method", "")
         params = request.get("params", {})
 
-        if method not in self._methods:
+        if not isinstance(method, str) or method not in self._methods:
             return {
                 "jsonrpc": "2.0",
                 "error": {"code": -32601, "message": f"Method not found: {method}"},
