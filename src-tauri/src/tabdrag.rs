@@ -660,11 +660,11 @@ pub fn on_window_geometry_changed(app: &AppHandle, window: &tauri::Window) {
 
 /// Forget a window's strip, and finish the handovers its destruction interrupted.
 ///
-/// Runs BEFORE `app_windows::on_window_destroyed` (`lib.rs`), which is what
-/// makes the recovery possible at all: a document handed to this window and
-/// never opened is still owned by it here, and one line later the claim is back
+/// Called only from the start of `app_windows::on_window_destroyed`, which is
+/// what makes the recovery possible at all: a document handed to this window and
+/// never opened is still owned by it here, and one step later the claim is back
 /// in the pool with nothing left to say where it came from.
-pub fn on_window_destroyed(app: &AppHandle, label: &str) {
+pub(crate) fn on_window_destroyed(app: &AppHandle, label: &str) {
     let registry = app.state::<StripRegistry>();
     registry.forget(label);
     if !app_windows::is_app_window(label) {
@@ -1788,5 +1788,156 @@ mod tests {
         let sweep = strips.sweep_destroyed(&claims, &registry, "doc-1", &live(&["main"]));
         assert_eq!(sweep, DestroySweep::default());
         assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+    }
+
+    // ── Races and destruction orderings ───────────────────────────────────
+
+    #[test]
+    fn two_releases_of_one_path_racing_move_it_once() {
+        for _ in 0..200 {
+            let (strips, claims, registry) = two_windows();
+            let outcomes: Vec<Reserved> = std::thread::scope(|scope| {
+                let workers: Vec<_> = (0..2)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            strips.reserve_release(
+                                &claims,
+                                &registry,
+                                &live(&["main", "doc-1"]),
+                                "main",
+                                DOC,
+                                None,
+                                950,
+                                110,
+                            )
+                        })
+                    })
+                    .collect();
+                workers.into_iter().map(|w| w.join().unwrap()).collect()
+            });
+            let held = outcomes
+                .iter()
+                .filter(|o| matches!(o, Reserved::Held { .. }))
+                .count();
+            assert_eq!(held, 1, "{outcomes:?}");
+            assert!(outcomes.contains(&Reserved::Refused("doc-1".to_string())));
+            assert_eq!(claims.owner(DOC).as_deref(), Some("doc-1"));
+            assert_eq!(registry.take_pending("doc-1").len(), 1);
+        }
+    }
+
+    #[test]
+    fn a_committed_token_is_never_honoured_again() {
+        let (strips, claims, registry) = two_windows();
+        let first = reserve_onto_doc1(&strips, &claims, &registry);
+        assert!(strips.take_reservation(first, "main").is_some());
+        assert!(registry.release_pending("doc-1", first));
+        assert_eq!(registry.take_deliverable("doc-1").len(), 1);
+
+        // The document travels back. The old token names a finished handover
+        // and must neither commit nor cancel the new one.
+        strips.set(
+            "doc-1",
+            StripRect { x: 0, y: 0, width: 400, height: 40 },
+            (900, 100),
+        );
+        let second = match strips.reserve_release(
+            &claims,
+            &registry,
+            &live(&["main", "doc-1"]),
+            "doc-1",
+            DOC,
+            None,
+            10,
+            10,
+        ) {
+            Reserved::Held { token, target } => {
+                assert_eq!(target, "main");
+                token
+            }
+            other => panic!("expected a held handover, got {other:?}"),
+        };
+        assert_ne!(first, second);
+        assert_eq!(strips.take_reservation(first, "main"), None);
+        assert_eq!(strips.take_reservation(first, "doc-1"), None);
+        assert!(!registry.release_pending("main", first));
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+        assert!(strips.take_reservation(second, "doc-1").is_some());
+    }
+
+    #[test]
+    fn a_voided_reservation_reports_the_refusal_to_its_source_only() {
+        let (strips, claims, registry) = two_windows();
+        let token = reserve_onto_doc1(&strips, &claims, &registry);
+        let sweep = strips.sweep_destroyed(&claims, &registry, "doc-1", &live(&["main"]));
+        claims.release_label("doc-1");
+        assert!(sweep.returned.is_empty(), "the source hears it at the commit");
+        assert_eq!(strips.take_reservation(token, "doc-1"), None);
+        let voided = strips.take_reservation(token, "main").expect("held");
+        assert!(voided.void);
+        assert_eq!(voided.from, "main");
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn a_committed_handover_is_returned_once_across_repeated_sweeps() {
+        let (strips, claims, registry) = two_windows();
+        let token = reserve_onto_doc1(&strips, &claims, &registry);
+        assert!(strips.take_reservation(token, "main").is_some());
+        assert!(registry.release_pending("doc-1", token));
+
+        let first = strips.sweep_destroyed(&claims, &registry, "doc-1", &live(&["main"]));
+        claims.release_label("doc-1");
+        let second = strips.sweep_destroyed(&claims, &registry, "doc-1", &live(&["main"]));
+        assert_eq!(first.returned, vec![("main".to_string(), DOC.to_string())]);
+        assert_eq!(second, DestroySweep::default());
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+        assert_eq!(claims.write_claims("main"), vec![DOC.to_string()]);
+    }
+
+    #[test]
+    fn a_source_destroyed_before_the_commit_leaves_one_owner_and_one_open() {
+        let (strips, claims, registry) = two_windows();
+        let token = reserve_onto_doc1(&strips, &claims, &registry);
+        let sweep = strips.sweep_destroyed(&claims, &registry, "main", &live(&["doc-1"]));
+        claims.release_label("main");
+        assert_eq!(sweep.deliver.len(), 1);
+        assert_eq!(claims.owner(DOC).as_deref(), Some("doc-1"));
+        assert_eq!(claims.write_claims("main"), Vec::<String>::new());
+        assert!(!claims.claim(DOC, "doc-2", ClaimMode::Write).granted);
+        assert_eq!(registry.take_deliverable("doc-1").len(), 1);
+
+        // The receiver dying next hands the document to whatever still
+        // stands, never back to the dead source.
+        let later = strips.sweep_destroyed(&claims, &registry, "doc-1", &live(&["doc-2"]));
+        assert!(later.returned.is_empty(), "the receiver already opened it");
+        assert_eq!(strips.take_reservation(token, "main"), None);
+    }
+
+    #[test]
+    fn a_source_destroyed_before_an_undrained_commit_hands_the_document_on() {
+        let (strips, claims, registry) = two_windows();
+        let _ = reserve_onto_doc1(&strips, &claims, &registry);
+        let _ = strips.sweep_destroyed(&claims, &registry, "main", &live(&["doc-1", "doc-2"]));
+        claims.release_label("main");
+        let sweep =
+            strips.sweep_destroyed(&claims, &registry, "doc-1", &live(&["doc-2"]));
+        claims.release_label("doc-1");
+        assert_eq!(sweep.returned, vec![("doc-2".to_string(), DOC.to_string())]);
+        assert_eq!(claims.owner(DOC).as_deref(), Some("doc-2"));
+    }
+
+    #[test]
+    fn releasing_claims_before_the_sweep_loses_a_committed_document() {
+        let (strips, claims, registry) = two_windows();
+        let token = reserve_onto_doc1(&strips, &claims, &registry);
+        assert!(strips.take_reservation(token, "main").is_some());
+        // The reversed order: the claim is in the pool before the sweep reads
+        // the queue, so the sweep has nothing to move and the document is in
+        // no window.
+        claims.release_label("doc-1");
+        let sweep = strips.sweep_destroyed(&claims, &registry, "doc-1", &live(&["main"]));
+        assert!(sweep.returned.is_empty());
+        assert_eq!(claims.owner(DOC), None);
     }
 }

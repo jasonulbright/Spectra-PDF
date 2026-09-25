@@ -462,7 +462,6 @@ pub fn run() {
                 // one quit path that never passes through `close_window`.
                 tauri::WindowEvent::Destroyed => {
                     session::on_window_destroyed(app, window.label());
-                    tabdrag::on_window_destroyed(app, window.label());
                     health_engine::on_window_destroyed(app, window.label());
                     app_windows::on_window_destroyed(app, window.label());
                 }
