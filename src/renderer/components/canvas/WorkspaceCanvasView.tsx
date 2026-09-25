@@ -272,6 +272,8 @@ import { CanvasStatusBar } from './CanvasStatusBar';
 import { useOtherWindowWork } from '../../hooks/useOtherWindowWork';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber, currentLanguage, type UiKey } from '../../i18n';
+import { pointerScope } from '../../lib/pointer-scope';
+import { watchDevicePixelRatio } from '../../lib/device-pixel-ratio';
 
 interface WorkspaceCanvasViewProps {
   onOpenFiles: () => void;
@@ -914,6 +916,9 @@ export function WorkspaceCanvasView({
   // buffer-identity invalidation moved into the reducer with it.
   const selectedPageIds = state.ui.selectedPageIds;
   const [renderVersion, setRenderVersion] = useState(0);
+  // The detail raster is sized in device pixels. A ratio change without a
+  // re-render leaves it at the old backing resolution until the next pan.
+  useEffect(() => watchDevicePixelRatio(window, () => setRenderVersion((v) => v + 1)), []);
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string; pageId: string } | null>(
     null,
   );
@@ -4329,23 +4334,21 @@ export function WorkspaceCanvasView({
     const el = splitContainerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const pointerId = e.pointerId;
-    const onMove = (ev: PointerEvent): void => {
-      if (ev.pointerId !== pointerId) return;
+    const pointers = pointerScope(e.pointerId);
+    const onMove = (ev: PointerEvent): void => {
       const r = (ev.clientY - rect.top) / Math.max(rect.height, 1);
       setSplitRatio(Math.min(0.85, Math.max(0.15, r)));
     };
-    const onUp = (ev: Event): void => {
-      if (ev instanceof PointerEvent && ev.pointerId !== pointerId) return;
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      window.removeEventListener('blur', onUp);
+    const onUp = (): void => {
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onUp);
+      pointers.remove('blur', onUp);
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
-    window.addEventListener('blur', onUp);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onUp);
+    pointers.add('blur', onUp);
   }, []);
   // The quad's two dividers (same window-listener idiom, against the quad
   // container): rows reuse splitRatio, columns drive quadCol.
@@ -4354,9 +4357,8 @@ export function WorkspaceCanvasView({
     const el = quadContainerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const pointerId = e.pointerId;
-    const onMove = (ev: PointerEvent): void => {
-      if (ev.pointerId !== pointerId) return;
+    const pointers = pointerScope(e.pointerId);
+    const onMove = (ev: PointerEvent): void => {
       if (axis === 'row') {
         const r = (ev.clientY - rect.top) / Math.max(rect.height, 1);
         setSplitRatio(Math.min(0.85, Math.max(0.15, r)));
@@ -4365,17 +4367,16 @@ export function WorkspaceCanvasView({
         setQuadCol(Math.min(0.85, Math.max(0.15, c)));
       }
     };
-    const onUp = (ev: Event): void => {
-      if (ev instanceof PointerEvent && ev.pointerId !== pointerId) return;
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      window.removeEventListener('blur', onUp);
+    const onUp = (): void => {
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onUp);
+      pointers.remove('blur', onUp);
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
-    window.addEventListener('blur', onUp);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onUp);
+    pointers.add('blur', onUp);
   }, []);
 
   const handleCommitTextEdit = useCallback(

@@ -146,6 +146,7 @@ import {
 import type { ShapeType } from '../../state/types';
 import { useTranslation } from 'react-i18next';
 import i18next, { tChrome, tNumber, type UiKey } from '../../i18n';
+import { pointerScope } from '../../lib/pointer-scope';
 
 // Measure overlays draw in amber — legible over both white paper and the
 // annotation palette's blues/yellows, and distinct from ink's default. The
@@ -1580,10 +1581,10 @@ function PageCellImpl({
       setGuideDrag({ id, axis, pos: latest });
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
-      window.removeEventListener('blur', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       cancelGuideDrag.current = null;
       setGuideDrag(null);
       if (!commit) return;
@@ -1596,10 +1597,11 @@ function PageCellImpl({
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     cancelGuideDrag.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('blur', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
   const snapOptions: SnapOptions = {
     radiusPx: snapSettings?.radiusPx ?? 0,
@@ -1931,16 +1933,20 @@ function PageCellImpl({
     let ownPts: SnapPoint[] | null = null;
     let moveIndex: SnapIndex | null = null;
 
+    // The grabbed point is fixed in PAGE space at the press. Re-deriving it
+    // from the press's screen position on every move turns a wheel pan or
+    // zoom during the drag into a jump: the object stops tracking the pointer
+    // and lands off by the view change.
+    const pressRect = cell.getBoundingClientRect();
+    const d0 = {
+      x: (startX - pressRect.left) / pressRect.width,
+      y: (startY - pressRect.top) / pressRect.height,
+    };
     const storedDelta = (ev: PointerEvent): { dx: number; dy: number } => {
       // Un-project the pointer TRAVEL as two points — a delta is the
       // difference of un-projected positions, never an un-projected pair of
-      // raw distances (axes swap at 90/270). One rect read serves both, so
-      // the pair can never straddle a layout change.
+      // raw distances (axes swap at 90/270).
       const rect = cell.getBoundingClientRect();
-      const d0 = {
-        x: (startX - rect.left) / rect.width,
-        y: (startY - rect.top) / rect.height,
-      };
       const raw = {
         dx: (ev.clientX - rect.left) / rect.width - d0.x,
         dy: (ev.clientY - rect.top) / rect.height - d0.y,
@@ -1972,11 +1978,11 @@ function PageCellImpl({
       setManipPreview(next);
     };
     const finish = (commit: boolean, ev?: PointerEvent): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
       window.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('blur', onBlur);
+      pointers.remove('blur', onBlur);
       cancelManip.current = null;
       endSnapGesture();
       if (!activated) {
@@ -2018,11 +2024,12 @@ function PageCellImpl({
     };
     const onBlur = (): void => finish(false);
     cancelManip.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
     window.addEventListener('keydown', onKey, true);
-    window.addEventListener('blur', onBlur);
+    pointers.add('blur', onBlur);
   };
 
   /** Drag a resize handle (single selection only — handles only render
@@ -2084,11 +2091,11 @@ function PageCellImpl({
       applyAt(ev);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
       window.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('blur', onBlur);
+      pointers.remove('blur', onBlur);
       cancelManip.current = null;
       endSnapGesture();
       if (!activated) return;
@@ -2129,11 +2136,12 @@ function PageCellImpl({
     };
     const onBlur = (): void => finish(false);
     cancelManip.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
     window.addEventListener('keydown', onKey, true);
-    window.addEventListener('blur', onBlur);
+    pointers.add('blur', onBlur);
   };
 
   /**
@@ -2177,11 +2185,11 @@ function PageCellImpl({
       applyAt(ev);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
       window.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('blur', onBlur);
+      pointers.remove('blur', onBlur);
       cancelManip.current = null;
       endSnapGesture();
       if (!activated) return;
@@ -2204,11 +2212,12 @@ function PageCellImpl({
     };
     const onBlur = (): void => finish(false);
     cancelManip.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
     window.addEventListener('keydown', onKey, true);
-    window.addEventListener('blur', onBlur);
+    pointers.add('blur', onBlur);
   };
 
   // Ctrl-marquee rubber band (Select tool): plain drags stay text selection,
@@ -2241,9 +2250,10 @@ function PageCellImpl({
       setMarquee(latest);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       window.removeEventListener('keydown', onKey, true);
       manipActive.current = false;
       cancelManip.current = null;
@@ -2273,9 +2283,11 @@ function PageCellImpl({
       }
     };
     cancelManip.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
     window.addEventListener('keydown', onKey, true);
   };
 
@@ -2312,9 +2324,10 @@ function PageCellImpl({
       setMarquee(latest);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       window.removeEventListener('keydown', onKey, true);
       manipActive.current = false;
       cancelManip.current = null;
@@ -2345,9 +2358,11 @@ function PageCellImpl({
       }
     };
     cancelManip.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
     window.addEventListener('keydown', onKey, true);
   };
 
@@ -2385,11 +2400,11 @@ function PageCellImpl({
       setManipPreview(new Map([[a.id, last]]));
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
       window.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('blur', onBlur);
+      pointers.remove('blur', onBlur);
       cancelManip.current = null;
       endSnapGesture();
       if (!activated) return;
@@ -2420,11 +2435,12 @@ function PageCellImpl({
     };
     const onBlur = (): void => finish(false);
     cancelManip.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
     window.addEventListener('keydown', onKey, true);
-    window.addEventListener('blur', onBlur);
+    pointers.add('blur', onBlur);
   };
 
   // ── Shape + callout creation ────────────────────────────────
@@ -2469,9 +2485,10 @@ function PageCellImpl({
       setShapeCursor(lastP);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       bandActive.current = false;
       cancelBand.current = null;
       endSnapGesture();
@@ -2484,9 +2501,11 @@ function PageCellImpl({
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     cancelBand.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
 
   const handleShapeVertexDown = (e: React.PointerEvent<HTMLElement>): void => {
@@ -2509,7 +2528,7 @@ function PageCellImpl({
       const onMove = (ev: PointerEvent): void =>
         setShapeCursor(normPoint(el, ev.clientX, ev.clientY, ev));
       const cleanup = (): void => {
-        window.removeEventListener('pointermove', onMove);
+        pointers.remove('pointermove', onMove);
         shapeSeqActive.current = false;
         if (cancelBand.current === cleanup) cancelBand.current = null;
         cancelShapeSeq.current = null;
@@ -2536,7 +2555,8 @@ function PageCellImpl({
       };
       cancelBand.current = cleanup;
       cancelShapeSeq.current = cleanup;
-      window.addEventListener('pointermove', onMove);
+      const pointers = pointerScope(e.pointerId);
+      pointers.add('pointermove', onMove);
       return;
     }
     appendShapeVertexRef.current?.(p, e.detail >= 2);
@@ -2581,9 +2601,10 @@ function PageCellImpl({
       setEraseSwath(path);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       bandActive.current = false;
       cancelBand.current = null;
       endSnapGesture();
@@ -2619,9 +2640,11 @@ function PageCellImpl({
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     cancelBand.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
 
   const handleInkDown = (e: React.PointerEvent<HTMLElement>): void => {
@@ -2642,9 +2665,10 @@ function PageCellImpl({
       setInkPoints(points);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       bandActive.current = false;
       cancelBand.current = null;
       endSnapGesture();
@@ -2731,9 +2755,11 @@ function PageCellImpl({
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     cancelBand.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
 
   // ── Measure ───────────────────────────────────────────────────────────
@@ -2813,9 +2839,10 @@ function PageCellImpl({
       setMeasureCursor(last);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       bandActive.current = false;
       cancelBand.current = null;
       endSnapGesture();
@@ -2836,9 +2863,11 @@ function PageCellImpl({
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     cancelBand.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
 
   /** Perimeter/area: click adds a vertex, double-click finishes, Escape (or
@@ -2862,7 +2891,7 @@ function PageCellImpl({
       const onMove = (ev: PointerEvent): void =>
         setMeasureCursor(normPoint(el, ev.clientX, ev.clientY, ev));
       const cleanup = (): void => {
-        window.removeEventListener('pointermove', onMove);
+        pointers.remove('pointermove', onMove);
         measureSeqActive.current = false;
         cancelBand.current = null;
         endSnapGesture();
@@ -2893,7 +2922,8 @@ function PageCellImpl({
         setMeasurePts(pts);
       };
       cancelBand.current = cleanup;
-      window.addEventListener('pointermove', onMove);
+      const pointers = pointerScope(e.pointerId);
+      pointers.add('pointermove', onMove);
       return;
     }
     // e.detail === 2 is the second press of a double-click: the first press
@@ -3185,9 +3215,10 @@ function PageCellImpl({
       setBand(latest);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       bandActive.current = false;
       cancelBand.current = null;
       endSnapGesture();
@@ -3290,9 +3321,11 @@ function PageCellImpl({
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     cancelBand.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
 
   // Leaving annotate mode (Escape, tool toggle) mid-drag cancels the band —

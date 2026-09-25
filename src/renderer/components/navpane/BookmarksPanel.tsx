@@ -22,6 +22,7 @@ import type { PdfBuffer } from '../../state/types';
 import type { NavPanelComponentProps } from './types';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../../i18n';
+import { pointerScope } from '../../lib/pointer-scope';
 
 // Bookmarks nav panel — the ONE bookmarks surface, merging the
 // canvas OutlineSidebar (drag-reorder + click-to-jump) with the
@@ -208,20 +209,21 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
         detachRef.current();
         setDrag(null);
       };
-      window.addEventListener('pointermove', dragMove);
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', cancel);
+      const pointers = pointerScope(e.pointerId);
+      pointers.add('pointermove', dragMove);
+      pointers.add('pointerup', onUp);
+      pointers.add('pointercancel', cancel);
       // Match usePageDrag / the Pages panel: blur + Escape abort the drag.
-      window.addEventListener('blur', cancel);
+      pointers.add('blur', cancel);
       const unEscape = pushEscapeInterceptor(() => {
         cancel();
         return true;
       });
       detachRef.current = () => {
-        window.removeEventListener('pointermove', dragMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', cancel);
-        window.removeEventListener('blur', cancel);
+        pointers.remove('pointermove', dragMove);
+        pointers.remove('pointerup', onUp);
+        pointers.remove('pointercancel', cancel);
+        pointers.remove('blur', cancel);
         unEscape();
       };
     },

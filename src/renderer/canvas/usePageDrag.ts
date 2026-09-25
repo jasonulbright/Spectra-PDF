@@ -6,6 +6,7 @@ import { buildDragGhost, moveDragGhost, setDragGhostRefusal } from './drag-ghost
 import { tChrome } from '../i18n';
 import type { CanvasLayout, DropTarget } from './layout';
 import type { CanvasHandle } from './canvas-handle';
+import { ownsPointer } from '../lib/pointer-scope';
 
 export interface DragSource {
   docId: string;
@@ -121,7 +122,7 @@ export function usePageDrag(deps: PageDragDeps) {
 
   function onPointerMove(e: PointerEvent): void {
     const s = session.current;
-    if (!s) return;
+    if (!s || !ownsPointer(s.pointerId, e)) return;
     if (!s.started) {
       const w = depsRef.current.canvasRef.current?.clientToWorld(e.clientX, e.clientY);
       const zoomedOut = w != null && !dropTargetGate(DOC_HEIGHT * w.k).ok;
@@ -149,7 +150,7 @@ export function usePageDrag(deps: PageDragDeps) {
 
   function onPointerUp(e: PointerEvent): void {
     const s = session.current;
-    if (!s) return;
+    if (!s || !ownsPointer(s.pointerId, e)) return;
     if (!s.started) {
       teardown();
       return; // below the threshold — an ordinary click, let it through
@@ -169,7 +170,9 @@ export function usePageDrag(deps: PageDragDeps) {
     else if (target?.kind === 'between') depsRef.current.movePagesToNewDoc(movingIds, target.docIndex);
   }
 
-  function onPointerCancel(): void {
+  function onPointerCancel(e: PointerEvent): void {
+    const s = session.current;
+    if (s && !ownsPointer(s.pointerId, e)) return;
     teardown();
   }
 

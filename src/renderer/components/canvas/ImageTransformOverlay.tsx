@@ -17,6 +17,7 @@ import {
 } from '../../lib/image-transform';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../../i18n';
+import { pointerScope } from '../../lib/pointer-scope';
 
 // Direct-manipulation transform of the selected image placement.
 // The outline + move body are an SVG polygon (crisp via non-scaling-stroke,
@@ -119,9 +120,10 @@ export default function ImageTransformOverlay({
       setPreview(latest);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       active.current = false;
       cancelRef.current = null;
       setPreview(null);
@@ -133,9 +135,11 @@ export default function ImageTransformOverlay({
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     cancelRef.current = onCancel; // unmount mid-drag → cancel, don't commit
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
 
   // Crop band: drag in the image's LOCAL unit space (pointer → user →
@@ -168,9 +172,10 @@ export default function ImageTransformOverlay({
       ]);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       active.current = false;
       cancelRef.current = null;
       setCropBand(null);
@@ -179,9 +184,11 @@ export default function ImageTransformOverlay({
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     cancelRef.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
 
   // Drag one crop edge in the image's local unit space; commit the
@@ -205,9 +212,10 @@ export default function ImageTransformOverlay({
       setCropPreview(latest);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       active.current = false;
       cancelRef.current = null;
       setCropPreview(null);
@@ -217,9 +225,11 @@ export default function ImageTransformOverlay({
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     cancelRef.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
 
   // Drag one gradient-mask dot ('from' | 'to') in the image's
@@ -249,9 +259,10 @@ export default function ImageTransformOverlay({
       });
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       active.current = false;
       cancelRef.current = null;
       setMaskPreview(null);
@@ -272,9 +283,11 @@ export default function ImageTransformOverlay({
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     cancelRef.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
 
   const moveGesture: Compute = (s, c, b) => applyMove(b, c[0] - s[0], c[1] - s[1]);

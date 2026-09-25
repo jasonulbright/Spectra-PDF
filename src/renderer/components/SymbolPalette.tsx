@@ -200,6 +200,7 @@ export function SymbolPalette({
                           { symbolId: symbol.id, name, parts: symbol.parts, color },
                           e.clientX,
                           e.clientY,
+                          e.pointerId,
                           (dragged) => {
                             suppressClick.current = dragged;
                           },

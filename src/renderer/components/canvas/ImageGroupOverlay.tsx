@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { pointerScope } from '../../lib/pointer-scope';
 import {
   displayToUser,
   LOCAL_CORNERS,
@@ -132,9 +133,10 @@ export default function ImageGroupOverlay({
       setPreviewD(latest);
     };
     const finish = (commit: boolean): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      pointers.remove('pointermove', onMove);
+      pointers.remove('pointerup', onUp);
+      pointers.remove('pointercancel', onCancel);
+      pointers.remove('blur', onCancel);
       active.current = false;
       cancelRef.current = null;
       setPreviewD(null);
@@ -153,9 +155,11 @@ export default function ImageGroupOverlay({
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
     cancelRef.current = onCancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    const pointers = pointerScope(e.pointerId);
+    pointers.add('pointermove', onMove);
+    pointers.add('pointerup', onUp);
+    pointers.add('pointercancel', onCancel);
+    pointers.add('blur', onCancel);
   };
 
   const moveGesture: ComputeD = (s, c) => [1, 0, 0, 1, c[0] - s[0], c[1] - s[1]];

@@ -9,6 +9,7 @@ import { ExtractTextPanel } from '../panels/ExtractTextPanel';
 import { ToolIcon } from './tool-icons';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tOperationTitle, tToolTitle } from '../i18n';
+import { pointerScope } from '../lib/pointer-scope';
 import { inlineExtent } from '../lib/inline-direction';
 import type { CanvasTextRequest } from '../lib/extract-text-owner';
 
@@ -60,14 +61,19 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
         });
       };
       const detach = () => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
+        pointers.remove('pointermove', onMove);
+        pointers.remove('pointerup', onUp);
+        pointers.remove('pointercancel', onUp);
+        pointers.remove('blur', onUp);
         resizeCleanup.current = null;
         setResizing(false);
       };
       const onUp = () => detach();
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
+      const pointers = pointerScope(e.pointerId);
+      pointers.add('pointermove', onMove);
+      pointers.add('pointerup', onUp);
+      pointers.add('pointercancel', onUp);
+      pointers.add('blur', onUp);
       resizeCleanup.current = detach;
     },
     [dispatch],
