@@ -1048,6 +1048,38 @@ def _raise_mapped_signing_refusal(certify: bool, existing: dict) -> None:
     ) from None
 
 
+def _refuse_unusable_signer_certificate(certificate, now=None) -> None:
+    """Refuse a signer certificate that cannot back a document signature.
+
+    A certificate outside its validity period, or one whose key usage excludes
+    both digitalSignature and nonRepudiation, still produces bytes that verify
+    cryptographically, so the self-verification after signing cannot catch it:
+    every validator later reports the signature as invalid for its signer. An
+    absent key-usage extension restricts nothing (RFC 5280 4.2.1.3)."""
+    import datetime as _dt
+
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    not_before = certificate.not_valid_before
+    not_after = certificate.not_valid_after
+    if now < not_before:
+        raise ValueError(
+            f"The signing certificate is not valid until {not_before:%Y-%m-%d}, "
+            "so it cannot sign yet."
+        )
+    if now > not_after:
+        raise ValueError(
+            f"The signing certificate expired on {not_after:%Y-%m-%d}, "
+            "so it cannot sign."
+        )
+    usage = certificate.key_usage_value
+    if usage is not None:
+        if not set(usage.native) & {"digital_signature", "non_repudiation"}:
+            raise ValueError(
+                "The signing certificate's key usage does not permit digital "
+                "signatures, so it cannot sign a document."
+            )
+
+
 def _refuse_unverifiable_output(verification: dict, field_name: str) -> None:
     """Refuse a just-written signature that does not verify against its own
     bytes.
@@ -1553,6 +1585,7 @@ def sign_pdf(
     # holds an open token session here (closed as soon as the signed bytes
     # exist; the write/verify below needs no signer).
     with signer_cm as signer:
+        _refuse_unusable_signer_certificate(signer.signing_cert)
         meta_kwargs: dict = {"field_name": field_name, "reason": reason, "location": location}
         if pades:
             meta_kwargs["subfilter"] = SigSeedSubFilter.PADES
