@@ -130,7 +130,10 @@ PRESETS: dict[str, dict] = {
         "verify_threshold": 0.97,
     },
     "balanced": {
-        "mask_codec": JBIG2_SYMBOL,
+        # Symbol mode stores one glyph for several similar ones, which can put
+        # a different character on the page; only the preset that says so
+        # (Smallest) may use it without the caller naming it.
+        "mask_codec": JBIG2_GENERIC,
         "symbol_threshold": 0.92,  # jbig2enc's own default
         "bg_div": 3,
         "bg_step": 2**4,

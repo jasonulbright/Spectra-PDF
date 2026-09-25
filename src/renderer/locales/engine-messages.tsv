@@ -300,6 +300,7 @@ guided_actions.stepUsePlacementsPosition	pattern	guided_actions	step {{v0}} ({{o
 hairlines.formHairlineDrawnCould	exact	hairlines	The form a hairline is drawn in could not be found.
 hairlines.hairlineThresholdMustGreater	exact	hairlines	The hairline threshold must be greater than zero.
 hairlines.replacementWidthMustLeast	exact	hairlines	The replacement width must be at least the hairline threshold, or the corrected strokes are still hairlines.
+headers.batesStartMustWhole	exact	headers	The Bates start must be a whole number of 0 or more, and the number of digits a whole number from 1 to 12.
 headers.fontSizeMust	pattern	headers	font_size must be >= {{_MIN_FONT_SIZE}}
 headers.leastOnePlacementRequired	exact	headers	at least one placement is required
 headers.positionMustOneGot	pattern	headers	position must be one of {{_POSITIONS}}, got {{pos}}
@@ -484,6 +485,7 @@ pdf_version.pdfVersionCannotDetermined	exact	pdf_version	The PDF version cannot 
 pdf_version.versionDeclarationsCannotPreserved	exact	pdf_version	The version declarations cannot be preserved completely.
 pdfa.ghostscriptPdfConversionDid	pattern	pdfa	Ghostscript PDF/A conversion did not produce {{requested}}: the output declares {{declared}}.
 pdfa.ghostscriptPdfConversionFailed	pattern	pdfa	Ghostscript PDF/A conversion failed: {{v0}}
+pdfa.outputCarriesPdfOutput	pattern	pdfa	The output carries no PDF/A output intent, so {{requested}} was not produced.
 pdfa.outputDeclaresPdfConformance	pattern	pdfa	The output declares no PDF/A conformance at all, so {{requested}} was not produced.
 portfolio.documentAlreadyPortfolio	exact	portfolio	this document is already a portfolio
 portfolio.memberNamed	pattern	portfolio	no member named {{name}}
@@ -585,6 +587,7 @@ read_aloud.nothingPageStructureTree	exact	read_aloud	nothing on this page is in 
 read_aloud.pageContentOutsideStructure	exact	read_aloud	page content outside the structure tree
 read_aloud.tagged	exact	read_aloud	not tagged
 rebuild.ghostscriptRebuildFailed	pattern	rebuild	Ghostscript rebuild failed: {{stderr}}
+rebuild.rebuildKeptDocumentS	pattern	rebuild	The rebuild kept {{page_count}} of the document's {{source_pages}} pages, so it was not saved. Use Repair (Tier 1) or Recover (Tier 3) instead.
 recognize.couldRenderPageOcr	pattern	recognize	Could not render page {{page}} for OCR: {{detail}}
 recognize.invalidRecognitionLanguage	pattern	recognize	Invalid recognition language: {{lang}}
 recognize.ocrEngineAvailableTesseract	pattern	recognize	The OCR engine is not available: no tesseract.exe at {{v0}}. Run scripts/bundle-tesseract.ps1.
@@ -914,7 +917,6 @@ watermark.pdfCannotOwnWatermark	pattern	watermark	a PDF cannot be its own waterm
 watermark.pdfPageWatermarkSource	pattern	watermark	a PDF page is a watermark source of its own — set the PDF source instead of the image source: {{path}}
 watermark.tilingWatermarkWouldNeed	pattern	watermark	tiling this watermark would need {{v0}} copies per page, more than the {{MAX_TILES}} allowed — increase the scale or the gap
 watermark.unreadableWatermarkImage	pattern	watermark	unreadable watermark image: {{path}} ({{exc}})
-watermark.unreadableWatermarkImageImage	pattern	watermark	unreadable watermark image: {{path}} (no image stream)
 watermark.unreadableWatermarkPdf	pattern	watermark	unreadable watermark PDF: {{source_path}} ({{exc}})
 watermark.verticalWatermarkDrawsThrough	exact	watermark	a vertical watermark draws through an embedded vertical face and no fallback font is available
 watermark.watermarkImageEmpty	pattern	watermark	watermark image is empty: {{path}}

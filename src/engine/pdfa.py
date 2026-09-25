@@ -1,8 +1,9 @@
 """PDF/A conversion via Ghostscript."""
 
+import tempfile
 from pathlib import Path
 
-from . import budget, standards_report
+from . import budget, gs_capability, standards_report
 from .inplace import is_same_file, staged_write_if
 from .validate import validate_pdf
 
@@ -65,9 +66,13 @@ def convert_pdfa(
     # there is nothing left to compare against.
     source_facts = standards_report.census(input_path)
 
-    with staged_write_if(same_file, output_path) as gs_target:
+    capability = gs_capability.require(gs_path)
+    with staged_write_if(same_file, output_path) as gs_target,             tempfile.TemporaryDirectory(prefix="spectra-pdfa-") as scratch:
+        profile = _rgb_profile(Path(capability.path))
+        definition = Path(scratch) / "pdfa_def.ps"
+        definition.write_text(_output_intent_ps(profile), encoding="ascii")
         cmd = [
-            gs_path,
+            capability.path,
             "-dPDFA=" + pdfa_level,
             "-dBATCH",
             "-dNOPAUSE",
@@ -78,7 +83,14 @@ def convert_pdfa(
             # claim; policy 2 names itself an abort but still writes a complete
             # file and still exits 0, so it refuses nothing.
             "-dPDFACompatibilityPolicy=1",
+            # Every colour lands in DeviceRGB under one sRGB OutputIntent:
+            # without the intent a page that paints in a device space is not
+            # PDF/A, whatever the XMP identification says.
+            "-sColorConversionStrategy=RGB",
+            "-sProcessColorModel=DeviceRGB",
+            f"--permit-file-read={_ps_path(profile)}",
             f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % is a gs filename template char
+            str(definition),
             str(input_path),
         ]
 
@@ -93,6 +105,12 @@ def convert_pdfa(
         )
 
         requested = f"PDF/A-{level}"
+        if not _has_pdfa_output_intent(gs_target):
+            _discard(gs_target)
+            raise RuntimeError(
+                "The output carries no PDF/A output intent, so "
+                f"{requested} was not produced."
+            )
         declared = standards_report.declared_pdfa(gs_target)
         if declared.upper() != requested.upper():
             _discard(gs_target)
@@ -127,3 +145,62 @@ def _discard(produced: Path) -> None:
         produced.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+# The ICC version PDF/A-1 admits is ICC.1:1998-09 (version 2); the profile the
+# user's Ghostscript ships as its own RGB default is version 2, and ROM-built
+# Windows binaries carry it under %rom% when the on-disk tree is absent.
+_ROM_RGB_PROFILE = "%rom%iccprofiles/default_rgb.icc"
+
+
+def _rgb_profile(executable: Path) -> str:
+    for root in (executable.parent.parent, executable.parent):
+        candidate = root / "iccprofiles" / "default_rgb.icc"
+        if candidate.is_file():
+            return str(candidate)
+    return _ROM_RGB_PROFILE
+
+
+def _ps_path(path: str) -> str:
+    return path.replace("\\", "/")
+
+
+def _ps_string(text: str) -> str:
+    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    return f"({escaped})"
+
+
+def _output_intent_ps(profile: str) -> str:
+    return (
+        "%!\n"
+        "[/_objdef {spectra_icc} /type /stream /OBJ pdfmark\n"
+        "[{spectra_icc} << /N 3 >> /PUT pdfmark\n"
+        f"[{{spectra_icc}} {_ps_string(_ps_path(profile))} (r) file /PUT pdfmark\n"
+        "[/_objdef {spectra_intent} /type /dict /OBJ pdfmark\n"
+        "[{spectra_intent} << /Type /OutputIntent /S /GTS_PDFA1"
+        " /DestOutputProfile {spectra_icc}"
+        " /OutputConditionIdentifier (sRGB IEC61966-2.1)"
+        " /Info (sRGB IEC61966-2.1)"
+        " /RegistryName (http://www.color.org) >> /PUT pdfmark\n"
+        "[{Catalog} << /OutputIntents [ {spectra_intent} ] >> /PUT pdfmark\n"
+    )
+
+
+def _has_pdfa_output_intent(produced: Path) -> bool:
+    import pikepdf
+
+    try:
+        with pikepdf.open(str(produced)) as pdf:
+            intents = pdf.Root.get("/OutputIntents")
+            if not isinstance(intents, pikepdf.Array):
+                return False
+            for intent in intents:
+                if (
+                    isinstance(intent, pikepdf.Dictionary)
+                    and intent.get("/S") == pikepdf.Name("/GTS_PDFA1")
+                    and isinstance(intent.get("/DestOutputProfile"), pikepdf.Stream)
+                ):
+                    return True
+    except Exception:
+        return False
+    return False

@@ -25,6 +25,7 @@ from pikepdf import Dictionary, Name
 
 from . import budget, icc_profiles, standards_report
 from .acroform import reattach_forms_file
+from .inplace import staged_write
 from .pdf_save import refuse_encrypted_source
 from .pdf_tree import name_bytes, token_text
 from .trapping import DEFAULT_TRAPPED, TRAPPED_VALUES
@@ -674,7 +675,7 @@ def convert_cmyk(
     output_path = Path(output)
     profile = _resolve_dest_profile(dest_profile, icc_dir)
 
-    def command(source: Path) -> list:
+    def command(source: Path, target: Path) -> list:
         return [
             gs_path,
             "-sDEVICE=pdfwrite",
@@ -699,44 +700,51 @@ def convert_cmyk(
             "-dBATCH",
             "-dSAFER",
             # % is a gs filename template char.
-            f"-sOutputFile={str(output_path).replace('%', '%%')}",
+            f"-sOutputFile={str(target).replace('%', '%%')}",
             str(source),
         ]
 
-    def run(source: Path):
+    def run(source: Path, target: Path):
         # Derived budget (budget.run keeps the stdin isolation — gs must
         # never inherit the RPC pipe).
-        outcome = budget.gs(command(source), what="Ghostscript (CMYK conversion)",
+        outcome = budget.gs(command(source, target), what="Ghostscript (CMYK conversion)",
                             path=input_path, pages=info["pages"])
         if outcome.returncode != 0:
             raise RuntimeError(f"Ghostscript CMYK conversion failed: {outcome.stderr}")
         return outcome
 
     source_inks = _ink_names(input_path)
+    original_size = input_path.stat().st_size
     scratch = Path(tempfile.mkdtemp(prefix="spectra-prepress-"))
     try:
-        # A widget carrying no appearance is given one before anything reads
-        # this document as content, so the producer has none to synthesize and
-        # flatten. Every read below takes that copy — the carve-out's ident
-        # order is re-derived from the same file the staging walked, and the
-        # reattach would otherwise restore a bare widget.
-        forms_input = regenerate_appearances_file(input_path, scratch,
-                                                  font_dir) or input_path
-        staged, claimed, rasterized, boxes = _stage_carve_out(
-            forms_input, scratch, annotations=True, forms=True)
-        result = run(staged if staged is not None else forms_input)
-        rasterized = _after_restore(output_path, forms_input, claimed, rasterized,
-                                    annotations=True)
-        forms_source = harvest_appearances(output_path, forms_input,
-                                           scratch, boxes, info["pages"])
-        _rebase_appearances(output_path)
-        # gs pdfwrite drops /AcroForm and every widget annotation — converting a
-        # filled form would silently destroy it. Transplant the fields back onto
-        # the regenerated pages (no-op for non-form files) — the same reattach
-        # grayscale/compress do, from the file carrying the appearances the
-        # producer just converted.
-        reattach_forms_file(forms_source if forms_source is not None
-                            else forms_input, output_path)
+        # Ghostscript writes beside the output and the result lands only when
+        # every step succeeded: an output that names the input would otherwise
+        # be truncated while Ghostscript is still reading it.
+        with staged_write(output_path) as target:
+            # A widget carrying no appearance is given one before anything reads
+            # this document as content, so the producer has none to synthesize and
+            # flatten. Every read below takes that copy — the carve-out's ident
+            # order is re-derived from the same file the staging walked, and the
+            # reattach would otherwise restore a bare widget.
+            forms_input = regenerate_appearances_file(input_path, scratch,
+                                                      font_dir) or input_path
+            staged, claimed, rasterized, boxes = _stage_carve_out(
+                forms_input, scratch, annotations=True, forms=True)
+            result = run(staged if staged is not None else forms_input, target)
+            rasterized = _after_restore(target, forms_input, claimed, rasterized,
+                                        annotations=True)
+            forms_source = harvest_appearances(target, forms_input,
+                                               scratch, boxes, info["pages"])
+            _rebase_appearances(target)
+            # gs pdfwrite drops /AcroForm and every widget annotation — converting a
+            # filled form would silently destroy it. Transplant the fields back onto
+            # the regenerated pages (no-op for non-form files) — the same reattach
+            # grayscale/compress do, from the file carrying the appearances the
+            # producer just converted.
+            reattach_forms_file(forms_source if forms_source is not None
+                                else forms_input, target)
+            colour = _colour_report(source_inks, target, rasterized,
+                                    result.stdout, result.stderr)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
@@ -747,11 +755,10 @@ def convert_cmyk(
         # description string. A conversion that cannot say which press it
         # targeted is a number nobody can check.
         "dest_profile": profile.description,
-        "original_size": input_path.stat().st_size,
+        "original_size": original_size,
         "output_size": output_path.stat().st_size,
         "encryption_removed": encryption_removed,
-        **_colour_report(source_inks, output_path, rasterized,
-                         result.stdout, result.stderr),
+        **colour,
     }
 
 
@@ -925,7 +932,7 @@ def convert_pdfx(
             f.write(_pdfx_def_ps(version, condition, identifier, info,
                                  profile.path, trapped, registry))
 
-        def command(source: Path) -> list:
+        def command(source: Path, target: Path) -> list:
             return [
                 gs_path,
                 "-sDEVICE=pdfwrite",
@@ -950,14 +957,14 @@ def convert_pdfx(
                 # drops the standard, leaving the preamble's version key as the
                 # only surviving claim.
                 "-dPDFACompatibilityPolicy=1",
-                f"-sOutputFile={str(output_path).replace('%', '%%')}",
+                f"-sOutputFile={str(target).replace('%', '%%')}",
                 def_path,
                 str(source),
             ]
 
-        def run(source: Path):
+        def run(source: Path, target: Path):
             # Derived budget; the floor stays at this call's own 600 s.
-            outcome = budget.gs(command(source), what="Ghostscript (PDF/X conversion)",
+            outcome = budget.gs(command(source, target), what="Ghostscript (PDF/X conversion)",
                                 path=input_path, base=600.0)
             if outcome.returncode != 0:
                 raise RuntimeError(f"Ghostscript PDF/X conversion failed: {outcome.stderr}")
@@ -971,45 +978,50 @@ def convert_pdfx(
         # form staging is off for the same reason plus one more: this output is
         # a deliberate non-carrier of the original's fields (docstring), so
         # there is no reattach for a converted appearance to travel on.
-        staged, claimed, rasterized, _boxes = _stage_carve_out(
-            input_path, scratch, annotations=False)
-        result = run(staged if staged is not None else input_path)
-        rasterized = _after_restore(output_path, input_path, claimed, rasterized,
-                                    annotations=False)
-        _rebase_appearances(output_path)
+        original_size = input_path.stat().st_size
+        # Ghostscript writes beside the output and the result lands only when
+        # every check passed: an output that names the input would otherwise
+        # be truncated while Ghostscript is still reading it, and a refused
+        # conversion must leave no non-conformant file behind.
+        with staged_write(output_path) as target:
+            staged, claimed, rasterized, _boxes = _stage_carve_out(
+                input_path, scratch, annotations=False)
+            result = run(staged if staged is not None else input_path, target)
+            rasterized = _after_restore(target, input_path, claimed, rasterized,
+                                        annotations=False)
+            _rebase_appearances(target)
+
+            report = standards_report.build(
+                source_facts, target, result.stdout, result.stderr
+            )
+            if standards_report.abandoned(report):
+                said = "; ".join(
+                    entry["message"]
+                    for row in report["altered"]
+                    if row["kind"] == "conformance_abandoned"
+                    for entry in row["detail"]
+                )
+                raise RuntimeError(f"PDF/X conversion abandoned the standard: {said}")
+
+            # A colorant loss is invisible to the structural census — the marks
+            # stay, they simply print on the wrong plates — so the two ink lists
+            # are the only evidence, and they lead the report.
+            report["altered"] = [
+                row for row in (
+                    standards_report.colorant_shadings_lost(rasterized),
+                    standards_report.colorants_lost(source_inks, _ink_names(target)),
+                ) if row is not None
+            ] + report["altered"]
+
+            # The claim is checkable — check it (never ship a silent non-conformance).
+            with pikepdf.open(target) as pdf:
+                intents = pdf.Root.get("/OutputIntents")
+                if intents is None or len(intents) == 0:
+                    raise RuntimeError("PDF/X output carries no /OutputIntents — conversion failed.")
+                gts = str(pdf.docinfo.get("/GTS_PDFXVersion", ""))
+                claimed = str(pdf.docinfo.get("/Trapped", "")).lstrip("/")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-
-    report = standards_report.build(
-        source_facts, output_path, result.stdout, result.stderr
-    )
-    if standards_report.abandoned(report):
-        said = "; ".join(
-            entry["message"]
-            for row in report["altered"]
-            if row["kind"] == "conformance_abandoned"
-            for entry in row["detail"]
-        )
-        output_path.unlink(missing_ok=True)
-        raise RuntimeError(f"PDF/X conversion abandoned the standard: {said}")
-
-    # A colorant loss is invisible to the structural census — the marks stay,
-    # they simply print on the wrong plates — so the two ink lists are the
-    # only evidence, and they lead the report.
-    report["altered"] = [
-        row for row in (
-            standards_report.colorant_shadings_lost(rasterized),
-            standards_report.colorants_lost(source_inks, _ink_names(output_path)),
-        ) if row is not None
-    ] + report["altered"]
-
-    # The claim is checkable — check it (never ship a silent non-conformance).
-    with pikepdf.open(output_path) as pdf:
-        intents = pdf.Root.get("/OutputIntents")
-        if intents is None or len(intents) == 0:
-            raise RuntimeError("PDF/X output carries no /OutputIntents — conversion failed.")
-        gts = str(pdf.docinfo.get("/GTS_PDFXVersion", ""))
-        claimed = str(pdf.docinfo.get("/Trapped", "")).lstrip("/")
 
     return {
         "output": str(output_path),
@@ -1019,7 +1031,7 @@ def convert_pdfx(
         "dest_profile": profile.description,
         "output_condition_identifier": identifier,
         "encryption_removed": encryption_removed,
-        "original_size": input_path.stat().st_size,
+        "original_size": original_size,
         "output_size": output_path.stat().st_size,
         **report,
     }

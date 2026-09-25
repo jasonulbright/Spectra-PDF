@@ -309,7 +309,8 @@ class TestPresets:
         # similar glyphs and stores one representative, which is the mechanism
         # behind the scanner character-substitution class.
         assert PRESETS["archival"]["mask_codec"] == JBIG2_GENERIC
-        assert PRESETS["balanced"]["mask_codec"] == JBIG2_SYMBOL
+        assert PRESETS["balanced"]["mask_codec"] == JBIG2_GENERIC
+        assert PRESETS["smallest"]["mask_codec"] == JBIG2_SYMBOL
 
     def test_archival_is_the_most_conservative_threshold(self):
         # Sauvola's bracket is negative over paper, so a SMALLER k finds MORE
@@ -1153,7 +1154,7 @@ class TestGrainRouting:
             scan_pdf.pages.extend(grain_pdf.pages)
             scan_pdf.save(both)
         out = os.path.join(tmp_dir, "mrc.pdf")
-        report = mrc_compress(both, out, gs_path=gs_path)
+        report = mrc_compress(both, out, preset="smallest", gs_path=gs_path)
         assert report["pages_mrc"] == 2
         assert report["mask_codec"] == "mixed"
         codecs = {row["page"]: row["mask_codec"] for row in report["pages"]}

@@ -49,7 +49,6 @@ until the bundle script has been run.
 """
 
 import contextlib
-import io
 import math
 import re
 from pathlib import Path
@@ -355,32 +354,14 @@ def _face_glyph_height_em(face_path: str) -> float:
         return _GLYPH_HEIGHT_EM
 
 
-def _plain(value):
-    """A PDF value rebuilt out of primitives, owned by no document.
-
-    Image dictionary entries are copied between documents by VALUE here; a
-    direct assignment would carry a reference into a document that is about
-    to close.
-    """
-    if isinstance(value, pikepdf.Array):
-        return pikepdf.Array([_plain(v) for v in value])
-    if isinstance(value, pikepdf.Dictionary):
-        return Dictionary({str(k): _plain(v) for k, v in value.items()})
-    if isinstance(value, pikepdf.Name):
-        return Name(str(value))
-    return value
-
-
 def _embed_image(pdf: pikepdf.Pdf, path: str) -> tuple[pikepdf.Object, int, int, int]:
     """The picture as ONE Image XObject in `pdf`: (object, px width, px height,
     frame count).
 
-    The decode and the encode go through Create PDF's own normalisation and
-    Pillow PDF writer (`create_pdf._normalise` / `_frame_pdf`), so the filter
-    choice per image mode is decided in one place for both features. The
-    one-page PDF that comes back holds exactly one Image XObject; its raw
-    (still-encoded) bytes and the handful of image keys are rebuilt here, so
-    nothing depends on a foreign document staying open.
+    The decode and the encode go through Create PDF's own normalisation,
+    orientation and image writer (`create_pdf._normalise`, `orient`,
+    `image_xobject`), so the encoding per image mode is decided in one place
+    for both features.
 
     A multi-frame source (animated GIF, multi-page TIFF) contributes its
     FIRST frame — a watermark is one picture — and the frame count is
@@ -418,23 +399,28 @@ def _embed_image(pdf: pikepdf.Pdf, path: str) -> tuple[pikepdf.Object, int, int,
         )
     create_pdf_mod._register_heif()
 
-    from PIL import Image, ImageSequence, UnidentifiedImageError  # noqa: PLC0415
+    from PIL import Image, UnidentifiedImageError  # noqa: PLC0415
 
     try:
         with Image.open(src_path) as im:
+            orientation = create_pdf_mod.orientation_of(im)
+            jpeg = create_pdf_mod.source_jpeg(im) if orientation == 1 else None
+            adobe = "adobe" in (im.info or {})
             frames = 0
             first = None
-            for raw in ImageSequence.Iterator(im):
+            raw_mode = None
+            icc = None
+            for raw in create_pdf_mod.frames_of(im):
                 frames += 1
                 if first is None:
-                    first = create_pdf_mod._normalise(raw.copy())
+                    raw_mode = raw.mode
+                    icc = (raw.info or {}).get("icc_profile") or (im.info or {}).get("icc_profile")
+                    first = create_pdf_mod.orient(
+                        create_pdf_mod._normalise(raw.copy()), orientation
+                    )
             if first is None:
                 raise ValueError(f"the watermark image contains no frames: {path}")
             px_w, px_h = first.size
-            # 72 dpi: the wrapper page's size is irrelevant here — only the
-            # image XObject is lifted, and a watermark is placed relative to
-            # the page it stamps, never at the picture's own physical size.
-            data = create_pdf_mod._frame_pdf(first, 72.0)
     except UnidentifiedImageError as exc:
         raise ValueError(f"unreadable watermark image: {path} ({exc})") from None
     except (OSError, ValueError) as exc:
@@ -446,33 +432,10 @@ def _embed_image(pdf: pikepdf.Pdf, path: str) -> tuple[pikepdf.Object, int, int,
     if px_w <= 0 or px_h <= 0:
         raise ValueError("the watermark image has no pixels")
 
-    with pikepdf.open(io.BytesIO(data)) as wrapper:
-        xobjects = wrapper.pages[0].obj.get("/Resources", {}).get("/XObject", {})
-        source = None
-        for _, candidate in (xobjects.items() if xobjects else []):
-            if candidate.get("/Subtype") == Name.Image:
-                source = candidate
-                break
-        if source is None:
-            raise ValueError(f"unreadable watermark image: {path} (no image stream)")
-        # The stream is copied still ENCODED (read_raw_bytes), so the filter
-        # chain has to travel with it verbatim — decoding and re-encoding
-        # here would throw away the plugin's per-mode filter choice, which is
-        # the whole reason the encode goes through Create PDF.
-        image = pdf.make_stream(source.read_raw_bytes())
-        image.Type = Name.XObject
-        image.Subtype = Name.Image
-        image.Width = int(source.Width)
-        image.Height = int(source.Height)
-        image.BitsPerComponent = int(source.get("/BitsPerComponent", 8))
-        # `_normalise` guarantees a mode the plugin writes with a NAMED device
-        # colour space, so nothing indirect travels with the stream.
-        image.ColorSpace = Name(str(source.ColorSpace))
-        for key in ("/Filter", "/DecodeParms", "/Decode", "/ImageMask"):
-            value = source.get(key)
-            if value is not None:
-                image[key] = _plain(value)
-    return pdf.make_indirect(image), px_w, px_h, frames
+    image = create_pdf_mod.image_xobject(
+        pdf, first, jpeg=jpeg if first.mode == raw_mode else None, adobe=adobe, icc=icc
+    )
+    return image, px_w, px_h, frames
 
 
 def _page_content_bytes(page: pikepdf.Page) -> bytes:

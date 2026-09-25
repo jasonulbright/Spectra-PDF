@@ -96,6 +96,7 @@ def _substitute(text: str, page_no: int | str, total: int | str, bates: str) -> 
 
 
 _DIGITS = "0123456789"
+_MAX_BATES_DIGITS = 12
 
 
 def _coverage_probe(text: str) -> str:
@@ -176,6 +177,14 @@ def add_header_footer(
         raise ValueError(f"font_size must be >= {_MIN_FONT_SIZE}")
     rgb = _parse_color(color)
     r, g, b = rgb
+    if (
+        type(bates_start) is not int or bates_start < 0
+        or type(bates_digits) is not int or not 1 <= bates_digits <= _MAX_BATES_DIGITS
+    ):
+        raise ValueError(
+            "The Bates start must be a whole number of 0 or more, and the number of "
+            "digits a whole number from 1 to 12."
+        )
 
     input_path = Path(file)
     output_path = Path(output)

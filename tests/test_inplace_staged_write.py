@@ -65,6 +65,8 @@ from engine import redact_marks as redact_marks_mod
 from engine import reversion as reversion_mod
 from engine import rotate as rotate_mod
 from engine import pdfa as pdfa_mod
+from engine import prepress as prepress_mod
+from engine import rebuild as rebuild_mod
 from engine import search_redact as search_redact_mod
 from engine import signatures as signatures_mod
 from engine import struct_audit as struct_audit_mod
@@ -1664,6 +1666,51 @@ CASES = (
         deterministic=False,
     ),
     Case(
+        "convert_cmyk",
+        prepress_mod,
+        _with_text,
+        None,  # filled in below; the run needs the Ghostscript path
+        _producer,
+        doors=("convert_cmyk",),
+        needs_gs=True,
+        run_gs=lambda src, out, gs: prepress_mod.convert_cmyk(src, out, gs_path=gs),
+        dies_on=budget_mod,
+        dies="gs",
+        staged_of=_gs_output_file,
+        varies=("output_size",),
+        deterministic=False,
+    ),
+    Case(
+        "convert_pdfx",
+        prepress_mod,
+        _with_text,
+        None,  # filled in below; the run needs the Ghostscript path
+        _producer,
+        doors=("convert_pdfx",),
+        needs_gs=True,
+        run_gs=lambda src, out, gs: prepress_mod.convert_pdfx(src, out, gs_path=gs),
+        dies_on=budget_mod,
+        dies="gs",
+        staged_of=_gs_output_file,
+        varies=("output_size",),
+        deterministic=False,
+    ),
+    Case(
+        "rebuild",
+        rebuild_mod,
+        _with_text,
+        None,  # filled in below; the run needs the Ghostscript path
+        _producer,
+        doors=("rebuild",),
+        needs_gs=True,
+        run_gs=lambda src, out, gs: rebuild_mod.rebuild(src, out, gs_path=gs),
+        dies_on=budget_mod,
+        dies="gs",
+        staged_of=_gs_output_file,
+        varies=("rebuilt_size",),
+        deterministic=False,
+    ),
+    Case(
         "ink_alias",
         ink_manager_mod,
         _two_spots,
@@ -2131,6 +2178,10 @@ EXCLUDED_DOORS = {
     "export_document": (
         "writes a Word, Excel or PowerPoint file — the output is a different "
         "format from the document it was handed and can never be it"
+    ),
+    "render_separations": (
+        "has no `output`: it rasterizes plates into its own scratch "
+        "directory, and its CMYK pass writes a staging file, never the input"
     ),
     "unlock": (
         "has no `output` at all: it always rewrites the file it was given, so "
