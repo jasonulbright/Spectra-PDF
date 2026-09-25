@@ -1181,11 +1181,12 @@ pub fn on_window_focused(app: &AppHandle, label: &str) {
 
 /// Drop everything a destroyed window held.
 ///
-/// `tabdrag::on_window_destroyed` runs BEFORE this (`lib.rs`): a document handed
-/// to this window and never opened is still owned by it here, and releasing the
-/// claim into the pool is what makes it unrecoverable. The sweep there hands
-/// those back first, so what this releases is only what the window actually had.
+/// The tab hand-off sweep runs first, from here and from nowhere else: a
+/// document handed to this window and never opened is still owned by it until
+/// the claims below are released, and released first it is unrecoverable.
+/// Calling the sweep here leaves no separate call order to get wrong.
 pub fn on_window_destroyed(app: &AppHandle, label: &str) {
+    crate::tabdrag::on_window_destroyed(app, label);
     if !is_app_window(label) {
         return;
     }
@@ -2149,5 +2150,66 @@ mod tests {
         assert_eq!(state.get("main"), "none");
         state.forget("doc-9");
         assert_eq!(state.get("doc-9"), "none");
+    }
+
+    #[test]
+    fn destruction_releases_every_claim_of_one_label_and_no_other() {
+        let state = test_claim_state();
+        // A hung renderer never sends a release; destruction is the only one.
+        assert!(state.claim("C:\\hung.pdf", "doc-1", ClaimMode::Write).granted);
+        assert!(state.claim("C:\\shared.pdf", "doc-1", ClaimMode::Read).granted);
+        assert!(state.claim("C:\\shared.pdf", "main", ClaimMode::Read).granted);
+        assert!(state.claim("C:\\mine.pdf", "main", ClaimMode::Write).granted);
+        let folder = run(&state, "doc-1", &["C:\\batch"]).token.unwrap();
+
+        state.release_label("doc-1");
+
+        assert!(state.write_claims("doc-1").is_empty());
+        assert!(!state.release_run(folder, "doc-1"));
+        assert!(state.claim("C:\\hung.pdf", "doc-2", ClaimMode::Write).granted);
+        assert!(run(&state, "doc-2", &["C:\\batch"]).granted);
+        assert_eq!(state.owner("C:\\shared.pdf").as_deref(), Some("main"));
+        assert!(!state.claim("C:\\shared.pdf", "doc-2", ClaimMode::Write).granted);
+        assert_eq!(state.write_claims("main"), vec!["C:\\mine.pdf".to_string()]);
+    }
+
+    #[test]
+    fn a_folder_and_a_document_in_it_claimed_in_opposite_orders_go_to_one_window() {
+        const FOLDER: &str = "C:\\race";
+        const DOC: &str = "C:\\race\\a.pdf";
+        for _ in 0..200 {
+            let state = test_claim_state();
+            let barrier = std::sync::Barrier::new(2);
+            let (done, finished) = std::sync::mpsc::channel();
+            let (a, b) = std::thread::scope(|scope| {
+                let a = scope.spawn(|| {
+                    barrier.wait();
+                    let folder = run(&state, "main", &[FOLDER]).granted;
+                    let doc = state.claim(DOC, "main", ClaimMode::Write).granted;
+                    (folder, doc)
+                });
+                let b = scope.spawn(|| {
+                    barrier.wait();
+                    let doc = state.claim(DOC, "doc-1", ClaimMode::Write).granted;
+                    let folder = run(&state, "doc-1", &[FOLDER]).granted;
+                    (folder, doc)
+                });
+                let watchdog = scope.spawn(move || {
+                    finished
+                        .recv_timeout(std::time::Duration::from_secs(10))
+                        .expect("claims deadlocked")
+                });
+                let out = (a.join().unwrap(), b.join().unwrap());
+                done.send(()).unwrap();
+                watchdog.join().unwrap();
+                out
+            });
+            let granted = [a.0, a.1, b.0, b.1].iter().filter(|g| **g).count();
+            assert_eq!(granted, 1, "main {a:?}, doc-1 {b:?}");
+            assert!(a.0 ^ b.1, "main {a:?}, doc-1 {b:?}");
+            // Read claims still coexist with whichever side won.
+            assert!(state.claim(DOC, "doc-2", ClaimMode::Read).granted || b.1);
+            assert!(state.claim("C:\\race\\b.pdf", "doc-2", ClaimMode::Read).granted);
+        }
     }
 }
