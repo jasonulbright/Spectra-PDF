@@ -19,10 +19,12 @@ font-substitution pin, and it must stay implausible.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -171,6 +173,30 @@ def convert(flat: Path, filt: str, out_dir: Path) -> None:
         shutil.rmtree(profile, ignore_errors=True)
 
 
+_FIELD_ID = re.compile(rb'(<a:fld id=")\{[0-9A-F-]{36}\}')
+_RSID = re.compile(rb'(config:name="Rsid(?:Root)?" config:type="int">)\d+')
+
+
+def normalize_package(path: Path) -> None:
+    """Pin the per-run values soffice writes: member mtimes, slide field GUIDs, ODF rsids."""
+    with zipfile.ZipFile(path) as src:
+        members = [(info, src.read(info.filename)) for info in src.infolist()]
+    counter = iter(range(1, 1 << 32))
+    with zipfile.ZipFile(path, "w") as dst:
+        for info, data in members:
+            if info.filename.endswith(".xml"):
+                data = _FIELD_ID.sub(
+                    lambda m: m.group(1) + b"{00000000-0000-4000-8000-%012X}" % next(counter),
+                    data,
+                )
+                data = _RSID.sub(rb"\g<1>1", data)
+            pinned = zipfile.ZipInfo(info.filename, date_time=(1980, 1, 1, 0, 0, 0))
+            pinned.compress_type = info.compress_type
+            pinned.external_attr = info.external_attr
+            pinned.create_system = info.create_system
+            dst.writestr(pinned, data)
+
+
 def main() -> int:
     SOURCES.mkdir(parents=True, exist_ok=True)
     for name, body in TEXT_SOURCES.items():
@@ -188,6 +214,7 @@ def main() -> int:
                 print(f"  FAILED {flat} -> {final}")
                 return 1
             shutil.move(str(produced), str(SOURCES / final))
+            normalize_package(SOURCES / final)
             print(f"  wrote {final} ({(SOURCES / final).stat().st_size} B)")
     finally:
         shutil.rmtree(work, ignore_errors=True)

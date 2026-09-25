@@ -83,7 +83,7 @@ def _page_pdf(scan: Image.Image, dest: Path) -> None:
         Contents=pdf.make_stream(f"q {w:.2f} 0 0 {h:.2f} 0 0 cm /Im0 Do Q".encode("latin-1")),
     )
     pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
-    pdf.save(str(dest))
+    pdf.save(str(dest), deterministic_id=True)
 
 
 def base_page() -> Image.Image:

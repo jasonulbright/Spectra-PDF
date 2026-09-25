@@ -172,7 +172,7 @@ directory — license fields below were read from those wheels' METADATA):
 | spylls | MIT | <https://github.com/zverok/spylls> |
 | typing_extensions | PSF-2.0 | <https://github.com/python/typing_extensions> |
 | tzdata | Apache-2.0 | <https://github.com/python/tzdata> |
-| uharfbuzz | Apache-2.0 (embeds HarfBuzz, MIT-0) | <https://github.com/harfbuzz/uharfbuzz> |
+| uharfbuzz | Apache-2.0 (embeds HarfBuzz, MIT-Modern-Variant) | <https://github.com/harfbuzz/uharfbuzz> |
 | tzlocal | MIT | <https://github.com/regebro/tzlocal> |
 | uritools | MIT | <https://github.com/tkem/uritools> |
 | urllib3 | MIT | <https://github.com/urllib3/urllib3> |
@@ -630,8 +630,8 @@ the license above are offered by us alone and not by Adobe.
 ## Frontend / runtime libraries
 
 Bundled into the WebView2 renderer (see `package.json` for exact versions):
-React (MIT), pdf.js / pdfjs-dist (Apache-2.0), pdf-lib and @pdf-lib/fontkit
-(MIT),
+React (MIT), pdf.js / pdfjs-dist (Apache-2.0), pdf-lib, @pdf-lib/fontkit and
+@pdf-lib/standard-fonts (MIT),
 d3-selection and d3-zoom (ISC), Radix UI (MIT), the @tauri-apps JS API and
 plugin packages (MIT / Apache-2.0), Tailwind CSS (MIT), i18next and
 react-i18next (MIT).

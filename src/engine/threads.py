@@ -20,10 +20,8 @@ same reason: a thread's identity is its position in /Threads, so a per-item
 mutation API would be an index convention layered over an object graph with no
 stable names. One writer, one shape, and no partial-update class of bug.
 
-Reader support in the wild is thin — the commercial editor defines and follows
-articles, most other viewers ignore /Threads entirely. That is a fact about
-readers, not about the document: what this module writes is the real
-structure, and the panel says plainly which readers will act on it.
+Many viewers ignore /Threads entirely. That is a fact about readers, not
+about the document: what this module writes is the real structure.
 """
 
 import math
