@@ -696,6 +696,8 @@
   "chrome.status.snapGridTitle": "Griglia",
   "chrome.status.snapGridUnit": "Unità della griglia",
   "chrome.status.snapHint": "Tenere premuto Alt per sospendere · Tab per cambiare bersaglio",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Opzioni di aggancio",
   "chrome.status.snapRadius": "Raggio",
   "chrome.status.snapTitle": "Aggancia alla geometria della pagina durante il disegno",

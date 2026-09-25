@@ -5,7 +5,7 @@ import { dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount } from '../i18n';
+import { joinSentences, tChrome, tChromeCount } from '../i18n';
 import { TEST_HARNESS_ENABLED, registerSplit } from '../testHarness';
 import { useOwnedDocumentRun } from '../hooks/useOwnedDocumentRun';
 import { runCommitGate } from '../lib/commit-gate';
@@ -90,13 +90,14 @@ export function SplitPanel(): React.ReactElement {
       const parts = (r as unknown as { parts: number }).parts;
       const over = (r as unknown as { oversize: unknown[] }).oversize ?? [];
       const retained = (r as unknown as { retained_files?: string[] }).retained_files ?? [];
-      setStatus(
-        (mode === 'ranges'
+      const sentences = [
+        mode === 'ranges'
           ? tChrome('panel.split.done', { count: r.pages_extracted })
-          : tChromeCount('panel.split.doneParts', parts, { pages: r.pages_extracted }) +
-            (over.length > 0 ? ' ' + tChromeCount('panel.split.oversize', over.length) : '')) +
-          (retained.length ? ' ' + tChrome('panel.split.retainedFiles', { paths: retained.join('; ') }) : ''),
-      );
+          : tChromeCount('panel.split.doneParts', parts, { pages: r.pages_extracted }),
+        ...(mode !== 'ranges' && over.length > 0 ? [tChromeCount('panel.split.oversize', over.length)] : []),
+        ...(retained.length ? [tChrome('panel.split.retainedFiles', { paths: retained.join('; ') })] : []),
+      ];
+      setStatus(joinSentences(sentences));
     } catch (e: unknown) {
       if (run.visible()) setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {

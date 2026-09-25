@@ -682,6 +682,8 @@
   "chrome.status.snapGridTitle": "Raster",
   "chrome.status.snapGridUnit": "Rastereenheid",
   "chrome.status.snapHint": "Houd Alt ingedrukt om te onderbreken · Tab om door de doelen te lopen",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Uitlijnopties",
   "chrome.status.snapRadius": "Straal",
   "chrome.status.snapTitle": "Tijdens het tekenen uitlijnen op de paginageometrie",

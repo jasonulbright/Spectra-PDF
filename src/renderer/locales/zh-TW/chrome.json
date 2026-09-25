@@ -668,6 +668,8 @@
   "chrome.status.snapGridTitle": "格線",
   "chrome.status.snapGridUnit": "格線單位",
   "chrome.status.snapHint": "按住 Alt 暫停 · 按 Tab 循環目標",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}}{{second}}",
   "chrome.status.snapOptions": "貼齊選項",
   "chrome.status.snapRadius": "半徑",
   "chrome.status.snapTitle": "繪製時貼齊頁面圖形",

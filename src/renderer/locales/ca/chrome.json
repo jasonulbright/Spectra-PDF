@@ -696,6 +696,8 @@
   "chrome.status.snapGridTitle": "Graella",
   "chrome.status.snapGridUnit": "Unitat de la graella",
   "chrome.status.snapHint": "Manteniu premuda la tecla Alt per suspendre-ho · Tab per recórrer els objectius",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Opcions d'ajustament",
   "chrome.status.snapRadius": "Radi",
   "chrome.status.snapTitle": "Ajusta a la geometria de la pàgina mentre dibuixeu",

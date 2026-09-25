@@ -668,6 +668,8 @@
   "chrome.status.snapGridTitle": "グリッド",
   "chrome.status.snapGridUnit": "グリッドの単位",
   "chrome.status.snapHint": "Alt で一時停止 · Tab で対象を切り替え",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}}{{second}}",
   "chrome.status.snapOptions": "スナップのオプション",
   "chrome.status.snapRadius": "半径",
   "chrome.status.snapTitle": "作図中にページの図形にスナップします",

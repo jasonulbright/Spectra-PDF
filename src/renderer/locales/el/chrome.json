@@ -682,6 +682,8 @@
   "chrome.status.snapGridTitle": "Πλέγμα",
   "chrome.status.snapGridUnit": "Μονάδα πλέγματος",
   "chrome.status.snapHint": "Κρατήστε το Alt για αναστολή · Tab για εναλλαγή στόχων",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Επιλογές έλξης",
   "chrome.status.snapRadius": "Ακτίνα",
   "chrome.status.snapTitle": "Έλξη στη γεωμετρία της σελίδας κατά τη σχεδίαση",

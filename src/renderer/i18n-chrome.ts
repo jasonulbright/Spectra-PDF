@@ -48,6 +48,10 @@ export const CHROME_STRINGS = {
   'chrome.status.snap': 'Snap',
   'chrome.status.snapTitle': 'Snap to page geometry while drawing',
   'chrome.status.snapHint': 'Hold Alt to suspend · Tab to cycle targets',
+  'chrome.status.snapTooltip': '{{title}} — {{hint}}',
+  // Two complete sentences in one status line. Scripts that do not separate
+  // sentences with a space (Japanese, Chinese) drop the space in their catalog.
+  'chrome.common.sentencePair': '{{first}} {{second}}',
   'chrome.status.snapOptions': 'Snap options',
   'chrome.status.snapTypes': 'Snap to',
   'chrome.status.snapRadius': 'Radius',

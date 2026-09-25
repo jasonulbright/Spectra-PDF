@@ -710,6 +710,8 @@
   "chrome.status.snapGridTitle": "Mreža",
   "chrome.status.snapGridUnit": "Enota mreže",
   "chrome.status.snapHint": "Držite Alt za začasno izklopitev · Tab za kroženje po ciljih",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Možnosti pripenjanja",
   "chrome.status.snapRadius": "Polmer",
   "chrome.status.snapTitle": "Med risanjem pripni na geometrijo strani",

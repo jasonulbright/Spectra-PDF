@@ -696,6 +696,8 @@
   "chrome.status.snapGridTitle": "Grille",
   "chrome.status.snapGridUnit": "Unité de grille",
   "chrome.status.snapHint": "Maintenez Alt pour suspendre · Tab pour changer de cible",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Options de magnétisme",
   "chrome.status.snapRadius": "Rayon",
   "chrome.status.snapTitle": "Aimanter sur la géométrie de la page pendant le tracé",

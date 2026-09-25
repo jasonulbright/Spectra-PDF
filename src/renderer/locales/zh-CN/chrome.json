@@ -668,6 +668,8 @@
   "chrome.status.snapGridTitle": "网格",
   "chrome.status.snapGridUnit": "网格单位",
   "chrome.status.snapHint": "按住 Alt 暂停 · 按 Tab 切换目标",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}}{{second}}",
   "chrome.status.snapOptions": "吸附选项",
   "chrome.status.snapRadius": "半径",
   "chrome.status.snapTitle": "绘图时吸附到页面上的图形",

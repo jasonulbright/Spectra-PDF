@@ -12,6 +12,7 @@
 // Settings control.
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import { foldSentences } from './lib/sentence-join';
 import enChrome from './locales/en/chrome.json';
 import esChrome from './locales/es/chrome.json';
 import frChrome from './locales/fr/chrome.json';
@@ -517,6 +518,11 @@ export function tChrome(
     ...vars,
     ...(lng ? { lng } : {}),
   });
+}
+
+/** Joins complete, already-translated sentences through the locale's own separator. */
+export function joinSentences(sentences: readonly string[]): string {
+  return foldSentences(sentences, (first, second) => tChrome('chrome.common.sentencePair', { first, second }));
 }
 
 /**

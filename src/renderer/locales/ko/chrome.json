@@ -668,6 +668,8 @@
   "chrome.status.snapGridTitle": "모눈",
   "chrome.status.snapGridUnit": "모눈 단위",
   "chrome.status.snapHint": "Alt를 누르면 일시 중지 · Tab으로 대상 순환",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "스냅 옵션",
   "chrome.status.snapRadius": "반경",
   "chrome.status.snapTitle": "그리는 동안 페이지 도형에 스냅합니다",

@@ -682,6 +682,8 @@
   "chrome.status.snapGridTitle": "Rács",
   "chrome.status.snapGridUnit": "Rácsegység",
   "chrome.status.snapHint": "Alt lenyomva felfüggeszti · Tab vált a célpontok között",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Illesztési beállítások",
   "chrome.status.snapRadius": "Sugár",
   "chrome.status.snapTitle": "Illesztés az oldal geometriájához rajzolás közben",
