@@ -21,6 +21,14 @@ fn send_dir() -> PathBuf {
     std::env::temp_dir().join("spectrapdf").join("send-to")
 }
 
+/// Whether `path` sits directly in the staging folder `dir`, by physical
+/// identity of its parent. MAPI attaches whatever path it is handed, so an
+/// unconfined path would put any local file into a compose window.
+fn is_staged_copy(path: &Path, dir: &Path) -> bool {
+    path.parent()
+        .is_some_and(|parent| same_file::is_same_file(parent, dir).unwrap_or(false))
+}
+
 /// A display name derives from a real file name, but it crossed the webview
 /// boundary — strip separators and reserved characters anyway.
 fn safe_file_name(name: &str) -> String {
@@ -40,22 +48,26 @@ fn safe_file_name(name: &str) -> String {
     }
 }
 
-/// `name.pdf` → `name (2).pdf` → `name (3).pdf`… first free slot. Every
-/// staged copy keeps its own bytes — a second send must never overwrite a
-/// file an open compose window may still read.
-fn collision_free(dir: &Path, name: &str) -> PathBuf {
-    let first = dir.join(name);
-    if !first.exists() {
-        return first;
-    }
+/// `name.pdf` → `name (2).pdf` → `name (3).pdf`… first free slot, created
+/// empty so the name is this call's before it returns. Every staged copy keeps
+/// its own bytes: a second send must never overwrite a file an open compose
+/// window may still read, and two sends that only checked for a free name
+/// could both take the same one.
+fn reserve_free(dir: &Path, name: &str) -> std::io::Result<PathBuf> {
     let (stem, ext) = match name.rsplit_once('.') {
         Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
         _ => (name.to_string(), String::new()),
     };
-    for n in 2.. {
-        let candidate = dir.join(format!("{stem} ({n}){ext}"));
-        if !candidate.exists() {
-            return candidate;
+    for n in 1.. {
+        let candidate = if n == 1 {
+            dir.join(name)
+        } else {
+            dir.join(format!("{stem} ({n}){ext}"))
+        };
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
+            Ok(_) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
         }
     }
     unreachable!()
@@ -90,8 +102,12 @@ pub async fn stage_send_copy(path: String, display_name: String) -> Result<Strin
     let dir = send_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not prepare the staging folder: {e}"))?;
     sweep_old(&dir);
-    let dest = collision_free(&dir, &safe_file_name(&display_name));
-    std::fs::copy(&path, &dest).map_err(|e| format!("Could not stage the attachment copy: {e}"))?;
+    let dest = reserve_free(&dir, &safe_file_name(&display_name))
+        .map_err(|e| format!("Could not stage the attachment copy: {e}"))?;
+    if let Err(e) = std::fs::copy(&path, &dest) {
+        let _ = std::fs::remove_file(&dest);
+        return Err(format!("Could not stage the attachment copy: {e}"));
+    }
     Ok(dest.to_string_lossy().to_string())
 }
 
@@ -232,6 +248,9 @@ pub async fn send_by_email(window: tauri::WebviewWindow, staged_path: String) ->
                 .to_string(),
         );
     }
+    if !is_staged_copy(Path::new(&staged_path), &send_dir()) {
+        return Err(format!("Not a staged attachment copy: {staged_path}"));
+    }
     if !Path::new(&staged_path).is_file() {
         return Err(format!("The staged attachment is missing: {staged_path}"));
     }
@@ -268,17 +287,36 @@ mod tests {
 
     #[test]
     fn staged_names_never_collide() {
-        let dir = std::env::temp_dir().join("opdfs-sendto-test");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let first = collision_free(&dir, "doc.pdf");
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        // No copy lands between the calls: a name is taken when it is handed out.
+        let first = reserve_free(dir, "doc.pdf").unwrap();
         assert_eq!(first.file_name().unwrap(), "doc.pdf");
-        std::fs::write(&first, b"a").unwrap();
-        let second = collision_free(&dir, "doc.pdf");
+        let second = reserve_free(dir, "doc.pdf").unwrap();
         assert_eq!(second.file_name().unwrap(), "doc (2).pdf");
         std::fs::write(&second, b"b").unwrap();
-        let third = collision_free(&dir, "doc.pdf");
+        let third = reserve_free(dir, "doc.pdf").unwrap();
         assert_eq!(third.file_name().unwrap(), "doc (3).pdf");
+        assert_eq!(std::fs::read(&second).unwrap(), b"b");
+        let bare = reserve_free(dir, "README").unwrap();
+        assert_eq!(reserve_free(dir, "README").unwrap().file_name().unwrap(), "README (2)");
+        assert_eq!(bare.file_name().unwrap(), "README");
+    }
+
+    #[test]
+    fn only_a_file_in_the_staging_folder_is_attachable() {
+        let dir = std::env::temp_dir().join("opdfs-sendto-confine-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("inner")).unwrap();
+        let staged = dir.join("doc.pdf");
+        std::fs::write(&staged, b"a").unwrap();
+        assert!(is_staged_copy(&staged, &dir));
+        assert!(is_staged_copy(&dir.join("inner").join("..").join("doc.pdf"), &dir));
+        let elsewhere = tempfile::tempdir().unwrap();
+        let theirs = elsewhere.path().join("doc.pdf");
+        std::fs::write(&theirs, b"b").unwrap();
+        assert!(!is_staged_copy(&theirs, &dir));
+        assert!(!is_staged_copy(&dir.join("inner").join("doc.pdf"), &dir));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

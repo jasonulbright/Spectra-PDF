@@ -72,6 +72,15 @@ describe('claimOutputRoots', () => {
     expect(releaseRoots).not.toHaveBeenCalled();
   });
 
+  it('a refusal by an open document names the document and the folder', async () => {
+    claimRoots.mockResolvedValue({ ...refused('main', true, 'C:/docs'), document: 'C:/docs/sub/a.pdf' });
+    const run = await claimOutputRoots(['C:/docs']);
+    expect(run.granted).toBe(false);
+    expect(run.message).toBe(
+      tChrome('app.window.folderHasOpenDocument', { name: 'a.pdf', folder: 'C:/docs' }),
+    );
+  });
+
   it('a refusal by another window names the folder the arbiter reports', async () => {
     claimRoots.mockResolvedValue(refused('doc-2', false, 'C:\\Out'));
     const run = await claimOutputRoots(['c:/out']);

@@ -69,10 +69,15 @@ export async function claimOutputRoots(roots: readonly string[]): Promise<Output
   if (!outcome.granted) {
     return {
       granted: false,
-      message: tChrome(
-        outcome.sameWindow ? 'app.window.folderBusyHere' : 'app.window.folderBusy',
-        { folder: outcome.folder },
-      ),
+      message: outcome.document
+        ? tChrome('app.window.folderHasOpenDocument', {
+          name: outcome.document.split(/[\\/]/).pop() ?? outcome.document,
+          folder: outcome.folder,
+        })
+        : tChrome(
+          outcome.sameWindow ? 'app.window.folderBusyHere' : 'app.window.folderBusy',
+          { folder: outcome.folder },
+        ),
       release: async () => {},
     };
   }

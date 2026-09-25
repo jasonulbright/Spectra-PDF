@@ -61,6 +61,9 @@ export const engine = {
 export interface ClaimResult {
   granted: boolean;
   owner: string;
+  /** The folder a run of `owner` is writing, when that run refused the claim;
+   * empty otherwise. */
+  folder: string;
 }
 
 /** A record the launch reads before any window exists, which it could not
@@ -75,8 +78,8 @@ export interface UnreadableRecord {
 /** What claiming the folders of one run answered. `token` is a number exactly
  * when `granted` is true. */
 export type RunClaimResult =
-  | { granted: true; owner: string; sameWindow: boolean; folder: string; token: number }
-  | { granted: false; owner: string; sameWindow: boolean; folder: string; token: null };
+  | { granted: true; owner: string; sameWindow: boolean; folder: string; document: string; token: number }
+  | { granted: false; owner: string; sameWindow: boolean; folder: string; document: string; token: null };
 
 /** What handing a document to another window did.
  *
@@ -210,6 +213,22 @@ let openDialogInflight: Promise<string[]> | null = null;
 let saveDialogInflight: Promise<string | null> | null = null;
 let createPdfDialogInflight: Promise<string[]> | null = null;
 
+/** The window that has a picked output path open as a document. */
+export interface OutputHolder {
+  owner: string;
+  sameWindow: boolean;
+}
+
+/** Tells the user a picked output is an open document. Unset, such an
+ * answer reads as a cancelled dialog. */
+let heldOutputReporter: ((path: string, holder: OutputHolder) => Promise<void>) | null = null;
+
+export function setHeldOutputReporter(
+  report: ((path: string, holder: OutputHolder) => Promise<void>) | null,
+): void {
+  heldOutputReporter = report;
+}
+
 /** One row of the Windows certificate store's signing-capable certificates. */
 export interface StoreCertificate {
   thumbprint: string;
@@ -259,15 +278,33 @@ export const dialog = {
     }
     return openDialogInflight;
   },
-  saveFile: (options?: { defaultPath?: string }) => {
+  /** `ownPath` is the one open document the answer may name: Save As of that
+   * document onto its own file. */
+  saveFile: (options?: { defaultPath?: string; ownPath?: string }) => {
     // A chosen output authorizes ONE caller's write. Sharing this promise
     // lets another intent overwrite the first caller's output without its
     // own picker/overwrite confirmation. Treat overlap as cancellation;
     // the original caller retains its dialog and the next idle call may ask.
     if (saveDialogInflight) return Promise.resolve(null);
-    saveDialogInflight = invoke<string | null>('save_file_dialog', {
-      defaultPath: options?.defaultPath,
-    }).finally(() => {
+    // An answer naming an open document is never returned: writing there
+    // leaves that document's working copy holding the old bytes, and its next
+    // save writes them back over the new file. The user is told and asked again.
+    const pick = async (): Promise<string | null> => {
+      for (;;) {
+        const path = await invoke<string | null>('save_file_dialog', {
+          defaultPath: options?.defaultPath,
+        });
+        if (path === null) return null;
+        const holder = await invoke<OutputHolder | null>('output_holder', {
+          path,
+          ownPath: options?.ownPath ?? null,
+        });
+        if (holder === null) return path;
+        if (!heldOutputReporter) return null;
+        await heldOutputReporter(path, holder);
+      }
+    };
+    saveDialogInflight = pick().finally(() => {
       saveDialogInflight = null;
     });
     return saveDialogInflight;

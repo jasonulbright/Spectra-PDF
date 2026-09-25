@@ -166,11 +166,13 @@ function calleeName(node: ts.CallExpression): string {
   return '';
 }
 
-/** The single command name a subtree invokes, or ''. */
+/** The first command name a subtree invokes, or ''. A picker export asks
+ * its dialog first; a later invoke (the open-document check on a save
+ * answer) is not the picker. */
 function invokedCommand(node: ts.Node): string {
   let found = '';
   const walk = (n: ts.Node): void => {
-    if (ts.isCallExpression(n) && n.expression.getText() === 'invoke') {
+    if (!found && ts.isCallExpression(n) && n.expression.getText() === 'invoke') {
       const first = n.arguments[0];
       if (first && ts.isStringLiteralLike(first)) found = first.text;
     }

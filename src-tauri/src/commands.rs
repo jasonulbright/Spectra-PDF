@@ -51,10 +51,19 @@ pub(crate) fn is_openable_document_path(arg: &str) -> bool {
 }
 
 /// Renderer-callable form, for paths that arrive THROUGH the webview (file
-/// drops) rather than from a Rust producer.
+/// drops) rather than from a Rust producer. A path naming a file that is
+/// already claimed under another spelling answers with that spelling, so the
+/// open funnel sees one document rather than two.
 #[tauri::command]
-pub async fn canonicalize_paths(paths: Vec<String>) -> Result<Vec<String>, String> {
-    Ok(paths.iter().map(|p| canonical_path(p)).collect())
+pub async fn canonicalize_paths(app: AppHandle, paths: Vec<String>) -> Result<Vec<String>, String> {
+    let claims = app.state::<crate::app_windows::ClaimState>();
+    Ok(paths
+        .iter()
+        .map(|p| {
+            let canonical = canonical_path(p);
+            claims.claimed_alias(&canonical).unwrap_or(canonical)
+        })
+        .collect())
 }
 
 /// How a remembered path resolves, for a caller that prunes a list on the
