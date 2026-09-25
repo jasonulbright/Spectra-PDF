@@ -556,8 +556,7 @@ def set_link_target(file: str, output: str, page: int, index: int, target: dict)
         spec = _target_spec(pdf, annot)
         preserved = _save(pdf, input_path, output_path, same_file)
     out = {"output": str(output_path), "page": int(page), "index": int(index), "target": spec}
-    if preserved:
-        out["signatures_preserved"] = True
+    out.update(preserved)
     return out
 
 
@@ -584,8 +583,7 @@ def set_link_appearance(file: str, output: str, page: int, index: int, appearanc
         landed = _read_appearance(annot)
         preserved = _save(pdf, input_path, output_path, same_file)
     out = {"output": str(output_path), "page": int(page), "index": int(index), "appearance": landed}
-    if preserved:
-        out["signatures_preserved"] = True
+    out.update(preserved)
     return out
 
 
@@ -599,8 +597,7 @@ def set_link_rect(file: str, output: str, page: int, index: int, rect: list) -> 
         annot["/Rect"] = Array(_normalized_rect(rect))
         preserved = _save(pdf, input_path, output_path, same_file)
     out = {"output": str(output_path), "page": int(page), "index": int(index)}
-    if preserved:
-        out["signatures_preserved"] = True
+    out.update(preserved)
     return out
 
 
@@ -661,8 +658,7 @@ def add_links(file: str, output: str, links: list) -> dict:
             pg.obj["/Annots"] = Array([*existing, annot]) if existing is not None else Array([annot])
         preserved = _save(pdf, input_path, output_path, same_file)
     out = {"output": str(output_path), "added": len(prepared)}
-    if preserved:
-        out["signatures_preserved"] = True
+    out.update(preserved)
     return out
 
 
@@ -681,8 +677,7 @@ def delete_link(file: str, output: str, page: int, index: int) -> dict:
             del pg.obj["/Annots"]
         preserved = _save(pdf, input_path, output_path, same_file)
     out = {"output": str(output_path), "page": int(page), "index": int(index)}
-    if preserved:
-        out["signatures_preserved"] = True
+    out.update(preserved)
     return out
 
 
@@ -857,24 +852,24 @@ def create_links_from_urls(
         "annotations": result["added"],
         "skipped_existing": skipped,
         "candidates": len(candidates),
-        **({"signatures_preserved": True} if result.get("signatures_preserved") else {}),
+        **{k: result[k] for k in ("signatures_preserved", "signatures_invalidated", "signatures_invalidated_reason") if k in result},
     }
 
 
-def _save(pdf, input_path: Path, output_path: Path, same_file: bool) -> bool:
+def _save(pdf, input_path: Path, output_path: Path, same_file: bool) -> dict:
     """Land the rewrite; on a SIGNED input the landed bytes become an
     incremental append instead, so link edits never break the
-    signature they ride beside. Returns whether that preservation ran.
+    signature they ride beside. Returns the signature result keys.
 
     A same-file write stages beside the document and swaps the directory
     entry, so a write that dies leaves the input whole. The preservation reads
     the input at its own path, so it runs against the staged bytes before the
     swap; the Pdf is closed after it because the destination cannot be
     replaced while it is held open."""
-    from engine.incremental import finalize_preserving_signatures
+    from engine.incremental import finalize_preserving_signatures, signature_outcome
 
     with staged_write(output_path) as staged:
         save_pdf(pdf, str(staged))
         preserved = finalize_preserving_signatures(str(input_path), str(staged))
         pdf.close()
-    return bool(preserved.get("preserved"))
+    return signature_outcome(preserved)

@@ -1578,6 +1578,21 @@ def transplant_incremental(original: str, modified: str, output: str, *,
     }
 
 
+def signature_outcome(preserved: dict) -> dict:
+    """The result keys an in-place op reports for ``finalize_preserving_signatures``.
+
+    A rewrite that stood over a signed original breaks every signature in it;
+    a caller with no pre-write decision of its own (a headless run) learns
+    that only from these keys."""
+    if preserved.get("preserved"):
+        return {"signatures_preserved": True}
+    reason = preserved.get("reason")
+    if reason == "not-signed":
+        return {}
+    return {"signatures_invalidated": True,
+            "signatures_invalidated_reason": reason or "unknown"}
+
+
 def finalize_preserving_signatures(original: str, rewritten_tmp: str, *,
                                    update_version_metadata: bool = False) -> dict:
     """Call-site helper for in-place engine ops (fill, XFDF import, link

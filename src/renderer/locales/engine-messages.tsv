@@ -679,6 +679,11 @@ signatures.signerGivenProvidePfx	exact	signatures	No signer given — provide a 
 signatures.signerKeyFileFound	exact	signatures	Signer key file not found.
 signatures.signerNameCommonName	exact	signatures	A signer name (common name) is required.
 signatures.signingCancelledWindowsGiven	exact	signatures	Signing was cancelled — Windows was not given permission to use the key.
+signatures.signingCertificateExpiredCannot	pattern	signatures	The signing certificate expired on {{not_after}}, so it cannot sign.
+signatures.signingCertificateSChain	exact	signatures	The signing certificate's chain could not be built to a trusted root: an issuing certificate is missing from the signer and could not be retrieved. Add the intermediate certificate or its root.
+signatures.signingCertificateSChain2	exact	signatures	The signing certificate's chain did not validate, so validation information for long-term validation could not be embedded.
+signatures.signingCertificateSKey	exact	signatures	The signing certificate's key usage does not permit digital signatures, so it cannot sign a document.
+signatures.signingCertificateValidUntil	pattern	signatures	The signing certificate is not valid until {{not_before}}, so it cannot sign yet.
 signatures.trustRootFound	pattern	signatures	trust root not found: {{p}}
 signatures.unknownCertificationLevelChoose	pattern	signatures	Unknown certification level "{{certify_level}}". Choose none, form-fill, or annotate.
 signatures.unknownFieldLockChoose	pattern	fieldmdp	Unknown field lock "{{lock}}". Choose all, include, or exclude.
