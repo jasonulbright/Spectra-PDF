@@ -15,9 +15,11 @@ export function setCommitGate(fn: Gate | null): void {
 // Concurrent callers share one run. Errors propagate so a blocked operation
 // aborts instead of running against stale bytes. The commit implementation
 // itself must use the raw (ungated) bridge functions or this would deadlock.
+// A joining caller runs the gate again once the shared run settles: that run
+// planned before the caller arrived, so edits made in between stay pending.
 export function runCommitGate(): Promise<void> {
   if (!gate) return Promise.resolve();
-  if (inflight) return inflight;
+  if (inflight) return inflight.then(() => runCommitGate());
   const current = gate;
   inflight = (async () => {
     try {

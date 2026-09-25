@@ -725,7 +725,8 @@ function AppContent(): React.ReactElement {
   // it does not re-enter this renderer commit gate.
   const inflightCommit = useRef<Promise<void> | null>(null);
   const commitIfNeeded = useCallback((): Promise<void> => {
-    if (inflightCommit.current) return inflightCommit.current;
+    // The shared run planned before this caller; edits made since stay pending.
+    if (inflightCommit.current) return inflightCommit.current.then(() => commitRef.current());
     if (readState().pageDirtyPaths.length === 0 && !hasPendingPageCommit() && !hasWorkspacePublication()
         && workspaceSettled(readState())) return Promise.resolve();
     const run = serializeWorkspacePublication(async () => {
