@@ -21,6 +21,7 @@ from xml.etree import ElementTree as ET
 import pikepdf
 
 from engine import budget
+from engine.inplace import publish_copy
 from engine.pdf_fonts import name_str
 from engine.system_fonts import installed_families
 
@@ -652,7 +653,7 @@ def to_pdf(source: str | Path, output: str | Path, soffice_path: str) -> dict:
                 os.chmod(out_path, 0o666)
             except OSError:
                 pass
-        shutil.move(str(produced), str(out_path))
+        publish_copy(produced, out_path)
         result = {
             "output": str(out_path),
             "pages": pages,

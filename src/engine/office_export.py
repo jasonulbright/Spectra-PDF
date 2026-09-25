@@ -33,6 +33,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from engine.inplace import publish_copy
 from engine.soffice import run_convert
 
 LIBREOFFICE = "libreoffice"
@@ -277,7 +278,7 @@ def _export_libreoffice(key, target, input_path, output_path, soffice_path) -> d
                 os.chmod(output_path, 0o666)
             except OSError:
                 pass
-        shutil.move(str(produced), str(output_path))
+        publish_copy(produced, output_path)
         return {"output": str(output_path), "format": key, "size": output_path.stat().st_size}
     finally:
         shutil.rmtree(work, ignore_errors=True)

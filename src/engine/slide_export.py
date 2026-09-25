@@ -26,6 +26,7 @@ from pathlib import Path
 import pikepdf
 
 from engine import bidi, budget
+from engine.inplace import publish_copy
 from engine.form_detect import _crop_box, _page_rotate, _page_segments
 from engine.pdf_fonts import name_str
 from engine.soffice import _normalise_face
@@ -344,7 +345,7 @@ def export_slides(
                 out_path.chmod(0o666)
             except OSError:
                 pass
-        shutil.move(str(staged), str(out_path))
+        publish_copy(staged, out_path)
         return {
             "output": str(out_path),
             "format": "pptx",

@@ -91,6 +91,24 @@ class TestImageSources:
         text = extract_text(out)["text"].upper()
         assert "SCANNED" in text and "PAGE" in text
 
+    def test_replacing_repaired_originals_never_rewrites_an_image(self, tmp_dir):
+        src = os.path.join(tmp_dir, "in")
+        dst = os.path.join(tmp_dir, "out")
+        os.makedirs(src)
+        image = _scan_png(tmp_dir, os.path.join(src, "scan.png"))
+        with open(image, "rb") as fh:
+            before = fh.read()
+        report = batch_ocr(source=src, dest=dst, gs_path=GS, tesseract_path=TESS,
+                           include_images=True, repair_damaged=True,
+                           replace_repaired_originals=True)
+        (result,) = report["results"]
+        assert result["status"] == "ocr", result
+        assert "repaired" not in result and "repairedOriginalReplaced" not in result
+        with open(image, "rb") as fh:
+            assert fh.read() == before
+        assert sorted(os.listdir(src)) == ["scan.png"]
+        assert sorted(os.listdir(dst)) == ["scan.png.pdf"]
+
     def test_images_are_ignored_without_the_option(self, tmp_dir):
         src = os.path.join(tmp_dir, "in")
         dst = os.path.join(tmp_dir, "out")
