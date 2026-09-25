@@ -51,6 +51,7 @@ asserted directly by the test suite's dual-walk harness.
 """
 
 import math
+import math
 import os
 import re
 import statistics
@@ -3734,6 +3735,10 @@ def _color_sync(target, current, stroke: bool) -> list:
 
 
 def _f(v: float) -> float:
+    # The reads drop overflowing operands, so this is the last line before a
+    # content stream: a written inf or nan is not a PDF number at all.
+    if not math.isfinite(v):
+        raise OverflowError("a text coordinate is not a finite number")
     r = round(v, 6)
     return 0.0 if r == 0 else r
 

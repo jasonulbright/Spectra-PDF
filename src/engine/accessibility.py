@@ -46,6 +46,7 @@ longer resolves surfaces a notice rather than retargeting.
 
 from __future__ import annotations
 
+import math
 import xml.etree.ElementTree as ElementTree
 
 import pikepdf
@@ -553,6 +554,8 @@ def _annotations(entries: list) -> list:
         try:
             rect = [float(v) for v in annot.get("/Rect")] if annot.get("/Rect") else None
         except (TypeError, ValueError):
+            rect = None
+        if rect is not None and not all(math.isfinite(v) for v in rect):
             rect = None
         try:
             contents = str(annot.get("/Contents") or "").strip()

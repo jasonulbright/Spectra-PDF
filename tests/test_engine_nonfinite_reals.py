@@ -101,3 +101,87 @@ def test_image_listing_omits_only_the_infinite_placement(doc):
     result = page_images.list_page_images(doc, 1)
     _encodes(result)
     assert [image["index"] for image in result["images"]] == [1]
+
+
+def _write_text_doc(path, content: str) -> str:
+    objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R "
+        "/Resources << /Font << /F1 6 0 R /F2 7 0 R >> >> /Annots [8 0 R] >>",
+        f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {H} {H}] /TrimBox [0 0 {H} 10] >>",
+        f"<< /Length {len(content)} >>\nstream\n{content}\nendstream",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FirstChar 72 /LastChar 105 "
+        f"/Widths [{' '.join([H] * 34)}] >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        f"<< /Type /Annot /Subtype /Text /Contents (note) /Rect [0 0 {H} 10] >>",
+    ]
+    out = "%PDF-1.7\n"
+    for i, o in enumerate(objs, 1):
+        out += f"{i} 0 obj\n{o}\nendobj\n"
+    out += "trailer\n<< /Root 1 0 R /Size 9 >>\n%%EOF\n"
+    target = path / "overflow-text.pdf"
+    target.write_bytes(out.encode("latin-1"))
+    return str(target)
+
+
+TEXT_CONTENT = (
+    "BT /F2 12 Tf 10 700 Td (Keep me) Tj ET "
+    f"BT /F2 {H} Tf 10 600 Td (Size) Tj ET "
+    f"BT /F2 12 Tf {H} 500 Td (Move) Tj ET "
+    f"BT /F2 12 Tf {H} 0 0 1 10 400 Tm (Matrix) Tj ET "
+    f"BT /F2 12 Tf {H} Tc {H} Tw {H} TL {H} Tz 10 300 Td (Spacing) Tj ET "
+    f"BT /F2 12 Tf 10 200 Td [(Ke) -{H} (rn)] TJ ET "
+    "BT /F1 12 Tf 10 100 Td (Hi) Tj ET "
+    f"q {H} 0 0 {H} 0 0 cm BT /F2 12 Tf 10 50 Td (Scaled) Tj ET Q "
+    f"0 0 {H} 1 re f"
+)
+
+
+@pytest.fixture
+def text_doc(tmp_path):
+    return _write_text_doc(tmp_path, TEXT_CONTENT)
+
+
+def test_text_listing_keeps_every_run_with_finite_geometry(text_doc):
+    from engine import text_paragraphs
+
+    result = text_paragraphs.list_text_paragraphs(text_doc, 1)
+    _encodes(result)
+    texts = [run["text"] for run in result["runs"]]
+    assert texts == ["Keep me", "Size", "Move", "Matrix", "Spacing", "Kern", "Hi", "Scaled"]
+    assert [run["index"] for run in result["runs"]] == list(range(8))
+
+
+def test_read_aloud_keeps_the_readable_text(text_doc):
+    from engine import read_aloud
+
+    result = read_aloud.read_aloud_page(text_doc, 1)
+    _encodes(result)
+    assert "Keep me" in json.dumps(result)
+
+
+def test_accessibility_report_encodes(text_doc):
+    from engine import accessibility
+
+    _encodes(accessibility.check_accessibility(text_doc))
+
+
+def test_transparency_bounds_overflowing_objects_by_the_page(text_doc):
+    from engine import flattener
+
+    result = flattener.list_transparency(text_doc)
+    _encodes(result)
+    first, second = result["pages"]
+    assert first["error"] is None
+    assert all(o["rect"][2] <= 612.0 for o in first["objects"])
+    assert second["error"] and second["objects"] == []
+
+
+def test_printer_marks_treat_an_overflowing_box_as_absent(text_doc):
+    from engine import printer_marks
+
+    result = printer_marks.list_printer_marks(text_doc)
+    _encodes(result)
+    second = result["pages"][1]
+    assert second["media"] == [] and second["trim_source"] == "default"

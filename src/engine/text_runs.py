@@ -44,6 +44,7 @@ Empty `new_text` is allowed — it deletes the run's text (negative Δ pulls
 same-line anchors back).
 """
 
+import math
 from pathlib import Path
 
 import pikepdf
@@ -305,6 +306,39 @@ def _click_box(operator, operands, cap, state, combined, raw_width, vertical) ->
     return _bbox_of_corners_under_matrix(combined, lo, state.rise, hi, state.rise + size)
 
 
+_TEXT_STATE_FIELDS = (
+    "ctm", "tm", "tlm", "font_size", "leading", "h_scale", "char_spacing", "word_spacing", "rise",
+)
+
+
+def _finite_text_state(state: GraphicsTextState) -> bool:
+    values = []
+    for field in _TEXT_STATE_FIELDS:
+        value = getattr(state, field)
+        values.extend(value if isinstance(value, tuple) else (value,))
+    if not all(math.isfinite(v) for v in values):
+        return False
+    combined = _mat_mult(state.tm, state.ctm)
+    scale = max(abs(v) for v in combined[:4])
+    extent = max(1.0, abs(state.font_size), abs(state.leading), abs(state.rise),
+                 abs(state.char_spacing), abs(state.word_spacing))
+    return all(math.isfinite(v) for v in combined) and math.isfinite(scale * extent * 1000.0)
+
+
+def _feed_readable(state: GraphicsTextState, operator: str, operands: list) -> bool:
+    """`state.feed`, except that an operator whose operands overflow a double
+    (a valid PDF real past about 309 digits reads as inf; two of them subtract
+    to NaN) is unreadable and leaves the text state as it was. Run geometry
+    derived from such a state cannot be encoded, and one such run would fail
+    the whole listing."""
+    before = tuple(getattr(state, field) for field in _TEXT_STATE_FIELDS)
+    fed = state.feed(operator, operands)
+    if not _finite_text_state(state):
+        for field, value in zip(_TEXT_STATE_FIELDS, before):
+            setattr(state, field, value)
+    return fed
+
+
 def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nested, fonts, parent_state=None, detail=None, stream_path=(), base_clip=None, breaks=None):
     # Text is read and measured with the font DICTIONARY the text state holds:
     # the one a `Tf` names here, an ExtGState /Font entry sets, or the
@@ -372,17 +406,20 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                         }
                     )
             continue
-        if state.feed(operator, operands):
+        if _feed_readable(state, operator, operands):
             continue
         if operator in SHOW_OPS:
             if operator in ("'", '"'):
                 state.next_line()
                 if operator == '"' and len(operands) >= 2:
                     try:
-                        state.word_spacing = float(operands[0])
-                        state.char_spacing = float(operands[1])
+                        word, char = float(operands[0]), float(operands[1])
                     except (TypeError, ValueError):
-                        pass
+                        word = char = math.nan
+                    prior = (state.word_spacing, state.char_spacing)
+                    state.word_spacing, state.char_spacing = word, char
+                    if not _finite_text_state(state):
+                        state.word_spacing, state.char_spacing = prior
             cap = fonts.capability_of(state.font)
             text, raw_width = _run_metrics(operator, operands, cap, state)
             combined = _mat_mult(state.tm, state.ctm)
@@ -390,6 +427,11 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
             # still draws its column downward.
             vertical = bool(cap is not None and cap.writes_vertical)
             x0, y0, x1, y1 = _click_box(operator, operands, cap, state, combined, raw_width, vertical)
+            if not all(math.isfinite(v) for v in (raw_width, x0, y0, x1, y1)):
+                # Finite operands whose product still overflows: the pen
+                # stays put and the run keeps its index with an em box.
+                raw_width = 0.0
+                x0, y0, x1, y1 = _click_box(operator, operands, None, state, combined, 0.0, vertical)
             named = _names_its_font(state)
             editable = bool(cap and cap.editable and text.strip() and named)
             reason = None

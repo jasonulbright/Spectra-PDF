@@ -166,17 +166,27 @@ def _clamp(rect, box):
     ]
 
 
+class UnreadablePageBox(ValueError):
+    """The page declares a box, but a coordinate overflows a double."""
+
+
 def _page_box(page) -> list[float]:
+    overflowed = False
     for key in ("/CropBox", "/MediaBox"):
         try:
             values = [float(v) for v in page.obj.get(key)]
         except (TypeError, ValueError):
+            continue
+        if not all(math.isfinite(v) for v in values):
+            overflowed = True
             continue
         if len(values) == 4:
             return [
                 min(values[0], values[2]), min(values[1], values[3]),
                 max(values[0], values[2]), max(values[1], values[3]),
             ]
+    if overflowed:
+        raise UnreadablePageBox("This page has no media box.")
     raise ValueError("This page has no media box.")
 
 
@@ -593,7 +603,8 @@ def page_objects(pdf, page) -> tuple[list[dict], list[str]]:
 
     def emit(kind: str, rect, drop_idxs, transparent: bool, pattern: bool,
              unknown: bool) -> None:
-        if rect is None:
+        if rect is None or not all(math.isfinite(float(v)) for v in rect):
+            # An overflowing coordinate still paints only inside the page.
             rect = list(box)
         out.append({
             "index": len(out),
@@ -977,6 +988,13 @@ def list_transparency(
             try:
                 objects, unknowns = page_objects(pdf, page)
                 box = _page_box(page)
+            except UnreadablePageBox as exc:
+                report.append({
+                    "page": number, "error": str(exc), "objects": [], "regions": [],
+                    "counts": {name: 0 for name in CATEGORIES}, "whole_page": False,
+                    "unknown": [],
+                })
+                continue
             except ValueError:
                 raise
             except Exception as exc:
