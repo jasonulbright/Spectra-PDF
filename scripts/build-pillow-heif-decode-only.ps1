@@ -12,7 +12,7 @@
 # binding is built from the pinned pillow_heif sdist against that prefix and
 # repaired with delvewheel the way upstream repairs its Windows wheels.
 #
-# The wheel is versioned 1.8.0+decode.1: a local version label, because the
+# The wheel is versioned 1.8.0+decode.2: a local version label, because the
 # bytes are not upstream's and must never carry upstream's filename. The label
 # is written into pillow_heif/_version.py of the extracted build tree only;
 # nothing else in the sdist is edited.
@@ -36,14 +36,15 @@ $Repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $OutDir = [System.IO.Path]::GetFullPath($OutDir)
 
 $BindingVersion = "1.8.0"
-$LocalLabel = "decode.1"
+$LocalLabel = "decode.2"
 $WheelVersion = "$BindingVersion+$LocalLabel"
-$LibheifVersion = "1.23.4"
+$LibheifVersion = "1.23.5"
 $Libde265Version = "1.1.3"
 
-# libheif and libde265 are the versions upstream's own Windows wheel of this
-# release bundles; the libheif archive hash equals the one pinned in the
-# sdist's libheif/windows/mingw-w64-libheif/PKGBUILD.
+# libde265 is the version upstream's own Windows wheel of this release bundles.
+# libheif is one patch release past the sdist's PKGBUILD pin (1.23.4, which
+# carries advisories fixed in 1.23.5); the headers differ only in comments and
+# the binding requires libheif >= 1.23.4.
 $Sources = @(
     [pscustomobject]@{
         Name = "pillow_heif sdist"; File = "pillow_heif-$BindingVersion.tar.gz"
@@ -53,7 +54,7 @@ $Sources = @(
     },
     [pscustomobject]@{
         Name = "libheif"; File = "libheif-$LibheifVersion.tar.gz"
-        Sha256 = "d0c02b4b0e978f34a1974b6f3eea7975a537bf7a9195ffeea38e7242ff316fdd"
+        Sha256 = "fd9036064c4432f0550d15072ddf34956a248279ee9aeaff0fba3fa0f77d8f1a"
         Url = "https://github.com/strukturag/libheif/releases/download/v$LibheifVersion/libheif-$LibheifVersion.tar.gz"
         Committed = $null
     },

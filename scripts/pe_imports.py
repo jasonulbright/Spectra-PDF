@@ -28,6 +28,8 @@ class NotPE(ValueError):
 _EXPORT_DIR = 0
 _IMPORT_DIR = 1
 _DELAY_IMPORT_DIR = 13
+_RESOURCE_DIR = 2
+_RT_VERSION = 16
 
 
 class _Image:
@@ -148,6 +150,94 @@ def exports(path: str | Path) -> list[str]:
             out.append(img.cstr(struct.unpack_from("<I", img.data, names + 4 * i)[0]))
             named.add(struct.unpack_from("<H", img.data, ords + 2 * i)[0])
     out.extend(f"#{base + i}" for i in range(n_funcs) if i not in named)
+    return out
+
+
+def _resource_entries(img: _Image, base: int, table: int) -> list[tuple[int, int]]:
+    """[(id-or-name-offset, entry-offset), ...] of one IMAGE_RESOURCE_DIRECTORY."""
+    named, ids = struct.unpack_from("<HH", img.data, table + 12)
+    out = []
+    for i in range(named + ids):
+        ident, target = struct.unpack_from("<II", img.data, table + 16 + 8 * i)
+        out.append((ident, target))
+    return out
+
+
+def _version_blob(img: _Image) -> bytes | None:
+    rva, _size = img.directory(_RESOURCE_DIR)
+    if rva == 0:
+        return None
+    base = img.off(rva)
+    for ident, target in _resource_entries(img, base, base):
+        if ident != _RT_VERSION or not target & 0x80000000:
+            continue
+        level = base + (target & 0x7FFFFFFF)
+        # Type -> name -> language: the first leaf is the version resource;
+        # a DLL carries one, and every language variant holds the same fixed block.
+        for _ in range(2):
+            entries = _resource_entries(img, base, level)
+            if not entries:
+                return None
+            nxt = entries[0][1]
+            if nxt & 0x80000000:
+                level = base + (nxt & 0x7FFFFFFF)
+            else:
+                data_rva, size = struct.unpack_from("<II", img.data, base + nxt)
+                start = img.off(data_rva)
+                return img.data[start : start + size]
+        return None
+    return None
+
+
+def _align4(n: int) -> int:
+    return (n + 3) & ~3
+
+
+def _blocks(blob: bytes, start: int, end: int):
+    """Yield (key, value-bytes, wType, children-start, block-end) for each
+    VS_VERSIONINFO-shaped block in [start, end)."""
+    pos = start
+    while pos + 6 <= end:
+        length, value_len, wtype = struct.unpack_from("<HHH", blob, pos)
+        if length == 0:
+            return
+        block_end = min(pos + length, end)
+        k = pos + 6
+        key_end = k
+        while key_end + 1 < block_end and blob[key_end : key_end + 2] != b"\0\0":
+            key_end += 2
+        key = blob[k:key_end].decode("utf-16-le", "replace")
+        value_at = _align4(key_end + 2)
+        # wValueLength counts WCHARs for a text value, bytes for binary.
+        vbytes = value_len * 2 if wtype == 1 else value_len
+        value = blob[value_at : min(value_at + vbytes, block_end)]
+        yield key, value, wtype, _align4(value_at + vbytes), block_end
+        pos = _align4(block_end)
+
+
+def version_info(path: str | Path) -> dict[str, str] | None:
+    """The VS_VERSIONINFO resource: 'FileVersion#'/'ProductVersion#' from the
+    fixed block as dotted quads, plus every StringFileInfo string (first
+    string table wins). None when the image carries no version resource."""
+    img = _image(path)
+    blob = _version_blob(img)
+    if not blob:
+        return None
+    out: dict[str, str] = {}
+    for key, value, _t, children, end in _blocks(blob, 0, len(blob)):
+        if key != "VS_VERSION_INFO":
+            continue
+        if len(value) >= 52 and struct.unpack_from("<I", value, 0)[0] == 0xFEEF04BD:
+            fms, fls, pms, pls = struct.unpack_from("<IIII", value, 8)
+            out["FileVersion#"] = f"{fms >> 16}.{fms & 0xFFFF}.{fls >> 16}.{fls & 0xFFFF}"
+            out["ProductVersion#"] = f"{pms >> 16}.{pms & 0xFFFF}.{pls >> 16}.{pls & 0xFFFF}"
+        for ckey, _v, _t2, cchildren, cend in _blocks(blob, children, end):
+            if ckey != "StringFileInfo":
+                continue
+            for _table, _v3, _t3, tchildren, tend in _blocks(blob, cchildren, cend):
+                for skey, svalue, _t4, _c, _e in _blocks(blob, tchildren, tend):
+                    text = svalue.decode("utf-16-le", "replace").split("\0", 1)[0].strip()
+                    out.setdefault(skey, text)
     return out
 
 

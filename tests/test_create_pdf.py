@@ -440,7 +440,7 @@ SHIPPED_PYTHON = SHIPPED_SITE.parents[1] / "python.exe"
 class TestShippedHeifRuntime:
     def test_the_runtime_carries_the_decode_only_build_and_nothing_it_replaced(self):
         names = [p.name for p in SHIPPED_SITE.iterdir()]
-        assert "pillow_heif-1.8.0+decode.1.dist-info" in names
+        assert "pillow_heif-1.8.0+decode.2.dist-info" in names
         assert not [n for n in names if n.lower().startswith(("pi_heif", "_pi_heif"))]
         assert not [
             n
@@ -475,7 +475,7 @@ class TestShippedHeifRuntime:
         result = json.loads(run.stdout)
         assert result["digest"] == HEIF_DECODE_DIGESTS["rgb8.heic"]
         info = result["info"]
-        assert info["libheif"] == "1.23.4"
+        assert info["libheif"] == "1.23.5"
         assert info["decoders"] == {"libde265": "libde265 HEVC decoder, version 1.1.3"}
         assert info["encoders"] == {"mask": "mask"}
         assert info["HEIF"] == ""
