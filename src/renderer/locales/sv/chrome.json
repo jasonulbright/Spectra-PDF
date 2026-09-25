@@ -682,6 +682,8 @@
   "chrome.status.snapGridTitle": "Rutnät",
   "chrome.status.snapGridUnit": "Rutnätsenhet",
   "chrome.status.snapHint": "Håll ned Alt för att pausa · Tabb för att växla mellan mål",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Fästalternativ",
   "chrome.status.snapRadius": "Radie",
   "chrome.status.snapTitle": "Fäst vid sidans geometri under ritandet",

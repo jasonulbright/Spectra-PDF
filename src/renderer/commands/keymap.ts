@@ -32,14 +32,44 @@ export function isEditable(el: EventTarget | null): boolean {
 
 interface KeyLike {
   key: string;
+  code?: string;
   ctrlKey: boolean;
   metaKey: boolean;
   shiftKey: boolean;
   altKey?: boolean;
 }
 
+const US_PUNCTUATION: Record<string, string> = {
+  BracketLeft: '[',
+  BracketRight: ']',
+  Minus: '-',
+  Equal: '=',
+  Comma: ',',
+  Period: '.',
+  Slash: '/',
+  Semicolon: ';',
+  Quote: "'",
+  Backquote: '`',
+  Backslash: '\\',
+};
+
+/**
+ * The key a binding is compared against. A single character outside ASCII
+ * comes from a non-Latin layout (Cyrillic, Greek, Hebrew, Arabic): the table
+ * names Latin letters, and the webview still fires its own accelerators by
+ * physical key, so Ctrl+R on a Russian layout reloads the app unless the
+ * physical Latin key is used here.
+ */
+export function bindingKey(e: KeyLike): string {
+  const k = e.key.toLowerCase();
+  if (k.length !== 1 || k.charCodeAt(0) < 0x80 || !e.code) return k;
+  const m = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(e.code);
+  if (m) return (m[1] ?? m[2]).toLowerCase();
+  return US_PUNCTUATION[e.code] ?? k;
+}
+
 function matches(b: KeyBinding, e: KeyLike): boolean {
-  if (b.key !== e.key.toLowerCase()) return false;
+  if (b.key !== bindingKey(e)) return false;
   const mod = e.ctrlKey || e.metaKey;
   if (b.ctrl !== undefined && b.ctrl !== mod) return false;
   if (b.shift !== undefined && b.shift !== e.shiftKey) return false;
@@ -181,7 +211,7 @@ export function dispatchWindowBlur(): void {
  * take it. (Ctrl+Shift+R is already a bound 'always' chord — rotate pane.)
  */
 function suppressBrowserDefault(e: KeyLike & { preventDefault(): void }): void {
-  const k = e.key.toLowerCase();
+  const k = bindingKey(e);
   const mod = e.ctrlKey || e.metaKey;
   if (
     k === 'f5' ||

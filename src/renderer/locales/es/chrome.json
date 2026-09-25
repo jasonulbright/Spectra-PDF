@@ -696,6 +696,8 @@
   "chrome.status.snapGridTitle": "Cuadrícula",
   "chrome.status.snapGridUnit": "Unidad de la cuadrícula",
   "chrome.status.snapHint": "Mantén Alt para suspender · Tab para recorrer los destinos",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Opciones de ajuste",
   "chrome.status.snapRadius": "Radio",
   "chrome.status.snapTitle": "Ajustar a la geometría de la página al dibujar",

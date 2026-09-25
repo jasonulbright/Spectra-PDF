@@ -9,7 +9,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerWatermark } from '../testHarness';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount } from '../i18n';
+import { joinSentences, tChrome, tChromeCount } from '../i18n';
 import { STAMP_PALETTE } from '../lib/stamp-palette';
 import {
   resolvedColumns,
@@ -145,8 +145,10 @@ export function WatermarkPanel(): React.ReactElement {
       const frames = answer?.image_frames ?? 0;
       setColumns(resolvedColumns(answer?.writing_mode));
       setStatus(
-        tChromeCount('panel.watermark.done', count) +
-          (frames > 1 ? ' ' + tChromeCount('panel.watermark.usedFirstFrame', frames) : ''),
+        joinSentences([
+          tChromeCount('panel.watermark.done', count),
+          ...(frames > 1 ? [tChromeCount('panel.watermark.usedFirstFrame', frames)] : []),
+        ]),
       );
     } catch (e: unknown) {
       if (!run.visible()) return;

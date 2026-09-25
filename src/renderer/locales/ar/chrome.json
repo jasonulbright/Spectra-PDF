@@ -738,6 +738,8 @@
   "chrome.status.snapGridTitle": "الشبكة",
   "chrome.status.snapGridUnit": "وحدة الشبكة",
   "chrome.status.snapHint": "اضغط باستمرار على Alt للتعليق المؤقت · اضغط Tab للتنقل بين الأهداف",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "خيارات التجاذب",
   "chrome.status.snapRadius": "نصف القطر",
   "chrome.status.snapTitle": "التجاذب إلى هندسة الصفحة أثناء الرسم",

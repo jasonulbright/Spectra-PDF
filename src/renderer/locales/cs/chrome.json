@@ -710,6 +710,8 @@
   "chrome.status.snapGridTitle": "Mřížka",
   "chrome.status.snapGridUnit": "Jednotka mřížky",
   "chrome.status.snapHint": "Podržte Alt pro pozastavení · Tab pro procházení cílů",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Možnosti přichytávání",
   "chrome.status.snapRadius": "Poloměr",
   "chrome.status.snapTitle": "Přichytávání ke geometrii stránky při kreslení",

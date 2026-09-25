@@ -710,6 +710,8 @@
   "chrome.status.snapGridTitle": "Siatka",
   "chrome.status.snapGridUnit": "Jednostka siatki",
   "chrome.status.snapHint": "Przytrzymaj Alt, aby wstrzymać · Tab, aby przełączać cele",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Opcje przyciągania",
   "chrome.status.snapRadius": "Promień",
   "chrome.status.snapTitle": "Przyciąganie do geometrii strony podczas rysowania",

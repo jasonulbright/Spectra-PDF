@@ -682,6 +682,8 @@
   "chrome.status.snapGridTitle": "Ruudukko",
   "chrome.status.snapGridUnit": "Ruudukon yksikkö",
   "chrome.status.snapHint": "Pidä Alt-näppäintä pohjassa keskeyttääksesi · Sarkain vaihtaa kohteita",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Kiinnitysasetukset",
   "chrome.status.snapRadius": "Säde",
   "chrome.status.snapTitle": "Kiinnitä sivun geometriaan piirrettäessä",

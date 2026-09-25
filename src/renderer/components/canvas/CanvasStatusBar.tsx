@@ -84,7 +84,10 @@ function SnapSegment({
         type="button"
         data-testid="snap-toggle"
         aria-pressed={snap.enabled}
-        title={`${tChrome('chrome.status.snapTitle')} — ${tChrome('chrome.status.snapHint')}`}
+        title={tChrome('chrome.status.snapTooltip', {
+          title: tChrome('chrome.status.snapTitle'),
+          hint: tChrome('chrome.status.snapHint'),
+        })}
         onClick={() => onChange({ ...snap, enabled: !snap.enabled })}
         className={'canvas-status-action canvas-status-quiet' + (snap.enabled ? ' active' : '')}
       >

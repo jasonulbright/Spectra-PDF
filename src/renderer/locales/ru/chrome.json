@@ -710,6 +710,8 @@
   "chrome.status.snapGridTitle": "Сетка",
   "chrome.status.snapGridUnit": "Единица сетки",
   "chrome.status.snapHint": "Удерживайте Alt для приостановки · Tab для перебора целей",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Параметры привязки",
   "chrome.status.snapRadius": "Радиус",
   "chrome.status.snapTitle": "Привязка к геометрии страницы при рисовании",

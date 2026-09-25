@@ -682,6 +682,8 @@
   "chrome.status.snapGridTitle": "Gitter",
   "chrome.status.snapGridUnit": "Gitterenhed",
   "chrome.status.snapHint": "Hold Alt nede for at afbryde · Tab for at skifte mellem mål",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Fastgørelsesindstillinger",
   "chrome.status.snapRadius": "Radius",
   "chrome.status.snapTitle": "Fastgør til sidens geometri under tegning",

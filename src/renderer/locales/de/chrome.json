@@ -682,6 +682,8 @@
   "chrome.status.snapGridTitle": "Raster",
   "chrome.status.snapGridUnit": "Rastereinheit",
   "chrome.status.snapHint": "Alt gedrückt halten zum Aussetzen · Tab zum Wechseln der Ziele",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Einrastoptionen",
   "chrome.status.snapRadius": "Radius",
   "chrome.status.snapTitle": "Beim Zeichnen an der Seitengeometrie einrasten",

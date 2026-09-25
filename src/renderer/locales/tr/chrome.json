@@ -682,6 +682,8 @@
   "chrome.status.snapGridTitle": "Kılavuz",
   "chrome.status.snapGridUnit": "Kılavuz birimi",
   "chrome.status.snapHint": "Askıya almak için Alt · Hedefler arasında geçiş için Tab",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Yapışma seçenekleri",
   "chrome.status.snapRadius": "Yarıçap",
   "chrome.status.snapTitle": "Çizerken sayfa geometrisine yapış",

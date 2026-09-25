@@ -79,7 +79,9 @@ export default function FieldCandidateOverlay({
       dragging.current = true;
       onSelect(id);
       let latest = base;
+      const pointerId = event.pointerId;
       const move = (ev: PointerEvent): void => {
+        if (ev.pointerId !== pointerId) return;
         const dx = (ev.clientX - startX) / bounds.width;
         const dy = (ev.clientY - startY) / bounds.height;
         if (corner === null) {
@@ -100,15 +102,29 @@ export default function FieldCandidateOverlay({
         }
         setPreview(latest);
       };
-      const up = (): void => {
+      const detach = (): void => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', cancel);
+        window.removeEventListener('blur', cancel);
         dragging.current = false;
         setPreview(null);
+      };
+      const up = (ev: PointerEvent): void => {
+        if (ev.pointerId !== pointerId) return;
+        detach();
         onCommit(id, latest);
+      };
+      // A cancelled gesture discards the preview: committing it would place
+      // the box wherever the pointer happened to be when the gesture died.
+      const cancel = (ev: Event): void => {
+        if (ev instanceof PointerEvent && ev.pointerId !== pointerId) return;
+        detach();
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', cancel);
+      window.addEventListener('blur', cancel);
     },
     [id, onCommit, onSelect, rect],
   );

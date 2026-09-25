@@ -4329,16 +4329,23 @@ export function WorkspaceCanvasView({
     const el = splitContainerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
+    const pointerId = e.pointerId;
     const onMove = (ev: PointerEvent): void => {
+      if (ev.pointerId !== pointerId) return;
       const r = (ev.clientY - rect.top) / Math.max(rect.height, 1);
       setSplitRatio(Math.min(0.85, Math.max(0.15, r)));
     };
-    const onUp = (): void => {
+    const onUp = (ev: Event): void => {
+      if (ev instanceof PointerEvent && ev.pointerId !== pointerId) return;
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('blur', onUp);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('blur', onUp);
   }, []);
   // The quad's two dividers (same window-listener idiom, against the quad
   // container): rows reuse splitRatio, columns drive quadCol.
@@ -4347,7 +4354,9 @@ export function WorkspaceCanvasView({
     const el = quadContainerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
+    const pointerId = e.pointerId;
     const onMove = (ev: PointerEvent): void => {
+      if (ev.pointerId !== pointerId) return;
       if (axis === 'row') {
         const r = (ev.clientY - rect.top) / Math.max(rect.height, 1);
         setSplitRatio(Math.min(0.85, Math.max(0.15, r)));
@@ -4356,12 +4365,17 @@ export function WorkspaceCanvasView({
         setQuadCol(Math.min(0.85, Math.max(0.15, c)));
       }
     };
-    const onUp = (): void => {
+    const onUp = (ev: Event): void => {
+      if (ev instanceof PointerEvent && ev.pointerId !== pointerId) return;
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('blur', onUp);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('blur', onUp);
   }, []);
 
   const handleCommitTextEdit = useCallback(

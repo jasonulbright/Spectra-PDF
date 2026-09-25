@@ -696,6 +696,8 @@
   "chrome.status.snapGridTitle": "רשת",
   "chrome.status.snapGridUnit": "יחידת רשת",
   "chrome.status.snapHint": "החזק את Alt כדי להשהות · Tab למעבר בין היעדים",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "אפשרויות הצמדה",
   "chrome.status.snapRadius": "רדיוס",
   "chrome.status.snapTitle": "הצמד לגאומטריית העמוד בזמן השרטוט",

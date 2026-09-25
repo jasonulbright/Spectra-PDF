@@ -696,6 +696,8 @@
   "chrome.status.snapGridTitle": "Grade",
   "chrome.status.snapGridUnit": "Unidade da grade",
   "chrome.status.snapHint": "Segure Alt para suspender · Tab para percorrer os alvos",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Opções de aderência",
   "chrome.status.snapRadius": "Raio",
   "chrome.status.snapTitle": "Aderir à geometria da página ao desenhar",

@@ -696,6 +696,8 @@
   "chrome.status.snapGridTitle": "Grilă",
   "chrome.status.snapGridUnit": "Unitate de grilă",
   "chrome.status.snapHint": "Țineți apăsat Alt pentru suspendare · Tab pentru parcurgerea țintelor",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Opțiuni de fixare",
   "chrome.status.snapRadius": "Rază",
   "chrome.status.snapTitle": "Fixare la geometria paginii în timpul desenării",

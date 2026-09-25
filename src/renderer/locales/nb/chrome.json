@@ -682,6 +682,8 @@
   "chrome.status.snapGridTitle": "Rutenett",
   "chrome.status.snapGridUnit": "Rutenettenhet",
   "chrome.status.snapHint": "Hold Alt nede for å avbryte · Tab for å bla gjennom mål",
+  "chrome.status.snapTooltip": "{{title}} — {{hint}}",
+  "chrome.common.sentencePair": "{{first}} {{second}}",
   "chrome.status.snapOptions": "Festealternativer",
   "chrome.status.snapRadius": "Radius",
   "chrome.status.snapTitle": "Fest til sidens geometri mens du tegner",

@@ -17,6 +17,7 @@ import type { AppAction, AppState } from '../src/renderer/state/types';
 
 interface FakeEventInit {
   key: string;
+  code?: string;
   ctrl?: boolean;
   meta?: boolean;
   shift?: boolean;
@@ -27,6 +28,7 @@ interface FakeEventInit {
 function fakeEvent(init: FakeEventInit): KeyboardEvent & { defaultPrevented: boolean } {
   const e = {
     key: init.key,
+    code: init.code,
     ctrlKey: init.ctrl ?? false,
     metaKey: init.meta ?? false,
     shiftKey: init.shift ?? false,
@@ -100,6 +102,23 @@ describe('table integrity', () => {
   it('escape is never a table binding — the chain owns it', () => {
     expect(KEY_BINDINGS.some((b) => b.key === 'escape')).toBe(false);
   });
+});
+
+describe('non-Latin keyboard layouts', () => {
+  it('resolves Ctrl+S, Ctrl+Z and Ctrl+Shift+Z by physical key on a Cyrillic layout', () => {
+    expect(resolveBinding(fakeEvent({ key: 'ы', code: 'KeyS', ctrl: true }))?.command).toBe('file.save');
+    expect(resolveBinding(fakeEvent({ key: 'я', code: 'KeyZ', ctrl: true }))?.command).toBe('edit.undo');
+    expect(resolveBinding(fakeEvent({ key: 'Я', code: 'KeyZ', ctrl: true, shift: true }))?.command).toBe('edit.redo');
+  });
+
+  it('resolves a bracket binding by physical key on a Cyrillic layout', () => {
+    expect(resolveBinding(fakeEvent({ key: 'ъ', code: 'BracketRight' }))?.command).toBe('document.rotateSelectionCW');
+  });
+
+  it('keeps a Latin layout on its own character (AZERTY A sits on the Q key)', () => {
+    expect(resolveBinding(fakeEvent({ key: 'z', code: 'KeyW', ctrl: true }))?.command).toBe('edit.undo');
+  });
+
 });
 
 describe('resolveBinding', () => {
@@ -223,6 +242,13 @@ function uiState(partial: Partial<AppState['ui']>): AppState {
 }
 
 describe('dispatchKeyEvent', () => {
+  it('suppresses the webview reload for Ctrl+R on a Cyrillic layout', () => {
+    wire(uiState({}));
+    const e = fakeEvent({ key: 'к', code: 'KeyR', ctrl: true });
+    dispatchKeyEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+  });
+
   it('does nothing before the context is registered', () => {
     const e = fakeEvent({ key: 'z', ctrl: true });
     expect(() => dispatchKeyEvent(e)).not.toThrow();
