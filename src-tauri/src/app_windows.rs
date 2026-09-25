@@ -344,6 +344,9 @@ struct Claim {
 pub struct ClaimOutcome {
     pub granted: bool,
     pub owner: String,
+    /// The folder a run of `owner` is writing, when that run refused the
+    /// claim. Empty when a document claim refused it.
+    pub folder: String,
 }
 
 impl ClaimOutcome {
@@ -351,6 +354,7 @@ impl ClaimOutcome {
         Self {
             granted: true,
             owner: String::new(),
+            folder: String::new(),
         }
     }
 
@@ -358,6 +362,15 @@ impl ClaimOutcome {
         Self {
             granted: false,
             owner: owner.to_string(),
+            folder: String::new(),
+        }
+    }
+
+    fn refused_by_run(owner: &str, folder: &str) -> Self {
+        Self {
+            granted: false,
+            owner: owner.to_string(),
+            folder: folder.to_string(),
         }
     }
 }
@@ -415,6 +428,9 @@ pub struct RunClaimOutcome {
     pub same_window: bool,
     /// The requested folder that conflicts. Empty when granted.
     pub folder: String,
+    /// The open document inside `folder` that refused the run. Empty when a
+    /// run, not a document, refused it.
+    pub document: String,
     /// The key `release_run` takes. `None` when refused.
     pub token: Option<u64>,
 }
@@ -447,6 +463,21 @@ impl ClaimState {
     }
 
     pub fn claim(&self, path: &str, label: &str, mode: ClaimMode) -> ClaimOutcome {
+        // Lock order: `runs` before `by_path`, as in `claim_roots`. A document
+        // opened inside a folder a run is writing would hold bytes the run is
+        // about to replace, and its next save would write them back.
+        let runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        if mode == ClaimMode::Write {
+            let writing = runs.held.iter().find_map(|run| {
+                run.roots
+                    .iter()
+                    .find(|root| roots_conflict(root, path))
+                    .map(|root| (run.label.clone(), root.clone()))
+            });
+            if let Some((owner, folder)) = writing {
+                return ClaimOutcome::refused_by_run(&owner, &folder);
+            }
+        }
         let Ok(mut map) = self.by_path.lock() else {
             return ClaimOutcome::granted();
         };
@@ -538,6 +569,40 @@ impl ClaimState {
             .map(|c| c.label.clone())
     }
 
+    /// The claimed spelling of the file `path` names, when that file is claimed
+    /// under a different spelling.
+    ///
+    /// Canonical strings still differ for one file across hard links and for a
+    /// local file reached through a loopback share, so string keys alone let
+    /// one file be open twice. The lock is not held across the identity reads.
+    pub fn claimed_alias(&self, path: &str) -> Option<String> {
+        let keys: Vec<String> = {
+            let map = self.by_path.lock().ok()?;
+            if map.contains_key(path) {
+                return None;
+            }
+            map.keys().cloned().collect()
+        };
+        keys.into_iter()
+            .find(|key| same_file::is_same_file(key, path).unwrap_or(false))
+    }
+
+    /// The window with `path` open as a document, unless `path` is `own`.
+    ///
+    /// Read holders are not counted: a read claim is an import source whose
+    /// bytes are already held in memory, so writing over its file changes no
+    /// live document.
+    pub fn open_holder(&self, path: &str, own: Option<&str>) -> Option<String> {
+        if own == Some(path) {
+            return None;
+        }
+        let map = self.by_path.lock().ok()?;
+        map.get(path)?
+            .iter()
+            .find(|c| c.mode == ClaimMode::Write)
+            .map(|c| c.label.clone())
+    }
+
     /// The documents a window has open, in path order.
     ///
     /// Write claims only: a read claim is an import SOURCE, a file whose bytes
@@ -586,8 +651,32 @@ impl ClaimState {
                     owner: holder.label.clone(),
                     same_window: holder.label == label,
                     folder: wanted.clone(),
+                    document: String::new(),
                     token: None,
                 });
+            }
+        }
+        // A run writing over an open document leaves that document's working
+        // copy holding the old bytes, and its next save writes them back.
+        if let Ok(map) = self.by_path.lock() {
+            for wanted in &roots {
+                let open = map.iter().find_map(|(path, holders)| {
+                    holders
+                        .iter()
+                        .find(|c| c.mode == ClaimMode::Write)
+                        .filter(|_| roots_conflict(wanted, path))
+                        .map(|c| (path.clone(), c.label.clone()))
+                });
+                if let Some((document, owner)) = open {
+                    return Ok(RunClaimOutcome {
+                        granted: false,
+                        same_window: owner == label,
+                        owner,
+                        folder: wanted.clone(),
+                        document,
+                        token: None,
+                    });
+                }
             }
         }
         let lease = match &self.folder_registry {
@@ -597,7 +686,8 @@ impl ClaimState {
         let lease = match lease {
             Ok(lease) => std::sync::Arc::new(lease),
             Err(crate::folder_claims::ClaimError::Busy(folder)) => return Ok(RunClaimOutcome {
-                granted: false, owner: String::new(), same_window: false, folder, token: None,
+                granted: false, owner: String::new(), same_window: false, folder,
+                document: String::new(), token: None,
             }),
             Err(crate::folder_claims::ClaimError::Unavailable(message)) => return Err(message),
         };
@@ -614,6 +704,7 @@ impl ClaimState {
             owner: String::new(),
             same_window: false,
             folder: String::new(),
+            document: String::new(),
             token: Some(token),
         })
     }
@@ -1174,7 +1265,45 @@ pub async fn claim_document(
     mode: ClaimMode,
 ) -> Result<ClaimOutcome, String> {
     let path = crate::commands::canonical_path(&path);
-    Ok(app.state::<ClaimState>().claim(&path, window.label(), mode))
+    let state = app.state::<ClaimState>();
+    // A second spelling of a claimed file is refused rather than claimed: a
+    // grant would key a second live document to the same file.
+    if let Some(owner) = state.claimed_alias(&path).and_then(|alias| state.owner(&alias)) {
+        return Ok(ClaimOutcome::refused(&owner));
+    }
+    Ok(state.claim(&path, window.label(), mode))
+}
+
+/// Which window has an output path open as a document.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputHolder {
+    pub owner: String,
+    pub same_window: bool,
+}
+
+/// A picked output path that names an open document other than `own_path`.
+///
+/// Writing a new file over an open document replaces the bytes under a
+/// document whose working copy still holds the old ones; its next save then
+/// writes the old bytes back over the new file.
+#[tauri::command]
+pub async fn output_holder(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    path: String,
+    own_path: Option<String>,
+) -> Result<Option<OutputHolder>, String> {
+    let state = app.state::<ClaimState>();
+    let path = crate::commands::canonical_path(&path);
+    let path = state.claimed_alias(&path).unwrap_or(path);
+    let own = own_path.map(|p| crate::commands::canonical_path(&p));
+    Ok(state
+        .open_holder(&path, own.as_deref())
+        .map(|owner| OutputHolder {
+            same_window: owner == window.label(),
+            owner,
+        }))
 }
 
 #[tauri::command]
@@ -1521,6 +1650,48 @@ mod tests {
     }
 
     #[test]
+    fn a_second_spelling_of_a_claimed_file_resolves_to_the_claimed_one() {
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.pdf");
+        std::fs::write(&file, b"%PDF-1.7").unwrap();
+        let alias = dir.path().join("alias.pdf");
+        std::fs::hard_link(&file, &alias).unwrap();
+        let other = dir.path().join("b.pdf");
+        std::fs::write(&other, b"%PDF-1.7").unwrap();
+        let file = crate::commands::canonical_path(&file.to_string_lossy());
+        let alias = crate::commands::canonical_path(&alias.to_string_lossy());
+        let other = crate::commands::canonical_path(&other.to_string_lossy());
+        assert_ne!(file, alias);
+
+        assert_eq!(state.claimed_alias(&alias), None);
+        assert!(state.claim(&file, "main", ClaimMode::Write).granted);
+        assert_eq!(state.claimed_alias(&alias), Some(file.clone()));
+        assert_eq!(state.claimed_alias(&file), None);
+        assert_eq!(state.claimed_alias(&other), None);
+        let missing = dir.path().join("missing.pdf").to_string_lossy().to_string();
+        assert_eq!(state.claimed_alias(&missing), None);
+    }
+
+    #[test]
+    fn an_output_path_names_its_holder_unless_it_is_the_document_itself() {
+        let state = test_claim_state();
+        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+        assert!(state.claim("C:\\b.pdf", "doc-1", ClaimMode::Write).granted);
+        assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Read).granted);
+
+        assert_eq!(state.open_holder("C:\\a.pdf", None), Some("main".to_string()));
+        assert_eq!(state.open_holder("C:\\b.pdf", Some("C:\\a.pdf")), Some("doc-1".to_string()));
+        // Save As of a document onto its own file.
+        assert_eq!(state.open_holder("C:\\a.pdf", Some("C:\\a.pdf")), None);
+        assert_eq!(state.open_holder("C:\\new.pdf", None), None);
+        assert_eq!(state.open_holder("C:\\src.pdf", None), None);
+
+        state.release("C:\\a.pdf", "main");
+        assert_eq!(state.open_holder("C:\\a.pdf", None), None);
+    }
+
+    #[test]
     fn the_documents_a_window_has_open_are_its_write_claims_only() {
         let state = test_claim_state();
         assert!(state.claim("C:\\b.pdf", "main", ClaimMode::Write).granted);
@@ -1569,6 +1740,33 @@ mod tests {
     fn run(state: &ClaimState, label: &str, paths: &[&str]) -> RunClaimOutcome {
         let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
         state.claim_roots(&paths, label).unwrap()
+    }
+
+    #[test]
+    fn a_run_and_an_open_document_in_its_folder_refuse_each_other() {
+        let state = test_claim_state();
+        assert!(state.claim("C:\\docs\\a.pdf", "main", ClaimMode::Write).granted);
+        assert!(state.claim("C:\\src\\import.pdf", "main", ClaimMode::Read).granted);
+
+        let refused = run(&state, "doc-1", &["C:\\out", "C:\\docs"]);
+        assert!(!refused.granted);
+        assert_eq!(refused.document, "C:\\docs\\a.pdf");
+        assert_eq!(refused.folder, "C:\\docs");
+        assert_eq!(refused.owner, "main");
+        assert!(!refused.same_window);
+        assert!(!run(&state, "main", &["C:\\"]).granted);
+        assert!(run(&state, "main", &["C:\\src"]).granted, "an import source is not open");
+        assert!(run(&state, "main", &["C:\\docs2"]).granted, "a sibling folder is not inside");
+
+        let token = run(&state, "doc-1", &["C:\\batch"]).token.unwrap();
+        let blocked = state.claim("C:\\batch\\sub\\b.pdf", "main", ClaimMode::Write);
+        assert!(!blocked.granted);
+        assert_eq!(blocked.owner, "doc-1");
+        assert_eq!(blocked.folder, "C:\\batch");
+        assert!(state.claim("C:\\batch\\c.pdf", "main", ClaimMode::Read).granted);
+        assert!(state.claim("C:\\batchx\\d.pdf", "main", ClaimMode::Write).granted);
+        assert!(state.release_run(token, "doc-1"));
+        assert!(state.claim("C:\\batch\\sub\\b.pdf", "main", ClaimMode::Write).granted);
     }
 
     #[test]
@@ -1731,6 +1929,7 @@ mod tests {
                 "owner": "",
                 "sameWindow": false,
                 "folder": "",
+                "document": "",
                 "token": granted.token.unwrap(),
             })
         );
@@ -1742,8 +1941,26 @@ mod tests {
                 "owner": "main",
                 "sameWindow": false,
                 "folder": "C:\\out\\sub",
+                "document": "",
                 "token": null,
             })
+        );
+        assert!(state.claim("C:\\docs\\a.pdf", "doc-1", ClaimMode::Write).granted);
+        let open = run(&state, "doc-1", &["C:\\docs"]);
+        assert_eq!(
+            serde_json::to_value(&open).unwrap(),
+            serde_json::json!({
+                "granted": false,
+                "owner": "doc-1",
+                "sameWindow": true,
+                "folder": "C:\\docs",
+                "document": "C:\\docs\\a.pdf",
+                "token": null,
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(state.claim("C:\\out\\b.pdf", "doc-1", ClaimMode::Write)).unwrap(),
+            serde_json::json!({ "granted": false, "owner": "main", "folder": "C:\\out" })
         );
     }
 

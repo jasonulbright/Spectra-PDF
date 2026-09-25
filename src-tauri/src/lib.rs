@@ -270,6 +270,7 @@ pub fn run() {
             app_windows::open_new_window,
             app_windows::claim_document,
             app_windows::release_document,
+            app_windows::output_holder,
             app_windows::claim_output_roots,
             app_windows::release_output_roots,
             app_windows::focus_app_window,

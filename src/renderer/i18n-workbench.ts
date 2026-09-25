@@ -307,6 +307,20 @@ export const WORKBENCH_STRINGS = {
     'A run in this window is still writing to this folder: {{folder}}. Wait until it stops, then try again.',
   // Sentence case, like every other button in the product.
   'app.window.focusOther': 'Show that window',
+  // A new file written over an open document is lost at that document's next
+  // save, so an output picker refuses an open document and asks again.
+  'app.window.outputOpenTitle': 'File Is Open',
+  'app.window.outputOpenHere':
+    '"{{name}}" is open in this window. Close it, or choose another name.',
+  'app.window.outputOpenElsewhere':
+    '"{{name}}" is open in another window. Close it there, or choose another name.',
+  // A folder run and an open document inside its folders exclude each other:
+  // the run would replace bytes the document's next save writes back.
+  'app.window.folderHasOpenDocument':
+    '"{{name}}" is open, and this run writes to its folder: {{folder}}. Close the document, then try again.',
+  'app.window.folderRunTitle': 'Folder Is Being Written',
+  'app.window.openInRunFolder':
+    'A run is writing to {{folder}}, so these files cannot be opened until it stops: {{names}}.',
 
   // The commit-failure banner. Both messages were built by `+`-concatenating
   // two English halves around the engine's own text — one interpolated key
@@ -316,6 +330,10 @@ export const WORKBENCH_STRINGS = {
   'app.commit.failedAbort':
     'Applying page changes failed: {{message}}. Nothing was saved — your edits are still pending.',
   'app.commit.retry': 'Retry',
+  // A refused write over the user's own file. `reason` is the system's text.
+  'app.save.failedTitle': 'Could Not Save',
+  'app.save.failed':
+    '"{{name}}" was not saved and is unchanged on disk. {{reason}}',
   'app.commit.recoveryRequired': 'The page commit needs recovery. Original working copies are retained. Retry before continuing.',
   'app.commit.dismiss': 'Dismiss',
   'app.history.changed': 'The document or history changed. Try again.',

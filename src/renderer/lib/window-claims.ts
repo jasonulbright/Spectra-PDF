@@ -25,10 +25,13 @@ export interface ClaimOutcome {
   owner: string;
 }
 
-/** A path that could not be claimed, with the window that holds it. */
+/** A path that could not be claimed, with the window that holds it. `folder`
+ * is set when a folder run of that window refused it rather than an open
+ * document. */
 export interface ClaimRefusal {
   path: string;
   owner: string;
+  folder?: string;
 }
 
 export interface ClaimPartition {
@@ -83,7 +86,7 @@ export async function claimPaths(
   for (const path of paths) {
     const outcome = await inPathOrder(path, () => claims.claim(path, mode));
     if (outcome.granted) granted.push(path);
-    else refused.push({ path, owner: outcome.owner });
+    else refused.push({ path, owner: outcome.owner, ...(outcome.folder ? { folder: outcome.folder } : {}) });
   }
   return { granted, refused };
 }

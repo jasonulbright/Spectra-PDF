@@ -20,6 +20,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// The minimum Ghostscript this build drives, mirroring
 /// `engine/gs_capability.MINIMUM_VERSION`. A minimum, never a pin.
@@ -128,6 +129,53 @@ fn command(exe: &str) -> std::process::Command {
     cmd
 }
 
+/// Budgets for the two probe runs, the same as `engine/gs_capability.py`'s.
+/// A picked program that never exits (the windowed `gswin64.exe` waits for
+/// its window to close) would otherwise hold the probe, and the settings
+/// surface waiting on it, for as long as it runs.
+const VERSION_BUDGET: Duration = Duration::from_secs(30);
+const SMOKE_BUDGET: Duration = Duration::from_secs(60);
+
+/// Run `cmd` to completion or until `budget` passes, when it is killed and
+/// the run fails with `TimedOut`. Output is drained on threads so a child
+/// that fills a pipe cannot stall the wait.
+fn output_within(mut cmd: std::process::Command, budget: Duration) -> std::io::Result<std::process::Output> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    };
+    let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let stderr = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let deadline = Instant::now() + budget;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("the program did not finish within {} seconds", budget.as_secs()),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    Ok(std::process::Output {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
+}
+
 /// The leading dotted integers of a `--version` line.
 ///
 /// Ghostscript prints `10.07.1`; the zero-padded minor is a spelling, not a
@@ -158,7 +206,8 @@ fn probe_dir() -> std::io::Result<tempfile::TempDir> {
 fn smoke(exe: &str) -> Result<(), String> {
     let dir = probe_dir().map_err(|e| format!("cannot create a probe directory: {}", e))?;
     let png = dir.path().join("probe.png");
-    let outcome = command(exe)
+    let mut render = command(exe);
+    render
         .args([
             "-q",
             "-dNOPAUSE",
@@ -172,8 +221,8 @@ fn smoke(exe: &str) -> Result<(), String> {
         .args([
             "-c",
             "0 0 moveto 16 16 lineto 0.5 setlinewidth stroke showpage",
-        ])
-        .output();
+        ]);
+    let outcome = output_within(render, SMOKE_BUDGET);
     let verdict = match outcome {
         Err(e) => Err(format!("{}", e)),
         Ok(out) if !out.status.success() => {
@@ -206,7 +255,9 @@ pub fn probe(path: &str) -> GsAnswer {
         return hit;
     }
 
-    let answer = match command(path).arg("--version").output() {
+    let mut version = command(path);
+    version.arg("--version");
+    let answer = match output_within(version, VERSION_BUDGET) {
         Err(e) => GsAnswer::unavailable(path, PROBE_FAILED, &format!("{}", e)),
         Ok(out) => {
             let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -619,6 +670,22 @@ mod tests {
                 dirs.iter().map(|d| d.path().to_path_buf()).collect();
             assert_eq!(distinct.len(), WIDTH);
         }
+    }
+
+    #[test]
+    fn a_program_that_never_exits_is_killed_at_its_budget() {
+        let started = Instant::now();
+        let mut cmd = std::process::Command::new("powershell.exe");
+        cmd.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 30"]);
+        let err = output_within(cmd, Duration::from_millis(500)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(10));
+
+        let mut cmd = std::process::Command::new("cmd.exe");
+        cmd.args(["/c", "echo 10.05.1"]);
+        let out = output_within(cmd, Duration::from_secs(10)).unwrap();
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "10.05.1");
     }
 
     #[test]

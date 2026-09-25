@@ -50,6 +50,19 @@ describe('claimPaths', () => {
     expect(claim).toHaveBeenCalledTimes(3);
   });
 
+  it('carries the folder of a run that refused the claim', async () => {
+    claim.mockImplementation(async (path: string) =>
+      path === 'B'
+        ? { granted: false, owner: 'main', folder: 'C:/batch' }
+        : { granted: false, owner: 'doc-1', folder: '' },
+    );
+    const { refused } = await claimPaths(['A', 'B'], 'write');
+    expect(refused).toEqual([
+      { path: 'A', owner: 'doc-1' },
+      { path: 'B', owner: 'main', folder: 'C:/batch' },
+    ]);
+  });
+
   it('passes the mode through so an import source claims a read', async () => {
     claim.mockResolvedValue({ granted: true, owner: '' });
     await claimPaths(['A'], 'read');

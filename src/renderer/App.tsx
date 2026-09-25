@@ -4,7 +4,7 @@ import { restoreHistory } from './lib/disk-history';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
 import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/workspace-publication';
 import { withFileLock } from './lib/engine-lock';
-import { file, app, dialog, batch, tabDrag, pageCommit } from './lib/tauri-bridge';
+import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter } from './lib/tauri-bridge';
 import type { PhysicalScreenPoint, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
 import { flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
 import {
@@ -472,6 +472,31 @@ function AppContent(): React.ReactElement {
     });
   }, [requestConfirm]);
 
+  // Every write of a working copy over a user's file. A refused write (a file
+  // another program holds, a read-only file, a full disk) leaves the file as
+  // it was and the document unsaved; the gestures that start one run from
+  // fire-and-forget command handlers, so the refusal is shown here or nowhere.
+  const saveOrReport = useCallback(
+    async (workingPath: string, dest: string): Promise<boolean> => {
+      try {
+        await file.saveAs(workingPath, dest);
+        return true;
+      } catch (e: unknown) {
+        await showNotice(
+          tChrome('app.save.failedTitle'),
+          tChrome('app.save.failed', {
+            name: dest.split(/[\\/]/).pop() ?? dest,
+            reason: e instanceof Error ? e.message : String(e),
+          }),
+        );
+        return false;
+      }
+    },
+    [showNotice],
+  );
+  const saveOrReportRef = useRef(saveOrReport);
+  saveOrReportRef.current = saveOrReport;
+
   // A launch that corrected a "Start with Windows" entry, or found a record it
   // could not read, did so before any window existed; it reports here.
   useEffect(() => {
@@ -937,6 +962,14 @@ function AppContent(): React.ReactElement {
       const names = refused
         .map((r) => r.path.split(/[\\/]/).pop() ?? r.path)
         .join(', ');
+      const running = refused.find((r) => r.folder);
+      if (running?.folder) {
+        await showNotice(
+          tChrome('app.window.folderRunTitle'),
+          tChrome('app.window.openInRunFolder', { names, folder: running.folder }),
+        );
+        return;
+      }
       const title = tChrome('app.window.claimTitle');
       const body = tChrome(
         kind === 'import' ? 'app.window.importElsewhere' : 'app.window.openElsewhere',
@@ -952,6 +985,26 @@ function AppContent(): React.ReactElement {
     },
     [showNotice, showActionConfirm],
   );
+
+  // Every output picker of this window reports an answer that names an open
+  // document here, then asks again.
+  useEffect(() => {
+    setHeldOutputReporter(async (path, holder) => {
+      const name = path.split(/[\\/]/).pop() ?? path;
+      const title = tChrome('app.window.outputOpenTitle');
+      if (holder.sameWindow) {
+        await showNotice(title, tChrome('app.window.outputOpenHere', { name }));
+        return;
+      }
+      const go = await showActionConfirm(
+        title,
+        tChrome('app.window.outputOpenElsewhere', { name }),
+        tChrome('app.window.focusOther'),
+      );
+      if (go) await app.focusWindow(holder.owner);
+    });
+    return () => setHeldOutputReporter(null);
+  }, [showNotice, showActionConfirm]);
 
   // ONE notice for a whole open batch, whatever its size. A file that never
   // appears is the one case where silence is wrong: the user made a request
@@ -2389,13 +2442,13 @@ function AppContent(): React.ReactElement {
       return;
     }
     if (!(await commitOrAbort())) return;
-    await file.saveAs(activeFile.workingPath, activeFile.path);
+    if (!(await saveOrReport(activeFile.workingPath, activeFile.path))) return;
     dispatch({ type: 'MARK_SAVED', path: activeFile.path });
-  }, [activeFile, dispatch, commitOrAbort]);
+  }, [activeFile, dispatch, commitOrAbort, saveOrReport]);
 
   const handleSaveAs = useCallback(async () => {
     if (!activeFile) return;
-    const dest = await saveFile(activeFile.name);
+    const dest = await dialog.saveFile({ defaultPath: activeFile.name, ownPath: activeFile.path });
     if (!dest) return;
     // The destination is a bare byte copy over whatever is there. Writing over
     // a file another window has open replaces the bytes under a live document
@@ -2413,14 +2466,14 @@ function AppContent(): React.ReactElement {
       }
       granted = claim.granted;
       if (!(await commitOrAbort())) return;
-      await file.saveAs(activeFile.workingPath, dest);
+      if (!(await saveOrReport(activeFile.workingPath, dest))) return;
       dispatch({ type: 'MARK_SAVED', path: activeFile.path });
     } finally {
       claimHolds.current.drop([dest]);
       // A document of this window open at `dest` keeps the claim.
       if (granted.length > 0) void releasePaths(granted, pathInUse);
     }
-  }, [activeFile, saveFile, dispatch, commitOrAbort, reportClaimRefusal, pathInUse]);
+  }, [activeFile, dispatch, commitOrAbort, reportClaimRefusal, pathInUse, saveOrReport]);
 
   // Save routes INTO Save As for a downloaded document, and Save As is
   // declared after it. One implementation either way — a second copy of the
@@ -2477,12 +2530,12 @@ function AppContent(): React.ReactElement {
       if (result === 'cancel') return;
       if (result === 'save') {
         if (!(await commitOrAbort())) return;
-        await file.saveAs(f.workingPath, f.path);
+        if (!(await saveOrReport(f.workingPath, f.path))) return;
       }
     }
     dispatch({ type: 'CLOSE_FILE', path: filePath });
     void releasePaths([filePath], pathInUse);
-  }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort, pathInUse]);
+  }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort, pathInUse, saveOrReport]);
 
   // Close all open files with unsaved changes prompt
   const handleCloseAll = useCallback(async () => {
@@ -2495,7 +2548,8 @@ function AppContent(): React.ReactElement {
       if (result === 'save') {
         if (!(await commitOrAbort())) return;
         for (const f of dirtyFiles) {
-          await file.saveAs(f.workingPath, f.path);
+          if (!(await saveOrReport(f.workingPath, f.path))) return;
+          dispatch({ type: 'MARK_SAVED', path: f.path });
         }
       }
     }
@@ -2503,7 +2557,7 @@ function AppContent(): React.ReactElement {
       dispatch({ type: 'CLOSE_FILE', path: f.path });
     }
     void releasePaths(allOpen.map((f) => f.path), pathInUse);
-  }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort, pathInUse]);
+  }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort, pathInUse, saveOrReport]);
 
   // Exit the app (File ▸ Exit / Ctrl+Q) — always quits when clean; the
   // tray-minimize setting governs the window × (below), not an explicit Exit.
@@ -2515,7 +2569,10 @@ function AppContent(): React.ReactElement {
       if (result === 'cancel') return;
       if (result === 'save') {
         if (!(await commitOrAbort())) return;
-        for (const f of dirtyFiles) await file.saveAs(f.workingPath, f.path);
+        for (const f of dirtyFiles) {
+          if (!(await saveOrReport(f.workingPath, f.path))) return;
+          dispatch({ type: 'MARK_SAVED', path: f.path });
+        }
       }
     }
     // The quit SEALS the session record, and the seal takes whatever tab order
@@ -2557,7 +2614,7 @@ function AppContent(): React.ReactElement {
     if (!(await app.confirmClose())) {
       await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
     }
-  }, [state.files, isFileDirty, showConfirm, commitOrAbort, showNotice]);
+  }, [state.files, isFileDirty, showConfirm, commitOrAbort, showNotice, dispatch, saveOrReport]);
 
   // Hand a document to another window. A hand-off MOVES: the document leaves
   // this workspace, so two live copies of one file never exist and every
@@ -2616,7 +2673,11 @@ function AppContent(): React.ReactElement {
       let moved: TabDragResult;
       try {
         if (plan.saveFirst && handed) {
-          await file.saveAs(handed.workingPath, handed.path);
+          if (!(await saveOrReportRef.current(handed.workingPath, handed.path))) {
+            handOffsInFlight.current.delete(path);
+            await tabDrag.release(held.token).catch(() => {});
+            return false;
+          }
           dispatch({ type: 'MARK_SAVED', path });
         }
         moved = await tabDrag.commit(held.token);
@@ -2975,13 +3036,11 @@ function AppContent(): React.ReactElement {
           await app.quitCancelled();
           return;
         }
-        try {
-          for (const f of dirtyFiles) {
-            await file.saveAs(f.workingPath, f.path);
+        for (const f of dirtyFiles) {
+          if (!(await saveOrReportRef.current(f.workingPath, f.path))) {
+            await app.quitCancelled();
+            return;
           }
-        } catch (e) {
-          await app.quitCancelled();
-          throw e;
         }
       }
       await closeOrReport(minimizeToTray);
