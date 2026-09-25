@@ -9,11 +9,11 @@
 # is the manifest; the notice gate below refuses to leave a tree that is missing
 # any file it names. See THIRD-PARTY-LICENSES.md section LibreOffice.
 #
-# Two sources, tried in order:
-#   1. A local system install (C:\Program Files\LibreOffice) -- copied verbatim
-#      ONLY when its three-part release version matches the pinned version below.
-#      This is the fast path on a dev/packaging machine that already has the
-#      exact release build; an older/newer install cannot change shipped bytes.
+# Two sources:
+#   1. With -UseLocalInstall only: a local system install (C:\Program Files#      LibreOffice), copied verbatim when its three-part release version matches
+#      the pinned version below. Its bytes are NOT hash-verified -- an install
+#      carries whatever optional components its owner chose -- so no workflow
+#      passes this switch; it exists for a dev machine's smoke build.
 #   2. The official upstream Windows .msi -- downloaded, CHECKSUM-VERIFIED, and
 #      extracted headlessly. This is what makes a CI-tag release self-sufficient:
 #      the GitHub windows-latest runner has no LibreOffice, so it falls to this
@@ -48,7 +48,8 @@ param(
     [string]$MsiCacheDir = $env:SPECTRAPDF_LO_MSI_CACHE,
     # Run only the notice gate against -DestDir and exit with its verdict.
     # Nothing is downloaded, copied or removed.
-    [switch]$GateOnly
+    [switch]$GateOnly,
+    [switch]$UseLocalInstall
 )
 
 # Sources for the SAME pinned build, tried in order. The PRIMARY is a named
@@ -191,10 +192,12 @@ function Copy-Install([string]$root) {
 }
 
 # -- 1. Local system install -------------------------------------------------
-$roots = @(
-    "$env:ProgramFiles\LibreOffice",
-    "${env:ProgramFiles(x86)}\LibreOffice"
-) | Where-Object { $_ -and (Test-Path $_) }
+$roots = if ($UseLocalInstall) {
+    @(
+        "$env:ProgramFiles\LibreOffice",
+        "${env:ProgramFiles(x86)}\LibreOffice"
+    ) | Where-Object { $_ -and (Test-Path $_) }
+} else { @() }
 
 foreach ($r in $roots) {
     $localVersion = Get-InstallReleaseVersion $r
@@ -257,7 +260,7 @@ if ($CacheFile -and (Test-Path -LiteralPath $CacheFile)) {
 if (-not $haveMsi) {
     $failures = @()
     foreach ($url in $MsiUrls) {
-        Write-Host "No local LibreOffice; downloading $url ..."
+        Write-Host "Downloading $url ..."
         try {
             Invoke-DownloadWithRetry -Description $url -OutFile $Msi -Download {
                 Invoke-WebRequest -Uri $url -OutFile $Msi -UseBasicParsing -TimeoutSec 1800
@@ -293,7 +296,13 @@ if ($Pinned) {
 
 # Administrative install extracts the payload without touching the system.
 Write-Host "Extracting (msiexec /a) ..."
-Start-Process msiexec.exe -ArgumentList "/a `"$Msi`" /qn TARGETDIR=`"$Extract`"" -Wait
+# Start-Process reports no failure of its own: a failed administrative install
+# can leave a partial tree whose soffice.exe and version still pass below.
+$msiexec = Start-Process msiexec.exe -ArgumentList "/a `"$Msi`" /qn TARGETDIR=`"$Extract`"" -Wait -PassThru
+if ($msiexec.ExitCode -ne 0) {
+    Write-Error "msiexec /a failed with exit code $($msiexec.ExitCode) for $Msi"
+    exit 1
+}
 
 $installed = Get-ChildItem -Path $Extract -Recurse -Filter "soffice.exe" -ErrorAction SilentlyContinue |
     Select-Object -First 1
