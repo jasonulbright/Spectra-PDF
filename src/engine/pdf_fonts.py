@@ -521,9 +521,10 @@ class FontCapability:
         # Is `default_width` DECLARED by the document, or a placeholder?
         # A composite font's /DW (default 1000 per spec) genuinely states the
         # advance of every CID its /W omits, so a code outside /W is measured,
-        # not guessed. The simple/Type3 paths have no such declaration — their
-        # default is the 500 placeholder, and a placeholder that comes out
-        # NARROW is a redaction false negative. `measures()` is the only reader.
+        # not guessed. A simple/Type3 font declares one only through
+        # /MissingWidth beside a /Widths array; otherwise its default is the
+        # 500 placeholder, and a placeholder that comes out NARROW is a
+        # redaction false negative. `measures()` is the only reader.
         self._default_declared = default_declared
         self._code_bytes = code_bytes  # 1 (simple) or 2 (Identity-H CID)
         # A VARIABLE-WIDTH codespace, as pdfminer's CMap trie —
@@ -1437,12 +1438,35 @@ def _declared_simple_widths(font_obj) -> dict[int, float]:
     return widths
 
 
+def _missing_width(font_obj) -> Optional[float]:
+    """The advance a simple font DECLARES for every code its /Widths does not
+    list: the descriptor's /MissingWidth (ISO 32000-2 Table 120). Only a font
+    with a non-empty /Widths declares one here; without /Widths the advances
+    come from the font program or the standard metrics, which a viewer uses
+    in its place."""
+    w = font_obj.get("/Widths")
+    desc = font_obj.get("/FontDescriptor")
+    if w is None or len(w) == 0 or not isinstance(desc, pikepdf.Dictionary):
+        return None
+    raw = desc.get("/MissingWidth")
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
 def _simple_widths(font_obj, code2uni: dict[int, str]) -> tuple[dict[int, float], float]:
     """code → advance for a simple font: /Widths + /FirstChar, else base-14
-    AFM metrics via /BaseFont (AFM widths are keyed by unicode CHAR)."""
+    AFM metrics via /BaseFont (AFM widths are keyed by unicode CHAR). The
+    default is the declared /MissingWidth when there is one (see
+    `_missing_width`), else the placeholder."""
     widths = _declared_simple_widths(font_obj)
     if widths:
-        return widths, DEFAULT_WIDTH
+        missing = _missing_width(font_obj)
+        return widths, DEFAULT_WIDTH if missing is None else missing
     base = _strip_subset_prefix(name_str(font_obj.get("/BaseFont", "")).lstrip("/"))
     metrics = FONT_METRICS.get(base)
     if metrics is not None:
@@ -1729,6 +1753,7 @@ def font_capability(font_obj) -> FontCapability:
             default * t3_scale,
             1,
             sequences=_ligatures(code2uni, code2uni),
+            default_declared=_missing_width(font_obj) is not None,
         )
 
     if subtype == "Type0":
@@ -1966,9 +1991,12 @@ def font_capability(font_obj) -> FontCapability:
                 # advances survive the refusal even though the text does not.
                 # The reason names the class and is matched verbatim by the
                 # message catalog; `diagnostic` carries the mechanism.
+                missing = _missing_width(font_obj)
                 return _refused(
                     "no resolvable encoding (symbolic font without ToUnicode)",
                     widths=_declared_simple_widths(font_obj),
+                    default_width=DEFAULT_WIDTH if missing is None else missing,
+                    default_declared=missing is not None,
                     diagnostic=program_failure,
                 )
             code2uni = derived
@@ -2027,4 +2055,5 @@ def font_capability(font_obj) -> FontCapability:
         default,
         1,
         sequences=_ligatures(code2uni, encode_map),
+        default_declared=_missing_width(font_obj) is not None,
     )

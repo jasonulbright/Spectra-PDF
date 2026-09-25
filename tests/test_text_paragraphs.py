@@ -5670,3 +5670,40 @@ class TestTheFontTheTextStateHolds:
         (para,) = _paras(src)
         assert para["bold"] is True
         assert [span.get("family") for span in para["spans"]] == ["sans"]
+
+
+class TestDropCap:
+    """A drop cap beside the lines it spans is not a risen span of the
+    line whose baseline it sits near."""
+
+    def _src(self, tmp_dir) -> str:
+        src = os.path.join(tmp_dir, "dropcap.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=_helv(pdf)))
+        page.Contents = pdf.make_stream(
+            b"BT /F1 36 Tf 72 680 Td (O) Tj ET "
+            b"BT /F1 12 Tf 14 TL 102 700 Td (nce upon a time there) Tj T* (was a story.) Tj ET"
+        )
+        pdf.save(src)
+        pdf.close()
+        return src
+
+    def test_drop_cap_stays_out_of_the_body_text(self, tmp_dir):
+        texts = [p["text"] for p in list_text_paragraphs(self._src(tmp_dir), 1)["paragraphs"]]
+        assert "nce upon a time there was a story." in texts
+        assert "O" in texts
+
+    def test_superscript_still_attaches(self, tmp_dir):
+        src = os.path.join(tmp_dir, "sup.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=_helv(pdf)))
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 72 700 Td (x) Tj ET BT /F1 8 Tf 79 705 Td (2) Tj ET "
+            b"BT /F1 12 Tf 84 700 Td ( plus y) Tj ET"
+        )
+        pdf.save(src)
+        pdf.close()
+        texts = [p["text"] for p in list_text_paragraphs(src, 1)["paragraphs"]]
+        assert texts == ["x2 plus y"]

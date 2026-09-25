@@ -1159,3 +1159,47 @@ class TestTheClickBoxCoversEveryGlyph:
         for cx, cy in centres:
             assert any(r["rect"][0] <= cx <= r["rect"][2] and r["rect"][1] <= cy <= r["rect"][3]
                        for r in runs), (cx, cy)
+
+
+class TestMissingWidth:
+    """A code outside /Widths advances by the descriptor's /MissingWidth
+    (ISO 32000-2 Table 120), not by a placeholder."""
+
+    @staticmethod
+    def _font(pdf, missing=None):
+        desc = Dictionary(
+            Type=Name("/FontDescriptor"), FontName=Name("/Foo"), Flags=32,
+            FontBBox=[0, 0, 1000, 1000], ItalicAngle=0, Ascent=800, Descent=-200,
+            CapHeight=700, StemV=80,
+        )
+        if missing is not None:
+            desc["/MissingWidth"] = missing
+        return pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"), Subtype=Name("/Type1"), BaseFont=Name("/Foo"),
+                Encoding=Name("/WinAnsiEncoding"), FirstChar=65, LastChar=65,
+                Widths=[600], FontDescriptor=pdf.make_indirect(desc),
+            )
+        )
+
+    def _runs(self, tmp_dir, missing):
+        src = os.path.join(tmp_dir, "mw.pdf")
+        pdf = pikepdf.new()
+        _page(pdf, b"BT /F1 10 Tf 72 700 Td (AB) Tj (A) Tj ET", {"/F1": self._font(pdf, missing)})
+        pdf.save(src)
+        pdf.close()
+        return list_text_runs(src, 1)["runs"]
+
+    def test_code_outside_widths_advances_by_missing_width(self, tmp_dir):
+        runs = self._runs(tmp_dir, 250)
+        assert runs[0]["rect"][2] == pytest.approx(72 + (600 + 250) / 1000 * 10)
+        assert runs[1]["rect"][0] == pytest.approx(80.5)
+
+    def test_capability_counts_missing_width_as_declared(self):
+        from engine.pdf_fonts import font_capability
+
+        pdf = pikepdf.new()
+        cap = font_capability(self._font(pdf, 0))
+        assert cap.decoded_width(b"AB") == pytest.approx(600)
+        assert cap.measures(b"AB")
+        assert not font_capability(self._font(pdf)).measures(b"AB")

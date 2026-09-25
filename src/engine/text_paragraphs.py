@@ -847,7 +847,16 @@ def _cluster_lines(members: list[_Member]) -> list[_Line]:
             o_ref = _widest(other)
             big = max(o_ref.eff, c_ref.eff)
             small = min(o_ref.eff, c_ref.eff)
-            if abs(c_ref.y - o_ref.y) <= RISE_ATTACH_EM * big and small <= RISE_SIZE_RATIO * big:
+            # The merged line's baseline is its widest member's, so the body
+            # must stay the widest: a drop cap beside a wider line of body
+            # text would become the line's risen span, and its glyph would
+            # read into the middle of the paragraph.
+            body, risen = (o_ref, c_ref) if o_ref.eff >= c_ref.eff else (c_ref, o_ref)
+            if (
+                abs(c_ref.y - o_ref.y) <= RISE_ATTACH_EM * big
+                and small <= RISE_SIZE_RATIO * big
+                and body.x1 - body.x0 >= risen.x1 - risen.x0
+            ):
                 target = other
                 break
         if target is None:
