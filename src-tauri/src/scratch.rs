@@ -117,16 +117,21 @@ fn legacy_net_file(name: &str) -> bool {
 /// payload is built for one request, so its request's end is its end. Any
 /// other path is left alone. Returns whether a file was removed.
 pub(crate) fn release_net_file(path: &Path, dir: &Path) -> bool {
+    is_net_file_in(path, dir) && std::fs::remove_file(path).is_ok()
+}
+
+/// Whether `path` names a network scratch file directly in `dir`, judged by
+/// the name this app gives such files and by the physical identity of the
+/// parent folder, never by string prefix.
+pub(crate) fn is_net_file_in(path: &Path, dir: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
     };
     if net_file_owner(name).is_none() && !legacy_net_file(name) {
         return false;
     }
-    let inside = path
-        .parent()
-        .is_some_and(|parent| same_file::is_same_file(parent, dir).unwrap_or(false));
-    inside && std::fs::remove_file(path).is_ok()
+    path.parent()
+        .is_some_and(|parent| same_file::is_same_file(parent, dir).unwrap_or(false))
 }
 
 // ── The launch reclaim ───────────────────────────────────────────────────
