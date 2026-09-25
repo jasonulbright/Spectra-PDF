@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   EMPTY_STRIP,
+  HandOffGate,
   NO_DRAG,
   TAB_DRAG_THRESHOLD_PX,
   advanceDrag,
@@ -809,5 +810,48 @@ describe('frame throttle', () => {
     throttle.post(2);
     frames.run();
     expect(run.mock.calls).toEqual([[2]]);
+  });
+});
+
+describe('HandOffGate', () => {
+  it('holds a close until a write-back in flight has landed and committed', async () => {
+    const gate = new HandOffGate();
+    const order: string[] = [];
+    let landWrite!: () => void;
+    const written = new Promise<void>((r) => (landWrite = r));
+    const handOff = gate.run(async () => {
+      await written;
+      order.push('commit');
+      return true;
+    });
+    const close = gate.settled().then(() => order.push('close'));
+    await Promise.resolve();
+    expect(order).toEqual([]);
+    landWrite();
+    await Promise.all([handOff, close]);
+    expect(order).toEqual(['commit', 'close']);
+  });
+
+  it('settles after a failed hand-off and passes its rejection through', async () => {
+    const gate = new HandOffGate();
+    const failed = gate.run(() => Promise.reject(new Error('refused')));
+    await expect(failed).rejects.toThrow('refused');
+    await expect(gate.settled()).resolves.toBeUndefined();
+  });
+
+  it('waits for a hand-off begun while the close was already waiting', async () => {
+    const gate = new HandOffGate();
+    const order: string[] = [];
+    let endFirst!: () => void;
+    let endSecond!: () => void;
+    void gate.run(() => new Promise<void>((r) => (endFirst = r)));
+    const close = gate.settled().then(() => order.push('close'));
+    void gate.run(() => new Promise<void>((r) => (endSecond = r)).then(() => { order.push('second'); }));
+    endFirst();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(order).toEqual([]);
+    endSecond();
+    await close;
+    expect(order).toEqual(['second', 'close']);
   });
 });

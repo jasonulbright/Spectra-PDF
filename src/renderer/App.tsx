@@ -6,7 +6,7 @@ import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/wo
 import { withFileLock } from './lib/engine-lock';
 import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter } from './lib/tauri-bridge';
 import type { PhysicalScreenPoint, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
-import { flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
+import { HandOffGate, flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
 import {
   decodeToRawSource,
   type AddImageSource,
@@ -905,6 +905,7 @@ function AppContent(): React.ReactElement {
   // whether that return means "keep the tab you were about to close" or "open
   // this again" is a question only the hand-off in flight can answer.
   const handOffsInFlight = useRef(new Map<string, { returned: boolean }>());
+  const handOffGate = useRef(new HandOffGate());
 
   // A newly opened document's own initial view: the layout, navigation pane
   // and reading mode land as one reducer act; the opening page and its
@@ -2659,7 +2660,8 @@ function AppContent(): React.ReactElement {
   // differ only in where the document is going, and an explicit menu command
   // has no destination to resolve.
   const handOffDocument = useCallback(
-    async (path: string, reserve: () => Promise<TabDragReservation>): Promise<boolean> => {
+    (path: string, reserve: () => Promise<TabDragReservation>): Promise<boolean> =>
+      handOffGate.current.run(async () => {
       if (!(await commitOrAbort())) return false;
       const held = await reserve();
       const handed = stateRef.current.files.get(path);
@@ -2698,7 +2700,7 @@ function AppContent(): React.ReactElement {
       // now holds it.
       dispatch({ type: 'CLOSE_FILE', path });
       return true;
-    },
+      }),
     [dispatch, commitOrAbort, isFileDirty],
   );
 
@@ -3008,6 +3010,7 @@ function AppContent(): React.ReactElement {
       // stays open — the quit aborts on its own bounded wait. A plain window ×
       // is never refused this way: it has no quit to withhold from.
       if (!(await sealBeforeClose(quitId, { flush: flushTabOrder, ack: app.quitAck }))) return;
+      await handOffGate.current.settled();
       const minimizeToTray = getSettings().minimizeToTray === true;
       const dirtyFiles = Array.from(filesRef.current.values()).filter(
         (f) => f.dirty || pageDirtyRef.current.includes(f.path),
