@@ -86,11 +86,8 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     id: 'comment',
     title: 'Comment',
     description: 'Highlight, add text boxes, draw, stamp — and review every comment in the document.',
-    // fold: 'comments' (the review list) was a SECOND tool sitting next to
-    // this one in the grid, one letter apart — "Comment" to make them,
-    // "Comments" to read them. That is not a distinction a user should have to
-    // infer from a plural. It is one job, so it is one tool: the modes below
-    // author the markup, and the op below is the list of what is there.
+    // One tool for one job: the modes below author the markup, and the
+    // 'comments' op is the review list of what is there.
     // Safe against the mode: `worksOnPage` is true either way (canvasTools),
     // and the reducer arms a tool's canvas mode BEFORE it considers ops — so
     // Comment still lands you ON the page, with its pane seated one dock-click

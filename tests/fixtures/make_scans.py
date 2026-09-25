@@ -95,7 +95,7 @@ def _text_pdf(dest: Path) -> None:
         Contents=pdf.make_stream(content),
     )
     pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
-    pdf.save(str(dest))
+    pdf.save(str(dest), deterministic_id=True)
 
 
 def _render(src: Path, dest: Path) -> Image.Image:
@@ -242,7 +242,7 @@ def _jpeg_page_pdf(scan: Image.Image, dest: Path, *, ocr_text: bool, form: bool)
             )
         )
 
-    pdf.save(str(dest))
+    pdf.save(str(dest), deterministic_id=True)
 
 
 def build() -> None:

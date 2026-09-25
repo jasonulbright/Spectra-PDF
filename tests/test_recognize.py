@@ -198,7 +198,7 @@ class TestValidation:
         assert _LANG_RE.match("chi_sim")
         assert _LANG_RE.match("chi_tra")
 
-    @pytest.mark.skipif(not TESSDATA.is_dir(), reason="vendored tessdata not provisioned")
+    @pytest.mark.skipif(not _shipped_stems(), reason="vendored tessdata not provisioned")
     def test_every_shipped_model_passes_the_door(self):
         stems = _shipped_stems()
         assert stems, "no traineddata in the vendored tessdata"
@@ -210,7 +210,7 @@ class TestValidation:
         # and never recognise with.
         assert [c for c in _offered_codes() if not _LANG_RE.match(c)] == []
 
-    @pytest.mark.skipif(not TESSDATA.is_dir(), reason="vendored tessdata not provisioned")
+    @pytest.mark.skipif(not _shipped_stems(), reason="vendored tessdata not provisioned")
     def test_every_offered_language_has_a_model_in_the_tree(self):
         shipped = set(_shipped_stems())
         assert [c for c in _offered_codes() if c not in shipped] == []

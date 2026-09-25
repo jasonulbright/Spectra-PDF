@@ -67,7 +67,7 @@ def _one_page_with_unembedded_font() -> bytes:
     page.obj["/Resources"] = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=font))
     page.contents_add(pikepdf.Stream(pdf, b"BT /F1 12 Tf 20 100 Td (Hello) Tj ET"))
     buf = io.BytesIO()
-    pdf.save(buf)
+    pdf.save(buf, deterministic_id=True)
     return buf.getvalue()
 
 
@@ -139,7 +139,7 @@ def _form_hosted_image() -> bytes:
     )
     page.contents_add(pikepdf.Stream(pdf, b"q 100 0 0 100 50 50 cm /Fm0 Do Q"))
     buf = io.BytesIO()
-    pdf.save(buf)
+    pdf.save(buf, deterministic_id=True)
     return buf.getvalue()
 
 
@@ -157,7 +157,7 @@ def _broken_form_content() -> bytes:
     )
     page.contents_add(pikepdf.Stream(pdf, b"q 100 0 0 100 50 50 cm /Fm0 Do Q"))
     buf = io.BytesIO()
-    pdf.save(buf)
+    pdf.save(buf, deterministic_id=True)
     return buf.getvalue()
 
 
@@ -192,7 +192,7 @@ def _broken_appearance() -> bytes:
     page.obj["/Annots"] = pikepdf.Array([pdf.make_indirect(annot)])
     page.contents_add(pikepdf.Stream(pdf, b"q Q"))
     buf = io.BytesIO()
-    pdf.save(buf)
+    pdf.save(buf, deterministic_id=True)
     return buf.getvalue()
 
 
@@ -201,6 +201,8 @@ def _owner_encrypted() -> bytes:
     pdf.add_blank_page(page_size=(200, 200))
     buf = io.BytesIO()
     # user="" — opening needs no password at all; only /Owner differs.
+    # The encryption key and salts are random per save, so this fixture is the
+    # one output that never regenerates byte-identically.
     pdf.save(buf, encryption=pikepdf.Encryption(user="", owner="owner-secret"))
     return buf.getvalue()
 
