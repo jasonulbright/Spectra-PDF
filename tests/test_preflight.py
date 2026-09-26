@@ -738,3 +738,79 @@ class TestCategoryShape:
         for category in report["categories"]:
             for row in category["checks"]:
                 assert by_id[row["id"]] == category["id"]
+
+
+class TestDocumentJavaScriptIsFoundWhereverItRuns:
+    """A script runs from the catalog's open action, from any action a
+    `/Next` chain reaches, and from a form field's own additional actions as
+    well as from the name tree and the annotation and page triggers."""
+
+    @staticmethod
+    def _js():
+        import pikepdf
+
+        return pikepdf.Dictionary(S=pikepdf.Name.JavaScript, JS=pikepdf.String("app.alert(1)"))
+
+    def _check(self, tmp_dir, mutate) -> dict:
+        import pikepdf
+
+        pdf = pikepdf.new()
+        pdf.add_blank_page()
+        mutate(pdf)
+        path = os.path.join(tmp_dir, "js.pdf")
+        pdf.save(path)
+        return _row(preflight(path, profile=_profile(document_javascript={"allow_js": False})),
+                    "document_javascript")
+
+    def test_the_catalog_open_action(self, tmp_dir):
+        row = self._check(tmp_dir, lambda pdf: pdf.Root.__setitem__(
+            "/OpenAction", pdf.make_indirect(self._js())))
+        assert row["status"] == "fail"
+        assert [f["values"]["name"] for f in row["findings"]] == ["document OpenAction"]
+
+    def test_a_script_reached_through_next(self, tmp_dir):
+        import pikepdf
+
+        def mutate(pdf):
+            first = pikepdf.Dictionary(S=pikepdf.Name.URI, URI=pikepdf.String("x"),
+                                       Next=pikepdf.Array([self._js()]))
+            pdf.pages[0].obj["/AA"] = pikepdf.Dictionary(O=first)
+
+        row = self._check(tmp_dir, mutate)
+        assert row["status"] == "fail"
+        assert [f["values"]["name"] for f in row["findings"]] == ["page 1 O"]
+
+    def test_a_calculation_on_a_parent_field(self, tmp_dir):
+        import pikepdf
+
+        def mutate(pdf):
+            widget = pdf.make_indirect(pikepdf.Dictionary(
+                Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Widget,
+                Rect=pikepdf.Array([0, 0, 10, 10])))
+            field = pdf.make_indirect(pikepdf.Dictionary(
+                FT=pikepdf.Name.Tx, T=pikepdf.String("total"),
+                Kids=pikepdf.Array([widget]), AA=pikepdf.Dictionary(C=self._js())))
+            widget["/Parent"] = field
+            pdf.pages[0].obj["/Annots"] = pikepdf.Array([widget])
+            pdf.Root["/AcroForm"] = pdf.make_indirect(pikepdf.Dictionary(
+                Fields=pikepdf.Array([field])))
+
+        row = self._check(tmp_dir, mutate)
+        assert row["status"] == "fail"
+        assert [f["values"]["name"] for f in row["findings"]] == ["form field C"]
+
+    def test_a_chain_too_long_to_follow_is_not_a_pass(self, tmp_dir):
+        import pikepdf
+
+        def mutate(pdf):
+            action = None
+            for _ in range(40):
+                action = pikepdf.Dictionary(S=pikepdf.Name.URI, URI=pikepdf.String("x"),
+                                            **({"Next": action} if action is not None else {}))
+            pdf.Root["/OpenAction"] = pdf.make_indirect(action)
+
+        row = self._check(tmp_dir, mutate)
+        assert row["status"] == "needs_review"
+
+    def test_a_document_without_scripts_passes(self, tmp_dir):
+        assert self._check(tmp_dir, lambda pdf: None)["status"] == "pass"

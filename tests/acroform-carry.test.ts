@@ -686,6 +686,21 @@ describe('Document-level form behavior', () => {
     expect(await coNamesOf(rebuilt)).toEqual(['title', 'title+1']);
   });
 
+  it('maps each /CO entry through its own root rename, never through a chain of them', async () => {
+    const plain = await PDFDocument.create();
+    const page = plain.addPage([600, 800]);
+    plain.getForm().createTextField('t').addToPage(page, { x: 50, y: 700, width: 100, height: 20 });
+    const first = await withCalcOrder(await plain.save(), ['t']);
+    const twin = await PDFDocument.create();
+    const twinPage = twin.addPage([600, 800]);
+    twin.getForm().createTextField('t').addToPage(twinPage, { x: 50, y: 700, width: 100, height: 20 });
+    twin.getForm().createTextField('t+1').addToPage(twinPage, { x: 50, y: 650, width: 100, height: 20 });
+    const second = await withCalcOrder(await twin.save(), ['t', 't+1']);
+    // The second source's 't' renames to 't+1' and its own 't+1' to 't+1+1'.
+    const rebuilt = await buildPdf([...pagesOf(first, 'a', [0]), ...pagesOf(second, 'b', [0])]);
+    expect(await coNamesOf(rebuilt)).toEqual(['t', 't+1', 't+1+1']);
+  });
+
   it('REFUSES the rebuild outright for an XFA document', async () => {
     const src = await withXfaPacket(await makeMultiPageForm());
     await expect(buildPdf(pagesOf(src, 'a', [0, 1, 2]))).rejects.toThrow(/XML form/);
