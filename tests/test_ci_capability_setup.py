@@ -2784,21 +2784,46 @@ def test_the_sign_script_logs_the_environment_it_ran_in() -> None:
     assert "signtool=$signtool dlib=$dlib" in text, text
 
 
-def test_the_client_tools_install_has_a_second_source() -> None:
-    """winget is not reachable from every unattended runner account.
-
-    The NuGet payload carries the same dlib, so the install falls back to it
-    and exports the path the resolver reads rather than failing the release.
-    """
+def test_the_signing_client_is_one_exact_nupkg_and_hash() -> None:
+    """signtool loads the dlib in the release job; newest-listed is not a pin."""
     text = (ROOT / SIGN_TOOLS_SCRIPT).read_text(encoding="utf-8")
-    assert "Microsoft.Azure.ArtifactSigningClientTools" in text
-    urls = [urlsplit(u) for u in re.findall(r"https://[^\s\"'$)]+", text)]
-    assert any(
-        u.netloc == "api.nuget.org" and u.path.startswith("/v3-flatcontainer/")
-        for u in urls
+    assert re.search(r'^\$SigningClientVersion = "\d+\.\d+\.\d+"$', text, re.M)
+    assert re.search(r'^\$SigningClientSha256 = "[0-9a-f]{64}"$', text, re.M)
+    assert (
+        '$SigningClientUrl = "https://api.nuget.org/v3-flatcontainer/$SigningClientPackage/'
+        '$SigningClientVersion/$SigningClientPackage.$SigningClientVersion.nupkg"' in text
     )
+    assert "index.json" not in text and "versions" not in text
+    assert "winget" not in text.split("[switch]$SkipWinget", 1)[1]
     assert "SPECTRAPDF_SIGN_DLIB" in text
     assert "GITHUB_ENV" in text
+    body = text[text.index("function Install-PinnedSigningClient"):]
+    assert body.index("-ne $SigningClientSha256") < body.index("ExtractToDirectory(")
+
+
+@pytest.mark.skipif(not shutil.which("powershell"), reason="needs Windows PowerShell")
+def test_a_signing_client_that_misses_the_pin_is_refused_before_extraction(
+    tmp_path: Path,
+) -> None:
+    impostor = tmp_path / "impostor.nupkg"
+    impostor.write_bytes(b"not the pinned package")
+    root = tmp_path / "client"
+    probe = tmp_path / "probe.ps1"
+    probe.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        f". '{ROOT / SIGN_TOOLS_SCRIPT}'\n"
+        f"$SigningClientUrl = '{impostor.as_uri()}'\n"
+        f"try {{ Install-PinnedSigningClient -Root '{root}' | Out-Null; 'INSTALLED' }}"
+        " catch { 'REFUSED: ' + $_.Exception.Message }\n",
+        encoding="utf-8",
+    )
+    run = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert run.returncode == 0, run.stderr
+    assert "REFUSED:" in run.stdout and "the pin is" in run.stdout, run.stdout
+    assert not (root / "package").exists(), "bytes were extracted"
 
 
 @pytest.mark.parametrize("workflow,job", (
@@ -2842,22 +2867,6 @@ def test_the_dlib_search_reads_the_registered_install_location() -> None:
     assert "HKCU:" in text
     assert re.search(r"\$\w*[Ee]ntry\.InstallLocation\b", text)
     assert re.search(r"\$\w*[Ee]ntry\.DisplayName\b", text)
-
-
-def test_the_nuget_fallback_survives_a_failed_presence_probe() -> None:
-    """The NuGet branch is the verified source; nothing before it may be fatal."""
-    lines = (ROOT / SIGN_TOOLS_SCRIPT).read_text(encoding="utf-8").splitlines()
-
-    def _targets_nuget(line: str) -> bool:
-        return any(
-            urlsplit(url).netloc == "api.nuget.org"
-            for url in re.findall(r"""https://[^\s"'$)]+""", line)
-        )
-
-    fetch = next(i for i, line in enumerate(lines) if _targets_nuget(line))
-    assert any(
-        re.search(r"^\s*\}?\s*catch\b", line) for line in lines[:fetch]
-    ), "the NuGet fetch is not reached from a caught failure path"
 
 
 SMOKE_WORKFLOW = "signing-smoke.yml"

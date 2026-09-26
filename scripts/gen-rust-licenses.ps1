@@ -16,9 +16,14 @@ $ErrorActionPreference = 'Stop'
 
 $SrcTauri = Join-Path (Split-Path -Parent $PSScriptRoot) 'src-tauri'
 
-if (-not (Get-Command 'cargo-about' -ErrorAction SilentlyContinue)) {
-    Write-Host "cargo-about not found; installing (build-time tool)..."
-    cargo install cargo-about --locked --features cli
+# Output layout varies between cargo-about releases, so a regenerated file is
+# comparable to the committed one only when both come from this version.
+$CargoAboutVersion = '0.9.2'
+
+$installed = if (Get-Command 'cargo-about' -ErrorAction SilentlyContinue) { (& cargo-about --version) -replace '^cargo-about\s+', '' } else { '' }
+if ($installed -ne $CargoAboutVersion) {
+    Write-Host "cargo-about $CargoAboutVersion not found (have '$installed'); installing (build-time tool)..."
+    cargo install cargo-about --version $CargoAboutVersion --locked --features cli
     if ($LASTEXITCODE -ne 0) { throw "cargo-about install failed ($LASTEXITCODE)" }
 }
 

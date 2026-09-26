@@ -1,18 +1,18 @@
-# Install the Artifact Signing client tools on a build runner: the signtool
-# build that can load the signing dlib, plus the dlib itself. Build tooling, not
-# a shipped runtime.
+# Install the Artifact Signing client dlib on a build runner, plus the signtool
+# build that can load it. Build tooling, not a shipped runtime.
 #
-# Two sources, in order. winget is the documented one but needs a package
-# manager that is not guaranteed to be reachable from an unattended service
-# account; the NuGet payload is the same files in a zip and needs nothing but
-# a download. The fallback exports SPECTRAPDF_SIGN_DLIB so the resolver in
-# windows-signing.ps1 takes the extracted copy rather than searching for an
-# install that never happened.
+# The dlib runs inside signtool in the release job, so it comes from exactly one
+# pinned NuGet package and is refused unless the .nupkg bytes match the SHA-256
+# below; nothing is extracted before that check. The pin was cross-checked
+# against the SHA-512 packageHash nuget.org publishes in the package's catalog
+# entry. A pre-existing or package-manager install is never used: either could
+# be any version. The script exports SPECTRAPDF_SIGN_DLIB, which the resolver in
+# windows-signing.ps1 takes ahead of any installed copy.
 
 param(
-    [string]$NuGetPackage = "Microsoft.ArtifactSigning.Client",
-    [string]$ExtractRoot = "$env:RUNNER_TEMP\artifact-signing-client",
-    # Exercises the NuGet branch on a machine that already carries an install.
+    [string]$ExtractRoot = "",
+    # Accepted and ignored: release-redo passes one argument list to every
+    # tag's copy of this script, and older copies take this switch.
     [switch]$SkipWinget
 )
 
@@ -21,80 +21,48 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-signing.ps1")
 . (Join-Path $PSScriptRoot "download-retry.ps1")
 
-function Test-ToolsPresent {
-    try {
-        $dlib = Get-ArtifactSigningDlibPath
-        Write-Host "artifact signing dlib: $dlib"
-        return $true
-    } catch {
-        return $false
+$SigningClientPackage = "microsoft.artifactsigning.client"
+$SigningClientVersion = "1.0.128"
+$SigningClientSha256 = "74bd7d27e6ce1051409c38d9b46bc8df0400ecd643d51ffbf2ac00869061e40b"
+$SigningClientUrl = "https://api.nuget.org/v3-flatcontainer/$SigningClientPackage/$SigningClientVersion/$SigningClientPackage.$SigningClientVersion.nupkg"
+
+function Install-PinnedSigningClient {
+    param([Parameter(Mandatory)][string]$Root)
+    if (Test-Path -LiteralPath $Root) { Remove-Item -LiteralPath $Root -Recurse -Force }
+    New-Item -ItemType Directory -Path $Root | Out-Null
+
+    $nupkg = Join-Path $Root "$SigningClientPackage.$SigningClientVersion.nupkg"
+    Write-Host "install-signing-tools: fetching $SigningClientPackage $SigningClientVersion"
+    Invoke-DownloadWithRetry -Description "$SigningClientPackage $SigningClientVersion" -OutFile $nupkg -Download {
+        Invoke-WebRequest -Uri $SigningClientUrl -OutFile $nupkg -UseBasicParsing -TimeoutSec $DownloadRetryTimeoutSeconds
     }
+    $actual = (Get-FileHash -LiteralPath $nupkg -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $SigningClientSha256) {
+        Remove-Item -LiteralPath $nupkg -Force -ErrorAction SilentlyContinue
+        throw "$SigningClientPackage $SigningClientVersion has SHA-256 $actual; the pin is $SigningClientSha256"
+    }
+
+    $extracted = Join-Path $Root "package"
+    # Expand-Archive refuses any extension but .zip; the zip reader does not care.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($nupkg, $extracted)
+    $dlibs = @(Get-ChildItem -LiteralPath $extracted -Recurse -Filter "Azure.CodeSigning.Dlib.dll" -File)
+    $x64 = @($dlibs | Where-Object { $_.FullName -like "*\x64\*" })
+    if ($x64.Count -gt 0) { $dlibs = $x64 }
+    if ($dlibs.Count -eq 0) { throw "install-signing-tools: $SigningClientPackage $SigningClientVersion carries no Azure.CodeSigning.Dlib.dll" }
+    return $dlibs[0].FullName
 }
 
-# Everything ahead of the NuGet fetch is opportunistic: a probe or a diagnostic
-# that throws must not cost the release the fallback, which is the only branch
-# that is verified to produce the dlib. The fetch itself is the sole fatal path.
-try {
-    if (-not $SkipWinget -and (Test-ToolsPresent)) {
-        Write-Host "install-signing-tools: the client tools are already present"
-        exit 0
+if ($MyInvocation.InvocationName -ne ".") {
+    if (-not $ExtractRoot) {
+        $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
+        $ExtractRoot = Join-Path $tempRoot "artifact-signing-client"
     }
+    $dlib = Install-PinnedSigningClient -Root $ExtractRoot
+    $env:SPECTRAPDF_SIGN_DLIB = $dlib
+    if ($env:GITHUB_ENV) { Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTRAPDF_SIGN_DLIB=$dlib" }
+    Write-Host "install-signing-tools: using the pinned payload at $dlib"
 
-    $winget = if ($SkipWinget) { $null } else { Get-Command winget.exe -ErrorAction SilentlyContinue }
-    if ($winget) {
-        Write-Host "install-signing-tools: trying winget"
-        & $winget.Source install -e --id Microsoft.Azure.ArtifactSigningClientTools `
-            --accept-package-agreements --accept-source-agreements --disable-interactivity
-        Write-Host "install-signing-tools: winget exited $LASTEXITCODE"
-        if (Test-ToolsPresent) { exit 0 }
-        # A winget install that reports success but leaves nothing the resolver
-        # can find is only diagnosable from the uninstall entries it did write.
-        $registered = @(Get-ArtifactSigningInstallHits)
-        if ($registered.Count -eq 0) {
-            Write-Host "install-signing-tools: no signing-client uninstall entry is registered"
-        } else {
-            foreach ($hit in $registered) {
-                Write-Host "install-signing-tools: registered '$($hit.DisplayName)' at '$($hit.InstallLocation)'"
-            }
-        }
-    } elseif ($SkipWinget) {
-        Write-Host "install-signing-tools: skipping winget"
-    } else {
-        Write-Host "install-signing-tools: winget is not on PATH"
-    }
-} catch {
-    Write-Host "install-signing-tools: pre-fallback step failed, continuing to the NuGet payload: $($_.Exception.Message)"
+    # The dlib is only half of it: signtool must be a build new enough to load it.
+    Get-SignToolPath | ForEach-Object { Write-Host "install-signing-tools: signtool $_" }
 }
-
-# NuGet fallback: a .nupkg is a zip, so no NuGet client is required.
-if (-not $ExtractRoot) { $ExtractRoot = Join-Path ([System.IO.Path]::GetTempPath()) "artifact-signing-client" }
-if (Test-Path -LiteralPath $ExtractRoot) { Remove-Item -LiteralPath $ExtractRoot -Recurse -Force }
-New-Item -ItemType Directory -Path $ExtractRoot | Out-Null
-
-$index = Invoke-DownloadWithRetry -Description "$NuGetPackage version index" -Download {
-    Invoke-RestMethod -Uri "https://api.nuget.org/v3-flatcontainer/$($NuGetPackage.ToLowerInvariant())/index.json" `
-        -TimeoutSec $DownloadRetryTimeoutSeconds
-}
-$version = @($index.versions)[-1]
-$nupkg = Join-Path $ExtractRoot "$NuGetPackage.$version.nupkg"
-Write-Host "install-signing-tools: fetching $NuGetPackage $version from nuget.org"
-& curl.exe --fail --silent --show-error --location @(Get-CurlRetryArguments) `
-    -o $nupkg "https://api.nuget.org/v3-flatcontainer/$($NuGetPackage.ToLowerInvariant())/$version/$($NuGetPackage.ToLowerInvariant()).$version.nupkg"
-if ($LASTEXITCODE -ne 0) { throw "install-signing-tools: could not download $NuGetPackage $version" }
-
-$extracted = Join-Path $ExtractRoot "package"
-# Expand-Archive refuses any extension but .zip; the zip reader does not care.
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::ExtractToDirectory($nupkg, $extracted)
-$dlibs = @(Get-ChildItem -LiteralPath $extracted -Recurse -Filter "Azure.CodeSigning.Dlib.dll" -File)
-$x64 = @($dlibs | Where-Object { $_.FullName -like "*\x64\*" })
-if ($x64.Count -gt 0) { $dlibs = $x64 }
-if ($dlibs.Count -eq 0) { throw "install-signing-tools: $NuGetPackage $version carries no Azure.CodeSigning.Dlib.dll" }
-$dlib = $dlibs[0].FullName
-
-$env:SPECTRAPDF_SIGN_DLIB = $dlib
-if ($env:GITHUB_ENV) { Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTRAPDF_SIGN_DLIB=$dlib" }
-Write-Host "install-signing-tools: using the NuGet payload at $dlib"
-
-# The dlib is only half of it: signtool must be a build new enough to load it.
-Get-SignToolPath | ForEach-Object { Write-Host "install-signing-tools: signtool $_" }
