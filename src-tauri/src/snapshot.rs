@@ -20,7 +20,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::ipc::{InvokeBody, Request};
 use windows::core::w;
-use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
+use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     RegisterClipboardFormatW, SetClipboardData,
@@ -102,16 +102,16 @@ impl Drop for MovableBlock {
 }
 
 /// Open the clipboard, retrying while another application holds it.
-fn open_clipboard() -> Result<(), String> {
+fn open_clipboard_with(
+    owner: Option<isize>,
+    mut open: impl FnMut(Option<isize>) -> Result<(), String>,
+) -> Result<(), String> {
     let mut last = String::new();
     for attempt in 0..OPEN_ATTEMPTS {
-        // A null window handle associates the clipboard with the current
-        // task, which is what a transient write wants: no window is claiming
-        // to render formats on demand.
-        match unsafe { OpenClipboard(None) } {
+        match open(owner) {
             Ok(()) => return Ok(()),
-            Err(e) => {
-                last = e.to_string();
+            Err(error) => {
+                last = error;
                 if attempt + 1 < OPEN_ATTEMPTS {
                     sleep(OPEN_RETRY);
                 }
@@ -119,6 +119,13 @@ fn open_clipboard() -> Result<(), String> {
         }
     }
     Err(format!("Another application is holding the clipboard: {last}"))
+}
+
+fn open_clipboard(owner: Option<isize>) -> Result<(), String> {
+    open_clipboard_with(owner, |owner| {
+        unsafe { OpenClipboard(owner.map(|handle| HWND(handle as *mut _))) }
+            .map_err(|e| e.to_string())
+    })
 }
 
 /// Read just the DIB dimensions while the clipboard is held open. The
@@ -140,7 +147,7 @@ fn dib_dimensions(
 
 /// Read the width/height back out of whatever DIB the clipboard now holds.
 fn read_back(png_format: u32) -> Result<ClipboardImage, String> {
-    open_clipboard()?;
+    open_clipboard(None)?;
     let result = (|| -> Result<ClipboardImage, String> {
         let mut formats = Vec::new();
         if unsafe { IsClipboardFormatAvailable(CF_DIB.0 as u32) }.is_ok() {
@@ -191,7 +198,10 @@ fn header_number(request: &Request<'_>, name: &str) -> Result<usize, String> {
 /// where the split is. Synchronous deliberately — Tauri runs a non-async
 /// command on the main thread, and the clipboard is owned per task.
 #[tauri::command]
-pub fn copy_image_to_clipboard(request: Request<'_>) -> Result<ClipboardImage, String> {
+pub fn copy_image_to_clipboard(
+    window: tauri::WebviewWindow,
+    request: Request<'_>,
+) -> Result<ClipboardImage, String> {
     let body = match request.body() {
         InvokeBody::Raw(bytes) => bytes,
         InvokeBody::Json(_) => {
@@ -210,8 +220,15 @@ pub fn copy_image_to_clipboard(request: Request<'_>) -> Result<ClipboardImage, S
     let mut dib_block = MovableBlock::new(dib)?;
     let mut png_block = if png.is_empty() { None } else { Some(MovableBlock::new(png)?) };
     let png_format = unsafe { RegisterClipboardFormatW(w!("PNG")) };
+    let owner = window
+        .hwnd()
+        .map(|handle| handle.0 as isize)
+        .map_err(|e| format!("Could not access the clipboard owner window: {e}"))?;
 
-    open_clipboard()?;
+    // EmptyClipboard clears ownership. Windows requires a real owner window
+    // before SetClipboardData can publish the formats; a null owner makes the
+    // next call fail even though OpenClipboard and EmptyClipboard succeeded.
+    open_clipboard(Some(owner))?;
     let wrote = (|| -> Result<(), String> {
         unsafe { EmptyClipboard() }.map_err(|e| format!("Could not clear the clipboard: {e}"))?;
         dib_block.publish(CF_DIB.0 as u32)?;
@@ -305,6 +322,18 @@ fn percent_decode(value: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opening_the_clipboard_for_a_write_keeps_the_owner_window() {
+        let owner = 123isize;
+        let mut seen = Vec::new();
+        open_clipboard_with(Some(owner), |passed| {
+            seen.push(passed);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(seen, vec![Some(owner)]);
+    }
 
     #[test]
     fn a_replaced_short_dib_is_refused_before_reading_its_header() {
