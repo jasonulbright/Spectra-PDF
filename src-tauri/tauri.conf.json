@@ -17,6 +17,10 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "Jason Ulbright",
+    "copyright": "Copyright (c) 2026 Jason Ulbright",
+    "shortDescription": "Open-source PDF workbench for Windows",
+    "longDescription": "Open-source PDF workbench for Windows",
     "createUpdaterArtifacts": true,
     "licenseFile": "../vendor/icc/Adobe-Color-Profile-License.txt",
     "targets": ["nsis"],
