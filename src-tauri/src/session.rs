@@ -795,8 +795,12 @@ fn load_from(
     crate::staging::reclaim_record_stages(path, own, running);
     let failure = match crate::staging::read_record(path) {
         Ok(None) => return Session::default(),
-        Ok(Some(bytes)) => match serde_json::from_slice(&bytes) {
-            Ok(session) => return session,
+        Ok(Some(bytes)) => match serde_json::from_slice::<Session>(&bytes) {
+            Ok(session) if session.version <= SESSION_VERSION => return session,
+            Ok(session) => format!(
+                "unsupported session version {} (current version is {})",
+                session.version, SESSION_VERSION
+            ),
             Err(e) => e.to_string(),
         },
         Err(e) => e.to_string(),
@@ -1289,6 +1293,51 @@ mod tests {
         let session: Session = serde_json::from_str(lean).unwrap();
         assert_eq!(session.windows[0].files, Vec::<String>::new());
         assert_eq!(session.windows[0].monitor, "");
+    }
+
+    #[test]
+    fn a_future_session_version_is_preserved_instead_of_downgraded() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SESSION_FILE);
+        let future = br#"{"version":2,"windows":[],"futureState":{"keep":true}}"#;
+        std::fs::write(&path, future).unwrap();
+        let unreadable = UnreadableRecords::new();
+
+        assert_eq!(
+            load_from(&path, 4100, |_| false, &unreadable),
+            Session::default()
+        );
+
+        let aside = dir.path().join(format!("{SESSION_FILE}.unreadable"));
+        assert_eq!(std::fs::read(&aside).unwrap(), future);
+        assert!(!path.exists());
+        assert_eq!(
+            unreadable.take(),
+            vec![UnreadableRecord {
+                record: LaunchRecord::Session,
+                kept_as: Some(aside.to_string_lossy().into_owned()),
+            }]
+        );
+
+        write_at(
+            &path,
+            &Session {
+                version: SESSION_VERSION,
+                ..Session::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(&aside).unwrap(),
+            future,
+            "a later current-version write must not replace the preserved record"
+        );
+        assert_eq!(
+            serde_json::from_slice::<Session>(&std::fs::read(&path).unwrap())
+                .unwrap()
+                .version,
+            SESSION_VERSION
+        );
     }
 
     fn saved_session() -> Session {
