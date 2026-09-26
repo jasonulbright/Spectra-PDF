@@ -492,6 +492,12 @@ fn bmp_histogram(file: &mut std::fs::File, head: &BmpHeader) -> Option<Histogram
     if head.compression != 0 {
         return None;
     }
+    // The row buffer is sized from the header; a stride no file row can fill
+    // would request an allocation that aborts the process.
+    let length = file.metadata().ok()?.len();
+    if head.stride == 0 || head.stride > length {
+        return None;
+    }
     let mut header = head.clone();
     if header.palette_len > 0 {
         header.palette = read_palette(file, &header);
@@ -1140,6 +1146,13 @@ pub struct RowRecord {
     pub tester_answers: Vec<TesterAnswer>,
     pub elapsed_secs: u64,
     pub attached_scans: Vec<String>,
+    /// Full paths of this row's staged pages. They stay on disk until the row
+    /// ends because the tester is asked to open them.
+    #[serde(skip)]
+    pub staged: Vec<PathBuf>,
+    /// This row's scan scratch folders, removed by `finish_row`.
+    #[serde(skip)]
+    pub scratch: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1459,6 +1472,8 @@ pub fn run(options: &Options, console: &dyn Console) -> Result<Report, String> {
             tester_answers: Vec::new(),
             elapsed_secs: 0,
             attached_scans: Vec::new(),
+            staged: Vec::new(),
+            scratch: Vec::new(),
         };
         if let Applicability::Skipped(why) = applies(row.needs, &capabilities) {
             record.status = RowStatus::Skipped;
@@ -1495,6 +1510,7 @@ pub fn run(options: &Options, console: &dyn Console) -> Result<Report, String> {
             &mut record,
         );
         record.elapsed_secs = started.elapsed().as_secs();
+        finish_row(&mut record, console);
         console.say(&format!("  → {:?}", record.status));
         for note in &record.notes {
             console.say(&format!("    {note}"));
@@ -1616,9 +1632,24 @@ fn acquire(
         })
     });
 
-    match &outcome {
+    settle(record, scratch, &outcome, options, console);
+    outcome
+}
+
+/// Record one acquisition's outcome. The scratch folder is kept, not
+/// discarded: the row may still ask the tester to open its pages.
+fn settle(
+    record: &mut RowRecord,
+    scratch: PathBuf,
+    outcome: &Result<ScanResult, ScanRefusal>,
+    options: &Options,
+    console: &dyn Console,
+) {
+    record.scratch.push(scratch);
+    match outcome {
         Ok(result) => {
             record.pages = result.pages.iter().map(|p| page_evidence(Path::new(p))).collect();
+            record.staged.extend(result.pages.iter().map(PathBuf::from));
             record.interrupted = result.interrupted.as_ref().map(RefusalRecord::from);
             record.adjustments = result
                 .adjusted
@@ -1626,13 +1657,33 @@ fn acquire(
                 .filter_map(|a| serde_json::to_value(a).ok())
                 .collect();
             if options.attach_scans {
-                record.attached_scans = attach(&result.pages, &options.out, &record.id, console);
+                let saved = attach(&result.pages, &options.out, &record.id, &record.attached_scans, console);
+                record.attached_scans.extend(saved);
             }
         }
         Err(refusal) => record.refusal = Some(RefusalRecord::from(refusal)),
     }
-    let _ = crate::scanner::discard_scan_scratch(&scratch);
-    outcome
+}
+
+/// Remove every scratch folder the row staged pages in.
+fn finish_row(record: &mut RowRecord, console: &dyn Console) {
+    for scratch in record.scratch.drain(..) {
+        if let Err(refusal) = crate::scanner::discard_scan_scratch(&scratch) {
+            console.say(&format!("  {}", refusal.message));
+        }
+    }
+    record.staged.clear();
+}
+
+/// Tell the tester where the pages they are about to judge are.
+fn show_staged(console: &dyn Console, record: &RowRecord) {
+    if record.staged.is_empty() {
+        return;
+    }
+    console.say("  The scanned pages are here until this row ends:");
+    for page in &record.staged {
+        console.say(&format!("    {}", page.display()));
+    }
 }
 
 /// The settings a row asked for, as the report records them.
@@ -1659,7 +1710,7 @@ impl From<&ScanSettings> for SettingsRecord {
     }
 }
 
-fn attach(pages: &[String], out: &Path, row: &str, console: &dyn Console) -> Vec<String> {
+fn attach(pages: &[String], out: &Path, row: &str, taken: &[String], console: &dyn Console) -> Vec<String> {
     let dir = out.join("scan-test-scans").join(format!("row-{row}"));
     if let Err(e) = std::fs::create_dir_all(&dir) {
         console.say(&format!("  Could not save the scans beside the report: {e}"));
@@ -1669,7 +1720,18 @@ fn attach(pages: &[String], out: &Path, row: &str, console: &dyn Console) -> Vec
     for page in pages {
         let from = Path::new(page);
         let Some(name) = from.file_name() else { continue };
-        let to = dir.join(name);
+        let mut to = dir.join(name);
+        // Each acquisition stages from page-0000, so a second acquisition in
+        // one row must not replace the first one's copy.
+        let mut n = 2;
+        while taken.iter().chain(saved.iter()).any(|t| Path::new(t) == to) {
+            let stem = from.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            to = match from.extension() {
+                Some(ext) => dir.join(format!("{stem}-{n}.{}", ext.to_string_lossy())),
+                None => dir.join(format!("{stem}-{n}")),
+            };
+            n += 1;
+        }
         // A report from an earlier run in this folder names the scan it
         // replaces, so the scan is replaced whole or not at all.
         match crate::staging::export_copy(from, &to) {
@@ -1831,6 +1893,7 @@ fn run_row(
             record.pages = all;
             let verdict = judge_pages(&PageExpectation::new(CountRule::Exactly(2)), &record.pages);
             apply(record, verdict);
+            show_staged(console, record);
             ask_confirm(
                 console,
                 record,
@@ -1863,6 +1926,7 @@ fn run_row(
                 }
             }
             if record.status == RowStatus::Pass {
+                show_staged(console, record);
                 ask_confirm(
                     console,
                     record,
@@ -1896,6 +1960,7 @@ fn run_row(
                 }
             }
             if record.status == RowStatus::Pass {
+                show_staged(console, record);
                 ask_confirm(
                     console,
                     record,
@@ -2089,9 +2154,12 @@ fn run_row(
             {
                 let mut recovery = RowRecord {
                     pages: Vec::new(),
+                    staged: Vec::new(),
+                    scratch: Vec::new(),
+                    attached_scans: Vec::new(),
                     ..record.clone()
                 };
-                match acquire(
+                let recovered = acquire(
                     sessions,
                     &device,
                     settings,
@@ -2099,7 +2167,10 @@ fn run_row(
                     options,
                     &mut recovery,
                     false,
-                ) {
+                );
+                record.scratch.append(&mut recovery.scratch);
+                record.attached_scans.append(&mut recovery.attached_scans);
+                match recovered {
                     Ok(_) => record
                         .notes
                         .push("the scanner scanned normally again afterwards".to_string()),
@@ -2227,6 +2298,7 @@ fn run_row(
                 "  Open the {} page(s) that came back and read each one in turn.",
                 record.pages.len()
             ));
+            show_staged(console, record);
             let total = record.pages.len();
             let mut claimed = Vec::with_capacity(total);
             for index in 0..total {
@@ -2789,6 +2861,22 @@ mod tests {
         assert!(evidence.integrity.starts_with("truncated"), "{evidence:?}");
     }
 
+    /// A header whose row stride exceeds the file is refused before any row
+    /// buffer is sized from it: the row allocation would abort the process.
+    #[test]
+    fn a_bmp_header_larger_than_its_file_is_not_sampled() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("page-0000.bmp");
+        let mut bytes = bmp(4, 4, 300.0, &|_, _| [0, 0, 0]);
+        bytes[18..22].copy_from_slice(&i32::MAX.to_le_bytes());
+        bytes[28..30].copy_from_slice(&u16::MAX.to_le_bytes());
+        std::fs::write(&path, bytes).expect("write");
+        let evidence = page_evidence(&path);
+        assert_eq!(evidence.format, "bmp");
+        assert_eq!(evidence.content, ContentVerdict::Unverifiable);
+        assert!(evidence.histogram.is_none());
+    }
+
     #[test]
     fn a_png_reports_geometry_and_resolution_without_a_histogram() {
         let dir = tempfile::tempdir().expect("a temp dir");
@@ -2843,6 +2931,8 @@ mod tests {
                     tester_answers: Vec::new(),
                     elapsed_secs: 12,
                     attached_scans: Vec::new(),
+                    staged: Vec::new(),
+                    scratch: Vec::new(),
                 },
                 RowRecord {
                     id: "4".to_string(),
@@ -2859,6 +2949,8 @@ mod tests {
                     tester_answers: Vec::new(),
                     elapsed_secs: 0,
                     attached_scans: Vec::new(),
+                    staged: Vec::new(),
+                    scratch: Vec::new(),
                 },
             ],
             passed: 0,
@@ -2949,6 +3041,8 @@ mod tests {
             tester_answers: Vec::new(),
             elapsed_secs: 0,
             attached_scans: Vec::new(),
+            staged: Vec::new(),
+            scratch: Vec::new(),
         }
     }
 
@@ -3075,6 +3169,7 @@ mod tests {
             &[page.to_string_lossy().to_string()],
             out.path(),
             "1",
+            &[],
             &ScriptedConsole::eof(),
         );
         let report = empty_report();
@@ -3136,6 +3231,7 @@ mod tests {
                 &[page.to_string_lossy().to_string()],
                 out.path(),
                 "1",
+                &[],
                 &ScriptedConsole::eof(),
             )
         };
@@ -3146,5 +3242,59 @@ mod tests {
         let parsed: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&json).expect("json")).expect("parses");
         assert_eq!(parsed["device_name"], "Test Scanner");
+    }
+
+    /// Row 3 acquires twice and rows 3, 4, 5, 16 and 17 ask the tester to
+    /// open the pages after the acquisition: both scratch folders stay until
+    /// the row ends, and the second acquisition's page-0000 does not replace
+    /// the first one's attached copy.
+    #[cfg(windows)]
+    #[test]
+    fn a_row_keeps_its_pages_until_it_ends_and_attaches_every_acquisition() {
+        let out = tempfile::tempdir().expect("a temp dir");
+        let options = Options {
+            device: None,
+            rows: Vec::new(),
+            out: out.path().to_path_buf(),
+            attach_scans: true,
+        };
+        let console = ScriptedConsole::eof();
+        let mut record = blank_record();
+        record.id = "3".to_string();
+        let mut staged = Vec::new();
+        for body in [&b"BM colour original"[..], &b"BM mono original"[..]] {
+            let scratch = crate::scanner::new_scan_scratch().expect("a scratch folder");
+            let page = scratch.join("page-0000.bmp");
+            std::fs::write(&page, body).expect("a staged page");
+            let result = Ok(ScanResult {
+                pages: vec![page.to_string_lossy().to_string()],
+                cancelled: false,
+                interrupted: None,
+                scratch: scratch.to_string_lossy().to_string(),
+                dpi: 300,
+                adjusted: Vec::new(),
+                bytes: body.len() as u64,
+            });
+            settle(&mut record, scratch.clone(), &result, &options, &console);
+            staged.push((scratch, page));
+        }
+        for (_, page) in &staged {
+            assert!(page.exists(), "a page the tester is asked to open was already removed");
+        }
+        assert_eq!(record.staged.len(), 2);
+        let bodies: Vec<Vec<u8>> = record
+            .attached_scans
+            .iter()
+            .map(|p| std::fs::read(p).expect("attached"))
+            .collect();
+        assert_eq!(bodies, vec![b"BM colour original".to_vec(), b"BM mono original".to_vec()]);
+
+        finish_row(&mut record, &console);
+        for (scratch, _) in &staged {
+            assert!(!scratch.exists(), "the row's scratch outlived the row");
+        }
+        assert!(record.scratch.is_empty() && record.staged.is_empty());
+        let json = serde_json::to_value(&record).expect("serializes");
+        assert!(json.get("staged").is_none() && json.get("scratch").is_none());
     }
 }
