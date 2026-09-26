@@ -47,7 +47,7 @@ does not have.
 """
 
 from __future__ import annotations
-from engine.credentials import open_pdf
+from engine.credentials import copy_document, open_pdf
 
 from pathlib import Path
 from typing import NamedTuple
@@ -725,7 +725,7 @@ def apply_fixups(file: str, output: str, profile=None, profile_path: str = "",
             # Nothing to repair, and the caller asked for a copy: an output
             # that does not exist would report a success that wrote no file.
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_bytes(Path(file).read_bytes())
+            copy_document(file, output_path)
         after = before
     else:
         # The re-check is not optional. A fixup report carrying the BEFORE

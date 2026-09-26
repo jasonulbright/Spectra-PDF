@@ -51,7 +51,7 @@ import time
 from pathlib import Path
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import PERMISSIONS_HELD, gs_password_argv, open_pdf, print_resolution
 
 from . import gs_capability
 from .print_layout import (
@@ -119,6 +119,9 @@ _SUBSETS = ("all", "odd", "even")
 _LAYOUTS = ("single", "nup", "booklet", "poster")
 
 MIN_IMAGE_DPI, MAX_IMAGE_DPI = 72, 1200
+#: The finest raster a document whose owner permits only low-resolution
+#: printing (ISO 32000-2 Table 22, bit 12 clear) is spooled at.
+LOW_RESOLUTION_DPI = 150
 MIN_SHEET_PT, MAX_SHEET_PT = 72.0, 14400.0
 
 # Preview scratch dirs: distinctive prefix so cleanup can never be
@@ -298,15 +301,17 @@ def _run_jobs(args: list[str], jobs: int) -> None:
     args = [gs_capability.require(args[0] if args else "").path, *args[1:]]
     for _ in range(jobs):
         try:
-            result = subprocess.run(
-                args,
-                capture_output=True,
-                text=True,
-                timeout=JOB_TIMEOUT_S,
-                # stdin isolation: gs must never inherit the RPC pipe
-                # (-dSAFER does not sandbox std streams).
-                stdin=subprocess.DEVNULL,
-            )
+            # build_gs_args puts the input document last.
+            with gs_password_argv(args, args[-1]) as argv:
+                result = subprocess.run(
+                    argv,
+                    capture_output=True,
+                    text=True,
+                    timeout=JOB_TIMEOUT_S,
+                    # stdin isolation: gs must never inherit the RPC pipe
+                    # (-dSAFER does not sandbox std streams).
+                    stdin=subprocess.DEVNULL,
+                )
         except subprocess.TimeoutExpired:
             raise RuntimeError(
                 f"Print job timed out after {JOB_TIMEOUT_S}s — the printer "
@@ -372,6 +377,16 @@ def print_pdf(
             paper; this module never guesses).
     """
     validate_pdf(file)
+
+    resolution = print_resolution(file)
+    if resolution == "none":
+        raise PermissionError(PERMISSIONS_HELD)
+    if resolution == "low":
+        # The spool carries page images no finer than LOW_RESOLUTION_DPI,
+        # never the document's own content streams.
+        requested = as_image and isinstance(image_dpi, int) and not isinstance(image_dpi, bool)
+        image_dpi = min(image_dpi, LOW_RESOLUTION_DPI) if requested else LOW_RESOLUTION_DPI
+        as_image = True
 
     if not _preview and (not printer or not printer.strip()):
         raise ValueError("No printer specified")
@@ -694,6 +709,8 @@ def print_pdf(
     if as_image:
         result["as_image"] = True
         result["image_dpi"] = image_dpi
+    if resolution == "low":
+        result["print_resolution"] = "low"
     return result
 
 

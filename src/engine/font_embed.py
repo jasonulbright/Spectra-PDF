@@ -39,7 +39,7 @@ import re
 from pathlib import Path
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import copy_document, open_pdf
 from pikepdf import Array, Dictionary, Name
 
 from engine.font_embedding import font_embedded
@@ -571,7 +571,7 @@ def embed_missing_fonts(file: str, output: str, sources=("system",),
         # copy: an output that does not exist would report a success that
         # wrote no file.
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(Path(file).read_bytes())
+        copy_document(file, output_path)
     return {
         "output": str(output_path),
         "embedded": embedded,

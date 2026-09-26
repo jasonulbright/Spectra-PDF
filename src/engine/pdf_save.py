@@ -5,7 +5,7 @@ from typing import NamedTuple
 from xml.etree import ElementTree
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import lend_saved_copy, open_pdf
 
 _SENTINEL = object()
 
@@ -500,6 +500,7 @@ def save_pdf(
             Only for an operation whose whole purpose is removing protection,
             or one whose output is by construction not the source document.
     """
+    kept_user_encryption = False
     if "encryption" not in kwargs and not drop_encryption:
         source = pdf if encryption_source is _SENTINEL else encryption_source
         if source is pdf and getattr(pdf, "_spectra_preserve_encryption", False):
@@ -507,6 +508,7 @@ def save_pdf(
             # rebuild this protection is not held, so qpdf copies the
             # document's own /Encrypt, /O, /U and /P instead.
             kwargs["encryption"] = True
+            kept_user_encryption = True
         elif source is not None:
             encryption = source_encryption(source)
             if encryption is not None:
@@ -532,3 +534,5 @@ def save_pdf(
         # it absent after recovering an input that omitted this required key.
         pdf.trailer["/Size"] = 1
     pdf.save(target, **kwargs)
+    if kept_user_encryption:
+        lend_saved_copy(pdf, target)

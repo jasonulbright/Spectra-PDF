@@ -31,11 +31,10 @@ reported at once); output is written only after the full fill succeeds.
 """
 
 import math
-import shutil
 from pathlib import Path
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import copy_document, open_pdf
 from pikepdf import Dictionary, Name
 
 from engine import afcalc, fieldactions, formdata, xfa, xfa_datasets
@@ -2216,7 +2215,7 @@ def export_form_data(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "pdf":
         if Path(file).resolve() != output_path.resolve():
-            shutil.copyfile(file, output_path)
+            copy_document(file, output_path)
         with open_pdf(file) as pdf:
             values = form_data_values(pdf, fields, exclude, include_empty)
         return {"output": str(output_path), "format": fmt, "count": len(values)}
@@ -2284,7 +2283,7 @@ def import_form_data(
             )
     if not edits:
         if Path(file).resolve() != Path(output).resolve():
-            shutil.copyfile(file, output)
+            copy_document(file, output)
         out = {"output": str(output), "imported": 0}
         if unknown:
             out["unknown"] = unknown
@@ -2422,7 +2421,7 @@ def reset_form_fields(
         # Nothing to reset is a RESULT (the button did its job on an empty
         # scope), not an error — but the output must still exist.
         if Path(file).resolve() != Path(output).resolve():
-            shutil.copyfile(file, output)
+            copy_document(file, output)
         return {"output": str(output), "reset": 0}
 
     result = fill_form_fields(file, output, values, font_dir=font_dir)

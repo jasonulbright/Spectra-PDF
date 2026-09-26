@@ -232,3 +232,314 @@ def test_a_new_document_from_a_user_opened_source_refuses(user_opened, tmp_dir, 
     with pytest.raises(ValueError, match="held by an owner password"):
         run(user_opened, out, out_dir)
     assert [n for n in os.listdir(out_dir) if os.path.getsize(os.path.join(out_dir, n))] == []
+
+
+
+# -- doors that read a user-opened copy with the stored password --------------
+
+
+TEXT_CONTENT = (b"BT /F1 24 Tf 72 700 Td (Hello reader) Tj ET "
+                b"q /GS0 gs 1 0 0 rg 100 100 200 200 re f Q")
+
+
+def _allow(**granted):
+    names = ("accessibility", "extract", "modify_annotation", "modify_assembly",
+             "modify_form", "modify_other", "print_lowres", "print_highres")
+    return pikepdf.Permissions(**{n: granted.get(n, False) for n in names})
+
+
+def _text_protected(folder, name, allow, password=USER):
+    """A one-page document with text and a half-transparent fill, protected
+    with `password` as its user password and opened with it."""
+    path = os.path.join(folder, name)
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    font = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1, BaseFont=pikepdf.Name.Helvetica))
+    page.Resources = pikepdf.Dictionary(
+        Font=pikepdf.Dictionary(F1=font),
+        ExtGState=pikepdf.Dictionary(GS0=pikepdf.Dictionary(ca=0.5, CA=0.5)))
+    page.Contents = pdf.make_stream(TEXT_CONTENT)
+    pdf.save(path, encryption=pikepdf.Encryption(user=password, owner=OWNER, R=6, allow=allow))
+    pdf.close()
+    assert open_document(path, password)["opener"] == "user"
+    return path
+
+
+@pytest.fixture
+def readable(tmp_dir):
+    path = _text_protected(tmp_dir, "readable.pdf",
+                           _allow(extract=True, print_lowres=True, print_highres=True))
+    yield path
+    close_document(path)
+
+
+@pytest.fixture
+def copy_denied(tmp_dir):
+    path = _text_protected(tmp_dir, "denied.pdf", _allow())
+    yield path
+    close_document(path)
+
+
+def test_pdfminer_extracts_a_user_opened_copy(readable):
+    from engine.extract_text import extract_text
+
+    assert "Hello reader" in extract_text(readable)["text"]
+
+
+def test_pdfminer_extracts_when_copy_is_denied(copy_denied):
+    """The app gates copying; the engine gate is only the encryption."""
+    from engine.extract_text import extract_text
+
+    assert "Hello reader" in extract_text(copy_denied)["text"]
+
+
+def test_every_pdfminer_door_reads_a_user_opened_copy(readable, tmp_dir):
+    from engine.compare import compare_text
+    from engine.search_in_files import search_in_files
+    from engine.text_export import export_text
+
+    out = os.path.join(tmp_dir, "text.txt")
+    export_text(readable, out)
+    with open(out, encoding="utf-8") as handle:
+        assert "Hello reader" in handle.read()
+    rows = compare_text(readable, readable)["rows"]
+    assert any("Hello reader" in row.get("text", "") for row in rows)
+    found = search_in_files([readable], "reader")
+    assert found["hits"] and not found["errors"]
+
+
+def test_without_the_credential_pdfminer_still_refuses(readable, tmp_dir):
+    from pdfminer.pdfdocument import PDFPasswordIncorrect
+
+    from engine.extract_text import extract_text
+
+    copy = os.path.join(tmp_dir, "unlent.pdf")
+    with open(readable, "rb") as src, open(copy, "wb") as dst:
+        dst.write(src.read())
+    with pytest.raises(PDFPasswordIncorrect):
+        extract_text(copy)
+
+
+def test_health_reports_on_a_user_opened_copy(readable, tmp_dir):
+    from engine.document_health import document_health
+
+    assert document_health(readable)["status"] == "collected"
+    scratch = os.path.join(tmp_dir, "health-scratch.pdf")
+    with open(readable, "rb") as src, open(scratch, "wb") as dst:
+        dst.write(src.read())
+    report = document_health(scratch, password=USER)
+    assert report["status"] == "collected"
+    assert not [f for f in report["facts"] if f.get("code") == "document.encrypted"]
+
+
+def test_a_saved_scratch_copy_borrows_the_credential_until_the_original_closes(readable, tmp_dir):
+    from engine.pdf_save import save_pdf
+
+    scratch = os.path.join(tmp_dir, "scratch.pdf")
+    with credentials.open_pdf(readable) as pdf:
+        save_pdf(pdf, scratch)
+    assert get_page_count(scratch)["pages"] == 1
+    close_document(readable)
+    with pytest.raises(pikepdf.PasswordError):
+        get_page_count(scratch)
+
+
+def test_a_byte_copy_and_a_lent_copy_read_with_the_credential(readable, tmp_dir):
+    copied = os.path.join(tmp_dir, "copied.pdf")
+    credentials.copy_document(readable, copied)
+    assert get_page_count(copied)["pages"] == 1
+    close_document(copied)
+    with pytest.raises(pikepdf.PasswordError):
+        get_page_count(copied)
+    with credentials.lent(readable, copied):
+        assert get_page_count(copied)["pages"] == 1
+    with pytest.raises(pikepdf.PasswordError):
+        get_page_count(copied)
+
+
+def test_a_version_copy_of_a_user_opened_document_reads_back(readable, tmp_dir):
+    from engine.reversion import set_pdf_version
+
+    out = os.path.join(tmp_dir, "same-version.pdf")
+    with credentials.open_pdf(readable) as pdf:
+        current = str(pdf.pdf_version)
+    set_pdf_version(readable, out, current)
+    assert _facts(out, OWNER)["owner"] is True
+
+
+def test_signing_a_user_opened_document_keeps_the_protection(tmp_dir):
+    from test_pades import _build_pki
+
+    from engine.signatures import sign_pdf, verify_signatures
+
+    path = _text_protected(tmp_dir, "sign.pdf", _allow(modify_form=True, modify_annotation=True))
+    try:
+        pki = _build_pki(tmp_dir)
+        signed = sign_pdf(path, path, pfx_path=pki["pfx"], password="pw", allow_in_place=True)
+        assert signed["valid"] and signed["intact"]
+        assert verify_signatures(path)["signature_count"] == 1
+        assert _facts(path, OWNER)["owner"] is True
+    finally:
+        close_document(path)
+
+
+def test_a_comment_summary_of_a_user_opened_document_refuses(tmp_dir):
+    from engine.comment_summary import summarize_comments
+    from engine.pdf_save import save_pdf
+
+    path = _text_protected(tmp_dir, "comments.pdf", _allow(extract=True))
+    try:
+        staged = path + ".tmp"
+        with credentials.open_pdf(path) as pdf:
+            note = pdf.make_indirect(pikepdf.Dictionary(
+                Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Text,
+                Rect=[72, 72, 92, 92], Contents=pikepdf.String("note")))
+            pdf.pages[0].Annots = pdf.make_indirect(pikepdf.Array([note]))
+            save_pdf(pdf, staged)
+        os.replace(staged, path)
+        out = os.path.join(tmp_dir, "summary.pdf")
+        with pytest.raises(ValueError, match="held by an owner password"):
+            summarize_comments(path, out)
+        assert not os.path.exists(out)
+    finally:
+        close_document(path)
+
+
+# -- Ghostscript --------------------------------------------------------------
+
+
+@pytest.mark.parametrize("password", [
+    "reader-pw", "a b", 'q"x', '"lead', "a\\b", "a\\", "a\\\\", 'a\\"b', "t\tx",
+    "#hash", "it's", "per%cent", "ünï€", " lead", "trail ", "@at", "-dx",
+])
+def test_the_argfile_line_round_trips_through_ghostscript(gs_path, tmp_dir, password):
+    import subprocess
+
+    from engine.credentials import gs_password_argv
+
+    path = os.path.join(tmp_dir, "gs-pw.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(72, 72))
+    pdf.save(path, encryption=pikepdf.Encryption(user=password, owner=OWNER, R=6))
+    pdf.close()
+    open_document(path, password)
+    try:
+        out = os.path.join(tmp_dir, "gs-pw.png")
+        cmd = [gs_path, "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=png16m",
+               "-r10", f"-sOutputFile={out}", path]
+        with gs_password_argv(cmd, path) as argv:
+            subprocess.run(argv, capture_output=True, stdin=subprocess.DEVNULL, check=False)
+        assert os.path.isfile(out)
+    finally:
+        close_document(path)
+
+
+@pytest.mark.parametrize("password", ["a b\\", '"x\\', 'q\\"x\\', "line\nbreak"])
+def test_a_password_with_no_argfile_spelling_refuses_by_name(password):
+    from engine.credentials import GhostscriptPasswordUnsupported, gs_password_line
+
+    with pytest.raises(GhostscriptPasswordUnsupported, match="cannot be handed to Ghostscript"):
+        gs_password_line(password)
+
+
+def _spy_subprocess(monkeypatch):
+    """Record every argv handed to `subprocess.run` / `Popen` while still
+    running the real process, and check each argument file while it exists."""
+    import subprocess
+
+    seen: list[list[str]] = []
+    real_run, real_popen = subprocess.run, subprocess.Popen
+
+    def run(args, *a, **k):
+        seen.append([str(x) for x in args])
+        for arg in seen[-1]:
+            if arg.startswith("@"):
+                with open(arg[1:], encoding="utf-8") as handle:
+                    assert USER in handle.read()
+        return real_run(args, *a, **k)
+
+    class Popen(real_popen):
+        def __init__(self, args, *a, **k):
+            seen.append([str(x) for x in args])
+            super().__init__(args, *a, **k)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "Popen", Popen)
+    return seen
+
+
+def _assert_no_password_in(seen):
+    assert seen
+    for argv in seen:
+        assert not any(USER in arg for arg in argv), argv
+        for arg in argv:
+            if arg.startswith("@"):
+                assert not os.path.exists(arg[1:]), "the argument file outlives the run"
+
+
+def test_gs_doors_read_a_user_opened_copy_without_the_password_in_argv(
+        readable, tmp_dir, gs_path, monkeypatch):
+    from engine.flattener import flatten_transparency
+    from engine.image_export import export_images
+    from engine.object_inspector import inspect_point
+    from engine.separations import render_separations
+
+    seen = _spy_subprocess(monkeypatch)
+    images = export_images(readable, os.path.join(tmp_dir, "img.png"), dpi=36, gs_path=gs_path)
+    assert images["outputs"] and all(os.path.getsize(p) for p in images["outputs"])
+    plates = render_separations(readable, page=1, dpi=72, gs_path=gs_path, reuse=False)
+    assert plates["plates"]
+    point = inspect_point(readable, page=1, x=150, y=150, plates=plates["plates"],
+                          plates_dir=plates["dir"], gs_path=gs_path)
+    assert point["objects"]
+    flat = os.path.join(tmp_dir, "flat.pdf")
+    flatten_transparency(readable, flat, gs_path=gs_path)
+    assert _facts(flat, OWNER)["owner"] is True
+    _assert_no_password_in(seen)
+    assert any(arg.startswith("@") for argv in seen for arg in argv)
+
+
+def _preview(path, gs_path):
+    from engine.printer import print_preview
+
+    return print_preview(path, gs_path=gs_path, dpi=36, max_pages=1,
+                         sheet_width=612, sheet_height=792)
+
+
+def test_print_preview_renders_a_user_opened_copy(readable, gs_path, monkeypatch):
+    seen = _spy_subprocess(monkeypatch)
+    result = _preview(readable, gs_path)
+    assert result["pages"] and all(os.path.isfile(p) for p in result["pages"])
+    assert not any(stage.startswith("rasterize") for stage in result["prepass"])
+    _assert_no_password_in(seen)
+
+
+def test_low_resolution_print_spools_page_images(tmp_dir, gs_path, monkeypatch):
+    path = _text_protected(tmp_dir, "lowres.pdf", _allow(print_lowres=True))
+    try:
+        assert credentials.print_resolution(path) == "low"
+        seen = _spy_subprocess(monkeypatch)
+        result = _preview(path, gs_path)
+        assert "rasterize@150dpi" in result["prepass"]
+        assert result["pages"]
+        _assert_no_password_in(seen)
+    finally:
+        close_document(path)
+
+
+def test_print_is_refused_by_name_when_the_owner_withholds_it(copy_denied, gs_path):
+    with pytest.raises(PermissionError, match="held by an owner password"):
+        _preview(copy_denied, gs_path)
+
+
+def test_print_resolution_follows_the_owner_permissions(tmp_dir):
+    high = _text_protected(tmp_dir, "high.pdf", _allow(print_lowres=True, print_highres=True))
+    none = _text_protected(tmp_dir, "none.pdf", _allow())
+    try:
+        assert credentials.print_resolution(high) == "high"
+        assert credentials.print_resolution(none) == "none"
+        assert credentials.print_resolution(os.path.join(tmp_dir, "unknown.pdf")) == "high"
+    finally:
+        close_document(high)
+        close_document(none)

@@ -15,8 +15,8 @@ a scheduled task alike, so this is registered as a step and inherits it.
 """
 
 from pathlib import Path
-import shutil
 
+from engine.credentials import copy_document
 from engine.incremental import signature_policy, signed_edit_decision
 from engine.redact import redact
 from engine.redact_marks import save_redaction_marks
@@ -123,7 +123,7 @@ def search_and_redact(
         # next command reads the file. In place there is nothing to write.
         if Path(file).resolve() != Path(output).resolve():
             Path(output).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(file, output)
+            copy_document(file, output)
         return result
 
     if marks_only:

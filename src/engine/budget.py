@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 
 from . import gs_capability
+from .credentials import gs_password_argv
 
 
 def derive(
@@ -138,4 +139,7 @@ def gs(cmd: list[str], *, what: str, path: str | Path, pages: int = 0,
     except OSError:
         pass
     allowed = derive(base=base, size_bytes=size, pages=pages, per_mb=per_mb, per_page=per_page)
-    return run(cmd, what=what, budget=allowed, size_bytes=size, pages=pages, text=text)
+    # `path` sizes the budget and is not always the document gs reads, which
+    # every caller passes last.
+    with gs_password_argv(cmd, path, cmd[-1]) as argv:
+        return run(argv, what=what, budget=allowed, size_bytes=size, pages=pages, text=text)

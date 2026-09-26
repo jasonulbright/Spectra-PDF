@@ -19,9 +19,9 @@ creates EVERY candidate, because a run with no reviewer has nobody to ask.
 """
 
 from pathlib import Path
-import shutil
 
 from engine.afemit import DETECTED_DATE_FORMAT
+from engine.credentials import copy_document
 from engine.form_authoring import add_form_fields, existing_field_names
 from engine.form_detect import MAX_CANDIDATES_DEFAULT, detect_form_fields
 
@@ -152,7 +152,7 @@ def create_detected_fields(
     if not rows:
         if Path(file).resolve() != Path(output).resolve():
             Path(output).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(file, output)
+            copy_document(file, output)
         return {"output": str(output), "created": 0, "names": [], "candidates": 0}
     specs = specs_from_candidates(rows, existing_field_names(file))
     result = add_form_fields(file, output, specs, allow_signed=allow_signed, font_dir=font_dir)

@@ -1,13 +1,12 @@
 """Truthful PDF version declarations, with verified atomic publication."""
 
 from pathlib import Path
-import shutil
 from io import BytesIO
 
 from lxml import etree
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import copy_document, open_pdf
 from engine.inplace import staged_write
 from engine.pdf_save import encryption_profile, save_pdf
 from engine.pdf_version import effective_version, parse_version, version_facts
@@ -116,7 +115,7 @@ def set_pdf_version(
             else:
                 # Do not rewrite signed, encrypted or conforming bytes when
                 # their effective requirement already matches the request.
-                shutil.copyfile(input_path, staged)
+                copy_document(input_path, staged)
         if changed:
             from engine.incremental import finalize_preserving_signatures
 
