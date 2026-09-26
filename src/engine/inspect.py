@@ -26,12 +26,19 @@ def check_encrypted(file: str) -> dict:
 
 
 def unlock(file: str, password: str) -> dict:
-    """Open an encrypted PDF with password and save decrypted to same path."""
+    """Open an encrypted PDF with password and save decrypted to same path.
+
+    ISO 32000-2 7.6.4.1: the user password grants only the permissions the
+    owner set, so it cannot remove the protection. A document opened with it
+    refuses and leaves the file unchanged."""
+    from engine.encrypt import _require_owner_authority
+
     file_path = Path(file)
     fd, tmp_path = tempfile.mkstemp(suffix=".pdf", dir=file_path.parent)
     os.close(fd)
     try:
         with pikepdf.open(file, password=password) as pdf:
+            _require_owner_authority(pdf)
             # Removing the protection IS the operation.
             save_pdf(pdf, tmp_path, drop_encryption=True)
         os.replace(tmp_path, file)

@@ -776,3 +776,53 @@ def test_encrypt_refuses_to_replace_an_owner_password_it_was_not_given(owner_gat
     with pytest.raises(RuntimeError, match="held by an owner password"):
         encrypt(owner_gated_pdf, out, owner_password="mine")
     assert not os.path.exists(out)
+
+
+def test_unlock_with_the_user_password_keeps_the_owner_protection(tmp_dir):
+    path = os.path.join(tmp_dir, "user-and-owner.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    pdf.save(path, encryption=pikepdf.Encryption(owner="secret", user="reader", R=6, allow=LOCKED))
+    pdf.close()
+    before = open(path, "rb").read()
+    with pytest.raises(RuntimeError, match="held by an owner password"):
+        unlock(path, "reader")
+    assert open(path, "rb").read() == before
+    assert [n for n in os.listdir(tmp_dir) if n != "user-and-owner.pdf"] == []
+
+
+def _signed(tmp_dir):
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+    from pyhanko.sign import signers
+
+    from test_pades import _build_pki
+
+    pki = _build_pki(tmp_dir)
+    plain = os.path.join(tmp_dir, "plain.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    pdf.save(plain)
+    pdf.close()
+    signed = os.path.join(tmp_dir, "signed.pdf")
+    with open(plain, "rb") as inf, open(signed, "wb") as outf:
+        signers.sign_pdf(
+            IncrementalPdfFileWriter(inf),
+            signers.PdfSignatureMetadata(field_name="Sig1"),
+            signer=signers.SimpleSigner.load_pkcs12(pki["pfx"], passphrase=b"pw"),
+            output=outf,
+        )
+    return signed
+
+
+def test_encrypt_and_decrypt_of_a_signed_document_report_the_invalidation(tmp_dir):
+    signed = _signed(tmp_dir)
+    encrypted = os.path.join(tmp_dir, "encrypted.pdf")
+    result = encrypt(signed, encrypted, owner_password="o")
+    assert result["signatures_invalidated"] is True
+    result = decrypt(encrypted, os.path.join(tmp_dir, "decrypted.pdf"), "o")
+    assert result["signatures_invalidated"] is True
+
+
+def test_encrypt_of_an_unsigned_document_reports_no_signatures(sample_pdf, tmp_dir):
+    result = encrypt(sample_pdf, os.path.join(tmp_dir, "e.pdf"), owner_password="o")
+    assert "signatures_invalidated" not in result

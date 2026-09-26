@@ -612,6 +612,19 @@ def _verify_one(embedded, sources: "_TrustSources | None" = None,
     }
 
 
+def _signature_reader(f) -> PdfFileReader:
+    """A reader over `f` that can resolve encrypted objects.
+
+    ISO 32000-2 7.6.4.4: an empty user password opens a document without a
+    prompt, and pyHanko resolves nothing encrypted until a password is
+    supplied. A document that needs a real password still raises on the first
+    encrypted read rather than reading as one without signatures."""
+    reader = PdfFileReader(f)
+    if reader.encrypted:
+        reader.decrypt(b"")
+    return reader
+
+
 def verify_signatures(
     file: str, trust_roots: list | None = None, system_trust: bool = False,
     eutl_trust: bool = False, msctl_trust: bool = False,
@@ -641,7 +654,7 @@ def verify_signatures(
     # it. Read first: every signature's policy verdict is relative to it.
     certification = certification_of_file(file)
     with open(file, "rb") as f:
-        reader = PdfFileReader(f)
+        reader = _signature_reader(f)
         # Regular signatures only — a PAdES B-LTA document timestamp is a
         # different animal (it seals the DSS, it doesn't sign content) and
         # validate_pdf_signature would misreport it as a broken signature.

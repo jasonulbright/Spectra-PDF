@@ -4,6 +4,7 @@ import { restoreHistory } from './lib/disk-history';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
 import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/workspace-publication';
 import { withFileLock } from './lib/engine-lock';
+import { unlockFailureText } from './lib/engine-messages';
 import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter } from './lib/tauri-bridge';
 import type { PhysicalScreenPoint, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
 import { HandOffGate, flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
@@ -868,8 +869,8 @@ function AppContent(): React.ReactElement {
             try {
               await call('unlock', { file: workingPath, password: result.password });
               unlocked = true;
-            } catch {
-              error = 'Incorrect password. Please try again.';
+            } catch (e) {
+              error = unlockFailureText(e, 'Incorrect password. Please try again.');
             }
           }
         }
