@@ -357,9 +357,13 @@ def add(container, component, raw, expr):
     if raw is not None and raw != "":
         out.append([container, component, str(raw), expr])
 add("python.exe", "cpython", platform.python_version(), "platform.python_version()")
-import ssl, sqlite3, pyexpat, zlib, decimal
+import ssl, pyexpat, zlib, decimal
 add("libssl-3.dll", "openssl", ssl.OPENSSL_VERSION, "ssl.OPENSSL_VERSION")
-add("sqlite3.dll", "sqlite", sqlite3.sqlite_version, "sqlite3.sqlite_version")
+try:
+    import sqlite3
+    add("sqlite3.dll", "sqlite", sqlite3.sqlite_version, "sqlite3.sqlite_version")
+except ImportError:
+    pass
 add(origin("pyexpat"), "expat", pyexpat.EXPAT_VERSION, "pyexpat.EXPAT_VERSION")
 zc = origin("zlib") or "python314.dll"
 if hasattr(zlib, "ZLIBNG_VERSION"):
@@ -475,6 +479,7 @@ PYTHON_ROOT_FILES = {
     "sqlite3.dll": "sqlite",
     "libffi-8.dll": "libffi",
     "libtommath.dll": "libtommath",
+    "_lzma.pyd": "xz",
     "vcruntime140.dll": "msvc-runtime",
     "vcruntime140_1.dll": "msvc-runtime",
 }
@@ -540,7 +545,10 @@ def inventory_python(inv: Inventory, runtime: bool = True) -> None:
             if (rel, component) in covered and not _pe_version(path)[0]:
                 inv.embedded(tree, root, path, {component})
                 continue
-            inv.primary(tree, root, path, component)
+            # An extension module carries the interpreter's version resource,
+            # not the version of the library compiled into it.
+            stamp = "Python" if path.suffix.lower() == ".pyd" else None
+            inv.primary(tree, root, path, component, stamped_by=stamp)
             continue
         if in_site and path.suffix.lower() == ".dll":
             srel = _rel(path, site)
@@ -639,9 +647,14 @@ def inventory_tesseract(inv: Inventory, runtime: bool = True, manifest: Path | N
     tree = "tesseract"
     files = _manifest_files(manifest or REPO / TESSERACT_MANIFEST)
     if runtime:
+        # The report names the libraries tesseract.exe was built against; their
+        # code is in the DLLs beside it, so each row names the DLL it resolves to.
+        library = {TESSERACT_COMPONENTS.get(upstream): name for name, upstream in files.items()
+                   if name.lower().endswith(".dll") and (root / name).is_file()}
         report = _run([str(root / "tesseract.exe"), "--version"], root)
         for component, version, token in version_report_rows(report):
-            inv.add(tree, "tesseract.exe", component, version, "runtime", f'tesseract.exe --version: "{token}"')
+            code = f"{CODE_IN}{library[component]}" if component in library else ""
+            inv.add(tree, "tesseract.exe", component, version, "runtime", f'tesseract.exe --version: "{token}"{code}')
     for path in _pe_files(root):
         name = path.name
         if path.parent != root:
@@ -762,7 +775,9 @@ def inventory_libreoffice(inv: Inventory, runtime: bool = True) -> None:
     version, info = _pe_version(soffice)
     inv.add(tree, "program/soffice.exe", "libreoffice", version, "pe-version", _pe_evidence(info))
     covered: set[tuple[str, str]] = set()
-    if runtime:
+    # bundle-libreoffice.ps1 removes the embedded Python; a tree without it
+    # has no runtime to ask, and every remaining binary is read below.
+    if runtime and (program / "python.exe").is_file():
         probe = json.loads(_run([str(program / "python.exe"), "-I", "-c", LO_PYTHON_PROBE], program)
                            .strip().splitlines()[-1])
         for component, raw, expr, *where in probe:
@@ -913,18 +928,52 @@ def floor_for(version: str, floors: list[str]) -> str:
     return lowest
 
 
+CODE_IN = "; code in "
+ABSENT = "absent:"
+
+
+def resolve(rows: list[Row]) -> list[Row]:
+    """Each row with its version replaced by the physical library's, where it names one.
+
+    A row whose evidence ends `; code in <file>` reports what a binary was
+    built against; the code is the <file> row of the same tree and component.
+    It takes that row's version when that version is known, and keeps its own
+    otherwise.
+    """
+    physical = {(r[0], r[1], canonical(r[2])): r[3] for r in rows}
+    out = []
+    for r in rows:
+        head, sep, target = r[5].rpartition(CODE_IN)
+        known = physical.get((r[0], target, canonical(r[2]))) if sep else None
+        out.append((*r[:3], known, *r[4:]) if known not in (None, UNKNOWN) else r)
+    return out
+
+
 def breaches(rows: list[Row], advisories: list[tuple[str, ...]]) -> list[str]:
-    """Every shipped version below a floor, every EXEMPT row, and every floor naming nothing shipped.
+    """Every shipped version below a floor, every EXEMPT row, every floor naming nothing shipped,
+    and every `absent:<floor>` component that is shipped again.
 
     A disposition starting `EXEMPT:` is an owner-ruled exemption: its lines
-    start `EXEMPT:` and do not fail the gate.
+    start `EXEMPT:` and do not fail the gate. One line per tree, component,
+    resolved version and advisory: the files carrying that version are listed
+    on it, so one library is one finding however many files report it.
     """
     out = []
     by_component: dict[str, list[Row]] = {}
-    for r in rows:
+    for r in resolve(rows):
         by_component.setdefault(canonical(r[2]), []).append(r)
     unmatched: Counter = Counter()
     for component, floor, advisory, disposition in advisories:
+        if floor.strip().startswith(ABSENT):
+            # The component was removed from the bundle. Its return is a
+            # finding in itself, whatever its version; the recorded floor is
+            # the one to restore when the row goes back to a plain floor.
+            present = by_component.get(canonical(component), [])
+            if present:
+                files = ", ".join(dict.fromkeys(f"{r[0]}/{r[1]}" for r in present))
+                out.append(f"removed component shipped: {component} in {files}; restore floor "
+                           f"{floor.strip()[len(ABSENT):]} ({advisory})")
+            continue
         floors = [f.strip() for f in floor.split(",") if f.strip() not in ("-", "")]
         if not floors:
             continue
@@ -933,17 +982,23 @@ def breaches(rows: list[Row], advisories: list[tuple[str, ...]]) -> list[str]:
             unmatched[component.strip()] += 1
             continue
         exempt = disposition.strip().startswith("EXEMPT:")
+        groups: dict[tuple, list[str]] = {}
         for r in shipped:
             limit = floor_for(r[3] if r[3] != UNKNOWN else "", floors)
             cmp = compare_versions(r[3], limit) if r[3] != UNKNOWN else None
             if cmp is not None and cmp >= 0:
                 continue
-            if exempt:
-                out.append(f"EXEMPT: {component} {r[3]} in {r[0]}/{r[1]} below {limit} ({advisory})")
-            elif cmp is None:
-                out.append(f"unverifiable: {component} in {r[0]}/{r[1]} reports {r[3]!r}, floor {limit} ({advisory})")
+            kind = "exempt" if exempt else ("unverifiable" if cmp is None else "below")
+            key = (kind, r[0], version_key(r[3]) or r[3], limit)
+            groups.setdefault(key, [r[3]]).append(r[1])
+        for (kind, tree, _v, limit), (version, *containers) in groups.items():
+            where = f"{tree}/{', '.join(dict.fromkeys(containers))}"
+            if kind == "exempt":
+                out.append(f"EXEMPT: {component} {version} in {where} below {limit} ({advisory})")
+            elif kind == "unverifiable":
+                out.append(f"unverifiable: {component} in {where} reports {version!r}, floor {limit} ({advisory})")
             else:
-                out.append(f"below floor: {component} {r[3]} in {r[0]}/{r[1]} < {limit} ({advisory})")
+                out.append(f"below floor: {component} {version} in {where} < {limit} ({advisory})")
     for name, count in sorted(unmatched.items()):
         out.append(f"floor names no shipped component: {name} ({count} advisories)")
     return out

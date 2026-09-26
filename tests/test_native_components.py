@@ -1,5 +1,6 @@
 """The shipped native-component inventory and its advisory floors."""
 
+import hashlib
 import importlib.util
 import json
 import subprocess
@@ -297,3 +298,48 @@ def test_the_firebird_build_string_must_agree_with_its_major_minor():
     assert nc.signature_hits(b"\0NP-V3.0.7.33374 Firebird 3.0\0") == {
         ("firebird", "3.0.7.33374"): 'strings: "-V<v> Firebird <major.minor>"'}
     assert nc.signature_hits(b"\0NP-V6.3.7.33374 Firebird 3.0\0") == {}
+
+
+def test_one_library_reported_by_several_files_is_one_finding():
+    rows = [_row("cpython", "3.14.7", "python.exe"), _row("cpython", "3.14.7", "python314.dll"),
+            _row("sqlite", "3.50.4", "sqlite3.dll", source="runtime"), _row("sqlite", "3.50.4.0", "sqlite3.dll")]
+    problems = nc.breaches(rows, [("CPython", "3.14.8", "CVE-a", "-"), ("SQLite", "3.53.2", "CVE-b", "-")])
+    assert len(problems) == 2
+    assert "python/python.exe, python314.dll" in problems[0]
+    assert problems[1].count("sqlite3.dll") == 1
+
+
+def test_a_compile_time_report_resolves_to_the_library_that_carries_the_code():
+    rows = [_row("xz", "5.6.2", "liblzma-5.dll", tree="tesseract"),
+            _row("xz", "5.6.1", "tesseract.exe", tree="tesseract", source="runtime",
+                 evidence='tesseract.exe --version: "liblzma/5.6.1"; code in liblzma-5.dll')]
+    assert nc.breaches(rows, [("XZ Utils", "5.6.2", "CVE-2024-3094", "-")]) == []
+    problems = nc.breaches(rows, [("XZ Utils", "5.8.3", "CVE-c", "-")])
+    assert problems == ["below floor: XZ Utils 5.6.2 in tesseract/liblzma-5.dll, tesseract.exe < 5.8.3 (CVE-c)"]
+
+
+def test_a_compile_time_report_keeps_its_own_version_when_the_library_is_unknown():
+    rows = [_row("giflib", "unknown", "libgif-7.dll", tree="tesseract"),
+            _row("giflib", "5.2.1", "tesseract.exe", tree="tesseract", evidence="x; code in libgif-7.dll")]
+    problems = nc.breaches(rows, [("giflib", "5.2.2", "CVE-d", "-")])
+    assert any("giflib 5.2.1 in tesseract/tesseract.exe" in p for p in problems)
+    assert any(p.startswith("unverifiable") for p in problems)
+
+
+def test_an_extension_module_takes_its_library_version_from_the_evidence_file(tmp_path):
+    root = tmp_path / "resources" / "python"
+    root.mkdir(parents=True)
+    pyd = root / "_lzma.pyd"
+    pyd.write_bytes(b"MZ not a real image")
+    sha = hashlib.sha256(pyd.read_bytes()).hexdigest()
+    inv = nc.Inventory(tmp_path / "resources", {("python", "_lzma.pyd"): (sha, "xz", "5.2.5", "embed zip")})
+    inv.primary("python", root, pyd, "xz", stamped_by="Python")
+    assert [(r[2], r[3]) for r in inv.rows] == [("xz", "5.2.5")]
+
+
+def test_a_removed_component_that_returns_fails_the_gate():
+    advisories = [("GLib", "absent:2.82.1", "CVE-2024-52533", "removed")]
+    assert nc.breaches([_row("zlib", "1.3.2")], advisories) == []
+    problems = nc.breaches([_row("glib", "2.99.0", "libglib-2.0-0.dll", tree="tesseract")], advisories)
+    assert problems == ["removed component shipped: GLib in tesseract/libglib-2.0-0.dll; "
+                        "restore floor 2.82.1 (CVE-2024-52533)"]

@@ -22,7 +22,7 @@
 
 param(
     [string]$Msys2Root = $(if ($env:MSYS2_ROOT) { $env:MSYS2_ROOT } else { "C:\msys64" }),
-    [string]$Version = "4.6.0",
+    [string]$Version = "4.7.2",
     [string]$OutDir = "$PSScriptRoot\tesseract-libtiff"
 )
 
@@ -33,8 +33,8 @@ $ErrorActionPreference = "Stop"
 # publishers of the same number. The patch is that recipe's own, taken at the
 # commit that carried $Version, and only installs headers.
 $TarUrl = "https://download.osgeo.org/libtiff/tiff-$Version.tar.gz"
-$TarSha256 = "88B3979E6D5C7E32B50D7EC72FB15AF724F6AB2CBF7E10880C360A77E4B5D99A"
-$RecipeCommit = "3f3d7684e19dc172fb4d0819d5833c567d570d26"
+$TarSha256 = "672BD7D10AEE4606171AFB864F3570B83340F6A33E2C186DC0512F7145FFDF6A"
+$RecipeCommit = "d4d856ec99e57d5e0eb65e2b4c7ac9b4570c792d"
 $PatchUrl = "https://raw.githubusercontent.com/msys2/MINGW-packages/$RecipeCommit/mingw-w64-libtiff/0002-libtiff-install-headers.patch"
 $PatchSha256 = "493742947C8667655B6B89F2D7D27E92E1438A490ED86F50811112394B432A12"
 $RecipeUrl = "https://github.com/msys2/MINGW-packages/tree/$RecipeCommit/mingw-w64-libtiff"

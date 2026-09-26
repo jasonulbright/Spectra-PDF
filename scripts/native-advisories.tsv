@@ -7,6 +7,9 @@
 # each applies to its own release branch (same major.minor); a version on no listed
 # branch is held to the lowest listed floor.
 # A row with floor "-" and advisory "none" records a component audited clean.
+# Floor "-" with any other advisory records that the vulnerable part does not ship.
+# Floor "absent:<v>" records a removed component: the gate fails if it is shipped
+# again, and <v> is the floor to restore.
 # Reachability is recorded in the disposition; it never exempts a row.
 component	floor	advisory	disposition
 CPython	3.14.8	CVE-2026-15310	affects embedded 3.14.7; fixed on the 3.14 branch, no 3.14.8 release as of 2026-09-25; 3.12.14 not affected
@@ -100,11 +103,11 @@ Expat	2.8.4	CVE-2026-76956	affects every shipped copy; getentropy handling, not 
 Expat	2.8.4	CVE-2026-76957	affects every shipped copy
 Expat	2.8.5	CVE-2026-93990	affects every shipped copy; CPython 3.14 branch carries 2.8.5 (unreleased)
 zlib	1.3.2	CVE-2026-27171	affects 1.3.1 zlib1.dll in the Tesseract tree and 1.3.1 linked into pikepdf qpdf30 dll
-zlib	1.3.2	CVE-2026-22184	affects 1.3.1 by version; contrib/untgz only, not compiled into the shipped library
+zlib	-	CVE-2026-22184	not applicable to any shipped file: the defect is in contrib/untgz, a separate program that no shipped tree carries (no file named untgz* and no binary containing the string untgz under resources/, listing 2026-09-25); a version scanner still reports it against zlib 1.3.1; floor was 1.3.2
 XZ Utils	5.8.3	CVE-2026-34743	affects 5.2.5 linked into CPython _lzma.pyd and 5.6.2 liblzma-5.dll in the Tesseract tree
-XZ Utils	5.8.1	CVE-2025-31115	affects 5.6.2 liblzma-5.dll in the Tesseract tree (range 5.3.3alpha to 5.8.0)
+XZ Utils	5.2.0,5.8.1	CVE-2025-31115	affects 5.6.2 liblzma-5.dll in the Tesseract tree (range 5.3.3alpha to 5.8.0); the 5.2 branch floor 5.2.0 records that 5.2.5 (CPython _lzma.pyd) predates the range
 XZ Utils	5.2.6	CVE-2020-22916	affects 5.2.5 in CPython _lzma.pyd by version; disputed by upstream
-XZ Utils	5.6.2	CVE-2024-3094	not affected: shipped liblzma-5.dll is 5.6.2; libarchive-13.dll embeds the compile-time string liblzma/5.6.1
+XZ Utils	5.2.0,5.6.2	CVE-2024-3094	not affected: shipped liblzma-5.dll is 5.6.2; libarchive-13.dll embeds the compile-time string liblzma/5.6.1; only 5.6.0 and 5.6.1 carry the backdoor, so the 5.2 branch floor is 5.2.0
 libxml2	2.12.10	CVE-2024-56171	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
 libxml2	2.12.10	CVE-2025-24928	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
 libxml2	2.12.10	CVE-2025-27113	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
@@ -150,11 +153,11 @@ Tesseract	5.5.4	CVE-2026-88053	affects 5.4.0 and 5.5.3; upstream names no patche
 Tesseract	5.5.4	CVE-2026-88054	affects 5.4.0 and 5.5.3; upstream names no patched version; model-file loader, product loads its own models
 Tesseract	5.5.4	CVE-2026-73067	affects 5.4.0 and 5.5.3; upstream names no patched version; model-file loader, product loads its own models
 Tesseract	5.5.3	CVE-2026-73066	affects 5.4.0; fixed in 5.5.3
-giflib	5.2.2	CVE-2022-28506	affects 5.2.1 by version (libgif-7.dll in the Tesseract tree; micro version unverified); gif2rgb and getarg tools not shipped
-giflib	5.2.2	CVE-2023-39742	affects 5.2.1 by version (libgif-7.dll in the Tesseract tree; micro version unverified); gif2rgb and getarg tools not shipped
-giflib	5.2.2	CVE-2023-48161	affects 5.2.1 by version (libgif-7.dll in the Tesseract tree; micro version unverified); gif2rgb and getarg tools not shipped
-giflib	6.0.0	CVE-2024-45993	affects 5.2.2 in jbig2enc by version; gif2rgb tool not shipped
-giflib	6.1.2	CVE-2026-23868	affects every shipped giflib 5.x; upstream states tools only, not the library
+giflib	-	CVE-2022-28506	not applicable to any shipped file: the defect is in the gif2rgb tool; no giflib tool ships (no gif2rgb/giftool/giffix/giftext/gifclrmp/gifbuild file under resources/, and no binary contains DumpScreen2RGB, listing 2026-09-25); libgif-7.dll is 5.2.2 by MSYS2 package hash; a version scanner still reports it against 5.2.x; floor was 5.2.2
+giflib	-	CVE-2023-39742	not applicable to any shipped file: the defect is in getarg.c, compiled only into the giflib tools; no binary under resources/ contains GAPrintErrMsg (listing 2026-09-25); libgif-7.dll is 5.2.2 by MSYS2 package hash; floor was 5.2.2
+giflib	-	CVE-2023-48161	not applicable to any shipped file: the defect is in the gif2rgb tool (DumpScreen2RGB); no binary under resources/ contains it (listing 2026-09-25); libgif-7.dll is 5.2.2 by MSYS2 package hash; floor was 5.2.2
+giflib	-	CVE-2024-45993	not applicable to any shipped file: the defect is in the gif2rgb tool; no gif2rgb file or DumpScreen2RGB code under resources/ (listing 2026-09-25); a version scanner still reports it against giflib 5.2.2 (Tesseract libgif-7.dll, jbig2enc static); floor was 6.0.0
+giflib	-	CVE-2026-23868	not applicable to any shipped file: upstream states the giflib tools only, not the library; no giflib tool under resources/ (listing 2026-09-25); a version scanner still reports it against giflib 5.2.2; floor was 6.1.2
 giflib	6.1.4	CVE-2026-26740	affects 5.2.2 in jbig2enc by version; fixed in the giflib repository head, no release as of 2026-09-25
 libpng	1.6.47	CVE-2025-28162	affects 1.6.43 in the Tesseract tree
 libpng	1.6.47	CVE-2025-28164	affects 1.6.43 in the Tesseract tree
@@ -189,28 +192,28 @@ libarchive	3.8.0	CVE-2025-5917	affects 3.7.4 in the Tesseract tree
 libarchive	3.8.0	CVE-2025-5918	affects 3.7.4 in the Tesseract tree
 libarchive	3.8.2	CVE-2025-60753	affects 3.7.4 in the Tesseract tree
 libarchive	3.8.8	CVE-2026-45308	affects 3.7.4 in the Tesseract tree
-GLib	2.82.1	CVE-2024-52533	affects 2.80.2 in the Tesseract tree
-GLib	2.84.1	CVE-2025-4056	affects 2.80.2 in the Tesseract tree
-GLib	2.84.4	CVE-2025-6052	affects 2.80.2 in the Tesseract tree
-GLib	2.86.3	CVE-2025-13601	affects 2.80.2 in the Tesseract tree
-GLib	2.86.3	CVE-2025-14087	affects 2.80.2 in the Tesseract tree
-GLib	2.86.3	CVE-2025-14512	affects 2.80.2 in the Tesseract tree
-GLib	2.86.5	CVE-2026-58010	affects 2.80.2 in the Tesseract tree
-GLib	2.86.5	CVE-2026-58011	affects 2.80.2 in the Tesseract tree
-GLib	2.86.5	CVE-2026-58012	affects 2.80.2 in the Tesseract tree
-GLib	2.88.1	CVE-2026-58013	affects 2.80.2 in the Tesseract tree
-GLib	2.88.1	CVE-2026-58014	affects 2.80.2 in the Tesseract tree
-GLib	2.88.1	CVE-2026-58015	affects 2.80.2 in the Tesseract tree
-GLib	2.88.1	CVE-2026-58016	affects 2.80.2 in the Tesseract tree
-ICU	77.1	CVE-2025-5222	affects 75.1 in the Tesseract tree; genrb tool, not shipped
-PCRE2	10.48	CVE-2026-86145	affects 10.43 in the Tesseract tree; Tesseract 5.5.3 carries 10.47, also affected
-PCRE2	10.48	CVE-2026-89156	affects 10.43 in the Tesseract tree; Tesseract 5.5.3 carries 10.47, also affected
-PCRE2	10.48	CVE-2026-89157	affects 10.43 in the Tesseract tree; Tesseract 5.5.3 carries 10.47, also affected
-PCRE2	10.48	CVE-2026-89158	affects 10.43 in the Tesseract tree; Tesseract 5.5.3 carries 10.47, also affected
-PCRE2	10.48	CVE-2026-89160	affects 10.43 in the Tesseract tree; Tesseract 5.5.3 carries 10.47, also affected
-PCRE2	10.48	CVE-2026-89161	affects 10.43 in the Tesseract tree; Tesseract 5.5.3 carries 10.47, also affected
+GLib	absent:2.82.1	CVE-2024-52533	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.82.1 if GLib returns
+GLib	absent:2.84.1	CVE-2025-4056	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.84.1 if GLib returns
+GLib	absent:2.84.4	CVE-2025-6052	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.84.4 if GLib returns
+GLib	absent:2.86.3	CVE-2025-13601	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.86.3 if GLib returns
+GLib	absent:2.86.3	CVE-2025-14087	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.86.3 if GLib returns
+GLib	absent:2.86.3	CVE-2025-14512	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.86.3 if GLib returns
+GLib	absent:2.86.5	CVE-2026-58010	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.86.5 if GLib returns
+GLib	absent:2.86.5	CVE-2026-58011	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.86.5 if GLib returns
+GLib	absent:2.86.5	CVE-2026-58012	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.86.5 if GLib returns
+GLib	absent:2.88.1	CVE-2026-58013	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.88.1 if GLib returns
+GLib	absent:2.88.1	CVE-2026-58014	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.88.1 if GLib returns
+GLib	absent:2.88.1	CVE-2026-58015	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.88.1 if GLib returns
+GLib	absent:2.88.1	CVE-2026-58016	not shipped since 2026-09-25: the Tesseract GLib DLLs are outside the import closure of tesseract.exe and bundle-tesseract.ps1 no longer ships them; restore floor 2.88.1 if GLib returns
+ICU	-	CVE-2025-5222	not applicable to any shipped file: the defect is in the genrb tool; no genrb/icupkg file under resources/ (listing 2026-09-25); the Tesseract ICU 75 DLLs are no longer shipped; LibreOffice ICU 78.3 is above the floor; floor was 77.1
+PCRE2	absent:10.48	CVE-2026-86145	not shipped since 2026-09-25: libpcre2-8-0.dll was imported only by the removed GLib; restore floor 10.48 if PCRE2 returns
+PCRE2	absent:10.48	CVE-2026-89156	not shipped since 2026-09-25: libpcre2-8-0.dll was imported only by the removed GLib; restore floor 10.48 if PCRE2 returns
+PCRE2	absent:10.48	CVE-2026-89157	not shipped since 2026-09-25: libpcre2-8-0.dll was imported only by the removed GLib; restore floor 10.48 if PCRE2 returns
+PCRE2	absent:10.48	CVE-2026-89158	not shipped since 2026-09-25: libpcre2-8-0.dll was imported only by the removed GLib; restore floor 10.48 if PCRE2 returns
+PCRE2	absent:10.48	CVE-2026-89160	not shipped since 2026-09-25: libpcre2-8-0.dll was imported only by the removed GLib; restore floor 10.48 if PCRE2 returns
+PCRE2	absent:10.48	CVE-2026-89161	not shipped since 2026-09-25: libpcre2-8-0.dll was imported only by the removed GLib; restore floor 10.48 if PCRE2 returns
 FreeType	2.14.0	CVE-2026-23865	affects 2.13.2 in the Tesseract tree
-HarfBuzz	10.1.0	CVE-2024-56732	affects 8.5.0 in the Tesseract tree by version; hb-cairo code is not in the shipped DLL set
+HarfBuzz	-	CVE-2024-56732	not applicable to any shipped file: the defect is in hb-cairo; no binary under resources/ contains hb_cairo_ code (listing 2026-09-25); the Tesseract HarfBuzz 8.5.0 DLL is no longer shipped; floor was 10.1.0
 HarfBuzz	12.3.0	CVE-2026-22693	affects 8.5.0 in the Tesseract tree
 HarfBuzz	14.0.0	GHSA-q4gc-p4hh-3765	affects 8.5.0 in the Tesseract tree and 12.3.2 in LibreOffice; no CVE assigned
 curl	8.22.0	CVE-2026-13608	affects libcurl 8.21.0 in LibreOffice; LibreOffice 26.2.6 and 26.8.0 still pin 8.21.0
@@ -232,32 +235,32 @@ Firebird	3.0.14	CVE-2026-33337	affects 3.0.7 embedded in LibreOffice (Base datab
 Firebird	3.0.14	CVE-2026-34232	affects 3.0.7 embedded in LibreOffice (Base database engine); LibreOffice 26.8.0 carries 3.0.13, still affected
 Firebird	3.0.14	CVE-2026-35215	affects 3.0.7 embedded in LibreOffice (Base database engine); LibreOffice 26.8.0 carries 3.0.13, still affected
 Firebird	3.0.14	CVE-2026-40342	affects 3.0.7 embedded in LibreOffice (Base database engine); LibreOffice 26.8.0 carries 3.0.13, still affected
-PostgreSQL	15.19	CVE-2026-14662	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14663	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14664	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14666	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14668	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14669	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14670	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14671	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14672	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14673	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14677	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14678	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14679	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-14680	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-15741	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-15742	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-16238	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-16239	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-16241	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-18024	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-18408	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-19385	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-6464	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-6469	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-6470	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
-PostgreSQL	15.19	CVE-2026-6471	affects libpq.dll 15.18 in LibreOffice by version (most are server-side); LibreOffice 26.2.6 carries 15.19
+PostgreSQL	absent:15.19	CVE-2026-14662	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14663	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14664	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14666	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14668	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14669	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14670	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14671	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14672	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14673	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14677	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14678	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14679	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-14680	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-15741	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-15742	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-16238	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-16239	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-16241	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-18024	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-18408	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-19385	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-6464	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-6469	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-6470	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
+PostgreSQL	absent:15.19	CVE-2026-6471	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
 Raptor	2.0.17	CVE-2024-57822	affects raptor2.dll 2.0.16 in LibreOffice; no fixed upstream release as of 2026-09-25
 Raptor	2.0.17	CVE-2024-57823	affects raptor2.dll 2.0.16 in LibreOffice; no fixed upstream release as of 2026-09-25
 Leptonica	-	none	no open advisory for 1.84.1 (Tesseract) and 1.87.0 (jbig2enc); checked 2026-09-25

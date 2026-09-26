@@ -49,6 +49,8 @@ param(
     # Run only the notice gate against -DestDir and exit with its verdict.
     # Nothing is downloaded, copied or removed.
     [switch]$GateOnly,
+    # Apply only the unused-component trim and both gates to -DestDir.
+    [switch]$TrimOnly,
     [switch]$UseLocalInstall
 )
 
@@ -146,7 +148,67 @@ function Get-InstallReleaseVersion([string]$root) {
     return $null
 }
 
+# Parts of the install no conversion path loads: the embedded Python (and
+# pyuno), the PostgreSQL driver with the libpq client it imports and its
+# registry file, and the embedded Firebird engine. They serve macros, wizards
+# and Base databases; a headless document conversion runs none of them.
+# libcrypto/libssl are imported only by libpq and the Python extension
+# modules. ifbclient.dll stays: the core library imports it statically.
+# Registry entries that stay registered with no implementation behind them:
+# four Python-loader components in program/services/services.rdb
+# (org.openoffice.pyuno.MailMessage/MailServiceProvider and the fax, letter
+# and agenda CallWizard) and ScriptProviderForPython in share/registry/main.xcd.
+# No conversion path instantiates them (mail merge, wizards, Python macros);
+# instantiating one fails at that call and does not affect loading.
+$UnusedParts = @(
+    "program\python.exe", "program\python3.dll", "program\python312.dll",
+    "program\python-core-*", "program\pythonloaderlo.dll", "program\pythonloader.py",
+    "program\pythonloader.uno.ini", "program\pythonscript.py", "program\pyuno.pyd",
+    "program\uno.py", "program\unohelper.py", "program\officehelper.py",
+    "program\mailmerge.py", "program\msgbox.py", "program\access2base.py",
+    "program\scriptforge.py", "program\__pycache__",
+    "program\services\pyuno.rdb", "program\services\scriptproviderforpython.rdb",
+    "share\Scripts\python",
+    "program\libpq.dll", "program\postgresql-sdbc-impllo.dll",
+    "program\services\postgresql-sdbc.rdb", "share\registry\postgresql.xcd",
+    "program\libcrypto-3.dll", "program\libssl-3.dll",
+    "program\Engine12.dll", "program\intl"
+)
+$UnusedDlls = @("python3.dll", "python312.dll", "pythonloaderlo.dll", "pyuno.pyd", "libpq.dll",
+    "postgresql-sdbc-impllo.dll", "libcrypto-3.dll", "libssl-3.dll", "engine12.dll", "fbintl.dll")
+
+function Remove-UnusedParts([string]$tree) {
+    foreach ($part in $UnusedParts) {
+        foreach ($hit in @(Get-Item -Path (Join-Path $tree $part) -Force -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $hit.FullName -Recurse -Force
+        }
+    }
+    $left = @($UnusedParts | Where-Object { Test-Path (Join-Path $tree $_) })
+    if ($left) { throw "LibreOffice trim left: $($left -join ', ')" }
+    # A binary still importing a removed DLL would fail to load when reached.
+    $python = Join-Path $PSScriptRoot "..\resources\python\python.exe"
+    if (-not (Test-Path $python)) { throw "Embedded runtime missing at $python -- run setup-python-embed.ps1 first." }
+    $program = Join-Path $tree "program"
+    $targets = @($program) + @(Get-ChildItem $program -Recurse -Filter *.exe -File | ForEach-Object { $_.FullName })
+    $json = & $python (Join-Path $PSScriptRoot "pe_imports.py") @targets
+    if ($LASTEXITCODE -ne 0) { throw "import inventory of $program failed" }
+    $report = ($json | Out-String) | ConvertFrom-Json
+    $bad = @()
+    foreach ($p in $report.PSObject.Properties) {
+        foreach ($dll in @($p.Value.imports) + @($p.Value.delay_imports)) {
+            if ($dll -and $UnusedDlls -contains $dll.ToLowerInvariant()) { $bad += "$($p.Name) imports $dll" }
+        }
+    }
+    if ($bad) { throw "LibreOffice trim gate refused:`n  " + ($bad -join "`n  ") }
+    Write-Host "Removed the unused LibreOffice parts; no remaining binary imports them."
+}
+
 if ($GateOnly) {
+    Assert-Notices $DestDir
+    exit 0
+}
+if ($TrimOnly) {
+    Remove-UnusedParts $DestDir
     Assert-Notices $DestDir
     exit 0
 }
@@ -173,6 +235,7 @@ function Copy-Install([string]$root) {
         $p = Join-Path $root $sub
         if (Test-Path $p) { Copy-Item $p (Join-Path $DestDir $sub) -Recurse -Force }
     }
+    Remove-UnusedParts $DestDir
     # LibreOffice's Windows font backend registers this directory with
     # AddFontResourceExW(FR_PRIVATE). Copy the app's already-vendored faces
     # here so clean machines convert with the same fonts the rest of Spectra
