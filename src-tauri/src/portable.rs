@@ -143,9 +143,34 @@ pub fn is_portable() -> bool {
 /// The one field both records carry. Spelled the same in the installer's JSON
 /// and in the portable one so a single reader serves both.
 const ACCEPTED_KEY: &str = "adobeIccEulaAccepted";
+const MAX_ASSENT_RECORD_BYTES: u64 = 4 * 1024;
+const MAX_ICC_LICENSE_BYTES: u64 = 256 * 1024;
+
+fn read_utf8_limited(path: &Path, max_bytes: u64) -> std::io::Result<String> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path)?;
+    if file.metadata()?.len() > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file exceeds the allowed size",
+        ));
+    }
+
+    let mut text = String::new();
+    file.take(max_bytes.saturating_add(1))
+        .read_to_string(&mut text)?;
+    if text.len() as u64 > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file exceeds the allowed size",
+        ));
+    }
+    Ok(text)
+}
 
 fn read_accepted_flag(path: &Path) -> Option<bool> {
-    let text = std::fs::read_to_string(path).ok()?;
+    let text = read_utf8_limited(path, MAX_ASSENT_RECORD_BYTES).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     value.get(ACCEPTED_KEY)?.as_bool()
 }
@@ -488,8 +513,14 @@ fn open_url(url: &str) {
 /// There is no second copy to drift.
 pub fn read_icc_license(icc_dir: &Path) -> Result<String, String> {
     let path = icc_dir.join("Adobe-Color-Profile-License.txt");
-    std::fs::read_to_string(&path)
-        .map_err(|e| format!("Cannot read the colour-profile licence at {}: {}", path.display(), e))
+    read_utf8_limited(&path, MAX_ICC_LICENSE_BYTES)
+        .map_err(|e| {
+            format!(
+                "Cannot read the colour-profile licence at {}: {}",
+                path.display(),
+                e
+            )
+        })
 }
 
 // ── the commands ───────────────────────────────────────────────────────────
@@ -619,6 +650,27 @@ mod tests {
         std::fs::write(dir.join(INSTALL_RECORD), "not json at all").unwrap();
         assert_eq!(icc_assent_at(&dir), IccAssent::Unrecorded);
         assert_eq!(assent_env_value(IccAssent::Unrecorded), "0");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_oversized_assent_record_is_not_loaded() {
+        let dir = scratch("oversized-assent");
+        let mut record = format!(r#"{{"{ACCEPTED_KEY}":true}}"#);
+        record.push_str(&" ".repeat(MAX_ASSENT_RECORD_BYTES as usize + 1));
+        std::fs::write(dir.join(INSTALL_RECORD), record).unwrap();
+
+        assert_eq!(icc_assent_at(&dir), IccAssent::Unrecorded);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_oversized_license_text_is_refused() {
+        let dir = scratch("oversized-license");
+        let path = dir.join("Adobe-Color-Profile-License.txt");
+        std::fs::write(&path, "x".repeat(MAX_ICC_LICENSE_BYTES as usize + 1)).unwrap();
+
+        assert!(read_icc_license(&dir).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 
