@@ -33,3 +33,5 @@
 package	version	role	file	sha256	spdx	upstream
 pillow_heif	1.8.0+decode.2	wheel	pillow_heif-1.8.0+decode.2-cp314-cp314-win_amd64.whl	3af6e836c5eadaa14fc1680cf223f58e3a18c9d065a4d7182b851800aca8322d	BSD-3-Clause	scripts/build-pillow-heif-decode-only.ps1
 pillow_heif	1.8.0	sdist	pillow_heif-1.8.0.tar.gz	e47c27432c6fd3d66c22f0de9f27fd379383b646c947520bc485854ce72060d0	BSD-3-Clause	https://files.pythonhosted.org/packages/bb/4c/d5319a1f276c70528ff97893afc42a300ff28029e27ca8de89bb3b271680/pillow_heif-1.8.0.tar.gz
+lxml	6.1.2+libxml215.1	wheel	lxml-6.1.2+libxml215.1-cp314-cp314-win_amd64.whl	a04d9d53f8e0a50033f00b3eaa78b706af9fca4385968f97148ef09fec2ee078	BSD-3-Clause	scripts/build-lxml-libxml215.ps1
+lxml	6.1.2	sdist	lxml-6.1.2.tar.gz	1055241852f2b02068af4a625a5d32c087db193c12251928af2562ecd2239f18	BSD-3-Clause	https://files.pythonhosted.org/packages/ad/a9/970b8fa0ecc4fbf1dfaed0d89bbc1fc1421b25ec26a2038c91e872dc6c8e/lxml-6.1.2.tar.gz

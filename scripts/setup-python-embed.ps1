@@ -94,6 +94,27 @@ foreach ($name in $OpenSslOverlay.Dlls.Keys) {
 & $DestDir\python.exe -I -c "import ssl, sys; sys.exit(0 if ssl.OPENSSL_VERSION.startswith('OpenSSL 3.5.8 ') else 1)"
 if ($LASTEXITCODE -ne 0) { throw "the embedded runtime does not report OpenSSL 3.5.8 after the overlay" }
 
+# pyexpat overlay. CPython links Expat statically into pyexpat.pyd; 3.14.7
+# carries Expat 2.8.2. scripts/python-pyexpat/pyexpat.pyd is built by
+# build-pyexpat-expat285.ps1 from the 3.14.7 source release with Expat 2.8.5
+# substituted, and is bound to the 3.14.7 pin for the same reason as the
+# OpenSSL overlay: left in place under another pin it would mix two releases.
+$PyexpatOverlay = @{
+    Pin    = "3.14.7"
+    Sha256 = "420c90acbec3fa3c0882c1de81d8b504c34611ebc94157108df18178ead63fb4"
+    Expat  = "expat_2.8.5"
+}
+if ($PythonVersion -ne $PyexpatOverlay.Pin) {
+    throw "The pyexpat overlay is bound to Python $($PyexpatOverlay.Pin); the pin is $PythonVersion. Rebuild or remove the overlay."
+}
+$PyexpatSrc = Join-Path $PSScriptRoot "python-pyexpat\pyexpat.pyd"
+if (-not (Test-Path -LiteralPath $PyexpatSrc)) { throw "missing $PyexpatSrc; run scripts\build-pyexpat-expat285.ps1 and commit the result" }
+$got = (Get-FileHash -LiteralPath $PyexpatSrc -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($got -ne $PyexpatOverlay.Sha256) { throw "$PyexpatSrc has SHA-256 $got; pinned $($PyexpatOverlay.Sha256)" }
+Copy-Item -LiteralPath $PyexpatSrc -Destination (Join-Path $DestDir "pyexpat.pyd") -Force
+& $DestDir\python.exe -I -c "import pyexpat, sys, xml.etree.ElementTree as ET; ET.fromstring('<a/>'); sys.exit(0 if pyexpat.EXPAT_VERSION == '$($PyexpatOverlay.Expat)' else 1)"
+if ($LASTEXITCODE -ne 0) { throw "the embedded runtime does not report $($PyexpatOverlay.Expat) after the pyexpat overlay" }
+
 Write-Host "Installing pinned pip..."
 Install-PinnedPip -Python "$DestDir\python.exe"
 
@@ -165,6 +186,10 @@ if ($stale) {
 # cleanup below, which removes pip.
 & powershell -ExecutionPolicy Bypass -File "$PSScriptRoot\install-vendored-wheels.ps1" -Python "$DestDir\python.exe"
 if ($LASTEXITCODE -ne 0) { throw "Vendored wheel install failed" }
+# The lockfile's index lxml (libxml2 2.11.9) is installed first; only the
+# vendored wheel may survive.
+& $DestDir\python.exe -I -c "import sys, lxml.etree as e; sys.exit(0 if e.LIBXML_VERSION == (2, 15, 4) else 1)"
+if ($LASTEXITCODE -ne 0) { throw "the embedded runtime's lxml does not report libxml2 2.15.4 after the vendored install" }
 
 # Cleanup -- remove pip, caches, install bookkeeping. dist-info dirs are
 # PRUNED, not deleted: each wheel's METADATA (name/version/license fields)

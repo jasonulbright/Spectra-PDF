@@ -11,8 +11,8 @@ python	Lib/site-packages/cryptography/hazmat/bindings/_rust.pyd	openssl	4.0.2	st
 python	Lib/site-packages/fonttools-4.63.0.dist-info	fonttools	4.63.0	manifest:Lib/site-packages/fonttools-4.63.0.dist-info/METADATA	METADATA Version; RECORD native files: 6
 python	Lib/site-packages/heif-876f3a80218b1a207d7419d7664b9497.dll	libheif	1.23.5	runtime	python.exe -I: pillow_heif.libheif_info()['libheif']
 python	Lib/site-packages/libde265-f4739cb4844efa5930bf0764c71d55e2.dll	libde265	1.1.3	runtime	python.exe -I: pillow_heif.libheif_info()['decoders']['libde265']
-python	Lib/site-packages/lxml-6.1.2.dist-info	lxml	6.1.2	manifest:Lib/site-packages/lxml-6.1.2.dist-info/METADATA	METADATA Version; RECORD native files: 7
-python	Lib/site-packages/lxml/etree.cp314-win_amd64.pyd	libxml2	2.11.9	runtime	python.exe -I: lxml.etree.LIBXML_VERSION
+python	Lib/site-packages/lxml-6.1.2+libxml215.1.dist-info	lxml	6.1.2+libxml215.1	manifest:Lib/site-packages/lxml-6.1.2+libxml215.1.dist-info/METADATA	METADATA Version; RECORD native files: 7
+python	Lib/site-packages/lxml/etree.cp314-win_amd64.pyd	libxml2	2.15.4	runtime	python.exe -I: lxml.etree.LIBXML_VERSION
 python	Lib/site-packages/lxml/etree.cp314-win_amd64.pyd	libxslt	1.1.45	runtime	python.exe -I: lxml.etree.LIBXSLT_VERSION
 python	Lib/site-packages/lxml/etree.cp314-win_amd64.pyd	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
 python	Lib/site-packages/lxml/objectify.cp314-win_amd64.pyd	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
@@ -49,8 +49,8 @@ python	libffi-8.dll	libffi	3.4.4	strings	strings: UTF-16 "libffi-<v>" (Authentic
 python	libssl-3.dll	openssl	3.5.8	pe-version	VS_VERSIONINFO ProductVersion
 python	libssl-3.dll	openssl	3.5.8	runtime	python.exe -I: ssl.OPENSSL_VERSION
 python	libtommath.dll	libtommath	unknown	strings	no version resource; no identifying string
-python	pyexpat.pyd	expat	2.8.2	runtime	python.exe -I: pyexpat.EXPAT_VERSION
-python	pyexpat.pyd	expat	2.8.2	strings	strings: "expat_<v>"
+python	pyexpat.pyd	expat	2.8.5	runtime	python.exe -I: pyexpat.EXPAT_VERSION
+python	pyexpat.pyd	expat	2.8.5	strings	strings: "expat_<v>"
 python	python.exe	cpython	3.14.7	pe-version	VS_VERSIONINFO ProductVersion
 python	python.exe	cpython	3.14.7	runtime	python.exe -I: platform.python_version()
 python	python3.dll	cpython	3.14.7	pe-version	VS_VERSIONINFO ProductVersion
@@ -116,7 +116,7 @@ libreoffice	program/lcms2.dll	littlecms	2.17.0.0	pe-version	VS_VERSIONINFO Produ
 libreoffice	program/libcurl.dll	curl	8.22.0	pe-version	VS_VERSIONINFO ProductVersion
 libreoffice	program/libexslt.dll	libxslt	unknown	strings	no version resource; no identifying string
 libreoffice	program/librdf.dll	redland-librdf	1.0.17	strings	VS_VERSIONINFO carries the LibreOffice release; strings: sole standalone version literal
-libreoffice	program/libxml2.dll	libxml2	2.14.6	pe-version	VS_VERSIONINFO ProductVersion
+libreoffice	program/libxml2.dll	libxml2	2.15.4	pe-version	VS_VERSIONINFO ProductVersion
 libreoffice	program/libxmlsec-mscng.dll	xmlsec	1.3.12	pe-version	VS_VERSIONINFO ProductVersion
 libreoffice	program/libxmlsec.dll	xmlsec	1.3.12	pe-version	VS_VERSIONINFO ProductVersion
 libreoffice	program/libxslt.dll	libxslt	unknown	strings	no version resource; no identifying string

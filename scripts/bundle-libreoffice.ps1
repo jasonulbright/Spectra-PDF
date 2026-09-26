@@ -203,12 +203,35 @@ function Remove-UnusedParts([string]$tree) {
     Write-Host "Removed the unused LibreOffice parts; no remaining binary imports them."
 }
 
+# libxml2 overlay. program/libxml2.dll of 26.2.6 is libxml2 2.14.6; the file
+# from scripts/build-lo-libxml2.ps1 is 2.15.4 (same ABI, every symbol the tree
+# imports exported) and replaces it. Bound to the LibreOffice pin: another
+# release carries its own libxml2 and must be rebuilt against, not overlaid.
+$LibXml2Overlay = @{
+    Pin    = "26.2.6"
+    Sha256 = "eb7878a7ebe3e9fab8dc2120e5117ca445d29e09ebf69d3796bc0b6ad3f490bd"
+}
+function Install-LibXml2Overlay([string]$tree) {
+    if ($Version -ne $LibXml2Overlay.Pin) {
+        throw "The libxml2 overlay is bound to LibreOffice $($LibXml2Overlay.Pin); the pin is $Version. Rebuild or remove the overlay."
+    }
+    $src = Join-Path $PSScriptRoot "libreoffice-libxml2\libxml2.dll"
+    if (-not (Test-Path -LiteralPath $src)) { throw "missing $src; run scripts\build-lo-libxml2.ps1 and commit the result" }
+    $got = (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($got -ne $LibXml2Overlay.Sha256) { throw "$src has SHA-256 $got; pinned $($LibXml2Overlay.Sha256)" }
+    $dest = Join-Path $tree "program\libxml2.dll"
+    if (-not (Test-Path -LiteralPath $dest)) { throw "no program\libxml2.dll in $tree to replace" }
+    Copy-Item -LiteralPath $src -Destination $dest -Force
+    Write-Host "Installed the libxml2 2.15.4 overlay ($got)"
+}
+
 if ($GateOnly) {
     Assert-Notices $DestDir
     exit 0
 }
 if ($TrimOnly) {
     Remove-UnusedParts $DestDir
+    Install-LibXml2Overlay $DestDir
     Assert-Notices $DestDir
     exit 0
 }
@@ -236,6 +259,7 @@ function Copy-Install([string]$root) {
         if (Test-Path $p) { Copy-Item $p (Join-Path $DestDir $sub) -Recurse -Force }
     }
     Remove-UnusedParts $DestDir
+    Install-LibXml2Overlay $DestDir
     # LibreOffice's Windows font backend registers this directory with
     # AddFontResourceExW(FR_PRIVATE). Copy the app's already-vendored faces
     # here so clean machines convert with the same fonts the rest of Spectra
