@@ -290,6 +290,12 @@ pub struct SessionState {
     /// a session that has already half-disappeared. An exit that is cancelled
     /// clears it again — the tear-down it protects against never happened.
     sealed: AtomicBool,
+    /// Identifies the app-level exit that owns a seal. A late cancellation
+    /// from an older exit must not clear a newer exit's snapshot. Zero means
+    /// the seal came from a non-prompted close path.
+    sealed_by: AtomicU64,
+    /// App-level exit generations, kept separate from renderer receipt ids.
+    next_seal_id: AtomicU64,
     /// Held across every write to the file, across the seal, and across the
     /// unseal, so that moving the seal and writing the snapshot that goes with
     /// it is one critical section. Taken before the geometry map is read and
@@ -305,6 +311,8 @@ impl SessionState {
             revision: AtomicU64::new(0),
             scheduled: AtomicBool::new(false),
             sealed: AtomicBool::new(false),
+            sealed_by: AtomicU64::new(0),
+            next_seal_id: AtomicU64::new(0),
             writer: Mutex::new(()),
         }
     }
@@ -353,13 +361,23 @@ impl SessionState {
     /// and refusing the quit snapshot because an unrelated thread panicked
     /// would lose the session the user is quitting with.
     fn seal_and_write(&self, sink: impl Fn() -> std::io::Result<()>) -> WriteOutcome {
+        self.seal_and_write_for(None, sink)
+    }
+
+    fn seal_and_write_for(
+        &self,
+        session_id: Option<u64>,
+        sink: impl Fn() -> std::io::Result<()>,
+    ) -> WriteOutcome {
         let _guard = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         if self.sealed.swap(true, Ordering::SeqCst) {
             return WriteOutcome::Refused;
         }
+        self.sealed_by.store(session_id.unwrap_or(0), Ordering::SeqCst);
         if sink().or_else(|_| sink()).is_ok() {
             return WriteOutcome::Written;
         }
+        self.sealed_by.store(0, Ordering::SeqCst);
         self.sealed.store(false, Ordering::SeqCst);
         WriteOutcome::Failed
     }
@@ -381,10 +399,22 @@ impl SessionState {
     /// and any number of them can cancel, so every cancel calls this and only
     /// the first one finds a seal to lift.
     fn unseal_and_write(&self, sink: impl FnOnce() -> std::io::Result<()>) -> WriteOutcome {
+        self.unseal_and_write_for(None, sink)
+    }
+
+    fn unseal_and_write_for(
+        &self,
+        session_id: Option<u64>,
+        sink: impl FnOnce() -> std::io::Result<()>,
+    ) -> WriteOutcome {
         let _guard = self.writer.lock().unwrap_or_else(|e| e.into_inner());
-        if !self.sealed.swap(false, Ordering::SeqCst) {
+        if !self.sealed.load(Ordering::SeqCst)
+            || self.sealed_by.load(Ordering::SeqCst) != session_id.unwrap_or(0)
+        {
             return WriteOutcome::Refused;
         }
+        self.sealed_by.store(0, Ordering::SeqCst);
+        self.sealed.store(false, Ordering::SeqCst);
         match sink() {
             Ok(()) => WriteOutcome::Written,
             // The seal is off either way — that half is what puts the run back
@@ -396,6 +426,10 @@ impl SessionState {
 
     pub fn is_sealed(&self) -> bool {
         self.sealed.load(Ordering::SeqCst)
+    }
+
+    fn new_seal_id(&self) -> u64 {
+        self.next_seal_id.fetch_add(1, Ordering::SeqCst) + 1
     }
 
     fn remember(&self, label: &str, geometry: Geometry) {
@@ -483,6 +517,9 @@ pub enum QuitGate {
 #[serde(rename_all = "camelCase")]
 pub struct BeforeClose {
     pub quit_id: Option<u64>,
+    /// App-level exit whose sealed session this close flow may cancel. A
+    /// normal window close carries none and cannot unseal an app-level exit.
+    pub session_id: Option<u64>,
 }
 
 struct PendingQuit {
@@ -1004,20 +1041,22 @@ pub fn capture_and_seal(app: &AppHandle) -> WriteOutcome {
         .seal_and_write(|| write(app, &snapshot_excluding(app, None)))
 }
 
-/// Return the session to live tracking after an exit that did not happen.
-///
-/// A quit seals the file before any window is asked anything, so a window that
-/// then cancels leaves the app running behind a snapshot of the moment the
-/// exit was decided: the windows that did close during the aborted exit are
-/// still in it, and every later open, close and move goes unrecorded for the
-/// rest of the run.
-///
-/// Both halves matter. The fresh snapshot replaces a record that has already
-/// stopped being true, and clearing the seal puts the ordinary debounced
-/// writes back.
-pub fn unseal(app: &AppHandle) -> WriteOutcome {
+/// Allocate the owner token for an app-level exit's session capture.
+pub fn new_seal_id(app: &AppHandle) -> u64 {
+    app.state::<SessionState>().new_seal_id()
+}
+
+/// Capture and seal the session for one app-level exit generation.
+pub fn capture_and_seal_for(app: &AppHandle, session_id: u64) -> WriteOutcome {
     app.state::<SessionState>()
-        .unseal_and_write(|| write(app, &snapshot_excluding(app, None)))
+        .seal_and_write_for(Some(session_id), || write(app, &snapshot_excluding(app, None)))
+}
+
+/// Return the session to live tracking only if this cancellation owns the
+/// current app-level exit seal.
+pub fn unseal_for(app: &AppHandle, session_id: u64) -> WriteOutcome {
+    app.state::<SessionState>()
+        .unseal_and_write_for(Some(session_id), || write(app, &snapshot_excluding(app, None)))
 }
 
 /// Wait out a quit's receipts, putting the session back under live tracking
@@ -1026,19 +1065,19 @@ pub fn unseal(app: &AppHandle) -> WriteOutcome {
 /// The unseal is the same one a cancelled prompt runs: an exit that does not
 /// happen has to leave the record following the windows that are still there,
 /// and an unanswered request is an exit that does not happen.
-pub fn await_quit_acks(app: &AppHandle, id: u64) -> QuitGate {
+pub fn await_quit_acks(app: &AppHandle, id: u64, session_id: u64) -> QuitGate {
     let gate = app.state::<QuitAcks>().wait(id, QUIT_ACK_TIMEOUT);
     if gate == QuitGate::Abort {
-        unseal(app);
+        unseal_for(app, session_id);
     }
     gate
 }
 
 /// Call a quit off before it was ever waited on — a request that could not be
 /// delivered is one that will never be answered.
-pub fn abandon_quit(app: &AppHandle, id: u64) {
+pub fn abandon_quit(app: &AppHandle, id: u64, session_id: u64) {
     app.state::<QuitAcks>().abort(id);
-    unseal(app);
+    unseal_for(app, session_id);
 }
 
 /// Wait out the PREPARE round's receipts.
@@ -1071,10 +1110,9 @@ pub fn abandon_prepare(app: &AppHandle, id: u64) {
 /// and only then are they asked to close. A round nobody answers aborts with
 /// nothing captured and nothing sealed.
 ///
-/// A capture that FAILED aborts too. `seal_and_write` has already lifted the
-/// seal on that outcome, so the file still holds the previous run's record;
-/// closing the windows now would exit having silently thrown this session away,
-/// with the windows that could still be captured already gone.
+/// A capture that did not create this exit's seal aborts too. A failed write
+/// leaves the previous record on disk, while a refused capture belongs to a
+/// different close path; neither authorizes this request to close peers.
 pub fn sequence_quit(
     prepare: impl FnOnce() -> QuitGate,
     capture: impl FnOnce() -> WriteOutcome,
@@ -1083,7 +1121,7 @@ pub fn sequence_quit(
     if prepare() == QuitGate::Abort {
         return false;
     }
-    if capture() == WriteOutcome::Failed {
+    if capture() != WriteOutcome::Written {
         return false;
     }
     close() == QuitGate::Proceed
@@ -1800,6 +1838,26 @@ mod tests {
 
     // ── The two-phase quit ────────────────────────────────────────────────
 
+    #[test]
+    fn before_close_separates_receipt_and_session_ids() {
+        assert_eq!(
+            serde_json::to_value(BeforeClose {
+                quit_id: Some(7),
+                session_id: Some(11),
+            })
+            .unwrap(),
+            serde_json::json!({"quitId": 7, "sessionId": 11})
+        );
+        assert_eq!(
+            serde_json::to_value(BeforeClose {
+                quit_id: None,
+                session_id: None,
+            })
+            .unwrap(),
+            serde_json::json!({"quitId": null, "sessionId": null})
+        );
+    }
+
     /// A quit snapshot that cannot be written, however many times it is tried.
     fn held_open() -> std::io::Result<()> {
         Err(std::io::Error::new(
@@ -2024,6 +2082,61 @@ mod tests {
             WriteOutcome::Refused
         );
         assert_eq!(spurious.get(), 0);
+    }
+
+    #[test]
+    fn a_late_cancel_from_an_old_exit_cannot_unseal_a_new_exit() {
+        let state = SessionState::new();
+        let old_exit = state.new_seal_id();
+        assert_eq!(
+            state.seal_and_write_for(Some(old_exit), || Ok(())),
+            WriteOutcome::Written
+        );
+
+        // The first exit aborts on an unanswered window and puts tracking back.
+        assert_eq!(
+            state.unseal_and_write_for(Some(old_exit), || Ok(())),
+            WriteOutcome::Written
+        );
+
+        // A second exit takes a new capture. A prompt from the first exit can
+        // still finish later, but its cancellation must not clear this newer
+        // seal. An unscoped window-close cancellation must not clear it either.
+        let new_exit = state.new_seal_id();
+        assert_eq!(
+            state.seal_and_write_for(Some(new_exit), || Ok(())),
+            WriteOutcome::Written
+        );
+        assert_eq!(
+            state.unseal_and_write_for(Some(old_exit), || Ok(())),
+            WriteOutcome::Refused
+        );
+        assert_eq!(state.unseal_and_write(|| Ok(())), WriteOutcome::Refused);
+        assert!(state.is_sealed());
+        assert_eq!(
+            state.unseal_and_write_for(Some(new_exit), || Ok(())),
+            WriteOutcome::Written
+        );
+    }
+
+    #[test]
+    fn an_exit_that_did_not_take_the_seal_does_not_close_peers() {
+        let state = SessionState::new();
+        let closed = Cell::new(false);
+        assert_eq!(state.seal_and_write(|| Ok(())), WriteOutcome::Written);
+
+        let proceeded = sequence_quit(
+            || QuitGate::Proceed,
+            || state.seal_and_write(|| Ok(())),
+            || {
+                closed.set(true);
+                QuitGate::Proceed
+            },
+        );
+
+        assert!(!proceeded);
+        assert!(!closed.get());
+        assert!(state.is_sealed());
     }
 
     #[test]

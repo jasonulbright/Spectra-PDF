@@ -445,7 +445,10 @@ pub fn run() {
                     let _ = app.emit_to(
                         window.label(),
                         "app:beforeClose",
-                        session::BeforeClose { quit_id: None },
+                        session::BeforeClose {
+                            quit_id: None,
+                            session_id: None,
+                        },
                     );
                 }
                 tauri::WindowEvent::Focused(true) => {

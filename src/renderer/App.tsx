@@ -3048,7 +3048,7 @@ function AppContent(): React.ReactElement {
 
   // Handle window close — Rust intercepts CloseRequested and emits app:beforeClose
   useEffect(() => {
-    const unlisten = app.onBeforeClose(async (quitId) => {
+    const unlisten = app.onBeforeClose(async (quitId, sessionId) => {
       // Flush, THEN acknowledge — the ordering `lib/close-sequence` exists to
       // pin. The seal takes whatever order arrived last, and only the sealing
       // window used to flush, so a reorder made in THIS window was sealed over
@@ -3087,19 +3087,19 @@ function AppContent(): React.ReactElement {
       // record before any window is asked, and the app is still running. The
       // call is idempotent and harmless when this close was only a window ×.
       if (result === 'cancel') {
-        await app.quitCancelled();
+        await app.quitCancelled(sessionId);
         return;
       }
       if (result === 'save') {
         try {
           await commitRef.current();
         } catch {
-          await app.quitCancelled();
+          await app.quitCancelled(sessionId);
           return;
         }
         for (const f of dirtyFiles) {
           if (!(await saveOrReportRef.current(f.workingPath, f.path))) {
-            await app.quitCancelled();
+            await app.quitCancelled(sessionId);
             return;
           }
         }
