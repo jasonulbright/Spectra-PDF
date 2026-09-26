@@ -5,10 +5,12 @@
 //! only ever holds unprocessed work.
 //!
 //! Watching is POLLING, on purpose: a 5-second scan of one directory is
-//! negligible, and it needs no filesystem-event dependency. A file must hold the SAME SIZE across two
-//! consecutive ticks before it counts as arrived — a half-copied file never
-//! triggers a run (and if it slips through anyway, the run's per-file
-//! isolation reports it and leaves it in the intake for the next tick).
+//! negligible, and it needs no filesystem-event dependency. A PDF must hold
+//! the same size and last-write time across two consecutive ticks before it
+//! counts as arrived; an in-place same-size correction resets stability. This
+//! quiet-period check prevents ordinary partial copies from starting a run
+//! (and if a file changes after the check, the run's per-file isolation reports
+//! it and leaves it in the intake for the next tick).
 //!
 //! Each run SPAWNS THE CLI (`spectrapdf run-action … --moved …`): the
 //! exact process a scheduled task runs, so watched runs and scheduled runs
@@ -25,6 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use tauri::{AppHandle, Manager};
 
@@ -248,9 +251,16 @@ pub fn validate_folder(f: &WatchedFolder) -> Result<(), String> {
     Ok(())
 }
 
-/// The stable-PDF snapshot of an intake folder: (name, size) pairs for files
-/// whose size held across two ticks are compared by the caller.
-fn scan_pdfs(dir: &Path) -> HashMap<String, u64> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct PdfStamp {
+    size: u64,
+    modified: SystemTime,
+}
+
+/// The stable-PDF snapshot of an intake folder: file size and last-write time
+/// are both compared across ticks, so an in-place same-size correction is new
+/// work rather than the unchanged failure from the previous run.
+fn scan_pdfs(dir: &Path) -> HashMap<String, PdfStamp> {
     let mut out = HashMap::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return out;
@@ -264,9 +274,15 @@ fn scan_pdfs(dir: &Path) -> HashMap<String, u64> {
         if !is_pdf || !path.is_file() {
             continue;
         }
-        if let Ok(meta) = entry.metadata() {
-            out.insert(entry.file_name().to_string_lossy().to_string(), meta.len());
-        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let Ok(modified) = meta.modified() else { continue };
+        out.insert(
+            entry.file_name().to_string_lossy().to_string(),
+            PdfStamp {
+                size: meta.len(),
+                modified,
+            },
+        );
     }
     out
 }
@@ -317,8 +333,8 @@ fn classify_run_status(code: Option<i32>, success: bool) -> RunOutcome {
 
 fn failure_snapshot(
     outcome: RunOutcome,
-    leftovers: HashSet<(String, u64)>,
-) -> Option<HashSet<(String, u64)>> {
+    leftovers: HashSet<(String, PdfStamp)>,
+) -> Option<HashSet<(String, PdfStamp)>> {
     // Folder contention is temporary; unchanged intake files must stay
     // eligible for the next poll after the competing writer releases its lease.
     if outcome == RunOutcome::FolderBusy || leftovers.is_empty() {
@@ -328,7 +344,22 @@ fn failure_snapshot(
     }
 }
 
-fn intake_ready_to_run(current: &HashMap<String, u64>, stable: &HashSet<(String, u64)>) -> bool {
+fn stable_files(
+    current: &HashMap<String, PdfStamp>,
+    previous: &HashMap<String, PdfStamp>,
+) -> HashSet<(String, PdfStamp)> {
+    current
+        .iter()
+        .filter_map(|(name, stamp)| {
+            (previous.get(name) == Some(stamp)).then(|| (name.clone(), *stamp))
+        })
+        .collect()
+}
+
+fn intake_ready_to_run(
+    current: &HashMap<String, PdfStamp>,
+    stable: &HashSet<(String, PdfStamp)>,
+) -> bool {
     // `stable` is built from `current`; if their cardinalities differ, at
     // least one PDF is still changing and the folder-wide CLI would read it.
     !current.is_empty() && stable.len() == current.len()
@@ -404,22 +435,18 @@ fn spawn_watcher(app: &AppHandle, folder: WatchedFolder) -> Result<(), String> {
         .name(format!("watched-folder-{}", folder.id))
         .spawn(move || {
             let source = PathBuf::from(&folder.source);
-            let mut previous: HashMap<String, u64> = HashMap::new();
+            let mut previous: HashMap<String, PdfStamp> = HashMap::new();
             // What the last run LEFT BEHIND (failed files stay in the intake).
             // A tick whose stable set equals this snapshot must not re-trigger —
             // a permanently-broken file would otherwise re-run every interval.
-            let mut last_failures: Option<HashSet<(String, u64)>> = None;
+            let mut last_failures: Option<HashSet<(String, PdfStamp)>> = None;
             while !watcher_stop.load(Ordering::Relaxed) {
                 std::thread::sleep(std::time::Duration::from_secs(POLL_SECS));
                 if watcher_stop.load(Ordering::Relaxed) {
                     break;
                 }
                 let current = scan_pdfs(&source);
-                let stable: HashSet<(String, u64)> = current
-                    .iter()
-                    .filter(|(name, size)| previous.get(*name) == Some(size))
-                    .map(|(name, size)| (name.clone(), *size))
-                    .collect();
+                let stable = stable_files(&current, &previous);
                 let ready = intake_ready_to_run(&current, &stable);
                 previous = current;
                 if stable.is_empty() {
@@ -434,9 +461,9 @@ fn spawn_watcher(app: &AppHandle, folder: WatchedFolder) -> Result<(), String> {
                 }
                 let outcome = run_once(&exe, &folder, &action_file);
                 let after = scan_pdfs(&source);
-                let leftovers: HashSet<(String, u64)> = after
+                let leftovers: HashSet<(String, PdfStamp)> = after
                     .iter()
-                    .map(|(name, size)| (name.clone(), *size))
+                    .map(|(name, stamp)| (name.clone(), *stamp))
                     .collect();
                 last_failures = failure_snapshot(outcome, leftovers);
                 previous = after;
@@ -544,9 +571,16 @@ pub async fn delete_watched_folder(app: AppHandle, id: String) -> Result<(), Str
 mod tests {
     use super::*;
 
+    fn stamp(size: u64, modified: u64) -> PdfStamp {
+        PdfStamp {
+            size,
+            modified: std::time::UNIX_EPOCH + std::time::Duration::from_secs(modified),
+        }
+    }
+
     #[test]
     fn folder_contention_does_not_cache_intake_files_as_permanent_failures() {
-        let leftovers = HashSet::from([("report.pdf".to_string(), 123)]);
+        let leftovers = HashSet::from([("report.pdf".to_string(), stamp(123, 1))]);
         assert_eq!(
             classify_run_status(Some(crate::cli::EXIT_FOLDER_BUSY), false),
             RunOutcome::FolderBusy
@@ -568,16 +602,16 @@ mod tests {
     #[test]
     fn watcher_waits_until_every_pdf_in_the_intake_is_stable() {
         let current = HashMap::from([
-            ("ready.pdf".to_string(), 123),
-            ("still-copying.pdf".to_string(), 456),
+            ("ready.pdf".to_string(), stamp(123, 1)),
+            ("still-copying.pdf".to_string(), stamp(456, 2)),
         ]);
-        let partially_stable = HashSet::from([("ready.pdf".to_string(), 123)]);
+        let partially_stable = HashSet::from([("ready.pdf".to_string(), stamp(123, 1))]);
         assert!(!intake_ready_to_run(&current, &partially_stable));
         assert!(intake_ready_to_run(
             &current,
             &HashSet::from([
-                ("ready.pdf".to_string(), 123),
-                ("still-copying.pdf".to_string(), 456),
+                ("ready.pdf".to_string(), stamp(123, 1)),
+                ("still-copying.pdf".to_string(), stamp(456, 2)),
             ])
         ));
         assert!(!intake_ready_to_run(&HashMap::new(), &HashSet::new()));
@@ -792,8 +826,39 @@ mod tests {
         std::fs::write(tmp.join("notes.txt"), b"x").unwrap();
         let scan = scan_pdfs(&tmp);
         assert_eq!(scan.len(), 2);
-        assert_eq!(scan.get("a.pdf"), Some(&5));
+        assert_eq!(scan.get("a.pdf").map(|stamp| stamp.size), Some(5));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn same_size_rewrite_changes_the_watched_file_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report.pdf");
+        std::fs::write(&path, b"first").unwrap();
+        let first_time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(first_time))
+            .unwrap();
+        let first = scan_pdfs(dir.path());
+
+        std::fs::write(&path, b"other").unwrap();
+        let second_time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(2_000);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(second_time))
+            .unwrap();
+        let second = scan_pdfs(dir.path());
+
+        assert!(first.contains_key("report.pdf"));
+        assert!(second.contains_key("report.pdf"));
+        assert_ne!(first, second, "same-size content corrections must be observable");
+        assert!(stable_files(&second, &first).is_empty());
+        assert_eq!(stable_files(&second, &second).len(), 1);
     }
 
     fn entry(id: &str, name: &str) -> WatchedFolder {
