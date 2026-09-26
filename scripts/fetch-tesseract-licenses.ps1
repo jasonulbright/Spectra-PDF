@@ -45,29 +45,10 @@ $Sources = [ordered]@{
     "LICENSE-LERC.txt"            = @("https://raw.githubusercontent.com/Esri/lerc/master/LICENSE")
     "LICENSE-libarchive.txt"      = @("https://raw.githubusercontent.com/libarchive/libarchive/master/COPYING")
     "LICENSE-libb2.txt"           = @("https://raw.githubusercontent.com/BLAKE2/libb2/master/COPYING")
-    "LICENSE-brotli.txt"          = @("https://raw.githubusercontent.com/google/brotli/master/LICENSE")
     "LICENSE-bzip2.txt"           = @(,@("https://raw.githubusercontent.com/libarchive/bzip2/master/LICENSE",
                                          "https://raw.githubusercontent.com/enthought/bzip2-1.0.6/master/LICENSE"))
-    # cairo/COPYING is the dual-licence STATEMENT and points at two sibling
-    # files for the actual terms, so all three ship (the graphite2 shape).
-    # gitlab.freedesktop.org is behind an Anubis proof-of-work anti-bot and
-    # answers every scripted fetch with HTML, so the mirror is the source.
-    "LICENSE-cairo.txt"           = @("https://raw.githubusercontent.com/freedesktop-unofficial-mirror/cairo/master/COPYING",
-                                      "https://raw.githubusercontent.com/freedesktop-unofficial-mirror/cairo/master/COPYING-LGPL-2.1",
-                                      "https://raw.githubusercontent.com/freedesktop-unofficial-mirror/cairo/master/COPYING-MPL-1.1")
-    "LICENSE-openssl.txt"         = @("https://raw.githubusercontent.com/openssl/openssl/master/LICENSE.txt")
-    "LICENSE-libdatrie.txt"       = @("https://raw.githubusercontent.com/tlwg/libdatrie/master/COPYING")
     "LICENSE-libdeflate.txt"      = @("https://raw.githubusercontent.com/ebiggers/libdeflate/master/COPYING")
     "LICENSE-expat.txt"           = @("https://raw.githubusercontent.com/libexpat/libexpat/master/expat/COPYING")
-    "LICENSE-libffi.txt"          = @("https://raw.githubusercontent.com/libffi/libffi/master/LICENSE")
-    "LICENSE-fontconfig.txt"      = @(,@("https://raw.githubusercontent.com/freedesktop/fontconfig/main/COPYING",
-                                         "https://raw.githubusercontent.com/behdad/fontconfig/master/COPYING"))
-    # FreeType is dual FTL/GPL-2: ship the top-level notice AND the FTL text.
-    "LICENSE-freetype.txt"        = @(@("https://raw.githubusercontent.com/freetype/freetype/master/LICENSE.TXT",
-                                        "https://gitlab.freedesktop.org/freetype/freetype/-/raw/master/LICENSE.TXT"),
-                                      @("https://raw.githubusercontent.com/freetype/freetype/master/docs/FTL.TXT",
-                                        "https://gitlab.freedesktop.org/freetype/freetype/-/raw/master/docs/FTL.TXT"))
-    "LICENSE-fribidi.txt"         = @("https://raw.githubusercontent.com/fribidi/fribidi/master/COPYING")
     # SPDX license-list-data rather than gnu.org: same texts, canonical and
     # machine-readable, on a CDN. gnu.org timed out mid-run here and these are
     # the ONLY source for three copyleft notices, which would block a release.
@@ -77,16 +58,7 @@ $Sources = [ordered]@{
                                       "https://raw.githubusercontent.com/spdx/license-list-data/main/text/GCC-exception-3.1.txt")
     "LICENSE-giflib.txt"          = @(,@("https://raw.githubusercontent.com/mirrorer/giflib/master/COPYING",
                                          "https://sourceforge.net/p/giflib/code/ci/master/tree/COPYING?format=raw"))
-    # glib/COPYING is a ONE-LINE POINTER to LICENSES/ -- fetch the real text.
-    "LICENSE-glib.txt"            = @("https://raw.githubusercontent.com/GNOME/glib/main/LICENSES/LGPL-2.1-or-later.txt")
-    # graphite2/COPYING is the licensing STATEMENT; LICENSE carries the terms.
-    "LICENSE-graphite2.txt"       = @("https://raw.githubusercontent.com/silnrsi/graphite/master/COPYING",
-                                      "https://raw.githubusercontent.com/silnrsi/graphite/master/LICENSE")
-    "LICENSE-harfbuzz.txt"        = @("https://raw.githubusercontent.com/harfbuzz/harfbuzz/main/COPYING")
     "LICENSE-libiconv.txt"        = @("https://raw.githubusercontent.com/spdx/license-list-data/main/text/LGPL-2.1-only.txt")
-    # icu4c/LICENSE is a POINTER ("../LICENSE") -- fetch the real text.
-    "LICENSE-icu.txt"             = @("https://raw.githubusercontent.com/unicode-org/icu/main/LICENSE")
-    "LICENSE-gettext-runtime.txt" = @("https://raw.githubusercontent.com/spdx/license-list-data/main/text/LGPL-2.1-only.txt")
     "LICENSE-libjpeg-turbo.txt"   = @("https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/main/LICENSE.md")
     "LICENSE-leptonica.txt"       = @("https://raw.githubusercontent.com/DanBloomberg/leptonica/master/leptonica-license.txt")
     # We ship the LIBRARY (liblz4), which is BSD-2 under lib/. The repo-root
@@ -94,16 +66,7 @@ $Sources = [ordered]@{
     "LICENSE-lz4.txt"             = @("https://raw.githubusercontent.com/lz4/lz4/dev/lib/LICENSE")
     "LICENSE-xz.txt"              = @("https://raw.githubusercontent.com/tukaani-project/xz/master/COPYING")
     "LICENSE-openjpeg.txt"        = @("https://raw.githubusercontent.com/uclouvain/openjpeg/master/LICENSE")
-    "LICENSE-pango.txt"           = @(,@("https://raw.githubusercontent.com/GNOME/pango/main/COPYING",
-                                         "https://gitlab.gnome.org/GNOME/pango/-/raw/main/COPYING"))
-    "LICENSE-pcre2.txt"           = @(,@("https://raw.githubusercontent.com/PCRE2Project/pcre2/master/LICENCE.md",
-                                         "https://raw.githubusercontent.com/PCRE2Project/pcre2/main/LICENCE",
-                                         "https://raw.githubusercontent.com/PCRE2Project/pcre2/master/COPYING"))
-    # Same Anubis wall as cairo; pixman's COPYING carries the MIT text AND the
-    # full copyright-holder list, which MIT requires us to reproduce.
-    "LICENSE-pixman.txt"          = @("https://raw.githubusercontent.com/freedesktop-unofficial-mirror/pixman/master/COPYING")
     "LICENSE-libpng.txt"          = @("https://raw.githubusercontent.com/pnggroup/libpng/master/LICENSE")
-    "LICENSE-libthai.txt"         = @("https://raw.githubusercontent.com/tlwg/libthai/master/COPYING")
     "LICENSE-libtiff.txt"         = @("https://gitlab.com/libtiff/libtiff/-/raw/master/LICENSE.md")
     "LICENSE-libwebp.txt"         = @("https://raw.githubusercontent.com/webmproject/libwebp/main/COPYING")
     "LICENSE-mingw-w64.txt"       = @(,@("https://raw.githubusercontent.com/mingw-w64/mingw-w64/master/COPYING",
