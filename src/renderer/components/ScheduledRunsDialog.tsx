@@ -54,6 +54,8 @@ const EMPTY: ScheduleProfile = {
   time: '09:30',
   days: 'MON,TUE,WED,THU,FRI',
   account: '',
+  accountPasswordRequired: false,
+  enabled: true,
   inPlace: false,
   mrc: false,
   mrcPreset: 'balanced',
@@ -665,7 +667,18 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                 <input
                   data-testid="schedule-account"
                   value={editing.account}
-                  onChange={(e) => setEditing({ ...editing, account: e.target.value })}
+                  onChange={(e) => {
+                    const account = e.target.value;
+                    const saved = runs?.find((run) => run.name === editing.name)?.profile;
+                    setEditing({
+                      ...editing,
+                      account,
+                      accountPasswordRequired: Boolean(
+                        saved?.accountPasswordRequired &&
+                          saved.account.trim().toLowerCase() === account.trim().toLowerCase(),
+                      ),
+                    });
+                  }}
                   placeholder="DOMAIN\user  or  DOMAIN\gmsa$"
                   className="w-full px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
                 />

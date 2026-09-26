@@ -561,6 +561,11 @@ export interface ScheduleProfile {
   days: string;
   /** Empty = the current user. Otherwise DOMAIN\\user, or DOMAIN\\gmsa$. */
   account: string;
+  /** Windows stores passwords outside Spectra PDF; editing a password-logon
+   * schedule requires the owner to enter that password again. */
+  accountPasswordRequired: boolean;
+  /** Preserve a paused task when another setting is edited. */
+  enabled: boolean;
   /** DESTRUCTIVE: replace each original with its searchable version. Retires
    * `dest` and `movedRoot`, which the Rust validator refuses alongside it. */
   inPlace: boolean;
@@ -580,8 +585,8 @@ export interface ScheduleProfile {
 
 export interface ScheduledRun {
   name: string;
-  /** Read back from the command line the task will actually run — there is no
-   * second store to disagree with it. Null if it was edited outside the app. */
+  /** Read back from the task command, trigger and principal. Null if the task
+   * definition cannot be represented safely by this editor. */
   profile: ScheduleProfile | null;
   /** Task Scheduler's own status text. DISPLAY ONLY — Windows localizes it,
    * so nothing branches on its wording; `enabled` is the discriminant. */

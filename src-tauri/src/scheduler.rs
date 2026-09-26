@@ -9,11 +9,9 @@
 //! scheduling. Task Scheduler survives logoff and reboot without requiring the
 //! app to ship a background service.
 //!
-//! **One source of truth.** The registered task IS the store: its `<Arguments>`
-//! carry the whole run, and its `<Description>` carries the profile JSON the UI
-//! renders. Keeping a parallel profile file would let the two disagree about
-//! what a schedule does, and the one that actually fires would be the one the
-//! user cannot see.
+//! **One source of truth.** The registered task IS the store: `<Arguments>`
+//! carry the job options, while its trigger and principal carry the schedule
+//! and account. The UI reconstructs edits from that same definition.
 //!
 //! **Scoped to our own folder.** Everything lives under `\Spectra PDF\`, so
 //! enumeration and deletion address a folder we created rather than pattern-
@@ -29,6 +27,10 @@ use tauri::AppHandle;
 /// The one Task Scheduler folder this app writes to. Everything below is
 /// scoped to it; nothing outside it is ever listed, changed or deleted.
 const TASK_FOLDER: &str = "Spectra PDF";
+
+fn default_schedule_enabled() -> bool {
+    true
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +66,13 @@ pub struct ScheduleProfile {
     /// (`DOMAIN\user`, or `DOMAIN\gmsa$` for a group Managed Service Account).
     #[serde(default)]
     pub account: String,
+    /// Task Scheduler does not return the stored password. When editing a
+    /// password-logon task, the owner must enter it again before replacement.
+    #[serde(default)]
+    pub account_password_required: bool,
+    /// Preserve a paused task when its remaining settings are edited.
+    #[serde(default = "default_schedule_enabled")]
+    pub enabled: bool,
     /// DESTRUCTIVE: replace each original with its searchable version instead
     /// of mirroring into `dest`. Mutually exclusive with a destination and
     /// with `moved_root` — the processed file IS the original.
@@ -101,9 +110,8 @@ pub struct ScheduleProfile {
 #[serde(rename_all = "camelCase")]
 pub struct ScheduledRun {
     pub name: String,
-    /// The profile as stored in the task's description. `None` when the task
-    /// was edited outside the app and no longer carries one — shown as such
-    /// rather than hidden, because it will still FIRE.
+    /// The profile reconstructed from the task definition. `None` when its
+    /// command, trigger or principal cannot be represented by this editor.
     pub profile: Option<ScheduleProfile>,
     /// Task Scheduler's own status ("Ready", "Disabled", "Running", …).
     /// Display only: schtasks localizes it, so nothing may branch on the text.
@@ -1186,6 +1194,12 @@ fn build_task_xml(
     } else {
         let logon = match password {
             Some(pw) if !pw.is_empty() => "Password",
+            _ if p.account_password_required => {
+                return Err(
+                    "This schedule uses a Windows-stored password. Enter it again to update the schedule."
+                        .into(),
+                )
+            }
             _ => "S4U",
         };
         format!(
@@ -1209,7 +1223,7 @@ fn build_task_xml(
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <StartWhenAvailable>true</StartWhenAvailable>
-    <Enabled>true</Enabled>
+    <Enabled>{enabled}</Enabled>
     <Hidden>false</Hidden>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
   </Settings>
@@ -1224,6 +1238,7 @@ fn build_task_xml(
         desc = xml_escape(&format!("{} -> {}", p.source, p.dest)),
         command = xml_escape(exe),
         args = xml_escape(&build_arguments(exe, p)),
+        enabled = p.enabled,
     ))
 }
 
@@ -1292,9 +1307,8 @@ fn tokenize(line: &str) -> Vec<String> {
 
 /// Rebuild the profile from the command line the task will actually run.
 ///
-/// The COMMAND LINE is the single source of truth on purpose. A parallel
-/// profile file could disagree with it, and the one that would actually fire is
-/// the one the user cannot see — so the UI reads back exactly what will run.
+/// The command line is the source of truth for the job options. Task trigger
+/// and principal settings are added by `profile_from_task_xml`.
 fn profile_from_command(name: &str, command: &str) -> Option<ScheduleProfile> {
     let tokens = tokenize(command);
     let (start, run_type) = match tokens.iter().position(|t| t == "batch-ocr") {
@@ -1316,6 +1330,8 @@ fn profile_from_command(name: &str, command: &str) -> Option<ScheduleProfile> {
         time: String::new(),
         days: String::new(),
         account: String::new(),
+        account_password_required: false,
+        enabled: true,
         in_place: false,
         mrc: false,
         mrc_preset: String::new(),
@@ -1368,6 +1384,159 @@ fn profile_from_command(name: &str, command: &str) -> Option<ScheduleProfile> {
     Some(p)
 }
 
+fn weekly_days_from_xml(days: &str) -> Option<String> {
+    const DAYS: [(&str, &str); 7] = [
+        ("Monday", "MON"),
+        ("Tuesday", "TUE"),
+        ("Wednesday", "WED"),
+        ("Thursday", "THU"),
+        ("Friday", "FRI"),
+        ("Saturday", "SAT"),
+        ("Sunday", "SUN"),
+    ];
+    let mut remainder = days.to_string();
+    let mut found = Vec::new();
+    for (element, day) in DAYS {
+        let spaced = format!("<{element} />");
+        let compact = format!("<{element}/>");
+        let count =
+            remainder.matches(&spaced).count() + remainder.matches(&compact).count();
+        if count > 1 {
+            return None;
+        }
+        if count == 1 {
+            remainder = remainder.replace(&spaced, "").replace(&compact, "");
+            found.push(day);
+        }
+    }
+    if found.is_empty() || !remainder.chars().all(char::is_whitespace) {
+        return None;
+    }
+    Some(found.join(","))
+}
+
+/// Rebuild every editable profile field from the registered task definition.
+/// The command line holds the job options; trigger/principal XML holds when
+/// and under which account Windows will run it. If either half is unknown,
+/// leave the task visible but do not offer an unsafe partial edit.
+fn profile_from_task_xml(
+    name: &str,
+    xml: &str,
+    expected_exe: &Path,
+) -> Option<ScheduleProfile> {
+    let executable = extract_tag(xml, "Command")?;
+    if !same_file::is_same_file(&executable, expected_exe).unwrap_or(false) {
+        return None;
+    }
+    let command = format!(
+        "{executable} {}",
+        extract_tag(xml, "Arguments").unwrap_or_default()
+    );
+    let mut profile = profile_from_command(name, &command)?;
+    let triggers = extract_tag(xml, "Triggers")?;
+    if triggers.matches("<CalendarTrigger>").count() != 1
+        || triggers.matches("</CalendarTrigger>").count() != 1
+        || [
+            "BootTrigger",
+            "EventTrigger",
+            "IdleTrigger",
+            "LogonTrigger",
+            "RegistrationTrigger",
+            "SessionStateChangeTrigger",
+            "TimeTrigger",
+        ]
+        .iter()
+        .any(|trigger| triggers.contains(&format!("<{trigger}")))
+    {
+        return None;
+    }
+    if !extract_tag(&triggers, "Enabled")?.eq_ignore_ascii_case("true") {
+        return None;
+    }
+    let boundary = extract_tag(&triggers, "StartBoundary")?;
+    let (date, clock) = boundary.split_once('T')?;
+    if date != "2020-01-01" {
+        return None;
+    }
+    if clock.get(5..8)? != ":00" || !clock.get(8..)?.is_empty() {
+        return None;
+    }
+    let time = clock.get(..5)?.to_string();
+    if !valid_schedule_time(&time) {
+        return None;
+    }
+    let weekly = extract_tag(&triggers, "ScheduleByWeek");
+    let daily = extract_tag(&triggers, "ScheduleByDay");
+    let (frequency, days) = match (weekly, daily) {
+        (Some(weekly), None) => {
+            if extract_tag(&weekly, "WeeksInterval").as_deref() != Some("1") {
+                return None;
+            }
+            let days_xml = extract_tag(&weekly, "DaysOfWeek")?;
+            ("weekly", weekly_days_from_xml(&days_xml)?)
+        }
+        (None, Some(daily)) => {
+            if extract_tag(&daily, "DaysInterval").as_deref() != Some("1") {
+                return None;
+            }
+            ("daily", String::new())
+        }
+        _ => return None,
+    };
+
+    let settings = extract_tag(xml, "Settings")?;
+    let enabled = match extract_tag(&settings, "Enabled")?.as_str() {
+        "true" => true,
+        "false" => false,
+        _ => return None,
+    };
+    if extract_tag(&settings, "MultipleInstancesPolicy")?.as_str() != "IgnoreNew"
+        || extract_tag(&settings, "DisallowStartIfOnBatteries")?.as_str() != "false"
+        || extract_tag(&settings, "StopIfGoingOnBatteries")?.as_str() != "false"
+        || extract_tag(&settings, "StartWhenAvailable")?.as_str() != "true"
+        || extract_tag(&settings, "Hidden")?.as_str() != "false"
+        || extract_tag(&settings, "ExecutionTimeLimit")?.as_str() != "PT0S"
+    {
+        return None;
+    }
+
+    let principals = extract_tag(xml, "Principals")?;
+    if principals.matches("<Principal ").count() != 1
+        || principals.matches("</Principal>").count() != 1
+    {
+        return None;
+    }
+    if extract_tag(&principals, "RunLevel")?.as_str() != "LeastPrivilege" {
+        return None;
+    }
+    let (account, password_required) = match extract_tag(&principals, "LogonType")?.as_str() {
+        "InteractiveToken" => (String::new(), false),
+        "Password" => (extract_tag(&principals, "UserId")?, true),
+        "S4U" => (extract_tag(&principals, "UserId")?, false),
+        _ => return None,
+    };
+    if password_required && account.trim().is_empty() {
+        return None;
+    }
+
+    if xml.matches("<Exec>").count() != 1
+        || xml.matches("</Exec>").count() != 1
+        || xml.contains("<ComHandler")
+        || xml.contains("<SendEmail")
+        || xml.contains("<ShowMessage")
+    {
+        return None;
+    }
+
+    profile.frequency = frequency.to_string();
+    profile.time = time;
+    profile.days = days;
+    profile.account = account;
+    profile.account_password_required = password_required;
+    profile.enabled = enabled;
+    Some(profile)
+}
+
 /// What the frozen action file says it does — for the list. A missing or
 /// unreadable file is reported, not hidden: the task still FIRES.
 fn read_action_summary(profile: Option<&ScheduleProfile>) -> (String, Vec<String>, bool) {
@@ -1413,17 +1582,15 @@ fn extract_tag(xml: &str, tag: &str) -> Option<String> {
     Some(xml_unescape(xml[start..end].trim()))
 }
 
-/// The command line a task will run, read from its XML definition.
+/// The task definition, read from its XML rather than the truncation-prone CSV.
 ///
 /// NOT from the CSV listing: schtasks' "Task To Run" column TRUNCATES around
 /// 261 characters and prints embedded quotes raw (both verified live) — a
 /// run-action command with real paths overflows it, and the truncation +
 /// quote desync turned the parsed profile into garbage. The XML is the full,
 /// properly-escaped definition.
-fn task_command_line(full_task_path: &str) -> Option<(String, bool)> {
+fn task_definition_xml(full_task_path: &str) -> Option<(bool, String)> {
     let xml = run(schtasks().args(["/Query", "/TN", full_task_path, "/XML"])).ok()?;
-    let cmd = extract_tag(&xml, "Command").unwrap_or_default();
-    let args = extract_tag(&xml, "Arguments").unwrap_or_default();
     // `<Enabled>` appears inside TRIGGERS as well, and a trigger precedes
     // <Settings> in schtasks' XML — so the settings block is sliced out first
     // and the tag read from THAT. Absent (or unreadable) means enabled, which
@@ -1433,10 +1600,10 @@ fn task_command_line(full_task_path: &str) -> Option<(String, bool)> {
         .and_then(|s| extract_tag(s, "Enabled"))
         .map(|v| !v.eq_ignore_ascii_case("false"))
         .unwrap_or(true);
-    if cmd.is_empty() && args.is_empty() {
+    if extract_tag(&xml, "Command").is_none() {
         return None;
     }
-    Some((format!("{cmd} {args}"), enabled))
+    Some((enabled, xml))
 }
 
 /// One row of schtasks' CSV output. Quoted fields, `""` for a literal quote.
@@ -1494,16 +1661,16 @@ pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
             .iter()
             .position(|h| h.trim().eq_ignore_ascii_case(name))
     };
-    let (i_name, i_next, i_status, i_last, i_result, i_cmd) = (
+    let (i_name, i_next, i_status, i_last, i_result) = (
         idx("TaskName"),
         idx("Next Run Time"),
         idx("Status"),
         idx("Last Run Time"),
         idx("Last Result"),
-        idx("Task To Run"),
     );
 
     let prefix = format!("\\{TASK_FOLDER}\\");
+    let current_exe = std::env::current_exe().ok();
     let mut runs = Vec::new();
     for line in lines {
         let record = parse_csv_line(line);
@@ -1520,10 +1687,21 @@ pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
         if name.is_empty() || name.contains('\\') {
             continue;
         }
-        // The CSV's own command column is truncation-prone — the task XML is
-        // the faithful source; the column stays as a last-resort fallback.
-        let (command, enabled) = task_command_line(&full).unwrap_or_else(|| (get(i_cmd), true));
-        let profile = profile_from_command(&name, &command);
+        // The CSV's command column is truncation-prone, and it contains none
+        // of the trigger or principal settings. Only a complete XML readback
+        // can safely produce an editable profile.
+        let definition = task_definition_xml(&full);
+        let enabled = definition
+            .as_ref()
+            .map(|(enabled, _)| *enabled)
+            .unwrap_or(true);
+        let profile = definition
+            .as_ref()
+            .and_then(|(_, xml)| {
+                current_exe
+                    .as_deref()
+                    .and_then(|exe| profile_from_task_xml(&name, xml, exe))
+            });
         let (action_name, action_steps, action_missing) = read_action_summary(profile.as_ref());
         runs.push(ScheduledRun {
             name: name.clone(),
@@ -1609,6 +1787,8 @@ mod tests {
             time: "03:00".into(),
             days: String::new(),
             account: String::new(),
+            account_password_required: false,
+            enabled: true,
             in_place: false,
             mrc: false,
             mrc_preset: String::new(),
@@ -1837,6 +2017,8 @@ mod tests {
             time: "03:00".into(),
             days: String::new(),
             account: String::new(),
+            account_password_required: false,
+            enabled: true,
             in_place: false,
             mrc: true,
             mrc_preset: "smallest".into(),
@@ -1846,6 +2028,109 @@ mod tests {
             run_type: "batch-ocr".into(),
             action_file: String::new(),
         }
+    }
+
+    fn build_test_task_xml(p: &ScheduleProfile, password: Option<&str>) -> String {
+        let exe = std::env::current_exe().expect("test executable path");
+        let exe = exe.to_string_lossy();
+        build_task_xml(&exe, p, password).expect("valid test task XML")
+    }
+
+    fn parse_test_task_xml(name: &str, xml: &str) -> Option<ScheduleProfile> {
+        let exe = std::env::current_exe().ok()?;
+        profile_from_task_xml(name, xml, &exe)
+    }
+
+    #[test]
+    fn task_xml_round_trips_weekly_trigger_and_password_logon() {
+        let mut p = ocr_profile();
+        p.frequency = "weekly".into();
+        p.days = "MON,FRI".into();
+        p.time = "22:45".into();
+        p.account = r"CORP\Scanner".into();
+        p.account_password_required = true;
+
+        let xml = build_test_task_xml(&p, Some("secret"));
+        let loaded = parse_test_task_xml(&p.name, &xml).expect("editable task profile");
+        assert_eq!(loaded.frequency, p.frequency);
+        assert_eq!(loaded.days, p.days);
+        assert_eq!(loaded.time, p.time);
+        assert_eq!(loaded.account, p.account);
+        assert!(loaded.account_password_required);
+        assert!(loaded.enabled);
+    }
+
+    #[test]
+    fn editing_a_disabled_task_preserves_its_disabled_state() {
+        let mut p = ocr_profile();
+        p.enabled = false;
+        let xml = build_test_task_xml(&p, None);
+        let loaded = parse_test_task_xml(&p.name, &xml).expect("editable task profile");
+        assert!(!loaded.enabled);
+        assert!(xml.contains("<Enabled>false</Enabled>"));
+    }
+
+    #[test]
+    fn task_xml_round_trips_s4u_without_requesting_a_password() {
+        let mut p = ocr_profile();
+        p.account = r"CORP\nightly$".into();
+        let xml = build_test_task_xml(&p, None);
+        let loaded = parse_test_task_xml(&p.name, &xml).expect("editable task profile");
+        assert_eq!(loaded.account, p.account);
+        assert!(!loaded.account_password_required);
+    }
+
+    #[test]
+    fn replacing_password_logon_schedule_requires_the_secret_again() {
+        let mut p = ocr_profile();
+        p.account = r"CORP\Scanner".into();
+        p.account_password_required = true;
+        let exe = std::env::current_exe().unwrap();
+        let exe = exe.to_string_lossy();
+        let error = build_task_xml(&exe, &p, None).expect_err("must not downgrade");
+        assert!(error.contains("Enter it again"), "{error}");
+    }
+
+    #[test]
+    fn unknown_task_trigger_is_not_offered_as_an_editable_profile() {
+        let p = ocr_profile();
+        let xml = build_test_task_xml(&p, None).replace(
+            "<DaysInterval>1</DaysInterval>",
+            "<DaysInterval>2</DaysInterval>",
+        );
+        assert!(parse_test_task_xml(&p.name, &xml).is_none());
+
+        let xml = build_test_task_xml(&p, None).replace(
+            "<Triggers>",
+            "<Triggers><TimeTrigger><Enabled>true</Enabled></TimeTrigger>",
+        );
+        assert!(parse_test_task_xml(&p.name, &xml).is_none());
+
+        let xml = build_test_task_xml(&p, None).replace("2020-01-01", "2030-01-01");
+        assert!(parse_test_task_xml(&p.name, &xml).is_none());
+    }
+
+    #[test]
+    fn unknown_task_privilege_or_run_policy_is_not_offered_for_editing() {
+        let p = ocr_profile();
+        let xml = build_test_task_xml(&p, None);
+        let elevated = xml.replace(
+            "<RunLevel>LeastPrivilege</RunLevel>",
+            "<RunLevel>HighestAvailable</RunLevel>",
+        );
+        assert!(parse_test_task_xml(&p.name, &elevated).is_none());
+        let parallel = xml.replace(
+            "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
+            "<MultipleInstancesPolicy>Parallel</MultipleInstancesPolicy>",
+        );
+        assert!(parse_test_task_xml(&p.name, &parallel).is_none());
+    }
+
+    #[test]
+    fn a_task_repointed_to_another_executable_is_not_offered_for_editing() {
+        let p = ocr_profile();
+        let xml = build_task_xml("foreign.exe", &p, None).expect("valid task XML");
+        assert!(parse_test_task_xml(&p.name, &xml).is_none());
     }
 
     /// A named preset is EXPANDED into the command line at scheduling time —
