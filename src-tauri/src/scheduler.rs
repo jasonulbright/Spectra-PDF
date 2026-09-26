@@ -1521,6 +1521,7 @@ fn profile_from_task_xml(
         || extract_tag(&settings, "StartWhenAvailable")?.as_str() != "true"
         || extract_tag(&settings, "Hidden")?.as_str() != "false"
         || extract_tag(&settings, "ExecutionTimeLimit")?.as_str() != "PT0S"
+        || extract_tag(&settings, "WakeToRun").as_deref().is_some_and(|v| v != "false")
     {
         return None;
     }
@@ -2175,6 +2176,16 @@ mod tests {
             "<MultipleInstancesPolicy>Parallel</MultipleInstancesPolicy>",
         );
         assert!(parse_test_task_xml(&p.name, &parallel).is_none());
+    }
+
+    #[test]
+    fn task_with_an_unpreserved_wake_setting_is_not_offered_for_editing() {
+        let p = ocr_profile();
+        let xml = build_test_task_xml(&p, None).replace(
+            "</Settings>",
+            "<WakeToRun>true</WakeToRun></Settings>",
+        );
+        assert!(parse_test_task_xml(&p.name, &xml).is_none());
     }
 
     #[test]
