@@ -390,7 +390,65 @@ def _detect_form_fields(pdf, page_numbers):
 
 
 def _is_js_action(action) -> bool:
-    return isinstance(action, pikepdf.Dictionary) and token_text(action.get("/S", "")) == "/JavaScript"
+    """A JavaScript action, or a rendition action whose `/JS` script is its only
+    operation (ISO 32000-2 Table 218: `/OP` is required when `/JS` is absent)."""
+    if not isinstance(action, pikepdf.Dictionary):
+        return False
+    kind = token_text(action.get("/S", ""))
+    return kind == "/JavaScript" or (
+        kind == "/Rendition" and action.get("/JS") is not None and action.get("/OP") is None
+    )
+
+
+def _carries_script(action) -> bool:
+    return _is_js_action(action) or (
+        isinstance(action, pikepdf.Dictionary)
+        and token_text(action.get("/S", "")) == "/Rendition"
+        and action.get("/JS") is not None
+    )
+
+
+def _outline_items(pdf):
+    """Every outline item dictionary (Table 151), each once, siblings and
+    children alike."""
+    outlines = pdf.Root.get("/Outlines")
+    stack = [outlines.get("/First")] if isinstance(outlines, pikepdf.Dictionary) else []
+    seen: set = set()
+    while stack:
+        item = stack.pop()
+        if not isinstance(item, pikepdf.Dictionary):
+            continue
+        if item.is_indirect:
+            if item.objgen in seen:
+                continue
+            seen.add(item.objgen)
+        yield item
+        stack.append(item.get("/Next"))
+        stack.append(item.get("/First"))
+
+
+def _field_nodes(pdf):
+    """Every form field dictionary that is not itself a widget annotation, with
+    its qualified name. A widget's own actions are reached with its page."""
+    acro = _acroform(pdf)
+    fields = acro.get("/Fields") if acro is not None else None
+    stack = [(node, "", 0) for node in (fields if isinstance(fields, pikepdf.Array) else [])]
+    seen: set = set()
+    while stack:
+        node, prefix, depth = stack.pop()
+        if not isinstance(node, pikepdf.Dictionary) or depth > 32:
+            continue
+        if node.is_indirect:
+            if node.objgen in seen:
+                continue
+            seen.add(node.objgen)
+        partial = _text_of(node.get("/T"))
+        name = f"{prefix}.{partial}" if prefix and partial else (partial or prefix)
+        if token_text(node.get("/Subtype", "")) != "/Widget":
+            yield node, name or "(unnamed)"
+        kids = node.get("/Kids")
+        if isinstance(kids, pikepdf.Array):
+            stack.extend((kid, name, depth + 1) for kid in kids)
 
 
 def _action_chain(action, depth: int = 0):
@@ -413,16 +471,16 @@ def _detect_javascript(pdf, page_numbers):
         names.get("/JavaScript"), pikepdf.Dictionary
     ):
         for name, action in pikepdf.NameTree(names["/JavaScript"]).items():
-            if _is_js_action(action):
+            if _carries_script(action):
                 rows.append({"site": "name_tree", "where": f"document script: {name}"})
     for action in _action_chain(pdf.Root.get("/OpenAction")):
-        if _is_js_action(action):
+        if _carries_script(action):
             rows.append({"site": "open_action", "where": "open action"})
     catalog_aa = pdf.Root.get("/AA")
     if isinstance(catalog_aa, pikepdf.Dictionary):
         for key in sorted(catalog_aa.keys()):
             for action in _action_chain(catalog_aa[key]):
-                if _is_js_action(action):
+                if _carries_script(action):
                     rows.append(
                         {"site": "catalog_aa", "where": f"document action: {str(key).lstrip('/')}"}
                     )
@@ -432,7 +490,7 @@ def _detect_javascript(pdf, page_numbers):
         if isinstance(page_aa, pikepdf.Dictionary):
             for key in sorted(page_aa.keys()):
                 for action in _action_chain(page_aa[key]):
-                    if _is_js_action(action):
+                    if _carries_script(action):
                         rows.append(
                             {
                                 "site": "page_aa",
@@ -451,7 +509,7 @@ def _detect_javascript(pdf, page_numbers):
             if isinstance(annot_aa, pikepdf.Dictionary):
                 for key in sorted(annot_aa.keys()):
                     for action in _action_chain(annot_aa[key]):
-                        if _is_js_action(action):
+                        if _carries_script(action):
                             rows.append(
                                 {
                                     "site": "annotation_aa",
@@ -460,10 +518,25 @@ def _detect_javascript(pdf, page_numbers):
                                 }
                             )
             for action in _action_chain(annot.get("/A")):
-                if _is_js_action(action):
+                if _carries_script(action):
                     rows.append(
                         {"site": "annotation_action", "page": n, "where": f"{label} action"}
                     )
+    for item in _outline_items(pdf):
+        for action in _action_chain(item.get("/A")):
+            if _carries_script(action):
+                rows.append(
+                    {"site": "outline_action", "where": f"bookmark {_text_of(item.get('/Title'))} action"}
+                )
+    for field, name in _field_nodes(pdf):
+        field_aa = field.get("/AA")
+        if isinstance(field_aa, pikepdf.Dictionary):
+            for key in sorted(field_aa.keys()):
+                for action in _action_chain(field_aa[key]):
+                    if _carries_script(action):
+                        rows.append(
+                            {"site": "field_aa", "where": f"field {name} action: {str(key).lstrip('/')}"}
+                        )
     return len(rows), rows, {}
 
 
@@ -539,17 +612,22 @@ def _detect_links_and_actions(pdf, page_numbers):
                     kind, target = _link_target(pdf, annot)
                     rows.append({"page": n, "site": "link", "kind": kind, "target": target})
                     continue
-                for action in _action_chain(annot.get("/A")):
-                    kind = token_text(action.get("/S", ""))
-                    if kind in NON_LINK_ACTIONS:
-                        rows.append(
-                            {
-                                "page": n,
-                                "site": "annotation_action",
-                                "kind": kind.lstrip("/"),
-                                "target": _text_of(action.get("/URI") or action.get("/F")),
-                            }
-                        )
+                annot_actions = [annot.get("/A")]
+                annot_aa = annot.get("/AA")
+                if isinstance(annot_aa, pikepdf.Dictionary):
+                    annot_actions += [annot_aa[key] for key in sorted(annot_aa.keys())]
+                for slot in annot_actions:
+                    for action in _action_chain(slot):
+                        kind = token_text(action.get("/S", ""))
+                        if kind in NON_LINK_ACTIONS:
+                            rows.append(
+                                {
+                                    "page": n,
+                                    "site": "annotation_action",
+                                    "kind": kind.lstrip("/"),
+                                    "target": _text_of(action.get("/URI") or action.get("/F")),
+                                }
+                            )
         page_aa = page.get("/AA")
         if isinstance(page_aa, pikepdf.Dictionary):
             for key in sorted(page_aa.keys()):
@@ -583,6 +661,22 @@ def _detect_links_and_actions(pdf, page_numbers):
                     rows.append(
                         {"site": "catalog_aa", "kind": kind.lstrip("/"), "target": ""}
                     )
+    slots = [("outline_action", item.get("/A")) for item in _outline_items(pdf)]
+    for field, _name in _field_nodes(pdf):
+        field_aa = field.get("/AA")
+        if isinstance(field_aa, pikepdf.Dictionary):
+            slots += [("field_aa", field_aa[key]) for key in sorted(field_aa.keys())]
+    for site, slot in slots:
+        for action in _action_chain(slot):
+            kind = token_text(action.get("/S", ""))
+            if kind in NON_LINK_ACTIONS:
+                rows.append(
+                    {
+                        "site": site,
+                        "kind": kind.lstrip("/"),
+                        "target": _text_of(action.get("/URI") or action.get("/F")),
+                    }
+                )
     return len(rows), rows, {}
 
 
@@ -977,10 +1071,14 @@ def _action_sites(pdf):
             continue
         for annot in annots:
             yield from emit(annot)
+    for item in _outline_items(pdf):
+        yield from emit(item)
+    for field, _name in _field_nodes(pdf):
+        yield from emit(field)
 
 
 def _prune_empty_action_dicts(pdf) -> None:
-    for owner in [pdf.Root] + [p.obj for p in pdf.pages]:
+    for owner in [pdf.Root] + [p.obj for p in pdf.pages] + [f for f, _n in _field_nodes(pdf)]:
         extra = owner.get("/AA")
         if isinstance(extra, pikepdf.Dictionary) and not len(extra.keys()):
             del owner["/AA"]
@@ -997,11 +1095,17 @@ def _prune_empty_action_dicts(pdf) -> None:
 
 
 def _remove_javascript(pdf) -> int:
-    """All five script sites. The named tree is one of them; the other four are
-    action dictionaries — the open action, and the additional actions on the
-    catalog, the pages and their annotations and fields."""
+    """Every script site. The named tree is one of them; the others are action
+    slots — the open action, the additional actions on the catalog, the pages,
+    their annotations and the form fields, and the outline items' actions. A
+    rendition action that also plays media keeps the media and loses `/JS`."""
     removed = _remove_document_scripts(pdf)
     for container, key in list(_action_sites(pdf)):
+        slot = container.get(Name(key)) if isinstance(key, str) else container.get(key)
+        for action in list(_action_chain(slot)):
+            if _carries_script(action) and not _is_js_action(action):
+                del action["/JS"]
+                removed += 1
         removed += _strip_action_slot(container, key, _is_js_action)
     _prune_empty_action_dicts(pdf)
     return removed

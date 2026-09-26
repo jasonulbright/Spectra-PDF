@@ -814,3 +814,45 @@ class TestDocumentJavaScriptIsFoundWhereverItRuns:
 
     def test_a_document_without_scripts_passes(self, tmp_dir):
         assert self._check(tmp_dir, lambda pdf: None)["status"] == "pass"
+
+    def test_a_script_on_a_nested_outline_item(self, tmp_dir):
+        import pikepdf
+
+        def mutate(pdf):
+            outlines = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.Outlines))
+            top = pdf.make_indirect(pikepdf.Dictionary(Title=pikepdf.String("top"), Parent=outlines))
+            sibling = pdf.make_indirect(pikepdf.Dictionary(Title=pikepdf.String("next"), Parent=outlines, Prev=top))
+            child = pdf.make_indirect(pikepdf.Dictionary(
+                Title=pikepdf.String("child"), Parent=sibling, A=pdf.make_indirect(self._js())))
+            top["/Next"] = sibling
+            sibling["/First"] = sibling["/Last"] = child
+            outlines["/First"], outlines["/Last"] = top, sibling
+            pdf.Root["/Outlines"] = outlines
+
+        row = self._check(tmp_dir, mutate)
+        assert row["status"] == "fail"
+        assert [f["values"]["name"] for f in row["findings"]] == ["outline item"]
+
+    def test_a_rendition_action_carrying_a_script(self, tmp_dir):
+        import pikepdf
+
+        def mutate(pdf):
+            rendition = pikepdf.Dictionary(S=pikepdf.Name.Rendition, OP=0, JS=pikepdf.String("app.alert(1)"))
+            pdf.pages[0].obj["/AA"] = pikepdf.Dictionary(O=rendition)
+
+        row = self._check(tmp_dir, mutate)
+        assert row["status"] == "fail"
+        assert [f["values"]["name"] for f in row["findings"]] == ["page 1 O"]
+
+    def test_an_outline_whose_siblings_cycle_is_read_once(self, tmp_dir):
+        import pikepdf
+
+        def mutate(pdf):
+            outlines = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.Outlines))
+            a = pdf.make_indirect(pikepdf.Dictionary(Title=pikepdf.String("a"), Parent=outlines))
+            b = pdf.make_indirect(pikepdf.Dictionary(Title=pikepdf.String("b"), Parent=outlines, Next=a))
+            a["/Next"] = b
+            outlines["/First"] = a
+            pdf.Root["/Outlines"] = outlines
+
+        assert self._check(tmp_dir, mutate)["status"] == "pass"

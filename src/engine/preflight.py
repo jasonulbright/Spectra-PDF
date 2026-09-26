@@ -538,8 +538,10 @@ def _javascript_sites(pdf) -> tuple:
 
     A script runs from the catalog name tree, the catalog's open action and
     additional actions, a page's additional actions, an annotation's action
-    and additional actions, and a form field's additional actions — and from
-    any action any of those chains to through `/Next` (ISO 32000-2 12.6.2).
+    and additional actions, a form field's additional actions and an outline
+    item's action (Table 151) — and from any action any of those chains to
+    through `/Next` (ISO 32000-2 12.6.2). A rendition action carries a script
+    in its `/JS` entry (Table 218).
     A profile that forbids scripting has to be told about all of them. A site
     that will not read is returned apart, because "could not look" is not "no
     script".
@@ -562,7 +564,8 @@ def _javascript_sites(pdf) -> tuple:
             if action.objgen in seen:
                 return
             seen.add(action.objgen)
-        if token_text(action.get("/S") or "") == "/JavaScript":
+        kind = token_text(action.get("/S") or "")
+        if kind == "/JavaScript" or (kind == "/Rendition" and action.get("/JS") is not None):
             sites.append(where)
         nxt = action.get("/Next")
         if nxt is not None:
@@ -597,6 +600,26 @@ def _javascript_sites(pdf) -> tuple:
             chain("document OpenAction", opening)
     except Exception as exc:
         unreadable.append(f"the open action will not read: {exc}")
+    try:
+        outlines = pdf.Root.get("/Outlines")
+        stack = [outlines.get("/First")] if isinstance(outlines, pikepdf.Dictionary) else []
+        visited_items: set = set()
+        while stack:
+            item = stack.pop()
+            if not isinstance(item, pikepdf.Dictionary):
+                continue
+            if item.is_indirect:
+                if item.objgen in visited_items:
+                    continue
+                visited_items.add(item.objgen)
+            if len(visited_items) > 100000:
+                unreadable.append("the outline has too many items to read")
+                break
+            chain("outline item", item.get("/A"))
+            stack.append(item.get("/Next"))
+            stack.append(item.get("/First"))
+    except Exception as exc:
+        unreadable.append(f"the outline will not read: {exc}")
     for index, page in enumerate(pdf.pages, start=1):
         sweep(f"page {index}", page.obj, single=())
         try:
