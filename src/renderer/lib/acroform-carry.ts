@@ -642,9 +642,11 @@ export function carryAcroForm(output: PDFDocument, contributions: FormContributi
       let name = sourceFqName(contributions[ci].source, co.get(i));
       if (name === null) continue;
       if (renames) {
+        // One rename per entry: a renamed root's new name can be another
+        // root's old name, and a chained pass lands the entry on that field.
         for (const [oldRoot, newRoot] of renames) {
-          if (name === oldRoot) name = newRoot;
-          else if (name.startsWith(`${oldRoot}.`)) name = newRoot + name.slice(oldRoot.length);
+          if (name === oldRoot) { name = newRoot; break; }
+          if (name.startsWith(`${oldRoot}.`)) { name = newRoot + name.slice(oldRoot.length); break; }
         }
       }
       const ref = fqIndex.get(name);

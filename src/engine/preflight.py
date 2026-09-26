@@ -532,35 +532,54 @@ def _annotation_rows(pdf) -> tuple:
     return rows, unreadable
 
 
-def _javascript_sites(pdf) -> list:
-    """Every place a document carries JavaScript, not only the catalog name
-    tree. A document can carry scripts in four sites where the name tree
-    reports one, and a profile that forbids scripting has to be told about
-    all of them."""
+def _javascript_sites(pdf) -> tuple:
+    """Every place a document carries JavaScript, and every place that would
+    not read.
+
+    A script runs from the catalog name tree, the catalog's open action and
+    additional actions, a page's additional actions, an annotation's action
+    and additional actions, and a form field's additional actions — and from
+    any action any of those chains to through `/Next` (ISO 32000-2 12.6.2).
+    A profile that forbids scripting has to be told about all of them. A site
+    that will not read is returned apart, because "could not look" is not "no
+    script".
+    """
     sites: list = []
+    unreadable: list = []
+    seen: set = set()
 
-    def note(where: str, obj) -> None:
-        try:
-            if not isinstance(obj, pikepdf.Dictionary):
+    def chain(where: str, action, depth: int = 0) -> None:
+        if depth > 32:
+            unreadable.append(f"{where}: the action chain nests too deeply")
+            return
+        if isinstance(action, pikepdf.Array):
+            for entry in action:
+                chain(where, entry, depth + 1)
+            return
+        if not isinstance(action, pikepdf.Dictionary):
+            return
+        if action.is_indirect:
+            if action.objgen in seen:
                 return
-            if str(obj.get("/S") or "") == "/JavaScript":
-                sites.append(where)
-        except Exception:
-            return
+            seen.add(action.objgen)
+        if token_text(action.get("/S") or "") == "/JavaScript":
+            sites.append(where)
+        nxt = action.get("/Next")
+        if nxt is not None:
+            chain(where, nxt, depth + 1)
 
-    def sweep(where: str, holder) -> None:
+    def sweep(where: str, holder, single=("/A",)) -> None:
         try:
-            for key in ("/A", "/AA"):
-                entry = holder.get(key) if holder is not None else None
-                if entry is None:
-                    continue
-                if token_text(entry.get("/S") or "") == "/JavaScript":
-                    sites.append(where)
-                    continue
-                for trigger in list(entry.keys()):
-                    note(f"{where} {str(trigger).lstrip('/')}", entry[trigger])
-        except Exception:
-            return
+            if not isinstance(holder, pikepdf.Dictionary):
+                return
+            for key in single:
+                chain(where, holder.get(key))
+            triggers = holder.get("/AA")
+            if isinstance(triggers, pikepdf.Dictionary):
+                for trigger in list(triggers.keys()):
+                    chain(f"{where} {str(trigger).lstrip('/')}", triggers[trigger])
+        except Exception as exc:
+            unreadable.append(f"{where}: the actions will not read: {exc}")
 
     try:
         names = pdf.Root.get("/Names")
@@ -569,19 +588,49 @@ def _javascript_sites(pdf) -> list:
             for name, action in pikepdf.NameTree(tree).items():
                 if isinstance(action, pikepdf.Dictionary):
                     sites.append(str(name))
-    except Exception:
-        pass
-    sweep("document", pdf.Root)
+    except Exception as exc:
+        unreadable.append(f"the document scripts will not read: {exc}")
+    sweep("document", pdf.Root, single=())
+    try:
+        opening = pdf.Root.get("/OpenAction")
+        if isinstance(opening, pikepdf.Dictionary):
+            chain("document OpenAction", opening)
+    except Exception as exc:
+        unreadable.append(f"the open action will not read: {exc}")
     for index, page in enumerate(pdf.pages, start=1):
-        sweep(f"page {index}", page.obj)
+        sweep(f"page {index}", page.obj, single=())
         try:
             annots = page.obj.get("/Annots")
             if annots is not None:
                 for annot in list(annots):
                     sweep(f"page {index}", annot)
-        except Exception:
-            continue
-    return sorted(set(sites))
+        except Exception as exc:
+            unreadable.append(f"page {index}: the annotations will not read: {exc}")
+    try:
+        acro = pdf.Root.get("/AcroForm")
+        fields = acro.get("/Fields") if isinstance(acro, pikepdf.Dictionary) else None
+        stack = [(node, 0) for node in (fields if isinstance(fields, pikepdf.Array) else [])]
+        visited: set = set()
+        while stack:
+            node, depth = stack.pop()
+            if not isinstance(node, pikepdf.Dictionary):
+                continue
+            if depth > 32:
+                unreadable.append("a form field nests too deeply")
+                continue
+            if node.is_indirect:
+                if node.objgen in visited:
+                    continue
+                visited.add(node.objgen)
+            # A widget's own actions were read with its page's annotations.
+            if node.get("/Subtype") != pikepdf.Name.Widget:
+                sweep("form field", node, single=())
+            kids = node.get("/Kids")
+            if isinstance(kids, pikepdf.Array):
+                stack.extend((kid, depth + 1) for kid in kids)
+    except Exception as exc:
+        unreadable.append(f"the form fields will not read: {exc}")
+    return sorted(set(sites)), unreadable
 
 
 # ── the checks ────────────────────────────────────────────────────────────
@@ -1477,6 +1526,12 @@ def _check_document_javascript(check, reads) -> None:
         for site in sites
     ]
     _verdict(check, 1, findings)
+    if not findings and reads["javascript_unreadable"]:
+        check.status = REVIEW
+        check.findings = [
+            _finding(_page_address(), "unreadable_branch", values={"reason": reason})
+            for reason in reads["javascript_unreadable"][:_REVIEW_DETAIL_CAP]
+        ]
 
 
 def _check_xmp(check, reads) -> None:
@@ -1687,7 +1742,7 @@ def _gather(file: str, profile: dict, gs_path: str, font_dir) -> dict:
         reads["annotations"], annot_unreadable = _annotation_rows(pdf)
         for reason in annot_unreadable:
             note((), reason)
-        reads["javascript"] = _javascript_sites(pdf)
+        reads["javascript"], reads["javascript_unreadable"] = _javascript_sites(pdf)
         if {"min_type_size", "small_text_k_only"} & wanted:
             measurements, text_unreadable = document_contrast(pdf)
             reads["text_runs"] = measurements
