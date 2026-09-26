@@ -44,7 +44,7 @@ function fixture(mode = 'ranges') {
   const shared = { activeFile: file, beginRun: () => runs.begin(file), mode, ranges: '1', everyN: 1, maxMb: 5,
     runCommitGate: gate, call, setStatus: status, setBusy: busy,
     tChrome: (key: string, params?: unknown) => `${key}:${JSON.stringify(params)}`,
-    tChromeCount: (key: string) => key };
+    tChromeCount: (key: string) => key, joinSentences: (sentences: readonly string[]) => sentences.join(' ') };
   const performSplit = callback<(choose: () => Promise<unknown>) => Promise<void>>('performSplit', shared);
   const handle = callback<() => Promise<void>>('handleSplit', { ...shared, performSplit, saveFile, dialog: { pickFolder } });
   return { file, state: () => state, change: (patch: Partial<AppState>) => { state = { ...state, ...patch }; },

@@ -171,6 +171,7 @@ export const PANEL_STRINGS = {
   'panel.recover.recoveredPages': 'Recovered: pages {{pages}}',
   'panel.recover.lostPages': 'Lost pages:',
   'panel.recover.lostLine': 'Page {{page}}: {{error}}',
+  'panel.recover.notCarried': 'Not carried into the recovered PDF: {{reason}}',
 
   'panel.repair.open': 'Open a PDF to repair',
   'panel.repair.blurb':

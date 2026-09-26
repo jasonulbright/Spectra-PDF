@@ -117,11 +117,34 @@ def _status(report: dict, check_id: str) -> str:
 
 
 def _fix_permissions(source: str, output: str, report: dict, allow_signed: bool) -> int:
+    gate = _signed_structural_gate(source, allow_signed)
+    if gate == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so granting assistive "
+            "technology access would produce a file that reports as illegally modified"
+        )
+    if gate == "warn":
+        raise RuntimeError(
+            "this document is signed and granting assistive technology access invalidates "
+            "its signatures -- the run must state that signed documents are included before "
+            "it will touch one"
+        )
     grant_accessibility_permission(source, output)
     return 1
 
 
 def _fix_tagged(source: str, output: str, report: dict, allow_signed: bool) -> int:
+    gate = _signed_structural_gate(source, allow_signed)
+    if gate == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so tagging it would produce "
+            "a file that reports as illegally modified"
+        )
+    if gate == "warn":
+        raise RuntimeError(
+            "this document is signed and tagging it invalidates its signatures -- the run "
+            "must state that signed documents are included before it will touch one"
+        )
     autotag(source, output)
     return 1
 
@@ -172,6 +195,17 @@ def _fix_suspects(source: str, output: str, report: dict, allow_signed: bool) ->
 
 
 def _fix_bookmarks(source: str, output: str, report: dict, allow_signed: bool) -> int:
+    gate = _signed_structural_gate(source, allow_signed)
+    if gate == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so adding bookmarks would "
+            "produce a file that reports as illegally modified"
+        )
+    if gate == "warn":
+        raise RuntimeError(
+            "this document is signed and adding bookmarks invalidates its signatures -- "
+            "the run must state that signed documents are included before it will touch one"
+        )
     outline_from_structure(source, output)
     return 1
 
