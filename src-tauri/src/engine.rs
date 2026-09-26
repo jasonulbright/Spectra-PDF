@@ -394,12 +394,23 @@ pub fn get_soffice_path(app: &AppHandle) -> String {
 pub fn python_env() -> Vec<(String, String)> {
     vec![
         ("PYTHONUTF8".to_string(), "1".to_string()),
+        ("PYTHONNOUSERSITE".to_string(), "1".to_string()),
         ("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string()),
         (
             crate::portable::ICC_ASSENT_ENV.to_string(),
             crate::portable::assent_env_value(crate::portable::icc_assent()).to_string(),
         ),
     ]
+}
+
+/// Interpreter argv for every engine child. The runtime's `._pth` runs
+/// `import site`, which adds the user's `%APPDATA%\Python\Python3xx\site-packages`
+/// and runs its `usercustomize` and `.pth` lines inside the engine; a `.pth`
+/// line can also put a directory ahead of the shipped packages. `-s` removes
+/// the user site. `-I` is not used: it also implies `-E`, which drops the
+/// `PYTHONUTF8` that `python_env` sets.
+pub fn python_args(script: &str) -> Vec<String> {
+    vec!["-s".to_string(), script.to_string()]
 }
 
 /// Starts the Python engine sidecar and wires stdout to the webview.
@@ -419,7 +430,7 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
     let shell = app.shell();
     let (mut rx, child) = shell
         .command(&python_path)
-        .args([&script_path])
+        .args(python_args(&script_path))
         .envs(python_env().into_iter().collect::<HashMap<String, String>>())
         .spawn()
         .map_err(|e| format!("Failed to start engine: {}", e))?;
@@ -552,6 +563,15 @@ where
 mod start_tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn the_engine_child_never_loads_the_user_site() {
+        let script = r"C:\resources\engine\__startup__.py";
+        assert_eq!(python_args(script), vec!["-s", script]);
+        let env = python_env();
+        assert!(env.iter().any(|(k, v)| k == "PYTHONNOUSERSITE" && v == "1"));
+        assert!(env.iter().any(|(k, v)| k == "PYTHONUTF8" && v == "1"));
+    }
 
     #[tokio::test]
     async fn an_emptied_slot_is_refilled_before_the_send() {

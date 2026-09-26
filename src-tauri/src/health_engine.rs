@@ -469,7 +469,7 @@ async fn start_locked<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
     let shell = app.shell();
     let (mut rx, child) = shell
         .command(&python_path)
-        .args([&script_path])
+        .args(crate::engine::python_args(&script_path))
         .envs(
             crate::engine::python_env()
                 .into_iter()
