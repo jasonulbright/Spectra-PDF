@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import io
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -729,6 +730,72 @@ class TestBudget:
 
     def test_a_missing_file_still_gets_the_floor(self, tmp_dir):
         assert budget.for_file(os.path.join(tmp_dir, "nope"), base=10, per_mb=100) == 10
+
+    def test_child_output_is_capped_without_buffering_the_overflow(self):
+        script = (
+            "import sys; sys.stdout.buffer.write(b'x' * 4096); sys.stdout.flush(); "
+            "sys.stderr.buffer.write(b'y' * 4096); sys.stderr.flush()"
+        )
+        started = time.monotonic()
+        with pytest.raises(budget.SubprocessOutputExceeded, match="captured-output limit"):
+            budget.run(
+                [sys.executable, "-c", script],
+                what="test child",
+                budget=10,
+                max_output_bytes=4096,
+            )
+        assert time.monotonic() - started < 5
+
+    def test_capped_runner_keeps_text_and_binary_output_contracts(self):
+        binary = budget.run(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'pdf')"],
+            what="test child",
+            budget=10,
+            max_output_bytes=16,
+        )
+        text = budget.run(
+            [sys.executable, "-c", "print('ready')"],
+            what="test child",
+            budget=10,
+            max_output_bytes=16,
+            text=True,
+        )
+        assert binary.stdout == b"pdf"
+        assert text.stdout == "ready\n"
+
+    def test_capped_runner_reaps_a_descendant_holding_its_pipes(self, tmp_dir):
+        marker = Path(tmp_dir) / "orphan-marker"
+        grandchild = [
+            sys.executable,
+            "-c",
+            f"import pathlib,time; time.sleep(0.15); pathlib.Path({str(marker)!r}).write_text('orphan')",
+        ]
+        script = (
+            "import subprocess,sys,time; "
+            f"subprocess.Popen({grandchild!r}); "
+            "sys.stdout.buffer.write(b'x' * (2 << 20)); sys.stdout.flush(); "
+            "time.sleep(10)"
+        )
+        with pytest.raises(budget.SubprocessOutputExceeded):
+            budget.run(
+                [sys.executable, "-c", script],
+                what="test child",
+                budget=10,
+                max_output_bytes=64 << 10,
+            )
+        assert not marker.exists(), "a child process outlived the bounded run"
+
+    def test_runner_reaps_a_descendant_after_the_direct_child_exits(self, tmp_dir):
+        marker = Path(tmp_dir) / "normal-exit-orphan-marker"
+        grandchild = [
+            sys.executable,
+            "-c",
+            f"import pathlib,time; time.sleep(0.15); pathlib.Path({str(marker)!r}).write_text('orphan')",
+        ]
+        script = f"import subprocess; subprocess.Popen({grandchild!r}); print('finished')"
+        result = budget.run([sys.executable, "-c", script], what="test child", budget=10)
+        assert result.stdout.rstrip(b"\r\n") == b"finished"
+        assert not marker.exists(), "a child process outlived the completed run"
 
 
 class TestGhostscriptBudgetFamily:

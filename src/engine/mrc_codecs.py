@@ -409,6 +409,10 @@ def _run_generic(
             size_bytes=page_bytes,
             pages=1,
             cwd=wd,
+            # JBIG2's returned codestream is needed in memory by the PDF
+            # builder. Bound it to a generous multiple of the uncompressed
+            # bitmap plus a fixed allowance, with an absolute ceiling.
+            max_output_bytes=max(8 << 20, min(512 << 20, page_bytes * 2 + (1 << 20))),
         )
         if result.returncode != 0:
             raise _jbig2_failed(result)

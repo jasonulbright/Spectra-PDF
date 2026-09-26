@@ -14,7 +14,7 @@ use serde::Serialize;
 #[cfg(windows)]
 use windows::core::{PCSTR, PSTR};
 #[cfg(windows)]
-use windows::Win32::Foundation::FILETIME;
+use windows::Win32::Foundation::{GetLastError, SetLastError, FILETIME, WIN32_ERROR};
 #[cfg(windows)]
 use windows::Win32::Security::Cryptography::*;
 
@@ -35,6 +35,19 @@ pub const EKU_CODE_SIGNING: &[&str] = &[
 pub const KU_DIGITAL_SIGNATURE: u16 = 0x0080;
 /// CERT_NON_REPUDIATION_KEY_USAGE
 pub const KU_NON_REPUDIATION: u16 = 0x0040;
+
+#[cfg(windows)]
+const MAX_CERT_NAME_UNITS: usize = 32_767;
+#[cfg(windows)]
+const MAX_CERT_EKU_BYTES: usize = 1024 * 1024;
+#[cfg(windows)]
+const MAX_CERT_EKU_OIDS: usize = 4096;
+#[cfg(windows)]
+const MAX_CERT_EKU_OID_BYTES: usize = 4096;
+#[cfg(windows)]
+const CRYPT_E_NOT_FOUND: u32 = 0x8009_2004;
+#[cfg(windows)]
+const ERROR_MORE_DATA: u32 = 234;
 
 /// One certificate the picker can offer.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -88,7 +101,21 @@ pub fn hresult_hex(code: i32) -> String {
 /// own. Key usage is only consulted when the certificate declares it: an
 /// absent extension is unrestricted under RFC 5280, and treating it as a
 /// refusal would hide certificates that sign perfectly well.
-pub fn eligible(has_private_key: bool, expired: bool, key_usage: u16, eku: &[String]) -> bool {
+pub fn eligible(
+    has_private_key: bool,
+    expired: bool,
+    key_usage: Option<u16>,
+    eku: Option<&[String]>,
+) -> bool {
+    let Some(key_usage) = key_usage else {
+        // A failed key-usage decode is not the same as an absent extension.
+        return false;
+    };
+    let Some(eku) = eku else {
+        // A failed or malformed EKU read is not evidence that a certificate
+        // is unrestricted. Do not offer an identity whose purpose is unknown.
+        return false;
+    };
     if !has_private_key || expired {
         return false;
     }
@@ -169,9 +196,19 @@ unsafe fn read_name(
     if len <= 1 {
         return String::new();
     }
-    let mut buf = vec![0u16; len as usize];
+    let Ok(capacity) = usize::try_from(len) else {
+        return String::new();
+    };
+    if capacity > MAX_CERT_NAME_UNITS {
+        return String::new();
+    }
+    let mut buf = Vec::new();
+    if buf.try_reserve_exact(capacity).is_err() {
+        return String::new();
+    }
+    buf.resize(capacity, 0u16);
     let written = CertGetNameStringW(cert, kind, flags, para, Some(&mut buf));
-    if written <= 1 {
+    if written <= 1 || written > len {
         return String::new();
     }
     String::from_utf16_lossy(&buf[..(written as usize - 1)])
@@ -181,7 +218,10 @@ unsafe fn read_name(
 unsafe fn thumbprint(cert: *const CERT_CONTEXT) -> Option<String> {
     let mut size: u32 = 0;
     CertGetCertificateContextProperty(cert, CERT_SHA1_HASH_PROP_ID, None, &mut size).ok()?;
-    let mut buf = vec![0u8; size as usize];
+    let mut buf = [0u8; 20];
+    if size as usize != buf.len() {
+        return None;
+    }
     CertGetCertificateContextProperty(
         cert,
         CERT_SHA1_HASH_PROP_ID,
@@ -189,6 +229,9 @@ unsafe fn thumbprint(cert: *const CERT_CONTEXT) -> Option<String> {
         &mut size,
     )
     .ok()?;
+    if size as usize != buf.len() {
+        return None;
+    }
     Some(buf.iter().map(|b| format!("{:02X}", b)).collect())
 }
 
@@ -203,9 +246,10 @@ unsafe fn has_private_key(cert: *const CERT_CONTEXT) -> bool {
 }
 
 #[cfg(windows)]
-unsafe fn intended_key_usage(cert: *const CERT_CONTEXT) -> u16 {
+unsafe fn intended_key_usage(cert: *const CERT_CONTEXT) -> Option<u16> {
     let mut bytes = [0u8; 2];
     let info = (*cert).pCertInfo;
+    SetLastError(WIN32_ERROR(0));
     if CertGetIntendedKeyUsage(
         (*cert).dwCertEncodingType,
         info,
@@ -216,36 +260,116 @@ unsafe fn intended_key_usage(cert: *const CERT_CONTEXT) -> u16 {
         // The API writes the DER bit string's bytes in the order the
         // CERT_*_KEY_USAGE constants are defined against, so the first byte
         // already carries digitalSignature.
-        u16::from_le_bytes(bytes)
+        Some(u16::from_le_bytes(bytes))
+    } else if GetLastError().0 == 0 {
+        // Windows documents a missing Key Usage extension as FALSE with a
+        // zeroed output and ERROR_SUCCESS; absence means no key-use restriction.
+        Some(0)
     } else {
-        0
+        // An ASN.1 decode error is not evidence that the certificate has no
+        // key-use restriction.
+        None
     }
 }
 
 #[cfg(windows)]
-unsafe fn enhanced_key_usage(cert: *const CERT_CONTEXT) -> Vec<String> {
+unsafe fn enhanced_key_usage(cert: *const CERT_CONTEXT) -> Option<Vec<String>> {
     let mut size: u32 = 0;
-    if CertGetEnhancedKeyUsage(cert, 0, None, &mut size).is_err() {
-        return Vec::new();
+    SetLastError(WIN32_ERROR(0));
+    let probe = CertGetEnhancedKeyUsage(cert, 0, None, &mut size);
+    let probe_error = GetLastError().0;
+    if size == 0 && probe.is_err() && probe_error == CRYPT_E_NOT_FOUND {
+        // Windows uses CRYPT_E_NOT_FOUND to mean there is no EKU extension or
+        // property, which is the RFC 5280 unrestricted case.
+        return Some(Vec::new());
     }
-    let mut buf = vec![0u8; size as usize];
-    let usage = buf.as_mut_ptr() as *mut CTL_USAGE;
-    if CertGetEnhancedKeyUsage(cert, 0, Some(usage), &mut size).is_err() {
-        return Vec::new();
+    let header_bytes = std::mem::size_of::<CTL_USAGE>();
+    let mut capacity = (size as usize).max(header_bytes);
+    if capacity > MAX_CERT_EKU_BYTES {
+        return None;
     }
-    let count = (*usage).cUsageIdentifier as usize;
-    let ids = (*usage).rgpszUsageIdentifier;
-    let mut out = Vec::with_capacity(count);
-    for i in 0..count {
-        let ptr: PSTR = *ids.add(i);
-        if ptr.is_null() {
-            continue;
+
+    for attempt in 0..2 {
+        let words = capacity.div_ceil(std::mem::size_of::<u64>());
+        let mut storage = Vec::<u64>::new();
+        storage.try_reserve_exact(words).ok()?;
+        storage.resize(words, 0);
+        let usage = storage.as_mut_ptr().cast::<CTL_USAGE>();
+        let mut written = capacity as u32;
+        SetLastError(WIN32_ERROR(0));
+        let result = CertGetEnhancedKeyUsage(cert, 0, Some(usage), &mut written);
+        let error = GetLastError().0;
+        if result.is_err() {
+            if error == CRYPT_E_NOT_FOUND {
+                return Some(Vec::new());
+            }
+            let needed = written as usize;
+            if error == ERROR_MORE_DATA
+                && attempt == 0
+                && needed > capacity
+                && needed <= MAX_CERT_EKU_BYTES
+            {
+                capacity = needed;
+                continue;
+            }
+            return None;
         }
-        if let Ok(text) = ptr.to_string() {
-            out.push(text);
+
+        let actual = written as usize;
+        if actual < header_bytes || actual > capacity {
+            return None;
         }
+        let count = (*usage).cUsageIdentifier as usize;
+        if count == 0 {
+            // The same empty structure has two meanings: CRYPT_E_NOT_FOUND
+            // means unrestricted; ERROR_SUCCESS means no valid purposes.
+            return (error == CRYPT_E_NOT_FOUND).then(Vec::new);
+        }
+        if count > MAX_CERT_EKU_OIDS {
+            return None;
+        }
+        let ids = (*usage).rgpszUsageIdentifier;
+        if ids.is_null() {
+            return None;
+        }
+        let base = storage.as_ptr() as usize;
+        let end = base.checked_add(actual)?;
+        let ids_start = ids as usize;
+        let ids_bytes = count.checked_mul(std::mem::size_of::<PSTR>())?;
+        let ids_end = ids_start.checked_add(ids_bytes)?;
+        if ids_start < base.checked_add(header_bytes)? || ids_end > end {
+            return None;
+        }
+
+        let mut out = Vec::new();
+        out.try_reserve_exact(count).ok()?;
+        let mut total_oid_bytes = 0usize;
+        for i in 0..count {
+            let ptr: PSTR = *ids.add(i);
+            if ptr.is_null() {
+                return None;
+            }
+            let start = ptr.0 as usize;
+            if start < base || start >= end {
+                return None;
+            }
+            let remaining = end - start;
+            let scan_len = remaining.min(MAX_CERT_EKU_OID_BYTES + 1);
+            let bytes = std::slice::from_raw_parts(ptr.0 as *const u8, scan_len);
+            let nul = bytes.iter().position(|byte| *byte == 0)?;
+            if nul == 0 {
+                return None;
+            }
+            total_oid_bytes = total_oid_bytes.checked_add(nul)?;
+            if total_oid_bytes > MAX_CERT_EKU_BYTES {
+                return None;
+            }
+            let oid = std::str::from_utf8(&bytes[..nul]).ok()?;
+            out.push(oid.to_owned());
+        }
+        return Some(out);
     }
-    out
+    None
 }
 
 /// Whether the key lives in hardware, asked under a SILENT context.
@@ -334,8 +458,10 @@ fn read_store(machine_store: bool) -> Result<Vec<StoreCertificate>, StoreReadErr
             let has_key = has_private_key(cert);
             let expired = filetime_u64(&info.NotAfter) <= now;
             let usage = intended_key_usage(cert);
-            let eku = enhanced_key_usage(cert);
-            if !eligible(has_key, expired, usage, &eku) {
+            let Some(eku) = enhanced_key_usage(cert) else {
+                continue;
+            };
+            if !eligible(has_key, expired, usage, Some(&eku)) {
                 continue;
             }
             let Some(print) = thumbprint(cert) else {
@@ -406,28 +532,29 @@ mod tests {
 
     #[test]
     fn a_certificate_with_no_key_is_not_a_signer() {
-        assert!(!eligible(false, false, KU_DIGITAL_SIGNATURE, &[]));
+        assert!(!eligible(false, false, Some(KU_DIGITAL_SIGNATURE), Some(&[])));
     }
 
     #[test]
     fn an_expired_certificate_is_excluded() {
-        assert!(!eligible(true, true, KU_DIGITAL_SIGNATURE, &[]));
+        assert!(!eligible(true, true, Some(KU_DIGITAL_SIGNATURE), Some(&[])));
     }
 
     #[test]
     fn an_absent_key_usage_extension_is_unrestricted() {
-        assert!(eligible(true, false, 0, &[]));
+        assert!(eligible(true, false, Some(0), Some(&[])));
+        assert!(!eligible(true, false, None, Some(&[])));
     }
 
     #[test]
     fn key_usage_without_signing_is_excluded() {
         // keyEncipherment alone — an encryption certificate.
-        assert!(!eligible(true, false, 0x0020, &[]));
+        assert!(!eligible(true, false, Some(0x0020), Some(&[])));
     }
 
     #[test]
     fn non_repudiation_alone_qualifies() {
-        assert!(eligible(true, false, KU_NON_REPUDIATION, &[]));
+        assert!(eligible(true, false, Some(KU_NON_REPUDIATION), Some(&[])));
     }
 
     #[test]
@@ -436,8 +563,8 @@ mod tests {
         assert!(!eligible(
             true,
             false,
-            KU_DIGITAL_SIGNATURE,
-            &oids(&["1.3.6.1.5.5.7.3.3", "1.3.6.1.4.1.311.10.3.13"])
+            Some(KU_DIGITAL_SIGNATURE),
+            Some(&oids(&["1.3.6.1.5.5.7.3.3", "1.3.6.1.4.1.311.10.3.13"]))
         ));
     }
 
@@ -450,8 +577,8 @@ mod tests {
         assert!(eligible(
             true,
             false,
-            KU_DIGITAL_SIGNATURE,
-            &oids(&["1.3.6.1.5.5.7.3.3", "1.3.6.1.5.5.7.3.4"])
+            Some(KU_DIGITAL_SIGNATURE),
+            Some(&oids(&["1.3.6.1.5.5.7.3.3", "1.3.6.1.5.5.7.3.4"]))
         ));
     }
 
@@ -461,8 +588,10 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_eku_list_declares_no_restriction() {
+    fn a_missing_eku_is_unrestricted_but_an_unknown_eku_is_not_eligible() {
         assert!(!code_signing_only(&[]));
+        assert!(eligible(true, false, Some(KU_DIGITAL_SIGNATURE), Some(&[])));
+        assert!(!eligible(true, false, Some(KU_DIGITAL_SIGNATURE), None));
     }
 
     #[test]
