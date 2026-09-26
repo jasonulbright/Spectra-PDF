@@ -100,6 +100,9 @@ struct Record {
     roots: Vec<String>,
 }
 
+const MAX_LIVE_RECORDS: usize = 4096;
+const MAX_REGISTRY_ENTRIES: usize = MAX_LIVE_RECORDS + 1; // plus registry.lock
+
 pub fn registry_path() -> Result<PathBuf, ClaimError> {
     // Task Scheduler can run under another account. ProgramData supplies one
     // machine-wide location; its default inherited Users permissions allow
@@ -107,7 +110,9 @@ pub fn registry_path() -> Result<PathBuf, ClaimError> {
     let base = std::env::var_os("ProgramData").ok_or_else(|| {
         ClaimError::Unavailable("The shared application data folder is unavailable.".into())
     })?;
-    Ok(PathBuf::from(base).join("Spectra PDF").join("folder-claims"))
+    Ok(PathBuf::from(base)
+        .join("Spectra PDF")
+        .join("folder-claims"))
 }
 
 fn exclusive(path: &Path) -> io::Result<File> {
@@ -234,16 +239,23 @@ pub fn claim_in(registry: &Path, roots: &[String]) -> Result<FolderLease, ClaimE
         .collect::<Result<Vec<_>, _>>()?;
     std::fs::create_dir_all(registry)?;
     let _mutex = registry_lock(&registry.join("registry.lock"))?;
-    let mut count = 0;
+    let mut entry_count = 0;
+    let mut record_count = 0;
     for entry in std::fs::read_dir(registry)? {
         let path = entry?.path();
+        entry_count += 1;
+        if entry_count > MAX_REGISTRY_ENTRIES {
+            return Err(ClaimError::Unavailable(
+                "The folder ownership registry has too many entries.".into(),
+            ));
+        }
         if path.extension().map_or(true, |ext| ext != "json") {
             continue;
         }
-        count += 1;
-        if count > 4096 {
+        record_count += 1;
+        if record_count > MAX_LIVE_RECORDS {
             return Err(ClaimError::Unavailable(
-                "The folder ownership registry is too large.".into(),
+                "The folder ownership registry has too many live records.".into(),
             ));
         }
         match exclusive(&path) {
@@ -375,6 +387,22 @@ mod tests {
         permissions.set_readonly(false);
         std::fs::set_permissions(&mutex, permissions).unwrap();
         assert!(acquired);
+    }
+
+    #[test]
+    fn ignored_registry_entries_cannot_bypass_the_scan_limit() {
+        let scratch = tempfile::tempdir().unwrap();
+        let registry = scratch.path().join("claims");
+        std::fs::create_dir_all(&registry).unwrap();
+        for index in 0..MAX_REGISTRY_ENTRIES {
+            std::fs::write(registry.join(format!("ignored-{index}.tmp")), []).unwrap();
+        }
+
+        let root = scratch.path().join("out").to_string_lossy().into_owned();
+        assert!(matches!(
+            claim_in(&registry, &[root]),
+            Err(ClaimError::Unavailable(_))
+        ));
     }
 
     // Invoked by a second test process; its OS handle is independent of this
