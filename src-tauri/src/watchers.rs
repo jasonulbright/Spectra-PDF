@@ -216,7 +216,7 @@ pub fn validate_folder(f: &WatchedFolder) -> Result<(), String> {
     if f.id.trim().is_empty() || f.name.trim().is_empty() {
         return Err("A watched folder needs a name.".into());
     }
-    validate_watcher_id(f.id.trim())?;
+    validate_watcher_id(&f.id)?;
     let source = Path::new(&f.source);
     if !source.is_dir() {
         return Err(format!("Watch folder not found: {}", f.source));
@@ -715,6 +715,21 @@ mod tests {
         }
         assert!(validate_watcher_id(&"a".repeat(65)).is_err(), "over-long id");
         assert!(validate_watcher_id(&"a".repeat(64)).is_ok(), "64 is allowed");
+    }
+
+    #[test]
+    fn a_watched_folder_id_is_not_validated_after_trimming() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("in");
+        std::fs::create_dir(&source).unwrap();
+        let mut folder = folder(
+            &source.to_string_lossy(),
+            &dir.path().join("out").to_string_lossy(),
+            &dir.path().join("done").to_string_lossy(),
+        );
+        folder.id = "w1 ".to_string();
+
+        assert!(validate_folder(&folder).is_err());
     }
 
     #[test]
