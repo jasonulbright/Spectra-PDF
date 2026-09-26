@@ -746,6 +746,31 @@ class TestBudget:
             )
         assert time.monotonic() - started < 5
 
+    def test_runner_terminates_child_if_an_output_reader_cannot_start(self, tmp_dir, monkeypatch):
+        marker = Path(tmp_dir) / "reader-start-failure-marker"
+        script = (
+            "import pathlib,time; time.sleep(0.2); "
+            f"pathlib.Path({str(marker)!r}).write_text('orphan')"
+        )
+        real_start = budget.threading.Thread.start
+        starts = 0
+
+        def fail_second_reader(thread):
+            nonlocal starts
+            starts += 1
+            if starts == 2:
+                raise RuntimeError("synthetic reader startup failure")
+            return real_start(thread)
+
+        monkeypatch.setattr(budget.threading.Thread, "start", fail_second_reader)
+        with pytest.raises(RuntimeError, match="synthetic reader startup failure"):
+            budget.run([sys.executable, "-c", script], what="test child", budget=10)
+
+        # The child would write after the runner has already raised if it was
+        # left alive by the reader-start failure.
+        time.sleep(0.3)
+        assert not marker.exists(), "a child process outlived reader startup failure"
+
     def test_capped_runner_keeps_text_and_binary_output_contracts(self):
         binary = budget.run(
             [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'pdf')"],

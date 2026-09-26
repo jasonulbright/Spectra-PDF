@@ -332,8 +332,27 @@ def run(cmd: list[str], *, what: str, budget: float, size_bytes: int = 0, pages:
         threading.Thread(target=drain, args=(process.stdout, stdout, "stdout"), daemon=True),
         threading.Thread(target=drain, args=(process.stderr, stderr, "stderr"), daemon=True),
     ]
-    for reader in readers:
-        reader.start()
+    started_readers = []
+    try:
+        for reader in readers:
+            reader.start()
+            started_readers.append(reader)
+    except BaseException:
+        # If thread creation fails (for example under process-wide resource
+        # pressure), the child has no complete set of pipe drains and cannot
+        # safely be left running without the wait/timeout path below.
+        try:
+            terminate()
+        except OSError:
+            pass
+        try:
+            process.wait()
+        finally:
+            for reader in started_readers:
+                reader.join(_PIPE_DRAIN_GRACE)
+            if windows_job is not None:
+                windows_job.close()
+        raise
     try:
         process.wait(timeout=budget)
     except subprocess.TimeoutExpired:
