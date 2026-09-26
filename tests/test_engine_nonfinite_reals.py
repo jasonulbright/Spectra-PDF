@@ -185,3 +185,42 @@ def test_printer_marks_treat_an_overflowing_box_as_absent(text_doc):
     _encodes(result)
     second = result["pages"][1]
     assert second["media"] == [] and second["trim_source"] == "default"
+
+
+def _write_form_doc(path) -> str:
+    form = "BT /F2 12 Tf 1 1 Td (In form) Tj ET"
+    page = "BT /F2 12 Tf 10 700 Td (Keep me) Tj ET q /X0 Do Q"
+    objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        "/Resources << /Font << /F2 5 0 R >> /XObject << /X0 6 0 R >> >> >>",
+        f"<< /Length {len(page)} >>\nstream\n{page}\nendstream",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        f"<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Matrix [{H} 0 0 {H} 0 0] "
+        f"/Resources << /Font << /F2 5 0 R >> >> /Length {len(form)} >>\nstream\n{form}\nendstream",
+    ]
+    out = "%PDF-1.7\n"
+    for i, o in enumerate(objs, 1):
+        out += f"{i} 0 obj\n{o}\nendobj\n"
+    out += "trailer\n<< /Root 1 0 R /Size 7 >>\n%%EOF\n"
+    target = path / "overflow-form.pdf"
+    target.write_bytes(out.encode("latin-1"))
+    return str(target)
+
+
+def test_a_form_whose_matrix_overflows_lists_its_text_under_the_identity(tmp_path):
+    from engine import text_paragraphs, text_runs
+
+    source = _write_form_doc(tmp_path)
+    runs = text_runs.list_text_runs(source, 1)
+    _encodes(runs)
+    assert [run["text"] for run in runs["runs"]] == ["Keep me", "In form"]
+    paragraphs = text_paragraphs.list_text_paragraphs(source, 1)
+    _encodes(paragraphs)
+    assert [run["text"] for run in paragraphs["runs"]] == ["Keep me", "In form"]
+    edited = str(tmp_path / "edited.pdf")
+    text_runs.replace_text_run(source, edited, 1, 1, "In it")
+    after = text_runs.list_text_runs(edited, 1)
+    _encodes(after)
+    assert [run["text"] for run in after["runs"]] == ["Keep me", "In it"]
