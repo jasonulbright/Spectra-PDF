@@ -75,6 +75,25 @@ class TestMerge:
         result = merge(files=[sample_pdf, sample_pdf], output=out)
         assert result["pages"] == 10
 
+    def test_merge_of_page_less_inputs_writes_nothing(self, tmp_dir):
+        empties = []
+        for name in ("empty-a.pdf", "empty-b.pdf"):
+            path = os.path.join(tmp_dir, name)
+            with pikepdf.new() as pdf:
+                pdf.save(path)
+            empties.append(path)
+        out = os.path.join(tmp_dir, "merged.pdf")
+        with pytest.raises(RuntimeError, match="no pages"):
+            merge(files=empties, output=out)
+        assert not os.path.exists(out)
+
+    def test_merge_keeps_a_page_less_input_beside_real_pages(self, sample_pdf, tmp_dir):
+        empty = os.path.join(tmp_dir, "empty.pdf")
+        with pikepdf.new() as pdf:
+            pdf.save(empty)
+        out = os.path.join(tmp_dir, "merged.pdf")
+        assert merge(files=[empty, sample_pdf], output=out)["pages"] == 5
+
 
 # ── Split ─────────────────────────────────────────────────────────────────
 
