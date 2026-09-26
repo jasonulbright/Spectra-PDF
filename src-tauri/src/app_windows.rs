@@ -9,6 +9,7 @@
 //! lives in managed state on this side of the boundary.
 
 use std::collections::HashMap;
+#[cfg(windows)]
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
@@ -379,8 +380,8 @@ impl ClaimOutcome {
 /// Does one output root contain the other, or name it?
 ///
 /// Existing path prefixes are canonicalized, but output files and directories
-/// need not exist yet. The comparison key therefore also folds Windows case
-/// and separators and resolves lexical dot segments. The separator test keeps
+/// need not exist yet. The key folds case only on Windows, normalizes separator
+/// spelling, and resolves lexical dot segments. The separator test keeps
 /// `C:\out2` from reading as a child of `C:\out`.
 fn path_comparison_key(path: &str) -> String {
     #[cfg(windows)]
@@ -423,9 +424,16 @@ fn path_comparison_key(path: &str) -> String {
     #[cfg(not(windows))]
     let path = path.to_string();
 
-    path.replace('/', "\\")
-        .trim_end_matches('\\')
-        .to_lowercase()
+    #[cfg(windows)]
+    {
+        path.replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        path.replace('\\', "/").trim_end_matches('/').to_string()
+    }
 }
 
 fn roots_conflict(a: &str, b: &str) -> bool {
@@ -451,7 +459,7 @@ fn root_contains(root: &str, path: &str) -> bool {
     path == root
         || path
             .strip_prefix(&root)
-            .is_some_and(|suffix| suffix.starts_with('\\'))
+            .is_some_and(|suffix| suffix.starts_with('\\') || suffix.starts_with('/'))
 }
 
 /// One folder run's hold on every folder it writes.
@@ -889,11 +897,11 @@ impl ClaimState {
         runs: &mut RunClaims,
         kind: RunClaimKind,
     ) -> Result<RunClaimOutcome, String> {
-        // A root that trims to nothing would contain every UNC path under the
-        // separator rule of `roots_conflict`.
+        // An empty value carries no root. Keep separator-only roots: on Unix,
+        // `/` is the filesystem root, and on Windows a volume root is valid.
         let roots: Vec<String> = roots
             .iter()
-            .filter(|root| !root.trim_end_matches(['\\', '/']).is_empty())
+            .filter(|root| !root.is_empty())
             .cloned()
             .collect();
         for wanted in &roots {
@@ -2439,7 +2447,7 @@ mod tests {
     #[test]
     fn a_blank_folder_claims_nothing() {
         let state = test_claim_state();
-        assert!(run(&state, "main", &["", "/"]).granted);
+        assert!(run(&state, "main", &[""]).granted);
         let root = tempfile::tempdir().unwrap();
         assert!(
             run(
@@ -2457,6 +2465,22 @@ mod tests {
             )
             .granted
         );
+    }
+
+    #[test]
+    fn a_filesystem_root_run_refuses_an_open_document_beneath_it() {
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("open.pdf");
+        std::fs::write(&path, b"%PDF-1.7").unwrap();
+        let path = crate::commands::canonical_path(&path.to_string_lossy());
+        assert!(state.claim_document(&path, "doc-1", ClaimMode::Write).granted);
+
+        let separator = std::path::MAIN_SEPARATOR.to_string();
+        let root = run(&state, "batch-1", &[&separator]);
+        assert!(!root.granted, "the filesystem root contains the open document");
+        assert_eq!(root.document, path);
+        assert_eq!(root.owner, "doc-1");
     }
 
     #[test]
@@ -2525,9 +2549,12 @@ mod tests {
         assert!(roots_conflict("C:\\out", "C:\\out\\sub"));
         assert!(roots_conflict("C:\\out\\sub", "C:\\out"));
         assert!(roots_conflict("C:\\out\\", "C:\\out"));
-        assert!(roots_conflict("C:\\OUT", "c:/out/sub"));
-        assert!(roots_conflict(r"C:\out", r"C:\other\..\out\sub"));
-        assert!(root_contains(r"C:\OUT", r"c:/other/../out/sub/result.pdf"));
+        #[cfg(windows)]
+        {
+            assert!(roots_conflict("C:\\OUT", "c:/out/sub"));
+            assert!(roots_conflict(r"C:\out", r"C:\other\..\out\sub"));
+            assert!(root_contains(r"C:\OUT", r"c:/other/../out/sub/result.pdf"));
+        }
         assert!(!root_contains(r"C:\out", r"C:\out2\result.pdf"));
         assert!(!roots_conflict("C:\\out", "C:\\out2"));
         assert!(!roots_conflict("C:\\out", "C:\\other"));
@@ -2537,12 +2564,22 @@ mod tests {
         let refused = run(&state, "doc-1", &["C:\\out\\sub"]);
         assert!(!refused.granted);
         assert_eq!(refused.owner, "main");
-        let case_alias = run(&state, "doc-2", &["c:/OUT/sub"]);
-        assert!(!case_alias.granted);
-        assert_eq!(case_alias.owner, "main");
+        #[cfg(windows)]
+        {
+            let case_alias = run(&state, "doc-2", &["c:/OUT/sub"]);
+            assert!(!case_alias.granted);
+            assert_eq!(case_alias.owner, "main");
+        }
         assert!(run(&state, "doc-1", &["C:\\out2"]).granted);
         assert!(!run(&state, "main", &["C:\\out2\\x"]).granted);
         assert!(run(&state, "main", &["C:\\other"]).granted);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn case_distinct_paths_on_posix_are_not_the_same_output_root() {
+        assert!(!roots_conflict("/tmp/Output", "/tmp/output"));
+        assert!(!root_contains("/tmp/Output", "/tmp/output/result.pdf"));
     }
 
     #[test]
