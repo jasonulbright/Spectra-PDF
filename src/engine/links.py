@@ -38,11 +38,10 @@ is unchanged by this module gaining an appearance vocabulary.
 """
 
 import math
-import shutil
 from pathlib import Path
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import copy_document, open_pdf
 from pikepdf import Array, Dictionary, Name, String
 from engine.fieldactions import destination_page as _resolve_dest_page
 from engine.inplace import is_same_file, staged_write
@@ -837,7 +836,7 @@ def create_links_from_urls(
         # Everything found is already linked. That is a RESULT, not a failure:
         # the document is in the state the user asked for.
         if str(Path(file).resolve()) != str(Path(output).resolve()):
-            shutil.copyfile(file, output)
+            copy_document(file, output)
         return {
             "output": str(Path(output)),
             "added": 0,

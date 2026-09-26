@@ -895,7 +895,7 @@ def _register(run: _Run) -> str:
     return token
 
 
-def document_health_begin(file: str) -> dict:
+def document_health_begin(file: str, password: str | None = None) -> dict:
     """Open one document and report what the open itself said.
 
     Returns a run ``token`` the caller steps with, or an empty token and
@@ -908,6 +908,9 @@ def document_health_begin(file: str) -> dict:
 
     Args:
         file: Input PDF path.
+        password: The user password of a document opened with it. The sweep
+            runs in its own engine process, which holds no credential of the
+            window's engine, over a copy of the working copy's bytes.
     """
     input_path = Path(file)
     if not input_path.exists():
@@ -924,7 +927,8 @@ def document_health_begin(file: str) -> dict:
     }
 
     try:
-        pdf = open_pdf(file, suppress_warnings=True)
+        kwargs = {} if password is None else {"password": password}
+        pdf = open_pdf(file, suppress_warnings=True, **kwargs)
     except pikepdf.PasswordError:
         head["status"] = "undetermined"
         head["facts"] = [_fact("undetermined", "info", "engine", "document.encrypted")]
@@ -1058,7 +1062,7 @@ def document_health_end(token: str) -> dict:
     return {"token": token, "ended": _drop(token)}
 
 
-def document_health(file: str) -> dict:
+def document_health(file: str, password: str | None = None) -> dict:
     """Collect health facts for one document without modifying it.
 
     Never raises for a damaged document: unreadability is a RESULT
@@ -1068,8 +1072,9 @@ def document_health(file: str) -> dict:
 
     Args:
         file: Input PDF path.
+        password: As for `document_health_begin`.
     """
-    head = document_health_begin(file)
+    head = document_health_begin(file, password)
     facts: list[dict] = list(head["facts"])
     token = head["token"]
     done = bool(head["done"])

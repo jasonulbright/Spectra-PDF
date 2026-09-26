@@ -13,6 +13,9 @@ and an encrypted one still raises `pikepdf.PasswordError`.
 """
 
 import os
+import shutil
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 _PERMISSION_KEYS = (
@@ -34,6 +37,7 @@ class _Credential:
     permissions: dict
     revision: int | None
     p: int | None
+    origin: str = ""
 
 
 _documents: dict[str, _Credential] = {}
@@ -66,7 +70,152 @@ def open_pdf(source, *args, document=None, **kwargs):
     pdf = pikepdf.open(source, *args, **kwargs)
     if credential is not None and credential.opener == "user" and pdf.is_encrypted:
         pdf._spectra_preserve_encryption = True
+        pdf._spectra_credential = credential
     return pdf
+
+
+def document_password(source) -> str | None:
+    """The stored user password of the document at `source`, or None.
+
+    Every reader that does not go through `open_pdf` (pdfminer, pyHanko,
+    Ghostscript) asks here, so a copy lent the credential reads the same as
+    the working copy it came from."""
+    if not _is_path(source):
+        return None
+    credential = _documents.get(_key(source))
+    if credential is None or credential.opener != "user":
+        return None
+    return credential.password
+
+
+def lend_saved_copy(pdf, target) -> None:
+    """Lend `pdf`'s credential to `target`, a file just written from it with
+    its own /Encrypt.
+
+    A scratch, staged or intermediate file written from a user-opened
+    document is encrypted with the same user password, so a later reopen by
+    path needs the credential. The lend lasts until the original is closed.
+    A path already holding a different document's credential keeps it."""
+    _lend(getattr(pdf, "_spectra_credential", None), target)
+
+
+def _lend(credential, target) -> None:
+    if credential is None or not _is_path(target):
+        return
+    key = _key(target)
+    held = _documents.get(key)
+    if held is None or held is credential:
+        _documents[key] = credential
+
+
+def copy_document(source, target) -> None:
+    """Copy the document at `source` to `target` byte for byte, lending the
+    copy the credential of `source` until `source` is closed, as `save_pdf`
+    does for a copy it writes."""
+    shutil.copyfile(source, target)
+    if _is_path(source):
+        _lend(_documents.get(_key(source)), target)
+
+
+@contextmanager
+def lent(original, copy):
+    """Lend the credential of `original` to `copy`, a byte copy of it, for
+    the body of the block.
+
+    A byte copy made outside `save_pdf` is otherwise unreadable when the
+    original was opened with its user password."""
+    credential = _documents.get(_key(original)) if _is_path(original) else None
+    key = _key(copy)
+    shared = credential is not None and key not in _documents
+    if shared:
+        _documents[key] = credential
+    try:
+        yield
+    finally:
+        if shared and _documents.get(key) is credential:
+            del _documents[key]
+
+
+#: The refusal of an operation the owner's permissions withhold from a
+#: document opened with its user password.
+PERMISSIONS_HELD = (
+    "This document's permissions are held by an owner password, which is "
+    "needed to change them. Open it with that password first."
+)
+
+
+class GhostscriptPasswordUnsupported(ValueError):
+    """The stored password has no spelling Ghostscript's argument file reads
+    back unchanged."""
+
+
+GS_PASSWORD_UNSUPPORTED = (
+    "This document's password cannot be handed to Ghostscript, so this "
+    "operation cannot read the document. Open it with the owner password, or "
+    "decrypt the document first."
+)
+
+
+def gs_password_line(password: str) -> str:
+    """One `@file` argument line that Ghostscript 10 reads back as
+    `-sPDFPassword=<password>`.
+
+    Inside quotes a backslash-quote is a quote and every other backslash is
+    literal, except a backslash before the closing quote, which escapes it.
+    Unquoted, whitespace ends the argument and one final backslash is
+    dropped. A password ending in a backslash therefore has a spelling only
+    unquoted, and only without whitespace, a leading quote or a
+    backslash-quote. A line break or NUL has no spelling."""
+    if any(c in password for c in "\r\n\0"):
+        raise GhostscriptPasswordUnsupported(GS_PASSWORD_UNSUPPORTED)
+    if not password.endswith("\\"):
+        return '"-sPDFPassword=' + password.replace('"', '\\"') + '"'
+    if any(c.isspace() for c in password) or password.startswith('"') or '\\"' in password:
+        raise GhostscriptPasswordUnsupported(GS_PASSWORD_UNSUPPORTED)
+    return "-sPDFPassword=" + password + "\\"
+
+
+@contextmanager
+def gs_password_argv(cmd: list[str], *sources):
+    """`cmd` with the stored password of the first of `sources` that has one
+    handed to Ghostscript.
+
+    Ghostscript reads an encrypted PDF only with `-sPDFPassword=`, and a
+    command-line argument is visible to every process on the machine. The
+    password goes into an `@file` argument inside a directory that
+    `tempfile.mkdtemp` creates readable by its owner only, removed when the
+    block ends. Without the password Ghostscript exits 0 having rendered
+    nothing, so the omission never surfaces as its own error."""
+    password = next((pw for pw in map(document_password, sources) if pw), None)
+    if not password:
+        yield list(cmd)
+        return
+    line = gs_password_line(password)
+    folder = tempfile.mkdtemp(prefix="spectrapdf-gs-")
+    try:
+        argfile = os.path.join(folder, "args")
+        with open(argfile, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(line + "\n")
+        yield [cmd[0], "@" + argfile, *cmd[1:]]
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def print_resolution(source) -> str:
+    """"none", "low" or "high": how the document at `source` may print.
+
+    ISO 32000-2 Table 22: bit 3 permits printing; from revision 3, bit 12
+    clear limits printing to a low-level representation of the appearance.
+    A document not opened with its user password prints without limit."""
+    credential = _documents.get(_key(source)) if _is_path(source) else None
+    if credential is None or credential.opener != "user":
+        return "high"
+    permissions = credential.permissions
+    if not permissions.get("print"):
+        return "none"
+    if not permissions.get("print_high") and (credential.revision or 0) >= 3:
+        return "low"
+    return "high"
 
 
 def _decoded_permissions(pdf) -> dict:
@@ -98,9 +247,9 @@ def open_document(path: str, password: str = "") -> dict:
         return {"encrypted": False, "opener": "none"}
     if owner:
         _decrypt_in_place(path, password)
-        _documents[_key(path)] = _Credential("owner", None, permissions, revision, p)
+        _documents[_key(path)] = _Credential("owner", None, permissions, revision, p, _key(path))
         return {"encrypted": True, "opener": "owner", "encryption_kept": False}
-    _documents[_key(path)] = _Credential("user", password, permissions, revision, p)
+    _documents[_key(path)] = _Credential("user", password, permissions, revision, p, _key(path))
     return {"encrypted": True, "opener": "user", "encryption_kept": True}
 
 
@@ -117,8 +266,14 @@ def share_document(path: str, alias: str) -> dict:
 
 
 def close_document(path: str) -> dict:
-    """Forget the credential of the document at `path`."""
-    return {"forgotten": _documents.pop(_key(path), None) is not None}
+    """Forget the credential of the document at `path`, and every copy it was
+    lent to when `path` is the document it was opened as."""
+    key = _key(path)
+    credential = _documents.pop(key, None)
+    if credential is not None and credential.origin == key:
+        for alias in [k for k, v in _documents.items() if v is credential]:
+            del _documents[alias]
+    return {"forgotten": credential is not None}
 
 
 def document_permissions(path: str) -> dict:

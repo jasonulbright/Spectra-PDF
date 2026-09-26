@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import PERMISSIONS_HELD, open_pdf
 
 from .inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
@@ -33,10 +33,7 @@ def _require_owner_authority(pdf) -> None:
     encryption or the permissions. A document opened without it (an empty user
     password over a non-empty owner password, or the user password) refuses."""
     if pdf.is_encrypted and not pdf.owner_password_matched:
-        raise RuntimeError(
-            "This document's permissions are held by an owner password, which is "
-            "needed to change them. Open it with that password first."
-        )
+        raise RuntimeError(PERMISSIONS_HELD)
 
 
 def _signature_report(pdf) -> dict:

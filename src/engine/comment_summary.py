@@ -73,7 +73,7 @@ from engine.annotations import (
     reply_relationship,
 )
 from engine.create_pdf import PAGE_SIZES
-from engine.pdf_save import save_pdf
+from engine.pdf_save import refuse_user_opened_source, save_pdf
 from engine.print_layout import expand_page_spec, place_in_cell
 from engine.redact import _annot_key
 from engine.text_authoring import block_height, emit_text_box, layout_text_box
@@ -985,6 +985,7 @@ def summarize_comments(
     name = document_name or Path(file).name
 
     with open_pdf(file) as source:
+        refuse_user_opened_source(source)
         model = build_model(source, sort, filter)
         comments = model["comments"]
         if not comments:
@@ -1033,7 +1034,7 @@ def summarize_comments(
         out.Root["/Lang"] = pikepdf.String(lang or "en")
         if direction == "rtl":
             out.Root["/ViewerPreferences"] = Dictionary(Direction=Name("/R2L"))
-        save_pdf(out, output)
+        save_pdf(out, output, encryption_source=source)
         sheet_count = len(out.pages)
 
     written = len(comments)

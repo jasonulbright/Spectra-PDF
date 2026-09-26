@@ -50,7 +50,7 @@ exactly the security-critical plumbing not to hand-roll.
 """
 
 import logging
-from engine.credentials import open_pdf
+from engine.credentials import document_password, lent, open_pdf
 
 # pyHanko logs the path-building failure as a WARNING-with-traceback whenever a
 # signature doesn't chain to a trust anchor — which is BY DESIGN here (we
@@ -613,16 +613,19 @@ def _verify_one(embedded, sources: "_TrustSources | None" = None,
     }
 
 
-def _signature_reader(f) -> PdfFileReader:
-    """A reader over `f` that can resolve encrypted objects.
+def _signature_reader(f, file) -> PdfFileReader:
+    """A reader over `f`, the open bytes of `file`, that can resolve
+    encrypted objects.
 
-    ISO 32000-2 7.6.4.4: an empty user password opens a document without a
-    prompt, and pyHanko resolves nothing encrypted until a password is
-    supplied. A document that needs a real password still raises on the first
-    encrypted read rather than reading as one without signatures."""
+    pyHanko resolves nothing encrypted until a password is supplied. The
+    stored password of a document opened with its user password is used;
+    otherwise the empty one (ISO 32000-2 7.6.4.4: an empty user password
+    opens a document without a prompt). A document that needs a password
+    nobody supplied still raises on the first encrypted read rather than
+    reading as one without signatures."""
     reader = PdfFileReader(f)
     if reader.encrypted:
-        reader.decrypt(b"")
+        reader.decrypt(document_password(file) or b"")
     return reader
 
 
@@ -655,7 +658,7 @@ def verify_signatures(
     # it. Read first: every signature's policy verdict is relative to it.
     certification = certification_of_file(file)
     with open(file, "rb") as f:
-        reader = _signature_reader(f)
+        reader = _signature_reader(f, file)
         # Regular signatures only — a PAdES B-LTA document timestamp is a
         # different animal (it seals the DSS, it doesn't sign content) and
         # validate_pdf_signature would misreport it as a broken signature.
@@ -872,7 +875,7 @@ def _validated_existing_field(file: str, field_name: str) -> None:
     yields signature fields only, so a same-named text field correctly
     reports as 'no empty signature field'."""
     with open(file, "rb") as f:
-        reader = PdfFileReader(f)
+        reader = _signature_reader(f, file)
         for name, value, _ref in fields.enumerate_sig_fields(reader):
             if name == field_name:
                 if value is not None:
@@ -894,7 +897,7 @@ def _free_field_name(file: str, requested: str) -> str:
     used: set[str] = set()
     try:
         with open(file, "rb") as f:
-            reader = PdfFileReader(f)
+            reader = _signature_reader(f, file)
             for name, _value, _ref in fields.enumerate_sig_fields(reader):
                 used.add(name)
     except Exception:
@@ -990,7 +993,7 @@ def _filled_signature_fields(file: str) -> list[str]:
     filled: list[str] = []
     try:
         with open(file, "rb") as f:
-            reader = PdfFileReader(f)
+            reader = _signature_reader(f, file)
             for name, value, _ref in fields.enumerate_sig_fields(reader, filled_status=True):
                 filled.append(name)
     except Exception:
@@ -1670,6 +1673,10 @@ def sign_pdf(
         try:
             with open(file, "rb") as inf:
                 writer = IncrementalPdfFileWriter(inf)
+                if writer.prev.encrypted:
+                    # The appended revision is encrypted with the original's
+                    # own key; pyHanko refuses to write without it.
+                    writer.encrypt(document_password(file) or b"")
                 # A lock rides the signature FIELD, never the metadata: the
                 # signing machinery reads it off the field's /Lock and turns it
                 # into the signature's /FieldMDP transform. So each placement
@@ -1729,18 +1736,19 @@ def sign_pdf(
         # The temp holds exactly the bytes that will land at output_path, so its
         # verification is the output's — computed while a failure is still fully
         # recoverable.
-        verification = verify_signatures(tmp_name)
-        # Fail closed on the verdict, not only on an exception: a signature
-        # that does not verify against its own bytes is broken output, and
-        # letting it land while merely reporting `valid: false` puts a file the
-        # user believes is signed where the original was. `valid`/`intact` are
-        # crypto-and-coverage facts, independent of trust anchors, so a
-        # self-signed or untrusted-but-correct signer still passes here.
-        _refuse_unverifiable_output(verification, field_name)
-        # Read back out of the WRITTEN bytes, never echoed from the request —
-        # the same discipline as the valid/intact fields beside it.
-        written_certification = certification_of_file(tmp_name)
-        written_dss = _dss_counts(tmp_name) if embed_revocation else None
+        with lent(file, tmp_name):
+            verification = verify_signatures(tmp_name)
+            # Fail closed on the verdict, not only on an exception: a signature
+            # that does not verify against its own bytes is broken output, and
+            # letting it land while merely reporting `valid: false` puts a file the
+            # user believes is signed where the original was. `valid`/`intact` are
+            # crypto-and-coverage facts, independent of trust anchors, so a
+            # self-signed or untrusted-but-correct signer still passes here.
+            _refuse_unverifiable_output(verification, field_name)
+            # Read back out of the WRITTEN bytes, never echoed from the request —
+            # the same discipline as the valid/intact fields beside it.
+            written_certification = certification_of_file(tmp_name)
+            written_dss = _dss_counts(tmp_name) if embed_revocation else None
         os.replace(tmp_name, output_path)
     except BaseException:
         try:

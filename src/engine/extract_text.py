@@ -21,6 +21,8 @@ from pdfminer.pdftypes import PDFObjRef, dict_value, list_value, resolve1
 from pdfminer.psparser import literal_name
 from pdfminer.utils import Plane
 
+from engine.credentials import document_password
+
 
 class TextStateInterpreter(PDFPageInterpreter):
     """pdfminer's page interpreter with the text state ISO 32000-2 defines.
@@ -152,6 +154,15 @@ class LayoutPageAggregator(_DrawnOrderLayout, PDFPageAggregator):
     """pdfminer's `PDFPageAggregator` with drawn-order grouping."""
 
 
+def document_pages(handle, file, page_numbers=None, caching: bool = True):
+    """`PDFPage.get_pages` over `handle`, the open bytes of `file`, with the
+    stored password of `file`. Every pdfminer read in the engine goes through
+    here: pdfminer tries only the empty password, and a document opened with
+    its user password raises `PDFPasswordIncorrect` without it."""
+    password = document_password(file) or ""
+    return PDFPage.get_pages(handle, page_numbers, password=password, caching=caching)
+
+
 def pdfminer_text(file: str, page_numbers=None, laparams: LAParams | None = None) -> str:
     """pdfminer's `high_level.extract_text`, read through `TextStateInterpreter`.
     `page_numbers` are 0-based, as pdfminer's are."""
@@ -159,7 +170,7 @@ def pdfminer_text(file: str, page_numbers=None, laparams: LAParams | None = None
         manager = PDFResourceManager(caching=True)
         device = LayoutTextConverter(manager, sink, codec="utf-8", laparams=laparams or LAParams())
         interpreter = TextStateInterpreter(manager, device)
-        for page in PDFPage.get_pages(handle, page_numbers, caching=True):
+        for page in document_pages(handle, file, page_numbers):
             interpreter.process_page(page)
         return sink.getvalue()
 
@@ -192,7 +203,7 @@ def pdfminer_pages(file: str, page_numbers=None, laparams: LAParams | None = Non
         manager = PDFResourceManager(caching=True)
         device = LayoutPageAggregator(manager, laparams=laparams or LAParams())
         interpreter = TextStateInterpreter(manager, device)
-        for page in PDFPage.get_pages(handle, page_numbers, caching=True):
+        for page in document_pages(handle, file, page_numbers):
             interpreter.process_page(page)
             yield device.get_result()
 

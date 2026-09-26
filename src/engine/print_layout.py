@@ -34,7 +34,7 @@ import subprocess
 from pathlib import Path
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import gs_password_argv, open_pdf
 from engine import gs_capability
 from engine.pdf_save import save_pdf
 
@@ -534,13 +534,15 @@ def _run_render(args: list[str], what: str) -> None:
     # named the wrong thing.
     args = [gs_capability.require(args[0] if args else "").path, *args[1:]]
     try:
-        result = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            timeout=RENDER_TIMEOUT_S,
-            stdin=subprocess.DEVNULL,
-        )
+        # The input document is the last argument of every render stage.
+        with gs_password_argv(args, args[-1]) as argv:
+            result = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=RENDER_TIMEOUT_S,
+                stdin=subprocess.DEVNULL,
+            )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"{what} timed out after {RENDER_TIMEOUT_S}s") from None
     if result.returncode != 0:

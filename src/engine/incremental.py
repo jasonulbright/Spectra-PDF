@@ -1546,7 +1546,7 @@ def transplant_incremental(original: str, modified: str, output: str, *,
             "— refusing to emit a signature-breaking file"
         )
     # The appended revision must still parse as a healthy document.
-    with open_pdf(io.BytesIO(result)):
+    with open_pdf(io.BytesIO(result), document=original):
         pass
 
     fd, tmp = tempfile.mkstemp(

@@ -37,11 +37,10 @@ Boundaries, each measured:
     rebasing would re-anchor them to a space they were not written for.
 """
 
-import shutil
 from pathlib import Path
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import copy_document, open_pdf
 from pikepdf import Dictionary, Name
 
 from .acroform import has_form_fields
@@ -312,7 +311,7 @@ def harvest_appearances(output: Path, source: Path, scratch: Path,
     if not boxes:
         return None
     forms = Path(scratch) / "forms.pdf"
-    shutil.copyfile(str(source), str(forms))
+    copy_document(str(source), str(forms))
     paired = False
     with open_pdf(str(output), allow_overwriting_input=True) as converted:
         pages = list(converted.pages)

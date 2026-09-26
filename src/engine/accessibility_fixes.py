@@ -33,7 +33,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import copy_document, open_pdf
 
 from engine.accessibility import check_accessibility
 from engine.autotag import autotag
@@ -473,7 +473,7 @@ def apply_accessibility_fixes(
         # Nothing to repair, and the caller asked for a copy: an output path
         # that does not exist would report a success that wrote no file.
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(Path(file).read_bytes())
+        copy_document(file, output_path)
     return {
         "output": str(output_path),
         "applied": applied,

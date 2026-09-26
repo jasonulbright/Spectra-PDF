@@ -2188,6 +2188,11 @@ EXCLUDED_DOORS = {
         "there is no distinct-output run to compare an in-place run against. "
         "Its rewrite is pinned by tests/test_engine.py"
     ),
+    "open_document": (
+        "has no `output` at all: an owner-password open rewrites the file it "
+        "was given without its protection, and a user-password open leaves it "
+        "byte for byte. Both are pinned by tests/test_user_password_open.py"
+    ),
 }
 
 #: Doors whose in-place mode is real but is NOT a `(file, output)` question:

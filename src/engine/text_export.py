@@ -18,9 +18,8 @@ import pikepdf
 from engine.credentials import open_pdf
 from pdfminer.layout import LAParams
 from pdfminer.pdfinterp import PDFResourceManager
-from pdfminer.pdfpage import PDFPage
 
-from engine.extract_text import LayoutTextConverter, TextStateInterpreter
+from engine.extract_text import LayoutTextConverter, TextStateInterpreter, document_pages
 
 LAYOUTS = ("reading", "layout")
 PAGE_BREAK = "\f"
@@ -75,7 +74,7 @@ def page_texts(file: str, wanted: list[int], layout: str) -> list[tuple[int, str
     try:
         with open(file, "rb") as handle:
             selected = {number - 1 for number in wanted}
-            for number, page in zip(wanted, PDFPage.get_pages(handle, selected)):
+            for number, page in zip(wanted, document_pages(handle, file, selected)):
                 mark = sink.tell()
                 interpreter.process_page(page)
                 sink.seek(mark)
