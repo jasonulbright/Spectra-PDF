@@ -9,6 +9,7 @@
 //! lives in managed state on this side of the boundary.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
@@ -377,13 +378,59 @@ impl ClaimOutcome {
 
 /// Does one output root contain the other, or name it?
 ///
-/// Both sides arrive canonicalized, so equality is identity and the only
-/// remaining relation is containment. The separator test is what keeps
+/// Existing path prefixes are canonicalized, but output files and directories
+/// need not exist yet. The comparison key therefore also folds Windows case
+/// and separators and resolves lexical dot segments. The separator test keeps
 /// `C:\out2` from reading as a child of `C:\out`.
+fn path_comparison_key(path: &str) -> String {
+    #[cfg(windows)]
+    let path = {
+        // The canonical path helper preserves paths that do not exist yet.
+        // Collapse lexical dot segments first, then resolve the longest
+        // existing prefix so aliases still compare as one path.
+        let mut normalized = PathBuf::new();
+        for component in Path::new(path).components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    if !normalized.pop() && !normalized.has_root() {
+                        normalized.push(component.as_os_str());
+                    }
+                }
+                _ => normalized.push(component.as_os_str()),
+            }
+        }
+        let mut tail = Vec::new();
+        let mut current = normalized.clone();
+        loop {
+            if current.exists() {
+                let canonical = crate::commands::canonical_path(&current.to_string_lossy());
+                let mut base = PathBuf::from(canonical);
+                for part in tail.iter().rev() {
+                    base.push(part);
+                }
+                break base.to_string_lossy().into_owned();
+            }
+            let Some(name) = current.file_name() else {
+                break normalized.to_string_lossy().into_owned();
+            };
+            tail.push(name.to_os_string());
+            if !current.pop() {
+                break normalized.to_string_lossy().into_owned();
+            }
+        }
+    };
+    #[cfg(not(windows))]
+    let path = path.to_string();
+
+    path.replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_lowercase()
+}
+
 fn roots_conflict(a: &str, b: &str) -> bool {
-    let trim = |s: &str| s.trim_end_matches(['\\', '/']).to_string();
-    let a = trim(a);
-    let b = trim(b);
+    let a = path_comparison_key(a);
+    let b = path_comparison_key(b);
     if a == b {
         return true;
     }
@@ -399,14 +446,8 @@ fn roots_conflict(a: &str, b: &str) -> bool {
 /// Unlike `roots_conflict`, this direction matters: a nested folder lease does
 /// not reserve a sibling or its parent.
 fn root_contains(root: &str, path: &str) -> bool {
-    let fold = |value: &str| {
-        value
-            .replace('/', "\\")
-            .trim_end_matches('\\')
-            .to_lowercase()
-    };
-    let root = fold(root);
-    let path = fold(path);
+    let root = path_comparison_key(root);
+    let path = path_comparison_key(path);
     path == root
         || path
             .strip_prefix(&root)
@@ -2484,6 +2525,10 @@ mod tests {
         assert!(roots_conflict("C:\\out", "C:\\out\\sub"));
         assert!(roots_conflict("C:\\out\\sub", "C:\\out"));
         assert!(roots_conflict("C:\\out\\", "C:\\out"));
+        assert!(roots_conflict("C:\\OUT", "c:/out/sub"));
+        assert!(roots_conflict(r"C:\out", r"C:\other\..\out\sub"));
+        assert!(root_contains(r"C:\OUT", r"c:/other/../out/sub/result.pdf"));
+        assert!(!root_contains(r"C:\out", r"C:\out2\result.pdf"));
         assert!(!roots_conflict("C:\\out", "C:\\out2"));
         assert!(!roots_conflict("C:\\out", "C:\\other"));
 
@@ -2492,6 +2537,9 @@ mod tests {
         let refused = run(&state, "doc-1", &["C:\\out\\sub"]);
         assert!(!refused.granted);
         assert_eq!(refused.owner, "main");
+        let case_alias = run(&state, "doc-2", &["c:/OUT/sub"]);
+        assert!(!case_alias.granted);
+        assert_eq!(case_alias.owner, "main");
         assert!(run(&state, "doc-1", &["C:\\out2"]).granted);
         assert!(!run(&state, "main", &["C:\\out2\\x"]).granted);
         assert!(run(&state, "main", &["C:\\other"]).granted);

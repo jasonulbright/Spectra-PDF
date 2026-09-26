@@ -25,7 +25,9 @@ use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     RegisterClipboardFormatW, SetClipboardData,
 };
-use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+use windows::Win32::System::Memory::{
+    GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
+};
 use windows::Win32::System::Ole::CF_DIB;
 
 /// A `BITMAPINFOHEADER` is 40 bytes and carries the dimensions the read-back
@@ -119,6 +121,23 @@ fn open_clipboard() -> Result<(), String> {
     Err(format!("Another application is holding the clipboard: {last}"))
 }
 
+/// Read just the DIB dimensions while the clipboard is held open. The
+/// clipboard may have changed between publishing and read-back, so its
+/// current global block must be checked before the fixed-size header copy.
+fn dib_dimensions(
+    size: usize,
+    read_header: impl FnOnce(&mut [u8; DIB_HEADER_BYTES]) -> Result<(), String>,
+) -> Result<(i32, i32), String> {
+    if size < DIB_HEADER_BYTES {
+        return Err("The clipboard image header is incomplete".to_string());
+    }
+    let mut header = [0u8; DIB_HEADER_BYTES];
+    read_header(&mut header)?;
+    let width = i32::from_le_bytes([header[4], header[5], header[6], header[7]]);
+    let height = i32::from_le_bytes([header[8], header[9], header[10], header[11]]);
+    Ok((width, height))
+}
+
 /// Read the width/height back out of whatever DIB the clipboard now holds.
 fn read_back(png_format: u32) -> Result<ClipboardImage, String> {
     open_clipboard()?;
@@ -133,17 +152,22 @@ fn read_back(png_format: u32) -> Result<ClipboardImage, String> {
         let handle = unsafe { GetClipboardData(CF_DIB.0 as u32) }
             .map_err(|e| format!("The clipboard did not accept the image: {e}"))?;
         let block = HGLOBAL(handle.0);
-        let ptr = unsafe { GlobalLock(block) };
-        if ptr.is_null() {
-            return Err("The clipboard image could not be read back".to_string());
-        }
-        let mut header = [0u8; DIB_HEADER_BYTES];
-        unsafe {
-            std::ptr::copy_nonoverlapping(ptr as *const u8, header.as_mut_ptr(), DIB_HEADER_BYTES);
-            let _ = GlobalUnlock(block);
-        }
-        let width = i32::from_le_bytes([header[4], header[5], header[6], header[7]]);
-        let height = i32::from_le_bytes([header[8], header[9], header[10], header[11]]);
+        let size = unsafe { GlobalSize(block) };
+        let (width, height) = dib_dimensions(size, |header| {
+            let ptr = unsafe { GlobalLock(block) };
+            if ptr.is_null() {
+                return Err("The clipboard image could not be read back".to_string());
+            }
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    ptr as *const u8,
+                    header.as_mut_ptr(),
+                    DIB_HEADER_BYTES,
+                );
+                let _ = GlobalUnlock(block);
+            }
+            Ok(())
+        })?;
         Ok(ClipboardImage { width, height, formats })
     })();
     unsafe {
@@ -281,6 +305,31 @@ fn percent_decode(value: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_replaced_short_dib_is_refused_before_reading_its_header() {
+        let mut read = false;
+        let error = dib_dimensions(DIB_HEADER_BYTES - 1, |_| {
+            read = true;
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(error.contains("header is incomplete"));
+        assert!(!read, "the undersized clipboard block was read");
+    }
+
+    #[test]
+    fn dib_dimensions_are_read_from_the_checked_header() {
+        let mut header = [0u8; DIB_HEADER_BYTES];
+        header[4..8].copy_from_slice(&640i32.to_le_bytes());
+        header[8..12].copy_from_slice(&(-480i32).to_le_bytes());
+        let dims = dib_dimensions(DIB_HEADER_BYTES, |out| {
+            *out = header;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(dims, (640, -480));
+    }
 
     fn png(tail: &[u8]) -> Vec<u8> {
         let mut bytes = PNG_SIGNATURE.to_vec();
