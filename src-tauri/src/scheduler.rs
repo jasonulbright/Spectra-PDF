@@ -1305,16 +1305,43 @@ fn tokenize(line: &str) -> Vec<String> {
     tokens
 }
 
-/// Rebuild the profile from the command line the task will actually run.
-///
-/// The command line is the source of truth for the job options. Task trigger
-/// and principal settings are added by `profile_from_task_xml`.
+fn command_value(args: &[String], index: &mut usize) -> Option<String> {
+    *index += 1;
+    let value = args.get(*index)?;
+    if value.is_empty() || value.starts_with("--") {
+        return None;
+    }
+    Some(value.clone())
+}
+
+#[cfg(test)]
 fn profile_from_command(name: &str, command: &str) -> Option<ScheduleProfile> {
     let tokens = tokenize(command);
     let (start, run_type) = match tokens.iter().position(|t| t == "batch-ocr") {
         Some(i) => (i, "batch-ocr"),
         None => (tokens.iter().position(|t| t == "run-action")?, "action"),
     };
+    profile_from_tokens(name, &tokens, start, run_type)
+}
+
+/// Rebuild the profile from the task's argument string, which is the source of
+/// truth for job options. Trigger and principal settings come from the XML.
+fn profile_from_arguments(name: &str, arguments: &str) -> Option<ScheduleProfile> {
+    let tokens = tokenize(arguments);
+    let run_type = match tokens.first()?.as_str() {
+        "batch-ocr" => "batch-ocr",
+        "run-action" => "action",
+        _ => return None,
+    };
+    profile_from_tokens(name, &tokens, 0, run_type)
+}
+
+fn profile_from_tokens(
+    name: &str,
+    tokens: &[String],
+    start: usize,
+    run_type: &str,
+) -> Option<ScheduleProfile> {
     let rest = &tokens[start + 1..];
     let mut p = ScheduleProfile {
         name: name.to_string(),
@@ -1345,37 +1372,38 @@ fn profile_from_command(name: &str, command: &str) -> Option<ScheduleProfile> {
     let mut i = 0;
     while i < rest.len() {
         let tok = rest[i].as_str();
-        let mut take_value = |target: &mut String| {
-            if i + 1 < rest.len() {
-                *target = rest[i + 1].clone();
-                i += 1;
-            }
-        };
         match tok {
-            "--dest" => take_value(&mut p.dest),
-            "--lang" => take_value(&mut p.lang),
-            "--moved" => take_value(&mut p.moved_root),
-            "--errors" => take_value(&mut p.error_root),
-            "--log-dir" => take_value(&mut p.log_dir),
-            "--action" => take_value(&mut p.action_file),
-            "--mrc-preset" => take_value(&mut p.mrc_preset),
-            "--repair" => p.repair_damaged = true,
-            "--replace-repaired" => p.replace_repaired_originals = true,
-            "--in-place" => p.in_place = true,
-            "--mrc" => p.mrc = true,
-            "--mrc-verify-text" => p.mrc_verify_text = true,
-            "--enhance" => p.enhance = true,
-            "--no-enhance-orientation" => p.enhance_orientation = false,
+            "--dest" => p.dest = command_value(rest, &mut i)?,
+            "--lang" if run_type == "batch-ocr" => p.lang = command_value(rest, &mut i)?,
+            "--moved" if run_type == "batch-ocr" => p.moved_root = command_value(rest, &mut i)?,
+            "--errors" if run_type == "batch-ocr" => p.error_root = command_value(rest, &mut i)?,
+            "--log-dir" => p.log_dir = command_value(rest, &mut i)?,
+            "--action" if run_type == "action" => p.action_file = command_value(rest, &mut i)?,
+            "--mrc-preset" if run_type == "batch-ocr" => {
+                p.mrc_preset = command_value(rest, &mut i)?
+            }
+            "--repair" if run_type == "batch-ocr" => p.repair_damaged = true,
+            "--replace-repaired" if run_type == "batch-ocr" => p.replace_repaired_originals = true,
+            "--in-place" if run_type == "batch-ocr" => p.in_place = true,
+            "--mrc" if run_type == "batch-ocr" => p.mrc = true,
+            "--mrc-verify-text" if run_type == "batch-ocr" => p.mrc_verify_text = true,
+            "--enhance" if run_type == "batch-ocr" => p.enhance = true,
+            "--no-enhance-orientation" if run_type == "batch-ocr" => p.enhance_orientation = false,
             other if !other.starts_with("--") && p.source.is_empty() => {
                 p.source = other.to_string();
             }
-            _ => {}
+            _ => return None,
         }
         i += 1;
     }
-    // An in-place run has no destination by construction, so requiring one
-    // would report every in-place schedule as unreadable.
-    if p.source.is_empty() || (p.dest.is_empty() && !p.in_place) {
+    // Do not offer an edit if it would normalize away unsupported combinations.
+    if p.source.is_empty()
+        || (p.dest.is_empty() && !p.in_place)
+        || (p.in_place && (!p.dest.is_empty() || !p.moved_root.is_empty()))
+        || (p.mrc_verify_text && !p.mrc)
+        || (!p.mrc_preset.is_empty() && !p.mrc)
+        || (!p.enhance_orientation && !p.enhance)
+    {
         return None;
     }
     if p.run_type == "action" && p.action_file.is_empty() {
@@ -1428,11 +1456,8 @@ fn profile_from_task_xml(
     if !same_file::is_same_file(&executable, expected_exe).unwrap_or(false) {
         return None;
     }
-    let command = format!(
-        "{executable} {}",
-        extract_tag(xml, "Arguments").unwrap_or_default()
-    );
-    let mut profile = profile_from_command(name, &command)?;
+    let arguments = extract_tag(xml, "Arguments")?;
+    let mut profile = profile_from_arguments(name, &arguments)?;
     let triggers = extract_tag(xml, "Triggers")?;
     if triggers.matches("<CalendarTrigger>").count() != 1
         || triggers.matches("</CalendarTrigger>").count() != 1
@@ -2000,6 +2025,32 @@ mod tests {
         // enhancement off and its orientation half at the shipped default.
         assert!(!parsed.enhance && parsed.enhance_orientation);
         assert!(!parsed.in_place && !parsed.mrc);
+    }
+
+    #[test]
+    fn unsupported_task_command_arguments_are_not_offered_for_editing() {
+        for command in [
+            r#"app.exe batch-ocr "C:\scans" --dest "C:\done" --future-option"#,
+            r#"app.exe batch-ocr "C:\scans" --dest "C:\done" unexpected-operand"#,
+            r#"app.exe batch-ocr "C:\scans" --dest "C:\done" --lang"#,
+            r#"app.exe batch-ocr "C:\scans" --dest "C:\done" --lang """#,
+            r#"app.exe batch-ocr "C:\scans" --dest "C:\done" --mrc-verify-text"#,
+        ] {
+            assert!(
+                profile_from_command("Legacy", command).is_none(),
+                "unsupported task command was offered for editing: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn task_arguments_must_start_with_a_supported_verb() {
+        let p = ocr_profile();
+        let xml = build_test_task_xml(&p, None).replace(
+            "<Arguments>batch-ocr",
+            "<Arguments>--future-option batch-ocr",
+        );
+        assert!(parse_test_task_xml(&p.name, &xml).is_none());
     }
 
     fn ocr_profile() -> ScheduleProfile {
