@@ -89,9 +89,11 @@ a maintenance tool run only when the pin moves.
 
 ## LibreOffice
 
-- **Version:** 26.2.6 (unmodified upstream; version- and sha256-pinned — vendored
+- **Version:** 26.2.6 (upstream release; version- and sha256-pinned — vendored
   by `scripts/bundle-libreoffice.ps1`, which verifies the official installer's
-  SHA-256 before extracting it)
+  SHA-256 before extracting it). One file differs from the release:
+  `program/libxml2.dll` is libxml2 2.15.4 (MIT), built from the GNOME release by
+  `scripts/build-lo-libxml2.ps1` in place of the release's 2.14.6.
 - **License:** Mozilla Public License v2.0 (MPL-2.0), except for the PDF-import
   helper covered in the table below
 - **Role:** Invoked by Spectra PDF as a separate process (`soffice
@@ -137,6 +139,8 @@ written source offer below.
 ## Embedded Python runtime
 
 - **CPython 3.14.7** — Python Software Foundation License (PSF) — <https://www.python.org/>
+
+`pyexpat.pyd` is rebuilt from the CPython 3.14.7 source release with Expat 2.8.5 (MIT; the notice is in the runtime's `LICENSE.txt`) by `scripts/build-pyexpat-expat285.ps1`. The lxml wheel is `lxml-6.1.2+libxml215.1`, built by `scripts/build-lxml-libxml215.ps1` from the committed sdist with libxml2 2.15.4 (MIT), libxslt 1.1.45 (MIT), zlib 1.3.2 (Zlib) and win-iconv 0.0.10 (public domain) linked statically; their notices ship in the wheel's `dist-info/licenses/`.
 
 Bundled Python packages (installed into the embedded runtime; exact versions are
 hash-pinned in `scripts/python-requirements.txt`, or in

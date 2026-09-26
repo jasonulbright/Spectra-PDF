@@ -537,3 +537,44 @@ def test_the_export_direction_still_works_through_the_shared_runner(tmp_dir, sam
     assert result["format"] == "docx"
     assert out.is_file() and out.stat().st_size > 0
     assert os.path.samefile(result["output"], out)
+
+
+class TestPackageMemberMethods:
+    """CVE-2026-15310: zipfile's bzip2/LZMA/Zstandard readers pre-allocate from
+    the member header. A source member in those methods is refused before any
+    decompressor is built."""
+
+    DOCUMENT = (
+        b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        b'<w:body><w:p><w:r><w:rPr><w:rFonts w:cs="Noto Sans Arabic"/></w:rPr>'
+        b"<w:t>x</w:t></w:r></w:p></w:body></w:document>"
+    )
+
+    def _docx(self, tmp_dir, method) -> Path:
+        import zipfile
+
+        path = Path(tmp_dir) / f"m{method}.docx"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("word/document.xml", self.DOCUMENT, compress_type=method)
+            zf.writestr("META-INF/manifest.xml", b"<encryption-data/>", compress_type=method)
+        return path
+
+    @pytest.mark.parametrize("method_name", ["ZIP_BZIP2", "ZIP_LZMA", "ZIP_ZSTANDARD"])
+    def test_a_non_package_method_is_never_decompressed(self, tmp_dir, monkeypatch, method_name):
+        import zipfile
+
+        path = self._docx(tmp_dir, getattr(zipfile, method_name))
+
+        def refuse(*_args, **_kwargs):
+            raise AssertionError("a decompressor was built for a refused member")
+
+        monkeypatch.setattr(zipfile, "_get_decompressor", refuse)
+        assert declared_faces(path) == set()
+        assert soffice_mod._is_encrypted(path) is False
+
+    def test_a_deflated_package_still_reads(self, tmp_dir):
+        import zipfile
+
+        path = self._docx(tmp_dir, zipfile.ZIP_DEFLATED)
+        assert declared_faces(path) == {"Noto Sans Arabic"}
+        assert soffice_mod._is_encrypted(path) is True

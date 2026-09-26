@@ -249,6 +249,22 @@ _ODF_SUFFIXES = (".odt", ".ott", ".ods", ".ots", ".odp", ".otp", ".odg", ".otg")
 # OLE2 compound file wrapping an EncryptedPackage stream.
 _OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
+# OOXML and ODF packages store members STORED or DEFLATED (ECMA-376 Part 2
+# Annex C; ODF 1.3 Part 2 section 3.3; second-hand: neither standard is held
+# in pdfa/). zipfile's bzip2, LZMA and Zstandard readers size their first
+# allocation from the member header, which the file controls (CVE-2026-15310),
+# so a member in any other method is refused before its data is read.
+_PACKAGE_METHODS = (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+
+
+def _read_member(zf: zipfile.ZipFile, name: str) -> bytes:
+    info = zf.getinfo(name)
+    if info.compress_type not in _PACKAGE_METHODS:
+        raise zipfile.BadZipFile(
+            f"{name}: compression method {info.compress_type} is not used by office packages"
+        )
+    return zf.read(info)
+
 
 def is_office_source(path: str | Path) -> bool:
     return Path(path).suffix.lower() in OFFICE_SUFFIXES
@@ -272,7 +288,7 @@ def _is_encrypted(path: Path) -> bool:
         try:
             with zipfile.ZipFile(path) as zf:
                 if "META-INF/manifest.xml" in zf.namelist():
-                    manifest = zf.read("META-INF/manifest.xml")
+                    manifest = _read_member(zf, "META-INF/manifest.xml")
                     return b"encryption-data" in manifest
         except (OSError, zipfile.BadZipFile, KeyError):
             return False
@@ -548,7 +564,7 @@ def declared_faces(path: str | Path) -> set[str]:
                 if suffix.startswith((".doc", ".dot")):
                     parts, pattern = ("word/document.xml",), _DOCX_DRAWN
                     if "word/styles.xml" in members:
-                        block = _DOCX_DEFAULTS.search(zf.read("word/styles.xml"))
+                        block = _DOCX_DEFAULTS.search(_read_member(zf, "word/styles.xml"))
                         if block is not None:
                             names.update(
                                 m.decode("utf-8", "replace")
@@ -568,14 +584,14 @@ def declared_faces(path: str | Path) -> set[str]:
                 for member in parts:
                     if member in members:
                         names.update(
-                            m.decode("utf-8", "replace") for m in pattern.findall(zf.read(member))
+                            m.decode("utf-8", "replace") for m in pattern.findall(_read_member(zf, member))
                         )
         elif suffix in _ODF_SUFFIXES:
             with zipfile.ZipFile(src) as zf:
                 members = zf.namelist()
                 names.update(
                     _odf_faces(
-                        [zf.read(m) for m in ("content.xml", "styles.xml") if m in members]
+                        [_read_member(zf, m) for m in ("content.xml", "styles.xml") if m in members]
                     )
                 )
         elif suffix in (".fodt", ".fods", ".fodp"):

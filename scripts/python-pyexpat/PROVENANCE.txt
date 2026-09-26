@@ -1,0 +1,15 @@
+pyexpat.pyd -- CPython 3.14.7 pyexpat with Expat 2.8.5.
+
+Built by scripts/build-pyexpat-expat285.ps1 from:
+  CPython  https://www.python.org/ftp/python/3.14.7/Python-3.14.7.tgz
+           SHA-256 62859805f6fdf25e2bcbf3fa3217801e1996887ca33e6a2af80674bdfa2dbe07
+  Expat    https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.gz
+           SHA-256 920dde485e15eda0cce8d2310b41d492c534e5e3d89ad407a0b4176dd2ff88fe
+  Modules/expat/ prepared as CPython's refresh.sh prepares it and equal, file
+  for file, to Modules/expat/ at python/cpython 5659aee18f2b5c7e06ba1363e2fa3529d6a025d9 (3.14 branch).
+  No other source file is changed.
+
+SHA-256 of the pyd as committed: 420c90acbec3fa3c0882c1de81d8b504c34611ebc94157108df18178ead63fb4
+
+Expat is MIT-licensed; its COPYING is unchanged from the one CPython 3.14.7
+bundles, and the notice ships in the runtime's LICENSE.txt.

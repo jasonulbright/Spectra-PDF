@@ -108,26 +108,26 @@ XZ Utils	5.8.3	CVE-2026-34743	affects 5.2.5 linked into CPython _lzma.pyd and 5.
 XZ Utils	5.2.0,5.8.1	CVE-2025-31115	affects 5.6.2 liblzma-5.dll in the Tesseract tree (range 5.3.3alpha to 5.8.0); the 5.2 branch floor 5.2.0 records that 5.2.5 (CPython _lzma.pyd) predates the range
 XZ Utils	5.2.6	CVE-2020-22916	affects 5.2.5 in CPython _lzma.pyd by version; disputed by upstream
 XZ Utils	5.2.0,5.6.2	CVE-2024-3094	not affected: shipped liblzma-5.dll is 5.6.2; libarchive-13.dll embeds the compile-time string liblzma/5.6.1; only 5.6.0 and 5.6.1 carry the backdoor, so the 5.2 branch floor is 5.2.0
-libxml2	2.12.10	CVE-2024-56171	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
-libxml2	2.12.10	CVE-2025-24928	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
-libxml2	2.12.10	CVE-2025-27113	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
-libxml2	2.13.8	CVE-2025-32414	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
-libxml2	2.13.8	CVE-2025-32415	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
-libxml2	2.14.4	CVE-2025-6021	affects 2.11.9 in the lxml Windows wheel by version (upstream wheel carries backported patches)
-libxml2	2.15.2	CVE-2025-8732	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
-libxml2	2.15.2	CVE-2026-0989	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
-libxml2	2.15.2	CVE-2026-0990	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
-libxml2	2.15.2	CVE-2026-0992	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
-libxml2	2.15.3	CVE-2026-6732	affects 2.14.6 in LibreOffice
-libxml2	2.15.4	CVE-2026-11979	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
-libxml2	2.15.4	CVE-2026-86137	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
-libxml2	2.15.4	CVE-2026-86138	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
-libxml2	2.15.4	CVE-2026-86139	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
-libxml2	2.15.4	CVE-2026-86140	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
-libxml2	2.15.4	CVE-2026-86141	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
-libxml2	2.15.4	CVE-2026-86142	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
-libxml2	2.15.4	CVE-2026-86143	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
-libxml2	2.15.4	CVE-2026-86144	affects 2.14.6 in LibreOffice and 2.11.9 in lxml
+libxml2	2.12.10	CVE-2024-56171	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.12.10 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.12.10	CVE-2025-24928	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.12.10 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.12.10	CVE-2025-27113	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.12.10 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.13.8	CVE-2025-32414	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.13.8 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.13.8	CVE-2025-32415	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.13.8 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.14.4	CVE-2025-6021	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.14.4 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.2	CVE-2025-8732	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.2 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.2	CVE-2026-0989	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.2 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.2	CVE-2026-0990	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.2 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.2	CVE-2026-0992	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.2 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.3	CVE-2026-6732	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.3 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.4	CVE-2026-11979	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.4 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.4	CVE-2026-86137	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.4 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.4	CVE-2026-86138	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.4 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.4	CVE-2026-86139	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.4 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.4	CVE-2026-86140	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.4 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.4	CVE-2026-86141	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.4 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.4	CVE-2026-86142	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.4 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.4	CVE-2026-86143	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.4 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
+libxml2	2.15.4	CVE-2026-86144	shipped libxml2 is 2.15.4 (lxml wheel 6.1.2+libxml215.1 and LibreOffice program/libxml2.dll, both built from the 2.15.4 release), at or above the 2.15.4 floor; previously affected 2.11.9 in lxml and/or 2.14.6 in LibreOffice
 libheif	1.23.5	GHSA-qfj5-c4pq-q998	affected the replaced 1.23.4; shipped 1.23.5 is fixed (pillow_heif decode-only build); AV1, JPEG 2000 and encoder paths are not compiled in; no CVE assigned
 libheif	1.23.5	GHSA-qwpf-5wf7-r996	affected the replaced 1.23.4; shipped 1.23.5 is fixed (pillow_heif decode-only build); AV1, JPEG 2000 and encoder paths are not compiled in; no CVE assigned
 libheif	1.23.5	GHSA-9c75-9g8r-4728	affected the replaced 1.23.4; shipped 1.23.5 is fixed (pillow_heif decode-only build); AV1, JPEG 2000 and encoder paths are not compiled in; no CVE assigned
@@ -261,8 +261,8 @@ PostgreSQL	absent:15.19	CVE-2026-6464	not shipped since 2026-09-25: bundle-libre
 PostgreSQL	absent:15.19	CVE-2026-6469	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
 PostgreSQL	absent:15.19	CVE-2026-6470	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
 PostgreSQL	absent:15.19	CVE-2026-6471	not shipped since 2026-09-25: bundle-libreoffice.ps1 removes libpq.dll and the PostgreSQL driver (Base only); restore floor 15.19 if libpq returns
-Raptor	2.0.17	CVE-2024-57822	affects raptor2.dll 2.0.16 in LibreOffice; no fixed upstream release as of 2026-09-25
-Raptor	2.0.17	CVE-2024-57823	affects raptor2.dll 2.0.16 in LibreOffice; no fixed upstream release as of 2026-09-25
+Raptor	-	CVE-2024-57822	the CVE fix is applied in the shipped build: LibreOffice 26.2.6 builds raptor2.dll from 2.0.16 with external/redland/raptor/raptor-backport-unreleased-fixes.patch.1 (raptor_ntriples.c bnode bound, position > 0), all platforms, per UnpackedTarball_raptor.mk at tag libreoffice-26-2-6. An un-numbered underread remains in the same N-Triples term parser (a malformed \u escape reads one byte before the buffer; upstream raptor 701621c98cc3, 2026-07-11, not carried by LibreOffice). Not reachable: raptor_ntriples_parse_term is called only by the ntriples/nquads parsers and by raptor_new_term_from_counted_string, whose one caller in the tree is rasqal's CSV/TSV query-results reader (rasqal_format_sv.c); LibreOffice creates its only parser as librdf_new_parser(world, "rdfxml") in unoxml librdf_repository.cxx (ODF manifest.rdf and metadata import), runs SPARQL against the in-memory model and never reads a results file; "rdfxml" is the only raptor syntax name in mergedlo.dll. No fixed upstream release; floor was 2.0.17
+Raptor	-	CVE-2024-57823	the vulnerable code does not ship: LibreOffice 26.2.6 builds raptor2.dll with external/redland/raptor/CVE-2024-57823.patch.1 and the raptor_uri_normalize_path bounds of raptor-backport-unreleased-fixes.patch.1 (UnpackedTarball_raptor.mk at tag libreoffice-26-2-6, all platforms); the shipped raptor2.dll carries the patch's release-build strings "Path '%s' length %ld does not match calculated %ld." and "Path length %ld does not match calculated %ld." (debug-only upstream); floor was 2.0.17
 Leptonica	-	none	no open advisory for 1.84.1 (Tesseract) and 1.87.0 (jbig2enc); checked 2026-09-25
 jbig2enc	-	none	no open advisory for 0.32; checked 2026-09-25
 libjpeg-turbo	-	none	no open advisory for 3.0.3 and 3.1.4.1; checked 2026-09-25
