@@ -24,7 +24,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
 
-use crate::app_windows::{self, ClaimState, Handover, WindowRegistry};
+use crate::app_windows::{self, ClaimState, Handover, PendingOpen, WindowRegistry};
 
 /// A tab strip in physical screen pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -363,7 +363,9 @@ impl StripRegistry {
                 continue;
             };
             for path in open.files {
-                if !claims.transfer(&path, label, &home).granted {
+                if !claims.transfer(&path, label, &home).granted
+                    && claims.owner(&path).as_deref() != Some(home.as_str())
+                {
                     continue;
                 }
                 if !(waiting && home_is_source) {
@@ -471,6 +473,33 @@ struct DestroySweep {
     returned: Vec<(String, String)>,
     /// Handovers the destroyed window reserved and will never commit.
     deliver: Vec<Reservation>,
+}
+
+/// Return a delivered handover whose renderer could not open it. A failed
+/// destination may still be alive, so this uses the same ownership recovery as
+/// window destruction and tells the selected window to restore the path.
+fn return_unopened_handover(
+    claims: &ClaimState,
+    receiver: &str,
+    open: &PendingOpen,
+    live: &[String],
+) -> Vec<(String, String)> {
+    let Some(handover) = open.handover.as_ref() else {
+        return Vec::new();
+    };
+    let home = if handover.from != receiver && live.iter().any(|label| label == &handover.from) {
+        Some(handover.from.clone())
+    } else {
+        live.iter().find(|label| label.as_str() != receiver).cloned()
+    };
+    let Some(home) = home else {
+        return Vec::new();
+    };
+    open.files
+        .iter()
+        .filter(|path| claims.transfer(path, receiver, &home).granted)
+        .map(|path| (home.clone(), path.clone()))
+        .collect()
 }
 
 /// Registered strips in screen coordinates, in label order so hit-testing is
@@ -1079,6 +1108,52 @@ pub async fn tabdrag_release(
         }
     }
     Ok(TabDragResult::refused(reservation.from))
+}
+
+/// Acknowledge a queued handover after its renderer has either opened the path
+/// or reached an open failure. Until this call the in-flight record remains
+/// available to the window-destruction recovery path.
+#[tauri::command]
+pub async fn tabdrag_complete_open(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    token: u64,
+    opened: bool,
+) -> Result<(), String> {
+    let receiver = window.label().to_string();
+    let Some(open) = app
+        .state::<WindowRegistry>()
+        .handover_open(&receiver, token)
+    else {
+        // A concurrent window-destroyed sweep already recovered this token.
+        return Ok(());
+    };
+    if opened {
+        app.state::<WindowRegistry>()
+            .finish_handover_open(&receiver, token);
+        return Ok(());
+    }
+    let live = app_windows::app_window_labels(&app);
+    let returned = return_unopened_handover(
+        &app.state::<ClaimState>(),
+        &receiver,
+        &open,
+        &live,
+    );
+    if returned.is_empty()
+        || app
+            .state::<WindowRegistry>()
+            .finish_handover_open(&receiver, token)
+            .is_none()
+    {
+        // A concurrent destruction sweep owns notification when it wins the
+        // removal race; it also accepts a claim already moved to the source.
+        return Ok(());
+    }
+    for (home, path) in returned {
+        let _ = app.emit_to(home.as_str(), RETURNED_EVENT, ReturnedPayload { path });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1729,6 +1804,67 @@ mod tests {
     }
 
     #[test]
+    fn a_target_destroyed_after_drain_but_before_open_returns_the_document() {
+        let (strips, claims, registry) = two_windows();
+        let token = reserve_onto_doc1(&strips, &claims, &registry);
+        assert!(strips.take_reservation(token, "main").is_some());
+        assert!(registry.release_pending("doc-1", token));
+        assert_eq!(registry.take_deliverable("doc-1").len(), 1);
+
+        // The renderer drained the IPC queue but has not finished opening the
+        // path. Destruction in this window must still find the handover.
+        let sweep = strips.sweep_destroyed(&claims, &registry, "doc-1", &live(&["main"]));
+        assert_eq!(sweep.returned, vec![("main".to_string(), DOC.to_string())]);
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn a_failed_open_returns_the_in_flight_document_to_its_live_source() {
+        let (strips, claims, registry) = two_windows();
+        let token = reserve_onto_doc1(&strips, &claims, &registry);
+        assert!(strips.take_reservation(token, "main").is_some());
+        assert!(registry.release_pending("doc-1", token));
+        assert_eq!(registry.take_deliverable("doc-1").len(), 1);
+
+        let open = registry.handover_open("doc-1", token).expect("in flight");
+        let returned = return_unopened_handover(
+            &claims,
+            "doc-1",
+            &open,
+            &live(&["main", "doc-1"]),
+        );
+        assert!(registry.finish_handover_open("doc-1", token).is_some());
+        assert_eq!(returned, vec![("main".to_string(), DOC.to_string())]);
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+        assert!(registry.finish_handover_open("doc-1", token).is_none());
+    }
+
+    #[test]
+    fn a_destruction_sweep_notifies_when_a_failed_open_already_moved_the_claim() {
+        let (strips, claims, registry) = two_windows();
+        let token = reserve_onto_doc1(&strips, &claims, &registry);
+        assert!(strips.take_reservation(token, "main").is_some());
+        assert!(registry.release_pending("doc-1", token));
+        assert_eq!(registry.take_deliverable("doc-1").len(), 1);
+        let open = registry.handover_open("doc-1", token).expect("in flight");
+        assert_eq!(
+            return_unopened_handover(
+                &claims,
+                "doc-1",
+                &open,
+                &live(&["main", "doc-1"])
+            ),
+            vec![("main".to_string(), DOC.to_string())]
+        );
+
+        // The failure acknowledgement and window close can race. The sweep
+        // must still notify the source after the claim was already moved.
+        let sweep = strips.sweep_destroyed(&claims, &registry, "doc-1", &live(&["main"]));
+        assert_eq!(sweep.returned, vec![("main".to_string(), DOC.to_string())]);
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+    }
+
+    #[test]
     fn a_document_whose_source_is_gone_too_goes_to_a_window_that_can_open_it() {
         let (strips, claims, registry) = two_windows();
         let token = reserve_onto_doc1(&strips, &claims, &registry);
@@ -1906,9 +2042,11 @@ mod tests {
         assert_eq!(claims.write_claims("main"), Vec::<String>::new());
         assert!(!claims.claim(DOC, "doc-2", ClaimMode::Write).granted);
         assert_eq!(registry.take_deliverable("doc-1").len(), 1);
+        assert!(registry.finish_handover_open("doc-1", token).is_some());
 
         // The receiver dying next hands the document to whatever still
-        // stands, never back to the dead source.
+        // stands, never back to the dead source. The renderer already
+        // acknowledged the open, so this is an ordinary later window close.
         let later = strips.sweep_destroyed(&claims, &registry, "doc-1", &live(&["doc-2"]));
         assert!(later.returned.is_empty(), "the receiver already opened it");
         assert_eq!(strips.take_reservation(token, "main"), None);

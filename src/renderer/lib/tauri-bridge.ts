@@ -119,6 +119,13 @@ export interface PhysicalScreenRect extends PhysicalScreenPoint {
   height: number;
 }
 
+export interface PendingOpen {
+  files: string[];
+  merge: boolean;
+  index: number | null;
+  handover?: { token: number; from: string };
+}
+
 /** The cross-window tab drag. The source window streams the pointer here and
  * Rust answers the two questions a renderer cannot: whose strip is under the
  * cursor, and who owns the document after the release. Only the PATH ever
@@ -171,6 +178,10 @@ export const tabDrag = {
   /** Undo a held handover the source is not going to commit — the write a move
    * costs failed, so the document must not arrive anywhere. */
   release: (token: number) => invoke<TabDragResult>('tabdrag_release', { token }),
+  /** Confirm that the receiving renderer opened the handed-over path, or
+   * return it to its source when the open was refused. */
+  completeOpen: (token: number, opened: boolean) =>
+    invoke<void>('tabdrag_complete_open', { token, opened }),
   /** `x` is physical pixels from THIS window's own strip's left edge. */
   onHover: (callback: (x: number) => void) =>
     listen<{ x: number }>('tabdrag://hover', (event) => callback(event.payload.x)),
@@ -1013,9 +1024,10 @@ export const app = {
 
   /** Take (and clear) the opens queued for this window. `index` is the tab
    * position the first file lands at when the open came from a gesture that
-   * named one (a dropped tab); null for every other open, which appends. */
+   * named one (a dropped tab); null for every other open, which appends.
+   * Handover opens stay tracked until the renderer acknowledges the result. */
   takePendingOpens: () =>
-    invoke<{ files: string[]; merge: boolean; index: number | null }[]>('take_pending_opens'),
+    invoke<PendingOpen[]>('take_pending_opens'),
 
   /** Record the web address a downloaded copy came from, keyed by its temp
    * path in app-wide Rust state. The path — never a per-realm page/document id

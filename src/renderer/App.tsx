@@ -1077,7 +1077,13 @@ function AppContent(): React.ReactElement {
   }, [state.files, pathInUse]);
   const openByPaths = useCallback(async (
     paths: string[],
-    opts?: { focus?: boolean; index?: number; webOrigin?: string; reportFailures?: boolean },
+    opts?: {
+      focus?: boolean;
+      index?: number;
+      webOrigin?: string;
+      reportFailures?: boolean;
+      onPathOpenResult?: (path: string, opened: boolean) => void | Promise<void>;
+    },
   ): Promise<OpenSummary> => {
     // Every file this batch reached a verdict on. A cancelled password prompt
     // is neither: the user answered the question and the answer was no.
@@ -1225,6 +1231,7 @@ function AppContent(): React.ReactElement {
             return true;
           },
         });
+        await opts?.onPathOpenResult?.(filePath, step === 'opened' || step === 'reactivated');
         // A document holds the claim now; any other path is released in the
         // finally unless this window uses it by then.
         if (step === 'opened' || step === 'reactivated') unopened.delete(filePath);
@@ -3142,13 +3149,43 @@ function AppContent(): React.ReactElement {
     let cancelled = false;
     const drain = async (): Promise<void> => {
       for (const pending of await app.takePendingOpens()) {
-        if (cancelled) return;
-        // A dropped tab carries the gap its caret marked in the receiving
-        // window; every other queued open carries none and appends.
-        await openByPaths(
-          pending.files,
-          pending.index === null ? undefined : { index: pending.index },
-        );
+        const token = pending.handover?.token;
+        let acknowledged = false;
+        let result: boolean | undefined;
+        const completeHandover = async (opened: boolean): Promise<void> => {
+          if (token === undefined || acknowledged) return;
+          result ??= opened;
+          try {
+            await tabDrag.completeOpen(token, result);
+            acknowledged = true;
+          } catch {
+            // The later fallback retries the same result if IPC did not
+            // acknowledge this one.
+          }
+        };
+        if (cancelled) {
+          await completeHandover(false);
+          continue;
+        }
+        try {
+          // A dropped tab carries the gap its caret marked in the receiving
+          // window; every other queued open carries none and appends.
+          await openByPaths(
+            pending.files,
+            {
+              ...(pending.index === null ? {} : { index: pending.index }),
+              onPathOpenResult: token === undefined
+                ? undefined
+                : (_path, opened) => completeHandover(opened),
+            },
+          );
+          // Refused claims and cancelled password prompts can produce no
+          // per-path callback. In either case, return the still-unopened path.
+          await completeHandover(false);
+        } catch (error) {
+          await completeHandover(false);
+          throw error;
+        }
       }
     };
     void drain();

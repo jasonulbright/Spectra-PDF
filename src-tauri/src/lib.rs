@@ -284,6 +284,7 @@ pub fn run() {
             tabdrag::tabdrag_reserve,
             tabdrag::tabdrag_commit,
             tabdrag::tabdrag_release,
+            tabdrag::tabdrag_complete_open,
             tabdrag::tabdrag_reserve_new_window,
             snapshot::copy_image_to_clipboard,
             snapshot::save_snapshot_png,
