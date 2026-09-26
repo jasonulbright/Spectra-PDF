@@ -254,8 +254,8 @@ const ANNOTATION_EDITS: ReadonlySet<AppAction['type']> = new Set<AppAction['type
 
 /** The one permission check of the page tier: every gesture, key and drop that
  * edits pages or their annotations arrives here as an action. The commit
- * writes every file it touches with pdf-lib, so a source file whose pages are
- * imported answers for itself too. */
+ * rewrites every file it touches, so a source file whose pages are imported
+ * answers for itself too. */
 function pageEditBlock(state: AppState, action: AppAction, edited: readonly OpenDocument[]): CapabilityBlock | null {
   const capability: Capability = ANNOTATION_EDITS.has(action.type) ? 'commentTier' : 'pageTier';
   const paths = new Set(edited.map((d) => d.path));
@@ -263,6 +263,16 @@ function pageEditBlock(state: AppState, action: AppAction, edited: readonly Open
   for (const path of paths) {
     const block = capabilityBlock(documentPermissions(state, path), capability);
     if (block) return block;
+  }
+  // The owner password that would protect those pages in another file is
+  // not held, so a user-opened document's pages never leave it.
+  const destination = action.type === 'MOVE_PAGE' || action.type === 'MOVE_PAGES' || action.type === 'IMPORT_PAGES'
+    ? state.workspace.documents.find((d) => d.id === action.toDocId)?.path
+    : undefined;
+  if (destination !== undefined) {
+    for (const path of paths) {
+      if (path !== destination && documentPermissions(state, path).opener === 'user') return { kind: 'ownerPassword' };
+    }
   }
   return null;
 }

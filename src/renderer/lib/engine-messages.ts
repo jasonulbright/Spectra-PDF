@@ -218,17 +218,3 @@ export class EngineError extends Error {
     }
   }
 }
-
-const OWNER_PASSWORD_HELD =
-  "This document's permissions are held by an owner password, which is needed to change them. Open it with that password first.";
-
-/**
- * The password prompt's error line after a failed unlock. A user password is
- * correct but cannot remove the protection, so that refusal is shown as the
- * engine worded it; every other failure is a wrong password.
- */
-export function unlockFailureText(err: unknown, wrongPassword: string): string {
-  return err instanceof EngineError && err.raw === OWNER_PASSWORD_HELD
-    ? err.message
-    : wrongPassword;
-}

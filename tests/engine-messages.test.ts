@@ -17,7 +17,6 @@ import {
   localizeEngineMessage,
   matchEngineMessage,
   rawEngineMessage,
-  unlockFailureText,
 } from '../src/renderer/lib/engine-messages';
 
 const EN: Record<string, string> = JSON.parse(
@@ -212,13 +211,20 @@ describe('EngineError', () => {
   });
 });
 
-describe('unlockFailureText', () => {
-  it('shows the owner-password refusal the table carries, and a wrong password otherwise', () => {
-    const row = ENGINE_MESSAGE_ROWS.find((r) => r.key === 'encrypt.documentSPermissionsHeld');
-    expect(row).toBeDefined();
-    const refusal = new EngineError(row!.message);
-    expect(unlockFailureText(refusal, 'wrong')).toBe(refusal.message);
-    expect(unlockFailureText(new EngineError('invalid password'), 'wrong')).toBe('wrong');
-    expect(unlockFailureText(new Error(row!.message), 'wrong')).toBe('wrong');
+describe('removed unlock leftovers', () => {
+  it('no longer exports the unlock prompt text helper', async () => {
+    const mod = await import('../src/renderer/lib/engine-messages');
+    expect('unlockFailureText' in mod).toBe(false);
+  });
+});
+
+describe('sealed-edit and Ghostscript password refusals', () => {
+  it('carry catalog rows', async () => {
+    for (const key of ['credentials.ghostscriptPasswordUnsupported', 'sealed_edit.editLeavesDocumentPages']) {
+      const row = ENGINE_MESSAGE_ROWS.find((r) => r.key === key);
+      expect(row, key).toBeDefined();
+      expect(localizeEngineMessage(row!.message)).toBe(EN[`engine.${key}`]);
+      expect(localizeEngineMessage(row!.message)).not.toBe('');
+    }
   });
 });

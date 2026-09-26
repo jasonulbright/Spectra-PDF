@@ -37,7 +37,6 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   extract_text: 'Extract Text',
   set_metadata: 'Update Metadata',
   set_outline: 'Save Bookmarks',
-  unlock: 'Unlock',
   redact: 'Redact',
   search_text_regions: 'Search & Redact',
   watermark: 'Watermark',
@@ -465,7 +464,6 @@ export function formatQueueLabel(l: QueueLabel, lng?: string): string {
     case 'encrypt':
     case 'decrypt':
     case 'set_metadata':
-    case 'unlock':
       return tChrome('dialog.opqueue.file', { op, file }, lng);
     case 'merge':
       return tChromeCount('dialog.opqueue.mergeFiles', l.fileCount ?? 0, { op }, lng);

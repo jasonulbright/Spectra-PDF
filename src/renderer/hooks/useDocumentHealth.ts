@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { requestDocumentProxy } from '../lib/pdfDocCache';
 import { collectPdfjsFacts } from '../lib/doc-health-pdfjs';
+import { documentPassword } from '../lib/document-passwords';
 import type { EngineHealthReply } from '../lib/doc-health-engine';
 import {
   EMPTY_HEALTH_LEDGER,
@@ -50,6 +51,7 @@ export interface DocumentHealthApi {
 type IdleHealthCall = (
   buffer: PdfBuffer,
   isCurrent: () => boolean,
+  password?: string,
 ) => Promise<EngineHealthReply | null>;
 
 interface StartedRun {
@@ -109,7 +111,7 @@ export function useDocumentHealth(
 
       void (async () => {
         try {
-          const parsed = await collectHealth(buffer, isCurrent);
+          const parsed = await collectHealth(buffer, isCurrent, documentPassword(path));
           // `null` is a run the lane abandoned part-way, and a run that
           // finished after being superseded describes a question nobody is
           // asking any more. Neither is evidence about the row standing now.

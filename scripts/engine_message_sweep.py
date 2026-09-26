@@ -85,6 +85,8 @@ PUBLIC_EXCEPTIONS = frozenset(
         # The remote signing service client. A ValueError subclass whose
         # messages are the user-facing refusals of that source.
         "CscError",
+        # Ghostscript cannot be handed the stored user password.
+        "GhostscriptPasswordUnsupported",
     }
 )
 
@@ -139,14 +141,23 @@ def _placeholder_name(node: ast.AST, src: str, taken: list[str]) -> str:
     return name
 
 
-def _template(node: ast.AST, src: str) -> tuple[str, tuple[str, ...]] | None:
-    """Render a message expression as a template, or None if it is dynamic."""
+def _template(
+    node: ast.AST, src: str, constants: dict[str, str] | None = None
+) -> tuple[str, tuple[str, ...]] | None:
+    """Render a message expression as a template, or None if it is dynamic.
+
+    `constants` resolves a bare name to a module-level string constant of the
+    raising module or one it imports from another engine module; a shared
+    refusal sentence raised through its constant still needs a row."""
     parts: list[str] = []
     names: list[str] = []
 
     def walk(n: ast.AST) -> bool:
         if isinstance(n, ast.Constant) and isinstance(n.value, str):
             parts.append(n.value)
+            return True
+        if isinstance(n, ast.Name) and constants and n.id in constants:
+            parts.append(constants[n.id])
             return True
         if isinstance(n, ast.JoinedStr):
             for value in n.values:
@@ -220,13 +231,51 @@ def _reason_expression(node: ast.AST) -> ast.AST | None:
     return None
 
 
+def _module_constants(tree: ast.Module) -> dict[str, str]:
+    """Module-level `NAME = "literal"` (or a parenthesised concatenation of
+    literals) string constants."""
+    out: dict[str, str] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+            target, value = stmt.targets[0], stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            target, value = stmt.target, stmt.value
+        else:
+            continue
+        if not isinstance(target, ast.Name) or not target.id.isupper():
+            continue
+        if any(isinstance(n, ast.JoinedStr) for n in ast.walk(value)):
+            continue
+        rendered = _template(value, "")
+        if rendered is not None:
+            out[target.id] = rendered[0]
+    return out
+
+
+def _visible_constants(tree: ast.Module, own: dict[str, str], every: dict[str, dict[str, str]]) -> dict[str, str]:
+    visible = dict(own)
+    for stmt in ast.walk(tree):
+        if isinstance(stmt, ast.ImportFrom) and stmt.module and stmt.module.startswith("engine."):
+            source = every.get(stmt.module.split(".", 1)[1], {})
+            for alias in stmt.names:
+                if alias.name in source:
+                    visible[alias.asname or alias.name] = source[alias.name]
+    return visible
+
+
 def sweep(engine_dir: pathlib.Path | None = None) -> list[Refusal]:
     """Every user-facing refusal in the engine, sorted by module then line."""
     directory = engine_dir or ENGINE_DIR
     found: list[Refusal] = []
+    trees = {
+        path: ast.parse(path.read_text(encoding="utf-8"))
+        for path in sorted(directory.glob("*.py"))
+    }
+    every = {path.stem: _module_constants(tree) for path, tree in trees.items()}
     for path in sorted(directory.glob("*.py")):
         src = path.read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        tree = trees[path]
+        constants = _visible_constants(tree, every[path.stem], every)
         stack: list[ast.AST] = []
 
         def visit(node: ast.AST) -> None:
@@ -239,7 +288,7 @@ def sweep(engine_dir: pathlib.Path | None = None) -> list[Refusal]:
                     and node.exc.args
                     and not _caught_in_place(stack, func.id)
                 ):
-                    rendered = _template(node.exc.args[0], src)
+                    rendered = _template(node.exc.args[0], src, constants)
                     if rendered is not None:
                         template, variables = rendered
                         found.append(
@@ -247,7 +296,7 @@ def sweep(engine_dir: pathlib.Path | None = None) -> list[Refusal]:
                         )
             reason_expr = _reason_expression(node)
             if reason_expr is not None:
-                rendered = _template(reason_expr, src)
+                rendered = _template(reason_expr, src, constants)
                 if rendered is not None:
                     template, variables = rendered
                     found.append(

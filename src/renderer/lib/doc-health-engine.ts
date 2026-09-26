@@ -243,8 +243,11 @@ export async function runHealthSweep(
   dispatch: HealthDispatch,
   file: string,
   gate: <R>(send: () => Promise<R>) => Promise<R>,
+  password?: string,
 ): Promise<EngineHealthReply> {
-  const raw = await gate(() => dispatch('document_health_begin', { file }));
+  // The health worker is its own engine process with no credential; a
+  // user-opened document's copy opens only with the password handed here.
+  const raw = await gate(() => dispatch('document_health_begin', password ? { file, password } : { file }));
   const begun = parseBegin(raw);
   if (!begun.ok) {
     await endRun(dispatch, salvageToken(raw));

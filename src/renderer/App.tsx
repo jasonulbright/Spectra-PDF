@@ -50,6 +50,7 @@ import { reportLaunch } from './lib/launch-notices';
 import { PasswordDialog } from './components/PasswordDialog';
 import { openWithCredentials } from './lib/document-open';
 import { setStageCredentialCaller } from './lib/stage-credentials';
+import { setSealedReader } from './lib/sealed-edit';
 import { rememberDocumentPassword } from './lib/document-passwords';
 import { droppedCredentials, releaseDocumentCredentials } from './lib/credential-release';
 import { capabilityBlock, type Capability, type DocumentSecurity } from './lib/document-permissions';
@@ -783,6 +784,9 @@ function AppContent(): React.ReactElement {
                 return r; // the commit boundary validates the actual wire types
               },
               readBack: batch.readFileBuffer,
+              // A user-opened file's build and landing (lib/sealed-edit.ts);
+              // callRaw for the same re-entry reason as above.
+              sealed: callRaw,
             });
           });
         }
@@ -830,7 +834,11 @@ function AppContent(): React.ReactElement {
 
   useEffect(() => {
     setStageCredentialCaller(callRaw);
-    return () => setStageCredentialCaller(null);
+    setSealedReader(callRaw);
+    return () => {
+      setStageCredentialCaller(null);
+      setSealedReader(null);
+    };
   }, [callRaw]);
 
   const isFileDirty = useCallback(
