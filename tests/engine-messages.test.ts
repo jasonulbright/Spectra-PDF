@@ -17,6 +17,7 @@ import {
   localizeEngineMessage,
   matchEngineMessage,
   rawEngineMessage,
+  unlockFailureText,
 } from '../src/renderer/lib/engine-messages';
 
 const EN: Record<string, string> = JSON.parse(
@@ -208,5 +209,16 @@ describe('EngineError', () => {
     expect(rawEngineMessage(new Error('cancelled'))).toBe('cancelled');
     expect(rawEngineMessage('plain string')).toBe('plain string');
     await i18next.changeLanguage('en');
+  });
+});
+
+describe('unlockFailureText', () => {
+  it('shows the owner-password refusal the table carries, and a wrong password otherwise', () => {
+    const row = ENGINE_MESSAGE_ROWS.find((r) => r.key === 'encrypt.documentSPermissionsHeld');
+    expect(row).toBeDefined();
+    const refusal = new EngineError(row!.message);
+    expect(unlockFailureText(refusal, 'wrong')).toBe(refusal.message);
+    expect(unlockFailureText(new EngineError('invalid password'), 'wrong')).toBe('wrong');
+    expect(unlockFailureText(new Error(row!.message), 'wrong')).toBe('wrong');
   });
 });

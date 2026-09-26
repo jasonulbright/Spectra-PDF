@@ -2322,9 +2322,10 @@ def set_widget_visibility(
     names = [str(n) for n in (targets or []) if str(n).strip()]
     if not names:
         raise ValueError("Name the form fields to show or hide.")
+    from engine.incremental import finalize_preserving_signatures, signature_outcome
+
     input_path = Path(file)
     output_path = Path(output)
-    same_file = is_same_file(str(input_path), str(output_path))
     changed = 0
     missing: list[str] = []
     with pikepdf.open(file) as pdf:
@@ -2344,14 +2345,16 @@ def set_widget_visibility(
             raise ValueError(
                 "this document has no form field named " + ", ".join(missing)
             )
-        if same_file:
-            with staged_write(output_path) as staged:
-                save_pdf(pdf, str(staged))
-                pdf.close()
-        else:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            save_pdf(pdf, output_path)
-    out = {"output": str(output_path), "changed": changed, "hidden": bool(hide)}
+        # A signed input lands as its original bytes plus one revision where
+        # the transplant accepts the /F change; otherwise the result reports
+        # the invalidation.
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with staged_write(output_path) as staged:
+            save_pdf(pdf, str(staged))
+            pdf.close()
+            preserved = finalize_preserving_signatures(str(input_path), str(staged))
+    out = {"output": str(output_path), "changed": changed, "hidden": bool(hide),
+           **signature_outcome(preserved)}
     if missing:
         out["missing"] = missing
     return out

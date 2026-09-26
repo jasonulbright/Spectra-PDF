@@ -38,6 +38,17 @@ def _require_owner_authority(pdf) -> None:
         )
 
 
+def _signature_report(pdf) -> dict:
+    """The result keys for a rewrite of `pdf`. Encryption covers the whole
+    file, so no revision appended to a signed original can add, change or
+    remove it: every signature in the input stops covering the output."""
+    from engine.incremental import signature_outcome, signature_policy_of_pdf
+
+    if not signature_policy_of_pdf(pdf)["signed"]:
+        return {}
+    return signature_outcome({"preserved": False, "reason": "encryption-changed"})
+
+
 # User-facing permission categories → pikepdf.Permissions flags. Accessibility
 # (assistive-tech text extraction) is never blocked: preventing a screen reader
 # from reading the document is an accessibility failure, not a permission choice.
@@ -90,6 +101,7 @@ def encrypt(
 
     with pikepdf.open(file) as pdf:
         _require_owner_authority(pdf)
+        report = _signature_report(pdf)
         output_path = Path(output)
         _save(pdf, file, output_path, encryption=pikepdf.Encryption(**enc_kwargs))
 
@@ -98,6 +110,7 @@ def encrypt(
         "encryption": "AES-256",
         "has_user_password": bool(user_password),
         "restricted": permissions is not None,
+        **report,
     }
 
 
@@ -153,8 +166,9 @@ def grant_accessibility_permission(file: str, output: str) -> dict:
         if revision < 4:
             enc_kwargs["metadata"] = False
         encryption = pikepdf.Encryption(**enc_kwargs)
+        report = _signature_report(pdf)
         _save(pdf, file, output_path, encryption=encryption)
-    return {"output": str(output_path), "revision": revision}
+    return {"output": str(output_path), "revision": revision, **report}
 
 
 def decrypt(file: str, output: str, password: str = "") -> dict:
@@ -167,10 +181,12 @@ def decrypt(file: str, output: str, password: str = "") -> dict:
     """
     with pikepdf.open(file, password=password) as pdf:
         _require_owner_authority(pdf)
+        report = _signature_report(pdf)
         output_path = Path(output)
         _save(pdf, file, output_path)
 
     return {
         "output": str(output_path),
         "decrypted": True,
+        **report,
     }

@@ -1510,3 +1510,37 @@ class TestFieldsSharingOneName:
         assert result["changed"] == 2
         with pikepdf.open(out) as pdf:
             assert all(int(f.F) & 2 for f in pdf.Root.AcroForm.Fields)
+
+
+def test_hiding_a_field_of_a_signed_document_appends_and_keeps_the_signature(tmp_path):
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+    from pyhanko.sign import signers
+
+    from engine.forms import set_widget_visibility
+    from engine.signatures import verify_signatures
+    from test_pades import _build_pki
+
+    pki = _build_pki(str(tmp_path))
+    src = tmp_path / "form.pdf"
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(300, 300))
+    widget = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Widget, FT=pikepdf.Name.Tx,
+        T=pikepdf.String("Name"), Rect=[10, 10, 200, 40], F=4, P=pdf.pages[0].obj,
+    ))
+    pdf.pages[0].obj.Annots = pikepdf.Array([widget])
+    pdf.Root.AcroForm = pikepdf.Dictionary(Fields=pikepdf.Array([widget]))
+    pdf.save(src)
+    signed = tmp_path / "signed.pdf"
+    with open(src, "rb") as inf, open(signed, "wb") as outf:
+        signers.sign_pdf(
+            IncrementalPdfFileWriter(inf), signers.PdfSignatureMetadata(field_name="Sig1"),
+            signer=signers.SimpleSigner.load_pkcs12(pki["pfx"], passphrase=b"pw"), output=outf,
+        )
+    original = signed.read_bytes()
+    result = set_widget_visibility(str(signed), str(signed), ["Name"], True)
+    assert result["signatures_preserved"] is True
+    assert signed.read_bytes().startswith(original)
+    assert all(s["intact"] for s in verify_signatures(str(signed))["signatures"])
+    with pikepdf.open(signed) as out:
+        assert int(out.pages[0].obj.Annots[0].F) & 2

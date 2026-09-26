@@ -240,3 +240,37 @@ class TestUserTrustAnchors:
         _sign(blank_pdf, out, pki, pades=True)
         with pytest.raises(ValueError, match="trust root not found"):
             verify_signatures(out, trust_roots=[os.path.join(tmp_dir, "missing.pem")])
+
+
+def _sign_encrypted(tmp_dir, pki, user: str, owner: str = "") -> str:
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+    from pyhanko.sign import signers
+
+    src = os.path.join(tmp_dir, "enc-src.pdf")
+    doc = pikepdf.new()
+    doc.add_blank_page(page_size=(400, 400))
+    doc.save(src, encryption=pikepdf.Encryption(owner=owner, user=user, R=6))
+    doc.close()
+    out = os.path.join(tmp_dir, "enc-signed.pdf")
+    signer = signers.SimpleSigner.load_pkcs12(pki["pfx"], passphrase=b"pw")
+    with open(src, "rb") as inf:
+        w = IncrementalPdfFileWriter(inf)
+        w.encrypt(user.encode())
+        with open(out, "wb") as outf:
+            signers.sign_pdf(
+                w, signers.PdfSignatureMetadata(field_name="Sig1"), signer=signer, output=outf
+            )
+    return out
+
+
+def test_empty_password_encrypted_signature_verifies(tmp_dir, pki):
+    out = _sign_encrypted(tmp_dir, pki, user="")
+    sigs = verify_signatures(out)["signatures"]
+    assert [s["field"] for s in sigs] == ["Sig1"]
+    assert sigs[0]["intact"] and sigs[0]["valid"]
+
+
+def test_password_encrypted_signature_never_reads_as_unsigned(tmp_dir, pki):
+    out = _sign_encrypted(tmp_dir, pki, user="u", owner="o")
+    with pytest.raises(Exception):
+        verify_signatures(out)
