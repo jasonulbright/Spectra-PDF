@@ -802,6 +802,77 @@ class TestJavaScriptRemoval:
             assert str(pdf.Root["/OpenAction"]["/S"]) == "/GoTo"
 
 
+class TestScriptsOutsideThePages:
+    """Outline items (Table 151 /A), a parent field's own additional actions and
+    a rendition action's /JS (Table 218) run scripts too."""
+
+    @staticmethod
+    def _doc(path, mutate):
+        pdf = pikepdf.new()
+        pdf.add_blank_page()
+        mutate(pdf)
+        pdf.save(path)
+        return path
+
+    @staticmethod
+    def _js(pdf):
+        return pdf.make_indirect(Dictionary(S=Name.JavaScript, JS=String("app.alert(1)")))
+
+    def _outline(self, pdf):
+        outlines = pdf.make_indirect(Dictionary(Type=Name("/Outlines")))
+        top = pdf.make_indirect(Dictionary(Title=String("top"), Parent=outlines))
+        child = pdf.make_indirect(Dictionary(Title=String("child"), Parent=top, A=self._js(pdf)))
+        top["/First"] = top["/Last"] = child
+        outlines["/First"] = outlines["/Last"] = top
+        pdf.Root["/Outlines"] = outlines
+
+    def _parent_field(self, pdf):
+        field = pdf.make_indirect(Dictionary(FT=Name("/Tx"), T=String("total"),
+                                             AA=Dictionary(C=self._js(pdf))))
+        widget = pdf.make_indirect(Dictionary(Type=Name.Annot, Subtype=Name.Widget,
+                                              Rect=Array([0, 0, 10, 10]), Parent=field))
+        field["/Kids"] = Array([widget])
+        pdf.pages[0].obj["/Annots"] = Array([widget])
+        pdf.Root["/AcroForm"] = pdf.make_indirect(Dictionary(Fields=Array([field])))
+
+    @pytest.mark.parametrize("shape, site", [("_outline", "outline_action"),
+                                             ("_parent_field", "field_aa")])
+    def test_found_and_removed(self, tmp_dir, shape, site):
+        src = self._doc(os.path.join(tmp_dir, "in.pdf"), getattr(self, shape))
+        found = row(audit_hidden_information(src), "javascript")
+        assert found["count"] == 1
+        assert [d["site"] for d in found["detail"]] == [site]
+        out, result = sanitized(src, tmp_dir, ["javascript"])
+        assert removed_counts(result)["javascript"] == 1
+        assert counts(audit_hidden_information(out))["javascript"] == 0
+
+    def test_a_rendition_keeps_its_media_and_loses_its_script(self, tmp_dir):
+        def mutate(pdf):
+            pdf.pages[0].obj["/AA"] = Dictionary(O=Dictionary(
+                S=Name("/Rendition"), OP=0, JS=String("app.alert(1)")))
+            pdf.Root["/OpenAction"] = Dictionary(S=Name("/Rendition"), JS=String("app.alert(2)"))
+
+        src = self._doc(os.path.join(tmp_dir, "in.pdf"), mutate)
+        assert row(audit_hidden_information(src), "javascript")["count"] == 2
+        out, result = sanitized(src, tmp_dir, ["javascript"])
+        assert removed_counts(result)["javascript"] == 2
+        with pikepdf.open(out) as pdf:
+            kept = pdf.pages[0].obj["/AA"]["/O"]
+            assert str(kept["/S"]) == "/Rendition" and "/JS" not in kept
+            assert "/OpenAction" not in pdf.Root
+
+    def test_an_outline_uri_counts_as_an_action_that_reaches_outside(self, tmp_dir):
+        def mutate(pdf):
+            self._outline(pdf)
+            pdf.Root["/Outlines"]["/First"]["/First"]["/A"] = Dictionary(
+                S=Name("/URI"), URI=String("https://example.invalid/"))
+
+        src = self._doc(os.path.join(tmp_dir, "in.pdf"), mutate)
+        assert counts(audit_hidden_information(src))["links_and_actions"] == 1
+        out, _result = sanitized(src, tmp_dir, ["links_and_actions"])
+        assert counts(audit_hidden_information(out))["links_and_actions"] == 0
+
+
 class TestNonLinkActionRemoval:
     def test_links_and_the_actions_that_reach_outside(self, hidden_pdf, tmp_dir):
         before = counts(audit_hidden_information(hidden_pdf))["links_and_actions"]
