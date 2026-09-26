@@ -762,8 +762,10 @@ def _tag_optional_content_groups(source: str, out_dir: Path):
             if not off_keys:
                 return None, set()
             tagged = out_dir / "octagged.pdf"
-            # An intermediate consumed by the renderer, never a user output.
-            save_pdf(src, tagged, drop_encryption=True)
+            # The plate cache outlives the session: a copy of a user-opened
+            # document keeps its protection (or the save refuses), and the
+            # save lends it the credential until the original is closed.
+            save_pdf(src, tagged)
         return tagged, off_keys
     except (OSError, pikepdf.PdfError, ValueError):
         return None, set()

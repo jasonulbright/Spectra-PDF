@@ -18,6 +18,7 @@ import pikepdf
 from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name, String
 from engine.inplace import is_same_file, staged_write
+from engine.incremental import signature_outcome, signature_policy_of_pdf
 from engine.pdf_save import save_pdf
 
 _STYLES = {"D", "r", "R", "a", "A"}
@@ -224,6 +225,15 @@ def get_page_labels(file: str) -> dict:
             return {"ranges": [], "labels": [], "count": 0, "complete": False}
 
 
+
+def _signature_report(pdf) -> dict:
+    """The result keys for a rewrite of `pdf`: a catalog change is not one a
+    revision appended to a signed original can carry."""
+    if not signature_policy_of_pdf(pdf)["signed"]:
+        return {}
+    return signature_outcome({"preserved": False, "reason": "catalog-changed"})
+
+
 def set_page_labels(file: str, output: str, ranges: list[dict]) -> dict:
     """Write the /PageLabels number tree. An empty `ranges` removes it."""
     input_path = Path(file)
@@ -231,6 +241,7 @@ def set_page_labels(file: str, output: str, ranges: list[dict]) -> dict:
     same_file = is_same_file(str(input_path), str(output_path))
 
     with open_pdf(file) as pdf:
+        report = _signature_report(pdf)
         total = len(pdf.pages)
         norm = _normalize(ranges, total)
         if not norm:
@@ -257,4 +268,4 @@ def set_page_labels(file: str, output: str, ranges: list[dict]) -> dict:
         else:
             save_pdf(pdf, output_path)
 
-    return {"output": str(output_path), "ranges": len(ranges or [])}
+    return {"output": str(output_path), "ranges": len(ranges or []), **report}

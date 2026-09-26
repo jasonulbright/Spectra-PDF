@@ -396,8 +396,10 @@ class DatasetsPacket:
 def _is_xml_name(name: str) -> bool:
     """Whether `name` is spelled as an element name that parses back as
     itself. A field name can hold any text; spliced into a tag, a space, an
-    ampersand or a leading digit makes the whole packet ill-formed."""
-    parser = expat.ParserCreate()
+    ampersand or a leading digit makes the whole packet ill-formed, and a
+    colon names an undeclared namespace prefix, which a namespace-aware XFA
+    reader rejects."""
+    parser = expat.ParserCreate(namespace_separator=" ")
     seen: list[str] = []
     parser.StartElementHandler = lambda tag, _attrs: seen.append(tag)
     try:

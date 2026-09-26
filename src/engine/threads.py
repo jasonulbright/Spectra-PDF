@@ -32,6 +32,7 @@ from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name, String
 
 from engine.inplace import is_same_file, staged_write
+from engine.incremental import signature_outcome, signature_policy_of_pdf
 from engine.pdf_save import save_pdf
 
 MAX_THREADS = 512
@@ -175,6 +176,15 @@ def _clean_threads(specs, page_count: int) -> list[dict]:
     return out
 
 
+
+def _signature_report(pdf) -> dict:
+    """The result keys for a rewrite of `pdf`: a catalog change is not one a
+    revision appended to a signed original can carry."""
+    if not signature_policy_of_pdf(pdf)["signed"]:
+        return {}
+    return signature_outcome({"preserved": False, "reason": "catalog-changed"})
+
+
 def set_threads(file: str, output: str, threads) -> dict:
     """Replace the document's articles.
 
@@ -185,6 +195,7 @@ def set_threads(file: str, output: str, threads) -> dict:
     output_path = Path(output)
     same_file = is_same_file(file, output)
     with open_pdf(file) as pdf:
+        report = _signature_report(pdf)
         cleaned = _clean_threads(threads or [], len(pdf.pages))
 
         for page in pdf.pages:
@@ -245,4 +256,4 @@ def set_threads(file: str, output: str, threads) -> dict:
         else:
             save_pdf(pdf, output_path)
 
-    return {"output": str(output_path), "count": len(cleaned), "beads": bead_total}
+    return {"output": str(output_path), "count": len(cleaned), "beads": bead_total, **report}

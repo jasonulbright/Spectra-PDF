@@ -8,6 +8,7 @@ import pikepdf
 from engine.credentials import open_pdf
 from pikepdf import OutlineItem
 from engine.inplace import is_same_file, staged_write
+from engine.incremental import signature_outcome, signature_policy_of_pdf
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import key_name, key_text, name_object
 from engine.fieldactions import destination_array
@@ -297,6 +298,15 @@ def _build_items(pdf: pikepdf.Pdf, entries: list[dict], page_count: int, depth: 
     return built
 
 
+
+def _signature_report(pdf) -> dict:
+    """The result keys for a rewrite of `pdf`: a catalog change is not one a
+    revision appended to a signed original can carry."""
+    if not signature_policy_of_pdf(pdf)["signed"]:
+        return {}
+    return signature_outcome({"preserved": False, "reason": "catalog-changed"})
+
+
 def set_outline(file: str, outline: list[dict], output: str) -> dict:
     """Replace the bookmark tree from a JSON tree of {title, page, children}."""
     input_path = Path(file)
@@ -304,6 +314,7 @@ def set_outline(file: str, outline: list[dict], output: str) -> dict:
     same_file = is_same_file(str(input_path), str(output_path))
 
     with open_pdf(file) as pdf:
+        report = _signature_report(pdf)
         items = _build_items(pdf, outline or [], len(pdf.pages), 0)
         with pdf.open_outline() as ol:
             ol.root.clear()
@@ -316,4 +327,4 @@ def set_outline(file: str, outline: list[dict], output: str) -> dict:
         else:
             save_pdf(pdf, output_path)
 
-    return {"output": str(output_path), "count": _count(outline or [])}
+    return {"output": str(output_path), "count": _count(outline or []), **report}

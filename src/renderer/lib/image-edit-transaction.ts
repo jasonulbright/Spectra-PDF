@@ -4,6 +4,9 @@ import type { EngineCall } from './engine-call';
 import { decodeToRawSource, engineWantsRawFallback, isJpegPath, isSvgPath, jpegExifOrientation,
   type AddImageSource, type ReplacementSource } from './image-replace';
 import { rewriteWorkspaceFile, type WorkspaceRewriteIo } from './workspace-rewrite';
+import { capabilityBlock } from './document-permissions';
+import { PermissionRefusal } from './document-permission-text';
+import { documentPermissions } from '../state/selectors';
 
 export type ImageEdit =
   | { kind: 'replace'; page: number; index: number; source?: ReplacementSource }
@@ -22,6 +25,10 @@ function unverified(): Error { return new Error(tChrome('app.operation.unverifie
  * final validated stage can produce working bytes or an undo entry. */
 export async function editWorkspaceImage(path: string, edit: ImageEdit, getState: () => AppState,
   dispatch: (action: AppAction) => void, io: ImageEditIo): Promise<boolean> {
+  // The canvas shows every open document, so the edit tool's own gray state
+  // (read off the active document) does not cover the page this gesture names.
+  const block = capabilityBlock(documentPermissions(getState(), path), 'modify');
+  if (block) throw new PermissionRefusal(block);
   const request = structuredClone(edit);
   let source: AddImageSource | undefined = request.source;
   let picked: string | null = null;

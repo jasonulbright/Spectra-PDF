@@ -324,7 +324,13 @@ def open_document(path: str, password: str = "") -> dict:
     if not encrypted:
         return {"encrypted": False, "opener": "none"}
     if owner:
-        _decrypt_in_place(path, password)
+        try:
+            _decrypt_in_place(path, password)
+        except Exception:
+            # The file on disk is unchanged, so its reader still needs the old record.
+            if previous is not None:
+                _documents[_key(path)] = previous
+            raise
         _documents[_key(path)] = _Credential("owner", None, permissions, revision, p, _key(path))
         return {"encrypted": True, "opener": "owner", "encryption_kept": False}
     _documents[_key(path)] = _Credential("user", password, permissions, revision, p, _key(path))

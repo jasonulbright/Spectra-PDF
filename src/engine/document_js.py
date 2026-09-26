@@ -21,6 +21,7 @@ from pathlib import Path
 import pikepdf
 from engine.credentials import open_pdf
 from engine.inplace import is_same_file, staged_write
+from engine.incremental import signature_outcome, signature_policy_of_pdf
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import token_text
 
@@ -215,6 +216,15 @@ def list_document_js(file: str, for_edit: bool = False) -> dict:
     return {"scripts": scripts, "count": len(scripts)}
 
 
+
+def _signature_report(pdf) -> dict:
+    """The result keys for a rewrite of `pdf`: a catalog change is not one a
+    revision appended to a signed original can carry."""
+    if not signature_policy_of_pdf(pdf)["signed"]:
+        return {}
+    return signature_outcome({"preserved": False, "reason": "catalog-changed"})
+
+
 def set_document_js(file: str, output: str, scripts: list | None = None) -> dict:
     """Replace the document-level JavaScript set with `scripts` and write to
     `output`.
@@ -260,6 +270,7 @@ def set_document_js(file: str, output: str, scripts: list | None = None) -> dict
     same_file = is_same_file(file, output)
     output_path = Path(output)
     with open_pdf(file) as pdf:
+        report = _signature_report(pdf)
         names = pdf.Root.get("/Names")
         if not cleaned:
             if isinstance(names, pikepdf.Dictionary) and "/JavaScript" in names:
@@ -287,4 +298,4 @@ def set_document_js(file: str, output: str, scripts: list | None = None) -> dict
         else:
             save_pdf(pdf, output)
 
-    return {"output": output, "count": len(cleaned)}
+    return {"output": output, "count": len(cleaned), **report}
