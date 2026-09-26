@@ -552,13 +552,70 @@ pub struct VirtualPrinterStatus {
     pub printer_name: String,
 }
 
+fn printer_check_functions() -> String {
+    format!(
+        "function Test-SpectraPdfPort($candidate) {{\n\
+           if ($null -eq $candidate) {{ return $false }}\n\
+           return ([string]$candidate.PrinterHostAddress -eq '127.0.0.1' -and [int]$candidate.PortNumber -eq {PORT} -and [int]$candidate.Protocol -eq 1)\n\
+         }}\n\
+         function Test-SpectraPdfPrinter($candidate) {{\n\
+           return ($null -ne $candidate -and [string]$candidate.DriverName -eq 'Microsoft PS Class Driver' -and [string]$candidate.PortName -eq '{PORT_NAME}')\n\
+         }}\n"
+    )
+}
+
+fn printer_status_script() -> String {
+    format!(
+        "{}$printer = Get-Printer -Name '{PRINTER_NAME}' -ErrorAction SilentlyContinue; \
+         if (Test-SpectraPdfPrinter $printer) {{ \
+           $port = Get-PrinterPort -Name '{PORT_NAME}' -ErrorAction SilentlyContinue; \
+           if (Test-SpectraPdfPort $port) {{ 'yes' }} else {{ 'no' }} \
+         }} else {{ 'no' }}",
+        printer_check_functions()
+    )
+}
+
+fn install_printer_script() -> String {
+    format!(
+        "{}$ErrorActionPreference = 'Stop'\r\n\
+         $port = Get-PrinterPort -Name '{PORT_NAME}' -ErrorAction SilentlyContinue\r\n\
+         if (-not $port) {{\r\n\
+           Add-PrinterPort -Name '{PORT_NAME}' -PrinterHostAddress '127.0.0.1' -PortNumber {PORT}\r\n\
+           $port = Get-PrinterPort -Name '{PORT_NAME}' -ErrorAction Stop\r\n\
+         }}\r\n\
+         if (-not (Test-SpectraPdfPort $port)) {{ throw 'The Spectra PDF port name is already in use by a different port configuration.' }}\r\n\
+         $printer = Get-Printer -Name '{PRINTER_NAME}' -ErrorAction SilentlyContinue\r\n\
+         if ($printer) {{\r\n\
+           if (-not (Test-SpectraPdfPrinter $printer)) {{ throw 'A different printer already uses the Spectra PDF name.' }}\r\n\
+         }} else {{\r\n\
+           Add-Printer -Name '{PRINTER_NAME}' -DriverName 'Microsoft PS Class Driver' -PortName '{PORT_NAME}'\r\n\
+           $printer = Get-Printer -Name '{PRINTER_NAME}' -ErrorAction Stop\r\n\
+         }}\r\n\
+         if (-not (Test-SpectraPdfPrinter $printer) -or -not (Test-SpectraPdfPort $port)) {{ throw 'The installed Spectra PDF printer configuration could not be verified.' }}",
+        printer_check_functions()
+    )
+}
+
+fn uninstall_printer_script() -> String {
+    format!(
+        "{}$ErrorActionPreference = 'Stop'\r\n\
+         $printer = Get-Printer -Name '{PRINTER_NAME}' -ErrorAction SilentlyContinue\r\n\
+         if ($printer) {{\r\n\
+           if (-not (Test-SpectraPdfPrinter $printer)) {{ throw 'A different printer already uses the Spectra PDF name; it was not removed.' }}\r\n\
+           Remove-Printer -Name '{PRINTER_NAME}'\r\n\
+         }}\r\n\
+         $users = @(Get-Printer -ErrorAction Stop | Where-Object {{ $_.PortName -eq '{PORT_NAME}' }})\r\n\
+         $port = Get-PrinterPort -Name '{PORT_NAME}' -ErrorAction SilentlyContinue\r\n\
+         if ($users.Count -eq 0 -and (Test-SpectraPdfPort $port)) {{ Remove-PrinterPort -Name '{PORT_NAME}' -ErrorAction Stop }}",
+        printer_check_functions()
+    )
+}
+
 #[tauri::command]
 pub async fn virtual_printer_status(app: AppHandle) -> Result<VirtualPrinterStatus, String> {
-    let installed = run_powershell(&[&format!(
-        "if (Get-Printer -Name '{PRINTER_NAME}' -ErrorAction SilentlyContinue) {{ 'yes' }} else {{ 'no' }}"
-    )])
-    .map(|out| out.contains("yes"))
-    .unwrap_or(false);
+    let installed = run_powershell(&[&printer_status_script()])
+        .map(|out| out.trim().eq_ignore_ascii_case("yes"))
+        .unwrap_or(false);
     let state = app.state::<PrinterState>();
     let listener = state.listener_status.lock().unwrap().clone();
     let last_job_error = state.last_job_error.lock().unwrap().clone();
@@ -572,31 +629,170 @@ pub async fn virtual_printer_status(app: AppHandle) -> Result<VirtualPrinterStat
 
 #[tauri::command]
 pub async fn install_virtual_printer() -> Result<(), String> {
-    let script = format!(
-        "$ErrorActionPreference = 'Stop'\r\n\
-         if (-not (Get-PrinterPort -Name '{PORT_NAME}' -ErrorAction SilentlyContinue)) {{\r\n\
-           Add-PrinterPort -Name '{PORT_NAME}' -PrinterHostAddress '127.0.0.1' -PortNumber {PORT}\r\n\
-         }}\r\n\
-         if (-not (Get-Printer -Name '{PRINTER_NAME}' -ErrorAction SilentlyContinue)) {{\r\n\
-           Add-Printer -Name '{PRINTER_NAME}' -DriverName 'Microsoft PS Class Driver' -PortName '{PORT_NAME}'\r\n\
-         }}\r\n"
-    );
+    let script = install_printer_script();
     run_elevated_script(&script, "install")
 }
 
 #[tauri::command]
 pub async fn uninstall_virtual_printer() -> Result<(), String> {
-    let script = format!(
-        "Remove-Printer -Name '{PRINTER_NAME}' -ErrorAction SilentlyContinue\r\n\
-         Remove-PrinterPort -Name '{PORT_NAME}' -ErrorAction SilentlyContinue\r\n\
-         exit 0\r\n"
-    );
+    let script = uninstall_printer_script();
     run_elevated_script(&script, "remove")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    fn run_printer_script_probe(setup: &str, script: &str) -> Result<String, String> {
+        let harness = r#"
+$script:printers = @()
+$script:ports = @()
+$script:events = @()
+function Get-Printer {
+    [CmdletBinding()]
+    param([string]$Name)
+    if ($PSBoundParameters.ContainsKey('Name')) {
+        return @($script:printers | Where-Object { $_.Name -eq $Name })
+    }
+    return @($script:printers)
+}
+function Get-PrinterPort {
+    [CmdletBinding()]
+    param([string]$Name)
+    return @($script:ports | Where-Object { $_.Name -eq $Name })
+}
+function Add-PrinterPort {
+    [CmdletBinding()]
+    param([string]$Name, [string]$PrinterHostAddress, [uint32]$PortNumber)
+    $script:events += 'add-port'
+    $script:ports += [pscustomobject]@{ Name=$Name; PrinterHostAddress=$PrinterHostAddress; PortNumber=$PortNumber; Protocol=1 }
+}
+function Remove-PrinterPort {
+    [CmdletBinding()]
+    param([string]$Name)
+    $script:events += 'remove-port'
+    $script:ports = @($script:ports | Where-Object { $_.Name -ne $Name })
+}
+function Add-Printer {
+    [CmdletBinding()]
+    param([string]$Name, [string]$DriverName, [string]$PortName)
+    $script:events += 'add-printer'
+    $script:printers += [pscustomobject]@{ Name=$Name; DriverName=$DriverName; PortName=$PortName }
+}
+function Remove-Printer {
+    [CmdletBinding()]
+    param([string]$Name)
+    $script:events += 'remove-printer'
+    $script:printers = @($script:printers | Where-Object { $_.Name -ne $Name })
+}
+__SETUP__
+try {
+    __SCRIPT__
+    $script:result = 'OK'
+} catch {
+    $script:result = 'ERROR'
+    $script:message = $_.Exception.Message
+}
+"RESULT=$($script:result)"
+"ERROR=$($script:message)"
+"EVENTS=$($script:events -join ',')"
+"PRINTERS=$($script:printers.Name -join ',')"
+"PORTS=$($script:ports.Name -join ',')"
+"#;
+        let command = harness
+            .replace("__SETUP__", setup)
+            .replace("__SCRIPT__", script);
+        run_powershell(&[&command])
+    }
+
+    #[cfg(windows)]
+    fn matching_port_record() -> &'static str {
+        "$script:ports = @([pscustomobject]@{ Name='SpectraPDF_9100'; PrinterHostAddress='127.0.0.1'; PortNumber=9100; Protocol=1 })"
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn install_creates_and_reads_back_the_expected_printer_and_port() {
+        let result = run_printer_script_probe("", &install_printer_script()).unwrap();
+        assert!(result.contains("RESULT=OK"), "{result}");
+        assert!(result.contains("EVENTS=add-port,add-printer"), "{result}");
+        assert!(result.contains("PRINTERS=Spectra PDF"), "{result}");
+        assert!(result.contains("PORTS=SpectraPDF_9100"), "{result}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn install_refuses_a_different_printer_with_the_product_name() {
+        let setup = format!(
+            "{}\n$script:printers = @([pscustomobject]@{{ Name='Spectra PDF'; DriverName='Microsoft Print to PDF'; PortName='FILE:' }})",
+            matching_port_record()
+        );
+        let result = run_printer_script_probe(&setup, &install_printer_script()).unwrap();
+        assert!(result.contains("RESULT=ERROR"), "{result}");
+        assert!(result.contains("different printer already uses the Spectra PDF name"), "{result}");
+        assert!(result.contains("EVENTS="), "{result}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn install_refuses_a_port_name_with_a_different_endpoint_or_protocol() {
+        let setup = "$script:ports = @([pscustomobject]@{ Name='SpectraPDF_9100'; PrinterHostAddress='203.0.113.7'; PortNumber=9100; Protocol=2 })";
+        let result = run_printer_script_probe(setup, &install_printer_script()).unwrap();
+        assert!(result.contains("RESULT=ERROR"), "{result}");
+        assert!(result.contains("different port configuration"), "{result}");
+        assert!(result.contains("EVENTS="), "{result}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn status_does_not_call_a_misconfigured_same_name_printer_installed() {
+        let setup = format!(
+            "{}\n$script:printers = @([pscustomobject]@{{ Name='Spectra PDF'; DriverName='Microsoft Print to PDF'; PortName='FILE:' }})",
+            matching_port_record()
+        );
+        let result = run_printer_script_probe(&setup, &printer_status_script()).unwrap();
+        assert!(result.lines().any(|line| line.trim() == "no"), "{result}");
+        assert!(!result.lines().any(|line| line.trim() == "yes"), "{result}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn uninstall_keeps_a_port_still_used_by_another_printer() {
+        let setup = format!(
+            "{}\n$script:printers = @([pscustomobject]@{{ Name='Spectra PDF'; DriverName='Microsoft PS Class Driver'; PortName='SpectraPDF_9100' }}, [pscustomobject]@{{ Name='Other printer'; DriverName='Other driver'; PortName='SpectraPDF_9100' }})",
+            matching_port_record()
+        );
+        let result = run_printer_script_probe(&setup, &uninstall_printer_script()).unwrap();
+        assert!(result.contains("RESULT=OK"), "{result}");
+        assert!(result.contains("EVENTS=remove-printer"), "{result}");
+        assert!(result.contains("PRINTERS=Other printer"), "{result}");
+        assert!(result.contains("PORTS=SpectraPDF_9100"), "{result}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn uninstall_removes_the_owned_printer_and_its_unused_port() {
+        let setup = format!(
+            "{}\n$script:printers = @([pscustomobject]@{{ Name='Spectra PDF'; DriverName='Microsoft PS Class Driver'; PortName='SpectraPDF_9100' }})",
+            matching_port_record()
+        );
+        let result = run_printer_script_probe(&setup, &uninstall_printer_script()).unwrap();
+        assert!(result.contains("RESULT=OK"), "{result}");
+        assert!(result.contains("EVENTS=remove-printer,remove-port"), "{result}");
+        assert!(result.contains("PRINTERS="), "{result}");
+        assert!(result.contains("PORTS="), "{result}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn uninstall_refuses_to_remove_an_unrelated_same_name_printer() {
+        let setup = "$script:printers = @([pscustomobject]@{ Name='Spectra PDF'; DriverName='Microsoft Print to PDF'; PortName='FILE:' })";
+        let result = run_printer_script_probe(setup, &uninstall_printer_script()).unwrap();
+        assert!(result.contains("RESULT=ERROR"), "{result}");
+        assert!(result.contains("EVENTS="), "{result}");
+        assert!(result.contains("PRINTERS=Spectra PDF"), "{result}");
+    }
 
     #[test]
     fn elevation_command_keeps_a_quoted_script_path_as_one_argument() {
@@ -766,8 +962,10 @@ mod tests {
     fn install_scripts_are_pure_ascii() {
         // The standing .ps1 rule: a non-ASCII char in a BOM-less script is
         // read as ANSI by PS 5.1 and silently corrupts the parse.
-        let install = format!("{PRINTER_NAME}{PORT_NAME}");
-        assert!(install.is_ascii());
+        assert!(format!("{PRINTER_NAME}{PORT_NAME}").is_ascii());
+        assert!(printer_status_script().is_ascii());
+        assert!(install_printer_script().is_ascii());
+        assert!(uninstall_printer_script().is_ascii());
     }
 
     /// the acceptance, against real sockets: one client that connects and
