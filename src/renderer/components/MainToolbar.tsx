@@ -3,7 +3,7 @@ import { useAppState } from '../state/AppStateProvider';
 import { visibleToolbarNodes, type ToolbarNode } from '../commands/toolbars';
 import { COMMANDS, type CommandId } from '../commands/registry';
 import { shortcutForCommand } from '../commands/keymap';
-import { invokeCommand, isCommandEnabled } from '../commands/context';
+import { commandBlockText, invokeCommand, isCommandEnabled } from '../commands/context';
 import { ChromeIcon, type ChromeIconId } from './chrome-icons';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tCommandTitle } from '../i18n';
@@ -51,9 +51,12 @@ function ToolbarButton({
   const enabled = isCommandEnabled(command);
   const shortcut = shortcutForCommand(command);
   const cmdTitle = tCommandTitle(command, COMMANDS[command].title);
-  const title = shortcut
-    ? tChrome('chrome.toolbar.titleWithShortcut', { title: cmdTitle, shortcut })
-    : cmdTitle;
+  const blocked = enabled ? null : commandBlockText(command);
+  const title = blocked
+    ? blocked
+    : shortcut
+      ? tChrome('chrome.toolbar.titleWithShortcut', { title: cmdTitle, shortcut })
+      : cmdTitle;
   return (
     <button
       type="button"
@@ -66,6 +69,7 @@ function ToolbarButton({
       onClick={() => invokeCommand(command)}
       title={title}
       aria-label={cmdTitle}
+      aria-description={blocked ?? undefined}
       className={
         'w-7 h-7 flex items-center justify-center rounded text-neutral-300 hover:bg-neutral-700 hover:text-white disabled:opacity-60 disabled:pointer-events-none transition-colors' +
         (pressed ? ' bg-neutral-700 text-white' : '')

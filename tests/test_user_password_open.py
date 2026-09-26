@@ -12,7 +12,7 @@ import pytest
 from engine import credentials
 from engine.compress import compress
 from engine.create_pdf import create_pdf
-from engine.credentials import close_document, document_permissions, open_document
+from engine.credentials import close_document, document_permissions, open_document, share_document
 from engine.grayscale import grayscale
 from engine.inspect import get_page_count, unlock
 from engine.ipc import JsonRpcServer
@@ -146,6 +146,26 @@ def test_an_unknown_encrypted_path_still_needs_its_password(user_opened, tmp_dir
         get_page_count(copy)
 
 
+def test_a_staged_copy_borrows_the_credential_and_keeps_the_protection(user_opened, tmp_dir):
+    stage = os.path.join(tmp_dir, "protected.pdf.operation-stage.pdf")
+    with open(user_opened, "rb") as src, open(stage, "wb") as dst:
+        dst.write(src.read())
+    assert share_document(user_opened, stage) == {"shared": True}
+    try:
+        rotate(stage, [1], 90, stage)
+        assert _facts(stage, USER)["P"] == _facts(user_opened, USER)["P"]
+        assert _facts(stage, OWNER)["owner"] is True
+    finally:
+        assert close_document(stage) == {"forgotten": True}
+    with pytest.raises(pikepdf.PasswordError):
+        get_page_count(stage)
+    assert get_page_count(user_opened)["pages"] == 3
+
+
+def test_sharing_an_unknown_document_shares_nothing(protected, tmp_dir):
+    assert share_document(protected, os.path.join(tmp_dir, "alias.pdf")) == {"shared": False}
+
+
 def test_a_save_to_another_path_keeps_the_protection(user_opened, tmp_dir):
     out = os.path.join(tmp_dir, "rotated.pdf")
     rotate(user_opened, [2], 90, out)
@@ -158,6 +178,7 @@ def test_no_response_payload_carries_a_password(protected):
     for name, handler in (("open_document", open_document),
                           ("document_permissions", document_permissions),
                           ("close_document", close_document),
+                          ("share_document", share_document),
                           ("unlock", unlock),
                           ("get_page_count", get_page_count)):
         server.register(name, handler)
@@ -166,6 +187,8 @@ def test_no_response_payload_carries_a_password(protected):
         ("open_document", {"path": protected, "password": USER}),
         ("document_permissions", {"path": protected}),
         ("get_page_count", {"file": protected}),
+        ("share_document", {"path": protected, "alias": protected + ".stage.pdf"}),
+        ("close_document", {"path": protected + ".stage.pdf"}),
         ("unlock", {"file": protected, "password": USER}),
         ("close_document", {"path": protected}),
         ("open_document", {"path": protected, "password": OWNER}),

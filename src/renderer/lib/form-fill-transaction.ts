@@ -4,6 +4,7 @@ import { readFormFields, type FormFieldValue, type FormReadResult } from './form
 import { fillClosure, formCalculation, resolveFillTargets } from './form-overlay';
 import { classifyFillResult } from './fill-result';
 import { rewriteWorkspaceFile, type WorkspaceRewriteIo } from './workspace-rewrite';
+import { releaseStageCredential, shareStageCredential } from './stage-credentials';
 import type { EngineCall } from './engine-call';
 import { assertOperationGateResult, assertOperationIntent, type OperationIntent } from './operation-intent';
 
@@ -71,11 +72,14 @@ export async function fillFormValues(path: string, values: Record<string, FormFi
     ...io,
     confirm: async (source, working) => {
       requireDraftRevision();
-      const buffer = getState().files.get(source)?.buffer;
-      if (!buffer) throw unverified();
+      const record = getState().files.get(source);
+      const buffer = record?.buffer;
+      if (!record || !buffer) throw unverified();
       const inspection = `${working}.forms-policy-${crypto.randomUUID()}.pdf`;
+      let shared = false;
       try {
         await io.write(inspection, bytes(buffer));
+        shared = await shareStageCredential(record, inspection);
         const post = await readFormFields(io.callStaged, inspection, true);
         if (!pre) {
           pre = post;
@@ -101,6 +105,7 @@ export async function fillFormValues(path: string, values: Record<string, FormFi
         return await io.confirm(source, inspection, targets, typed, settings.flatten === true);
       } finally {
         await io.remove(inspection).catch(() => {});
+        if (shared) await releaseStageCredential(inspection);
       }
     },
   }, async (stage, original, requireCurrent) => {

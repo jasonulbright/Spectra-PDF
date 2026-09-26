@@ -4,7 +4,7 @@ import { useAppState } from '../state/AppStateProvider';
 import { MENUS, type MenuNode } from '../commands/menus';
 import { COMMANDS, type CommandId } from '../commands/registry';
 import { shortcutForCommand } from '../commands/keymap';
-import { getCommandContext, invokeCommand, isCommandEnabled } from '../commands/context';
+import { commandBlockText, getCommandContext, invokeCommand, isCommandEnabled } from '../commands/context';
 import { useTranslation } from 'react-i18next';
 import { tCommandTitle, tMenuLabel } from '../i18n';
 
@@ -37,6 +37,7 @@ function renderNodes(nodes: MenuNode[]): React.ReactNode {
     }
     if (node.kind === 'command') {
       const cmd = COMMANDS[node.command];
+      const blocked = commandBlockText(node.command);
       return (
         <Menubar.Item
           key={i}
@@ -51,8 +52,12 @@ function renderNodes(nodes: MenuNode[]): React.ReactNode {
           onPointerDown={(e) => e.preventDefault()}
           onSelect={() => invokeCommand(node.command)}
           className={itemCls}
+          title={blocked ?? undefined}
         >
-          <span>{tCommandTitle(node.command, cmd.title)}</span>
+          <span>
+            {tCommandTitle(node.command, cmd.title)}
+            {blocked && <span className="block text-[11px] text-neutral-500">{blocked}</span>}
+          </span>
           <Shortcut command={node.command} />
         </Menubar.Item>
       );

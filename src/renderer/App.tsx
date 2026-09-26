@@ -4,7 +4,6 @@ import { restoreHistory } from './lib/disk-history';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
 import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/workspace-publication';
 import { withFileLock } from './lib/engine-lock';
-import { unlockFailureText } from './lib/engine-messages';
 import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter } from './lib/tauri-bridge';
 import type { PhysicalScreenPoint, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
 import { HandOffGate, flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
@@ -49,6 +48,12 @@ import { createConfirmQueue } from './lib/confirm-queue';
 import { createUnlockPrompts, type UnlockPrompt } from './lib/unlock-prompts';
 import { reportLaunch } from './lib/launch-notices';
 import { PasswordDialog } from './components/PasswordDialog';
+import { openWithCredentials } from './lib/document-open';
+import { setStageCredentialCaller } from './lib/stage-credentials';
+import { rememberDocumentPassword } from './lib/document-passwords';
+import { droppedCredentials, releaseDocumentCredentials } from './lib/credential-release';
+import { capabilityBlock, type Capability, type DocumentSecurity } from './lib/document-permissions';
+import { capabilityBlockText, PermissionRefusal } from './lib/document-permission-text';
 import { CertUnlockDialog } from './components/CertUnlockDialog';
 import { SplitPanel } from './panels/SplitPanel';
 import { RotatePanel } from './panels/RotatePanel';
@@ -95,7 +100,7 @@ import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
 import { indexImportSource, readPublishedBytes } from './lib/workspace';
 import type { AppState, PageRef, PdfBuffer } from './state/types';
 import { isDocTab, viewOf } from './state/types';
-import { showableDoc, showableDocuments, tabFiles } from './state/selectors';
+import { documentPermissions, showableDoc, showableDocuments, tabFiles } from './state/selectors';
 import type { CanvasTool } from './state/types';
 import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
 import { PresentationView } from './components/canvas/PresentationView';
@@ -105,7 +110,7 @@ import { commitPageEdits } from './lib/workspace-commit';
 import { awaitSettledWorkspace, indexError, retryFailedIndexes, workspaceSettled } from './lib/workspace-settle';
 import { hasPendingPageCommit, recoverPendingPageCommit } from './lib/page-commit-transaction';
 import { pageEditDecision, type PageDelta } from './lib/page-edit-gate';
-import { sequenceEditClass, type OpMethod } from './lib/op-edit-class';
+import { opCapability, sequenceEditClass, type OpMethod } from './lib/op-edit-class';
 import type { PreserveOutcome, PreserveRefusal } from './lib/preserve-reason';
 import { sealBeforeClose } from './lib/close-sequence';
 import { setCommitGate, runCommitGate } from './lib/commit-gate';
@@ -823,63 +828,56 @@ function AppContent(): React.ReactElement {
     return () => setCommitGate(null);
   }, []);
 
+  useEffect(() => {
+    setStageCredentialCaller(callRaw);
+    return () => setStageCredentialCaller(null);
+  }, [callRaw]);
+
   const isFileDirty = useCallback(
     (f: { path: string; dirty: boolean }) =>
       f.dirty || state.pageDirtyPaths.includes(f.path),
     [state.pageDirtyPaths],
   );
 
-  // Create a working copy, unlock if encrypted, read bytes + page count. Shared
-  // by opening files and by importing a file's pages into a document.
-  // Returns null if the user cancelled an encrypted file.
+  const releaseCredentials = useCallback((path: string, workingPath: string) => {
+    void releaseDocumentCredentials(path, workingPath, readState().files.has(path), callRaw);
+  }, [callRaw, readState]);
+  const credentialHolders = useRef(new Map<string, string>());
+  useEffect(() => {
+    for (const { path, workingPath } of droppedCredentials(credentialHolders.current, state.files)) {
+      releaseCredentials(path, workingPath);
+    }
+  }, [state.files, releaseCredentials]);
+
+  // Create a working copy, open it with its credentials, read bytes + page
+  // count. Shared by opening files and by importing a file's pages into a
+  // document. Returns null if the user cancelled an encrypted file.
+  // The user password goes to the pdf.js password store and nowhere else: the
+  // returned object is spread into OPEN_FILE / REGISTER_IMPORT_SOURCE.
   const prepareFileBytes = useCallback(
     async (
       filePath: string,
-    ): Promise<{ workingPath: string; name: string; buffer: PdfBuffer; pageCount: number } | null> => {
+    ): Promise<{ workingPath: string; name: string; buffer: PdfBuffer; pageCount: number; security: DocumentSecurity } | null> => {
       const workingPath = await file.createWorkingCopy(filePath);
       const name = filePath.split(/[\\/]/).pop() || filePath;
-      const encStatus = await call('check_encrypted', { file: workingPath });
-      if (encStatus.encrypted) {
-        let unlocked = false;
-        let error: string | undefined;
-        let unlockPfx: string | undefined;
-        while (!unlocked) {
-          if (encStatus.kind === 'pubkey') {
-            // Certificate-encrypted (Adobe.PubSec) — unlock with the
-            // user's PKCS#12 key. The engine's refusals are already honest
-            // ("does not match any recipient" / "check the file and its
-            // password"), so they surface verbatim.
-            const result = await showCertUnlockPrompt(name, error, unlockPfx);
-            if (result === 'cancel') return null;
-            unlockPfx = result.pfx;
-            try {
-              await call('decrypt_pubkey', {
-                file: workingPath,
-                output: workingPath,
-                pfx: result.pfx,
-                password: result.password,
-              });
-              unlocked = true;
-            } catch (e) {
-              error = e instanceof Error ? e.message : String(e);
-            }
-          } else {
-            const result = await showPasswordPrompt(name, error);
-            if (result === 'cancel') return null;
-            try {
-              await call('unlock', { file: workingPath, password: result.password });
-              unlocked = true;
-            } catch (e) {
-              error = unlockFailureText(e, 'Incorrect password. Please try again.');
-            }
-          }
-        }
+      const opened = await openWithCredentials(workingPath, name, {
+        call: (method, params) => call(method, params) as unknown as Promise<Record<string, unknown>>,
+        askPassword: showPasswordPrompt,
+        askCertificate: showCertUnlockPrompt,
+        wrongPassword: () => tChrome('app.open.incorrectPassword'),
+      });
+      if (!opened) return null;
+      if (opened.password !== null) rememberDocumentPassword(filePath, opened.password);
+      try {
+        const buffer = await file.readBuffer(workingPath);
+        const info = await call('get_page_count', { file: workingPath });
+        return { workingPath, name, buffer, pageCount: info.pages, security: opened.security };
+      } catch (err) {
+        releaseCredentials(filePath, workingPath);
+        throw err;
       }
-      const buffer = await file.readBuffer(workingPath);
-      const info = await call('get_page_count', { file: workingPath });
-      return { workingPath, name, buffer, pageCount: info.pages };
     },
-    [call, showPasswordPrompt, showCertUnlockPrompt],
+    [call, releaseCredentials, showPasswordPrompt, showCertUnlockPrompt],
   );
 
   const stateRef = useRef(state);
@@ -1289,49 +1287,58 @@ function AppContent(): React.ReactElement {
           name: string;
           pageCount: number;
           buffer: PdfBuffer;
+          security: DocumentSecurity;
         }[] = [];
-        const allPages: PageRef[] = [];
-        const sources: { path: string; buffer: PdfBuffer }[] = [];
-        for (const filePath of filePaths) {
-          // A file being opened meanwhile is read once: the import takes the
-          // opened document's bytes instead of preparing the file a second time.
-          await openFlights.current.pending(filePath);
-          // Read from the store, not the render: a file opened or committed
-          // since the render holds other bytes, and pages indexed from the
-          // render's bytes name other pages of the file (the import is then
-          // refused).
-          const existing = readState().files.get(filePath);
-          let src: { workingPath: string; name: string; buffer: PdfBuffer; pageCount: number };
-          if (existing?.buffer) {
-            src = {
-              workingPath: existing.workingPath,
-              name: existing.name,
-              buffer: existing.buffer,
-              pageCount: existing.pageCount,
-            };
-          } else {
-            const prepared = await prepareFileBytes(filePath);
-            if (!prepared) continue;
-            toRegister.push({ path: filePath, ...prepared });
-            src = prepared;
+        let registered = false;
+        try {
+          const allPages: PageRef[] = [];
+          const sources: { path: string; buffer: PdfBuffer }[] = [];
+          for (const filePath of filePaths) {
+            // A file being opened meanwhile is read once: the import takes the
+            // opened document's bytes instead of preparing the file a second time.
+            await openFlights.current.pending(filePath);
+            // Read from the store, not the render: a file opened or committed
+            // since the render holds other bytes, and pages indexed from the
+            // render's bytes name other pages of the file (the import is then
+            // refused).
+            const existing = readState().files.get(filePath);
+            let src: { workingPath: string; name: string; buffer: PdfBuffer; pageCount: number };
+            if (existing?.buffer) {
+              src = {
+                workingPath: existing.workingPath,
+                name: existing.name,
+                buffer: existing.buffer,
+                pageCount: existing.pageCount,
+              };
+            } else {
+              const prepared = await prepareFileBytes(filePath);
+              if (!prepared) continue;
+              toRegister.push({ path: filePath, ...prepared });
+              src = prepared;
+            }
+            const docs = await indexImportSource({
+              path: filePath,
+              workingPath: src.workingPath,
+              name: src.name,
+              pageCount: src.pageCount,
+              buffer: src.buffer,
+              dirty: false,
+              undoStack: [],
+              redoStack: [],
+              importOnly: true,
+            });
+            for (const d of docs) allPages.push(...d.pages);
+            sources.push({ path: filePath, buffer: src.buffer });
           }
-          const docs = await indexImportSource({
-            path: filePath,
-            workingPath: src.workingPath,
-            name: src.name,
-            pageCount: src.pageCount,
-            buffer: src.buffer,
-            dirty: false,
-            undoStack: [],
-            redoStack: [],
-            importOnly: true,
-          });
-          for (const d of docs) allPages.push(...d.pages);
-          sources.push({ path: filePath, buffer: src.buffer });
+          if (allPages.length === 0) return;
+          for (const reg of toRegister) dispatch({ type: 'REGISTER_IMPORT_SOURCE', ...reg });
+          registered = true;
+          dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages, sources });
+        } finally {
+          // A source prepared and never registered has no `files` entry for
+          // the release effect to notice.
+          if (!registered) for (const reg of toRegister) releaseCredentials(reg.path, reg.workingPath);
         }
-        if (allPages.length === 0) return;
-        for (const reg of toRegister) dispatch({ type: 'REGISTER_IMPORT_SOURCE', ...reg });
-        dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages, sources });
       } finally {
         claimHolds.current.drop(canonicalImports);
         // A claim outlives only what it protects. A path this window uses by
@@ -1349,6 +1356,7 @@ function AppContent(): React.ReactElement {
       prepareFileBytes,
       reportClaimRefusal,
       confirmPageEdit,
+      releaseCredentials,
     ],
   );
 
@@ -1563,12 +1571,43 @@ function AppContent(): React.ReactElement {
   //
   // Consent precedes the commit gate. The operation writes only a private
   // stage; complete bytes, working file and history publish as one transaction.
+  // The operation doors' permission check: an engine operation, a fill and a
+  // field creation each refuse by name before any consent dialog or commit.
+  // Native copy from the reading view's text layer is the one copy path no
+  // command runs; a document that withholds copying refuses it here. Form
+  // fields and other editable text stay the user's own to copy.
+  useEffect(() => {
+    const onCopy = (event: ClipboardEvent) => {
+      const now = readState();
+      const path = showableDoc(now);
+      if (!path || !isDocTab(now.ui.focusedTab)) return;
+      const target = event.target;
+      if (target instanceof HTMLElement
+          && (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+      const block = capabilityBlock(documentPermissions(now, path), 'copy');
+      if (!block) return;
+      event.preventDefault();
+      void showNotice(tChrome('app.permissions.title'), capabilityBlockText(block));
+    };
+    document.addEventListener('copy', onCopy, true);
+    return () => document.removeEventListener('copy', onCopy, true);
+  }, [readState, showNotice]);
+
+  const requireCapabilities = useCallback((path: string, capabilities: readonly Capability[]) => {
+    const security = documentPermissions(readState(), path);
+    for (const capability of capabilities) {
+      const block = capabilityBlock(security, capability);
+      if (block) throw new PermissionRefusal(block);
+    }
+  }, [readState]);
+
   const performOperation = useCallback<PerformOperation>(async (
     filePath: string,
     method: OpMethod,
     params: Record<string, unknown>,
     options,
   ) => {
+    requireCapabilities(filePath, [method, ...(options?.following?.map(step => step.method) ?? [])].map(opCapability));
     const editClass = options?.structuralConsent ? 'structural' : sequenceEditClass(method, options?.following?.map(step => step.method));
     return trackInteractive(() => executeWorkspaceOperation(filePath, method, params, readState, dispatch, {
       confirm: (path, working) => editClass === 'none' ? Promise.resolve(true) : confirmEditOfSignedDoc(path, working, editClass),
@@ -1577,7 +1616,7 @@ function AppContent(): React.ReactElement {
       callStaged: callRaw,
       track: async (name, values, run) => isTrackableMethod(name) ? await trackOperation(name, values, run) as Awaited<ReturnType<typeof run>> : run(),
     }, options));
-  }, [readState, callRaw, dispatch, confirmEditOfSignedDoc, trackOperation]);
+  }, [readState, callRaw, dispatch, confirmEditOfSignedDoc, trackOperation, requireCapabilities]);
 
   // Captured synchronously by the gesture, before any font, picker or confirm
   // await: a write dispatched by path alone lands in whichever session holds
@@ -1838,6 +1877,7 @@ function AppContent(): React.ReactElement {
 
   const handleFillFormValues = useCallback(
     async (path: string, values: Record<string, FormFieldValue>, options?: import('./lib/form-fill-transaction').FormFillOptions) => {
+      requireCapabilities(path, ['fill']);
       const filled = await trackInteractive(() => fillFormValues(path, values, readState, dispatch, {
         confirm: (source, policyPath, targets, typed, flatten) => confirmEditOfSignedDoc(source, policyPath, flatten ? 'structural' : 'form-fill', targets, typed),
         commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
@@ -1847,13 +1887,14 @@ function AppContent(): React.ReactElement {
       }, options));
       return filled.completed ? filled : EDIT_DECLINED;
     },
-    [readState, dispatch, callRaw, confirmEditOfSignedDoc, trackOperation],
+    [readState, dispatch, callRaw, confirmEditOfSignedDoc, trackOperation, requireCapabilities],
   );
 
   // Single placements and accepted detection batches share one staged edit.
   // Font binding/choice appearances finish before bytes and history publish.
   const handleAddFormFields = useCallback(
     async (path: string, specs: readonly NewFieldSpec[]) => {
+      requireCapabilities(path, ['formAuthoring']);
       const created = await createFormFields(path, specs, readState, dispatch, {
         confirm: (source, working) => confirmEditOfSignedDoc(source, working, 'structural'),
         commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
@@ -1864,7 +1905,7 @@ function AppContent(): React.ReactElement {
       });
       if (!created) return EDIT_DECLINED;
     },
-    [readState, dispatch, callRaw, confirmEditOfSignedDoc],
+    [readState, dispatch, callRaw, confirmEditOfSignedDoc, requireCapabilities],
   );
 
   const handleAddFormField = useCallback(
@@ -3390,7 +3431,11 @@ function AppContent(): React.ReactElement {
           role="alert"
           className="app-banner flex items-center gap-3 px-4 py-2 bg-red-600/20 border-b border-red-500/40 text-sm text-red-200 shrink-0"
         >
-          <span className="flex-1">{tChrome('app.history.changed')}</span>
+          <span className="flex-1">
+            {state.pageEditRefusalReason
+              ? capabilityBlockText(state.pageEditRefusalReason)
+              : tChrome('app.history.changed')}
+          </span>
           <button
             onClick={() => setPageEditRefused(false)}
             className="text-red-300 hover:text-red-100 text-xs"

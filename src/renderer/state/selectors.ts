@@ -1,4 +1,5 @@
 import type { AppState, OpenDocument, OpenFile, PageRef } from './types';
+import { UNRESTRICTED, type DocumentSecurity } from '../lib/document-permissions';
 
 // Questions about the state that more than one layer needs to ask, answered
 // once. A leaf: types only, so anything may import it.
@@ -29,6 +30,14 @@ export function showableDoc(state: AppState): string | null {
   if (!path) return null;
   const f = state.files.get(path);
   return f && !f.importOnly ? path : null;
+}
+
+/** Who opened the file at `fileId` and what its /P bits allow. A file with no
+ * record (unencrypted, or not open) allows everything. Every permission check
+ * reads it here, never off `files` directly. */
+export function documentPermissions(state: AppState, fileId: string | null | undefined): DocumentSecurity {
+  if (!fileId) return UNRESTRICTED;
+  return state.files.get(fileId)?.security ?? UNRESTRICTED;
 }
 
 /** `showableDoc`, resolved to the file itself. */

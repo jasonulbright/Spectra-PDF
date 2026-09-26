@@ -11,7 +11,10 @@ import { executeWorkspaceOperation } from '../src/renderer/lib/operation-transac
 import { createOwnedOperationRuns } from '../src/renderer/lib/owned-operation-run';
 import { inspectOperationInput } from '../src/renderer/lib/operation-input';
 import { EDIT_DECLINED } from '../src/renderer/lib/edit-text';
-import { isOpMethod, sequenceEditClass } from '../src/renderer/lib/op-edit-class';
+import { isOpMethod, opCapability, sequenceEditClass } from '../src/renderer/lib/op-edit-class';
+import { capabilityBlock } from '../src/renderer/lib/document-permissions';
+import { PermissionRefusal } from '../src/renderer/lib/document-permission-text';
+import { documentPermissions } from '../src/renderer/state/selectors';
 import { STEP_CATALOG, stepDefFor, engineMethodFor, buildStepParams, newStep, planAction, gsBlocker, gsPathFor } from '../src/renderer/lib/guided-actions';
 import { writtenRoots } from '../src/renderer/lib/output-root-claim';
 import { replaceRange, wordAt } from '../src/renderer/lib/spellcheck';
@@ -112,7 +115,10 @@ async function fixture() {
     readState: store.getState, dispatch: store.dispatch, executeWorkspaceOperation, fillFormValues,
     trackInteractive: async (run: () => Promise<unknown>) => run(),
     trackOperation: async (_m: string, _p: unknown, run: () => Promise<unknown>) => run(),
-    isTrackableMethod: () => true, sequenceEditClass, isOpMethod,
+    isTrackableMethod: () => true, sequenceEditClass, isOpMethod, opCapability,
+    requireCapabilities: actual('App.tsx', 'requireCapabilities', {
+      readState: store.getState, documentPermissions, capabilityBlock, PermissionRefusal,
+    }),
     commitRef: { current: async () => {} }, confirmEditOfSignedDoc: async () => fault.allow,
     callRaw: call, call, pageCommit: transaction,
     readPublishedBytes: readingWith(async (b: Uint8Array) => (await PDFDocument.load(b)).getPageCount()),

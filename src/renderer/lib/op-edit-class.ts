@@ -17,6 +17,7 @@
 // change does. `none` is the fourth value and is not a class at all — it marks
 // the ops that must NOT take this decision, each with the reason it must not.
 import type { EditClass } from './signatures';
+import type { Capability } from './document-permissions';
 
 /** An op's class, or `none` for the ops this gate deliberately skips. */
 export type OpEditClass = EditClass | 'none';
@@ -173,6 +174,20 @@ export const UNGATED_OPS: readonly OpMethod[] = ['sign_pdf', 'sanitize_pdf'];
 
 export function opEditClass(method: OpMethod): OpEditClass {
   return OP_EDIT_CLASS[method];
+}
+
+/** The permission an in-place operation needs from a document opened with its
+ * user password (ISO 32000-2 Table 22). Page rotation and deletion are page
+ * assembly; signing fills a signature field; the annotate and form-fill
+ * classes are exactly the annotation and fill bits; every other rewrite
+ * changes content. */
+export function opCapability(method: OpMethod): Capability {
+  if (method === 'rotate' || method === 'delete') return 'assemble';
+  if (method === 'sign_pdf') return 'fill';
+  const editClass = opEditClass(method);
+  if (editClass === 'annotate') return 'annotate';
+  if (editClass === 'form-fill') return 'fill';
+  return 'modify';
 }
 
 /** A composite edit cannot borrow only its first call's consent. Unlike a

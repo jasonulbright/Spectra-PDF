@@ -8,7 +8,8 @@ import { toolById, toolForOp, armedModeOf, type ToolDef } from '../commands/tool
 // Pure math only (no DOM, no storage) — the count tier's sequence allocation
 // lives here because the reducer is the only place that holds a whole document.
 import { countContents, countMarksOf, groupOf, nextSequence } from '../lib/count-marks';
-import { placeTabAt } from './selectors';
+import { documentPermissions, placeTabAt } from './selectors';
+import { capabilityBlock, type Capability, type CapabilityBlock } from '../lib/document-permissions';
 
 // Re-project a display-normalized annotation rect when its page's display
 // rotates by `delta` quarter-turns clockwise: annotation coords always live
@@ -164,6 +165,7 @@ export const initialState: AppState = {
   pageRedoStack: [],
   pageDirtyPaths: [],
   pageEditRefusals: 0,
+  pageEditRefusalReason: null,
 };
 
 // Selection holds positional PageRef ids (`path#pN`) that the indexer
@@ -240,8 +242,29 @@ function mapDocument(
 
 // An edit the page tier cannot take: nothing changes, and one more notice is
 // owed.
-function refuseEdit(state: AppState): AppState {
-  return { ...state, pageEditRefusals: state.pageEditRefusals + 1 };
+function refuseEdit(state: AppState, reason: CapabilityBlock | null = null): AppState {
+  return { ...state, pageEditRefusals: state.pageEditRefusals + 1, pageEditRefusalReason: reason };
+}
+
+const ANNOTATION_EDITS: ReadonlySet<AppAction['type']> = new Set<AppAction['type']>([
+  'ADD_ANNOTATION', 'REGROUP_COUNT_MARKS', 'UPDATE_ANNOTATION', 'RECOLOR_ANNOTATION', 'REMOVE_ANNOTATION',
+  'REORDER_ANNOTATIONS', 'RESTYLE_ANNOTATIONS', 'RECALIBRATE_ANNOTATION', 'RECOLOR_ANNOTATIONS',
+  'REMOVE_ANNOTATIONS', 'TRANSFORM_ANNOTATIONS',
+]);
+
+/** The one permission check of the page tier: every gesture, key and drop that
+ * edits pages or their annotations arrives here as an action. The commit
+ * writes every file it touches with pdf-lib, so a source file whose pages are
+ * imported answers for itself too. */
+function pageEditBlock(state: AppState, action: AppAction, edited: readonly OpenDocument[]): CapabilityBlock | null {
+  const capability: Capability = ANNOTATION_EDITS.has(action.type) ? 'commentTier' : 'pageTier';
+  const paths = new Set(edited.map((d) => d.path));
+  if (action.type === 'IMPORT_PAGES') for (const source of action.sources) paths.add(source.path);
+  for (const path of paths) {
+    const block = capabilityBlock(documentPermissions(state, path), capability);
+    if (block) return block;
+  }
+  return null;
 }
 
 /** The documents a page edit writes into, null when a document or page it
@@ -708,6 +731,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   if (edited === null || edited?.some((d) => state.files.get(d.path)?.buffer !== d.buffer)) {
     return refuseEdit(state);
   }
+  const blocked = edited ? pageEditBlock(state, action, edited) : null;
+  if (blocked) return refuseEdit(state, blocked);
   switch (action.type) {
     case 'OPEN_FILE': {
       // A REOPEN replaces the path's buffer — ITS selection ids die (fresh
@@ -730,6 +755,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         // field exists; a re-open of the same path without one clears it,
         // which is correct — those bytes came from the file, not the web.
         ...(action.webOrigin ? { webOrigin: action.webOrigin } : {}),
+        ...(action.security ? { security: action.security } : {}),
       });
       // A tab dropped from another window lands at the gap its caret marked.
       // Every other open appends, and a stale index — the strip changed while
@@ -788,6 +814,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         undoStack: [],
         redoStack: [],
         importOnly: true,
+        ...(action.security ? { security: action.security } : {}),
       });
       return { ...state, files };
     }
@@ -955,6 +982,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           pageRedoStack: [],
           pageDirtyPaths: [],
           pageEditRefusals: state.pageEditRefusals + 1,
+          pageEditRefusalReason: null,
         };
       } else {
         const base = withCommitted(since.length > 0 ? since[0].documents : state.workspace.documents);
@@ -980,6 +1008,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             ...committed,
             ...replayed.tier,
             pageEditRefusals: state.pageEditRefusals + replayed.refused,
+            pageEditRefusalReason: replayed.refused > 0 ? null : state.pageEditRefusalReason,
           };
         }
       }
@@ -1078,6 +1107,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ui: survivingUi(state.ui, prev, documents),
         ...tier,
         pageEditRefusals: state.pageEditRefusals + refused,
+        pageEditRefusalReason: refused > 0 ? null : state.pageEditRefusalReason,
       };
     }
     case 'REORDER_PAGES': {

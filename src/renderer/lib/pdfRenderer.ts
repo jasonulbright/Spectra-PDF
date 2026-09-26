@@ -31,7 +31,7 @@ const ASSET_URLS = {
   standardFontDataUrl: assetBase('standard_fonts'),
 } as const;
 
-export async function loadDocument(buffer: PdfBuffer): Promise<pdfjsLib.PDFDocumentProxy> {
+export async function loadDocument(buffer: PdfBuffer, password?: string): Promise<pdfjsLib.PDFDocumentProxy> {
   // Tauri IPC serializes file bytes as a number[]; other sources may pass an
   // ArrayBuffer or Uint8Array. Typed-array input is copied because pdf.js
   // transfers (detaches) the array it is given to its worker, and state
@@ -44,8 +44,13 @@ export async function loadDocument(buffer: PdfBuffer): Promise<pdfjsLib.PDFDocum
   } else {
     data = new Uint8Array(buffer);
   }
-  return pdfjsLib.getDocument({ data, useWorkerFetch: false, useSystemFonts: true, ...ASSET_URLS })
-    .promise;
+  return pdfjsLib.getDocument({
+    data,
+    useWorkerFetch: false,
+    useSystemFonts: true,
+    ...ASSET_URLS,
+    ...(password !== undefined ? { password } : {}),
+  }).promise;
 }
 
 export async function renderPageToCanvas(

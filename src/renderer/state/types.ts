@@ -31,6 +31,9 @@ export interface OpenFile {
   // buffer change makes the record inert with no cleanup choreography).
   // Set by COMMIT_PAGE_EDITS; consumed by the workspace indexer.
   authoredIdentity?: import('../lib/durable-identity').AuthoredIdentity;
+  // Who opened the file and what its /P bits allow, recorded at open. Absent
+  // means unencrypted. Read through `documentPermissions`, never directly.
+  security?: import('../lib/document-permissions').DocumentSecurity;
 }
 
 // A fingerprint of a pre-existing PDF annotation object as read at import
@@ -652,13 +655,16 @@ export interface AppState {
   // from new bytes, or because the document or page they address is gone or
   // no longer as it was drawn on. Monotonic: each increase is one notice owed.
   pageEditRefusals: number;
+  // Why the latest refusal happened when a document's permissions refused
+  // it; null for every other refusal.
+  pageEditRefusalReason: import('../lib/document-permissions').CapabilityBlock | null;
 }
 
 export type AppAction =
   // `index` is a position in TAB space (byte-only import sources are not in
   // it). Absent, the file appends, which is what every open but a dropped tab
   // does; given, it lands at that position, clamped.
-  | { type: 'OPEN_FILE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer; index?: number; webOrigin?: string }
+  | { type: 'OPEN_FILE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer; index?: number; webOrigin?: string; security?: import('../lib/document-permissions').DocumentSecurity }
   // Move an open document's TAB to an index. View arrangement, not a document
   // edit: nothing is dirtied, no history is touched, and the files Map's
   // insertion order stays the one authority on tab order.
@@ -666,7 +672,7 @@ export type AppAction =
   // Register a file's bytes WITHOUT a strip, as an import source. Not a
   // page edit (doesn't touch the page-tier undo history or activeFileId);
   // idempotent. Its pages are then spliced into a real document via IMPORT_PAGES.
-  | { type: 'REGISTER_IMPORT_SOURCE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer }
+  | { type: 'REGISTER_IMPORT_SOURCE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer; security?: import('../lib/document-permissions').DocumentSecurity }
   | { type: 'CLOSE_FILE'; path: string }
   | { type: 'SET_ACTIVE_FILE'; path: string }
   // `documents`: the path's documents as `buffer` holds them, read from it

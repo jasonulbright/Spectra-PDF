@@ -1,4 +1,5 @@
 import { loadDocument } from './pdfRenderer';
+import { documentPassword } from './document-passwords';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PdfBuffer } from '../state/types';
 
@@ -35,7 +36,7 @@ export function getDocumentProxy(path: string, buffer: PdfBuffer): Promise<PDFDo
   const existing = cache.get(path);
   if (existing && existing.buffer === buffer) return existing.promise;
   if (existing) destroyEntry(path, existing);
-  const entry: CacheEntry = { buffer, promise: loadDocument(buffer) };
+  const entry: CacheEntry = { buffer, promise: loadDocument(buffer, documentPassword(path)) };
   // A rejected load must not stay cached: retriers (the indexer re-running
   // on state changes, useWorkspaceForms' bounded retry) would replay the
   // same cached rejection forever instead of re-attempting the load.

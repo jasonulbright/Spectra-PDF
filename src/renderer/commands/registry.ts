@@ -5,7 +5,8 @@
 // handler. Every action is registered here; the chrome only
 // *references* what is here.
 import { isDocTab } from '../state/types';
-import { insertAnchor, showableDoc, tabFiles } from '../state/selectors';
+import { documentPermissions, insertAnchor, showableDoc, tabFiles } from '../state/selectors';
+import { capabilityBlock, type Capability, type CapabilityBlock } from '../lib/document-permissions';
 import type { AppState, CanvasTool, FocusedTab, NavPanelId } from '../state/types';
 import type { Command, CommandContext, CommandNamespace } from './types';
 import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
@@ -409,7 +410,7 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   export: [],
 };
 
-export const COMMANDS: Record<CommandId, Command> = {
+const BASE_COMMANDS: Record<CommandId, Command> = {
   'file.open': {
     title: 'Open…',
     when: (ctx) => ctx.app !== null,
@@ -1173,3 +1174,109 @@ export const COMMANDS: Record<CommandId, Command> = {
     ]),
   ) as Record<`tools.open.${(typeof TOOL_IDS)[number]}`, Command>),
 };
+
+// --- Document permissions -------------------------------------------------
+//
+// The capability each command needs from the document it acts on (ISO 32000-2
+// Table 22). A command absent here needs none. Gated once, below, by wrapping
+// `when`, so menus, toolbars, the keymap and OmniSearch all gray from it, and
+// `commandBlock` names the permission for the disabled state.
+
+const COMMAND_CAPABILITY: Partial<Record<CommandId, Capability>> = {
+  'file.print': 'print',
+  'edit.copy': 'copy',
+  'file.exportWord': 'copy',
+  'file.exportRtf': 'copy',
+  'file.exportOdt': 'copy',
+  'file.exportHtml': 'copy',
+  'file.exportXhtml': 'copy',
+  'file.exportText': 'copy',
+  'file.exportExcel': 'copy',
+  'file.exportPowerpoint': 'copy',
+  'file.exportImages': 'copy',
+  'view.readAloud.page': 'accessibility',
+  'view.readAloud.document': 'accessibility',
+  'document.deleteSelection': 'pageTier',
+  'document.rotateSelectionCW': 'pageTier',
+  'document.rotateSelectionCCW': 'pageTier',
+  'document.insertBlankPage': 'pageTier',
+  'document.insertFromFile': 'pageTier',
+  'document.insertFromScanner': 'pageTier',
+};
+
+/** Panels whose purpose is an edit or an extraction. The engine door
+ * (`performOperation`) refuses the write itself; this grays the entry. */
+const OPERATION_CAPABILITY: Partial<Record<Operation, Capability>> = {
+  extract_text: 'copy',
+  rotate: 'assemble',
+  delete: 'assemble',
+  watermark: 'modify',
+  headerfooter: 'modify',
+  pagebox: 'modify',
+  pagelabels: 'modify',
+  printermarks: 'modify',
+  hairlines: 'modify',
+  search_redact: 'modify',
+  scanenhance: 'modify',
+  forms: 'fill',
+  links: 'annotate',
+  accessibility: 'accessibility',
+  tags: 'accessibility',
+  readingorder: 'accessibility',
+};
+
+/** Tools whose canvas work is an edit or an extraction; their canvas modes
+ * inherit the owning tool's capability. */
+const TOOL_CAPABILITY: Partial<Record<ToolId, Capability>> = {
+  comment: 'commentTier',
+  measure: 'commentTier',
+  takeoff: 'commentTier',
+  edit: 'modify',
+  fillsign: 'fill',
+  prepareform: 'formAuthoring',
+  redact: 'modify',
+  pagebox: 'modify',
+  links: 'annotate',
+  snapshot: 'copy',
+};
+
+export function commandCapability(id: CommandId): Capability | null {
+  const direct = COMMAND_CAPABILITY[id];
+  if (direct) return direct;
+  if (id.startsWith('tools.panel.')) return OPERATION_CAPABILITY[id.slice('tools.panel.'.length) as Operation] ?? null;
+  if (id.startsWith('tools.open.')) return TOOL_CAPABILITY[id.slice('tools.open.'.length) as ToolId] ?? null;
+  if (id.startsWith('tools.')) {
+    const owner = toolForCanvasTool(id.slice('tools.'.length) as CanvasTool);
+    return owner ? TOOL_CAPABILITY[owner.id] ?? null : null;
+  }
+  return null;
+}
+
+const SELECTION_COMMANDS: ReadonlySet<CommandId> = new Set<CommandId>([
+  'document.deleteSelection',
+  'document.rotateSelectionCW',
+  'document.rotateSelectionCCW',
+]);
+
+/** Why the document denies this command, or null. A selection command answers
+ * for every file its selection touches; every other command for the document
+ * on screen. */
+export function commandBlock(ctx: CommandContext, id: CommandId): CapabilityBlock | null {
+  const capability = commandCapability(id);
+  if (!capability) return null;
+  const paths = SELECTION_COMMANDS.has(id) ? selectedPagePaths(ctx.state) : [showableDoc(ctx.state)];
+  for (const path of paths) {
+    if (!path) continue;
+    const block = capabilityBlock(documentPermissions(ctx.state, path), capability);
+    if (block) return block;
+  }
+  return null;
+}
+
+export const COMMANDS: Record<CommandId, Command> = Object.fromEntries(
+  (Object.entries(BASE_COMMANDS) as [CommandId, Command][]).map(([id, command]) => {
+    if (!commandCapability(id)) return [id, command];
+    const base = command.when;
+    return [id, { ...command, when: (ctx: CommandContext) => (base ? base(ctx) : true) && commandBlock(ctx, id) === null }];
+  }),
+) as Record<CommandId, Command>;
