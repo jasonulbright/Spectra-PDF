@@ -56,12 +56,18 @@ describe('Document action preservation through actual page commits', () => {
     const ids = await getWorkspacePageIds(); await selectCanvasPages([ids[1]]); await deleteSelectedCanvasPages();
     await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 1);
     await commitPendingEdits();
-    // The opening action and the close trigger both chain into a GoTo onto the
-    // deleted page, so each entry is omitted whole; nothing else changes.
+    // Only the GoTo onto the deleted page leaves the /Next chain. The script
+    // stays the opening action and the close trigger, and its chain keeps the
+    // remaining member, the rejoin to itself, in order.
     const committed = await PDFDocument.load(readFileSync(work), { updateMetadata: false });
     expect(committed.getPageCount()).toBe(1);
-    expect(committed.catalog.get(N('OpenAction'))).toBeUndefined();
-    expect(committed.catalog.get(N('AA'))).toBeUndefined();
+    const aa = committed.catalog.lookup(N('AA'), PDFDict);
+    expect(committed.catalog.get(N('OpenAction'))).toEqual(aa.get(N('WC')));
+    const script = aa.lookup(N('WC'), PDFDict);
+    expect(script.lookup(N('JS'), PDFString).decodeText()).toBe('// retained; never executed');
+    const next = script.lookup(N('Next'), PDFArray);
+    expect(next.size()).toBe(1);
+    expect(next.get(0)).toEqual(aa.get(N('WC')));
     expect(readFileSync(source).equals(before)).toBe(true); expect((await history()).undo).toHaveLength(1);
     await invokeAppCommand('edit.undo');
     await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 2);
