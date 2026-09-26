@@ -328,6 +328,12 @@ fn failure_snapshot(
     }
 }
 
+fn intake_ready_to_run(current: &HashMap<String, u64>, stable: &HashSet<(String, u64)>) -> bool {
+    // `stable` is built from `current`; if their cardinalities differ, at
+    // least one PDF is still changing and the folder-wide CLI would read it.
+    !current.is_empty() && stable.len() == current.len()
+}
+
 fn run_once(exe: &Path, folder: &WatchedFolder, action_file: &Path) -> RunOutcome {
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("run-action")
@@ -414,9 +420,13 @@ fn spawn_watcher(app: &AppHandle, folder: WatchedFolder) -> Result<(), String> {
                     .filter(|(name, size)| previous.get(*name) == Some(size))
                     .map(|(name, size)| (name.clone(), *size))
                     .collect();
+                let ready = intake_ready_to_run(&current, &stable);
                 previous = current;
                 if stable.is_empty() {
                     last_failures = None;
+                    continue;
+                }
+                if !ready {
                     continue;
                 }
                 if last_failures.as_ref() == Some(&stable) {
@@ -553,6 +563,24 @@ mod tests {
             Some(leftovers)
         );
         assert_eq!(failure_snapshot(RunOutcome::Failed, HashSet::new()), None);
+    }
+
+    #[test]
+    fn watcher_waits_until_every_pdf_in_the_intake_is_stable() {
+        let current = HashMap::from([
+            ("ready.pdf".to_string(), 123),
+            ("still-copying.pdf".to_string(), 456),
+        ]);
+        let partially_stable = HashSet::from([("ready.pdf".to_string(), 123)]);
+        assert!(!intake_ready_to_run(&current, &partially_stable));
+        assert!(intake_ready_to_run(
+            &current,
+            &HashSet::from([
+                ("ready.pdf".to_string(), 123),
+                ("still-copying.pdf".to_string(), 456),
+            ])
+        ));
+        assert!(!intake_ready_to_run(&HashMap::new(), &HashSet::new()));
     }
 
     #[test]
