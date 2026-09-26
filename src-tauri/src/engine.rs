@@ -45,6 +45,7 @@ struct Route {
     inner: serde_json::Value,
     leases: Vec<Arc<crate::folder_claims::FolderLease>>,
     _workers: Vec<crate::folder_claims::WorkerLease>,
+    _output_reservation: Option<crate::app_windows::EngineOutputReservation>,
 }
 
 impl EngineRouter {
@@ -57,24 +58,32 @@ impl EngineRouter {
 
     fn register(&self, label: &str, inner: serde_json::Value,
         leases: Vec<Arc<crate::folder_claims::FolderLease>>,
-        workers: Vec<crate::folder_claims::WorkerLease>) -> u64 {
+        workers: Vec<crate::folder_claims::WorkerLease>,
+        output_reservation: Option<crate::app_windows::EngineOutputReservation>) -> u64 {
         let outer = self.next_outer.fetch_add(1, Ordering::SeqCst);
-        if let Ok(mut map) = self.by_outer.lock() {
-            map.insert(
-                outer,
-                Route {
-                    label: label.to_string(),
-                    inner,
-                    leases,
-                    _workers: workers,
-                },
-            );
-        }
+        let mut map = self
+            .by_outer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        map.insert(
+            outer,
+            Route {
+                label: label.to_string(),
+                inner,
+                leases,
+                _workers: workers,
+                _output_reservation: output_reservation,
+            },
+        );
         outer
     }
 
     fn take(&self, outer: u64) -> Option<Route> {
-        self.by_outer.lock().ok()?.remove(&outer).filter(|route| !route.label.is_empty())
+        self.by_outer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&outer)
+            .filter(|route| !route.label.is_empty())
     }
 
     /// Retire one routing, answering who asked and under which id.
@@ -85,9 +94,10 @@ impl EngineRouter {
     /// Retire EVERY routing. For a sidecar that has been killed: nothing is
     /// coming back, so each caller is owed an answer from whoever killed it.
     pub fn take_all(&self) -> Vec<(u64, String, serde_json::Value)> {
-        let Ok(mut map) = self.by_outer.lock() else {
-            return Vec::new();
-        };
+        let mut map = self
+            .by_outer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         map.drain().filter(|(_, route)| !route.label.is_empty())
             .map(|(outer, route)| (outer, route.label, route.inner))
             .collect()
@@ -96,17 +106,20 @@ impl EngineRouter {
     /// Retire every request belonging to one window and return the process ids
     /// whose companion state must be retired with them.
     pub fn take_label(&self, label: &str) -> Vec<u64> {
-        let Ok(mut map) = self.by_outer.lock() else {
-            return Vec::new();
-        };
+        let mut map = self
+            .by_outer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let ids: Vec<u64> = map
             .iter()
             .filter_map(|(outer, route)| (route.label == label).then_some(*outer))
             .collect();
         for outer in &ids {
-            if map.get(outer).is_some_and(|route| !route.leases.is_empty()) {
-                // Retain the lease, not the destroyed UI's delivery address.
-                // The eventual response removes this entry and releases it.
+            if map.get(outer).is_some_and(|route| {
+                !route.leases.is_empty() || route._output_reservation.is_some()
+            }) {
+                // Retain active write protection, not the destroyed UI's
+                // delivery address. The eventual response removes the entry.
                 map.get_mut(outer).unwrap().label.clear();
             } else {
                 map.remove(outer);
@@ -125,11 +138,15 @@ impl EngineRouter {
     /// How many requests each window has in flight.
     pub fn outstanding(&self) -> HashMap<String, usize> {
         let mut counts: HashMap<String, usize> = HashMap::new();
-        if let Ok(map) = self.by_outer.lock() {
-            for route in map.values() {
-                if route.label.is_empty() { continue; }
-                *counts.entry(route.label.clone()).or_insert(0) += 1;
+        let map = self
+            .by_outer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for route in map.values() {
+            if route.label.is_empty() {
+                continue;
             }
+            *counts.entry(route.label.clone()).or_insert(0) += 1;
         }
         counts
     }
@@ -167,10 +184,23 @@ pub fn publish_activity(app: &AppHandle) {
 
 /// Rewrite an outbound request's id to a process-global number and remember
 /// who asked. Returns the outer id when one was allocated.
-pub fn route_request(app: &AppHandle, label: &str, request: &mut serde_json::Value, pid: u32) -> Result<Option<u64>, String> {
+pub(crate) fn route_request(
+    app: &AppHandle,
+    label: &str,
+    request: &mut serde_json::Value,
+    pid: u32,
+    output_reservation: Option<crate::app_windows::EngineOutputReservation>,
+) -> Result<Option<u64>, String> {
     let leases = app.state::<crate::app_windows::ClaimState>().folder_leases(label);
     let workers = leases.iter().map(|lease| lease.retain_in_worker(pid)).collect::<Result<Vec<_>, _>>()?;
-    Ok(route_with_leases(&app.state::<EngineRouter>(), label, request, leases, workers))
+    Ok(route_with_leases(
+        &app.state::<EngineRouter>(),
+        label,
+        request,
+        leases,
+        workers,
+        output_reservation,
+    ))
 }
 
 /// The same rewrite against a NAMED router. Each sidecar keeps its own table:
@@ -182,18 +212,19 @@ pub fn route_with(
     label: &str,
     request: &mut serde_json::Value,
 ) -> Option<u64> {
-    route_with_leases(router, label, request, Vec::new(), Vec::new())
+    route_with_leases(router, label, request, Vec::new(), Vec::new(), None)
 }
 
 fn route_with_leases(router: &EngineRouter, label: &str, request: &mut serde_json::Value,
     leases: Vec<Arc<crate::folder_claims::FolderLease>>,
-    workers: Vec<crate::folder_claims::WorkerLease>) -> Option<u64> {
+    workers: Vec<crate::folder_claims::WorkerLease>,
+    output_reservation: Option<crate::app_windows::EngineOutputReservation>) -> Option<u64> {
     let obj = request.as_object_mut()?;
     let inner = obj.get("id").cloned()?;
     if inner.is_null() {
         return None;
     }
-    let outer = router.register(label, inner, leases, workers);
+    let outer = router.register(label, inner, leases, workers, output_reservation);
     obj.insert("id".to_string(), serde_json::Value::from(outer));
     Some(outer)
 }
@@ -645,6 +676,79 @@ mod start_tests {
 #[cfg(test)]
 mod lease_tests {
     use super::*;
+
+    #[test]
+    fn an_engine_output_stays_claimed_until_its_response_retires_the_route() {
+        let scratch = tempfile::tempdir().unwrap();
+        let registry = scratch.path().join("claims");
+        let state = crate::app_windows::ClaimState::with_registry(registry);
+        let output = scratch.path().join("result.pdf").to_string_lossy().into_owned();
+        let reservation = state.claim_engine_output(&output, "doc-1").unwrap();
+        let leases = state.folder_leases("doc-1");
+        assert_eq!(leases.len(), 1);
+
+        let router = EngineRouter::new();
+        let mut request = serde_json::json!({"id": 7});
+        let outer = route_with_leases(
+            &router,
+            "doc-1",
+            &mut request,
+            leases,
+            Vec::new(),
+            Some(reservation),
+        )
+        .unwrap();
+
+        // Window destruction releases ordinary claims, while the routed
+        // output remains protected until the sidecar replies or is retired.
+        state.release_label("doc-1");
+        router.drop_label("doc-1");
+        assert_eq!(state.folder_leases("doc-1").len(), 1);
+        assert!(router.take_route(outer).is_none());
+        assert!(state.folder_leases("doc-1").is_empty());
+    }
+
+    #[test]
+    fn an_output_reservation_survives_router_poison_and_window_destruction() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        let state = crate::app_windows::ClaimState::new();
+        let router = EngineRouter::new();
+        let path = r"C:\export\result.pdf";
+        let reservation = state.claim_engine_output(path, "doc-1").unwrap();
+
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _routes = router.by_outer.lock().unwrap();
+            panic!("poison the test route map");
+        }));
+
+        let mut request = serde_json::json!({"id": 7});
+        let outer = route_with_leases(
+            &router,
+            "doc-1",
+            &mut request,
+            Vec::new(),
+            Vec::new(),
+            Some(reservation),
+        )
+        .unwrap();
+
+        state.release_label("doc-1");
+        router.drop_label("doc-1");
+        assert_eq!(state.folder_leases("doc-1").len(), 1);
+        assert!(!state
+            .claim_document(path, "doc-2", crate::app_windows::ClaimMode::Write)
+            .granted);
+
+        // The response is discarded because its original window is gone; the
+        // reservation retires with that response route.
+        assert!(router.take_route(outer).is_none());
+        assert!(state.folder_leases("doc-1").is_empty());
+        assert!(state
+            .claim_document(path, "doc-2", crate::app_windows::ClaimMode::Write)
+            .granted);
+    }
+
     #[test]
     fn closing_a_window_keeps_its_folders_until_work_finishes() {
         for terminate in [false, true] {
@@ -654,7 +758,15 @@ mod lease_tests {
             let lease = Arc::new(crate::folder_claims::claim_in(&registry, &roots).unwrap());
             let router = EngineRouter::new();
             let mut request = serde_json::json!({"id": 7});
-            let outer = route_with_leases(&router, "doc-1", &mut request, vec![lease.clone()], Vec::new()).unwrap();
+            let outer = route_with_leases(
+                &router,
+                "doc-1",
+                &mut request,
+                vec![lease.clone()],
+                Vec::new(),
+                None,
+            )
+            .unwrap();
             router.drop_label("doc-1");
             drop(lease);
             assert!(router.outstanding().is_empty());

@@ -1637,6 +1637,22 @@ pub async fn open_batch_log_folder(app: AppHandle, dir: Option<String>) -> Resul
 
 // ── Engine (Python sidecar) ───────────────────────────────────────────────
 
+fn engine_output_path(request: &serde_json::Value) -> Result<Option<&str>, String> {
+    let Some(output) = request.get("params").and_then(|params| params.get("output")) else {
+        return Ok(None);
+    };
+    let Some(path) = output.as_str() else {
+        return Err("An engine output path must be text.".to_string());
+    };
+    if path.is_empty() {
+        return Ok(None);
+    }
+    if !Path::new(path).is_absolute() {
+        return Err("An engine output path must be absolute.".to_string());
+    }
+    Ok(Some(path))
+}
+
 #[tauri::command]
 pub async fn start_engine(app: AppHandle) -> Result<(), String> {
     engine::start(&app).await
@@ -1657,7 +1673,40 @@ pub async fn send_to_engine(
     let state = app.state::<EngineState>();
     let mut guard = engine::lock_started(&state.child, || engine::start(&app)).await?;
     if let Some(ref mut child) = *guard {
-        let outer = engine::route_request(&app, window.label(), &mut request, child.child.pid())?;
+        let label = window.label().to_string();
+        let output_reservation = if let Some(path) = engine_output_path(&request)? {
+            let path = canonical_path(path);
+            let claim_app = app.clone();
+            let claim_label = label.clone();
+            Some(
+                tauri::async_runtime::spawn_blocking(move || {
+                    claim_app
+                        .state::<crate::app_windows::ClaimState>()
+                        .claim_engine_output(&path, &claim_label)
+                })
+                .await
+                .map_err(|error| error.to_string())??,
+            )
+        } else {
+            None
+        };
+        if output_reservation.is_some()
+            && request
+                .get("id")
+                .is_none_or(serde_json::Value::is_null)
+        {
+            return Err("An output request must have a response id.".to_string());
+        }
+        let outer = match engine::route_request(
+            &app,
+            &label,
+            &mut request,
+            child.child.pid(),
+            output_reservation,
+        ) {
+            Ok(outer) => outer,
+            Err(error) => return Err(error),
+        };
         let unroute = |app: &AppHandle| {
             if let Some(outer) = outer { engine::unroute_request(app, outer); }
         };
@@ -2310,7 +2359,8 @@ pub async fn set_startup_enabled(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_line_at, classify_recent_paths, copy_file_creating_dirs_at, is_batch_log_name,
+        append_line_at, classify_recent_paths, copy_file_creating_dirs_at, engine_output_path,
+        is_batch_log_name,
         is_managed_member_path, load_startup_config_at, move_file_creating_dirs_at,
         reclaim_batch_log_stages, run_key_action, save_as, select_argument, working_copy_in,
         write_action_file, write_batch_log_at, write_profile_file, write_report_file,
@@ -2326,6 +2376,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn only_absolute_engine_output_paths_are_reserved() {
+        let request = serde_json::json!({"id": 1, "params": {"output": r"C:\out\result.pdf"}});
+        assert_eq!(engine_output_path(&request).unwrap(), Some(r"C:\out\result.pdf"));
+
+        let relative = serde_json::json!({"id": 2, "params": {"output": "result.pdf"}});
+        assert!(engine_output_path(&relative).unwrap_err().contains("absolute"));
+        let absent = serde_json::json!({"id": 3, "params": {"file": r"C:\in.pdf"}});
+        assert_eq!(engine_output_path(&absent).unwrap(), None);
     }
 
     #[test]

@@ -20,6 +20,7 @@
 
 use std::path::PathBuf;
 use std::thread::sleep;
+use std::io::Write;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -39,6 +40,10 @@ const OPEN_RETRY: Duration = Duration::from_millis(25);
 
 /// A `BITMAPINFOHEADER` is 40 bytes; a shorter body is not a DIB.
 const DIB_HEADER_BYTES: usize = 40;
+/// Clipboard blocks belong to another process. Bound both the copy and the
+/// parsing expansion before allocating memory from the advertised size.
+const MAX_CLIPBOARD_IMAGE_BYTES: usize = 256 * 1024 * 1024;
+const MAX_CLIPBOARD_TEXT_BYTES: usize = 32 * 1024 * 1024;
 
 /// Scratch files older than this are removed when a new one is written. A
 /// clipboard source is consumed within one dialog session, so anything from a
@@ -82,35 +87,52 @@ fn open_clipboard() -> Result<(), String> {
             }
         }
     }
-    Err(format!("Another application is holding the clipboard: {last}"))
+    Err(format!(
+        "Another application is holding the clipboard: {last}"
+    ))
 }
 
 /// Copy one format's payload out of the open clipboard.
 ///
 /// The handle belongs to the clipboard and is never freed here. `GlobalSize`
 /// bounds the copy: a clipboard block carries no length of its own.
-fn read_format(format: u32) -> Option<Vec<u8>> {
+fn checked_clipboard_size(size: usize, limit: usize, kind: &str) -> Result<usize, String> {
+    if size > limit {
+        return Err(format!(
+            "The clipboard {kind} exceeds the {} MiB import limit.",
+            limit / (1024 * 1024)
+        ));
+    }
+    Ok(size)
+}
+
+fn read_format(format: u32, limit: usize, kind: &str) -> Result<Option<Vec<u8>>, String> {
     if format == 0 || unsafe { IsClipboardFormatAvailable(format) }.is_err() {
-        return None;
+        return Ok(None);
     }
-    let handle = unsafe { GetClipboardData(format) }.ok()?;
+    let Ok(handle) = (unsafe { GetClipboardData(format) }) else {
+        return Ok(None);
+    };
     let block = HGLOBAL(handle.0);
-    let size = unsafe { GlobalSize(block) };
+    let size = checked_clipboard_size(unsafe { GlobalSize(block) }, limit, kind)?;
     if size == 0 {
-        return None;
+        return Ok(None);
     }
+    let mut out = Vec::new();
+    out.try_reserve_exact(size)
+        .map_err(|error| format!("Not enough memory to read clipboard {kind}: {error}"))?;
+    out.resize(size, 0);
     let ptr = unsafe { GlobalLock(block) };
     if ptr.is_null() {
-        return None;
+        return Ok(None);
     }
-    let mut out = vec![0u8; size];
     unsafe {
         std::ptr::copy_nonoverlapping(ptr as *const u8, out.as_mut_ptr(), size);
         // GlobalUnlock reports failure when the lock count reaches zero,
         // which is the expected outcome here.
         let _ = GlobalUnlock(block);
     }
-    Some(out)
+    Ok(Some(out))
 }
 
 /// A UTF-16 clipboard payload as a Rust string, stopping at the terminator.
@@ -121,6 +143,18 @@ fn utf16_payload(bytes: &[u8]) -> String {
         .take_while(|&u| u != 0)
         .collect();
     String::from_utf16_lossy(&units)
+}
+
+fn dib_dimensions(bytes: &[u8]) -> Result<(i32, i32), String> {
+    if bytes.len() < DIB_HEADER_BYTES {
+        return Err("The clipboard image is not a device-independent bitmap".to_string());
+    }
+    let width = i32::from_le_bytes(bytes[4..8].try_into().expect("four-byte width"));
+    let signed_height = i32::from_le_bytes(bytes[8..12].try_into().expect("four-byte height"));
+    let height = signed_height
+        .checked_abs()
+        .ok_or_else(|| "The clipboard image has an invalid height".to_string())?;
+    Ok((width, height))
 }
 
 /// `StartFragment`/`EndFragment` are byte offsets into the WHOLE `CF_HTML`
@@ -215,12 +249,46 @@ fn prune(dir: &std::path::Path) {
         let stale = entry
             .metadata()
             .and_then(|m| m.modified())
-            .map(|t| t.elapsed().map(|age| age > SCRATCH_MAX_AGE).unwrap_or(false))
+            .map(|t| {
+                t.elapsed()
+                    .map(|age| age > SCRATCH_MAX_AGE)
+                    .unwrap_or(false)
+            })
             .unwrap_or(false);
         if stale {
             let _ = std::fs::remove_file(entry.path());
         }
     }
+}
+
+fn create_scratch_candidate(candidate: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(candidate)?;
+    if let Err(error) = file.write_all(bytes) {
+        drop(file);
+        let _ = std::fs::remove_file(candidate);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn write_scratch_at(
+    dir: &std::path::Path,
+    extension: &str,
+    bytes: &[u8],
+    stamp: u128,
+) -> Result<String, String> {
+    for n in 0..1_000u32 {
+        let candidate = dir.join(format!("clipboard-{stamp}-{n}.{extension}"));
+        match create_scratch_candidate(&candidate, bytes) {
+            Ok(()) => return Ok(candidate.to_string_lossy().to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("Could not create the clipboard file: {error}")),
+        }
+    }
+    Err("could not allocate a clipboard scratch file".to_string())
 }
 
 fn write_scratch(extension: &str, bytes: &[u8]) -> Result<String, String> {
@@ -230,15 +298,7 @@ fn write_scratch(extension: &str, bytes: &[u8]) -> Result<String, String> {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    for n in 0..1_000u32 {
-        let candidate = dir.join(format!("clipboard-{stamp}-{n}.{extension}"));
-        if !candidate.exists() {
-            std::fs::write(&candidate, bytes)
-                .map_err(|e| format!("Could not write the clipboard file: {e}"))?;
-            return Ok(candidate.to_string_lossy().to_string());
-        }
-    }
-    Err("could not allocate a clipboard scratch file".to_string())
+    write_scratch_at(&dir, extension, bytes, stamp)
 }
 
 /// What the clipboard holds, as a file Create PDF accepts.
@@ -257,26 +317,30 @@ pub fn read_clipboard_source() -> Result<ClipboardSource, String> {
     let html_format = unsafe { RegisterClipboardFormatW(w!("HTML Format")) };
 
     open_clipboard()?;
-    let picked = (|| {
-        if let Some(bytes) = read_format(png_format) {
-            return Some(("png", "PNG", bytes));
+    let picked = (|| -> Result<Option<(&str, &str, Vec<u8>)>, String> {
+        if let Some(bytes) = read_format(png_format, MAX_CLIPBOARD_IMAGE_BYTES, "image")? {
+            return Ok(Some(("png", "PNG", bytes)));
         }
-        if let Some(bytes) = read_format(CF_DIB.0 as u32) {
-            return Some(("dib", "CF_DIB", bytes));
+        if let Some(bytes) = read_format(CF_DIB.0 as u32, MAX_CLIPBOARD_IMAGE_BYTES, "image")? {
+            return Ok(Some(("dib", "CF_DIB", bytes)));
         }
-        if let Some(bytes) = read_format(html_format) {
-            return Some(("html", "CF_HTML", bytes));
+        if let Some(bytes) = read_format(html_format, MAX_CLIPBOARD_TEXT_BYTES, "HTML")? {
+            return Ok(Some(("html", "CF_HTML", bytes)));
         }
-        if let Some(bytes) = read_format(CF_UNICODETEXT.0 as u32) {
-            return Some(("txt", "CF_UNICODETEXT", bytes));
+        if let Some(bytes) = read_format(
+            CF_UNICODETEXT.0 as u32,
+            MAX_CLIPBOARD_TEXT_BYTES,
+            "text",
+        )? {
+            return Ok(Some(("txt", "CF_UNICODETEXT", bytes)));
         }
-        None
+        Ok(None)
     })();
     unsafe {
         let _ = CloseClipboard();
     }
 
-    let Some((extension, format, raw)) = picked else {
+    let Some((extension, format, raw)) = picked? else {
         return Err(
             "The clipboard holds nothing Create PDF can use — copy an image, \
              formatted text or plain text first"
@@ -299,11 +363,7 @@ pub fn read_clipboard_source() -> Result<ClipboardSource, String> {
             })
         }
         "dib" => {
-            if raw.len() < DIB_HEADER_BYTES {
-                return Err("The clipboard image is not a device-independent bitmap".to_string());
-            }
-            let width = i32::from_le_bytes([raw[4], raw[5], raw[6], raw[7]]);
-            let height = i32::from_le_bytes([raw[8], raw[9], raw[10], raw[11]]);
+            let (width, height) = dib_dimensions(&raw)?;
             let path = write_scratch("dib", &raw)?;
             Ok(ClipboardSource {
                 path,
@@ -365,20 +425,128 @@ pub fn read_clipboard_source() -> Result<ClipboardSource, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{html_document, parse_cf_html, utf16_payload};
+    use super::{
+        checked_clipboard_size, dib_dimensions, html_document, parse_cf_html, utf16_payload,
+        create_scratch_candidate, write_scratch_at,
+    };
+    use std::sync::{mpsc, Arc, Barrier};
+
+    #[test]
+    fn clipboard_payload_sizes_stop_at_their_memory_bound() {
+        let limit = 16 * 1024 * 1024;
+        assert_eq!(checked_clipboard_size(limit, limit, "text").unwrap(), limit);
+        assert!(checked_clipboard_size(limit + 1, limit, "text")
+            .unwrap_err()
+            .contains("16 MiB"));
+    }
+
+    #[test]
+    fn simultaneous_scratch_writes_cannot_replace_one_another() {
+        let dir = tempfile::tempdir().unwrap();
+        let start = Arc::new(Barrier::new(3));
+        let (paths_tx, paths_rx) = mpsc::channel();
+        let workers: Vec<_> = [b"first".as_slice(), b"second".as_slice()]
+            .into_iter()
+            .map(|bytes| {
+                let dir = dir.path().to_path_buf();
+                let start = Arc::clone(&start);
+                let paths_tx = paths_tx.clone();
+                std::thread::spawn(move || {
+                    start.wait();
+                    let path = write_scratch_at(&dir, "txt", bytes, 7).unwrap();
+                    paths_tx.send((path, bytes.to_vec())).unwrap();
+                })
+            })
+            .collect();
+        start.wait();
+        drop(paths_tx);
+
+        let results: Vec<_> = paths_rx.into_iter().collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(results.len(), 2);
+        assert_ne!(results[0].0, results[1].0);
+        for (path, expected) in results {
+            assert_eq!(std::fs::read(path).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn a_scratch_candidate_is_created_by_only_one_concurrent_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let candidate = dir.path().join("clipboard-7-0.txt");
+        let start = Arc::new(Barrier::new(3));
+        let (result_tx, result_rx) = mpsc::channel();
+        let writers: Vec<_> = [b"first".as_slice(), b"second".as_slice()]
+            .into_iter()
+            .map(|bytes| {
+                let start = Arc::clone(&start);
+                let result_tx = result_tx.clone();
+                let candidate = candidate.clone();
+                std::thread::spawn(move || {
+                    start.wait();
+                    result_tx
+                        .send((create_scratch_candidate(&candidate, bytes), bytes.to_vec()))
+                        .unwrap();
+                })
+            })
+            .collect();
+        start.wait();
+        drop(result_tx);
+
+        let results: Vec<_> = result_rx.into_iter().collect();
+        for writer in writers {
+            writer.join().unwrap();
+        }
+        assert_eq!(results.len(), 2);
+        assert_eq!(results.iter().filter(|(result, _)| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter_map(|(result, _)| result.as_ref().err())
+                .next()
+                .unwrap()
+                .kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        let expected = results
+            .iter()
+            .find(|(result, _)| result.is_ok())
+            .unwrap()
+            .1
+            .clone();
+        assert_eq!(std::fs::read(candidate).unwrap(), expected);
+    }
+
+    #[test]
+    fn a_dib_height_that_cannot_be_made_positive_is_refused() {
+        let mut header = [0u8; 40];
+        header[4..8].copy_from_slice(&1i32.to_le_bytes());
+        header[8..12].copy_from_slice(&i32::MIN.to_le_bytes());
+        assert!(dib_dimensions(&header).is_err());
+
+        header[8..12].copy_from_slice(&(-12i32).to_le_bytes());
+        assert_eq!(dib_dimensions(&header).unwrap(), (1, 12));
+    }
 
     fn cf_html(fragment: &str, source: Option<&str>) -> String {
         // Build the payload the way a browser does: fixed-width offsets
         // computed over the finished bytes.
-        let mut header = String::from("Version:0.9\r\nStartFragment:0000000000\r\nEndFragment:0000000000\r\n");
+        let mut header =
+            String::from("Version:0.9\r\nStartFragment:0000000000\r\nEndFragment:0000000000\r\n");
         if let Some(url) = source {
             header.push_str(&format!("SourceURL:{url}\r\n"));
         }
-        let body = format!("<html><body><!--StartFragment-->{fragment}<!--EndFragment--></body></html>");
+        let body =
+            format!("<html><body><!--StartFragment-->{fragment}<!--EndFragment--></body></html>");
         let start = header.len() + body.find(fragment).unwrap();
         let end = start + fragment.len();
         let header = header
-            .replace("StartFragment:0000000000", &format!("StartFragment:{start:010}"))
+            .replace(
+                "StartFragment:0000000000",
+                &format!("StartFragment:{start:010}"),
+            )
             .replace("EndFragment:0000000000", &format!("EndFragment:{end:010}"));
         format!("{header}{body}")
     }
