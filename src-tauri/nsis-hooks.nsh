@@ -6,6 +6,39 @@
 
 !include "FileFunc.nsh"
 
+; ── Install-directory key adoption ──────────────────────────────────────
+; The template stores the install directory under Software\<publisher>\<product>
+; and reads it back to pick the upgrade target and to pass `_?=<dir>` to the
+; previous uninstaller. Builds without a configured publisher used the
+; identifier segment `spectrapdf`. When that key is the only one present, an
+; upgrade reads an empty directory: the previous uninstaller receives `_?=`
+; with no path, and a /D= location is lost, which leaves a second copy on disk.
+; SPECTRA_PRODUCT_KEY must equal Software\<bundle.publisher>\<productName>.
+!define SPECTRA_PRODUCT_KEY "Software\Jason Ulbright\Spectra PDF"
+!define SPECTRA_LEGACY_MANU_KEY "Software\spectrapdf"
+!define SPECTRA_LEGACY_PRODUCT_KEY "${SPECTRA_LEGACY_MANU_KEY}\Spectra PDF"
+
+!macro SPECTRA_ADOPT_LEGACY_INSTALL_DIR
+  ReadRegStr $R8 SHCTX "${SPECTRA_PRODUCT_KEY}" ""
+  ${If} $R8 == ""
+    ReadRegStr $R8 SHCTX "${SPECTRA_LEGACY_PRODUCT_KEY}" ""
+    ${If} $R8 != ""
+      WriteRegStr SHCTX "${SPECTRA_PRODUCT_KEY}" "" $R8
+      ; An explicit /D= outranks the recorded location.
+      ${If} $INSTDIR == "$PROGRAMFILES64\Spectra PDF"
+        StrCpy $INSTDIR $R8
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+; The legacy key is removed only after a completed install; a cancelled
+; upgrade leaves the previous installation's own record intact.
+!macro SPECTRA_DROP_LEGACY_INSTALL_DIR
+  DeleteRegKey SHCTX "${SPECTRA_LEGACY_PRODUCT_KEY}"
+  DeleteRegKey /ifempty SHCTX "${SPECTRA_LEGACY_MANU_KEY}"
+!macroend
+
 ; ── /? switch dialog ─────────────────────────────────────────────────────
 ; Show installer switches in a MessageBox when /? is passed.
 ; MUI_CUSTOMFUNCTION_GUIINIT tells MUI to call our function from its
@@ -50,9 +83,18 @@ Function SpectraPdfGuiInit
       Press Ctrl+C to copy this text."
     Quit
   _noHelp:
+  ; Runs after .onInit set the shell context and before the reinstall page
+  ; reads the install-directory key.
+  !insertmacro SPECTRA_ADOPT_LEGACY_INSTALL_DIR
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
+  ; /S shows no GUI, so the GUI-init adoption never ran.
+  ${If} ${Silent}
+    !insertmacro SPECTRA_ADOPT_LEGACY_INSTALL_DIR
+    SetOutPath $INSTDIR
+  ${EndIf}
+
   ; The interactive wizard's license page obtains acceptance before reaching
   ; this section. /S and /P skip that page, so unattended deployment must make
   ; the acceptance explicit. Refuse before the application or its ICC profiles
@@ -100,6 +142,8 @@ FunctionEnd
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
+  !insertmacro SPECTRA_DROP_LEGACY_INSTALL_DIR
+
   ; The install record. Its PRESENCE is how the application knows it was
   ; installed rather than unzipped -- the portable zip carries the same payload
   ; tree and cannot acquire this file, so the two containers are told apart
