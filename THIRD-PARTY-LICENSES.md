@@ -403,12 +403,18 @@ License text shipped at: `resources/fonts/LICENSE-Parisienne-OFL.txt`
 
 ### Bundled OCR runtime components
 
-`bundle-tesseract.ps1` ships `tesseract.exe` plus **every DLL beside it** — 50
-today — enumerated rather than hand-listed so the copy set cannot go stale when
-upstream changes its dependencies. The upstream installer supplies notices for
-only two of those 51 binaries. The rest were collected once from their
-canonical upstreams by `scripts/fetch-tesseract-licenses.ps1` — a maintenance
-tool run only when the pinned Tesseract build changes — reviewed, and checked
+`bundle-tesseract.ps1` ships `tesseract.exe` plus **the DLLs it loads** — the
+import closure of `tesseract.exe`, 24 today — computed from the import tables
+rather than hand-listed so the copy set cannot go stale when upstream changes
+its dependencies. The installer's other DLLs serve its training tools and do
+not ship. Eleven of the shipped libraries (libarchive, Expat, libpng, OpenJPEG,
+zlib, XZ Utils, Zstandard, LZ4, bzip2, libb2, libiconv) are replaced with
+released MSYS2 package builds, pinned by SHA-256 in `bundle-tesseract.ps1`;
+`scripts/tesseract-licenses.tsv` names the exact source archive of each. The
+upstream installer supplies notices for only two of those 25 binaries. The
+rest were collected once from their canonical upstreams by
+`scripts/fetch-tesseract-licenses.ps1` — a maintenance tool run only when the
+pinned Tesseract build changes — reviewed, and checked
 in at `scripts/tesseract-licenses/`, each file naming its source URL on its
 first line; the build copies them, offline, to
 **`resources/tesseract/licenses/`**. Git is the integrity record for those
@@ -420,10 +426,10 @@ The mapping from each shipped file to its component and notice is
 installer if any shipped binary lacks a row there or its notice file is
 absent** — so this list cannot silently drift from what is actually in the box.
 
-Several components are weak-copyleft (LGPL). They are listed here on exactly
-the same footing as the permissive ones, and each entry names the upstream its
-source comes from; each is a separate dynamically loaded DLL, so a recipient
-can substitute a modified build. Every DLL in this tree is a build of an MSYS2
+One component, GNU libiconv, is weak-copyleft (LGPL). It is listed here on
+exactly the same footing as the permissive ones, and its entry names the
+upstream its source comes from; it is a separate dynamically loaded DLL, so a
+recipient can substitute a modified build. Every DLL in this tree is a build of an MSYS2
 mingw-w64 package, and MSYS2 publishes both the build recipe and a per-version
 source package for each — `scripts/tesseract-licenses.tsv` records the recipe
 URL per binary. Their source is available under the written source offer above.
@@ -436,40 +442,23 @@ build refuses if any shipped binary references it. Nothing in this program can
 reach JBIG: TIFF compression 34661 is the only carrier, and the OCR engine is
 only ever handed a PNG this program rendered.
 
-- **Brotli** — MIT — <https://github.com/google/brotli> — `licenses/LICENSE-brotli.txt`
 - **bzip2** — bzip2-1.0.6 — <https://gitlab.com/bzip2/bzip2> — `licenses/LICENSE-bzip2.txt`
-- **Cairo** — LGPL-2.1-only OR MPL-1.1 — <https://gitlab.freedesktop.org/cairo/cairo> — `licenses/LICENSE-cairo.txt`
 - **Expat** — MIT — <https://github.com/libexpat/libexpat> — `licenses/LICENSE-expat.txt`
-- **fontconfig** — MIT — <https://gitlab.freedesktop.org/fontconfig/fontconfig> — `licenses/LICENSE-fontconfig.txt`
-- **FreeType** — FTL OR GPL-2.0-or-later — <https://gitlab.freedesktop.org/freetype/freetype> — `licenses/LICENSE-freetype.txt`
 - **GCC runtime library** (libgcc, libstdc++) — GPL-3.0-or-later WITH GCC-exception-3.1 — <https://gcc.gnu.org/> — `licenses/LICENSE-gcc-runtime.txt`
 - **giflib** — MIT — <https://sourceforge.net/projects/giflib/> — `licenses/LICENSE-giflib.txt`
-- **GLib** (glib, gio, gobject, gmodule) — LGPL-2.1-or-later — <https://gitlab.gnome.org/GNOME/glib> — `licenses/LICENSE-glib.txt`
-- **GNU FriBidi** — LGPL-2.1-or-later — <https://github.com/fribidi/fribidi> — `licenses/LICENSE-fribidi.txt`
-- **GNU gettext** (libintl) — LGPL-2.1-or-later — <https://savannah.gnu.org/projects/gettext/> — `licenses/LICENSE-gettext-runtime.txt`
 - **GNU libiconv** — LGPL-2.1-or-later — <https://savannah.gnu.org/projects/libiconv/> — `licenses/LICENSE-libiconv.txt`
-- **Graphite2** — LGPL-2.1-or-later OR MPL-2.0 OR GPL-2.0-or-later — <https://github.com/silnrsi/graphite> — `licenses/LICENSE-graphite2.txt`
-- **HarfBuzz** — MIT — <https://github.com/harfbuzz/harfbuzz> — `licenses/LICENSE-harfbuzz.txt`
-- **ICU** — Unicode-DFS-2016 — <https://github.com/unicode-org/icu> — `licenses/LICENSE-icu.txt`
 - **Leptonica** — BSD-2-Clause — <https://github.com/DanBloomberg/leptonica> — `licenses/LICENSE-leptonica.txt`
 - **LERC** — Apache-2.0 — <https://github.com/Esri/lerc> — `licenses/LICENSE-LERC.txt`
 - **libarchive** — BSD-2-Clause — <https://github.com/libarchive/libarchive> — `licenses/LICENSE-libarchive.txt`
 - **libb2 (BLAKE2)** — CC0-1.0 — <https://github.com/BLAKE2/libb2> — `licenses/LICENSE-libb2.txt`
-- **libdatrie** — LGPL-2.1-or-later — <https://github.com/tlwg/libdatrie> — `licenses/LICENSE-libdatrie.txt`
 - **libdeflate** — MIT — <https://github.com/ebiggers/libdeflate> — `licenses/LICENSE-libdeflate.txt`
-- **libffi** — MIT — <https://github.com/libffi/libffi> — `licenses/LICENSE-libffi.txt`
 - **libjpeg-turbo** — IJG AND BSD-3-Clause AND Zlib — <https://github.com/libjpeg-turbo/libjpeg-turbo> — `licenses/LICENSE-libjpeg-turbo.txt`
 - **libpng** — libpng-2.0 — <https://github.com/pnggroup/libpng> — `licenses/LICENSE-libpng.txt`
-- **libthai** — LGPL-2.1-or-later — <https://github.com/tlwg/libthai> — `licenses/LICENSE-libthai.txt`
 - **libtiff** (rebuilt without JBIG support) — libtiff — <https://gitlab.com/libtiff/libtiff> — `licenses/LICENSE-libtiff.txt`
 - **libwebp** (webp, webpmux, sharpyuv) — BSD-3-Clause — <https://github.com/webmproject/libwebp> — `licenses/LICENSE-libwebp.txt`
 - **LZ4** — BSD-2-Clause — <https://github.com/lz4/lz4> — `licenses/LICENSE-lz4.txt`
 - **mingw-w64** (winpthreads) — MIT AND Zope-2.1 — <https://www.mingw-w64.org/> — `licenses/LICENSE-mingw-w64.txt`
 - **OpenJPEG** — BSD-2-Clause — <https://github.com/uclouvain/openjpeg> — `licenses/LICENSE-openjpeg.txt`
-- **OpenSSL** — Apache-2.0 — <https://github.com/openssl/openssl> — `licenses/LICENSE-openssl.txt`
-- **Pango** (pango, pangocairo, pangoft2, pangowin32) — LGPL-2.1-or-later — <https://gitlab.gnome.org/GNOME/pango> — `licenses/LICENSE-pango.txt`
-- **PCRE2** — BSD-3-Clause — <https://github.com/PCRE2Project/pcre2> — `licenses/LICENSE-pcre2.txt`
-- **Pixman** — MIT — <https://gitlab.freedesktop.org/pixman/pixman> — `licenses/LICENSE-pixman.txt`
 - **XZ Utils** (liblzma) — 0BSD — <https://github.com/tukaani-project/xz> — `licenses/LICENSE-xz.txt`
 - **zlib** — Zlib — <https://github.com/madler/zlib> — `licenses/LICENSE-zlib.txt`
 - **Zstandard** — BSD-3-Clause OR GPL-2.0-only — <https://github.com/facebook/zstd> — `licenses/LICENSE-zstd.txt`

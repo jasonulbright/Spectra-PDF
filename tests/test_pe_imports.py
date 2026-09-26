@@ -138,3 +138,18 @@ def test_it_reads_the_runtime_dll_version_resource():
     assert info["ProductName"] == "Python"
     assert info["ProductVersion"].startswith("3.")
     assert info["FileVersion#"].startswith("3.")
+
+
+TESSERACT = REPO / "resources" / "tesseract"
+
+
+@pytest.mark.skipif(not (TESSERACT / "tesseract.exe").is_file(), reason="the OCR runtime is not provisioned")
+def test_the_ocr_tree_ships_only_the_import_closure_of_the_recognizer():
+    assert pe_imports.unreached(TESSERACT, ["tesseract.exe"]) == []
+    live = pe_imports.reached(TESSERACT, ["tesseract.exe"])
+    assert {"libtesseract-5.dll", "libleptonica-6.dll", "libpng16-16.dll"} <= live
+
+
+def test_a_missing_root_refuses(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        pe_imports.reached(tmp_path, ["absent.exe"])

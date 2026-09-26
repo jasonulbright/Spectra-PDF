@@ -59,6 +59,41 @@ if ($pthFile) {
     Write-Host "Enabled site-packages in $($pthFile.Name)"
 }
 
+# OpenSSL overlay. CPython 3.14.7 ships OpenSSL 3.5.7 as the unmodified
+# python/cpython-bin-deps drop (git blob identical). The same repository
+# publishes the 3.5.8 drop, signed by the same publisher and ABI-compatible
+# within 3.5.x; it replaces the two DLLs here. The overlay is bound to the
+# 3.14.7 pin: a later CPython carries its own OpenSSL, and an overlay left in
+# place could downgrade it, so any other pin refuses until this block is revisited.
+$OpenSslOverlay = @{
+    Pin  = "3.14.7"
+    Tag  = "openssl-bin-3.5.8"
+    Dlls = @{
+        "libcrypto-3.dll" = "acf285a10e428256dfefc489895fa104f3a49764a16c9a760748321397bab8e4"
+        "libssl-3.dll"    = "819b8cf3c984ab7465d32ebf85664ff66f1e74886cb1d3a6afa40dbd9cb245ba"
+    }
+}
+if ($PythonVersion -ne $OpenSslOverlay.Pin) {
+    throw "The OpenSSL overlay is bound to Python $($OpenSslOverlay.Pin); the pin is $PythonVersion. Remove or re-pin the overlay."
+}
+foreach ($name in $OpenSslOverlay.Dlls.Keys) {
+    $target = Join-Path $DestDir $name
+    $want = $OpenSslOverlay.Dlls[$name]
+    if ((Test-Path -LiteralPath $target) -and
+        (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() -eq $want) { continue }
+    $src = "https://raw.githubusercontent.com/python/cpython-bin-deps/$($OpenSslOverlay.Tag)/amd64/$name"
+    $staged = Join-Path $env:TEMP "spectrapdf-$($OpenSslOverlay.Tag)-$name"
+    Invoke-DownloadWithRetry -Description "$($OpenSslOverlay.Tag) $name" -OutFile $staged -Download {
+        Invoke-WebRequest -Uri $src -OutFile $staged -TimeoutSec $DownloadRetryTimeoutSeconds
+    }
+    $got = (Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($got -ne $want) { throw "$src has SHA-256 $got; pinned $want" }
+    Copy-Item -LiteralPath $staged -Destination $target -Force
+    Write-Host "Overlaid $name from $($OpenSslOverlay.Tag)"
+}
+& $DestDir\python.exe -I -c "import ssl, sys; sys.exit(0 if ssl.OPENSSL_VERSION.startswith('OpenSSL 3.5.8 ') else 1)"
+if ($LASTEXITCODE -ne 0) { throw "the embedded runtime does not report OpenSSL 3.5.8 after the overlay" }
+
 Write-Host "Installing pinned pip..."
 Install-PinnedPip -Python "$DestDir\python.exe"
 
@@ -163,6 +198,15 @@ foreach ($di in (Get-ChildItem $DestDir -Recurse -Directory -Filter "*.dist-info
 }
 Get-ChildItem $DestDir -Recurse -Directory -Filter "tests" | Remove-Item -Recurse -Force
 Remove-Item "$DestDir\Scripts" -Recurse -Force -ErrorAction SilentlyContinue
+# SQLite: no engine module and no installed package imports sqlite3, so the
+# extension module and the library it loads do not ship. Importing sqlite3
+# raises ImportError instead of loading an unused, scanner-visible SQLite.
+foreach ($unused in @("_sqlite3.pyd", "sqlite3.dll")) {
+    Remove-Item (Join-Path $DestDir $unused) -Force -ErrorAction SilentlyContinue
+}
+# Exit 3 only when _sqlite3 is absent; any other failure is a broken runtime.
+& $DestDir\python.exe -I -c "import importlib.util, sys; sys.exit(3 if importlib.util.find_spec('_sqlite3') is None else 0)" 2>$null
+if ($LASTEXITCODE -ne 3) { throw "_sqlite3 is still importable after the SQLite removal, or the runtime failed (exit $LASTEXITCODE)" }
 
 $sizeMB = [math]::Round(((Get-ChildItem $DestDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
 Write-Host "Done. Embedded Python: ${sizeMB}MB"

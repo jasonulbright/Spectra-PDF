@@ -11,6 +11,11 @@ the embedded runtime, which carries no third-party parser.
 prints one JSON object keyed by path, each value
 {"imports": [dll, ...], "delay_imports": [dll, ...]}. A directory argument
 contributes every *.dll and *.pyd beneath it.
+
+    python scripts/pe_imports.py --unreached <directory> <root.exe> ...
+
+prints a JSON list of the *.dll files directly in <directory> that no root
+reaches through static or delay-load imports.
 """
 
 from __future__ import annotations
@@ -251,7 +256,41 @@ def binaries(paths: list[str]) -> list[Path]:
     return out
 
 
+def reached(directory: str | Path, roots: list[str]) -> set[str]:
+    """Lower-cased names of the files in `directory` the roots load, roots included.
+
+    The walk follows static and delay-load imports to files present directly
+    in `directory`; a DLL resolved from the system directory ends the walk.
+    """
+    here = {p.name.lower(): p for p in Path(directory).iterdir()
+            if p.is_file() and p.suffix.lower() in (".dll", ".exe")}
+    seen: set[str] = set()
+    stack = [r.lower() for r in roots]
+    while stack:
+        name = stack.pop()
+        if name in seen or name not in here:
+            continue
+        seen.add(name)
+        path = here[name]
+        stack.extend(d.lower() for d in (*imports(path), *delay_imports(path)))
+    missing = [r for r in roots if r.lower() not in here]
+    if missing:
+        raise FileNotFoundError(f"root not present in {directory}: {', '.join(missing)}")
+    return seen
+
+
+def unreached(directory: str | Path, roots: list[str]) -> list[str]:
+    """Names of the *.dll files directly in `directory` that no root loads."""
+    live = reached(directory, roots)
+    return sorted(p.name for p in Path(directory).iterdir()
+                  if p.is_file() and p.suffix.lower() == ".dll" and p.name.lower() not in live)
+
+
 def main(argv: list[str]) -> int:
+    if argv[:1] == ["--unreached"] and len(argv) >= 3:
+        json.dump(unreached(argv[1], argv[2:]), sys.stdout)
+        sys.stdout.write("\n")
+        return 0
     if not argv:
         print(__doc__, file=sys.stderr)
         return 2

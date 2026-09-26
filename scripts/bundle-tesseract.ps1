@@ -39,7 +39,32 @@ $ExpectedSha256 = "C885FFF6998E0608BA4BB8AB51436E1C6775C2BAFC2559A19B423E18678B6
 # deliberately, from what build-libtiff-nojbig.ps1 prints.
 $LibTiffSrc = Join-Path $PSScriptRoot "tesseract-libtiff\libtiff-6.dll"
 . (Join-Path $PSScriptRoot "download-retry.ps1")
-$ExpectedLibTiffSha256 = "AA79B1C2EC7FD815325C94A5E97BC904A962D9A40E55C74EB06A804AD7D756D8"
+$ExpectedLibTiffSha256 = "5FA8372AA46CE25CEA6035C1201F00D55A9C9E2A49FD69AE202A403D6D1F4010"
+
+# ---------------------------------------------------------------------------
+# The library overlay. tesseract.exe stays the pinned 5.4.0 build; the
+# libraries it loads are replaced with released MSYS2 packages that close
+# published advisories against the installer's 2024 copies. Each package is
+# pinned by the SHA-256 that MSYS2's mingw64.db publishes (%SHA256SUM%), and
+# each extracted DLL by its own SHA-256, so a re-vendor reproduces the same
+# bytes. Same DLL names, same msvcrt CRT; every imported symbol resolves
+# against the runtime DLLs already in the tree (checked when the table
+# changes). libtiff is not here: it is the checked-in JBIG-free rebuild above.
+# ---------------------------------------------------------------------------
+$Msys2Repo = "https://repo.msys2.org/mingw/mingw64"
+$Overlay = @(
+    @{ Dll = "libarchive-13.dll"; Pkg = "mingw-w64-x86_64-libarchive-3.8.9-6-any.pkg.tar.zst"; PkgSha = "591e1e7fb90adc7503bf0edb59e1f6c98d9ffce76b9568a554ccdfe1ed0e4380"; DllSha = "e4fcffb9e10cac802d01831b5a978b6dc662d576fa03351efdfc72ba8c99d6e4" }
+    @{ Dll = "libexpat-1.dll";    Pkg = "mingw-w64-x86_64-expat-2.8.5-1-any.pkg.tar.zst";      PkgSha = "254d05d2e89acbbb998636dd478fc1d640ce3ec4e63326f17398958d2b68dfeb"; DllSha = "a79b7025c3fdccb6fe38fb560f3b6cfa75c26750052cf6de307816fb7c22faa0" }
+    @{ Dll = "libpng16-16.dll";   Pkg = "mingw-w64-x86_64-libpng-1.6.58-1-any.pkg.tar.zst";     PkgSha = "d8ae6066f99b3a04b83b8013b554a26a205d7e68580b80823c173ed045ba76a5"; DllSha = "3737838ee8d6b893df7bdabf7439775371a57dce7e17ee6b35586023c64bd9ab" }
+    @{ Dll = "libopenjp2-7.dll";  Pkg = "mingw-w64-x86_64-openjpeg2-2.5.4-2-any.pkg.tar.zst";   PkgSha = "32f8f5dc7df9f1f2d57157717136fbba431e15bc000420c953c00ffdf76ecde4"; DllSha = "123587086cb1a25d2a338fb9b7c1d6bda10bf9062625b4f08c6a92b3d9cafe47" }
+    @{ Dll = "zlib1.dll";         Pkg = "mingw-w64-x86_64-zlib-1.3.2-2-any.pkg.tar.zst";         PkgSha = "9e75842a070ba648e986e12424e1c92c9d7d77200e85f6a34eeb600819f2e694"; DllSha = "93e9243a44c29200eeacaf9658efe2558581770e4b11ca4b500e18e424a6e3b5" }
+    @{ Dll = "liblzma-5.dll";     Pkg = "mingw-w64-x86_64-xz-5.8.4-1-any.pkg.tar.zst";           PkgSha = "2de0f26da60b7ff7aa192a226330d7de6b1099cb9b9f9de4145affb80146bbc8"; DllSha = "ccb6a179acf35e704b2ffd7f232677982c4856bd1dda1341713a27518cf97ce1" }
+    @{ Dll = "libzstd.dll";       Pkg = "mingw-w64-x86_64-zstd-1.5.7-2-any.pkg.tar.zst";         PkgSha = "1add6705b344664f6aca108c85f79ab5bdd9e1162662bb06a4cf40a34f6e0907"; DllSha = "b95c223a9548a9ecf51377c962e0bc8f0c51eb0c6f67a296dbc885996f0dd40d" }
+    @{ Dll = "liblz4.dll";        Pkg = "mingw-w64-x86_64-lz4-1.10.0-1-any.pkg.tar.zst";         PkgSha = "a4c5a3bcd26111554c87591275b8a681bfa4473d1607647e24c22ef6213c055c"; DllSha = "35f917274bca8f19677ba66f1b3cc3c83568c3249fc43215fc16e76439c8e856" }
+    @{ Dll = "libbz2-1.dll";      Pkg = "mingw-w64-x86_64-bzip2-1.0.8-4-any.pkg.tar.zst";        PkgSha = "123768f30ae14ba654a6feb70f8526146a331bc85f831a91a549ffb3f6cbffc7"; DllSha = "a4fbb97c26662d2b8a80bf4597ed3effb69b12048b0cb1eef2c3f211e2e66673" }
+    @{ Dll = "libb2-1.dll";       Pkg = "mingw-w64-x86_64-libb2-0.98.1-3-any.pkg.tar.zst";       PkgSha = "3c898f08c5f19e25dc6d7e39aa36b6f323141f0e62c5c50f089cd3f89711854c"; DllSha = "77bab532b5421d6cdddb96c3ae9a4bde144eb481ccaf243336c9f8c690a50987" }
+    @{ Dll = "libiconv-2.dll";    Pkg = "mingw-w64-x86_64-libiconv-1.19-1-any.pkg.tar.zst";      PkgSha = "21e334d0911f25de75d3e18e0697648bcecfa9658256d600cad0827d719c2f35"; DllSha = "7a282a854e01be726c6cccfe46f548c716aa45b3014818468253aaa4efbcd067" }
+)
 
 # Ordered installer sources, tried in turn. The project-hosted mirror carries the
 # same bytes as the upstream build and is the only source: the upstream host is
@@ -127,6 +152,26 @@ function Get-JbigProblems {
     return $problems
 }
 
+# ---------------------------------------------------------------------------
+# The load gate. The installer carries the training tools' dependencies (GLib,
+# Pango, Cairo, ICU, HarfBuzz, ...) beside tesseract.exe; the recognizer never
+# loads them. Only the import closure of tesseract.exe ships: a DLL outside it
+# is a scanner-visible version with no caller. Same both-paths rule as the
+# gates above. Runs scripts/pe_imports.py under the embedded runtime, which
+# setup-python-embed.ps1 provisions before this script.
+# ---------------------------------------------------------------------------
+$EmbeddedPython = Join-Path $PSScriptRoot "..\resources\python\python.exe"
+function Get-UnreachedDlls {
+    param([string]$Root)
+    if (-not (Test-Path $EmbeddedPython)) {
+        throw "Embedded runtime missing at $EmbeddedPython -- run setup-python-embed.ps1 first."
+    }
+    $json = & $EmbeddedPython (Join-Path $PSScriptRoot "pe_imports.py") --unreached $Root "tesseract.exe"
+    if ($LASTEXITCODE -ne 0) { throw "import closure of $Root failed" }
+    # Windows PowerShell emits a JSON array as ONE object; the ForEach unrolls it.
+    return @((($json | Out-String) | ConvertFrom-Json) | ForEach-Object { $_ })
+}
+
 $tessExe = Join-Path $DestDir "tesseract.exe"
 if ((-not $DownloadOnly) -and (Test-Path $tessExe)) {
     $current = (& $tessExe --version 2>$null | Select-Object -First 1)
@@ -139,11 +184,20 @@ if ((-not $DownloadOnly) -and (Test-Path $tessExe)) {
     $hasNotices = $noticeProblems.Count -eq 0
     $jbigProblems = @(Get-JbigProblems -Root $DestDir)
     $noJbig = $jbigProblems.Count -eq 0
-    if ($current -eq "tesseract v$TessVersion" -and $hasTsv -and $hasModel -and $hasNotices -and $noJbig) {
+    $unreachedDlls = @(Get-UnreachedDlls -Root $DestDir)
+    $closed = $unreachedDlls.Count -eq 0
+    $stale = @($Overlay | Where-Object {
+        $f = Join-Path $DestDir $_.Dll
+        -not (Test-Path $f) -or (Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant() -ne $_.DllSha
+    })
+    $tiff = Join-Path $DestDir "libtiff-6.dll"
+    $overlaid = ($stale.Count -eq 0) -and (Test-Path $tiff) -and
+        ((Get-FileHash $tiff -Algorithm SHA256).Hash -eq $ExpectedLibTiffSha256)
+    if ($current -eq "tesseract v$TessVersion" -and $hasTsv -and $hasModel -and $hasNotices -and $noJbig -and $closed -and $overlaid) {
         Write-Host "Tesseract $TessVersion already vendored at $DestDir (notices complete, JBIG-free)"
         return
     }
-    Write-Host "Re-vendoring: existing tree is incomplete (tsv=$hasTsv models=$hasModel notices=$hasNotices nojbig=$noJbig)"
+    Write-Host "Re-vendoring: existing tree is incomplete (tsv=$hasTsv models=$hasModel notices=$hasNotices nojbig=$noJbig closed=$closed overlaid=$overlaid)"
     if (-not $hasNotices) {
         $noticeProblems | Select-Object -First 5 | ForEach-Object { Write-Host $_ }
     }
@@ -168,6 +222,14 @@ if (-not $SevenZip -and -not $DownloadOnly) {
 $Work = Join-Path $env:TEMP "tesseract-vendor-$TessVersion"
 $Installer = Join-Path $Work "installer.exe"
 $Extracted = Join-Path $Work "extracted"
+# A run that failed after stashing tessdata left the staged models in $Work;
+# clearing $Work first would delete them.
+$OrphanStash = Join-Path $Work "tessdata-stash"
+if ((Test-Path $OrphanStash) -and -not (Test-Path (Join-Path $DestDir "tessdata"))) {
+    New-Item -ItemType Directory -Force $DestDir | Out-Null
+    Move-Item $OrphanStash (Join-Path $DestDir "tessdata")
+    Write-Host "  Restored tessdata/ stashed by an interrupted run"
+}
 Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $Work | Out-Null
 
@@ -276,6 +338,37 @@ if ($libTiffSha -ne $ExpectedLibTiffSha256) {
 Copy-Item $LibTiffSrc -Destination (Join-Path $DestDir "libtiff-6.dll") -Force
 Write-Host "  Installed the JBIG-free libtiff-6.dll ($ExpectedLibTiffSha256)"
 Remove-Item (Join-Path $DestDir "libjbig-0.dll") -Force -ErrorAction SilentlyContinue
+$PkgCache = Join-Path $env:TEMP "spectrapdf-msys2-packages"
+New-Item -ItemType Directory -Force $PkgCache | Out-Null
+foreach ($o in $Overlay) {
+    $archive = Join-Path $PkgCache $o.Pkg
+    $cached = (Test-Path $archive) -and ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -eq $o.PkgSha)
+    if (-not $cached) {
+        $url = "$Msys2Repo/$($o.Pkg)"
+        Invoke-DownloadWithRetry -Description $url -OutFile $archive -Download {
+            Invoke-WebRequest -Uri $url -OutFile $archive -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" `
+                -TimeoutSec $DownloadRetryTimeoutSeconds
+        }
+    }
+    $target = Join-Path $DestDir $o.Dll
+    & $EmbeddedPython (Join-Path $PSScriptRoot "msys2_package.py") $archive $o.PkgSha "mingw64/bin/$($o.Dll)" $target
+    if ($LASTEXITCODE -ne 0) { Write-Error "Overlay of $($o.Dll) from $($o.Pkg) failed."; exit 1 }
+    $got = (Get-FileHash $target -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($got -ne $o.DllSha) { Write-Error "$($o.Dll) from $($o.Pkg) has SHA-256 $got; pinned $($o.DllSha)"; exit 1 }
+}
+Write-Host "  Overlaid $($Overlay.Count) libraries from pinned MSYS2 packages"
+& (Join-Path $DestDir "tesseract.exe") --version *> $null
+if ($LASTEXITCODE -ne 0) { Write-Error "tesseract.exe does not start with the overlaid libraries."; exit 1 }
+
+$dropped = @(Get-UnreachedDlls -Root $DestDir)
+foreach ($name in $dropped) { Remove-Item (Join-Path $DestDir $name) -Force }
+Write-Host "  Dropped $($dropped.Count) DLLs outside the import closure of tesseract.exe"
+if (@(Get-UnreachedDlls -Root $DestDir).Count -ne 0) {
+    Write-Error "Load gate FAILED -- a DLL outside the import closure of tesseract.exe survived."
+    exit 1
+}
+& (Join-Path $DestDir "tesseract.exe") --version *> $null
+if ($LASTEXITCODE -ne 0) { Write-Error "tesseract.exe does not start after the closure prune."; exit 1 }
 $jbigProblems = @(Get-JbigProblems -Root $DestDir)
 if ($jbigProblems) {
     Write-Error ("JBIG gate FAILED -- refusing to ship:`n" + ($jbigProblems -join "`n"))
@@ -365,7 +458,17 @@ if (-not (Test-Path $LicenseSrc)) {
     exit 1
 }
 New-Item -ItemType Directory -Force $LicenseDir | Out-Null
-Copy-Item (Join-Path $LicenseSrc "*.txt") -Destination $LicenseDir -Force
+# Only the notices a shipped binary's manifest row names: the store also holds
+# texts for installer DLLs outside the import closure, which do not ship.
+$named = @(Get-Content (Join-Path $PSScriptRoot "tesseract-licenses.tsv") |
+    Where-Object { $_ -and $_ -notmatch '^\s*#' } | Select-Object -Skip 1 |
+    ForEach-Object { ($_ -split "`t")[3].Trim() } |
+    Where-Object { $_ -and $_ -ne "LICENSE-Tesseract.txt" } | Sort-Object -Unique)
+foreach ($notice in $named) {
+    $src = Join-Path $LicenseSrc $notice
+    if (-not (Test-Path $src)) { Write-Error "Licence store lacks $notice"; exit 1 }
+    Copy-Item $src -Destination $LicenseDir -Force
+}
 $copied = @(Get-ChildItem $LicenseDir -Filter *.txt -File).Count
 Write-Host "  Copied $copied third-party licence texts (offline, from the checked-in store)"
 

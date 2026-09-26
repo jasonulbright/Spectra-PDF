@@ -76,3 +76,54 @@ def test_override_cannot_bypass_the_checksum_pin(tmp_path: Path) -> None:
     )
     assert proc.returncode == 1
     assert "Checksum mismatch" in proc.stdout + proc.stderr
+
+
+def _overlay_rows() -> list[dict[str, str]]:
+    import re
+
+    body = TEXT[TEXT.index("$Overlay = @(") : TEXT.index("$PkgCache")]
+    return [
+        dict(re.findall(r'(\w+) = "([^"]*)"', line))
+        for line in body.splitlines()
+        if line.strip().startswith("@{")
+    ]
+
+
+def test_every_overlay_row_pins_the_package_and_the_extracted_dll() -> None:
+    import re
+
+    rows = _overlay_rows()
+    assert {r["Dll"] for r in rows} >= {"libarchive-13.dll", "libexpat-1.dll", "libpng16-16.dll", "zlib1.dll"}
+    for r in rows:
+        assert re.fullmatch(r"mingw-w64-x86_64-[\w.+-]+-any\.pkg\.tar\.zst", r["Pkg"])
+        assert re.fullmatch(r"[0-9a-f]{64}", r["PkgSha"]) and re.fullmatch(r"[0-9a-f]{64}", r["DllSha"])
+    assert len({r["Dll"] for r in rows}) == len(rows)
+
+
+def test_the_overlay_is_applied_after_the_jbig_swap_and_before_the_closure_prune() -> None:
+    swap = TEXT.index('Copy-Item $LibTiffSrc -Destination (Join-Path $DestDir "libtiff-6.dll")')
+    apply = TEXT.index("foreach ($o in $Overlay)")
+    prune = TEXT.index("$dropped = @(Get-UnreachedDlls -Root $DestDir)")
+    assert swap < apply < prune
+    assert "tesseract.exe does not start with the overlaid libraries" in TEXT
+
+
+def test_every_overlaid_dll_names_its_exact_source_archive() -> None:
+    manifest = (ROOT / "scripts" / "tesseract-licenses.tsv").read_text(encoding="utf-8")
+    srcpkg = {c[0]: c[5] for c in (l.split("\t") for l in manifest.splitlines()) if len(c) >= 6}
+    for r in _overlay_rows():
+        stem = r["Pkg"].removesuffix("-any.pkg.tar.zst").replace("mingw-w64-x86_64-", "mingw-w64-", 1)
+        assert srcpkg[r["Dll"]] == f"https://mirror.msys2.org/mingw/sources/{stem}.src.tar.zst"
+
+
+def test_the_package_extractor_refuses_an_archive_off_its_pin(tmp_path: Path) -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("msys2_package", ROOT / "scripts" / "msys2_package.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    archive = tmp_path / "x.pkg.tar.zst"
+    archive.write_bytes(b"not an archive")
+    with pytest.raises(ValueError):
+        mod.extract(archive, "0" * 64, "mingw64/bin/x.dll", tmp_path / "x.dll")
+    assert not (tmp_path / "x.dll").exists()
