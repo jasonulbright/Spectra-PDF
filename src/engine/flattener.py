@@ -30,6 +30,7 @@ import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from . import budget
 from .content_walk import (
@@ -982,7 +983,7 @@ def list_transparency(
     validate_pdf(file)
     dpi = max(1, int(dpi))
     report: list[dict] = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for number in _page_numbers(pdf, pages):
             page = pdf.pages[number - 1]
             try:
@@ -1225,7 +1226,7 @@ def flatten_transparency(
     report: list[dict] = []
     try:
         with contextlib.ExitStack() as stack:
-            pdf = stack.enter_context(pikepdf.open(file))
+            pdf = stack.enter_context(open_pdf(file))
             numbers = _page_numbers(pdf, pages)
             for number in numbers:
                 page = pdf.pages[number - 1]
@@ -1271,7 +1272,7 @@ def flatten_transparency(
                     raster = work / f"raster-{number}-{ordinal}.pdf"
                     _rasterize_region(source, raster, dpi, gs_path,
                                       f"Transparency flattening (page {number})")
-                    raster_pdf = stack.enter_context(pikepdf.open(raster))
+                    raster_pdf = stack.enter_context(open_pdf(raster))
                     rasters.append((f"/FlatR{ordinal}", _xobject_for(pdf, raster_pdf, 0, {})))
                 _prune_resources(pdf, page, kept, {name for name, _ in rasters})
                 resources = page.obj["/Resources"]

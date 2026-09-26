@@ -39,6 +39,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name
 
 from engine.incremental import signature_policy, signed_edit_decision
@@ -287,7 +288,7 @@ def tag_page_content(
 
     output_path = Path(output)
     same_file = is_same_file(file, output)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         page_no = int(page)
         if not 1 <= page_no <= total:

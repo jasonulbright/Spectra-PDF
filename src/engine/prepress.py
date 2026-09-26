@@ -21,6 +21,7 @@ import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
 from . import budget, icc_profiles, standards_report
@@ -343,7 +344,7 @@ def _stage_carve_out(source: Path, scratch: Path, annotations: bool,
     """
     from .ink_manager import _content_owners
 
-    with pikepdf.open(str(source)) as pdf:
+    with open_pdf(str(source)) as pdf:
         targets, rasterized = _carve_targets(pdf, annotations)
         staged = _apply_staging(pdf, targets)
         rasterized.update(name for item in targets if item.ident not in staged
@@ -456,12 +457,12 @@ def _restore_carve_out(output: Path, source: Path, idents: set,
     swapped: set = set()
     if not idents:
         return swapped
-    with pikepdf.open(str(source)) as src:
+    with open_pdf(str(source)) as src:
         targets, _rasterized = _carve_targets(src, annotations)
         by_ident = {item.ident: item for item in targets if item.ident in idents}
         if set(by_ident) != set(idents):
             return swapped
-        with pikepdf.open(str(output), allow_overwriting_input=True) as converted:
+        with open_pdf(str(output), allow_overwriting_input=True) as converted:
             for item in by_ident.values():
                 item.colorspace = converted.copy_foreign(item.colorspace)
                 item.function = converted.copy_foreign(item.function)
@@ -586,7 +587,7 @@ def _appearance_streams(pdf) -> list:
 
 def _rebase_appearances(output: Path) -> None:
     """Re-express every pattern-painting appearance in the page's own space."""
-    with pikepdf.open(str(output), allow_overwriting_input=True) as pdf:
+    with open_pdf(str(output), allow_overwriting_input=True) as pdf:
         rebased = False
         for stream, rect in _appearance_streams(pdf):
             if not _paints_through_pattern(stream):
@@ -1014,7 +1015,7 @@ def convert_pdfx(
             ] + report["altered"]
 
             # The claim is checkable — check it (never ship a silent non-conformance).
-            with pikepdf.open(target) as pdf:
+            with open_pdf(target) as pdf:
                 intents = pdf.Root.get("/OutputIntents")
                 if intents is None or len(intents) == 0:
                     raise RuntimeError("PDF/X output carries no /OutputIntents — conversion failed.")

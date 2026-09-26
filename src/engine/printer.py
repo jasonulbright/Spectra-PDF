@@ -51,6 +51,7 @@ import time
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from . import gs_capability
 from .print_layout import (
@@ -432,7 +433,7 @@ def print_pdf(
     if not _preview and not printer_exists(printer):
         raise ValueError(f"Unknown printer: '{printer}'")
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         page_count = len(pdf.pages)
     page_list = parse_page_spec(pages, page_count)
 
@@ -657,7 +658,7 @@ def print_pdf(
                 return _emit_preview(current, final_fit, spec, total)
 
             if uncollated_dup:
-                with pikepdf.open(current) as prepared:
+                with open_pdf(current) as prepared:
                     n_prepared = len(prepared.pages)
                 dup_order = [p for p in range(n_prepared) for _ in range(copies)]
                 dup = str(tdp / "uncollated.pdf")

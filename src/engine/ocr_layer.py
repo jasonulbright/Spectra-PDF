@@ -30,6 +30,7 @@ import stat
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
 from engine.inplace import is_same_file, staged_write
@@ -112,7 +113,7 @@ def apply_ocr_layer(file: str, output: str, pages: list[dict]) -> dict:
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         # Validate EVERYTHING before mutating anything.
         problems: list[str] = []

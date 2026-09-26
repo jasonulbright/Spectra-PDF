@@ -34,6 +34,7 @@ from collections import Counter
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from .pdf_tree import key_text, name_label, token_text
 
@@ -345,7 +346,7 @@ def census(path: str | Path) -> _Facts:
     """Every structural fact the comparison needs, read from one document."""
     facts = _Facts()
     try:
-        pdf = pikepdf.open(str(path))
+        pdf = open_pdf(str(path))
     except Exception as exc:  # noqa: BLE001
         facts.unreadable(FACT_NAMES, f"{type(exc).__name__}: {exc}")
         return facts
@@ -616,7 +617,7 @@ def declared_pdfa(path: str | Path) -> str:
     a file that declares a level may still fail validation against it.
     """
     try:
-        with pikepdf.open(str(path)) as pdf:
+        with open_pdf(str(path)) as pdf:
             with pdf.open_metadata() as meta:
                 part = str(meta.get("pdfaid:part", "")).strip()
                 conformance = str(meta.get("pdfaid:conformance", "")).strip()

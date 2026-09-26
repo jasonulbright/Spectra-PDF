@@ -23,6 +23,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Name
 
 from engine import distill as distill_mod
@@ -30,7 +31,7 @@ from engine import gs_capability
 from engine import merge as merge_mod
 from engine import soffice as soffice_mod
 from engine.page_copy import copy_pages_with_forms
-from engine.pdf_save import save_pdf
+from engine.pdf_save import refuse_user_opened_source, save_pdf
 from engine.split import parse_ranges
 
 # Accepted raster formats. Bundled Pillow decodes WEBP, JPEG 2000, AVIF, GIF,
@@ -257,7 +258,7 @@ def image_xobject(pdf, frame, *, jpeg: bytes | None = None, adobe: bool = False,
     elif mode == "1":
         buf = io.BytesIO()
         frame.save(buf, "PDF", resolution=72.0)
-        with pikepdf.open(io.BytesIO(buf.getvalue())) as wrapper:
+        with open_pdf(io.BytesIO(buf.getvalue())) as wrapper:
             xobjects = wrapper.pages[0].obj.Resources.XObject
             source = xobjects[list(xobjects.keys())[0]]
             image = pdf.make_stream(source.read_raw_bytes())
@@ -550,7 +551,7 @@ def _apply_page_size(path: Path, page_size: str, orientation: str, margin: float
     """Apply sizing once to the assembled document."""
     if page_size == "auto" and orientation == "auto":
         return
-    with pikepdf.open(str(path), allow_overwriting_input=True) as pdf:
+    with open_pdf(str(path), allow_overwriting_input=True) as pdf:
         if len(pdf.pages) == 0:
             return
         first_displayed = _displayed(pdf.pages[0])
@@ -598,7 +599,8 @@ def _subset(src: Path, dest: Path, spec: str, label: str) -> int:
             f"the page range {spec!r} for {label} is not a list of pages or "
             f"ranges like '1-3,5'"
         )
-    with pikepdf.open(str(src)) as pdf, pikepdf.Pdf.new() as out:
+    with open_pdf(str(src)) as pdf, pikepdf.Pdf.new() as out:
+        refuse_user_opened_source(pdf)
         indices = parse_ranges(str(spec), len(pdf.pages))
         if not indices:
             raise ValueError(
@@ -657,7 +659,7 @@ def _convert_one(
 
     row: dict = {"path": str(path), "kind": detected}
     if detected == _KIND_PDF:
-        with pikepdf.open(str(path)) as pdf:
+        with open_pdf(str(path)) as pdf:
             row["pages"] = len(pdf.pages)
         row["converter"] = "passthrough"
         row["_file"] = str(path)
@@ -806,7 +808,7 @@ def create_pdf(
         merged = merge_mod.merge(parts, str(output_path))
         _apply_page_size(output_path, page_size, orientation, margin)
 
-        with pikepdf.open(str(output_path)) as pdf:
+        with open_pdf(str(output_path)) as pdf:
             pages = len(pdf.pages)
         if pages == 0:
             # The zero-page invariant holds at the builder as well as at the

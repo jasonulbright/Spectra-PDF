@@ -48,6 +48,7 @@ import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from . import budget
 from .color_spaces import build_resolver
@@ -1089,7 +1090,7 @@ def inspect_point(
     page = int(page)
     x = float(x)
     y = float(y)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         if not 1 <= page <= total:
             raise ValueError(f"Page {page} is not in this document.")

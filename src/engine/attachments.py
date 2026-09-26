@@ -11,13 +11,14 @@ import mimetypes
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 
 def list_attachments(file: str) -> dict:
     """Every embedded file: name, byte size, description, and MIME type."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         out = []
         for name in pdf.attachments.keys():
             spec = pdf.attachments[name]
@@ -65,7 +66,7 @@ def add_attachment(
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if attach_name in pdf.attachments:
             raise ValueError(f"an attachment named {attach_name!r} already exists")
         spec = pikepdf.AttachedFileSpec(
@@ -79,7 +80,7 @@ def add_attachment(
 
 def extract_attachment(file: str, name: str, output: str) -> dict:
     """Write an embedded file out to `output` on disk."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if name not in pdf.attachments:
             raise ValueError(f"no attachment named {name!r}")
         data = pdf.attachments[name].get_file().read_bytes()
@@ -93,7 +94,7 @@ def remove_attachment(file: str, output: str, name: str) -> dict:
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if name not in pdf.attachments:
             raise ValueError(f"no attachment named {name!r}")
         del pdf.attachments[name]

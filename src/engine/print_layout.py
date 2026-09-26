@@ -34,6 +34,7 @@ import subprocess
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from engine import gs_capability
 from engine.pdf_save import save_pdf
 
@@ -247,7 +248,7 @@ def _page_rotate(page) -> int:
 def page_geometry(path: str) -> list[dict]:
     """[{w, h, rotate, display_landscape}] per page (crop-effective)."""
     out = []
-    with pikepdf.open(path) as pdf:
+    with open_pdf(path) as pdf:
         for page in pdf.pages:
             _, _, w, h = _crop_box(page)
             rot = _page_rotate(page)
@@ -262,7 +263,7 @@ def strip_annotations(src: str, dst: str, mode: str) -> int:
     not being in any keep set."""
     keep = ANNOT_KEEP[mode]
     removed = 0
-    with pikepdf.open(src) as pdf:
+    with open_pdf(src) as pdf:
         for page in pdf.pages:
             annots = page.obj.get("/Annots")
             if annots is None:
@@ -303,7 +304,7 @@ def build_sequence(
     probe-pinned). Safe after sequencing: appended pages are distinct dicts,
     so per-occurrence /Rotate does not alias.
     """
-    with pikepdf.open(src) as pdf:
+    with open_pdf(src) as pdf:
         n = len(pdf.pages)
         originals = [pdf.pages[i] for i in range(n)]
         blank_w, blank_h = 612.0, 792.0
@@ -375,7 +376,7 @@ def impose_sheets(
     is exactly why the pipeline bakes them first (workspace-commit's
     allowlist lesson, applied to print).
     """
-    with pikepdf.open(src) as src_pdf:
+    with open_pdf(src) as src_pdf:
         geo = []
         for page in src_pdf.pages:
             x0, y0, w, h = _crop_box(page)
@@ -442,7 +443,7 @@ def impose_poster(
     edges only) and a small gray label names the tile position.
     Returns {"sheets": n, "grid": [[cols, rows] per source page]}.
     """
-    with pikepdf.open(src) as src_pdf:
+    with open_pdf(src) as src_pdf:
         geo = []
         for page in src_pdf.pages:
             x0, y0, w, h = _crop_box(page)

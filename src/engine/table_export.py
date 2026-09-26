@@ -44,6 +44,7 @@ import re
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine import bidi
 from engine.form_detect import (
@@ -675,7 +676,7 @@ def detect_tables(file: str, pages="all") -> dict:
     regions: list[_Region] = []
     untabled: dict[int, list[str]] = {}
     vertical_writing = 0
-    with pikepdf.open(str(file)) as pdf:
+    with open_pdf(str(file)) as pdf:
         wanted = _page_numbers(pages, pdf)
         for number in wanted:
             page = pdf.pages[number - 1]
@@ -930,7 +931,7 @@ def export_tables(
             raise ValueError(
                 "no table was accepted, so there is nothing to write to a spreadsheet"
             )
-        with pikepdf.open(str(file)) as pdf:
+        with open_pdf(str(file)) as pdf:
             found_regions, wanted, lines_cache, vertical_writing = _reviewed(pdf, regions)
             untabled = _untabled_outside(found_regions, wanted, lines_cache)
     else:

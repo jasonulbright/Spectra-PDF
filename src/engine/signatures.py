@@ -50,6 +50,7 @@ exactly the security-critical plumbing not to hand-roll.
 """
 
 import logging
+from engine.credentials import open_pdf
 
 # pyHanko logs the path-building failure as a WARNING-with-traceback whenever a
 # signature doesn't chain to a trust anchor — which is BY DESIGN here (we
@@ -681,7 +682,7 @@ def verify_signatures(
         from engine.incremental import _widget_field_name
 
         page_by_name: dict[str, int] = {}
-        with pikepdf.open(file) as pdf:
+        with open_pdf(file) as pdf:
             for i, page in enumerate(pdf.pages):
                 annots = page.obj.get("/Annots")
                 if annots is None:
@@ -857,7 +858,7 @@ def _validated_appearance(appearance: dict, file: str) -> tuple[int, tuple[float
         raise ValueError("Invalid signature appearance: the rectangle is empty.")
     import pikepdf
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         page_count = len(pdf.pages)
     if not (1 <= page <= page_count):
         raise ValueError(f"Invalid signature appearance: page {page} is out of range (1-{page_count}).")
@@ -934,7 +935,7 @@ def _validated_lock(
         import pikepdf
 
         try:
-            with pikepdf.open(file) as pdf:
+            with open_pdf(file) as pdf:
                 present = set(form_field_forest(pdf))
         except Exception:
             # A document that cannot be read has no field list to check against.
@@ -960,7 +961,7 @@ def _existing_field_lock_refusal(file: str, field_name: str, spec: FieldMDPSpec 
     import pikepdf
 
     try:
-        with pikepdf.open(file) as pdf:
+        with open_pdf(file) as pdf:
             field = form_field_forest(pdf).get(field_name)
             existing = lock_of_field_dict(field) if field is not None else None
     except Exception:
@@ -1071,7 +1072,7 @@ def _dss_counts(path: str) -> dict:
     the long-term material carries certificates only."""
     import pikepdf
 
-    with pikepdf.open(path) as pdf:
+    with open_pdf(path) as pdf:
         dss = pdf.Root.get("/DSS")
         if not isinstance(dss, pikepdf.Dictionary):
             return {"certs": 0, "crls": 0, "ocsps": 0}

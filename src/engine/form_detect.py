@@ -48,6 +48,7 @@ import statistics
 from typing import NamedTuple, Optional
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.form_detect_vocab import is_date_label, is_signature_label
 from engine.page_vectors import _walk_vectors
@@ -1286,7 +1287,7 @@ def detect_form_fields(
     if scan not in _SCAN_MODES:
         raise ValueError('scan must be "auto", "never" or "always"')
     validate_pdf(file)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         wanted = _page_numbers(pages, pdf)
         existing = _existing_field_names(pdf)
         raw: list[_Raw] = []

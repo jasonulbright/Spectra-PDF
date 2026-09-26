@@ -39,6 +39,7 @@ import re
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name
 
 from engine.font_embedding import font_embedded
@@ -504,7 +505,7 @@ def embed_missing_fonts(file: str, output: str, sources=("system",),
     substituted: list[dict] = []
     seen: set = set()
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         targets: list = []
 
         def collect(font_obj, _page, _name) -> None:

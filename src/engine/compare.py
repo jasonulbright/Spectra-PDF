@@ -30,6 +30,7 @@ from pathlib import Path
 from . import budget
 
 import pikepdf
+from engine.credentials import open_pdf
 from engine.extract_text import pdfminer_text as pdfminer_extract
 
 Name_Page = pikepdf.Name("/Page")
@@ -77,7 +78,7 @@ def _initial_chunk_pages(dpi: int) -> int:
 
 
 def _page_count(file: str) -> int:
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         return len(pdf.pages)
 
 
@@ -117,7 +118,7 @@ def _strict_page_count(file: str) -> int:
             f"cannot be certified complete on a damaged file. Repair the file first."
         )
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         pages_root = pdf.Root.get("/Pages")
         if pages_root is None:
             raise anomaly("catalog has no /Pages")

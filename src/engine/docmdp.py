@@ -12,6 +12,7 @@ for the edit tier to consult before every edit.
 """
 
 import pikepdf
+from engine.credentials import open_pdf
 from decimal import Decimal
 
 # /P → wire name. Mapping tables, not a computation: an unknown /P must report
@@ -87,7 +88,7 @@ def certification_of_file(file: str) -> dict:
     not-certified shape with an error, so a caller consulting the policy before
     an edit never has to distinguish a raise from a verdict."""
     try:
-        with pikepdf.open(file) as pdf:
+        with open_pdf(file) as pdf:
             return certification_of_pdf(pdf)
     except Exception:
         return {**_not_certified(), "error": "The document could not be opened."}

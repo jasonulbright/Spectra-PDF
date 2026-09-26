@@ -39,6 +39,7 @@ re-runs on every buffer change.
 from __future__ import annotations
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Name  # noqa: F401  (re-exported for callers of the walk)
 
 from engine.font_embedding import font_embedded
@@ -1674,7 +1675,7 @@ def _gather(file: str, profile: dict, gs_path: str, font_dir) -> dict:
         if not embedded and name not in non_embedded:
             non_embedded.append(name)
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         # The effective declared version, not conformance or the header: a
         # ceiling a catalog declaration exceeds is exceeded (Table 29). A
         # declaration that cannot be read leaves the fact absent, which the

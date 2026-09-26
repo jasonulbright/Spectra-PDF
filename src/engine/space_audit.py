@@ -32,6 +32,7 @@ import re
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.pdf_tree import token_text
 
@@ -484,7 +485,7 @@ def audit_space_usage(file: str) -> dict:
     data = path.read_bytes()
     size = len(data)
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         table = pdf.get_xref_table()
         found = _attribute(pdf)
 

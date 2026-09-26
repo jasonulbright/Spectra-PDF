@@ -27,6 +27,7 @@ import io
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from asn1crypto import pem as asn1_pem
 from asn1crypto import x509 as asn1_x509
 from pyhanko.pdf_utils import crypt as pyhanko_crypt
@@ -109,7 +110,7 @@ def _staged_write(writer, output_path: Path) -> None:
 def classify_encryption(file: str) -> str:
     """'none' | 'password' | 'pubkey'."""
     try:
-        with pikepdf.open(file):
+        with open_pdf(file):
             return "none"
     except pikepdf.PasswordError:
         return "password"
@@ -126,7 +127,7 @@ def classify_encryption(file: str) -> str:
     except Exception:
         pass
     # Not an encryption we recognize — surface pikepdf's original complaint.
-    with pikepdf.open(file):
+    with open_pdf(file):
         return "none"  # unreachable; open() raises
 
 

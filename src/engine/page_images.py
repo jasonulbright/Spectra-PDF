@@ -53,6 +53,7 @@ import zlib
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
 from engine.content_walk import ClipTracker, GraphicsTextState
@@ -370,7 +371,7 @@ def _walk_placements(
 def list_page_images(file: str, page: int) -> dict:
     """Image placements on 1-based `page`, in the id order every mutator
     below targets."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
@@ -1294,7 +1295,7 @@ def delete_page_images(file: str, output: str, page: int, indexes: list) -> dict
         raise ValueError("indexes must name at least one placement")
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
@@ -1371,7 +1372,7 @@ def transform_page_images(file: str, output: str, page: int, targets: list) -> d
         raise ValueError("targets must name at least one placement")
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
@@ -1464,7 +1465,7 @@ def crop_page_image(file: str, output: str, page: int, index: int, rect: list) -
         raise ValueError("crop rect is degenerate (nothing would remain visible)")
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
@@ -1568,7 +1569,7 @@ def set_image_opacity(
         )
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
@@ -1769,7 +1770,7 @@ def replace_page_image(
         raise ValueError('fit must be "stretch" or "contain"')
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         image_obj = _image_from_source(pdf, source)
     except Exception:
@@ -1990,7 +1991,7 @@ def add_page_image(
 
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         image_obj = _image_from_source(pdf, source)
     except Exception:
@@ -2087,7 +2088,7 @@ def add_page_vector_graphic(
 
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         form, view_w, view_h = compile_svg(pdf, svg_bytes)
         total = len(pdf.pages)
@@ -2125,7 +2126,7 @@ def add_page_vector_graphic(
 def extract_page_image(file: str, page: int, index: int, output_prefix: str) -> dict:
     """Save one placement's image bytes out (placement-independent — the
     XObject's own encoded data; pikepdf picks the natural format)."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")

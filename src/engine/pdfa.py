@@ -1,6 +1,7 @@
 """PDF/A conversion via Ghostscript."""
 
 import tempfile
+from engine.credentials import open_pdf
 from pathlib import Path
 
 from . import budget, gs_capability, standards_report
@@ -190,7 +191,7 @@ def _has_pdfa_output_intent(produced: Path) -> bool:
     import pikepdf
 
     try:
-        with pikepdf.open(str(produced)) as pdf:
+        with open_pdf(str(produced)) as pdf:
             intents = pdf.Root.get("/OutputIntents")
             if not isinstance(intents, pikepdf.Array):
                 return False

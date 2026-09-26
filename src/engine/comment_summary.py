@@ -60,6 +60,7 @@ from datetime import date
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
 from engine.annotations import (
@@ -571,7 +572,7 @@ def list_comments(file: str, sort: str = "page", filter: dict | None = None) -> 
     A pure read: it never touches the file's bytes, which is why the renderer
     may re-request it on a control change without flushing pending page edits.
     """
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         model = build_model(pdf, sort, filter)
     by_type: dict[str, int] = {}
     for comment in model["comments"]:
@@ -983,7 +984,7 @@ def summarize_comments(
     align = "right" if direction == "rtl" else "left"
     name = document_name or Path(file).name
 
-    with pikepdf.open(file) as source:
+    with open_pdf(file) as source:
         model = build_model(source, sort, filter)
         comments = model["comments"]
         if not comments:

@@ -59,6 +59,7 @@ from pathlib import Path
 
 import numpy as np
 import pikepdf
+from engine.credentials import open_pdf
 from PIL import Image
 from pikepdf import Dictionary, Name
 
@@ -1058,7 +1059,7 @@ def mrc_compress(
     # ~1 MB, and pass two re-lifts the one source it is working on.
     prepared: list[tuple[_Candidate, Image.Image, dict, int]] = []
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         candidates: list[_Candidate] = []
         for number, page in enumerate(pdf.pages, start=1):
             candidate, reason = _classify_page(pdf, page, number)

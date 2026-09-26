@@ -42,6 +42,7 @@ import math
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name
 
 from engine.inplace import is_same_file, staged_write
@@ -710,7 +711,7 @@ def add_printer_marks(
     marked = 0
     skipped: list[dict] = []
     reports: list[dict] = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         targets = [
             (index, page) for index, page in enumerate(pdf.pages, start=1)
@@ -831,7 +832,7 @@ def remove_printer_marks(file: str, output: str, pages: list | None = None) -> d
 
     removed = 0
     unmarked: list[int] = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for index, page in enumerate(pdf.pages, start=1):
             if wanted is not None and index not in wanted:
                 continue
@@ -856,7 +857,7 @@ def list_printer_marks(file: str, pages: list | None = None) -> dict:
     validate_pdf(file)
     wanted = None if pages is None else {int(p) for p in pages}
     rows: list[dict] = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for index, page in enumerate(pdf.pages, start=1):
             if wanted is not None and index not in wanted:
                 continue

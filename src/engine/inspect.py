@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from engine.pdf_save import save_pdf
 
 
@@ -25,20 +26,14 @@ def check_encrypted(file: str) -> dict:
     return {"encrypted": True, "kind": kind}
 
 
-def unlock(file: str, password: str) -> dict:
-    """Open an encrypted PDF with password and save decrypted to same path.
-
-    ISO 32000-2 7.6.4.1: the user password grants only the permissions the
-    owner set, so it cannot remove the protection. A document opened with it
-    refuses and leaves the file unchanged."""
-    from engine.encrypt import _require_owner_authority
-
+def _decrypt_in_place(file: str, password: str) -> None:
+    """Rewrite `file` without its protection. The caller has established the
+    owner authority."""
     file_path = Path(file)
     fd, tmp_path = tempfile.mkstemp(suffix=".pdf", dir=file_path.parent)
     os.close(fd)
     try:
-        with pikepdf.open(file, password=password) as pdf:
-            _require_owner_authority(pdf)
+        with open_pdf(file, password=password) as pdf:
             # Removing the protection IS the operation.
             save_pdf(pdf, tmp_path, drop_encryption=True)
         os.replace(tmp_path, file)
@@ -46,6 +41,20 @@ def unlock(file: str, password: str) -> dict:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
         raise
+
+
+def unlock(file: str, password: str) -> dict:
+    """Remove the protection of an encrypted PDF in place.
+
+    ISO 32000-2 7.6.4.1: the user password grants only the permissions the
+    owner set, so it cannot remove the protection. A document opened with it
+    refuses and leaves the file unchanged."""
+    from engine.credentials import open_document
+    from engine.encrypt import _require_owner_authority
+
+    with open_pdf(file, password=password) as pdf:
+        _require_owner_authority(pdf)
+    open_document(file, password)
     return {"unlocked": True}
 
 
@@ -64,7 +73,7 @@ def _box_size(box) -> tuple[float | None, float | None]:
 
 def get_page_count(file: str) -> dict:
     """Return page count and page dimensions for a PDF."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         page_sizes = []
         for page in pdf.pages:
             w, h = _box_size(page.trimbox or page.mediabox)
@@ -78,7 +87,7 @@ def get_page_count(file: str) -> dict:
 
 def get_page_info(file: str, page: int) -> dict:
     """Return details for a single page (1-based)."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if page < 1 or page > len(pdf.pages):
             raise ValueError(f"Page {page} out of range (1-{len(pdf.pages)})")
         p = pdf.pages[page - 1]

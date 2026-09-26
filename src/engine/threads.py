@@ -28,6 +28,7 @@ import math
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name, String
 
 from engine.inplace import is_same_file, staged_write
@@ -106,7 +107,7 @@ def _beads_of(thread, pages_by_og) -> list[dict]:
 
 def list_threads(file: str) -> dict:
     """Every article in the document, with its beads in reading order."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         raw = pdf.Root.get("/Threads")
         if raw is None or not isinstance(raw, pikepdf.Array):
             return {"threads": [], "count": 0}
@@ -183,7 +184,7 @@ def set_threads(file: str, output: str, threads) -> dict:
     """
     output_path = Path(output)
     same_file = is_same_file(file, output)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         cleaned = _clean_threads(threads or [], len(pdf.pages))
 
         for page in pdf.pages:

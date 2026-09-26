@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import ContentStreamInstruction as _CSI
 from pikepdf import Dictionary, Name, Operator, String
 
@@ -1684,7 +1685,7 @@ def add_text_box(
     agrees with it. A vertical box cannot also be rotated."""
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         # Input-shape validation (text/rect/rotate/style) runs FIRST, before
         # the page-range check — the pre-refactor precedence (a doubly-invalid
@@ -1845,7 +1846,7 @@ def measure_text_box(
     and the drawn WIDTH for a column, whose lines are columns). `fits` is
     text_height <= box_height. Overflow is NOT an error — the box is a
     guide, not a clip; the card warns, the commit still proceeds."""
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         # Same precedence as add_text_box: input-shape checks (inside
         # _layout_box) before the page range.

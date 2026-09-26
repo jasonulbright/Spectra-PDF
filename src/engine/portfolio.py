@@ -34,6 +34,7 @@ import mimetypes
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
 from engine.attachments import _save, list_attachments
@@ -53,7 +54,7 @@ _VIEW_NAMES = {"/D": "details", "/T": "tile", "/H": "hidden"}
 
 def get_portfolio(file: str) -> dict:
     """Whether `file` is a portfolio, its view mode, and its member list."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         col = pdf.Root.get("/Collection")
         is_portfolio = col is not None
         view = ""
@@ -114,7 +115,7 @@ def make_portfolio(file: str, output: str) -> dict:
     input_path = Path(file)
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if pdf.Root.get("/Collection") is not None:
             raise ValueError("this document is already a portfolio")
         pdf.Root.Collection = pdf.make_indirect(
@@ -143,7 +144,7 @@ def update_portfolio_member(
 
     data = src.read_bytes()
     mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if name not in pdf.attachments:
             raise ValueError(f"no member named {name!r}")
         kept = description.strip() or (pdf.attachments[name].description or "")
@@ -158,7 +159,7 @@ def update_portfolio_member(
 def extract_member_to_dir(file: str, name: str, dest_dir: str) -> dict:
     """Extract member `name` into `dest_dir` (created if missing), sanitizing
     characters the filesystem refuses; returns the real path written."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if name not in pdf.attachments:
             raise ValueError(f"no member named {name!r}")
         data = pdf.attachments[name].get_file().read_bytes()

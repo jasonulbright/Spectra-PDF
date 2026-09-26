@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 
@@ -24,7 +25,7 @@ def rotate(file: str, pages: list[int] | str, angle: int, output: str) -> dict:
     input_path = Path(file)
     output_path = Path(output)
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if pages == "all":
             target_pages = list(range(len(pdf.pages)))
         else:

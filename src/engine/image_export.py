@@ -27,6 +27,7 @@ the user was looking at when they asked for it.
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from . import budget
 from .printer import parse_page_spec
@@ -111,7 +112,7 @@ def export_images(
     if output_path.is_dir():
         raise ValueError(f"output path is a directory, not a file: {output}")
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         page_count = len(pdf.pages)
     spec = parse_page_spec(pages or "", page_count)
     n_pages = _pages_in_spec(spec, page_count)

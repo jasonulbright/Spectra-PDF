@@ -30,6 +30,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.compress import compress
 # ONE image wrap for the whole product. batch OCR was where it lived and
@@ -318,7 +319,7 @@ def _verify_output(path: Path, expected_pages: int) -> bool:
     this must never return True on doubt.
     """
     try:
-        with pikepdf.open(str(path)) as out:
+        with open_pdf(str(path)) as out:
             return len(out.pages) == expected_pages
     except Exception:
         return False
@@ -415,7 +416,7 @@ def ocr_file(
             result["output"] = str(output_path)
         return result
 
-    with pikepdf.open(str(source_path)) as pdf:
+    with open_pdf(str(source_path)) as pdf:
         total = len(pdf.pages)
         needing = _pages_needing_ocr(str(source_path), pdf)
 
@@ -619,9 +620,9 @@ def batch_ocr(
                 if result is not None:
                     raise _AlreadyHandled()
                 pdf = (
-                    pikepdf.open(str(source_for_open), password=password)
+                    open_pdf(str(source_for_open), password=password)
                     if password
-                    else pikepdf.open(str(source_for_open))
+                    else open_pdf(str(source_for_open))
                 )
             except _AlreadyHandled:
                 pdf = None
@@ -634,7 +635,7 @@ def batch_ocr(
                     try:
                         scratch.parent.mkdir(parents=True, exist_ok=True)
                         repair(str(abs_path), str(scratch))
-                        pdf = pikepdf.open(str(scratch))
+                        pdf = open_pdf(str(scratch))
                     except Exception as repair_exc:
                         pdf = None
                         if scratch is not None:
@@ -843,7 +844,7 @@ def _to_pdf_rects(file: str, page_index: int, words: list[dict]) -> list[dict]:
     module's own copy had /Rotate 270 mapping through the box's width and
     height swapped, which puts the invisible text layer outside the page box.
     """
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         page = pdf.pages[page_index]
         box = _crop_box(page)
         rotate = _page_rotate(page) % 360

@@ -6,6 +6,7 @@ which were lost.
 """
 
 import pikepdf
+from engine.credentials import open_pdf
 from pathlib import Path
 from engine.acroform import (
     prune_form_to_pages,
@@ -131,7 +132,7 @@ def recover(file: str, output: str) -> dict:
 
     # Try to open the damaged file -- pikepdf will attempt recovery
     try:
-        source = pikepdf.open(file, suppress_warnings=False)
+        source = open_pdf(file, suppress_warnings=False)
     except pikepdf.PasswordError:
         raise ValueError("PDF is encrypted -- decrypt before recovery")
     except Exception as e:

@@ -33,6 +33,7 @@ import re
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
 from engine.inplace import is_same_file, staged_write
@@ -191,7 +192,7 @@ def add_header_footer(
     same_file = is_same_file(str(input_path), str(output_path))
 
     stamped = 0
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         lo, hi = 1, total
         if pages is None:

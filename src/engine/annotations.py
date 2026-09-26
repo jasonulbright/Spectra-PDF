@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Name
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
@@ -150,7 +151,7 @@ def usable_relationship_name(value: str) -> str | None:
 
 def list_annotations(file: str) -> dict:
     """Every markup annotation, with page, subtype, rect, and its text/author."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         out = []
         by_type: dict[str, int] = {}
         for i, page in enumerate(pdf.pages):
@@ -230,7 +231,7 @@ def delete_all_annotations(file: str, output: str, subtypes: list | None = None,
 
     wanted = _sweep_set(subtypes)
     removed = 0
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for page in pdf.pages:
             annots = page.obj.get("/Annots")
             if annots is None:

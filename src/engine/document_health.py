@@ -65,6 +65,7 @@ from collections import OrderedDict, deque
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine import xfa
 from engine.font_embedding import font_embedded
@@ -923,7 +924,7 @@ def document_health_begin(file: str) -> dict:
     }
 
     try:
-        pdf = pikepdf.open(file, suppress_warnings=True)
+        pdf = open_pdf(file, suppress_warnings=True)
     except pikepdf.PasswordError:
         head["status"] = "undetermined"
         head["facts"] = [_fact("undetermined", "info", "engine", "document.encrypted")]

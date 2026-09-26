@@ -22,6 +22,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name, String
 
 from .inplace import staged_write
@@ -366,7 +367,7 @@ def _get_initial_view(file: str) -> dict:
     Args:
         file: Input PDF path.
     """
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         raw_layout = pdf.Root.get("/PageLayout")
         layout = _enum_name(raw_layout, _PAGE_LAYOUTS_INVERSE, 'default')
         raw_mode = pdf.Root.get("/PageMode")
@@ -528,7 +529,7 @@ def set_initial_view(
         raise ValueError("The opening page must be an integer.")
 
     output_path = Path(output)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         if page_layout is not None:
             if page_layout == "default":
@@ -763,7 +764,7 @@ def set_document_language(
         )
 
     output_path = Path(output)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if text:
             pdf.Root[Name.Lang] = String(text)
         elif "/Lang" in pdf.Root:
@@ -812,7 +813,7 @@ def set_document_title(
         )
 
     output_path = Path(output)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if title is not None:
             from .metadata import apply_metadata_fields
             apply_metadata_fields(pdf, title=str(title))
@@ -858,7 +859,7 @@ def set_page_tab_order(
         )
 
     output_path = Path(output)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         wanted = None
         if pages is not None:
@@ -1022,7 +1023,7 @@ def _get_advanced_properties(file: str) -> dict:
         file: Input PDF path.
     """
     size = Path(file).stat().st_size
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         info = pdf.trailer.get('/Info')
         raw_trapped = _dictionary(info).get('/Trapped') if info is not None else None
         trapped = _enum_name(raw_trapped, _TRAPPED_INVERSE, 'unknown')
@@ -1079,7 +1080,7 @@ def set_advanced_properties(
         raise ValueError(f"trapped must be one of {sorted(_TRAPPED)}, got {trapped!r}")
 
     output_path = Path(output)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if trapped is not None:
             # `docinfo` materializes the trailer's /Info dict when the file has
             # none, which is the only way a trapped flag can land on a document

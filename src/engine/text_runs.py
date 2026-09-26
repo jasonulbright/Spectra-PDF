@@ -48,6 +48,7 @@ import math
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
 from engine.content_walk import ClipTracker, GraphicsTextState
@@ -553,7 +554,7 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
 
 
 def list_text_runs(file: str, page: int) -> dict:
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
@@ -895,7 +896,7 @@ def _refuse_offpage_retype(pdf, p, resources, fonts, kept, index, old_rect):
 def replace_text_run(file: str, output: str, page: int, index: int, new_text: str) -> dict:
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
@@ -973,7 +974,7 @@ def restyle_text_run(
 
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
@@ -1037,7 +1038,7 @@ def convert_text_run(
 
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):

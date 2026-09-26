@@ -47,6 +47,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 import pikepdf
+from engine.credentials import open_pdf
 from engine.annotations import (
     _MARKUP,
     relationship_name,
@@ -210,7 +211,7 @@ def export_xfdf(file: str, output: str) -> dict:
     skipped: list[dict] = []
     partial: list[dict] = []
     parts: list[str] = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for page_index, page in enumerate(pdf.pages):
             annots, readable = _read(page.obj, "/Annots")
             if not readable:
@@ -579,7 +580,7 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
     unresolved = 0
     pending_irt: list[tuple[pikepdf.Object, int, str, str]] = []
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         page_count = len(pdf.pages)
         for el in annots_el:
             element = local(el.tag)

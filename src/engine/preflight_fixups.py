@@ -47,6 +47,7 @@ does not have.
 """
 
 from __future__ import annotations
+from engine.credentials import open_pdf
 
 from pathlib import Path
 from typing import NamedTuple
@@ -392,7 +393,7 @@ def _box_groups(source: str, key: str, target_of) -> tuple[list, list]:
 
     wanted: dict = {}
     refusals: list = []
-    with pikepdf.open(source) as pdf:
+    with open_pdf(source) as pdf:
         for number, page in enumerate(pdf.pages, start=1):
             media = effective_box(page, "/MediaBox")
             target, refusal = target_of(page, media, number)

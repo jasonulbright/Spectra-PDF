@@ -19,6 +19,7 @@ not this module's scope.
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import token_text
@@ -188,7 +189,7 @@ def list_document_js(file: str, for_edit: bool = False) -> dict:
         file: PDF path.
     """
     scripts: list[dict] = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if for_edit:
             try:
                 scripts = _editable_scripts(pdf)
@@ -258,7 +259,7 @@ def set_document_js(file: str, output: str, scripts: list | None = None) -> dict
     # rather than leaving it beside the user's document.
     same_file = is_same_file(file, output)
     output_path = Path(output)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         names = pdf.Root.get("/Names")
         if not cleaned:
             if isinstance(names, pikepdf.Dictionary) and "/JavaScript" in names:

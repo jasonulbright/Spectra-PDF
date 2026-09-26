@@ -24,6 +24,7 @@ from itertools import islice
 
 import pikepdf
 
+from engine.credentials import open_pdf
 from .font_embedding import font_embedded
 from .font_fallback import classify_font_style, style_key
 from .pdf_fonts import _strip_subset_prefix, name_str
@@ -272,7 +273,7 @@ def list_document_fonts(file: str, font_dir: str | None = None) -> dict:
             non-embedded font reports the face this app would substitute.
     """
     out: dict = {}
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         walk_document_fonts(
             pdf,
             lambda font_obj, page, _name: _record(font_obj, page, out, font_dir),
