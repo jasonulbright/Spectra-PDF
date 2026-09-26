@@ -574,6 +574,7 @@ printer.unknownExpectedOne	pattern	printer	Unknown {{name}} {{value}} (expected 
 printer.unknownPaperId	pattern	printer	Unknown paper id {{paper}}
 printer.unknownPrinter	pattern	printer	Unknown printer: '{{printer}}'
 printer_marks.addingPrinterMarksWould	pattern	printer_marks	Adding printer marks would make page {{index}} larger than the 14400-point page limit.
+printer_marks.colourBarCannotFit	pattern	printer_marks	The colour bar cannot fit its {{needed}} patches along the top edge of page {{page_number}}.
 printer_marks.markOffsetMustZero	exact	printer_marks	Mark offset must be zero or more and mark length must be positive.
 printer_marks.markStyleMustOne	pattern	printer_marks	Mark style must be one of {{styles}}.
 printer_marks.markWeightMustOne	pattern	printer_marks	Mark weight must be one of {{weights}}.

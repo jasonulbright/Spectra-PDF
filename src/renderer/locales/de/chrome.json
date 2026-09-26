@@ -2494,6 +2494,7 @@
   "engine.print_layout.timedOutAfterS": "Zeitüberschreitung von {{what}} nach {{RENDER_TIMEOUT_S}} s",
   "engine.print_layout.unvalidatedPageSpecToken": "nicht validiertes Token der Seitenangabe: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Durch das Hinzufügen von Druckermarken würde Seite {{index}} die Grenze von 14400 Punkt überschreiten.",
+  "engine.printer_marks.colourBarCannotFit": "Der Farbkontrollstreifen kann seine {{needed}} Felder nicht am oberen Rand von Seite {{page_number}} unterbringen.",
   "engine.printer_marks.markOffsetMustZero": "Der Markenabstand muss null oder größer sein und die Markenlänge muss positiv sein.",
   "engine.printer_marks.markStyleMustOne": "Der Markenstil muss einer von {{styles}} sein.",
   "engine.printer_marks.markWeightMustOne": "Die Markenstärke muss eine von {{weights}} sein.",

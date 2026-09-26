@@ -2483,6 +2483,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} timed out after {{RENDER_TIMEOUT_S}}s",
   "engine.print_layout.unvalidatedPageSpecToken": "unvalidated page spec token: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Adding printer marks would make page {{index}} larger than the 14400-point page limit.",
+  "engine.printer_marks.colourBarCannotFit": "The colour bar cannot fit its {{needed}} patches along the top edge of page {{page_number}}.",
   "engine.printer_marks.markOffsetMustZero": "Mark offset must be zero or more and mark length must be positive.",
   "engine.printer_marks.markStyleMustOne": "Mark style must be one of {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "Mark weight must be one of {{weights}}.",

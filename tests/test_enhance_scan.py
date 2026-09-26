@@ -404,6 +404,38 @@ class TestClassification:
         assert all(r["decision"] == "untouched" for r in report["pages"])
         assert all("not a scanned image" in r["reason"] for r in report["pages"])
 
+    def test_a_cmyk_scan_is_left_in_its_own_space(self, tmp_dir):
+        import zlib
+
+        width, height = 600, 800
+        samples = np.zeros((height, width, 4), dtype=np.uint8)
+        samples[..., 0:3] = 20
+        samples[100:110, 50:550, 3] = 255
+        samples[300:310, 50:550, 3] = 255
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(width * 72 / 150, height * 72 / 150))
+        image = pikepdf.Stream(pdf, zlib.compress(samples.tobytes()))
+        image.Type = pikepdf.Name.XObject
+        image.Subtype = pikepdf.Name.Image
+        image.Width, image.Height = width, height
+        image.ColorSpace = pikepdf.Name.DeviceCMYK
+        image.BitsPerComponent = 8
+        image.Filter = pikepdf.Name.FlateDecode
+        page.obj.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=image))
+        page.Contents = pdf.make_stream(
+            b"q %f 0 0 %f 0 0 cm /Im0 Do Q" % (width * 72 / 150, height * 72 / 150))
+        src = os.path.join(tmp_dir, "cmyk.pdf")
+        pdf.save(src)
+        out = os.path.join(tmp_dir, "cmyk-out.pdf")
+
+        report = enhance_scan(src, out, deskew=False, despeckle=False, orientation=False)
+
+        # Paper is the low end of a CMYK sample: whitening it as RGB and
+        # writing RGB back would turn K-only text into four-plate black.
+        assert report["written"] is False
+        assert report["pages"][0]["decision"] == "untouched"
+        assert not os.path.exists(out)
+
     @needs_gs
     def test_acroform_fields_survive_the_surgery(self, tmp_dir):
         form = _copy("scan-form.pdf", tmp_dir)

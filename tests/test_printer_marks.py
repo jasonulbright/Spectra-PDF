@@ -287,6 +287,26 @@ class TestColourBar:
         out = os.path.join(tmp_dir, "m.pdf")
         assert add_printer_marks(src, out, marks=["colorbars"])["spot_patches"] == []
 
+    def test_a_small_page_still_carries_every_patch(self, tmp_dir):
+        # Each run holds whole patches only, so the bar's width over the patch
+        # count leaves one patch without room on a page this narrow.
+        src = _plain_pdf(os.path.join(tmp_dir, "s.pdf"), size=(200, 200))
+        out = os.path.join(tmp_dir, "m.pdf")
+        add_printer_marks(src, out, marks=["colorbars"])
+        with pikepdf.open(out) as pdf:
+            form = pdf.pages[0].obj["/Resources"]["/XObject"]["/SpectraPrinterMarks"]
+            text = form.read_bytes().decode("latin-1")
+        # Sixteen process patches, then the overprint control patch.
+        assert text.count(" re f Q") == 17
+        assert text.count("/OPon gs") == 1
+
+    def test_a_bar_that_cannot_fit_refuses_by_name(self, tmp_dir):
+        src = _plain_pdf(os.path.join(tmp_dir, "s.pdf"), size=(24, 200))
+        out = os.path.join(tmp_dir, "m.pdf")
+        with pytest.raises(ValueError, match="cannot fit its 17 patches"):
+            add_printer_marks(src, out, marks=["colorbars"])
+        assert not os.path.exists(out)
+
 
 class TestABarOverUnknownColorantsRefuses:
     """A colour bar is a WRITE, so an unreadable colorant branch refuses.

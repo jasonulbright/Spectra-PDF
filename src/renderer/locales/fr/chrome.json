@@ -2557,6 +2557,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} a expiré après {{RENDER_TIMEOUT_S}} s",
   "engine.print_layout.unvalidatedPageSpecToken": "jeton de spécification de pages non validé : {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Ajouter des repères d’impression rendrait la page {{index}} plus grande que la limite de 14400 points.",
+  "engine.printer_marks.colourBarCannotFit": "La gamme de contrôle ne peut pas loger ses {{needed}} plages le long du bord supérieur de la page {{page_number}}.",
   "engine.printer_marks.markOffsetMustZero": "Le décalage des repères doit être nul ou positif et leur longueur doit être positive.",
   "engine.printer_marks.markStyleMustOne": "Le style des repères doit être l’un de : {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "L’épaisseur des repères doit être l’une de : {{weights}}.",

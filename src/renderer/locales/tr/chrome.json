@@ -2494,6 +2494,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} {{RENDER_TIMEOUT_S}} sn sonra zaman aşımına uğradı",
   "engine.print_layout.unvalidatedPageSpecToken": "doğrulanmamış sayfa belirtimi belirteci: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Baskı işaretleri eklemek {{index}}. sayfayı 14400 puntoluk sayfa sınırından büyük yapardı.",
+  "engine.printer_marks.colourBarCannotFit": "Renk çubuğu, {{needed}} yamasını {{page_number}}. sayfanın üst kenarına sığdıramıyor.",
   "engine.printer_marks.markOffsetMustZero": "İşaret uzaklığı sıfır veya daha büyük, işaret uzunluğu ise pozitif olmalıdır.",
   "engine.printer_marks.markStyleMustOne": "İşaret biçemi {{styles}} arasından biri olmalıdır.",
   "engine.printer_marks.markWeightMustOne": "İşaret kalınlığı {{weights}} arasından biri olmalıdır.",

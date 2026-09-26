@@ -934,13 +934,12 @@ def watermark(
             # A stamp is single-line: every layout control or separator,
             # including \x0b, \x0c, and U+2028,
             # flattens to space so the drawn glyph set matches the embed.
-            if is_vertical:
-                # There is no standard-14 vertical face, so a column always
-                # embeds — the Latin-1 shortcut has nothing to shortcut to,
-                # and the vertical arm builds its own embed rather than the
-                # `needs_unicode` one.
-                draw_text = _flatten_control_chars(text, keep_newline=False)
-            else:
+            draw_text = _flatten_control_chars(text, keep_newline=False)
+            # There is no standard-14 vertical face, so a column always embeds
+            # — the Latin-1 shortcut has nothing to shortcut to, and the
+            # vertical arm builds its own embed rather than the
+            # `needs_unicode` one.
+            if not is_vertical:
                 try:
                     text.encode("latin-1")
                 except UnicodeEncodeError:
@@ -951,7 +950,6 @@ def watermark(
                             "watermark text contains characters outside Latin-1 and no "
                             "fallback font is available"
                         )
-                    draw_text = _flatten_control_chars(text, keep_newline=False)
                     glyph_height = _face_glyph_height_em(face)
 
         # The picture embeds ONCE, before the loop: one XObject in the file
@@ -1087,17 +1085,17 @@ def watermark(
                     float(font_size)
                     if float(font_size) > 0
                     else _auto_font_size(
-                        text, width, height, rotate, angle,
+                        draw_text, width, height, rotate, angle,
                         em_width=auto_em, glyph_height_em=auto_gh,
                     ) * scale_value
                 )
-                em = auto_em if auto_em is not None else _text_width_em(text)
+                em = auto_em if auto_em is not None else _text_width_em(draw_text)
                 gh = auto_gh if auto_gh is not None else _GLYPH_HEIGHT_EM
                 centers = _centers(
                     disp_w, disp_h, float(angle), em * size, gh * size,
                     position, margin_value, bool(tile), gap_value,
                 )
-                body, font_used, _ = _text_draw(pdf, text, size, rgb, theta, centers, uni)
+                body, font_used, _ = _text_draw(pdf, draw_text, size, rgb, theta, centers, uni)
                 resources = Dictionary(Font=Dictionary(F0=font_used))
             form = _make_watermark_form(pdf, body, resources, float(opacity), disp_w, disp_h)
             rect = pikepdf.Rectangle(x0, y0, x1, y1)

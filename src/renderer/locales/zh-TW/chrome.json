@@ -2431,6 +2431,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} 在 {{RENDER_TIMEOUT_S}} 秒後逾時",
   "engine.print_layout.unvalidatedPageSpecToken": "未經驗證的頁面指定語彙基元：{{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "新增印刷標記會使第 {{index}} 頁超過 14400 點的頁面大小上限。",
+  "engine.printer_marks.colourBarCannotFit": "色彩導表無法在第 {{page_number}} 頁的上邊緣容納其 {{needed}} 個色塊。",
   "engine.printer_marks.markOffsetMustZero": "標記位移必須為零或更大，且標記長度必須為正值。",
   "engine.printer_marks.markStyleMustOne": "標記樣式必須是 {{styles}} 其中之一。",
   "engine.printer_marks.markWeightMustOne": "標記粗細必須是 {{weights}} 其中之一。",

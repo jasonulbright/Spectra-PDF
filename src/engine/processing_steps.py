@@ -372,13 +372,31 @@ def _bdc_opens_step(operands, resources, steps: dict) -> bool:
     return _oc_is_processing_step(_resource(resources, "/Properties", prop), steps)
 
 
+_FILL_PAINT = frozenset({"f", "F", "f*"})
+_STROKE_PAINT = frozenset({"S", "s"})
+_BOTH_PAINT = frozenset({"B", "B*", "b", "b*", "Tj", "TJ", "'", '"'})
+
+
+def _is_stencil(image) -> bool:
+    try:
+        return bool(image.get("/ImageMask"))
+    except Exception:
+        return False
+
+
 def _scan(stream, resources, steps: dict, inside: set, outside: set,
-          *, in_step: bool, seen: set, depth: int) -> None:
+          *, in_step: bool, seen: set, depth: int, colour=(None, None)) -> None:
     """One content stream, attributing every colorant to a side.
 
     `in_step` carries the enclosing state into a form XObject: an XObject
     invoked from inside a die-line section paints inside it, whatever the
-    XObject's own dictionary says.
+    XObject's own dictionary says. `colour` is the (fill, stroke) colour the
+    stream starts with, which a form inherits from the stream that draws it.
+
+    A colorant belongs to the side that PAINTS with it. The colour in force
+    is graphics state and outlives the marked-content section that selected
+    it, so a spot chosen inside a die-line section and filled after it is
+    artwork ink.
     """
     try:
         instructions = pikepdf.parse_content_stream(stream)
@@ -386,9 +404,23 @@ def _scan(stream, resources, steps: dict, inside: set, outside: set,
         return
     mc_depth = 0
     step_at = 0 if in_step else None
+    state = list(colour)
+    stack: list = []
 
     def sink() -> set:
         return inside if step_at is not None else outside
+
+    def paint(channels) -> None:
+        for channel in channels:
+            entry = state[channel]
+            if entry is None:
+                continue
+            kind, value, where = entry
+            if kind == "space":
+                _colorants(value, where, sink())
+            else:
+                _pattern(value, steps, inside, outside,
+                         in_step=step_at is not None, seen=seen, depth=depth)
 
     for instruction in instructions:
         try:
@@ -409,37 +441,68 @@ def _scan(stream, resources, steps: dict, inside: set, outside: set,
             mc_depth = max(0, mc_depth - 1)
             continue
 
-        if operator in ("cs", "CS") and operands:
-            _colorants(operands[0], resources, sink())
+        if operator == "q":
+            stack.append(list(state))
+        elif operator == "Q":
+            if stack:
+                state = stack.pop()
+        elif operator in ("g", "rg", "k"):
+            state[0] = None
+        elif operator in ("G", "RG", "K"):
+            state[1] = None
+        elif operator in ("cs", "CS") and operands:
+            state[0 if operator == "cs" else 1] = ("space", operands[0], resources)
         elif operator in ("scn", "SCN") and operands:
             pattern = _resource(resources, "/Pattern", operands[-1])
             if pattern is not None:
-                _pattern(pattern, steps, inside, outside,
-                         in_step=step_at is not None, seen=seen, depth=depth)
+                state[0 if operator == "scn" else 1] = ("pattern", pattern, resources)
+        elif operator in _FILL_PAINT:
+            paint((0,))
+        elif operator in _STROKE_PAINT:
+            paint((1,))
+        elif operator in _BOTH_PAINT:
+            paint((0, 1))
         elif operator == "sh" and operands:
             shading = _resource(resources, "/Shading", operands[0])
             if isinstance(shading, pikepdf.Dictionary):
                 _colorants(shading.get("/ColorSpace"), resources, sink())
         elif operator == "Do" and operands:
             xobject = _resource(resources, "/XObject", operands[0])
+            if isinstance(xobject, pikepdf.Stream) and _is_stencil(xobject):
+                # A stencil mask paints with the fill colour in force.
+                if _oc_is_processing_step(xobject.get("/OC"), steps):
+                    entry = state[0]
+                    if entry is not None and entry[0] == "space":
+                        _colorants(entry[1], entry[2], inside)
+                    elif entry is not None:
+                        _pattern(entry[1], steps, inside, outside,
+                                 in_step=True, seen=seen, depth=depth)
+                else:
+                    paint((0,))
+                continue
             _xobject(xobject, steps, inside, outside,
-                     in_step=step_at is not None, seen=seen, depth=depth)
+                     in_step=step_at is not None, seen=seen, depth=depth,
+                     colour=tuple(state))
         elif operator == "INLINE IMAGE":
             # An inline image may only name a device space or one of the
             # page's own; the named case resolves through /Resources.
             try:
-                _colorants(instruction.operands[0].colorspace, resources, sink())
+                image = instruction.operands[0]
+                if image.image_mask:
+                    paint((0,))
+                else:
+                    _colorants(image.colorspace, resources, sink())
             except Exception:
                 continue
 
 
 def _xobject(xobject, steps: dict, inside: set, outside: set,
-             *, in_step: bool, seen: set, depth: int) -> None:
+             *, in_step: bool, seen: set, depth: int, colour=(None, None)) -> None:
     if not isinstance(xobject, pikepdf.Stream) or depth >= _MAX_FORM_DEPTH:
         return
     key = _objgen(xobject)
     own = _oc_is_processing_step(xobject.get("/OC"), steps)
-    marker = (key, in_step or own)
+    marker = (key, in_step or own, repr(colour))
     if key is not None:
         if marker in seen:
             return
@@ -450,7 +513,7 @@ def _xobject(xobject, steps: dict, inside: set, outside: set,
         _colorants(xobject.get("/ColorSpace"), xobject.get("/Resources"), target)
         return
     _scan(xobject, xobject.get("/Resources"), steps, inside, outside,
-          in_step=in_step or own, seen=seen, depth=depth + 1)
+          in_step=in_step or own, seen=seen, depth=depth + 1, colour=colour)
 
 
 def _pattern(pattern, steps: dict, inside: set, outside: set,

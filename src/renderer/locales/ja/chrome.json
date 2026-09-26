@@ -2431,6 +2431,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} が {{RENDER_TIMEOUT_S}} 秒でタイムアウトしました",
   "engine.print_layout.unvalidatedPageSpecToken": "検証されていないページ指定のトークンです：{{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "トンボを追加すると、ページ {{index}} が 14400 ポイントの上限を超えます。",
+  "engine.printer_marks.colourBarCannotFit": "カラーバーの {{needed}} 個のパッチがページ {{page_number}} の上端に収まりません。",
   "engine.printer_marks.markOffsetMustZero": "トンボのオフセットは 0 以上、長さは正の値である必要があります。",
   "engine.printer_marks.markStyleMustOne": "トンボの様式は次のいずれかである必要があります: {{styles}}。",
   "engine.printer_marks.markWeightMustOne": "トンボの線幅は次のいずれかである必要があります: {{weights}}。",

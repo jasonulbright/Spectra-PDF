@@ -192,6 +192,15 @@ def _filter_name(xobj) -> str:
     return token_text(filt)
 
 
+class _Unsupported(Exception):
+    """A scanned page whose samples this pass cannot correct and write back
+    in their own space. The page is reported untouched with `UNSUPPORTED`."""
+
+
+#: The row reason for such a page. A report field, not a refusal.
+UNSUPPORTED = "the page image is not greyscale or RGB"
+
+
 def _lift(pdf, page, candidate: _Candidate) -> tuple[Image.Image | None, str]:
     """`(image, source filter)` — the scan's OWN samples, mode preserved.
 
@@ -215,7 +224,10 @@ def _lift(pdf, page, candidate: _Candidate) -> tuple[Image.Image | None, str]:
     except Exception:
         return None, filt
     if im.mode not in ("L", "RGB"):
-        im = im.convert("RGB")
+        # Paper is the high end of an L or RGB sample and the low end of a
+        # CMYK one, and the raster is written back in the samples' own space:
+        # any other space would come back converted.
+        raise _Unsupported
     return im, filt
 
 
@@ -732,8 +744,12 @@ def analyze_scan(
             if candidate is None:
                 rows.append({"page": number, "decision": DECISION_UNTOUCHED, "reason": reason})
                 continue
+            try:
+                measured = _measure(pdf, file, page, candidate, opts, gs_path, tesseract_path)
+            except _Unsupported:
+                rows.append({"page": number, "decision": DECISION_UNTOUCHED, "reason": UNSUPPORTED})
+                continue
             scans += 1
-            measured = _measure(pdf, file, page, candidate, opts, gs_path, tesseract_path)
             row = _measurement_row(measured, opts)
             row["decision"] = DECISION_SCAN
             do_deskew, do_despeckle, do_background, rotate = _would_act(measured, opts)
@@ -828,7 +844,12 @@ def enhance_scan(
 
         for candidate in candidates:
             page = pdf.pages[candidate.page_number - 1]
-            measured = _measure(pdf, file, page, candidate, opts, gs_path, tesseract_path)
+            try:
+                measured = _measure(pdf, file, page, candidate, opts, gs_path, tesseract_path)
+            except _Unsupported:
+                rows.append({"page": candidate.page_number, "decision": DECISION_UNTOUCHED,
+                             "reason": UNSUPPORTED})
+                continue
             row = _measurement_row(measured, opts, with_filter=True)
             do_deskew, do_despeckle, do_background, rotate = _would_act(measured, opts)
 

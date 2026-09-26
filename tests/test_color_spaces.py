@@ -131,6 +131,22 @@ class TestFunctions:
             s["/Range"] = [0.0, 1.0]
             assert build_function(s)([0.2, 0.4]) is None
 
+    def test_type4_a_program_that_doubles_its_stack_is_unknown(self, pdf):
+        # Thirty-four doublings ask for 2**34 entries from a few hundred bytes.
+        program = b"{ " + b" ".join(b"%d copy" % (1 << i) for i in range(34)) + b" pop }"
+        s = pdf.make_stream(program)
+        s["/FunctionType"] = 4
+        s["/Domain"] = [0.0, 1.0]
+        s["/Range"] = [0.0, 1.0]
+        assert build_function(s)([0.5]) is None
+
+    def test_type4_a_shift_wider_than_any_integer_is_unknown(self, pdf):
+        s = pdf.make_stream(b"{ pop 1 1000000000000 bitshift }")
+        s["/FunctionType"] = 4
+        s["/Domain"] = [0.0, 1.0]
+        s["/Range"] = [0.0, 1.0]
+        assert build_function(s)([0.5]) is None
+
     def test_type4_round_is_half_up_not_bankers(self, pdf):
         s = pdf.make_stream(b"{ round }")
         s["/FunctionType"] = 4

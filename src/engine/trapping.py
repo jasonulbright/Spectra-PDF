@@ -429,6 +429,12 @@ def export_postscript(
         raise ValueError("PostScript language level must be 2 or 3.")
     source = Path(file)
     target = Path(output)
+    from .printer import parse_page_spec
+
+    with pikepdf.open(file) as pdf:
+        total = len(pdf.pages)
+        stored = _read_assignments(pdf)
+    pages = parse_page_spec(str(pages or ""), total)
     cmd = [
         gs_path, "-dNOPAUSE", "-dBATCH", "-dSAFER", "-q",
         "-sDEVICE=ps2write", f"-dLanguageLevel={level}",
@@ -442,8 +448,6 @@ def export_postscript(
         raise RuntimeError(f"Ghostscript PostScript export failed: {detail}")
 
     carried = list_trap_presets(file)
-    with pikepdf.open(file) as pdf:
-        stored = _read_assignments(pdf)
     attached = 0
     if trapping and carried["assignments"]:
         if level != 3:
@@ -454,7 +458,8 @@ def export_postscript(
         # The stored assignment, not the listing: its overrides are keyed by
         # the colorant bytes the document paints, which the text a listing
         # shows cannot always spell.
-        emitted = emit_trapping_setup(str(target), assignments=stored)
+        emitted = emit_trapping_setup(
+            str(target), assignments=_exported_assignments(stored, pages, total))
         attached = emitted["attached"]
     return {
         "output": str(target),
@@ -463,6 +468,29 @@ def export_postscript(
         "trapped": carried["trapped"],
         "output_size": target.stat().st_size,
     }
+
+
+def _exported_assignments(stored: list[dict], spec: str, total: int) -> list[dict]:
+    """The stored assignments renumbered onto the pages the export wrote.
+
+    The PostScript numbers its pages from 1 in document order whatever pages
+    were selected, so an assignment keyed by document page would land on
+    another page of a partial export.
+    """
+    if not spec:
+        return stored
+    exported: set = set()
+    for token in spec.split(","):
+        first, _, last = token.partition("-")
+        exported.update(range(int(first), int(last or first) + 1))
+    out: list[dict] = []
+    for position, page in enumerate(sorted(exported), start=1):
+        for entry in stored:
+            if entry["first"] <= page <= entry["last"]:
+                out.append({"first": position, "last": position,
+                            "name": entry["name"], "preset": entry["preset"]})
+                break
+    return out
 
 
 # ── the document assignment, and `/Trapped` ────────────────────────────────

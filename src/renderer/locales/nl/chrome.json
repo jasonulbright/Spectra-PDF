@@ -2494,6 +2494,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} is na {{RENDER_TIMEOUT_S}}s afgebroken",
   "engine.print_layout.unvalidatedPageSpecToken": "niet-gevalideerd token in de paginaspecificatie: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Drukkersmerken toevoegen zou pagina {{index}} groter maken dan de paginalimiet van 14400 punten.",
+  "engine.printer_marks.colourBarCannotFit": "De kleurbalk kan zijn {{needed}} velden niet kwijt langs de bovenrand van pagina {{page_number}}.",
   "engine.printer_marks.markOffsetMustZero": "De merkafstand moet nul of meer zijn en de merklengte moet positief zijn.",
   "engine.printer_marks.markStyleMustOne": "De merkstijl moet een van {{styles}} zijn.",
   "engine.printer_marks.markWeightMustOne": "Het merkgewicht moet een van {{weights}} zijn.",

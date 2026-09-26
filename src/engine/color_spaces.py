@@ -25,6 +25,15 @@ from .pdf_tree import name_bytes, name_label, name_object
 
 _MAX_DEPTH = 8  # colour-space / function nesting guard (cyclic or hostile input)
 
+# Type 4 programs have no loops, but `copy` doubles the operand stack in one
+# operator, so a few hundred bytes of program can ask for more memory than
+# the machine has. A calculator function computes a handful of outputs; a
+# stack past this bound is a hostile program and evaluates to unknown.
+_MAX_PS_STACK = 1000
+# A shift past the width of any integer the calculator holds builds a Python
+# integer of arbitrary size.
+_MAX_PS_SHIFT = 64
+
 
 # ── numeric helpers ────────────────────────────────────────────────────────
 
@@ -340,6 +349,8 @@ def _run_ps(prog: list, stack: list, depth: int = 0) -> bool:
                 return False
         except (IndexError, ValueError, TypeError, OverflowError, ZeroDivisionError):
             return False
+        if len(stack) > _MAX_PS_STACK:
+            return False
     return True
 
 
@@ -443,7 +454,7 @@ def _ps_op(op: str, st: list, depth: int) -> bool:
         return True
     if op == "copy":
         n = int(pop_num())
-        if n < 0 or n > len(st):
+        if n < 0 or n > len(st) or len(st) + n > _MAX_PS_STACK:
             return False  # stack underflow — a malformed program, not a colour
         if n > 0:
             st.extend(st[-n:])
@@ -483,6 +494,8 @@ def _ps_op(op: str, st: list, depth: int) -> bool:
     if op == "bitshift":
         shift = int(pop_num())
         val = int(pop_num())
+        if abs(shift) > _MAX_PS_SHIFT:
+            return False
         st.append(float(val << shift if shift >= 0 else val >> -shift))
         return True
     return False  # unknown operator

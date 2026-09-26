@@ -2494,6 +2494,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} fik tidsafbrydelse efter {{RENDER_TIMEOUT_S}}s",
   "engine.print_layout.unvalidatedPageSpecToken": "uvalideret token i sideangivelsen: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Tilføjelse af trykmærker ville gøre side {{index}} større end sidegrænsen på 14400 punkter.",
+  "engine.printer_marks.colourBarCannotFit": "Farvebjælken kan ikke rumme sine {{needed}} felter langs den øverste kant af side {{page_number}}.",
   "engine.printer_marks.markOffsetMustZero": "Mærkeafstanden skal være nul eller derover, og mærkelængden skal være positiv.",
   "engine.printer_marks.markStyleMustOne": "Mærketypografien skal være en af {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "Mærkevægten skal være en af {{weights}}.",

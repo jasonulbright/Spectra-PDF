@@ -2620,6 +2620,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} překročilo časový limit {{RENDER_TIMEOUT_S}} s",
   "engine.print_layout.unvalidatedPageSpecToken": "neověřený token specifikace stránek: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Přidání tiskových značek by stránku {{index}} zvětšilo nad limit 14400 bodů.",
+  "engine.printer_marks.colourBarCannotFit": "Barevná škála se nevejde podél horního okraje stránky {{page_number}} (počet polí: {{needed}}).",
   "engine.printer_marks.markOffsetMustZero": "Odsazení značky musí být nula nebo více a délka značky musí být kladná.",
   "engine.printer_marks.markStyleMustOne": "Styl značky musí být jedno z {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "Tloušťka značky musí být jedna z {{weights}}.",

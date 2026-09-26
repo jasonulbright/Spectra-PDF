@@ -2557,6 +2557,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} ha excedit el temps després de {{RENDER_TIMEOUT_S}} s",
   "engine.print_layout.unvalidatedPageSpecToken": "testimoni d'especificació de pàgines no validat: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Afegir marques d'impressió faria que la pàgina {{index}} superés el límit de 14400 punts.",
+  "engine.printer_marks.colourBarCannotFit": "La barra de color no pot encabir les seves {{needed}} mostres a la vora superior de la pàgina {{page_number}}.",
   "engine.printer_marks.markOffsetMustZero": "El desplaçament de la marca ha de ser zero o més i la llargada de la marca ha de ser positiva.",
   "engine.printer_marks.markStyleMustOne": "L'estil de marca ha de ser un de {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "El gruix de marca ha de ser un de {{weights}}.",

@@ -368,3 +368,40 @@ def test_a_print_usage_of_off_takes_a_group_off_the_print() -> None:
                                  PrintState=pikepdf.Name("/OFF"))
     )
     assert not prints_by_default(ocg, set())
+
+
+def _die_line_page(content: bytes):
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    ocg = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name.OCG, Name=pikepdf.String("Die"),
+        GTS_Metadata=pikepdf.Dictionary(
+            GTS_ProcStepsGroup=pikepdf.Name("/Structural"),
+            GTS_ProcStepsType=pikepdf.Name("/Cutting"))))
+    pdf.Root.OCProperties = pikepdf.Dictionary(
+        OCGs=pikepdf.Array([ocg]), D=pikepdf.Dictionary(ON=pikepdf.Array([ocg])))
+    tint = pdf.make_indirect(pikepdf.Dictionary(
+        FunctionType=2, Domain=[0, 1], C0=[0, 0, 0, 0], C1=[0, 1, 0, 0], N=1))
+    spot = pikepdf.Array([pikepdf.Name.Separation, pikepdf.Name("/Spot"),
+                          pikepdf.Name.DeviceCMYK, tint])
+    page.obj.Resources = pikepdf.Dictionary(
+        ColorSpace=pikepdf.Dictionary(CS0=spot),
+        Properties=pikepdf.Dictionary(MC0=ocg))
+    page.Contents = pdf.make_stream(content)
+    return pdf
+
+
+def test_an_ink_selected_on_the_die_line_and_painted_after_it_is_artwork() -> None:
+    from engine.processing_steps import processing_step_only_colorants
+
+    pdf = _die_line_page(
+        b"/OC /MC0 BDC /CS0 cs 1 scn 0 0 10 10 re f EMC 20 20 100 100 re f")
+    assert processing_step_only_colorants(pdf, [1]) == set()
+
+
+def test_an_ink_painted_only_on_the_die_line_is_a_processing_step_ink() -> None:
+    from engine.processing_steps import processing_step_only_colorants
+
+    pdf = _die_line_page(
+        b"/CS0 cs 1 scn /OC /MC0 BDC 0 0 10 10 re f EMC 0 g 20 20 100 100 re f")
+    assert processing_step_only_colorants(pdf, [1]) == {b"Spot"}

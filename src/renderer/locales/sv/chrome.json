@@ -2494,6 +2494,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} tog för lång tid och avbröts efter {{RENDER_TIMEOUT_S}}s",
   "engine.print_layout.unvalidatedPageSpecToken": "ovaliderad token i sidangivelsen: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Att lägga till tryckmärken skulle göra sida {{index}} större än sidgränsen på 14400 punkter.",
+  "engine.printer_marks.colourBarCannotFit": "Färgskalan får inte plats med sina {{needed}} fält längs överkanten på sida {{page_number}}.",
   "engine.printer_marks.markOffsetMustZero": "Märkesavståndet måste vara noll eller mer och märkeslängden måste vara positiv.",
   "engine.printer_marks.markStyleMustOne": "Märkesstilen måste vara en av {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "Märkesvikten måste vara en av {{weights}}.",

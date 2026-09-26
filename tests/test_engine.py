@@ -1898,6 +1898,18 @@ class TestWatermark:
             assert b") Tj" in form.read_bytes()  # WinAnsi literal-string show
             assert str(form["/Resources"]["/Font"]["/F0"]["/Subtype"]) == "/Type1"
 
+    def test_watermark_latin1_layout_controls_draw_as_spaces(self, tmp_dir):
+        # The same flattening every other stamp applies: a tab is a gap, not
+        # a character the standard font has no glyph for.
+        src = os.path.join(tmp_dir, "wt_in.pdf")
+        out = os.path.join(tmp_dir, "wt_out.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        watermark(file=src, output=out, text="DRAFT\tCOPY\x0b")
+        with pikepdf.open(out) as pdf:
+            xo = pdf.pages[0].obj["/Resources"]["/XObject"]
+            form = next(xo[k] for k in xo.keys())
+            assert b"(DRAFT COPY ) Tj" in form.read_bytes()
+
     @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
     def test_watermark_unicode_embeds_font_and_is_searchable(self, tmp_dir):
         # A Cyrillic/Greek watermark (outside Latin-1) embeds a
@@ -4251,6 +4263,24 @@ class TestPrintPipeline:
         assert widths == [105, 103, 101]
         # The prepared file is printed whole — no -sPageList on the job.
         assert not any(a.startswith("-sPageList") for a in cap["argv"][0])
+
+    def test_an_odd_subset_in_document_order_spools_only_the_odd_pages(
+        self, tmp_dir, monkeypatch,
+    ):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103, 104, 105])
+        print_pdf(file=src, printer="P", gs_path="GS", subset="odd")
+        assert [a for a in cap["argv"][0] if a.startswith("-sPageList")] == [
+            "-sPageList=1,3,5"
+        ]
+
+    def test_an_even_subset_within_a_range_spools_its_even_pages(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103, 104, 105])
+        print_pdf(file=src, printer="P", gs_path="GS", pages="2-5", subset="even")
+        assert [a for a in cap["argv"][0] if a.startswith("-sPageList")] == [
+            "-sPageList=2,4"
+        ]
 
     def test_uncollated_copies_duplicate_into_one_job(self, tmp_dir, monkeypatch):
         cap = self._capture(monkeypatch, tmp_dir)

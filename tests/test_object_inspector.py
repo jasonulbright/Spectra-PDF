@@ -163,6 +163,26 @@ class TestWhichObject:
         assert result["candidates"] == 1
         assert result["objects"] == []
 
+    def test_a_path_that_clips_and_fills_is_the_paint_at_its_point(self, tmp_path, gs_path):
+        """A fill written as `re W f` paints; the text whose box covers the
+        point without inking it is not what the reader is looking at."""
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        font = pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1,
+            BaseFont=pikepdf.Name.Helvetica))
+        page.obj.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=font))
+        page.Contents = pdf.make_stream(
+            b"BT /F1 60 Tf 10 50 Td (i  i) Tj ET q 0 0 1 rg 40 40 60 60 re W f Q")
+        src = str(tmp_path / "clipfill.pdf")
+        pdf.save(src)
+        plates = render_separations(src, page=1, dpi=150, gs_path=gs_path, reuse=False)
+
+        result = inspect_point(src, page=1, x=70, y=70, plates=plates["plates"],
+                               plates_dir=plates["dir"], gs_path=gs_path)
+
+        assert [entry["kind"] for entry in result["objects"]] == ["fill"]
+
     def test_blank_paper_is_an_answer(self, oracle):
         _src, _plates, read = oracle
         result = read("paper")

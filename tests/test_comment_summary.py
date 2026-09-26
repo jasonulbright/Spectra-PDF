@@ -336,6 +336,23 @@ class TestListComments:
         assert model["comments"][0]["orphan"] is True
         assert model["comments"][0]["reply_to"] is None
 
+    def test_sort_by_date_orders_by_the_instant_across_time_zones(self, tmp_path):
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(612, 792))
+        # 2025-01-02 04:00 UTC, recorded the evening before in UTC-05:00.
+        _annot(pdf, 0, "/Text", [10, 10, 30, 30], Contents=String("later"),
+               M=String("D:20250101230000-05'00"))
+        # 2025-01-02 01:00 UTC.
+        _annot(pdf, 0, "/Text", [40, 10, 60, 30], Contents=String("earlier"),
+               M=String("D:20250102010000Z"))
+        path = str(tmp_path / "zones.pdf")
+        pdf.save(path)
+        pdf.close()
+
+        model = list_comments(path, sort="date")
+
+        assert [c["contents"] for c in model["comments"]] == ["earlier", "later"]
+
     def test_unknown_sort_refuses_by_name(self, fixture_pdf):
         with pytest.raises(ValueError, match="not a way to sort comments"):
             list_comments(fixture_pdf, sort="colour")

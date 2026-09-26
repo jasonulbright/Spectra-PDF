@@ -2494,6 +2494,7 @@
   "engine.print_layout.timedOutAfterS": "Το {{what}} έληξε χρονικά μετά από {{RENDER_TIMEOUT_S}} δευτ.",
   "engine.print_layout.unvalidatedPageSpecToken": "μη επικυρωμένο διακριτικό προδιαγραφής σελίδων: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Η προσθήκη σημάνσεων εκτύπωσης θα έκανε τη σελίδα {{index}} μεγαλύτερη από το όριο των 14400 points.",
+  "engine.printer_marks.colourBarCannotFit": "Η χρωματική ράβδος δεν χωρά τα {{needed}} πεδία της κατά μήκος του επάνω άκρου της σελίδας {{page_number}}.",
   "engine.printer_marks.markOffsetMustZero": "Η μετατόπιση σήμανσης πρέπει να είναι μηδέν ή μεγαλύτερη και το μήκος σήμανσης πρέπει να είναι θετικό.",
   "engine.printer_marks.markStyleMustOne": "Το στιλ σήμανσης πρέπει να είναι ένα από {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "Το πάχος σήμανσης πρέπει να είναι ένα από {{weights}}.",

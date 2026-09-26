@@ -2557,6 +2557,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} expirou depois de {{RENDER_TIMEOUT_S}} s",
   "engine.print_layout.unvalidatedPageSpecToken": "token de especificação de páginas não validado: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Adicionar marcas de impressão deixaria a página {{index}} maior que o limite de 14400 pontos.",
+  "engine.printer_marks.colourBarCannotFit": "A barra de cor não comporta suas {{needed}} amostras ao longo da borda superior da página {{page_number}}.",
   "engine.printer_marks.markOffsetMustZero": "O deslocamento das marcas deve ser zero ou mais e o comprimento delas deve ser positivo.",
   "engine.printer_marks.markStyleMustOne": "O estilo das marcas deve ser um destes: {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "A espessura das marcas deve ser uma destas: {{weights}}.",
