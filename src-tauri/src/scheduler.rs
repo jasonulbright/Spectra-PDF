@@ -1461,6 +1461,9 @@ fn profile_from_task_xml(
     let triggers = extract_tag(xml, "Triggers")?;
     if triggers.matches("<CalendarTrigger>").count() != 1
         || triggers.matches("</CalendarTrigger>").count() != 1
+        || ["EndBoundary", "Repetition", "RandomDelay", "Delay"]
+            .iter()
+            .any(|setting| triggers.contains(&format!("<{setting}")))
         || [
             "BootTrigger",
             "EventTrigger",
@@ -2160,6 +2163,27 @@ mod tests {
 
         let xml = build_test_task_xml(&p, None).replace("2020-01-01", "2030-01-01");
         assert!(parse_test_task_xml(&p.name, &xml).is_none());
+    }
+
+    #[test]
+    fn a_calendar_trigger_with_unpreserved_modifiers_is_not_offered_for_editing() {
+        let p = ocr_profile();
+        let base = build_test_task_xml(&p, None);
+        for modifier in [
+            "<EndBoundary>2030-01-01T03:00:00</EndBoundary>",
+            "<Repetition><Interval>PT5M</Interval><Duration>PT1H</Duration></Repetition>",
+            "<RandomDelay>PT15M</RandomDelay>",
+            "<Delay>PT15M</Delay>",
+        ] {
+            let xml = base.replace(
+                "</CalendarTrigger>",
+                &format!("{modifier}</CalendarTrigger>"),
+            );
+            assert!(
+                parse_test_task_xml(&p.name, &xml).is_none(),
+                "calendar modifier was offered for editing: {modifier}"
+            );
+        }
     }
 
     #[test]
