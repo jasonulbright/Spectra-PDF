@@ -33,6 +33,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.accessibility import check_accessibility
 from engine.autotag import autotag
@@ -185,7 +186,7 @@ def _fix_suspects(source: str, output: str, report: dict, allow_signed: bool) ->
             "signatures -- the run must state that signed documents are included before "
             "it will touch one"
         )
-    with pikepdf.open(source, allow_overwriting_input=True) as pdf:
+    with open_pdf(source, allow_overwriting_input=True) as pdf:
         mark_info = pdf.Root.get("/MarkInfo")
         if mark_info is None:
             return 0
@@ -350,7 +351,7 @@ def _fix_embedded_file_names(source: str, output: str, report: dict,
             "it will touch one"
         )
     applied = 0
-    with pikepdf.open(source, allow_overwriting_input=True) as pdf:
+    with open_pdf(source, allow_overwriting_input=True) as pdf:
         for obj in pdf.objects:
             if not isinstance(obj, pikepdf.Dictionary):
                 continue

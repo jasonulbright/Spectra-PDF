@@ -40,6 +40,7 @@ import math
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine import color_spaces
 from engine.bezier import cubic_bbox_points, flatten_cubic
@@ -610,7 +611,7 @@ def list_page_vectors(file: str, page: int) -> dict:
     device draws, and `nested` (inside a Form XObject)."""
     _INTERNAL = ("drop_idxs", "_do_chain", "_edit_depth", "_start_ctm", "_sh_frame",
                  "_sh_name", "_scale")
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
@@ -677,7 +678,7 @@ def list_page_geometry(file: str, page: int) -> dict:
     rule the walk already applies). Per page, on demand — never whole-document;
     that is what bounds the payload on a 60-sheet drawing set.
     """
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
@@ -957,7 +958,7 @@ def delete_page_vector(file: str, output: str, page: int, index: int) -> dict:
     copy of its form."""
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
@@ -1018,7 +1019,7 @@ def transform_page_vector(file: str, output: str, page: int, index: int, matrix:
         raise ValueError("matrix must be [a, b, c, d, e, f]")
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
@@ -1139,7 +1140,7 @@ def restyle_page_vector(
         raise ValueError("restyle requires at least one of fill, stroke, line_width")
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):

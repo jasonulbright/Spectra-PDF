@@ -54,6 +54,7 @@ import re
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
 from engine.inplace import is_same_file, staged_write
@@ -917,7 +918,7 @@ def watermark(
     image_frames = 0
     pdf_page_count = 0
     with contextlib.ExitStack() as stack:
-        pdf = stack.enter_context(pikepdf.open(file))
+        pdf = stack.enter_context(open_pdf(file))
         # A non-Latin-1 stamp is drawn with a subsetted Type0 font SHARED
         # across pages (the text is constant), else the WinAnsi Helvetica path
         # (uni=None, byte-identical). Resolve the FACE upfront (cheap, no
@@ -968,7 +969,7 @@ def watermark(
         source_unit: tuple[float, float] = (1.0, 1.0)
         if has_pdf:
             try:
-                source_pdf_doc = stack.enter_context(pikepdf.open(source_path))
+                source_pdf_doc = stack.enter_context(open_pdf(source_path))
             except pikepdf.PasswordError:
                 raise ValueError(
                     f"the watermark PDF is password protected: {source_path}"

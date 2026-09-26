@@ -20,6 +20,7 @@ standard it is read against and why that reading is second-hand.
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Name
 from engine.inplace import is_same_file, staged_write
 from engine.processing_steps import read_processing_step
@@ -120,7 +121,7 @@ def list_layers(file: str, for_edit: bool = False) -> dict:
     carry one. `processing_step_count` is what tells a caller whether this is
     a packaging document at all without walking the list.
     """
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if for_edit:
             try:
                 ocgs, _, off, locked, _ = _editable_config(pdf)
@@ -156,7 +157,7 @@ def set_layer_visibility(file: str, output: str, index: int, visible: bool) -> d
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         ocgs, d, off, locked, radios = _editable_config(pdf)
         if type(index) is not int or not (0 <= index < len(ocgs)):
             raise ValueError(f"layer index {index} is out of range (0-{len(ocgs) - 1})")

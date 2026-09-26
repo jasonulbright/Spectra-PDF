@@ -7,6 +7,7 @@ from io import BytesIO
 from lxml import etree
 
 import pikepdf
+from engine.credentials import open_pdf
 from engine.inplace import staged_write
 from engine.pdf_save import encryption_profile, save_pdf
 from engine.pdf_version import effective_version, parse_version, version_facts
@@ -75,7 +76,7 @@ def _prepare_version_metadata(pdf: pikepdf.Pdf, version: str) -> None:
 
 def get_pdf_version(file: str) -> dict:
     """Read effective version and explicitly labelled physical declarations."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         return {"file": file, **version_facts(pdf), "pages": len(pdf.pages)}
 
 
@@ -98,7 +99,7 @@ def set_pdf_version(
     # Stage even for a different output: a refusal must leave an existing
     # destination intact. Close every input handle before the final rename.
     with staged_write(output_path) as staged:
-        with pikepdf.open(file) as pdf:
+        with open_pdf(file) as pdf:
             facts = version_facts(pdf)
             current = effective_version(pdf)
             if target < current:
@@ -123,7 +124,7 @@ def set_pdf_version(
             preserved = bool(result.get('preserved'))
             if not preserved and result.get('reason') != 'not-signed':
                 raise ValueError("The PDF version cannot be changed while preserving this document's signatures.")
-        with pikepdf.open(staged) as written:
+        with open_pdf(staged) as written:
             if effective_version(written) != target:
                 raise ValueError("The written PDF does not declare the requested version.")
             if changed:

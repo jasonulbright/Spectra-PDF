@@ -25,6 +25,7 @@ import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine import budget
 from engine.acroform import adopt_orphan_widget_fields
@@ -208,7 +209,7 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "") 
     adopted = 0
     adopted_tmp: str | None = None
     try:
-        with pikepdf.open(output_path) as pdf:
+        with open_pdf(output_path) as pdf:
             pages = len(pdf.pages)
             if pages > 0:
                 adopted = adopt_orphan_widget_fields(pdf)

@@ -35,6 +35,7 @@ import os
 import shutil
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine import gs_capability
 from engine.batch_ocr import (
@@ -766,7 +767,7 @@ def _readable_output(path: Path) -> bool:
     pages. An ENCRYPTED result counts as readable — a terminal encrypt step
     produces exactly that on purpose."""
     try:
-        with pikepdf.open(str(path)) as pdf:
+        with open_pdf(str(path)) as pdf:
             return len(pdf.pages) > 0
     except pikepdf.PasswordError:
         return True

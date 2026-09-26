@@ -33,6 +33,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.batch_ocr import (
     _format_duration,
@@ -71,7 +72,7 @@ def _readable_output(path: Path) -> bool:
     """The in-place gate: the processed staging must read back as a PDF with
     pages before it replaces anything."""
     try:
-        with pikepdf.open(str(path)) as pdf:
+        with open_pdf(str(path)) as pdf:
             return len(pdf.pages) > 0
     except pikepdf.PasswordError:
         return True

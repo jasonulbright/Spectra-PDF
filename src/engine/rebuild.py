@@ -6,6 +6,7 @@ Slower than Tier 1, may lose interactive elements (form fields, JS actions).
 """
 
 from pathlib import Path
+from engine.credentials import open_pdf
 
 from . import budget
 from .inplace import staged_write
@@ -23,7 +24,7 @@ def _source_page_count(file: str):
     """
     import pikepdf
     try:
-        pdf = pikepdf.open(file, suppress_warnings=True)
+        pdf = open_pdf(file, suppress_warnings=True)
     except Exception:
         return None
     with pdf:
@@ -100,7 +101,7 @@ def rebuild(
 
         # Verify the output is valid by opening with pikepdf
         import pikepdf
-        with pikepdf.open(str(staged)) as pdf:
+        with open_pdf(str(staged)) as pdf:
             page_count = len(pdf.pages)
 
         if source_pages is not None and page_count < source_pages:

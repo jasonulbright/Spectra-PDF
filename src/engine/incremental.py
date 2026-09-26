@@ -84,6 +84,7 @@ import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pyhanko.pdf_utils import generic
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.pdf_utils.metadata.model import DocumentMetadata
@@ -153,7 +154,7 @@ def _effective_ft(node, inherited, depth=0):
 
 def _live_sig_count(path: str) -> int:
     try:
-        with pikepdf.open(path) as pdf:
+        with open_pdf(path) as pdf:
             return len(live_signature_fields(pdf, strict=True))
     except Exception:
         refuse_unreadable_policy()
@@ -188,7 +189,7 @@ def signature_policy(path: str) -> dict:
     over all partial facts. Absence of that error is required before editing.
     """
     try:
-        with pikepdf.open(path) as pdf:
+        with open_pdf(path) as pdf:
             return signature_policy_of_pdf(pdf)
     except Exception:
         return {"signed": False, "count": 0, "certified": False,
@@ -1399,7 +1400,7 @@ def transplant_incremental(original: str, modified: str, output: str, *,
     orig_bytes = Path(original).read_bytes()
 
     try:
-        with pikepdf.open(io.BytesIO(orig_bytes)) as orig, pikepdf.open(modified) as mod:
+        with open_pdf(io.BytesIO(orig_bytes), document=original) as orig, open_pdf(modified) as mod:
             policy = signature_policy_of_pdf(orig)
             if policy.get("error"):
                 return {"applied": False, "blocked": True, "reason": POLICY_UNREADABLE}
@@ -1545,7 +1546,7 @@ def transplant_incremental(original: str, modified: str, output: str, *,
             "— refusing to emit a signature-breaking file"
         )
     # The appended revision must still parse as a healthy document.
-    with pikepdf.open(io.BytesIO(result)):
+    with open_pdf(io.BytesIO(result)):
         pass
 
     fd, tmp = tempfile.mkstemp(

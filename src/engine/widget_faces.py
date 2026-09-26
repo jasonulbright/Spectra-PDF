@@ -41,6 +41,7 @@ import shutil
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
 from .acroform import has_form_fields
@@ -214,7 +215,7 @@ def regenerate_appearances_file(source: Path, scratch: Path,
     happens in — drawing it would need a face `font_dir` did not supply, and
     inventing one spells the value in glyphs that mean something else.
     """
-    with pikepdf.open(str(source)) as pdf:
+    with open_pdf(str(source)) as pdf:
         if not has_form_fields(pdf):
             return None
         from .forms import regenerate_missing_appearances
@@ -234,7 +235,7 @@ def stage_appearances_file(source: Path, scratch: Path):
     None means nothing was staged and the pass runs on the original, which is
     every document that carries no form field.
     """
-    with pikepdf.open(str(source)) as pdf:
+    with open_pdf(str(source)) as pdf:
         boxes = stage_appearances(pdf)
         if not boxes:
             return None, []
@@ -313,7 +314,7 @@ def harvest_appearances(output: Path, source: Path, scratch: Path,
     forms = Path(scratch) / "forms.pdf"
     shutil.copyfile(str(source), str(forms))
     paired = False
-    with pikepdf.open(str(output), allow_overwriting_input=True) as converted:
+    with open_pdf(str(output), allow_overwriting_input=True) as converted:
         pages = list(converted.pages)
         if len(pages) != source_pages + len(boxes):
             # Which pages are the scaffolding is known from the count the
@@ -326,7 +327,7 @@ def harvest_appearances(output: Path, source: Path, scratch: Path,
                 "cannot reattach its form fields."
             )
         staged_pages = pages[source_pages:]
-        with pikepdf.open(str(forms), allow_overwriting_input=True) as src:
+        with open_pdf(str(forms), allow_overwriting_input=True) as src:
             faces = staged_faces(src)
             if len(faces) == len(boxes):
                 for face, page, box in zip(faces, staged_pages, boxes):

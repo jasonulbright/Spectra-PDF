@@ -43,6 +43,7 @@ destroys the form when a consumer drops the XML.
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name, String
 
 from engine import afemit, fieldactions
@@ -148,7 +149,7 @@ def _top_level_names(pdf: pikepdf.Pdf) -> set:
 
 def existing_field_names(file: str) -> set:
     """Every field name the document carries, terminal and parent alike."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         names = _top_level_names(pdf)
         for field in _all_fields(pdf):
             names.add(field.name)
@@ -1058,7 +1059,7 @@ def add_form_fields(
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
     names = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         refuse_if_xfa(pdf, input_path, "adding form fields")
         _validate(pdf, specs, font_dir)
         acro = _acroform(pdf)
@@ -1130,7 +1131,7 @@ def author_vertical_field_font(
     input_path = Path(file)
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         refuse_if_xfa(pdf, input_path, "setting a field's writing mode")
         forest = form_field_forest(pdf)
         problems: list[str] = []
@@ -1241,7 +1242,7 @@ def author_choice_appearance(
     input_path = Path(file)
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         refuse_if_xfa(pdf, input_path, "redrawing an option list")
         terminals = {field.name: field for field in _all_fields(pdf)}
         acro = _forms_acroform(pdf)
@@ -1400,7 +1401,7 @@ def set_field_lock(
     input_path = Path(file)
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         refuse_if_xfa(pdf, input_path, "setting a field lock")
         forest = form_field_forest(pdf)
         target = forest.get(name)
@@ -1469,7 +1470,7 @@ def set_field_description(
     input_path = Path(file)
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         refuse_if_xfa(pdf, input_path, "setting a field description")
         forest = form_field_forest(pdf)
         target = forest.get(name)
@@ -1546,7 +1547,7 @@ def set_field_actions(
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
     dropped = set(clear or ())
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         refuse_if_xfa(pdf, input_path, "setting a field action")
         forest = form_field_forest(pdf)
         target = forest.get(name)

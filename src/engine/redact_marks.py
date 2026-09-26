@@ -25,6 +25,7 @@ import math
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from .incremental import finalize_preserving_signatures, signature_outcome
 from .inplace import is_same_file, staged_write
@@ -234,7 +235,7 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         scanned = _scan(pdf)
         # BEFORE any mutation: a replace over a set we cannot read would drop
         # or keep marks arbitrarily, which is the same silence from the other
@@ -323,7 +324,7 @@ def list_redact_annotations(file: str) -> dict:
     """
     validate_pdf(file)
     marks = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         scanned = _scan(pdf)
         _refuse_unreadable(scanned)
         for i, rec in enumerate(scanned):

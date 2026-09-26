@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import OutlineItem
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
@@ -231,7 +232,7 @@ def _read_items(pdf: pikepdf.Pdf, items, depth: int, budget: list[int]) -> list[
 def get_outline(file: str) -> dict:
     """Read the bookmark tree. Items whose destination can't be resolved to a
     page keep their place in the tree with page=None."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         with pdf.open_outline() as outline:
             budget = [MAX_NODES]
             items = _read_items(pdf, outline.root, 0, budget)
@@ -302,7 +303,7 @@ def set_outline(file: str, outline: list[dict], output: str) -> dict:
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         items = _build_items(pdf, outline or [], len(pdf.pages), 0)
         with pdf.open_outline() as ol:
             ol.root.clear()

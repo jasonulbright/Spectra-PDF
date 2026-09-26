@@ -19,6 +19,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine import budget
 from engine.inplace import publish_copy
@@ -344,7 +345,7 @@ def _normalise_face(name: str) -> str:
 def embedded_faces(pdf_path: str | Path) -> set[str]:
     """The normalised face names a produced PDF actually draws with."""
     faces: set[str] = set()
-    with pikepdf.open(str(pdf_path)) as pdf:
+    with open_pdf(str(pdf_path)) as pdf:
         for page in pdf.pages:
             resources = page.get("/Resources") or {}
             for _key, font in (resources.get("/Font") or {}).items():
@@ -649,7 +650,7 @@ def to_pdf(source: str | Path, output: str | Path, soffice_path: str) -> dict:
     try:
         produced = run_convert(soffice_path, "pdf", src, work, ".pdf")
         try:
-            with pikepdf.open(str(produced)) as pdf:
+            with open_pdf(str(produced)) as pdf:
                 pages = len(pdf.pages)
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(

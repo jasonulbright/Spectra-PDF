@@ -39,6 +39,7 @@ nothing and is not read.
 from __future__ import annotations
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.content_walk import GraphicsTextState
 from engine.redact import IDENTITY, _resolve_resources, _span_bbox
@@ -329,7 +330,7 @@ def read_aloud_page(file: str, page: int) -> dict:
     character of that range.
     """
     validate_pdf(file)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")

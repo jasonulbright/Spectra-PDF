@@ -42,6 +42,7 @@ with placeholder alternate text is worse than one the checker reports.
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.content_walk import IDENTITY, GraphicsTextState
 from engine.inplace import is_same_file, staged_write
@@ -229,7 +230,7 @@ def autotag(file: str, output: str) -> dict:
     output_path = Path(output)
     same_file = is_same_file(file, output)
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if _is_tagged(pdf):
             raise ValueError(
                 "This document is already tagged. Refine its tags in the Tags "

@@ -23,6 +23,7 @@ import math
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.mrc import _classify_page
 from engine.page_images import _walk_placements
@@ -98,7 +99,7 @@ def summarize_image_resolution(file: str) -> dict:
     placements: list[dict] = []
     unmeasured = 0
     scan_pages = 0
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         for number, page in enumerate(pdf.pages, start=1):
             try:

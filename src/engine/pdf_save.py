@@ -5,6 +5,7 @@ from typing import NamedTuple
 from xml.etree import ElementTree
 
 import pikepdf
+from engine.credentials import open_pdf
 
 _SENTINEL = object()
 
@@ -421,6 +422,15 @@ def encryption_profile(pdf):
     return _descriptor(pdf)
 
 
+def refuse_user_opened_source(pdf) -> None:
+    """Refuse a source opened with its user password as input to a NEW
+    document. The owner password that authors a protection is not held, and
+    qpdf copies encryption only onto the document it was read from, so the
+    output could carry the source's pages only unprotected."""
+    if getattr(pdf, "_spectra_preserve_encryption", False):
+        _refuse_unreproducible_encryption(False, True)
+
+
 def refuse_encrypted_source(file, *, drop_encryption: bool = False) -> bool:
     """Refuse an encrypted document, or drop its protection by consent.
 
@@ -440,7 +450,7 @@ def refuse_encrypted_source(file, *, drop_encryption: bool = False) -> bool:
     report in its result.
     """
     try:
-        with pikepdf.open(file) as pdf:
+        with open_pdf(file) as pdf:
             state = _encryption_reproducibility(pdf)
     except pikepdf.PasswordError:
         raise
@@ -492,7 +502,12 @@ def save_pdf(
     """
     if "encryption" not in kwargs and not drop_encryption:
         source = pdf if encryption_source is _SENTINEL else encryption_source
-        if source is not None:
+        if source is pdf and getattr(pdf, "_spectra_preserve_encryption", False):
+            # Opened with the user password: the owner password needed to
+            # rebuild this protection is not held, so qpdf copies the
+            # document's own /Encrypt, /O, /U and /P instead.
+            kwargs["encryption"] = True
+        elif source is not None:
             encryption = source_encryption(source)
             if encryption is not None:
                 kwargs["encryption"] = encryption

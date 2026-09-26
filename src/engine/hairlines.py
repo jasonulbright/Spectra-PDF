@@ -30,6 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary
 
 from engine.content_walk import mat_mult
@@ -452,7 +453,7 @@ def list_hairlines(
     unreadable: list[str] = []
     strokes = 0
     borders = 0
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for number in _page_numbers(pdf, pages):
             page = pdf.pages[number - 1]
             row: dict = {"page": number, "strokes": [], "annotations": [], "error": None}
@@ -574,7 +575,7 @@ def fix_hairlines(
     fixed_borders = 0
     rows: list[dict] = []
 
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         for number in _page_numbers(pdf, pages):
             page = pdf.pages[number - 1]

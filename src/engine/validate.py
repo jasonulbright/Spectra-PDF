@@ -6,6 +6,7 @@ GS operations so malformed PDFs never reach the interpreter.
 """
 
 import pikepdf
+from engine.credentials import open_pdf
 
 # Configurable limits to prevent resource exhaustion
 MAX_PAGES = 50_000
@@ -29,7 +30,7 @@ def validate_pdf(path: str) -> dict:
 
     # pikepdf.open validates: PDF header magic, xref table, trailer,
     # object stream integrity, cross-reference consistency
-    with pikepdf.open(path) as pdf:
+    with open_pdf(path) as pdf:
         page_count = len(pdf.pages)
 
         if page_count > MAX_PAGES:

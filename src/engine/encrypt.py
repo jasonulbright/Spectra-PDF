@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from .inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
@@ -99,7 +100,7 @@ def encrypt(
     if allow is not None:
         enc_kwargs["allow"] = allow
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         _require_owner_authority(pdf)
         report = _signature_report(pdf)
         output_path = Path(output)
@@ -131,7 +132,7 @@ def grant_accessibility_permission(file: str, output: str) -> dict:
     altogether.
     """
     output_path = Path(output)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if not pdf.is_encrypted:
             raise ValueError(
                 "This document is not encrypted, so nothing is stopping assistive "
@@ -179,7 +180,7 @@ def decrypt(file: str, output: str, password: str = "") -> dict:
         output: Output PDF path.
         password: Password to unlock the document.
     """
-    with pikepdf.open(file, password=password) as pdf:
+    with open_pdf(file, password=password) as pdf:
         _require_owner_authority(pdf)
         report = _signature_report(pdf)
         output_path = Path(output)

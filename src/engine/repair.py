@@ -6,6 +6,7 @@ preserves annotations, bookmarks, metadata.
 """
 
 import pikepdf
+from engine.credentials import open_pdf
 from pathlib import Path
 from engine.acroform import strip_signatures
 from engine.pdf_save import save_pdf
@@ -35,7 +36,7 @@ def repair(file: str, output: str) -> dict:
     # open and while objects resolve; each reconstruction is a warning, and the
     # warnings are the only record of what the rewrite repaired.
     try:
-        pdf = pikepdf.open(
+        pdf = open_pdf(
             file, suppress_warnings=True, allow_overwriting_input=True
         )
     except pikepdf.PasswordError:

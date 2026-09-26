@@ -28,6 +28,7 @@ silently over a structure it failed to parse.
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Name
 
 from engine.docmdp import certification_of_pdf
@@ -773,7 +774,7 @@ def audit_hidden_information(file: str, pages="all", deep_text: bool = True) -> 
         raw = b""
 
     report = _Report()
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         page_numbers = _page_numbers(pdf, pages)
         signatures = _signature_summary(file, pdf)
 
@@ -1333,7 +1334,7 @@ def sanitize_pdf(
     removed = {cid: 0 for cid in CATEGORY_IDS}
 
     options = {"form_fields_mode": form_fields_mode, "hidden_text_ocr": bool(hidden_text_ocr)}
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         from engine.incremental import signature_policy_of_pdf
         from engine.docmdp import refuse_unreadable_policy
         if signature_policy_of_pdf(pdf).get("error"):

@@ -55,6 +55,7 @@ import unicodedata
 from typing import NamedTuple, Optional
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.content_walk import GraphicsTextState
 from engine.redact import IDENTITY, _resolve_resources, _span_bbox
@@ -571,7 +572,7 @@ def search_text_regions(
     hits: list[dict] = []
     pages_without_text: list[int] = []
     truncated = False
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         wanted = _page_numbers(pages, pdf)
         for page_number in wanted:
             if truncated:

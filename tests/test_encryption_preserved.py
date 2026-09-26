@@ -497,7 +497,7 @@ def _pikepdf_saves(path):
 
     tree = ast.parse(path.read_text(encoding="utf-8"))
     constructors = {
-        "pikepdf.open", "pikepdf.new",
+        "pikepdf.open", "pikepdf.new", "open_pdf",
         "pikepdf.Pdf.open", "pikepdf.Pdf.new",
         "Pdf.open", "Pdf.new",
     }

@@ -16,11 +16,12 @@ import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.acroform import refuse_if_xfa
 from engine.page_copy import copy_pages_with_forms
 from engine.fs_names import safe_file_name, unique_name
-from engine.pdf_save import save_pdf
+from engine.pdf_save import refuse_user_opened_source, save_pdf
 
 MODES = ("ranges", "every_n", "size", "bookmarks")
 
@@ -51,7 +52,7 @@ def _render_part(file: str | bytes, page_indices: list[int]) -> bytes:
     from the same open would inherit the first part's prune and lose its own
     fields. A fresh open per part is what makes the prune safe to repeat.
     """
-    with pikepdf.open(io.BytesIO(file) if isinstance(file, bytes) else file) as pdf, pikepdf.Pdf.new() as result:
+    with open_pdf(io.BytesIO(file) if isinstance(file, bytes) else file) as pdf, pikepdf.Pdf.new() as result:
         # The shared copy boundary prunes before copying and registers all
         # selected pages' widgets through one field map, including repeats.
         copy_pages_with_forms(result, pdf, pages=page_indices)
@@ -90,7 +91,7 @@ def _bookmark_parts(file: str | bytes, page_count: int) -> list[tuple[list[int],
     from engine.outline import _resolve_dest_array, _resolve_dest_page  # noqa: PLC0415
 
     starts: list[tuple[int, str]] = []
-    with pikepdf.open(io.BytesIO(file) if isinstance(file, bytes) else file) as pdf:
+    with open_pdf(io.BytesIO(file) if isinstance(file, bytes) else file) as pdf:
         with pdf.open_outline() as outline:
             for item in outline.root:
                 page = _resolve_dest_page(pdf, _resolve_dest_array(pdf, item))
@@ -364,7 +365,8 @@ def split(
     if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
             after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
         raise ValueError("Split source changed during preparation")
-    with pikepdf.open(io.BytesIO(source_bytes)) as pdf:
+    with open_pdf(io.BytesIO(source_bytes), document=file) as pdf:
+        refuse_user_opened_source(pdf)
         refuse_if_xfa(pdf, file, "splitting")
         page_count = len(pdf.pages)
     if page_count == 0:

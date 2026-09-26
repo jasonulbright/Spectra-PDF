@@ -35,6 +35,7 @@ import shutil
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
 from engine import afcalc, fieldactions, formdata, xfa, xfa_datasets
@@ -740,7 +741,7 @@ def _calc_value(field: _Field, ftype: str) -> str:
 
 def read_form_fields(file: str) -> dict:
     """Enumerate AcroForm fields (read-only)."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         annot_map, page_map = _page_index_maps(pdf)
         order = _calculation_order(pdf)
         calculated = set(order)
@@ -2216,10 +2217,10 @@ def export_form_data(
     if fmt == "pdf":
         if Path(file).resolve() != output_path.resolve():
             shutil.copyfile(file, output_path)
-        with pikepdf.open(file) as pdf:
+        with open_pdf(file) as pdf:
             values = form_data_values(pdf, fields, exclude, include_empty)
         return {"output": str(output_path), "format": fmt, "count": len(values)}
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         values = form_data_values(pdf, fields, exclude, include_empty)
     name = source or Path(file).name
     if fmt == "fdf":
@@ -2256,7 +2257,7 @@ def import_form_data(
     if not str(data or "").strip():
         raise ValueError("Name the form-data file to import.")
     values = formdata.parse_form_data(str(data))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         known: dict = {}
         for field in _all_fields(pdf):
             known[field.name] = _classify(field)
@@ -2328,7 +2329,7 @@ def set_widget_visibility(
     output_path = Path(output)
     changed = 0
     missing: list[str] = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         by_name: dict[str, list] = {}
         for f in _all_fields(pdf):
             by_name.setdefault(f.name, []).append(f)
@@ -2386,7 +2387,7 @@ def reset_form_fields(
 
     values: dict = {}
     skipped_bad_dv: list[str] = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for f in _all_fields(pdf):
             ftype = _classify(f)
             if ftype in ("button", "signature", "unknown"):
@@ -2463,7 +2464,7 @@ def fill_form_fields(
     # flatten inherently destroys what the signature covers).
     from engine.incremental import finalize_preserving_signatures, signature_outcome
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if xfa.classify(pdf) == xfa.DYNAMIC:
             # A dynamic XFA form builds its own pages from its template when
             # it is opened (ISO 32000-2 Table 29, `NeedsRendering`), so the

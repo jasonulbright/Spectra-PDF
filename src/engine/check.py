@@ -7,6 +7,7 @@ for programmatic use.
 
 import os
 import pikepdf
+from engine.credentials import open_pdf
 from pathlib import Path
 
 from engine.font_embedding import font_embedded
@@ -164,7 +165,7 @@ def check(file: str) -> dict:
 
     # 2. Try opening with pikepdf (validates xref, trailer, object streams)
     try:
-        pdf = pikepdf.open(file, suppress_warnings=False)
+        pdf = open_pdf(file, suppress_warnings=False)
     except pikepdf.PasswordError:
         report["info"]["encrypted"] = True
         report["issues"].append({

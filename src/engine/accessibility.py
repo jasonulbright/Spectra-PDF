@@ -50,6 +50,7 @@ import math
 import xml.etree.ElementTree as ElementTree
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine import struct_audit, struct_nesting
 from engine.contrast import page_contrast
@@ -4718,7 +4719,7 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
         except Exception as exc:
             return [], [{"reason": str(exc)}]
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         pages = _Pages(pdf)
         entries, annots_unread = read(lambda: annots_of(pdf))
         tree = audit_tree(pdf, entries)

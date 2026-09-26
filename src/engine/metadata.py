@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from lxml import etree
 
 from .inplace import staged_write
@@ -199,7 +200,7 @@ def get_metadata(file: str) -> dict:
     Args:
         file: Input PDF path.
     """
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         _, values = _read_properties(pdf)
         return {"file": file, **values, "pages": len(pdf.pages)}
 
@@ -248,7 +249,7 @@ def set_metadata(
         subject: Subject/description (None = don't change).
         keywords: Keywords string (None = don't change).
     """
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         apply_metadata_fields(pdf, title=title, author=author, subject=subject, keywords=keywords)
         output_path = Path(output)
         _save_copy(pdf, output_path)
@@ -270,7 +271,7 @@ def strip_metadata(file: str, output: str) -> dict:
         output: Output PDF path.
     """
     output_path = Path(output)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         # Explicit removal does not need a recoverable interpretation of the
         # bytes being removed; do not repair malformed XML just to delete it.
         if '/Metadata' in pdf.Root:

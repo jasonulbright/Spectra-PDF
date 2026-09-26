@@ -24,6 +24,7 @@ import zipfile
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine import bidi, budget
 from engine.inplace import publish_copy
@@ -284,7 +285,7 @@ def export_slides(
 
     work = Path(tempfile.mkdtemp(prefix="slide-export-"))
     try:
-        with pikepdf.open(str(file)) as pdf:
+        with open_pdf(str(file)) as pdf:
             wanted = _page_numbers(pages, pdf)
             geometry = []
             for number in wanted:

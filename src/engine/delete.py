@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.acroform import prune_form_to_pages, refuse_if_xfa
 from engine.inplace import is_same_file, staged_write
@@ -21,7 +22,7 @@ def delete(file: str, pages: list[int], output: str) -> dict:
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         refuse_if_xfa(pdf, file, "deleting pages")
         total = len(pdf.pages)
         indices = sorted(set(p - 1 for p in pages if 0 < p <= total), reverse=True)

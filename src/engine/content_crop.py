@@ -29,6 +29,7 @@ identical to its input.
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array
 
 from engine.content_walk import IDENTITY
@@ -243,7 +244,7 @@ def content_crop(
     changed = 0
     measured: list[dict] = []
     skipped: list[dict] = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for index, page in enumerate(pdf.pages, start=1):
             if wanted is not None and index not in wanted:
                 continue

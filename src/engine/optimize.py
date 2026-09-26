@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
@@ -38,7 +39,7 @@ def optimize(
     # output, so afterwards `input_path` IS the result.
     original_size = input_path.stat().st_size
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         if strip_metadata:
             with pdf.open_metadata(
                 set_pikepdf_as_editor=False, update_docinfo=False

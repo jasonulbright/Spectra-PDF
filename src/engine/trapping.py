@@ -35,6 +35,7 @@ import re
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name, String
 
 from .page_images import _save
@@ -431,7 +432,7 @@ def export_postscript(
     target = Path(output)
     from .printer import parse_page_spec
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         stored = _read_assignments(pdf)
     pages = parse_page_spec(str(pages or ""), total)
@@ -606,7 +607,7 @@ def assign_presets(
     from .separations import entry_bytes, list_inks
 
     known = {entry_bytes(entry) for entry in list_inks(file)["inks"]}
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         plan = _normalized_assignments(assignments, len(pdf.pages))
         _resolved_zones(plan, known)
         records = Array()
@@ -648,7 +649,7 @@ def list_trap_presets(file: str) -> dict:
     from .separations import entry_bytes, list_inks
 
     known = {entry_bytes(entry) for entry in list_inks(file)["inks"]}
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         assignments = _read_assignments(pdf)
         trapped = name_text(pdf.docinfo.get(Name("/Trapped"), "")).lstrip("/")

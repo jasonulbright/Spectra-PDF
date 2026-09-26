@@ -15,6 +15,7 @@ Styles: D decimal, r/R roman lower/upper, a/A alphabetic lower/upper, or none
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name, String
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
@@ -213,7 +214,7 @@ def _render_labels(ranges: list[dict], total: int) -> list[str]:
 
 def get_page_labels(file: str) -> dict:
     """Only complete reads may seed the editor; `labels` is for navigation."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         try:
             ranges = _read_ranges(pdf)
@@ -229,7 +230,7 @@ def set_page_labels(file: str, output: str, ranges: list[dict]) -> dict:
     output_path = Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         norm = _normalize(ranges, total)
         if not norm:

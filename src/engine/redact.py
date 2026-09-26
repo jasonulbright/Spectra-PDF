@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Name
 
 from engine import image_redact, redact_document, redact_fonts, vector_redact
@@ -1799,7 +1800,7 @@ def redact(
         "annotations_removed": 0,
     }
     pages_redacted = 0
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         run = _Run(pdf, gs_path)
         total = len(pdf.pages)
         marked = [pdf.pages[number - 1] for number in by_page if 1 <= number <= total]

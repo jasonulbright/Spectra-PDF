@@ -16,6 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Name
 
 from engine.inplace import is_same_file
@@ -67,7 +68,7 @@ def set_table_headers(
 
     input_path, output_path = Path(file), Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         tree = audit_tree(pdf)
         if not tree["tagged"]:
             raise ValueError("document has no structure tree (it is untagged)")

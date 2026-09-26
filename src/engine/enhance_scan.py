@@ -63,6 +63,7 @@ from pathlib import Path
 
 import numpy as np
 import pikepdf
+from engine.credentials import open_pdf
 from PIL import Image
 from pikepdf import Name
 
@@ -735,7 +736,7 @@ def analyze_scan(
     rows: list[dict] = []
     scans = 0
     would_change = 0
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         wanted = _selected(pages, len(pdf.pages))
         for number, page in enumerate(pdf.pages, start=1):
             if number not in wanted:
@@ -825,7 +826,7 @@ def enhance_scan(
     rows: list[dict] = []
     enhanced = 0
     unchanged = 0
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         wanted = _selected(pages, len(pdf.pages))
         candidates: list[_Candidate] = []
         for number, page in enumerate(pdf.pages, start=1):

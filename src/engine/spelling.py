@@ -29,6 +29,7 @@ short-circuits that pass whenever the edits already sufficed.
 """
 
 from __future__ import annotations
+from engine.credentials import open_pdf
 
 import re
 import shutil
@@ -705,7 +706,7 @@ def document_language(file: str) -> dict:
 
     from engine.pdf_tree import token_text
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         try:
             lang = pdf.Root.get("/Lang")
         except Exception:
@@ -788,7 +789,7 @@ def check_spelling(
                 continue
             emit(make(token))
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total_pages = len(pdf.pages)
     page_list = [p for p in (pages or range(1, total_pages + 1))]
     for page in page_list:

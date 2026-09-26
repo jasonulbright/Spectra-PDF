@@ -124,6 +124,7 @@ from engine.doc_properties import (
 from engine.font_inventory import list_document_fonts
 from engine.reversion import get_pdf_version, set_pdf_version
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
+from engine.credentials import close_document, document_permissions, open_document
 from engine.repair import repair
 from engine.rebuild import rebuild
 from engine.recover import recover
@@ -338,6 +339,9 @@ def main() -> None:
     server.register("get_page_info", get_page_info)
     server.register("check_encrypted", check_encrypted)
     server.register("unlock", unlock)
+    server.register("open_document", open_document)
+    server.register("close_document", close_document)
+    server.register("document_permissions", document_permissions)
     server.register("repair", repair)
     server.register("rebuild", rebuild)
     server.register("recover", recover)

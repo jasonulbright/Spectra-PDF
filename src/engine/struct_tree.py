@@ -41,6 +41,7 @@ survive every engine path too — pikepdf edits the tree in place.
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name, String
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
@@ -165,7 +166,7 @@ def get_struct_tree(file: str) -> dict:
     text-alternative properties, and each node's DIRECT content references
     ({page, mcid} / {page, kind: 'objr'}) so the renderer can preview content
     and derive per-page reading order without a second engine call."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         st = pdf.Root.get("/StructTreeRoot")
         if st is None:
             return {"tagged": False, "count": 0, "root": [], "role_map": {}}
@@ -324,7 +325,7 @@ def set_struct_props(file: str, output: str, path: list, props: dict) -> dict:
         )
     input_path, output_path = Path(file), Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         elem = _walk_path(pdf, path)[-1]
         if "type" in props:
             new_type = str(props["type"]).strip().lstrip("/")
@@ -381,7 +382,7 @@ def move_struct_node(file: str, output: str, path: list, direction: str, index=N
         raise ValueError("direction 'to' needs an index")
     input_path, output_path = Path(file), Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         chain = _walk_path(pdf, path)
         elem = chain[-1]
         parent = chain[-2]  # the StructTreeRoot for a top-level element
@@ -492,7 +493,7 @@ def delete_struct_node(file: str, output: str, path: list) -> dict:
         raise ValueError("path must name an element, not the tree root")
     input_path, output_path = Path(file), Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         chain = _walk_path(pdf, path)
         elem = chain[-1]
         parent = chain[-2]
@@ -521,7 +522,7 @@ def add_struct_node(file: str, output: str, parent_path: list, stype: str, index
         raise ValueError("type must not be empty")
     input_path, output_path = Path(file), Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         parent = _walk_path(pdf, parent_path)[-1]
         elem = pdf.make_indirect(
             Dictionary(Type=Name.StructElem, S=Name("/" + new_type), P=parent)

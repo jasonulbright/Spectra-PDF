@@ -39,6 +39,7 @@ import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.autotag import autotag
 from engine.inplace import staged_write
@@ -377,7 +378,7 @@ def preview_structure_outline(file: str, max_level: int = MAX_LEVEL) -> dict:
     about what the document contains.
     """
     level_cap = _clamp_level(max_level)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         tagged = pdf.Root.get("/StructTreeRoot") is not None
         if not tagged:
             existing = _count(_existing_outline(pdf))
@@ -454,7 +455,7 @@ def outline_from_structure(
     output_path = Path(output)
     source = "structure"
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         tagged = pdf.Root.get("/StructTreeRoot") is not None
     with tempfile.TemporaryDirectory(prefix="spectra-outline-") as scratch:
         working = file
@@ -466,7 +467,7 @@ def outline_from_structure(
             autotag(file, working)
             source = "autotag"
 
-        with pikepdf.open(working) as pdf:
+        with open_pdf(working) as pdf:
             headings, skipped = _collect_headings(pdf, level_cap)
             if not headings:
                 raise ValueError(

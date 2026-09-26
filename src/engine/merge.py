@@ -4,6 +4,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.acroform import refuse_if_xfa
 from engine.page_copy import copy_pages_with_forms
@@ -32,7 +33,7 @@ def merge(files: list[str], output: str) -> dict:
     with ExitStack() as stack:
         merged = stack.enter_context(pikepdf.Pdf.new())
         for file_path in files:
-            pdf = stack.enter_context(pikepdf.open(file_path))
+            pdf = stack.enter_context(open_pdf(file_path))
             refuse_if_xfa(pdf, file_path, "merging")
             profile = encryption_profile(pdf)
             profiles.add(profile)

@@ -23,6 +23,7 @@ from __future__ import annotations
 import math
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from .content_walk import DEFAULT_COLOR, IDENTITY, as_matrix, mat_mult
 from .glyph_outlines import GlyphSource, OutlineRefusal
@@ -843,7 +844,7 @@ def list_outlines(file: str, pages=None, font_dir: str = "") -> dict:
     """
     validate_pdf(file)
     report: list[dict] = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for number in _page_numbers(pdf, pages):
             entry = _dry_run(pdf, number, font_dir)
             report.append(entry)

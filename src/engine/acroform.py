@@ -61,6 +61,7 @@ untouched, as always.
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import token_text
@@ -828,10 +829,10 @@ def reattach_forms_file(original_path, regenerated_path) -> bool:
     ``original_path``'s form fields onto the Ghostscript output at
     ``regenerated_path``, saving it in place. Returns True when the file was
     rewritten (i.e. the original actually had fields)."""
-    with pikepdf.open(original_path) as orig:
+    with open_pdf(original_path) as orig:
         if not has_form_fields(orig):
             return False
-        with pikepdf.open(regenerated_path, allow_overwriting_input=True) as regen:
+        with open_pdf(regenerated_path, allow_overwriting_input=True) as regen:
             if not reattach_acroform(orig, regen):
                 return False
             save_pdf(regen, regenerated_path)

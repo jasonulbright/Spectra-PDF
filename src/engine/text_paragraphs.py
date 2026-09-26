@@ -60,6 +60,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
 from engine import bidi
@@ -2382,7 +2383,7 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
 
 def list_text_paragraphs(file: str, page: int) -> dict:
     """One walk → the standard run listing PLUS the paragraph layer."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
@@ -5782,7 +5783,7 @@ def replace_paragraph_text(
     fallback faces are horizontal (v1 boundary)."""
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     # Initialized BEFORE any refusal can raise — the finally block
     # reads these, and a validation error firing earlier would otherwise
     # turn into an UnboundLocalError that buries the real message.
@@ -6002,7 +6003,7 @@ def merge_paragraph_with_previous(
     existing lkey guard — the mode rides in lkey."""
     input_path = Path(file)
     output_path = Path(output)
-    pdf = pikepdf.open(file)
+    pdf = open_pdf(file)
     try:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):

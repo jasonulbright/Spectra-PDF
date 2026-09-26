@@ -15,6 +15,7 @@ import io
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pdfminer.layout import LAParams
 from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfpage import PDFPage
@@ -107,7 +108,7 @@ def export_text(
     if mode not in LAYOUTS:
         raise ValueError(f"unknown text layout {layout!r} (choose reading or layout)")
 
-    with pikepdf.open(str(file)) as pdf:
+    with open_pdf(str(file)) as pdf:
         wanted = page_numbers(pages, pdf)
 
     extracted = page_texts(str(file), wanted, mode)

@@ -26,6 +26,7 @@ import csv
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 COUNT_INTENT = "/Count"
 
@@ -73,7 +74,7 @@ def collect_count_marks(file: str) -> list[dict]:
     filesystem round trip.
     """
     marks: list[dict] = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for page_index, page in enumerate(pdf.pages):
             annots = page.obj.get("/Annots")
             if annots is None:

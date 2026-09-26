@@ -16,6 +16,7 @@ import math
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array
 
 from engine.inplace import is_same_file, staged_write
@@ -89,7 +90,7 @@ def set_page_boxes(
 
     changed = 0
     skipped: list[dict] = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for index, page in enumerate(pdf.pages, start=1):
             if wanted is not None and index not in wanted:
                 continue

@@ -48,6 +48,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from . import icc_profiles
 from .color_spaces import build_function
@@ -311,7 +312,7 @@ def read_output_intent(file: str) -> dict:
     identifier = ""
     raw = b""
     try:
-        with pikepdf.open(file) as pdf:
+        with open_pdf(file) as pdf:
             intents = pdf.Root.get("/OutputIntents")
             if intents is not None:
                 for intent in intents:
@@ -589,7 +590,7 @@ def page_alternates(file: str, page: int) -> dict:
                 on_colorspace(alternate, _category, depth + 1)
 
     try:
-        with pikepdf.open(file) as pdf:
+        with open_pdf(file) as pdf:
             if 1 <= page <= len(pdf.pages):
                 walk_page_resources(pdf.pages[page - 1], on_colorspace=on_colorspace)
     except Exception:  # noqa: BLE001 - an unreadable page describes no colorant

@@ -56,6 +56,7 @@ import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from . import budget, icc_profiles, soft_proof
 from .acroform import has_form_fields
@@ -417,7 +418,7 @@ def list_inks(file: str, pages=None, show_processing_steps: bool = False) -> dic
     unknown: list[str] = []
     families: set = set()
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         numbers = _page_numbers(pdf, pages)
         for number in numbers:
             page = pdf.pages[number - 1]
@@ -590,7 +591,7 @@ def _set_key(file: str, page: int, dpi: int, overprint: bool, profile: str = "",
 
 
 def _carries_form_fields(file: str) -> bool:
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         return has_form_fields(pdf)
 
 
@@ -600,7 +601,7 @@ def _stage_without_processing_steps(source: Path, out_dir: Path):
     None means the document declares no processing steps at all, in which
     case there is nothing to stage and the original is rastered directly.
     """
-    with pikepdf.open(str(source)) as pdf:
+    with open_pdf(str(source)) as pdf:
         if hide_processing_steps(pdf) == 0:
             return None
         staged = out_dir / "noprocsteps.pdf"
@@ -736,7 +737,7 @@ def _tag_optional_content_groups(source: str, out_dir: Path):
     copy, never the user's file, and all keys are stripped after validation.
     """
     try:
-        with pikepdf.open(source) as src:
+        with open_pdf(source) as src:
             properties = src.Root.get("/OCProperties")
             config = (properties.get("/D")
                       if isinstance(properties, pikepdf.Dictionary) else None)
@@ -780,7 +781,7 @@ def _carry_off_configuration(single: Path, off_keys: set) -> bool:
     if not off_keys:
         return True
     try:
-        with pikepdf.open(single, allow_overwriting_input=True) as pdf:
+        with open_pdf(single, allow_overwriting_input=True) as pdf:
             groups, complete = _page_optional_content_groups(pdf)
             if not complete:
                 return False

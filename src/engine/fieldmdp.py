@@ -15,6 +15,7 @@ for the edit tier to consult before every edit.
 """
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from .acroform import live_signature_fields
 from .docmdp import refuse_unreadable_policy
@@ -213,7 +214,7 @@ def locks_of_file(file: str, *, strict=False) -> list[dict]:
     """Path wrapper. Strict edit reads raise on uncertainty; the default
     lenient inspection read cannot establish permission to edit."""
     try:
-        with pikepdf.open(file) as pdf:
+        with open_pdf(file) as pdf:
             return locks_of_pdf(pdf, strict=strict)
     except Exception:
         if strict:

@@ -29,6 +29,7 @@ is reported through `unreadable` and never counted as clean.
 from __future__ import annotations
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from engine.color_spaces import build_resolver
 from engine.pdf_tree import name_bytes, name_object, name_text, token_text
@@ -338,7 +339,7 @@ def list_overprint(file: str, pages=None) -> dict:
     rows: list = []
     unreadable: list = []
     states: list = []
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         total = len(pdf.pages)
         numbers = (
             list(range(1, total + 1))

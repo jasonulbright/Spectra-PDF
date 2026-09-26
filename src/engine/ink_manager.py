@@ -48,6 +48,7 @@ import stat
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name
 
 from engine.inplace import is_same_file, staged_write
@@ -382,7 +383,7 @@ def compare_tint_transforms(file: str, a: str, b: str) -> dict:
     checkable rather than asserted.
     """
     validate_pdf(file)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         known = _document_colorants(pdf)
         raw_a = _resolve(pdf, a, known)
         raw_b = _resolve(pdf, b, known)
@@ -459,7 +460,7 @@ def alias_ink(
     it from the job.
     """
     validate_pdf(file)
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         known = _document_colorants(pdf)
         source_raw = _resolve(pdf, source, known)
         target_raw = _resolve(pdf, target, known)
@@ -479,7 +480,7 @@ def alias_ink(
         )
 
     renamed = 0
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for table in _colorspace_dicts(pdf):
             for key in list(table.keys()):
                 cs = table[key]
@@ -902,7 +903,7 @@ def spot_to_process(
     """
     validate_pdf(file)
     inventory = {entry_bytes(e): e for e in list_inks(file)["inks"]}
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         known = set(inventory) | _document_colorants(pdf)
         wanted = {_resolve(pdf, value, known) for value in inks}
     if not wanted:
@@ -917,7 +918,7 @@ def spot_to_process(
     converted_spaces = 0
     changed_paints = 0
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         # Which resource keys, in which owner, select a space that must go.
         for raw in sorted(wanted):
             space = _first_space_named(pdf, raw)

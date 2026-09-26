@@ -77,6 +77,7 @@ from __future__ import annotations
 import re
 
 import pikepdf
+from engine.credentials import open_pdf
 
 from .pdf_tree import name_bytes, name_object
 
@@ -626,7 +627,7 @@ def document_processing_steps(file: str) -> dict:
     """
     from engine.sanitize_content import off_ocg_set
 
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         steps = processing_step_ocgs(pdf)
         off = off_ocg_set(pdf)
         rows = []

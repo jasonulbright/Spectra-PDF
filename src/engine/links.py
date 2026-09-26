@@ -42,6 +42,7 @@ import shutil
 from pathlib import Path
 
 import pikepdf
+from engine.credentials import open_pdf
 from pikepdf import Array, Dictionary, Name, String
 from engine.fieldactions import destination_page as _resolve_dest_page
 from engine.inplace import is_same_file, staged_write
@@ -301,7 +302,7 @@ def _links_on(page) -> list:
 
 
 def list_links(file: str) -> dict:
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         links = []
         for pi, page in enumerate(pdf.pages):
             for li, annot in enumerate(_links_on(page)):
@@ -362,7 +363,7 @@ def list_named_destinations(file: str) -> dict:
     """Every named destination the document declares, with the page it lands
     on. The `named` target kind picks from THIS list, so an author chooses a
     name the document has rather than typing one that resolves to nothing."""
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         out = _named_destinations_of(pdf)
     return {"destinations": out, "count": len(out)}
 
@@ -550,7 +551,7 @@ def set_link_target(file: str, output: str, page: int, index: int, target: dict)
     """Retarget a link (replaces any existing action AND destination)."""
     input_path, output_path = Path(file), Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         annot = _nth_link(pdf, page, index)
         _write_target(pdf, annot, target or {})
         spec = _target_spec(pdf, annot)
@@ -577,7 +578,7 @@ def set_link_appearance(file: str, output: str, page: int, index: int, appearanc
     request, so a style left out is REMOVED rather than left behind."""
     input_path, output_path = Path(file), Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         annot = _nth_link(pdf, page, index)
         _write_appearance(annot, appearance)
         landed = _read_appearance(annot)
@@ -592,7 +593,7 @@ def set_link_rect(file: str, output: str, page: int, index: int, rect: list) -> 
     existing link — the canvas hands back the rect it dragged."""
     input_path, output_path = Path(file), Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         annot = _nth_link(pdf, page, index)
         annot["/Rect"] = Array(_normalized_rect(rect))
         preserved = _save(pdf, input_path, output_path, same_file)
@@ -633,7 +634,7 @@ def add_links(file: str, output: str, links: list) -> dict:
         raise ValueError("no links to add")
     input_path, output_path = Path(file), Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         prepared = []
         for spec in links:
             page_no = int(spec["page"])
@@ -666,7 +667,7 @@ def delete_link(file: str, output: str, page: int, index: int) -> dict:
     """Remove one link annotation from a page."""
     input_path, output_path = Path(file), Path(output)
     same_file = is_same_file(str(input_path), str(output_path))
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         target = _nth_link(pdf, page, index)
         pg = pdf.pages[int(page) - 1]
         annots = pg.obj.get("/Annots")
@@ -715,7 +716,7 @@ def _contains(outer: list[float], inner: list[float]) -> bool:
 
 def _existing_link_rects(file: str) -> dict[int, list[list[float]]]:
     by_page: dict[int, list[list[float]]] = {}
-    with pikepdf.open(file) as pdf:
+    with open_pdf(file) as pdf:
         for pi, page in enumerate(pdf.pages):
             rects = [r for r in (_rect(a) for a in _links_on(page)) if r is not None]
             if rects:
