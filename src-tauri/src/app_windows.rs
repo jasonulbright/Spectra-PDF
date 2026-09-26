@@ -395,26 +395,69 @@ fn roots_conflict(a: &str, b: &str) -> bool {
     contains(&a, &b) || contains(&b, &a)
 }
 
+/// Whether an already-held folder root contains a particular output path.
+/// Unlike `roots_conflict`, this direction matters: a nested folder lease does
+/// not reserve a sibling or its parent.
+fn root_contains(root: &str, path: &str) -> bool {
+    let fold = |value: &str| {
+        value
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_lowercase()
+    };
+    let root = fold(root);
+    let path = fold(path);
+    path == root
+        || path
+            .strip_prefix(&root)
+            .is_some_and(|suffix| suffix.starts_with('\\'))
+}
+
 /// One folder run's hold on every folder it writes.
 ///
 /// Held per run, not per window: a window can have two runs at once, one still
 /// finishing after its dialog closed and one just started. A hold shared by the
 /// window lets the second run write the first one's tree, and lets the first
 /// one's release strip the second of its protection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RunClaimKind {
+    Folder,
+    EngineOutput,
+}
+
 #[derive(Clone, Debug)]
 struct RunClaim {
     token: u64,
     label: String,
     roots: Vec<String>,
+    kind: RunClaimKind,
     _lease: std::sync::Arc<crate::folder_claims::FolderLease>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct RunClaims {
     /// Never reused, so a late release of a finished run cannot land on a run
     /// that started after it.
     last_token: u64,
     held: Vec<RunClaim>,
+}
+
+/// An engine output remains reserved until its routed response is retired.
+/// Moving this value into `EngineRouter::Route` makes cancellation, window
+/// destruction, and engine failure release the same claim through Drop.
+#[derive(Debug)]
+pub(crate) struct EngineOutputReservation {
+    runs: std::sync::Arc<Mutex<RunClaims>>,
+    token: u64,
+    label: String,
+}
+
+impl Drop for EngineOutputReservation {
+    fn drop(&mut self) {
+        let mut runs = self.runs.lock().unwrap_or_else(|error| error.into_inner());
+        runs.held
+            .retain(|run| !(run.token == self.token && run.label == self.label));
+    }
 }
 
 /// The outcome of claiming the folders one run writes.
@@ -445,7 +488,12 @@ pub struct RunClaimOutcome {
 /// the window's own destruction instead.
 pub struct ClaimState {
     by_path: Mutex<HashMap<String, Vec<Claim>>>,
-    runs: Mutex<RunClaims>,
+    // Alias detection requires filesystem identity reads, so it cannot safely
+    // hold `by_path` while running. Serialize the identity check and claim as
+    // one operation instead; otherwise two hard-link spellings can both pass
+    // the check before either is inserted.
+    identity_claim: Mutex<()>,
+    runs: std::sync::Arc<Mutex<RunClaims>>,
     folder_registry: Option<std::path::PathBuf>,
     #[cfg(test)]
     test_registry: Option<tempfile::TempDir>,
@@ -455,9 +503,21 @@ impl ClaimState {
     pub fn new() -> Self {
         Self {
             by_path: Mutex::new(HashMap::new()),
-            runs: Mutex::new(RunClaims::default()),
+            identity_claim: Mutex::new(()),
+            runs: std::sync::Arc::new(Mutex::new(RunClaims::default())),
             folder_registry: None,
             #[cfg(test)]
+            test_registry: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_registry(folder_registry: std::path::PathBuf) -> Self {
+        Self {
+            by_path: Mutex::new(HashMap::new()),
+            identity_claim: Mutex::new(()),
+            runs: std::sync::Arc::new(Mutex::new(RunClaims::default())),
+            folder_registry: Some(folder_registry),
             test_registry: None,
         }
     }
@@ -478,9 +538,10 @@ impl ClaimState {
                 return ClaimOutcome::refused_by_run(&owner, &folder);
             }
         }
-        let Ok(mut map) = self.by_path.lock() else {
-            return ClaimOutcome::granted();
-        };
+        let mut map = self
+            .by_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Read before `entry`: an `or_default` on the refusal path would leave
         // an empty holder list behind for a path nobody holds.
         if let Some(holders) = map.get(path) {
@@ -530,9 +591,8 @@ impl ClaimState {
         let Some(holders) = map.get_mut(path) else {
             return ClaimOutcome::refused("");
         };
-        let exclusive = holders.len() == 1
-            && holders[0].label == from
-            && holders[0].mode == ClaimMode::Write;
+        let exclusive =
+            holders.len() == 1 && holders[0].label == from && holders[0].mode == ClaimMode::Write;
         if !exclusive {
             let blocker = holders
                 .iter()
@@ -560,7 +620,10 @@ impl ClaimState {
     /// Which window a path belongs to. A write holder answers first — it is
     /// the window an inbound open must be routed to.
     pub fn owner(&self, path: &str) -> Option<String> {
-        let map = self.by_path.lock().ok()?;
+        let map = self
+            .by_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let holders = map.get(path)?;
         holders
             .iter()
@@ -577,7 +640,10 @@ impl ClaimState {
     /// one file be open twice. The lock is not held across the identity reads.
     pub fn claimed_alias(&self, path: &str) -> Option<String> {
         let keys: Vec<String> = {
-            let map = self.by_path.lock().ok()?;
+            let map = self
+                .by_path
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if map.contains_key(path) {
                 return None;
             }
@@ -585,6 +651,61 @@ impl ClaimState {
         };
         keys.into_iter()
             .find(|key| same_file::is_same_file(key, path).unwrap_or(false))
+    }
+
+    /// Claim a document path without letting concurrent hard-link spellings
+    /// acquire separate write owners. The identity check runs outside the map
+    /// lock, under a dedicated gate shared by all document-claim requests.
+    pub fn claim_document(&self, path: &str, label: &str, mode: ClaimMode) -> ClaimOutcome {
+        self.claim_document_after_identity_scan(path, label, mode, || {})
+    }
+
+    fn claim_document_after_identity_scan(
+        &self,
+        path: &str,
+        label: &str,
+        mode: ClaimMode,
+        after_scan: impl FnOnce(),
+    ) -> ClaimOutcome {
+        let _identity_claim = self
+            .identity_claim
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let alias_owner = self
+            .claimed_alias(path)
+            .and_then(|alias| self.open_holder(&alias, None));
+        let owner = self.open_holder(path, None).or(alias_owner);
+        after_scan();
+        if let Some(owner) = owner {
+            return ClaimOutcome::refused(&owner);
+        }
+        let output_roots = {
+            let runs = self.runs.lock().unwrap_or_else(|error| error.into_inner());
+            runs.held
+                .iter()
+                .filter(|run| run.kind == RunClaimKind::EngineOutput)
+                .flat_map(|run| run.roots.iter().cloned())
+                .collect::<Vec<_>>()
+        };
+        if let Some(output) = output_roots
+            .iter()
+            .find(|output| {
+                roots_conflict(output, path)
+                    || same_file::is_same_file(output, path).unwrap_or(false)
+            })
+        {
+            let owner = self
+                .runs
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .held
+                .iter()
+                .find(|run| run.kind == RunClaimKind::EngineOutput && run.roots.contains(output))
+                .map(|run| run.label.clone())
+                .unwrap_or_default();
+            return ClaimOutcome::refused(&owner);
+        }
+        self.claim(path, label, mode)
     }
 
     /// The window with `path` open as a document, unless `path` is `own`.
@@ -596,7 +717,10 @@ impl ClaimState {
         if own == Some(path) {
             return None;
         }
-        let map = self.by_path.lock().ok()?;
+        let map = self
+            .by_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         map.get(path)?
             .iter()
             .find(|c| c.mode == ClaimMode::Write)
@@ -610,9 +734,10 @@ impl ClaimState {
     /// right. Reopening one would put a document on screen the user never
     /// opened.
     pub fn write_claims(&self, label: &str) -> Vec<String> {
-        let Ok(map) = self.by_path.lock() else {
-            return Vec::new();
-        };
+        let map = self
+            .by_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut paths: Vec<String> = map
             .iter()
             .filter(|(_, holders)| {
@@ -632,6 +757,97 @@ impl ClaimState {
     /// contains it, whichever window that run belongs to. The folders of one
     /// run never conflict with each other.
     pub fn claim_roots(&self, roots: &[String], label: &str) -> Result<RunClaimOutcome, String> {
+        let mut runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        self.claim_roots_locked(roots, label, &mut runs, RunClaimKind::Folder)
+    }
+
+    /// Reserve one engine output until its routed response arrives. If the
+    /// output is already covered by this window's folder run, that run's lease
+    /// is enough; otherwise install a file-root lease that blocks a document
+    /// open from passing the write.
+    pub(crate) fn claim_engine_output(
+        &self,
+        path: &str,
+        label: &str,
+    ) -> Result<EngineOutputReservation, String> {
+        let _identity_claim = self
+            .identity_claim
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let alias_owner = self
+            .claimed_alias(path)
+            .and_then(|alias| self.open_holder(&alias, None));
+        if let Some(owner) = self.open_holder(path, None).or(alias_owner) {
+            return Err(format!(
+                "Cannot write the output {path} because it is open in {owner}."
+            ));
+        }
+
+        let mut runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        if runs.held.iter().any(|run| {
+            run.kind == RunClaimKind::EngineOutput
+                && run.roots.iter().any(|held| {
+                    roots_conflict(held, path)
+                        || same_file::is_same_file(held, path).unwrap_or(false)
+                })
+        }) {
+            return Err(format!(
+                "Cannot write the output {path} because another operation is writing it."
+            ));
+        }
+
+        if let Some(folder) = runs.held.iter().find(|run| {
+            run.kind == RunClaimKind::Folder
+                && run.label == label
+                && run.roots.iter().any(|root| root_contains(root, path))
+        }) {
+            let lease = folder._lease.clone();
+            runs.last_token += 1;
+            let token = runs.last_token;
+            runs.held.push(RunClaim {
+                token,
+                label: label.to_string(),
+                roots: vec![path.to_string()],
+                kind: RunClaimKind::EngineOutput,
+                _lease: lease,
+            });
+            return Ok(EngineOutputReservation {
+                runs: self.runs.clone(),
+                token,
+                label: label.to_string(),
+            });
+        }
+
+        let outcome = self.claim_roots_locked(
+            &[path.to_string()],
+            label,
+            &mut runs,
+            RunClaimKind::EngineOutput,
+        )?;
+        if outcome.granted {
+            let token = outcome.token.expect("a granted output reservation has a token");
+            return Ok(EngineOutputReservation {
+                runs: self.runs.clone(),
+                token,
+                label: label.to_string(),
+            });
+        }
+        if !outcome.document.is_empty() {
+            return Err(format!(
+                "Cannot write the output because {} is open in {}.",
+                outcome.document, outcome.owner
+            ));
+        }
+        Err(format!("Cannot write the output; {} is busy.", outcome.folder))
+    }
+
+    fn claim_roots_locked(
+        &self,
+        roots: &[String],
+        label: &str,
+        runs: &mut RunClaims,
+        kind: RunClaimKind,
+    ) -> Result<RunClaimOutcome, String> {
         // A root that trims to nothing would contain every UNC path under the
         // separator rule of `roots_conflict`.
         let roots: Vec<String> = roots
@@ -639,7 +855,6 @@ impl ClaimState {
             .filter(|root| !root.trim_end_matches(['\\', '/']).is_empty())
             .cloned()
             .collect();
-        let mut runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
         for wanted in &roots {
             let holder = runs
                 .held
@@ -658,25 +873,27 @@ impl ClaimState {
         }
         // A run writing over an open document leaves that document's working
         // copy holding the old bytes, and its next save writes them back.
-        if let Ok(map) = self.by_path.lock() {
-            for wanted in &roots {
-                let open = map.iter().find_map(|(path, holders)| {
-                    holders
-                        .iter()
-                        .find(|c| c.mode == ClaimMode::Write)
-                        .filter(|_| roots_conflict(wanted, path))
-                        .map(|c| (path.clone(), c.label.clone()))
+        let map = self
+            .by_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for wanted in &roots {
+            let open = map.iter().find_map(|(path, holders)| {
+                holders
+                    .iter()
+                    .find(|c| c.mode == ClaimMode::Write)
+                    .filter(|_| roots_conflict(wanted, path))
+                    .map(|c| (path.clone(), c.label.clone()))
+            });
+            if let Some((document, owner)) = open {
+                return Ok(RunClaimOutcome {
+                    granted: false,
+                    same_window: owner == label,
+                    owner,
+                    folder: wanted.clone(),
+                    document,
+                    token: None,
                 });
-                if let Some((document, owner)) = open {
-                    return Ok(RunClaimOutcome {
-                        granted: false,
-                        same_window: owner == label,
-                        owner,
-                        folder: wanted.clone(),
-                        document,
-                        token: None,
-                    });
-                }
             }
         }
         let lease = match &self.folder_registry {
@@ -685,10 +902,16 @@ impl ClaimState {
         };
         let lease = match lease {
             Ok(lease) => std::sync::Arc::new(lease),
-            Err(crate::folder_claims::ClaimError::Busy(folder)) => return Ok(RunClaimOutcome {
-                granted: false, owner: String::new(), same_window: false, folder,
-                document: String::new(), token: None,
-            }),
+            Err(crate::folder_claims::ClaimError::Busy(folder)) => {
+                return Ok(RunClaimOutcome {
+                    granted: false,
+                    owner: String::new(),
+                    same_window: false,
+                    folder,
+                    document: String::new(),
+                    token: None,
+                })
+            }
             Err(crate::folder_claims::ClaimError::Unavailable(message)) => return Err(message),
         };
         runs.last_token += 1;
@@ -697,6 +920,7 @@ impl ClaimState {
             token,
             label: label.to_string(),
             roots,
+            kind,
             _lease: lease,
         });
         Ok(RunClaimOutcome {
@@ -721,25 +945,40 @@ impl ClaimState {
 
     /// A submitted engine request keeps its writer leases until its response,
     /// even if the window that submitted it disappears in the meantime.
-    pub(crate) fn folder_leases(&self, label: &str) -> Vec<std::sync::Arc<crate::folder_claims::FolderLease>> {
-        self.runs.lock().unwrap_or_else(|e| e.into_inner()).held.iter()
-            .filter(|run| run.label == label).map(|run| run._lease.clone()).collect()
+    pub(crate) fn folder_leases(
+        &self,
+        label: &str,
+    ) -> Vec<std::sync::Arc<crate::folder_claims::FolderLease>> {
+        let runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        let mut leases = Vec::new();
+        for run in runs.held.iter().filter(|run| run.label == label) {
+            if !leases
+                .iter()
+                .any(|lease| std::sync::Arc::ptr_eq(lease, &run._lease))
+            {
+                leases.push(run._lease.clone());
+            }
+        }
+        leases
     }
 
     /// Drop everything a window held. Driven by the window's destruction so a
     /// renderer that never got to release cannot wedge a path.
     pub fn release_label(&self, label: &str) {
-        if let Ok(mut map) = self.by_path.lock() {
-            map.retain(|_, holders| {
-                holders.retain(|c| c.label != label);
-                !holders.is_empty()
-            });
-        }
+        let mut map = self
+            .by_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        map.retain(|_, holders| {
+            holders.retain(|c| c.label != label);
+            !holders.is_empty()
+        });
+        drop(map);
         self.runs
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .held
-            .retain(|run| run.label != label);
+            .retain(|run| run.label != label || run.kind == RunClaimKind::EngineOutput);
     }
 }
 
@@ -857,7 +1096,11 @@ impl WindowRegistry {
     }
 
     pub fn next_doc_label(&self) -> String {
-        format!("{}{}", DOC_LABEL_PREFIX, self.next_doc.fetch_add(1, Ordering::SeqCst))
+        format!(
+            "{}{}",
+            DOC_LABEL_PREFIX,
+            self.next_doc.fetch_add(1, Ordering::SeqCst)
+        )
     }
 
     pub fn set_focused(&self, label: &str) {
@@ -994,7 +1237,9 @@ pub fn route_target(app: &AppHandle) -> String {
     if live.iter().any(|l| *l == focused) {
         return focused;
     }
-    live.into_iter().next().unwrap_or_else(|| MAIN_LABEL.to_string())
+    live.into_iter()
+        .next()
+        .unwrap_or_else(|| MAIN_LABEL.to_string())
 }
 
 /// Bring every workspace window back from the tray, raising the routing
@@ -1051,12 +1296,7 @@ pub fn route_open(app: &AppHandle, files: Vec<String>, merge: bool) {
 /// Split from the signal so a handover can queue under the lock that guards it
 /// and signal after: the queue is the delivery, and the event only says a queue
 /// is worth draining.
-pub fn queue_open(
-    registry: &WindowRegistry,
-    label: &str,
-    files: Vec<String>,
-    merge: bool,
-) -> bool {
+pub fn queue_open(registry: &WindowRegistry, label: &str, files: Vec<String>, merge: bool) -> bool {
     registry.push_pending(
         label,
         PendingOpen {
@@ -1267,12 +1507,7 @@ pub async fn claim_document(
 ) -> Result<ClaimOutcome, String> {
     let path = crate::commands::canonical_path(&path);
     let state = app.state::<ClaimState>();
-    // A second spelling of a claimed file is refused rather than claimed: a
-    // grant would key a second live document to the same file.
-    if let Some(owner) = state.claimed_alias(&path).and_then(|alias| state.owner(&alias)) {
-        return Ok(ClaimOutcome::refused(&owner));
-    }
-    Ok(state.claim(&path, window.label(), mode))
+    Ok(state.claim_document(&path, window.label(), mode))
 }
 
 /// Which window has an output path open as a document.
@@ -1329,8 +1564,11 @@ pub async fn claim_output_roots(
         .map(|p| crate::commands::canonical_path(p))
         .collect();
     let label = window.label().to_string();
-    tauri::async_runtime::spawn_blocking(move || app.state::<ClaimState>().claim_roots(&roots, &label))
-        .await.map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<ClaimState>().claim_roots(&roots, &label)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1398,7 +1636,6 @@ mod tests {
         state.test_registry = Some(dir);
         state
     }
-
 
     #[test]
     fn a_show_asked_for_before_first_paint_waits_for_it() {
@@ -1591,7 +1828,11 @@ mod tests {
         assert!(!unowned.granted);
         assert!(unowned.owner.is_empty());
         assert_eq!(state.owner("C:\\ghost.pdf"), None);
-        assert!(state.claim("C:\\ghost.pdf", "doc-2", ClaimMode::Write).granted);
+        assert!(
+            state
+                .claim("C:\\ghost.pdf", "doc-2", ClaimMode::Write)
+                .granted
+        );
     }
 
     #[test]
@@ -1675,14 +1916,78 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_hard_link_opens_do_not_both_claim_the_same_file() {
+        use std::sync::{mpsc, Arc};
+        use std::time::Duration;
+
+        let state = Arc::new(test_claim_state());
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.pdf");
+        std::fs::write(&file, b"%PDF-1.7").unwrap();
+        let alias = dir.path().join("alias.pdf");
+        std::fs::hard_link(&file, &alias).unwrap();
+        let file = crate::commands::canonical_path(&file.to_string_lossy());
+        let alias = crate::commands::canonical_path(&alias.to_string_lossy());
+        assert_ne!(file, alias);
+
+        // Pause the first caller after its identity scan. Without the gate, a
+        // second spelling can pass its scan before either path is inserted.
+        let (scanned_tx, scanned_rx) = mpsc::channel();
+        let (continue_tx, continue_rx) = mpsc::channel();
+        let first = {
+            let state = Arc::clone(&state);
+            let file = file.clone();
+            std::thread::spawn(move || {
+                state.claim_document_after_identity_scan(
+                    &file,
+                    "main",
+                    ClaimMode::Write,
+                    || {
+                        scanned_tx.send(()).unwrap();
+                        continue_rx.recv().unwrap();
+                    },
+                )
+            })
+        };
+        scanned_rx.recv().unwrap();
+
+        let (second_started_tx, second_started_rx) = mpsc::channel();
+        let (second_done_tx, second_done_rx) = mpsc::channel();
+        let second = {
+            let state = Arc::clone(&state);
+            std::thread::spawn(move || {
+                second_started_tx.send(()).unwrap();
+                second_done_tx.send(state.claim_document(
+                    &alias,
+                    "doc-1",
+                    ClaimMode::Write,
+                )).unwrap();
+            })
+        };
+
+        second_started_rx.recv().unwrap();
+        assert!(second_done_rx.recv_timeout(Duration::from_millis(100)).is_err());
+        continue_tx.send(()).unwrap();
+        assert!(first.join().unwrap().granted);
+        assert!(!second_done_rx.recv().unwrap().granted);
+        second.join().unwrap();
+    }
+
+    #[test]
     fn an_output_path_names_its_holder_unless_it_is_the_document_itself() {
         let state = test_claim_state();
         assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
         assert!(state.claim("C:\\b.pdf", "doc-1", ClaimMode::Write).granted);
         assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Read).granted);
 
-        assert_eq!(state.open_holder("C:\\a.pdf", None), Some("main".to_string()));
-        assert_eq!(state.open_holder("C:\\b.pdf", Some("C:\\a.pdf")), Some("doc-1".to_string()));
+        assert_eq!(
+            state.open_holder("C:\\a.pdf", None),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            state.open_holder("C:\\b.pdf", Some("C:\\a.pdf")),
+            Some("doc-1".to_string())
+        );
         // Save As of a document onto its own file.
         assert_eq!(state.open_holder("C:\\a.pdf", Some("C:\\a.pdf")), None);
         assert_eq!(state.open_holder("C:\\new.pdf", None), None);
@@ -1746,8 +2051,16 @@ mod tests {
     #[test]
     fn a_run_and_an_open_document_in_its_folder_refuse_each_other() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\docs\\a.pdf", "main", ClaimMode::Write).granted);
-        assert!(state.claim("C:\\src\\import.pdf", "main", ClaimMode::Read).granted);
+        assert!(
+            state
+                .claim("C:\\docs\\a.pdf", "main", ClaimMode::Write)
+                .granted
+        );
+        assert!(
+            state
+                .claim("C:\\src\\import.pdf", "main", ClaimMode::Read)
+                .granted
+        );
 
         let refused = run(&state, "doc-1", &["C:\\out", "C:\\docs"]);
         assert!(!refused.granted);
@@ -1756,18 +2069,190 @@ mod tests {
         assert_eq!(refused.owner, "main");
         assert!(!refused.same_window);
         assert!(!run(&state, "main", &["C:\\"]).granted);
-        assert!(run(&state, "main", &["C:\\src"]).granted, "an import source is not open");
-        assert!(run(&state, "main", &["C:\\docs2"]).granted, "a sibling folder is not inside");
+        assert!(
+            run(&state, "main", &["C:\\src"]).granted,
+            "an import source is not open"
+        );
+        assert!(
+            run(&state, "main", &["C:\\docs2"]).granted,
+            "a sibling folder is not inside"
+        );
 
         let token = run(&state, "doc-1", &["C:\\batch"]).token.unwrap();
         let blocked = state.claim("C:\\batch\\sub\\b.pdf", "main", ClaimMode::Write);
         assert!(!blocked.granted);
         assert_eq!(blocked.owner, "doc-1");
         assert_eq!(blocked.folder, "C:\\batch");
-        assert!(state.claim("C:\\batch\\c.pdf", "main", ClaimMode::Read).granted);
-        assert!(state.claim("C:\\batchx\\d.pdf", "main", ClaimMode::Write).granted);
+        assert!(
+            state
+                .claim("C:\\batch\\c.pdf", "main", ClaimMode::Read)
+                .granted
+        );
+        assert!(
+            state
+                .claim("C:\\batchx\\d.pdf", "main", ClaimMode::Write)
+                .granted
+        );
         assert!(state.release_run(token, "doc-1"));
-        assert!(state.claim("C:\\batch\\sub\\b.pdf", "main", ClaimMode::Write).granted);
+        assert!(
+            state
+                .claim("C:\\batch\\sub\\b.pdf", "main", ClaimMode::Write)
+                .granted
+        );
+    }
+
+    #[test]
+    fn an_engine_output_reservation_blocks_a_later_document_open() {
+        let state = test_claim_state();
+        let path = r"C:\export\result.pdf";
+        let reservation = state.claim_engine_output(path, "main").unwrap();
+
+        let blocked = state.claim_document(path, "doc-1", ClaimMode::Write);
+        assert!(!blocked.granted);
+        assert_eq!(blocked.owner, "main");
+
+        drop(reservation);
+        assert!(state.claim_document(path, "doc-1", ClaimMode::Write).granted);
+    }
+
+    #[test]
+    fn engine_outputs_inside_the_windows_folder_run_reuse_its_claim() {
+        let state = test_claim_state();
+        let token = run(&state, "main", &[r"C:\batch"]).token.unwrap();
+
+        let reservation = state
+            .claim_engine_output(r"C:\batch\result.pdf", "main")
+            .unwrap();
+        assert_eq!(state.folder_leases("main").len(), 1);
+        assert!(!state
+            .claim_document(r"C:\batch\result.pdf", "doc-1", ClaimMode::Write)
+            .granted);
+
+        assert!(state.release_run(token, "main"));
+        assert!(!state
+            .claim_document(r"C:\batch\result.pdf", "doc-1", ClaimMode::Write)
+            .granted);
+        drop(reservation);
+        assert!(state
+            .claim_document(r"C:\batch\result.pdf", "doc-1", ClaimMode::Write)
+            .granted);
+    }
+
+    #[test]
+    fn an_engine_output_that_is_already_open_is_refused_before_writing() {
+        let state = test_claim_state();
+        assert!(state
+            .claim_document(r"C:\export\result.pdf", "doc-1", ClaimMode::Write)
+            .granted);
+
+        let refusal = state
+            .claim_engine_output(r"C:\export\result.pdf", "main")
+            .unwrap_err();
+        assert!(refusal.contains(r"C:\export\result.pdf"));
+        assert!(refusal.contains("doc-1"));
+    }
+
+    #[test]
+    fn a_second_request_cannot_reserve_the_same_engine_output() {
+        let state = test_claim_state();
+        let first = state
+            .claim_engine_output(r"C:\export\result.pdf", "main")
+            .unwrap();
+        let second = state.claim_engine_output(r"C:\export\result.pdf", "main");
+        assert!(second.unwrap_err().contains("another operation is writing it"));
+        drop(first);
+    }
+
+    #[test]
+    fn engine_output_reservations_block_hard_link_document_opens() {
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("output.pdf");
+        let alias = dir.path().join("open.pdf");
+        std::fs::write(&output, b"%PDF-1.7").unwrap();
+        std::fs::hard_link(&output, &alias).unwrap();
+        let output = crate::commands::canonical_path(&output.to_string_lossy());
+        let alias = crate::commands::canonical_path(&alias.to_string_lossy());
+
+        let reservation = state.claim_engine_output(&output, "main").unwrap();
+        assert!(!state
+            .claim_document(&alias, "doc-1", ClaimMode::Write)
+            .granted);
+        drop(reservation);
+        assert!(state
+            .claim_document(&alias, "doc-1", ClaimMode::Write)
+            .granted);
+    }
+
+    #[test]
+    fn overlapping_folder_outputs_refuse_hard_link_aliases_of_one_file() {
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("output.pdf");
+        let alias = dir.path().join("alias.pdf");
+        std::fs::write(&output, b"%PDF-1.7").unwrap();
+        std::fs::hard_link(&output, &alias).unwrap();
+        let root = crate::commands::canonical_path(&dir.path().to_string_lossy());
+        let output = crate::commands::canonical_path(&output.to_string_lossy());
+        let alias = crate::commands::canonical_path(&alias.to_string_lossy());
+        let folder = run(&state, "main", &[root.as_str()]).token.unwrap();
+
+        let first = state.claim_engine_output(&output, "main").unwrap();
+        let refusal = state.claim_engine_output(&alias, "main").unwrap_err();
+        assert!(refusal.contains("another operation is writing it"));
+
+        drop(first);
+        assert!(state.release_run(folder, "main"));
+    }
+
+    #[test]
+    fn engine_output_reservation_refuses_an_open_hard_link_alias() {
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let open = dir.path().join("open.pdf");
+        let output = dir.path().join("output.pdf");
+        std::fs::write(&open, b"%PDF-1.7").unwrap();
+        std::fs::hard_link(&open, &output).unwrap();
+        let open = crate::commands::canonical_path(&open.to_string_lossy());
+        let output = crate::commands::canonical_path(&output.to_string_lossy());
+        assert!(state
+            .claim_document(&open, "doc-1", ClaimMode::Write)
+            .granted);
+
+        let error = state.claim_engine_output(&output, "main").unwrap_err();
+        assert!(error.contains("doc-1"));
+    }
+
+    #[test]
+    fn a_poisoned_document_map_does_not_let_folder_writes_bypass_open_files() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("open.pdf");
+        std::fs::write(&path, b"%PDF-1.7").unwrap();
+        let alias = dir.path().join("alias.pdf");
+        std::fs::hard_link(&path, &alias).unwrap();
+        let path = crate::commands::canonical_path(&path.to_string_lossy());
+        let alias = crate::commands::canonical_path(&alias.to_string_lossy());
+        assert!(state
+            .claim_document(&path, "doc-1", ClaimMode::Write)
+            .granted);
+
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _map = state.by_path.lock().unwrap();
+            panic!("poison the test claim map");
+        }));
+
+        let denied_alias = state.claim_document(&alias, "doc-2", ClaimMode::Write);
+        assert!(!denied_alias.granted);
+        assert_eq!(denied_alias.owner, "doc-1");
+
+        let root = crate::commands::canonical_path(&dir.path().to_string_lossy());
+        let denied = run(&state, "batch-1", &[root.as_str()]);
+        assert!(!denied.granted);
+        assert_eq!(denied.document, path);
+        assert_eq!(denied.owner, "doc-1");
     }
 
     #[test]
@@ -1915,8 +2400,22 @@ mod tests {
         let state = test_claim_state();
         assert!(run(&state, "main", &["", "/"]).granted);
         let root = tempfile::tempdir().unwrap();
-        assert!(run(&state, "doc-1", &[&root.path().join("out").to_string_lossy()]).granted);
-        assert!(run(&state, "doc-2", &[&root.path().join("other").to_string_lossy()]).granted);
+        assert!(
+            run(
+                &state,
+                "doc-1",
+                &[&root.path().join("out").to_string_lossy()]
+            )
+            .granted
+        );
+        assert!(
+            run(
+                &state,
+                "doc-2",
+                &[&root.path().join("other").to_string_lossy()]
+            )
+            .granted
+        );
     }
 
     #[test]
@@ -1946,7 +2445,11 @@ mod tests {
                 "token": null,
             })
         );
-        assert!(state.claim("C:\\docs\\a.pdf", "doc-1", ClaimMode::Write).granted);
+        assert!(
+            state
+                .claim("C:\\docs\\a.pdf", "doc-1", ClaimMode::Write)
+                .granted
+        );
         let open = run(&state, "doc-1", &["C:\\docs"]);
         assert_eq!(
             serde_json::to_value(&open).unwrap(),
@@ -2005,8 +2508,18 @@ mod tests {
     #[test]
     fn queued_opens_drain_once() {
         let registry = WindowRegistry::new();
-        assert!(queue_open(&registry, "doc-1", vec!["C:\\a.pdf".into()], false));
-        assert!(queue_open(&registry, "doc-1", vec!["C:\\b.pdf".into()], true));
+        assert!(queue_open(
+            &registry,
+            "doc-1",
+            vec!["C:\\a.pdf".into()],
+            false
+        ));
+        assert!(queue_open(
+            &registry,
+            "doc-1",
+            vec!["C:\\b.pdf".into()],
+            true
+        ));
         let drained = registry.take_pending("doc-1");
         assert_eq!(drained.len(), 2);
         assert!(drained[1].merge);
@@ -2034,7 +2547,12 @@ mod tests {
             handover(1),
         ));
         // Everything else appends, and says so rather than guessing a position.
-        assert!(queue_open(&registry, "doc-1", vec!["C:\\b.pdf".into()], false));
+        assert!(queue_open(
+            &registry,
+            "doc-1",
+            vec!["C:\\b.pdf".into()],
+            false
+        ));
         let drained = registry.take_pending("doc-1");
         assert_eq!(drained[0].index, Some(2));
         assert_eq!(drained[1].index, None);
@@ -2043,8 +2561,19 @@ mod tests {
     #[test]
     fn a_revoked_handover_leaves_the_queue_it_was_the_only_entry_of_empty() {
         let registry = WindowRegistry::new();
-        assert!(queue_handover(&registry, "doc-1", vec!["C:\\a.pdf".into()], None, handover(7)));
-        assert!(queue_open(&registry, "doc-1", vec!["C:\\b.pdf".into()], false));
+        assert!(queue_handover(
+            &registry,
+            "doc-1",
+            vec!["C:\\a.pdf".into()],
+            None,
+            handover(7)
+        ));
+        assert!(queue_open(
+            &registry,
+            "doc-1",
+            vec!["C:\\b.pdf".into()],
+            false
+        ));
 
         // Only the named handover goes: an ordinary open queued to the same
         // window is nobody's to cancel.
@@ -2062,7 +2591,13 @@ mod tests {
     #[test]
     fn a_handover_carries_its_token_over_the_wire_and_an_ordinary_open_carries_none() {
         let registry = WindowRegistry::new();
-        assert!(queue_handover(&registry, "doc-1", vec!["C:\\a.pdf".into()], None, handover(3)));
+        assert!(queue_handover(
+            &registry,
+            "doc-1",
+            vec!["C:\\a.pdf".into()],
+            None,
+            handover(3)
+        ));
         let drained = registry.take_pending("doc-1");
         assert_eq!(drained[0].handover, Some(handover(3)));
 
@@ -2083,8 +2618,19 @@ mod tests {
     #[test]
     fn an_uncommitted_handover_is_invisible_to_the_drain_and_stays_queued() {
         let registry = WindowRegistry::new();
-        assert!(queue_open(&registry, "doc-1", vec!["C:\\b.pdf".into()], false));
-        assert!(queue_handover(&registry, "doc-1", vec!["C:\\a.pdf".into()], None, handover(4)));
+        assert!(queue_open(
+            &registry,
+            "doc-1",
+            vec!["C:\\b.pdf".into()],
+            false
+        ));
+        assert!(queue_handover(
+            &registry,
+            "doc-1",
+            vec!["C:\\a.pdf".into()],
+            None,
+            handover(4)
+        ));
 
         // The source is still writing the file this open would read, and the
         // entry is the destruction rollback's only record of the move.
@@ -2104,8 +2650,20 @@ mod tests {
     #[test]
     fn a_release_names_one_token_and_a_destruction_still_sees_what_was_never_committed() {
         let registry = WindowRegistry::new();
-        assert!(queue_handover(&registry, "doc-1", vec!["C:\\a.pdf".into()], None, handover(4)));
-        assert!(queue_handover(&registry, "doc-1", vec!["C:\\b.pdf".into()], None, handover(5)));
+        assert!(queue_handover(
+            &registry,
+            "doc-1",
+            vec!["C:\\a.pdf".into()],
+            None,
+            handover(4)
+        ));
+        assert!(queue_handover(
+            &registry,
+            "doc-1",
+            vec!["C:\\b.pdf".into()],
+            None,
+            handover(5)
+        ));
         // A commit releases its own handover and no other window's.
         assert!(!registry.release_pending("doc-9", 4));
         assert!(!registry.release_pending("doc-1", 6));
@@ -2156,20 +2714,44 @@ mod tests {
     fn destruction_releases_every_claim_of_one_label_and_no_other() {
         let state = test_claim_state();
         // A hung renderer never sends a release; destruction is the only one.
-        assert!(state.claim("C:\\hung.pdf", "doc-1", ClaimMode::Write).granted);
-        assert!(state.claim("C:\\shared.pdf", "doc-1", ClaimMode::Read).granted);
-        assert!(state.claim("C:\\shared.pdf", "main", ClaimMode::Read).granted);
-        assert!(state.claim("C:\\mine.pdf", "main", ClaimMode::Write).granted);
+        assert!(
+            state
+                .claim("C:\\hung.pdf", "doc-1", ClaimMode::Write)
+                .granted
+        );
+        assert!(
+            state
+                .claim("C:\\shared.pdf", "doc-1", ClaimMode::Read)
+                .granted
+        );
+        assert!(
+            state
+                .claim("C:\\shared.pdf", "main", ClaimMode::Read)
+                .granted
+        );
+        assert!(
+            state
+                .claim("C:\\mine.pdf", "main", ClaimMode::Write)
+                .granted
+        );
         let folder = run(&state, "doc-1", &["C:\\batch"]).token.unwrap();
 
         state.release_label("doc-1");
 
         assert!(state.write_claims("doc-1").is_empty());
         assert!(!state.release_run(folder, "doc-1"));
-        assert!(state.claim("C:\\hung.pdf", "doc-2", ClaimMode::Write).granted);
+        assert!(
+            state
+                .claim("C:\\hung.pdf", "doc-2", ClaimMode::Write)
+                .granted
+        );
         assert!(run(&state, "doc-2", &["C:\\batch"]).granted);
         assert_eq!(state.owner("C:\\shared.pdf").as_deref(), Some("main"));
-        assert!(!state.claim("C:\\shared.pdf", "doc-2", ClaimMode::Write).granted);
+        assert!(
+            !state
+                .claim("C:\\shared.pdf", "doc-2", ClaimMode::Write)
+                .granted
+        );
         assert_eq!(state.write_claims("main"), vec!["C:\\mine.pdf".to_string()]);
     }
 
@@ -2209,7 +2791,11 @@ mod tests {
             assert!(a.0 ^ b.1, "main {a:?}, doc-1 {b:?}");
             // Read claims still coexist with whichever side won.
             assert!(state.claim(DOC, "doc-2", ClaimMode::Read).granted || b.1);
-            assert!(state.claim("C:\\race\\b.pdf", "doc-2", ClaimMode::Read).granted);
+            assert!(
+                state
+                    .claim("C:\\race\\b.pdf", "doc-2", ClaimMode::Read)
+                    .granted
+            );
         }
     }
 }

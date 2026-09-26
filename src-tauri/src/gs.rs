@@ -135,25 +135,68 @@ fn command(exe: &str) -> std::process::Command {
 /// surface waiting on it, for as long as it runs.
 const VERSION_BUDGET: Duration = Duration::from_secs(30);
 const SMOKE_BUDGET: Duration = Duration::from_secs(60);
+const MAX_PROBE_OUTPUT: usize = 1024 * 1024;
+const PIPE_DRAIN_GRACE: Duration = Duration::from_millis(500);
 
 /// Run `cmd` to completion or until `budget` passes, when it is killed and
 /// the run fails with `TimedOut`. Output is drained on threads so a child
 /// that fills a pipe cannot stall the wait.
-fn output_within(mut cmd: std::process::Command, budget: Duration) -> std::io::Result<std::process::Output> {
+fn output_within(
+    mut cmd: std::process::Command,
+    budget: Duration,
+) -> std::io::Result<std::process::Output> {
     use std::io::Read;
     use std::process::Stdio;
     let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
-    let drain = |pipe: Option<Box<dyn Read + Send>>| {
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            if let Some(mut pipe) = pipe {
-                let _ = pipe.read_to_end(&mut bytes);
-            }
-            bytes
-        })
+    #[cfg(windows)]
+    let job = match crate::process_job::ProcessJob::attach(child.id()) {
+        Ok(job) => Some(job),
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::other(format!(
+                "could not contain the Ghostscript probe process: {error}"
+            )));
+        }
     };
-    let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let stderr = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    #[cfg(not(windows))]
+    let job: Option<()> = None;
+
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let mut bytes = Vec::with_capacity(8192);
+            let mut buffer = [0u8; 8192];
+            if let Some(mut pipe) = pipe {
+                loop {
+                    match pipe.read(&mut buffer) {
+                        Ok(0) | Err(_) => break,
+                        Ok(count) => {
+                            let remaining = MAX_PROBE_OUTPUT.saturating_sub(bytes.len());
+                            let keep = count.min(remaining);
+                            bytes.extend_from_slice(&buffer[..keep]);
+                            // Continue draining after the cap so a verbose
+                            // process cannot block on a full pipe.
+                        }
+                    }
+                }
+            }
+            let _ = send.send(bytes);
+        });
+        receive
+    };
+    let stdout = drain(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let stderr = drain(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
     let deadline = Instant::now() + budget;
     let status = loop {
         if let Some(status) = child.try_wait()? {
@@ -162,17 +205,32 @@ fn output_within(mut cmd: std::process::Command, budget: Duration) -> std::io::R
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
+            drop(job);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
-                format!("the program did not finish within {} seconds", budget.as_secs()),
+                format!(
+                    "the program did not finish within {} seconds",
+                    budget.as_secs()
+                ),
             ));
         }
         std::thread::sleep(Duration::from_millis(25));
     };
+    // A probe owns the process tree it started. On Windows closing the job
+    // terminates descendants that inherited the captured pipe handles; the
+    // bounded receive below also prevents a stray handle on another target
+    // from extending the caller's timeout forever.
+    drop(job);
+    let drain_deadline = Instant::now() + PIPE_DRAIN_GRACE;
+    let collect = |reader: std::sync::mpsc::Receiver<Vec<u8>>| {
+        reader
+            .recv_timeout(drain_deadline.saturating_duration_since(Instant::now()))
+            .unwrap_or_default()
+    };
     Ok(std::process::Output {
         status,
-        stdout: stdout.join().unwrap_or_default(),
-        stderr: stderr.join().unwrap_or_default(),
+        stdout: collect(stdout),
+        stderr: collect(stderr),
     })
 }
 
@@ -199,7 +257,9 @@ pub fn parse_version(text: &str) -> Option<(u32, u32)> {
 /// `probe-failed`. A name taken from the clock is not enough: threads that
 /// start together read the same tick.
 fn probe_dir() -> std::io::Result<tempfile::TempDir> {
-    tempfile::Builder::new().prefix("spectra-gs-probe-").tempdir()
+    tempfile::Builder::new()
+        .prefix("spectra-gs-probe-")
+        .tempdir()
 }
 
 /// Render one tiny page. `Ok(())` only when a raster actually came out.
@@ -577,7 +637,10 @@ mod tests {
     fn discovery_puts_an_explicit_path_first_and_the_bundle_last() {
         let bundled = PathBuf::from("C:\\app\\ghostscript\\gswin64c.exe");
         let found = candidates(Some("C:\\chosen\\gswin64c.exe"), Some(&bundled));
-        assert_eq!(found.first().map(String::as_str), Some("C:\\chosen\\gswin64c.exe"));
+        assert_eq!(
+            found.first().map(String::as_str),
+            Some("C:\\chosen\\gswin64c.exe")
+        );
         assert_eq!(
             found.last().map(String::as_str),
             Some("C:\\app\\ghostscript\\gswin64c.exe")
@@ -589,8 +652,9 @@ mod tests {
         // The bundled tree is optional by construction: asking with None must
         // not panic and must never invent the vendored path.
         let found = candidates(None, None);
-        assert!(found.iter().all(|p| !p.contains("\\ghostscript\\gswin64c.exe")
-            || !p.starts_with("C:\\app")));
+        assert!(found
+            .iter()
+            .all(|p| !p.contains("\\ghostscript\\gswin64c.exe") || !p.starts_with("C:\\app")));
     }
 
     #[test]
@@ -642,7 +706,11 @@ mod tests {
             at(VERSION_BELOW_MINIMUM, "", ""),
         ] {
             let text = cli_error(&answer);
-            assert!(missing_names_the_shared_error(&text), "{}: {text}", answer.reason);
+            assert!(
+                missing_names_the_shared_error(&text),
+                "{}: {text}",
+                answer.reason
+            );
             assert!(text.contains("--gs-path"), "{}: {text}", answer.reason);
             assert!(text.contains(PATH_ENV_VAR), "{}: {text}", answer.reason);
             assert!(!text.contains("Preferences"), "{}: {text}", answer.reason);
@@ -664,8 +732,10 @@ mod tests {
                     })
                 })
                 .collect();
-            let dirs: Vec<tempfile::TempDir> =
-                starts.into_iter().map(|t| t.join().expect("a probe thread")).collect();
+            let dirs: Vec<tempfile::TempDir> = starts
+                .into_iter()
+                .map(|t| t.join().expect("a probe thread"))
+                .collect();
             let distinct: std::collections::HashSet<PathBuf> =
                 dirs.iter().map(|d| d.path().to_path_buf()).collect();
             assert_eq!(distinct.len(), WIDTH);
@@ -686,6 +756,62 @@ mod tests {
         let out = output_within(cmd, Duration::from_secs(10)).unwrap();
         assert!(out.status.success());
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "10.05.1");
+    }
+
+    #[test]
+    #[ignore]
+    fn output_within_descendant_helper() {
+        if std::env::var("SPECTRA_GS_DESCENDANT_HELPER").as_deref() == Ok("parent") {
+            let exe = std::env::current_exe().unwrap();
+            std::process::Command::new(exe)
+                .args([
+                    "--exact",
+                    "gs::tests::output_within_descendant_helper",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env("SPECTRA_GS_DESCENDANT_HELPER", "child")
+                .spawn()
+                .unwrap();
+        } else if std::env::var("SPECTRA_GS_DESCENDANT_HELPER").as_deref() == Ok("child") {
+            std::thread::sleep(Duration::from_secs(4));
+        } else if std::env::var("SPECTRA_GS_DESCENDANT_HELPER").as_deref() == Ok("flood") {
+            use std::io::Write;
+            std::io::stdout()
+                .write_all(&vec![b'x'; MAX_PROBE_OUTPUT * 2])
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn output_within_finishes_when_the_executable_leaves_a_pipe_holding_child() {
+        let started = Instant::now();
+        let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
+        cmd.args([
+            "--exact",
+            "gs::tests::output_within_descendant_helper",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("SPECTRA_GS_DESCENDANT_HELPER", "parent");
+        let out = output_within(cmd, Duration::from_secs(2)).unwrap();
+        assert!(out.status.success());
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn output_within_bounds_the_bytes_retained_from_a_probe() {
+        let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
+        cmd.args([
+            "--exact",
+            "gs::tests::output_within_descendant_helper",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("SPECTRA_GS_DESCENDANT_HELPER", "flood");
+        let out = output_within(cmd, Duration::from_secs(2)).unwrap();
+        assert!(out.status.success());
+        assert!(out.stdout.len() <= MAX_PROBE_OUTPUT);
     }
 
     #[test]
