@@ -361,10 +361,22 @@ def _value_of(reader: _Reader, node):
     return str(value)
 
 
-def _walk_fdf_fields(reader: _Reader, entries, prefix: str, out: dict, depth: int) -> None:
+def _walk_fdf_fields(
+    reader: _Reader, entries, prefix: str, out: dict, depth: int, seen: set | None = None
+) -> None:
+    # Each object is walked once: a /Kids array that names a field object
+    # twice, or names its own parent, otherwise multiplies the walk by its
+    # length at every level of the depth bound.
+    if seen is None:
+        seen = set()
     if depth > 32 or not isinstance(entries, list):
         return
     for entry in entries:
+        if isinstance(entry, _Ref):
+            key = (entry.num, entry.gen)
+            if key in seen:
+                continue
+            seen.add(key)
         node = reader.resolve(entry)
         if not isinstance(node, dict):
             continue
@@ -375,7 +387,7 @@ def _walk_fdf_fields(reader: _Reader, entries, prefix: str, out: dict, depth: in
             name = f"{prefix}.{part}" if prefix else part
         kids = reader.get(node, "/Kids")
         if isinstance(kids, list) and kids:
-            _walk_fdf_fields(reader, kids, name, out, depth + 1)
+            _walk_fdf_fields(reader, kids, name, out, depth + 1, seen)
             continue
         if not name:
             continue

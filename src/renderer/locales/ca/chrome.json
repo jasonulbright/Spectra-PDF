@@ -6051,6 +6051,7 @@
   "refusal.field.needsOption": "Aquest tipus de camp necessita almenys una opció.",
   "refusal.field.optionRectsPartial": "O bé cada opció porta el seu propi rectangle, o bé no en porta cap.",
   "refusal.field.optionsUnique": "Les opcions han de ser úniques.",
+  "refusal.field.radioOptionOff": "Una opció de botó d'opció no es pot dir \"Off\": aquest nom és l'estat desactivat de tots els botons.",
   "refusal.field.pageOutOfRange": "La pàgina {{page}} és fora de l'interval (1-{{count}}).",
   "refusal.field.rangeInverted": "El valor acceptat més petit no pot ser més gran que el més gran.",
   "refusal.field.rangeNeedsBound": "Un interval acceptat necessita un valor mínim, un valor màxim o tots dos.",

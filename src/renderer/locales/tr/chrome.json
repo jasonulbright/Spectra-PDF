@@ -5915,6 +5915,7 @@
   "refusal.field.needsOption": "Bu alan türü en az bir seçenek gerektirir.",
   "refusal.field.optionRectsPartial": "Ya her seçenek kendi dikdörtgenini taşır ya da hiçbiri taşımaz.",
   "refusal.field.optionsUnique": "Seçenekler benzersiz olmalıdır.",
+  "refusal.field.radioOptionOff": "Bir radyo düğmesi seçeneğinin adı \"Off\" olamaz; bu ad her düğmenin kapalı durumunun adıdır.",
   "refusal.field.pageOutOfRange": "{{page}}. sayfa aralık dışında (1-{{count}}).",
   "refusal.field.rangeInverted": "Kabul edilen en küçük değer en büyükten büyük olamaz.",
   "refusal.field.rangeNeedsBound": "Kabul edilen aralık bir en küçük değer, bir en büyük değer ya da her ikisini gerektirir.",

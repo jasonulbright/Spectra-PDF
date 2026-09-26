@@ -6187,6 +6187,7 @@
   "refusal.field.needsOption": "Этому типу поля нужен хотя бы один вариант.",
   "refusal.field.optionRectsPartial": "Либо каждый вариант несёт собственный прямоугольник, либо ни один.",
   "refusal.field.optionsUnique": "Варианты должны быть уникальными.",
+  "refusal.field.radioOptionOff": "Вариант переключателя не может называться «Off»: это имя обозначает выключенное состояние каждой кнопки.",
   "refusal.field.pageOutOfRange": "Страница {{page}} вне диапазона (1-{{count}}).",
   "refusal.field.rangeInverted": "Наименьшее допустимое значение не может быть больше наибольшего.",
   "refusal.field.rangeNeedsBound": "Допустимому диапазону нужно наименьшее значение, наибольшее или оба.",

@@ -339,6 +339,18 @@ def _feed_readable(state: GraphicsTextState, operator: str, operands: list) -> b
     return fed
 
 
+def form_ctm(xobj, ctm) -> tuple:
+    """The CTM a Form XObject's content runs under: its /Matrix composed with
+    the invoking `ctm`. A /Matrix that will not read, or whose product with
+    `ctm` overflows a double, contributes the identity, the same rule
+    `_feed_readable` applies to a `cm` operand: run geometry derived from a
+    non-finite matrix cannot be encoded, and one such run fails the listing."""
+    composed = _mat_mult(_as_matrix(xobj.get("/Matrix")) or IDENTITY, ctm)
+    if all(math.isfinite(v) for v in composed):
+        return composed
+    return ctm
+
+
 def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nested, fonts, parent_state=None, detail=None, stream_path=(), base_clip=None, breaks=None):
     # Text is read and measured with the font DICTIONARY the text state holds:
     # the one a `Tf` names here, an ExtGState /Font entry sets, or the
@@ -518,7 +530,6 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
             xobj = _lookup_xobject(name, resources, fallback)
             subtype = token_text(xobj.get("/Subtype", "")) if xobj is not None else ""
             if xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
-                form_matrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
                 form_res = xobj.get("/Resources")
                 child_path = stream_path + (local_form_ordinal,)
                 local_form_ordinal += 1
@@ -526,7 +537,7 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     pdf,
                     pikepdf.parse_content_stream(xobj),
                     form_res if form_res is not None else resources,
-                    _mat_mult(form_matrix, state.ctm),
+                    form_ctm(xobj, state.ctm),
                     depth + 1,
                     resources,
                     out,
@@ -788,7 +799,6 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
             if xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
                 form_res = xobj.get("/Resources")
                 read_res = form_res if form_res is not None else resources
-                form_matrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
                 inner_kept, inner_changed, inner_new_forms = _rewrite_runs(
                     pdf,
                     pikepdf.parse_content_stream(xobj),
@@ -799,7 +809,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                     fonts,
                     counter,
                     reserved,
-                    base_ctm=_mat_mult(form_matrix, gts.ctm),
+                    base_ctm=form_ctm(xobj, gts.ctm),
                     parent_state=gts,
                 )
                 if inner_changed:

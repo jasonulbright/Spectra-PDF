@@ -5915,6 +5915,7 @@
   "refusal.field.needsOption": "Tämä kenttätyyppi tarvitsee vähintään yhden vaihtoehdon.",
   "refusal.field.optionRectsPartial": "Joko jokaisella vaihtoehdolla on oma suorakulmionsa tai ei yhdelläkään.",
   "refusal.field.optionsUnique": "Vaihtoehtojen on oltava yksilöllisiä.",
+  "refusal.field.radioOptionOff": "Valintanapin vaihtoehdon nimi ei voi olla ”Off”, koska se on jokaisen painikkeen pois-tilan nimi.",
   "refusal.field.pageOutOfRange": "Sivu {{page}} on alueen ulkopuolella (1-{{count}}).",
   "refusal.field.rangeInverted": "Pienin hyväksytty arvo ei voi olla suurempi kuin suurin.",
   "refusal.field.rangeNeedsBound": "Hyväksytty väli tarvitsee pienimmän arvon, suurimman arvon tai molemmat.",

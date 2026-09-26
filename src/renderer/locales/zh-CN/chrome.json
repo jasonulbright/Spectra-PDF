@@ -5779,6 +5779,7 @@
   "refusal.field.needsOption": "此类字段至少需要一个选项。",
   "refusal.field.optionRectsPartial": "要么每个选项都有自己的矩形，要么都没有。",
   "refusal.field.optionsUnique": "各选项不能重复。",
+  "refusal.field.radioOptionOff": "单选按钮的选项不能命名为“Off”，该名称是每个按钮的关闭状态。",
   "refusal.field.pageOutOfRange": "第 {{page}} 页超出范围（1-{{count}}）。",
   "refusal.field.rangeInverted": "接受的最小值不能大于最大值。",
   "refusal.field.rangeNeedsBound": "接受范围需要一个最小值、一个最大值或两者。",

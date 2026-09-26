@@ -342,6 +342,20 @@ describe('addFormFields', () => {
     expect(widgets[1].rect[0]).toBeGreaterThan(widgets[0].rect[0]);
   });
 
+  it('refuses a radio option named Off, the name of every button off state', async () => {
+    await expect(
+      addFormFields(await blankPdf(), [
+        {
+          name: 'switch',
+          type: 'radio',
+          pageIndex: 0,
+          rect: [50, 300, 460, 320],
+          options: ['On', 'Off'],
+        },
+      ]),
+    ).rejects.toThrow(/cannot be named "Off"/);
+  });
+
   it('refuses a partial set of option rectangles', async () => {
     await expect(
       addFormFields(await blankPdf(), [

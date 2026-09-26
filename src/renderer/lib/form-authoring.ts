@@ -377,6 +377,11 @@ function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
       } else if (new Set(options.map((o) => o.label)).size !== options.length) {
         push('refusal.field.optionsUnique');
       }
+      // ISO 32000-2 12.7.5.2.3: every button's off appearance state is named
+      // Off, so an option exported as Off has no on state of its own.
+      if (spec.type === 'radio' && options.some((o) => o.label === 'Off')) {
+        push('refusal.field.radioOptionOff');
+      }
       const placed = options.filter((o) => o.rect).length;
       if (placed > 0 && placed !== options.length) {
         push('refusal.field.optionRectsPartial');

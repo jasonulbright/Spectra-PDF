@@ -6187,6 +6187,7 @@
   "refusal.field.needsOption": "Ten typ pola wymaga co najmniej jednej opcji.",
   "refusal.field.optionRectsPartial": "Albo każda opcja niesie własny prostokąt, albo żadna.",
   "refusal.field.optionsUnique": "Opcje muszą być unikalne.",
+  "refusal.field.radioOptionOff": "Opcja przycisku opcji nie może nosić nazwy „Off”, ponieważ ta nazwa oznacza stan wyłączenia każdego przycisku.",
   "refusal.field.pageOutOfRange": "Strona {{page}} jest poza zakresem (1-{{count}}).",
   "refusal.field.rangeInverted": "Najmniejsza dopuszczalna wartość nie może być większa niż największa.",
   "refusal.field.rangeNeedsBound": "Dopuszczalny zakres wymaga najmniejszej wartości, największej albo obu.",

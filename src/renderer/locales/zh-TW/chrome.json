@@ -5779,6 +5779,7 @@
   "refusal.field.needsOption": "這種欄位類型至少需要一個選項。",
   "refusal.field.optionRectsPartial": "所有選項都各自帶有矩形，或都不帶。",
   "refusal.field.optionsUnique": "選項必須互不重複。",
+  "refusal.field.radioOptionOff": "選項按鈕的選項不能命名為「Off」，該名稱是每個按鈕的關閉狀態。",
   "refusal.field.pageOutOfRange": "第 {{page}} 頁超出範圍（1-{{count}}）。",
   "refusal.field.rangeInverted": "接受的最小值不能大於最大值。",
   "refusal.field.rangeNeedsBound": "接受範圍需要一個最小值、一個最大值或兩者。",

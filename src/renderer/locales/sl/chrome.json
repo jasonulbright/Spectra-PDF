@@ -6187,6 +6187,7 @@
   "refusal.field.needsOption": "Ta vrsta polja potrebuje vsaj eno možnost.",
   "refusal.field.optionRectsPartial": "Ali vsaka možnost nosi svoj pravokotnik ali pa nobena.",
   "refusal.field.optionsUnique": "Možnosti morajo biti enolične.",
+  "refusal.field.radioOptionOff": "Možnost izbirnega gumba se ne more imenovati »Off«, ker je to ime izklopljenega stanja vsakega gumba.",
   "refusal.field.pageOutOfRange": "Stran {{page}} je zunaj obsega (1-{{count}}).",
   "refusal.field.rangeInverted": "Najmanjša dovoljena vrednost ne sme biti večja od največje.",
   "refusal.field.rangeNeedsBound": "Dovoljen razpon potrebuje najmanjšo vrednost, največjo vrednost ali obe.",

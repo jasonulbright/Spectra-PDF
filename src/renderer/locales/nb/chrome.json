@@ -5915,6 +5915,7 @@
   "refusal.field.needsOption": "Denne felttypen trenger minst ett alternativ.",
   "refusal.field.optionRectsPartial": "Enten har hvert alternativ sitt eget rektangel, eller så har ingen av dem det.",
   "refusal.field.optionsUnique": "Alternativene må være unike.",
+  "refusal.field.radioOptionOff": "Et alternativ i en radioknapp kan ikke hete «Off», fordi det navnet er av-tilstanden til alle knapper.",
   "refusal.field.pageOutOfRange": "Side {{page}} ligger utenfor intervallet (1-{{count}}).",
   "refusal.field.rangeInverted": "Den minste godtatte verdien kan ikke være større enn den største.",
   "refusal.field.rangeNeedsBound": "Et godtatt område trenger en minste verdi, en største verdi eller begge.",

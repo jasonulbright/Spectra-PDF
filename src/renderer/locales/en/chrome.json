@@ -5918,6 +5918,7 @@
   "refusal.field.optionRectsPartial": "Either every option carries its own rectangle, or none of them do.",
   "refusal.field.optionsUnique": "Options must be unique.",
   "refusal.field.pageOutOfRange": "Page {{page}} is out of range (1-{{count}}).",
+  "refusal.field.radioOptionOff": "A radio option cannot be named \"Off\": that name is the off state of every button.",
   "refusal.field.rangeInverted": "The smallest accepted value cannot be larger than the largest.",
   "refusal.field.rangeNeedsBound": "An accepted range needs a smallest value, a largest value, or both.",
   "refusal.field.rangeNotNumber": "A range bound must be a number.",

@@ -328,6 +328,24 @@ def test_duplicate_options_refuse(tmp_path):
     assert "different" in problems[0]
 
 
+def test_a_radio_option_named_off_refuses(tmp_path):
+    # Off names every button's off state, so an option exported as Off would
+    # carry no on-state appearance and could never be shown selected.
+    problems = _refusal(
+        tmp_path,
+        [
+            {
+                "name": "Pick",
+                "type": "radio",
+                "page_index": 0,
+                "rect": [1, 1, 40, 20],
+                "options": ["On", "Off"],
+            }
+        ],
+    ).problems
+    assert "Off" in problems[0]
+
+
 def test_a_partial_set_of_option_rectangles_refuses(tmp_path):
     problems = _refusal(
         tmp_path,

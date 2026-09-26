@@ -6051,6 +6051,7 @@
   "refusal.field.needsOption": "Acest tip de câmp are nevoie de cel puțin o opțiune.",
   "refusal.field.optionRectsPartial": "Ori fiecare opțiune poartă propriul dreptunghi, ori niciuna.",
   "refusal.field.optionsUnique": "Opțiunile trebuie să fie unice.",
+  "refusal.field.radioOptionOff": "O opțiune de buton radio nu se poate numi „Off”, deoarece acest nume este starea dezactivată a fiecărui buton.",
   "refusal.field.pageOutOfRange": "Pagina {{page}} este în afara intervalului (1-{{count}}).",
   "refusal.field.rangeInverted": "Cea mai mică valoare acceptată nu poate fi mai mare decât cea mai mare.",
   "refusal.field.rangeNeedsBound": "Un interval acceptat are nevoie de o valoare minimă, una maximă sau de amândouă.",
