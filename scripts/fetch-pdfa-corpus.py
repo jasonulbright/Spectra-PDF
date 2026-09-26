@@ -95,6 +95,7 @@ def _extract(archive: bytes, into: Path) -> int:
     if into.exists():
         shutil.rmtree(into)
     into.mkdir(parents=True)
+    root = into.resolve()
     count = 0
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
         for member in tar.getmembers():
@@ -104,7 +105,7 @@ def _extract(archive: bytes, into: Path) -> int:
             if not parts:
                 continue
             target = (into / Path(*parts)).resolve()
-            if not str(target).startswith(str(into.resolve())):
+            if root not in target.parents:
                 raise RuntimeError(f"archive member escapes the destination: {member.name}")
             target.parent.mkdir(parents=True, exist_ok=True)
             extracted = tar.extractfile(member)
