@@ -578,20 +578,45 @@ fn printer_status_script() -> String {
 fn install_printer_script() -> String {
     format!(
         "{}$ErrorActionPreference = 'Stop'\r\n\
-         $port = Get-PrinterPort -Name '{PORT_NAME}' -ErrorAction SilentlyContinue\r\n\
-         if (-not $port) {{\r\n\
-           Add-PrinterPort -Name '{PORT_NAME}' -PrinterHostAddress '127.0.0.1' -PortNumber {PORT}\r\n\
-           $port = Get-PrinterPort -Name '{PORT_NAME}' -ErrorAction Stop\r\n\
-         }}\r\n\
-         if (-not (Test-SpectraPdfPort $port)) {{ throw 'The Spectra PDF port name is already in use by a different port configuration.' }}\r\n\
          $printer = Get-Printer -Name '{PRINTER_NAME}' -ErrorAction SilentlyContinue\r\n\
-         if ($printer) {{\r\n\
-           if (-not (Test-SpectraPdfPrinter $printer)) {{ throw 'A different printer already uses the Spectra PDF name.' }}\r\n\
-         }} else {{\r\n\
-           Add-Printer -Name '{PRINTER_NAME}' -DriverName 'Microsoft PS Class Driver' -PortName '{PORT_NAME}'\r\n\
-           $printer = Get-Printer -Name '{PRINTER_NAME}' -ErrorAction Stop\r\n\
-         }}\r\n\
-         if (-not (Test-SpectraPdfPrinter $printer) -or -not (Test-SpectraPdfPort $port)) {{ throw 'The installed Spectra PDF printer configuration could not be verified.' }}",
+         if ($printer -and -not (Test-SpectraPdfPrinter $printer)) {{ throw 'A different printer already uses the Spectra PDF name.' }}\r\n\
+         $port = Get-PrinterPort -Name '{PORT_NAME}' -ErrorAction SilentlyContinue\r\n\
+         $createdPort = $false\r\n\
+         $createdPrinter = $false\r\n\
+         try {{\r\n\
+           if (-not $port) {{\r\n\
+             Add-PrinterPort -Name '{PORT_NAME}' -PrinterHostAddress '127.0.0.1' -PortNumber {PORT}\r\n\
+             $createdPort = $true\r\n\
+             $port = Get-PrinterPort -Name '{PORT_NAME}' -ErrorAction Stop\r\n\
+           }}\r\n\
+           if (-not (Test-SpectraPdfPort $port)) {{ throw 'The Spectra PDF port name is already in use by a different port configuration.' }}\r\n\
+           if (-not $printer) {{\r\n\
+             Add-Printer -Name '{PRINTER_NAME}' -DriverName 'Microsoft PS Class Driver' -PortName '{PORT_NAME}'\r\n\
+             $createdPrinter = $true\r\n\
+             $printer = Get-Printer -Name '{PRINTER_NAME}' -ErrorAction Stop\r\n\
+           }}\r\n\
+           if (-not (Test-SpectraPdfPrinter $printer) -or -not (Test-SpectraPdfPort $port)) {{ throw 'The installed Spectra PDF printer configuration could not be verified.' }}\r\n\
+         }} catch {{\r\n\
+           $installError = $_\r\n\
+           $rollbackErrors = @()\r\n\
+           if ($createdPrinter) {{\r\n\
+             try {{\r\n\
+               $installedPrinter = Get-Printer -Name '{PRINTER_NAME}' -ErrorAction SilentlyContinue\r\n\
+               if (Test-SpectraPdfPrinter $installedPrinter) {{ Remove-Printer -Name '{PRINTER_NAME}' -ErrorAction Stop }}\r\n\
+             }} catch {{ $rollbackErrors += $_.Exception.Message }}\r\n\
+           }}\r\n\
+           if ($createdPort) {{\r\n\
+             try {{\r\n\
+               $users = @(Get-Printer -ErrorAction Stop | Where-Object {{ $_.PortName -eq '{PORT_NAME}' }})\r\n\
+               $currentPort = Get-PrinterPort -Name '{PORT_NAME}' -ErrorAction SilentlyContinue\r\n\
+               if ($users.Count -eq 0 -and (Test-SpectraPdfPort $currentPort)) {{ Remove-PrinterPort -Name '{PORT_NAME}' -ErrorAction Stop }}\r\n\
+             }} catch {{ $rollbackErrors += $_.Exception.Message }}\r\n\
+           }}\r\n\
+           if ($rollbackErrors.Count -gt 0) {{\r\n\
+             throw \"$($installError.Exception.Message) (rollback failed: $($rollbackErrors -join '; '))\"\r\n\
+           }}\r\n\
+           throw $installError\r\n\
+         }}",
         printer_check_functions()
     )
 }
@@ -732,6 +757,27 @@ try {
         assert!(result.contains("RESULT=ERROR"), "{result}");
         assert!(result.contains("different printer already uses the Spectra PDF name"), "{result}");
         assert!(result.contains("EVENTS="), "{result}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn install_does_not_create_a_port_when_the_printer_name_is_foreign() {
+        let setup = "$script:printers = @([pscustomobject]@{ Name='Spectra PDF'; DriverName='Microsoft Print to PDF'; PortName='FILE:' })";
+        let result = run_printer_script_probe(setup, &install_printer_script()).unwrap();
+        assert!(result.contains("RESULT=ERROR"), "{result}");
+        assert!(result.contains("EVENTS=\r\n"), "{result}");
+        assert!(result.contains("PORTS=\r\n"), "{result}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn install_removes_its_new_port_when_printer_creation_fails() {
+        let setup = "function Add-Printer { throw 'simulated printer creation failure' }";
+        let result = run_printer_script_probe(setup, &install_printer_script()).unwrap();
+        assert!(result.contains("RESULT=ERROR"), "{result}");
+        assert!(result.contains("EVENTS=add-port,remove-port"), "{result}");
+        assert!(result.contains("PRINTERS="), "{result}");
+        assert!(result.contains("PORTS="), "{result}");
     }
 
     #[cfg(windows)]
