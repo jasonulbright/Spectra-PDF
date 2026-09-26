@@ -3288,7 +3288,7 @@ impl CliEngine {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
         let mut child = Command::new(&python)
-            .arg(&script)
+            .args(crate::engine::python_args(&script.to_string_lossy()))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
