@@ -416,7 +416,7 @@ unsafe fn hardware_backed(cert: *const CERT_CONTEXT) -> bool {
         )
         .is_ok()
         {
-            hardware = impl_type & (NCRYPT_IMPL_HARDWARE_FLAG | NCRYPT_IMPL_HARDWARE_RNG_FLAG) != 0;
+            hardware = ncrypt_provider_is_hardware(impl_type);
         }
         if caller_free.as_bool() {
             let _ = NCryptFreeObject(NCRYPT_HANDLE(key.0 as usize));
@@ -425,6 +425,11 @@ unsafe fn hardware_backed(cert: *const CERT_CONTEXT) -> bool {
         let _ = CryptReleaseContext(key.0 as usize, 0);
     }
     hardware
+}
+
+#[cfg(windows)]
+fn ncrypt_provider_is_hardware(impl_type: u32) -> bool {
+    impl_type & NCRYPT_IMPL_HARDWARE_FLAG != 0
 }
 
 /// Every eligible certificate in one store location.
@@ -638,6 +643,15 @@ mod tests {
         assert_eq!(v["reason"], "open-failed");
         assert_eq!(v["code"], "0x80070005");
         assert!(v["message"].as_str().is_some());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_hardware_random_generator_does_not_make_a_software_key_hardware_backed() {
+        assert!(!ncrypt_provider_is_hardware(
+            NCRYPT_IMPL_SOFTWARE_FLAG | NCRYPT_IMPL_HARDWARE_RNG_FLAG
+        ));
+        assert!(ncrypt_provider_is_hardware(NCRYPT_IMPL_HARDWARE_FLAG));
     }
 }
 
