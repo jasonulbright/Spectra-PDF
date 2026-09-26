@@ -532,6 +532,11 @@ def _walk_analysis(
     clip = base_clip
     clip_stack: list = []
     pending_clip = False
+    # Render modes 4-7 add the glyph outlines to the clip, applied at ET
+    # (ISO 32000-2 9.3.6). The glyph region is not tracked, so from ET until
+    # the matching Q the clip is inexact and no cover is trusted.
+    in_text = False
+    text_clip = False
     # How far the pen may lag what is tracked since the last positioning
     # operator: a run the font cannot measure advances by the wide estimate,
     # so the text after it may sit up to this much further back, and its box
@@ -575,6 +580,23 @@ def _walk_analysis(
 
         if operator in ("Td", "TD", "Tm", "T*", "BT", "ET"):
             slack = 0.0
+
+        if operator == "BT":
+            in_text = True
+            text_clip = False
+        elif operator == "ET":
+            if text_clip:
+                clip = (clip[0], False)
+            in_text = False
+            text_clip = False
+        elif in_text and operator == "Tr" and operands:
+            try:
+                if int(float(operands[0])) >= 4:
+                    text_clip = True
+            except (TypeError, ValueError):
+                text_clip = True
+        elif in_text and operator in SHOW_OPS and state.render_mode >= 4:
+            text_clip = True
 
         if state.feed(operator, operands):
             continue
@@ -759,7 +781,7 @@ def _narrowed(clip, box, exact: bool):
     """The clip after intersecting it with a new clipping path's box."""
     region, was_exact = clip
     if region is None:
-        return (tuple(box), exact)
+        return (tuple(box), was_exact and exact)
     shared = (max(box[0], region[0]), max(box[1], region[1]),
               min(box[2], region[2]), min(box[3], region[3]))
     if shared[2] <= shared[0] or shared[3] <= shared[1]:

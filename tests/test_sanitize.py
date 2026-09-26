@@ -459,6 +459,87 @@ class TestHiddenText:
 
         assert analyze_page(pdf, pdf.pages[0], off_ocg_set(pdf))["runs"] == []
 
+    @staticmethod
+    def _kinds(content: bytes, form_content: bytes = None) -> dict:
+        from engine.sanitize_content import analyze_page, off_ocg_set
+
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(300, 300))
+        font = pdf.make_indirect(Dictionary(
+            Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica))
+        resources = Dictionary(Font=Dictionary(F1=font))
+        if form_content is not None:
+            form = pdf.make_stream(form_content)
+            form.Type = Name.XObject
+            form.Subtype = Name.Form
+            form.BBox = Array([0, 0, 300, 300])
+            form.Resources = Dictionary(Font=Dictionary(F1=font))
+            resources.XObject = Dictionary(Fm0=form)
+        page.obj.Resources = resources
+        page.Contents = pdf.make_stream(content)
+        runs = analyze_page(pdf, pdf.pages[0], off_ocg_set(pdf))["runs"]
+        return {r.text: r.kind for r in runs}
+
+    VISIBLE = b"BT /F1 12 Tf 150 200 Td (Visible words) Tj ET "
+    WHITE_PAGE = b"1 1 1 rg 0 0 300 300 re f"
+
+    def test_a_mode_7_text_clip_keeps_a_fill_from_covering(self):
+        kinds = self._kinds(
+            self.VISIBLE
+            + b"q BT 7 Tr /F1 12 Tf 10 10 Td (clip) Tj ET " + self.WHITE_PAGE + b" Q")
+        assert "Visible words" not in kinds
+        assert kinds["clip"] == "invisible"
+
+    def test_a_mode_4_fill_and_clip_keeps_a_fill_from_covering(self):
+        kinds = self._kinds(
+            self.VISIBLE
+            + b"q BT 4 Tr /F1 12 Tf 10 10 Td (clip) Tj ET " + self.WHITE_PAGE + b" Q")
+        assert "Visible words" not in kinds
+
+    def test_a_text_clip_set_before_bt_applies_at_et(self):
+        kinds = self._kinds(
+            self.VISIBLE
+            + b"q 6 Tr BT /F1 12 Tf 10 10 Td (clip) Tj ET " + self.WHITE_PAGE + b" Q")
+        assert "Visible words" not in kinds
+
+    def test_a_text_clip_with_a_rectangle_clip_still_does_not_cover(self):
+        kinds = self._kinds(
+            self.VISIBLE
+            + b"q 0 0 300 300 re W n BT 7 Tr /F1 12 Tf 10 10 Td (clip) Tj ET "
+            + self.WHITE_PAGE + b" Q")
+        assert "Visible words" not in kinds
+
+    def test_a_text_clip_inside_a_form_keeps_its_fill_from_covering(self):
+        kinds = self._kinds(
+            self.VISIBLE + b"/Fm0 Do",
+            form_content=b"BT 7 Tr /F1 12 Tf 10 10 Td (clip) Tj ET " + self.WHITE_PAGE)
+        assert "Visible words" not in kinds
+
+    def test_a_form_inherits_the_text_clip_of_its_caller(self):
+        kinds = self._kinds(
+            self.VISIBLE + b"q BT 7 Tr /F1 12 Tf 10 10 Td (clip) Tj ET /Fm0 Do Q",
+            form_content=self.WHITE_PAGE)
+        assert "Visible words" not in kinds
+
+    def test_q_restores_a_rectangle_clip_and_the_cover_is_trusted_again(self):
+        kinds = self._kinds(
+            self.VISIBLE
+            + b"q 0 0 300 300 re W n "
+            + b"q BT 7 Tr /F1 12 Tf 10 10 Td (clip) Tj ET Q "
+            + self.WHITE_PAGE + b" Q")
+        assert kinds["Visible words"] == "covered"
+
+    def test_covers_under_rectangle_clips_are_still_found(self):
+        # Unclipped, clipped by a rectangle around the text, and a form whose
+        # /BBox holds the text: all three covers still hide it.
+        assert self._kinds(self.VISIBLE + self.WHITE_PAGE)["Visible words"] == "covered"
+        assert self._kinds(
+            self.VISIBLE + b"q 100 150 200 150 re W n " + self.WHITE_PAGE + b" Q"
+        )["Visible words"] == "covered"
+        assert self._kinds(
+            self.VISIBLE + b"/Fm0 Do", form_content=self.WHITE_PAGE
+        )["Visible words"] == "covered"
+
     def test_a_recognition_layer_is_its_own_sub_class(self, scan_pdf):
         found = row(audit_hidden_information(scan_pdf), "hidden_text")
         assert [d["kind"] for d in found["detail"]] == ["ocr_layer"]
