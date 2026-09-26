@@ -4,8 +4,11 @@ ISO 32000-2 7.6.4.1: a document with a user password and a different owner
 password opened with the USER password stays encrypted, and only the
 operations its /P bits allow may run on it. The working copy therefore keeps
 its /Encrypt, and every later read of it needs the password again. The
-password lives here, in this process only: it is never written to a file and
-never placed in a response.
+password lives here, in this process, and is never placed in a response. The
+one file it is written to is a Ghostscript argument file inside an
+owner-only temporary folder for the length of one run (`gs_password_argv`);
+a folder a killed engine left behind is removed at the next engine start
+(`remove_stale_gs_argfiles`).
 
 Keys are canonical paths, so two spellings of one working copy share one
 record. A path that is not a known document opens with the empty password,
@@ -175,6 +178,38 @@ def gs_password_line(password: str) -> str:
     return "-sPDFPassword=" + password + "\\"
 
 
+_GS_FOLDER_PREFIX = "spectrapdf-gs-"
+#: A folder younger than this may belong to a run of another engine process
+#: (the health worker) between writing its argument file and spawning gs.
+_GS_STALE_SECONDS = 60
+
+
+def remove_stale_gs_argfiles() -> int:
+    """Remove argument-file folders a killed engine left in the temporary
+    directory, each holding a stored password. Returns the count removed."""
+    import time
+
+    root = tempfile.gettempdir()
+    removed = 0
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return 0
+    now = time.time()
+    for name in names:
+        if not name.startswith(_GS_FOLDER_PREFIX):
+            continue
+        folder = os.path.join(root, name)
+        try:
+            if not os.path.isdir(folder) or now - os.path.getmtime(folder) < _GS_STALE_SECONDS:
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(folder, ignore_errors=True)
+        removed += 0 if os.path.exists(folder) else 1
+    return removed
+
+
 @contextmanager
 def gs_password_argv(cmd: list[str], *sources):
     """`cmd` with the stored password of the first of `sources` that has one
@@ -191,7 +226,7 @@ def gs_password_argv(cmd: list[str], *sources):
         yield list(cmd)
         return
     line = gs_password_line(password)
-    folder = tempfile.mkdtemp(prefix="spectrapdf-gs-")
+    folder = tempfile.mkdtemp(prefix=_GS_FOLDER_PREFIX)
     try:
         argfile = os.path.join(folder, "args")
         with open(argfile, "w", encoding="utf-8", newline="\n") as handle:
@@ -233,8 +268,14 @@ def open_document(path: str, password: str = "") -> dict:
     password raises `pikepdf.PasswordError` and records nothing."""
     from engine.inspect import _decrypt_in_place
 
-    _documents.pop(_key(path), None)
-    pdf = open_pdf(path, password=password)
+    previous = _documents.pop(_key(path), None)
+    try:
+        pdf = open_pdf(path, password=password)
+    except Exception:
+        # A wrong password on an open document leaves its record as it was.
+        if previous is not None:
+            _documents[_key(path)] = previous
+        raise
     try:
         encrypted = pdf.is_encrypted
         owner = encrypted and pdf.owner_password_matched
@@ -253,6 +294,10 @@ def open_document(path: str, password: str = "") -> dict:
     return {"encrypted": True, "opener": "user", "encryption_kept": True}
 
 
+class CredentialConflict(RuntimeError):
+    """A path already holds a different document's credential."""
+
+
 def share_document(path: str, alias: str) -> dict:
     """Let `alias`, a byte copy of the document at `path`, open with the
     credential `path` was opened with. The renderer stages every in-place
@@ -261,6 +306,9 @@ def share_document(path: str, alias: str) -> dict:
     credential = _documents.get(_key(path))
     if credential is None:
         return {"shared": False}
+    held = _documents.get(_key(alias))
+    if held is not None and held is not credential:
+        raise CredentialConflict("the alias already holds another document's credential")
     _documents[_key(alias)] = credential
     return {"shared": True}
 

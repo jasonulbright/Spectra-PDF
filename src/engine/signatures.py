@@ -50,7 +50,14 @@ exactly the security-critical plumbing not to hand-roll.
 """
 
 import logging
-from engine.credentials import document_password, lent, open_pdf
+from engine.credentials import (
+    PERMISSIONS_HELD,
+    document_password,
+    document_permissions,
+    lent,
+    open_pdf,
+    opened_with_user_password,
+)
 
 # pyHanko logs the path-building failure as a WARNING-with-traceback whenever a
 # signature doesn't chain to a trust anchor — which is BY DESIGN here (we
@@ -1563,6 +1570,12 @@ def sign_pdf(
         font_dir: The app's bundled fonts directory, which is where a typed
             personal-signature face is resolved from. Never a system font.
     """
+    # ISO 32000-2 Table 22: signing fills a signature field, which bit 9
+    # (fill) or bit 6 (annotate) must permit on a user-opened document.
+    if opened_with_user_password(file):
+        allowed = document_permissions(file)["permissions"]
+        if not (allowed.get("fill") or allowed.get("annotate")):
+            raise PermissionError(PERMISSIONS_HELD)
     input_path = Path(file)
     output_path = Path(output)
     # IN-PLACE signing (output == input) is allowed ONLY when the caller

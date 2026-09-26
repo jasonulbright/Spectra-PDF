@@ -124,7 +124,13 @@ from engine.doc_properties import (
 from engine.font_inventory import list_document_fonts
 from engine.reversion import get_pdf_version, set_pdf_version
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
-from engine.credentials import close_document, document_permissions, open_document, share_document
+from engine.credentials import (
+    close_document,
+    document_permissions,
+    open_document,
+    remove_stale_gs_argfiles,
+    share_document,
+)
 from engine.sealed_edit import sealed_plaintext, sealed_reseal
 from engine.repair import repair
 from engine.rebuild import rebuild
@@ -231,6 +237,7 @@ def ping() -> dict:
 
 
 def main() -> None:
+    remove_stale_gs_argfiles()
     server = JsonRpcServer()
     server.register("ping", ping)
     server.register("merge", merge)

@@ -1,5 +1,5 @@
 import { tChrome } from '../i18n';
-import type { CapabilityBlock, PermissionName } from './document-permissions';
+import { UNRESTRICTED, capabilityBlock, type CapabilityBlock, type DocumentSecurity, type PermissionName } from './document-permissions';
 
 const PERMISSION_TEXT = {
   print: 'app.permissions.name.print',
@@ -29,4 +29,11 @@ export class PermissionRefusal extends Error {
     this.name = 'PermissionRefusal';
     this.block = block;
   }
+}
+
+/** Why signing `file` is refused, or null. A signature fills a signature
+ * field, which ISO 32000-2 Table 22 bit 9 (or bit 6) must permit; the engine
+ * refuses the same document again. */
+export function signBlock(file: { security?: DocumentSecurity } | null | undefined): CapabilityBlock | null {
+  return capabilityBlock(file?.security ?? UNRESTRICTED, 'fill');
 }

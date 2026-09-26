@@ -535,6 +535,8 @@ def _pikepdf_saves(path):
 # through `save_pdf`, which is where an encrypted source's protection is put
 # back.
 DIRECT_SAVE_ALLOWED = {
+    # Decrypted bytes returned to the renderer's builder in memory, never a file.
+    ("sealed_edit.py", "sealed_plaintext", "pdf"),
     # A new document built object by object; it has no source to carry.
     ("object_inspector.py", "_isolation_pdf", "out"),
     # Scratch input staged for Ghostscript, consumed and deleted.
