@@ -47,6 +47,39 @@ fn checked_paper_count(count: i32) -> Result<usize, String> {
     Ok(count)
 }
 
+fn checked_paper_counts(ids: i32, names: i32, sizes: i32) -> Result<usize, String> {
+    let counts = [
+        checked_paper_count(ids)?,
+        checked_paper_count(names)?,
+        checked_paper_count(sizes)?,
+    ];
+    if counts[1] != counts[0] || counts[2] != counts[0] {
+        return Err("The printer returned inconsistent paper capability counts".to_string());
+    }
+    Ok(counts[0])
+}
+
+struct PaperOutputBuffers {
+    ids: Vec<u16>,
+    names: Vec<u16>,
+    sizes: Vec<POINT>,
+}
+
+fn paper_output_buffers() -> Result<PaperOutputBuffers, String> {
+    let name_units = MAX_PAPER_OPTIONS
+        .checked_mul(64)
+        .ok_or_else(|| "The printer paper-name list is too large".to_string())?;
+    Ok(PaperOutputBuffers {
+        // DeviceCapabilitiesW does not accept an output-buffer length. Keep
+        // each buffer at the validated hard limit so a driver whose count
+        // changes between the sizing and output calls cannot write past the
+        // allocation. These three output buffers total under 9 MiB.
+        ids: zeroed::<u16>(MAX_PAPER_OPTIONS, "printer paper ids")?,
+        names: zeroed::<u16>(name_units, "printer paper names")?,
+        sizes: zeroed::<POINT>(MAX_PAPER_OPTIONS, "printer paper sizes")?,
+    })
+}
+
 fn checked_buffer_size(size: usize, limit: usize, what: &str) -> Result<usize, String> {
     if size > limit {
         return Err(format!(
@@ -194,60 +227,76 @@ pub fn capabilities(name: &str) -> Result<PrinterCapabilities, String> {
     let wname = wide(name)?;
     let device = PCWSTR(wname.as_ptr());
 
-    // Paper ids / names / sizes are three parallel queries; drivers report
-    // the same count for each, but a mismatched (buggy) driver only narrows
-    // the zip — never an out-of-bounds read.
-    let n_papers = unsafe { DeviceCapabilitiesW(device, PCWSTR::null(), DC_PAPERS, None, None) };
-    if n_papers < 0 {
-        return Err(format!("The printer '{name}' did not report its capabilities"));
-    }
-    let n = checked_paper_count(n_papers)?;
+    // Each capability has its own sizing query. Never size all three output
+    // buffers from only the DC_PAPERS result.
+    let n_ids = unsafe { DeviceCapabilitiesW(device, PCWSTR::null(), DC_PAPERS, None, None) };
+    let n_names = unsafe { DeviceCapabilitiesW(device, PCWSTR::null(), DC_PAPERNAMES, None, None) };
+    let n_sizes = unsafe { DeviceCapabilitiesW(device, PCWSTR::null(), DC_PAPERSIZE, None, None) };
+    let n = checked_paper_counts(n_ids, n_names, n_sizes)
+        .map_err(|e| format!("The printer '{name}' {e}"))?;
 
-    let names_len = n
-        .checked_mul(64)
-        .ok_or_else(|| "The printer paper-name list is too large".to_string())?;
-    let mut ids = zeroed::<u16>(n, "printer paper ids")?;
-    let mut names_buf = zeroed::<u16>(names_len, "printer paper names")?;
-    let mut sizes = zeroed::<POINT>(n, "printer paper sizes")?;
-    if n > 0 {
-        unsafe {
+    let mut output = if n > 0 {
+        Some(paper_output_buffers()?)
+    } else {
+        None
+    };
+    if let Some(buffers) = output.as_mut() {
+        let ids_written = unsafe {
             DeviceCapabilitiesW(
                 device,
                 PCWSTR::null(),
                 DC_PAPERS,
-                Some(PWSTR(ids.as_mut_ptr())),
+                Some(PWSTR(buffers.ids.as_mut_ptr())),
                 None,
-            );
+            )
+        };
+        let names_written = unsafe {
             DeviceCapabilitiesW(
                 device,
                 PCWSTR::null(),
                 DC_PAPERNAMES,
-                Some(PWSTR(names_buf.as_mut_ptr())),
+                Some(PWSTR(buffers.names.as_mut_ptr())),
                 None,
-            );
+            )
+        };
+        let sizes_written = unsafe {
             DeviceCapabilitiesW(
                 device,
                 PCWSTR::null(),
                 DC_PAPERSIZE,
-                Some(PWSTR(sizes.as_mut_ptr() as *mut u16)),
+                Some(PWSTR(buffers.sizes.as_mut_ptr() as *mut u16)),
                 None,
-            );
+            )
+        };
+        if checked_paper_counts(ids_written, names_written, sizes_written)
+            .map_err(|e| format!("The printer '{name}' {e}"))?
+            != n
+        {
+            return Err(format!(
+                "The printer '{name}' changed its paper capabilities while they were being read"
+            ));
         }
     }
 
-    let mut papers = Vec::with_capacity(n);
+    let mut papers = Vec::new();
+    papers
+        .try_reserve_exact(n)
+        .map_err(|e| format!("Could not allocate printer paper options: {e}"))?;
     for i in 0..n {
-        let raw = &names_buf[i * 64..(i + 1) * 64];
+        let buffers = output
+            .as_ref()
+            .ok_or_else(|| "The printer returned paper data without output buffers".to_string())?;
+        let raw = &buffers.names[i * 64..(i + 1) * 64];
         let len = raw.iter().position(|&c| c == 0).unwrap_or(64);
         let paper_name = String::from_utf16_lossy(&raw[..len]);
-        let w = sizes[i].x as f64 * TENTHS_MM_TO_PT;
-        let h = sizes[i].y as f64 * TENTHS_MM_TO_PT;
+        let w = buffers.sizes[i].x as f64 * TENTHS_MM_TO_PT;
+        let h = buffers.sizes[i].y as f64 * TENTHS_MM_TO_PT;
         // A zero-sized or nameless row is driver noise, not a paper.
         if paper_name.is_empty() || w <= 0.0 || h <= 0.0 {
             continue;
         }
         papers.push(PaperOption {
-            id: ids[i],
+            id: buffers.ids[i],
             name: paper_name,
             width_pt: w,
             height_pt: h,
@@ -367,6 +416,21 @@ mod tests {
         assert!(checked_devmode_size(MAX_DEVMODE_BYTES as i32 + 1).is_err());
         assert_eq!(wide("Printer").unwrap().last(), Some(&0));
         assert!(wide(&"x".repeat(MAX_PRINTER_NAME_UNITS)).is_err());
+    }
+
+    #[test]
+    fn paper_capability_counts_must_match_before_the_rows_are_zipped() {
+        assert_eq!(checked_paper_counts(3, 3, 3).unwrap(), 3);
+        assert!(checked_paper_counts(3, 4, 3).is_err());
+        assert!(checked_paper_counts(3, 3, -1).is_err());
+    }
+
+    #[test]
+    fn paper_output_buffers_cover_the_full_bounded_driver_count() {
+        let buffers = paper_output_buffers().unwrap();
+        assert_eq!(buffers.ids.len(), MAX_PAPER_OPTIONS);
+        assert_eq!(buffers.names.len(), MAX_PAPER_OPTIONS * 64);
+        assert_eq!(buffers.sizes.len(), MAX_PAPER_OPTIONS);
     }
 
     #[test]
