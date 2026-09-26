@@ -22,6 +22,9 @@ export interface QueueItem {
    * the current language; null when it says nothing beyond completing. */
   outcome: QueueOutcome | null;
   startTime: number;
+  /** When the operation finished; absent while it runs. The elapsed time is
+   * end minus start, never read off the clock at paint. */
+  endTime?: number;
 }
 
 interface OperationQueueProps {
@@ -93,9 +96,9 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
                 {item.status === 'done' ? formatOutcome(item.outcome) : item.message}
               </span>
               <span className="text-neutral-500 shrink-0">
-                {item.status === 'done'
+                {item.status === 'done' && item.endTime !== undefined
                   ? tChrome('dialog.opqueue.elapsed', {
-                      seconds: ((Date.now() - item.startTime) / 1000).toFixed(1),
+                      seconds: ((item.endTime - item.startTime) / 1000).toFixed(1),
                     })
                   : ''}
               </span>

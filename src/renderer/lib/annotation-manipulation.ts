@@ -400,6 +400,7 @@ export function alignEdits(members: Placed[], mode: AlignMode): AnnotationTransf
       h: a.h,
       ...(t.points ? { points: t.points } : {}),
       ...(t.strokes ? { strokes: t.strokes } : {}),
+      ...(t.calloutBox ? { calloutBox: t.calloutBox } : {}),
     });
   }
   return out;
@@ -440,6 +441,7 @@ export function distributeEdits(members: Placed[], mode: DistributeMode): Annota
       h: a.h,
       ...(t.points ? { points: t.points } : {}),
       ...(t.strokes ? { strokes: t.strokes } : {}),
+      ...(t.calloutBox ? { calloutBox: t.calloutBox } : {}),
     });
   }
   return out;
@@ -472,6 +474,7 @@ export function sizeMatchEdits(
     if (box.x === a.x && box.y === a.y && box.w === a.w && box.h === a.h) continue;
     const points = a.points ? scaledPoints(a, box) : undefined;
     const strokes = a.strokes ? scaledStrokes(a, box) : undefined;
+    const calloutBox = a.calloutBox ? scaledCalloutBox(a, box) : undefined;
     const dims = pageDims.get(m.pageId);
     const note =
       points && dims
@@ -483,6 +486,7 @@ export function sizeMatchEdits(
       ...box,
       ...(points ? { points } : {}),
       ...(strokes ? { strokes } : {}),
+      ...(calloutBox ? { calloutBox } : {}),
       ...(note !== undefined ? { note } : {}),
     });
   }

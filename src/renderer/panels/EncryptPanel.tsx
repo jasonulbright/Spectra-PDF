@@ -5,7 +5,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { dialog } from '../lib/tauri-bridge';
 import { useTranslation } from 'react-i18next';
-import { tChrome } from '../i18n';
+import { tChrome, tChromeCount } from '../i18n';
 import { suffixedOutputName } from '../lib/output-names';
 
 export function EncryptPanel(): React.ReactElement {
@@ -72,13 +72,9 @@ export function EncryptPanel(): React.ReactElement {
         ...(restricted ? { permissions: perms } : {}),
       });
       setStatus(
-        tChrome(
-          r.recipients === 1 ? 'panel.encrypt.encryptedTo_one' : 'panel.encrypt.encryptedTo_other',
-          {
-            count: r.recipients,
-            permsSuffix: restricted ? tChrome('panel.encrypt.permsSuffix') : '',
-          },
-        ),
+        tChromeCount('panel.encrypt.encryptedTo', r.recipients, {
+          permsSuffix: restricted ? tChrome('panel.encrypt.permsSuffix') : '',
+        }),
       );
     } catch (e: unknown) { setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) })); }
     finally { setBusy(false); }

@@ -483,12 +483,33 @@ export interface ScanPage {
   /** The run that staged it — its scratch folder is discarded when the last
    * page from that run is gone or the dialog is cancelled. */
   scratch: string;
+  /** The resolution the run that staged it read back. An image that stores no
+   * resolution is sized from this, so two runs at different settings do not
+   * share one. Absent where no run reported one. */
+  dpi?: number;
 }
 
 let nextPageId = 0;
 
 export function pagesFromResult(result: ScanResult): ScanPage[] {
-  return result.pages.map((path) => ({ id: `p${++nextPageId}`, path, scratch: result.scratch }));
+  return result.pages.map((path) => ({
+    id: `p${++nextPageId}`,
+    path,
+    scratch: result.scratch,
+    dpi: result.dpi,
+  }));
+}
+
+/** The staged pages as consecutive runs of one resolution, in page order —
+ * one assembly each, so every page is sized from the run that scanned it. */
+export function dpiSegments(pages: readonly ScanPage[]): { dpi: number | undefined; pages: ScanPage[] }[] {
+  const out: { dpi: number | undefined; pages: ScanPage[] }[] = [];
+  for (const page of pages) {
+    const last = out[out.length - 1];
+    if (last && last.dpi === page.dpi) last.pages.push(page);
+    else out.push({ dpi: page.dpi, pages: [page] });
+  }
+  return out;
 }
 
 export function removePage(pages: readonly ScanPage[], id: string): ScanPage[] {

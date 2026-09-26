@@ -15,6 +15,7 @@ import { gsPathIfAvailable } from '../lib/gs-capability';
 import {
   DEFAULT_SCAN_ENHANCE,
   previewCounts,
+  readerPage,
   refusedRows,
   scopeParam,
   settingsProblem,
@@ -61,23 +62,26 @@ export function ScanEnhancePanel(): React.ReactElement {
   const buffer = activeFile?.buffer ?? null;
   const problem = settingsProblem(settings);
 
-  // The page the reader is on, 1-based, resolved the way every other panel
-  // resolves it: through the workspace documents that share the visible file's
-  // path, never a canvas ref (the Takeoff legend precedent).
-  const currentPage = useMemo(() => {
-    const docs = state.workspace.documents.filter((d) => d.path === activeFile?.path);
-    for (const doc of docs) {
-      const index = doc.pages.findIndex((p) => p.id === state.ui.currentPageId);
-      if (index >= 0) return index + 1;
-    }
-    return 1;
-  }, [state.workspace.documents, state.ui.currentPageId, activeFile?.path]);
+  // The page the reader is on, resolved through the workspace documents that
+  // share the visible file's path, never a canvas ref.
+  const page = useMemo(
+    () => readerPage(state.workspace.documents, activeFile?.path ?? '', state.ui.currentPageId),
+    [state.workspace.documents, state.ui.currentPageId, activeFile?.path],
+  );
 
-  const params = useMemo(() => {
-    const target: ScanScope =
-      scope === 'document' ? { kind: 'document' } : { kind: 'page', page: currentPage };
-    return { pages: scopeParam(target), ...settings };
-  }, [scope, currentPage, settings]);
+  const paramsFor = useCallback(
+    (pageNumber: number) => {
+      const target: ScanScope =
+        scope === 'document' ? { kind: 'document' } : { kind: 'page', page: pageNumber };
+      return { pages: scopeParam(target), ...settings };
+    },
+    [scope, settings],
+  );
+  const params = useMemo(() => paramsFor(page.apply), [paramsFor, page.apply]);
+  const measureParams = useMemo(
+    () => (scope === 'document' ? paramsFor(page.apply) : page.measure === null ? null : paramsFor(page.measure)),
+    [scope, paramsFor, page.apply, page.measure],
+  );
 
   const counts = useMemo(() => previewCounts(report), [report]);
 
@@ -96,13 +100,13 @@ export function ScanEnhancePanel(): React.ReactElement {
   );
 
   const measure = useCallback(async () => {
-    if (!workingPath || problem) return;
+    if (!workingPath || problem || !measureParams) return;
     setBusy(true);
     setStatus(tChrome('panel.scanEnhance.measuring'));
     try {
       const res = await call('analyze_scan', {
         file: workingPath,
-        ...params,
+        ...measureParams,
         ...(await toolPaths()),
       });
       setReport(res as unknown as ScanAnalysis);
@@ -116,12 +120,12 @@ export function ScanEnhancePanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [workingPath, call, params, problem, toolPaths]);
+  }, [workingPath, call, measureParams, problem, toolPaths]);
 
   // Measured whenever the document, the scope or a setting changes, so the
   // panel states what each correction would do BEFORE anything is rewritten.
   useEffect(() => {
-    if (!workingPath || problem) {
+    if (!workingPath || problem || !measureParams) {
       setReport(null);
       return;
     }
@@ -131,7 +135,7 @@ export function ScanEnhancePanel(): React.ReactElement {
         try {
           const res = await call('analyze_scan', {
             file: workingPath,
-            ...params,
+            ...measureParams,
             ...(await toolPaths()),
           });
           if (!cancelled) setReport(res as unknown as ScanAnalysis);
@@ -150,7 +154,7 @@ export function ScanEnhancePanel(): React.ReactElement {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [workingPath, buffer, call, params, problem, toolPaths]);
+  }, [workingPath, buffer, call, measureParams, problem, toolPaths]);
 
   const apply = useCallback(async () => {
     if (!filePath || problem) return;

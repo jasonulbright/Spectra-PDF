@@ -795,7 +795,11 @@ export function SecondaryToolbar({
           {editSelectionKind === 'image' &&
             editImageMask !== null &&
             editImageMask.kind !== 'none' && (
+              // Keyed by the seed: the inputs are uncontrolled, and without a
+              // remount another image's selection keeps showing (and on blur
+              // committing) the previous image's alphas.
               <label
+                key={`${editImageMask.startAlpha}:${editImageMask.endAlpha}`}
                 className="secondary-toolbar-blend"
                 title={tChrome('canvas.edit.fadeAlphaTitle')}
               >

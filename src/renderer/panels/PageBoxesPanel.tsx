@@ -45,6 +45,10 @@ export function PageBoxesPanel(): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [margin, setMargin] = useState(0);
   const [autoPreview, setAutoPreview] = useState<ContentCropSummary | null>(null);
+  // A preview describes one document's bytes under one box, margin and scope;
+  // any change makes it describe something Auto Apply would not do.
+  useEffect(() => { setAutoPreview(null); },
+    [activeFile?.path, activeFile?.workingPath, activeFile?.buffer, box, margin, pageInput]);
 
   // A crop dragged on the page lands in these fields. The panel still
   // owns the commit — drawing fills the form, Apply is what changes the file,
@@ -108,8 +112,7 @@ export function PageBoxesPanel(): React.ReactElement {
       const res = result as unknown as { changed: number; skipped: { page: number; reason: string }[] };
       const skipped = res.skipped?.length ?? 0;
       setStatus(
-        tChrome(res.changed === 1 ? 'panel.pageBoxes.updated_one' : 'panel.pageBoxes.updated_other', {
-          count: res.changed,
+        tChromeCount('panel.pageBoxes.updated', res.changed, {
           skipped: skipped > 0 ? tChrome('panel.pageBoxes.skippedSuffix', { count: skipped }) : '',
         }),
       );

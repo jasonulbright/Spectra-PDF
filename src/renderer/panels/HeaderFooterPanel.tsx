@@ -109,8 +109,9 @@ export function HeaderFooterPanel(): React.ReactElement {
       <p className="text-xs text-neutral-500">
         {tChrome('panel.hf.tokensPrefix')} <code>{'{page}'}</code> {tChrome('panel.hf.tokenPage')} ·{' '}
         <code>{'{pages}'}</code> {tChrome('panel.hf.tokenPages')} · <code>{'{bates}'}</code>{' '}
-        {tChrome('panel.hf.tokenBates')}. {tChrome('panel.hf.emptySkips')}
+        {tChrome('panel.hf.tokenBates')}
       </p>
+      <p className="text-xs text-neutral-500" data-testid="hf-empty-skips">{tChrome('panel.hf.emptySkips')}</p>
       <div className="grid grid-cols-3 gap-2">
         {SLOTS.map((s) => (
           <div key={s.pos}>

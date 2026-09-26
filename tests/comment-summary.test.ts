@@ -34,6 +34,7 @@ import {
   summaryFileName,
   summaryLabels,
   summaryParams,
+  typeCountList,
   typeLabel,
   type CommentModel,
   type EngineComment,
@@ -417,6 +418,13 @@ describe('typeLabel', () => {
 
   it('shows an unknown subtype verbatim rather than blank', () => {
     expect(typeLabel('Projection')).toBe('Projection');
+  });
+
+  it('lists the per-type totals under the names the rows use', () => {
+    expect(typeCountList({ Highlight: 3, FreeText: 1 })).toBe(
+      `${typeLabel('Highlight')}: 3, ${typeLabel('FreeText')}: 1`,
+    );
+    expect(typeCountList({ FreeText: 1 })).not.toContain('FreeText');
   });
 });
 

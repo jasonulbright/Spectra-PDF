@@ -857,10 +857,15 @@ function CscSignerFields({
       // The remembered credential is an OFFER: it pre-selects only while the
       // provider still enumerates it AND still reports it usable.
       const remembered = preselectedCredential(provider.id, result.credentials);
+      // A selection this listing no longer offers as usable is not a selection:
+      // the picker would show none while the request still named it.
+      const current = result.credentials.find(
+        (r) => r.credential_id === value.credentialId && r.usable,
+      )?.credential_id ?? null;
       onChange({
         mode: 'csc',
         providerId: provider.id,
-        credentialId: value.credentialId ?? remembered,
+        credentialId: current ?? remembered,
         authorization: authorization ?? null,
       });
     } catch (e: unknown) {

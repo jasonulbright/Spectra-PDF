@@ -517,27 +517,29 @@ export function runTracked(
 
   // The log is a DIAGNOSTIC sink and stays English regardless of the UI
   // language (the same boundary the engine's own messages sit on).
-  const logLine = (status: string, detail: string) => {
+  const logLine = (status: string, detail: string, endTime: number) => {
     const ts = new Date(startTime).toISOString();
-    const elapsed = ((sinks.now() - startTime) / 1000).toFixed(1);
+    const elapsed = ((endTime - startTime) / 1000).toFixed(1);
     const english = formatQueueLabel(label, 'en');
     sinks.log(`${ts} [${status}] ${english} — ${detail} (${elapsed}s)`);
   };
 
   return operation().then(
     (result) => {
+      const endTime = sinks.now();
       const outcome = describeResult(method, result);
-      sinks.put({ id, label, status: 'done', message: '', outcome, startTime });
-      logLine('OK', formatOutcome(outcome, 'en'));
+      sinks.put({ id, label, status: 'done', message: '', outcome, startTime, endTime });
+      logLine('OK', formatOutcome(outcome, 'en'), endTime);
       return result;
     },
     (err) => {
       // The queue LINE renders in the UI language; the LOG stays English
       // (an engine refusal keeps its original text in the
       // diagnostic sink, exactly as the label above passes `lng: 'en'`).
+      const endTime = sinks.now();
       const message = err instanceof Error ? err.message : String(err);
-      sinks.put({ id, label, status: 'error', message, outcome: null, startTime });
-      logLine('ERROR', rawEngineMessage(err));
+      sinks.put({ id, label, status: 'error', message, outcome: null, startTime, endTime });
+      logLine('ERROR', rawEngineMessage(err), endTime);
       throw err;
     },
   );

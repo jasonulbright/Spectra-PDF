@@ -323,12 +323,7 @@ function VisualResultView({
           data-testid="compare-visual-summary"
           className="shrink-0 px-3 py-2 bg-green-600/15 border border-green-600/40 rounded text-sm text-green-300"
         >
-          {tChrome(
-            summary.pairs_compared === 1
-              ? 'panel.compare.visualIdentical_one'
-              : 'panel.compare.visualIdentical_other',
-            { count: summary.pairs_compared, dpi: summary.dpi },
-          )}
+          {tChromeCount('panel.compare.visualIdentical', summary.pairs_compared, { dpi: summary.dpi })}
         </div>
       ) : (
         <div
@@ -336,12 +331,9 @@ function VisualResultView({
           className="shrink-0 flex items-center gap-4 px-3 py-2 bg-neutral-800/60 border border-neutral-700 rounded text-sm"
         >
           <span className="text-neutral-300">
-            {tChrome(
-              summary.pairs_compared === 1
-                ? 'panel.compare.pairsDiffer_one'
-                : 'panel.compare.pairsDiffer_other',
-              { differing: summary.pairs_differing, count: summary.pairs_compared },
-            )}
+            {tChromeCount('panel.compare.pairsDiffer', summary.pairs_compared, {
+              differing: summary.pairs_differing,
+            })}
           </span>
           {summary.pages_a !== summary.pages_b && (
             <span className="text-amber-300">

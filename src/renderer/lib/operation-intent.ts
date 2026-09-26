@@ -18,14 +18,22 @@ export function captureOperationIntent(state: AppState, source: OpenFile): Opera
   return captureFileOperationIntent(state, source);
 }
 
+/** The page count a gesture names: the pending page tier, including every
+ * partition. The stored OpenFile count describes the older on-disk revision
+ * until the commit gate writes the tier. */
+export function pendingPageCount(
+  state: Pick<AppState, 'pageDirtyPaths' | 'workspace'>,
+  source: Pick<OpenFile, 'path' | 'pageCount'>,
+): number {
+  return state.pageDirtyPaths.includes(source.path)
+    ? state.workspace.documents.filter(doc => doc.path === source.path).reduce((n, doc) => n + doc.pages.length, 0)
+    : source.pageCount;
+}
+
 /** A canvas batch can deliberately target several visible files. */
 export function captureFileOperationIntent(state: AppState, source: OpenFile): OperationIntent {
   if (!source.buffer || source.importOnly || state.files.get(source.path) !== source) throw changed();
-  // The pending page tier, including every partition, is what the gesture
-  // names. The stored OpenFile count describes the older on-disk revision.
-  const pageCount = state.pageDirtyPaths.includes(source.path)
-    ? state.workspace.documents.filter(doc => doc.path === source.path).reduce((n, doc) => n + doc.pages.length, 0)
-    : source.pageCount;
+  const pageCount = pendingPageCount(state, source);
   if (!Number.isSafeInteger(pageCount) || pageCount < 1) throw changed();
   return { source, pageCount, pageDirtyPaths: state.pageDirtyPaths,
     pageUndoStack: state.pageUndoStack, pageRedoStack: state.pageRedoStack };

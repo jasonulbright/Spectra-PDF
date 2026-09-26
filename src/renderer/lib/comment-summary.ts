@@ -227,6 +227,15 @@ export function typeLabel(subtype: string): string {
   return key ? tChrome(key) : subtype;
 }
 
+/** The engine's per-subtype totals as one localized list, each entry named
+ * the way the rows name it. */
+export function typeCountList(byType: Readonly<Record<string, number>>): string {
+  return Object.entries(byType)
+    .map(([subtype, count]) =>
+      tChrome('panel.standards.detail.subtypeCount', { subtype: typeLabel(subtype), count: tNumber(count) }))
+    .join(', ');
+}
+
 const SUBTYPE_KEY: Record<string, Parameters<typeof tChrome>[0]> = {
   highlight: 'panel.comments.kind.highlight',
   underline: 'panel.comments.kind.underline',

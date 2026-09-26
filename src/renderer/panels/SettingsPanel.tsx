@@ -909,7 +909,7 @@ function VirtualPrinterBlock(): React.JSX.Element {
       </p>
       <GsRequiredNotice capability={gs} testId="virtual-printer-gs" />
       {vpStatus === null ? (
-        <p className="text-sm text-neutral-500">Checking…</p>
+        <p className="text-sm text-neutral-500">{tChrome('panel.settings.gsChecking')}</p>
       ) : (
         <>
           <p className="text-sm text-neutral-300" data-testid="virtual-printer-status">
