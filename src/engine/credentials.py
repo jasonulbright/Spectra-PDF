@@ -245,23 +245,49 @@ def print_resolution(source) -> str:
     never passed to `open_document` (a headless caller) is read with the
     empty password, so an owner-gated document that opens without a prompt
     keeps its /P bits."""
-    credential = _documents.get(_key(source)) if _is_path(source) else None
-    if credential is not None:
-        if credential.opener != "user":
-            return "high"
-        permissions, revision = credential.permissions, credential.revision
-    else:
-        if not _is_path(source) or not os.path.exists(source):
-            return "high"
-        with open_pdf(source) as pdf:
-            if not pdf.is_encrypted or pdf.owner_password_matched:
-                return "high"
-            permissions, revision = _decoded_permissions(pdf), int(pdf.encryption.R)
+    held = _opener_permissions(source)
+    if held is None:
+        return "high"
+    permissions, revision = held
     if not permissions.get("print"):
         return "none"
     if not permissions.get("print_high") and (revision or 0) >= 3:
         return "low"
     return "high"
+
+
+def require_permission(source, name: str) -> None:
+    """Refuse an operation the /P bits of the document at `source` withhold
+    from its opener (`name` is a key of `_PERMISSION_KEYS`), before anything
+    is read or written. The opener is decided as `print_resolution` decides
+    it, so a document never passed to `open_document` keeps its bits. A
+    document that needs a password nobody supplied, or that does not parse,
+    is left to the door's own read, which reports it."""
+    import pikepdf
+
+    try:
+        held = _opener_permissions(source)
+    except (pikepdf.PasswordError, pikepdf.PdfError):
+        return
+    if held is not None and not held[0].get(name):
+        raise PermissionError(PERMISSIONS_HELD)
+
+
+def _opener_permissions(source):
+    """(permissions, revision) held by the opener of the document at
+    `source`, or None where nothing limits it: an owner-password open, an
+    unencrypted document, or a path that does not exist."""
+    credential = _documents.get(_key(source)) if _is_path(source) else None
+    if credential is not None:
+        if credential.opener != "user":
+            return None
+        return credential.permissions, credential.revision
+    if not _is_path(source) or not os.path.exists(source):
+        return None
+    with open_pdf(source) as pdf:
+        if not pdf.is_encrypted or pdf.owner_password_matched:
+            return None
+        return _decoded_permissions(pdf), int(pdf.encryption.R)
 
 
 def _decoded_permissions(pdf) -> dict:

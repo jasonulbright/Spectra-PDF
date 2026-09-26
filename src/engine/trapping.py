@@ -35,7 +35,7 @@ import re
 from pathlib import Path
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import open_pdf, require_permission
 from pikepdf import Array, Dictionary, Name, String
 
 from .page_images import _save
@@ -425,6 +425,7 @@ def export_postscript(
     from . import budget
 
     validate_pdf(file)
+    require_permission(file, "copy")
     level = int(level)
     if level not in (2, 3):
         raise ValueError("PostScript language level must be 2 or 3.")

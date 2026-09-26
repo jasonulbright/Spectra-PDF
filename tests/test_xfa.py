@@ -342,6 +342,12 @@ class TestDatasetsPacket:
         assert packet.set("topmostSubform[0].fresh[0]", "x", create=True) is True
         assert DatasetsPacket(packet.bytes()).get("topmostSubform[0].fresh[0]") == "x"
 
+    @pytest.mark.parametrize("leaf", ["First Name", "a&b", "1st", 'x a="b"', "x><y"])
+    def test_a_leaf_that_is_no_xml_name_is_not_created(self, leaf):
+        packet = DatasetsPacket(EMPTY_HOLDER_DATASETS)
+        assert packet.set(f"topmostSubform[0].Page1[0].{leaf}[0]", "v", create=True) is False
+        assert packet.bytes() == EMPTY_HOLDER_DATASETS
+
     def test_two_absent_nodes_under_one_empty_holder_compose(self):
         """Two creates under a self-closing holder each rewrote that holder's
         whole tag span, so the second was applied against bytes the first had
