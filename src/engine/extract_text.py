@@ -21,7 +21,7 @@ from pdfminer.pdftypes import PDFObjRef, dict_value, list_value, resolve1
 from pdfminer.psparser import literal_name
 from pdfminer.utils import Plane
 
-from engine.credentials import document_password
+from engine.credentials import document_password, require_permission
 
 
 class TextStateInterpreter(PDFPageInterpreter):
@@ -217,6 +217,7 @@ def extract_text(file: str, pages: list[int] | str = "all", output: str | None =
         output: optional destination path; the extracted text is written there
             as UTF-8 with no BOM and the path is reported back.
     """
+    require_permission(file, "copy")
     page_numbers = None
     if pages != "all":
         # pdfminer uses 0-based page indices

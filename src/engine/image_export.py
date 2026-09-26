@@ -27,7 +27,7 @@ the user was looking at when they asked for it.
 from pathlib import Path
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import open_pdf, require_permission
 
 from . import budget
 from .printer import parse_page_spec
@@ -107,6 +107,7 @@ def export_images(
     quality = max(1, min(100, int(quality)))
 
     validate_pdf(file)
+    require_permission(file, "copy")
     input_path = Path(file)
     output_path = Path(output)
     if output_path.is_dir():

@@ -326,7 +326,7 @@ class DatasetsPacket:
 
     def _create(self, field_name: str, value) -> bool:
         parent, leaf = self.parent_of(field_name)
-        if parent is None or not leaf:
+        if parent is None or not leaf or not _is_xml_name(leaf):
             return False
         inner = (
             b"".join(
@@ -391,6 +391,20 @@ class DatasetsPacket:
 
     def changed(self) -> bool:
         return bool(self._edits) or bool(self._empty_edits)
+
+
+def _is_xml_name(name: str) -> bool:
+    """Whether `name` is spelled as an element name that parses back as
+    itself. A field name can hold any text; spliced into a tag, a space, an
+    ampersand or a leading digit makes the whole packet ill-formed."""
+    parser = expat.ParserCreate()
+    seen: list[str] = []
+    parser.StartElementHandler = lambda tag, _attrs: seen.append(tag)
+    try:
+        parser.Parse(b"<" + name.encode("utf-8") + b"/>", True)
+    except expat.ExpatError:
+        return False
+    return seen == [name]
 
 
 def parse_som_path(field_name: str) -> list[tuple[str, int]]:

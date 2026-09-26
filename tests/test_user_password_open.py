@@ -301,11 +301,48 @@ def test_pdfminer_extracts_a_user_opened_copy(readable):
     assert "Hello reader" in extract_text(readable)["text"]
 
 
-def test_pdfminer_extracts_when_copy_is_denied(copy_denied):
-    """The app gates copying; the engine gate is only the encryption."""
+def _extraction_doors(folder):
+    from engine.extract_text import extract_text
+    from engine.image_export import export_images
+    from engine.office_export import export_document
+    from engine.page_images import extract_page_image
+    from engine.trapping import export_postscript
+
+    out = lambda name: os.path.join(folder, name)
+    return [
+        lambda src: extract_text(src),
+        lambda src: extract_text(src, "all", out("t.txt")),
+        lambda src: export_document(src, out("e.txt"), "txt"),
+        lambda src: export_images(src, out("i.png"), "png", 72, gs_path="gs-not-reached"),
+        lambda src: extract_page_image(src, 1, 0, out("x")),
+        lambda src: export_postscript(src, out("p.ps"), "gs-not-reached"),
+    ]
+
+
+@pytest.mark.parametrize("door", range(6))
+@pytest.mark.parametrize("opened", [True, False])
+def test_extraction_refuses_when_copy_is_denied(tmp_dir, door, opened):
+    """Table 22 bit 5, for a user-password open and for a document read
+    headless with the empty user password (CLI, folder export)."""
+    user = USER if opened else ""
+    path = _text_protected(tmp_dir, "denied.pdf", _allow(print_lowres=True, print_highres=True), password=user)
+    if not opened:
+        close_document(path)
+    folder = os.path.join(tmp_dir, "out")
+    os.makedirs(folder)
+    try:
+        with pytest.raises(PermissionError, match="held by an owner password"):
+            _extraction_doors(folder)[door](path)
+        assert os.listdir(folder) == []
+    finally:
+        close_document(path)
+
+
+def test_extraction_follows_the_copy_permission(readable):
     from engine.extract_text import extract_text
 
-    assert "Hello reader" in extract_text(copy_denied)["text"]
+    credentials.require_permission(readable, "copy")
+    assert "Hello reader" in extract_text(readable)["text"]
 
 
 def test_every_pdfminer_door_reads_a_user_opened_copy(readable, tmp_dir):

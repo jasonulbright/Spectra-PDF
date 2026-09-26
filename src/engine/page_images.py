@@ -53,7 +53,7 @@ import zlib
 from pathlib import Path
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import open_pdf, require_permission
 from pikepdf import Dictionary, Name
 
 from engine.content_walk import ClipTracker, GraphicsTextState
@@ -2126,6 +2126,7 @@ def add_page_vector_graphic(
 def extract_page_image(file: str, page: int, index: int, output_prefix: str) -> dict:
     """Save one placement's image bytes out (placement-independent — the
     XObject's own encoded data; pikepdf picks the natural format)."""
+    require_permission(file, "copy")
     with open_pdf(file) as pdf:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):

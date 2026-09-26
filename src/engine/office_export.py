@@ -33,6 +33,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from engine.credentials import require_permission
 from engine.inplace import publish_copy
 from engine.soffice import run_convert
 
@@ -163,6 +164,7 @@ def export_document(
     # A zero-byte input can still produce a zero exit code, so validate first.
     if input_path.stat().st_size == 0:
         raise ValueError(f"the input file is empty: {file}")
+    require_permission(file, "copy")
     # A directory destination would make shutil.move drop the file INSIDE it
     # under the intermediate's stem (e.g. a bridge's HTML-stem name) while we
     # report `output` + a directory's stat size — a silent misplace + a
