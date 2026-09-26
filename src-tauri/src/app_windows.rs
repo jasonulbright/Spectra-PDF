@@ -1063,6 +1063,8 @@ pub struct Handover {
 /// Queued rather than carried on the event, because a window created for this
 /// open has no listener yet when the event fires. The event is a signal; the
 /// payload is drained here, so an open can be neither lost nor applied twice.
+/// A handover remains in the in-flight queue after delivery until the renderer
+/// confirms its open result.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PendingOpen {
     pub files: Vec<String>,
@@ -1085,9 +1087,8 @@ pub struct PendingOpen {
     /// Invisible to the drain while it stands. The source writes its working
     /// copy back over the user's own file BETWEEN taking the reservation and
     /// committing it, so a target that drained the entry before that write
-    /// opens the bytes the write was about to replace — and the drain removes
-    /// the entry, leaving the destruction rollback nothing to hand back. The
-    /// commit clears this and signals; nothing else may.
+    /// opens the bytes the write was about to replace. The commit clears this
+    /// and signals; nothing else may.
     #[serde(default, skip_serializing)]
     pub reserved: bool,
 }
@@ -1095,7 +1096,13 @@ pub struct PendingOpen {
 pub struct WindowRegistry {
     next_doc: AtomicU32,
     last_focused: Mutex<String>,
-    pending: Mutex<HashMap<String, Vec<PendingOpen>>>,
+    opens: Mutex<OpenQueues>,
+}
+
+#[derive(Default)]
+struct OpenQueues {
+    pending: HashMap<String, Vec<PendingOpen>>,
+    in_flight: HashMap<String, Vec<PendingOpen>>,
 }
 
 /// Web-download provenance, keyed by canonical path, shared app-wide.
@@ -1145,7 +1152,7 @@ impl WindowRegistry {
         Self {
             next_doc: AtomicU32::new(1),
             last_focused: Mutex::new(MAIN_LABEL.to_string()),
-            pending: Mutex::new(HashMap::new()),
+            opens: Mutex::new(OpenQueues::default()),
         }
     }
 
@@ -1174,10 +1181,10 @@ impl WindowRegistry {
     /// that has already moved ownership has to act on rather than report a
     /// delivery that never happened.
     pub fn push_pending(&self, label: &str, open: PendingOpen) -> bool {
-        let Ok(mut pending) = self.pending.lock() else {
+        let Ok(mut queues) = self.opens.lock() else {
             return false;
         };
-        pending.entry(label.to_string()).or_default().push(open);
+        queues.pending.entry(label.to_string()).or_default().push(open);
         true
     }
 
@@ -1188,62 +1195,103 @@ impl WindowRegistry {
     /// caller is undoing something that already happened to somebody else, and
     /// the answer says so rather than reporting a removal that did not occur.
     pub fn revoke_pending(&self, label: &str, token: u64) -> bool {
-        let Ok(mut pending) = self.pending.lock() else {
+        let Ok(mut queues) = self.opens.lock() else {
             return false;
         };
-        let Some(queue) = pending.get_mut(label) else {
+        let Some(queue) = queues.pending.get_mut(label) else {
             return false;
         };
         let held = |open: &PendingOpen| open.handover.as_ref().map(|h| h.token) == Some(token);
         let found = queue.iter().any(held);
         queue.retain(|open| !held(open));
         if queue.is_empty() {
-            pending.remove(label);
+            queues.pending.remove(label);
         }
         found
     }
 
-    /// Every open queued for a label, reserved or not.
+    /// Every open queued for or currently being opened by a label.
     ///
-    /// The recovery read: a window's destruction has to see the handovers that
-    /// moved to it and were never committed, which are exactly the ones the
-    /// drain cannot take.
+    /// The recovery read: a window's destruction has to see handovers still in
+    /// the queue and ones the renderer drained but has not acknowledged open.
     pub fn take_pending(&self, label: &str) -> Vec<PendingOpen> {
-        self.pending
-            .lock()
-            .ok()
-            .and_then(|mut p| p.remove(label))
-            .unwrap_or_default()
+        let Ok(mut queues) = self.opens.lock() else {
+            return Vec::new();
+        };
+        let mut pending = queues.pending.remove(label).unwrap_or_default();
+        pending.extend(queues.in_flight.remove(label).unwrap_or_default());
+        pending
     }
 
-    /// The opens a window may act on now, leaving uncommitted handovers queued.
+    /// The opens a window may act on now, leaving uncommitted handovers queued
+    /// and retaining committed handovers until the renderer acknowledges them.
     ///
     /// The renderer drains on mount and on every open signal, both of which can
     /// fall between a reservation and its commit; a reserved entry taken there
     /// would open a file its source is still writing.
     pub fn take_deliverable(&self, label: &str) -> Vec<PendingOpen> {
-        let Ok(mut pending) = self.pending.lock() else {
+        let Ok(mut queues) = self.opens.lock() else {
             return Vec::new();
         };
-        let (held, ready): (Vec<PendingOpen>, Vec<PendingOpen>) = match pending.get_mut(label) {
-            Some(queue) => queue.drain(..).partition(|open| open.reserved),
-            None => return Vec::new(),
-        };
+        let (held, ready): (Vec<PendingOpen>, Vec<PendingOpen>) =
+            match queues.pending.get_mut(label) {
+                Some(queue) => queue.drain(..).partition(|open| open.reserved),
+                None => return Vec::new(),
+            };
         if held.is_empty() {
-            pending.remove(label);
+            queues.pending.remove(label);
         } else {
-            pending.insert(label.to_string(), held);
+            queues.pending.insert(label.to_string(), held);
         }
-        ready
+        let mut deliver = Vec::with_capacity(ready.len());
+        for open in ready {
+            if open.handover.is_some() {
+                queues
+                    .in_flight
+                    .entry(label.to_string())
+                    .or_default()
+                    .push(open.clone());
+            }
+            deliver.push(open);
+        }
+        deliver
+    }
+
+    /// Read one delivered handover without consuming its recovery record.
+    /// Failed-open handling transfers ownership before it removes the record.
+    pub fn handover_open(&self, label: &str, token: u64) -> Option<PendingOpen> {
+        self.opens
+            .lock()
+            .ok()?
+            .in_flight
+            .get(label)?
+            .iter()
+            .find(|open| open.handover.as_ref().map(|handover| handover.token) == Some(token))
+            .cloned()
+    }
+
+    /// Complete one delivered handover after the renderer reaches an open
+    /// result.
+    pub fn finish_handover_open(&self, label: &str, token: u64) -> Option<PendingOpen> {
+        let mut queues = self.opens.lock().ok()?;
+        let queue = queues.in_flight.get_mut(label)?;
+        let at = queue.iter().position(|open| {
+            open.handover.as_ref().map(|handover| handover.token) == Some(token)
+        })?;
+        let open = queue.remove(at);
+        if queue.is_empty() {
+            queues.in_flight.remove(label);
+        }
+        Some(open)
     }
 
     /// Make a committed handover drainable. False when the token names no
     /// queued entry — drained, revoked, or reclaimed by a destruction.
     pub fn release_pending(&self, label: &str, token: u64) -> bool {
-        let Ok(mut pending) = self.pending.lock() else {
+        let Ok(mut queues) = self.opens.lock() else {
             return false;
         };
-        let Some(queue) = pending.get_mut(label) else {
+        let Some(queue) = queues.pending.get_mut(label) else {
             return false;
         };
         let mut found = false;
@@ -1257,8 +1305,9 @@ impl WindowRegistry {
     }
 
     pub fn forget(&self, label: &str) {
-        if let Ok(mut pending) = self.pending.lock() {
-            pending.remove(label);
+        if let Ok(mut queues) = self.opens.lock() {
+            queues.pending.remove(label);
+            queues.in_flight.remove(label);
         }
     }
 
@@ -1269,7 +1318,7 @@ impl WindowRegistry {
         let _ = std::thread::scope(|scope| {
             scope
                 .spawn(|| {
-                    let _held = self.pending.lock().expect("queue was already poisoned");
+                    let _held = self.opens.lock().expect("queue was already poisoned");
                     panic!("poisoning the queue");
                 })
                 .join()
@@ -2771,6 +2820,10 @@ mod tests {
         let committed = registry.take_deliverable("doc-1");
         assert_eq!(committed.len(), 1);
         assert_eq!(committed[0].files, vec!["C:\\a.pdf".to_string()]);
+        assert_eq!(
+            registry.finish_handover_open("doc-1", 4).unwrap().handover,
+            Some(handover(4))
+        );
         assert!(registry.take_pending("doc-1").is_empty());
     }
 
@@ -2796,11 +2849,12 @@ mod tests {
         assert!(!registry.release_pending("doc-1", 6));
         assert!(registry.release_pending("doc-1", 4));
         assert_eq!(registry.take_deliverable("doc-1").len(), 1);
-        // The recovery read sees the one still held, which is the point of
-        // holding it: the drain could not have taken it away.
+        // The recovery read sees both the still-held entry and the drained
+        // handover that the renderer has not acknowledged yet.
         let left = registry.take_pending("doc-1");
-        assert_eq!(left.len(), 1);
-        assert_eq!(left[0].files, vec!["C:\\b.pdf".to_string()]);
+        assert_eq!(left.len(), 2);
+        assert!(left.iter().any(|open| open.files == vec!["C:\\a.pdf"]));
+        assert!(left.iter().any(|open| open.files == vec!["C:\\b.pdf"]));
     }
 
     #[test]
