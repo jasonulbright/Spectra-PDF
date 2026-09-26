@@ -601,14 +601,12 @@ pub async fn send<R: Runtime>(
     Ok(())
 }
 
-/// Drop a destroyed window's outstanding health requests.
+/// Drop a destroyed window's response routes without shortening worker deadlines.
 pub fn on_window_destroyed<R: Runtime>(app: &AppHandle<R>, label: &str) {
-    let ids = app.state::<HealthRouter>().0.take_label(label);
-    for outer in ids {
-        app.state::<HealthEngineState>()
-            .watchdog
-            .disarmed_request(outer);
-    }
+    // The caller route is no longer useful, but the worker may still be
+    // processing the request. Keep its deadline armed until the response or
+    // worker retirement disarms it, even when no window remains to receive it.
+    app.state::<HealthRouter>().0.drop_label(label);
 }
 
 #[cfg(test)]
