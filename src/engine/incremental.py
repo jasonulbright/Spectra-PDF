@@ -1043,7 +1043,7 @@ def _prepare_correspondence(writer, orig, mod, plan):
                                   if orig_owners.get(o.objgen) == old_owner]
                     if len(candidates) > 1:
                         candidates = [(o, ft) for o, ft in candidates if memo.equal(o, m, skip=frozenset({
-                            "/AP", "/AS", "/V", "/DV", "/Kids", "/Parent", "/P",
+                            "/AP", "/AS", "/V", "/DV", "/F", "/Kids", "/Parent", "/P",
                         }))]
                 if not available:
                     continue  # the form delta emits its existing addition refusal
