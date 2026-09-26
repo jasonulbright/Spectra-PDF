@@ -22,6 +22,7 @@ import {
   matchWorkspaceRow,
   orderedComments,
   summaryExclusions,
+  typeCountList,
   typeLabel,
 } from '../lib/comment-summary';
 import type {
@@ -124,14 +125,18 @@ export function CommentsPanel(): React.ReactElement {
   const rows = useMemo<WorkspaceRow[]>(() => {
     const docs = state.workspace.documents.filter((d) => d.path === activeFile?.path);
     const out: WorkspaceRow[] = [];
+    // A file split into partitions numbers its pages across all of them.
+    let before = 0;
     for (const doc of docs) {
+      const offset = before;
+      before += doc.pages.length;
       doc.pages.forEach((page, i) => {
         for (const a of page.annotations ?? []) {
           const original = a.importedOriginal;
           out.push({
             docId: doc.id,
             pageId: page.id,
-            pageNumber: i + 1,
+            pageNumber: offset + i + 1,
             annotationId: a.id,
             label: labelFor(a.kind, a.markupType),
             color: a.color,
@@ -251,10 +256,7 @@ export function CommentsPanel(): React.ReactElement {
         ? tChrome('panel.comments.importedSkipped', { count: rr.skipped.length })
         : '';
       setStatus(
-        tChrome(rr.added === 1 ? 'panel.comments.imported_one' : 'panel.comments.imported_other', {
-          count: rr.added,
-          skipped,
-        }),
+        tChromeCount('panel.comments.imported', rr.added, { skipped }),
       );
     } catch (e: unknown) {
       if (!run.visible()) return;
@@ -330,7 +332,7 @@ export function CommentsPanel(): React.ReactElement {
           <div className="text-sm text-neutral-300" data-testid="comments-summary">
             {tChromeCount('panel.comments.summary', total)}
             {types.length > 0 && (
-              <span className="text-neutral-500"> — {types.map(([t, n]) => `${n} ${t}`).join(', ')}</span>
+              <span className="text-neutral-500"> — {typeCountList(model?.by_type ?? {})}</span>
             )}
           </div>
 

@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useActiveFile } from '../hooks/useActiveFile';
+import { useAppState } from '../state/AppStateProvider';
+import { pendingPageCount } from '../lib/operation-intent';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -64,6 +66,7 @@ export function SearchRedactPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, allFiles, openNewFiles } = useActiveFile();
+  const state = useAppState();
   const { call } = useEngine();
 
   const [query, setQuery] = useState('');
@@ -189,7 +192,9 @@ export function SearchRedactPanel(): React.ReactElement {
     let pageSelection: number[] | null = null;
     if (scope.kind === 'pages') {
       try {
-        pageSelection = parsePageRange(scope.pages, activeFile.pageCount);
+        // Page numbers name the pending page tier: the gated search commits
+        // it before the engine reads, so the stored count is the older file.
+        pageSelection = parsePageRange(scope.pages, pendingPageCount(state, activeFile));
       } catch (e) {
         setError(tChrome('panel.searchRedact.badRange', { token: e instanceof Error ? e.message : '' }));
         return;
@@ -199,6 +204,9 @@ export function SearchRedactPanel(): React.ReactElement {
     setBusy(true);
     setError(null);
     setStale(false);
+    // The gated search commits pending page edits, which replaces the buffer
+    // mid-run; results still on screen would then flag the fresh set stale.
+    setResults(null);
     setStatus(tChrome('panel.searchRedact.searching'));
     const next: FileSearchResult[] = [];
     try {
@@ -282,7 +290,7 @@ export function SearchRedactPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, allFiles, call, expand, options, patterns, query, scope, wordList]);
+  }, [activeFile, allFiles, call, expand, options, patterns, query, scope, state, wordList]);
 
   const markedByPath = useMemo(() => {
     const map = new Map<string, { page: number; rect: [number, number, number, number] }[]>();

@@ -22,6 +22,7 @@ import {
   maxPages,
   numericControl,
   offersAllPages,
+  dpiSegments,
   pagesFromResult,
   refusalKey,
   refusalText,
@@ -350,6 +351,24 @@ describe('the staged page list', () => {
     // folder another run still holds pages in is never dropped.
     expect(liveScratches(removePage(all, first[0].id))).toEqual(['S2']);
     expect(liveScratches(removePage(all, second[0].id))).toEqual(['S1', 'S2']);
+  });
+});
+
+describe('pages from runs at different resolutions', () => {
+  it('keeps the resolution of each run and assembles runs apart in page order', () => {
+    const run = (paths: string[], scratch: string, dpi: number) =>
+      pagesFromResult({ pages: paths, cancelled: false, scratch, dpi, adjusted: [], bytes: 0 });
+    const first = run(['a.bmp', 'b.bmp'], 'S1', 300);
+    const second = run(['c.bmp'], 'S2', 600);
+    const third = run(['d.bmp'], 'S3', 300);
+    expect(first.map((p) => p.dpi)).toEqual([300, 300]);
+    const segments = dpiSegments([...first, ...second, ...third]);
+    expect(segments.map((s) => [s.dpi, s.pages.map((p) => p.path)])).toEqual([
+      [300, ['a.bmp', 'b.bmp']],
+      [600, ['c.bmp']],
+      [300, ['d.bmp']],
+    ]);
+    expect(dpiSegments(first)).toHaveLength(1);
   });
 });
 

@@ -162,6 +162,17 @@ describe('runTracked — one operation, one line, one log entry', () => {
     expect(sink.lines[0]).toContain('Complete');
   });
 
+  it('fixes the elapsed time at completion, matching the log', async () => {
+    const sink = sinks();
+    await runTracked('3', 'merge', {}, async () => ({}), sink);
+    const done = sink.items[0];
+    expect(done.endTime).toBe(2_000);
+    expect(done.endTime! - done.startTime).toBe(500);
+    expect(sink.lines[0]).toContain('(0.5s)');
+    sink.now();
+    expect(sink.items[0].endTime).toBe(2_000);
+  });
+
   it("keeps a failure's own text on the line and in the log, and rethrows it", async () => {
     const sink = sinks();
     const refusal = new Error('This image cannot be partly redacted (a JPEG 2000 palette image). Mark the whole image to remove it.');

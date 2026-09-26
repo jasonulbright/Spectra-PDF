@@ -397,6 +397,10 @@ export function PreflightPanel(): React.ReactElement {
           ...(await tools()),
         })) as unknown as PreflightReport;
         setReport(res);
+        // A draft is keyed by its finding's position in the report it was
+        // typed against; kept across a new report it would name another
+        // finding at the same position.
+        setDrafts({});
         // The addresses in the previous run's findings were read from a
         // document this run has replaced, so what is drawn goes with them.
         getCanvasServices()?.a11yFindings.clear();

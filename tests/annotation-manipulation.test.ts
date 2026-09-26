@@ -420,6 +420,28 @@ describe('alignEdits / distributeEdits / sizeMatchEdits', () => {
     expect(edits[0].annotationId).toBe('b');
     expect(edits[0].x).toBeCloseTo(0.3); // gaps: (0.7-0.3)/2 = 0.2 each
   });
+  it('carries a callout text box with its box through align, distribute and size match', () => {
+    const callout = (id: string, x: number, y: number) =>
+      annot(id, {
+        kind: 'callout', x, y, w: 0.2, h: 0.1,
+        points: [x, y + 0.1, x + 0.05, y + 0.05],
+        calloutBox: [x + 0.1, y, 0.1, 0.1],
+      });
+    const a = callout('a', 0.1, 0.1);
+    const b = callout('b', 0.5, 0.4);
+    const c = callout('c', 0.2, 0.9);
+    const [left] = alignEdits([m(a), m(b)], 'left');
+    expect(left.annotationId).toBe('b');
+    expect(left.calloutBox?.[0]).toBeCloseTo(0.2);
+    expect(left.calloutBox?.[1]).toBeCloseTo(0.4);
+    const spread = distributeEdits([m(a), m(b), m(c)], 'vertical');
+    const moved = spread.find((e) => e.annotationId === 'b')!;
+    expect(moved.calloutBox?.[1]).toBeCloseTo(moved.y);
+    const dims = new Map([[P, { width: 300, height: 400, rotation: 0 }]]);
+    const big = annot('r', { w: 0.4, h: 0.2 });
+    const [sized] = sizeMatchEdits([m(big), m(b)], 'both', dims);
+    [0.7, 0.4, 0.2, 0.2].forEach((v, i) => expect(sized.calloutBox?.[i]).toBeCloseTo(v));
+  });
   it('matches sizes to the first-selected member', () => {
     const ref = annot('r', { w: 0.3, h: 0.3 });
     const b = annot('b', { x: 0.5, y: 0.5, w: 0.1, h: 0.1 });

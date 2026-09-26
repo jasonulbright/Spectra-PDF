@@ -21,6 +21,7 @@ import {
   MAX_PREVIEW_BYTES,
   PAPER_SIZES,
   defaultScanOutputName,
+  dpiSegments,
   initialColorMode,
   initialDpi,
   initialValue,
@@ -354,21 +355,39 @@ export function ScanDialog({
         // therefore proceeds with no capability at all; the OCR leg below is
         // the one that requires one.
         const [gsPath, sofficePath] = await Promise.all([gsPathIfAvailable(), app.getSofficePath()]);
-        await track('create_pdf', { file: output }, () =>
-          callRaw('create_pdf', {
-            sources: pages.map((p) => ({ path: p.path })),
-            output,
-            page_size: 'auto',
-            orientation: 'auto',
-            margin_pt: 0,
-            // The resolution the device REPORTED BACK, not the one asked for:
-            // a driver that clamped the request, or wrote no resolution into
-            // the image header at all, still produces correctly sized pages.
-            image_dpi_default: scanDpi ?? dpi ?? 300,
-            gs_path: gsPath,
-            soffice_path: sofficePath,
-          }),
-        );
+        const build = (sources: { path: string }[], target: string, resolution: number) =>
+          track('create_pdf', { file: target }, () =>
+            callRaw('create_pdf', {
+              sources,
+              output: target,
+              page_size: 'auto',
+              orientation: 'auto',
+              margin_pt: 0,
+              // The resolution the device REPORTED BACK, not the one asked for:
+              // a driver that clamped the request, or wrote no resolution into
+              // the image header at all, still produces correctly sized pages.
+              image_dpi_default: resolution,
+              gs_path: gsPath,
+              soffice_path: sofficePath,
+            }),
+          );
+        const fallback = scanDpi ?? dpi ?? 300;
+        const segments = dpiSegments(pages);
+        if (segments.length === 1 || segments.some((seg) => seg.pages[0].scratch === '')) {
+          await build(pages.map((p) => ({ path: p.path })), output, segments[0]?.dpi ?? fallback);
+        } else {
+          // Runs at different resolutions assemble apart, each inside its own
+          // scratch folder (discarded with the pages), then join in order.
+          const parts: { path: string }[] = [];
+          for (const [i, seg] of segments.entries()) {
+            const scratch = seg.pages[0].scratch;
+            const sep = scratch.includes('\\') ? '\\' : '/';
+            const part = `${scratch}${sep}segment-${i}-${crypto.randomUUID()}.pdf`;
+            await build(seg.pages.map((p) => ({ path: p.path })), part, seg.dpi ?? fallback);
+            parts.push({ path: part });
+          }
+          await build(parts, output, fallback);
+        }
         // Enhance BEFORE recognising, always: OCR over an unstraightened page
         // is the defect the enhancement exists to fix, and doing it the other
         // way would bake a worse text layer into the document at the one

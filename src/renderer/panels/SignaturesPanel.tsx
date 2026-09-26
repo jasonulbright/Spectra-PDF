@@ -223,6 +223,7 @@ export function SignaturesPanel(): React.ReactElement {
 
   const path = activeFile?.path ?? null;
   const workingPath = activeFile?.workingPath ?? null;
+  const buffer = activeFile?.buffer ?? null;
 
   const runVerify = useCallback(async () => {
     if (!workingPath) return;
@@ -243,12 +244,14 @@ export function SignaturesPanel(): React.ReactElement {
     }
   }, [workingPath, call, trust]);
 
-  // Auto-verify when the active file OR the trust configuration changes.
+  // Auto-verify when the active file, its bytes, or the trust configuration
+  // changes. A result kept across a byte change reports signatures over bytes
+  // the document no longer holds.
   useEffect(() => {
     if (path) void runVerify();
     else setResult(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, trust]);
+  }, [path, buffer, trust]);
 
   // Reset the sign form when the active file changes — never carry a typed
   // password or a previous file's result across a switch.

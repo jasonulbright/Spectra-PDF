@@ -5,6 +5,7 @@
 // keeps saying: there is no DOM test environment, so anything with a rule in
 // it belongs in a module a vitest suite can call. The panel renders; this
 // decides.
+import type { OpenDocument } from '../state/types';
 
 /** Tesseract's orientation & script reading for one page. */
 export interface OsdReading {
@@ -95,6 +96,37 @@ export type ScanScope = { kind: 'document' } | { kind: 'page'; page: number };
 
 export function scopeParam(scope: ScanScope): 'all' | number[] {
   return scope.kind === 'document' ? 'all' : [scope.page];
+}
+
+/**
+ * The page the reader is on, 1-based, as each call addresses it.
+ *
+ * `apply` counts the file's pages across every document of `path` in
+ * workspace order: the commit gate writes that order before the enhancement
+ * runs. `measure` counts the pages of the bytes the file holds now, which a
+ * pending move has not reordered; it is null for a page those bytes do not
+ * hold (a pending import from another file). A partition's own index is
+ * neither, so a page past the first partition would name another page.
+ */
+export function readerPage(
+  docs: readonly OpenDocument[],
+  path: string,
+  pageId: string | null,
+): { apply: number; measure: number | null } {
+  let before = 0;
+  for (const doc of docs) {
+    if (doc.path !== path) continue;
+    const index = doc.pages.findIndex((p) => p.id === pageId);
+    if (index >= 0) {
+      const page = doc.pages[index];
+      return {
+        apply: before + index + 1,
+        measure: page.sourceDocId === path ? page.sourcePageIndex + 1 : null,
+      };
+    }
+    before += doc.pages.length;
+  }
+  return { apply: 1, measure: 1 };
 }
 
 /** Why the settings cannot be run, or null.

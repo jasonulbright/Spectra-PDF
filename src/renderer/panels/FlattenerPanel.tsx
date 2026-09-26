@@ -10,7 +10,7 @@ import { gsBlocked, requireGsPath } from '../lib/gs-capability';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { app } from '../lib/tauri-bridge';
-import { tChrome } from '../i18n';
+import { joinSentences, tChrome } from '../i18n';
 import { localizeEngineMessage } from '../lib/engine-messages';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import {
@@ -208,7 +208,7 @@ export function FlattenerPanel(): React.ReactElement {
         {refusals.length > 0 && (
           <div className="text-xs text-amber-400" data-testid="flattener-outline-refusals">
             {tChrome('panel.flattener.outlineRefusals', {
-              reasons: refusals.join(' '),
+              reasons: joinSentences(refusals),
             })}
           </div>
         )}
@@ -239,7 +239,7 @@ export function FlattenerPanel(): React.ReactElement {
         )}
         {unknown.length > 0 && (
           <div className="text-xs text-amber-400" data-testid="flattener-unknown">
-            {tChrome('panel.flattener.unknownNote', { reasons: unknown.join(' ') })}
+            {tChrome('panel.flattener.unknownNote', { reasons: joinSentences(unknown) })}
           </div>
         )}
         {counts.transparent === 0 && unknown.length === 0 && report !== null && (

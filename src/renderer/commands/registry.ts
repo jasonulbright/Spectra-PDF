@@ -675,8 +675,8 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openFolderPreflight(),
   },
-  // Request 5 — same no-document shape as Batch OCR: it manages schedules over
-  // picked folder trees, nothing to do with what is open.
+  // Same no-document shape as Batch OCR: it manages schedules over picked
+  // folder trees, nothing to do with what is open.
   'tools.scheduledRuns': {
     title: 'Scheduled Batch Runs…',
     when: (ctx) => ctx.app !== null,
@@ -1101,12 +1101,8 @@ export const COMMANDS: Record<CommandId, Command> = {
         // The two-entry-point question, settled: EVERY tool
         // sets `activeToolId` when opened, ops-less ones included. It is "the
         // tool that is open", full stop — one answer, not one per surface.
-        //
-        // (An earlier draft of this comment claimed the opposite, and stayed
-        // there for a commit after the code changed underneath it. `activeToolId`
-        // is what the secondary toolbar reads, so Escape can disarm the mode
-        // without closing the tool — which is why the ops-less branch had to
-        // start setting it.)
+        // `activeToolId` is what the secondary toolbar reads, so Escape can
+        // disarm the mode without closing the tool.
         //
         // What each surface does with it differs, and that's the actual answer:
         // the DOC tab's strip shows the tool if it drives the canvas; the TOOLS
@@ -1129,7 +1125,7 @@ export const COMMANDS: Record<CommandId, Command> = {
           // so the canvas is still unmounted right now.
           if (tool.id === 'ocr' && path) openFindWhenCanvasReady(ctx.canvas, path);
           // OPENING A TOOL GOES WHERE ITS WORK IS. One rule, and it is the whole
-          // of the destination logic (revision):
+          // of the destination logic:
           //
           //   owns canvas modes, or has no ops  ⇒  the DOCUMENT (mode armed)
           //   a form to fill in, with a doc     ⇒  the DOCUMENT + the RIGHT DOCK
