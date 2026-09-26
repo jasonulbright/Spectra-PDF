@@ -15,6 +15,7 @@
 //! display scaling.
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex};
@@ -27,6 +28,7 @@ use crate::app_windows::{self, ClaimState, WindowRegistry, MAIN_LABEL};
 use crate::commands::{LaunchRecord, UnreadableRecord, UnreadableRecords};
 
 const SESSION_FILE: &str = "session.json";
+const MAX_SESSION_RECORD_BYTES: u64 = 16 * 1024 * 1024;
 
 /// How long a move or resize has to stop before the file is rewritten. A drag
 /// delivers hundreds of events; the in-memory record follows every one of them
@@ -785,6 +787,63 @@ pub fn load(app: &AppHandle) -> Session {
         .unwrap_or_default()
 }
 
+fn read_record_bounded(path: &Path, max_bytes: u64) -> std::io::Result<Option<Vec<u8>>> {
+    let path_metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if !path_metadata.file_type().is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "session record is not a regular file",
+        ));
+    }
+    if path_metadata.len() > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("session record exceeds the {max_bytes}-byte limit"),
+        ));
+    }
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "session record is not a regular file",
+        ));
+    }
+    if metadata.len() > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("session record exceeds the {max_bytes}-byte limit"),
+        ));
+    }
+    let capacity = usize::try_from(metadata.len()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "session record size does not fit this process",
+        )
+    })?;
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(capacity)
+        .map_err(std::io::Error::other)?;
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("session record grew beyond the {max_bytes}-byte limit"),
+        ));
+    }
+    Ok(Some(bytes))
+}
+
 /// Read the record, first removing the stages that killed writers left beside
 /// it.
 ///
@@ -798,7 +857,7 @@ fn load_from(
     unreadable: &UnreadableRecords,
 ) -> Session {
     crate::staging::reclaim_record_stages(path, own, running);
-    let failure = match crate::staging::read_record(path) {
+    let failure = match read_record_bounded(path, MAX_SESSION_RECORD_BYTES) {
         Ok(None) => return Session::default(),
         Ok(Some(bytes)) => match serde_json::from_slice::<Session>(&bytes) {
             Ok(session) if session.version <= SESSION_VERSION => return session,
@@ -844,10 +903,48 @@ fn write(app: &AppHandle, session: &Session) -> std::io::Result<()> {
     write_at(&path, session)
 }
 
+struct BoundedJsonBuffer {
+    bytes: Vec<u8>,
+    max_bytes: usize,
+}
+
+impl std::io::Write for BoundedJsonBuffer {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let next_len = self
+            .bytes
+            .len()
+            .checked_add(bytes.len())
+            .ok_or_else(|| std::io::Error::other("session record length overflowed"))?;
+        if next_len > self.max_bytes {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("session record exceeds the {}-byte limit", self.max_bytes),
+            ));
+        }
+        self.bytes
+            .try_reserve(bytes.len())
+            .map_err(std::io::Error::other)?;
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 fn write_at(path: &Path, session: &Session) -> std::io::Result<()> {
-    let json = serde_json::to_string(session)
+    write_at_with_limit(path, session, MAX_SESSION_RECORD_BYTES as usize)
+}
+
+fn write_at_with_limit(path: &Path, session: &Session, max_bytes: usize) -> std::io::Result<()> {
+    let mut json = BoundedJsonBuffer {
+        bytes: Vec::new(),
+        max_bytes,
+    };
+    serde_json::to_writer(&mut json, session)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    crate::staging::write_record(path, json.as_bytes())
+    crate::staging::write_record(path, &json.bytes)
 }
 
 fn write_now(app: &AppHandle, gone: Option<&str>) -> WriteOutcome {
@@ -1304,6 +1401,23 @@ mod tests {
         let session: Session = serde_json::from_str(lean).unwrap();
         assert_eq!(session.windows[0].files, Vec::<String>::new());
         assert_eq!(session.windows[0].monitor, "");
+    }
+
+    #[test]
+    fn a_session_record_read_is_bounded_and_includes_the_exact_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SESSION_FILE);
+        std::fs::write(&path, b"12345678").unwrap();
+        assert_eq!(
+            read_record_bounded(&path, 8).unwrap(),
+            Some(b"12345678".to_vec())
+        );
+
+        std::fs::write(&path, b"123456789").unwrap();
+        assert_eq!(
+            read_record_bounded(&path, 8).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
     }
 
     #[test]
@@ -2106,6 +2220,25 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"version\":2}");
         // And nothing is left beside the record.
         assert!(!staging_path(&path).exists());
+    }
+
+    #[test]
+    fn an_oversized_session_write_preserves_the_previous_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SESSION_FILE);
+        crate::staging::write_record(&path, b"previous").unwrap();
+        let session = saved_session();
+        let json = serde_json::to_string(&session).unwrap();
+
+        assert_eq!(
+            write_at_with_limit(&path, &session, json.len() - 1)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous");
+        write_at_with_limit(&path, &session, json.len()).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), json.as_bytes());
     }
 
     #[test]
