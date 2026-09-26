@@ -163,7 +163,7 @@ fn dib_dimensions(bytes: &[u8]) -> Result<(i32, i32), String> {
 /// A header that does not carry usable offsets falls back to everything after
 /// the header block (the first blank-line-free run of `Key:Value` lines),
 /// because a fragment we cannot locate is still a fragment we can convert.
-pub fn parse_cf_html(payload: &str) -> (String, Option<String>) {
+pub fn parse_cf_html(payload: &[u8]) -> (String, Option<String>) {
     let mut start: Option<usize> = None;
     let mut end: Option<usize> = None;
     let mut source_url: Option<String> = None;
@@ -182,8 +182,16 @@ pub fn parse_cf_html(payload: &str) -> (String, Option<String>) {
         "EndSelection",
         "SourceURL",
     ];
-    for line in payload.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches(['\r', '\n']);
+    for line in payload.split_inclusive(|byte| *byte == b'\n') {
+        let mut trimmed = line;
+        while matches!(trimmed.last(), Some(b'\r' | b'\n')) {
+            trimmed = &trimmed[..trimmed.len() - 1];
+        }
+        // The header vocabulary and its numeric offsets are ASCII. A malformed
+        // body must not be decoded before offsets are applied to the raw bytes.
+        let Ok(trimmed) = std::str::from_utf8(trimmed) else {
+            break;
+        };
         let Some((key, value)) = trimmed.split_once(':') else {
             break;
         };
@@ -207,19 +215,18 @@ pub fn parse_cf_html(payload: &str) -> (String, Option<String>) {
         header_end += line.len();
     }
 
-    let bytes = payload.as_bytes();
     if let (Some(s), Some(e)) = (start, end) {
-        if s < e && e <= bytes.len() {
+        if s < e && e <= payload.len() {
             // Offsets are byte offsets and may land mid-character on a
             // malformed writer; lossy rather than refusing the paste.
             return (
-                String::from_utf8_lossy(&bytes[s..e]).into_owned(),
+                String::from_utf8_lossy(&payload[s..e]).into_owned(),
                 source_url,
             );
         }
     }
-    let tail = payload.get(header_end..).unwrap_or("").trim();
-    (tail.to_string(), source_url)
+    let tail = String::from_utf8_lossy(payload.get(header_end..).unwrap_or_default());
+    (tail.trim().to_string(), source_url)
 }
 
 /// Wrap a fragment as a standalone document. No base href, deliberately (see
@@ -379,8 +386,7 @@ pub fn read_clipboard_source() -> Result<ClipboardSource, String> {
         "html" => {
             // CF_HTML is defined as UTF-8 and its offsets are byte offsets
             // into that encoding.
-            let payload = String::from_utf8_lossy(&raw);
-            let (fragment, source_url) = parse_cf_html(&payload);
+            let (fragment, source_url) = parse_cf_html(&raw);
             if fragment.trim().is_empty() {
                 return Err("The clipboard holds an empty HTML fragment".to_string());
             }
@@ -554,22 +560,50 @@ mod tests {
     #[test]
     fn fragment_comes_from_the_declared_offsets() {
         let payload = cf_html("<p>hello</p>", None);
-        let (fragment, url) = parse_cf_html(&payload);
+        let (fragment, url) = parse_cf_html(payload.as_bytes());
         assert_eq!(fragment, "<p>hello</p>");
         assert!(url.is_none());
     }
 
     #[test]
+    fn invalid_utf8_before_a_fragment_does_not_shift_cf_html_offsets() {
+        let mut body = b"<html><body>prefix".to_vec();
+        body.push(0xFF);
+        body.extend_from_slice(
+            b"<!--StartFragment--><p>captured</p><!--EndFragment--></body></html>",
+        );
+        let start_marker = b"<!--StartFragment-->";
+        let start = "Version:0.9\r\nStartFragment:0000000000\r\nEndFragment:0000000000\r\n".len()
+            + body
+                .windows(start_marker.len())
+                .position(|window| window == start_marker)
+                .unwrap()
+            + start_marker.len();
+        let end = start + b"<p>captured</p>".len();
+        let header = "Version:0.9\r\nStartFragment:0000000000\r\nEndFragment:0000000000\r\n"
+            .replace(
+                "StartFragment:0000000000",
+                &format!("StartFragment:{start:010}"),
+            )
+            .replace("EndFragment:0000000000", &format!("EndFragment:{end:010}"));
+        let mut raw = header.into_bytes();
+        raw.extend_from_slice(&body);
+
+        let (fragment, _) = parse_cf_html(&raw);
+        assert_eq!(fragment, "<p>captured</p>");
+    }
+
+    #[test]
     fn source_url_survives_its_own_colons() {
         let payload = cf_html("<b>x</b>", Some("https://example.test:8443/a/b?q=1"));
-        let (_, url) = parse_cf_html(&payload);
+        let (_, url) = parse_cf_html(payload.as_bytes());
         assert_eq!(url.as_deref(), Some("https://example.test:8443/a/b?q=1"));
     }
 
     #[test]
     fn about_blank_is_not_a_source_url() {
         let payload = cf_html("<b>x</b>", Some("about:blank"));
-        let (_, url) = parse_cf_html(&payload);
+        let (_, url) = parse_cf_html(payload.as_bytes());
         assert!(url.is_none());
     }
 
@@ -578,7 +612,7 @@ mod tests {
         // Offsets past the end of the payload: the fragment is still there.
         let payload = "Version:0.9\r\nStartFragment:9999999\r\nEndFragment:9999999\r\n\
                        <p>fallback</p>";
-        let (fragment, _) = parse_cf_html(payload);
+        let (fragment, _) = parse_cf_html(payload.as_bytes());
         assert_eq!(fragment, "<p>fallback</p>");
     }
 
