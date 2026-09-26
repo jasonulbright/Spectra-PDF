@@ -1818,10 +1818,9 @@ const BEFORE_CLOSE_EVENT: &str = "app:beforeClose";
 
 /// Ask every peer one question and wait for its receipt.
 ///
-/// `sealed` names which round this is. The close round runs behind the seal, so
-/// an abort there has to put the record back under live tracking; the prepare
-/// round has captured nothing and has nothing to undo — unsealing there would
-/// write a snapshot for a quit that never took one.
+/// `session_id` identifies a sealed close round. An abort there returns the
+/// record to live tracking; the prepare round carries none because it has no
+/// capture to undo.
 ///
 /// A quit that prompted no peer answers immediately: `wait` finds nothing
 /// outstanding.
@@ -1829,24 +1828,25 @@ fn ack_round(
     app: &AppHandle,
     peers: &[String],
     event: &str,
-    sealed: bool,
+    session_id: Option<u64>,
 ) -> crate::session::QuitGate {
     let quit_id = app.state::<crate::session::QuitAcks>().begin(peers.to_vec());
     for label in peers {
         let payload = crate::session::BeforeClose {
             quit_id: Some(quit_id),
+            session_id,
         };
         if app.emit_to(label.as_str(), event, payload).is_err() {
-            if sealed {
-                crate::session::abandon_quit(app, quit_id);
+            if let Some(session_id) = session_id {
+                crate::session::abandon_quit(app, quit_id, session_id);
             } else {
                 crate::session::abandon_prepare(app, quit_id);
             }
             return crate::session::QuitGate::Abort;
         }
     }
-    if sealed {
-        crate::session::await_quit_acks(app, quit_id)
+    if let Some(session_id) = session_id {
+        crate::session::await_quit_acks(app, quit_id, session_id)
     } else {
         crate::session::await_prepare_acks(app, quit_id)
     }
@@ -1858,6 +1858,7 @@ pub async fn request_quit(app: AppHandle, window: tauri::WebviewWindow) -> Resul
         .into_iter()
         .filter(|l| l != window.label())
         .collect();
+    let session_id = crate::session::new_seal_id(&app);
     let runner = app.clone();
     // Two rounds with the capture between them. Every peer publishes its tab
     // order through a channel nothing waits on, so an order changed seconds
@@ -1867,9 +1868,9 @@ pub async fn request_quit(app: AppHandle, window: tauri::WebviewWindow) -> Resul
     // a condvar the main loop must stay free of.
     let sequenced = tauri::async_runtime::spawn_blocking(move || {
         crate::session::sequence_quit(
-            || ack_round(&runner, &peers, PREPARE_CLOSE_EVENT, false),
-            || crate::session::capture_and_seal(&runner),
-            || ack_round(&runner, &peers, BEFORE_CLOSE_EVENT, true),
+            || ack_round(&runner, &peers, PREPARE_CLOSE_EVENT, None),
+            || crate::session::capture_and_seal_for(&runner, session_id),
+            || ack_round(&runner, &peers, BEFORE_CLOSE_EVENT, Some(session_id)),
         )
     })
     .await;
@@ -1879,7 +1880,7 @@ pub async fn request_quit(app: AppHandle, window: tauri::WebviewWindow) -> Resul
         // whatever it had taken has to come off: the run would otherwise carry
         // on behind a record frozen at the moment Exit was chosen.
         Err(_) => {
-            crate::session::unseal(&app);
+            crate::session::unseal_for(&app, session_id);
             Ok(false)
         }
     }
@@ -1902,14 +1903,13 @@ pub async fn quit_ack(
 }
 
 /// Report that a window prompted by `request_quit` is not closing after all.
-///
-/// The quit recorded the session and closed the file to further writes before
-/// asking anything; the app is still running, so that record is no longer a
-/// description of anything and the file goes back to tracking the windows that
-/// are left. Idempotent — every prompted window can cancel.
+/// The session token prevents a late prompt from cancelling a newer exit. A
+/// normal window-close flow sends no token and cannot lift an app-exit seal.
 #[tauri::command]
-pub async fn quit_cancelled(app: AppHandle) -> Result<(), String> {
-    let _ = crate::session::unseal(&app);
+pub async fn quit_cancelled(app: AppHandle, session_id: Option<u64>) -> Result<(), String> {
+    if let Some(session_id) = session_id {
+        let _ = crate::session::unseal_for(&app, session_id);
+    }
     Ok(())
 }
 

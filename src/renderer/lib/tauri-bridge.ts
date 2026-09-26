@@ -980,11 +980,10 @@ export const app = {
    * what an emit cannot report on its own. */
   quitAck: (quitId: number) => invoke('quit_ack', { quitId }),
 
-  /** Report that this window's close prompt was cancelled, so the quit the
-   * prompt belonged to is off. The quit recorded the session and froze the
-   * record before prompting; the app is still running, so the record goes back
-   * to following the windows that are left. Safe to call unprompted. */
-  quitCancelled: () => invoke('quit_cancelled'),
+  /** Report that this window's app-exit prompt was cancelled. The session id
+   * makes a late prompt harmless after another exit has taken a new capture;
+   * null is a no-op for a regular window-close prompt. */
+  quitCancelled: (sessionId: number | null) => invoke('quit_cancelled', { sessionId }),
 
   /** Hide this window to the system tray instead of closing. */
   hideToTray: () => invoke('hide_to_tray'),
@@ -996,11 +995,11 @@ export const app = {
   focusWindow: (label: string) => invoke<void>('focus_app_window', { label }),
 
   /** Listen for close-requested event (Rust intercepted the window close).
-   * The quit id names the app-level quit this request belongs to, and is null
-   * for a window × — which no quit is waiting on. */
-  onBeforeClose: (callback: (quitId: number | null) => void) => {
-    return listen<{ quitId: number | null }>('app:beforeClose', (event) =>
-      callback(event.payload?.quitId ?? null),
+   * The quit id names the receipt round; the session id names the app-exit
+   * capture a cancelled prompt may undo. Both are null for a window ×. */
+  onBeforeClose: (callback: (quitId: number | null, sessionId: number | null) => void) => {
+    return listen<{ quitId: number | null; sessionId: number | null }>('app:beforeClose', (event) =>
+      callback(event.payload?.quitId ?? null, event.payload?.sessionId ?? null),
     );
   },
 
