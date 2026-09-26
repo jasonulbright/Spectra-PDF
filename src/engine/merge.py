@@ -51,6 +51,8 @@ def merge(files: list[str], output: str) -> dict:
                 "permissions, and one combined document can only have one. "
                 "Give them matching protection, or decrypt them first."
             )
+        if total_pages == 0:
+            raise RuntimeError("the sources produced no pages, so no PDF was written")
         # Sources stay open through the save — qpdf resolves foreign copies
         # lazily, so a source closed before the destination is saved risks
         # reading freed data (the old per-file `with` closed each one early).
