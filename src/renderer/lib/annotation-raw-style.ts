@@ -119,6 +119,10 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
   } catch {
     return null;
   }
+  // Strings of an encrypted file read without its key are ciphertext; names
+  // are never encrypted (ISO 32000-2 7.6.2), so only they are read.
+  const encrypted = doc.context.trailerInfo.Encrypt !== undefined;
+  const text = encrypted ? (v: unknown) => (v instanceof PDFName ? v.decodeText() : undefined) : textOf;
   const pages = doc.getPages();
   const out: RawAnnotStyle[][] = [];
   for (const page of pages) {
@@ -172,11 +176,11 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
             vertices: numArray(dict.lookupMaybe(PDFName.of('Vertices'), PDFArray)),
             l: numArray(dict.lookupMaybe(PDFName.of('L'), PDFArray)),
             measure: !!dict.get(PDFName.of('Measure')),
-            subj: textOf(dict.lookup(PDFName.of('Subj'))),
-            spectraSymbol: textOf(dict.lookup(PDFName.of('SpectraSymbol'))),
-            spectraLegend: textOf(dict.lookup(PDFName.of('SpectraLegend'))),
-            spectraSymbolParts: textOf(dict.lookup(PDFName.of('SpectraSymbolParts'))),
-            spectraInkStyle: textOf(dict.lookup(PDFName.of('SpectraInkStyle'))),
+            subj: text(dict.lookup(PDFName.of('Subj'))),
+            spectraSymbol: text(dict.lookup(PDFName.of('SpectraSymbol'))),
+            spectraLegend: text(dict.lookup(PDFName.of('SpectraLegend'))),
+            spectraSymbolParts: text(dict.lookup(PDFName.of('SpectraSymbolParts'))),
+            spectraInkStyle: text(dict.lookup(PDFName.of('SpectraInkStyle'))),
             ...(rd && rd.length === 4 ? { rd: rd as [number, number, number, number] } : {}),
           });
           } catch {

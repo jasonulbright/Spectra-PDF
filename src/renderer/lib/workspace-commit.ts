@@ -11,6 +11,7 @@ import { editsSincePlan } from '../state/page-tier';
 import { tChrome } from '../i18n';
 import { preserveReason, type PreserveOutcome, type PreserveRefusal } from './preserve-reason';
 import { hasPendingPageCommit, recoverPendingPageCommit, publishPageCommit, type PageCommitIo } from './page-commit-transaction';
+import { commitCapabilities, isSealed, sealedPlaintext, sealedReseal, type SealedCall, type SealedCapability } from './sealed-edit';
 
 // A page's 1-based position within its file's committed order: pages of all
 // same-path documents in workspace order — what the file looks like after
@@ -338,6 +339,10 @@ interface CommitDeps {
    *  TRANSPLANTED bytes, not the pdf-lib rebuild's (buffer identity keys
    *  the reindex). Required whenever preserveSignatures is supplied. */
   readBack?: (filePath: string) => Promise<Uint8Array>;
+  /** The engine transport for a file opened with its user password
+   *  (`lib/sealed-edit.ts`), ungated for the reason `preserveSignatures` is.
+   *  Without it such a file refuses; with it `readBack` is required too. */
+  sealed?: SealedCall;
 }
 
 // Temp names are unique per run so a stale leftover (crash, prior failure)
@@ -376,6 +381,7 @@ export async function commitPageEdits({
   remove,
   preserveSignatures,
   readBack,
+  sealed,
 }: CommitDeps): Promise<CommitOutcome> {
   if (commitRunning) {
     throw new Error('commitPageEdits is already running — callers must share the in-flight run');
@@ -389,18 +395,36 @@ export async function commitPageEdits({
       dispatch({ type: 'CLEAR_PAGE_EDITS' });
       return { signatureRefusals };
     }
-    // pdf-lib cannot decrypt, so a rebuild of a working copy that is still
-    // encrypted would write ciphertext without its /Encrypt over the file.
-    // The reducer refuses such edits; this holds when anything else reaches here.
+    // pdf-lib cannot decrypt, so a file opened with its user password builds
+    // from the engine's decrypted bytes and lands through the engine under its
+    // own protection. Its pages never leave it: the owner password that would
+    // protect them in another file is not held.
     for (const plan of plans) {
-      const keys = new Set([plan.path, ...plan.documents.flatMap((d) => d.pages.map((p) => p.sourceKey))]);
-      const locked = [...keys].find((key) => files.get(key)?.security?.opener === 'user');
-      if (locked !== undefined) {
+      const keys = new Set(plan.documents.flatMap((d) => d.pages.map((p) => p.sourceKey)));
+      const leaving = [...keys].find((key) => key !== plan.path && isSealed(files.get(key)));
+      if (leaving !== undefined || (isSealed(files.get(plan.path)) && (!sealed || !readBack))) {
         throw new Error(tChrome('canvas.common.fileFailure', {
-          name: baseName(locked),
+          name: baseName(leaving ?? plan.path),
           message: tChrome('app.permissions.ownerPasswordNeeded'),
         }));
       }
+    }
+    const sealedCaps = new Map<number, SealedCapability[]>();
+    for (let i = 0; i < plans.length; i++) {
+      const plan = plans[i];
+      if (!isSealed(files.get(plan.path))) continue;
+      const pages = plan.documents.flatMap((d) => d.pages);
+      const caps = commitCapabilities(plan.path, pages, files.get(plan.path)!.pageCount);
+      sealedCaps.set(i, caps);
+      const plain = await sealedPlaintext(sealed!, plan.workingPath, caps);
+      plans[i] = {
+        ...plan,
+        ownBytes: plain,
+        documents: plan.documents.map((d) => ({
+          ...d,
+          pages: d.pages.map((p) => (p.sourceKey === plan.path ? { ...p, bytes: plain } : p)),
+        })),
+      };
     }
     // Every dirty file builds in one pass, so one file's refusal aborts the
     // whole commit: without the file in the message the user is told a save
@@ -423,7 +447,14 @@ export async function commitPageEdits({
       for (let i = 0; i < plans.length; i++) {
         const tmp = plans[i].workingPath + runTag;
         staged.push(tmp); // a failed write can itself leave a partial file
-        await writeBuffer(tmp, built[i]);
+        const caps = sealedCaps.get(i);
+        if (caps) {
+          await sealedReseal(sealed!, plans[i].workingPath, built[i], tmp, caps);
+          // The state buffer holds the encrypted bytes the file holds.
+          built[i] = await readBack!(tmp);
+        } else {
+          await writeBuffer(tmp, built[i]);
+        }
         // An annotation-tier commit on a SIGNED file lands as an
         // incremental append instead of the pdf-lib rewrite, so the
         // signature keeps verifying. A mechanical refusal can use the

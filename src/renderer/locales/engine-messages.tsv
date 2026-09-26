@@ -96,6 +96,7 @@ create_pdf.unreadableImage	pattern	create_pdf	unreadable image: {{src_path}} ({{
 create_pdf_folders.destinationFolderRequired	exact	create_pdf_folders	A destination folder is required.
 create_pdf_folders.destinationMustOutsideSource	exact	create_pdf_folders	The destination must be outside the source folder -- choose a separate folder for the assembled documents.
 create_pdf_folders.unknownSourceSet	pattern	create_pdf_folders	unknown source set {{sources}} ({{v1}})
+credentials.ghostscriptPasswordUnsupported	exact	credentials	This document's password cannot be handed to Ghostscript, so this operation cannot read the document. Open it with the owner password, or decrypt the document first.
 csc.credentialUsesExplicitAuthorization	exact	csc	This credential uses explicit authorization, which requires this application to collect a PIN or one-time password and send it to the signing service. This application does not collect or transmit authentication secrets. Use a credential authorized through the provider's own sign-in instead.
 csc.credentialUsesUnsupportedAuthorization	pattern	csc	This credential uses an unsupported authorization mode ({{v0}}).
 csc.mustUseHttpsRefusing	pattern	csc	The {{what}} must use HTTPS. Refusing to send signing credentials to a {{v1}} address.
@@ -185,7 +186,7 @@ document_js.eachDocumentScriptMust	exact	document_js	Each document script must b
 document_js.eachDocumentScriptNeeds	exact	document_js	Each document script needs a non-empty name.
 encrypt.documentAlreadyAllowsAssistive	exact	encrypt	This document already allows assistive technology to read it.
 encrypt.documentEncryptedNothingStopping	exact	encrypt	This document is not encrypted, so nothing is stopping assistive technology from reading it.
-encrypt.documentSPermissionsHeld	exact	encrypt	This document's permissions are held by an owner password, which is needed to change them. Open it with that password first.
+encrypt.documentSPermissionsHeld	exact	encrypt,printer,sealed_edit	This document's permissions are held by an owner password, which is needed to change them. Open it with that password first.
 enhance_scan.backgroundStrengthMustGot	pattern	enhance_scan	the background strength must be 0-1, got {{strength}}
 enhance_scan.enhancementAskedTurnDeskew	exact	enhance_scan	no enhancement was asked for — turn on deskew, despeckle, background removal or orientation detection
 enhance_scan.jpegQualityMustGot	pattern	enhance_scan	the JPEG quality must be 1-100, got {{quality}}
@@ -632,6 +633,7 @@ sanitize.documentContainsXmlForm	exact	sanitize	This document contains an XML fo
 sanitize.formFieldsModeMust	exact	sanitize	form_fields_mode must be 'remove' or 'flatten'.
 sanitize.reportedNeverRemovedTake	pattern	sanitize	{{name}} is reported and never removed — take it out of the selection.
 sanitize.unknownCategoryCategories	pattern	sanitize	Unknown category {{name}}. The categories are: {{v1}}.
+sealed_edit.editLeavesDocumentPages	exact	sealed_edit	the edit leaves the document with no pages, so it was not written
 search_redact.documentCertifiedAllowChanges	exact	search_redact	this document is certified to allow no changes, so redacting it would produce a file that reports as illegally modified
 search_redact.documentSignedEditInvalidates	exact	search_redact	this document is signed and this edit invalidates its signatures -- the run must state that signed documents are included before it will touch one
 search_redact.searchCouldCompiled	pattern	search_redact	the search could not be compiled: {{v0}}
@@ -891,6 +893,7 @@ text_runs.editDidApplyRun	exact	text_runs	edit did not apply (run not found)
 text_runs.fontActiveText	exact	text_runs	no font is active for this text
 text_runs.fontActiveTextRun	exact	text_runs	no font is active for this text run
 text_runs.newTextWouldExtend	exact	text_runs	the new text would extend off the page — shorten it or reduce the size
+text_runs.nothingEdit	exact	text_runs	nothing to edit
 text_runs.nothingRestyleGiveSize	exact	text_runs	nothing to restyle — give a size and/or a color
 text_runs.restyleDidApplyRun	exact	text_runs	restyle did not apply (run not found)
 text_runs.sizeMustBetweenPoints	exact	text_runs	size must be between 0.1 and 1000 points

@@ -148,11 +148,11 @@ describe('the command guards', () => {
       .toEqual({ kind: 'permission', permission: 'modify' });
   });
 
-  it('refuses the renderer-written page tier on a user-opened document by the owner password', () => {
+  it('permits the renderer-built tiers on a user-opened document where /P allows them', () => {
     const state = stateOf(allowing([...PERMISSION_NAMES]));
-    expect(commandBlock(ctxOf(state), 'document.rotateSelectionCW')).toEqual({ kind: 'ownerPassword' });
-    expect(commandBlock(ctxOf(state), 'tools.open.prepareform')).toEqual({ kind: 'ownerPassword' });
-    expect(commandBlock(ctxOf(state), 'tools.open.comment')).toEqual({ kind: 'ownerPassword' });
+    expect(commandBlock(ctxOf(state), 'document.rotateSelectionCW')).toBeNull();
+    expect(commandBlock(ctxOf(state), 'tools.open.prepareform')).toBeNull();
+    expect(commandBlock(ctxOf(state), 'tools.open.comment')).toBeNull();
     expect(commandBlock(ctxOf(state), 'tools.panel.forms')).toBeNull();
     expect(capabilityBlockText({ kind: 'ownerPassword' })).toBe(tChrome('app.permissions.ownerPasswordNeeded'));
   });
@@ -182,13 +182,44 @@ describe('the page tier refuses in the reducer', () => {
     expect(next.pageEditRefusalReason).toEqual({ kind: 'permission', permission: 'assemble' });
   });
 
-  it('refuses an annotation on a user-opened document by the owner password', () => {
+  it('takes an annotation edit and a rotation on a user-opened document that allows them', () => {
     const state = stateOf(allowing([...PERMISSION_NAMES]));
+    const rotated = appReducer(state, { type: 'ROTATE_PAGE_REFS', pageIds: [`${PATH}#p0`], delta: 90 });
+    expect(rotated.pageDirtyPaths).toEqual([PATH]);
+    expect(rotated.pageEditRefusals).toBe(state.pageEditRefusals);
+    const removed = appReducer(state, {
+      type: 'REMOVE_ANNOTATION', docId: `${PATH}#0`, pageId: `${PATH}#p0`, annotationId: 'a1',
+    });
+    expect(removed.pageEditRefusalReason).not.toEqual({ kind: 'ownerPassword' });
+  });
+
+  it('refuses an annotation edit where /P withholds annotate', () => {
+    const state = stateOf(allowing(['assemble', 'modify']));
     const next = appReducer(state, {
       type: 'REMOVE_ANNOTATION', docId: `${PATH}#0`, pageId: `${PATH}#p0`, annotationId: 'a1',
     });
-    expect(next.pageEditRefusals).toBe(state.pageEditRefusals + 1);
-    expect(next.pageEditRefusalReason).toEqual({ kind: 'ownerPassword' });
+    expect(next.pageEditRefusalReason).toEqual({ kind: 'permission', permission: 'annotate' });
+  });
+
+  it("keeps a user-opened document's pages from moving into another file, and takes pages into it", () => {
+    const OTHER = 'C:/docs/plain.pdf';
+    const base = stateOf(allowing([...PERMISSION_NAMES]));
+    const other = makeFile(OTHER);
+    const otherDoc: OpenDocument = { ...other, id: `${OTHER}#0`, pages: pages(OTHER), pageCount: 2 };
+    const state: AppState = {
+      ...base,
+      files: new Map([...base.files, [OTHER, other]]),
+      workspace: { documents: [...base.workspace.documents, otherDoc] },
+    };
+    const out = appReducer(state, {
+      type: 'MOVE_PAGE', fromDocId: `${PATH}#0`, pageId: `${PATH}#p0`, toDocId: `${OTHER}#0`, toIndex: 0,
+    } as never);
+    expect(out.pageEditRefusalReason).toEqual({ kind: 'ownerPassword' });
+    expect(out.workspace).toBe(state.workspace);
+    const into = appReducer(state, {
+      type: 'MOVE_PAGE', fromDocId: `${OTHER}#0`, pageId: `${OTHER}#p0`, toDocId: `${PATH}#0`, toIndex: 0,
+    } as never);
+    expect(into.pageEditRefusals).toBe(state.pageEditRefusals);
   });
 
   it('lets the same rotation through on an unencrypted document', () => {
@@ -342,7 +373,7 @@ describe('where the typed password may live', () => {
     expect(Object.keys(next.files.get(PATH)!)).not.toContain('password');
   });
 
-  it('is held by one module, read only by the pdf.js loaders, the open funnel and the close path', () => {
+  it('is held by one module, read only by the pdf.js loaders, the health sweep, the open funnel and the close path', () => {
     const root = join(__dirname, '../src/renderer');
     const files: string[] = [];
     const walk = (dir: string): void => {
@@ -357,7 +388,7 @@ describe('where the typed password may live', () => {
       .filter((f) => /from '[./]*(lib\/)?document-passwords'/.test(readFileSync(f, 'utf8')))
       .map((f) => relative(root, f).replace(/\\/g, '/'))
       .sort();
-    expect(importers).toEqual(['App.tsx', 'lib/credential-release.ts', 'lib/pdfDocCache.ts', 'lib/workspace.ts']);
+    expect(importers).toEqual(['App.tsx', 'hooks/useDocumentHealth.ts', 'lib/credential-release.ts', 'lib/pdfDocCache.ts', 'lib/workspace.ts']);
     const store = readFileSync(join(root, 'lib/document-passwords.ts'), 'utf8');
     expect(store).not.toMatch(/localStorage|sessionStorage|indexedDB|console\.|writeBuffer|invoke\(/);
   });

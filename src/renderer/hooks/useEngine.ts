@@ -253,12 +253,12 @@ export function useEngine() {
   // at its next step boundary. Resolves to `null` for a run abandoned before it
   // finished — which is not a failure and must not be recorded as one.
   const collectHealth = useCallback(
-    (buffer: PdfBuffer, isCurrent: () => boolean): Promise<EngineHealthReply | null> =>
+    (buffer: PdfBuffer, isCurrent: () => boolean, password?: string): Promise<EngineHealthReply | null> =>
       submitIdle((gate) => withHealthInput(buffer, gate, {
         allocate: () => batch.createScratch(`health-${crypto.randomUUID()}`),
         write: fileIO.writeBuffer,
         remove: batch.deleteHealthScratch,
-      }, (path) => runHealthSweep(dispatch, path, gate)), isCurrent),
+      }, (path) => runHealthSweep(dispatch, path, gate, password)), isCurrent),
     [dispatch],
   );
 

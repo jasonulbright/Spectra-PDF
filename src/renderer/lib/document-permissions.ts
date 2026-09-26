@@ -37,8 +37,9 @@ export const UNRESTRICTED: DocumentSecurity = Object.freeze({
 /** What the app does with a document, in the terms its /P bits speak.
  *
  * `pageTier`, `commentTier` and `formAuthoring` are the edits the renderer
- * writes itself with pdf-lib, which cannot write an encrypted file; the other
- * edit capabilities run in the engine, which keeps the protection. */
+ * builds itself with pdf-lib; on a user-opened document the engine hands the
+ * builder the decrypted bytes and writes its output back under the
+ * document's own protection (`lib/sealed-edit.ts`). */
 export type Capability =
   | 'print'
   | 'copy'
@@ -51,13 +52,12 @@ export type Capability =
   | 'commentTier'
   | 'formAuthoring';
 
-/** Why a capability is unavailable: a /P bit the document withholds, or a
- * renderer-written edit on a working copy that is still encrypted. */
+/** Why a capability is unavailable: a /P bit the document withholds, or an
+ * edit that would carry a user-opened document's pages into another file,
+ * where its protection cannot follow them. */
 export type CapabilityBlock =
   | { kind: 'permission'; permission: PermissionName }
   | { kind: 'ownerPassword' };
-
-const RENDERER_WRITTEN: ReadonlySet<Capability> = new Set<Capability>(['pageTier', 'commentTier', 'formAuthoring']);
 
 /** The /P bit a capability lacks, or null when the bits allow it.
  *
@@ -91,9 +91,7 @@ export function deniedPermission(security: DocumentSecurity, capability: Capabil
 
 export function capabilityBlock(security: DocumentSecurity, capability: Capability): CapabilityBlock | null {
   const permission = deniedPermission(security, capability);
-  if (permission) return { kind: 'permission', permission };
-  if (security.opener === 'user' && RENDERER_WRITTEN.has(capability)) return { kind: 'ownerPassword' };
-  return null;
+  return permission ? { kind: 'permission', permission } : null;
 }
 
 /** The engine's `document_permissions` reply, read defensively. A reply that

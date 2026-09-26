@@ -3,6 +3,7 @@ import { tChrome } from '../i18n';
 import { addFormFields, type NewFieldSpec } from './form-authoring';
 import { choiceAppearanceFields, verticalFontCalls } from './form-writing';
 import { rewriteWorkspaceFile, type WorkspaceRewriteIo } from './workspace-rewrite';
+import { isSealed, sealedPlaintext, sealedReseal } from './sealed-edit';
 
 export interface FormCreateIo extends WorkspaceRewriteIo {
   fontDirectory: () => Promise<string>;
@@ -24,7 +25,17 @@ export async function createFormFields(path: string, requested: readonly NewFiel
   if (!requested.length) return true;
   const specs = structuredClone(requested);
   const result = await rewriteWorkspaceFile(path, getState, dispatch, io, async (stage, original, requireCurrent) => {
-    await io.write(stage, await addFormFields(original, specs));
+    const file = getState().files.get(path);
+    if (file && isSealed(file)) {
+      // A user-opened document: the builder runs on the engine's decrypted
+      // bytes and the engine writes the stage under the document's own
+      // protection (lib/sealed-edit.ts).
+      const plain = await sealedPlaintext(io.callStaged, file.workingPath, ['formAuthoring']);
+      requireCurrent();
+      await sealedReseal(io.callStaged, file.workingPath, await addFormFields(plain, specs), stage, ['formAuthoring']);
+    } else {
+      await io.write(stage, await addFormFields(original, specs));
+    }
     const vertical = verticalFontCalls(specs);
     const choices = choiceAppearanceFields(specs);
     if (vertical.length || choices.length) {

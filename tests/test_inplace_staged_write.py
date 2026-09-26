@@ -2193,6 +2193,12 @@ EXCLUDED_DOORS = {
         "was given without its protection, and a user-password open leaves it "
         "byte for byte. Both are pinned by tests/test_user_password_open.py"
     ),
+    "sealed_reseal": (
+        "its output is the renderer's stage beside the working copy and the "
+        "door refuses an output resolving to the working copy; the stage is "
+        "published by the renderer's transaction. Pinned by "
+        "tests/test_sealed_edit.py"
+    ),
 }
 
 #: Doors whose in-place mode is real but is NOT a `(file, output)` question:
