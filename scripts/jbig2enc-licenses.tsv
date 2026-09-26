@@ -25,10 +25,13 @@
 #
 # RULES:
 #  - A dependency is never removed to simplify this file. Every component gets
-#    a row, whatever its licence. (Nothing here is copyleft, but that is a fact
-#    about this artifact, not a criterion — this project is MIT open source
-#    with a public repository, so the source column answers "where is the
-#    source" for any licence.)
+#    a row, whatever its licence. The licence class decides whether the binary
+#    ships at all: a permissive component ships with its notice; a
+#    weak-copyleft component (LGPL, MPL and similar) ships only after that
+#    component's own terms are verified, never by analogy to another row; GPL
+#    or AGPL object code is not shipped. A public repository naming the
+#    upstream records where the source lives; it does not discharge a
+#    corresponding-source obligation. Every component here is permissive.
 #  - Notices are FETCHED ONCE, from a URL pinned to the component version
 #    above, by fetch-jbig2enc-licenses.ps1, reviewed as a git diff, and
 #    committed. The build copies them offline. There is no ongoing obligation

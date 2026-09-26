@@ -79,8 +79,7 @@ jobs:
       # same signature. The client tools supply the signtool build that loads
       # the signing dlib; the dlib takes its token from the Azure login below.
       - name: Install the Artifact Signing client tools
-        # Avoid an unattended MSI install; the existing NuGet branch extracts
-        # the same client payload without winget or Windows Installer.
+        # One pinned NuGet payload; no unattended MSI install.
         timeout-minutes: 5
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File scripts/install-signing-tools.ps1 -SkipWinget

@@ -106,8 +106,9 @@ a maintenance tool run only when the pin moves.
   notice and the GNU GPL version 2 text.
 
 LibreOffice is invoked as an independent program (mere aggregation), so the two
-may be distributed together. LibreOffice itself remains under the MPL-2.0; its
-complete corresponding source is available at the link above.
+may be distributed together. LibreOffice itself remains under the MPL-2.0. Its
+complete source release, `libreoffice-26.2.6.3.tar.xz`, is attached to every
+release as a release asset.
 
 ### PDF-import helper (poppler)
 
@@ -126,15 +127,16 @@ load their input; without the GPL encoding tables, the exports succeed but drop
 the text of any PDF that draws a CJK font through a predefined CMap encoding —
 the permissive cMap tables alone do not restore it.
 
-Complete corresponding source for the helper's object code is the LibreOffice
-source release for the pinned version, which carries the poppler sources the
-build consumed:
-<https://download.documentfoundation.org/libreoffice/src/26.2.6/>. The upstream
-poppler and poppler-data version numbers are not recorded in the shipped files;
-the pin is the SHA-256 in `scripts/libreoffice-notices.tsv` together with that
-source release. `scripts/bundle-libreoffice.ps1` refuses to vendor a tree that
-is missing any file the manifest names. The source is available under the
-written source offer below.
+Complete corresponding source for the helper's object code and the encoding
+tables is attached to every release as release assets: the LibreOffice source
+release for the pinned version (`libreoffice-26.2.6.3.tar.xz`, which carries the
+helper's own source and the build scripts) and the two external archives its
+`download.lst` names, `poppler-26.06.0.tar.xz` and `poppler-data-0.4.12.tar.gz`.
+The same files are at
+<https://download.documentfoundation.org/libreoffice/src/26.2.6/> and
+<https://dev-www.libreoffice.org/src/>. The shipped helper is pinned by the
+SHA-256 in `scripts/libreoffice-notices.tsv`; `scripts/bundle-libreoffice.ps1`
+refuses to vendor a tree that is missing any file that manifest names.
 
 ## Embedded Python runtime
 
@@ -243,8 +245,8 @@ The obligations that follow, and how each is met:
 - **Corresponding source.** The archives linked in the table above are the
   source for these exact versions. The release workflow accompanies each
   installer it publishes with those two archives and the binding's own source
-  distribution as release assets; `scripts/corresponding-source.tsv` pins all
-  three by SHA-256 and `scripts/stage-corresponding-source.ps1` stages them.
+  distribution as release assets; `scripts/corresponding-source.tsv` pins them
+  by SHA-256 and `scripts/stage-corresponding-source.ps1` stages them.
   They are also available from us on request. The scripts used to control
   compilation are `scripts/build-pillow-heif-decode-only.ps1` in this
   repository, under this repository's MIT license; it records every build
@@ -436,7 +438,9 @@ upstream its source comes from; it is a separate dynamically loaded DLL, so a
 recipient can substitute a modified build. Every other DLL in this tree is a build of an MSYS2
 mingw-w64 package, and MSYS2 publishes both the build recipe and a per-version
 source package for each — `scripts/tesseract-licenses.tsv` records the recipe
-URL per binary. Their source is available under the written source offer above.
+URL per binary. The MSYS2 source package for libiconv,
+`mingw-w64-libiconv-1.19-1.src.tar.zst`, is attached to every release as a
+release asset.
 
 **No GPL object code ships in this tree.** The upstream build's `libtiff-6.dll`
 imports `libjbig-0.dll` (JBIG-KIT, GPL-2.0-or-later), so `libtiff` is rebuilt
@@ -501,7 +505,10 @@ upstream licence and readme files ship verbatim beside its word list in
 Several of these are copyleft. The shipped `.aff` and `.dic` text files, plus
 the per-language build/readme material copied beside them, are themselves the
 preferred form for modifying these dictionaries, so their corresponding source
-accompanies every installer. The table records the pinned upstream provenance.
+accompanies every installer. The complete LibreOffice `dictionaries` repository
+at the pinned commit is also attached to every release as a release asset,
+`LibreOffice-dictionaries-f2ff99058268502bdcf4cad25c1ca2935ad8aa7d.tar.gz`. The
+table records the pinned upstream provenance.
 
 | Tag | Language | License | Source |
 |---|---|---|---|
@@ -559,9 +566,11 @@ ship verbatim in `dictionaries/fi/notices/`.
 
 libvoikko is tri-licensed; MPL-1.1 is the option this project exercises, and
 all three are recorded because upstream's notice files carry all three.
-voikko-fi is copyleft (GPL-2.0-or-later); its complete Debian source package is
-available at the exact source location named in the row and under the written
-source offer above.
+voikko-fi is copyleft (GPL-2.0-or-later). Its complete Debian source package
+(`voikko-fi_2.5-2.dsc`, `voikko-fi_2.5.orig.tar.gz`,
+`voikko-fi_2.5-2.debian.tar.xz`) is attached to every release as release
+assets, and so is the MSYS2 source package for libvoikko,
+`mingw-w64-libvoikko-4.3.3-3.src.tar.zst`.
 
 `libvoikko-1.dll` links the same three mingw runtime DLLs the OCR runtime does
 (`libgcc_s_seh-1.dll`, `libstdc++-6.dll`, `libwinpthread-1.dll`). A DLL loaded

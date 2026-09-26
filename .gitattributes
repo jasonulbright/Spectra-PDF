@@ -68,3 +68,6 @@ tests/fixtures/xmp-extension-schemas/*.xml -text
 # the payload byte-identical to the committed blob on every platform.
 
 src/engine/** -text
+# Corresponding-source archives are pinned by SHA-256; a line-ending rewrite of
+# the text .dsc changes its hash and the stage refuses it.
+vendor/sources/** -text

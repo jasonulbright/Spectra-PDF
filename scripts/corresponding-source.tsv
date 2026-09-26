@@ -1,10 +1,28 @@
-# Source archives that accompany every release which ships the matching object code.
+# Source archives that accompany every release which ships the matching object
+# code or copyleft data.
 #
 # Remote archives are downloaded by scripts/stage-corresponding-source.ps1 and
 # accepted only at the SHA-256 recorded here. Repository paths are copied from
 # the reviewed vendored artifact. The release workflow uploads every row and
 # includes it in SHA256SUMS.txt.
+#
+# Digest provenance per row: libreoffice from the .sha256 sidecar on
+# download.documentfoundation.org; poppler and poppler-data from the
+# LibreOffice 26.2.6.3 download.lst; voikko-fi from the Debian archive's
+# signed Sources index; the MSYS2 source packages verified against their
+# detached .sig. The dictionaries archive is GitHub's generated tarball of the
+# pinned commit; GitHub does not guarantee those bytes stay identical, so a
+# hash refusal there means regenerate and re-pin, never skip.
 component	version	file	sha256	source
 libheif	1.23.5	libheif-1.23.5.tar.gz	fd9036064c4432f0550d15072ddf34956a248279ee9aeaff0fba3fa0f77d8f1a	https://github.com/strukturag/libheif/releases/download/v1.23.5/libheif-1.23.5.tar.gz
 libde265	1.1.3	libde265-1.1.3.tar.gz	554228bd17788c99a7e63b37ab5634722190e6e2bf60c1dcb01cef328e133905	https://github.com/strukturag/libde265/releases/download/v1.1.3/libde265-1.1.3.tar.gz
 pillow_heif	1.8.0	pillow_heif-1.8.0.tar.gz	e47c27432c6fd3d66c22f0de9f27fd379383b646c947520bc485854ce72060d0	vendor/wheels/pillow_heif-1.8.0.tar.gz
+libreoffice	26.2.6.3	libreoffice-26.2.6.3.tar.xz	3a2570aa7087bf8e0cbdf49ac5bd0e452c2025274af99e07882daa104c5685bd	https://download.documentfoundation.org/libreoffice/src/26.2.6/libreoffice-26.2.6.3.tar.xz
+poppler	26.06.0	poppler-26.06.0.tar.xz	4cb4e5a3dc8cb5eec751c8a23c8ba19f61f96dedc0cd07d2aee6b0c8e2cf6ba4	https://dev-www.libreoffice.org/src/poppler-26.06.0.tar.xz
+poppler-data	0.4.12	poppler-data-0.4.12.tar.gz	c835b640a40ce357e1b83666aabd95edffa24ddddd49b8daff63adb851cdab74	https://dev-www.libreoffice.org/src/poppler-data-0.4.12.tar.gz
+voikko-fi	2.5-2	voikko-fi_2.5-2.dsc	36d28b729ae19727c129718584f70ea94c3b00d0e55014a5b3451061257f30ce	vendor/sources/voikko-fi/voikko-fi_2.5-2.dsc
+voikko-fi	2.5-2	voikko-fi_2.5.orig.tar.gz	3bc9b0a0562526173957bf23b5caaf57b60ecc53be63fc16874118002ec620f1	vendor/sources/voikko-fi/voikko-fi_2.5.orig.tar.gz
+voikko-fi	2.5-2	voikko-fi_2.5-2.debian.tar.xz	b7a9056ecfbcaccbc6c524a15c2baf6f7c7dd776391bfaa5b82cb3c3f74cefda	vendor/sources/voikko-fi/voikko-fi_2.5-2.debian.tar.xz
+libvoikko	4.3.3-3	mingw-w64-libvoikko-4.3.3-3.src.tar.zst	f1519b0d522e12c5023e95c9f37dce0b26f8a1d319e0cce09ddfeab0191e8653	https://repo.msys2.org/mingw/sources/mingw-w64-libvoikko-4.3.3-3.src.tar.zst
+libiconv	1.19-1	mingw-w64-libiconv-1.19-1.src.tar.zst	74428280c17094da5b702c29b2e1a0abae59556ea5dfdd65705cc8ccc1e000fb	https://repo.msys2.org/mingw/sources/mingw-w64-libiconv-1.19-1.src.tar.zst
+dictionaries	f2ff99058268502bdcf4cad25c1ca2935ad8aa7d	LibreOffice-dictionaries-f2ff99058268502bdcf4cad25c1ca2935ad8aa7d.tar.gz	3d26e5607b01d2564094a0539328dadf7f0b4e0a7bdc3d836fca372f5c7fe2fc	https://codeload.github.com/LibreOffice/dictionaries/tar.gz/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d
