@@ -3,7 +3,7 @@
 # Upstream ships no Windows binary and points Windows users at
 # the UB Mannheim build, so that is the source: downloaded, verified against a
 # pinned SHA-256, and extracted from the NSIS installer with 7-Zip WITHOUT
-# running it -- the same technique bundle-jbig2enc.ps1 uses.
+# running it.
 #
 # Tesseract is Apache-2.0 and Leptonica (its imaging dependency) is BSD-2-Clause.
 # tesseract.exe is invoked as a separate process, unmodified upstream (see
@@ -16,6 +16,12 @@
 # recipe with JBIG disabled -- and is installed over the installer's copy here,
 # after which libjbig-0.dll is dropped. Nothing in the product can reach JBIG:
 # both Tesseract spawn sites receive a PNG this program rendered.
+#
+# libgif-7.dll is replaced the same way, by an export stub built by
+# scripts/build-giflib-stub.ps1: libleptonica-6.dll imports eleven giflib
+# symbols, so the DLL must load, and every stub entry point returns giflib's
+# documented failure value. No GIF is decoded or encoded on any OCR path, for
+# the same PNG-only reason.
 #
 # The LANGUAGE MODELS are NOT staged here -- scripts/sync-ocr-assets.mjs owns
 # them, because the offered-language list is parsed out of the app's own
@@ -40,6 +46,11 @@ $ExpectedSha256 = "C885FFF6998E0608BA4BB8AB51436E1C6775C2BAFC2559A19B423E18678B6
 $LibTiffSrc = Join-Path $PSScriptRoot "tesseract-libtiff\libtiff-6.dll"
 . (Join-Path $PSScriptRoot "download-retry.ps1")
 $ExpectedLibTiffSha256 = "5FA8372AA46CE25CEA6035C1201F00D55A9C9E2A49FD69AE202A403D6D1F4010"
+
+# The checked-in giflib export stub, and the hash it must have. Update both
+# deliberately, from what build-giflib-stub.ps1 prints.
+$GifStubSrc = Join-Path $PSScriptRoot "tesseract-giflib-stub\libgif-7.dll"
+$ExpectedGifStubSha256 = "24207DD19034DC7C53673355240536E4D51E4CD28F4ECC9D4BAFCE9AB810FC2A"
 
 # ---------------------------------------------------------------------------
 # The library overlay. tesseract.exe stays the pinned 5.4.0 build; the
@@ -191,8 +202,10 @@ if ((-not $DownloadOnly) -and (Test-Path $tessExe)) {
         -not (Test-Path $f) -or (Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant() -ne $_.DllSha
     })
     $tiff = Join-Path $DestDir "libtiff-6.dll"
+    $gif = Join-Path $DestDir "libgif-7.dll"
     $overlaid = ($stale.Count -eq 0) -and (Test-Path $tiff) -and
-        ((Get-FileHash $tiff -Algorithm SHA256).Hash -eq $ExpectedLibTiffSha256)
+        ((Get-FileHash $tiff -Algorithm SHA256).Hash -eq $ExpectedLibTiffSha256) -and
+        (Test-Path $gif) -and ((Get-FileHash $gif -Algorithm SHA256).Hash -eq $ExpectedGifStubSha256)
     if ($current -eq "tesseract v$TessVersion" -and $hasTsv -and $hasModel -and $hasNotices -and $noJbig -and $closed -and $overlaid) {
         Write-Host "Tesseract $TessVersion already vendored at $DestDir (notices complete, JBIG-free)"
         return
@@ -357,6 +370,19 @@ foreach ($o in $Overlay) {
     if ($got -ne $o.DllSha) { Write-Error "$($o.Dll) from $($o.Pkg) has SHA-256 $got; pinned $($o.DllSha)"; exit 1 }
 }
 Write-Host "  Overlaid $($Overlay.Count) libraries from pinned MSYS2 packages"
+if (-not (Test-Path $GifStubSrc)) {
+    Write-Error ("giflib stub missing: $GifStubSrc`n" +
+                 "Run scripts\build-giflib-stub.ps1 and commit the result.")
+    exit 1
+}
+$gifStubSha = (Get-FileHash $GifStubSrc -Algorithm SHA256).Hash
+if ($gifStubSha -ne $ExpectedGifStubSha256) {
+    Write-Error ("Checksum mismatch for the checked-in libgif-7.dll stub.`n" +
+                 "  expected: $ExpectedGifStubSha256`n  actual:   $gifStubSha")
+    exit 1
+}
+Copy-Item $GifStubSrc -Destination (Join-Path $DestDir "libgif-7.dll") -Force
+Write-Host "  Installed the giflib export stub libgif-7.dll ($ExpectedGifStubSha256)"
 & (Join-Path $DestDir "tesseract.exe") --version *> $null
 if ($LASTEXITCODE -ne 0) { Write-Error "tesseract.exe does not start with the overlaid libraries."; exit 1 }
 

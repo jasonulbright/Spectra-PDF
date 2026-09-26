@@ -49,21 +49,22 @@ download, launch, install or accept terms for Ghostscript.
 
 ## JBIG2 encoder (jbig2enc)
 
-- **Version:** 0.32 (unmodified upstream prebuilt; version- and SHA-256-pinned
-  — vendored by `scripts/bundle-jbig2enc.ps1`, which verifies the official
-  release asset's SHA-256 before extracting it)
+- **Version:** 0.32, built from the upstream source tag by
+  `scripts/build-jbig2enc.ps1` with upstream's release recipe, without GIF
+  support and on zlib 1.3.2; the committed build is SHA-256-pinned and
+  installed by `scripts/bundle-jbig2enc.ps1`
 - **License:** Apache License 2.0
 - **Role:** Invoked by Spectra PDF as a separate process (no linking) to encode
   the 1-bit text stencil of an MRC-compressed scan as `/JBIG2Decode`. Nothing
   else in the stack can encode JBIG2 — qpdf decodes only.
-- **Binary source:** <https://github.com/agl/jbig2enc/releases/tag/0.32>
-- **Corresponding source:** <https://github.com/agl/jbig2enc>
+- **Source:** <https://github.com/agl/jbig2enc/tree/0.32>; build inputs in
+  `scripts/jbig2enc-build/PROVENANCE.txt`
 - **License text shipped at:** `resources/jbig2enc/LICENSE-jbig2enc.txt`
 - **Patent note shipped at:** `resources/jbig2enc/PATENTS-jbig2enc.txt` —
   upstream's own note that JBIG2 describes processes which may be patented.
 
 The shipped `jbig2.exe` is a STATIC build: the libraries below are linked
-inside that single executable rather than sitting beside it. Upstream's own
+inside that single executable rather than sitting beside it. The build's own
 dependency manifest ships with it as `resources/jbig2enc/depmf.json` and is
 what `scripts/jbig2enc-licenses.tsv` is checked against at build time — the
 bundling script refuses to ship when a component named there has no row, or
@@ -73,13 +74,12 @@ when a row's version disagrees with it.
 |---|---|---|---|
 | jbig2enc | 0.32 | Apache-2.0 | `resources/jbig2enc/LICENSE-jbig2enc.txt` |
 | leptonica | 1.87.0 | BSD-2-Clause | `resources/jbig2enc/licenses/LICENSE-leptonica.txt` |
-| libtiff | 4.7.1 | libtiff AND BSD-4.3TAHOE | `.../LICENSE-libtiff.txt` |
-| libjpeg-turbo | 3.1.4.1 | BSD-3-Clause AND IJG | `.../LICENSE-libjpeg-turbo.txt` |
+| libtiff | 4.7.2 | libtiff AND BSD-4.3TAHOE | `.../LICENSE-libtiff.txt` |
+| libjpeg-turbo | 3.2.0 | BSD-3-Clause AND IJG | `.../LICENSE-libjpeg-turbo.txt` |
 | libpng | 1.6.58 | libpng-2.0 | `.../LICENSE-libpng.txt` |
-| zlib-ng | 2.3.3 | Zlib | `.../LICENSE-zlib-ng.txt` |
+| zlib | 1.3.2 | Zlib | `.../LICENSE-zlib.txt` |
 | openjp2 (OpenJPEG) | 2.5.4 | BSD-2-Clause | `.../LICENSE-openjpeg.txt` |
 | libwebp | 1.6.0 | BSD-3-Clause | `.../LICENSE-libwebp.txt` |
-| giflib | 5.2.2 | MIT | `.../LICENSE-giflib.txt` |
 
 Each notice was fetched ONCE, from a URL pinned to the component version above,
 reviewed as a git diff and committed at `scripts/jbig2enc-licenses/`; the build
@@ -433,7 +433,7 @@ absent** — so this list cannot silently drift from what is actually in the box
 One component, GNU libiconv, is weak-copyleft (LGPL). It is listed here on
 exactly the same footing as the permissive ones, and its entry names the
 upstream its source comes from; it is a separate dynamically loaded DLL, so a
-recipient can substitute a modified build. Every DLL in this tree is a build of an MSYS2
+recipient can substitute a modified build. Every other DLL in this tree is a build of an MSYS2
 mingw-w64 package, and MSYS2 publishes both the build recipe and a per-version
 source package for each — `scripts/tesseract-licenses.tsv` records the recipe
 URL per binary. Their source is available under the written source offer above.
@@ -446,10 +446,16 @@ build refuses if any shipped binary references it. Nothing in this program can
 reach JBIG: TIFF compression 34661 is the only carrier, and the OCR engine is
 only ever handed a PNG this program rendered.
 
+`libgif-7.dll` is not giflib. It is an export stub built from
+`scripts/tesseract-giflib-stub/libgif-stub.c` by `scripts/build-giflib-stub.ps1`:
+it exports the eleven giflib functions that Leptonica imports, and each returns
+giflib's documented failure value. It contains no giflib code. The giflib notice
+below stays because the stub reproduces giflib's interface.
+
 - **bzip2** — bzip2-1.0.6 — <https://gitlab.com/bzip2/bzip2> — `licenses/LICENSE-bzip2.txt`
 - **Expat** — MIT — <https://github.com/libexpat/libexpat> — `licenses/LICENSE-expat.txt`
 - **GCC runtime library** (libgcc, libstdc++) — GPL-3.0-or-later WITH GCC-exception-3.1 — <https://gcc.gnu.org/> — `licenses/LICENSE-gcc-runtime.txt`
-- **giflib** — MIT — <https://sourceforge.net/projects/giflib/> — `licenses/LICENSE-giflib.txt`
+- **giflib** (interface of the `libgif-7.dll` stub) — MIT — <https://sourceforge.net/projects/giflib/> — `licenses/LICENSE-giflib.txt`
 - **GNU libiconv** — LGPL-2.1-or-later — <https://savannah.gnu.org/projects/libiconv/> — `licenses/LICENSE-libiconv.txt`
 - **Leptonica** — BSD-2-Clause — <https://github.com/DanBloomberg/leptonica> — `licenses/LICENSE-leptonica.txt`
 - **LERC** — Apache-2.0 — <https://github.com/Esri/lerc> — `licenses/LICENSE-LERC.txt`

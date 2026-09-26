@@ -317,6 +317,8 @@ class Inventory:
         if pinned and pinned[1] == component:
             sha = hashlib.sha256(data).hexdigest()
             if sha == pinned[0]:
+                if pinned[2] == STUBBED:
+                    check_stub(path, pinned[3])
                 self.add(tree, container, component, pinned[2], f"manifest:{EVIDENCE.relative_to(REPO).as_posix()}",
                          f"sha256 {sha[:16]}: {pinned[3]}")
                 return
@@ -591,6 +593,7 @@ TESSERACT_COMPONENTS = {
     "GNU FriBidi": "fribidi",
     "GCC runtime library": "gcc-runtime",
     "giflib": "giflib",
+    "giflib export stub": "giflib",
     "GLib": "glib",
     "Graphite2": "graphite2",
     "HarfBuzz": "harfbuzz",
@@ -930,6 +933,21 @@ def floor_for(version: str, floors: list[str]) -> str:
 
 CODE_IN = "; code in "
 ABSENT = "absent:"
+# Version of an evidence row for a file that replaces a library with an export
+# stub. Its evidence starts `stub:<export>,<export>,...`. A runtime row whose
+# code is in that file resolves to it, so the library counts as not shipped.
+STUBBED = "absent"
+STUB = "stub:"
+
+
+def check_stub(path: Path, evidence: str) -> None:
+    """Refuse a stub whose export table is not exactly the one its evidence declares."""
+    if not evidence.startswith(STUB):
+        raise RuntimeError(f"{path.name}: evidence version {STUBBED!r} requires '{STUB}<exports>' evidence")
+    declared = sorted(evidence[len(STUB):].split(";", 1)[0].strip().split(","))
+    actual = sorted(pe_imports.exports(path))
+    if declared != actual:
+        raise RuntimeError(f"{path.name}: stub exports {actual} differ from the declared {declared}")
 
 
 def resolve(rows: list[Row]) -> list[Row]:
@@ -961,7 +979,8 @@ def breaches(rows: list[Row], advisories: list[tuple[str, ...]]) -> list[str]:
     out = []
     by_component: dict[str, list[Row]] = {}
     for r in resolve(rows):
-        by_component.setdefault(canonical(r[2]), []).append(r)
+        if r[3] != STUBBED:
+            by_component.setdefault(canonical(r[2]), []).append(r)
     unmatched: Counter = Counter()
     for component, floor, advisory, disposition in advisories:
         if floor.strip().startswith(ABSENT):

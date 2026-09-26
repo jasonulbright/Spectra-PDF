@@ -127,3 +127,28 @@ def test_the_package_extractor_refuses_an_archive_off_its_pin(tmp_path: Path) ->
     with pytest.raises(ValueError):
         mod.extract(archive, "0" * 64, "mingw64/bin/x.dll", tmp_path / "x.dll")
     assert not (tmp_path / "x.dll").exists()
+
+
+def test_the_giflib_stub_is_pinned_exports_the_leptonica_imports_and_imports_nothing() -> None:
+    import hashlib
+    import re
+    import sys
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import pe_imports
+
+    stub = ROOT / "scripts" / "tesseract-giflib-stub" / "libgif-7.dll"
+    pin = re.search(r'\$ExpectedGifStubSha256 = "([0-9A-F]{64})"', TEXT).group(1)
+    assert hashlib.sha256(stub.read_bytes()).hexdigest().upper() == pin
+    assert sorted(pe_imports.exports(stub)) == [
+        "DGifCloseFile", "DGifOpen", "DGifSlurp", "EGifCloseFile", "EGifOpen", "EGifPutComment",
+        "EGifPutImageDesc", "EGifPutLine", "EGifPutScreenDesc", "GifFreeMapObject", "GifMakeMapObject"]
+    assert pe_imports.imports(stub) == {}
+
+
+def test_the_giflib_stub_is_installed_after_the_overlay_and_before_the_closure_prune() -> None:
+    apply = TEXT.index("foreach ($o in $Overlay)")
+    stub = TEXT.index('Copy-Item $GifStubSrc -Destination (Join-Path $DestDir "libgif-7.dll")')
+    start = TEXT.index("tesseract.exe does not start with the overlaid libraries")
+    prune = TEXT.index("$dropped = @(Get-UnreachedDlls -Root $DestDir)")
+    assert apply < stub < start < prune

@@ -65,7 +65,7 @@ tesseract	libbz2-1.dll	bzip2	1.0.8	strings	strings: "<v>, <dd-Mon-yyyy>"
 tesseract	libdeflate.dll	libdeflate	unknown	strings	no version resource; no identifying string
 tesseract	libexpat-1.dll	expat	2.8.5.0	pe-version	VS_VERSIONINFO ProductVersion
 tesseract	libgcc_s_seh-1.dll	gcc-runtime	14.1.0	strings	no version resource; strings: dominant "GCC: (...) <v>" ident
-tesseract	libgif-7.dll	giflib	5.2.2	manifest:scripts/native-components-evidence.tsv	sha256 a1a179853ae6fad8: bin/libgif-7.dll of MSYS2 package mingw-w64-x86_64-giflib-5.2.2-1-any.pkg.tar.zst (https://repo.msys2.org/mingw/mingw64/) has this SHA-256
+tesseract	libgif-7.dll	giflib	absent	manifest:scripts/native-components-evidence.tsv	sha256 24207dd19034dc7c: stub:DGifCloseFile,DGifOpen,DGifSlurp,EGifCloseFile,EGifOpen,EGifPutComment,EGifPutImageDesc,EGifPutLine,EGifPutScreenDesc,GifFreeMapObject,GifMakeMapObject; export stub built by scripts/build-giflib-stub.ps1 from scripts/tesseract-giflib-stub/libgif-stub.c; no giflib code, imports nothing; every entry point returns the giflib 5.2 failure value
 tesseract	libiconv-2.dll	libiconv	1.19	pe-version	VS_VERSIONINFO ProductVersion
 tesseract	libjpeg-8.dll	libjpeg-turbo	3.0.3	strings	strings: "libjpeg-turbo version <v>"
 tesseract	libleptonica-6.dll	leptonica	unknown	strings	no version resource; no identifying string
@@ -167,23 +167,21 @@ libreoffice	program/wps.dll	libwps	unknown	strings	VS_VERSIONINFO carries the Li
 libreoffice	program/xpdfimport.exe	libjpeg-turbo	3.1.0	strings	strings: "libjpeg-turbo version <v>"
 libreoffice	program/xpdfimport.exe	poppler	unknown	strings	VS_VERSIONINFO carries the LibreOffice release; no identifying string
 libreoffice	program/xpdfimport.exe	zlib	1.3.2	strings	strings: "deflate <v> Copyright"
-jbig2enc	depmf.json	giflib	5.2.2	manifest:depmf.json	depmf.json projects.giflib.version
 jbig2enc	depmf.json	jbig2enc	0.32	manifest:depmf.json	depmf.json projects.jbig2enc.version
 jbig2enc	depmf.json	leptonica	1.87.0	manifest:depmf.json	depmf.json projects.leptonica.version
-jbig2enc	depmf.json	libjpeg-turbo	3.1.4.1	manifest:depmf.json	depmf.json projects.libjpeg-turbo.version
+jbig2enc	depmf.json	libjpeg-turbo	3.2.0	manifest:depmf.json	depmf.json projects.libjpeg-turbo.version
 jbig2enc	depmf.json	libpng	1.6.58	manifest:depmf.json	depmf.json projects.libpng.version
-jbig2enc	depmf.json	libtiff	4.7.1	manifest:depmf.json	depmf.json projects.tiff.version
+jbig2enc	depmf.json	libtiff	4.7.2	manifest:depmf.json	depmf.json projects.tiff.version
 jbig2enc	depmf.json	libwebp	1.6.0	manifest:depmf.json	depmf.json projects.libwebp.version
 jbig2enc	depmf.json	openjpeg	2.5.4	manifest:depmf.json	depmf.json projects.openjp2.version
-jbig2enc	depmf.json	zlib-ng	2.3.3	manifest:depmf.json	depmf.json projects.zlib-ng.version
-jbig2enc	jbig2.exe	giflib	5.2.2	runtime	jbig2.exe --version: "libgif 5.2.2"
+jbig2enc	depmf.json	zlib	1.3.2	manifest:depmf.json	depmf.json projects.zlib.version
 jbig2enc	jbig2.exe	jbig2enc	0.32	runtime	jbig2.exe --version: "jbig2enc 0.32"
 jbig2enc	jbig2.exe	leptonica	1.87.0	runtime	jbig2.exe --version: "leptonica-1.87.0"
-jbig2enc	jbig2.exe	libjpeg-turbo	3.1.4.1	runtime	jbig2.exe --version: "libjpeg-turbo 3.1.4.1"
-jbig2enc	jbig2.exe	libjpeg-turbo	3.1.4.1	strings	strings: "libjpeg-turbo version <v>"
+jbig2enc	jbig2.exe	libjpeg-turbo	3.2.0	runtime	jbig2.exe --version: "libjpeg-turbo 3.2.0"
+jbig2enc	jbig2.exe	libjpeg-turbo	3.2.0	strings	strings: "libjpeg-turbo version <v>"
 jbig2enc	jbig2.exe	libpng	1.6.58	runtime	jbig2.exe --version: "libpng 1.6.58"
-jbig2enc	jbig2.exe	libtiff	4.7.1	runtime	jbig2.exe --version: "libtiff 4.7.1"
-jbig2enc	jbig2.exe	libtiff	4.7.1	strings	strings: "LIBTIFF, Version <v>"
+jbig2enc	jbig2.exe	libtiff	4.7.2	runtime	jbig2.exe --version: "libtiff 4.7.2"
+jbig2enc	jbig2.exe	libtiff	4.7.2	strings	strings: "LIBTIFF, Version <v>"
 jbig2enc	jbig2.exe	libwebp	1.6.0	runtime	jbig2.exe --version: "libwebp 1.6.0"
 jbig2enc	jbig2.exe	openjpeg	2.5.4	runtime	jbig2.exe --version: "libopenjp2 2.5.4"
-jbig2enc	jbig2.exe	zlib	1.3.1.zlib-ng	runtime	jbig2.exe --version: "zlib 1.3.1.zlib-ng"
+jbig2enc	jbig2.exe	zlib	1.3.2	runtime	jbig2.exe --version: "zlib 1.3.2"
