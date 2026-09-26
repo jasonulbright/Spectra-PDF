@@ -723,9 +723,14 @@ impl ClaimState {
         let alias_owner = self
             .claimed_alias(path)
             .and_then(|alias| self.open_holder(&alias, None));
-        let owner = self.open_holder(path, None).or(alias_owner);
         after_scan();
-        if let Some(owner) = owner {
+        // A second spelling of the same file must not create another edit
+        // session, even in this window. The exact claimed path is different:
+        // the open funnel uses that idempotent claim to reactivate its tab.
+        if let Some(owner) = alias_owner {
+            return ClaimOutcome::refused(&owner);
+        }
+        if let Some(owner) = self.open_holder(path, None).filter(|owner| owner != label) {
             return ClaimOutcome::refused(&owner);
         }
         let output_roots = {
@@ -1821,6 +1826,43 @@ mod tests {
         // Re-claiming from the holder is the same claim, not a conflict.
         assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
         assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn the_document_owner_can_reclaim_its_path_for_tab_reactivation() {
+        let state = test_claim_state();
+        let path = r"C:\same.pdf";
+        assert!(state
+            .claim_document(path, "main", ClaimMode::Write)
+            .granted);
+
+        let reactivated = state.claim_document(path, "main", ClaimMode::Write);
+        assert!(reactivated.granted, "the current owner must reach tab reactivation");
+        assert_eq!(state.owner(path).as_deref(), Some("main"));
+
+        let other_window = state.claim_document(path, "doc-1", ClaimMode::Write);
+        assert!(!other_window.granted);
+        assert_eq!(other_window.owner, "main");
+    }
+
+    #[test]
+    fn one_window_cannot_open_a_hard_link_alias_as_a_second_document() {
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("original.pdf");
+        std::fs::write(&original, b"%PDF-1.7").unwrap();
+        let alias = dir.path().join("alias.pdf");
+        std::fs::hard_link(&original, &alias).unwrap();
+        let original = crate::commands::canonical_path(&original.to_string_lossy());
+        let alias = crate::commands::canonical_path(&alias.to_string_lossy());
+        assert_ne!(original, alias);
+
+        assert!(state
+            .claim_document(&original, "main", ClaimMode::Write)
+            .granted);
+        let duplicate = state.claim_document(&alias, "main", ClaimMode::Write);
+        assert!(!duplicate.granted);
+        assert_eq!(duplicate.owner, "main");
     }
 
     #[test]
