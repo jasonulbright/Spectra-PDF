@@ -18,9 +18,9 @@
 //! The bytes never cross the IPC boundary: a pasted screenshot is megabytes,
 //! the engine needs a file anyway, and the caller needs only the path.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::thread::sleep;
-use std::io::Write;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -308,6 +308,50 @@ fn write_scratch(extension: &str, bytes: &[u8]) -> Result<String, String> {
     write_scratch_at(&dir, extension, bytes, stamp)
 }
 
+fn discard_scratch_at(dir: &std::path::Path, path: &std::path::Path) -> Result<(), String> {
+    let scratch = dir
+        .canonicalize()
+        .map_err(|e| format!("Cannot locate the clipboard scratch folder: {e}"))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "The clipboard scratch path is invalid".to_string())?
+        .canonicalize()
+        .map_err(|e| format!("Cannot locate the clipboard scratch file: {e}"))?;
+    if parent != scratch {
+        return Err("The path is outside the clipboard scratch folder".to_string());
+    }
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "The clipboard scratch filename is invalid".to_string())?;
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !name.starts_with("clipboard-")
+        || !matches!(extension.as_str(), "png" | "dib" | "html" | "txt")
+    {
+        return Err("The path is not a clipboard scratch file".to_string());
+    }
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() => {}
+        Ok(_) => return Err("The clipboard scratch path is not a regular file".to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("Could not inspect clipboard scratch file: {error}")),
+    }
+    std::fs::remove_file(path).map_err(|e| format!("Could not remove clipboard scratch file: {e}"))
+}
+
+/// Remove a clipboard copy after its Create PDF dialog no longer needs it.
+/// The renderer supplies the path it received, but deletion is confined to
+/// this command's dedicated scratch directory and filename set.
+#[tauri::command]
+pub fn discard_clipboard_source(path: String) -> Result<(), String> {
+    let dir = scratch_dir()?;
+    discard_scratch_at(&dir, std::path::Path::new(&path))
+}
+
 /// What the clipboard holds, as a file Create PDF accepts.
 ///
 /// Priority: `PNG`, `CF_DIB`, `HTML Format`, `CF_UNICODETEXT`. Image before
@@ -432,8 +476,8 @@ pub fn read_clipboard_source() -> Result<ClipboardSource, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        checked_clipboard_size, dib_dimensions, html_document, parse_cf_html, utf16_payload,
-        create_scratch_candidate, write_scratch_at,
+        checked_clipboard_size, create_scratch_candidate, dib_dimensions, discard_scratch_at,
+        html_document, parse_cf_html, utf16_payload, write_scratch_at,
     };
     use std::sync::{mpsc, Arc, Barrier};
 
@@ -523,6 +567,32 @@ mod tests {
             .1
             .clone();
         assert_eq!(std::fs::read(candidate).unwrap(), expected);
+    }
+
+    #[test]
+    fn clipboard_scratch_release_removes_only_its_own_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let scratch = dir.path().join("clipboard-7-0.txt");
+        std::fs::write(&scratch, b"private clipboard text").unwrap();
+        discard_scratch_at(dir.path(), &scratch).unwrap();
+        assert!(!scratch.exists());
+        // Releasing twice is safe when close and row-removal race.
+        discard_scratch_at(dir.path(), &scratch).unwrap();
+    }
+
+    #[test]
+    fn clipboard_scratch_release_refuses_paths_outside_its_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let protected = outside.path().join("clipboard-7-0.txt");
+        std::fs::write(&protected, b"keep").unwrap();
+        assert!(discard_scratch_at(dir.path(), &protected).is_err());
+        assert_eq!(std::fs::read(protected).unwrap(), b"keep");
+
+        let unrelated = dir.path().join("important.txt");
+        std::fs::write(&unrelated, b"keep").unwrap();
+        assert!(discard_scratch_at(dir.path(), &unrelated).is_err());
+        assert_eq!(std::fs::read(unrelated).unwrap(), b"keep");
     }
 
     #[test]

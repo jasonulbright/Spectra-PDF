@@ -812,6 +812,8 @@ export const app = {
    * already accepts. The BYTES never cross this boundary — a pasted
    * screenshot is megabytes and the engine needs a file anyway. */
   readClipboardSource: () => invoke<ClipboardSourceResult>('read_clipboard_source'),
+  /** Remove a clipboard scratch copy after its Create PDF row is discarded. */
+  discardClipboardSource: (path: string) => invoke<void>('discard_clipboard_source', { path }),
   /** Capture a web page in a VISIBLE browser window, through WebView2's own
    * print-to-PDF. Every fetch this makes is one the user started and can
    * watch; the engine is not involved and gains no network code. */
