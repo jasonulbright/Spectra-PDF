@@ -50,6 +50,8 @@ import {
   type StampAppearanceOptions,
 } from '../lib/stamp-appearance';
 import { readFormFields } from '../lib/forms';
+import { createVerifyRuns, displayedVerify, runOwnedVerify, verifyOwnerOf, type OwnedVerify } from '../lib/signature-verify-owner';
+import { useReadAppState } from '../state/AppStateProvider';
 import {
   eutlProvenance,
   eutlUnavailable,
@@ -130,7 +132,9 @@ export function SignaturesPanel(): React.ReactElement {
   // The SAME undoable in-place flow the canvas edits use, so signing in
   // place snapshots for undo and only touches the on-disk file on Save.
   const { performOperation } = useOperations();
-  const [result, setResult] = useState<VerifyResult | null>(null);
+  const readState = useReadAppState();
+  const [ownedResult, setOwnedResult] = useState<OwnedVerify<VerifyResult> | null>(null);
+  const [verifyRuns] = useState(createVerifyRuns);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -218,6 +222,8 @@ export function SignaturesPanel(): React.ReactElement {
 
   // The bundle's own provenance, which only a verification can report — the
   // panel never asserts a fetch date the engine did not just state.
+  // A result shows only under the document, bytes and trust it judged.
+  const result = displayedVerify(ownedResult, activeFile, trust);
   const provenance = eutlProvenance(result);
   const programProvenance = msctlProvenance(result);
 
@@ -226,30 +232,39 @@ export function SignaturesPanel(): React.ReactElement {
   const buffer = activeFile?.buffer ?? null;
 
   const runVerify = useCallback(async () => {
-    if (!workingPath) return;
+    const owner = verifyOwnerOf(activeFile, trust);
+    if (!owner) return;
     setBusy(true);
     setStatus(tChrome('panel.sig.verifying'));
-    setResult(null);
+    setOwnedResult(null);
+    // A stale run leaves busy and status to the run that superseded it.
     try {
-      const res = (await call('verify_signatures', {
-        file: workingPath,
-        ...trustVerifyParams(trust),
-      })) as unknown as VerifyResult;
-      setResult(res);
-      setStatus('');
+      const outcome = await runOwnedVerify(
+        verifyRuns,
+        owner,
+        async () =>
+          (await call('verify_signatures', {
+            file: owner.workingPath,
+            ...trustVerifyParams(trust),
+          })) as unknown as VerifyResult,
+        setOwnedResult,
+      );
+      if (outcome === 'published') {
+        setStatus('');
+        setBusy(false);
+      }
     } catch (e: unknown) {
       setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
-    } finally {
       setBusy(false);
     }
-  }, [workingPath, call, trust]);
+  }, [activeFile, call, trust, verifyRuns]);
 
   // Auto-verify when the active file, its bytes, or the trust configuration
   // changes. A result kept across a byte change reports signatures over bytes
   // the document no longer holds.
   useEffect(() => {
     if (path) void runVerify();
-    else setResult(null);
+    else setOwnedResult(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, buffer, trust]);
 
@@ -464,8 +479,12 @@ export function SignaturesPanel(): React.ReactElement {
     setSignError(null);
     setSignResult(null);
     try {
+      const signedPath = activeFile.path;
       const v = await doSignInPlace(resolved.params!, password, reason, location, certify, lock, stampParams);
-      setResult(v); // the new signature lists immediately
+      // The new signature lists immediately, bound to the signed bytes.
+      const state = readState();
+      const owner = state.activeFileId === signedPath ? verifyOwnerOf(state.files.get(signedPath), trust) : null;
+      if (owner) setOwnedResult({ owner, value: v });
       if (source.mode === 'store' && source.thumbprint) rememberStoreCertificate(source.thumbprint);
       if (source.mode === 'csc' && source.providerId && source.credentialId)
         rememberCscCredential(source.providerId, source.credentialId);
@@ -477,7 +496,7 @@ export function SignaturesPanel(): React.ReactElement {
       signInPlaceRef.current = false;
       setSigning(false);
     }
-  }, [activeFile, source, password, reason, location, doSignInPlace, certify, lock, appearanceParams]);
+  }, [activeFile, source, password, reason, location, doSignInPlace, certify, lock, appearanceParams, readState, trust]);
 
   // e2e-only: register the real sign call so the harness can drive it with
   // injected paths (the native dialogs can't be driven by WebDriver).
