@@ -58,7 +58,7 @@ resources/tesseract/
 # lives in git; the binary does not).
 resources/jbig2enc/
 # Hunspell spelling dictionaries (vendored by scripts/bundle-dictionaries.ps1;
-# ~147MB of word lists across 34 languages, same repo-hygiene class as the
+# ~147MB of word lists, one per tag in scripts/dictionaries.tsv, same class as the
 # above. The pinned manifest with every file's sha256 is what lives in git).
 resources/dictionaries/
 # ICC colour profiles (staged by scripts/bundle-icc.ps1 from the committed

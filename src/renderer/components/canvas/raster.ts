@@ -8,8 +8,7 @@ export const MAX_DETAIL = 4096;
 // __SPECTRA_TEST__.getRenderTimings(). Recording is unconditional (a
 // float+push per page render — nanoscale next to the render itself); the
 // only CONSUMER is the e2e-build harness, so release behavior is one dead
-// array. The perf harness (e2e spec) opens fixtures, drains this, and the
-// recorded baseline lives in the dev notes.
+// array. The perf harness (e2e spec) opens fixtures and drains this.
 
 export interface RenderTiming {
   kind: 'base' | 'detail';

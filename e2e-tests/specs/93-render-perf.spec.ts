@@ -50,8 +50,8 @@ describe('render-performance harness', () => {
     const median = sorted[Math.floor(sorted.length / 2)];
     const max = sorted[sorted.length - 1];
 
-    // The REPORT — this line is the harness's product; the number lands in
-    // the recorded dev notes as the current baseline.
+    // The REPORT: this line is the harness's output, a measurement of this
+    // run on this machine.
     console.log(
       `[render-perf] base rasters: n=${base.length} median=${median.toFixed(1)}ms ` +
         `max=${max.toFixed(1)}ms (blank 5-page fixture, near pages only)`,

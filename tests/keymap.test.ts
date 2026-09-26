@@ -562,10 +562,8 @@ describe('single-key accelerators (pref-gated, default OFF)', () => {
   });
 
   it('INVERSION — Z/S/E bind (their features shipped); modified forms stay dead', () => {
-    // This test used to pin the trio as RESERVED (no zoom device, no note
-    // kind, no content editing). All three exist now, so reserve-don't-
-    // remap resolves to BINDING them — while the modifier discipline that
-    // motivated the reservation still holds.
+    // Z, S and E bind to their tools; the modified forms of each stay
+    // unbound.
     expect(resolveBinding(fakeEvent({ key: 'z' }))?.command).toBe('tools.zoommarquee');
     expect(resolveBinding(fakeEvent({ key: 's' }))?.command).toBe('tools.note');
     expect(resolveBinding(fakeEvent({ key: 'e' }))?.command).toBe('tools.open.edit');

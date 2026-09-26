@@ -345,10 +345,8 @@ describe('imported annotation commit round trip', () => {
   });
 
   it('INVERSION — a multi-stroke Ink imports whole and round-trips all strokes', async () => {
-    // This test used to pin the REFUSAL ("would lose strokes after the
-    // first on edit") — the no-degradation rule under a single-stroke
-    // model. The model now holds per-stroke paths, so the same rule is
-    // satisfied by fidelity: import, commit, and every stroke survives.
+    // The model holds per-stroke paths, so a multi-stroke Ink imports whole:
+    // after import and commit, every stroke survives.
     const doc = await PDFDocument.create();
     const page = doc.addPage([300, 400]);
     const ctx = doc.context;
