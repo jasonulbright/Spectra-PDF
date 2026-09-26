@@ -53,14 +53,27 @@ pub struct WatchedFolder {
 }
 
 pub struct WatcherState {
+    /// Config writes and their matching start/stop transition are one change.
+    /// Without this guard, a concurrent disable or delete can land between an
+    /// upsert's write and its spawn, leaving a watcher for stale config.
+    lifecycle: Mutex<()>,
     running: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
 impl WatcherState {
     pub fn new() -> Self {
         Self {
+            lifecycle: Mutex::new(()),
             running: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn with_lifecycle<T>(&self, change: impl FnOnce() -> T) -> T {
+        let _lifecycle = self
+            .lifecycle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        change()
     }
 }
 
@@ -116,6 +129,17 @@ fn remove_at(path: &Path, id: &str) -> Result<(), String> {
     let mut folders = read_config_at(path)?;
     folders.retain(|f| f.id != id);
     write_config_at(path, &folders)
+}
+
+fn restore_after_start_failure(
+    path: &Path,
+    id: &str,
+    previous: Option<&WatchedFolder>,
+) -> Result<(), String> {
+    match previous {
+        Some(folder) => upsert_at(path, folder),
+        None => remove_at(path, id),
+    }
 }
 
 /// Canonicalize as far as the path actually EXISTS, then re-append the rest.
@@ -247,25 +271,28 @@ fn scan_pdfs(dir: &Path) -> HashMap<String, u64> {
     out
 }
 
-/// The ONE place a watcher id becomes a path. Validation lives here so every
-/// caller — present and future — is covered by construction; a per-call-site
-/// check only ever covers the call sites you thought of.
-fn action_file_for(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+/// The ONE place a watcher id becomes a path. Each watcher instance gets an
+/// immutable action file so a run already starting cannot pick up a later
+/// edit to the same watcher's configuration.
+fn action_file_in(dir: &Path, id: &str) -> Result<PathBuf, String> {
     validate_watcher_id(id)?;
-    let dir = crate::portable::config_root(app)?.join("watched-actions");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create the actions folder: {e}"))?;
-    let file = dir.join(format!("{id}.json"));
+    std::fs::create_dir_all(dir).map_err(|e| format!("Cannot create the actions folder: {e}"))?;
+    let file = dir.join(format!("{id}-{}.json", uuid::Uuid::new_v4().simple()));
     // Belt and braces: even with the charset check above, assert the result
     // really is a direct child of the actions folder before anyone writes or
     // deletes through it.
-    if file.parent() != Some(dir.as_path()) {
+    if file.parent() != Some(dir) {
         return Err("Refusing a watched-folder id that escapes its folder.".into());
     }
     Ok(file)
 }
 
-/// Write the frozen action a watcher's runs read. A run the replaced watcher
-/// spawned may be reading the file while it is rewritten.
+fn action_file_for(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    let dir = crate::portable::config_root(app)?.join("watched-actions");
+    action_file_in(&dir, id)
+}
+
+/// Write the frozen action a watcher instance's runs read.
 fn freeze_action(action_file: &Path, action: &serde_json::Value) -> std::io::Result<()> {
     let body = serde_json::to_string_pretty(action).map_err(std::io::Error::other)?;
     crate::staging::write_record(action_file, body.as_bytes())
@@ -292,12 +319,17 @@ fn run_once(exe: &Path, folder: &WatchedFolder, action_file: &Path) {
     }
     // The run's own report lives in the action-run log; a spawn failure has
     // nowhere better than stderr (the watcher keeps ticking either way).
-    match cmd.output() {
-        Ok(out) if !out.status.success() => {
+    match cmd
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(status) if !status.success() => {
             eprintln!(
                 "watched folder '{}': run-action exited {:?}",
                 folder.name,
-                out.status.code()
+                status.code()
             );
         }
         Err(e) => eprintln!("watched folder '{}': could not spawn the runner: {e}", folder.name),
@@ -305,72 +337,90 @@ fn run_once(exe: &Path, folder: &WatchedFolder, action_file: &Path) {
     }
 }
 
-fn spawn_watcher(app: &AppHandle, folder: WatchedFolder) {
+fn spawn_watcher(app: &AppHandle, folder: WatchedFolder) -> Result<(), String> {
     let state = app.state::<WatcherState>();
     let stop = Arc::new(AtomicBool::new(false));
-    state
-        .running
-        .lock()
-        .unwrap()
-        .insert(folder.id.clone(), stop.clone());
 
-    let Ok(exe) = std::env::current_exe() else {
-        eprintln!("watched folder '{}': cannot resolve the app path", folder.name);
-        return;
-    };
-    let Ok(action_file) = action_file_for(app, &folder.id) else {
-        return;
-    };
-    // Freeze the action beside the config (idempotent — upsert rewrites it).
+    let exe = std::env::current_exe()
+        .map_err(|error| format!("Cannot resolve the app path for '{}': {error}", folder.name))?;
+    let action_file = action_file_for(app, &folder.id)?;
+    // Freeze the action in its per-instance file before replacing a live
+    // watcher. A failed write must leave the existing watcher intact.
     if let Err(e) = freeze_action(&action_file, &folder.action) {
-        eprintln!(
-            "watched folder '{}': could not write its action file: {e}",
+        let _ = std::fs::remove_file(&action_file);
+        return Err(format!(
+            "Watched folder '{}': could not write its action file: {e}",
             folder.name
-        );
-        return;
+        ));
     }
 
-    std::thread::spawn(move || {
-        let source = PathBuf::from(&folder.source);
-        let mut previous: HashMap<String, u64> = HashMap::new();
-        // What the last run LEFT BEHIND (failed files stay in the intake).
-        // A tick whose stable set equals this snapshot must not re-trigger —
-        // a permanently-broken file would otherwise re-run every interval.
-        let mut last_failures: Option<HashSet<(String, u64)>> = None;
-        while !stop.load(Ordering::Relaxed) {
-            std::thread::sleep(std::time::Duration::from_secs(POLL_SECS));
-            if stop.load(Ordering::Relaxed) {
-                break;
+    let failed_action_file = action_file.clone();
+    let watcher_id = folder.id.clone();
+    let watcher_name = folder.name.clone();
+    let watcher_stop = stop.clone();
+    let thread = std::thread::Builder::new()
+        .name(format!("watched-folder-{}", folder.id))
+        .spawn(move || {
+            let source = PathBuf::from(&folder.source);
+            let mut previous: HashMap<String, u64> = HashMap::new();
+            // What the last run LEFT BEHIND (failed files stay in the intake).
+            // A tick whose stable set equals this snapshot must not re-trigger —
+            // a permanently-broken file would otherwise re-run every interval.
+            let mut last_failures: Option<HashSet<(String, u64)>> = None;
+            while !watcher_stop.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_secs(POLL_SECS));
+                if watcher_stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                let current = scan_pdfs(&source);
+                let stable: HashSet<(String, u64)> = current
+                    .iter()
+                    .filter(|(name, size)| previous.get(*name) == Some(size))
+                    .map(|(name, size)| (name.clone(), *size))
+                    .collect();
+                previous = current;
+                if stable.is_empty() {
+                    last_failures = None;
+                    continue;
+                }
+                if last_failures.as_ref() == Some(&stable) {
+                    continue; // only the leftovers from the failed run — wait for new work
+                }
+                run_once(&exe, &folder, &action_file);
+                let after = scan_pdfs(&source);
+                let leftovers: HashSet<(String, u64)> = after
+                    .iter()
+                    .map(|(name, size)| (name.clone(), *size))
+                    .collect();
+                last_failures = if leftovers.is_empty() { None } else { Some(leftovers) };
+                previous = after;
             }
-            let current = scan_pdfs(&source);
-            let stable: HashSet<(String, u64)> = current
-                .iter()
-                .filter(|(name, size)| previous.get(*name) == Some(size))
-                .map(|(name, size)| (name.clone(), *size))
-                .collect();
-            previous = current;
-            if stable.is_empty() {
-                last_failures = None;
-                continue;
-            }
-            if last_failures.as_ref() == Some(&stable) {
-                continue; // only the leftovers from the failed run — wait for new work
-            }
-            run_once(&exe, &folder, &action_file);
-            let after = scan_pdfs(&source);
-            let leftovers: HashSet<(String, u64)> = after
-                .iter()
-                .map(|(name, size)| (name.clone(), *size))
-                .collect();
-            last_failures = if leftovers.is_empty() { None } else { Some(leftovers) };
-            previous = after;
-        }
-    });
+            let _ = std::fs::remove_file(&action_file);
+        });
+    if let Err(error) = thread {
+        let _ = std::fs::remove_file(failed_action_file);
+        return Err(format!(
+            "Watched folder '{watcher_name}': could not start its watcher: {error}"
+        ));
+    }
+    if let Some(previous) = state
+        .running
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(watcher_id, stop)
+    {
+        previous.store(true, Ordering::Relaxed);
+    }
+    Ok(())
 }
 
 fn stop_watcher(app: &AppHandle, id: &str) {
     let state = app.state::<WatcherState>();
-    let removed = state.running.lock().unwrap().remove(id);
+    let removed = state
+        .running
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(id);
     if let Some(stop) = removed {
         stop.store(true, Ordering::Relaxed);
     }
@@ -381,20 +431,25 @@ fn stop_watcher(app: &AppHandle, id: &str) {
 /// A config that cannot be read starts nothing and is left as it is; the
 /// dialog reports the same error when it lists the folders.
 pub fn start_all(app: &AppHandle) {
-    let folders = match read_config(app) {
-        Ok(folders) => folders,
-        Err(e) => {
-            eprintln!("watched folders: none started: {e}");
-            return;
+    let state = app.state::<WatcherState>();
+    state.with_lifecycle(|| {
+        let folders = match read_config(app) {
+            Ok(folders) => folders,
+            Err(e) => {
+                eprintln!("watched folders: none started: {e}");
+                return;
+            }
+        };
+        for folder in folders.into_iter().filter(|f| f.enabled) {
+            if validate_folder(&folder).is_ok() {
+                if let Err(error) = spawn_watcher(app, folder) {
+                    eprintln!("{error}");
+                }
+            }
+            // An entry that no longer validates (folder deleted on disk) simply
+            // does not start; the dialog shows it and the user fixes or removes it.
         }
-    };
-    for folder in folders.into_iter().filter(|f| f.enabled) {
-        if validate_folder(&folder).is_ok() {
-            spawn_watcher(app, folder);
-        }
-        // An entry that no longer validates (folder deleted on disk) simply
-        // does not start; the dialog shows it and the user fixes or removes it.
-    }
+    });
 }
 
 #[tauri::command]
@@ -405,29 +460,107 @@ pub async fn list_watched_folders(app: AppHandle) -> Result<Vec<WatchedFolder>, 
 #[tauri::command]
 pub async fn upsert_watched_folder(app: AppHandle, folder: WatchedFolder) -> Result<(), String> {
     validate_folder(&folder)?;
-    upsert_at(&config_path(&app)?, &folder)?;
-    stop_watcher(&app, &folder.id);
-    if folder.enabled {
-        spawn_watcher(&app, folder);
-    }
-    Ok(())
+    let path = config_path(&app)?;
+    let state = app.state::<WatcherState>();
+    state.with_lifecycle(|| {
+        let previous = read_config_at(&path)?
+            .into_iter()
+            .find(|saved| saved.id == folder.id);
+        upsert_at(&path, &folder)?;
+        if folder.enabled {
+            if let Err(error) = spawn_watcher(&app, folder.clone()) {
+                if let Err(rollback) = restore_after_start_failure(&path, &folder.id, previous.as_ref()) {
+                    eprintln!("{error}; could not restore the prior watched-folder config: {rollback}");
+                }
+                return Err(error);
+            }
+        } else {
+            stop_watcher(&app, &folder.id);
+        }
+        Ok(())
+    })
 }
 
 #[tauri::command]
 pub async fn delete_watched_folder(app: AppHandle, id: String) -> Result<(), String> {
     // A renderer-supplied string otherwise reaches `remove_file` unchecked.
     validate_watcher_id(&id)?;
-    stop_watcher(&app, &id);
-    remove_at(&config_path(&app)?, &id)?;
-    if let Ok(file) = action_file_for(&app, &id) {
-        let _ = std::fs::remove_file(file);
-    }
-    Ok(())
+    let path = config_path(&app)?;
+    let state = app.state::<WatcherState>();
+    state.with_lifecycle(|| {
+        remove_at(&path, &id)?;
+        stop_watcher(&app, &id);
+        Ok(())
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn watcher_lifecycle_changes_do_not_interleave() {
+        let state = Arc::new(WatcherState::new());
+        let records = Arc::new(Mutex::new((false, false)));
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+
+        let enabling = {
+            let state = state.clone();
+            let records = records.clone();
+            std::thread::spawn(move || {
+                state.with_lifecycle(|| {
+                    records.lock().unwrap().0 = true;
+                    started_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    records.lock().unwrap().1 = true;
+                });
+            })
+        };
+        started_rx.recv().unwrap();
+
+        let (attempted_tx, attempted_rx) = std::sync::mpsc::channel();
+        let (deleted_tx, deleted_rx) = std::sync::mpsc::channel();
+        let deleting = {
+            let state = state.clone();
+            let records = records.clone();
+            std::thread::spawn(move || {
+                attempted_tx.send(()).unwrap();
+                state.with_lifecycle(|| {
+                    *records.lock().unwrap() = (false, false);
+                });
+                deleted_tx.send(()).unwrap();
+            })
+        };
+        attempted_rx.recv().unwrap();
+        let interleaved = deleted_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_ok();
+        release_tx.send(()).unwrap();
+        enabling.join().unwrap();
+        deleting.join().unwrap();
+
+        assert!(!interleaved, "delete ran inside the unfinished enable change");
+        assert_eq!(*records.lock().unwrap(), (false, false));
+    }
+
+    #[test]
+    fn a_failed_replacement_restores_the_saved_watcher_configuration() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("watched.json");
+        let previous = folder("source", "dest", "processed");
+        let mut replacement = previous.clone();
+        replacement.action = serde_json::json!({"steps": [{"op": "rotate"}]});
+
+        upsert_at(&path, &previous).unwrap();
+        upsert_at(&path, &replacement).unwrap();
+        restore_after_start_failure(&path, &replacement.id, Some(&previous)).unwrap();
+
+        let saved = read_config_at(&path).unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].action, previous.action);
+        assert_eq!(saved[0].source, previous.source);
+    }
 
     fn folder(source: &str, dest: &str, processed: &str) -> WatchedFolder {
         WatchedFolder {
@@ -497,6 +630,30 @@ mod tests {
         }
         assert!(validate_watcher_id(&"a".repeat(65)).is_err(), "over-long id");
         assert!(validate_watcher_id(&"a".repeat(64)).is_ok(), "64 is allowed");
+    }
+
+    #[test]
+    fn a_reconfigured_watcher_keeps_the_action_of_an_in_flight_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let first_path = action_file_in(dir.path(), "w1").unwrap();
+        let second_path = action_file_in(dir.path(), "w1").unwrap();
+        assert_ne!(first_path, second_path);
+        let first = serde_json::json!({"name": "First", "steps": [{"op": "rotate"}]});
+        let second = serde_json::json!({"name": "Second", "steps": [{"op": "strip_metadata"}]});
+
+        freeze_action(&first_path, &first).unwrap();
+        freeze_action(&second_path, &second).unwrap();
+
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(&first_path).unwrap())
+                .unwrap(),
+            first
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(&second_path).unwrap())
+                .unwrap(),
+            second
+        );
     }
 
     #[test]

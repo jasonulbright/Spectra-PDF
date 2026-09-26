@@ -19,7 +19,7 @@
 //! the app (and so the listener) is back; the Settings block says exactly
 //! that.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -237,7 +237,7 @@ fn handle_job(app: &AppHandle, bytes: Vec<u8>) {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let ok = match cmd.output() {
+    let ok = match crate::gs::output_within(cmd, Duration::from_secs(2 * 60 * 60)) {
         Ok(out) if out.status.success() && part_path.is_file() => {
             // Replace the reservation with the finished file.
             match std::fs::rename(&part_path, &pdf_path) {
@@ -256,7 +256,7 @@ fn handle_job(app: &AppHandle, bytes: Vec<u8>) {
             false
         }
         Err(e) => {
-            record_error(format!("could not run the converter: {e}"));
+            record_error(format!("the converter could not finish: {e}"));
             false
         }
     };
@@ -377,6 +377,39 @@ fn elevated_script_path(dir: &Path, label: &str, pid: u32) -> PathBuf {
     dir.join(format!("opdfs-printer-{label}-{pid}.ps1"))
 }
 
+fn write_elevated_script(path: &Path, body: &str) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // The elevated PowerShell child may read the file, but another process
+        // cannot replace or edit it while the administrator prompt is open.
+        options.share_mode(1); // FILE_SHARE_READ
+    }
+    let mut file = options.open(path)?;
+    if let Err(error) = file.write_all(body.as_bytes()).and_then(|()| file.flush()) {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(error);
+    }
+    Ok(file)
+}
+
+fn powershell_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn elevation_command(script_path: &Path) -> String {
+    let script_path = powershell_literal(&script_path.to_string_lossy());
+    format!(
+        "$scriptPath = {script_path}; \
+         $argumentList = '-NoProfile -ExecutionPolicy Bypass -File \"' + $scriptPath + '\"'; \
+         $p = Start-Process -Verb RunAs -Wait -PassThru -FilePath 'powershell.exe' \
+         -ArgumentList $argumentList; exit $p.ExitCode"
+    )
+}
+
 /// The process whose `elevated_script_path` produced `entry`.
 fn elevated_script_owner(entry: &str) -> Option<u32> {
     let (label, pid) = entry
@@ -403,13 +436,11 @@ fn run_elevated_script(script_body: &str, label: &str) -> Result<(), String> {
     if !script_body.is_ascii() {
         return Err("internal: the printer script must be pure ASCII".to_string());
     }
-    std::fs::write(&path, script_body).map_err(|e| format!("Could not stage the script: {e}"))?;
-    let command = format!(
-        "$p = Start-Process -Verb RunAs -Wait -PassThru powershell -ArgumentList \
-         '-NoProfile','-ExecutionPolicy','Bypass','-File','{}'; exit $p.ExitCode",
-        path.display()
-    );
+    let script_file = write_elevated_script(&path, script_body)
+        .map_err(|e| format!("Could not stage the script: {e}"))?;
+    let command = elevation_command(&path);
     let result = run_powershell(&[&command]);
+    drop(script_file);
     let _ = std::fs::remove_file(&path);
     result.map(|_| ()).map_err(|e| {
         if e.contains("canceled") || e.contains("cancelled") || e.contains("The operation was") {
@@ -474,6 +505,47 @@ pub async fn uninstall_virtual_printer() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn elevation_command_keeps_a_quoted_script_path_as_one_argument() {
+        let path = Path::new(r"C:\Users\O'; Start-Process calc;#\printer.ps1");
+        let command = elevation_command(path);
+        assert!(command.contains("'C:\\Users\\O''; Start-Process calc;#\\printer.ps1'"));
+        assert!(command.contains("-File \"' + $scriptPath + '\""));
+        assert!(!command.contains("O'Brien"));
+    }
+
+    #[test]
+    fn an_existing_elevated_script_is_never_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("printer.ps1");
+        std::fs::write(&path, b"keep this file").unwrap();
+
+        assert!(write_elevated_script(&path, "Remove-Printer").is_err());
+        assert_eq!(std::fs::read(path).unwrap(), b"keep this file");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_elevated_script_stays_readable_but_cannot_be_replaced_while_in_use() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("printer.ps1");
+        let held = write_elevated_script(&path, "Remove-Printer").unwrap();
+
+        let mut reader = std::fs::OpenOptions::new().read(true).open(&path).unwrap();
+        let mut body = String::new();
+        reader.read_to_string(&mut body).unwrap();
+        assert_eq!(body, "Remove-Printer");
+        assert!(std::fs::remove_file(&path).is_err());
+        assert!(std::fs::OpenOptions::new()
+            .write(true)
+            .share_mode(1)
+            .open(&path)
+            .is_err());
+        drop(held);
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn printed_names_never_collide() {

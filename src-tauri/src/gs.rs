@@ -135,19 +135,48 @@ fn command(exe: &str) -> std::process::Command {
 /// surface waiting on it, for as long as it runs.
 const VERSION_BUDGET: Duration = Duration::from_secs(30);
 const SMOKE_BUDGET: Duration = Duration::from_secs(60);
-const MAX_PROBE_OUTPUT: usize = 1024 * 1024;
+const MAX_CAPTURED_OUTPUT: usize = 1024 * 1024;
 const PIPE_DRAIN_GRACE: Duration = Duration::from_millis(500);
+
+#[cfg(unix)]
+fn terminate_process_group(pid: u32) {
+    use std::os::raw::c_int;
+    extern "C" {
+        fn kill(pid: c_int, signal: c_int) -> c_int;
+    }
+    if let Ok(pid) = i32::try_from(pid) {
+        // `output_within` creates a new process group before spawn; descendants
+        // inherit it. Closing the group prevents a child that inherited our
+        // pipes from outliving the bounded read threads.
+        unsafe {
+            let _ = kill(-pid, 9); // SIGKILL
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_process_group(_pid: u32) {}
 
 /// Run `cmd` to completion or until `budget` passes, when it is killed and
 /// the run fails with `TimedOut`. Output is drained on threads so a child
 /// that fills a pipe cannot stall the wait.
-fn output_within(
+pub(crate) fn output_within(
     mut cmd: std::process::Command,
     budget: Duration,
 ) -> std::io::Result<std::process::Output> {
     use std::io::Read;
     use std::process::Stdio;
-    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let pid = child.id();
     #[cfg(windows)]
     let job = match crate::process_job::ProcessJob::attach(child.id()) {
         Ok(job) => Some(job),
@@ -155,7 +184,7 @@ fn output_within(
             let _ = child.kill();
             let _ = child.wait();
             return Err(std::io::Error::other(format!(
-                "could not contain the Ghostscript probe process: {error}"
+                "could not contain the child process: {error}"
             )));
         }
     };
@@ -172,7 +201,7 @@ fn output_within(
                     match pipe.read(&mut buffer) {
                         Ok(0) | Err(_) => break,
                         Ok(count) => {
-                            let remaining = MAX_PROBE_OUTPUT.saturating_sub(bytes.len());
+                            let remaining = MAX_CAPTURED_OUTPUT.saturating_sub(bytes.len());
                             let keep = count.min(remaining);
                             bytes.extend_from_slice(&buffer[..keep]);
                             // Continue draining after the cap so a verbose
@@ -203,6 +232,7 @@ fn output_within(
             break status;
         }
         if Instant::now() >= deadline {
+            terminate_process_group(pid);
             let _ = child.kill();
             let _ = child.wait();
             drop(job);
@@ -217,9 +247,10 @@ fn output_within(
         std::thread::sleep(Duration::from_millis(25));
     };
     // A probe owns the process tree it started. On Windows closing the job
-    // terminates descendants that inherited the captured pipe handles; the
-    // bounded receive below also prevents a stray handle on another target
-    // from extending the caller's timeout forever.
+    // terminates descendants that inherited the captured pipe handles. On
+    // Unix the process group is terminated directly. The bounded receive is a
+    // final guard against a stray handle on another target extending timeout.
+    terminate_process_group(pid);
     drop(job);
     let drain_deadline = Instant::now() + PIPE_DRAIN_GRACE;
     let collect = |reader: std::sync::mpsc::Receiver<Vec<u8>>| {
@@ -774,17 +805,22 @@ mod tests {
                 .spawn()
                 .unwrap();
         } else if std::env::var("SPECTRA_GS_DESCENDANT_HELPER").as_deref() == Ok("child") {
-            std::thread::sleep(Duration::from_secs(4));
+            std::thread::sleep(Duration::from_millis(200));
+            if let Some(marker) = std::env::var_os("SPECTRA_GS_DESCENDANT_MARKER") {
+                std::fs::write(marker, b"survived").unwrap();
+            }
         } else if std::env::var("SPECTRA_GS_DESCENDANT_HELPER").as_deref() == Ok("flood") {
             use std::io::Write;
             std::io::stdout()
-                .write_all(&vec![b'x'; MAX_PROBE_OUTPUT * 2])
+                .write_all(&vec![b'x'; MAX_CAPTURED_OUTPUT * 2])
                 .unwrap();
         }
     }
 
     #[test]
     fn output_within_finishes_when_the_executable_leaves_a_pipe_holding_child() {
+        let scratch = tempfile::tempdir().unwrap();
+        let marker = scratch.path().join("descendant-survived");
         let started = Instant::now();
         let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
         cmd.args([
@@ -793,10 +829,12 @@ mod tests {
             "--ignored",
             "--nocapture",
         ])
-        .env("SPECTRA_GS_DESCENDANT_HELPER", "parent");
+        .env("SPECTRA_GS_DESCENDANT_HELPER", "parent")
+        .env("SPECTRA_GS_DESCENDANT_MARKER", &marker);
         let out = output_within(cmd, Duration::from_secs(2)).unwrap();
         assert!(out.status.success());
         assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(!marker.exists(), "the descendant outlived its run");
     }
 
     #[test]
@@ -811,7 +849,7 @@ mod tests {
         .env("SPECTRA_GS_DESCENDANT_HELPER", "flood");
         let out = output_within(cmd, Duration::from_secs(2)).unwrap();
         assert!(out.status.success());
-        assert!(out.stdout.len() <= MAX_PROBE_OUTPUT);
+        assert!(out.stdout.len() <= MAX_CAPTURED_OUTPUT);
     }
 
     #[test]

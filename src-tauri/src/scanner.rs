@@ -1838,26 +1838,35 @@ fn bmp_declared_len(head: &[u8]) -> Option<u64> {
         u32::from_le_bytes([head[at], head[at + 1], head[at + 2], head[at + 3]]) as u64
     };
     let declared = u32_at(2);
-    if declared >= 14 {
-        return Some(declared);
+    let geometry = if head.len() >= 54 {
+        let offset = u32_at(10);
+        let width = i32::from_le_bytes([head[18], head[19], head[20], head[21]]) as i64;
+        let height = i32::from_le_bytes([head[22], head[23], head[24], head[25]]) as i64;
+        let bits = u16::from_le_bytes([head[28], head[29]]) as i64;
+        let compression = u32_at(30);
+        if compression == 0 && width > 0 && height != 0 && bits > 0 {
+            // An overflowing geometry cannot describe a complete file on any
+            // supported filesystem. Preserve it as a too-large declaration.
+            let row_bits = (width as u64) * (bits as u64);
+            let stride = ((row_bits + 31) / 32) * 4;
+            let rows = height.unsigned_abs() as u64;
+            Some(
+                stride
+                    .checked_mul(rows)
+                    .and_then(|image_bytes| offset.checked_add(image_bytes))
+                    .unwrap_or(u64::MAX),
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    match (declared >= 14, geometry) {
+        (true, Some(geometry)) => Some((declared as u64).max(geometry)),
+        (true, None) => Some(declared as u64),
+        (false, geometry) => geometry,
     }
-    // `bfSize` of zero is written by some encoders. The DIB header is then the
-    // only witness, and only for an uncompressed image, whose size is exactly
-    // the padded rows.
-    if head.len() < 54 {
-        return None;
-    }
-    let offset = u32_at(10);
-    let width = i32::from_le_bytes([head[18], head[19], head[20], head[21]]) as i64;
-    let height = i32::from_le_bytes([head[22], head[23], head[24], head[25]]) as i64;
-    let bits = u16::from_le_bytes([head[28], head[29]]) as i64;
-    let compression = u32_at(30);
-    if compression != 0 || width <= 0 || height == 0 || bits <= 0 {
-        return None;
-    }
-    let stride = ((width * bits + 31) / 32) * 4;
-    let rows = height.unsigned_abs();
-    Some(offset + (stride as u64) * rows)
 }
 
 /// Whether one staged page holds everything its header promises.
@@ -1866,11 +1875,24 @@ fn bmp_declared_len(head: &[u8]) -> Option<u64> {
 /// records what the callback was told, and a lost device is exactly the case
 /// where that and the file disagree.
 pub fn page_integrity(path: &Path) -> PageIntegrity {
-    for attempt in 0..=5 {
-        match read_page_integrity(path) {
+    retry_page_integrity(|| read_page_integrity(path), std::thread::sleep)
+}
+
+const PAGE_READ_RETRY_LIMIT: u32 = 20;
+const PAGE_READ_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
+
+fn retry_page_integrity(
+    mut read: impl FnMut() -> std::io::Result<PageIntegrity>,
+    mut wait: impl FnMut(std::time::Duration),
+) -> PageIntegrity {
+    for attempt in 0..=PAGE_READ_RETRY_LIMIT {
+        match read() {
             Ok(verdict) => return verdict,
-            Err(error) if matches!(error.raw_os_error(), Some(32 | 33)) && attempt < 5 => {
-                std::thread::sleep(std::time::Duration::from_millis(20 * (attempt + 1)));
+            Err(error)
+                if matches!(error.raw_os_error(), Some(32 | 33))
+                    && attempt < PAGE_READ_RETRY_LIMIT =>
+            {
+                wait(PAGE_READ_RETRY_DELAY);
             }
             Err(error) => return PageIntegrity::Unreadable { error: error.to_string() },
         }
@@ -2701,18 +2723,30 @@ fn sweep_scan_scratch_once() {
     });
 }
 
-/// The highest run index the allocator will try before refusing.
-const SCRATCH_INDEX_LIMIT: u32 = 10_000;
+/// How many fresh names to try before refusing an allocation. Run folders
+/// carry random names so the path returned to one renderer is a capability;
+/// another window cannot guess and delete its scan by incrementing an index.
+const SCRATCH_ALLOCATION_ATTEMPTS: u32 = 32;
 
 /// A fresh, empty scratch folder for one run, with its liveness marker held.
 pub fn new_scan_scratch() -> Result<PathBuf, ScanRefusal> {
     sweep_scan_scratch_once();
-    allocate_scan_scratch(&scan_scratch_root(), SCRATCH_INDEX_LIMIT)
+    allocate_scan_scratch(&scan_scratch_root(), SCRATCH_ALLOCATION_ATTEMPTS)
 }
 
-/// The allocator, over an explicit root and ceiling so exhaustion is reachable
-/// in a test without ten thousand folders.
+/// The allocator, over an explicit root and attempt ceiling so collisions are
+/// reachable in a test without manufacturing a huge directory tree.
 fn allocate_scan_scratch(root: &Path, limit: u32) -> Result<PathBuf, ScanRefusal> {
+    allocate_scan_scratch_with(root, limit, |_, root| {
+        root.join(format!("scan-{}", uuid::Uuid::new_v4().simple()))
+    })
+}
+
+fn allocate_scan_scratch_with(
+    root: &Path,
+    limit: u32,
+    mut candidate_for: impl FnMut(u32, &Path) -> PathBuf,
+) -> Result<PathBuf, ScanRefusal> {
     let create_failed = |e: std::io::Error| ScanRefusal {
         key: "scan.failed",
         message: format!("Could not create the scan scratch folder: {e}"),
@@ -2721,9 +2755,9 @@ fn allocate_scan_scratch(root: &Path, limit: u32) -> Result<PathBuf, ScanRefusal
     };
     std::fs::create_dir_all(root).map_err(create_failed)?;
     for n in 0..limit {
-        let candidate = root.join(format!("scan-{n}"));
-        // `create_dir` is the claim, not a preceding `exists` test: two runs
-        // starting together would both see the same index free.
+        let candidate = candidate_for(n, root);
+        // `create_dir` is the claim, not a preceding `exists` test: even a
+        // collision or simultaneous allocation cannot replace another run.
         match std::fs::create_dir(&candidate) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -2739,35 +2773,47 @@ fn allocate_scan_scratch(root: &Path, limit: u32) -> Result<PathBuf, ScanRefusal
             .insert(candidate.clone(), lock);
         return Ok(candidate);
     }
-    // Every index taken AFTER a sweep means ten thousand runs are genuinely
-    // live, which no reclaiming can help. The refusal names the root so the
-    // remedy is something the user can act on rather than a dead end.
+    // Repeated collisions are not evidence that 10,000 scans are live; random
+    // names make that explanation both false and misleading.
     Err(ScanRefusal {
-        key: "scan.scratchFull",
-        message: format!(
-            "Could not allocate a scan scratch folder: every run folder under {} is in use.",
-            root.display()
-        ),
+        key: "scan.failed",
+        message: format!("Could not allocate a unique scan scratch folder under {}.", root.display()),
         code: None,
         folder: Some(root.to_string_lossy().to_string()),
     })
 }
 
-/// Is this path a scan scratch folder this process may delete?
+/// Is this exact run folder under the scan scratch root?
 ///
 /// String containment is not the test: `..` and a symlink both defeat it. The
 /// comparison is between canonicalised paths, and a path that cannot be
-/// canonicalised is not inside anything.
+/// canonicalised is not inside anything. Requiring a direct child also keeps
+/// a renderer from using this command to remove a nested or sibling resource.
 pub fn inside_scan_scratch(path: &Path) -> bool {
-    match (path.canonicalize(), scan_scratch_root().canonicalize()) {
-        (Ok(target), Ok(root)) => target.starts_with(&root) && target != root,
+    inside_scan_scratch_at(path, &scan_scratch_root())
+}
+
+fn inside_scan_scratch_at(path: &Path, scratch_root: &Path) -> bool {
+    match (path.canonicalize(), scratch_root.canonicalize()) {
+        (Ok(target), Ok(root)) => {
+            let run_name = target
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.strip_prefix("scan-"));
+            target.parent() == Some(root.as_path())
+                && run_name.is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
+        }
         _ => false,
     }
 }
 
 /// Delete one run's scratch folder and everything staged in it.
 pub fn discard_scan_scratch(path: &Path) -> Result<(), ScanRefusal> {
-    if !inside_scan_scratch(path) {
+    discard_scan_scratch_at(path, &scan_scratch_root())
+}
+
+fn discard_scan_scratch_at(path: &Path, scratch_root: &Path) -> Result<(), ScanRefusal> {
+    if !inside_scan_scratch_at(path, scratch_root) {
         return Err(ScanRefusal::named(
             "scan.failed",
             "That folder is not a scan scratch folder.",
@@ -3266,6 +3312,46 @@ mod tests {
     }
 
     #[test]
+    fn overflowing_bmp_geometry_is_refused_as_truncated() {
+        let root = temp_scratch_root("integrity-overflow");
+        let (mut head, _) = bmp_header(1, 1, false);
+        head[18..22].copy_from_slice(&i32::MAX.to_le_bytes());
+        head[22..26].copy_from_slice(&i32::MIN.to_le_bytes());
+        head[28..30].copy_from_slice(&u16::MAX.to_le_bytes());
+        let path = stage_page(&root, "page-0000.bmp", &head, head.len() as u64);
+
+        assert_eq!(
+            page_integrity(&path),
+            PageIntegrity::Truncated {
+                declared: u64::MAX,
+                actual: head.len() as u64,
+            }
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_undersized_bmp_file_length_cannot_hide_its_pixel_geometry() {
+        let root = temp_scratch_root("integrity-size-mismatch");
+        let (mut head, _) = bmp_header(1, 1, true);
+        let declared = head.len() as u32;
+        head[2..6].copy_from_slice(&declared.to_le_bytes());
+        head[18..22].copy_from_slice(&i32::MAX.to_le_bytes());
+        head[22..26].copy_from_slice(&i32::MAX.to_le_bytes());
+        head[28..30].copy_from_slice(&u16::MAX.to_le_bytes());
+        let path = stage_page(&root, "page-0000.bmp", &head, head.len() as u64);
+
+        assert_eq!(
+            page_integrity(&path),
+            PageIntegrity::Truncated {
+                declared: u64::MAX,
+                actual: head.len() as u64,
+            }
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn a_png_is_judged_by_its_terminator() {
         let root = temp_scratch_root("integrity-png");
         let mut whole = PNG_SIGNATURE.to_vec();
@@ -3312,6 +3398,27 @@ mod tests {
             .expect("a run holding a short page is caught");
         assert_eq!(named, short);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn page_integrity_retries_a_transient_sharing_lock_for_one_second() {
+        let mut attempts = 0;
+        let mut waits = Vec::new();
+        let verdict = retry_page_integrity(
+            || {
+                attempts += 1;
+                if attempts <= 12 {
+                    Err(std::io::Error::from_raw_os_error(32))
+                } else {
+                    Ok(PageIntegrity::Complete)
+                }
+            },
+            |delay| waits.push(delay),
+        );
+
+        assert_eq!(verdict, PageIntegrity::Complete);
+        assert_eq!(attempts, 13);
+        assert_eq!(waits, vec![PAGE_READ_RETRY_DELAY; 12]);
     }
 
     #[test]
@@ -4255,21 +4362,64 @@ mod tests {
     }
 
     #[test]
-    fn exhaustion_refuses_by_its_own_key_and_names_the_root() {
-        // Every index taken means live runs, not leaked ones — the sweep has
-        // already run by then. The refusal has to leave the user somewhere to
-        // go, which is why it carries the folder as a FIELD.
+    fn repeated_name_collisions_refuse_without_replacing_existing_runs() {
         let root = temp_scratch_root("full");
         let taken: Vec<PathBuf> = (0..2)
-            .map(|_| allocate_scan_scratch(&root, 2).expect("both indices allocate"))
+            .map(|n| {
+                allocate_scan_scratch_with(&root, 1, |_, root| {
+                    root.join(format!("scan-test-{n}"))
+                })
+                .expect("the distinct test folder allocates")
+            })
             .collect();
-        let refusal = allocate_scan_scratch(&root, 2).expect_err("no index is left");
-        assert_eq!(refusal.key, "scan.scratchFull");
+        let refusal = allocate_scan_scratch_with(&root, 2, |n, root| {
+            root.join(format!("scan-test-{n}"))
+        })
+        .expect_err("both forced names collide");
+        assert_eq!(refusal.key, "scan.failed");
         assert_eq!(refusal.folder.as_deref(), Some(root.to_string_lossy().as_ref()));
         assert!(refusal.message.contains(&root.to_string_lossy().to_string()));
         for dir in &taken {
             release_scratch_lock(dir);
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_guessed_sequential_name_cannot_discard_another_run() {
+        let root = temp_scratch_root("unpredictable");
+        let live = allocate_scan_scratch(&root, 8).expect("a random run folder allocates");
+        let name = live.file_name().unwrap().to_string_lossy();
+        let id = name.strip_prefix("scan-").expect("the run prefix");
+        assert!(uuid::Uuid::parse_str(id).is_ok(), "the folder suffix is a UUID");
+
+        let guessed = root.join("scan-0");
+        assert_ne!(live, guessed);
+        assert!(discard_scan_scratch_at(&guessed, &root).is_err());
+        assert!(live.exists(), "a guessed path cannot remove a live run");
+
+        release_scratch_lock(&live);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn discard_accepts_only_a_run_folder_not_its_children() {
+        let root = temp_scratch_root("discard-boundary");
+        let run = allocate_scan_scratch(&root, 8).expect("a run folder allocates");
+        let nested = run.join("nested");
+        std::fs::create_dir(&nested).expect("a nested folder can be staged");
+        std::fs::write(nested.join("page.bmp"), b"keep").expect("a page can be staged");
+        let unrelated = root.join("not-a-run");
+        std::fs::create_dir(&unrelated).expect("an unrelated folder can be staged");
+
+        assert!(!inside_scan_scratch_at(&nested, &root));
+        assert!(discard_scan_scratch_at(&nested, &root).is_err());
+        assert!(nested.join("page.bmp").exists());
+        assert!(!inside_scan_scratch_at(&unrelated, &root));
+        assert!(discard_scan_scratch_at(&unrelated, &root).is_err());
+        assert!(unrelated.exists());
+        assert!(discard_scan_scratch_at(&run, &root).is_ok());
+        assert!(!run.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
