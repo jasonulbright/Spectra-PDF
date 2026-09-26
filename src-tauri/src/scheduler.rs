@@ -1579,7 +1579,9 @@ fn profile_from_task_xml(
         return None;
     }
 
-    if xml.matches("<Exec>").count() != 1
+    let exec = extract_tag(xml, "Exec")?;
+    if exec.contains("<WorkingDirectory")
+        || xml.matches("<Exec>").count() != 1
         || xml.matches("</Exec>").count() != 1
         || xml.contains("<ComHandler")
         || xml.contains("<SendEmail")
@@ -2288,6 +2290,16 @@ mod tests {
     fn a_task_repointed_to_another_executable_is_not_offered_for_editing() {
         let p = ocr_profile();
         let xml = build_task_xml("foreign.exe", &p, None).expect("valid task XML");
+        assert!(parse_test_task_xml(&p.name, &xml).is_none());
+    }
+
+    #[test]
+    fn a_task_with_an_unpreserved_working_directory_is_not_offered_for_editing() {
+        let p = ocr_profile();
+        let xml = build_test_task_xml(&p, None).replace(
+            "</Exec>",
+            "<WorkingDirectory>C:\\scheduled-work</WorkingDirectory></Exec>",
+        );
         assert!(parse_test_task_xml(&p.name, &xml).is_none());
     }
 
