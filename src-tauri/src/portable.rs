@@ -253,11 +253,27 @@ pub fn apply_webview_user_data() -> Option<PathBuf> {
     }
     let dir = exe_dir();
     let wanted = webview_user_data_at(&dir, container_at(&dir))?;
-    if std::fs::create_dir_all(&wanted).is_err() {
+    if !ensure_writable_dir(&wanted) {
         return None;
     }
     std::env::set_var(WEBVIEW_USER_DATA_ENV, &wanted);
     Some(wanted)
+}
+
+/// Create `dir` if needed and prove it can accept a new file.
+///
+/// `create_dir_all` succeeds when the directory already exists, even when its
+/// volume or permissions have since become read-only. A portable copy may be
+/// moved onto read-only media after a prior launch, so existence alone cannot
+/// decide whether WebView2 or the app can keep using the portable root.
+fn ensure_writable_dir(dir: &Path) -> bool {
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    tempfile::Builder::new()
+        .prefix(".spectrapdf-write-probe-")
+        .tempfile_in(dir)
+        .is_ok()
 }
 
 // ── the writable data root ─────────────────────────────────────────────────
@@ -296,7 +312,7 @@ pub fn preferred_data_root(dir: &Path, container: Container) -> Option<PathBuf> 
 fn root_from(standard: Option<PathBuf>, what: &str) -> Result<PathBuf, String> {
     let dir = exe_dir();
     let preferred = preferred_data_root(&dir, container_at(&dir));
-    resolve_data_root(preferred, standard, |p| std::fs::create_dir_all(p).is_ok())
+    resolve_data_root(preferred, standard, ensure_writable_dir)
         .ok_or_else(|| format!("Cannot resolve the {what} folder."))
 }
 
@@ -664,6 +680,20 @@ mod tests {
             resolve_data_root(Some(dir.join(PORTABLE_DATA_DIR)), None, |_| false),
             None,
         );
+    }
+
+    #[test]
+    fn an_existing_data_directory_is_probed_for_file_creation() {
+        let temp = tempfile::tempdir().unwrap();
+        let existing = temp.path().join("data");
+        std::fs::create_dir(&existing).unwrap();
+
+        assert!(ensure_writable_dir(&existing));
+        assert_eq!(std::fs::read_dir(&existing).unwrap().count(), 0);
+
+        let blocked = temp.path().join("not-a-directory");
+        std::fs::write(&blocked, b"file").unwrap();
+        assert!(!ensure_writable_dir(&blocked));
     }
 
     #[test]
