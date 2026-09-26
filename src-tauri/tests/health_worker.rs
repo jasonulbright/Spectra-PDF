@@ -562,11 +562,24 @@ fn kill_leaves_the_route_table_and_watchdog_empty_for_the_respawn() {
 fn window_destroyed_drops_only_that_labels_routes_and_never_kills_the_worker() {
     let (app, rx_a, rx_b) = two_window_mock_app();
     let (outer_a, outer_b) = route_two_outstanding(&app);
+    let sent_at = Instant::now();
+    app.state::<HealthEngineState>()
+        .watchdog
+        .armed_request(outer_a, sent_at);
 
     health_engine::on_window_destroyed(&app, "window-a");
 
     // window-a's route is gone; window-b's survives untouched.
     assert!(app.state::<HealthRouter>().0.take_route(outer_a).is_none());
+    assert_eq!(
+        app.state::<HealthEngineState>().watchdog.outstanding(),
+        1,
+        "closing a window must not disable the deadline for its running request"
+    );
+    assert!(app.state::<HealthEngineState>().watchdog.overdue(
+        sent_at + health_engine::HEALTH_DEADLINE + Duration::from_millis(1),
+        health_engine::HEALTH_DEADLINE,
+    ));
     let (label, inner) = app
         .state::<HealthRouter>()
         .0
