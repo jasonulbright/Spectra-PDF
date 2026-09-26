@@ -289,6 +289,7 @@ pub fn run() {
             snapshot::copy_image_to_clipboard,
             snapshot::save_snapshot_png,
             clipboard_read::read_clipboard_source,
+            clipboard_read::discard_clipboard_source,
             web_capture::capture_web_page,
             net::net_request,
             net::net_payload_path,

@@ -99,6 +99,8 @@ export function CreatePdfDialog({
   // line ("Image, 1200 x 800") is about the PAYLOAD and cannot be recovered
   // from the scratch path.
   const [clipboardInfo, setClipboardInfo] = useState<Record<string, ClipboardSourceResult>>({});
+  const clipboardScratchPaths = useRef(new Set<string>());
+  const clipboardDialogMounted = useRef(true);
   const dragFrom = useRef<number | null>(null);
   // Ref, not state: convert()'s reentrancy window opens BEFORE any state
   // updates land (the whole native save-dialog round trip) — a second
@@ -106,6 +108,24 @@ export function CreatePdfDialog({
   // serialized dialog promise, and BOTH ran the conversion
   // (regression; the committingTextRef discipline).
   const convertingRef = useRef(false);
+
+  React.useEffect(() => {
+    clipboardDialogMounted.current = true;
+    return () => {
+      clipboardDialogMounted.current = false;
+      for (const path of clipboardScratchPaths.current) {
+        void app.discardClipboardSource(path).catch(() => {});
+      }
+      clipboardScratchPaths.current.clear();
+    };
+  }, []);
+
+  const releaseClipboardScratch = useCallback((path: string) => {
+    void app.discardClipboardSource(path).then(
+      () => clipboardScratchPaths.current.delete(path),
+      () => {},
+    );
+  }, []);
 
   // A drop that arrives while the dialog is ALREADY open must still land —
   // `initialPaths` seeds the first render, and this merges every later seed.
@@ -153,15 +173,35 @@ export function CreatePdfDialog({
     setResult(null);
     try {
       const clip = await app.readClipboardSource();
+      if (!clipboardDialogMounted.current) {
+        void app.discardClipboardSource(clip.path).catch(() => {});
+        return null;
+      }
+      clipboardScratchPaths.current.add(clip.path);
       const row = clipboardRow(clip);
       setClipboardInfo((prev) => ({ ...prev, [row.id]: clip }));
       setRows((prev) => [...prev, row]);
       return clip;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (clipboardDialogMounted.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
       return null;
     }
   }, []);
+
+  const removeSourceRow = useCallback((rowId: string) => {
+    const clipboardSource = clipboardInfo[rowId];
+    if (clipboardSource) {
+      releaseClipboardScratch(clipboardSource.path);
+      setClipboardInfo((prev) => {
+        const next = { ...prev };
+        delete next[rowId];
+        return next;
+      });
+    }
+    setRows((prev) => removeRow(prev, rowId));
+  }, [clipboardInfo, releaseClipboardScratch]);
 
   // A capture arrives as one row per captured page, in capture order, each
   // carrying the title its bookmark will use.
@@ -427,7 +467,7 @@ export function CreatePdfDialog({
                   aria-label={tChrome('dialog.createPdf.remove')}
                   className="px-1 text-neutral-400 hover:text-red-400 disabled:opacity-60"
                   disabled={busy}
-                  onClick={() => setRows((prev) => removeRow(prev, row.id))}
+                  onClick={() => removeSourceRow(row.id)}
                 >
                   ✕
                 </button>
