@@ -289,10 +289,18 @@ describe('the distribution never claims to carry Ghostscript', () => {
     expect(panel).not.toContain('panel.settings.licensesP1');
   });
 
-  it('describes the package as an optional integration', () => {
+  it('describes the package with one description that claims no bundled Ghostscript', () => {
+    const description = 'Open-source PDF workbench for Windows';
     const pkg = JSON.parse(text('package.json')) as { description: string };
-    expect(pkg.description).toContain('optional Ghostscript integration');
-    expect(pkg.description).not.toContain('vendors upstream Ghostscript');
+    const conf = JSON.parse(text('src-tauri/tauri.conf.json')) as {
+      bundle: { shortDescription: string; longDescription: string };
+    };
+    const cargo = /^description\s*=\s*"([^"]*)"/m.exec(text('src-tauri/Cargo.toml'))?.[1];
+    expect(pkg.description).toBe(description);
+    expect(conf.bundle.shortDescription).toBe(description);
+    expect(conf.bundle.longDescription).toBe(description);
+    expect(cargo).toBe(description);
+    expect(pkg.description).not.toContain('Ghostscript');
   });
 
   it('builds the scan fixture with the app-probed executable', () => {

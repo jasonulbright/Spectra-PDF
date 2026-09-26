@@ -299,6 +299,7 @@ if ($DownloadOnly) {
 }
 
 & $SevenZip x $Installer "-o$Extracted" -y | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Error "7-Zip failed to extract the Tesseract installer (exit $LASTEXITCODE)."; exit 1 }
 
 # Rebuild the destination, but PRESERVE tessdata: the language models are
 # staged there by sync-ocr-assets.mjs and re-vendoring the binary must not

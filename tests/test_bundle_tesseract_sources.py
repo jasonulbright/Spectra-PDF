@@ -152,3 +152,14 @@ def test_the_giflib_stub_is_installed_after_the_overlay_and_before_the_closure_p
     start = TEXT.index("tesseract.exe does not start with the overlaid libraries")
     prune = TEXT.index("$dropped = @(Get-UnreachedDlls -Root $DestDir)")
     assert apply < stub < start < prune
+
+
+def test_a_failed_installer_extraction_stops_the_vendoring() -> None:
+    # 7-Zip reports a truncated or unreadable member only through its exit code;
+    # a DLL it wrote partially would otherwise ship beside a tesseract.exe that
+    # still answers --version.
+    call = '& $SevenZip x $Installer "-o$Extracted" -y | Out-Null'
+    assert TEXT.count(call) == 1
+    after = TEXT[TEXT.index(call) + len(call):].lstrip().splitlines()[0]
+    assert after.startswith("if ($LASTEXITCODE -ne 0)"), after
+    assert "exit 1" in after or "throw" in after, after
