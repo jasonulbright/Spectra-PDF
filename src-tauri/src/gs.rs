@@ -78,6 +78,7 @@ impl GsAnswer {
 /// Cached per path + mtime + size: a replaced binary at the same path
 /// re-probes, an unchanged one costs nothing after the first ask.
 type CacheKey = (String, u128, u64);
+const MAX_CACHE_ENTRIES: usize = 32;
 static CACHE: Mutex<Option<Vec<(CacheKey, GsAnswer)>>> = Mutex::new(None);
 
 pub fn clear_cache() {
@@ -109,11 +110,17 @@ fn cached(key: &CacheKey) -> Option<GsAnswer> {
         .map(|(_, answer)| answer.clone())
 }
 
+fn remember_in(entries: &mut Vec<(CacheKey, GsAnswer)>, key: CacheKey, answer: &GsAnswer) {
+    entries.retain(|(cached_key, _)| cached_key != &key);
+    if entries.len() >= MAX_CACHE_ENTRIES {
+        entries.remove(0);
+    }
+    entries.push((key, answer.clone()));
+}
+
 fn remember(key: CacheKey, answer: &GsAnswer) {
     if let Ok(mut guard) = CACHE.lock() {
-        let entries = guard.get_or_insert_with(Vec::new);
-        entries.retain(|(k, _)| k != &key);
-        entries.push((key, answer.clone()));
+        remember_in(guard.get_or_insert_with(Vec::new), key, answer);
     }
 }
 
@@ -630,6 +637,25 @@ mod tests {
         assert_eq!(parse_version("GPL Ghostscript 10.02.1"), Some((10, 2)));
         assert_eq!(parse_version(""), None);
         assert_eq!(parse_version("not a version"), None);
+    }
+
+    #[test]
+    fn the_probe_cache_has_a_fixed_entry_limit() {
+        let mut entries = Vec::new();
+        for index in 0..(MAX_CACHE_ENTRIES * 4) {
+            let path = format!("C:\\gs\\candidate-{index}\\gswin64c.exe");
+            let key = (path.clone(), index as u128, index as u64);
+            remember_in(
+                &mut entries,
+                key,
+                &GsAnswer::unavailable(&path, PROBE_FAILED, "x"),
+            );
+        }
+
+        assert_eq!(entries.len(), MAX_CACHE_ENTRIES);
+        assert!(entries
+            .iter()
+            .all(|(key, _)| key.0.contains("candidate-")));
     }
 
     #[test]
