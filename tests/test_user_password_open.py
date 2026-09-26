@@ -113,6 +113,21 @@ def test_removing_protection_needs_the_owner_password(user_opened):
     assert document_permissions(user_opened)["opener"] == "owner"
 
 
+def test_a_failed_owner_unlock_keeps_the_user_credential(user_opened, monkeypatch):
+    import engine.inspect
+
+    def refuse(path, password):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(engine.inspect, "_decrypt_in_place", refuse)
+    before = open(user_opened, "rb").read()
+    with pytest.raises(OSError):
+        unlock(user_opened, OWNER)
+    assert open(user_opened, "rb").read() == before
+    assert document_permissions(user_opened)["opener"] == "user"
+    assert get_page_count(user_opened)["pages"] == 3
+
+
 def test_wrong_password_still_reports_incorrect(protected):
     with pytest.raises(pikepdf.PasswordError):
         open_document(protected, "wrong")

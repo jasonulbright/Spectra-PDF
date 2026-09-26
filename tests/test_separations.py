@@ -1686,3 +1686,34 @@ class TestOptionalContentCarriedAcrossExtraction:
         before = single.read_bytes()
         assert _carry_off_configuration(single, keys) is False
         assert single.read_bytes() == before
+
+
+def test_a_user_opened_document_never_reaches_the_plate_cache_unprotected(tmp_path, gs_path, monkeypatch):
+    """The optional-content staging copy was saved without its protection
+    into the plate cache, which outlives the session."""
+    import tempfile
+    from engine import credentials
+    from engine import separations as sep
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "temp"))
+    (tmp_path / "temp").mkdir()
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(300, 200))
+    ocg = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=pikepdf.String("hidden")))
+    pdf.Root.OCProperties = pikepdf.Dictionary(OCGs=[ocg], D=pikepdf.Dictionary(OFF=[ocg], Order=[ocg]))
+    page = pdf.pages[0]
+    page.Resources = pikepdf.Dictionary(Properties=pikepdf.Dictionary(oc1=ocg))
+    page.Contents = pdf.make_stream(
+        b"0.9 0.1 0.1 rg 50 50 100 100 re f /OC /oc1 BDC 0 0 1 rg 160 50 50 50 re f EMC")
+    src = str(tmp_path / "doc.pdf")
+    pdf.save(src, encryption=pikepdf.Encryption(owner="o", user="u", R=6))
+    credentials.open_document(src, "u")
+    try:
+        with pytest.raises(ValueError, match="encryption cannot be kept"):
+            sep.render_separations(src, page=1, dpi=72, gs_path=gs_path,
+                                   simulation={"source": "bundled"})
+    finally:
+        credentials.close_document(src)
+    for path in sep._cache_root().rglob("*.pdf"):
+        with pytest.raises(pikepdf.PasswordError):
+            pikepdf.open(path)

@@ -14,11 +14,11 @@ const edits: ImageEdit[] = [
   { kind: 'add', page: 1, rect: [10, 20, 50, 80], source: raw },
   { kind: 'add', page: 1, rect: null, at: [10, 20], source: { svg_path: 'image.svg' } },
 ];
-function fixture() {
+function fixture(security?: OpenFile['security']) {
   const original = new Uint8Array([1, 2, 3]), filled = new Uint8Array([4, 5, 6]);
   const disk = new Map([['work', original.slice()]]), backups = new Map<string, Uint8Array>();
   const file: OpenFile = { path: 'source', workingPath: 'work', name: 'source', pageCount: 1,
-    buffer: original, dirty: false, undoStack: [], redoStack: [] };
+    buffer: original, dirty: false, undoStack: [], redoStack: [], ...(security ? { security } : {}) };
   const store = createAppStore({ ...initialState, files: new Map([['source', file]]), activeFileId: 'source' });
   const actions: AppAction[] = [], events: string[] = [];
   const io: ImageEditIo = {
@@ -119,5 +119,14 @@ describe('image gesture publication', () => {
     f.io.commit = async () => f.store.dispatch({ type: 'UPDATE_FILE', path: 'source', buffer: f.original.slice(), pageCount: 1, snapshotPath: 'gate-snapshot', documents: [] });
     await f.run({ kind: 'add', page: 1, rect: null });
     expect(confirm).toHaveBeenCalledTimes(2); expect(f.io.pick).toHaveBeenCalledTimes(1);
+  });
+
+  it('a document whose opener lacks the modify permission refuses by name before anything is staged', async () => {
+    const permissions = { print: true, print_high: true, modify: false, copy: true, annotate: true, fill: true, accessibility: true, assemble: true };
+    for (const edit of edits) {
+      const f = fixture({ opener: 'user', permissions });
+      await expect(f.run(edit)).rejects.toMatchObject({ name: 'PermissionRefusal', block: { kind: 'permission', permission: 'modify' } });
+      expect(f.io.confirm).not.toHaveBeenCalled(); expect(f.io.callStaged).not.toHaveBeenCalled(); f.unchanged();
+    }
   });
 });

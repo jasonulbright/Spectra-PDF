@@ -11,6 +11,7 @@ import os
 
 import pikepdf
 import pytest
+from xml.parsers import expat
 from pikepdf import Dictionary, Name
 
 from engine import xfa
@@ -342,11 +343,20 @@ class TestDatasetsPacket:
         assert packet.set("topmostSubform[0].fresh[0]", "x", create=True) is True
         assert DatasetsPacket(packet.bytes()).get("topmostSubform[0].fresh[0]") == "x"
 
-    @pytest.mark.parametrize("leaf", ["First Name", "a&b", "1st", 'x a="b"', "x><y"])
+    @pytest.mark.parametrize("leaf", ["First Name", "a&b", "1st", 'x a="b"', "x><y", "a:b", "Ñ:x9"])
     def test_a_leaf_that_is_no_xml_name_is_not_created(self, leaf):
         packet = DatasetsPacket(EMPTY_HOLDER_DATASETS)
         assert packet.set(f"topmostSubform[0].Page1[0].{leaf}[0]", "v", create=True) is False
         assert packet.bytes() == EMPTY_HOLDER_DATASETS
+
+    @pytest.mark.parametrize("leaf", ["Né1", "été2", "x_1-b2"])
+    def test_a_non_ascii_or_digit_bearing_name_is_created_namespace_well_formed(self, leaf):
+        packet = DatasetsPacket(EMPTY_HOLDER_DATASETS)
+        field = f"topmostSubform[0].Page1[0].{leaf}[0]"
+        assert packet.set(field, "v", create=True) is True
+        parser = expat.ParserCreate(namespace_separator=" ")
+        parser.Parse(packet.bytes(), True)
+        assert DatasetsPacket(packet.bytes()).get(field) == "v"
 
     def test_two_absent_nodes_under_one_empty_holder_compose(self):
         """Two creates under a self-closing holder each rewrote that holder's

@@ -828,3 +828,24 @@ def test_encrypt_and_decrypt_of_a_signed_document_report_the_invalidation(tmp_di
 def test_encrypt_of_an_unsigned_document_reports_no_signatures(sample_pdf, tmp_dir):
     result = encrypt(sample_pdf, os.path.join(tmp_dir, "e.pdf"), owner_password="o")
     assert "signatures_invalidated" not in result
+
+
+@pytest.mark.parametrize("door", ["set_outline", "set_page_labels", "set_document_js", "set_threads"])
+def test_a_catalog_rewrite_of_a_signed_document_reports_the_invalidation(tmp_dir, door):
+    from engine.document_js import set_document_js
+    from engine.outline import set_outline
+    from engine.page_labels import set_page_labels
+    from engine.threads import set_threads
+
+    run = {
+        "set_outline": lambda f: set_outline(f, [{"title": "One", "page": 1, "children": []}], f),
+        "set_page_labels": lambda f: set_page_labels(f, f, [{"start": 0, "style": "r", "prefix": "", "start_at": 1}]),
+        "set_document_js": lambda f: set_document_js(f, f, [{"name": "a", "js": "app.alert(1);"}]),
+        "set_threads": lambda f: set_threads(f, f, [{"title": "T", "beads": [{"page": 1, "rect": [10, 10, 100, 100]}]}]),
+    }[door]
+    signed = _signed(tmp_dir)
+    result = run(signed)
+    assert result["signatures_invalidated"] is True
+    assert result["signatures_invalidated_reason"] == "catalog-changed"
+    plain = os.path.join(tmp_dir, "plain.pdf")
+    assert "signatures_invalidated" not in run(plain)
