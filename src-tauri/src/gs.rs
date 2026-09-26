@@ -164,17 +164,60 @@ fn terminate_process_group(pid: u32) {
 #[cfg(not(unix))]
 fn terminate_process_group(_pid: u32) {}
 
+fn stop_process(child: &mut std::process::Child, pid: u32) {
+    terminate_process_group(pid);
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// Run `cmd` to completion or until `budget` passes, when it is killed and
 /// the run fails with `TimedOut`. Output is drained on threads so a child
 /// that fills a pipe cannot stall the wait.
 pub(crate) fn output_within(
+    cmd: std::process::Command,
+    budget: Duration,
+) -> std::io::Result<std::process::Output> {
+    output_within_using(cmd, budget, true, drain_bounded)
+}
+
+fn drain_bounded(
+    pipe: Option<Box<dyn std::io::Read + Send>>,
+) -> std::io::Result<std::sync::mpsc::Receiver<Vec<u8>>> {
+    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new().spawn(move || {
+        let mut bytes = Vec::with_capacity(8192);
+        let mut buffer = [0u8; 8192];
+        if let Some(mut pipe) = pipe {
+            loop {
+                match pipe.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(count) => {
+                        let remaining = MAX_CAPTURED_OUTPUT.saturating_sub(bytes.len());
+                        let keep = count.min(remaining);
+                        bytes.extend_from_slice(&buffer[..keep]);
+                        // Continue draining after the cap so a verbose
+                        // process cannot block on a full pipe.
+                    }
+                }
+            }
+        }
+        let _ = send.send(bytes);
+    })?;
+    Ok(receive)
+}
+
+fn output_within_using(
     mut cmd: std::process::Command,
     budget: Duration,
+    contain_process_tree: bool,
+    mut drain: impl FnMut(
+        Option<Box<dyn std::io::Read + Send>>,
+    ) -> std::io::Result<std::sync::mpsc::Receiver<Vec<u8>>>,
 ) -> std::io::Result<std::process::Output> {
     use std::io::Read;
     use std::process::Stdio;
     #[cfg(unix)]
-    {
+    if contain_process_tree {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
@@ -185,63 +228,61 @@ pub(crate) fn output_within(
         .spawn()?;
     let pid = child.id();
     #[cfg(windows)]
-    let job = match crate::process_job::ProcessJob::attach(child.id()) {
-        Ok(job) => Some(job),
-        Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(std::io::Error::other(format!(
-                "could not contain the child process: {error}"
-            )));
+    let job = if contain_process_tree {
+        match crate::process_job::ProcessJob::attach(child.id()) {
+            Ok(job) => Some(job),
+            Err(error) => {
+                stop_process(&mut child, pid);
+                return Err(std::io::Error::other(format!(
+                    "could not contain the child process: {error}"
+                )));
+            }
         }
+    } else {
+        None
     };
     #[cfg(not(windows))]
     let job: Option<()> = None;
 
-    let drain = |pipe: Option<Box<dyn Read + Send>>| {
-        let (send, receive) = std::sync::mpsc::sync_channel(1);
-        std::thread::spawn(move || {
-            let mut bytes = Vec::with_capacity(8192);
-            let mut buffer = [0u8; 8192];
-            if let Some(mut pipe) = pipe {
-                loop {
-                    match pipe.read(&mut buffer) {
-                        Ok(0) | Err(_) => break,
-                        Ok(count) => {
-                            let remaining = MAX_CAPTURED_OUTPUT.saturating_sub(bytes.len());
-                            let keep = count.min(remaining);
-                            bytes.extend_from_slice(&buffer[..keep]);
-                            // Continue draining after the cap so a verbose
-                            // process cannot block on a full pipe.
-                        }
-                    }
-                }
-            }
-            let _ = send.send(bytes);
-        });
-        receive
-    };
-    let stdout = drain(
+    let stdout = match drain(
         child
             .stdout
             .take()
             .map(|p| Box::new(p) as Box<dyn Read + Send>),
-    );
-    let stderr = drain(
+    ) {
+        Ok(reader) => reader,
+        Err(error) => {
+            stop_process(&mut child, pid);
+            drop(job);
+            return Err(error);
+        }
+    };
+    let stderr = match drain(
         child
             .stderr
             .take()
             .map(|p| Box::new(p) as Box<dyn Read + Send>),
-    );
+    ) {
+        Ok(reader) => reader,
+        Err(error) => {
+            stop_process(&mut child, pid);
+            drop(job);
+            return Err(error);
+        }
+    };
     let deadline = Instant::now() + budget;
     let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                stop_process(&mut child, pid);
+                drop(job);
+                return Err(error);
+            }
         }
         if Instant::now() >= deadline {
-            terminate_process_group(pid);
-            let _ = child.kill();
-            let _ = child.wait();
+            stop_process(&mut child, pid);
             drop(job);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
@@ -653,9 +694,7 @@ mod tests {
         }
 
         assert_eq!(entries.len(), MAX_CACHE_ENTRIES);
-        assert!(entries
-            .iter()
-            .all(|(key, _)| key.0.contains("candidate-")));
+        assert!(entries.iter().all(|(key, _)| key.0.contains("candidate-")));
     }
 
     #[test]
@@ -813,6 +852,52 @@ mod tests {
         let out = output_within(cmd, Duration::from_secs(10)).unwrap();
         assert!(out.status.success());
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "10.05.1");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn output_within_stops_the_child_if_a_pipe_reader_cannot_start() {
+        let scratch = tempfile::tempdir().unwrap();
+        let marker = scratch.path().join("reader-start-failure");
+        let started = marker.with_extension("started");
+        let mut cmd = std::process::Command::new("powershell.exe");
+        cmd.args([
+            "-NoProfile",
+            "-Command",
+            "Set-Content -NoNewline -Path $env:SPECTRA_GS_STARTED_MARKER -Value started; Start-Sleep -Milliseconds 300; Set-Content -NoNewline -Path $env:SPECTRA_GS_DESCENDANT_MARKER -Value survived",
+        ])
+        .env("SPECTRA_GS_STARTED_MARKER", &started)
+        .env("SPECTRA_GS_DESCENDANT_MARKER", &marker);
+
+        let error = output_within_using(cmd, Duration::from_secs(2), false, {
+            let started = started.clone();
+            move |_| {
+                let startup_deadline = Instant::now() + Duration::from_secs(2);
+                while !started.exists() && Instant::now() < startup_deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                if !started.exists() {
+                    return Err(std::io::Error::other(
+                        "the child did not reach its startup marker",
+                    ));
+                }
+                Err(std::io::Error::other(
+                    "forced output-reader startup failure",
+                ))
+            }
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::Other);
+        assert_eq!(
+            error.to_string(),
+            "forced output-reader startup failure",
+            "the injected failure must happen after the child starts"
+        );
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(
+            !marker.exists(),
+            "the child outlived reader startup failure"
+        );
     }
 
     #[test]
