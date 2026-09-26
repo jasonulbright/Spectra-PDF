@@ -16,6 +16,7 @@
 use std::path::{Path, PathBuf};
 
 const SWEEP_AFTER_SECS: u64 = 24 * 60 * 60;
+const MAX_STAGED_NAME_ATTEMPTS: usize = 4_096;
 
 fn send_dir() -> PathBuf {
     std::env::temp_dir().join("spectrapdf").join("send-to")
@@ -54,23 +55,38 @@ fn safe_file_name(name: &str) -> String {
 /// window may still read, and two sends that only checked for a free name
 /// could both take the same one.
 fn reserve_free(dir: &Path, name: &str) -> std::io::Result<PathBuf> {
+    reserve_free_with_limit(dir, name, MAX_STAGED_NAME_ATTEMPTS)
+}
+
+fn reserve_free_with_limit(
+    dir: &Path,
+    name: &str,
+    max_attempts: usize,
+) -> std::io::Result<PathBuf> {
     let (stem, ext) = match name.rsplit_once('.') {
         Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
         _ => (name.to_string(), String::new()),
     };
-    for n in 1.. {
+    for n in 1..=max_attempts {
         let candidate = if n == 1 {
             dir.join(name)
         } else {
             dir.join(format!("{stem} ({n}){ext}"))
         };
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
             Ok(_) => return Ok(candidate),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),
         }
     }
-    unreachable!()
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "No free attachment staging name is available",
+    ))
 }
 
 /// Best-effort sweep of staged copies older than a day. Failures are ignored
@@ -301,6 +317,21 @@ mod tests {
         let bare = reserve_free(dir, "README").unwrap();
         assert_eq!(reserve_free(dir, "README").unwrap().file_name().unwrap(), "README (2)");
         assert_eq!(bare.file_name().unwrap(), "README");
+    }
+
+    #[test]
+    fn staged_name_search_stops_after_its_collision_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("doc.pdf"), b"first").unwrap();
+        std::fs::write(dir.path().join("doc (2).pdf"), b"second").unwrap();
+
+        let error = reserve_free_with_limit(dir.path(), "doc.pdf", 2).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(dir.path().join("doc.pdf")).unwrap(), b"first");
+        assert_eq!(
+            std::fs::read(dir.path().join("doc (2).pdf")).unwrap(),
+            b"second"
+        );
     }
 
     #[test]
