@@ -44,9 +44,31 @@ fn safe_file_name(name: &str) -> String {
     let trimmed = cleaned.trim().trim_matches('.').trim();
     if trimmed.is_empty() {
         "document.pdf".to_string()
+    } else if is_windows_device_name(trimmed) {
+        format!("_{trimmed}")
     } else {
         trimmed.to_string()
     }
+}
+
+fn is_windows_device_name(name: &str) -> bool {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches([' ', '.'])
+        .to_ascii_uppercase();
+    if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        return true;
+    }
+    ["COM", "LPT"].iter().any(|prefix| {
+        stem.strip_prefix(prefix).is_some_and(|number| {
+            matches!(
+                number,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    })
 }
 
 /// `name.pdf` → `name (2).pdf` → `name (3).pdf`… first free slot, created
@@ -299,6 +321,22 @@ mod tests {
         assert_eq!(safe_file_name("con:tract*.pdf"), "con-tract-.pdf");
         assert_eq!(safe_file_name("   "), "document.pdf");
         assert_eq!(safe_file_name("..."), "document.pdf");
+    }
+
+    #[test]
+    fn windows_device_names_are_made_valid_for_the_staging_file() {
+        for device in [
+            "CON", "PRN", "AUX", "NUL", "COM1", "COM9", "COM¹", "COM²", "COM³", "LPT1",
+            "LPT9", "LPT¹", "LPT²", "LPT³",
+        ] {
+            assert_eq!(
+                safe_file_name(&format!("{device}.pdf")),
+                format!("_{device}.pdf"),
+                "device name must not become a DOS device path: {device}"
+            );
+        }
+        assert_eq!(safe_file_name("COM10.pdf"), "COM10.pdf");
+        assert_eq!(safe_file_name("report-NUL.pdf"), "report-NUL.pdf");
     }
 
     #[test]
