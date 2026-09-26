@@ -169,8 +169,13 @@ pub fn place_rect(saved: Rect, monitors: &[Rect], primary_work_area: Rect) -> Re
     if area <= 0 {
         return center_in(saved, primary_work_area);
     }
-    let visible: i64 = monitors.iter().map(|m| saved.intersection_area(m)).sum();
-    if visible * MIN_VISIBLE_DENOMINATOR >= area * MIN_VISIBLE_NUMERATOR {
+    let visible: i128 = monitors
+        .iter()
+        .map(|m| i128::from(saved.intersection_area(m)))
+        .sum();
+    if visible * i128::from(MIN_VISIBLE_DENOMINATOR)
+        >= i128::from(area) * i128::from(MIN_VISIBLE_NUMERATOR)
+    {
         return saved;
     }
     center_in(saved, primary_work_area)
@@ -1238,6 +1243,12 @@ mod tests {
             place_rect(huge, &[rect(0, 0, 1920, 1080)], primary()),
             rect(460, 20, 1000, 1000)
         );
+    }
+
+    #[test]
+    fn visibility_fraction_does_not_overflow_for_maximum_saved_dimensions() {
+        let saved = rect(0, 0, i32::MAX, i32::MAX);
+        assert_eq!(place_rect(saved, &[saved], primary()), saved);
     }
 
     #[test]
