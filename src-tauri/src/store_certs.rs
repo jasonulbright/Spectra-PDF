@@ -95,6 +95,12 @@ pub fn hresult_hex(code: i32) -> String {
     format!("0x{:08X}", code as u32)
 }
 
+/// Whether `now` falls within the certificate's inclusive X.509 validity
+/// interval. All values are FILETIME ticks, preserving the source precision.
+pub fn certificate_valid_at(not_before: u64, not_after: u64, now: u64) -> bool {
+    not_before <= now && now <= not_after
+}
+
 /// Whether a certificate belongs in the signing picker.
 ///
 /// Separate from every Windows call so the rule can be read and tested on its
@@ -103,7 +109,7 @@ pub fn hresult_hex(code: i32) -> String {
 /// refusal would hide certificates that sign perfectly well.
 pub fn eligible(
     has_private_key: bool,
-    expired: bool,
+    valid_at_now: bool,
     key_usage: Option<u16>,
     eku: Option<&[String]>,
 ) -> bool {
@@ -116,7 +122,7 @@ pub fn eligible(
         // is unrestricted. Do not offer an identity whose purpose is unknown.
         return false;
     };
-    if !has_private_key || expired {
+    if !has_private_key || !valid_at_now {
         return false;
     }
     if key_usage != 0 && key_usage & (KU_DIGITAL_SIGNATURE | KU_NON_REPUDIATION) == 0 {
@@ -456,12 +462,16 @@ fn read_store(machine_store: bool) -> Result<Vec<StoreCertificate>, StoreReadErr
             }
             let info = &*(*cert).pCertInfo;
             let has_key = has_private_key(cert);
-            let expired = filetime_u64(&info.NotAfter) <= now;
+            let valid_at_now = certificate_valid_at(
+                filetime_u64(&info.NotBefore),
+                filetime_u64(&info.NotAfter),
+                now,
+            );
             let usage = intended_key_usage(cert);
             let Some(eku) = enhanced_key_usage(cert) else {
                 continue;
             };
-            if !eligible(has_key, expired, usage, Some(&eku)) {
+            if !eligible(has_key, valid_at_now, usage, Some(&eku)) {
                 continue;
             }
             let Some(print) = thumbprint(cert) else {
@@ -532,29 +542,43 @@ mod tests {
 
     #[test]
     fn a_certificate_with_no_key_is_not_a_signer() {
-        assert!(!eligible(false, false, Some(KU_DIGITAL_SIGNATURE), Some(&[])));
+        assert!(!eligible(false, true, Some(KU_DIGITAL_SIGNATURE), Some(&[])));
     }
 
     #[test]
     fn an_expired_certificate_is_excluded() {
-        assert!(!eligible(true, true, Some(KU_DIGITAL_SIGNATURE), Some(&[])));
+        assert!(!eligible(true, false, Some(KU_DIGITAL_SIGNATURE), Some(&[])));
+    }
+
+    #[test]
+    fn certificate_validity_includes_both_bounds_and_excludes_future_dates() {
+        assert!(certificate_valid_at(10, 20, 10));
+        assert!(certificate_valid_at(10, 20, 20));
+        assert!(!certificate_valid_at(10, 20, 9));
+        assert!(!certificate_valid_at(10, 20, 21));
+        assert!(!eligible(
+            true,
+            certificate_valid_at(20, 30, 10),
+            Some(KU_DIGITAL_SIGNATURE),
+            Some(&[]),
+        ));
     }
 
     #[test]
     fn an_absent_key_usage_extension_is_unrestricted() {
-        assert!(eligible(true, false, Some(0), Some(&[])));
-        assert!(!eligible(true, false, None, Some(&[])));
+        assert!(eligible(true, true, Some(0), Some(&[])));
+        assert!(!eligible(true, true, None, Some(&[])));
     }
 
     #[test]
     fn key_usage_without_signing_is_excluded() {
         // keyEncipherment alone — an encryption certificate.
-        assert!(!eligible(true, false, Some(0x0020), Some(&[])));
+        assert!(!eligible(true, true, Some(0x0020), Some(&[])));
     }
 
     #[test]
     fn non_repudiation_alone_qualifies() {
-        assert!(eligible(true, false, Some(KU_NON_REPUDIATION), Some(&[])));
+        assert!(eligible(true, true, Some(KU_NON_REPUDIATION), Some(&[])));
     }
 
     #[test]
@@ -562,7 +586,7 @@ mod tests {
         assert!(code_signing_only(&oids(&["1.3.6.1.5.5.7.3.3"])));
         assert!(!eligible(
             true,
-            false,
+            true,
             Some(KU_DIGITAL_SIGNATURE),
             Some(&oids(&["1.3.6.1.5.5.7.3.3", "1.3.6.1.4.1.311.10.3.13"]))
         ));
@@ -576,7 +600,7 @@ mod tests {
         ])));
         assert!(eligible(
             true,
-            false,
+            true,
             Some(KU_DIGITAL_SIGNATURE),
             Some(&oids(&["1.3.6.1.5.5.7.3.3", "1.3.6.1.5.5.7.3.4"]))
         ));
@@ -590,8 +614,8 @@ mod tests {
     #[test]
     fn a_missing_eku_is_unrestricted_but_an_unknown_eku_is_not_eligible() {
         assert!(!code_signing_only(&[]));
-        assert!(eligible(true, false, Some(KU_DIGITAL_SIGNATURE), Some(&[])));
-        assert!(!eligible(true, false, Some(KU_DIGITAL_SIGNATURE), None));
+        assert!(eligible(true, true, Some(KU_DIGITAL_SIGNATURE), Some(&[])));
+        assert!(!eligible(true, true, Some(KU_DIGITAL_SIGNATURE), None));
     }
 
     #[test]
