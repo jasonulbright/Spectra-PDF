@@ -172,8 +172,7 @@ describe('Create PDF from any file', () => {
     this.timeout(180_000);
     await waitForHarness();
 
-    // The command's own id — renamed from file.createPdfFromPostScript, which
-    // no longer exists anywhere.
+    // The command's own id.
     expect(await invokeAppCommand('file.createPdf')).toBe(true);
     await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ timeout: 10_000 });
 

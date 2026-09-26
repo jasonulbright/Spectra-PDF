@@ -108,7 +108,7 @@ npm run scan:log -- logs\last-run.log
 
 ## What's covered
 
-> The suite is **132 specs** (`specs/*.spec.ts`, all run by the config). The
+> The suite is every `specs/*.spec.ts` file; the config runs all of them. The
 > table below is a hand-maintained sample of the foundational specs and is
 > deliberately partial — it stops at 13 and does not list the later ones
 > (content editing, per-span styling, vector graphics, kerning, and the rest).
