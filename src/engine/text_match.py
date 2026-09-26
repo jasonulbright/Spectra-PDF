@@ -248,7 +248,7 @@ def _valid_email(raw: str) -> bool:
     local, _, domain = raw.partition("@")
     if not local or len(local) > 64 or ".." in local or local[0] == "." or local[-1] == ".":
         return False
-    if ".." in domain or domain[0] in ".-" or domain[-1] in ".-":
+    if not domain or ".." in domain or domain[0] in ".-" or domain[-1] in ".-":
         return False
     tld = domain.rsplit(".", 1)[-1] if "." in domain else ""
     return len(tld) >= 2 and tld.isalpha()

@@ -5779,6 +5779,7 @@
   "refusal.field.needsOption": "이 필드 유형에는 옵션이 하나 이상 필요합니다.",
   "refusal.field.optionRectsPartial": "모든 옵션이 각자 사각형을 가지거나, 어느 것도 갖지 않아야 합니다.",
   "refusal.field.optionsUnique": "옵션은 서로 달라야 합니다.",
+  "refusal.field.radioOptionOff": "라디오 버튼 옵션의 이름은 \"Off\"일 수 없습니다. 이 이름은 모든 버튼의 해제 상태를 나타냅니다.",
   "refusal.field.pageOutOfRange": "{{page}}쪽이 범위를 벗어났습니다(1-{{count}}).",
   "refusal.field.rangeInverted": "허용하는 최솟값은 최댓값보다 클 수 없습니다.",
   "refusal.field.rangeNeedsBound": "허용 범위에는 최솟값, 최댓값 또는 둘 다 필요합니다.",

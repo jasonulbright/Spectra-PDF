@@ -500,6 +500,10 @@ def _validate(pdf: pikepdf.Pdf, specs: list, font_dir: str = "") -> None:
                 problem("a choice field needs at least one option")
             elif len({o["label"] for o in options}) != len(options):
                 problem("a choice field's options must be different from one another")
+            # ISO 32000-2 12.7.5.2.3: every button's off appearance state is
+            # named Off, so an option exported as Off has no on state of its own.
+            if kind == "radio" and any(o["label"] == "Off" for o in options):
+                problem("a radio option cannot be named Off, the name of every button's off state")
             placed = [o for o in options if o["rect"]]
             if placed and len(placed) != len(options):
                 problem("either every option carries its own rectangle or none does")

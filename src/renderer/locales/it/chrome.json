@@ -6051,6 +6051,7 @@
   "refusal.field.needsOption": "Questo tipo di campo richiede almeno un’opzione.",
   "refusal.field.optionRectsPartial": "O ogni opzione ha il proprio rettangolo, oppure nessuna.",
   "refusal.field.optionsUnique": "Le opzioni devono essere univoche.",
+  "refusal.field.radioOptionOff": "Un’opzione di pulsante di scelta non può chiamarsi \"Off\": questo nome indica lo stato disattivato di ogni pulsante.",
   "refusal.field.pageOutOfRange": "La pagina {{page}} è fuori intervallo (1-{{count}}).",
   "refusal.field.rangeInverted": "Il valore accettato più piccolo non può superare il più grande.",
   "refusal.field.rangeNeedsBound": "Un intervallo accettato richiede un valore minimo, un valore massimo o entrambi.",

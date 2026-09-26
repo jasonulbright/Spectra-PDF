@@ -805,3 +805,75 @@ def test_adding_a_signature_field_alone_stays_at_the_form_level(tmp_dir, pki):
     author = next(r for r in rows if r[0] == "Signature1")
     assert author[1] is True
     assert author[2] == "FORM_FILLING"
+
+
+def _rewrite_page_content(writer):
+    """Rewrites the signed page content stream IN PLACE (same object number)
+    and returns its reference."""
+    page = _first_page(writer)
+    ref = page.raw_get(generic.pdf_name("/Contents"))
+    stream = ref.get_object()
+    for key in ("/Filter", "/DecodeParms"):
+        stream.pop(generic.pdf_name(key), None)
+    stream._data = b"BT /F1 12 Tf 72 700 Td (Replaced.) Tj ET"
+    stream._encoded_data = None
+    writer.update_container(stream)
+    return ref
+
+
+def test_a_rewritten_content_stream_named_in_annots_is_not_cleared(tmp_dir, pki):
+    certified, _ = _certify(tmp_dir, pki, "annotate", name="annots-named.pdf")
+
+    def attack(writer):
+        ref = _rewrite_page_content(writer)
+        _append_to_annots(writer, _first_page(writer), ref)
+
+    out = _appended(certified, os.path.join(tmp_dir, "annots-named-out.pdf"), attack)
+    _field, ok, modification = _rows_under(out, DIFF_POLICY)[0]
+    assert modification == "OTHER"
+    assert ok is False
+
+
+def test_a_rewritten_content_stream_named_as_a_kid_widget_appearance_is_not_cleared(
+    tmp_dir, pki
+):
+    src = os.path.join(tmp_dir, "kid-base.pdf")
+    pdf = pikepdf.new()
+    font = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name("/Font"), Subtype=pikepdf.Name("/Type1"),
+        BaseFont=pikepdf.Name("/Helvetica"),
+    ))
+    page = pdf.add_blank_page(page_size=(612, 792))
+    page.Contents = pdf.make_stream(b"BT /F1 12 Tf 72 700 Td (Page 1.) Tj ET")
+    page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=font))
+    field = pdf.make_indirect(pikepdf.Dictionary(
+        FT=pikepdf.Name("/Tx"), T=pikepdf.String("name"), V=pikepdf.String(""),
+        DA=pikepdf.String("/Helv 10 Tf 0 g"),
+    ))
+    kid = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Widget"), Parent=field,
+        Rect=pikepdf.Array([50, 500, 250, 530]), F=4,
+    ))
+    field["/Kids"] = pikepdf.Array([kid])
+    page.obj["/Annots"] = pdf.make_indirect(pikepdf.Array([kid]))
+    pdf.Root["/AcroForm"] = pdf.make_indirect(pikepdf.Dictionary(
+        Fields=pikepdf.Array([field]), DA=pikepdf.String("/Helv 10 Tf 0 g"),
+        DR=pikepdf.Dictionary(Font=pikepdf.Dictionary(Helv=font)),
+    ))
+    pdf.save(src)
+    certified, _ = _certify(tmp_dir, pki, "form-fill", name="kid-ap.pdf", src=src)
+
+    def attack(writer):
+        ref = _rewrite_page_content(writer)
+        acro = writer.root[generic.pdf_name("/AcroForm")]
+        owner = acro.raw_get(generic.pdf_name("/Fields")).get_object()[0].get_object()
+        owner[generic.pdf_name("/V")] = generic.pdf_string("filled")
+        writer.update_container(owner)
+        widget = owner[generic.pdf_name("/Kids")][0].get_object()
+        widget[generic.pdf_name("/AP")] = ref
+        writer.update_container(widget)
+
+    out = _appended(certified, os.path.join(tmp_dir, "kid-ap-out.pdf"), attack)
+    _field, ok, modification = _rows_under(out, DIFF_POLICY)[0]
+    assert modification == "OTHER"
+    assert ok is False

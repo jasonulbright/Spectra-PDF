@@ -6051,6 +6051,7 @@
   "refusal.field.needsOption": "סוג שדה זה זקוק לאפשרות אחת לפחות.",
   "refusal.field.optionRectsPartial": "או שכל אפשרות נושאת מלבן משלה, או שאף אחת אינה נושאת מלבן.",
   "refusal.field.optionsUnique": "האפשרויות חייבות להיות ייחודיות.",
+  "refusal.field.radioOptionOff": "אפשרות של לחצן בחירה אינה יכולה להיקרא \"Off\", כי זהו שם המצב הכבוי של כל לחצן.",
   "refusal.field.pageOutOfRange": "עמוד {{page}} מחוץ לטווח — במסמך יש {{count}} עמודים, החל מעמוד 1.",
   "refusal.field.rangeInverted": "הערך המותר הקטן ביותר אינו יכול להיות גדול מהגדול ביותר.",
   "refusal.field.rangeNeedsBound": "טווח מותר זקוק לערך קטן ביותר, לערך גדול ביותר או לשניהם.",

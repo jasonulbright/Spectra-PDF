@@ -5915,6 +5915,7 @@
   "refusal.field.needsOption": "Ehhez a mezőtípushoz legalább egy lehetőség szükséges.",
   "refusal.field.optionRectsPartial": "Vagy minden lehetőség hordozza a saját téglalapját, vagy egyik sem.",
   "refusal.field.optionsUnique": "A lehetőségeknek egyedinek kell lenniük.",
+  "refusal.field.radioOptionOff": "Egy választógomb-lehetőség neve nem lehet „Off”, mert ez minden gomb kikapcsolt állapotának neve.",
   "refusal.field.pageOutOfRange": "A(z) {{page}}. oldal a tartományon kívül esik (1-{{count}}).",
   "refusal.field.rangeInverted": "A legkisebb elfogadott érték nem lehet nagyobb a legnagyobbnál.",
   "refusal.field.rangeNeedsBound": "Az elfogadott tartományhoz legkisebb érték, legnagyobb érték vagy mindkettő kell.",

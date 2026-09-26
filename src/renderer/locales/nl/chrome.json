@@ -5915,6 +5915,7 @@
   "refusal.field.needsOption": "Dit veldtype heeft ten minste één optie nodig.",
   "refusal.field.optionRectsPartial": "Of elke optie draagt een eigen rechthoek, of geen van alle.",
   "refusal.field.optionsUnique": "Opties moeten uniek zijn.",
+  "refusal.field.radioOptionOff": "Een keuzerondje-optie kan niet \"Off\" heten: die naam is de uit-toestand van elke knop.",
   "refusal.field.pageOutOfRange": "Pagina {{page}} ligt buiten het bereik (1-{{count}}).",
   "refusal.field.rangeInverted": "De kleinste geaccepteerde waarde mag niet groter zijn dan de grootste.",
   "refusal.field.rangeNeedsBound": "Een geaccepteerd bereik heeft een kleinste waarde, een grootste waarde of beide nodig.",

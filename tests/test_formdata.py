@@ -133,3 +133,13 @@ def test_a_reference_to_an_object_that_is_not_there_reads_as_nothing():
         b"endobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n"
     )
     assert parse_fdf(data) == {"A": "1"}
+
+
+def test_a_field_whose_kids_name_itself_reads_each_object_once():
+    data = (
+        b"%FDF-1.2\n1 0 obj\n<< /FDF << /Fields [2 0 R] >> >>\nendobj\n"
+        b"2 0 obj\n<< /T (a) /Kids [2 0 R 3 0 R 2 0 R 3 0 R] >>\nendobj\n"
+        b"3 0 obj\n<< /T (b) /V (x) >>\nendobj\n"
+        b"trailer\n<< /Root 1 0 R >>\n%%EOF\n"
+    )
+    assert parse_fdf(data) == {"a.b": "x"}

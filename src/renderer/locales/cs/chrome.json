@@ -6187,6 +6187,7 @@
   "refusal.field.needsOption": "Tento typ pole potřebuje alespoň jednu možnost.",
   "refusal.field.optionRectsPartial": "Buď každá možnost nese vlastní obdélník, nebo žádná.",
   "refusal.field.optionsUnique": "Možnosti musí být jedinečné.",
+  "refusal.field.radioOptionOff": "Možnost přepínače nemůže mít název „Off“, protože tento název označuje vypnutý stav každého tlačítka.",
   "refusal.field.pageOutOfRange": "Stránka {{page}} je mimo rozsah (1-{{count}}).",
   "refusal.field.rangeInverted": "Nejmenší povolená hodnota nesmí být větší než největší.",
   "refusal.field.rangeNeedsBound": "Povolený rozsah potřebuje nejmenší hodnotu, největší hodnotu, nebo obě.",

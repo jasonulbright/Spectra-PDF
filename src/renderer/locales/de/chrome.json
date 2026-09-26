@@ -5915,6 +5915,7 @@
   "refusal.field.needsOption": "Dieser Feldtyp benötigt mindestens eine Option.",
   "refusal.field.optionRectsPartial": "Entweder hat jede Option ihr eigenes Rechteck oder keine.",
   "refusal.field.optionsUnique": "Die Optionen müssen eindeutig sein.",
+  "refusal.field.radioOptionOff": "Eine Optionsfeld-Option kann nicht „Off“ heißen, denn dieser Name ist der Aus-Zustand jeder Schaltfläche.",
   "refusal.field.pageOutOfRange": "Seite {{page}} liegt außerhalb des gültigen Bereichs (1-{{count}}).",
   "refusal.field.rangeInverted": "Der kleinste zulässige Wert darf nicht größer als der größte sein.",
   "refusal.field.rangeNeedsBound": "Ein zulässiger Bereich braucht einen kleinsten Wert, einen größten Wert oder beides.",

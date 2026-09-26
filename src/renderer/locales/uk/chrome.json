@@ -6187,6 +6187,7 @@
   "refusal.field.needsOption": "Цьому типу поля потрібен хоча б один варіант.",
   "refusal.field.optionRectsPartial": "Або кожен варіант несе власний прямокутник, або жоден.",
   "refusal.field.optionsUnique": "Варіанти мають бути унікальними.",
+  "refusal.field.radioOptionOff": "Варіант перемикача не може називатися «Off»: ця назва позначає вимкнений стан кожної кнопки.",
   "refusal.field.pageOutOfRange": "Сторінка {{page}} поза діапазоном (1-{{count}}).",
   "refusal.field.rangeInverted": "Найменше дозволене значення не може бути більшим за найбільше.",
   "refusal.field.rangeNeedsBound": "Дозволеному діапазону потрібне найменше значення, найбільше або обидва.",

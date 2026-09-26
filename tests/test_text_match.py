@@ -193,6 +193,15 @@ class TestPatterns:
         ]
         assert pattern_spans("email", "write to jane@localhost") == []
 
+    def test_a_mailto_with_no_domain_is_not_an_address_and_does_not_raise(self):
+        # The url alternative for mailto: runs to the end of the token, so the
+        # address it validates can end at the @ with nothing after it.
+        assert pattern_spans("url", "write to mailto:jane@ today") == []
+        text = "write to mailto:jane@example.com today"
+        assert [text[a:b] for a, b in pattern_spans("url", text)] == [
+            "mailto:jane@example.com"
+        ]
+
     # ── national identifiers ──────────────────────────────────────────────
     def test_nhs_number_check_digit(self):
         assert pattern_spans("nhs_uk", "NHS 943 476 5919")

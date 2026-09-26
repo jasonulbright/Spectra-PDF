@@ -123,6 +123,24 @@ def _is_widget(resolver, ref) -> bool:
         return True
 
 
+def _is_annotation(resolver, ref) -> bool:
+    """True only for a readable annotation dictionary that is not a widget. A
+    stream, or a dictionary with no /Subtype name, is some other kind of
+    object, and naming it in /Annots does not make its change an annotation
+    change."""
+    try:
+        obj = resolver(ref)
+    except Exception:
+        return False
+    if isinstance(obj, generic.StreamObject) or not isinstance(obj, generic.DictionaryObject):
+        return False
+    try:
+        subtype = obj.get(_SUBTYPE)
+    except Exception:
+        return False
+    return isinstance(subtype, generic.NameObject) and subtype != _WIDGET
+
+
 class PageAnnotationRule(WhitelistRule):
     """Clears annotation membership changes on pages whose every other key is
     unchanged."""
@@ -184,6 +202,15 @@ class PageAnnotationRule(WhitelistRule):
         if any(_is_widget(new, r) for r in kept_and_updated):
             return
         annotations = [r for r in added if not _is_widget(new, r)]
+        # A cleared annotation is approved on every path that reaches it, so
+        # only an annotation dictionary qualifies, and an object the signed
+        # revision already held may join /Annots only unchanged: naming a
+        # rewritten page content stream in /Annots would otherwise clear the
+        # rewrite at the annotation level.
+        if not all(_is_annotation(new, r) for r in annotations + kept_and_updated):
+            return
+        if any(r in updated and not old.is_ref_unassignable(r) for r in annotations):
+            return
         # Nothing but widgets moved: adding a signature field is judged by the
         # form rules, at the level they judge it at, and clearing the page here
         # would raise that level for every certification.
@@ -210,7 +237,7 @@ class PageAnnotationRule(WhitelistRule):
             )
         # Membership is cleared above; the widget OBJECTS added alongside are
         # not, and stay unexplained unless a form rule justifies them.
-        for ref in annotations + kept_and_updated:
+        for ref in [r for r in annotations if r in updated] + kept_and_updated:
             yield ReferenceUpdate(ref)
             yield from self._dependencies(ref, old, new)
 
@@ -285,6 +312,8 @@ class FieldWidgetAppearanceRule(WhitelistRule):
                 continue
             if not _field_value_changed(old, new, parent_ref):
                 continue
+            if not _appearance_is_its_own(old, old_widget, new_widget):
+                continue
             yield ReferenceUpdate(ref)
             yield from _appearance_dependencies(old, new, new_widget)
 
@@ -343,6 +372,34 @@ def _field_value_changed(old, new, field_ref) -> bool:
     ):
         return False
     return old_field.get(_V) != new_field.get(_V)
+
+
+def _appearance_is_its_own(old, old_widget, new_widget) -> bool:
+    """Whether the new /AP is a dictionary the widget owns: a direct one, the
+    indirect one the widget already held, or an object the signed revision
+    never assigned. An indirect /AP that re-points at any other existing
+    object would clear that object's change on every path that reaches it."""
+    try:
+        raw = new_widget.raw_get(_AP)
+    except KeyError:
+        return True
+    if isinstance(raw, generic.IndirectObject):
+        try:
+            prior = old_widget.raw_get(_AP)
+        except KeyError:
+            prior = None
+        owned = (
+            isinstance(prior, generic.IndirectObject) and prior.reference == raw.reference
+        ) or old.is_ref_unassignable(raw.reference)
+        if not owned:
+            return False
+    try:
+        value = raw.get_object()
+    except Exception:
+        return False
+    return isinstance(value, generic.DictionaryObject) and not isinstance(
+        value, generic.StreamObject
+    )
 
 
 def _appearance_dependencies(old, new, widget):

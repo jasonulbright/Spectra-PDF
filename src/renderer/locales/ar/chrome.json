@@ -6459,6 +6459,7 @@
   "refusal.field.needsOption": "يحتاج هذا النوع من الحقول إلى خيار واحد على الأقل.",
   "refusal.field.optionRectsPartial": "إما أن يحمل كل خيار مستطيله الخاص، أو لا يحمله أي منها.",
   "refusal.field.optionsUnique": "يجب أن تكون الخيارات فريدة.",
+  "refusal.field.radioOptionOff": "لا يمكن تسمية خيار زر الاختيار \"Off\"، لأن هذا الاسم هو حالة الإيقاف لكل زر.",
   "refusal.field.pageOutOfRange": "الصفحة {{page}} خارج النطاق المسموح، وهو من 1 إلى {{count}} صفحة.",
   "refusal.field.rangeInverted": "لا يجوز أن تكون أصغر قيمة مقبولة أكبر من أكبر قيمة.",
   "refusal.field.rangeNeedsBound": "يحتاج المدى المقبول إلى أصغر قيمة أو أكبر قيمة أو كلتيهما.",

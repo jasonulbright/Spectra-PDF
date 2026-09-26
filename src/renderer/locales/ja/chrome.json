@@ -5779,6 +5779,7 @@
   "refusal.field.needsOption": "この種類のフィールドには選択肢が少なくとも 1 つ必要です。",
   "refusal.field.optionRectsPartial": "各選択肢に個別の矩形を指定するか、どれにも指定しないかのどちらかにしてください。",
   "refusal.field.optionsUnique": "選択肢は重複させないでください。",
+  "refusal.field.radioOptionOff": "ラジオボタンの選択肢に「Off」という名前は使えません。この名前はすべてのボタンのオフ状態を表します。",
   "refusal.field.pageOutOfRange": "ページ {{page}} は範囲外です（1-{{count}}）。",
   "refusal.field.rangeInverted": "受け付ける最小値は最大値より大きくできません。",
   "refusal.field.rangeNeedsBound": "受け付ける範囲には最小値、最大値、またはその両方が必要です。",

@@ -89,6 +89,8 @@ export const REFUSAL_STRINGS = {
   'refusal.field.rectEmpty': 'The field rectangle is empty.',
   'refusal.field.needsOption': 'This field type needs at least one option.',
   'refusal.field.optionsUnique': 'Options must be unique.',
+  'refusal.field.radioOptionOff':
+    'A radio option cannot be named "Off": that name is the off state of every button.',
   'refusal.field.nameExists': 'A field named "{{name}}" already exists.',
   'refusal.field.optionRectsPartial':
     'Either every option carries its own rectangle, or none of them do.',

@@ -68,7 +68,6 @@ from engine.page_images import _finalize_page_rewrite, _fresh_name, _register_xo
 from engine.redact import (
     IDENTITY,
     MAX_FORM_DEPTH,
-    _as_matrix,
     _copy_resources_for_write,
     _lookup_xobject,
     _resolve_resources,
@@ -88,6 +87,7 @@ from engine.text_runs import (
     _walk_runs,
     break_marker_count,
     break_marker_instruction,
+    form_ctm,
 )
 from engine.pdf_tree import key_name, key_text, token_text
 
@@ -4802,8 +4802,7 @@ def _rewrite_paragraph_stream(
                             sync_state()
                     form_res = xobj.get("/Resources")
                     read_res = form_res if form_res is not None else resources
-                    form_matrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
-                    form_ctm = mat_mult(form_matrix, orig.ctm)
+                    child_ctm = form_ctm(xobj, orig.ctm)
                     inner_kept, inner_changed, inner_new_forms = _rewrite_paragraph_stream(
                         pdf,
                         pikepdf.parse_content_stream(xobj),
@@ -4815,7 +4814,7 @@ def _rewrite_paragraph_stream(
                         counter,
                         reserved,
                         child,
-                        base_ctm=form_ctm,
+                        base_ctm=child_ctm,
                         parent_state=orig,
                     )
                     if inner_changed:
@@ -4843,7 +4842,7 @@ def _rewrite_paragraph_stream(
                             for fname, fdict in child_tgt.pending_fonts:
                                 _register_font(pdf, copy_res, fname, fdict)
                         copy["/Resources"] = copy_res
-                        _expand_form_bbox(copy, edit, child, form_ctm)
+                        _expand_form_bbox(copy, edit, child, child_ctm)
                         new_name = _fresh_name(resources, counter, reserved)
                         new_forms[new_name] = copy
                         kept.append(_instruction([Name(new_name)], "Do"))
