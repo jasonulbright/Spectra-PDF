@@ -117,10 +117,11 @@ def layered_pdf(path):
 
 
 def encrypted_pdf(path):
-    """Encryption, which no conformance level permits."""
+    """Encryption, which no conformance level permits. The owner password is
+    empty: a source whose permissions an owner password holds refuses."""
     pdf = pikepdf.new()
     pdf.pages.append(pikepdf.Page(_page(pdf, f"BT /F1 24 Tf 72 700 Td ({TEXT}) Tj ET")))
-    pdf.save(str(path), encryption=pikepdf.Encryption(owner="owner", user="", R=6))
+    pdf.save(str(path), encryption=pikepdf.Encryption(owner="", user="", R=6))
     pdf.close()
     return str(path)
 

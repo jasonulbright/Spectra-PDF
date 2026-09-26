@@ -17,6 +17,7 @@ from engine.grayscale import grayscale
 from engine.inspect import get_page_count, unlock
 from engine.ipc import JsonRpcServer
 from engine.merge import merge
+from engine.pdfa import convert_pdfa
 from engine.prepress import convert_cmyk, convert_pdfx
 from engine.print_layout import impose_poster
 from engine.rebuild import rebuild
@@ -221,6 +222,7 @@ REFUSING_DOORS = [
     pytest.param(lambda src, out, d: create_pdf([{"path": src, "pages": "1"}], out),
                  id="create_pdf_range"),
     pytest.param(lambda src, out, d: create_pdf([{"path": src}], out), id="create_pdf"),
+    pytest.param(lambda src, out, d: convert_pdfa(src, out), id="convert_pdfa"),
 ]
 
 
@@ -233,6 +235,18 @@ def test_a_new_document_from_a_user_opened_source_refuses(user_opened, tmp_dir, 
         run(user_opened, out, out_dir)
     assert [n for n in os.listdir(out_dir) if os.path.getsize(os.path.join(out_dir, n))] == []
 
+
+
+def test_pdfa_conversion_refuses_an_owner_gated_document_that_opens_without_a_password(tmp_dir):
+    path = os.path.join(tmp_dir, "gated.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    pdf.save(path, encryption=pikepdf.Encryption(user="", owner=OWNER, R=6, allow=ALLOW))
+    pdf.close()
+    out = os.path.join(tmp_dir, "pdfa.pdf")
+    with pytest.raises(ValueError, match="held by an owner password"):
+        convert_pdfa(path, out)
+    assert not os.path.exists(out)
 
 
 # -- doors that read a user-opened copy with the stored password --------------
@@ -531,6 +545,19 @@ def test_low_resolution_print_spools_page_images(tmp_dir, gs_path, monkeypatch):
 def test_print_is_refused_by_name_when_the_owner_withholds_it(copy_denied, gs_path):
     with pytest.raises(PermissionError, match="held by an owner password"):
         _preview(copy_denied, gs_path)
+
+
+def test_print_resolution_reads_the_permissions_of_a_document_opened_without_a_prompt(tmp_dir):
+    path = os.path.join(tmp_dir, "noprint.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    pdf.save(path, encryption=pikepdf.Encryption(
+        user="", owner=OWNER, R=6, allow=pikepdf.Permissions(print_lowres=False, print_highres=False)))
+    pdf.close()
+    assert credentials.print_resolution(path) == "none"
+    with pytest.raises(PermissionError, match="held by an owner password"):
+        from engine.printer import print_preview
+        print_preview(path, dpi=36, max_pages=1, sheet_width=612, sheet_height=792)
 
 
 def test_print_resolution_follows_the_owner_permissions(tmp_dir):

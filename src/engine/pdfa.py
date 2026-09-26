@@ -6,6 +6,7 @@ from pathlib import Path
 
 from . import budget, gs_capability, standards_report
 from .inplace import is_same_file, staged_write_if
+from .pdf_save import refuse_encrypted_source
 from .validate import validate_pdf
 
 
@@ -53,6 +54,10 @@ def convert_pdfa(
     """
     # Pre-flight: validate PDF structure before passing to Ghostscript
     info = validate_pdf(file)
+    # The output cannot be encrypted, so a source whose permissions an owner
+    # password holds (a user-password open included) refuses here: Ghostscript
+    # reads it with the stored password and would write it unprotected.
+    refuse_encrypted_source(file, drop_encryption=True)
 
     pdfa_level = {"1b": "1", "2b": "2", "3b": "3"}.get(level, "2")
 

@@ -241,14 +241,25 @@ def print_resolution(source) -> str:
 
     ISO 32000-2 Table 22: bit 3 permits printing; from revision 3, bit 12
     clear limits printing to a low-level representation of the appearance.
-    A document not opened with its user password prints without limit."""
+    A document opened with its owner password prints without limit. One
+    never passed to `open_document` (a headless caller) is read with the
+    empty password, so an owner-gated document that opens without a prompt
+    keeps its /P bits."""
     credential = _documents.get(_key(source)) if _is_path(source) else None
-    if credential is None or credential.opener != "user":
-        return "high"
-    permissions = credential.permissions
+    if credential is not None:
+        if credential.opener != "user":
+            return "high"
+        permissions, revision = credential.permissions, credential.revision
+    else:
+        if not _is_path(source) or not os.path.exists(source):
+            return "high"
+        with open_pdf(source) as pdf:
+            if not pdf.is_encrypted or pdf.owner_password_matched:
+                return "high"
+            permissions, revision = _decoded_permissions(pdf), int(pdf.encryption.R)
     if not permissions.get("print"):
         return "none"
-    if not permissions.get("print_high") and (credential.revision or 0) >= 3:
+    if not permissions.get("print_high") and (revision or 0) >= 3:
         return "low"
     return "high"
 
