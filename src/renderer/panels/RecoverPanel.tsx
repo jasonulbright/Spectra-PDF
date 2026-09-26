@@ -42,6 +42,9 @@ export function RecoverPanel(): React.ReactElement {
     finally { setBusy(false); }
   }, [activeFile, call, saveFile]);
 
+  const reported = (report as { not_carried?: unknown } | null)?.not_carried;
+  const notCarried = typeof reported === 'string' ? reported : null;
+
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.recover.open')} />;
 
   return (
@@ -61,6 +64,11 @@ export function RecoverPanel(): React.ReactElement {
               {tChrome('panel.recover.lostLine', { page: lp.page, error: lp.error })}
             </div>
           ))}
+        </div>
+      )}
+      {notCarried && (
+        <div className="text-xs text-amber-400" role="status">
+          {tChrome('panel.recover.notCarried', { reason: notCarried })}
         </div>
       )}
       <StatusBar message={status} busy={busy} />

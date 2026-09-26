@@ -144,6 +144,30 @@ class TestRotate:
         result = rotate(file=tmp_pdf, pages=[1, 99], angle=90, output=out)
         assert result["pages_rotated"] == 1  # page 99 filtered out
 
+    @pytest.mark.parametrize("angle", [45, 1, 90.5, True])
+    def test_rotate_refuses_an_angle_that_is_not_a_right_angle(self, tmp_pdf, tmp_dir, angle):
+        out = os.path.join(tmp_dir, "rotated.pdf")
+        with pytest.raises(ValueError, match="multiple of 90"):
+            rotate(file=tmp_pdf, pages=[1], angle=angle, output=out)
+        assert not os.path.exists(out)
+
+    def test_rotate_of_a_signed_document_appends_and_keeps_the_signature(self, tmp_pdf, tmp_dir):
+        from engine.signatures import sign_pdf, verify_signatures
+        from test_pades import _build_pki
+
+        pki = _build_pki(tmp_dir)
+        signed = os.path.join(tmp_dir, "signed.pdf")
+        sign_pdf(tmp_pdf, signed, pfx_path=pki["pfx"], password="pw")
+        original = open(signed, "rb").read()
+        result = rotate(file=signed, pages=[1], angle=90, output=signed)
+        assert result["signatures_preserved"] is True
+        after = open(signed, "rb").read()
+        assert after.startswith(original) and len(after) > len(original)
+        with pikepdf.open(signed) as pdf:
+            assert int(pdf.pages[0].get("/Rotate", 0)) == 90
+        verdicts = verify_signatures(signed, trust_roots=[pki["ca_pem"]])["signatures"]
+        assert verdicts and all(v["intact"] for v in verdicts)
+
 
 # ── Delete ────────────────────────────────────────────────────────────────
 

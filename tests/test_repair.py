@@ -869,3 +869,44 @@ class TestRebuildStagesItsOutput:
         assert rebuild(file=src, output=src, gs_path=gs_path)["pages"] == 2
         with pikepdf.open(src) as pdf:
             assert len(pdf.pages) == 2
+
+
+def _catalog_state_pdf(path, *, broken_layers=False):
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page()
+    group = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=pikepdf.String("Layer")))
+    groups = pikepdf.Name.Broken if broken_layers else pikepdf.Array([group])
+    pdf.Root.OCProperties = pikepdf.Dictionary(OCGs=groups, D=pikepdf.Dictionary(OFF=[group]))
+    page.obj.Resources = pikepdf.Dictionary(Properties=pikepdf.Dictionary(L=group))
+    page.Contents = pdf.make_stream(b"/OC /L BDC 0 g 10 10 50 50 re f EMC")
+    profile = pdf.make_stream(bytes(128))
+    profile.N = 4
+    pdf.Root.OutputIntents = pikepdf.Array([pikepdf.Dictionary(
+        Type=pikepdf.Name.OutputIntent, S=pikepdf.Name.GTS_PDFX,
+        OutputConditionIdentifier=pikepdf.String("FOGRA39"), DestOutputProfile=profile)])
+    pdf.Root.Names = pikepdf.Dictionary(Dests=pikepdf.Dictionary(
+        Names=[pikepdf.String("here"), pikepdf.Array([page.obj, pikepdf.Name.Fit])]))
+    pdf.save(path, min_version="1.7")
+
+
+class TestRecoverCarriesDocumentState:
+    def test_version_layers_output_intents_and_destinations_survive(self, tmp_path):
+        src, out = str(tmp_path / "src.pdf"), str(tmp_path / "out.pdf")
+        _catalog_state_pdf(src)
+        result = recover(src, out)
+        assert "not_carried" not in result
+        with pikepdf.open(out) as pdf:
+            assert pdf.pdf_version == "1.7"
+            off = pdf.Root.OCProperties.D.OFF
+            assert len(off) == 1 and str(off[0].Name) == "Layer"
+            assert "/OutputIntents" in pdf.Root or "/OutputIntents" in pdf.pages[0].obj
+            assert "/Dests" in pdf.Root.Names
+
+    def test_a_part_that_cannot_be_carried_is_named_and_pages_still_land(self, tmp_path):
+        src, out = str(tmp_path / "src.pdf"), str(tmp_path / "out.pdf")
+        _catalog_state_pdf(src, broken_layers=True)
+        result = recover(src, out)
+        assert result["recovered"] == 1
+        assert result["not_carried"].startswith("optional content")
+        with pikepdf.open(out) as pdf:
+            assert len(pdf.pages) == 1 and "/Dests" in pdf.Root.Names

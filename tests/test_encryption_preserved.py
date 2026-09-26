@@ -15,7 +15,7 @@ import pikepdf
 import pytest
 
 from engine.compress import compress
-from engine.encrypt import decrypt
+from engine.encrypt import decrypt, encrypt
 from engine.grayscale import grayscale
 from engine.inspect import unlock
 from engine.merge import merge
@@ -753,3 +753,26 @@ def test_the_descriptor_is_the_profile(tmp_dir):
         assert profile.file_method == "aes"
         assert (profile.revision, profile.version, profile.bits) == (4, 4, 128)
         assert profile.encrypt_metadata is False
+
+
+# ── owner authority ───────────────────────────────────────────────────────
+
+
+def test_decrypt_refuses_an_owner_gated_document_without_the_owner_password(owner_gated_pdf, tmp_dir):
+    out = os.path.join(tmp_dir, "plain.pdf")
+    with pytest.raises(RuntimeError, match="held by an owner password"):
+        decrypt(owner_gated_pdf, out)
+    assert not os.path.exists(out)
+
+
+def test_decrypt_with_the_owner_password_still_decrypts(owner_gated_pdf, tmp_dir):
+    out = os.path.join(tmp_dir, "plain.pdf")
+    decrypt(owner_gated_pdf, out, password="secret")
+    assert_decrypted(out)
+
+
+def test_encrypt_refuses_to_replace_an_owner_password_it_was_not_given(owner_gated_pdf, tmp_dir):
+    out = os.path.join(tmp_dir, "re.pdf")
+    with pytest.raises(RuntimeError, match="held by an owner password"):
+        encrypt(owner_gated_pdf, out, owner_password="mine")
+    assert not os.path.exists(out)

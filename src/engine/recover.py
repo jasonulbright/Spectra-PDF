@@ -12,7 +12,11 @@ from engine.acroform import (
     refuse_if_xfa,
     strip_signatures,
 )
+from engine.catalog_carry import carry_catalog
+from engine.optional_content import OptionalContentCarry, read_optional_content
+from engine.output_intents import PAGE_LEVEL_VERSION, OutputIntentCarry, read_output_intents
 from engine.pdf_save import save_pdf
+from engine.pdf_version import VersionCarry
 
 
 def _copy_recovery_page(dest, page):
@@ -64,6 +68,48 @@ def _carry_recovered_forms(source, dest, file, complete):
         dest.Root.AA = dest.copy_foreign(handle)
 
 
+def _carry_document_state(source, dest, kept) -> list[str]:
+    """Carry the catalog state the salvaged pages depend on; return what could not be.
+
+    `kept` are the source pages copied into `dest`, in destination order. Without
+    this the output declares a fresh document's version and loses the optional
+    content configuration (a layer set OFF draws), the output intents and the
+    named destinations. A part that refuses is left out and named in the result;
+    the salvaged pages still land.
+    """
+    versions = VersionCarry()
+    dest._spectra_versions = versions
+    failures: list[str] = []
+    try:
+        versions.contribute(source)
+    except Exception as e:
+        failures.append(f"version: {e}")
+    content = OptionalContentCarry()
+    try:
+        optional = read_optional_content(source, kept, content.budget)
+        content.add(dest, optional)
+        if optional is not None:
+            versions.require(optional.minimum_version)
+    except Exception as e:
+        failures.append(f"optional content: {e}")
+    intents = OutputIntentCarry()
+    try:
+        intents.add(dest, read_output_intents(source, kept, 0, intents.budget))
+        if intents.page_level_required:
+            versions.require(PAGE_LEVEL_VERSION)
+    except Exception as e:
+        failures.append(f"output intents: {e}")
+    try:
+        carry_catalog(dest, source, kept, 0)
+    except Exception as e:
+        failures.append(f"named destinations: {e}")
+    try:
+        versions.apply(dest)
+    except Exception as e:
+        failures.append(f"version: {e}")
+    return failures
+
+
 def recover(file: str, output: str) -> dict:
     """Recover salvageable pages from a severely damaged PDF.
 
@@ -96,6 +142,7 @@ def recover(file: str, output: str) -> dict:
 
     total_pages = 0
     recovered_pages = []
+    kept_pages = []
     lost_pages = []
 
     with source, pikepdf.new() as dest:
@@ -116,6 +163,7 @@ def recover(file: str, output: str) -> dict:
                     page = source.pages[i]
                     _copy_recovery_page(dest, page)
                     recovered_pages.append(page_num)
+                    kept_pages.append(page)
                 except Exception as e:
                     lost_pages.append({
                         "page": page_num,
@@ -130,6 +178,7 @@ def recover(file: str, output: str) -> dict:
                     try:
                         _copy_recovery_page(dest, page)
                         recovered_pages.append(page_num)
+                        kept_pages.append(page)
                     except Exception as e:
                         lost_pages.append({
                             "page": page_num,
@@ -148,6 +197,7 @@ def recover(file: str, output: str) -> dict:
         _carry_recovered_forms(source, dest, file,
                                enumeration_complete and not lost_pages)
         signatures_removed = strip_signatures(dest)
+        not_carried = _carry_document_state(source, dest, kept_pages)
 
         save_pdf(
             dest,
@@ -174,4 +224,5 @@ def recover(file: str, output: str) -> dict:
         "recovered_size": output_size,
         "signatures_removed": signatures_removed,
         "tier": "recover",
+        **({"not_carried": "; ".join(not_carried)} if not_carried else {}),
     }

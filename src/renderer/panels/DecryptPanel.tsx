@@ -32,7 +32,7 @@ export function DecryptPanel(): React.ReactElement {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="text-sm text-neutral-400">Working on: <span className="text-neutral-200">{activeFile.name}</span></div>
+      <div className="text-sm text-neutral-400">{tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span></div>
       <div>
         <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.decrypt.password')}</label>
         <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={tChrome('panel.decrypt.passwordPlaceholder')}

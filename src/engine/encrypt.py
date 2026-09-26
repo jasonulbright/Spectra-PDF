@@ -27,6 +27,17 @@ def _save(pdf, file: str, output_path: Path, encryption=None) -> None:
         save_pdf(pdf, output_path, **kwargs)
 
 
+def _require_owner_authority(pdf) -> None:
+    """ISO 32000-2 7.6.4.1: only the owner password authorizes changing the
+    encryption or the permissions. A document opened without it (an empty user
+    password over a non-empty owner password, or the user password) refuses."""
+    if pdf.is_encrypted and not pdf.owner_password_matched:
+        raise RuntimeError(
+            "This document's permissions are held by an owner password, which is "
+            "needed to change them. Open it with that password first."
+        )
+
+
 # User-facing permission categories → pikepdf.Permissions flags. Accessibility
 # (assistive-tech text extraction) is never blocked: preventing a screen reader
 # from reading the document is an accessibility failure, not a permission choice.
@@ -78,6 +89,7 @@ def encrypt(
         enc_kwargs["allow"] = allow
 
     with pikepdf.open(file) as pdf:
+        _require_owner_authority(pdf)
         output_path = Path(output)
         _save(pdf, file, output_path, encryption=pikepdf.Encryption(**enc_kwargs))
 
@@ -116,11 +128,7 @@ def grant_accessibility_permission(file: str, output: str) -> dict:
             raise ValueError(
                 "This document already allows assistive technology to read it."
             )
-        if not pdf.owner_password_matched:
-            raise RuntimeError(
-                "This document's permissions are held by an owner password, which is "
-                "needed to change them. Open it with that password first."
-            )
+        _require_owner_authority(pdf)
         info = pdf.encryption
         revision = int(info.R)
         allow = pikepdf.Permissions(
@@ -158,6 +166,7 @@ def decrypt(file: str, output: str, password: str = "") -> dict:
         password: Password to unlock the document.
     """
     with pikepdf.open(file, password=password) as pdf:
+        _require_owner_authority(pdf)
         output_path = Path(output)
         _save(pdf, file, output_path)
 

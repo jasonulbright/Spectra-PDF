@@ -2328,15 +2328,18 @@ def set_widget_visibility(
     changed = 0
     missing: list[str] = []
     with pikepdf.open(file) as pdf:
-        by_name = {f.name: f for f in _all_fields(pdf)}
+        by_name: dict[str, list] = {}
+        for f in _all_fields(pdf):
+            by_name.setdefault(f.name, []).append(f)
         acted: list[str] = []
         for name in names:
-            field = by_name.get(name)
-            if field is None:
+            members = by_name.get(name)
+            if not members:
                 missing.append(name)
                 continue
             acted.append(name)
-            changed += fieldactions.set_widget_hidden(field.obj, bool(hide))
+            for field in members:
+                changed += fieldactions.set_widget_hidden(field.obj, bool(hide))
         if missing and not acted:
             raise ValueError(
                 "this document has no form field named " + ", ".join(missing)
@@ -2469,7 +2472,13 @@ def fill_form_fields(
                 "own pages from an XML template, so its fields cannot be "
                 "filled here."
             )
-        fields = {f.name: f for f in _all_fields(pdf)}
+        # ISO 32000-2 12.7.4.2: field dictionaries sharing one fully qualified
+        # name are one field. Every dictionary of the name takes the value, or a
+        # fill reports success over a copy that still shows the old one.
+        groups: dict[str, list] = {}
+        for f in _all_fields(pdf):
+            groups.setdefault(f.name, []).append(f)
+        fields = {name: members[0] for name, members in groups.items()}
         acro = _acroform(pdf)
 
         # Validate EVERYTHING before mutating ANYTHING — report all problems.
@@ -2480,108 +2489,109 @@ def fill_form_fields(
             if field is None:
                 problems.append(f"no such field: {name}")
                 continue
-            ftype = _classify(field)
-            if field.flags & FF_READ_ONLY:
-                problems.append(f"field is read-only: {name}")
-                continue
-            if ftype == "text":
-                text = str(value)
-                limit = _max_len(field)
-                if limit is not None and len(text) > limit:
-                    problems.append(
-                        f"value for {name} is longer than the field's maximum "
-                        f"of {limit} characters"
+            for field in groups[str(name)]:
+                ftype = _classify(field)
+                if field.flags & FF_READ_ONLY:
+                    problems.append(f"field is read-only: {name}")
+                    continue
+                if ftype == "text":
+                    text = str(value)
+                    limit = _max_len(field)
+                    if limit is not None and len(text) > limit:
+                        problems.append(
+                            f"value for {name} is longer than the field's maximum "
+                            f"of {limit} characters"
+                        )
+                        continue
+                    # Encodability is part of validation, not a mutation-time
+                    # The "list all problems" contract includes every appearance
+                    # encoding failure so multiple bad fields report together. A
+                    # non-WinAnsi value is fillable via an embedded Unicode font
+                    # when `font_dir` covers it, else refused here.
+                    fda = _field_da(field, acro)
+                    prob = _text_value_problem(
+                        name, text, fda, font_dir, _da_writes_vertically(pdf, fda)
                     )
-                    continue
-                # Encodability is part of validation, not a mutation-time
-                # The "list all problems" contract includes every appearance
-                # encoding failure so multiple bad fields report together. A
-                # non-WinAnsi value is fillable via an embedded Unicode font
-                # when `font_dir` covers it, else refused here.
-                fda = _field_da(field, acro)
-                prob = _text_value_problem(
-                    name, text, fda, font_dir, _da_writes_vertically(pdf, fda)
-                )
-                if prob is not None:
-                    problems.append(prob)
-                else:
-                    plan.append((field, ftype, text))
-            elif ftype == "checkbox":
-                b = _coerce_bool(value)
-                if b is None:
-                    problems.append(f"checkbox {name} needs true/false, got: {value!r}")
-                else:
-                    plan.append((field, ftype, b))
-            elif ftype == "radio":
-                if str(value) == "":
-                    plan.append((field, ftype, _CLEAR))  # deliberate de-selection
-                else:
-                    state = _radio_state_for(field, str(value))
-                    if state is None:
-                        opts = ", ".join(_radio_display_options(field))
-                        problems.append(f"radio {name} has no option {value!r} (options: {opts})")
+                    if prob is not None:
+                        problems.append(prob)
                     else:
-                        plan.append((field, ftype, state))
-            elif ftype == "optionlist" and isinstance(value, (list, tuple)):
-                # A multi-select list box — every element must be an option;
-                # store /V as the export array + /I as the selected indices.
-                fda = _field_da(field, acro)
-                labels_prob = _choice_labels_problem(
-                    name, _options(field), fda, font_dir, _da_writes_vertically(pdf, fda)
-                )
-                if labels_prob is not None:
-                    problems.append(labels_prob)
-                    continue
-                if len(value) == 0:
-                    plan.append((field, ftype, _CLEAR))  # nothing selected
-                    continue
-                pairs: list[tuple[str, int]] = []
-                bad: list[str] = []
-                for v in value:
-                    ei = _option_export_index(field, str(v))
-                    if ei is None:
-                        bad.append(str(v))
+                        plan.append((field, ftype, text))
+                elif ftype == "checkbox":
+                    b = _coerce_bool(value)
+                    if b is None:
+                        problems.append(f"checkbox {name} needs true/false, got: {value!r}")
                     else:
-                        pairs.append(ei)
-                if bad:
-                    opts = ", ".join(_options(field))
-                    problems.append(f"optionlist {name} has no option(s) {bad} (options: {opts})")
-                else:
-                    plan.append((field, ftype, pairs))
-            elif ftype in ("dropdown", "optionlist"):
-                editable = bool(field.flags & FF_EDIT) and ftype == "dropdown"
-                fda = _field_da(field, acro)
-                if ftype == "optionlist":
-                    # Clearing a list box still redraws its rows, so the
-                    # labels are checked even when nothing is selected.
-                    prob = _choice_labels_problem(
+                        plan.append((field, ftype, b))
+                elif ftype == "radio":
+                    if str(value) == "":
+                        plan.append((field, ftype, _CLEAR))  # deliberate de-selection
+                    else:
+                        state = _radio_state_for(field, str(value))
+                        if state is None:
+                            opts = ", ".join(_radio_display_options(field))
+                            problems.append(f"radio {name} has no option {value!r} (options: {opts})")
+                        else:
+                            plan.append((field, ftype, state))
+                elif ftype == "optionlist" and isinstance(value, (list, tuple)):
+                    # A multi-select list box — every element must be an option;
+                    # store /V as the export array + /I as the selected indices.
+                    fda = _field_da(field, acro)
+                    labels_prob = _choice_labels_problem(
                         name, _options(field), fda, font_dir, _da_writes_vertically(pdf, fda)
                     )
-                    if prob is not None:
-                        problems.append(prob)
+                    if labels_prob is not None:
+                        problems.append(labels_prob)
                         continue
-                if str(value) == "" and not editable:
-                    plan.append((field, ftype, _CLEAR))  # de-select a fixed choice
-                    continue
-                export = _option_export(field, str(value))
-                if export is None and not editable:
-                    opts = ", ".join(_options(field))
-                    problems.append(f"{ftype} {name} has no option {value!r} (options: {opts})")
-                else:
-                    chosen = export if export is not None else str(value)
-                    prob = (
-                        None
-                        if ftype == "optionlist"
-                        else _text_value_problem(
-                            name, chosen, fda, font_dir, _da_writes_vertically(pdf, fda)
-                        )
-                    )
-                    if prob is not None:
-                        problems.append(prob)
+                    if len(value) == 0:
+                        plan.append((field, ftype, _CLEAR))  # nothing selected
+                        continue
+                    pairs: list[tuple[str, int]] = []
+                    bad: list[str] = []
+                    for v in value:
+                        ei = _option_export_index(field, str(v))
+                        if ei is None:
+                            bad.append(str(v))
+                        else:
+                            pairs.append(ei)
+                    if bad:
+                        opts = ", ".join(_options(field))
+                        problems.append(f"optionlist {name} has no option(s) {bad} (options: {opts})")
                     else:
-                        plan.append((field, ftype, chosen))
-            else:
-                problems.append(f"field {name} has type {ftype!r}, which is not fillable")
+                        plan.append((field, ftype, pairs))
+                elif ftype in ("dropdown", "optionlist"):
+                    editable = bool(field.flags & FF_EDIT) and ftype == "dropdown"
+                    fda = _field_da(field, acro)
+                    if ftype == "optionlist":
+                        # Clearing a list box still redraws its rows, so the
+                        # labels are checked even when nothing is selected.
+                        prob = _choice_labels_problem(
+                            name, _options(field), fda, font_dir, _da_writes_vertically(pdf, fda)
+                        )
+                        if prob is not None:
+                            problems.append(prob)
+                            continue
+                    if str(value) == "" and not editable:
+                        plan.append((field, ftype, _CLEAR))  # de-select a fixed choice
+                        continue
+                    export = _option_export(field, str(value))
+                    if export is None and not editable:
+                        opts = ", ".join(_options(field))
+                        problems.append(f"{ftype} {name} has no option {value!r} (options: {opts})")
+                    else:
+                        chosen = export if export is not None else str(value)
+                        prob = (
+                            None
+                            if ftype == "optionlist"
+                            else _text_value_problem(
+                                name, chosen, fda, font_dir, _da_writes_vertically(pdf, fda)
+                            )
+                        )
+                        if prob is not None:
+                            problems.append(prob)
+                        else:
+                            plan.append((field, ftype, chosen))
+                else:
+                    problems.append(f"field {name} has type {ftype!r}, which is not fillable")
 
         # ── the field-script pass ─────────────────────────────────────────
         #
@@ -2657,7 +2667,7 @@ def fill_form_fields(
                 # bypass is scoped to fields reached through /CO, which is
                 # exactly what this list contains. A caller who NAMES a
                 # read-only field still refuses, above.
-                derived.append((field, ftype, value))
+                derived.extend((member, ftype, value) for member in groups[name])
 
         # The appearance draws the FORMATTED value while /V keeps the raw one.
         display: dict[str, str] = {}
@@ -2691,7 +2701,7 @@ def fill_form_fields(
                 problems.append(prob)
 
         if problems:
-            raise ValueError("; ".join(problems))
+            raise ValueError("; ".join(dict.fromkeys(problems)))
 
         # FieldMDP is a write constraint, not just a renderer precheck. A
         # calculation can change a locked field the caller never named, and
@@ -2728,7 +2738,6 @@ def fill_form_fields(
         else:
             xfa_report = _write_xfa_datasets(pdf, [*plan, *derived])
 
-        filled = 0
         fonts_substituted: list[str] = []
         for field, ftype, value in [*plan, *derived]:
             da = _field_da(field, acro)
@@ -2845,10 +2854,9 @@ def fill_form_fields(
                     raise ValueError(
                         f"couldn't regenerate the appearance for {field.name}: {exc}"
                     ) from None
-            filled += 1
-        # The caller's own fields; the recalculated ones are reported apart so
-        # a count of "what the user changed" stays what it was.
-        filled -= len(derived)
+        # The caller's own fields, counted by name; the recalculated ones are
+        # reported apart so a count of "what the user changed" stays what it was.
+        filled = len({field.name for field, _t, _v in plan})
 
         if acro is not None and "/NeedAppearances" in acro:
             del acro["/NeedAppearances"]
@@ -2890,7 +2898,7 @@ def fill_form_fields(
     }
     if derived:
         # Fields the DOCUMENT computed rather than the caller naming them.
-        result["calculated"] = [f.name for f, _t, _v in derived]
+        result["calculated"] = list(dict.fromkeys(f.name for f, _t, _v in derived))
     if calc_skipped:
         result["calculation_unwritable"] = calc_skipped
     if scripts_not_run:

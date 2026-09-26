@@ -1460,3 +1460,53 @@ class TestRotatedWidgetAppearance:
         with pikepdf.open(flat) as pdf:
             content = bytes(pdf.pages[0].Contents.read_bytes()).decode("latin-1")
         assert "q 1 0 0 1 112 600 cm /FlatW0x0 Do Q" in content
+
+
+def _make_same_name_form(path: str) -> None:
+    """Two root field dictionaries, one per page, sharing the name `name`."""
+    pdf = pikepdf.new()
+    widgets = []
+    for _ in range(2):
+        page = pdf.add_blank_page(page_size=(400, 400))
+        w = pdf.make_indirect(Dictionary(
+            Type=Name.Annot, Subtype=Name.Widget, FT=Name.Tx, T=pikepdf.String("name"),
+            Rect=[40, 340, 200, 364], F=4, P=page.obj,
+        ))
+        page.obj["/Annots"] = pdf.make_indirect(pikepdf.Array([w]))
+        widgets.append(w)
+    pdf.Root.AcroForm = pdf.make_indirect(
+        Dictionary(Fields=pikepdf.Array(widgets), DA=pikepdf.String("/Helv 10 Tf 0 g"))
+    )
+    pdf.save(path)
+
+
+class TestFieldsSharingOneName:
+    """ISO 32000-2 12.7.4.2: dictionaries with one fully qualified name are one field."""
+
+    def test_fill_writes_every_dictionary_of_the_name(self, tmp_path):
+        src, out = str(tmp_path / "same.pdf"), str(tmp_path / "out.pdf")
+        _make_same_name_form(src)
+        result = fill_form_fields(src, out, {"name": "filled"})
+        assert result["filled"] == 1
+        with pikepdf.open(out) as pdf:
+            fields = list(pdf.Root.AcroForm.Fields)
+            assert [str(f.V) for f in fields] == ["filled", "filled"]
+            assert all("/AP" in f for f in fields)
+
+    def test_reset_clears_every_dictionary_of_the_name(self, tmp_path):
+        src, filled, out = (str(tmp_path / n) for n in ("same.pdf", "filled.pdf", "reset.pdf"))
+        _make_same_name_form(src)
+        fill_form_fields(src, filled, {"name": "filled"})
+        reset_form_fields(filled, out)
+        with pikepdf.open(out) as pdf:
+            assert [str(f.get("/V", "")) for f in pdf.Root.AcroForm.Fields] == ["", ""]
+
+    def test_hide_covers_every_dictionary_of_the_name(self, tmp_path):
+        from engine.forms import set_widget_visibility
+
+        src, out = str(tmp_path / "same.pdf"), str(tmp_path / "hidden.pdf")
+        _make_same_name_form(src)
+        result = set_widget_visibility(src, out, targets=["name"], hide=True)
+        assert result["changed"] == 2
+        with pikepdf.open(out) as pdf:
+            assert all(int(f.F) & 2 for f in pdf.Root.AcroForm.Fields)

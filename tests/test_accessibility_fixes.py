@@ -516,3 +516,42 @@ class TestEncryptedInputKeepsItsProtection:
         apply_accessibility_fixes(src, src, ["embedded_file_names"])
         assert _statuses(src)["embedded_file_names"] in _BENIGN
         self._assert_protected(src)
+
+
+def _signed(tmp_dir, name):
+    """The roster document `name`, signed. An encrypted one is signed through
+    an authenticated incremental writer, which is how such a file arrives."""
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+    from pyhanko.sign import signers
+    from test_pades import _build_pki
+
+    src = _build(tmp_dir, name)
+    pki = _build_pki(os.path.join(tmp_dir))
+    signer = signers.SimpleSigner.load_pkcs12(pki["pfx"], passphrase=b"pw")
+    out = os.path.join(tmp_dir, f"{name}-signed.pdf")
+    with open(src, "rb") as inf:
+        writer = IncrementalPdfFileWriter(inf)
+        if writer.security_handler is not None:
+            writer.encrypt(b"")
+        with open(out, "wb") as outf:
+            signers.sign_pdf(writer, signers.PdfSignatureMetadata(field_name="Sig1"),
+                             signer=signer, output=outf)
+    return out
+
+
+class TestSignedDocumentsNeedTheRunsDecision:
+    @pytest.mark.parametrize("name,check", [
+        ("perm_blocked", "permissions"),
+        ("untagged", "tagged"),
+        ("no_bookmarks_long_with_headings", "bookmarks"),
+    ])
+    def test_a_rewriting_door_refuses_a_signed_document_unless_the_run_includes_it(
+            self, tmp_dir, name, check):
+        signed = _signed(tmp_dir, name)
+        assert _statuses(signed)[check] in ("fail", "warn")
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(RuntimeError, match="signed"):
+            apply_accessibility_fixes(signed, out, checks=[check], allow_signed=False)
+        assert not os.path.exists(out)
+        result = apply_accessibility_fixes(signed, out, checks=[check], allow_signed=True)
+        assert [a["check"] for a in result["applied"]] == [check]
