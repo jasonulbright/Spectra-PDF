@@ -1,6 +1,7 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { getDocumentProxy } from './pdfDocCache';
 import { loadDocument } from './pdfRenderer';
+import { documentPassword } from './document-passwords';
 import { readManifest, partitionPages, stripExtension } from './pdfx-format';
 import { importPageAnnotations } from './annotation-import';
 import { readRawAnnotationStyles } from './annotation-raw-style';
@@ -44,7 +45,7 @@ export async function indexOpenFile(file: OpenFile): Promise<OpenDocument[]> {
 export async function indexImportSource(file: OpenFile): Promise<OpenDocument[]> {
   const buffer = file.buffer;
   if (!buffer) return [];
-  return withOwnDocument(buffer, (doc) => indexDocument(file, buffer, doc));
+  return withOwnDocument(buffer, documentPassword(file.path), (doc) => indexDocument(file, buffer, doc));
 }
 
 // The bytes an operation or a disk undo or redo is about to place, read through
@@ -53,13 +54,17 @@ export async function indexImportSource(file: OpenFile): Promise<OpenDocument[]>
 // pdf.js cannot load, or whose pages it cannot read, refuse the publication:
 // placed anyway, they would show as a document with no pages.
 export const readPublishedBytes: ReadPublishedBytes = (file, buffer) =>
-  withOwnDocument(buffer, async (doc) => ({
+  withOwnDocument(buffer, documentPassword(file.path), async (doc) => ({
     pageCount: doc.numPages,
     documents: await indexDocument({ ...file, buffer }, buffer, doc),
   }));
 
-async function withOwnDocument<T>(buffer: PdfBuffer, read: (doc: PDFDocumentProxy) => Promise<T>): Promise<T> {
-  const doc = await loadDocument(buffer);
+async function withOwnDocument<T>(
+  buffer: PdfBuffer,
+  password: string | undefined,
+  read: (doc: PDFDocumentProxy) => Promise<T>,
+): Promise<T> {
+  const doc = await loadDocument(buffer, password);
   try {
     return await read(doc);
   } finally {

@@ -4,6 +4,7 @@ import { withFileLock } from './engine-lock';
 import { serializeWorkspacePublication } from './workspace-publication';
 import { hasPendingPageCommit, publishPageCommit, recoverPendingPageCommit, type PageCommitIo } from './page-commit-transaction';
 import type { ReadPublishedBytes } from './workspace-settle';
+import { releaseStageCredential, shareStageCredential } from './stage-credentials';
 
 export interface WorkspaceRewriteIo {
   confirm: (path: string, workingPath: string) => Promise<boolean>;
@@ -63,7 +64,11 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
     const original = copy(current.buffer!);
     const expectedWorkingSha256 = await digest(original);
     const stage = `${current.workingPath}.${options.kind}-${crypto.randomUUID()}.pdf`;
-    const cleanup = async () => { await io.remove(stage).catch(() => {}); };
+    const shared = await shareStageCredential(current, stage);
+    const cleanup = async () => {
+      await io.remove(stage).catch(() => {});
+      if (shared) await releaseStageCredential(stage);
+    };
     try {
       const value = await build(stage, original, requireCurrent);
       const buffer = (await io.read(stage)).slice();

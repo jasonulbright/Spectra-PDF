@@ -104,6 +104,18 @@ def open_document(path: str, password: str = "") -> dict:
     return {"encrypted": True, "opener": "user", "encryption_kept": True}
 
 
+def share_document(path: str, alias: str) -> dict:
+    """Let `alias`, a byte copy of the document at `path`, open with the
+    credential `path` was opened with. The renderer stages every in-place
+    rewrite on such a copy; without the credential a user-opened copy cannot
+    be read at all. `close_document(alias)` forgets it again."""
+    credential = _documents.get(_key(path))
+    if credential is None:
+        return {"shared": False}
+    _documents[_key(alias)] = credential
+    return {"shared": True}
+
+
 def close_document(path: str) -> dict:
     """Forget the credential of the document at `path`."""
     return {"forgotten": _documents.pop(_key(path), None) is not None}

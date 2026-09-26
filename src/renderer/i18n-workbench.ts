@@ -252,6 +252,22 @@ export const WORKBENCH_STRINGS = {
   'app.sanitize.certified_other':
     'This document is certified, which states what may change in it, and carries {{count}} signatures. Removing hidden information changes more than the certification allows and breaks them. Continue?',
 
+  // A document opened with its user password allows only what its owner set.
+  // {{permission}} is one of the app.permissions.name.* phrases.
+  'app.open.incorrectPassword': 'Incorrect password. Please try again.',
+  'app.permissions.title': 'Not allowed by this document',
+  'app.permissions.denied': 'This document does not allow {{permission}}.',
+  'app.permissions.ownerPasswordNeeded':
+    'This edit needs the owner password. The document was opened with its user password, and this edit cannot be saved with its protection kept.',
+  'app.permissions.name.print': 'printing',
+  'app.permissions.name.print_high': 'high-quality printing',
+  'app.permissions.name.modify': 'changes to its content',
+  'app.permissions.name.copy': 'copying its text and images',
+  'app.permissions.name.annotate': 'comments',
+  'app.permissions.name.fill': 'filling in its form fields',
+  'app.permissions.name.accessibility': 'text access for accessibility tools',
+  'app.permissions.name.assemble': 'page changes',
+
   'app.signedEdit.title': 'Document is signed',
   'app.signedEdit.policyUnreadable':
     "The document's signature policy could not be read. Editing is blocked.",

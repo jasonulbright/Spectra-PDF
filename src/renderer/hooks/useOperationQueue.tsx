@@ -103,6 +103,12 @@ const INTERNAL_METHODS = new Set([
   'get_page_count',
   'get_page_info',
   'check_encrypted',
+  // The open funnel's credential calls. Opening a document must not commit
+  // another document's pending page edits, and the password never belongs in
+  // a queue entry.
+  'open_document',
+  'close_document',
+  'document_permissions',
   'get_metadata',
   'get_pdf_version',
   // The Properties dialog's three read-only tabs. Same hazard as

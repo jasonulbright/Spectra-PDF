@@ -389,6 +389,19 @@ export async function commitPageEdits({
       dispatch({ type: 'CLEAR_PAGE_EDITS' });
       return { signatureRefusals };
     }
+    // pdf-lib cannot decrypt, so a rebuild of a working copy that is still
+    // encrypted would write ciphertext without its /Encrypt over the file.
+    // The reducer refuses such edits; this holds when anything else reaches here.
+    for (const plan of plans) {
+      const keys = new Set([plan.path, ...plan.documents.flatMap((d) => d.pages.map((p) => p.sourceKey))]);
+      const locked = [...keys].find((key) => files.get(key)?.security?.opener === 'user');
+      if (locked !== undefined) {
+        throw new Error(tChrome('canvas.common.fileFailure', {
+          name: baseName(locked),
+          message: tChrome('app.permissions.ownerPasswordNeeded'),
+        }));
+      }
+    }
     // Every dirty file builds in one pass, so one file's refusal aborts the
     // whole commit: without the file in the message the user is told a save
     // failed and given no way to tell which document refused.
