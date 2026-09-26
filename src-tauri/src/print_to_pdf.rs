@@ -19,7 +19,7 @@
 //! the app (and so the listener) is back; the Settings block says exactly
 //! that.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -37,6 +37,9 @@ const MAX_JOB_BYTES: u64 = 512 * 1024 * 1024;
 /// close; a spooler may pause mid-job, so this is generous. Without it a
 /// client that connects and never writes holds the socket forever.
 const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// A client cannot keep one of the eight job slots alive forever by sending
+/// bytes just before each idle timeout expires.
+const MAX_JOB_RECEIVE_DURATION: Duration = Duration::from_secs(10 * 60);
 /// Concurrent job cap. The accept loop does not serialise reads, so
 /// thread-per-connection needs a bound.
 const MAX_CONCURRENT_JOBS: usize = 8;
@@ -145,13 +148,56 @@ fn claim(path: &Path) -> std::io::Result<()> {
         .map(|_| ())
 }
 
+struct StagedPostscript {
+    path: PathBuf,
+    file: Option<std::fs::File>,
+    cleanup: bool,
+}
+
+impl StagedPostscript {
+    fn file_mut(&mut self) -> &mut std::fs::File {
+        self.file.as_mut().expect("staged PostScript handle is open")
+    }
+
+    /// Keep a test reservation on disk after closing its writer.
+    fn retain_path(mut self) -> PathBuf {
+        self.file.take();
+        self.cleanup = false;
+        self.path.clone()
+    }
+}
+
+impl Drop for StagedPostscript {
+    fn drop(&mut self) {
+        self.file.take();
+        if self.cleanup {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 /// Reserve the staging path for one job's PostScript. Internal; never seen.
-fn claim_staging(dir: &Path, stem: &str) -> std::io::Result<PathBuf> {
+fn claim_staging(dir: &Path, stem: &str) -> std::io::Result<StagedPostscript> {
     let seq = JOB_SEQ.fetch_add(1, Ordering::Relaxed);
     for extra in 0..1000u64 {
         let candidate = dir.join(format!("{stem}-{}.ps", seq + extra));
-        match claim(&candidate) {
-            Ok(()) => return Ok(candidate),
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            // Ghostscript may read the completed file while this reservation
+            // stays open; other processes cannot replace or edit it.
+            options.share_mode(1); // FILE_SHARE_READ
+        }
+        match options.open(&candidate) {
+            Ok(file) => {
+                return Ok(StagedPostscript {
+                    path: candidate,
+                    file: Some(file),
+                    cleanup: true,
+                })
+            }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),
         }
@@ -189,7 +235,7 @@ fn reserve_pdf(dir: &Path, stem: &str) -> std::io::Result<PathBuf> {
     ))
 }
 
-fn handle_job(app: &AppHandle, bytes: Vec<u8>) {
+fn handle_job(app: &AppHandle, stem: &str, staged: StagedPostscript) {
     let record_error = |msg: String| {
         eprintln!("virtual printer: {msg}");
         if let Some(state) = app.try_state::<PrinterState>() {
@@ -200,19 +246,10 @@ fn handle_job(app: &AppHandle, bytes: Vec<u8>) {
     if let Err(e) = std::fs::create_dir_all(&dir) {
         return record_error(format!("cannot create the printed-jobs folder: {e}"));
     }
-    let stem = timestamp_name();
-    let ps_path = match claim_staging(&dir, &stem) {
-        Ok(p) => p,
-        Err(e) => return record_error(format!("cannot stage the print job: {e}")),
-    };
-    if let Err(e) = std::fs::write(&ps_path, &bytes) {
-        let _ = std::fs::remove_file(&ps_path);
-        return record_error(format!("cannot stage the print job: {e}"));
-    }
-    let pdf_path = match reserve_pdf(&dir, &stem) {
+    let ps_path = staged.path.clone();
+    let pdf_path = match reserve_pdf(&dir, stem) {
         Ok(p) => p,
         Err(e) => {
-            let _ = std::fs::remove_file(&ps_path);
             return record_error(format!("cannot name the printed file: {e}"));
         }
     };
@@ -220,7 +257,6 @@ fn handle_job(app: &AppHandle, bytes: Vec<u8>) {
     // sees a half-written PDF at the final name.
     let part_path = part_path(&pdf_path);
     let Ok(exe) = std::env::current_exe() else {
-        let _ = std::fs::remove_file(&ps_path);
         let _ = std::fs::remove_file(&pdf_path);
         return record_error("cannot resolve the app path".to_string());
     };
@@ -260,7 +296,6 @@ fn handle_job(app: &AppHandle, bytes: Vec<u8>) {
             false
         }
     };
-    let _ = std::fs::remove_file(&ps_path);
     if !ok {
         // Release the reserved name: a zero-byte PDF would look like a
         // successful print and consume the name permanently.
@@ -295,21 +330,25 @@ pub fn start_listener(app: &AppHandle) {
         if let Some(state) = handle.try_state::<PrinterState>() {
             *state.listener_status.lock().unwrap() = "listening".to_string();
         }
-        serve(listener, READ_IDLE_TIMEOUT, move |bytes| {
-            handle_job(&handle, bytes)
-        });
+        serve(
+            listener,
+            READ_IDLE_TIMEOUT,
+            printed_dir(),
+            move |stem, staged| handle_job(&handle, &stem, staged),
+        );
     });
 }
 
 /// The accept loop, separated from the app wiring so the stall behaviour is
 /// testable against real sockets: a test binds an ephemeral port and passes a
-/// plain sink, production passes `handle_job`. `idle_timeout` is a parameter
-/// for the same reason — the mid-job-stall test cannot wait out the
-/// production 60 seconds. Behaviour is identical to the pre-extraction loop.
+/// plain sink, production passes `handle_job`. `idle_timeout` and the staging
+/// directory are parameters so the socket behaviour and on-disk result can be
+/// tested without the app's global temp folder.
 fn serve(
     listener: TcpListener,
     idle_timeout: Duration,
-    on_job: impl Fn(Vec<u8>) + Clone + Send + 'static,
+    staging_dir: PathBuf,
+    on_job: impl Fn(String, StagedPostscript) + Clone + Send + 'static,
 ) {
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
@@ -323,31 +362,84 @@ fn serve(
         }
         IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
         let sink = on_job.clone();
+        let staging_dir = staging_dir.clone();
         std::thread::spawn(move || {
             let _slot = JobSlot;
             let mut stream = stream;
             // Per-read idle timeout: a half-open connection dies on its own
             // thread instead of holding the listener.
             let _ = stream.set_read_timeout(Some(idle_timeout));
-            // RAW/JetDirect: the client streams the job and closes. Reads
-            // are capped so a runaway writer cannot exhaust disk staging.
-            let mut bytes = Vec::new();
-            let mut capped = std::io::Read::take(&mut stream, MAX_JOB_BYTES + 1);
-            if capped.read_to_end(&mut bytes).is_err() {
-                // On timeout `read_to_end` leaves partial bytes in the
-                // buffer. Distilling a truncated stream yields a
-                // plausible-looking wrong document, so drop it.
+            if let Err(error) = std::fs::create_dir_all(&staging_dir) {
+                eprintln!("virtual printer: cannot create staging folder: {error}");
                 return;
             }
-            if bytes.is_empty() {
+            let stem = timestamp_name();
+            let mut staged = match claim_staging(&staging_dir, &stem) {
+                Ok(staged) => staged,
+                Err(error) => {
+                    eprintln!("virtual printer: cannot reserve the staging file: {error}");
+                    return;
+                }
+            };
+            // Stream RAW/JetDirect bytes straight to disk. Retaining every
+            // concurrent 512 MiB job in a Vec could use 4 GiB before
+            // Ghostscript starts. Read one byte over the cap to detect
+            // overflow; timeout and other failures drop the partial stage.
+            let count = match copy_job(
+                &mut stream,
+                staged.file_mut(),
+                MAX_JOB_BYTES,
+                MAX_JOB_RECEIVE_DURATION,
+            ) {
+                Ok(count) => count,
+                Err(error) => {
+                    eprintln!("virtual printer: could not receive the job: {error}");
+                    return;
+                }
+            };
+            if count == 0 {
                 return; // port probes (and the spooler's SNMP pokes) are not jobs
             }
-            if bytes.len() as u64 > MAX_JOB_BYTES {
+            if count > MAX_JOB_BYTES {
                 eprintln!("virtual printer: job over the {MAX_JOB_BYTES}-byte cap, refused");
                 return;
             }
-            sink(bytes);
+            if let Err(error) = staged.file_mut().flush() {
+                eprintln!("virtual printer: could not finish staging the job: {error}");
+                return;
+            }
+            sink(stem, staged);
         });
+    }
+}
+
+fn copy_job<R: std::io::Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    limit: u64,
+    max_duration: Duration,
+) -> std::io::Result<u64> {
+    let deadline = std::time::Instant::now() + max_duration;
+    let mut total = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "print job receive deadline exceeded",
+            ));
+        }
+        let remaining = limit.saturating_add(1).saturating_sub(total);
+        if remaining == 0 {
+            return Ok(total);
+        }
+        let capacity = remaining.min(buffer.len() as u64) as usize;
+        let read = reader.read(&mut buffer[..capacity])?;
+        if read == 0 {
+            return Ok(total);
+        }
+        writer.write_all(&buffer[..read])?;
+        total = total.saturating_add(read as u64);
     }
 }
 
@@ -528,6 +620,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn an_elevated_script_stays_readable_but_cannot_be_replaced_while_in_use() {
+        use std::io::Read;
         use std::os::windows::fs::OpenOptionsExt;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("printer.ps1");
@@ -574,7 +667,7 @@ mod tests {
         for _ in 0..N {
             let d = dir.clone();
             handles.push(std::thread::spawn(move || {
-                let ps = claim_staging(&d, stem).expect("staging");
+                let ps = claim_staging(&d, stem).expect("staging").retain_path();
                 let pdf = reserve_pdf(&d, stem).expect("pdf");
                 (ps, pdf)
             }));
@@ -606,8 +699,9 @@ mod tests {
     fn a_bound_listener_clears_only_what_unfinished_jobs_left() {
         let dir = tempfile::tempdir().unwrap();
         let stem = timestamp_name();
-        let staged = claim_staging(dir.path(), &stem).unwrap();
-        std::fs::write(&staged, b"%!PS-Adobe-3.0").unwrap();
+        let mut staged = claim_staging(dir.path(), &stem).unwrap();
+        staged.file_mut().write_all(b"%!PS-Adobe-3.0").unwrap();
+        let _ = staged.retain_path();
         let reserved = reserve_pdf(dir.path(), &stem).unwrap();
         let distilled = part_path(&reserved);
         std::fs::write(&distilled, b"%PDF-1.7 unfinished").unwrap();
@@ -688,9 +782,11 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let addr = listener.local_addr().unwrap();
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let staging_dir = tempfile::tempdir().unwrap();
+        let staging_path = staging_dir.path().to_path_buf();
         std::thread::spawn(move || {
-            serve(listener, Duration::from_secs(5), move |b| {
-                let _ = tx.send(b);
+            serve(listener, Duration::from_secs(5), staging_path, move |_, staged| {
+                let _ = tx.send(std::fs::read(&staged.path).unwrap());
             })
         });
 
@@ -731,9 +827,11 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let addr = listener.local_addr().unwrap();
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let staging_dir = tempfile::tempdir().unwrap();
+        let staging_path = staging_dir.path().to_path_buf();
         std::thread::spawn(move || {
-            serve(listener, Duration::from_millis(300), move |b| {
-                let _ = tx.send(b);
+            serve(listener, Duration::from_millis(300), staging_path, move |_, staged| {
+                let _ = tx.send(std::fs::read(&staged.path).unwrap());
             })
         });
 
@@ -747,5 +845,44 @@ mod tests {
             "a truncated job was delivered as if complete: {delivered:?}"
         );
         drop(c);
+    }
+
+    #[test]
+    fn streamed_job_copy_reads_only_one_byte_past_its_limit() {
+        let mut source = std::io::Cursor::new(b"four bytes".to_vec());
+        let mut staged = Vec::new();
+        let copied = copy_job(&mut source, &mut staged, 4, Duration::from_secs(1)).unwrap();
+        assert_eq!(copied, 5);
+        assert_eq!(staged, b"four ");
+    }
+
+    #[test]
+    fn a_slow_trickle_cannot_hold_a_job_slot_forever() {
+        struct Trickle {
+            remaining: usize,
+        }
+        impl std::io::Read for Trickle {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                std::thread::sleep(Duration::from_millis(10));
+                if self.remaining == 0 {
+                    return Ok(0);
+                }
+                out[0] = b'x';
+                self.remaining -= 1;
+                Ok(1)
+            }
+        }
+
+        let mut source = Trickle { remaining: 100 };
+        let mut staged = Vec::new();
+        let error = copy_job(
+            &mut source,
+            &mut staged,
+            1024,
+            Duration::from_millis(35),
+        )
+        .expect_err("the total receive deadline must stop an active trickle");
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(staged.len() < 100);
     }
 }

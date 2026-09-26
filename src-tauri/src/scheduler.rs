@@ -51,7 +51,7 @@ pub struct ScheduleProfile {
     /// `validate_profile`.
     #[serde(default)]
     pub log_dir: String,
-    /// "daily" | "weekly" | "once"
+    /// "daily" | "weekly"
     #[serde(default)]
     pub frequency: String,
     /// HH:MM, 24-hour, local time.
@@ -840,6 +840,48 @@ fn run(cmd: &mut Command) -> Result<String, String> {
     Ok(stdout)
 }
 
+fn valid_schedule_time(value: &str) -> bool {
+    if value.is_empty() {
+        return true;
+    }
+    let bytes = value.as_bytes();
+    if bytes.len() != 5
+        || bytes[2] != b':'
+        || !bytes[..2].iter().all(u8::is_ascii_digit)
+        || !bytes[3..].iter().all(u8::is_ascii_digit)
+    {
+        return false;
+    }
+    let hours = (bytes[0] - b'0') * 10 + (bytes[1] - b'0');
+    let minutes = (bytes[3] - b'0') * 10 + (bytes[4] - b'0');
+    hours < 24 && minutes < 60
+}
+
+fn parse_weekly_days(days: &str) -> Result<Vec<&'static str>, String> {
+    let mut parsed = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for day in days.split(',') {
+        let xml_day = match day.trim().to_ascii_uppercase().as_str() {
+            "MON" => "<Monday />",
+            "TUE" => "<Tuesday />",
+            "WED" => "<Wednesday />",
+            "THU" => "<Thursday />",
+            "FRI" => "<Friday />",
+            "SAT" => "<Saturday />",
+            "SUN" => "<Sunday />",
+            _ => return Err("A weekly schedule contains an unknown or empty day.".into()),
+        };
+        if !seen.insert(xml_day) {
+            return Err("A weekly schedule cannot repeat a day.".into());
+        }
+        parsed.push(xml_day);
+    }
+    if parsed.is_empty() {
+        return Err("A weekly schedule needs at least one day.".into());
+    }
+    Ok(parsed)
+}
+
 /// The refusals that must happen BEFORE a task is registered.
 ///
 /// A run under a service account resolves `%APPDATA%` inside that account's
@@ -848,6 +890,12 @@ fn run(cmd: &mut Command) -> Result<String, String> {
 /// produces exactly the failure this whole logging feature exists to prevent —
 /// an unattended run with no findable audit trail.
 pub fn validate_profile(p: &ScheduleProfile) -> Result<(), String> {
+    if p.run_type != "action" && p.run_type != "batch-ocr" {
+        return Err("A scheduled run must be a batch OCR run or a guided action.".into());
+    }
+    if p.frequency != "daily" && p.frequency != "weekly" {
+        return Err("A scheduled run frequency must be daily or weekly.".into());
+    }
     if !valid_task_name(&p.name) {
         return Err(
             "A schedule name may use letters, numbers, spaces, dots, hyphens and underscores only."
@@ -878,13 +926,29 @@ pub fn validate_profile(p: &ScheduleProfile) -> Result<(), String> {
     if !PathBuf::from(&p.source).is_dir() {
         return Err(format!("Source folder not found: {}", p.source));
     }
-    if !p.time.is_empty()
-        && !(p.time.len() == 5
-            && p.time.as_bytes()[2] == b':'
-            && p.time[..2].chars().all(|c| c.is_ascii_digit())
-            && p.time[3..].chars().all(|c| c.is_ascii_digit()))
-    {
+    if !valid_schedule_time(&p.time) {
         return Err("Time must be HH:MM (24-hour).".into());
+    }
+    if p.frequency == "weekly" {
+        parse_weekly_days(&p.days)?;
+    }
+    if p.run_type == "batch-ocr" {
+        if !p.lang.is_empty()
+            && !p.lang.split('+').all(|part| {
+                !part.is_empty()
+                    && part
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+            })
+        {
+            return Err("A scheduled OCR language must contain language codes only.".into());
+        }
+        if p.mrc
+            && !p.mrc_preset.is_empty()
+            && !matches!(p.mrc_preset.as_str(), "archival" | "balanced" | "smallest")
+        {
+            return Err("A scheduled MRC preset must be archival, balanced or smallest.".into());
+        }
     }
     if !p.account.trim().is_empty() && p.log_dir.trim().is_empty() {
         return Err(
@@ -900,64 +964,104 @@ pub fn validate_profile(p: &ScheduleProfile) -> Result<(), String> {
 fn build_arguments(exe: &str, p: &ScheduleProfile) -> String {
     let _ = exe;
     if p.run_type == "action" {
-        let mut args = format!(
-            "run-action \"{}\" --dest \"{}\" --action \"{}\"",
-            p.source, p.dest, p.action_file
-        );
+        let mut args = vec![
+            "run-action".to_string(),
+            quote_windows_arg(&p.source),
+            "--dest".to_string(),
+            quote_windows_arg(&p.dest),
+            "--action".to_string(),
+            quote_windows_arg(&p.action_file),
+        ];
         if !p.log_dir.is_empty() {
-            args.push_str(&format!(" --log-dir \"{}\"", p.log_dir));
+            args.extend(["--log-dir".to_string(), quote_windows_arg(&p.log_dir)]);
         }
-        return args;
+        return args.join(" ");
     }
     // The whole run is expanded HERE, into the task's own command line: the
     // registered task is the store, so a schedule carries its settings rather
     // than a reference to a preset the run could not read anyway (it fires
     // with the app closed, and possibly under another account).
     let mut args = if p.in_place {
-        format!(
-            "batch-ocr \"{}\" --in-place --lang {}",
-            p.source,
-            if p.lang.is_empty() { "eng" } else { &p.lang }
-        )
+        vec![
+            "batch-ocr".to_string(),
+            quote_windows_arg(&p.source),
+            "--in-place".to_string(),
+            "--lang".to_string(),
+            quote_windows_arg(if p.lang.is_empty() { "eng" } else { &p.lang }),
+        ]
     } else {
-        format!(
-            "batch-ocr \"{}\" --dest \"{}\" --lang {}",
-            p.source,
-            p.dest,
-            if p.lang.is_empty() { "eng" } else { &p.lang }
-        )
+        vec![
+            "batch-ocr".to_string(),
+            quote_windows_arg(&p.source),
+            "--dest".to_string(),
+            quote_windows_arg(&p.dest),
+            "--lang".to_string(),
+            quote_windows_arg(if p.lang.is_empty() { "eng" } else { &p.lang }),
+        ]
     };
     if p.mrc {
-        args.push_str(" --mrc");
+        args.push("--mrc".to_string());
         if !p.mrc_preset.is_empty() {
-            args.push_str(&format!(" --mrc-preset {}", p.mrc_preset));
+            args.extend(["--mrc-preset".to_string(), quote_windows_arg(&p.mrc_preset)]);
         }
         if p.mrc_verify_text {
-            args.push_str(" --mrc-verify-text");
+            args.push("--mrc-verify-text".to_string());
         }
     }
     if p.enhance {
-        args.push_str(" --enhance");
+        args.push("--enhance".to_string());
         if !p.enhance_orientation {
-            args.push_str(" --no-enhance-orientation");
+            args.push("--no-enhance-orientation".to_string());
         }
     }
     if !p.moved_root.is_empty() {
-        args.push_str(&format!(" --moved \"{}\"", p.moved_root));
+        args.extend(["--moved".to_string(), quote_windows_arg(&p.moved_root)]);
     }
     if !p.error_root.is_empty() {
-        args.push_str(&format!(" --errors \"{}\"", p.error_root));
+        args.extend(["--errors".to_string(), quote_windows_arg(&p.error_root)]);
     }
     if p.repair_damaged {
-        args.push_str(" --repair");
+        args.push("--repair".to_string());
     }
     if p.replace_repaired_originals {
-        args.push_str(" --replace-repaired");
+        args.push("--replace-repaired".to_string());
     }
     if !p.log_dir.is_empty() {
-        args.push_str(&format!(" --log-dir \"{}\"", p.log_dir));
+        args.extend(["--log-dir".to_string(), quote_windows_arg(&p.log_dir)]);
     }
-    args
+    args.join(" ")
+}
+
+/// Encode one argument using the Windows CRT quoting rules used by the task's
+/// executable. Backslashes before a closing quote must be doubled, or a path
+/// ending in `\` escapes that quote and changes every following argument.
+fn quote_windows_arg(value: &str) -> String {
+    let mut quoted = String::from("\"");
+    let mut backslashes = 0usize;
+    for ch in value.chars() {
+        match ch {
+            '\\' => backslashes += 1,
+            '"' => {
+                for _ in 0..backslashes.saturating_mul(2).saturating_add(1) {
+                    quoted.push('\\');
+                }
+                quoted.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                for _ in 0..backslashes {
+                    quoted.push('\\');
+                }
+                quoted.push(ch);
+                backslashes = 0;
+            }
+        }
+    }
+    for _ in 0..backslashes.saturating_mul(2) {
+        quoted.push('\\');
+    }
+    quoted.push('"');
+    quoted
 }
 
 /// Create (or replace) a scheduled run.
@@ -1058,26 +1162,7 @@ fn build_task_xml(
     let time = if p.time.is_empty() { "09:30" } else { &p.time };
     let trigger = match p.frequency.as_str() {
         "weekly" => {
-            let days: Vec<String> = p
-                .days
-                .split(',')
-                .map(|d| d.trim().to_uppercase())
-                .filter(|d| !d.is_empty())
-                .map(|d| match d.as_str() {
-                    "MON" => "<Monday />".to_string(),
-                    "TUE" => "<Tuesday />".to_string(),
-                    "WED" => "<Wednesday />".to_string(),
-                    "THU" => "<Thursday />".to_string(),
-                    "FRI" => "<Friday />".to_string(),
-                    "SAT" => "<Saturday />".to_string(),
-                    "SUN" => "<Sunday />".to_string(),
-                    _ => String::new(),
-                })
-                .filter(|d| !d.is_empty())
-                .collect();
-            if days.is_empty() {
-                return Err("A weekly schedule needs at least one day.".into());
-            }
+            let days = parse_weekly_days(&p.days)?;
             format!(
                 "<CalendarTrigger><StartBoundary>2020-01-01T{time}:00</StartBoundary>\
                  <Enabled>true</Enabled><ScheduleByWeek><WeeksInterval>1</WeeksInterval>\
@@ -1142,26 +1227,67 @@ fn build_task_xml(
     ))
 }
 
-/// Split a command line on spaces, respecting double quotes.
+/// Split a Windows command line using the executable's CRT backslash/quote rules.
 fn tokenize(line: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut in_quotes = false;
-    for ch in line.chars() {
-        match ch {
-            '"' => in_quotes = !in_quotes,
-            c if c.is_whitespace() && !in_quotes => {
-                if !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
-                }
+    let mut chars = line.chars().peekable();
+    let mut tokens = Vec::new();
+    loop {
+        while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
+            chars.next();
+        }
+        if chars.peek().is_none() {
+            break;
+        }
+        let mut token = String::new();
+        let mut in_quotes = false;
+        let mut started = false;
+        while let Some(&ch) = chars.peek() {
+            if ch.is_whitespace() && !in_quotes {
+                break;
             }
-            c => cur.push(c),
+            if ch == '\\' {
+                let mut count = 0usize;
+                while chars.peek() == Some(&'\\') {
+                    chars.next();
+                    count += 1;
+                }
+                if chars.peek() == Some(&'"') {
+                    token.extend(std::iter::repeat('\\').take(count / 2));
+                    chars.next();
+                    if count % 2 == 1 {
+                        token.push('"');
+                    } else if in_quotes && chars.peek() == Some(&'"') {
+                        chars.next();
+                        token.push('"');
+                    } else {
+                        in_quotes = !in_quotes;
+                    }
+                } else {
+                    token.extend(std::iter::repeat('\\').take(count));
+                }
+                started = true;
+                continue;
+            }
+            if ch == '"' {
+                chars.next();
+                if in_quotes && chars.peek() == Some(&'"') {
+                    chars.next();
+                    token.push('"');
+                } else {
+                    in_quotes = !in_quotes;
+                }
+                started = true;
+                continue;
+            }
+            token.push(ch);
+            chars.next();
+            started = true;
+        }
+        if started {
+            tokens.push(token);
         }
     }
-    if !cur.is_empty() {
-        out.push(cur);
-    }
-    out
+    tokens
 }
 
 /// Rebuild the profile from the command line the task will actually run.
@@ -1744,6 +1870,75 @@ mod tests {
         assert!(parsed.enhance);
         assert!(!parsed.enhance_orientation);
         assert!(!parsed.in_place);
+    }
+
+    #[test]
+    fn scheduled_folder_paths_ending_in_backslashes_round_trip() {
+        let mut p = ocr_profile();
+        p.source = r"C:\".into();
+        p.dest = r"D:\out folder\".into();
+        p.moved_root = r"E:\processed folder\".into();
+        p.error_root = r"F:\failed folder\".into();
+        p.log_dir = r"G:\logs folder\".into();
+
+        let args = build_arguments("exe", &p);
+        let parsed = profile_from_command(&p.name, &format!(r#""C:\Program Files\app.exe" {args}"#))
+            .expect("parses");
+        assert_eq!(parsed.source, p.source);
+        assert_eq!(parsed.dest, p.dest);
+        assert_eq!(parsed.moved_root, p.moved_root);
+        assert_eq!(parsed.error_root, p.error_root);
+        assert_eq!(parsed.log_dir, p.log_dir);
+    }
+
+    #[test]
+    fn windows_argument_quoting_round_trips_quotes_and_backslashes() {
+        let values = ["", "plain", "has space", r#"embedded \" quote"#, r"ends\\"];
+        for value in values {
+            assert_eq!(tokenize(&quote_windows_arg(value)), [value], "{value:?}");
+        }
+    }
+
+    #[test]
+    fn schedule_rejects_unsupported_modes_and_argument_values() {
+        let mut p = ocr_profile();
+        p.source = std::env::temp_dir().to_string_lossy().into_owned();
+        assert!(validate_profile(&p).is_ok());
+
+        p.frequency = "once".into();
+        assert!(validate_profile(&p).is_err());
+        p.frequency = "daily".into();
+        p.run_type = "unknown".into();
+        assert!(validate_profile(&p).is_err());
+        p.run_type = "batch-ocr".into();
+        p.lang = "eng --in-place".into();
+        assert!(validate_profile(&p).is_err());
+        p.lang = "eng+fra".into();
+        p.mrc_preset = "smallest --repair".into();
+        assert!(validate_profile(&p).is_err());
+    }
+
+    #[test]
+    fn weekly_schedule_rejects_days_it_would_otherwise_silently_drop() {
+        let mut p = ocr_profile();
+        p.source = std::env::temp_dir().to_string_lossy().into_owned();
+        p.frequency = "weekly".into();
+        p.days = "MON,FRI".into();
+        assert!(validate_profile(&p).is_ok());
+        p.days = "MON,NOT-A-DAY,FRI".into();
+        assert!(validate_profile(&p).is_err());
+        p.days = "MON,,FRI".into();
+        assert!(validate_profile(&p).is_err());
+        p.days = "MON,mon".into();
+        assert!(validate_profile(&p).is_err());
+
+        p.days = "MON".into();
+        p.time = "24:00".into();
+        assert!(validate_profile(&p).is_err());
+        p.time = "09:60".into();
+        assert!(validate_profile(&p).is_err());
+        p.time = "23:59".into();
+        assert!(validate_profile(&p).is_ok());
     }
 
     #[test]
