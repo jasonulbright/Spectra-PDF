@@ -1561,6 +1561,8 @@ fn profile_from_task_xml(
     let principals = extract_tag(xml, "Principals")?;
     if principals.matches("<Principal ").count() != 1
         || principals.matches("</Principal>").count() != 1
+        || principals.contains("<ProcessTokenSidType")
+        || principals.contains("<RequiredPrivileges")
     {
         return None;
     }
@@ -2262,6 +2264,22 @@ mod tests {
             assert!(
                 parse_test_task_xml(&p.name, &xml).is_none(),
                 "execution setting was offered for editing: {setting}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_task_with_unpreserved_principal_restrictions_is_not_offered_for_editing() {
+        let p = ocr_profile();
+        let base = build_test_task_xml(&p, None);
+        for restriction in [
+            "<ProcessTokenSidType>Unrestricted</ProcessTokenSidType>",
+            "<RequiredPrivileges><Privilege>SeChangeNotifyPrivilege</Privilege></RequiredPrivileges>",
+        ] {
+            let xml = base.replace("</Principal>", &format!("{restriction}</Principal>"));
+            assert!(
+                parse_test_task_xml(&p.name, &xml).is_none(),
+                "principal restriction was offered for editing: {restriction}"
             );
         }
     }
