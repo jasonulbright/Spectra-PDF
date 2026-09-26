@@ -2431,6 +2431,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}}在 {{RENDER_TIMEOUT_S}} 秒后超时",
   "engine.print_layout.unvalidatedPageSpecToken": "未经校验的页面指定标记：{{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "添加印刷标记会使第 {{index}} 页超过 14400 点的页面上限。",
+  "engine.printer_marks.colourBarCannotFit": "色标无法在第 {{page_number}} 页的上边缘容纳其 {{needed}} 个色块。",
   "engine.printer_marks.markOffsetMustZero": "标记偏移必须为零或更大，标记长度必须为正值。",
   "engine.printer_marks.markStyleMustOne": "标记样式必须是以下之一：{{styles}}。",
   "engine.printer_marks.markWeightMustOne": "标记线宽必须是以下之一：{{weights}}。",

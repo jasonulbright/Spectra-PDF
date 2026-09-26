@@ -2431,6 +2431,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} 작업이 {{RENDER_TIMEOUT_S}}초 후 시간 초과되었습니다",
   "engine.print_layout.unvalidatedPageSpecToken": "검증되지 않은 페이지 지정 토큰: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "인쇄 표시를 추가하면 {{index}}쪽이 14400포인트 페이지 한계를 넘습니다.",
+  "engine.printer_marks.colourBarCannotFit": "컬러 바의 패치 {{needed}}개가 {{page_number}}페이지 위쪽 가장자리에 들어가지 않습니다.",
   "engine.printer_marks.markOffsetMustZero": "표시 오프셋은 0 이상이어야 하고 표시 길이는 양수여야 합니다.",
   "engine.printer_marks.markStyleMustOne": "표시 스타일은 {{styles}} 중 하나여야 합니다.",
   "engine.printer_marks.markWeightMustOne": "표시 두께는 {{weights}} 중 하나여야 합니다.",

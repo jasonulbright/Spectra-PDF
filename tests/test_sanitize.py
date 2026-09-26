@@ -426,6 +426,39 @@ class TestHiddenText:
         assert "Visible paragraph one." not in by_text
         assert "Visible paragraph two." not in by_text
 
+    def test_a_fill_clipped_away_from_the_text_does_not_hide_it(self):
+        from engine.sanitize_content import analyze_page, off_ocg_set
+
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(300, 300))
+        font = pdf.make_indirect(Dictionary(
+            Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica))
+        page.obj.Resources = Dictionary(Font=Dictionary(F1=font))
+        # The white fill spans the page but paints only inside the clip.
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 150 200 Td (Visible words) Tj ET "
+            b"q 0 0 50 50 re W n 1 1 1 rg 0 0 300 300 re f Q")
+
+        assert analyze_page(pdf, pdf.pages[0], off_ocg_set(pdf))["runs"] == []
+
+    def test_a_form_bbox_clips_its_fill_too(self):
+        from engine.sanitize_content import analyze_page, off_ocg_set
+
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(300, 300))
+        font = pdf.make_indirect(Dictionary(
+            Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica))
+        form = pdf.make_stream(b"1 1 1 rg 0 0 300 300 re f")
+        form.Type = Name.XObject
+        form.Subtype = Name.Form
+        form.BBox = Array([0, 0, 50, 50])
+        page.obj.Resources = Dictionary(
+            Font=Dictionary(F1=font), XObject=Dictionary(Fm0=form))
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 150 200 Td (Visible words) Tj ET /Fm0 Do")
+
+        assert analyze_page(pdf, pdf.pages[0], off_ocg_set(pdf))["runs"] == []
+
     def test_a_recognition_layer_is_its_own_sub_class(self, scan_pdf):
         found = row(audit_hidden_information(scan_pdf), "hidden_text")
         assert [d["kind"] for d in found["detail"]] == ["ocr_layer"]
@@ -449,6 +482,27 @@ class TestHiddenLayers:
         out = os.path.join(tmp_dir, "hidden-layer.pdf")
         set_layer_visibility(hidden_pdf, out, 0, False)
         assert counts(audit_hidden_information(out))["hidden_layers"] == 1
+
+    def test_content_a_visibility_expression_hides_is_removed(self):
+        from engine.sanitize_content import off_ocg_set, remove_hidden_layer_content
+
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(300, 300))
+        secret = pdf.make_indirect(Dictionary(Type=Name.OCG, Name=String("Secret")))
+        pdf.Root.OCProperties = Dictionary(
+            OCGs=Array([secret]), D=Dictionary(OFF=Array([secret])))
+        # No /OCGs at all: the expression alone decides, and it reads hidden.
+        ocmd = pdf.make_indirect(Dictionary(Type=Name.OCMD, VE=Array([Name.And, secret])))
+        font = pdf.make_indirect(Dictionary(
+            Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica))
+        page.obj.Resources = Dictionary(
+            Font=Dictionary(F1=font), Properties=Dictionary(MC0=ocmd))
+        page.Contents = pdf.make_stream(
+            b"/OC /MC0 BDC BT /F1 12 Tf 20 200 Td (SECRET) Tj ET EMC")
+
+        assert remove_hidden_layer_content(pdf, off_ocg_set(pdf)) == 1
+        stream = pikepdf.unparse_content_stream(pikepdf.parse_content_stream(pdf.pages[0]))
+        assert b"SECRET" not in stream
 
 
 class TestPriorRevisions:

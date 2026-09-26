@@ -263,6 +263,41 @@ class TestSpotToProcess:
         with pytest.raises(ValueError, match="at least one ink"):
             spot_to_process(src, str(tmp_path / "o.pdf"), [])
 
+    def test_two_spots_with_different_alternates_keep_their_own(self, tmp_path):
+        from pikepdf import Array, Dictionary, Name
+
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        # The conversion reads the profile's /N, never its bytes.
+        profile = pdf.make_stream(b"profile bytes")
+        profile.N = 3
+        lab = Array([Name.Lab, Dictionary(WhitePoint=[0.9505, 1.0, 1.089],
+                                          Range=[-100, 100, -100, 100])])
+        rgb_tint = pdf.make_indirect(Dictionary(
+            FunctionType=2, Domain=[0, 1], C0=[0, 0, 0], C1=[1, 0, 0], N=1))
+        lab_tint = pdf.make_indirect(Dictionary(
+            FunctionType=2, Domain=[0, 1], C0=[100, 0, 0], C1=[50, 60, 40], N=1))
+        page.obj.Resources = Dictionary(ColorSpace=Dictionary(
+            CSA=Array([Name.Separation, Name("/SpotA"),
+                       Array([Name.ICCBased, profile]), rgb_tint]),
+            CSB=Array([Name.Separation, Name("/SpotB"), lab, lab_tint]),
+        ))
+        page.Contents = pdf.make_stream(
+            b"/CSA cs 1 scn 0 0 50 50 re f /CSB cs 1 scn 60 0 50 50 re f")
+        src = str(tmp_path / "spots.pdf")
+        pdf.save(src)
+        out = str(tmp_path / "o.pdf")
+
+        spot_to_process(src, out, ["SpotA", "SpotB"])
+
+        with pikepdf.open(out) as done:
+            page = done.pages[0]
+            table = page.obj.Resources.ColorSpace
+            selected = [i.operands[0] for i in pikepdf.parse_content_stream(page)
+                        if str(i.operator) == "cs"]
+            families = [str(table[name][0]) for name in selected]
+        assert families == ["/ICCBased", "/Lab"]
+
 
 class TestShadingsTheCompositionCannotDescribe:
     """Composing the tint transform onto a shading's function samples ONE

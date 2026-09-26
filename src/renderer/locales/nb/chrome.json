@@ -2494,6 +2494,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} ble avbrutt etter {{RENDER_TIMEOUT_S}}s",
   "engine.print_layout.unvalidatedPageSpecToken": "uvalidert symbol i sideangivelsen: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Å legge til trykkmerker ville gjort side {{index}} større enn sidegrensen på 14400 punkter.",
+  "engine.printer_marks.colourBarCannotFit": "Fargefeltet får ikke plass til sine {{needed}} felt langs øvre kant av side {{page_number}}.",
   "engine.printer_marks.markOffsetMustZero": "Merkeavstanden må være null eller mer, og merkelengden må være positiv.",
   "engine.printer_marks.markStyleMustOne": "Merkestilen må være en av {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "Merkevekten må være en av {{weights}}.",

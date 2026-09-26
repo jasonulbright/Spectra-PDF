@@ -539,11 +539,22 @@ def _alternate_operand(alt):
     return None, None
 
 
-def _install_alternate(resources, alt, cache: dict) -> str:
+def _same_space(a, b) -> bool:
+    try:
+        if a.is_indirect and b.is_indirect:
+            return a.objgen == b.objgen
+        return a.unparse() == b.unparse()
+    except Exception:  # noqa: BLE001 — an entry that will not compare is another space
+        return False
+
+
+def _install_alternate(resources, alt) -> str:
     """The resource name a `cs` operand can use for the alternate space.
 
     A device space names itself; anything else is added to the owner's
-    `/ColorSpace` under a fresh key, because an operand must be a name.
+    `/ColorSpace` under a fresh key, because an operand must be a name. An
+    entry already holding this very space is reused: two spots whose
+    alternates differ each keep their own.
     """
     direct, _ = _alternate_operand(alt)
     if direct is not None:
@@ -552,15 +563,14 @@ def _install_alternate(resources, alt, cache: dict) -> str:
     if table is None:
         table = Dictionary()
         resources["/ColorSpace"] = table
-    key = cache.get(id(resources))
-    if key is not None:
-        return key
+    for existing in list(table.keys()):
+        if str(existing).startswith("/InkAlt") and _same_space(table[existing], alt):
+            return str(existing)
     index = 0
     while Name(f"/InkAlt{index}") in table:
         index += 1
     key = f"/InkAlt{index}"
     table[Name(key)] = alt
-    cache[id(resources)] = key
     return key
 
 
@@ -588,7 +598,7 @@ def _numeric_operands(operands) -> list[float] | None:
     return values
 
 
-def _rewrite_stream(pdf, owner, targets: dict, alt_cache: dict) -> int:
+def _rewrite_stream(pdf, owner, targets: dict) -> int:
     """Replace every selection-and-paint of a target space in one stream.
 
     `targets` maps a resource key's bytes to (colour-space array, tint
@@ -620,7 +630,7 @@ def _rewrite_stream(pdf, owner, targets: dict, alt_cache: dict) -> int:
             if target is not None:
                 cs, tint, alt, _name = target
                 armed[slot] = target
-                operand = _install_alternate(resources, alt, alt_cache)
+                operand = _install_alternate(resources, alt)
                 out.append(pikepdf.ContentStreamInstruction(
                     [Name(operand)], pikepdf.Operator(operator)))
                 continue
@@ -915,7 +925,6 @@ def spot_to_process(
                 name = name_label(raw)
                 raise ValueError(f'Ink "{name}" declares no alternate colour space.')
 
-        alt_cache: dict = {}
         for owner in _content_owners(pdf):
             resources = owner.get("/Resources")
             if resources is None:
@@ -951,7 +960,7 @@ def spot_to_process(
                 targets[name_bytes(key)] = (cs, tint, alt, name)
                 converted_spaces += 1
             if targets:
-                changed_paints += _rewrite_stream(pdf, owner, targets, alt_cache)
+                changed_paints += _rewrite_stream(pdf, owner, targets)
                 _drop_converted_spaces(resources, table, targets)
 
         changed_images = _convert_images(pdf, wanted)

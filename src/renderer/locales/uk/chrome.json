@@ -2620,6 +2620,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} перевищило час очікування {{RENDER_TIMEOUT_S}} с",
   "engine.print_layout.unvalidatedPageSpecToken": "неперевірений токен специфікації сторінок: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Додавання міток друку зробило б сторінку {{index}} більшою за граничний розмір у 14400 пунктів.",
+  "engine.printer_marks.colourBarCannotFit": "Кольорова шкала не вміщується вздовж верхнього краю сторінки {{page_number}} (потрібно полів: {{needed}}).",
   "engine.printer_marks.markOffsetMustZero": "Зміщення мітки має бути нульовим або більшим, а довжина мітки — додатною.",
   "engine.printer_marks.markStyleMustOne": "Стиль мітки має бути одним із {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "Товщина мітки має бути однією з {{weights}}.",

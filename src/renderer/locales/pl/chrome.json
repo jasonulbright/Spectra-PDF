@@ -2620,6 +2620,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} przekroczyło limit czasu {{RENDER_TIMEOUT_S}} s",
   "engine.print_layout.unvalidatedPageSpecToken": "niezweryfikowany token specyfikacji stron: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Dodanie znaczników drukarskich uczyniłoby stronę {{index}} większą niż limit 14400 punktów.",
+  "engine.printer_marks.colourBarCannotFit": "Pasek kolorów nie mieści się wzdłuż górnej krawędzi strony {{page_number}} (liczba pól: {{needed}}).",
   "engine.printer_marks.markOffsetMustZero": "Przesunięcie znacznika musi wynosić zero lub więcej, a długość znacznika musi być dodatnia.",
   "engine.printer_marks.markStyleMustOne": "Styl znacznika musi być jednym z {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "Grubość znacznika musi być jedną z {{weights}}.",

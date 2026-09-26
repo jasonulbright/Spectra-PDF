@@ -1670,6 +1670,30 @@ class TestJpeg2000:
             redact(file=src, output=out, regions=[{"page": 1, "rect": _px_rect(4, 4, 8, 8, size)}])
         assert not os.path.exists(out)
 
+    def test_a_canvas_larger_than_the_image_refuses_before_it_is_walked(self, tmp_dir):
+        # The code-block walk sizes itself to SIZ; a 4 194 304-pixel square
+        # canvas behind a 16x16 image does not finish.
+        side = 1 << 22
+        siz = struct.pack(">HIIIIIIIIH", 0, side, side, 0, 0, side, side, 0, 0, 1) + bytes([7, 1, 1])
+        cod = bytes([0, 0]) + struct.pack(">H", 1) + bytes([0]) + bytes([5, 4, 4, 0, 1])
+        qcd = bytes([0x20]) + bytes([8 << 3] * 16)
+
+        def segment(marker: int, body: bytes) -> bytes:
+            return struct.pack(">HH", marker, len(body) + 2) + body
+
+        data = (b"\xff\x4f" + segment(0xFF51, siz) + segment(0xFF52, cod)
+                + segment(0xFF5C, qcd)
+                + struct.pack(">HHHIBB", 0xFF90, 10, 0, 0, 0, 1) + b"\xff\x93" + b"\xff\xd9")
+        size = 16
+        keys = {"/Width": size, "/Height": size, "/ColorSpace": Name("/DeviceGray"),
+                "/BitsPerComponent": 8, "/Filter": Name("/JPXDecode")}
+        src = _pixel_pdf(os.path.join(tmp_dir, "in.pdf"), data, keys, size, size)
+        out = os.path.join(tmp_dir, "out.pdf")
+
+        with pytest.raises(ValueError, match="contradicts the image dictionary"):
+            redact(file=src, output=out, regions=[{"page": 1, "rect": _px_rect(4, 4, 8, 8, size)}])
+        assert not os.path.exists(out)
+
 
 # ── bilevel codecs ────────────────────────────────────────────────────────
 

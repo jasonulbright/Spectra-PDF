@@ -530,9 +530,14 @@ def _exponent(quant: _Quant, levels: int, band_index: int, level: int) -> int:
     return quant.exponents[band_index]
 
 
-def jpx_layout(data: bytes) -> JpxLayout:
+def jpx_layout(data: bytes, expected: tuple | None = None) -> JpxLayout:
     """Parse the codestream down to one fact per code-block: how many coding
-    passes it kept, and how many it could have kept."""
+    passes it kept, and how many it could have kept.
+
+    `expected` is the `(width, height)` the image dictionary declares. The
+    code-block walk allocates per block of the canvas the SIZ segment states,
+    so a canvas that disagrees with the declared size is refused as soon as
+    SIZ is read, before that walk sizes itself to it."""
     codestream, colour = jpx_split(data)
     if codestream[:2] != b"\xff\x4f":
         raise TaintError("a JPX codestream without SOC")
@@ -611,6 +616,8 @@ def jpx_layout(data: bytes) -> JpxLayout:
                 ssiz, xr, yr = body[36 + 3 * k : 39 + 3 * k]
                 components.append(((ssiz & 0x7F) + 1, bool(ssiz & 0x80), xr, yr))
             siz = (xsiz, ysiz, xosiz, yosiz, xtsiz, ytsiz, xtosiz, ytosiz, tuple(components))
+            if expected is not None and (xsiz - xosiz, ysiz - yosiz) != tuple(expected):
+                raise TaintError("a JPX canvas whose size contradicts the image dictionary")
         elif marker == 0xFF52:
             main_cod = _read_cod(body, True)
         elif marker == 0xFF53:

@@ -56,6 +56,7 @@ are emitted verbatim.
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 
 import pikepdf
@@ -223,9 +224,13 @@ def _date_key(entry: dict | None) -> tuple:
     """A total sort key for a date field. Unparseable and absent sort LAST, so
     a document whose dates are damaged still orders deterministically."""
     if entry is None or "year" not in entry:
-        return (1, 0, 0, 0, 0, 0)
-    minutes = entry["hour"] * 60 + entry["minute"] - (entry["offset"] or 0)
-    return (0, entry["year"], entry["month"], entry["day"], minutes, entry["second"])
+        return (1, 0, 0)
+    # The instant, in minutes on one proleptic Gregorian line: removing the
+    # offset can carry a time across midnight, a month end or a year end, so
+    # the calendar fields cannot stay separate keys.
+    days = date(max(entry["year"], 1), entry["month"], 1).toordinal() + entry["day"] - 1
+    minutes = days * 1440 + entry["hour"] * 60 + entry["minute"] - (entry["offset"] or 0)
+    return (0, minutes, entry["second"])
 
 
 def _render_date(entry: dict | None, labels: dict, rendered: dict) -> str:

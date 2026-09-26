@@ -1505,7 +1505,7 @@ def _jpx_rewrite(raster: _Raster, destroy, role: str, fill):
 
     source = _peel(raster.raw, raster.filters)
     try:
-        layout = codec_taint.jpx_layout(source)
+        layout = codec_taint.jpx_layout(source, (raster.width, raster.height))
     except codec_taint.TaintError as exc:
         refuse(f"a JPEG 2000 image the dependency model cannot read: {exc}")
     if (layout.width, layout.height) != (raster.width, raster.height):

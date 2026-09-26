@@ -533,7 +533,10 @@ def print_pdf(
         if _preview:
             spec = ",".join(str(p + 1) for p in order[:preview_max])
             return _emit_preview(file, fit, spec, len(order))
-        args = build_gs_args(file, printer, page_list, fit, gs_path, duplex, us_ps)
+        # An odd or even subset is not in the user's range; the job's page
+        # list names the pages that remain after it.
+        job_pages = page_list if subset == "all" else ",".join(str(p + 1) for p in order)
+        args = build_gs_args(file, printer, job_pages, fit, gs_path, duplex, us_ps)
         jobs = copies
         _run_jobs(args, jobs)
     else:

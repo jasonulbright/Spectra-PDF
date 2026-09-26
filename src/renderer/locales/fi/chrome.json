@@ -2494,6 +2494,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} keskeytettiin {{RENDER_TIMEOUT_S}} sekunnin jälkeen",
   "engine.print_layout.unvalidatedPageSpecToken": "tarkistamaton merkki sivumäärityksessä: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Painomerkkien lisääminen tekisi sivusta {{index}} suuremman kuin 14400 pisteen sivuraja.",
+  "engine.printer_marks.colourBarCannotFit": "Väripalkin {{needed}} kenttää eivät mahdu sivun {{page_number}} yläreunaan.",
   "engine.printer_marks.markOffsetMustZero": "Merkin etäisyyden on oltava nolla tai enemmän ja merkin pituuden positiivinen.",
   "engine.printer_marks.markStyleMustOne": "Merkin tyylin on oltava jokin arvoista {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "Merkin paksuuden on oltava jokin arvoista {{weights}}.",

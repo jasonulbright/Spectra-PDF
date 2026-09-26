@@ -180,6 +180,25 @@ def test_the_emitted_postscript_still_processes(tmp_dir, gs_path):
         assert len(pdf.pages) == 3
 
 
+def test_a_partial_export_carries_each_exported_pages_own_preset(tmp_dir, gs_path):
+    source = _blank_pdf(os.path.join(tmp_dir, "src.pdf"), pages=4)
+    assigned = os.path.join(tmp_dir, "assigned.pdf")
+    assign_presets(source, assigned, assignments=[
+        {"first": 1, "last": 2, "name": "Early", "preset": {"TrapWidth": 3}},
+        {"first": 3, "last": 4, "name": "Late", "preset": {"TrapWidth": 7}},
+    ])
+    postscript = os.path.join(tmp_dir, "out.ps")
+
+    result = export_postscript(assigned, postscript, gs_path=gs_path, pages="3,4")
+
+    assert result["trapping_pages"] == 2
+    with open(postscript, "rb") as handle:
+        text = handle.read()
+    # The export's two pages are the document's pages 3 and 4.
+    assert text.count(b"/TrapWidth 7") == 2
+    assert b"/TrapWidth 3" not in text
+
+
 def test_a_page_range_outside_the_document_refuses(tmp_dir):
     source = _blank_pdf(os.path.join(tmp_dir, "src.pdf"))
     with pytest.raises(ValueError, match="not in this document"):

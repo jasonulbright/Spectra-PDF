@@ -178,9 +178,13 @@ def apply_ocr_layer(file: str, output: str, pages: list[dict]) -> dict:
                 # First application on this page: append the overlay draw.
                 # (On re-application the existing draw already points at the
                 # name we just swapped — REPLACE semantics, no stacking.)
-                existing = pikepdf.parse_content_stream(page)
-                content = pikepdf.unparse_content_stream(existing)
-                content += f"\nq {OCR_XOBJECT_NAME} Do Q".encode("ascii")
+                # A transform the page's own content leaves standing (a `cm`
+                # outside any q/Q, or an unmatched `q`) would move every word
+                # off its box, so that content is closed off first.
+                from engine.forms import _balanced_content
+
+                content = _balanced_content(page)
+                content += f"q {OCR_XOBJECT_NAME} Do Q".encode("ascii")
                 page.Contents = pdf.make_stream(content)
             words_applied += len(words)
 

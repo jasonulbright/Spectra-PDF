@@ -192,3 +192,34 @@ class TestApplyOcrLayer:
         r = apply_ocr_layer(src, out, [{"page": 1, "words": WORDS}])
         assert r["pages_applied"] == 1
         assert "INVOICE" in extract_text(out)["text"]
+
+
+class TestLayerIgnoresPageState:
+    def test_a_transform_the_page_leaves_standing_does_not_move_the_words(self, tmp_dir):
+        from pdfminer.high_level import extract_pages
+        from pdfminer.layout import LTChar
+
+        src = os.path.join(tmp_dir, "scaled.pdf")
+        out = os.path.join(tmp_dir, "scaled-ocr.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(400, 400))
+        # Conformant content: a `cm` outside any q/Q stays in force to the end.
+        page.Contents = pdf.make_stream(b"0.5 0 0 0.5 0 0 cm 0 0 1 rg 0 0 100 100 re f")
+        pdf.save(src)
+        pdf.close()
+
+        apply_ocr_layer(src, out, [{"page": 1, "words": [{"text": "Word", "rect": [200, 200, 300, 230]}]}])
+
+        chars = []
+
+        def walk(node):
+            for child in getattr(node, "_objs", None) or []:
+                if isinstance(child, LTChar):
+                    chars.append(child)
+                walk(child)
+
+        for layout in extract_pages(out):
+            walk(layout)
+        assert [c.get_text() for c in chars] == list("Word")
+        assert chars[0].x0 == pytest.approx(200, abs=1)
+        assert chars[0].y0 == pytest.approx(200, abs=5)

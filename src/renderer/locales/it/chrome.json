@@ -2557,6 +2557,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} scaduto dopo {{RENDER_TIMEOUT_S}} s",
   "engine.print_layout.unvalidatedPageSpecToken": "token della specifica di pagina non convalidato: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Aggiungere segni di stampa renderebbe la pagina {{index}} più grande del limite di 14400 punti.",
+  "engine.printer_marks.colourBarCannotFit": "La barra colore non può contenere i suoi {{needed}} campi lungo il bordo superiore della pagina {{page_number}}.",
   "engine.printer_marks.markOffsetMustZero": "Lo scostamento dei segni deve essere zero o più e la loro lunghezza deve essere positiva.",
   "engine.printer_marks.markStyleMustOne": "Lo stile dei segni deve essere uno tra: {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "Lo spessore dei segni deve essere uno tra: {{weights}}.",

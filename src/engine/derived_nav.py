@@ -35,12 +35,13 @@ as a source; such a heading falls through the ladder instead.
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pikepdf
 
 from engine.autotag import autotag
-from engine.inplace import is_same_file, staged_write
+from engine.inplace import staged_write
 from engine.outline import _count, get_outline, set_outline
 from engine.redact import IDENTITY, _resolve_resources
 from engine.struct_tree import _is_elem, _kids, _page_map, _page_no
@@ -451,35 +452,33 @@ def outline_from_structure(
         raise ValueError('mode must be "replace" or "append"')
     level_cap = _clamp_level(max_level)
     output_path = Path(output)
-    same_file = is_same_file(file, output)
     source = "structure"
-    working = file
 
     with pikepdf.open(file) as pdf:
         tagged = pdf.Root.get("/StructTreeRoot") is not None
-    if not tagged and tag_if_untagged:
-        # Tag INTO the output and carry on from there, so the tags the
-        # headings were read from are the tags the saved file carries.
-        if same_file:
-            with staged_write(output_path) as staged:
-                autotag(file, str(staged))
-        else:
-            autotag(file, str(output_path))
-        working = str(output_path)
-        source = "autotag"
+    with tempfile.TemporaryDirectory(prefix="spectra-outline-") as scratch:
+        working = file
+        if not tagged and tag_if_untagged:
+            # The tags are written to a private copy, and reach the output only
+            # with the bookmarks built from them: a run that finds no heading
+            # refuses with the named file untouched.
+            working = str(Path(scratch) / "tagged.pdf")
+            autotag(file, working)
+            source = "autotag"
 
-    with pikepdf.open(working) as pdf:
-        headings, skipped = _collect_headings(pdf, level_cap)
-        if not headings:
-            raise ValueError(
-                "No headings found in the structure tree — nothing to build "
-                "bookmarks from."
-            )
-        derived = _nest(headings)
+        with pikepdf.open(working) as pdf:
+            headings, skipped = _collect_headings(pdf, level_cap)
+            if not headings:
+                raise ValueError(
+                    "No headings found in the structure tree — nothing to build "
+                    "bookmarks from."
+                )
+            derived = _nest(headings)
 
-    existing = get_outline(working)["outline"] if mode == "append" else []
-    tree = [*existing, *derived]
-    set_outline(working, tree, str(output_path))
+        existing = get_outline(working)["outline"] if mode == "append" else []
+        tree = [*existing, *derived]
+        with staged_write(output_path) as staged:
+            set_outline(working, tree, str(staged))
     return {
         "output": str(output_path),
         "added": _count(derived),

@@ -284,6 +284,27 @@ class TestUntagged:
         with pytest.raises(ValueError, match="No headings"):
             outline_from_structure(path, os.path.join(tmp_dir, "x.pdf"))
 
+    def test_a_chain_that_finds_no_heading_leaves_the_file_untouched(self, tmp_dir):
+        path = os.path.join(tmp_dir, "uniform.pdf")
+        pdf = blank_pdf(1)
+        font = pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1, BaseFont=pikepdf.Name.Helvetica))
+        page = pdf.pages[0]
+        page.obj.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=font))
+        # One size throughout: autotag writes paragraphs and no heading.
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 20 500 Td (Body one) Tj ET BT /F1 12 Tf 20 450 Td (Body two) Tj ET")
+        pdf.save(path)
+        with open(path, "rb") as handle:
+            before = handle.read()
+
+        with pytest.raises(ValueError, match="No headings"):
+            outline_from_structure(path, path, tag_if_untagged=True)
+
+        with open(path, "rb") as handle:
+            assert handle.read() == before
+        assert sorted(os.listdir(tmp_dir)) == ["uniform.pdf"]
+
 
 class TestMarkedContentWalk:
     def test_runs_report_the_marked_content_id_they_sit_in(self, headed):

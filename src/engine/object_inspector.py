@@ -551,10 +551,13 @@ class _Walk:
                 has_clip = True
                 continue
             if operator in _PAINT_ALL:
-                if operator in _PAINT_VISIBLE and not has_clip and points:
+                if operator in _PAINT_VISIBLE and points:
+                    # A path that both clips and paints owns only its painting
+                    # operator: the construction and the W stay, so every
+                    # other object's isolation keeps the clip it drew under.
                     self._paint(
-                        operator, points, construct + [idx], state, clips,
-                        line_width, resources, unit_for, nested, form,
+                        operator, points, [idx] if has_clip else construct + [idx],
+                        state, clips, line_width, resources, unit_for, nested, form,
                     )
                 construct, points, has_clip = [], [], False
                 continue
@@ -844,7 +847,17 @@ def _isolation_pdf(pdf, page, units, wanted, tile, dest: Path) -> None:
     height = max(tile[3] - tile[1], 1e-3)
     for unit in wanted:
         drop = everything - set(unit)
-        kept = drop_dead_frames(without(instructions, drop))
+        # A removed painting operator that ends a clipping path becomes `n`:
+        # the clip it set still applies to what follows, and it paints nothing.
+        patched = list(instructions)
+        ended: set[int] = set()
+        for index in drop:
+            if (index > 0 and index - 1 not in drop
+                    and token_text(instructions[index].operator) in _PAINT_VISIBLE
+                    and token_text(instructions[index - 1].operator) in _CLIP):
+                patched[index] = pikepdf.ContentStreamInstruction([], pikepdf.Operator("n"))
+                ended.add(index)
+        kept = drop_dead_frames(without(patched, drop - ended))
         try:
             body = pikepdf.unparse_content_stream(kept)
         except Exception as exc:

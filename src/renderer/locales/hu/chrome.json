@@ -2494,6 +2494,7 @@
   "engine.print_layout.timedOutAfterS": "A(z) {{what}} időtúllépés után leállt: {{RENDER_TIMEOUT_S}} mp",
   "engine.print_layout.unvalidatedPageSpecToken": "érvényesítetlen oldalmegadási jelsor: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "A nyomdai jelek hozzáadása a(z) {{index}}. oldalt a 14400 pontos oldalhatár fölé növelné.",
+  "engine.printer_marks.colourBarCannotFit": "A színcsík {{needed}} mezője nem fér el a(z) {{page_number}}. oldal felső szélén.",
   "engine.printer_marks.markOffsetMustZero": "A jeleltolásnak nullának vagy nagyobbnak, a jelhossznak pedig pozitívnak kell lennie.",
   "engine.printer_marks.markStyleMustOne": "A jelstílus értéke ezek egyike lehet: {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "A jelvastagság értéke ezek egyike lehet: {{weights}}.",

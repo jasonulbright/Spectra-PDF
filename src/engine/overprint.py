@@ -279,7 +279,13 @@ def _walk(pdf, instructions, resources, state, depth, page_no, rows, unreadable,
                 xobj = _entry(resources, "/XObject", operands[0])
                 if xobj is None or name_bytes(xobj.get("/Subtype")) != b"Form":
                     continue
-                ident = xobj.objgen if getattr(xobj, "is_indirect", False) else id(xobj)
+                # One form drawn under two states paints twice: a draw is
+                # skipped only when the same form already ran under the same
+                # state, which also ends a form that draws itself.
+                ident = (
+                    xobj.objgen if getattr(xobj, "is_indirect", False) else id(xobj),
+                    tuple(repr(getattr(state, slot)) for slot in _State.__slots__),
+                )
                 if ident in seen:
                     continue
                 seen.add(ident)

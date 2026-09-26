@@ -2557,6 +2557,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} a expirat după {{RENDER_TIMEOUT_S}} s",
   "engine.print_layout.unvalidatedPageSpecToken": "simbol de specificație de pagini nevalidat: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Adăugarea marcajelor de tipar ar face pagina {{index}} mai mare decât limita de 14400 de puncte.",
+  "engine.printer_marks.colourBarCannotFit": "Bara de culoare nu încape de-a lungul marginii de sus a paginii {{page_number}} (număr de câmpuri: {{needed}}).",
   "engine.printer_marks.markOffsetMustZero": "Decalajul marcajului trebuie să fie zero sau mai mult, iar lungimea marcajului trebuie să fie pozitivă.",
   "engine.printer_marks.markStyleMustOne": "Stilul marcajului trebuie să fie unul dintre {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "Grosimea marcajului trebuie să fie una dintre {{weights}}.",

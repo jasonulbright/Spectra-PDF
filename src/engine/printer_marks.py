@@ -360,6 +360,39 @@ def _process_patches() -> list[tuple[str, tuple[float, float, float, float]]]:
     return out
 
 
+# The narrowest patch a colour bar draws, in points.
+_MIN_PATCH = 0.5
+
+
+def _patches_in(runs, width: float) -> int:
+    """How many patches of `width` the bar's runs hold, each run filled from
+    its left end, as the drawing loop fills them."""
+    return sum(int((hi - lo + 1e-6) / width) for lo, hi in runs)
+
+
+def _patch_width(runs, count: int, widest: float):
+    """The widest patch, up to `widest`, at which all `count` patches fit.
+
+    A patch never straddles the gap around the registration target, so the
+    width is not the bar's total over the count: each run holds whole patches
+    only. None when even the narrowest patch leaves one out.
+    """
+    if not runs or _patches_in(runs, _MIN_PATCH) < count:
+        return None
+    total = sum(hi - lo for lo, hi in runs)
+    high = max(_MIN_PATCH, min(widest, total / count))
+    if _patches_in(runs, high) >= count:
+        return high
+    low = _MIN_PATCH
+    for _ in range(60):
+        middle = (low + high) / 2.0
+        if _patches_in(runs, middle) >= count:
+            low = middle
+        else:
+            high = middle
+    return low
+
+
 def _build_mark_form(pdf, page, trim, media, offset, length, weight, style,
                      marks, spot_spaces, all_space, page_number, total,
                      filename, timestamp, font_dir):
@@ -405,36 +438,41 @@ def _build_mark_form(pdf, page, trim, media, offset, length, weight, style,
         # the overprint was honoured and one that shows both proves it was
         # knocked out.
         patches.append(("__overprint__", None))
-        total_width = sum(hi - lo for lo, hi in runs)
-        count = max(1, len(patches))
-        patch_w = min(length * 0.9, total_width / count)
+        needed = len(patches)
+        patch_w = _patch_width(runs, needed, length * 0.9)
+        if patch_w is None:
+            raise ValueError(
+                f"The colour bar cannot fit its {needed} patches along the top "
+                f"edge of page {page_number}."
+            )
         bar_h = max(1.0, length * 0.5)
         bar_y = trim[3] + offset
-        if patch_w >= 0.5:
-            resources[Name("/ExtGState")] = Dictionary(
-                OPon=pdf.make_indirect(Dictionary(Type=Name.ExtGState, OP=True, op=True, OPM=1)),
-            )
-            slot = 0
-            for run_lo, run_hi in runs:
-                x = run_lo
-                while slot < len(patches) and x + patch_w <= run_hi + 1e-6:
-                    key, comps = patches[slot]
-                    rect = f"{_n(x)} {_n(bar_y)} {_n(patch_w)} {_n(bar_h)} re"
-                    if key == "__overprint__":
-                        content.append(f"q 1 0 0 0 k {rect} f".encode("ascii"))
-                        content.append(
-                            f"/OPon gs 0 1 0 0 k {_n(x + patch_w * 0.35)} {_n(bar_y)} "
-                            f"{_n(patch_w * 0.65)} {_n(bar_h)} re f Q".encode("ascii")
-                        )
-                    elif comps is None:
-                        content.append(f"q {key} cs 1 scn {rect} f Q".encode("ascii"))
-                    else:
-                        c, m, y, k = comps
-                        content.append(
-                            f"q {_n(c)} {_n(m)} {_n(y)} {_n(k)} k {rect} f Q".encode("ascii")
-                        )
-                    x += patch_w
-                    slot += 1
+        resources[Name("/ExtGState")] = Dictionary(
+            OPon=pdf.make_indirect(Dictionary(Type=Name.ExtGState, OP=True, op=True, OPM=1)),
+        )
+        slot = 0
+        for run_lo, run_hi in runs:
+            room = _patches_in([(run_lo, run_hi)], patch_w)
+            for place in range(room):
+                if slot >= len(patches):
+                    break
+                x = run_lo + place * patch_w
+                key, comps = patches[slot]
+                rect = f"{_n(x)} {_n(bar_y)} {_n(patch_w)} {_n(bar_h)} re"
+                if key == "__overprint__":
+                    content.append(f"q 1 0 0 0 k {rect} f".encode("ascii"))
+                    content.append(
+                        f"/OPon gs 0 1 0 0 k {_n(x + patch_w * 0.35)} {_n(bar_y)} "
+                        f"{_n(patch_w * 0.65)} {_n(bar_h)} re f Q".encode("ascii")
+                    )
+                elif comps is None:
+                    content.append(f"q {key} cs 1 scn {rect} f Q".encode("ascii"))
+                else:
+                    c, m, y, k = comps
+                    content.append(
+                        f"q {_n(c)} {_n(m)} {_n(y)} {_n(k)} k {rect} f Q".encode("ascii")
+                    )
+                slot += 1
 
     if "pageinfo" in marks:
         label = _page_info_text(filename, page_number, total, timestamp, bar_names)

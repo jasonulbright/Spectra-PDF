@@ -2746,6 +2746,7 @@
   "engine.print_layout.timedOutAfterS": "انتهت مهلة العملية {{what}} بعد {{RENDER_TIMEOUT_S}} ثانية",
   "engine.print_layout.unvalidatedPageSpecToken": "رمز مواصفة صفحة غير مُتحقَّق منه: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "ستؤدي إضافة علامات الطباعة إلى تجاوز الصفحة {{index}} حد الصفحة البالغ 14400 نقطة.",
+  "engine.printer_marks.colourBarCannotFit": "لا يتسع شريط الألوان على الحافة العلوية للصفحة {{page_number}} (عدد الرقع: {{needed}}).",
   "engine.printer_marks.markOffsetMustZero": "يجب أن تكون إزاحة العلامة صفرًا أو أكثر، وأن يكون طول العلامة موجبًا.",
   "engine.printer_marks.markStyleMustOne": "يجب أن يكون نمط العلامة ضمن القيم {{styles}} المسموح بها.",
   "engine.printer_marks.markWeightMustOne": "يجب أن يكون سمك العلامة ضمن القيم {{weights}} المسموح بها.",

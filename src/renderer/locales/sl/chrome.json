@@ -2620,6 +2620,7 @@
   "engine.print_layout.timedOutAfterS": "{{what}} je poteklo po {{RENDER_TIMEOUT_S}} s",
   "engine.print_layout.unvalidatedPageSpecToken": "nepreverjen žeton določila strani: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "Dodajanje tiskarskih oznak bi stran {{index}} povečalo čez omejitev 14400 točk.",
+  "engine.printer_marks.colourBarCannotFit": "Barvni pas ne gre ob zgornji rob strani {{page_number}} (število polj: {{needed}}).",
   "engine.printer_marks.markOffsetMustZero": "Odmik oznake mora biti nič ali več, dolžina oznake pa mora biti pozitivna.",
   "engine.printer_marks.markStyleMustOne": "Slog oznake mora biti eden od {{styles}}.",
   "engine.printer_marks.markWeightMustOne": "Debelina oznake mora biti ena od {{weights}}.",

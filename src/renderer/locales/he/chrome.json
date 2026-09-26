@@ -2557,6 +2557,7 @@
   "engine.print_layout.timedOutAfterS": "הפעולה {{what}} חרגה מהזמן הקצוב לאחר {{RENDER_TIMEOUT_S}} שניות",
   "engine.print_layout.unvalidatedPageSpecToken": "אסימון לא מאומת במפרט העמודים: {{token}}",
   "engine.printer_marks.addingPrinterMarksWould": "הוספת סימני דפוס תגדיל את עמוד {{index}} מעבר למגבלת 14400 הנקודות של העמוד.",
+  "engine.printer_marks.colourBarCannotFit": "פס הצבע אינו נכנס לאורך הקצה העליון של עמוד {{page_number}} (מספר משבצות: {{needed}}).",
   "engine.printer_marks.markOffsetMustZero": "היסט הסימן חייב להיות אפס או יותר, ואורך הסימן חייב להיות חיובי.",
   "engine.printer_marks.markStyleMustOne": "סגנון הסימן חייב להיות אחד מהערכים {{styles}} בלבד.",
   "engine.printer_marks.markWeightMustOne": "עובי הסימן חייב להיות אחד מהערכים {{weights}} בלבד.",

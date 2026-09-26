@@ -236,6 +236,35 @@ def off_ocg_set(pdf) -> set:
     return everything - og_set("/ON")
 
 
+_MAX_EXPRESSION_DEPTH = 32
+
+
+def _expression_visible(expression, off_set: set, depth: int):
+    """A visibility expression evaluated in the default configuration: True,
+    False, or None when it is absent or cannot be read."""
+    if depth > _MAX_EXPRESSION_DEPTH:
+        return None
+    if isinstance(expression, pikepdf.Dictionary):
+        og = _objgen(expression)
+        return None if og is None else og not in off_set
+    if not isinstance(expression, pikepdf.Array) or len(expression) < 2:
+        return None
+    operator = token_text(expression[0])
+    operands = []
+    for item in list(expression)[1:]:
+        value = _expression_visible(item, off_set, depth + 1)
+        if value is None:
+            return None
+        operands.append(value)
+    if operator == "/And":
+        return all(operands)
+    if operator == "/Or":
+        return any(operands)
+    if operator == "/Not" and len(operands) == 1:
+        return not operands[0]
+    return None
+
+
 def oc_hidden(obj, off_set: set) -> bool:
     """Is this /OC value (an OCG, or an OCMD naming several) hidden in the
     default configuration? An OCMD's /P policy decides; AnyOn is the default."""
@@ -243,6 +272,11 @@ def oc_hidden(obj, off_set: set) -> bool:
         return False
     kind = token_text(obj.get("/Type", ""))
     if kind == "/OCMD":
+        # A visibility expression, where present, decides in place of /OCGs
+        # and /P (ISO 32000-2 8.11.2.2).
+        visible = _expression_visible(obj.get("/VE"), off_set, 0)
+        if visible is not None:
+            return not visible
         groups = obj.get("/OCGs")
         members = []
         if isinstance(groups, pikepdf.Array):
@@ -481,6 +515,7 @@ def _walk_analysis(
     parent_state=None,
     hidden_depth: int = 0,
     in_ocr_form: bool = False,
+    base_clip=(None, True),
 ) -> None:
     # The text state holds the font DICTIONARY: the one `Tf` names in this
     # stream's resources, an ExtGState /Font entry, or the invoking stream's,
@@ -490,6 +525,12 @@ def _walk_analysis(
     state = _child_state(base_ctm, parent_state, lookup=lookup)
     alpha = _AlphaState()
     path = _PathBox()
+    # (device box, exact): the clip in force, and whether every clip that
+    # made it was an axis-aligned rectangle, so the box IS the region. A fill
+    # paints only inside the clip, so a cover claims no more than the two
+    # boxes share, and it is trusted only where that box is exact.
+    clip = base_clip
+    clip_stack: list = []
     pending_clip = False
     # How far the pen may lag what is tracked since the last positioning
     # operator: a run the font cannot measure advances by the wide estimate,
@@ -508,8 +549,11 @@ def _walk_analysis(
 
         if operator == "q":
             alpha.push()
+            clip_stack.append(clip)
         elif operator == "Q":
             alpha.pop()
+            if clip_stack:
+                clip = clip_stack.pop()
         elif operator == "gs" and operands:
             alpha.apply(_gs_opacity(lookup("/ExtGState", operands[0])))
 
@@ -554,9 +598,10 @@ def _walk_analysis(
             continue
         if operator in _PAINT:
             box, is_rect = path.finish()
+            painted = _clipped(box, clip)
             if (
                 operator in _PAINT_FILLS
-                and box is not None
+                and painted is not None
                 and not pending_clip
                 and hidden_at is None
                 and alpha.opaque
@@ -564,13 +609,15 @@ def _walk_analysis(
                 an.events.append(
                     _Event(
                         "cover",
-                        box,
+                        painted,
                         {
                             "rgb": _color_rgb(state.fill_color, resources, an.pdf),
-                            "trusted": is_rect,
+                            "trusted": is_rect and clip[1],
                         },
                     )
                 )
+            if pending_clip and box is not None:
+                clip = _narrowed(clip, box, is_rect)
             path.reset()
             pending_clip = False
             continue
@@ -636,9 +683,11 @@ def _walk_analysis(
 
         if operator == "INLINE IMAGE":
             box = bbox_of_corners_under_matrix(state.ctm, 0.0, 0.0, 1.0, 1.0)
-            if hidden_at is None and alpha.opaque:
+            painted = _clipped(box, clip)
+            if hidden_at is None and alpha.opaque and painted is not None:
                 an.events.append(
-                    _Event("cover", box, {"rgb": None, "trusted": _axis_aligned(state.ctm)})
+                    _Event("cover", painted,
+                           {"rgb": None, "trusted": _axis_aligned(state.ctm) and clip[1]})
                 )
             _note_scan(an, box)
             continue
@@ -650,9 +699,12 @@ def _walk_analysis(
             xobj_hidden = xobj is not None and oc_hidden(xobj.get("/OC"), an.off_set)
             if subtype == "/Image":
                 box = bbox_of_corners_under_matrix(state.ctm, 0.0, 0.0, 1.0, 1.0)
-                if hidden_at is None and not xobj_hidden and alpha.opaque and _image_is_opaque(xobj):
+                painted = _clipped(box, clip)
+                if (hidden_at is None and not xobj_hidden and alpha.opaque
+                        and _image_is_opaque(xobj) and painted is not None):
                     an.events.append(
-                        _Event("cover", box, {"rgb": None, "trusted": _axis_aligned(state.ctm)})
+                        _Event("cover", painted,
+                               {"rgb": None, "trusted": _axis_aligned(state.ctm) and clip[1]})
                     )
                 _note_scan(an, box)
             elif subtype == "/Form" and depth < MAX_FORM_DEPTH:
@@ -660,6 +712,18 @@ def _walk_analysis(
                     an.layer_blocks += 1
                 form_matrix = as_matrix(xobj.get("/Matrix")) or IDENTITY
                 form_res = xobj.get("/Resources")
+                # The form's /BBox clips what it paints (ISO 32000-2 8.10.1).
+                form_ctm = mat_mult(form_matrix, state.ctm)
+                form_clip = clip
+                try:
+                    bx0, by0, bx1, by1 = (float(v) for v in xobj.get("/BBox"))
+                    form_clip = _narrowed(
+                        clip,
+                        bbox_of_corners_under_matrix(form_ctm, bx0, by0, bx1, by1),
+                        _axis_aligned(form_ctm),
+                    )
+                except (TypeError, ValueError):
+                    pass
                 _walk_analysis(
                     an,
                     pikepdf.parse_content_stream(xobj),
@@ -670,12 +734,37 @@ def _walk_analysis(
                     parent_state=state,
                     hidden_depth=1 if (hidden_at is not None or xobj_hidden) else 0,
                     in_ocr_form=in_ocr_form or name == OCR_FORM_NAME,
+                    base_clip=form_clip,
                 )
             continue
 
         # Anything else abandons the path under construction.
         path.reset()
         pending_clip = False
+
+
+def _clipped(box, clip):
+    """The part of `box` the clip lets paint, or None when nothing is left."""
+    if box is None:
+        return None
+    region = clip[0]
+    if region is None:
+        return box
+    shared = (max(box[0], region[0]), max(box[1], region[1]),
+              min(box[2], region[2]), min(box[3], region[3]))
+    return shared if shared[2] > shared[0] and shared[3] > shared[1] else None
+
+
+def _narrowed(clip, box, exact: bool):
+    """The clip after intersecting it with a new clipping path's box."""
+    region, was_exact = clip
+    if region is None:
+        return (tuple(box), exact)
+    shared = (max(box[0], region[0]), max(box[1], region[1]),
+              min(box[2], region[2]), min(box[3], region[3]))
+    if shared[2] <= shared[0] or shared[3] <= shared[1]:
+        shared = (shared[0], shared[1], shared[0], shared[1])
+    return (shared, was_exact and exact)
 
 
 def _note_scan(an: _Analysis, box: Rect) -> None:
