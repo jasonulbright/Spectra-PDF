@@ -3070,7 +3070,6 @@ RETRY_ROUTED_PS = (
     "sync-edit-fonts.ps1",
     "bundle-dictionaries.ps1",
     "bundle-voikko.ps1",
-    "bundle-jbig2enc.ps1",
     "bundle-libreoffice.ps1",
     "bundle-tesseract.ps1",
     "setup-python-embed.ps1",

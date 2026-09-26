@@ -1,0 +1,14 @@
+[wrap-file]
+directory = leptonica-1.87.0
+source_url = https://github.com/DanBloomberg/leptonica/releases/download/1.87.0/leptonica-1.87.0.tar.gz
+source_filename = leptonica-1.87.0.tar.gz
+source_hash = c73363397f96eb1295602bf44d708a994ad42046c791bf03ea0505d829bdb6a7
+source_fallback_url = https://wrapdb.mesonbuild.com/v2/leptonica_1.87.0-1/get_source/leptonica-1.87.0.tar.gz
+patch_filename = leptonica_1.87.0-1_patch.zip
+patch_url = https://wrapdb.mesonbuild.com/v2/leptonica_1.87.0-1/get_patch
+patch_fallback_url = https://github.com/mesonbuild/wrapdb/releases/download/leptonica_1.87.0-1/leptonica_1.87.0-1_patch.zip
+patch_hash = 9633d49f037bd296062ca9e4854d470f475a0ca268b8c6b411347e6ba2f75dfd
+wrapdb_version = 1.87.0-1
+
+[provide]
+dependency_names = lept

@@ -37,6 +37,9 @@
 #    support by scripts/build-libtiff-nojbig.ps1 so that libjbig-0.dll
 #    (JBIG-KIT, GPL-2.0-or-later) is neither imported nor shipped; the bundler
 #    refuses if any shipped binary references it.
+#  - libgif-7.dll is an export stub with no giflib code
+#    (scripts/build-giflib-stub.ps1). It keeps giflib's notice because its
+#    interface (names, signatures, error values) is giflib's.
 #  - Keep sorted by filename so a diff against a fresh `Get-ChildItem` reads
 #    cleanly.
 #
@@ -48,7 +51,7 @@ libbz2-1.dll	bzip2	bzip2-1.0.6	LICENSE-bzip2.txt	https://gitlab.com/bzip2/bzip2	
 libdeflate.dll	libdeflate	MIT	LICENSE-libdeflate.txt	https://github.com/ebiggers/libdeflate	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libdeflate
 libexpat-1.dll	Expat	MIT	LICENSE-expat.txt	https://github.com/libexpat/libexpat	https://mirror.msys2.org/mingw/sources/mingw-w64-expat-2.8.5-1.src.tar.zst
 libgcc_s_seh-1.dll	GCC runtime library	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-gcc
-libgif-7.dll	giflib	MIT	LICENSE-giflib.txt	https://sourceforge.net/projects/giflib/	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-giflib
+libgif-7.dll	giflib export stub	MIT	LICENSE-giflib.txt	https://sourceforge.net/projects/giflib/	scripts/tesseract-giflib-stub/libgif-stub.c (built by scripts/build-giflib-stub.ps1)
 libiconv-2.dll	GNU libiconv	LGPL-2.1-or-later	LICENSE-libiconv.txt	https://savannah.gnu.org/projects/libiconv/	https://mirror.msys2.org/mingw/sources/mingw-w64-libiconv-1.19-1.src.tar.zst
 libjpeg-8.dll	libjpeg-turbo	IJG AND BSD-3-Clause AND Zlib	LICENSE-libjpeg-turbo.txt	https://github.com/libjpeg-turbo/libjpeg-turbo	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libjpeg-turbo
 libleptonica-6.dll	Leptonica	BSD-2-Clause	LICENSE-leptonica.txt	https://github.com/DanBloomberg/leptonica	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-leptonica

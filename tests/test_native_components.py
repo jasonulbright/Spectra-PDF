@@ -343,3 +343,35 @@ def test_a_removed_component_that_returns_fails_the_gate():
     problems = nc.breaches([_row("glib", "2.99.0", "libglib-2.0-0.dll", tree="tesseract")], advisories)
     assert problems == ["removed component shipped: GLib in tesseract/libglib-2.0-0.dll; "
                         "restore floor 2.82.1 (CVE-2024-52533)"]
+
+
+GIF_STUB = REPO / "scripts" / "tesseract-giflib-stub" / "libgif-7.dll"
+GIF_EXPORTS = ("DGifCloseFile,DGifOpen,DGifSlurp,EGifCloseFile,EGifOpen,EGifPutComment,EGifPutImageDesc,"
+               "EGifPutLine,EGifPutScreenDesc,GifFreeMapObject,GifMakeMapObject")
+
+
+def test_a_stubbed_library_is_absent_and_its_compile_time_report_resolves_to_the_stub():
+    rows = [_row("giflib", "absent", "libgif-7.dll", tree="tesseract"),
+            _row("giflib", "5.2.1", "tesseract.exe", tree="tesseract", source="runtime",
+                 evidence='tesseract.exe --version: "libgif 5.2.1"; code in libgif-7.dll')]
+    advisories = [("giflib", "absent:6.1.4", "CVE-e", "-"), ("giflib", "-", "CVE-f", "tools only")]
+    assert nc.breaches(rows, advisories) == []
+    returned = rows + [_row("giflib", "5.2.2", "jbig2.exe", tree="jbig2enc")]
+    assert nc.breaches(returned, advisories) == [
+        "removed component shipped: giflib in jbig2enc/jbig2.exe; restore floor 6.1.4 (CVE-e)"]
+
+
+def test_a_stub_evidence_row_holds_only_while_the_export_table_is_the_declared_one(tmp_path):
+    root, manifest = _fixture_tesseract(tmp_path)
+    (root / "libgif-7.dll").write_bytes(GIF_STUB.read_bytes())
+    sha = hashlib.sha256(GIF_STUB.read_bytes()).hexdigest()
+    evidence = {("tesseract", "libgif-7.dll"): (sha, "giflib", "absent", f"stub:{GIF_EXPORTS}; stub")}
+    inv = nc.Inventory(tmp_path / "resources", evidence)
+    nc.inventory_tesseract(inv, runtime=False, manifest=manifest)
+    assert [r[3] for r in inv.rows if r[1] == "libgif-7.dll"] == ["absent"]
+
+    short = GIF_EXPORTS.rsplit(",", 1)[0]
+    for text in (f"stub:{short}; stub", "package giflib"):
+        evidence = {("tesseract", "libgif-7.dll"): (sha, "giflib", "absent", text)}
+        with pytest.raises(RuntimeError):
+            nc.inventory_tesseract(nc.Inventory(tmp_path / "resources", evidence), runtime=False, manifest=manifest)

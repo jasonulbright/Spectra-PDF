@@ -1,4 +1,4 @@
-=== source: https://gitlab.com/libtiff/libtiff/-/raw/v4.7.1/LICENSE.md ===
+=== source: https://gitlab.com/libtiff/libtiff/-/raw/v4.7.2/LICENSE.md ===
 
 # LibTIFF license
 
