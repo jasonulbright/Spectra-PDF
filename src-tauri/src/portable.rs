@@ -262,27 +262,70 @@ pub fn webview_user_data_at(dir: &Path, container: Container) -> Option<PathBuf>
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WebViewUserDataDecision {
+    /// Leave WebView2's default alone (installed app or an explicit override).
+    UseDefault,
+    /// Set the portable profile beside the executable.
+    SetPortable(PathBuf),
+    /// The app folder cannot hold the portable profile; WebView2 will use its
+    /// per-user default, which will not travel with the extracted copy.
+    PortableFallback,
+}
+
+/// Decides whether startup can keep WebView2 data beside a portable copy.
+///
+/// The override is supplied by an administrator or test harness and takes
+/// precedence over this app's default. The writable probe is only called when
+/// the portable folder is actually needed.
+pub fn decide_webview_user_data(
+    dir: &Path,
+    container: Container,
+    has_override: bool,
+    writable: impl FnOnce(&Path) -> bool,
+) -> WebViewUserDataDecision {
+    if has_override || container == Container::Installed {
+        return WebViewUserDataDecision::UseDefault;
+    }
+    let Some(wanted) = webview_user_data_at(dir, container) else {
+        return WebViewUserDataDecision::UseDefault;
+    };
+    if writable(&wanted) {
+        WebViewUserDataDecision::SetPortable(wanted)
+    } else {
+        WebViewUserDataDecision::PortableFallback
+    }
+}
+
 /// Applies the decision to this process, before any WebView2 environment is
 /// created.
 ///
 /// Returns the folder actually in force, or None when WebView2's default is.
 /// A portable copy on read-only media cannot create the folder; that falls back
-/// to the default rather than failing to open a window, and the fallback is
-/// reported by `assent_state`'s sibling command so nothing about it is silent.
+/// to the default rather than failing to open a window. A native warning names
+/// that the settings will stay in this Windows profile instead of traveling
+/// with the portable copy.
 ///
 /// An existing `WEBVIEW2_USER_DATA_FOLDER` in the environment is left alone:
 /// whoever set it (an administrator, a test harness) outranks this default.
 pub fn apply_webview_user_data() -> Option<PathBuf> {
-    if std::env::var_os(WEBVIEW_USER_DATA_ENV).is_some() {
-        return None;
-    }
     let dir = exe_dir();
-    let wanted = webview_user_data_at(&dir, container_at(&dir))?;
-    if !ensure_writable_dir(&wanted) {
-        return None;
+    match decide_webview_user_data(
+        &dir,
+        container_at(&dir),
+        std::env::var_os(WEBVIEW_USER_DATA_ENV).is_some(),
+        ensure_writable_dir,
+    ) {
+        WebViewUserDataDecision::UseDefault => None,
+        WebViewUserDataDecision::SetPortable(wanted) => {
+            std::env::set_var(WEBVIEW_USER_DATA_ENV, &wanted);
+            Some(wanted)
+        }
+        WebViewUserDataDecision::PortableFallback => {
+            report_portable_storage_fallback();
+            None
+        }
     }
-    std::env::set_var(WEBVIEW_USER_DATA_ENV, &wanted);
-    Some(wanted)
 }
 
 /// Create `dir` if needed and prove it can accept a new file.
@@ -471,6 +514,30 @@ fn yes_no_box(text: &str, caption: &str) -> bool {
     let title = wide(caption);
     unsafe { MessageBoxW(0, body.as_ptr(), title.as_ptr(), MB_YESNO | MB_ICONEXCLAMATION) == IDYES }
 }
+
+#[cfg(windows)]
+fn report_portable_storage_fallback() {
+    extern "system" {
+        fn MessageBoxW(hwnd: isize, text: *const u16, caption: *const u16, utype: u32) -> i32;
+    }
+    const MB_OK: u32 = 0x00000000;
+    const MB_ICONWARNING: u32 = 0x00000030;
+    let body = wide(
+        "The folder containing this portable copy cannot be written. Spectra PDF will keep settings in this Windows user profile, so they will not travel with the copy. Move the copy to a writable folder before changing settings if you want new settings saved beside it. Existing profile settings will not move automatically.",
+    );
+    let title = wide("Spectra PDF — Portable settings location");
+    unsafe {
+        MessageBoxW(
+            0,
+            body.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONWARNING,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn report_portable_storage_fallback() {}
 
 /// Opens a URL with the shell. Used only with [`WEBVIEW2_DOWNLOAD_URL`], which
 /// is compiled in — this takes no caller-supplied destination for the same
@@ -685,6 +752,33 @@ mod tests {
         // strand every existing user's settings, which live in localStorage
         // inside that folder.
         assert_eq!(webview_user_data_at(&dir, Container::Installed), None);
+    }
+
+    #[test]
+    fn an_unwritable_portable_webview_folder_is_reported_as_a_fallback() {
+        let dir = PathBuf::from(r"E:\SpectraPDF");
+        let wanted = dir.join(PORTABLE_DATA_DIR).join(WEBVIEW_DATA_DIR);
+
+        assert_eq!(
+            decide_webview_user_data(&dir, Container::Portable, false, |path| path == wanted),
+            WebViewUserDataDecision::SetPortable(wanted.clone()),
+        );
+        assert_eq!(
+            decide_webview_user_data(&dir, Container::Portable, false, |_| false),
+            WebViewUserDataDecision::PortableFallback,
+        );
+        assert_eq!(
+            decide_webview_user_data(&dir, Container::Installed, false, |_| panic!(
+                "an installed copy must leave WebView2's default alone"
+            )),
+            WebViewUserDataDecision::UseDefault,
+        );
+        assert_eq!(
+            decide_webview_user_data(&dir, Container::Portable, true, |_| panic!(
+                "an explicit WebView2 folder takes precedence"
+            )),
+            WebViewUserDataDecision::UseDefault,
+        );
     }
 
     #[test]
