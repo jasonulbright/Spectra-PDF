@@ -1524,6 +1524,35 @@ fn profile_from_task_xml(
         || extract_tag(&settings, "StartWhenAvailable")?.as_str() != "true"
         || extract_tag(&settings, "Hidden")?.as_str() != "false"
         || extract_tag(&settings, "ExecutionTimeLimit")?.as_str() != "PT0S"
+        || extract_tag(&settings, "AllowStartOnDemand")
+            .as_deref()
+            .is_some_and(|v| v != "true")
+        || extract_tag(&settings, "AllowHardTerminate")
+            .as_deref()
+            .is_some_and(|v| v != "true")
+        || extract_tag(&settings, "RunOnlyIfNetworkAvailable")
+            .as_deref()
+            .is_some_and(|v| v != "false")
+        || extract_tag(&settings, "RunOnlyIfIdle")
+            .as_deref()
+            .is_some_and(|v| v != "false")
+        || extract_tag(&settings, "UseUnifiedSchedulingEngine")
+            .as_deref()
+            .is_some_and(|v| v != "false")
+        || extract_tag(&settings, "DisallowStartOnRemoteAppSession")
+            .as_deref()
+            .is_some_and(|v| v != "false")
+        || extract_tag(&settings, "Volatile")
+            .as_deref()
+            .is_some_and(|v| v != "false")
+        || extract_tag(&settings, "Priority")
+            .as_deref()
+            .is_some_and(|v| v != "7")
+        || extract_tag(&settings, "DeleteExpiredTaskAfter")
+            .as_deref()
+            .is_some_and(|v| v != "PT0S")
+        || settings.contains("<RestartOnFailure")
+        || settings.contains("<MaintenanceSettings")
         || extract_tag(&settings, "WakeToRun").as_deref().is_some_and(|v| v != "false")
     {
         return None;
@@ -2210,6 +2239,31 @@ mod tests {
             "<WakeToRun>true</WakeToRun></Settings>",
         );
         assert!(parse_test_task_xml(&p.name, &xml).is_none());
+    }
+
+    #[test]
+    fn a_task_with_unpreserved_execution_settings_is_not_offered_for_editing() {
+        let p = ocr_profile();
+        let base = build_test_task_xml(&p, None);
+        for setting in [
+            "<AllowStartOnDemand>false</AllowStartOnDemand>",
+            "<AllowHardTerminate>false</AllowHardTerminate>",
+            "<RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>",
+            "<RunOnlyIfIdle>true</RunOnlyIfIdle>",
+            "<UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>",
+            "<DisallowStartOnRemoteAppSession>true</DisallowStartOnRemoteAppSession>",
+            "<Volatile>true</Volatile>",
+            "<Priority>5</Priority>",
+            "<DeleteExpiredTaskAfter>P1D</DeleteExpiredTaskAfter>",
+            "<RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure>",
+            "<MaintenanceSettings><Period>P7D</Period><Deadline>P1M</Deadline></MaintenanceSettings>",
+        ] {
+            let xml = base.replace("</Settings>", &format!("{setting}</Settings>"));
+            assert!(
+                parse_test_task_xml(&p.name, &xml).is_none(),
+                "execution setting was offered for editing: {setting}"
+            );
+        }
     }
 
     #[test]
