@@ -298,7 +298,37 @@ fn freeze_action(action_file: &Path, action: &serde_json::Value) -> std::io::Res
     crate::staging::write_record(action_file, body.as_bytes())
 }
 
-fn run_once(exe: &Path, folder: &WatchedFolder, action_file: &Path) {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RunOutcome {
+    Finished,
+    Failed,
+    FolderBusy,
+}
+
+fn classify_run_status(code: Option<i32>, success: bool) -> RunOutcome {
+    if code == Some(crate::cli::EXIT_FOLDER_BUSY) {
+        RunOutcome::FolderBusy
+    } else if success {
+        RunOutcome::Finished
+    } else {
+        RunOutcome::Failed
+    }
+}
+
+fn failure_snapshot(
+    outcome: RunOutcome,
+    leftovers: HashSet<(String, u64)>,
+) -> Option<HashSet<(String, u64)>> {
+    // Folder contention is temporary; unchanged intake files must stay
+    // eligible for the next poll after the competing writer releases its lease.
+    if outcome == RunOutcome::FolderBusy || leftovers.is_empty() {
+        None
+    } else {
+        Some(leftovers)
+    }
+}
+
+fn run_once(exe: &Path, folder: &WatchedFolder, action_file: &Path) -> RunOutcome {
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("run-action")
         .arg(&folder.source)
@@ -325,15 +355,21 @@ fn run_once(exe: &Path, folder: &WatchedFolder, action_file: &Path) {
         .stderr(std::process::Stdio::null())
         .status()
     {
-        Ok(status) if !status.success() => {
-            eprintln!(
-                "watched folder '{}': run-action exited {:?}",
-                folder.name,
-                status.code()
-            );
+        Ok(status) => {
+            let outcome = classify_run_status(status.code(), status.success());
+            if outcome == RunOutcome::Failed {
+                eprintln!(
+                    "watched folder '{}': run-action exited {:?}",
+                    folder.name,
+                    status.code()
+                );
+            }
+            outcome
         }
-        Err(e) => eprintln!("watched folder '{}': could not spawn the runner: {e}", folder.name),
-        _ => {}
+        Err(e) => {
+            eprintln!("watched folder '{}': could not spawn the runner: {e}", folder.name);
+            RunOutcome::Failed
+        }
     }
 }
 
@@ -386,13 +422,13 @@ fn spawn_watcher(app: &AppHandle, folder: WatchedFolder) -> Result<(), String> {
                 if last_failures.as_ref() == Some(&stable) {
                     continue; // only the leftovers from the failed run — wait for new work
                 }
-                run_once(&exe, &folder, &action_file);
+                let outcome = run_once(&exe, &folder, &action_file);
                 let after = scan_pdfs(&source);
                 let leftovers: HashSet<(String, u64)> = after
                     .iter()
                     .map(|(name, size)| (name.clone(), *size))
                     .collect();
-                last_failures = if leftovers.is_empty() { None } else { Some(leftovers) };
+                last_failures = failure_snapshot(outcome, leftovers);
                 previous = after;
             }
             let _ = std::fs::remove_file(&action_file);
@@ -497,6 +533,27 @@ pub async fn delete_watched_folder(app: AppHandle, id: String) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_contention_does_not_cache_intake_files_as_permanent_failures() {
+        let leftovers = HashSet::from([("report.pdf".to_string(), 123)]);
+        assert_eq!(
+            classify_run_status(Some(crate::cli::EXIT_FOLDER_BUSY), false),
+            RunOutcome::FolderBusy
+        );
+        assert_eq!(classify_run_status(Some(0), true), RunOutcome::Finished);
+        assert_eq!(classify_run_status(Some(1), false), RunOutcome::Failed);
+        assert_eq!(failure_snapshot(RunOutcome::FolderBusy, leftovers.clone()), None);
+        assert_eq!(
+            failure_snapshot(RunOutcome::Failed, leftovers.clone()),
+            Some(leftovers.clone())
+        );
+        assert_eq!(
+            failure_snapshot(RunOutcome::Finished, leftovers.clone()),
+            Some(leftovers)
+        );
+        assert_eq!(failure_snapshot(RunOutcome::Failed, HashSet::new()), None);
+    }
 
     #[test]
     fn watcher_lifecycle_changes_do_not_interleave() {

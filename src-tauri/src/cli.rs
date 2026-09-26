@@ -10,6 +10,10 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+/// A folder lease is held by another scheduled, watched, or interactive run.
+/// Callers may retry this run after that other writer releases its lease.
+pub const EXIT_FOLDER_BUSY: i32 = 75;
+
 // ── CLI argument definitions ────────────────────────────────────────────────
 
 #[derive(Parser)]
@@ -3801,10 +3805,10 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
     // prove that the worker has stopped writing.
     let _folder_guard = match claim_command_folders(&engine, &command) {
         Ok(guard) => guard,
-        Err(message) => {
+        Err(error) => {
             engine.shutdown();
-            eprintln!("error: {message}");
-            return 1;
+            eprintln!("error: {}", error.message());
+            return error.exit_code();
         }
     };
     let result = dispatch(&mut engine, &command);
@@ -3859,15 +3863,49 @@ fn written_folder_roots(command: &CliCommand) -> Vec<String> {
     paths.into_iter().map(|path| abs(path).to_string_lossy().into_owned()).collect()
 }
 
-fn claim_command_folders(engine: &CliEngine, command: &CliCommand)
-    -> Result<Option<(crate::folder_claims::FolderLease, crate::folder_claims::WorkerLease)>, String> {
+#[derive(Debug)]
+enum FolderClaimError {
+    Busy(String),
+    Unavailable(String),
+}
+
+impl FolderClaimError {
+    fn message(&self) -> &str {
+        match self {
+            Self::Busy(message) | Self::Unavailable(message) => message,
+        }
+    }
+
+    fn exit_code(&self) -> i32 {
+        match self {
+            Self::Busy(_) => EXIT_FOLDER_BUSY,
+            Self::Unavailable(_) => 1,
+        }
+    }
+}
+
+fn claim_command_folders(
+    engine: &CliEngine,
+    command: &CliCommand,
+) -> Result<
+    Option<(crate::folder_claims::FolderLease, crate::folder_claims::WorkerLease)>,
+    FolderClaimError,
+> {
     let roots = written_folder_roots(command);
-    let result = if roots.is_empty() { None } else {
+    let result = if roots.is_empty() {
+        None
+    } else {
         let folders = crate::folder_claims::claim(&roots).map_err(|error| match error {
-            crate::folder_claims::ClaimError::Busy(folder) => format!("Another run is writing to this folder: {folder}"),
-            crate::folder_claims::ClaimError::Unavailable(message) => message,
+            crate::folder_claims::ClaimError::Busy(folder) => FolderClaimError::Busy(format!(
+                "Another run is writing to this folder: {folder}"
+            )),
+            crate::folder_claims::ClaimError::Unavailable(message) => {
+                FolderClaimError::Unavailable(message)
+            }
         })?;
-        let worker = folders.retain_in_worker(engine.child.id())?;
+        let worker = folders
+            .retain_in_worker(engine.child.id())
+            .map_err(FolderClaimError::Unavailable)?;
         Some((folders, worker))
     };
     Ok(result)
@@ -6223,6 +6261,18 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
 mod tests {
     use super::*;
     use clap::Parser;
+
+    #[test]
+    fn folder_claim_busy_has_a_distinct_retryable_exit_code() {
+        assert_eq!(
+            FolderClaimError::Busy("held".into()).exit_code(),
+            EXIT_FOLDER_BUSY
+        );
+        assert_eq!(
+            FolderClaimError::Unavailable("offline".into()).exit_code(),
+            1
+        );
+    }
 
     fn parse(args: &[&str]) -> Cli {
         Cli::try_parse_from(args).expect("should parse")
