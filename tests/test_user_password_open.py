@@ -543,3 +543,60 @@ def test_print_resolution_follows_the_owner_permissions(tmp_dir):
     finally:
         close_document(high)
         close_document(none)
+
+
+def test_signing_refuses_where_neither_fill_nor_annotate_is_permitted(tmp_dir):
+    from test_pades import _build_pki
+
+    from engine.signatures import sign_pdf
+
+    path = _text_protected(tmp_dir, "nosign.pdf", _allow(modify_form=False, modify_annotation=False))
+    try:
+        before = open(path, "rb").read()
+        pki = _build_pki(tmp_dir)
+        with pytest.raises(PermissionError, match="held by an owner password"):
+            sign_pdf(path, path, pfx_path=pki["pfx"], password="pw", allow_in_place=True)
+        assert open(path, "rb").read() == before
+    finally:
+        close_document(path)
+
+
+def test_share_refuses_an_alias_holding_another_document(tmp_dir, user_opened):
+    other = os.path.join(tmp_dir, "other.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page()
+    pdf.save(other, encryption=pikepdf.Encryption(user="other-user", owner="other-owner", R=6))
+    pdf.close()
+    open_document(other, "other-user")
+    try:
+        with pytest.raises(credentials.CredentialConflict):
+            share_document(user_opened, other)
+        assert get_page_count(other)["pages"] == 1
+    finally:
+        close_document(other)
+
+
+def test_a_wrong_password_keeps_the_open_document_record(user_opened):
+    with pytest.raises(pikepdf.PasswordError):
+        open_document(user_opened, "not-the-password")
+    assert document_permissions(user_opened)["opener"] == "user"
+    assert get_page_count(user_opened)["pages"] == 3
+
+
+def test_engine_start_removes_stale_gs_argfile_folders(monkeypatch, tmp_dir):
+    import tempfile
+    import time
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_dir)
+    stale = os.path.join(tmp_dir, "spectrapdf-gs-stale")
+    fresh = os.path.join(tmp_dir, "spectrapdf-gs-fresh")
+    for folder in (stale, fresh):
+        os.makedirs(folder)
+        with open(os.path.join(folder, "args"), "w") as handle:
+            handle.write('"-sPDFPassword=secret"\n')
+    old = time.time() - 3600
+    os.utime(stale, (old, old))
+    assert credentials.remove_stale_gs_argfiles() == 1
+    assert not os.path.exists(stale) and os.path.exists(fresh)
+    main = open(os.path.join(os.path.dirname(credentials.__file__), "__main__.py"), encoding="utf-8").read()
+    assert "    remove_stale_gs_argfiles()\n    server = JsonRpcServer()" in main

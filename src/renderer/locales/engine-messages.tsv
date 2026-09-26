@@ -186,7 +186,7 @@ document_js.eachDocumentScriptMust	exact	document_js	Each document script must b
 document_js.eachDocumentScriptNeeds	exact	document_js	Each document script needs a non-empty name.
 encrypt.documentAlreadyAllowsAssistive	exact	encrypt	This document already allows assistive technology to read it.
 encrypt.documentEncryptedNothingStopping	exact	encrypt	This document is not encrypted, so nothing is stopping assistive technology from reading it.
-encrypt.documentSPermissionsHeld	exact	encrypt,printer,sealed_edit	This document's permissions are held by an owner password, which is needed to change them. Open it with that password first.
+encrypt.documentSPermissionsHeld	exact	encrypt,printer,sealed_edit,signatures	This document's permissions are held by an owner password, which is needed to change them. Open it with that password first.
 enhance_scan.backgroundStrengthMustGot	pattern	enhance_scan	the background strength must be 0-1, got {{strength}}
 enhance_scan.enhancementAskedTurnDeskew	exact	enhance_scan	no enhancement was asked for — turn on deskew, despeckle, background removal or orientation detection
 enhance_scan.jpegQualityMustGot	pattern	enhance_scan	the JPEG quality must be 1-100, got {{quality}}

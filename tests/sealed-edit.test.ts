@@ -288,3 +288,31 @@ describe('raw annotation styles of an encrypted file', () => {
     expect(sealed.spectraInkStyle).toBe('highlighter');
   });
 });
+
+describe('signing permission gate', () => {
+  it('refuses a user-opened document that permits neither fill nor annotate', async () => {
+    const { signBlock } = await import('../src/renderer/lib/document-permission-text');
+    const denied = parseDocumentSecurity({ opener: 'user', permissions: { print: true, modify: true } });
+    expect(signBlock({ security: denied })).toEqual({ kind: 'permission', permission: 'fill' });
+    expect(signBlock({ security: parseDocumentSecurity({ opener: 'user', permissions: { annotate: true } }) })).toBeNull();
+    expect(signBlock({ security: USER_OPENED })).toBeNull();
+    expect(signBlock({})).toBeNull();
+  });
+
+  it('gates the panel sign and the canvas sign before the engine call', async () => {
+    const { readFileSync } = await import('node:fs');
+    const panel = readFileSync(new URL('../src/renderer/panels/SignaturesPanel.tsx', import.meta.url), 'utf8');
+    const doSign = panel.slice(panel.indexOf('const doSign = useCallback('));
+    expect(doSign.indexOf('signBlock(activeFile)')).toBeGreaterThan(-1);
+    expect(doSign.indexOf('signBlock(activeFile)')).toBeLessThan(doSign.indexOf("call('sign_pdf'"));
+    const canvas = readFileSync(new URL('../src/renderer/components/canvas/WorkspaceCanvasView.tsx', import.meta.url), 'utf8');
+    const gate = canvas.indexOf('signBlock(file)');
+    const dialogAt = canvas.indexOf('dialog.saveFile({ defaultPath: `${baseName}-signed.pdf` })');
+    expect(gate).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(dialogAt);
+    expect(gate).toBeLessThan(canvas.indexOf("engineCall('sign_pdf'", dialogAt));
+    // Every canvas sign_pdf call, the harness field sign included, is gated.
+    const calls = canvas.split("engineCall('sign_pdf'").length - 1;
+    expect(canvas.split(/signBlock\((file|f)\)/).length - 1).toBeGreaterThanOrEqual(calls);
+  });
+});

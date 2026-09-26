@@ -7,6 +7,7 @@ import React, {
   useState,
   useSyncExternalStore,
 } from 'react';
+import { PermissionRefusal, capabilityBlockText, signBlock } from '../../lib/document-permission-text';
 import { useAppState, useAppDispatch, useReadAppState, useReadLinkDrafts, useSubscribeAppState } from '../../state/AppStateProvider';
 import { usePdfProxyState } from '../../hooks/usePdfProxies';
 import { isUnrenderable } from '../../lib/render-health';
@@ -5608,6 +5609,8 @@ export function WorkspaceCanvasView({
     if (state.pageDirtyPaths.includes(path)) {
       throw new Error('signCanvasField: apply pending page changes first');
     }
+    const harnessBlocked = signBlock(f);
+    if (harnessBlocked) throw new PermissionRefusal(harnessBlocked);
     return (await engineCall('sign_pdf', {
       file: f.workingPath,
       output: params.output,
@@ -6488,6 +6491,11 @@ export function WorkspaceCanvasView({
       const file = state.files.get(filePath);
       if (!file) {
         setSignError(tChrome('canvas.sign.fileClosed'));
+        return;
+      }
+      const signBlocked = signBlock(file);
+      if (signBlocked) {
+        setSignError(capabilityBlockText(signBlocked));
         return;
       }
       const baseName = (filePath.split(/[\\/]/).pop() ?? 'document').replace(/\.pdfx?$/i, '');

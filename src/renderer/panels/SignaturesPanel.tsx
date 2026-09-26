@@ -70,6 +70,7 @@ import {
 } from '../lib/trust-store';
 import { CertificationBanner } from '../components/CertificationBanner';
 import { useTranslation } from 'react-i18next';
+import { PermissionRefusal, signBlock } from '../lib/document-permission-text';
 import { tChrome, tChromeCount } from '../i18n';
 
 interface SignResult {
@@ -322,6 +323,8 @@ export function SignaturesPanel(): React.ReactElement {
       stampParams: Record<string, unknown> = {},
     ): Promise<SignResult> => {
       if (!activeFile) throw new Error(tChrome('refusal.file.noActiveToSign'));
+      const blocked = signBlock(activeFile);
+      if (blocked) throw new PermissionRefusal(blocked);
       return (await call('sign_pdf', {
         file: activeFile.workingPath,
         output,

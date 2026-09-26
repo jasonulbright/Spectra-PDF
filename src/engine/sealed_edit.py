@@ -107,6 +107,12 @@ def sealed_reseal(path: str, data: str, output: str, capabilities) -> dict:
     """Write the builder's plaintext output `data` (base64) to `output` under
     the protection of the user-opened working copy at `path`.
 
+    The /P check is on the declared `capabilities`, not on a diff of `data`
+    against the working copy: the caller is the renderer that already holds
+    the password and the decrypted bytes, the same trust boundary as every
+    other engine request, so a diff would add no protection. The renderer
+    gates each edit by /P before it reaches the page tier.
+
     The working copy's catalog and document information are replaced by the
     builder's; every object only the old graph reached is dropped by the
     writer. `output` is lent the credential, so the staged file reopens by
