@@ -1200,8 +1200,8 @@ export async function importPagesIntoDoc(
 
 /** Test-only: close every open file so the next case starts clean. */
 export async function closeAllFiles(): Promise<void> {
-  await browser.execute(function () {
-    (window as any).__SPECTRA_TEST__.closeAllFiles();
+  await browser.execute(async function () {
+    await (window as any).__SPECTRA_TEST__.closeAllFiles();
   });
 }
 

@@ -162,6 +162,32 @@ describe('createPathOperationLock', () => {
     ]);
   });
 
+  it('keeps both import endpoints stable until the page references land before close', async () => {
+    const locks = createPathOperationLock();
+    const order: string[] = [];
+    const importGate = deferred<void>();
+    const importing = locks.run(['source.pdf', 'target.pdf'], async () => {
+      order.push('import starts');
+      await importGate.promise;
+      order.push('import registers source');
+      order.push('import publishes page references');
+    });
+    await tick();
+    const closingSource = locks.run(['source.pdf'], async () => { order.push('source closes'); });
+    const closingTarget = locks.run(['target.pdf'], async () => { order.push('target closes'); });
+    await tick();
+    expect(order).toEqual(['import starts']);
+    importGate.resolve();
+    await Promise.all([importing, closingSource, closingTarget]);
+    expect(order.slice(0, 3)).toEqual([
+      'import starts',
+      'import registers source',
+      'import publishes page references',
+    ]);
+    expect(order).toContain('source closes');
+    expect(order).toContain('target closes');
+  });
+
   it('lets concurrent imports prepare a missing source only once', async () => {
     const locks = createPathOperationLock();
     const ready = deferred<void>();
@@ -218,7 +244,23 @@ describe('the open funnel', () => {
     // keeps a source buffer stable from import indexing through its reducer
     // dispatch, and makes an open re-check whether an import registered it.
     expect(app).toContain('sourcePathOperations.current.run([filePath], async () => {');
-    expect(app).toContain('sourcePathOperations.current.run(filePaths, async () => {');
+    expect(app).toContain('sourcePathOperations.current.run([...canonicalImports, destinationPath], async () => {');
     expect(app).not.toContain('await openFlights.current.pending(filePath);');
+  });
+
+  it('serializes imports with destination changes, close, close-all, and tab hand-off', () => {
+    const app = readFileSync(resolve(__dirname, '../src/renderer/App.tsx'), 'utf8');
+    const requiredWiring = [
+      'sourcePathOperations.current.run([...canonicalImports, destinationPath], async () => {',
+      'const currentDestination = readState().workspace.documents.find((d) => d.id === toDocId);',
+      'sourcePathOperations.current.run([filePath], async () => {',
+      'sourcePathOperations.current.run(paths, async () => {',
+      'sourcePathOperations.current.run([path], async () => {',
+      'closeAllFiles: async () => {',
+    ];
+    expect(requiredWiring.every((snippet) => app.includes(snippet))).toBe(true);
+    const importLock = app.indexOf(requiredWiring[0]);
+    const importClaim = app.indexOf('const claimed = await claimPaths(canonicalImports, \'read\');', importLock);
+    expect(importClaim).toBeGreaterThan(importLock);
   });
 });

@@ -1632,7 +1632,7 @@ export interface TestHarness {
   /** Test-only: close every open file so a spec starts from a clean
    * workspace (multi-select is workspace-wide, so accumulated files across
    * cases would otherwise cross-contaminate select-all). */
-  closeAllFiles: () => void;
+  closeAllFiles: () => Promise<void>;
   /** Import a file's pages into a document at an index — the same path
    * the add-page ghost / per-position drop run, bypassing the native picker.
    * Resolves once the byte-only source is registered and the pages spliced. */
@@ -2407,7 +2407,7 @@ export interface TestHarnessDeps {
   dispatchRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   dispatchRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
   commitPendingEdits: () => Promise<void>;
-  closeAllFiles: () => void;
+  closeAllFiles: () => Promise<void>;
   importPagesIntoDoc: (filePath: string, toDocId: string, toIndex: number) => Promise<void>;
   /** Export via the engine, with an explicit destination (no dialog). */
   exportActiveDocument: (destPath: string, format: string, options?: Record<string, unknown>) => Promise<unknown>;
@@ -2739,7 +2739,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw err;
       }
     },
-    closeAllFiles: () => deps.closeAllFiles(),
+    closeAllFiles: async () => { await deps.closeAllFiles(); },
     importPagesIntoDoc: async (filePath, toDocId, toIndex) => {
       try {
         await deps.importPagesIntoDoc(filePath, toDocId, toIndex);
