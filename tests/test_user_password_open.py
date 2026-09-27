@@ -12,7 +12,13 @@ import pytest
 from engine import credentials
 from engine.compress import compress
 from engine.create_pdf import create_pdf
-from engine.credentials import close_document, document_permissions, open_document, share_document
+from engine.credentials import (
+    close_document,
+    document_permissions,
+    open_document,
+    open_document_attempt,
+    share_document,
+)
 from engine.grayscale import grayscale
 from engine.inspect import get_page_count, unlock
 from engine.ipc import JsonRpcServer
@@ -135,6 +141,21 @@ def test_wrong_password_still_reports_incorrect(protected):
         get_page_count(protected)
 
 
+def test_open_document_attempt_returns_wrong_password_as_status(protected):
+    before = open(protected, "rb").read()
+    assert open_document_attempt(protected, "wrong") == {"status": "wrong_password"}
+    assert open(protected, "rb").read() == before
+
+    opened = open_document_attempt(protected, USER)
+    assert opened == {
+        "status": "opened",
+        "document": {"encrypted": True, "opener": "user", "encryption_kept": True},
+    }
+    main = os.path.join(os.path.dirname(__file__), "..", "src", "engine", "__main__.py")
+    registration = 'server.register("open_document_attempt", open_document_attempt)'
+    assert registration in open(main, encoding="utf-8").read()
+
+
 # -- the store ----------------------------------------------------------------
 
 
@@ -192,6 +213,7 @@ def test_a_save_to_another_path_keeps_the_protection(user_opened, tmp_dir):
 def test_no_response_payload_carries_a_password(protected):
     server = JsonRpcServer()
     for name, handler in (("open_document", open_document),
+                          ("open_document_attempt", open_document_attempt),
                           ("document_permissions", document_permissions),
                           ("close_document", close_document),
                           ("share_document", share_document),
@@ -201,6 +223,8 @@ def test_no_response_payload_carries_a_password(protected):
     requests = [
         ("open_document", {"path": protected, "password": "wrong"}),
         ("open_document", {"path": protected, "password": USER}),
+        ("open_document_attempt", {"path": protected, "password": "wrong"}),
+        ("open_document_attempt", {"path": protected, "password": USER}),
         ("document_permissions", {"path": protected}),
         ("get_page_count", {"file": protected}),
         ("share_document", {"path": protected, "alias": protected + ".stage.pdf"}),
@@ -656,6 +680,8 @@ def test_share_refuses_an_alias_holding_another_document(tmp_dir, user_opened):
 
 
 def test_a_wrong_password_keeps_the_open_document_record(user_opened):
+    assert open_document_attempt(user_opened, "not-the-password") == {"status": "wrong_password"}
+    assert document_permissions(user_opened)["opener"] == "user"
     with pytest.raises(pikepdf.PasswordError):
         open_document(user_opened, "not-the-password")
     assert document_permissions(user_opened)["opener"] == "user"

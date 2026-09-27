@@ -128,6 +128,7 @@ from engine.credentials import (
     close_document,
     document_permissions,
     open_document,
+    open_document_attempt,
     remove_stale_gs_argfiles,
     share_document,
 )
@@ -348,6 +349,7 @@ def main() -> None:
     server.register("check_encrypted", check_encrypted)
     server.register("unlock", unlock)
     server.register("open_document", open_document)
+    server.register("open_document_attempt", open_document_attempt)
     server.register("close_document", close_document)
     server.register("document_permissions", document_permissions)
     server.register("share_document", share_document)
