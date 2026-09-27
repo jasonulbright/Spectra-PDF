@@ -342,6 +342,7 @@ pub struct HistogramStats {
 
 /// How many samples the histogram takes at most, per page.
 const HISTOGRAM_SAMPLE_TARGET: u64 = 1_000_000;
+const MAX_BMP_ROW_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Read one staged page back and report what its own bytes say.
 pub fn page_evidence(path: &Path) -> PageEvidence {
@@ -493,10 +494,10 @@ fn bmp_histogram(file: &mut std::fs::File, head: &BmpHeader) -> Option<Histogram
     if head.compression != 0 {
         return None;
     }
-    // The row buffer is sized from the header; a stride no file row can fill
-    // would request an allocation that aborts the process.
+    // The row buffer is sized from the header. Refuse impossible rows and
+    // rows large enough to turn a scanner-produced file into a huge allocation.
     let length = file.metadata().ok()?.len();
-    if head.stride == 0 || head.stride > length {
+    if head.stride == 0 || head.stride > length || head.stride > MAX_BMP_ROW_BYTES {
         return None;
     }
     let mut header = head.clone();
@@ -2987,6 +2988,30 @@ mod tests {
         bytes[28..30].copy_from_slice(&u16::MAX.to_le_bytes());
         std::fs::write(&path, bytes).expect("write");
         let evidence = page_evidence(&path);
+        assert_eq!(evidence.format, "bmp");
+        assert_eq!(evidence.content, ContentVerdict::Unverifiable);
+        assert!(evidence.histogram.is_none());
+    }
+
+    #[test]
+    fn a_bmp_row_over_the_analysis_limit_is_not_sampled() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("page-0000.bmp");
+        let width = 5_592_408u32;
+        let stride = (u64::from(width) * 24).div_ceil(32) * 4;
+        assert!(stride > MAX_BMP_ROW_BYTES);
+        let file_len = 54 + stride;
+        let mut bytes = bmp(4, 1, 300.0, &|_, _| [0, 0, 0]);
+        bytes[2..6].copy_from_slice(&(file_len as u32).to_le_bytes());
+        bytes[18..22].copy_from_slice(&(width as i32).to_le_bytes());
+        bytes[22..26].copy_from_slice(&1i32.to_le_bytes());
+        bytes[34..38].copy_from_slice(&(stride as u32).to_le_bytes());
+        let mut file = std::fs::File::create(&path).expect("create BMP");
+        file.write_all(&bytes).expect("write header");
+        file.set_len(file_len).expect("extend BMP");
+
+        let evidence = page_evidence(&path);
+
         assert_eq!(evidence.format, "bmp");
         assert_eq!(evidence.content, ContentVerdict::Unverifiable);
         assert!(evidence.histogram.is_none());
