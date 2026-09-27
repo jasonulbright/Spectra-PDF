@@ -186,6 +186,47 @@ struct Host {
     job: AtomicUsize,
 }
 
+/// Own the child while setup is still fallible. Dropping `Child` alone does
+/// not stop the process, so every early return before `Host` takes ownership
+/// must kill and reap it here.
+struct StartingHost {
+    child: Option<Child>,
+    job: usize,
+}
+
+impl StartingHost {
+    fn new(child: Child) -> Self {
+        Self {
+            child: Some(child),
+            job: 0,
+        }
+    }
+
+    fn child_mut(&mut self) -> &mut Child {
+        self.child.as_mut().expect("starting host owns its child")
+    }
+
+    fn set_job(&mut self, job: usize) {
+        self.job = job;
+    }
+
+    fn into_parts(mut self) -> (Child, usize) {
+        let child = self.child.take().expect("starting host owns its child");
+        let job = std::mem::replace(&mut self.job, 0);
+        (child, job)
+    }
+}
+
+impl Drop for StartingHost {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        close_job(std::mem::take(&mut self.job));
+    }
+}
+
 impl Host {
     /// Wake every caller still waiting, by dropping the channel it waits on.
     ///
@@ -296,78 +337,92 @@ fn host_command() -> Result<Command, ScanRefusal> {
 }
 
 fn spawn_host() -> Result<Host, ScanRefusal> {
-    let mut child = host_command()?
+    spawn_host_with(confine)
+}
+
+fn spawn_host_with(
+    confine_child: impl FnOnce(u32) -> Result<usize, ScanRefusal>,
+) -> Result<Host, ScanRefusal> {
+    let child = host_command()?
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|_| host_refusal("The scanner service could not be started."))?;
-    let stdin = child
+    let mut starting = StartingHost::new(child);
+    let job = confine_child(starting.child_mut().id())?;
+    starting.set_job(job);
+    let stdin = starting
+        .child_mut()
         .stdin
         .take()
         .ok_or_else(|| host_refusal("The scanner service could not be started."))?;
-    let stdout = child
+    let stdout = starting
+        .child_mut()
         .stdout
         .take()
         .ok_or_else(|| host_refusal("The scanner service could not be started."))?;
-    let job = confine(child.id());
     let generation = generations().fetch_add(1, Ordering::SeqCst) + 1;
     let pending: Arc<Mutex<HashMap<u64, Sender<Reply>>>> = Arc::new(Mutex::new(HashMap::new()));
 
     let (announced, ready) = mpsc::channel::<()>();
     let routed = pending.clone();
-    std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            let Ok(line) = line else { break };
-            let Some(message) = protocol_line(&line) else {
-                // Anything that is not a protocol line is the host's own
-                // stream noise and carries no reply.
-                continue;
-            };
-            if message.get("ready").is_some() {
-                let _ = announced.send(());
-                continue;
-            }
-            let Some(id) = message.get("id").and_then(Value::as_u64) else {
-                continue;
-            };
-            let reply = if let Some(event) = message.get("event") {
-                match serde_json::from_value::<ScanEvent>(event.clone()) {
-                    Ok(event) => Reply::Event(event),
-                    Err(_) => continue,
+    std::thread::Builder::new()
+        .name("scanner-host-reader".to_string())
+        .spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                let Ok(line) = line else { break };
+                let Some(message) = protocol_line(&line) else {
+                    // Anything that is not a protocol line is the host's own
+                    // stream noise and carries no reply.
+                    continue;
+                };
+                if message.get("ready").is_some() {
+                    let _ = announced.send(());
+                    continue;
                 }
-            } else if message.get("phase").and_then(Value::as_str) == Some("body") {
-                Reply::BodyDone
-            } else if let Some(error) = message.get("err") {
-                Reply::Outcome(Err(refusal_from_wire(error)))
-            } else if let Some(ok) = message.get("ok") {
-                Reply::Outcome(Ok(ok.clone()))
-            } else {
-                continue;
-            };
-            let terminal = matches!(reply, Reply::Outcome(_));
-            let target = {
-                let Ok(mut open) = routed.lock() else { break };
-                if terminal {
-                    open.remove(&id)
+                let Some(id) = message.get("id").and_then(Value::as_u64) else {
+                    continue;
+                };
+                let reply = if let Some(event) = message.get("event") {
+                    match serde_json::from_value::<ScanEvent>(event.clone()) {
+                        Ok(event) => Reply::Event(event),
+                        Err(_) => continue,
+                    }
+                } else if message.get("phase").and_then(Value::as_str) == Some("body") {
+                    Reply::BodyDone
+                } else if let Some(error) = message.get("err") {
+                    Reply::Outcome(Err(refusal_from_wire(error)))
+                } else if let Some(ok) = message.get("ok") {
+                    Reply::Outcome(Ok(ok.clone()))
                 } else {
-                    open.get(&id).cloned()
+                    continue;
+                };
+                let terminal = matches!(reply, Reply::Outcome(_));
+                let target = {
+                    let Ok(mut open) = routed.lock() else { break };
+                    if terminal {
+                        open.remove(&id)
+                    } else {
+                        open.get(&id).cloned()
+                    }
+                };
+                if let Some(target) = target {
+                    let _ = target.send(reply);
                 }
-            };
-            if let Some(target) = target {
-                let _ = target.send(reply);
             }
-        }
-        // The stream ended: the child exited or was terminated. Every caller
-        // still waiting is woken now rather than at its own deadline, by
-        // dropping its channel — which is also how it learns that its request
-        // was never answered rather than refused.
-        if let Ok(mut open) = routed.lock() {
-            open.clear();
-        }
-    });
+            // The stream ended: the child exited or was terminated. Every caller
+            // still waiting is woken now rather than at its own deadline, by dropping
+            // its channel — which is also how it learns that its request was never
+            // answered rather than refused.
+            if let Ok(mut open) = routed.lock() {
+                open.clear();
+            }
+        })
+        .map_err(|_| host_refusal("The scanner service could not be started."))?;
 
+    let (child, job) = starting.into_parts();
     let host = Host {
         child: Mutex::new(child),
         stdin: Mutex::new(stdin),
@@ -389,7 +444,7 @@ fn spawn_host() -> Result<Host, ScanRefusal> {
 /// handle closes, so a parent that dies without unwinding does not leave a
 /// scanner process holding a device.
 #[cfg(windows)]
-fn confine(pid: u32) -> usize {
+fn confine(pid: u32) -> Result<usize, ScanRefusal> {
     use std::ffi::c_void;
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::CloseHandle;
@@ -401,9 +456,8 @@ fn confine(pid: u32) -> usize {
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
 
     unsafe {
-        let Ok(job) = CreateJobObjectW(None, PCWSTR::null()) else {
-            return 0;
-        };
+        let job = CreateJobObjectW(None, PCWSTR::null())
+            .map_err(|_| host_refusal("The scanner service could not be contained."))?;
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         if SetInformationJobObject(
@@ -415,25 +469,28 @@ fn confine(pid: u32) -> usize {
         .is_err()
         {
             let _ = CloseHandle(job);
-            return 0;
+            return Err(host_refusal("The scanner service could not be contained."));
         }
-        let Ok(process) = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid) else {
-            let _ = CloseHandle(job);
-            return 0;
+        let process = match OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid) {
+            Ok(process) => process,
+            Err(_) => {
+                let _ = CloseHandle(job);
+                return Err(host_refusal("The scanner service could not be contained."));
+            }
         };
         let assigned = AssignProcessToJobObject(job, process);
         let _ = CloseHandle(process);
         if assigned.is_err() {
             let _ = CloseHandle(job);
-            return 0;
+            return Err(host_refusal("The scanner service could not be contained."));
         }
-        job.0 as usize
+        Ok(job.0 as usize)
     }
 }
 
 #[cfg(not(windows))]
-fn confine(_pid: u32) -> usize {
-    0
+fn confine(_pid: u32) -> Result<usize, ScanRefusal> {
+    Ok(0)
 }
 
 #[cfg(windows)]
@@ -905,6 +962,8 @@ fn encode<T: serde::Serialize>(value: &T) -> Result<Value, ScanRefusal> {
 mod tests {
     use super::*;
 
+    const TEST_CHILD_MARKER_ENV: &str = "SPECTRA_TEST_SCAN_START_MARKER";
+
     /// Serialises the tests that deliberately end a child's life. One child
     /// serves the whole process, so two of them at once would be testing each
     /// other's interference rather than the boundary.
@@ -920,9 +979,57 @@ mod tests {
     /// suite neither serves nor hangs.
     #[test]
     fn serves_as_the_scanner_host_child() {
+        if let Some(marker) = std::env::var_os(TEST_CHILD_MARKER_ENV) {
+            std::thread::sleep(Duration::from_millis(150));
+            std::fs::write(marker, b"survived").unwrap();
+            return;
+        }
         if host_env_present() {
             serve();
         }
+    }
+
+    #[test]
+    fn a_startup_abort_kills_its_child() {
+        let scratch = tempfile::tempdir().unwrap();
+        let marker = scratch.path().join("orphan-survived");
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "scan_host::tests::serves_as_the_scanner_host_child",
+                "--nocapture",
+            ])
+            .env(TEST_CHILD_MARKER_ENV, &marker)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
+        }
+        let child = command.spawn().unwrap();
+        drop(StartingHost::new(child));
+        std::thread::sleep(Duration::from_millis(250));
+        assert!(!marker.exists(), "aborted setup left its child running");
+    }
+
+    #[test]
+    fn host_startup_refuses_failed_process_containment() {
+        let _serialised = one_at_a_time();
+        let result = spawn_host_with(|_| {
+            Err(host_refusal(
+                "The scanner service could not be contained.",
+            ))
+        });
+        assert!(result.is_err(), "an uncontained scanner child is not usable");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn confinement_refuses_an_unavailable_process() {
+        assert!(confine(u32::MAX).is_err());
     }
 
     /// The boundary, live: a real child process, a real handshake, a real
