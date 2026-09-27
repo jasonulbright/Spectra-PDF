@@ -1141,16 +1141,29 @@ pub async fn create_working_copy(file_path: String) -> Result<String, String> {
 /// carries this process's id, which is what lets a later launch remove it
 /// once this process has stopped (see `scratch`).
 fn working_copy_in(root: &Path, file_path: &str) -> Result<String, String> {
-    let work_dir = root.join(crate::scratch::working_folder_name(std::process::id()));
-    fs::create_dir_all(&work_dir)
-        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
-
     let filename = Path::new(file_path)
         .file_name()
         .ok_or("Invalid filename")?;
+    fs::create_dir_all(root).map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    let work_dir = root.join(crate::scratch::working_folder_name(std::process::id()));
+    fs::create_dir(&work_dir)
+        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+
     let dest = work_dir.join(filename);
-    fs::copy(file_path, &dest)
-        .map_err(|e| format!("Failed to copy: {}", e))?;
+    if let Err(error) = fs::copy(file_path, &dest) {
+        let mut message = format!("Failed to copy: {}", error);
+        if let Err(cleanup) = fs::remove_file(&dest) {
+            if cleanup.kind() != std::io::ErrorKind::NotFound {
+                message.push_str(&format!("; failed to remove partial copy: {}", cleanup));
+            }
+        }
+        if let Err(cleanup) = fs::remove_dir(&work_dir) {
+            if cleanup.kind() != std::io::ErrorKind::NotFound {
+                message.push_str(&format!("; failed to remove private folder: {}", cleanup));
+            }
+        }
+        return Err(message);
+    }
 
     Ok(dest.to_string_lossy().to_string())
 }
@@ -3040,6 +3053,19 @@ mod tests {
             crate::scratch::working_folder_owner(name),
             Some(std::process::id())
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_failed_working_copy_leaves_no_private_folder_or_partial_file() {
+        let root = scratch("working-copy-failed");
+        let tree = root.join("tree");
+        std::fs::create_dir_all(&tree).unwrap();
+        let missing = tree.join("missing.pdf");
+
+        assert!(working_copy_in(&tree, &missing.to_string_lossy()).is_err());
+        assert_eq!(std::fs::read_dir(&tree).unwrap().count(), 0);
+
         let _ = std::fs::remove_dir_all(&root);
     }
 

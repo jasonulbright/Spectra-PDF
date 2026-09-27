@@ -48,7 +48,7 @@ import { createConfirmQueue } from './lib/confirm-queue';
 import { createUnlockPrompts, type UnlockPrompt } from './lib/unlock-prompts';
 import { reportLaunch } from './lib/launch-notices';
 import { PasswordDialog } from './components/PasswordDialog';
-import { openWithCredentials } from './lib/document-open';
+import { discardDocumentWorkingCopy, prepareDocumentWorkingCopy } from './lib/document-open';
 import { setStageCredentialCaller } from './lib/stage-credentials';
 import { setSealedReader } from './lib/sealed-edit';
 import { rememberDocumentPassword } from './lib/document-passwords';
@@ -848,12 +848,12 @@ function AppContent(): React.ReactElement {
   );
 
   const releaseCredentials = useCallback((path: string, workingPath: string) => {
-    void releaseDocumentCredentials(path, workingPath, readState().files.has(path), callRaw);
+    return releaseDocumentCredentials(path, workingPath, readState().files.has(path), callRaw);
   }, [callRaw, readState]);
   const credentialHolders = useRef(new Map<string, string>());
   useEffect(() => {
     for (const { path, workingPath } of droppedCredentials(credentialHolders.current, state.files)) {
-      releaseCredentials(path, workingPath);
+      void releaseCredentials(path, workingPath);
     }
   }, [state.files, releaseCredentials]);
 
@@ -865,25 +865,19 @@ function AppContent(): React.ReactElement {
   const prepareFileBytes = useCallback(
     async (
       filePath: string,
-    ): Promise<{ workingPath: string; name: string; buffer: PdfBuffer; pageCount: number; security: DocumentSecurity } | null> => {
-      const workingPath = await file.createWorkingCopy(filePath);
+    ) => {
       const name = filePath.split(/[\\/]/).pop() || filePath;
-      const opened = await openWithCredentials(workingPath, name, {
+      return prepareDocumentWorkingCopy(filePath, name, {
+        createWorkingCopy: file.createWorkingCopy,
+        readBuffer: file.readBuffer,
+        rememberPassword: rememberDocumentPassword,
+        releaseCredentials,
+        removeWorkingCopy: file.remove,
         call: (method, params) => call(method, params) as unknown as Promise<Record<string, unknown>>,
         askPassword: showPasswordPrompt,
         askCertificate: showCertUnlockPrompt,
         wrongPassword: () => tChrome('app.open.incorrectPassword'),
       });
-      if (!opened) return null;
-      if (opened.password !== null) rememberDocumentPassword(filePath, opened.password);
-      try {
-        const buffer = await file.readBuffer(workingPath);
-        const info = await call('get_page_count', { file: workingPath });
-        return { workingPath, name, buffer, pageCount: info.pages, security: opened.security };
-      } catch (err) {
-        releaseCredentials(filePath, workingPath);
-        throw err;
-      }
     },
     [call, releaseCredentials, showPasswordPrompt, showCertUnlockPrompt],
   );
@@ -1352,7 +1346,12 @@ function AppContent(): React.ReactElement {
         } finally {
           // A source prepared and never registered has no `files` entry for
           // the release effect to notice.
-          if (!registered) for (const reg of toRegister) releaseCredentials(reg.path, reg.workingPath);
+          if (!registered) {
+            await Promise.all(toRegister.map((reg) => discardDocumentWorkingCopy(reg.path, reg.workingPath, {
+              releaseCredentials,
+              removeWorkingCopy: file.remove,
+            })));
+          }
         }
       } finally {
         claimHolds.current.drop(canonicalImports);
