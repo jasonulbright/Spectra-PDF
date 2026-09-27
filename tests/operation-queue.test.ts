@@ -187,6 +187,19 @@ describe('runTracked — one operation, one line, one log entry', () => {
     expect(sink.lines[0]).toContain('[ERROR]');
     expect(sink.lines[0]).toContain('a JPEG 2000 palette image');
   });
+
+  it('records a synchronous failure before the operation returns a promise', async () => {
+    const sink = sinks();
+    const refusal = new Error('The operation could not start.');
+    const pending = Promise.resolve().then(() =>
+      runTracked('4', 'merge', {}, () => { throw refusal; }, sink),
+    );
+    await expect(pending).rejects.toBe(refusal);
+    expect(sink.items[0].status).toBe('error');
+    expect(sink.items[0].message).toBe(refusal.message);
+    expect(sink.lines).toHaveLength(1);
+    expect(sink.lines[0]).toContain('[ERROR]');
+  });
 });
 
 describe('upsertQueueItem', () => {
