@@ -501,41 +501,40 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
                     if oversized_stdout {
                         continue;
                     }
-                    match append_stdout_chunk(&mut stdout_line, &bytes, MAX_ENGINE_RPC_LINE_BYTES) {
-                        Ok(lines) => {
-                            for line in lines {
-                                if !line.iter().all(u8::is_ascii_whitespace) {
-                                    if let Ok(json) =
-                                        serde_json::from_slice::<serde_json::Value>(&line)
-                                    {
-                                        route_response(&app_handle, json);
-                                    }
-                                }
+                    let chunk = append_stdout_chunk(
+                        &mut stdout_line,
+                        &bytes,
+                        MAX_ENGINE_RPC_LINE_BYTES,
+                    );
+                    for line in chunk.completed {
+                        if !line.iter().all(u8::is_ascii_whitespace) {
+                            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&line) {
+                                route_response(&app_handle, json);
                             }
                         }
-                        Err(()) => {
-                            eprintln!(
-                                "[engine] response line exceeded the {} MiB limit; stopping the engine",
-                                MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
-                            );
-                            oversized_stdout = true;
-                            let state = app_handle.state::<EngineState>();
-                            let mut guard = state.child.lock().await;
-                            if guard
-                                .as_ref()
-                                .is_some_and(|current| current.child.pid() == pid)
-                            {
-                                state.retiring.store(true, Ordering::SeqCst);
-                                let current = guard.take().expect("matched engine child");
-                                let EngineChild { child, _job } = current;
-                                retiring_job = Some(_job);
-                                claimed_oversize = true;
-                                if let Err(error) = child.kill() {
-                                    eprintln!("[engine] failed to stop oversized worker: {error}");
-                                    // Closing the kill-on-close job is the
-                                    // fallback if the direct process kill fails.
-                                    drop(retiring_job.take());
-                                }
+                    }
+                    if chunk.oversized {
+                        eprintln!(
+                            "[engine] response line exceeded the {} MiB limit; stopping the engine",
+                            MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
+                        );
+                        oversized_stdout = true;
+                        let state = app_handle.state::<EngineState>();
+                        let mut guard = state.child.lock().await;
+                        if guard
+                            .as_ref()
+                            .is_some_and(|current| current.child.pid() == pid)
+                        {
+                            state.retiring.store(true, Ordering::SeqCst);
+                            let current = guard.take().expect("matched engine child");
+                            let EngineChild { child, _job } = current;
+                            retiring_job = Some(_job);
+                            claimed_oversize = true;
+                            if let Err(error) = child.kill() {
+                                eprintln!("[engine] failed to stop oversized worker: {error}");
+                                // Closing the kill-on-close job is the
+                                // fallback if the direct process kill fails.
+                                drop(retiring_job.take());
                             }
                         }
                     }
@@ -586,13 +585,19 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
 }
 
 /// Add raw sidecar bytes to a partial frame, returning completed frames and
-/// refusing before the pending frame can exceed its limit. CR and LF are both
-/// accepted as line endings; the engine emits LF.
+/// whether the next pending frame would exceed its limit. Completed frames
+/// earlier in the same chunk remain usable even if a later frame is oversized.
+/// CR and LF are both accepted as line endings; the engine emits LF.
+pub(crate) struct AppendedStdoutChunk {
+    pub completed: Vec<Vec<u8>>,
+    pub oversized: bool,
+}
+
 pub(crate) fn append_stdout_chunk(
     pending: &mut Vec<u8>,
     chunk: &[u8],
     max_line_bytes: usize,
-) -> Result<Vec<Vec<u8>>, ()> {
+) -> AppendedStdoutChunk {
     let mut completed = Vec::new();
     let mut start = 0;
     while start < chunk.len() {
@@ -602,7 +607,10 @@ pub(crate) fn append_stdout_chunk(
         let end = delimiter.map_or(chunk.len(), |offset| start + offset);
         let segment = &chunk[start..end];
         if segment.len() > max_line_bytes.saturating_sub(pending.len()) {
-            return Err(());
+            return AppendedStdoutChunk {
+                completed,
+                oversized: true,
+            };
         }
         pending.extend_from_slice(segment);
         if delimiter.is_some() {
@@ -612,7 +620,10 @@ pub(crate) fn append_stdout_chunk(
             break;
         }
     }
-    Ok(completed)
+    AppendedStdoutChunk {
+        completed,
+        oversized: false,
+    }
 }
 
 #[derive(Debug)]
@@ -761,25 +772,37 @@ mod start_tests {
     #[test]
     fn raw_stdout_framing_handles_split_lines_and_enforces_the_limit() {
         let mut pending = Vec::new();
-        assert!(
-            append_stdout_chunk(&mut pending, b"{\"id", 8)
-                .unwrap()
-                .is_empty()
+        let chunk = append_stdout_chunk(&mut pending, b"{\"id", 8);
+        assert!(chunk.completed.is_empty());
+        assert!(!chunk.oversized);
+        let chunk = append_stdout_chunk(&mut pending, b"\":1}\r\n{}\n", 8);
+        assert_eq!(
+            chunk.completed,
+            vec![b"{\"id\":1}".to_vec(), b"".to_vec(), b"{}".to_vec()]
         );
-        let lines = append_stdout_chunk(&mut pending, b"\":1}\r\n{}\n", 8).unwrap();
-        assert_eq!(lines, vec![b"{\"id\":1}".to_vec(), b"".to_vec(), b"{}".to_vec()]);
+        assert!(!chunk.oversized);
         assert!(pending.is_empty());
 
-        assert!(append_stdout_chunk(&mut pending, b"1234", 4).unwrap().is_empty());
-        assert!(append_stdout_chunk(&mut pending, b"5", 4).is_err());
+        let chunk = append_stdout_chunk(&mut pending, b"1234", 4);
+        assert!(chunk.completed.is_empty());
+        assert!(!chunk.oversized);
+        assert!(append_stdout_chunk(&mut pending, b"5", 4).oversized);
         assert_eq!(pending, b"1234");
         pending.clear();
+
+        // A valid frame before an oversized one in the same OS read remains
+        // deliverable; only the bad frame and later bytes are discarded.
+        let chunk = append_stdout_chunk(&mut pending, b"okay\n12345\nlater\n", 4);
+        assert_eq!(chunk.completed, vec![b"okay".to_vec()]);
+        assert!(chunk.oversized);
 
         let nul_line = br#"{"id":"i\u0000d","result":"x\u0000y"}"#;
         let mut nul_frame = nul_line.to_vec();
         nul_frame.push(b'\n');
-        let lines = append_stdout_chunk(&mut pending, &nul_frame, 64).unwrap();
-        let response: serde_json::Value = serde_json::from_slice(&lines[0]).unwrap();
+        let chunk = append_stdout_chunk(&mut pending, &nul_frame, 64);
+        assert!(!chunk.oversized);
+        let response: serde_json::Value =
+            serde_json::from_slice(&chunk.completed[0]).unwrap();
         assert_eq!(response["id"], "i\0d");
         assert_eq!(response["result"], "x\0y");
     }
