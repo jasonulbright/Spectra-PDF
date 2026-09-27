@@ -529,7 +529,15 @@ export function runTracked(
     sinks.log(`${ts} [${status}] ${english} — ${detail} (${elapsed}s)`);
   };
 
-  return operation().then(
+  // Call immediately so the operation starts in the same turn as the running
+  // row, but normalize setup throws into the same error path as a rejection.
+  let pending: Promise<unknown>;
+  try {
+    pending = operation();
+  } catch (error) {
+    pending = Promise.reject(error);
+  }
+  return pending.then(
     (result) => {
       const endTime = sinks.now();
       const outcome = describeResult(method, result);
