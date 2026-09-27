@@ -5,11 +5,14 @@ import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
 import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { EDIT_DECLINED } from '../lib/edit-text';
+import { capabilityBlock } from '../lib/document-permissions';
+import { capabilityBlockText } from '../lib/document-permission-text';
 import { dialog } from '../lib/tauri-bridge';
 import { getCanvasServices, getCommandContext } from '../commands/context';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { ANNOTATION_PALETTE } from '../components/canvas/PageCell';
 import { CommentSummaryDialog } from '../components/CommentSummaryDialog';
+import { documentPermissions } from '../state/selectors';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
@@ -117,6 +120,7 @@ export function CommentsPanel(): React.ReactElement {
 
   const buffer = activeFile?.buffer ?? null;
   const workingPath = activeFile?.workingPath ?? null;
+  const exportBlock = capabilityBlock(documentPermissions(state, activeFile?.path), 'copy');
   const { sort, filter } = options;
 
   // The workspace's own annotations for the document on show. Unfiltered —
@@ -209,6 +213,11 @@ export function CommentsPanel(): React.ReactElement {
   // matches what the user sees); import is the standard undoable mutation.
   const exportXfdf = useCallback(async () => {
     if (!activeFile) return;
+    const block = capabilityBlock(documentPermissions(state, activeFile.path), 'copy');
+    if (block) {
+      setStatus(capabilityBlockText(block));
+      return;
+    }
     const output = await dialog.saveFile({
       defaultPath: activeFile.name.replace(/\.pdf$/i, '') + '.xfdf',
     });
@@ -234,7 +243,7 @@ export function CommentsPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, call]);
+  }, [activeFile, call, state]);
 
   const importXfdf = useCallback(async () => {
     if (!activeFile) return;
@@ -628,7 +637,7 @@ export function CommentsPanel(): React.ReactElement {
                 data-testid="comments-export-xfdf"
                 onClick={() => void exportXfdf()}
                 disabled={busy}
-                title={tChrome('panel.comments.exportTitle')}
+                title={exportBlock ? capabilityBlockText(exportBlock) : tChrome('panel.comments.exportTitle')}
                 className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm"
               >
                 {tChrome('panel.comments.exportBtn')}

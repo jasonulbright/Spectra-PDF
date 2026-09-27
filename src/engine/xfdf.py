@@ -47,7 +47,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 import pikepdf
-from engine.credentials import open_pdf
+from engine.credentials import open_pdf, require_permission
 from engine.annotations import (
     _MARKUP,
     relationship_name,
@@ -203,6 +203,7 @@ def _read_numbers(annot, key) -> tuple[str, list[float] | None]:
 def export_xfdf(file: str, output: str) -> dict:
     """Write every markup annotation XFDF has an element for, and report the
     comments and the attributes left behind."""
+    require_permission(file, "copy")
     count = 0
     found = 0
     by_type: dict[str, int] = {}
