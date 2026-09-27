@@ -640,11 +640,19 @@ impl Default for QuitAcks {
     }
 }
 
-/// Windows spells one file many ways and both sides hold the canonical
-/// spelling, so this compares two spellings of the same path rather than
-/// deciding identity — which is the raw string, settled at the boundary.
+/// Follow the workspace path rule: case variants are aliases on Windows, but
+/// spelling remains significant on case-sensitive platforms. Producers
+/// canonicalize paths at the Rust boundary before they reach this comparison.
 fn same_path(a: &str, b: &str) -> bool {
-    a.eq_ignore_ascii_case(b)
+    same_path_with_case_rule(a, b, cfg!(windows))
+}
+
+fn same_path_with_case_rule(a: &str, b: &str, case_insensitive: bool) -> bool {
+    if case_insensitive {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        a == b
+    }
 }
 
 /// A window's documents, arranged by the order it last published.
@@ -656,16 +664,35 @@ fn same_path(a: &str, b: &str) -> bool {
 /// held drops out (it was closed, or handed to another window). A window that
 /// never published anything keeps the claim table's own order.
 fn arrange(order: &[String], claimed: Vec<String>) -> Vec<String> {
+    arrange_by(order, claimed, same_path)
+}
+
+#[cfg(test)]
+fn arrange_with_case_rule(
+    order: &[String],
+    claimed: Vec<String>,
+    case_insensitive: bool,
+) -> Vec<String> {
+    arrange_by(order, claimed, |a, b| {
+        same_path_with_case_rule(a, b, case_insensitive)
+    })
+}
+
+fn arrange_by(
+    order: &[String],
+    claimed: Vec<String>,
+    same: impl Fn(&str, &str) -> bool,
+) -> Vec<String> {
     let mut out: Vec<String> = Vec::with_capacity(claimed.len());
     for named in order {
-        if let Some(path) = claimed.iter().find(|p| same_path(p, named)) {
-            if !out.iter().any(|p| same_path(p, path)) {
+        if let Some(path) = claimed.iter().find(|p| same(p, named)) {
+            if !out.iter().any(|p| same(p, path)) {
                 out.push(path.clone());
             }
         }
     }
     for path in claimed {
-        if !out.iter().any(|p| same_path(p, &path)) {
+        if !out.iter().any(|p| same(p, &path)) {
             out.push(path);
         }
     }
@@ -1770,8 +1797,37 @@ mod tests {
         // same file, and treating it as a different one would append the
         // document a second time.
         assert_eq!(
-            arrange(&paths(&["c:\\A.PDF"]), paths(&["C:\\a.pdf"])),
+            arrange_with_case_rule(&paths(&["c:\\A.PDF"]), paths(&["C:\\a.pdf"]), true),
             paths(&["C:\\a.pdf"])
+        );
+    }
+
+    #[test]
+    fn session_arrangement_keeps_case_only_files_when_path_case_matters() {
+        let claimed = paths(&["/docs/Report.pdf", "/docs/report.pdf"]);
+        assert_eq!(
+            arrange_with_case_rule(&claimed, claimed.clone(), false),
+            claimed,
+            "case-sensitive files must not collapse into one restored document"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn case_only_distinct_paths_both_survive_session_arrangement() {
+        let claimed = paths(&["/docs/Report.pdf", "/docs/report.pdf"]);
+        assert_eq!(
+            arrange(&claimed, claimed.clone()),
+            claimed,
+            "case-sensitive files must not collapse into one restored document"
+        );
+    }
+
+    #[test]
+    fn session_path_identity_uses_the_platform_case_rule() {
+        assert_eq!(
+            same_path("/docs/Report.pdf", "/docs/report.pdf"),
+            cfg!(windows)
         );
     }
 
