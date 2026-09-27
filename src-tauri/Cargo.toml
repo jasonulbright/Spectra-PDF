@@ -69,7 +69,7 @@ webview2-com = "0.38"
 # the 0.62 the rest of the crate uses. Neither version is a browser-runtime
 # pin: they track the crates, not the installed WebView2.
 windows-core-webview2 = { package = "windows-core", version = "0.61" }
-tokio = { version = "1", features = ["sync", "io-util", "fs"] }
+tokio = { version = "1", features = ["sync", "io-util", "fs", "net", "time"] }
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 # Windows-safe fs::canonicalize (strips the \\?\ verbatim prefix): file

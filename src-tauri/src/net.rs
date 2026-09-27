@@ -33,8 +33,9 @@
 //!
 //! Nothing received here is executed, and nothing here opens a shell.
 
+use std::future::Future;
 use std::io::{Read, Write};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -330,13 +331,26 @@ pub fn canonical_authority(authority: &str, scheme: &str) -> String {
     }
 }
 
-/// Resolve a host:port to the addresses it names. Empty resolution is an error,
-/// not an empty allow.
-fn resolve_host(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
-    let addrs: Vec<SocketAddr> = (host, port)
-        .to_socket_addrs()
-        .map_err(|e| format!("The address {host} could not be looked up: {e}"))?
-        .collect();
+async fn with_dns_timeout<T, F>(host: &str, timeout: Duration, lookup: F) -> Result<T, String>
+where
+    F: Future<Output = std::io::Result<T>>,
+{
+    tokio::time::timeout(timeout, lookup)
+        .await
+        .map_err(|_| {
+            format!("The address {host} could not be looked up within the request time limit")
+        })?
+        .map_err(|e| format!("The address {host} could not be looked up: {e}"))
+}
+
+/// Resolve a host:port to the addresses it names under the request deadline.
+/// Empty resolution is an error, not an empty allow.
+async fn resolve_host(host: &str, port: u16, timeout: Duration) -> Result<Vec<SocketAddr>, String> {
+    let lookup_host = host.to_string();
+    let addrs: Vec<SocketAddr> = with_dns_timeout(host, timeout, async move {
+        Ok(tokio::net::lookup_host((lookup_host, port)).await?.collect())
+    })
+    .await?;
     if addrs.is_empty() {
         return Err(format!("The address {host} resolved to nothing"));
     }
@@ -763,7 +777,7 @@ async fn fetch_into(
         // connect.
         let (_, cur_scheme, cur_authority) = validate_http_url(&current)?;
         let (host, port) = split_host_port(&cur_authority, &cur_scheme);
-        let addrs = resolve_host(&host, port)?;
+        let addrs = resolve_host(&host, port, remaining).await?;
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err(format!(
@@ -1711,6 +1725,24 @@ mod tests {
             url,
             "https://forms.example/submit?existing=1&name=Ada&city=London#section"
         );
+    }
+
+    #[tokio::test]
+    async fn a_slow_dns_lookup_consumes_the_request_deadline() {
+        let started = Instant::now();
+        let error = with_dns_timeout(
+            "slow.example",
+            Duration::from_millis(20),
+            async {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                Ok::<Vec<SocketAddr>, std::io::Error>(Vec::new())
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("slow.example"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[tokio::test]
