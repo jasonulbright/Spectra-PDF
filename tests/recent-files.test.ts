@@ -44,6 +44,12 @@ describe('parseRecent', () => {
     ]);
   });
 
+  it('treats finite timestamps outside the Date range as unknown', () => {
+    expect(parseRecent('[{"path":"a.pdf","openedAt":1e300}]')).toEqual([
+      { path: 'a.pdf', openedAt: null },
+    ]);
+  });
+
   it('returns [] on malformed JSON', () => {
     expect(parseRecent('{not json')).toEqual([]);
   });
@@ -122,6 +128,10 @@ describe('formatOpenedAt (the Home opened-when column)', () => {
 
   it('a legacy entry with no recorded time reads as an em dash — never a fabricated date', () => {
     expect(formatOpenedAt(null, now)).toBe('—');
+  });
+
+  it('keeps an invalid persisted date from crashing the Home screen', () => {
+    expect(formatOpenedAt(1e300, now)).toBe('—');
   });
 });
 
