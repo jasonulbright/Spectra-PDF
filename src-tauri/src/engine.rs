@@ -181,11 +181,30 @@ pub fn publish_activity(app: &AppHandle) {
         return;
     }
     let counts = app.state::<EngineRouter>().outstanding();
-    let total: usize = counts.values().sum();
     for label in labels {
-        let mine = counts.get(&label).copied().unwrap_or(0);
-        let _ = app.emit_to(label.as_str(), "engine:otherWindows", total - mine);
+        let _ = app.emit_to(
+            label.as_str(),
+            "engine:otherWindows",
+            other_window_work_count(&counts, &label),
+        );
     }
+}
+
+/// The number of outstanding engine requests owned by windows other than
+/// `label`. Used both for activity events and the initial renderer snapshot:
+/// a window opened during another window's request missed the earlier event.
+fn other_window_work_count(counts: &HashMap<String, usize>, label: &str) -> usize {
+    let total: usize = counts.values().sum();
+    total - counts.get(label).copied().unwrap_or(0)
+}
+
+/// Current cross-window activity for a renderer that subscribed after work
+/// had already started. The event stream carries later changes; this snapshot
+/// fills the initial state.
+#[tauri::command]
+pub fn other_window_work(app: AppHandle, window: tauri::WebviewWindow) -> usize {
+    let counts = app.state::<EngineRouter>().outstanding();
+    other_window_work_count(&counts, window.label())
 }
 
 /// Rewrite an outbound request's id to a process-global number and remember
@@ -237,7 +256,12 @@ fn route_with_leases(router: &EngineRouter, label: &str, request: &mut serde_jso
 
 /// Undo a routing when the request never reached the sidecar.
 pub fn unroute_request(app: &AppHandle, outer: u64) {
-    app.state::<EngineRouter>().take(outer);
+    if app.state::<EngineRouter>().take(outer).is_some() {
+        // The request may have been visible to a renderer's initial snapshot
+        // even though serialization or the pipe write then failed before the
+        // normal dispatch event was published.
+        publish_activity(app);
+    }
 }
 
 /// Restore a response's original id and deliver it to the window that asked.
@@ -767,6 +791,26 @@ mod start_tests {
         let env = python_env();
         assert!(env.iter().any(|(k, v)| k == "PYTHONNOUSERSITE" && v == "1"));
         assert!(env.iter().any(|(k, v)| k == "PYTHONUTF8" && v == "1"));
+    }
+
+    #[test]
+    fn initial_window_activity_excludes_only_the_calling_window() {
+        let counts = HashMap::from([("main".into(), 2), ("doc-1".into(), 3)]);
+        assert_eq!(other_window_work_count(&counts, "main"), 3);
+        assert_eq!(other_window_work_count(&counts, "doc-1"), 2);
+        assert_eq!(other_window_work_count(&counts, "doc-2"), 5);
+        assert_eq!(other_window_work_count(&HashMap::new(), "main"), 0);
+    }
+
+    #[test]
+    fn activity_snapshot_drops_a_route_that_never_reached_the_engine() {
+        let router = EngineRouter::new();
+        let mut request = serde_json::json!({"id": 7});
+        let outer = route_with(&router, "main", &mut request).unwrap();
+        assert_eq!(other_window_work_count(&router.outstanding(), "doc-1"), 1);
+
+        assert!(router.take(outer).is_some());
+        assert_eq!(other_window_work_count(&router.outstanding(), "doc-1"), 0);
     }
 
     #[test]

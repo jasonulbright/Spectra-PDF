@@ -54,6 +54,9 @@ export const engine = {
   onOtherWindows: (callback: (count: number) => void) => {
     return listen<number>('engine:otherWindows', (event) => callback(event.payload));
   },
+
+  /** Current other-window activity for a renderer that subscribed mid-run. */
+  otherWindowWorkSnapshot: () => invoke<number>('other_window_work'),
 };
 
 // ── Window ownership ──────────────────────────────────────────────────────
