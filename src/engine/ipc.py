@@ -81,7 +81,7 @@ class JsonRpcServer:
                 continue
             try:
                 request = json.loads(line)
-            except json.JSONDecodeError:
+            except (ValueError, RecursionError):
                 self._write_error(output_stream, None, -32700, "Parse error")
                 continue
             # An exception that escapes this loop ends the process, and every
@@ -100,6 +100,15 @@ class JsonRpcServer:
                     "jsonrpc": "2.0",
                     "error": {"code": -32603,
                               "message": f"Result not representable as JSON: {exc}"},
+                    "id": _representable_id(response.get("id")),
+                })
+            except RecursionError:
+                # Deep results can make the encoder's diagnostic itself huge;
+                # keep the fallback small and let the server continue.
+                encoded = encode_response({
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32603,
+                              "message": "Result exceeds JSON encoding limits."},
                     "id": _representable_id(response.get("id")),
                 })
             output_stream.write(encoded + "\n")
