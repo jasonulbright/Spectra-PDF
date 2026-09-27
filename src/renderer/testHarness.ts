@@ -10,6 +10,7 @@
  * scriptable remote control over the public IPC surface.
  */
 import { app, dialog, file, engine, pinStoreCertificates, scanner as scannerBridge, type StoreCertificateAnswer } from './lib/tauri-bridge';
+import { emit } from '@tauri-apps/api/event';
 import { runCommitGate } from './lib/commit-gate';
 import { windowLabel } from './lib/window-label';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
@@ -1562,6 +1563,8 @@ export interface TestHarness {
   waitForEngine: (timeoutMs?: number) => Promise<void>;
   /** This window's label — 'main' for the one the app opened by itself. */
   windowLabel: () => string;
+  /** Dispatch the same app-wide tray event that the native tray uses. */
+  emitTrayAction: (action: 'merge' | 'quit') => Promise<void>;
   /** Close THIS window through the same command the × handler ends on, so a
    * spec exercises the real "quit only on the last window" decision. */
   closeThisWindow: () => Promise<void>;
@@ -2548,6 +2551,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     waitForEngine,
     windowLabel: () => windowLabel(),
+    emitTrayAction: async (action) => { await emit('app:trayAction', action); },
     closeThisWindow: async () => { await app.closeWindow(false); },
     engineRequestWithId: requestWithId,
     saveActiveAs: async (destPath) => {
