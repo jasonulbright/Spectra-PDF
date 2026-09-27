@@ -406,6 +406,22 @@ export function recordRecentOpen(
   });
 }
 
+/** Merge just the opens that succeeded in the current batch back into this
+ * window's view. A storage failure can leave the batch's successful opens only
+ * in memory; the shared lock and current clear/removal markers prevent that
+ * recovery from resurrecting entries another window removed meanwhile. */
+export function persistSuccessfulRecentOpensSafely(
+  opened: readonly RecentEntry[],
+): Promise<RecentEntry[]> {
+  return withRecentStorageLock(() => {
+    const admissible = survivingRemovals(
+      survivingClear([...opened], readClearSeq()),
+      readTombstones(),
+    );
+    return persistRecent(mergeRecent(admissible, readRecent()));
+  });
+}
+
 interface ExpectedRecentEntry {
   readonly path: string;
   readonly openedAt: number | null;
