@@ -33,6 +33,10 @@ use windows::Win32::System::DataExchange::{
 use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::System::Ole::{CF_DIB, CF_UNICODETEXT};
 
+use crate::scratch::{
+    clipboard_dir, clipboard_file_name, clipboard_file_owner, legacy_clipboard_file,
+};
+
 /// Attempts to take the clipboard, matching the write side: another
 /// application can hold it for a few milliseconds at a time.
 const OPEN_ATTEMPTS: u32 = 12;
@@ -44,11 +48,6 @@ const DIB_HEADER_BYTES: usize = 40;
 /// parsing expansion before allocating memory from the advertised size.
 const MAX_CLIPBOARD_IMAGE_BYTES: usize = 256 * 1024 * 1024;
 const MAX_CLIPBOARD_TEXT_BYTES: usize = 32 * 1024 * 1024;
-
-/// Scratch files older than this are removed when a new one is written. A
-/// clipboard source is consumed within one dialog session, so anything from a
-/// previous run is abandoned by construction.
-const SCRATCH_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Serialize)]
 pub struct ClipboardSource {
@@ -242,30 +241,10 @@ fn html_document(fragment: &str) -> String {
 }
 
 fn scratch_dir() -> Result<PathBuf, String> {
-    let dir = std::env::temp_dir().join("spectrapdf").join("clipboard");
+    let dir = clipboard_dir();
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Cannot create the clipboard scratch folder: {e}"))?;
     Ok(dir)
-}
-
-fn prune(dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let stale = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .map(|t| {
-                t.elapsed()
-                    .map(|age| age > SCRATCH_MAX_AGE)
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
-        if stale {
-            let _ = std::fs::remove_file(entry.path());
-        }
-    }
 }
 
 fn create_scratch_candidate(candidate: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -288,7 +267,9 @@ fn write_scratch_at(
     stamp: u128,
 ) -> Result<String, String> {
     for n in 0..1_000u32 {
-        let candidate = dir.join(format!("clipboard-{stamp}-{n}.{extension}"));
+        let name = clipboard_file_name(stamp, n, std::process::id(), extension)
+            .ok_or_else(|| "The clipboard scratch filename is invalid".to_string())?;
+        let candidate = dir.join(name);
         match create_scratch_candidate(&candidate, bytes) {
             Ok(()) => return Ok(candidate.to_string_lossy().to_string()),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -300,7 +281,6 @@ fn write_scratch_at(
 
 fn write_scratch(extension: &str, bytes: &[u8]) -> Result<String, String> {
     let dir = scratch_dir()?;
-    prune(&dir);
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -324,14 +304,7 @@ fn discard_scratch_at(dir: &std::path::Path, path: &std::path::Path) -> Result<(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| "The clipboard scratch filename is invalid".to_string())?;
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if !name.starts_with("clipboard-")
-        || !matches!(extension.as_str(), "png" | "dib" | "html" | "txt")
-    {
+    if clipboard_file_owner(name).is_none() && !legacy_clipboard_file(name) {
         return Err("The path is not a clipboard scratch file".to_string());
     }
     match std::fs::symlink_metadata(path) {
@@ -523,9 +496,23 @@ mod tests {
     }
 
     #[test]
+    fn clipboard_scratch_names_include_the_owning_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_scratch_at(dir.path(), "txt", b"private", 7).unwrap();
+        let name = std::path::Path::new(&path)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(name, format!("clipboard-7-0.{}.txt", std::process::id()));
+    }
+
+    #[test]
     fn a_scratch_candidate_is_created_by_only_one_concurrent_writer() {
         let dir = tempfile::tempdir().unwrap();
-        let candidate = dir.path().join("clipboard-7-0.txt");
+        let candidate = dir
+            .path()
+            .join(format!("clipboard-7-0.{}.txt", std::process::id()));
         let start = Arc::new(Barrier::new(3));
         let (result_tx, result_rx) = mpsc::channel();
         let writers: Vec<_> = [b"first".as_slice(), b"second".as_slice()]
@@ -572,24 +559,42 @@ mod tests {
     #[test]
     fn clipboard_scratch_release_removes_only_its_own_file() {
         let dir = tempfile::tempdir().unwrap();
-        let scratch = dir.path().join("clipboard-7-0.txt");
+        let scratch = dir
+            .path()
+            .join(format!("clipboard-7-0.{}.txt", std::process::id()));
         std::fs::write(&scratch, b"private clipboard text").unwrap();
         discard_scratch_at(dir.path(), &scratch).unwrap();
         assert!(!scratch.exists());
         // Releasing twice is safe when close and row-removal race.
         discard_scratch_at(dir.path(), &scratch).unwrap();
+
+        let legacy = dir.path().join("clipboard-7-1.txt");
+        std::fs::write(&legacy, b"legacy clipboard text").unwrap();
+        discard_scratch_at(dir.path(), &legacy).unwrap();
+        assert!(!legacy.exists());
     }
 
     #[test]
     fn clipboard_scratch_release_refuses_paths_outside_its_folder() {
         let dir = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        let protected = outside.path().join("clipboard-7-0.txt");
+        let protected = outside
+            .path()
+            .join(format!("clipboard-7-0.{}.txt", std::process::id()));
         std::fs::write(&protected, b"keep").unwrap();
         assert!(discard_scratch_at(dir.path(), &protected).is_err());
         assert_eq!(std::fs::read(protected).unwrap(), b"keep");
 
         let unrelated = dir.path().join("important.txt");
+        std::fs::write(&unrelated, b"keep").unwrap();
+        assert!(discard_scratch_at(dir.path(), &unrelated).is_err());
+        assert_eq!(std::fs::read(unrelated).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn clipboard_scratch_release_refuses_unowned_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let unrelated = dir.path().join("clipboard-important.txt");
         std::fs::write(&unrelated, b"keep").unwrap();
         assert!(discard_scratch_at(dir.path(), &unrelated).is_err());
         assert_eq!(std::fs::read(unrelated).unwrap(), b"keep");

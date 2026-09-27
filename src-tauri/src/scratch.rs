@@ -1,11 +1,11 @@
 //! The app's own temp tree, `%TEMP%\spectrapdf`, and what each launch removes
 //! from it.
 //!
-//! Two kinds of entry belong to one process of the app: the working folder
-//! each open makes (`<uuid>.<pid>`), and the payloads and responses of the
-//! network client (`net\<stem>-<millis>-<8 hex>.<pid>.<ext>`). A process that
-//! is killed cannot remove them, so each launch removes the ones whose process
-//! no longer runs.
+//! Entries belong to one process of the app: working folders (`<uuid>.<pid>`),
+//! clipboard copies (`clipboard-<millis>-<n>.<pid>.<ext>`), and network
+//! payloads (`net\<stem>-<millis>-<8 hex>.<pid>.<ext>`). A process that is
+//! killed cannot remove them, so each launch removes the ones whose process no
+//! longer runs.
 //!
 //! A working folder named `<uuid>` and a network file named
 //! `<stem>-<millis>-<8 hex>.<ext>` carry no process id, so nothing in the name
@@ -13,8 +13,9 @@
 //! held open, and only while no other process of the app runs on the machine:
 //! a live window of another process is the one user they can still have.
 //!
-//! The exact `net` and `web-capture` feature roots are also visited. Other
-//! folders in the tree belong to their own features and are never entered.
+//! The exact `net`, `clipboard` and `web-capture` feature roots are also
+//! visited. Other folders in the tree belong to their own features and are
+//! never entered.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -25,6 +26,7 @@ use crate::staging::{decimal_pid, held_open, reclaim, reclaim_aged, LEGACY_STAGE
 const APP_IMAGE: &str = "spectrapdf.exe";
 
 const NET: &str = "net";
+const CLIPBOARD: &str = "clipboard";
 const WEB_CAPTURE: &str = "web-capture";
 
 pub(crate) fn root() -> PathBuf {
@@ -34,6 +36,11 @@ pub(crate) fn root() -> PathBuf {
 /// Where the network client keeps payloads and responses.
 pub(crate) fn net_dir() -> PathBuf {
     root().join(NET)
+}
+
+/// Where clipboard payloads stay until their Create PDF dialog releases them.
+pub(crate) fn clipboard_dir() -> PathBuf {
+    root().join(CLIPBOARD)
 }
 
 // ── Names ─────────────────────────────────────────────────────────────────
@@ -108,6 +115,54 @@ pub(crate) fn net_file_owner(name: &str) -> Option<u32> {
     decimal_pid(pid)
 }
 
+/// A clipboard scratch file's canonical name, owned by one process.
+pub(crate) fn clipboard_file_name(
+    stamp: u128,
+    n: u32,
+    pid: u32,
+    extension: &str,
+) -> Option<String> {
+    (n < 1_000 && pid != 0 && clipboard_extension(extension))
+        .then(|| format!("clipboard-{stamp}-{n}.{pid}.{extension}"))
+}
+
+fn clipboard_base(base: &str) -> bool {
+    let Some(rest) = base.strip_prefix("clipboard-") else {
+        return false;
+    };
+    let Some((stamp, n)) = rest.split_once('-') else {
+        return false;
+    };
+    let (Ok(stamp_value), Ok(n_value)) = (stamp.parse::<u128>(), n.parse::<u32>()) else {
+        return false;
+    };
+    stamp_value.to_string() == stamp && n_value.to_string() == n && n_value < 1_000
+}
+
+fn clipboard_extension(extension: &str) -> bool {
+    matches!(extension, "png" | "dib" | "html" | "txt")
+}
+
+/// The process a canonical, process-owned clipboard scratch file names.
+pub(crate) fn clipboard_file_owner(name: &str) -> Option<u32> {
+    let mut parts = name.split('.');
+    let (base, pid, extension) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() || !clipboard_base(base) || !clipboard_extension(extension) {
+        return None;
+    }
+    let pid = decimal_pid(pid)?;
+    (pid != 0).then_some(pid)
+}
+
+/// A clipboard scratch file created before process ownership was added.
+pub(crate) fn legacy_clipboard_file(name: &str) -> bool {
+    let mut parts = name.split('.');
+    let (base, extension) = (parts.next(), parts.next());
+    parts.next().is_none()
+        && base.is_some_and(clipboard_base)
+        && extension.is_some_and(clipboard_extension)
+}
+
 /// A network scratch file named without a process id.
 fn legacy_net_file(name: &str) -> bool {
     name.split_once('.')
@@ -142,9 +197,11 @@ pub(crate) fn is_net_file_in(path: &Path, dir: &Path) -> bool {
 struct Reclaimed {
     folders: usize,
     net: usize,
+    clipboard: usize,
     web_capture: usize,
     legacy_folders: usize,
     legacy_net: usize,
+    legacy_clipboard: usize,
     legacy_web_capture: usize,
 }
 
@@ -177,10 +234,16 @@ fn reclaim_tree(
     now: SystemTime,
 ) -> Reclaimed {
     let net = root.join(NET);
+    let clipboard = root.join(CLIPBOARD);
     let web_capture = root.join(WEB_CAPTURE);
     let mut done = Reclaimed {
         folders: reclaim_folders(root, own, working_folder_owner, &running),
         net: reclaim(&net, own, net_file_owner, &running),
+        clipboard: if plain_directory(&clipboard) {
+            reclaim(&clipboard, own, clipboard_file_owner, &running)
+        } else {
+            0
+        },
         web_capture: if plain_directory(&web_capture) {
             reclaim_folders(&web_capture, own, working_folder_owner, &running)
         } else {
@@ -192,6 +255,10 @@ fn reclaim_tree(
         done.legacy_folders =
             reclaim_aged_folders(root, legacy_working_folder, LEGACY_STAGE_AGE, now);
         done.legacy_net = reclaim_aged(&net, legacy_net_file, LEGACY_STAGE_AGE, now);
+        if plain_directory(&clipboard) {
+            done.legacy_clipboard =
+                reclaim_aged(&clipboard, legacy_clipboard_file, LEGACY_STAGE_AGE, now);
+        }
         if plain_directory(&web_capture) {
             done.legacy_web_capture =
                 reclaim_aged(&web_capture, legacy_web_capture_file, LEGACY_STAGE_AGE, now);
@@ -515,6 +582,40 @@ mod tests {
     }
 
     #[test]
+    fn clipboard_file_names_are_canonical_and_process_owned() {
+        let name = clipboard_file_name(7, 9, OWN, "html").unwrap();
+        assert_eq!(name, format!("clipboard-7-9.{OWN}.html"));
+        assert_eq!(clipboard_file_owner(&name), Some(OWN));
+        assert!(legacy_clipboard_file("clipboard-7-9.html"));
+        for other in [
+            "clipboard-07-9.4100.html",
+            "clipboard-7-09.4100.html",
+            "clipboard-7-1000.4100.html",
+            "clipboard-7-9.04100.html",
+            "clipboard-7-9.0.html",
+            "clipboard-7-9.4100.HTML",
+            "clipboard-7-9.4100.html.bak",
+            "clipboard-7-9.html",
+            "clipboard-7-9.4100.exe",
+        ] {
+            assert_eq!(clipboard_file_owner(other), None, "{other}");
+        }
+        for other in [
+            "clipboard-07-9.html",
+            "clipboard-7-09.html",
+            "clipboard-7-1000.html",
+            "clipboard-7.html",
+            "clipboard-7-9.html.bak",
+            "clipboard-7-9.exe",
+        ] {
+            assert!(!legacy_clipboard_file(other), "{other}");
+        }
+        assert!(clipboard_file_name(7, 1_000, OWN, "txt").is_none());
+        assert!(clipboard_file_name(7, 0, 0, "txt").is_none());
+        assert!(clipboard_file_name(7, 0, OWN, "exe").is_none());
+    }
+
+    #[test]
     fn legacy_web_capture_names_are_exact() {
         assert!(legacy_web_capture_file("capture-1760000000123-000.pdf"));
         for name in [
@@ -544,6 +645,31 @@ mod tests {
         let alone = reclaim_tree(root.path(), OWN, |_| false, || true, later);
         assert_eq!(alone.legacy_web_capture, 1);
         assert!(!output.exists());
+    }
+
+    #[test]
+    fn clipboard_outputs_are_reclaimed_by_owner_and_legacy_age_rules() {
+        let root = tempfile::tempdir().unwrap();
+        let clipboard = root.path().join("clipboard");
+        std::fs::create_dir(&clipboard).unwrap();
+        let own = clipboard.join(format!("clipboard-7-0.{OWN}.txt"));
+        let live = clipboard.join(format!("clipboard-7-1.{LIVE}.txt"));
+        let dead = clipboard.join(format!("clipboard-7-2.{DEAD}.txt"));
+        let legacy = clipboard.join("clipboard-7-3.txt");
+        for path in [&own, &live, &dead, &legacy] {
+            std::fs::write(path, b"private clipboard data").unwrap();
+        }
+        let old_enough = SystemTime::now() + LEGACY_STAGE_AGE + Duration::from_secs(1);
+
+        reclaim_tree(root.path(), OWN, |pid| pid == LIVE, || false, old_enough);
+
+        assert!(own.exists(), "the current process keeps its clipboard file");
+        assert!(live.exists(), "a running process keeps its clipboard file");
+        assert!(!dead.exists(), "a stopped process's file is reclaimed");
+        assert!(legacy.exists(), "legacy files wait until this is the only app process");
+
+        reclaim_tree(root.path(), OWN, |_| false, || true, old_enough);
+        assert!(!legacy.exists(), "an old legacy file is reclaimed when alone");
     }
 
     #[test]
