@@ -433,6 +433,32 @@ describe('an edit made after a commit lands and before its reindex lands', () =>
     expect(s.workspace.documents.map((d) => d.id)).toEqual(['a#0', 'b#0', 'b#1']);
     expect(s.pageEditRefusals).toBe(0);
   });
+
+  it('keeps a file opened after the first edit when another file is reindexed', () => {
+    const a = file('a.pdf', [1], 1);
+    const q = file('q.pdf', [2], 1);
+    const start = state([a, q], [
+      doc(a, 'a#0', [page('a.pdf', 0)]),
+      doc(q, 'q#0', [page('q.pdf', 0)]),
+    ]);
+    const editedA = appReducer(start, { type: 'ROTATE_PAGE_REFS', pageIds: ['a.pdf#p0'], delta: 180 });
+    const opened = appReducer(editedA, {
+      type: 'OPEN_FILE', path: 'p.pdf', workingPath: 'p.w', name: 'p.pdf', pageCount: 1, buffer: [3],
+    });
+    const p = opened.files.get('p.pdf')!;
+    const indexed = appReducer(opened, {
+      type: 'SET_WORKSPACE_DOCUMENTS', path: 'p.pdf', documents: [doc(p, 'p#0', [page('p.pdf', 0)])],
+    });
+    const editedP = appReducer(indexed, { type: 'ROTATE_PAGE_REFS', pageIds: ['p.pdf#p0'], delta: 90 });
+    const qReadBack = { ...editedP.workspace.documents.find((d) => d.path === 'q.pdf')!, name: 'q refreshed' };
+
+    const reindexed = appReducer(editedP, { type: 'SET_WORKSPACE_DOCUMENTS', path: 'q.pdf', documents: [qReadBack] });
+
+    expect(reindexed.pageEditRefusals).toBe(0);
+    expect(pageById(reindexed, 'a.pdf#p0').rotation).toBe(180);
+    expect(pageById(reindexed, 'p.pdf#p0').rotation).toBe(90);
+    expect(reindexed.pageDirtyPaths.slice().sort()).toEqual(['a.pdf', 'p.pdf']);
+  });
 });
 
 describe('the documents a commit lands', () => {
@@ -720,6 +746,31 @@ describe('an edit made while the commit is built and published', () => {
     expect(pageById(c.state, 'a.pdf#p0').rotation).toBe(180);
     expect([...c.state.pageDirtyPaths].sort()).toEqual(['a.pdf', 'b.pdf']);
     expect(c.state.pageEditRefusals).toBe(0);
+  });
+
+  it('keeps a file opened after the first concurrent edit when a commit replays newer edits', () => {
+    const a = file('a.pdf', [5], 1);
+    const start = pendingTurn();
+    const withA: AppState = {
+      ...start,
+      files: new Map(start.files).set('a.pdf', a),
+      workspace: { documents: [...start.workspace.documents, doc(a, 'a#0', [page('a.pdf', 0)])] },
+    };
+    const pBuffer = [3];
+    const c = commit(withA, [
+      { type: 'ROTATE_PAGE_REFS', pageIds: ['a.pdf#p0'], delta: 180 },
+      { type: 'OPEN_FILE', path: 'p.pdf', workingPath: 'p.w', name: 'p.pdf', pageCount: 1, buffer: pBuffer },
+      {
+        type: 'SET_WORKSPACE_DOCUMENTS', path: 'p.pdf',
+        documents: [doc(file('p.pdf', pBuffer, 1), 'p#0', [page('p.pdf', 0)])],
+      },
+      { type: 'ROTATE_PAGE_REFS', pageIds: ['p.pdf#p0'], delta: 90 },
+    ]);
+
+    expect(c.state.pageEditRefusals).toBe(0);
+    expect(pageById(c.state, 'a.pdf#p0').rotation).toBe(180);
+    expect(pageById(c.state, 'p.pdf#p0').rotation).toBe(90);
+    expect(c.state.pageDirtyPaths.slice().sort()).toEqual(['a.pdf', 'p.pdf']);
   });
 
   it('replays a cross-file move made while the source commit was being built', () => {
