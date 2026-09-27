@@ -1,6 +1,6 @@
 {
   "version": "1.1.20",
-  "notes": "See CHANGELOG.md for details. The installer is unsigned (no code-signing certificate); SmartScreen may warn on first run -- verify your download against SHA256SUMS.txt, published with this release. Exact corresponding-source archives for the bundled HEIF decoder libraries are attached to this release.",
+  "notes": "See CHANGELOG.md for details. Verify your download against SHA256SUMS.txt, published with this release.",
   "pub_date": "2026-08-31T21:07:04.411Z",
   "platforms": {
     "windows-x86_64": {

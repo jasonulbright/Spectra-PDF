@@ -1245,9 +1245,8 @@ def _draft_fixture(root: Path) -> tuple[list[str], Path]:
 
 
 RELEASE_BODY = (
-    "See CHANGELOG.md for details. The installer is unsigned (no code-signing "
-    "certificate); SmartScreen may warn on first run -- verify your download against "
-    "SHA256SUMS.txt, published with this release."
+    "See CHANGELOG.md for details. Verify your download against SHA256SUMS.txt, "
+    "published with this release."
 )
 
 
