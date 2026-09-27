@@ -76,6 +76,20 @@ export interface CaptureResult {
   failures: string[];
 }
 
+export interface CaptureFailureNotice {
+  examples: string[];
+  omitted: number;
+}
+
+/** Bound the failure details shown after a partial crawl. */
+export function captureFailureNotice(failures: readonly string[]): CaptureFailureNotice | null {
+  if (failures.length === 0) return null;
+  const examples = failures.slice(0, 5).map((failure) =>
+    failure.length > 1200 ? `${failure.slice(0, 1199)}…` : failure,
+  );
+  return { examples, omitted: failures.length - examples.length };
+}
+
 /**
  * The host a capture would contact, for the line the dialog shows BEFORE the
  * capture runs. `null` when nothing usable can be read out of the field —
