@@ -908,6 +908,7 @@ pub fn serve() -> i32 {
         };
         let out = out.clone();
         let sessions = sessions.clone();
+        prune_finished_workers(&mut workers);
         workers.push(std::thread::spawn(move || {
             handle(id, &message, sessions, &out);
         }));
@@ -918,6 +919,13 @@ pub fn serve() -> i32 {
     drop(sessions);
     let _ = workers;
     0
+}
+
+/// Release completed thread handles as requests arrive. Keeping every handle
+/// until the parent exits grows the child process's handle table with every
+/// scanner operation, even though none of these workers are joined.
+fn prune_finished_workers(workers: &mut Vec<std::thread::JoinHandle<()>>) {
+    workers.retain(|worker| !worker.is_finished());
 }
 
 fn emit(out: &Mutex<Box<dyn Write + Send>>, value: Value) {
@@ -1285,6 +1293,26 @@ mod tests {
         let error = read_bounded_line(&mut reader, &mut line, 5).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert!(line.len() <= 5, "the reader never stores bytes past its limit");
+    }
+
+    #[test]
+    fn completed_request_workers_are_released_while_active_workers_remain() {
+        let (release, wait_for_release) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let _ = wait_for_release.recv();
+        });
+        let mut workers = vec![worker];
+        prune_finished_workers(&mut workers);
+        assert_eq!(workers.len(), 1, "an active worker remains tracked");
+
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !workers[0].is_finished() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(workers[0].is_finished(), "the worker completed");
+        prune_finished_workers(&mut workers);
+        assert!(workers.is_empty(), "a completed worker handle is released");
     }
 
     #[test]
