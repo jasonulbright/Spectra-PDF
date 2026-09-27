@@ -15,6 +15,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, SystemTime};
 
+use sha2::Digest;
+
 /// A process id in the one spelling `u32`'s `Display` produces. A name that
 /// only parses as an id (`007`, `+7`) was not written by a writer here.
 pub(crate) fn decimal_pid(field: &str) -> Option<u32> {
@@ -112,24 +114,49 @@ pub(crate) fn reclaim(
 // ── Records ───────────────────────────────────────────────────────────────
 
 /// Where the process `pid` stages a replacement for `record`: beside it, so
-/// landing is a rename inside one directory, and under the writer's id, so two
-/// processes never share a stage.
+/// landing is a rename inside one directory. A random token keeps an unrelated
+/// user file from being mistaken for this process's stage.
 pub(crate) fn stage_path(record: &Path, pid: u32) -> PathBuf {
-    let mut name = record.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".{pid}.tmp"));
+    let original = record.file_name().unwrap_or_default().to_os_string();
+    let displayed = original.to_string_lossy();
+    let record_part = stage_record_part(&displayed, pid);
+    let mut name = if record_part == displayed {
+        original
+    } else {
+        record_part.into()
+    };
+    name.push(format!(".{pid}.{}.tmp", uuid::Uuid::new_v4().simple()));
     record.with_file_name(name)
+}
+
+fn stage_record_part(record: &str, pid: u32) -> String {
+    let suffix = format!(".{pid}.{}.tmp", "0".repeat(32));
+    // Keep the component valid under both Windows' UTF-16 unit and Unix's
+    // UTF-8 byte limits.
+    if record.encode_utf16().count() + suffix.len() <= 255
+        && record.len() + suffix.len() <= 255
+    {
+        return record.to_string();
+    }
+    let digest = sha2::Sha256::digest(record.as_bytes());
+    format!("_spectra-stage-{:x}", digest)
 }
 
 /// The record name and the process id that a [`stage_path`] name carries.
 pub(crate) fn split_stage(entry: &str) -> Option<(&str, u32)> {
-    let (record, pid) = entry.strip_suffix(".tmp")?.rsplit_once('.')?;
+    let (record_and_pid, nonce) = entry.strip_suffix(".tmp")?.rsplit_once('.')?;
+    if nonce.len() != 32 || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let (record, pid) = record_and_pid.rsplit_once('.')?;
     Some((record, decimal_pid(pid)?))
 }
 
 /// The process whose [`stage_path`] for the record named `record` produced
 /// `entry`.
 pub(crate) fn stage_owner(record: &str, entry: &str) -> Option<u32> {
-    split_stage(entry).and_then(|(staged, pid)| (staged == record).then_some(pid))
+    split_stage(entry)
+        .and_then(|(staged, pid)| (staged == stage_record_part(record, pid)).then_some(pid))
 }
 
 /// Remove each stage of `record` that a process neither `own` nor `running`
@@ -146,9 +173,8 @@ pub(crate) fn reclaim_record_stages(
     reclaim(dir, own, |entry| stage_owner(name, entry), running)
 }
 
-/// The lock this process holds while it stages and lands `record`. Every
-/// thread of one process stages a record under the same name, so two
-/// unserialized writers would fill one stage together.
+/// The lock this process holds while it stages and lands `record`. Distinct
+/// stages still replace one destination, so writers must publish in sequence.
 fn record_lock(record: &Path) -> Arc<Mutex<()>> {
     static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
     let mut locks = LOCKS
@@ -164,6 +190,71 @@ fn record_lock(record: &Path) -> Arc<Mutex<()>> {
     lock
 }
 
+pub(crate) struct StageFile {
+    file: File,
+    path: PathBuf,
+    landed: bool,
+}
+
+impl StageFile {
+    fn create(path: &Path) -> io::Result<Self> {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
+        Ok(Self {
+            file,
+            path: path.to_path_buf(),
+            landed: false,
+        })
+    }
+
+    fn landed(&mut self) {
+        self.landed = true;
+    }
+}
+
+impl std::ops::Deref for StageFile {
+    type Target = File;
+
+    fn deref(&self) -> &Self::Target {
+        &self.file
+    }
+}
+
+impl std::ops::DerefMut for StageFile {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.file
+    }
+}
+
+impl Drop for StageFile {
+    fn drop(&mut self) {
+        if !self.landed {
+            let _ = remove_stage_file(&self.path);
+        }
+    }
+}
+
+fn remove_stage_file(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            #[cfg(windows)]
+            if let Ok(metadata) = std::fs::metadata(path) {
+                let mut permissions = metadata.permissions();
+                if permissions.readonly() {
+                    permissions.set_readonly(false);
+                    if std::fs::set_permissions(path, permissions).is_ok() {
+                        return std::fs::remove_file(path);
+                    }
+                }
+            }
+            Err(error)
+        }
+    }
+}
+
 /// Stage `record` with `fill`, then `land` the stage under the record's name.
 ///
 /// `fill` writes the stage path it is given, flushes it to the disk and hands
@@ -172,25 +263,29 @@ fn record_lock(record: &Path) -> Arc<Mutex<()>> {
 /// either step removes the stage and leaves the record as it was.
 fn stage_and_land(
     record: &Path,
-    fill: impl FnOnce(&Path) -> io::Result<File>,
+    fill: impl FnOnce(&Path) -> io::Result<StageFile>,
+    land: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
+    let staged = stage_path(record, std::process::id());
+    stage_and_land_at(record, &staged, fill, land)
+}
+
+fn stage_and_land_at(
+    record: &Path,
+    staged: &Path,
+    fill: impl FnOnce(&Path) -> io::Result<StageFile>,
     land: impl FnOnce(&Path, &Path) -> io::Result<()>,
 ) -> io::Result<()> {
     let lock = record_lock(record);
     let _serialized = lock.lock().unwrap_or_else(|e| e.into_inner());
-    let own = std::process::id();
-    reclaim_record_stages(record, own, process_running);
-    let staged = stage_path(record, own);
-    // A stage of this process that an earlier failure could not remove.
-    let _ = std::fs::remove_file(&staged);
-    let landed = fill(&staged).and_then(|held| {
-        let landed = land(&staged, record);
-        drop(held);
-        landed
-    });
-    if landed.is_err() {
-        let _ = std::fs::remove_file(&staged);
+    reclaim_record_stages(record, std::process::id(), process_running);
+    let mut held = fill(staged)?;
+    let result = land(staged, record);
+    if result.is_ok() {
+        held.landed();
     }
-    landed
+    drop(held);
+    result
 }
 
 /// Replace `record` in one step: the stage takes the record's name by rename,
@@ -198,23 +293,25 @@ fn stage_and_land(
 /// writer killed at any point leaves the previous record intact.
 pub(crate) fn replace_record(
     record: &Path,
-    fill: impl FnOnce(&Path) -> io::Result<File>,
+    fill: impl FnOnce(&Path) -> io::Result<StageFile>,
 ) -> io::Result<()> {
-    stage_and_land(record, fill, |staged, record| std::fs::rename(staged, record))
+    stage_and_land(record, fill, |staged, record| {
+        std::fs::rename(staged, record)
+    })
 }
 
 /// Create `record` in one step. The stage lands only where nothing has the
 /// record's name; otherwise the call refuses with `AlreadyExists`.
 pub(crate) fn create_record(
     record: &Path,
-    fill: impl FnOnce(&Path) -> io::Result<File>,
+    fill: impl FnOnce(&Path) -> io::Result<StageFile>,
 ) -> io::Result<()> {
     stage_and_land(record, fill, rename_no_clobber)
 }
 
 /// Write `bytes` at the stage path `staged` and flush them to the disk.
-pub(crate) fn write_stage(staged: &Path, bytes: &[u8]) -> io::Result<File> {
-    let mut file = File::create(staged)?;
+pub(crate) fn write_stage(staged: &Path, bytes: &[u8]) -> io::Result<StageFile> {
+    let mut file = StageFile::create(staged)?;
     file.write_all(bytes)?;
     file.sync_all()?;
     Ok(file)
@@ -233,11 +330,8 @@ pub(crate) fn write_record(record: &Path, bytes: &[u8]) -> io::Result<()> {
 /// writes into the same file: the stage is held from its creation, and the
 /// handle keeps the write access the flush needs when the copy makes the
 /// stage read-only.
-pub(crate) fn copy_to_stage(source: &Path, staged: &Path) -> io::Result<(u64, File)> {
-    let held = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(staged)?;
+pub(crate) fn copy_to_stage(source: &Path, staged: &Path) -> io::Result<(u64, StageFile)> {
+    let held = StageFile::create(staged)?;
     let copied = std::fs::copy(source, staged)?;
     held.sync_all()?;
     Ok((copied, held))
@@ -345,7 +439,7 @@ pub(crate) fn export_record(record: &Path, bytes: &[u8]) -> io::Result<()> {
     }
     let mut create_refused = false;
     let staged = replace_record(record, |staged| {
-        let mut file = File::create(staged).inspect_err(|e| {
+        let mut file = StageFile::create(staged).inspect_err(|e| {
             create_refused = staged.parent().is_some_and(|dir| refused_for_create(e, dir));
         })?;
         file.write_all(bytes)?;
@@ -793,12 +887,11 @@ mod tests {
     fn a_stage_name_carries_exactly_its_record_and_its_process() {
         let record = Path::new("C:\\data").join("watched-folders.json");
         let staged = stage_path(&record, 4300);
-        assert_eq!(staged, Path::new("C:\\data").join("watched-folders.json.4300.tmp"));
         let name = staged.file_name().unwrap().to_str().unwrap();
         assert_eq!(split_stage(name), Some(("watched-folders.json", 4300)));
         assert_eq!(stage_owner("watched-folders.json", name), Some(4300));
-        // A name with no extension stages the same way.
-        assert_eq!(split_stage("record.7.tmp"), Some(("record", 7)));
+        assert_ne!(stage_path(&record, 4300), staged);
+        assert_eq!(split_stage("record.7.tmp"), None);
         for other in [
             "watched-folders.json",
             "watched-folders.json.tmp",
@@ -810,9 +903,44 @@ mod tests {
             "watched-folders.json.4300.TMP",
             ".4300.tmp",
             "other.json.4300.tmp",
+            "watched-folders.json.4300.short.tmp",
         ] {
             assert_eq!(stage_owner("watched-folders.json", other), None, "{other}");
         }
+        assert_eq!(
+            stage_owner(
+                "watched-folders.json",
+                "watched-folders.json.4300.00000000000000000000000000000000.tmp"
+            ),
+            Some(4300)
+        );
+        assert_eq!(
+            split_stage("record.7.00000000000000000000000000000000.tmp"),
+            Some(("record", 7))
+        );
+    }
+
+    #[test]
+    fn a_long_record_name_uses_a_bounded_stage_name_and_still_reclaims_by_owner() {
+        let record_name = "r".repeat(230);
+        let record = Path::new("C:\\data").join(&record_name);
+        let staged = stage_path(&record, 4300);
+        let name = staged.file_name().unwrap().to_str().unwrap();
+
+        assert!(name.encode_utf16().count() <= 255);
+        assert_eq!(stage_owner(&record_name, name), Some(4300));
+        assert_eq!(stage_owner(&format!("{record_name}x"), name), None);
+    }
+
+    #[test]
+    fn a_multibyte_record_name_uses_a_bounded_stage_name() {
+        let record_name = "é".repeat(120);
+        let record = Path::new("/data").join(&record_name);
+        let staged = stage_path(&record, 4300);
+        let name = staged.file_name().unwrap().to_str().unwrap();
+
+        assert!(name.len() <= 255);
+        assert_eq!(stage_owner(&record_name, name), Some(4300));
     }
 
     #[test]
@@ -837,9 +965,12 @@ mod tests {
         let record = dir.path().join("record.json");
         write_record(&record, b"previous record").unwrap();
         replace_record(&record, |staged| {
-            std::fs::write(staged, b"half a new rec")?;
+            let mut held = StageFile::create(staged)?;
+            held.write_all(b"a new ")?;
             assert_eq!(std::fs::read(&record).unwrap(), b"previous record");
-            write_stage(staged, b"a new record")
+            held.write_all(b"record")?;
+            held.sync_all()?;
+            Ok(held)
         })
         .unwrap();
         assert_eq!(std::fs::read(&record).unwrap(), b"a new record");
@@ -894,7 +1025,8 @@ mod tests {
         let record = dir.path().join("record.json");
         write_record(&record, b"previous record").unwrap();
         let failed = replace_record(&record, |staged| {
-            std::fs::write(staged, b"half a new rec")?;
+            let mut held = StageFile::create(staged)?;
+            held.write_all(b"half a new rec")?;
             Err(io::Error::other("the disk filled"))
         });
         assert!(failed.is_err());
@@ -903,18 +1035,34 @@ mod tests {
             names(dir.path()),
             BTreeSet::from(["record.json".to_string()])
         );
-
-        // A stage that cannot even be created fails the same way.
-        std::fs::create_dir(stage_path(&record, std::process::id())).unwrap();
-        assert!(write_record(&record, b"new record").is_err());
-        assert_eq!(std::fs::read(&record).unwrap(), b"previous record");
     }
 
     #[test]
-    fn a_stage_this_process_left_is_replaced_not_landed() {
+    fn a_stage_path_collision_does_not_delete_or_replace_the_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = dir.path().join("report.pdf");
+        write_record(&record, b"previous export").unwrap();
+        let user_file = stage_path(&record, std::process::id());
+        std::fs::write(&user_file, b"unrelated user data").unwrap();
+
+        let result = stage_and_land_at(
+            &record,
+            &user_file,
+            |staged| write_stage(staged, b"new export"),
+            |staged, record| std::fs::rename(staged, record),
+        );
+
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&record).unwrap(), b"previous export");
+        assert_eq!(std::fs::read(&user_file).unwrap(), b"unrelated user data");
+    }
+
+    #[test]
+    fn a_legacy_pid_only_stage_name_is_left_as_user_data() {
         let dir = tempfile::tempdir().unwrap();
         let record = dir.path().join("record.json");
-        let leftover = stage_path(&record, std::process::id());
+        let leftover =
+            record.with_file_name(format!("record.json.{}.tmp", std::process::id()));
         std::fs::write(&leftover, b"bytes from a failed write").unwrap();
         let mut permissions = std::fs::metadata(&leftover).unwrap().permissions();
         permissions.set_readonly(true);
@@ -922,7 +1070,10 @@ mod tests {
 
         write_record(&record, b"new record").unwrap();
         assert_eq!(std::fs::read(&record).unwrap(), b"new record");
-        assert!(!leftover.exists());
+        assert_eq!(
+            std::fs::read(&leftover).unwrap(),
+            b"bytes from a failed write"
+        );
     }
 
     #[cfg(windows)]
@@ -1174,20 +1325,23 @@ mod tests {
         );
     }
 
-    /// A folder under the stage's name refuses the stage for access too, in a
-    /// folder that accepts new files. Nothing is written in place.
+    /// An unrelated path matching the stage format does not block an export
+    /// or get removed when this process chooses a different random stage.
     #[test]
-    fn an_export_refused_for_another_reason_leaves_the_file_whole() {
+    fn an_unrelated_stage_path_does_not_block_or_get_removed_by_an_export() {
         let dir = tempfile::tempdir().unwrap();
         let record = dir.path().join("scan-test-report.json");
         std::fs::write(&record, b"the earlier report").unwrap();
         let source = dir.path().join("source.bin");
         std::fs::write(&source, b"the new bytes").unwrap();
-        std::fs::create_dir(stage_path(&record, std::process::id())).unwrap();
+        let unrelated = stage_path(&record, std::process::id());
+        std::fs::create_dir(&unrelated).unwrap();
 
-        assert!(export_record(&record, b"a new report").is_err());
-        assert!(export_copy(&source, &record).is_err());
-        assert_eq!(std::fs::read(&record).unwrap(), b"the earlier report");
+        export_record(&record, b"a new report").unwrap();
+        assert_eq!(std::fs::read(&record).unwrap(), b"a new report");
+        export_copy(&source, &record).unwrap();
+        assert_eq!(std::fs::read(&record).unwrap(), b"the new bytes");
+        assert!(unrelated.is_dir());
     }
 
     #[cfg(windows)]
