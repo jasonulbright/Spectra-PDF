@@ -359,7 +359,7 @@ describe('an edit made after a commit lands and before its reindex lands', () =>
     expect(s.pageEditRefusals).toBe(1);
   });
 
-  it('edits the stacks no longer record (another file closed) are refused with a notice, not kept dirty', () => {
+  it('preserves edits made after the plan across an unrelated clean close', () => {
     const a = file('a.pdf', [5], 1);
     const start = pendingTurn();
     const withA: AppState = {
@@ -369,12 +369,12 @@ describe('an edit made after a commit lands and before its reindex lands', () =>
     };
     const c = commit(withA);
     const edited = run(c.state, TURN, { type: 'CLOSE_FILE', path: 'a.pdf' });
-    expect(edited.pageUndoStack).toEqual([]);
+    expect(edited.pageUndoStack).toHaveLength(1);
     expect(edited.pageDirtyPaths).toEqual(['b.pdf']);
     const s = land(c, edited, 'b.pdf');
-    expect(pageById(s, 'b.pdf#p4').rotation).toBe(0);
-    expect(s.pageDirtyPaths).toEqual([]);
-    expect(s.pageEditRefusals).toBe(1);
+    expect(pageById(s, 'b.pdf#p4').rotation).toBe(90);
+    expect(s.pageDirtyPaths).toEqual(['b.pdf']);
+    expect(s.pageEditRefusals).toBe(0);
   });
 
   it('a selected page the read-back could not carry is pruned wherever it sat', () => {
@@ -699,7 +699,7 @@ describe('an edit made while the commit is built and published', () => {
     expect(pagesOf(clean, 'a.pdf')).toHaveLength(2);
   });
 
-  it('shows the committed bytes, re-derives every other dirty path, and says so when the stacks no longer show what the plan held', () => {
+  it('replays each edit made while the commit was built onto the committed documents', () => {
     const a = file('a.pdf', [5], 1);
     const start = pendingTurn();
     const withA: AppState = {
@@ -714,17 +714,15 @@ describe('an edit made while the commit is built and published', () => {
       { type: 'OPEN_FILE', path: 'z.pdf', workingPath: 'z.w', name: 'z.pdf', pageCount: 1, buffer: [3] },
     ]);
     expect([...c.plans.keys()]).toEqual(['b.pdf']);
-    // Which pending edit the plan held is unknown, so the ones made during the
-    // commit are dropped and said: b.pdf shows exactly its new bytes, and
-    // a.pdf, which could hold a page moved from b.pdf, waits for its own
-    // index.
-    expect(pageById(c.state, 'b.pdf#p4')).toMatchObject({ sourcePageIndex: 4, rotation: 0 });
-    expect(pagesOf(c.state, 'a.pdf')).toEqual([]);
-    expect(c.state.pageDirtyPaths).toEqual([]);
-    expect(c.state.pageEditRefusals).toBe(1);
+    // OPEN_FILE preserves the page-tier stacks, so the edits after the plan
+    // remain identifiable and can be replayed independently of its output.
+    expect(pageById(c.state, 'b.pdf#p4')).toMatchObject({ sourcePageIndex: 4, rotation: 90 });
+    expect(pageById(c.state, 'a.pdf#p0').rotation).toBe(180);
+    expect([...c.state.pageDirtyPaths].sort()).toEqual(['a.pdf', 'b.pdf']);
+    expect(c.state.pageEditRefusals).toBe(0);
   });
 
-  it('drops, when the stacks no longer show what the plan held, a page moved out of a committed file meanwhile', () => {
+  it('replays a cross-file move made while the source commit was being built', () => {
     const a = file('a.pdf', [5], 1);
     const start = pendingTurn();
     const withA: AppState = {
@@ -736,13 +734,14 @@ describe('an edit made while the commit is built and published', () => {
       { type: 'MOVE_PAGES', pageIds: ['b.pdf#p1'], toDocId: 'a#0', toIndex: 1 },
       { type: 'OPEN_FILE', path: 'z.pdf', workingPath: 'z.w', name: 'z.pdf', pageCount: 1, buffer: [3] },
     ]);
-    // The moved page indexes b.pdf's previous bytes; it is not left in a.pdf
-    // to name another page of the new ones. b.pdf keeps it where it was written.
+    // The authored identity carries the same physical page through the
+    // committed source bytes, so the concurrent move remains addressable.
     const holders = c.state.workspace.documents.filter((d) => d.pages.some((p) => p.id === 'b.pdf#p1'));
-    expect(holders.map((d) => d.path)).toEqual(['b.pdf']);
+    expect(holders.map((d) => d.path)).toEqual(['a.pdf']);
     expect(pageById(c.state, 'b.pdf#p1')).toMatchObject({ sourceDocId: 'b.pdf', sourcePageIndex: 1 });
-    expect(pagesOf(c.state, 'a.pdf')).toEqual([]);
-    expect(c.state.pageEditRefusals).toBe(1);
+    expect(pagesOf(c.state, 'a.pdf').map((p) => p.id)).toEqual(['a.pdf#p0', 'b.pdf#p1']);
+    expect([...c.state.pageDirtyPaths].sort()).toEqual(['a.pdf', 'b.pdf']);
+    expect(c.state.pageEditRefusals).toBe(0);
   });
 });
 
