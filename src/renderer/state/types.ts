@@ -12,6 +12,11 @@ export interface OpenFile {
   pageCount: number;
   buffer: PdfBuffer | null;
   dirty: boolean;
+  // Monotonic within an open path: advances for byte edits and page-tier
+  // edits, but not when the indexer replaces provisional documents with its
+  // read-back of those same bytes. Dirty-work prompts use it to distinguish a
+  // real edit during a save from that expected reindex.
+  editRevision?: number;
   undoStack: string[];    // snapshot paths (most recent last)
   redoStack: string[];    // snapshot paths for redo
   // Registered only so its bytes are available (for rendering imported pages

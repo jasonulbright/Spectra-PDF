@@ -247,6 +247,26 @@ function refuseEdit(state: AppState, reason: CapabilityBlock | null = null): App
   return { ...state, pageEditRefusals: state.pageEditRefusals + 1, pageEditRefusalReason: reason };
 }
 
+function bumpFileEditRevisions(files: Map<string, OpenFile>, paths: readonly string[]): Map<string, OpenFile> {
+  let next: Map<string, OpenFile> | null = null;
+  for (const path of new Set(paths)) {
+    const file = (next ?? files).get(path);
+    if (!file) continue;
+    next ??= new Map(files);
+    next.set(path, { ...file, editRevision: (file.editRevision ?? 0) + 1 });
+  }
+  return next ?? files;
+}
+
+function changedDocumentPaths(before: readonly OpenDocument[], after: readonly OpenDocument[]): string[] {
+  const paths = new Set([...before, ...after].map((document) => document.path));
+  return [...paths].filter((path) => {
+    const previous = before.filter((document) => document.path === path);
+    const next = after.filter((document) => document.path === path);
+    return previous.length !== next.length || previous.some((document, index) => document !== next[index]);
+  });
+}
+
 const ANNOTATION_EDITS: ReadonlySet<AppAction['type']> = new Set<AppAction['type']>([
   'ADD_ANNOTATION', 'REGROUP_COUNT_MARKS', 'UPDATE_ANNOTATION', 'RECOLOR_ANNOTATION', 'REMOVE_ANNOTATION',
   'REORDER_ANNOTATIONS', 'RESTYLE_ANNOTATIONS', 'RECALIBRATE_ANNOTATION', 'RECOLOR_ANNOTATIONS',
@@ -367,6 +387,7 @@ function applyPageEdit(
   ];
   return {
     ...state,
+    files: bumpFileEditRevisions(state.files, touchedPaths),
     workspace: { documents },
     pageUndoStack: [
       ...state.pageUndoStack,
@@ -647,6 +668,7 @@ function applyFileUpdate(
     pageCount: update.pageCount,
     buffer: update.buffer,
     dirty: true,
+    editRevision: (existing.editRevision ?? 0) + 1,
     undoStack: [...existing.undoStack, update.snapshotPath],
     redoStack: [], // new action clears redo
     // The identity channel: an authored update (page-tier commit)
@@ -1172,7 +1194,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const existing = state.files.get(action.path);
       if (!existing || !readFrom(action.documents, action.path, action.buffer)) return state;
       const files = new Map(state.files);
-      files.set(action.path, { ...existing, pageCount: action.pageCount, buffer: action.buffer });
+      files.set(action.path, {
+        ...existing,
+        pageCount: action.pageCount,
+        buffer: action.buffer,
+        editRevision: (existing.editRevision ?? 0) + 1,
+      });
       return withNewBytes(state, files, action.path, action.documents);
     }
     case 'MARK_SAVED': {
@@ -2018,11 +2045,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UNDO_PAGE_OP': {
       const last = state.pageUndoStack[state.pageUndoStack.length - 1];
       if (!last) return state;
+      const documents = keepPathsOpenedSinceSnapshot(last.documents, state.workspace.documents);
       return {
         ...state,
+        files: bumpFileEditRevisions(state.files, changedDocumentPaths(state.workspace.documents, documents)),
         // Files opened after this edit were not in its saved composition.
         // Keep their current documents when restoring the older workspace.
-        workspace: { documents: keepPathsOpenedSinceSnapshot(last.documents, state.workspace.documents) },
+        workspace: { documents },
         pageDirtyPaths: last.dirtyPaths,
         pageUndoStack: state.pageUndoStack.slice(0, -1),
         pageRedoStack: [
@@ -2034,9 +2063,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'REDO_PAGE_OP': {
       const next = state.pageRedoStack[state.pageRedoStack.length - 1];
       if (!next) return state;
+      const documents = keepPathsOpenedSinceSnapshot(next.documents, state.workspace.documents);
       return {
         ...state,
-        workspace: { documents: keepPathsOpenedSinceSnapshot(next.documents, state.workspace.documents) },
+        files: bumpFileEditRevisions(state.files, changedDocumentPaths(state.workspace.documents, documents)),
+        workspace: { documents },
         pageDirtyPaths: next.dirtyPaths,
         pageRedoStack: state.pageRedoStack.slice(0, -1),
         pageUndoStack: [

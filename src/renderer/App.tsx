@@ -190,7 +190,7 @@ import {
   sweepDeadRecents,
 } from './lib/recent-files';
 import { claimPaths, createClaimHolds, departedImportSources, downgradeImportSourceClaims, releasePaths, retainedImportSources, soleOwner, type ClaimRefusal } from './lib/window-claims';
-import { confirmDirtySnapshots, sameDirtyPromptSnapshot, type DirtyPromptSnapshot } from './lib/dirty-prompt';
+import { confirmDirtySnapshots, dirtyPromptSnapshots, sameDirtyPromptSnapshot } from './lib/dirty-prompt';
 import { createOpenFlights, createPathOperationLock, openPathOnce } from './lib/open-flights';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
@@ -2539,18 +2539,7 @@ function AppContent(): React.ReactElement {
     paths: () => readonly string[],
     message: (names: string) => string,
   ): Promise<boolean> => {
-    const snapshots = (): DirtyPromptSnapshot[] => {
-      const current = readState();
-      return paths().flatMap((path) => {
-        const file = current.files.get(path);
-        if (!file || !(file.dirty || current.pageDirtyPaths.includes(path))) return [];
-        return [{
-          path,
-          fileRevision: file,
-          pageRevisions: current.workspace.documents.filter((doc) => doc.path === path),
-        }];
-      });
-    };
+    const snapshots = () => dirtyPromptSnapshots(readState(), paths());
     return confirmDirtySnapshots(
       snapshots,
       (pending) => {
