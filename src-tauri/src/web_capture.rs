@@ -231,30 +231,29 @@ pub fn validate_url(raw: &str) -> Result<(String, String, String), String> {
     } else {
         format!("https://{trimmed}")
     };
-    let (scheme, rest) = candidate
-        .split_once(':')
-        .ok_or_else(|| format!("{trimmed} is not a web address"))?;
-    let scheme = scheme.to_ascii_lowercase();
+    let parsed = url::Url::parse(&candidate)
+        .map_err(|_| format!("{trimmed} is not a web address"))?;
+    let scheme = parsed.scheme().to_ascii_lowercase();
     if !matches!(scheme.as_str(), "http" | "https" | "file") {
         return Err(format!(
             "Only http, https and file addresses can be captured, not {scheme}"
         ));
     }
-    let after = rest.trim_start_matches('/');
-    if after.is_empty() {
-        return Err(format!("{trimmed} names no page to capture"));
-    }
-    // The host is what the dialog SHOWS before the capture runs, and what a
-    // crawl is confined to. A file: URL has no host and is its own origin.
+    // Store a URL-standard authority key, not the spelling the user typed.
+    // WebView2 reports canonical URLs: it removes default ports and converts
+    // internationalized names to ASCII. Using the same normalization keeps
+    // the initial navigation inside its own scope.
     let host = if scheme == "file" {
         String::new()
     } else {
-        let authority = after.split(['/', '?', '#']).next().unwrap_or("");
-        let authority = authority.rsplit('@').next().unwrap_or(authority);
-        if authority.is_empty() {
-            return Err(format!("{trimmed} names no host"));
-        }
-        authority.to_ascii_lowercase()
+        let host = parsed
+            .host_str()
+            .filter(|host| !host.is_empty())
+            .ok_or_else(|| format!("{trimmed} names no host"))?;
+        let port = parsed
+            .port_or_known_default()
+            .ok_or_else(|| format!("{trimmed} names no supported web port"))?;
+        format!("{}:{port}", host.to_ascii_lowercase())
     };
     Ok((candidate, scheme, host))
 }
@@ -1180,7 +1179,7 @@ mod tests {
         let (url, scheme, host) = validate_url("example.test/a").unwrap();
         assert_eq!(url, "https://example.test/a");
         assert_eq!(scheme, "https");
-        assert_eq!(host, "example.test");
+        assert_eq!(host, "example.test:443");
     }
 
     #[test]
@@ -1200,11 +1199,56 @@ mod tests {
     }
 
     #[test]
+    fn same_origin_uses_the_browser_canonical_authority() {
+        let (_, scheme, default_port) = validate_url("https://example.test:443/start").unwrap();
+        assert_eq!(default_port, "example.test:443");
+        assert!(same_origin("https://example.test/next", &scheme, &default_port));
+
+        let (_, scheme, idn) = validate_url("https://bücher.example/start").unwrap();
+        assert_eq!(idn, "xn--bcher-kva.example:443");
+        assert!(same_origin(
+            "https://xn--bcher-kva.example/next",
+            &scheme,
+            &idn
+        ));
+
+        assert!(!same_origin(
+            "https://example.test:444/next",
+            "https",
+            "example.test:443"
+        ));
+        // The scope remains the start's exact origin: apex-to-www and HTTP
+        // to HTTPS redirects are out of scope under the capture contract.
+        assert!(!same_origin(
+            "https://www.example.test/next",
+            "https",
+            "example.test:443"
+        ));
+        assert!(!same_origin(
+            "https://example.test/next",
+            "http",
+            "example.test:80"
+        ));
+    }
+
+    #[test]
     fn a_crawl_cannot_leave_its_origin() {
-        assert!(same_origin("https://example.test/b", "https", "example.test"));
-        assert!(!same_origin("https://other.test/b", "https", "example.test"));
+        assert!(same_origin(
+            "https://example.test/b",
+            "https",
+            "example.test:443"
+        ));
+        assert!(!same_origin(
+            "https://other.test/b",
+            "https",
+            "example.test:443"
+        ));
         // Scheme too: an https start must not follow http.
-        assert!(!same_origin("http://example.test/b", "https", "example.test"));
+        assert!(!same_origin(
+            "http://example.test/b",
+            "https",
+            "example.test:443"
+        ));
         assert!(!same_origin("javascript:void(0)", "https", "example.test"));
         // File URLs have no host, but they do not share one filesystem-wide origin.
         assert!(!same_origin("file:///C:/Users/Public/secret.pdf", "file", ""));
@@ -1215,19 +1259,19 @@ mod tests {
         assert!(link_in_scope(
             "https://example.test/final",
             "https",
-            "example.test",
+            "example.test:443",
             None
         ));
         assert!(!link_in_scope(
             "https://other.test/final",
             "https",
-            "example.test",
+            "example.test:443",
             None
         ));
         assert!(!link_in_scope(
             "http://example.test/final",
             "https",
-            "example.test",
+            "example.test:443",
             None
         ));
         assert!(!link_in_scope(
@@ -1280,7 +1324,7 @@ mod tests {
             .map(str::to_string)
             .collect(),
             "https",
-            "example.test",
+            "example.test:443",
             None,
             1,
             10,
@@ -1298,7 +1342,7 @@ mod tests {
         assert!(enqueue_links(
             vec!["https://example.test/overflow".to_string()],
             "https",
-            "example.test",
+            "example.test:443",
             None,
             1,
             10,
@@ -1328,7 +1372,7 @@ mod tests {
         assert!(enqueue_links(
             vec!["https://example.test/omitted".to_string()],
             "https",
-            "example.test",
+            "example.test:443",
             None,
             1,
             10,
@@ -1341,7 +1385,7 @@ mod tests {
         assert!(!enqueue_links(
             vec!["https://other.test/".to_string()],
             "https",
-            "example.test",
+            "example.test:443",
             None,
             1,
             10,
