@@ -1128,12 +1128,6 @@ function AppContent(): React.ReactElement {
       // OPEN_FILE below — so a failed IPC here can never keep a same-window
       // web-open from routing Save to Save As, nor abort the open itself.
       const canonicalSet = [...new Set(canonical)];
-      if (opts?.webOrigin) {
-        const origin = opts.webOrigin;
-        await Promise.all(
-          canonicalSet.map((p) => app.registerWebOrigin(p, origin).catch(() => {})),
-        );
-      }
       const recoveredOrigins = opts?.webOrigin
         ? null
         : await app.webOriginsFor(canonicalSet).catch(() => ({}) as Record<string, string>);
@@ -1156,6 +1150,12 @@ function AppContent(): React.ReactElement {
       const { granted, refused } = await claimPaths(canonicalSet, 'write');
       if (refused.length > 0) void reportClaimRefusal(refused, 'window');
       unopened = new Set(granted);
+      if (opts?.webOrigin) {
+        const origin = opts.webOrigin;
+        await Promise.all(
+          granted.map((p) => app.registerWebOrigin(p, origin).catch(() => {})),
+        );
+      }
       for (const filePath of granted) {
         const fileName = filePath.split(/[\\/]/).pop() || filePath;
         // An open of this path already in flight (another call of this funnel)

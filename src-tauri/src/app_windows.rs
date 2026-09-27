@@ -666,6 +666,44 @@ impl ClaimState {
         }
     }
 
+    /// Register a web origin only while this window owns the document path.
+    /// The claim lock remains held until the origin is stored, so a concurrent
+    /// close cannot leave behind an origin for a path no window owns.
+    fn set_web_origin(&self, origins: &WebOrigins, path: &str, label: &str, url: &str) {
+        let map = self
+            .by_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let held = map.get(path).is_some_and(|holders| {
+            holders
+                .iter()
+                .any(|claim| claim.label == label && claim.mode == ClaimMode::Write)
+        });
+        if held {
+            origins.set(path, url);
+        }
+    }
+
+    /// Forget a downloaded origin when its final read or write claim leaves.
+    fn forget_web_origin_if_unclaimed(&self, origins: &WebOrigins, path: &str) {
+        let map = self
+            .by_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !map.contains_key(path) {
+            origins.forget(path);
+        }
+    }
+
+    /// Remove any origins whose document claims ended with this window.
+    fn prune_web_origins(&self, origins: &WebOrigins) {
+        let map = self
+            .by_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        origins.retain_paths(map.keys());
+    }
+
     /// Which window a path belongs to. A write holder answers first — it is
     /// the window an inbound open must be routed to.
     pub fn owner(&self, path: &str) -> Option<String> {
@@ -1128,9 +1166,22 @@ impl WebOrigins {
     }
 
     /// Record where the downloaded copy at `path` came from.
-    pub fn set(&self, path: &str, url: &str) {
+    fn set(&self, path: &str, url: &str) {
         if let Ok(mut map) = self.0.lock() {
             map.insert(path.to_string(), url.to_string());
+        }
+    }
+
+    fn forget(&self, path: &str) {
+        if let Ok(mut map) = self.0.lock() {
+            map.remove(path);
+        }
+    }
+
+    fn retain_paths<'a>(&self, paths: impl Iterator<Item = &'a String>) {
+        let held: std::collections::HashSet<&str> = paths.map(String::as_str).collect();
+        if let Ok(mut map) = self.0.lock() {
+            map.retain(|path, _| held.contains(path.as_str()));
         }
     }
 
@@ -1533,7 +1584,9 @@ pub fn on_window_destroyed(app: &AppHandle, label: &str) {
     if !is_app_window(label) {
         return;
     }
-    app.state::<ClaimState>().release_label(label);
+    let claims = app.state::<ClaimState>();
+    claims.release_label(label);
+    claims.prune_web_origins(&app.state::<WebOrigins>());
     app.state::<BackdropState>().forget(label);
     app.state::<ShowGate>().forget(label);
     app.state::<ComposeGate>().forget(label);
@@ -1652,7 +1705,9 @@ pub async fn release_document(
     path: String,
 ) -> Result<(), String> {
     let path = crate::commands::canonical_path(&path);
-    app.state::<ClaimState>().release(&path, window.label());
+    let claims = app.state::<ClaimState>();
+    claims.release(&path, window.label());
+    claims.forget_web_origin_if_unclaimed(&app.state::<WebOrigins>(), &path);
     Ok(())
 }
 
@@ -1698,9 +1753,15 @@ pub async fn focus_app_window(app: AppHandle, label: String) -> Result<(), Strin
 /// that later opens that temp path — including one it was handed to across a
 /// window boundary — routes File ▸ Save to Save As.
 #[tauri::command]
-pub async fn register_web_origin(app: AppHandle, path: String, url: String) -> Result<(), String> {
+pub async fn register_web_origin(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    path: String,
+    url: String,
+) -> Result<(), String> {
     let path = crate::commands::canonical_path(&path);
-    app.state::<WebOrigins>().set(&path, &url);
+    app.state::<ClaimState>()
+        .set_web_origin(&app.state::<WebOrigins>(), &path, window.label(), &url);
     Ok(())
 }
 
@@ -1833,8 +1894,11 @@ mod tests {
     fn a_web_origin_round_trips_by_path_and_is_absent_otherwise() {
         // The provenance a cross-window hand-off recovers: registered against
         // the temp path on the download, read back by the window it moves to.
+        let claims = ClaimState::new();
         let origins = WebOrigins::new();
-        origins.set("C:\\Temp\\net\\a.pdf", "https://example.com/a.pdf");
+        let path = "C:\\Temp\\net\\a.pdf";
+        assert!(claims.claim_document(path, "main", ClaimMode::Write).granted);
+        claims.set_web_origin(&origins, path, "main", "https://example.com/a.pdf");
         let found = origins.lookup(&[
             "C:\\Temp\\net\\a.pdf".to_string(),
             "C:\\Temp\\net\\b.pdf".to_string(),
@@ -1846,6 +1910,50 @@ mod tests {
         // A path with no recorded origin is simply absent — never a temp path
         // masquerading as web-origined.
         assert!(!found.contains_key("C:\\Temp\\net\\b.pdf"));
+    }
+
+    #[test]
+    fn web_origin_registration_requires_a_live_write_claim() {
+        let claims = ClaimState::new();
+        let origins = WebOrigins::new();
+        let path = "C:\\Temp\\net\\a.pdf";
+
+        claims.set_web_origin(&origins, path, "main", "https://example.com/a.pdf");
+        assert!(origins.lookup(&[path.to_string()]).is_empty());
+
+        assert!(claims.claim_document(path, "main", ClaimMode::Write).granted);
+        claims.set_web_origin(&origins, path, "main", "https://example.com/a.pdf");
+        assert_eq!(
+            origins.lookup(&[path.to_string()]).get(path).map(String::as_str),
+            Some("https://example.com/a.pdf")
+        );
+    }
+
+    #[test]
+    fn web_origin_survives_handover_and_is_removed_after_the_last_claim() {
+        let claims = ClaimState::new();
+        let origins = WebOrigins::new();
+        let path = "C:\\Temp\\net\\a.pdf";
+        assert!(claims.claim_document(path, "main", ClaimMode::Write).granted);
+        claims.set_web_origin(&origins, path, "main", "https://example.com/a.pdf");
+
+        assert!(claims.transfer(path, "main", "doc-1").granted);
+        claims.forget_web_origin_if_unclaimed(&origins, path);
+        assert_eq!(
+            origins.lookup(&[path.to_string()]).get(path).map(String::as_str),
+            Some("https://example.com/a.pdf")
+        );
+
+        claims.release(path, "doc-1");
+        claims.forget_web_origin_if_unclaimed(&origins, path);
+        assert!(origins.lookup(&[path.to_string()]).is_empty());
+
+        let second = "C:\\Temp\\net\\b.pdf";
+        assert!(claims.claim_document(second, "main", ClaimMode::Write).granted);
+        claims.set_web_origin(&origins, second, "main", "https://example.com/b.pdf");
+        claims.release_label("main");
+        claims.prune_web_origins(&origins);
+        assert!(origins.lookup(&[second.to_string()]).is_empty());
     }
 
     #[test]
