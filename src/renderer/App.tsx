@@ -3177,14 +3177,15 @@ function AppContent(): React.ReactElement {
     dispatch({ type: 'UI_FOCUS_TAB', tab: firstDoc ? { doc: firstDoc.path } : 'home' });
   }, [dispatch]);
 
-  // Handle tray actions (Quick Merge) — land on the document board, or
-  // Home (its Open button) when nothing is open yet.
+  // Handle tray actions — land on the document board for Quick Merge, or use
+  // the shared dirty-document and peer-acknowledged close flow for Quit.
   useEffect(() => {
     const unlisten = app.onTrayAction((action: string) => {
       if (action === 'merge') focusBoardOrHome();
+      if (action === 'quit') void handleExit();
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, [focusBoardOrHome]);
+  }, [focusBoardOrHome, handleExit]);
 
   // Handle files opened via file association, context menu, or second instance.
   // openByPaths focuses the opened doc's tab (strips + merge-up ARE the merge
