@@ -1272,8 +1272,10 @@ function AppContent(): React.ReactElement {
       // `page-structure`: the append tier carries it on an approval-signed
       // document and no certification permits it. Asked first, before a claim
       // is taken or a byte is read, so a refusal costs nothing.
-      const dest = state.workspace.documents.find((d) => d.id === toDocId);
-      if (dest && !(await confirmPageEdit([dest.path], 'page-structure'))) return;
+      const dest = stateRef.current.workspace.documents.find((d) => d.id === toDocId);
+      if (!dest) return;
+      const destinationPath = dest.path;
+      if (!(await confirmPageEdit([destinationPath], 'page-structure'))) return;
       // Import sources are `files` entries keyed by path too — the same
       // identity gate as openByPaths (a case-variant drop must reuse the
       // already-registered source, not mint a second ghost) INCLUDING its
@@ -1294,10 +1296,23 @@ function AppContent(): React.ReactElement {
       claimHolds.current.hold(canonicalImports);
       let filePaths: string[] = [];
       try {
-        const claimed = await claimPaths(canonicalImports, 'read');
-        if (claimed.refused.length > 0) void reportClaimRefusal(claimed.refused, 'import');
-        filePaths = claimed.granted;
-        await sourcePathOperations.current.run(filePaths, async () => {
+        await sourcePathOperations.current.run([...canonicalImports, destinationPath], async () => {
+          // The target can close while the signed-edit confirmation or source
+          // claims are pending. Re-prove the same document still owns these
+          // bytes after acquiring both endpoint locks; a reopened tab at the
+          // same path is not the stale document the drop targeted.
+          const currentDestination = readState().workspace.documents.find((d) => d.id === toDocId);
+          if (
+            !currentDestination ||
+            currentDestination.path !== destinationPath ||
+            !readState().files.has(destinationPath)
+          ) return;
+          // Take the shared cross-window claim only after the local path locks:
+          // otherwise a hand-off could transfer an existing write claim while
+          // this import waits locally to start reading the same source.
+          const claimed = await claimPaths(canonicalImports, 'read');
+          if (claimed.refused.length > 0) void reportClaimRefusal(claimed.refused, 'import');
+          filePaths = claimed.granted;
           const toRegister: {
             path: string;
             workingPath: string;
@@ -1368,7 +1383,6 @@ function AppContent(): React.ReactElement {
       }
     },
     [
-      state.workspace.documents,
       readState,
       dispatch,
       pathInUse,
@@ -2601,40 +2615,53 @@ function AppContent(): React.ReactElement {
 
   // Close file with unsaved changes prompt
   const handleCloseFile = useCallback(async (filePath: string) => {
-    const f = state.files.get(filePath);
-    if (f && isFileDirty(f)) {
-      const result = await showConfirm(tChrome('app.close.unsaved', { name: f.name }));
-      if (result === 'cancel') return;
-      if (result === 'save') {
-        if (!(await commitOrAbort())) return;
-        if (!(await saveOrReport(f.workingPath, f.path))) return;
+    await sourcePathOperations.current.run([filePath], async () => {
+      const f = readState().files.get(filePath);
+      if (!f) return;
+      if (isFileDirty(f)) {
+        const result = await showConfirm(tChrome('app.close.unsaved', { name: f.name }));
+        if (result === 'cancel') return;
+        if (result === 'save') {
+          if (!(await commitOrAbort())) return;
+          if (!(await saveOrReport(f.workingPath, f.path))) return;
+        }
       }
-    }
-    dispatch({ type: 'CLOSE_FILE', path: filePath });
-    void releasePaths([filePath], pathInUse);
-  }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort, pathInUse, saveOrReport]);
+      dispatch({ type: 'CLOSE_FILE', path: filePath });
+      void releasePaths([filePath], pathInUse);
+    });
+  }, [readState, dispatch, showConfirm, isFileDirty, commitOrAbort, pathInUse, saveOrReport]);
 
   // Close all open files with unsaved changes prompt
   const handleCloseAll = useCallback(async () => {
-    const allOpen = Array.from(state.files.values());
-    const dirtyFiles = allOpen.filter(isFileDirty);
-    if (dirtyFiles.length > 0) {
-      const names = dirtyFiles.map((f) => f.name).join(', ');
-      const result = await showConfirm(tChrome('app.closeAll.unsaved', { names }));
-      if (result === 'cancel') return;
-      if (result === 'save') {
-        if (!(await commitOrAbort())) return;
-        for (const f of dirtyFiles) {
-          if (!(await saveOrReport(f.workingPath, f.path))) return;
-          dispatch({ type: 'MARK_SAVED', path: f.path });
+    // Keep the invocation's path set: an import already in flight may register
+    // a new hidden source while we wait, and that source is retired when its
+    // destination closes. Re-reading it as another close target would operate
+    // on a path this close-all never locked.
+    const paths = Array.from(readState().files.keys());
+    await sourcePathOperations.current.run(paths, async () => {
+      const allOpen = paths.flatMap((path) => {
+        const f = readState().files.get(path);
+        return f ? [f] : [];
+      });
+      const dirtyFiles = allOpen.filter(isFileDirty);
+      if (dirtyFiles.length > 0) {
+        const names = dirtyFiles.map((f) => f.name).join(', ');
+        const result = await showConfirm(tChrome('app.closeAll.unsaved', { names }));
+        if (result === 'cancel') return;
+        if (result === 'save') {
+          if (!(await commitOrAbort())) return;
+          for (const f of dirtyFiles) {
+            if (!(await saveOrReport(f.workingPath, f.path))) return;
+            dispatch({ type: 'MARK_SAVED', path: f.path });
+          }
         }
       }
-    }
-    for (const f of allOpen) {
-      dispatch({ type: 'CLOSE_FILE', path: f.path });
-    }
-    void releasePaths(allOpen.map((f) => f.path), pathInUse);
-  }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort, pathInUse, saveOrReport]);
+      for (const f of allOpen) {
+        if (readState().files.has(f.path)) dispatch({ type: 'CLOSE_FILE', path: f.path });
+      }
+      void releasePaths(paths, pathInUse);
+    });
+  }, [readState, dispatch, showConfirm, isFileDirty, commitOrAbort, pathInUse, saveOrReport]);
 
   // Exit the app (File ▸ Exit / Ctrl+Q) — always quits when clean; the
   // tray-minimize setting governs the window × (below), not an explicit Exit.
@@ -2736,47 +2763,55 @@ function AppContent(): React.ReactElement {
   // has no destination to resolve.
   const handOffDocument = useCallback(
     (path: string, reserve: () => Promise<TabDragReservation>): Promise<boolean> =>
-      handOffGate.current.run(async () => {
-      if (!(await commitOrAbort())) return false;
-      const held = await reserve();
-      const handed = stateRef.current.files.get(path);
-      const plan = planHandOff(reservationHolds(held), !!handed && isFileDirty(handed));
-      if (!plan.hand) return false;
-      // A destination that dies before it opens the document gives it back, and
-      // the window it goes back to is this one. Recorded per path so the return
-      // can be told apart from a document arriving from anywhere else: the tab
-      // is still open here, and re-opening it would be a second copy.
-      const flight = { returned: false };
-      handOffsInFlight.current.set(path, flight);
-      let moved: TabDragResult;
-      try {
-        if (plan.saveFirst && handed) {
-          if (!(await saveOrReportRef.current(handed.workingPath, handed.path))) {
-            handOffsInFlight.current.delete(path);
+      handOffGate.current.run(() =>
+        sourcePathOperations.current.run([path], async () => {
+          const beforeCommit = readState().files.get(path);
+          if (!beforeCommit || beforeCommit.importOnly) return false;
+          if (!(await commitOrAbort())) return false;
+          const held = await reserve();
+          const handed = readState().files.get(path);
+          if (!handed || handed.importOnly) {
             await tabDrag.release(held.token).catch(() => {});
             return false;
           }
-          dispatch({ type: 'MARK_SAVED', path });
-        }
-        moved = await tabDrag.commit(held.token);
-      } catch (e) {
-        // The write a move costs failed. The document is still held somewhere
-        // else, and nothing will ever come for it.
-        handOffsInFlight.current.delete(path);
-        await tabDrag.release(held.token).catch(() => {});
-        throw e;
-      }
-      handOffsInFlight.current.delete(path);
-      // Nothing below this line awaits, so a return that arrives after the
-      // check finds no flight and re-opens the document instead.
-      if (!tabMoved(moved) || flight.returned) return false;
-      // Closed WITHOUT a release — the path already belongs to the receiving
-      // window, and releasing here would strip the claim off the window that
-      // now holds it.
-      dispatch({ type: 'CLOSE_FILE', path });
-      return true;
-      }),
-    [dispatch, commitOrAbort, isFileDirty],
+          const plan = planHandOff(reservationHolds(held), isFileDirty(handed));
+          if (!plan.hand) return false;
+          // A destination that dies before it opens the document gives it back, and
+          // the window it goes back to is this one. Recorded per path so the return
+          // can be told apart from a document arriving from anywhere else: the tab
+          // is still open here, and re-opening it would be a second copy.
+          const flight = { returned: false };
+          handOffsInFlight.current.set(path, flight);
+          let moved: TabDragResult;
+          try {
+            if (plan.saveFirst) {
+              if (!(await saveOrReportRef.current(handed.workingPath, handed.path))) {
+                handOffsInFlight.current.delete(path);
+                await tabDrag.release(held.token).catch(() => {});
+                return false;
+              }
+              dispatch({ type: 'MARK_SAVED', path });
+            }
+            moved = await tabDrag.commit(held.token);
+          } catch (e) {
+            // The write a move costs failed. The document is still held somewhere
+            // else, and nothing will ever come for it.
+            handOffsInFlight.current.delete(path);
+            await tabDrag.release(held.token).catch(() => {});
+            throw e;
+          }
+          handOffsInFlight.current.delete(path);
+          // Nothing below this line awaits, so a return that arrives after the
+          // check finds no flight and re-opens the document instead.
+          if (!tabMoved(moved) || flight.returned) return false;
+          // Closed WITHOUT a release — the path already belongs to the receiving
+          // window, and releasing here would strip the claim off the window that
+          // now holds it.
+          dispatch({ type: 'CLOSE_FILE', path });
+          return true;
+        }),
+      ),
+    [dispatch, commitOrAbort, isFileDirty, readState],
   );
 
   const handleMoveToNewWindow = useCallback(async () => {
@@ -3416,10 +3451,14 @@ function AppContent(): React.ReactElement {
           throw new Error(`commitPendingEdits: the read-back of the committed bytes failed: ${cause.message}`, { cause });
         });
       },
-      closeAllFiles: () => {
+      closeAllFiles: async () => {
         const paths = [...filesRef.current.values()].map((f) => f.path);
-        for (const path of paths) dispatch({ type: 'CLOSE_FILE', path });
-        void releasePaths(paths, pathInUse);
+        await sourcePathOperations.current.run(paths, async () => {
+          for (const path of paths) {
+            if (readState().files.has(path)) dispatch({ type: 'CLOSE_FILE', path });
+          }
+          await releasePaths(paths, pathInUse);
+        });
       },
       importPagesIntoDoc: (filePath, toDocId, toIndex) =>
         importFilesIntoDoc([filePath], toDocId, toIndex),
