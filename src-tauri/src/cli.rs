@@ -3273,7 +3273,8 @@ const ENGINE_SURFACE: (&str, &str) = ("SPECTRAPDF_ENGINE_SURFACE", "cli");
 struct CliEngine {
     child: std::process::Child,
     reader: BufReader<std::process::ChildStdout>,
-    _job: crate::process_job::ProcessJob,
+    _job: Option<crate::process_job::ProcessJob>,
+    failed: bool,
 }
 
 impl CliEngine {
@@ -3327,10 +3328,18 @@ impl CliEngine {
             }
         });
 
-        Ok(Self { child, reader, _job: job })
+        Ok(Self {
+            child,
+            reader,
+            _job: Some(job),
+            failed: false,
+        })
     }
 
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        if self.failed {
+            return Err("The engine stopped after an oversized response.".to_string());
+        }
         let request = json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -3340,6 +3349,12 @@ impl CliEngine {
 
         let stdin = self.child.stdin.as_mut().expect("stdin not captured");
         let msg = serde_json::to_string(&request).unwrap();
+        if msg.len() > crate::engine::MAX_ENGINE_RPC_LINE_BYTES {
+            return Err(format!(
+                "Engine request exceeds the {} MiB limit.",
+                crate::engine::MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
+            ));
+        }
         stdin
             .write_all(msg.as_bytes())
             .map_err(|e| format!("Write error: {}", e))?;
@@ -3349,21 +3364,32 @@ impl CliEngine {
         stdin.flush().map_err(|e| format!("Flush error: {}", e))?;
 
         // Read response lines until we get valid JSON
-        let mut line = String::new();
         loop {
-            line.clear();
-            let bytes = self
-                .reader
-                .read_line(&mut line)
-                .map_err(|e| format!("Read error: {}", e))?;
-            if bytes == 0 {
-                return Err("Engine exited unexpectedly".to_string());
-            }
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
+            let line = match crate::engine::read_bounded_line(
+                &mut self.reader,
+                crate::engine::MAX_ENGINE_RPC_LINE_BYTES,
+            ) {
+                Ok(Some(line)) => line,
+                Ok(None) => {
+                    return Err("Engine exited unexpectedly".to_string());
+                }
+                Err(crate::engine::BoundedLineError::TooLong) => {
+                    self.failed = true;
+                    let _ = self.child.kill();
+                    self._job.take();
+                    return Err(format!(
+                        "Engine response exceeds the {} MiB limit; the worker was stopped.",
+                        crate::engine::MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
+                    ));
+                }
+                Err(crate::engine::BoundedLineError::Io(error)) => {
+                    return Err(format!("Read error: {}", error));
+                }
+            };
+            if line.is_empty() {
                 continue;
             }
-            if let Ok(response) = serde_json::from_str::<Value>(trimmed) {
+            if let Ok(response) = serde_json::from_slice::<Value>(&line) {
                 if let Some(err) = response.get("error") {
                     let msg = err
                         .get("message")
