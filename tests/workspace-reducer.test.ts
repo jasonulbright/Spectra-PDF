@@ -613,7 +613,7 @@ describe('COMMIT_PAGE_EDITS', () => {
 });
 
 describe('OPEN_FILE with a non-empty page tier', () => {
-  it('clears undo history (unreplayable) but keeps pending dirt', () => {
+  it('preserves undo/redo and newly opened documents without committing pending dirt', () => {
     const a = makeFile('a.pdf', 3);
     const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))]);
     const edited = appReducer(state, {
@@ -621,18 +621,45 @@ describe('OPEN_FILE with a non-empty page tier', () => {
       docId: 'a.pdf#0',
       order: ['a.pdf#p2', 'a.pdf#p0', 'a.pdf#p1'],
     });
+    const bBuffer = [5];
     const next = appReducer(edited, {
       type: 'OPEN_FILE',
       path: 'b.pdf',
       workingPath: 'b.pdf.working',
       name: 'b.pdf',
       pageCount: 2,
-      buffer: [5],
+      buffer: bBuffer,
     });
-    expect(next.pageUndoStack).toEqual([]);
+    expect(next.pageUndoStack).toHaveLength(1);
     expect(next.pageRedoStack).toEqual([]);
-    expect(next.pageDirtyPaths).toEqual(['a.pdf']); // composition still committable
+    expect(next.pageDirtyPaths).toEqual(['a.pdf']); // opening another file does not commit it
     expect(next.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0']);
+
+    const b = { ...makeFile('b.pdf', 2), buffer: bBuffer };
+    const bDocuments = [makeDoc(b, 'b.pdf#0', makePages('b.pdf', 2))];
+    const indexed = appReducer(next, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'b.pdf',
+      documents: bDocuments,
+    });
+    expect(indexed.workspace.documents.map((d) => d.path)).toEqual(['a.pdf', 'b.pdf']);
+
+    const undone = appReducer(indexed, { type: 'UNDO_PAGE_OP' });
+    expect(undone.workspace.documents.map((d) => d.path)).toEqual(['a.pdf', 'b.pdf']);
+    expect(pageIds(undone.workspace.documents[0])).toEqual(['a.pdf#p0', 'a.pdf#p1', 'a.pdf#p2']);
+    expect(undone.pageDirtyPaths).toEqual([]);
+
+    const redone = appReducer(undone, { type: 'REDO_PAGE_OP' });
+    expect(redone.workspace.documents.map((d) => d.path)).toEqual(['a.pdf', 'b.pdf']);
+    expect(pageIds(redone.workspace.documents[0])).toEqual(['a.pdf#p2', 'a.pdf#p0', 'a.pdf#p1']);
+
+    const undoneBeforeIndex = appReducer(next, { type: 'UNDO_PAGE_OP' });
+    const indexedAfterUndo = appReducer(undoneBeforeIndex, {
+      type: 'SET_WORKSPACE_DOCUMENTS', path: 'b.pdf', documents: bDocuments,
+    });
+    const redoneAfterIndex = appReducer(indexedAfterUndo, { type: 'REDO_PAGE_OP' });
+    expect(redoneAfterIndex.workspace.documents.map((d) => d.path)).toEqual(['a.pdf', 'b.pdf']);
+    expect(pageIds(redoneAfterIndex.workspace.documents[0])).toEqual(['a.pdf#p2', 'a.pdf#p0', 'a.pdf#p1']);
   });
 });
 
