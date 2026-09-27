@@ -716,3 +716,37 @@ describe('sweepDeadRecents', () => {
     expect(B.persistRecent(bList).map((e) => e.path)).toEqual(['here.pdf']);
   });
 });
+
+describe('completed opens after storage failure', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', fakeStorage());
+  });
+
+  it('keeps a successful open visible in this window when localStorage rejects the write', async () => {
+    const recents = await newWindow();
+    const storage = localStorage;
+    const originalSetItem = storage.setItem.bind(storage);
+    const setItem = vi.spyOn(storage, 'setItem').mockImplementation((key, value) => {
+      if (key === 'spectra-recent') throw new Error('quota exceeded');
+      return originalSetItem(key, value);
+    });
+
+    const opened = await recents.recordRecentOpen([], 'opened.pdf', 1234);
+    expect(opened.map((entry) => entry.path)).toEqual(['opened.pdf']);
+    const visible = await recents.persistSuccessfulRecentOpensSafely([opened[0]]);
+
+    expect(visible.map((entry) => entry.path)).toEqual(['opened.pdf']);
+    expect(recents.readRecent()).toEqual([]);
+    expect(setItem).toHaveBeenCalled();
+  });
+
+  it('does not resurrect an open removed while the final session merge waited', async () => {
+    const recents = await newWindow();
+    const opened = await recents.recordRecentOpen([], 'opened.pdf', 1234);
+    await recents.removeRecentEntriesSafely(opened, ['opened.pdf']);
+
+    const visible = await recents.persistSuccessfulRecentOpensSafely([opened[0]]);
+
+    expect(visible).toEqual([]);
+  });
+});

@@ -14,10 +14,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const claim = vi.fn();
 const release = vi.fn();
+const downgrade = vi.fn();
 vi.mock('../src/renderer/lib/tauri-bridge', () => ({
   claims: {
     claim: (path: string, mode: string) => claim(path, mode),
     release: (path: string) => release(path),
+    downgradeToRead: (path: string) => downgrade(path),
     claimOutputRoots: vi.fn(),
     releaseOutputRoots: vi.fn(),
   },
@@ -25,7 +27,7 @@ vi.mock('../src/renderer/lib/tauri-bridge', () => ({
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { claimPaths, createClaimHolds, departedImportSources, releasePaths, soleOwner } from '../src/renderer/lib/window-claims';
+import { claimPaths, createClaimHolds, departedImportSources, downgradeImportSourceClaims, releasePaths, retainedImportSources, soleOwner } from '../src/renderer/lib/window-claims';
 import type { OpenFile } from '../src/renderer/state/types';
 import { mergeRecent, sameRecent, type RecentEntry } from '../src/renderer/lib/recent-files';
 import { scopedKeyFor, PRIMARY_WINDOW_LABEL } from '../src/renderer/lib/window-label';
@@ -33,6 +35,7 @@ import { scopedKeyFor, PRIMARY_WINDOW_LABEL } from '../src/renderer/lib/window-l
 beforeEach(() => {
   claim.mockReset();
   release.mockReset();
+  downgrade.mockReset();
 });
 
 describe('claimPaths', () => {
@@ -288,6 +291,39 @@ describe('departedImportSources', () => {
   });
 });
 
+describe('retainedImportSources', () => {
+  const entry = (path: string, importOnly?: true): [string, OpenFile] => [path, {
+    path, workingPath: `${path}.w`, name: path, pageCount: 1, buffer: [1],
+    dirty: false, undoStack: [], redoStack: [], ...(importOnly ? { importOnly } : {}),
+  }];
+
+  it('downgrades only a real document retained as an import source', () => {
+    const previous = new Map([entry('closed.pdf'), entry('still-open.pdf'), entry('source.pdf', true)]);
+    const next = new Map([entry('closed.pdf', true), entry('still-open.pdf'), entry('source.pdf', true)]);
+
+    expect(retainedImportSources(previous, next)).toEqual(['closed.pdf']);
+  });
+
+  it('checks current state at its ordered turn so a reopen keeps its write claim', async () => {
+    let finishClaim!: () => void;
+    const gate = new Promise<void>((resolve) => { finishClaim = resolve; });
+    claim.mockImplementationOnce(async () => {
+      await gate;
+      return { granted: true, owner: '' };
+    });
+    downgrade.mockResolvedValue({ granted: true, owner: '' });
+    let importOnly = true;
+
+    const opening = claimPaths(['same.pdf'], 'write');
+    const downgrading = downgradeImportSourceClaims(['same.pdf'], () => importOnly);
+    importOnly = false;
+    finishClaim();
+    await Promise.all([opening, downgrading]);
+
+    expect(downgrade).not.toHaveBeenCalled();
+  });
+});
+
 // App has no DOM test environment: its claim flows are pinned to the rules
 // above as source text.
 describe('the window’s claim flows', () => {
@@ -305,6 +341,22 @@ describe('the window’s claim flows', () => {
   it('release the read claim of an import source that left the files', () => {
     expect(app).toContain('const departed = departedImportSources(filesSeen.current, state.files);');
     expect(app).toContain('if (departed.length > 0) void releasePaths(departed, pathInUse);');
+    expect(app).toContain('const retained = retainedImportSources(filesSeen.current, state.files);');
+    expect(app).toContain('downgradeImportSourceClaims(');
+  });
+
+  it('releases import claims after every early return once the import hold drops', () => {
+    const start = app.indexOf('const importFilesIntoDoc = useCallback');
+    const end = app.indexOf('// Handle the native file drop', start);
+    const flow = app.slice(start, end > start ? end : undefined);
+    expect(flow).toContain('claimHolds.current.drop(canonicalImports);');
+    expect(flow).toContain('void releasePaths(canonicalImports, pathInUse);');
+  });
+
+  it('checks unsaved state again after each close prompt resolves', () => {
+    expect(app).toContain('const confirmCurrentDirtyFiles = useCallback(async (');
+    expect(app).toContain('return confirmDirtySnapshots(');
+    expect(app.match(/confirmCurrentDirtyFiles\(/g)?.length).toBeGreaterThanOrEqual(4);
   });
 
   it('release only through the in-use check', () => {

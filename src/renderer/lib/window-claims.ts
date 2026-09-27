@@ -131,6 +131,17 @@ export function departedImportSources(
   return [...previous.values()].filter((f) => f.importOnly && !next.has(f.path)).map((f) => f.path);
 }
 
+/** Real documents retained as byte-only sources after close now need a READ
+ * claim. They still back imported pages, but no longer own an editable tab. */
+export function retainedImportSources(
+  previous: ReadonlyMap<string, OpenFile>,
+  next: ReadonlyMap<string, OpenFile>,
+): string[] {
+  return [...previous.values()]
+    .filter((file) => !file.importOnly && next.get(file.path)?.importOnly)
+    .map((file) => file.path);
+}
+
 /**
  * The single window a refusal set points at, or null when it points at more
  * than one. Only a single owner can be offered as somewhere to go.
@@ -161,6 +172,25 @@ export async function releasePaths(
       }).catch(() => {
         // The claim outlives only this window; a failed release is not a
         // state the user can be asked to do anything about.
+      }),
+    ),
+  );
+}
+
+/** Downgrade a document claim only if the path is still an import source when
+ * its ordered arbiter call runs. A reopen queued ahead of this call therefore
+ * keeps its WRITE claim. */
+export async function downgradeImportSourceClaims(
+  paths: readonly string[],
+  isImportOnly: (path: string) => boolean,
+): Promise<void> {
+  await Promise.all(
+    paths.map((path) =>
+      inPathOrder(path, async () => {
+        if (isImportOnly(path)) await claims.downgradeToRead(path);
+      }).catch(() => {
+        // The window's claim is released when it closes; a failed downgrade
+        // cannot be repaired by retrying from a later unrelated state change.
       }),
     ),
   );

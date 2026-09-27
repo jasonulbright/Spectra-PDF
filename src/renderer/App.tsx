@@ -183,12 +183,14 @@ import { type Operation } from './commands/operations';
 import {
   isRecentStorageKey,
   readRecent,
+  persistSuccessfulRecentOpensSafely,
   recordRecentOpen,
   removeRecentEntriesSafely,
   sameRecent,
   sweepDeadRecents,
 } from './lib/recent-files';
-import { claimPaths, createClaimHolds, departedImportSources, releasePaths, soleOwner, type ClaimRefusal } from './lib/window-claims';
+import { claimPaths, createClaimHolds, departedImportSources, downgradeImportSourceClaims, releasePaths, retainedImportSources, soleOwner, type ClaimRefusal } from './lib/window-claims';
+import { confirmDirtySnapshots, sameDirtyPromptSnapshot, type DirtyPromptSnapshot } from './lib/dirty-prompt';
 import { createOpenFlights, createPathOperationLock, openPathOnce } from './lib/open-flights';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
@@ -1068,10 +1070,17 @@ function AppContent(): React.ReactElement {
   // goes with it.
   const filesSeen = useRef(state.files);
   useEffect(() => {
+    const retained = retainedImportSources(filesSeen.current, state.files);
     const departed = departedImportSources(filesSeen.current, state.files);
     filesSeen.current = state.files;
+    if (retained.length > 0) {
+      void downgradeImportSourceClaims(
+        retained,
+        (path) => readState().files.get(path)?.importOnly === true,
+      );
+    }
     if (departed.length > 0) void releasePaths(departed, pathInUse);
-  }, [state.files, pathInUse]);
+  }, [state.files, pathInUse, readState]);
   const openByPaths = useCallback(async (
     paths: string[],
     opts?: {
@@ -1086,6 +1095,7 @@ function AppContent(): React.ReactElement {
     // is neither: the user answered the question and the answer was no.
     const outcomes: OpenOutcome[] = [];
     let recent = stateRef.current.ui.recentFiles;
+    const successfulOpens: typeof recent = [];
     let lastOpened: string | null = null;
     let inserted = 0;
     // The file that was really OPENED (not re-activated) and became the
@@ -1173,6 +1183,8 @@ function AppContent(): React.ReactElement {
             outcomes.push({ name: fileName, reason: null });
             dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
             recent = await recordRecentOpen(recent, filePath, Date.now(), originFor(filePath)); // only on success — a cancel/throw
+            const recorded = recent.find((entry) => entry.path === filePath);
+            if (recorded) successfulOpens.push(recorded);
             lastOpened = filePath;                  // must not pollute Recent (regression)
             freshlyOpened = null;
             changed = true;
@@ -1222,6 +1234,8 @@ function AppContent(): React.ReactElement {
             });
             inserted += 1;
             recent = await recordRecentOpen(recent, filePath, Date.now(), originFor(filePath));
+            const recorded = recent.find((entry) => entry.path === filePath);
+            if (recorded) successfulOpens.push(recorded);
             lastOpened = filePath;
             freshlyOpened = { path: filePath, workingPath: prepared.workingPath };
             changed = true;
@@ -1236,12 +1250,14 @@ function AppContent(): React.ReactElement {
     } finally {
       // Flush whatever succeeded even if a later file threw (a malformed PDF
       // mid-batch would otherwise strand the opened tabs unfocused + unrecorded).
-      // The batch's `recent` is only the input to its serialized writes. An
-      // awaited hand-off can let another window clear/remove/open entries after
-      // the last write; its storage event may already have updated this state.
-      // Finish from the authoritative store so this older batch cannot replace
-      // that newer transaction in the UI.
-      if (changed) dispatch({ type: 'UI_SET_RECENT_FILES', files: readRecent() });
+      // An awaited hand-off can let another window clear/remove/open entries
+      // after this batch's last write. Reconcile only this batch's completed
+      // opens with the latest markers and stored list; a stale mirror cannot
+      // undo a clear or a removal.
+      if (changed) {
+        const finalRecent = await persistSuccessfulRecentOpensSafely(successfulOpens).catch(readRecent);
+        dispatch({ type: 'UI_SET_RECENT_FILES', files: finalRecent });
+      }
       if (lastOpened && opts?.focus !== false) dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: lastOpened } });
       // A claim outlives only what it protects: a cancelled password prompt or
       // a file that threw mid-batch must not leave this window holding a path
@@ -1294,7 +1310,6 @@ function AppContent(): React.ReactElement {
       // Held from before the claim is sent until the finally: no release by
       // another flow of this window drops the claim this import reads under.
       claimHolds.current.hold(canonicalImports);
-      let filePaths: string[] = [];
       try {
         await sourcePathOperations.current.run([...canonicalImports, destinationPath], async () => {
           // The target can close while the signed-edit confirmation or source
@@ -1312,7 +1327,7 @@ function AppContent(): React.ReactElement {
           // this import waits locally to start reading the same source.
           const claimed = await claimPaths(canonicalImports, 'read');
           if (claimed.refused.length > 0) void reportClaimRefusal(claimed.refused, 'import');
-          filePaths = claimed.granted;
+          const filePaths = claimed.granted;
           const toRegister: {
             path: string;
             workingPath: string;
@@ -1375,11 +1390,10 @@ function AppContent(): React.ReactElement {
         });
       } finally {
         claimHolds.current.drop(canonicalImports);
-        // A claim outlives only what it protects. A path this window uses by
-        // its release's turn keeps it: a document open here (releasing it would
-        // drop the WRITE claim of a document still open), a source this import
-        // registered, an open or another import of it in flight.
-        if (filePaths.length > 0) void releasePaths(filePaths, pathInUse);
+        // Release every source path even when destination revalidation returned
+        // before the claim call. At the release's turn, a document, retained
+        // import source, open or another import still in use keeps its claim.
+        void releasePaths(canonicalImports, pathInUse);
       }
     },
     [
@@ -2521,6 +2535,47 @@ function AppContent(): React.ReactElement {
     }
   }, [commitIfNeeded]);
 
+  const confirmCurrentDirtyFiles = useCallback(async (
+    paths: () => readonly string[],
+    message: (names: string) => string,
+  ): Promise<boolean> => {
+    const snapshots = (): DirtyPromptSnapshot[] => {
+      const current = readState();
+      return paths().flatMap((path) => {
+        const file = current.files.get(path);
+        if (!file || !(file.dirty || current.pageDirtyPaths.includes(path))) return [];
+        return [{
+          path,
+          fileRevision: file,
+          pageRevisions: current.workspace.documents.filter((doc) => doc.path === path),
+        }];
+      });
+    };
+    return confirmDirtySnapshots(
+      snapshots,
+      (pending) => {
+        const names = pending.map(({ path }) => readState().files.get(path)?.name ?? path).join(', ');
+        return showConfirm(message(names));
+      },
+      async (pending) => {
+        if (!(await commitOrAbort())) return false;
+        for (const { path } of pending) {
+          const before = snapshots().find((snapshot) => snapshot.path === path);
+          if (!before) continue;
+          const file = readState().files.get(path);
+          if (!file || !(await saveOrReport(file.workingPath, path))) return false;
+          const after = snapshots().find((snapshot) => snapshot.path === path);
+          // Do not mark edits made while the write was in flight as saved. They
+          // will be named in the next prompt iteration.
+          if (after && sameDirtyPromptSnapshot(before, after)) {
+            dispatch({ type: 'MARK_SAVED', path });
+          }
+        }
+        return true;
+      },
+    );
+  }, [readState, showConfirm, commitOrAbort, saveOrReport, dispatch]);
+
   const handleSave = useCallback(async () => {
     if (!activeFile) return;
     // A document downloaded from a web address has no file of the user's
@@ -2616,20 +2671,15 @@ function AppContent(): React.ReactElement {
   // Close file with unsaved changes prompt
   const handleCloseFile = useCallback(async (filePath: string) => {
     await sourcePathOperations.current.run([filePath], async () => {
-      const f = readState().files.get(filePath);
-      if (!f) return;
-      if (isFileDirty(f)) {
-        const result = await showConfirm(tChrome('app.close.unsaved', { name: f.name }));
-        if (result === 'cancel') return;
-        if (result === 'save') {
-          if (!(await commitOrAbort())) return;
-          if (!(await saveOrReport(f.workingPath, f.path))) return;
-        }
-      }
+      if (!(await confirmCurrentDirtyFiles(
+        () => [filePath],
+        (names) => tChrome('app.close.unsaved', { name: names }),
+      ))) return;
+      if (!readState().files.has(filePath)) return;
       dispatch({ type: 'CLOSE_FILE', path: filePath });
       void releasePaths([filePath], pathInUse);
     });
-  }, [readState, dispatch, showConfirm, isFileDirty, commitOrAbort, pathInUse, saveOrReport]);
+  }, [readState, dispatch, confirmCurrentDirtyFiles, pathInUse]);
 
   // Close all open files with unsaved changes prompt
   const handleCloseAll = useCallback(async () => {
@@ -2639,46 +2689,24 @@ function AppContent(): React.ReactElement {
     // on a path this close-all never locked.
     const paths = Array.from(readState().files.keys());
     await sourcePathOperations.current.run(paths, async () => {
-      const allOpen = paths.flatMap((path) => {
-        const f = readState().files.get(path);
-        return f ? [f] : [];
-      });
-      const dirtyFiles = allOpen.filter(isFileDirty);
-      if (dirtyFiles.length > 0) {
-        const names = dirtyFiles.map((f) => f.name).join(', ');
-        const result = await showConfirm(tChrome('app.closeAll.unsaved', { names }));
-        if (result === 'cancel') return;
-        if (result === 'save') {
-          if (!(await commitOrAbort())) return;
-          for (const f of dirtyFiles) {
-            if (!(await saveOrReport(f.workingPath, f.path))) return;
-            dispatch({ type: 'MARK_SAVED', path: f.path });
-          }
-        }
-      }
-      for (const f of allOpen) {
-        if (readState().files.has(f.path)) dispatch({ type: 'CLOSE_FILE', path: f.path });
+      if (!(await confirmCurrentDirtyFiles(
+        () => paths,
+        (names) => tChrome('app.closeAll.unsaved', { names }),
+      ))) return;
+      for (const path of paths) {
+        if (readState().files.has(path)) dispatch({ type: 'CLOSE_FILE', path });
       }
       void releasePaths(paths, pathInUse);
     });
-  }, [readState, dispatch, showConfirm, isFileDirty, commitOrAbort, pathInUse, saveOrReport]);
+  }, [readState, dispatch, confirmCurrentDirtyFiles, pathInUse]);
 
   // Exit the app (File ▸ Exit / Ctrl+Q) — always quits when clean; the
   // tray-minimize setting governs the window × (below), not an explicit Exit.
   const handleExit = useCallback(async () => {
-    const dirtyFiles = Array.from(state.files.values()).filter(isFileDirty);
-    if (dirtyFiles.length > 0) {
-      const names = dirtyFiles.map((f) => f.name).join(', ');
-      const result = await showConfirm(tChrome('app.exit.unsaved', { names }));
-      if (result === 'cancel') return;
-      if (result === 'save') {
-        if (!(await commitOrAbort())) return;
-        for (const f of dirtyFiles) {
-          if (!(await saveOrReport(f.workingPath, f.path))) return;
-          dispatch({ type: 'MARK_SAVED', path: f.path });
-        }
-      }
-    }
+    if (!(await confirmCurrentDirtyFiles(
+      () => [...readState().files.keys()],
+      (names) => tChrome('app.exit.unsaved', { names }),
+    ))) return;
     // The quit SEALS the session record, and the seal takes whatever tab order
     // arrived last. The order publishes serially and nothing waits on it — a
     // reorder made in the seconds before Exit can still be behind an in-flight
@@ -2718,7 +2746,7 @@ function AppContent(): React.ReactElement {
     if (!(await app.confirmClose())) {
       await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
     }
-  }, [state.files, isFileDirty, showConfirm, commitOrAbort, showNotice, dispatch, saveOrReport]);
+  }, [readState, confirmCurrentDirtyFiles, showNotice]);
 
   // Hand a document to another window. A hand-off MOVES: the document leaves
   // this workspace, so two live copies of one file never exist and every
@@ -3066,8 +3094,6 @@ function AppContent(): React.ReactElement {
   // Keep refs to current state so the close handler always sees latest values
   const filesRef = useRef(state.files);
   filesRef.current = state.files;
-  const pageDirtyRef = useRef(state.pageDirtyPaths);
-  pageDirtyRef.current = state.pageDirtyPaths;
 
   // Close this window, and say so when it did not close.
   //
@@ -3122,45 +3148,25 @@ function AppContent(): React.ReactElement {
       if (!(await sealBeforeClose(quitId, { flush: flushTabOrder, ack: app.quitAck }))) return;
       await handOffGate.current.settled();
       const minimizeToTray = getSettings().minimizeToTray === true;
-      const dirtyFiles = Array.from(filesRef.current.values()).filter(
-        (f) => f.dirty || pageDirtyRef.current.includes(f.path),
-      );
       // Rust decides between hiding and closing, because only it knows whether
       // this is the last workspace window: tray residency is an app-level
       // state, so a second window's × closes that window rather than hiding
       // the app behind the first window's unsaved work.
-      if (dirtyFiles.length === 0) {
-        await closeOrReport(minimizeToTray);
-        return;
-      }
-      const names = dirtyFiles.map((f) => f.name).join(', ');
-      const result = await showConfirm(tChrome('app.window.unsaved', { names }));
       // Every path that leaves this window standing also calls off a quit that
       // may have prompted it: an app Exit records the session and freezes the
       // record before any window is asked, and the app is still running. The
       // call is idempotent and harmless when this close was only a window ×.
-      if (result === 'cancel') {
+      if (!(await confirmCurrentDirtyFiles(
+        () => [...filesRef.current.keys()],
+        (names) => tChrome('app.window.unsaved', { names }),
+      ))) {
         await app.quitCancelled(sessionId);
         return;
-      }
-      if (result === 'save') {
-        try {
-          await commitRef.current();
-        } catch {
-          await app.quitCancelled(sessionId);
-          return;
-        }
-        for (const f of dirtyFiles) {
-          if (!(await saveOrReportRef.current(f.workingPath, f.path))) {
-            await app.quitCancelled(sessionId);
-            return;
-          }
-        }
       }
       await closeOrReport(minimizeToTray);
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, [showConfirm, closeOrReport]);
+  }, [confirmCurrentDirtyFiles, closeOrReport]);
 
   // Leaving doc-tab-land commits pending page edits (the "in-memory edits
   // exist only while a document tab is focused" invariant — the Tools panels
