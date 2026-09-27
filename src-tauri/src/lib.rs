@@ -374,12 +374,13 @@ pub fn run() {
                         let _ = app.emit_to(target.as_str(), "app:trayAction", "merge");
                     }
                     "quit" => {
-                        // Before the exit, not after: every window is still
-                        // standing and still holding the documents the session
-                        // records.
-                        let _ = session::capture_and_seal(app);
-                        QUITTING.store(true, Ordering::SeqCst);
-                        app.exit(0);
+                        // Explicit Quit must use the renderer's shared close
+                        // flow so dirty documents can be saved or kept open,
+                        // and every workspace window can acknowledge the
+                        // request before the session is sealed.
+                        let target = app_windows::route_target(app);
+                        app_windows::focus_label(app, &target);
+                        let _ = app.emit_to(target.as_str(), "app:trayAction", "quit");
                     }
                     _ => {}
                 })
@@ -519,6 +520,20 @@ mod tests {
             .expect("the window events");
         let setup = &source[start..start + length];
         assert!(setup.contains("std::thread::spawn(scratch::reclaim_at_startup);"));
+    }
+
+    #[test]
+    fn tray_quit_routes_through_the_renderer_close_flow() {
+        let source = include_str!("lib.rs");
+        let start = source.find("\"quit\" => {").expect("the tray quit branch");
+        let length = source[start..]
+            .find("\n                    _ => {}")
+            .expect("the end of the tray event match");
+        let branch = &source[start..start + length];
+        assert!(branch.contains("app:trayAction"));
+        assert!(branch.contains("\"quit\""));
+        assert!(!branch.contains("capture_and_seal"));
+        assert!(!branch.contains("app.exit("));
     }
 
     /// An unregistered command fails only in the renderer, and the launch read
