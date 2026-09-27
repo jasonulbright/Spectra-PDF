@@ -477,6 +477,20 @@ pub(crate) fn export_copy(source: &Path, record: &Path) -> io::Result<u64> {
     }
 }
 
+/// Create a new exported file by copying `source` to a staged sibling and
+/// landing it only if `record` is still absent. A name selected after an
+/// existence check must use this form: `export_copy` intentionally replaces
+/// existing files and would otherwise lose a concurrent writer's data.
+pub(crate) fn export_copy_new(source: &Path, record: &Path) -> io::Result<u64> {
+    let mut copied = 0;
+    create_record(record, |staged| {
+        let (count, held) = copy_to_stage(source, staged)?;
+        copied = count;
+        Ok(held)
+    })?;
+    Ok(copied)
+}
+
 /// Copy `source` into the existing `record` through [`rewrite_existing`].
 /// Returns the byte count.
 fn copy_in_place(source: &Path, record: &Path, refusal: io::Error) -> io::Result<u64> {

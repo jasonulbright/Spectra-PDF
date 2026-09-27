@@ -1800,6 +1800,17 @@ fn attach(
     taken: &[String],
     console: &dyn Console,
 ) -> Vec<String> {
+    attach_with_publish_hook(pages, out, row, taken, console, |_| {})
+}
+
+fn attach_with_publish_hook(
+    pages: &[String],
+    out: &Path,
+    row: &str,
+    taken: &[String],
+    console: &dyn Console,
+    mut after_name_check: impl FnMut(&Path),
+) -> Vec<String> {
     let dir = out.join("scan-test-scans").join(format!("row-{row}"));
     if let Err(e) = std::fs::create_dir_all(&dir) {
         console.say(&format!("  Could not save the scans beside the report: {e}"));
@@ -1824,7 +1835,29 @@ fn attach(
             let existing_is_owned = std::fs::canonicalize(&to)
                 .is_ok_and(|existing| prior_scans.contains(&existing));
             if !was_taken && (!path_entry_exists(&to) || existing_is_owned) {
-                break;
+                after_name_check(&to);
+                let copied = if existing_is_owned {
+                    crate::staging::export_copy(from, &to)
+                } else {
+                    crate::staging::export_copy_new(from, &to)
+                };
+                match copied {
+                    Ok(_) => {
+                        saved.push(to.to_string_lossy().to_string());
+                        break;
+                    }
+                    Err(error)
+                        if !existing_is_owned
+                            && error.kind() == std::io::ErrorKind::AlreadyExists =>
+                    {
+                        // Another writer took the candidate after our
+                        // existence check. Re-select; never replace that file.
+                    }
+                    Err(error) => {
+                        console.say(&format!("  Could not copy {}: {error}", from.display()));
+                        break;
+                    }
+                }
             }
             attempts += 1;
             if attempts >= MAX_ATTACHMENT_NAME_ATTEMPTS {
@@ -1847,12 +1880,6 @@ fn attach(
         }
         if exhausted {
             continue;
-        }
-        // A prior report may authorize replacing its own scan; otherwise this
-        // path must be free before it is written.
-        match crate::staging::export_copy(from, &to) {
-            Ok(_) => saved.push(to.to_string_lossy().to_string()),
-            Err(e) => console.say(&format!("  Could not copy {}: {e}", from.display())),
         }
     }
     saved
@@ -3305,6 +3332,46 @@ mod tests {
         );
         assert_eq!(saved.len(), 1);
         assert_ne!(Path::new(&saved[0]), existing);
+        assert_eq!(
+            std::fs::read(&saved[0]).expect("attached scan"),
+            b"BM this run's scan"
+        );
+    }
+
+    #[test]
+    fn attaching_scans_does_not_replace_a_file_created_after_name_selection() {
+        let out = tempfile::tempdir().expect("a temp dir");
+        let scans = out.path().join("scan-test-scans").join("row-1");
+        let elsewhere = tempfile::tempdir().expect("a source folder");
+        let page = elsewhere.path().join("page-0000.bmp");
+        std::fs::write(&page, b"BM this run's scan").expect("a scan");
+        let claimed = scans.join("page-0000.bmp");
+
+        let mut create_race_winner = true;
+        let saved = attach_with_publish_hook(
+            &[page.to_string_lossy().to_string()],
+            out.path(),
+            "1",
+            &[],
+            &ScriptedConsole::eof(),
+            |chosen| {
+                if create_race_winner {
+                    assert_eq!(chosen, claimed);
+                    std::fs::write(chosen, b"created by another writer").expect("race winner");
+                    create_race_winner = false;
+                }
+            },
+        );
+
+        assert_eq!(
+            std::fs::read(&claimed).expect("the concurrently created file"),
+            b"created by another writer"
+        );
+        assert_eq!(saved.len(), 1);
+        assert_eq!(
+            Path::new(&saved[0]),
+            scans.join("page-0000-2.bmp").as_path()
+        );
         assert_eq!(
             std::fs::read(&saved[0]).expect("attached scan"),
             b"BM this run's scan"
