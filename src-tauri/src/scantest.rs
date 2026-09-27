@@ -17,6 +17,7 @@
 //! The COM work stays in `scanner.rs`; this module only drives it, so the
 //! apartment rule cannot be broken from here.
 
+use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -1710,12 +1711,100 @@ impl From<&ScanSettings> for SettingsRecord {
     }
 }
 
-fn attach(pages: &[String], out: &Path, row: &str, taken: &[String], console: &dyn Console) -> Vec<String> {
+const MAX_PRIOR_REPORT_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_ATTACHMENT_NAME_ATTEMPTS: usize = 4096;
+
+/// Return only existing scan files that the previous report for this output
+/// folder explicitly owned. A similarly named file on disk alone is not ours
+/// to replace.
+fn prior_report_scans(out: &Path, row: &str) -> HashSet<PathBuf> {
+    let mut owned = HashSet::new();
+    let root = match std::fs::canonicalize(out) {
+        Ok(path) => path,
+        Err(_) => return owned,
+    };
+    let scan_dir_path = out.join("scan-test-scans").join(format!("row-{row}"));
+    let scan_dir = match std::fs::canonicalize(&scan_dir_path) {
+        Ok(path) if path.starts_with(&root) => path,
+        _ => return owned,
+    };
+    let report_path = out.join("scan-test-report.json");
+    let Ok(file) = std::fs::File::open(report_path) else {
+        return owned;
+    };
+    let mut bytes = Vec::new();
+    if file
+        .take(MAX_PRIOR_REPORT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() as u64 > MAX_PRIOR_REPORT_BYTES
+    {
+        return owned;
+    }
+    let Ok(report) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return owned;
+    };
+    if report.get("schema").and_then(serde_json::Value::as_u64)
+        != Some(u64::from(REPORT_SCHEMA))
+        || report.get("tool").and_then(serde_json::Value::as_str)
+            != Some("spectrapdf scan-test")
+    {
+        return owned;
+    }
+    let Some(rows) = report.get("rows").and_then(serde_json::Value::as_array) else {
+        return owned;
+    };
+    for record in rows {
+        if record.get("id").and_then(serde_json::Value::as_str) != Some(row) {
+            continue;
+        }
+        let Some(paths) = record
+            .get("attached_scans")
+            .and_then(serde_json::Value::as_array)
+        else {
+            continue;
+        };
+        for path in paths.iter().filter_map(serde_json::Value::as_str) {
+            let path = Path::new(path);
+            let Ok(metadata) = std::fs::symlink_metadata(path) else {
+                continue;
+            };
+            if !metadata.file_type().is_file() {
+                continue;
+            }
+            let Ok(canonical) = std::fs::canonicalize(path) else {
+                continue;
+            };
+            if canonical.starts_with(&root) && canonical.parent() == Some(scan_dir.as_path()) {
+                owned.insert(canonical);
+            }
+        }
+    }
+    owned
+}
+
+/// `symlink_metadata` treats dangling symlinks and inaccessible entries as
+/// occupied, so collision handling never replaces them by mistake.
+fn path_entry_exists(path: &Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => true,
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
+fn attach(
+    pages: &[String],
+    out: &Path,
+    row: &str,
+    taken: &[String],
+    console: &dyn Console,
+) -> Vec<String> {
     let dir = out.join("scan-test-scans").join(format!("row-{row}"));
     if let Err(e) = std::fs::create_dir_all(&dir) {
         console.say(&format!("  Could not save the scans beside the report: {e}"));
         return Vec::new();
     }
+    let prior_scans = prior_report_scans(out, row);
     let mut saved = Vec::new();
     for page in pages {
         let from = Path::new(page);
@@ -1724,16 +1813,42 @@ fn attach(pages: &[String], out: &Path, row: &str, taken: &[String], console: &d
         // Each acquisition stages from page-0000, so a second acquisition in
         // one row must not replace the first one's copy.
         let mut n = 2;
-        while taken.iter().chain(saved.iter()).any(|t| Path::new(t) == to) {
-            let stem = from.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut attempts = 0;
+        let mut exhausted = false;
+        loop {
+            let was_taken = taken
+                .iter()
+                .chain(saved.iter())
+                .any(|t| Path::new(t) == to);
+            let existing_is_owned = std::fs::canonicalize(&to)
+                .is_ok_and(|existing| prior_scans.contains(&existing));
+            if !was_taken && (!path_entry_exists(&to) || existing_is_owned) {
+                break;
+            }
+            attempts += 1;
+            if attempts >= MAX_ATTACHMENT_NAME_ATTEMPTS {
+                console.say(&format!(
+                    "  Could not choose a free name for the scan {} after {MAX_ATTACHMENT_NAME_ATTEMPTS} collisions.",
+                    from.display()
+                ));
+                exhausted = true;
+                break;
+            }
+            let stem = from
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
             to = match from.extension() {
                 Some(ext) => dir.join(format!("{stem}-{n}.{}", ext.to_string_lossy())),
                 None => dir.join(format!("{stem}-{n}")),
             };
             n += 1;
         }
-        // A report from an earlier run in this folder names the scan it
-        // replaces, so the scan is replaced whole or not at all.
+        if exhausted {
+            continue;
+        }
+        // A prior report may authorize replacing its own scan; otherwise this
+        // path must be free before it is written.
         match crate::staging::export_copy(from, &to) {
             Ok(_) => saved.push(to.to_string_lossy().to_string()),
             Err(e) => console.say(&format!("  Could not copy {}: {e}", from.display())),
@@ -3140,6 +3255,37 @@ mod tests {
         assert!(listing.contains("minutes"), "{listing}");
     }
 
+    #[test]
+    fn attaching_scans_preserves_an_existing_file_not_owned_by_a_report() {
+        let out = tempfile::tempdir().expect("a temp dir");
+        let scans = out.path().join("scan-test-scans").join("row-1");
+        std::fs::create_dir_all(&scans).expect("the scans folder");
+        let existing = scans.join("page-0000.bmp");
+        std::fs::write(&existing, b"unrelated user data").expect("existing user file");
+        let elsewhere = tempfile::tempdir().expect("a source folder");
+        let page = elsewhere.path().join("page-0000.bmp");
+        std::fs::write(&page, b"BM this run's scan").expect("a scan");
+
+        let saved = attach(
+            &[page.to_string_lossy().to_string()],
+            out.path(),
+            "1",
+            &[],
+            &ScriptedConsole::eof(),
+        );
+
+        assert_eq!(
+            std::fs::read(&existing).expect("existing file"),
+            b"unrelated user data"
+        );
+        assert_eq!(saved.len(), 1);
+        assert_ne!(Path::new(&saved[0]), existing);
+        assert_eq!(
+            std::fs::read(&saved[0]).expect("attached scan"),
+            b"BM this run's scan"
+        );
+    }
+
     /// The report and the scans beside it go through the staged writer, which
     /// is also what reclaims the stage a run killed mid-write left.
     #[cfg(windows)]
@@ -3161,7 +3307,21 @@ mod tests {
         for orphan in &orphans {
             std::fs::write(orphan, b"torn").expect("an orphan");
         }
-        std::fs::write(scans.join("page-0000.bmp"), b"BM an earlier run's page").expect("old");
+        let scan = scans.join("page-0000.bmp");
+        std::fs::write(&scan, b"BM an earlier run's page").expect("old");
+        let earlier_report = serde_json::json!({
+            "schema": REPORT_SCHEMA,
+            "tool": "spectrapdf scan-test",
+            "rows": [{
+                "id": "1",
+                "attached_scans": [scan.to_string_lossy()]
+            }]
+        });
+        std::fs::write(
+            out.path().join("scan-test-report.json"),
+            serde_json::to_vec(&earlier_report).expect("old report"),
+        )
+        .expect("old report file");
         let page = out.path().join("page-0000.bmp");
         std::fs::write(&page, b"BM this run's page").expect("a page");
 
@@ -3215,9 +3375,18 @@ mod tests {
         let json = out.path().join("scan-test-report.json");
         let text = out.path().join("scan-test-report.txt");
         let scan = scans.join("page-0000.bmp");
-        for earlier in [&json, &text, &scan] {
-            std::fs::write(earlier, b"an earlier run, longer than this one").expect("old");
-        }
+        let earlier_report = serde_json::json!({
+            "schema": REPORT_SCHEMA,
+            "tool": "spectrapdf scan-test",
+            "rows": [{
+                "id": "1",
+                "attached_scans": [scan.to_string_lossy()]
+            }]
+        });
+        std::fs::write(&json, serde_json::to_vec(&earlier_report).expect("old report"))
+            .expect("old report file");
+        std::fs::write(&text, b"an earlier report").expect("old text report");
+        std::fs::write(&scan, b"an earlier attached scan").expect("old scan");
         let elsewhere = tempfile::tempdir().expect("a temp dir");
         let page = elsewhere.path().join("page-0000.bmp");
         std::fs::write(&page, b"BM this run's page").expect("a page");
@@ -3226,14 +3395,15 @@ mod tests {
         let saved = {
             let _out = crate::staging::Denied::create(out.path(), &[&json, &text]);
             let _scans = crate::staging::Denied::create(&scans, &[&scan]);
-            write_report(&report, out.path()).expect("the report");
-            attach(
+            let saved = attach(
                 &[page.to_string_lossy().to_string()],
                 out.path(),
                 "1",
                 &[],
                 &ScriptedConsole::eof(),
-            )
+            );
+            write_report(&report, out.path()).expect("the report");
+            saved
         };
 
         assert_eq!(saved, vec![scan.to_string_lossy().to_string()]);
