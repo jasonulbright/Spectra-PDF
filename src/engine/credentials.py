@@ -182,6 +182,52 @@ _GS_FOLDER_PREFIX = "spectrapdf-gs-"
 #: A folder younger than this may belong to a run of another engine process
 #: (the health worker) between writing its argument file and spawning gs.
 _GS_STALE_SECONDS = 60
+_GS_LEGACY_STALE_SECONDS = 3 * 60 * 60
+_GS_OWNER_FILE = ".owner-pid"
+
+
+def _gs_process_is_running(pid: int) -> bool:
+    """Return whether `pid` exists; uncertainty keeps the password file."""
+    if pid <= 0 or pid > 0xFFFFFFFF:
+        return True
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        open_process.restype = wintypes.HANDLE
+        get_exit_code = kernel32.GetExitCodeProcess
+        get_exit_code.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+        get_exit_code.restype = wintypes.BOOL
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = (wintypes.HANDLE,)
+        close_handle.restype = wintypes.BOOL
+        handle = open_process(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            # ERROR_INVALID_PARAMETER means the PID no longer exists. Access
+            # denied and every other failure are ambiguous, so fail closed.
+            return ctypes.get_last_error() != 87
+        try:
+            exit_code = wintypes.DWORD()
+            if not get_exit_code(handle, ctypes.byref(exit_code)):
+                return True
+            return exit_code.value == 259  # STILL_ACTIVE
+        finally:
+            close_handle(handle)
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        # EPERM, transient process-table errors, and unknown platform errors
+        # must not cause deletion of a possibly active password file.
+        return True
+    except OverflowError:
+        return True
 
 
 def remove_stale_gs_argfiles() -> int:
@@ -201,10 +247,30 @@ def remove_stale_gs_argfiles() -> int:
             continue
         folder = os.path.join(root, name)
         try:
-            if not os.path.isdir(folder) or now - os.path.getmtime(folder) < _GS_STALE_SECONDS:
+            if not os.path.isdir(folder):
+                continue
+            age = now - os.path.getmtime(folder)
+            if age < _GS_STALE_SECONDS:
                 continue
         except OSError:
             continue
+        owner_path = os.path.join(folder, _GS_OWNER_FILE)
+        try:
+            with open(owner_path, encoding="ascii") as owner_file:
+                owner_pid = int(owner_file.read().strip())
+        except FileNotFoundError:
+            # Older builds did not record an owner PID. Their Ghostscript
+            # budget is capped at two hours, so retain legacy folders beyond
+            # that full window plus a one-hour shutdown margin.
+            if age < _GS_LEGACY_STALE_SECONDS:
+                continue
+        except (OSError, ValueError):
+            # An unreadable or incomplete marker is not evidence that its
+            # process has stopped.
+            continue
+        else:
+            if _gs_process_is_running(owner_pid):
+                continue
         shutil.rmtree(folder, ignore_errors=True)
         removed += 0 if os.path.exists(folder) else 1
     return removed
@@ -228,6 +294,9 @@ def gs_password_argv(cmd: list[str], *sources):
     line = gs_password_line(password)
     folder = tempfile.mkdtemp(prefix=_GS_FOLDER_PREFIX)
     try:
+        owner_path = os.path.join(folder, _GS_OWNER_FILE)
+        with open(owner_path, "x", encoding="ascii") as owner_file:
+            owner_file.write(str(os.getpid()))
         argfile = os.path.join(folder, "args")
         with open(argfile, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(line + "\n")

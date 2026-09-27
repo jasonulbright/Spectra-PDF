@@ -720,14 +720,68 @@ def test_engine_start_removes_stale_gs_argfile_folders(monkeypatch, tmp_dir):
 
     monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_dir)
     stale = os.path.join(tmp_dir, "spectrapdf-gs-stale")
+    legacy_active = os.path.join(tmp_dir, "spectrapdf-gs-legacy-active")
     fresh = os.path.join(tmp_dir, "spectrapdf-gs-fresh")
-    for folder in (stale, fresh):
+    for folder in (stale, legacy_active, fresh):
         os.makedirs(folder)
         with open(os.path.join(folder, "args"), "w") as handle:
             handle.write('"-sPDFPassword=secret"\n')
-    old = time.time() - 3600
-    os.utime(stale, (old, old))
+    too_old = time.time() - 4 * 3600
+    within_legacy_budget = time.time() - 2 * 3600
+    os.utime(stale, (too_old, too_old))
+    os.utime(legacy_active, (within_legacy_budget, within_legacy_budget))
     assert credentials.remove_stale_gs_argfiles() == 1
-    assert not os.path.exists(stale) and os.path.exists(fresh)
+    assert not os.path.exists(stale)
+    assert os.path.exists(legacy_active) and os.path.exists(fresh)
     main = open(os.path.join(os.path.dirname(credentials.__file__), "__main__.py"), encoding="utf-8").read()
     assert "    remove_stale_gs_argfiles()\n    server = JsonRpcServer()" in main
+
+
+def test_engine_start_keeps_an_old_argfile_folder_owned_by_a_live_engine(monkeypatch, tmp_dir):
+    import tempfile
+    import time
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_dir)
+    active = os.path.join(tmp_dir, "spectrapdf-gs-active")
+    os.makedirs(active)
+    with open(os.path.join(active, "args"), "w") as handle:
+        handle.write('"-sPDFPassword=secret"\n')
+    with open(os.path.join(active, ".owner-pid"), "w") as handle:
+        handle.write(str(os.getpid()))
+    old = time.time() - 3600
+    os.utime(active, (old, old))
+
+    assert credentials.remove_stale_gs_argfiles() == 0
+    assert os.path.exists(os.path.join(active, "args"))
+
+
+def test_engine_start_removes_an_old_argfile_folder_after_its_owner_exits(monkeypatch, tmp_dir):
+    import tempfile
+    import time
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_dir)
+    monkeypatch.setattr(credentials, "_gs_process_is_running", lambda _pid: False)
+    stale = os.path.join(tmp_dir, "spectrapdf-gs-dead-owner")
+    os.makedirs(stale)
+    with open(os.path.join(stale, "args"), "w") as handle:
+        handle.write('"-sPDFPassword=secret"\n')
+    with open(os.path.join(stale, ".owner-pid"), "w") as handle:
+        handle.write("4242")
+    old = time.time() - 3600
+    os.utime(stale, (old, old))
+
+    assert credentials.remove_stale_gs_argfiles() == 1
+    assert not os.path.exists(stale)
+
+
+def test_gs_owner_process_liveness_tracks_a_real_child():
+    import subprocess
+    import sys
+
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert credentials._gs_process_is_running(child.pid)
+    finally:
+        child.terminate()
+        child.wait(timeout=10)
+    assert not credentials._gs_process_is_running(child.pid)
