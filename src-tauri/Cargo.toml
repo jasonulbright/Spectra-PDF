@@ -40,6 +40,7 @@ webdriver = ["tauri-plugin-webdriver"]
 e2e-net-private = []
 
 [dependencies]
+base64 = "0.22"
 sha2 = "0.10"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-webdriver = { version = "0.2", optional = true }
