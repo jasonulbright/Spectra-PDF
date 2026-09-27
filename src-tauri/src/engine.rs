@@ -773,6 +773,15 @@ mod start_tests {
         assert!(append_stdout_chunk(&mut pending, b"1234", 4).unwrap().is_empty());
         assert!(append_stdout_chunk(&mut pending, b"5", 4).is_err());
         assert_eq!(pending, b"1234");
+        pending.clear();
+
+        let nul_line = br#"{"id":"i\u0000d","result":"x\u0000y"}"#;
+        let mut nul_frame = nul_line.to_vec();
+        nul_frame.push(b'\n');
+        let lines = append_stdout_chunk(&mut pending, &nul_frame, 64).unwrap();
+        let response: serde_json::Value = serde_json::from_slice(&lines[0]).unwrap();
+        assert_eq!(response["id"], "i\0d");
+        assert_eq!(response["result"], "x\0y");
     }
 
     #[test]
