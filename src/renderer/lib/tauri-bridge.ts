@@ -808,6 +808,7 @@ export const app = {
    * cannot be two different answers to what leaves the machine. */
   netPayloadBytes: async (path: string) =>
     new Uint8Array(await invoke<ArrayBuffer>('read_file_binary', { filePath: path })),
+  netPayloadSize: (path: string) => invoke<number>('net_payload_size', { path }),
   /** Whatever is on the clipboard, written to a scratch file Create PDF
    * already accepts. The BYTES never cross this boundary — a pasted
    * screenshot is megabytes and the engine needs a file anyway. */

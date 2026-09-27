@@ -293,6 +293,7 @@ pub fn run() {
             web_capture::capture_web_page,
             net::net_request,
             net::net_payload_path,
+            net::net_payload_size,
             net::net_private_carveout_compiled,
             portable::icc_assent_state,
             portable::icc_license_text,

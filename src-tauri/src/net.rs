@@ -33,12 +33,14 @@
 //!
 //! Nothing received here is executed, and nothing here opens a shell.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncReadExt;
+use tokio_util::io::ReaderStream;
 
 /// How large a response this client will keep.
 ///
@@ -414,17 +416,51 @@ pub async fn net_private_carveout_compiled() -> bool {
     cfg!(feature = "e2e-net-private")
 }
 
-/// Append an already-encoded query string to a URL, before any fragment.
-fn append_query(url: &str, query: &str) -> String {
-    if query.is_empty() {
-        return url.to_string();
-    }
-    let (base, frag) = match url.find('#') {
+/// Append the already-encoded URL-encoded form payload from its prepared file.
+/// The request target must be materialized as a string for GET, so read directly
+/// into that final allocation instead of making a byte vector and a second
+/// payload-sized query string first.
+fn append_query_file(url: &str, path: &Path) -> Result<String, String> {
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("Cannot read the payload to send: {e}"))?;
+    let query_bytes = usize::try_from(
+        file.metadata()
+            .map_err(|e| format!("Cannot read the payload to send: {e}"))?
+            .len(),
+    )
+    .map_err(|_| "The form data is too large for a request URL".to_string())?;
+    let (base, fragment) = match url.find('#') {
         Some(i) => (&url[..i], &url[i..]),
         None => (url, ""),
     };
-    let sep = if base.contains('?') { '&' } else { '?' };
-    format!("{base}{sep}{query}{frag}")
+    let reserve = base
+        .len()
+        .checked_add(query_bytes)
+        .and_then(|n| n.checked_add(fragment.len()))
+        .and_then(|n| n.checked_add(1))
+        .ok_or_else(|| "The form data is too large for a request URL".to_string())?;
+    let mut result = String::new();
+    result
+        .try_reserve_exact(reserve)
+        .map_err(|e| format!("Cannot prepare the form request URL: {e}"))?;
+    result.push_str(base);
+    result.push(if base.contains('?') { '&' } else { '?' });
+    let query_start = result.len();
+    file.read_to_string(&mut result)
+        .map_err(|e| format!("The URL-encoded form data is not valid UTF-8: {e}"))?;
+
+    let query = &result[query_start..];
+    let leading = query.len() - query.trim_start().len();
+    let query_len = query.trim().len();
+    if query_len == 0 {
+        return Ok(url.to_string());
+    }
+    if leading > 0 {
+        result.drain(query_start..query_start + leading);
+    }
+    result.truncate(query_start + query_len);
+    result.push_str(fragment);
+    Ok(result)
 }
 
 /// Split an http(s) address into (normalized url, scheme, authority).
@@ -662,19 +698,28 @@ async fn fetch_into(
     let mut current = start;
     // A payload is only ever a file `net_payload_path` minted: the consent
     // dialog shows that file's bytes, so a body read from anywhere else would
-    // transmit a local file the user never saw.
-    let body = match request.body_path.as_deref() {
+    // transmit a local file the user never saw. POST streams the file; GET
+    // carries its URL-encoded payload in the request target instead.
+    let body_path = match request.body_path.as_deref() {
         Some(path) => {
             if !crate::scratch::is_net_file_in(Path::new(path), scratch) {
                 return Err("The payload to send is not a prepared submission file. Nothing was sent.".to_string());
             }
-            Some(std::fs::read(path).map_err(|e| format!("Cannot read the payload to send: {e}"))?)
+            Some(PathBuf::from(path))
         }
         None => None,
     };
+    let body_len = body_path
+        .as_deref()
+        .map(|path| {
+            std::fs::metadata(path)
+                .map(|metadata| metadata.len())
+                .map_err(|e| format!("Cannot read the payload to send: {e}"))
+        })
+        .transpose()?;
     if !post {
-        if let Some(ref bytes) = body {
-            if !bytes.is_empty() {
+        if let (Some(path), Some(length)) = (body_path.as_deref(), body_len) {
+            if length > 0 {
                 let base = request
                     .content_type
                     .as_deref()
@@ -689,8 +734,7 @@ async fn fetch_into(
                 // otherwise send NOTHING while the app reported success — that
                 // is refused by name instead.
                 if base == "application/x-www-form-urlencoded" {
-                    let query = String::from_utf8_lossy(bytes);
-                    current = append_query(&current, query.trim());
+                    current = append_query_file(&current, path)?;
                 } else {
                     return Err(format!(
                         "This form is set to submit by GET, which can only carry URL-encoded (HTML) form data, not {}. Nothing was sent.",
@@ -700,7 +744,6 @@ async fn fetch_into(
             }
         }
     }
-    let mut send_body = if post { body } else { None };
     let mut hops = 0u32;
     let mut first_hop_global = true;
 
@@ -786,7 +829,17 @@ async fn fetch_into(
             if let Some(ref ct) = request.content_type {
                 builder = builder.header(reqwest::header::CONTENT_TYPE, ct.clone());
             }
-            builder = builder.body(send_body.clone().unwrap_or_default());
+            if let (Some(path), Some(length)) = (body_path.as_deref(), body_len) {
+                let file = tokio::fs::File::open(path)
+                    .await
+                    .map_err(|e| format!("Cannot read the payload to send: {e}"))?;
+                let stream = ReaderStream::with_capacity(file.take(length), 64 * 1024);
+                builder = builder
+                    .header(reqwest::header::CONTENT_LENGTH, length.to_string())
+                    .body(reqwest::Body::wrap_stream(stream));
+            } else {
+                builder = builder.body(Vec::new());
+            }
         }
         let response = builder
             .send()
@@ -815,7 +868,6 @@ async fn fetch_into(
             }
             if !redirect_keeps_body(status) {
                 post = false;
-                send_body = None;
             }
             current = target;
             continue;
@@ -905,10 +957,23 @@ pub fn net_payload_path(stem: Option<String>, extension: Option<String>) -> Resu
         .to_string())
 }
 
+/// Return the size of a prepared form payload without loading its bytes. The
+/// consent dialog uses this for PDF submissions, which it summarizes by size.
+#[tauri::command]
+pub fn net_payload_size(path: String) -> Result<u64, String> {
+    let payload = Path::new(&path);
+    if !crate::scratch::is_net_file_in(payload, &crate::scratch::net_dir()) {
+        return Err("The payload is not a prepared submission file.".to_string());
+    }
+    std::fs::metadata(payload)
+        .map(|metadata| metadata.len())
+        .map_err(|e| format!("Cannot read the payload size: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
+    use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
     use std::time::{Duration, Instant};
 
@@ -934,9 +999,8 @@ mod tests {
                         Ok(s) => s,
                         Err(_) => break,
                     };
-                    let mut buffer = [0u8; 8192];
-                    let read = stream.read(&mut buffer).unwrap_or(0);
-                    let head = String::from_utf8_lossy(&buffer[..read]).to_string();
+                    let request = read_http_request(&mut stream);
+                    let head = String::from_utf8_lossy(&request).to_string();
                     sink.lock().unwrap().push(head);
                     let reply = replies[index.min(replies.len() - 1)].clone();
                     index += 1;
@@ -973,6 +1037,31 @@ mod tests {
             file_name: Some("probe".to_string()),
             refuse_private: false,
         }
+    }
+
+    fn read_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+        let mut reader = BufReader::new(stream);
+        let mut request = Vec::new();
+        let mut content_length = 0usize;
+        loop {
+            let mut line = Vec::new();
+            reader.read_until(b'\n', &mut line).unwrap();
+            assert!(!line.is_empty(), "request ended before its headers");
+            if line == b"\r\n" || line == b"\n" {
+                request.extend_from_slice(&line);
+                break;
+            }
+            if let Some((name, value)) = std::str::from_utf8(&line).unwrap().split_once(':') {
+                if name.eq_ignore_ascii_case("content-length") {
+                    content_length = value.trim().parse().unwrap();
+                }
+            }
+            request.extend_from_slice(&line);
+        }
+        let body_start = request.len();
+        request.resize(body_start + content_length, 0);
+        reader.read_exact(&mut request[body_start..]).unwrap();
+        request
     }
 
     #[test]
@@ -1587,11 +1676,41 @@ mod tests {
     }
 
     #[test]
+    fn payload_size_reads_metadata_only_for_this_process_s_payload() {
+        let payload = response_path(&crate::scratch::net_dir(), "size-probe", "pdf").unwrap();
+        std::fs::write(&payload, b"1234567").unwrap();
+        assert_eq!(
+            net_payload_size(payload.to_string_lossy().to_string()).unwrap(),
+            7
+        );
+        let _ = std::fs::remove_file(&payload);
+
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(outside.path(), b"1234567").unwrap();
+        assert!(net_payload_size(outside.path().to_string_lossy().to_string()).is_err());
+    }
+
+    #[test]
     fn a_response_name_cannot_be_steered() {
         assert_eq!(safe_stem(Some("../../evil")), "evil");
         assert_eq!(safe_stem(Some("")), "response");
         assert_eq!(safe_stem(None), "response");
         assert_eq!(safe_stem(Some("form_1-data")), "form_1-data");
+    }
+
+    #[test]
+    fn a_get_payload_query_is_appended_before_the_fragment() {
+        let payload = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(payload.path(), b"name=Ada&city=London\n").unwrap();
+        let url = append_query_file(
+            "https://forms.example/submit?existing=1#section",
+            payload.path(),
+        )
+        .unwrap();
+        assert_eq!(
+            url,
+            "https://forms.example/submit?existing=1&name=Ada&city=London#section"
+        );
     }
 
     #[tokio::test]
@@ -1631,6 +1750,53 @@ mod tests {
         let lowered = requests[0].to_ascii_lowercase();
         assert!(!lowered.contains("cookie:"));
         assert!(!lowered.contains("authorization:"));
+    }
+
+    #[tokio::test]
+    async fn a_large_post_body_streams_and_replays_on_a_preserving_redirect() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for reply in [
+                "HTTP/1.1 307 Temporary Redirect\r\nLocation: /retry\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/pdf\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                requests.push(read_http_request(&mut stream));
+                stream.write_all(reply.as_bytes()).unwrap();
+            }
+            requests
+        });
+
+        let payload =
+            response_path(&crate::scratch::net_dir(), "large-stream-probe", "pdf").unwrap();
+        let expected: Vec<u8> = (0..(2 * 1024 * 1024)).map(|index| (index % 251) as u8).collect();
+        std::fs::write(&payload, &expected).unwrap();
+        let response = fetch_with_policy(
+            &NetRequest {
+                url: format!("http://127.0.0.1:{port}/submit"),
+                method: "post".to_string(),
+                body_path: Some(payload.to_string_lossy().to_string()),
+                content_type: Some("application/pdf".to_string()),
+                file_name: Some("probe".to_string()),
+                refuse_private: true,
+            },
+            true,
+        )
+        .await
+        .unwrap();
+        let requests = server.join().unwrap();
+
+        assert_eq!(response.status, 200);
+        assert_eq!(requests.len(), 2);
+        for request in &requests {
+            let body_start = request.windows(4).position(|v| v == b"\r\n\r\n").unwrap() + 4;
+            assert_eq!(&request[body_start..], expected.as_slice());
+        }
+        assert!(String::from_utf8_lossy(&requests[1]).starts_with("POST /retry "));
+        let _ = std::fs::remove_file(payload);
+        let _ = std::fs::remove_file(response.path);
     }
 
     #[tokio::test]

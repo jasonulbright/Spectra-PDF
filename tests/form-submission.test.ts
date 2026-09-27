@@ -51,6 +51,7 @@ function io(script: Script): { io: SubmissionIo; log: string[] } {
         return script.build ? script.build() : { count: 2 };
       },
       payloadBytes: async () => new TextEncoder().encode('%FDF-1.2'),
+      payloadSize: async () => 7,
       send: async (request) => {
         log.push(`send ${request.bodyPath}`);
         if (script.reply instanceof Error) throw script.reply;
@@ -110,6 +111,30 @@ describe('the payload', () => {
     await run(fake);
     expect(log).not.toContain(`send ${PAYLOAD}`);
     expect(removed(log)).toEqual([PAYLOAD]);
+  });
+
+  it('summarizes a PDF from metadata without reading the entire payload', async () => {
+    const { io: fake, log } = io({ consent: 'cancel' });
+    let preview: Parameters<SubmissionIo['consent']>[0]['preview'] | undefined;
+    fake.payloadBytes = async () => { throw new Error('PDF bytes should not be loaded for the summary'); };
+    fake.payloadSize = async (path) => {
+      log.push(`size ${path}`);
+      return 987654321;
+    };
+    fake.consent = async (request) => {
+      preview = request.preview;
+      log.push('consent');
+      return 'cancel';
+    };
+
+    await runSubmission(fake, {
+      field: 'Send',
+      stem: 'invoice',
+      action: { ...action('https://forms.example/submit'), format: 'pdf' },
+    });
+
+    expect(preview).toEqual({ kind: 'document', bytes: 987654321 });
+    expect(log).toContain(`size ${PAYLOAD}`);
   });
 
   it('goes after the consent’s Save answer saves a copy, and nothing is sent', async () => {
