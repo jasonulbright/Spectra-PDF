@@ -414,6 +414,25 @@ function keepPathsOpenedSinceSnapshot(snapshot: OpenDocument[], live: OpenDocume
   return newlyOpened.length > 0 ? [...snapshot, ...newlyOpened] : snapshot;
 }
 
+/** Add newly opened files to a replay base in their state before their first
+ * recorded edit. Using the live documents would replay those edits twice. */
+function addOpenedPathsAtReplayStart(
+  snapshot: OpenDocument[],
+  live: OpenDocument[],
+  historySnapshots: readonly OpenDocument[][],
+): OpenDocument[] {
+  const snapshotPaths = new Set(snapshot.map((document) => document.path));
+  const livePaths = [...new Set(live.map((document) => document.path))];
+  const additions = livePaths
+    .filter((path) => !snapshotPaths.has(path))
+    .flatMap((path) => {
+      const firstRecorded = historySnapshots.find((documents) => documents.some((document) => document.path === path));
+      const source = firstRecorded ?? live;
+      return source.filter((document) => document.path === path);
+    });
+  return additions.length > 0 ? [...snapshot, ...additions] : snapshot;
+}
+
 /** Closing an unrelated file need not erase page edits in the rest of the
  * workspace. A retained import source keeps copied-page history resolvable;
  * moved pages still make the closing path part of the edit. */
@@ -1090,7 +1109,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           pageEditRefusalReason: null,
         };
       } else {
-        const base = withCommitted(since.length > 0 ? since[0].documents : state.workspace.documents);
+        const base = withCommitted(addOpenedPathsAtReplayStart(
+          since.length > 0 ? since[0].documents : state.workspace.documents,
+          state.workspace.documents,
+          since.map((entry) => entry.documents),
+        ));
         const committed: AppState = {
           ...state,
           files,
@@ -1188,7 +1211,15 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         const unrecorded = history.baseDirty.includes(action.path);
         const replayed = replayPageTier(
           state,
-          placeDocuments(history.base, action.path, action.documents),
+          placeDocuments(
+            addOpenedPathsAtReplayStart(
+              history.base,
+              prev,
+              state.pageUndoStack.map((entry) => entry.documents),
+            ),
+            action.path,
+            action.documents,
+          ),
           history.baseDirty.filter((p) => p !== action.path),
           history.actions,
           history.undoDepth,
