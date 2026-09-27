@@ -210,6 +210,8 @@ export const tabDrag = {
 export const claims = {
   claim: (path: string, mode: 'write' | 'read') =>
     invoke<ClaimResult>('claim_document', { path, mode }),
+  downgradeToRead: (path: string) =>
+    invoke<ClaimResult>('downgrade_document_to_read', { path }),
   release: (path: string) => invoke<void>('release_document', { path }),
   /** Claim every folder one run writes: all of them, or none. */
   claimOutputRoots: (paths: string[]) =>

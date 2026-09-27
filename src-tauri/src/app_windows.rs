@@ -480,7 +480,10 @@ struct RunClaim {
     label: String,
     roots: Vec<String>,
     kind: RunClaimKind,
-    _lease: std::sync::Arc<crate::folder_claims::FolderLease>,
+    // Private scratch writes still need an in-process output reservation so a
+    // document cannot open bytes mid-write, but they do not participate in
+    // machine-wide folder ownership.
+    _lease: Option<std::sync::Arc<crate::folder_claims::FolderLease>>,
 }
 
 #[derive(Debug, Default)]
@@ -604,8 +607,9 @@ impl ClaimState {
         let holders = map.entry(path.to_string()).or_default();
         match holders.iter_mut().find(|c| c.label == label) {
             // Re-claiming is idempotent per window: the open funnel runs for a
-            // file this window already holds, and a read claim upgrades to a
-            // write claim when the same window opens what it imported from.
+            // file this window already holds, and a read claim upgrades when
+            // that source is opened. Downgrading a closed import source is an
+            // explicit operation so an ordinary import cannot weaken a live tab.
             Some(held) => {
                 if mode == ClaimMode::Write {
                     held.mode = ClaimMode::Write;
@@ -656,14 +660,34 @@ impl ClaimState {
     }
 
     pub fn release(&self, path: &str, label: &str) {
-        if let Ok(mut map) = self.by_path.lock() {
-            if let Some(holders) = map.get_mut(path) {
-                holders.retain(|c| c.label != label);
-                if holders.is_empty() {
-                    map.remove(path);
-                }
+        let mut map = self
+            .by_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(holders) = map.get_mut(path) {
+            holders.retain(|c| c.label != label);
+            if holders.is_empty() {
+                map.remove(path);
             }
         }
+    }
+
+    pub fn downgrade_document_to_read(&self, path: &str, label: &str) -> ClaimOutcome {
+        let _identity_claim = self
+            .identity_claim
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut map = self
+            .by_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(held) = map
+            .get_mut(path)
+            .and_then(|holders| holders.iter_mut().find(|claim| claim.label == label))
+        {
+            held.mode = ClaimMode::Read;
+        }
+        ClaimOutcome::granted()
     }
 
     /// Register a web origin only while this window owns the document path.
@@ -862,6 +886,30 @@ impl ClaimState {
         path: &str,
         label: &str,
     ) -> Result<EngineOutputReservation, String> {
+        let scratch_root = crate::scratch::root().to_string_lossy().into_owned();
+        self.claim_engine_output_with_lease_policy(
+            path,
+            label,
+            !root_contains(&scratch_root, path),
+        )
+    }
+
+    /// Reserve a caller-selected output folder, including one beneath the
+    /// app's scratch root. It always needs the full cross-process lease.
+    pub(crate) fn claim_engine_output_folder(
+        &self,
+        path: &str,
+        label: &str,
+    ) -> Result<EngineOutputReservation, String> {
+        self.claim_engine_output_with_lease_policy(path, label, true)
+    }
+
+    fn claim_engine_output_with_lease_policy(
+        &self,
+        path: &str,
+        label: &str,
+        acquire_folder_lease: bool,
+    ) -> Result<EngineOutputReservation, String> {
         let _identity_claim = self
             .identity_claim
             .lock()
@@ -888,12 +936,29 @@ impl ClaimState {
             ));
         }
 
-        if let Some(folder) = runs.held.iter().find(|run| {
-            run.kind == RunClaimKind::Folder
-                && run.label == label
-                && run.roots.iter().any(|root| root_contains(root, path))
-        }) {
-            let lease = folder._lease.clone();
+        if acquire_folder_lease {
+            if let Some(folder) = runs.held.iter().find(|run| {
+                run.kind == RunClaimKind::Folder
+                    && run.label == label
+                    && run.roots.iter().any(|root| root_contains(root, path))
+            }) {
+                let lease = folder._lease.clone();
+                runs.last_token += 1;
+                let token = runs.last_token;
+                runs.held.push(RunClaim {
+                    token,
+                    label: label.to_string(),
+                    roots: vec![path.to_string()],
+                    kind: RunClaimKind::EngineOutput,
+                    _lease: lease,
+                });
+                return Ok(EngineOutputReservation {
+                    runs: self.runs.clone(),
+                    token,
+                    label: label.to_string(),
+                });
+            }
+        } else {
             runs.last_token += 1;
             let token = runs.last_token;
             runs.held.push(RunClaim {
@@ -901,7 +966,7 @@ impl ClaimState {
                 label: label.to_string(),
                 roots: vec![path.to_string()],
                 kind: RunClaimKind::EngineOutput,
-                _lease: lease,
+                _lease: None,
             });
             return Ok(EngineOutputReservation {
                 runs: self.runs.clone(),
@@ -951,7 +1016,10 @@ impl ClaimState {
             let holder = runs
                 .held
                 .iter()
-                .find(|run| run.roots.iter().any(|held| roots_conflict(held, wanted)));
+                .find(|run| {
+                    run._lease.is_some()
+                        && run.roots.iter().any(|held| roots_conflict(held, wanted))
+                });
             if let Some(holder) = holder {
                 return Ok(RunClaimOutcome {
                     granted: false,
@@ -1013,7 +1081,7 @@ impl ClaimState {
             label: label.to_string(),
             roots,
             kind,
-            _lease: lease,
+            _lease: Some(lease),
         });
         Ok(RunClaimOutcome {
             granted: true,
@@ -1044,11 +1112,14 @@ impl ClaimState {
         let runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
         let mut leases = Vec::new();
         for run in runs.held.iter().filter(|run| run.label == label) {
+            let Some(lease) = run._lease.as_ref() else {
+                continue;
+            };
             if !leases
                 .iter()
-                .any(|lease| std::sync::Arc::ptr_eq(lease, &run._lease))
+                .any(|held| std::sync::Arc::ptr_eq(held, lease))
             {
-                leases.push(run._lease.clone());
+                leases.push(lease.clone());
             }
         }
         leases
@@ -1664,6 +1735,17 @@ pub async fn claim_document(
     let path = crate::commands::canonical_path(&path);
     let state = app.state::<ClaimState>();
     Ok(state.claim_document(&path, window.label(), mode))
+}
+
+#[tauri::command]
+pub async fn downgrade_document_to_read(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    path: String,
+) -> Result<ClaimOutcome, String> {
+    let path = crate::commands::canonical_path(&path);
+    let state = app.state::<ClaimState>();
+    Ok(state.downgrade_document_to_read(&path, window.label()))
 }
 
 /// Which window has an output path open as a document.
@@ -2290,6 +2372,24 @@ mod tests {
         assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Write).granted);
     }
 
+    #[test]
+    fn a_document_retained_only_as_an_import_source_downgrades_to_read() {
+        let state = test_claim_state();
+        let path = r"C:\imports\source.pdf";
+        assert!(state
+            .claim_document(path, "main", ClaimMode::Write)
+            .granted);
+
+        assert!(state.downgrade_document_to_read(path, "main").granted);
+        assert!(state.write_claims("main").is_empty());
+        assert!(state
+            .claim_document(path, "doc-2", ClaimMode::Read)
+            .granted);
+        assert!(!state
+            .claim_document(path, "doc-2", ClaimMode::Write)
+            .granted);
+    }
+
     /// One run of `label` claiming `paths`.
     fn run(state: &ClaimState, label: &str, paths: &[&str]) -> RunClaimOutcome {
         let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
@@ -2364,6 +2464,84 @@ mod tests {
     }
 
     #[test]
+    fn a_private_scratch_output_is_not_blocked_by_a_temp_ancestor_run() {
+        let state = test_claim_state();
+        let temp_root = std::env::temp_dir().to_string_lossy().into_owned();
+        let output = crate::scratch::root()
+            .join(format!("codex-private-output-{}.pdf", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+
+        let folder_run = state.claim_roots(&[temp_root.clone()], "batch").unwrap();
+        assert!(folder_run.granted);
+        let user_output = std::path::PathBuf::from(&temp_root)
+            .join("codex-user-output.pdf")
+            .to_string_lossy()
+            .into_owned();
+        let user_error = state.claim_engine_output(&user_output, "main").unwrap_err();
+        assert!(user_error.contains("busy"), "{user_error}");
+
+        let reservation = state.claim_engine_output(&output, "main").unwrap();
+        assert!(state.folder_leases("main").is_empty());
+        drop(reservation);
+        assert!(state.release_run(folder_run.token.unwrap(), "batch"));
+
+        let reservation = state.claim_engine_output(&output, "main").unwrap();
+        let unrelated_run = state.claim_roots(&[temp_root], "batch").unwrap();
+        assert!(unrelated_run.granted);
+        drop(reservation);
+    }
+
+    #[test]
+    fn a_private_scratch_output_ignores_another_process_ancestor_lease() {
+        let state = test_claim_state();
+        let registry = state.folder_registry.as_ref().unwrap().clone();
+        let temp_root = std::env::temp_dir().to_string_lossy().into_owned();
+        let external_lease = crate::folder_claims::claim_in(&registry, &[temp_root]).unwrap();
+        let output = crate::scratch::root()
+            .join(format!("codex-private-external-{}.pdf", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+
+        let reservation = state.claim_engine_output(&output, "main").unwrap();
+        assert!(state.folder_leases("main").is_empty());
+        drop(reservation);
+        drop(external_lease);
+    }
+
+    #[test]
+    fn a_private_scratch_output_does_not_depend_on_the_folder_lease_registry() {
+        let mut state = test_claim_state();
+        let dir = state.test_registry.as_ref().unwrap().path();
+        let registry_file = dir.join("registry-is-a-file");
+        std::fs::write(&registry_file, b"not a directory").unwrap();
+        state.folder_registry = Some(registry_file);
+        let scratch_output = crate::scratch::root()
+            .join(format!("codex-private-registry-{}.pdf", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        let user_output = dir.join("user-output.pdf").to_string_lossy().into_owned();
+
+        let reservation = state.claim_engine_output(&scratch_output, "main").unwrap();
+        drop(reservation);
+        let error = state.claim_engine_output(&user_output, "main").unwrap_err();
+        assert!(error.contains("Folder ownership could not be checked"), "{error}");
+    }
+
+    #[test]
+    fn a_private_scratch_output_still_refuses_an_open_document() {
+        let state = test_claim_state();
+        let path = crate::scratch::root()
+            .join(format!("codex-private-open-{}.pdf", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        assert!(state.claim_document(&path, "doc-1", ClaimMode::Write).granted);
+
+        let error = state.claim_engine_output(&path, "main").unwrap_err();
+        assert!(error.contains("doc-1"), "{error}");
+    }
+
+    #[test]
     fn engine_outputs_inside_the_windows_folder_run_reuse_its_claim() {
         let state = test_claim_state();
         let token = run(&state, "main", &[r"C:\batch"]).token.unwrap();
@@ -2398,6 +2576,27 @@ mod tests {
             .unwrap_err();
         assert!(refusal.contains(r"C:\export\result.pdf"));
         assert!(refusal.contains("doc-1"));
+    }
+
+    #[test]
+    fn a_folder_output_reservation_refuses_an_open_generated_part() {
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("out");
+        std::fs::create_dir(&output_dir).unwrap();
+        let open_path = output_dir.join("report_1-2.pdf");
+        std::fs::write(&open_path, b"%PDF-1.7").unwrap();
+        let open_path = crate::commands::canonical_path(&open_path.to_string_lossy());
+        let output_dir = crate::commands::canonical_path(&output_dir.to_string_lossy());
+        assert!(state
+            .claim_document(&open_path, "doc-1", ClaimMode::Write)
+            .granted);
+
+        let error = state
+            .claim_engine_output_folder(&output_dir, "main")
+            .unwrap_err();
+        assert!(error.contains(&open_path), "{error}");
+        assert!(error.contains("doc-1"), "{error}");
     }
 
     #[test]
@@ -2469,6 +2668,22 @@ mod tests {
 
         let error = state.claim_engine_output(&output, "main").unwrap_err();
         assert!(error.contains("doc-1"));
+    }
+
+    #[test]
+    fn release_recovers_a_poisoned_document_map_and_frees_the_claim() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        let state = test_claim_state();
+        let path = r"C:\poisoned\document.pdf";
+        assert!(state.claim_document(path, "doc-1", ClaimMode::Write).granted);
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _map = state.by_path.lock().unwrap();
+            panic!("poison the test claim map");
+        }));
+
+        state.release(path, "doc-1");
+        assert!(state.claim_document(path, "doc-2", ClaimMode::Write).granted);
     }
 
     #[test]
