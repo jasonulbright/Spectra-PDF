@@ -15,7 +15,8 @@
 //! Enforced here rather than assumed:
 //!   * `http` / `https` / `file` only — every other scheme refuses by name;
 //!   * a web crawl follows only links whose HOST AND SCHEME match the start;
-//!     a local-file crawl stays under the selected page's canonical parent;
+//!     redirects and later top-level navigation obey the same boundary, and a
+//!     local-file crawl stays under the selected page's canonical parent;
 //!   * one window, navigated in turn — never a fan-out of hidden webviews;
 //!   * one capture at a time, and the window is destroyed on every exit path;
 //!   * closing the window cancels the run, and a cancelled run SAYS so rather
@@ -50,7 +51,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
 };
 use webview2_com::{
     take_pwstr, ExecuteScriptCompletedHandler, NavigationCompletedEventHandler,
-    PrintToPdfCompletedHandler,
+    NavigationStartingEventHandler, PrintToPdfCompletedHandler,
 };
 
 /// The window a capture runs in. One label, so a second capture cannot open a
@@ -534,6 +535,49 @@ where
     wait_step(&rx, timeout, timed_out)
 }
 
+/// Enforce the start page's scope for every top-level navigation made by this
+/// capture, including redirects and script or meta-refresh navigation during
+/// the settle and print steps. The capture window is destroyed on every exit,
+/// so the event registration has exactly the capture's lifetime.
+fn guard_navigation_scope(
+    window: &WebviewWindow,
+    scheme: String,
+    host: String,
+    local_root: Option<PathBuf>,
+) -> Result<(), StepError> {
+    run_step(
+        window,
+        DISPATCH_TIMEOUT,
+        "the capture scope could not be enforced",
+        move |browser, tx| {
+            let handler = NavigationStartingEventHandler::create(Box::new(move |_, args| {
+                if let Some(args) = args {
+                    let mut uri = PWSTR::null();
+                    let allowed = unsafe { args.Uri(&mut uri) }
+                        .ok()
+                        .map(|_| take_pwstr(uri))
+                        .is_some_and(|uri| {
+                            link_in_scope(&uri, &scheme, &host, local_root.as_deref())
+                        });
+                    if !allowed {
+                        let _ = unsafe { args.SetCancel(true) };
+                    }
+                }
+                Ok(())
+            }));
+            let mut token = 0i64;
+            unsafe {
+                browser
+                    .webview
+                    .add_NavigationStarting(&handler, &mut token)
+            }
+            .map_err(|e| format!("Could not enforce the capture scope: {e}"))?;
+            let _ = tx.send(Ok(()));
+            Ok(())
+        },
+    )
+}
+
 /// Wait for a step's completion off the window's thread.
 ///
 /// A disconnect is not a timeout: it means every sender was dropped, which
@@ -620,15 +664,25 @@ fn print_page(
     window: &WebviewWindow,
     path: &std::path::Path,
     options: &CaptureOptions,
-) -> Result<(), StepError> {
+    scheme: String,
+    host: String,
+    local_root: Option<PathBuf>,
+) -> Result<String, StepError> {
     let target = path.to_path_buf();
     let opts = options.clone();
-    run_step(
+    let final_url = run_step(
         window,
         PRINT_TIMEOUT,
         "the page did not finish rendering in time",
         move |browser, tx| {
             let settings = build_settings(&browser.environment, &opts)?;
+            let mut uri = PWSTR::null();
+            unsafe { browser.webview.Source(&mut uri) }
+                .map_err(|e| format!("Could not read the page address before printing: {e}"))?;
+            let final_url = take_pwstr(uri);
+            if !link_in_scope(&final_url, &scheme, &host, local_root.as_deref()) {
+                return Err("the page navigated outside the capture's permitted scope".to_string());
+            }
             // The print is asynchronous and the settings must outlive this
             // call, so a reference rides in the completion handler and is
             // released with it.
@@ -640,7 +694,7 @@ fn print_page(
                 } else {
                     Err("the page could not be rendered to PDF".to_string())
                 };
-                let _ = tx.send(outcome);
+                let _ = tx.send(outcome.map(|()| final_url));
                 Ok(())
             }));
             let wide = HSTRING::from(target.to_string_lossy().as_ref());
@@ -656,7 +710,10 @@ fn print_page(
     if !path.is_file() {
         return Err(StepError::Failed("the capture produced no PDF".to_string()));
     }
-    Ok(())
+    // The completion carries the exact source read immediately before the
+    // print call; it is the address whose document produced this PDF.
+    // `run_step` above has already waited for that completion.
+    Ok(final_url)
 }
 
 /// Same-document links, in document order, de-duplicated by the script so the
@@ -871,6 +928,12 @@ async fn run_capture(
     let hwnd = window.hwnd().map(|h| h.0 as usize).unwrap_or(0);
     let _ = window.with_webview(move |_| watch_close(hwnd));
 
+    match guard_navigation_scope(&window, scheme.clone(), host.clone(), local_root.clone()) {
+        Ok(()) => {}
+        Err(StepError::Cancelled) => return Ok(cancelled_result(capture_id)),
+        Err(StepError::Failed(error)) => return Err(error),
+    }
+
     let worker = window.clone();
     let opts = options.clone();
     let worker_scratch = scratch_dir;
@@ -1008,8 +1071,15 @@ fn crawl(
         }
 
         let path = scratch_dir.join(format!("page-{:03}.pdf", pages.len()));
-        match print_page(window, &path, options) {
-            Ok(()) => {}
+        let final_url = match print_page(
+            window,
+            &path,
+            options,
+            scheme.to_string(),
+            host.to_string(),
+            local_root.map(Path::to_path_buf),
+        ) {
+            Ok(final_url) => final_url,
             Err(StepError::Cancelled) => {
                 stopped = true;
                 break;
@@ -1019,11 +1089,15 @@ fn crawl(
                 failures.push(format!("{url}: {err}"));
                 continue;
             }
-        }
+        };
         let title = page_title(window);
         pages.push(CapturedPage {
-            url: url.clone(),
-            title: if title.trim().is_empty() { url.clone() } else { title },
+            url: final_url.clone(),
+            title: if title.trim().is_empty() {
+                final_url.clone()
+            } else {
+                title
+            },
             path: path.to_string_lossy().to_string(),
         });
 
@@ -1081,9 +1155,9 @@ fn crawl(
 mod tests {
     use super::{
         cancelled, cancelled_result, clamp, clear_cancel, decode_harvested_links,
-        discard_capture_at, enqueue_links, finish, frontier_cap, local_file_root, same_origin,
-        validate_url, window_close_requested, CaptureOptions, CaptureScratch, CapturedPage,
-        CAPTURE_LABEL, MAX_DEPTH_CEILING, MAX_PAGES_CEILING,
+        discard_capture_at, enqueue_links, finish, frontier_cap, link_in_scope, local_file_root,
+        same_origin, validate_url, window_close_requested, CaptureOptions, CaptureScratch,
+        CapturedPage, CAPTURE_LABEL, MAX_DEPTH_CEILING, MAX_PAGES_CEILING,
     };
 
     fn options(depth: u32, max_pages: u32) -> CaptureOptions {
@@ -1134,6 +1208,47 @@ mod tests {
         assert!(!same_origin("javascript:void(0)", "https", "example.test"));
         // File URLs have no host, but they do not share one filesystem-wide origin.
         assert!(!same_origin("file:///C:/Users/Public/secret.pdf", "file", ""));
+    }
+
+    #[test]
+    fn redirected_targets_are_checked_against_the_start_scope() {
+        assert!(link_in_scope(
+            "https://example.test/final",
+            "https",
+            "example.test",
+            None
+        ));
+        assert!(!link_in_scope(
+            "https://other.test/final",
+            "https",
+            "example.test",
+            None
+        ));
+        assert!(!link_in_scope(
+            "http://example.test/final",
+            "https",
+            "example.test",
+            None
+        ));
+        assert!(!link_in_scope(
+            "https://example.test:444/final",
+            "https",
+            "example.test:443",
+            None
+        ));
+
+        let temp = tempfile::tempdir().unwrap();
+        let site = temp.path().join("site");
+        let outside = temp.path().join("outside.html");
+        std::fs::create_dir_all(&site).unwrap();
+        let inside = site.join("final.html");
+        std::fs::write(&inside, "inside").unwrap();
+        std::fs::write(&outside, "outside").unwrap();
+        let root = std::fs::canonicalize(&site).unwrap();
+        let inside_url = url::Url::from_file_path(&inside).unwrap().to_string();
+        let outside_url = url::Url::from_file_path(&outside).unwrap().to_string();
+        assert!(link_in_scope(&inside_url, "file", "", Some(&root)));
+        assert!(!link_in_scope(&outside_url, "file", "", Some(&root)));
     }
 
     #[test]
