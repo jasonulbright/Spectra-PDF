@@ -26,6 +26,21 @@ $SigningClientVersion = "1.0.128"
 $SigningClientSha256 = "74bd7d27e6ce1051409c38d9b46bc8df0400ecd643d51ffbf2ac00869061e40b"
 $SigningClientUrl = "https://api.nuget.org/v3-flatcontainer/$SigningClientPackage/$SigningClientVersion/$SigningClientPackage.$SigningClientVersion.nupkg"
 
+function Get-SigningClientSha256([string]$Path) {
+    # Use .NET directly: the isolated Windows PowerShell image may not expose
+    # Microsoft.PowerShell.Utility's optional Get-FileHash command.
+    $stream = [System.IO.File]::OpenRead($Path)
+    $algorithm = $null
+    try {
+        $algorithm = [System.Security.Cryptography.SHA256]::Create()
+        $digest = $algorithm.ComputeHash($stream)
+        return [System.BitConverter]::ToString($digest).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        if ($algorithm) { $algorithm.Dispose() }
+    }
+}
+
 function Install-PinnedSigningClient {
     param([Parameter(Mandatory)][string]$Root)
     if (Test-Path -LiteralPath $Root) { Remove-Item -LiteralPath $Root -Recurse -Force }
@@ -36,7 +51,7 @@ function Install-PinnedSigningClient {
     Invoke-DownloadWithRetry -Description "$SigningClientPackage $SigningClientVersion" -OutFile $nupkg -Download {
         Invoke-WebRequest -Uri $SigningClientUrl -OutFile $nupkg -UseBasicParsing -TimeoutSec $DownloadRetryTimeoutSeconds
     }
-    $actual = (Get-FileHash -LiteralPath $nupkg -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actual = Get-SigningClientSha256 -Path $nupkg
     if ($actual -ne $SigningClientSha256) {
         Remove-Item -LiteralPath $nupkg -Force -ErrorAction SilentlyContinue
         throw "$SigningClientPackage $SigningClientVersion has SHA-256 $actual; the pin is $SigningClientSha256"

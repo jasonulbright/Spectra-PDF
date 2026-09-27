@@ -34,6 +34,10 @@ PDF/A requires one only where device colour spaces are used, so as configured
 the check would fail conformant files that use none. It is therefore cited
 against no PDF/A clause at all rather than cited as ``partial``.
 
+`document_javascript` has no PDF/A-4 citation: PDF/A-4 permits JavaScript
+under restrictions on automatic execution, so a blanket no-JavaScript check
+can reject a conforming file. The corpus check found such a mismatch.
+
 `fonts_subset` requires subsetting. PDF/A does not; its font-subset clause
 constrains subsets that exist. Same rule, opposite direction, so no citation.
 
@@ -134,8 +138,6 @@ PREFLIGHT_CLAUSES: tuple[Citation, ...] = (
     _c("xmp_present", "PDF/A-2b", "6.6.2.3.1", PARTIAL, {"require_xmp": True},
        "The document carries an XMP metadata stream."),
 
-    _c("document_javascript", "PDF/A-4", "6.6.1", PARTIAL, {"allow_js": False},
-       "The document carries no JavaScript action."),
     _c("xmp_present", "PDF/A-4", "6.7.2.1", PARTIAL, {"require_xmp": True},
        "The document carries an XMP metadata stream."),
 )
