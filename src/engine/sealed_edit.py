@@ -21,7 +21,12 @@ import os
 
 import pikepdf
 
-from engine.credentials import PERMISSIONS_HELD, open_pdf, opened_with_user_password
+from engine.credentials import (
+    PERMISSIONS_HELD,
+    _decoded_permissions,
+    open_pdf,
+    opened_with_user_password,
+)
 from engine.inplace import is_same_file
 from engine.pdf_save import save_pdf
 
@@ -39,7 +44,7 @@ class SealedEditMisuse(RuntimeError):
     """A sealed-edit door called for a document it does not serve."""
 
 
-def _require(path: str, capabilities) -> None:
+def _require(path: str, capabilities) -> list[str]:
     from engine.credentials import document_permissions
 
     if not opened_with_user_password(path):
@@ -51,6 +56,17 @@ def _require(path: str, capabilities) -> None:
     for name in names:
         if not _CAPABILITIES[name](permissions):
             raise PermissionError(PERMISSIONS_HELD)
+    return names
+
+
+def _first_document_id(pdf) -> bytes | None:
+    ids = pdf.trailer.get("/ID")
+    if not isinstance(ids, pikepdf.Array) or len(ids) < 1:
+        return None
+    first = ids[0]
+    if not isinstance(first, pikepdf.String):
+        return None
+    return bytes(first)
 
 
 def sealed_plaintext(path: str, capabilities, data: str | None = None) -> dict:
@@ -59,11 +75,31 @@ def sealed_plaintext(path: str, capabilities, data: str | None = None) -> dict:
 
     `data` (base64) names other encrypted bytes of the same document, such as
     a staged rewrite not yet published, to decrypt with `path`'s credential
-    instead of the file. Refused unless the document's /P bits allow every
-    one of `capabilities` ("pageTier", "commentTier", "formAuthoring")."""
-    _require(path, capabilities)
-    source = path if data is None else io.BytesIO(base64.b64decode(data, validate=True))
-    with open_pdf(source, document=path) as pdf:
+    instead of the file. Its first trailer /ID must match the working copy so
+    another file encrypted with the same password cannot inherit its /P
+    permissions. Refused unless the document's /P bits allow every one of
+    `capabilities` ("pageTier", "commentTier", "formAuthoring")."""
+    names = _require(path, capabilities)
+    if data is None:
+        source = path
+        pdf_context = open_pdf(source)
+    else:
+        source = io.BytesIO(base64.b64decode(data, validate=True))
+        with open_pdf(path) as working:
+            expected_id = _first_document_id(working)
+        if expected_id is None:
+            raise SealedEditMisuse(
+                "the supplied bytes cannot be matched to a document without a first trailer ID"
+            )
+        pdf_context = open_pdf(source, document=path)
+    with pdf_context as pdf:
+        if data is not None:
+            if not pdf.is_encrypted or _first_document_id(pdf) != expected_id:
+                raise SealedEditMisuse("the supplied bytes do not identify the same document")
+            permissions = _decoded_permissions(pdf)
+            for name in names:
+                if not _CAPABILITIES[name](permissions):
+                    raise PermissionError(PERMISSIONS_HELD)
         out = io.BytesIO()
         # Plaintext for the builder only; save_pdf would keep the encryption.
         pdf.save(out, encryption=False, deterministic_id=True)

@@ -30,16 +30,21 @@ def _allow(**overrides):
     return pikepdf.Permissions(**base)
 
 
-def _make(tmp_dir, allow, name="sealed.pdf"):
+def _make(tmp_dir, allow, name="sealed.pdf", page_label="page", document_id=None):
     path = os.path.join(tmp_dir, name)
     pdf = pikepdf.new()
     for i in range(3):
         pdf.add_blank_page(page_size=(612, 792))
-        pdf.pages[i].Contents = pdf.make_stream(f"BT /F1 12 Tf 72 700 Td (page {i + 1}) Tj ET".encode())
+        pdf.pages[i].Contents = pdf.make_stream(
+            f"BT /F1 12 Tf 72 700 Td ({page_label} {i + 1}) Tj ET".encode()
+        )
     pdf.Root.Outlines = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.Outlines, Count=0))
     pdf.Root.StructTreeRoot = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.StructTreeRoot))
     pdf.Root.OutputIntents = pikepdf.Array([pdf.make_indirect(pikepdf.Dictionary(
         Type=pikepdf.Name.OutputIntent, S=pikepdf.Name.GTS_PDFX, OutputConditionIdentifier="CGATS TR 001"))])
+    if document_id is not None:
+        identifier = document_id.ljust(16, b"\0")[:16]
+        pdf.trailer.ID = pikepdf.Array([pikepdf.String(identifier), pikepdf.String(identifier)])
     pdf.save(path, encryption=pikepdf.Encryption(user=USER, owner=OWNER, R=6, allow=allow))
     pdf.close()
     return path
@@ -47,7 +52,7 @@ def _make(tmp_dir, allow, name="sealed.pdf"):
 
 @pytest.fixture
 def sealed(tmp_dir):
-    path = _make(tmp_dir, _allow())
+    path = _make(tmp_dir, _allow(), document_id=b"sealed.pdf")
     assert open_document(path, USER)["opener"] == "user"
     yield path
     close_document(path)
@@ -222,3 +227,48 @@ def test_plaintext_of_given_bytes_uses_the_document_credential(sealed):
     with pikepdf.open(io.BytesIO(base64.b64decode(reply["data"]))) as plain:
         assert not plain.is_encrypted
         assert len(plain.pages) == 3
+
+
+def test_plaintext_refuses_another_documents_bytes_even_with_the_same_password(sealed, tmp_dir):
+    # The first document grants page edits; the second withholds them. A shared
+    # user password must not let the first document's /P authorize the second.
+    other = _make(
+        tmp_dir,
+        _allow(modify_other=False, modify_assembly=False),
+        "restricted.pdf",
+        page_label="restricted",
+        document_id=b"restricted.pdf",
+    )
+    with pikepdf.open(sealed, password=USER) as allowed:
+        with pikepdf.open(other, password=USER) as restricted:
+            assert bytes(allowed.trailer.ID[0]) != bytes(restricted.trailer.ID[0])
+    raw = base64.b64encode(open(other, "rb").read()).decode("ascii")
+
+    with pytest.raises(SealedEditMisuse, match="same document"):
+        sealed_plaintext(sealed, "pageTier", data=raw)
+
+
+def test_plaintext_checks_the_supplied_documents_permissions_when_ids_collide(sealed, tmp_dir):
+    other = _make(
+        tmp_dir,
+        _allow(modify_other=False, modify_assembly=False),
+        "restricted.pdf",
+        page_label="restricted",
+        document_id=b"sealed.pdf",
+    )
+    raw = base64.b64encode(open(other, "rb").read()).decode("ascii")
+
+    with pytest.raises(PermissionError, match="held by an owner password"):
+        sealed_plaintext(sealed, "pageTier", data=raw)
+
+
+def test_plaintext_accepts_a_resealed_stage_of_the_same_document(sealed, tmp_dir):
+    built = _plain(sealed, "pageTier")
+    built.pages[0].Rotate = 90
+    stage = os.path.join(tmp_dir, "sealed-stage.pdf")
+    sealed_reseal(sealed, _b64(built), stage, "pageTier")
+    raw = base64.b64encode(open(stage, "rb").read()).decode("ascii")
+
+    reply = sealed_plaintext(sealed, "pageTier", data=raw)
+    with pikepdf.open(io.BytesIO(base64.b64decode(reply["data"]))) as plain:
+        assert int(plain.pages[0].Rotate) == 90
