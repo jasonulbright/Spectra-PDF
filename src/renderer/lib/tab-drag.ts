@@ -473,7 +473,7 @@ export interface SerialPublisher<T> {
    * holding something older than this window measured, and reporting that as
    * flushed hands a quit a receipt for an order that never arrived.
    */
-  flush(): Promise<boolean>;
+  flush(timeoutMs?: number): Promise<boolean>;
 }
 
 /**
@@ -533,7 +533,7 @@ export function createSerialPublisher<T>(send: (value: T) => Promise<void>): Ser
       if (inFlight) return;
       start();
     },
-    flush(): Promise<boolean> {
+    flush(timeoutMs?: number): Promise<boolean> {
       // Idle is idle: a flush that nothing is outstanding for must not wait for
       // a publish that may never be posted.
       if (!inFlight && pending === null) {
@@ -551,7 +551,23 @@ export function createSerialPublisher<T>(send: (value: T) => Promise<void>): Ser
       // A value posted while this is waiting extends the wait rather than
       // slipping past it — the point is that the far side holds the newest
       // order, not that some publish finished.
-      return new Promise<boolean>((resolve) => waiting.push(resolve));
+      return new Promise<boolean>((resolve) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const waiter = (landed: boolean): void => {
+          if (timer !== undefined) clearTimeout(timer);
+          resolve(landed);
+        };
+        waiting.push(waiter);
+        if (timeoutMs !== undefined) {
+          timer = setTimeout(() => {
+            // A timed-out close must not leave a resolver retained until an
+            // IPC call that may never return. The publish itself stays in its
+            // serial lane; only this caller stops waiting for it.
+            waiting = waiting.filter((pending) => pending !== waiter);
+            resolve(false);
+          }, Math.max(0, timeoutMs));
+        }
+      });
     },
   };
 }
@@ -560,8 +576,13 @@ export function createSerialPublisher<T>(send: (value: T) => Promise<void>): Ser
 
 /** What `flushTabOrder` needs of a publisher, and nothing more. */
 export interface TabOrderChannel {
-  flush(): Promise<boolean>;
+  flush(timeoutMs?: number): Promise<boolean>;
 }
+
+// The renderer must report a failed order before Rust's 3-second quit receipt
+// deadline expires. A plain window × also uses this bound so a stalled invoke
+// cannot prevent the ordinary close flow from continuing.
+const TAB_ORDER_FLUSH_TIMEOUT_MS = 2500;
 
 /**
  * The strip's own publisher, for the one caller that is not the strip.
@@ -588,7 +609,7 @@ export function setTabOrderChannel(channel: TabOrderChannel | null): void {
  * no order, so there is none to lose.
  */
 export function flushTabOrder(): Promise<boolean> {
-  return tabOrder ? tabOrder.flush() : Promise.resolve(true);
+  return tabOrder ? tabOrder.flush(TAB_ORDER_FLUSH_TIMEOUT_MS) : Promise.resolve(true);
 }
 
 // ── Frame throttle ────────────────────────────────────────────────────────

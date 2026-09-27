@@ -748,6 +748,24 @@ describe('the tab order flush', () => {
       setTabOrderChannel(null);
     }
   });
+
+  it('returns a failed verdict instead of trapping close on a hung order command', async () => {
+    vi.useFakeTimers();
+    const publisher = createSerialPublisher<string[]>(() => new Promise<void>(() => {}));
+    setTabOrderChannel(publisher);
+    try {
+      publisher.post(['a', 'b']);
+      const done = flushTabOrder();
+      let settled = false;
+      void done.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(settled).toBe(true);
+      await expect(done).resolves.toBe(false);
+    } finally {
+      setTabOrderChannel(null);
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('frame throttle', () => {
