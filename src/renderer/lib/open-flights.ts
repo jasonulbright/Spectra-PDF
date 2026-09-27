@@ -35,6 +35,44 @@ export function createOpenFlights(): OpenFlights {
   };
 }
 
+/** Serialize operations that read or replace the bytes behind a path within
+ * one renderer. Open and import claims are exclusive across windows, but one
+ * window may upgrade its own read claim to a write claim; this lock closes
+ * the corresponding same-window race. Multiple paths are acquired in stable
+ * order so concurrent batches cannot deadlock. */
+export interface PathOperationLock {
+  run<T>(paths: readonly string[], operation: () => Promise<T>): Promise<T>;
+}
+
+export function createPathOperationLock(): PathOperationLock {
+  const tails = new Map<string, Promise<void>>();
+
+  const acquire = async (path: string): Promise<() => void> => {
+    const previous = tails.get(path) ?? Promise.resolve();
+    let release!: () => void;
+    const owned = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.then(() => owned);
+    tails.set(path, tail);
+    await previous;
+    return () => {
+      if (tails.get(path) === tail) tails.delete(path);
+      release();
+    };
+  };
+
+  return {
+    async run<T>(paths: readonly string[], operation: () => Promise<T>): Promise<T> {
+      const releases: (() => void)[] = [];
+      try {
+        for (const path of [...new Set(paths)].sort()) releases.push(await acquire(path));
+        return await operation();
+      } finally {
+        for (let i = releases.length - 1; i >= 0; i--) releases[i]();
+      }
+    },
+  };
+}
+
 /**
  * - `reactivated`: the path was open as a document and came forward.
  * - `opened`: this call read the bytes and landed OPEN_FILE.
