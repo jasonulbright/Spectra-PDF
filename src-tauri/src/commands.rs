@@ -2098,25 +2098,64 @@ pub struct UnreadableRecord {
 
 /// The records this launch could not read, until a renderer takes them.
 ///
-/// In memory only: a record set aside no longer has its own name, so the next
-/// launch has nothing to report, and nothing on disk has to remember that the
-/// report was shown.
-pub struct UnreadableRecords(std::sync::Mutex<Vec<UnreadableRecord>>);
+/// A session that could not be set aside also keeps a write guard after its
+/// notice is taken. The next session save must preserve that file first.
+pub struct UnreadableRecords {
+    records: std::sync::Mutex<Vec<UnreadableRecord>>,
+    session_needs_preservation: std::sync::atomic::AtomicBool,
+}
 
 impl UnreadableRecords {
     pub fn new() -> Self {
-        Self(std::sync::Mutex::new(Vec::new()))
+        Self {
+            records: std::sync::Mutex::new(Vec::new()),
+            session_needs_preservation: std::sync::atomic::AtomicBool::new(false),
+        }
     }
 
     pub fn push(&self, record: UnreadableRecord) {
-        self.0
+        if record.record == LaunchRecord::Session && record.kept_as.is_none() {
+            self.session_needs_preservation
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        self.records
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(record);
     }
 
     pub fn take(&self) -> Vec<UnreadableRecord> {
-        std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()))
+        std::mem::take(&mut *self.records.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    pub fn session_needs_preservation(&self) -> bool {
+        self.session_needs_preservation
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub fn session_was_preserved(&self, path: &Path) {
+        let path = path.to_string_lossy().into_owned();
+        if let Ok(mut records) = self.records.lock() {
+            if let Some(record) = records
+                .iter_mut()
+                .find(|record| record.record == LaunchRecord::Session && record.kept_as.is_none())
+            {
+                record.kept_as = Some(path);
+            }
+        }
+        self.session_needs_preservation
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn session_record_disappeared(&self) {
+        self.records
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|record| {
+                record.record != LaunchRecord::Session || record.kept_as.is_some()
+            });
+        self.session_needs_preservation
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

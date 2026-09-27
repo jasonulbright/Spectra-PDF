@@ -937,7 +937,7 @@ fn write(app: &AppHandle, session: &Session) -> std::io::Result<()> {
             "no app data directory",
         ));
     };
-    write_at(&path, session)
+    write_at_preserving_unreadable(&path, session, &app.state::<UnreadableRecords>())
 }
 
 struct BoundedJsonBuffer {
@@ -972,6 +972,30 @@ impl std::io::Write for BoundedJsonBuffer {
 
 fn write_at(path: &Path, session: &Session) -> std::io::Result<()> {
     write_at_with_limit(path, session, MAX_SESSION_RECORD_BYTES as usize)
+}
+
+fn write_at_preserving_unreadable(
+    path: &Path,
+    session: &Session,
+    unreadable: &UnreadableRecords,
+) -> std::io::Result<()> {
+    if unreadable.session_needs_preservation() {
+        match crate::staging::set_aside(path) {
+            Ok(aside) => unreadable.session_was_preserved(&aside),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                unreadable.session_record_disappeared();
+            }
+            Err(error) => {
+                return Err(std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "refusing to replace the unreadable session record until it can be preserved: {error}"
+                    ),
+                ));
+            }
+        }
+    }
+    write_at(path, session)
 }
 
 fn write_at_with_limit(path: &Path, session: &Session, max_bytes: usize) -> std::io::Result<()> {
@@ -2479,7 +2503,7 @@ mod tests {
     /// and refuses the rename that would set it aside.
     #[cfg(windows)]
     #[test]
-    fn a_session_record_that_cannot_be_set_aside_is_reported_where_it_stands() {
+    fn a_later_session_write_preserves_a_record_that_could_not_initially_be_set_aside() {
         use std::os::windows::fs::OpenOptionsExt;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(SESSION_FILE);
@@ -2497,6 +2521,10 @@ mod tests {
             Session::default()
         );
 
+        assert!(unreadable.session_needs_preservation());
+        assert!(write_at_preserving_unreadable(&path, &saved_session(), &unreadable).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), torn);
+
         drop(holder);
         assert_eq!(std::fs::read(&path).unwrap(), torn);
         assert_eq!(
@@ -2505,6 +2533,18 @@ mod tests {
                 record: LaunchRecord::Session,
                 kept_as: None,
             }]
+        );
+        assert!(unreadable.session_needs_preservation());
+
+        write_at_preserving_unreadable(&path, &saved_session(), &unreadable).unwrap();
+        let aside = dir.path().join(format!("{SESSION_FILE}.unreadable"));
+        assert_eq!(std::fs::read(&aside).unwrap(), torn);
+        assert!(!unreadable.session_needs_preservation());
+        assert_eq!(
+            serde_json::from_slice::<Session>(&std::fs::read(&path).unwrap())
+                .unwrap()
+                .version,
+            SESSION_VERSION
         );
     }
 
