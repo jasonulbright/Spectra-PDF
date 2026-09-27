@@ -188,18 +188,19 @@ function clearSelection(state: AppState): AppState {
  *   - CONTAINMENT (docs whose `path` matches): the path's documents are
  *     dropped/re-derived, taking every page INSIDE them — including
  *     pages moved in from other files.
- *   - `includeSourced` adds pages elsewhere whose `sourceDocId` matches:
- *     CLOSE_FILE also strips those from OTHER documents, so their ids
- *     leave the workspace too. Without this a cross-file-moved page's id
- *     became a PHANTOM after closing its source — never prunable again
- *     (generations!) and silently poisoning every batched rotate's
- *     all-or-nothing guard (regression, reducer-level repro).
+ *   - `includeSourced` adds pages elsewhere whose `sourceDocId` matches.
+ *   - `removedPageIds` adds the exact cross-file pages a close removes after
+ *     distinguishing moved originals from imported copies. Without pruning a
+ *     moved page's id, it becomes a PHANTOM after its source closes — never
+ *     prunable again (generations!) and silently poisoning every batched
+ *     rotate's all-or-nothing guard (regression, reducer-level repro).
  * Multiple paths at once serve the gate-bypass defensive branches, whose
  * invalidation spans every dirty path. */
 function pruneSelectionForPaths(
   state: AppState,
   paths: readonly string[],
   includeSourced: boolean,
+  removedPageIds: ReadonlySet<string> = new Set(),
 ): AppState {
   const { selectedPageIds, selectionAnchor } = state.ui;
   if (selectedPageIds.size === 0 && selectionAnchor === null) return state;
@@ -207,7 +208,7 @@ function pruneSelectionForPaths(
   const owned = new Set<string>();
   for (const d of state.workspace.documents) {
     for (const p of d.pages) {
-      if (pathSet.has(d.path) || (includeSourced && pathSet.has(p.sourceDocId))) {
+      if (pathSet.has(d.path) || (includeSourced && pathSet.has(p.sourceDocId)) || removedPageIds.has(p.id)) {
         owned.add(p.id);
       }
     }
@@ -414,9 +415,9 @@ function keepPathsOpenedSinceSnapshot(snapshot: OpenDocument[], live: OpenDocume
 }
 
 /** Closing an unrelated file need not erase page edits in the rest of the
- * workspace. Preserve history only when recorded actions and source references
- * are independent of the path being closed. */
-function pageHistoryIndependentOfPath(state: AppState, path: string): boolean {
+ * workspace. A retained import source keeps copied-page history resolvable;
+ * moved pages still make the closing path part of the edit. */
+function pageHistoryIndependentOfPath(state: AppState, path: string, retainSourceBytes: boolean): boolean {
   const history = [...state.pageUndoStack, ...state.pageRedoStack];
   if (state.pageDirtyPaths.includes(path) || history.some((entry) => entry.dirtyPaths.includes(path))) return false;
   const compositions = [state.workspace.documents, ...history.map((entry) => entry.documents)];
@@ -425,7 +426,7 @@ function pageHistoryIndependentOfPath(state: AppState, path: string): boolean {
     for (const doc of docs) {
       if (doc.path === path || seenDocuments.has(doc)) continue;
       seenDocuments.add(doc);
-      if (doc.pages.some((page) => page.sourceDocId === path)) return false;
+      if (!retainSourceBytes && doc.pages.some((page) => page.sourceDocId === path)) return false;
     }
   }
   return history.every((entry) => {
@@ -573,6 +574,7 @@ function evictUnreferencedImportSources(
   documents: OpenDocument[],
   pageUndoStack: unknown[],
   pageRedoStack: unknown[],
+  candidates?: ReadonlySet<string>,
 ): Map<string, OpenFile> {
   if (pageUndoStack.length > 0 || pageRedoStack.length > 0) return files;
   const hasImportOnly = [...files.values()].some((f) => f.importOnly);
@@ -582,7 +584,7 @@ function evictUnreferencedImportSources(
   let changed = false;
   const next = new Map(files);
   for (const [path, f] of files) {
-    if (f.importOnly && !referenced.has(path)) {
+    if (f.importOnly && (!candidates || candidates.has(path)) && !referenced.has(path)) {
       next.delete(path);
       changed = true;
     }
@@ -870,15 +872,62 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, files };
     }
     case 'CLOSE_FILE': {
-      // Closing a file drops ITS selected pages; selection in other files
-      // survives (and a later reopen can no longer collide anyway:
-      // reindex mints a fresh generation). includeSourced: CLOSE also
-      // strips this path's SOURCED pages out of other documents below, so
-      // their ids leave the workspace with it (regression phantom).
-      const base = pruneSelectionForPaths(state, [action.path], true);
-      const preservePageHistory = pageHistoryIndependentOfPath(state, action.path);
+      const sourceFile = state.files.get(action.path);
+      const pageHistory = [...state.pageUndoStack, ...state.pageRedoStack];
+      const sourceCompositions = [state.workspace.documents, ...pageHistory.map((entry) => entry.documents)];
+      const priorImportSources = new Set(
+        sourceCompositions.flat().flatMap((doc) => doc.pages.map((page) => page.sourceDocId)),
+      );
+      const sourceDocs = sourceCompositions.flat().filter((doc) => doc.path === action.path);
+      const sourcePageIds = new Set(
+        sourceDocs
+          .flatMap((doc) => doc.pages)
+          .filter((page) => page.sourceDocId === action.path)
+          .map((page) => page.id),
+      );
+      const sourcePageIndexes = new Set(
+        sourceDocs
+          .flatMap((doc) => doc.pages)
+          .filter((page) => page.sourceDocId === action.path)
+          .map((page) => page.sourcePageIndex),
+      );
+      const foreignSourcePages = state.workspace.documents
+        .filter((doc) => doc.path !== action.path)
+        .flatMap((doc) => doc.pages)
+        .filter((page) => page.sourceDocId === action.path);
+      // IMPORT_PAGES makes fresh PageRef ids while MOVE_PAGE keeps the moved
+      // page's id. Preserve the former against the source bytes as a hidden
+      // import source; discard the latter when its source file is closed.
+      // The distinction matters because only the imported copy belongs to the
+      // destination independently of the source tab.
+      const importedCopies = foreignSourcePages.filter(
+        (page) => sourcePageIndexes.has(page.sourcePageIndex) && !sourcePageIds.has(page.id),
+      );
+      const retainSourceBytes =
+        !!sourceFile && !sourceFile.importOnly && sourceFile.buffer !== null && importedCopies.length > 0;
+      const removedSourcePageIds = new Set(
+        foreignSourcePages
+          .filter((page) => !retainSourceBytes || sourcePageIds.has(page.id))
+          .map((page) => page.id),
+      );
+      // Closing a file drops its own selected pages and any moved page that is
+      // actually removed. A copied page that remains in another document keeps
+      // its selection and its identity.
+      const base = pruneSelectionForPaths(state, [action.path], false, removedSourcePageIds);
+      const preservePageHistory = pageHistoryIndependentOfPath(state, action.path, retainSourceBytes);
       const files = new Map(state.files);
-      files.delete(action.path);
+      if (retainSourceBytes && sourceFile) {
+        const { authoredIdentity: _authoredIdentity, ...source } = sourceFile;
+        files.set(action.path, {
+          ...source,
+          dirty: false,
+          undoStack: [],
+          redoStack: [],
+          importOnly: true,
+        });
+      } else {
+        files.delete(action.path);
+      }
       // Fall back to the next file the user can actually SEE — never a
       // byte-only import source. Ghosts have no tab and are never shown, so
       // making one "the active file" hands every panel an invisible target:
@@ -895,21 +944,19 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const activeFileId = state.activeFileId === action.path
         ? nextActive
         : state.activeFileId;
-      // Drop the file's documents, and strip its pages out of every other
-      // document — pending cross-file moves referencing it could never be
-      // committed once the source bytes are gone. History that references the
-      // closing path resets; independent page history survives with that
-      // path removed from its snapshots. Paths stripped all the way to zero
-      // pages are reset to their on-disk composition instead of keeping an
-      // uncommittable empty strip.
+      // Drop the file's documents and strip moved pages whose source is no
+      // longer represented there. Copied import pages keep the source bytes in
+      // the import-only entry until a commit bakes them into the destination.
+      // Paths stripped all the way to zero pages reset to their on-disk
+      // composition instead of keeping an uncommittable empty strip.
       const stripped = pruneEmptyDocs(
         state.workspace.documents
           .filter((d) => d.path !== action.path)
-          .map((d) =>
-            d.pages.some((p) => p.sourceDocId === action.path)
-              ? { ...d, pages: d.pages.filter((p) => p.sourceDocId !== action.path) }
-              : d,
-          ),
+          .map((d) => {
+            if (!d.pages.some((p) => removedSourcePageIds.has(p.id))) return d;
+            const pages = d.pages.filter((p) => !removedSourcePageIds.has(p.id));
+            return { ...d, pages, pageCount: pages.length };
+          }),
       );
       const { documents, dirtyPaths } = resetEmptiedPaths(
         stripped,
@@ -931,14 +978,19 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         const { [action.path]: _dropped, ...viewRotationByPath } = ui.viewRotationByPath;
         ui = { ...ui, viewRotationByPath };
       }
+      const pageUndoStack = preservePageHistory ? dropPathFromHistory(state.pageUndoStack, action.path) : [];
+      const pageRedoStack = preservePageHistory ? dropPathFromHistory(state.pageRedoStack, action.path) : [];
+      const retainedFiles = evictUnreferencedImportSources(
+        files, documents, pageUndoStack, pageRedoStack, priorImportSources,
+      );
       return {
         ...base,
-        files,
+        files: retainedFiles,
         activeFileId,
         ui,
         workspace: { documents },
-        pageUndoStack: preservePageHistory ? dropPathFromHistory(state.pageUndoStack, action.path) : [],
-        pageRedoStack: preservePageHistory ? dropPathFromHistory(state.pageRedoStack, action.path) : [],
+        pageUndoStack,
+        pageRedoStack,
         pageDirtyPaths: dirtyPaths,
       };
     }

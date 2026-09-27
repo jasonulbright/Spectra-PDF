@@ -966,6 +966,56 @@ describe('snapshot undo/redo history (multi-level)', () => {
 });
 
 describe('CLOSE_FILE with pending cross-file edits', () => {
+  it('keeps copied pages and their byte source when the source tab closes', () => {
+    const target = makeFile('target.pdf', 2);
+    const source = makeFile('source.pdf', 2);
+    const importedPage = { ...makePages('source.pdf', 1)[0], id: 'source.pdf#g-import#p0' };
+    const imported = appReducer(
+      stateWith(
+        [target, source],
+        [
+          makeDoc(target, 'target.pdf#0', makePages('target.pdf', 2)),
+          makeDoc(source, 'source.pdf#0', makePages('source.pdf', 2)),
+        ],
+      ),
+      {
+        type: 'IMPORT_PAGES',
+        toDocId: 'target.pdf#0',
+        toIndex: 1,
+        pages: [importedPage],
+        sources: [{ path: source.path, buffer: source.buffer! }],
+      },
+    );
+
+    const selected = {
+      ...imported,
+      ui: {
+        ...imported.ui,
+        selectedPageIds: new Set([importedPage.id]),
+        selectionAnchor: importedPage.id,
+      },
+    };
+    const closed = appReducer(selected, { type: 'CLOSE_FILE', path: source.path });
+    expect(closed.files.get(source.path)).toMatchObject({ importOnly: true, buffer: source.buffer });
+    expect(closed.workspace.documents.map((doc) => doc.path)).toEqual(['target.pdf']);
+    expect(pageIds(closed.workspace.documents[0])).toEqual([
+      'target.pdf#p0', 'source.pdf#g-import#p0', 'target.pdf#p1',
+    ]);
+    expect(closed.pageDirtyPaths).toEqual(['target.pdf']);
+    expect(closed.ui.selectedPageIds.has(importedPage.id)).toBe(true);
+    expect(closed.ui.selectionAnchor).toBe(importedPage.id);
+    expect(closed.pageUndoStack).toHaveLength(1);
+    expect(closed.pageUndoStack[0].documents.every((doc) => doc.path !== source.path)).toBe(true);
+
+    const undone = appReducer(closed, { type: 'UNDO_PAGE_OP' });
+    expect(pageIds(undone.workspace.documents[0])).toEqual(['target.pdf#p0', 'target.pdf#p1']);
+    expect(undone.files.get(source.path)?.importOnly).toBe(true); // redo still needs the bytes
+    const redone = appReducer(undone, { type: 'REDO_PAGE_OP' });
+    expect(pageIds(redone.workspace.documents[0])).toContain(importedPage.id);
+    const closedTarget = appReducer(redone, { type: 'CLOSE_FILE', path: target.path });
+    expect(closedTarget.files.has(source.path)).toBe(false); // last reference and history are gone
+  });
+
   it('strips pages sourced from the closed file and resets the tier', () => {
     const a = makeFile('a.pdf', 2);
     const b = makeFile('b.pdf', 2);
@@ -984,6 +1034,7 @@ describe('CLOSE_FILE with pending cross-file edits', () => {
     const closed = appReducer(moved, { type: 'CLOSE_FILE', path: 'a.pdf' });
     expect(closed.workspace.documents.map((d) => d.id)).toEqual(['b.pdf#0']);
     expect(closed.workspace.documents[0].pages.every((p) => p.sourceDocId === 'b.pdf')).toBe(true);
+    expect(closed.workspace.documents[0].pageCount).toBe(closed.workspace.documents[0].pages.length);
     expect(closed.pageUndoStack).toEqual([]);
     expect(closed.pageRedoStack).toEqual([]);
     expect(closed.pageDirtyPaths).toEqual(['b.pdf']);
