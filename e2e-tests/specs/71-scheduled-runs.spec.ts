@@ -220,6 +220,8 @@ describe('scheduled batch runs', () => {
         source: src,
         dest,
         inPlace: true,
+        frequency: 'daily',
+        time: '04:00',
       });
     } catch (e: unknown) {
       message = e instanceof Error ? e.message : String(e);
@@ -239,6 +241,8 @@ describe('scheduled batch runs', () => {
         name: 'E2E Should Not Exist',
         source: src,
         dest,
+        frequency: 'daily',
+        time: '04:00',
         account: 'CONTOSO\\svc_ocr$',
         logDir: '',
       });
@@ -254,11 +258,17 @@ describe('scheduled batch runs', () => {
     // separator is how that scoping would be escaped.
     let message = '';
     try {
-      await scheduleCreate({ name: '..\\..\\Microsoft\\Windows\\Evil', source: src, dest });
+      await scheduleCreate({
+        name: '..\\..\\Microsoft\\Windows\\Evil',
+        source: src,
+        dest,
+        frequency: 'daily',
+        time: '04:00',
+      });
     } catch (e: unknown) {
       message = e instanceof Error ? e.message : String(e);
     }
-    expect(message).toBeTruthy();
+    expect(message.toLowerCase()).toContain('schedule name may use letters');
   });
 
   it('deletes it, and Windows no longer has it', async () => {

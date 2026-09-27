@@ -507,18 +507,21 @@ def _pikepdf_saves(path):
             continue
         documents = set()
         for node in ast.walk(scope):
-            if isinstance(node, ast.withitem):
-                call = node.context_expr
-                if (isinstance(call, ast.Call)
-                        and ast.unparse(call.func) in constructors
-                        and isinstance(node.optional_vars, ast.Name)):
-                    documents.add(node.optional_vars.id)
-            elif (isinstance(node, ast.Assign)
+            if (isinstance(node, ast.Assign)
                     and isinstance(node.value, ast.Call)
                     and ast.unparse(node.value.func) in constructors):
                 documents.update(
                     t.id for t in node.targets if isinstance(t, ast.Name)
                 )
+        for node in ast.walk(scope):
+            if not isinstance(node, ast.withitem) or not isinstance(node.optional_vars, ast.Name):
+                continue
+            context = node.context_expr
+            if (isinstance(context, ast.Call)
+                    and ast.unparse(context.func) in constructors):
+                documents.add(node.optional_vars.id)
+            elif isinstance(context, ast.Name) and context.id in documents:
+                documents.add(node.optional_vars.id)
         for node in ast.walk(scope):
             if (isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Attribute)

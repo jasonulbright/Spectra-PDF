@@ -15,6 +15,21 @@ $PipWheel = "pip-$PipVersion-py3-none-any.whl"
 $PipSha256 = "71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e"
 $PipUrl = "https://files.pythonhosted.org/packages/f3/6e/1736e5b4ae2b778ef2f81c47d797de9f891d4d8acb047a24ca37a60294dd/$PipWheel"
 
+function Get-PipWheelSha256([string]$Path) {
+    # Use .NET directly: the isolated Windows PowerShell image may not expose
+    # Microsoft.PowerShell.Utility's optional Get-FileHash command.
+    $stream = [System.IO.File]::OpenRead($Path)
+    $algorithm = $null
+    try {
+        $algorithm = [System.Security.Cryptography.SHA256]::Create()
+        $digest = $algorithm.ComputeHash($stream)
+        return [System.BitConverter]::ToString($digest).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        if ($algorithm) { $algorithm.Dispose() }
+    }
+}
+
 function Install-PinnedPip {
     param([Parameter(Mandatory)][string]$Python)
     $pythonHome = Split-Path -Parent $Python
@@ -24,7 +39,7 @@ function Install-PinnedPip {
     Invoke-DownloadWithRetry -Description $PipWheel -OutFile $archive -Download {
         Invoke-WebRequest -Uri $PipUrl -OutFile $archive -UseBasicParsing -TimeoutSec $DownloadRetryTimeoutSeconds
     }
-    $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actual = Get-PipWheelSha256 -Path $archive
     if ($actual -ne $PipSha256) {
         Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
         throw "$PipWheel has SHA-256 $actual; the pin is $PipSha256"
