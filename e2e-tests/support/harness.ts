@@ -72,6 +72,23 @@ export async function getState(): Promise<TestStateSnapshot> {
   });
 }
 
+export async function emitTrayAction(action: 'merge' | 'quit'): Promise<void> {
+  const error = await browser.executeAsync<string | null, [typeof action]>(
+    function (value, done) {
+      const harness = (window as any).__SPECTRA_TEST__;
+      if (!harness) {
+        done('__SPECTRA_TEST__ missing — was the binary built with VITE_E2E=1?');
+        return;
+      }
+      harness.emitTrayAction(value)
+        .then(() => done(null))
+        .catch((err: unknown) => done(String(err)));
+    },
+    action,
+  );
+  if (error) throw new Error(`emitTrayAction failed: ${error}`);
+}
+
 export async function setView(view: TestStateSnapshot['view']): Promise<void> {
   await browser.execute<void, [TestStateSnapshot['view']]>(
     function (v) {
