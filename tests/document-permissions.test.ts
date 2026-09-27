@@ -18,7 +18,13 @@ import type { AppCommandHandlers, CommandContext } from '../src/renderer/command
 import { appReducer, initialState } from '../src/renderer/state/reducer';
 import { documentPermissions } from '../src/renderer/state/selectors';
 import type { AppState, OpenDocument, OpenFile, PageRef } from '../src/renderer/state/types';
-import { openWithCredentials, type DocumentOpenIo } from '../src/renderer/lib/document-open';
+import {
+  discardDocumentWorkingCopy,
+  openWithCredentials,
+  prepareDocumentWorkingCopy,
+  type DocumentOpenIo,
+  type PrepareDocumentIo,
+} from '../src/renderer/lib/document-open';
 import { droppedCredentials, releaseDocumentCredentials } from '../src/renderer/lib/credential-release';
 import { documentPassword, rememberDocumentPassword } from '../src/renderer/lib/document-passwords';
 import { releaseStageCredential, setStageCredentialCaller, shareStageCredential } from '../src/renderer/lib/stage-credentials';
@@ -334,6 +340,69 @@ describe('the open loop', () => {
     });
     const opened = await openWithCredentials('w.pdf', 'locked.pdf', io);
     expect(opened).toEqual({ security: { opener: 'owner', permissions: UNRESTRICTED.permissions }, password: null });
+  });
+});
+
+describe('working-copy open cleanup', () => {
+  function prepareIo(overrides: Partial<PrepareDocumentIo> = {}): PrepareDocumentIo {
+    return {
+      createWorkingCopy: vi.fn(async () => 'scratch/locked.pdf'),
+      readBuffer: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      rememberPassword: vi.fn(),
+      releaseCredentials: vi.fn(async () => {}),
+      removeWorkingCopy: vi.fn(async () => {}),
+      call: vi.fn(async (method) => {
+        if (method === 'check_encrypted') return { encrypted: true, kind: 'password' };
+        if (method === 'open_document_attempt') {
+          return { status: 'opened', document: { encrypted: true, opener: 'user' } };
+        }
+        if (method === 'document_permissions') return { opener: 'user', permissions: { copy: true } };
+        if (method === 'get_page_count') return { pages: 1 };
+        throw new Error(`unexpected ${method}`);
+      }),
+      askPassword: vi.fn(async (): Promise<{ password: string } | 'cancel'> => ({ password: USER_PASSWORD })),
+      askCertificate: vi.fn(async (): Promise<'cancel'> => 'cancel'),
+      wrongPassword: () => 'incorrect',
+      ...overrides,
+    };
+  }
+
+  it('releases and removes a copy when the password prompt is cancelled', async () => {
+    const io = prepareIo({ askPassword: vi.fn(async (): Promise<'cancel'> => 'cancel') });
+    expect(await prepareDocumentWorkingCopy(PATH, 'locked.pdf', io)).toBeNull();
+    expect(io.releaseCredentials).toHaveBeenCalledWith(PATH, 'scratch/locked.pdf');
+    expect(io.removeWorkingCopy).toHaveBeenCalledWith('scratch/locked.pdf');
+  });
+
+  it('releases an engine credential and removes the copy when a later open read fails', async () => {
+    const io = prepareIo({
+      readBuffer: vi.fn(async () => { throw new Error('disk full after password accepted'); }),
+    });
+    await expect(prepareDocumentWorkingCopy(PATH, 'locked.pdf', io))
+      .rejects.toThrow('disk full after password accepted');
+    expect(io.rememberPassword).not.toHaveBeenCalled();
+    expect(io.releaseCredentials).toHaveBeenCalledWith(PATH, 'scratch/locked.pdf');
+    expect(io.removeWorkingCopy).toHaveBeenCalledWith('scratch/locked.pdf');
+  });
+
+  it('removes a working copy even when credential release fails', async () => {
+    const io = prepareIo({
+      askPassword: vi.fn(async (): Promise<'cancel'> => 'cancel'),
+      releaseCredentials: vi.fn(async () => { throw new Error('engine unavailable'); }),
+    });
+    await expect(prepareDocumentWorkingCopy(PATH, 'locked.pdf', io))
+      .rejects.toThrow('engine unavailable');
+    expect(io.removeWorkingCopy).toHaveBeenCalledWith('scratch/locked.pdf');
+  });
+
+  it('keeps a fully prepared copy and disposes a later unregistered copy', async () => {
+    const io = prepareIo();
+    const prepared = await prepareDocumentWorkingCopy(PATH, 'locked.pdf', io);
+    expect(prepared?.pageCount).toBe(1);
+    expect(io.removeWorkingCopy).not.toHaveBeenCalled();
+    await discardDocumentWorkingCopy(PATH, prepared!.workingPath, io);
+    expect(io.releaseCredentials).toHaveBeenCalledWith(PATH, 'scratch/locked.pdf');
+    expect(io.removeWorkingCopy).toHaveBeenCalledWith('scratch/locked.pdf');
   });
 });
 
