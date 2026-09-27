@@ -142,4 +142,14 @@ describe('adversarial recent-file ordering', () => {
       .filter((path) => bypass.test(readFileSync(path, 'utf8')));
     expect(offenders).toEqual([]);
   });
+
+  it('an open batch finishes from persisted recent state, not its stale snapshot', () => {
+    const app = readFileSync(resolve(process.cwd(), 'src', 'renderer', 'App.tsx'), 'utf8');
+    const start = app.indexOf('const openByPaths = useCallback');
+    const end = app.indexOf('// Import one or more files', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const funnel = app.slice(start, end);
+    expect(funnel).toContain("if (changed) dispatch({ type: 'UI_SET_RECENT_FILES', files: readRecent() });");
+  });
 });

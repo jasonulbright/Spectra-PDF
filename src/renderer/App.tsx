@@ -1236,7 +1236,12 @@ function AppContent(): React.ReactElement {
     } finally {
       // Flush whatever succeeded even if a later file threw (a malformed PDF
       // mid-batch would otherwise strand the opened tabs unfocused + unrecorded).
-      if (changed) dispatch({ type: 'UI_SET_RECENT_FILES', files: recent });
+      // The batch's `recent` is only the input to its serialized writes. An
+      // awaited hand-off can let another window clear/remove/open entries after
+      // the last write; its storage event may already have updated this state.
+      // Finish from the authoritative store so this older batch cannot replace
+      // that newer transaction in the UI.
+      if (changed) dispatch({ type: 'UI_SET_RECENT_FILES', files: readRecent() });
       if (lastOpened && opts?.focus !== false) dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: lastOpened } });
       // A claim outlives only what it protects: a cancelled password prompt or
       // a file that threw mid-batch must not leave this window holding a path
