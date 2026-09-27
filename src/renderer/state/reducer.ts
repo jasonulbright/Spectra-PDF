@@ -405,6 +405,14 @@ function placeDocuments(
   return [...kept.slice(0, insertAt), ...incoming, ...kept.slice(insertAt)];
 }
 
+/** Keep documents from files opened after a page-tier snapshot when that
+ * snapshot is restored. Opening a file is not itself a page edit. */
+function keepPathsOpenedSinceSnapshot(snapshot: OpenDocument[], live: OpenDocument[]): OpenDocument[] {
+  const snapshotPaths = new Set(snapshot.map((document) => document.path));
+  const newlyOpened = live.filter((document) => !snapshotPaths.has(document.path));
+  return newlyOpened.length > 0 ? [...snapshot, ...newlyOpened] : snapshot;
+}
+
 type PageTier = Pick<AppState, 'workspace' | 'pageUndoStack' | 'pageRedoStack' | 'pageDirtyPaths'>;
 
 /** Replay recorded page edits onto `base` and rebuild both stacks from them.
@@ -748,7 +756,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // A REOPEN replaces the path's buffer — ITS selection ids die (fresh
       // generation on reindex); other files' selection survives. A
       // fresh open leaves the selection alone entirely.
-      const base = state.files.has(action.path)
+      const reopening = state.files.has(action.path);
+      const base = reopening
         ? pruneSelectionForPaths(state, [action.path], false)
         : state;
       let files = new Map(state.files);
@@ -785,16 +794,18 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         // briefly resurrects pre-reopen state (possibly already-edited docs). Drop
         // this path's docs (the indexer rebuilds them from the fresh buffer)
         // and its now-meaningless page-tier dirt; other files' compositions
-        // and dirt stay — an open invalidates only its own path.
+        // and dirt stay — an open invalidates only its own path. A genuinely
+        // new path keeps page-tier history; undo/redo retains its documents
+        // even in snapshots recorded before the path was opened.
         workspace: {
           documents: state.workspace.documents.filter((d) => d.path !== action.path),
         },
         pageDirtyPaths: state.pageDirtyPaths.filter((p) => p !== action.path),
-        // Page-edit history recorded before this file existed (or before its
-        // buffer was refreshed) can't be replayed against the new workspace —
-        // undoing it would drop the file's strip.
-        pageUndoStack: [],
-        pageRedoStack: [],
+        // Reopening replaces a buffer and invalidates its old history. A new
+        // file does not: it is not part of the user's page edits, and opening
+        // it must not force-commit another file just to retain undo.
+        pageUndoStack: reopening ? [] : state.pageUndoStack,
+        pageRedoStack: reopening ? [] : state.pageRedoStack,
       };
     }
     case 'REORDER_FILE': {
@@ -1894,7 +1905,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       if (!last) return state;
       return {
         ...state,
-        workspace: { documents: last.documents },
+        // Files opened after this edit were not in its saved composition.
+        // Keep their current documents when restoring the older workspace.
+        workspace: { documents: keepPathsOpenedSinceSnapshot(last.documents, state.workspace.documents) },
         pageDirtyPaths: last.dirtyPaths,
         pageUndoStack: state.pageUndoStack.slice(0, -1),
         pageRedoStack: [
@@ -1908,7 +1921,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       if (!next) return state;
       return {
         ...state,
-        workspace: { documents: next.documents },
+        workspace: { documents: keepPathsOpenedSinceSnapshot(next.documents, state.workspace.documents) },
         pageDirtyPaths: next.dirtyPaths,
         pageRedoStack: state.pageRedoStack.slice(0, -1),
         pageUndoStack: [
