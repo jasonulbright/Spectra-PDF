@@ -663,6 +663,19 @@ fn response_path(dir: &Path, stem: &str, extension: &str) -> Result<PathBuf, Str
     )))
 }
 
+/// A flush failure can be the first report of a full or faulty volume. Do not
+/// leave the response bytes already written before reporting that failure.
+fn flush_response_file<W: Write>(mut file: W, path: &Path) -> Result<(), String> {
+    match file.flush() {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            drop(file);
+            let _ = std::fs::remove_file(path);
+            Err(format!("Cannot write the response to disk: {error}"))
+        }
+    }
+}
+
 /// Perform one request, following same-origin redirects, and write the
 /// response body to a capped file in the app temp tree.
 ///
@@ -733,28 +746,28 @@ async fn fetch_into(
         .transpose()?;
     if !post {
         if let (Some(path), Some(length)) = (body_path.as_deref(), body_len) {
-            if length > 0 {
-                let base = request
-                    .content_type
-                    .as_deref()
-                    .unwrap_or("")
-                    .split(';')
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-                    .to_ascii_lowercase();
-                // Only URL-encoded (the HTML export) can ride a GET's query.
-                // FDF/XFDF/PDF have no query encoding, so a GET of one would
-                // otherwise send NOTHING while the app reported success — that
-                // is refused by name instead.
-                if base == "application/x-www-form-urlencoded" {
+            let base = request
+                .content_type
+                .as_deref()
+                .unwrap_or("")
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            // Only URL-encoded (the HTML export) can ride a GET's query.
+            // FDF/XFDF/PDF have no query encoding, so a GET of one would
+            // otherwise send NOTHING while the app reported success — that
+            // is refused by name instead, even when the prepared file is empty.
+            if base == "application/x-www-form-urlencoded" {
+                if length > 0 {
                     current = append_query_file(&current, path)?;
-                } else {
-                    return Err(format!(
-                        "This form is set to submit by GET, which can only carry URL-encoded (HTML) form data, not {}. Nothing was sent.",
-                        if base.is_empty() { "that format" } else { &base }
-                    ));
                 }
+            } else {
+                return Err(format!(
+                    "This form is set to submit by GET, which can only carry URL-encoded (HTML) form data, not {}. Nothing was sent.",
+                    if base.is_empty() { "that format" } else { &base }
+                ));
             }
         }
     }
@@ -928,8 +941,7 @@ async fn fetch_into(
                 return Err(format!("Cannot write the response to disk: {e}"));
             }
         }
-        file.flush()
-            .map_err(|e| format!("Cannot write the response to disk: {e}"))?;
+        flush_response_file(file, &path)?;
 
         return Ok(NetResponse {
             status,
@@ -1727,6 +1739,30 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_response_flush_failure_removes_the_partial_file() {
+        struct FlushFails;
+        impl Write for FlushFails {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "simulated disk failure",
+                ))
+            }
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let partial = temp.path().join("partial-response.pdf");
+        std::fs::write(&partial, b"partial response").unwrap();
+        let error = flush_response_file(FlushFails, &partial).unwrap_err();
+        assert!(error.contains("simulated disk failure"), "{error}");
+        assert!(!partial.exists(), "the failed response remained in scratch");
+    }
+
     #[tokio::test]
     async fn a_slow_dns_lookup_consumes_the_request_deadline() {
         let started = Instant::now();
@@ -1918,22 +1954,25 @@ mod tests {
         // FDF/XFDF/PDF have no GET query encoding: sending an empty GET while
         // reporting success is the defect, so this refuses instead of sending.
         let payload = response_path(&crate::scratch::net_dir(), "probe-payload", "fdf").unwrap();
-        std::fs::write(&payload, b"%FDF-1.2 data").unwrap();
-        let error = fetch_with_policy(
-            &NetRequest {
-                url: "http://127.0.0.1:1/submit".to_string(),
-                method: "get".to_string(),
-                body_path: Some(payload.to_string_lossy().to_string()),
-                content_type: Some("application/vnd.fdf".to_string()),
-                file_name: Some("probe".to_string()),
-                refuse_private: true,
-            },
-            true,
-        )
-        .await
-        .unwrap_err();
-        assert!(error.contains("URL-encoded"), "{error}");
-        assert!(error.contains("vnd.fdf"), "{error}");
+        for data in [b"%FDF-1.2 data".as_slice(), b""] {
+            std::fs::write(&payload, data).unwrap();
+            let error = fetch_with_policy(
+                &NetRequest {
+                    url: "http://127.0.0.1:1/submit".to_string(),
+                    method: "get".to_string(),
+                    body_path: Some(payload.to_string_lossy().to_string()),
+                    content_type: Some("application/vnd.fdf".to_string()),
+                    file_name: Some("probe".to_string()),
+                    refuse_private: true,
+                },
+                true,
+            )
+            .await
+            .unwrap_err();
+            assert!(error.contains("URL-encoded"), "{error}");
+            assert!(error.contains("vnd.fdf"), "{error}");
+        }
+        let _ = std::fs::remove_file(payload);
     }
 
     #[tokio::test]
