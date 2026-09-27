@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { engine } from '../lib/tauri-bridge';
+import { watchOtherWindowWork } from '../lib/other-window-work';
 
 /**
  * How many engine requests the OTHER windows have in flight.
@@ -14,10 +15,13 @@ import { engine } from '../lib/tauri-bridge';
 export function useOtherWindowWork(): number {
   const [count, setCount] = useState(0);
   useEffect(() => {
-    const unlisten = engine.onOtherWindows(setCount);
-    return () => {
-      unlisten.then((fn) => fn());
-    };
+    return watchOtherWindowWork(
+      {
+        listen: (onCount) => engine.onOtherWindows(onCount),
+        snapshot: () => engine.otherWindowWorkSnapshot(),
+      },
+      setCount,
+    );
   }, []);
   return count;
 }
