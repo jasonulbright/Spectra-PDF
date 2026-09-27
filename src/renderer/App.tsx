@@ -189,7 +189,7 @@ import {
   sweepDeadRecents,
 } from './lib/recent-files';
 import { claimPaths, createClaimHolds, departedImportSources, releasePaths, soleOwner, type ClaimRefusal } from './lib/window-claims';
-import { createOpenFlights, openPathOnce } from './lib/open-flights';
+import { createOpenFlights, createPathOperationLock, openPathOnce } from './lib/open-flights';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
 import type { TestStateSnapshot } from './testHarness';
@@ -1053,6 +1053,9 @@ function AppContent(): React.ReactElement {
   // Everything else gets the notice, because the alternative is the defect
   // this exists to close: the user picked a file and nothing happened.
   const openFlights = useRef(createOpenFlights());
+  // Same-window open and import paths must not replace a source buffer while
+  // an import is indexing it or publishing PageRefs that address its pages.
+  const sourcePathOperations = useRef(createPathOperationLock());
   const claimHolds = useRef(createClaimHolds());
   // Whether this window still uses `path`: a document or import source of it,
   // or an open or import of it that has not finished. A release is sent only
@@ -1174,7 +1177,7 @@ function AppContent(): React.ReactElement {
             freshlyOpened = null;
             changed = true;
           },
-          open: async () => {
+          open: () => sourcePathOperations.current.run([filePath], async () => {
             if (readState().files.get(filePath)?.importOnly) {
               // Upgrading a ghost REPLACES bytes that other documents' pending
               // pages still point into (`PageRef.sourceDocId` + a positional
@@ -1223,7 +1226,7 @@ function AppContent(): React.ReactElement {
             freshlyOpened = { path: filePath, workingPath: prepared.workingPath };
             changed = true;
             return true;
-          },
+          }),
         });
         await opts?.onPathOpenResult?.(filePath, step === 'opened' || step === 'reactivated');
         // A document holds the claim now; any other path is released in the
@@ -1274,85 +1277,82 @@ function AppContent(): React.ReactElement {
       // for this whole call — without the Set both passes take the
       // "unregistered" branch and IMPORT_PAGES splices duplicate PageRef
       // ids into the document (regression).
-      // A READ claim, and it is exclusive against a write claim: an import
-      // source's pending pages resolve by (source, positional index) at commit
-      // time, so a window rewriting that file turns those indices into
-      // different content — a silent wrong page, across a boundary where no
-      // flush can fix it. Two readers coexist; nobody rewrites through a read
-      // claim.
+      // A READ claim excludes writers in other windows: an import source's
+      // pending pages resolve by (source, positional index) at commit time, so
+      // a writer changing that file turns those indices into different content.
+      // Two readers coexist. Within this window, the arbiter upgrades one
+      // owner's read claim to write, so sourcePathOperations also serializes
+      // imports with opens through the final IMPORT_PAGES dispatch.
       const canonicalImports = [...new Set(await app.canonicalizePaths(rawPaths))];
       // Held from before the claim is sent until the finally: no release by
-      // another flow of this window (a cancelled open of the same file) drops
-      // the claim this import reads under.
+      // another flow of this window drops the claim this import reads under.
       claimHolds.current.hold(canonicalImports);
       let filePaths: string[] = [];
       try {
         const claimed = await claimPaths(canonicalImports, 'read');
         if (claimed.refused.length > 0) void reportClaimRefusal(claimed.refused, 'import');
         filePaths = claimed.granted;
-        const toRegister: {
-          path: string;
-          workingPath: string;
-          name: string;
-          pageCount: number;
-          buffer: PdfBuffer;
-          security: DocumentSecurity;
-        }[] = [];
-        let registered = false;
-        try {
-          const allPages: PageRef[] = [];
-          const sources: { path: string; buffer: PdfBuffer }[] = [];
-          for (const filePath of filePaths) {
-            // A file being opened meanwhile is read once: the import takes the
-            // opened document's bytes instead of preparing the file a second time.
-            await openFlights.current.pending(filePath);
-            // Read from the store, not the render: a file opened or committed
-            // since the render holds other bytes, and pages indexed from the
-            // render's bytes name other pages of the file (the import is then
-            // refused).
-            const existing = readState().files.get(filePath);
-            let src: { workingPath: string; name: string; buffer: PdfBuffer; pageCount: number };
-            if (existing?.buffer) {
-              src = {
-                workingPath: existing.workingPath,
-                name: existing.name,
-                buffer: existing.buffer,
-                pageCount: existing.pageCount,
-              };
-            } else {
-              const prepared = await prepareFileBytes(filePath);
-              if (!prepared) continue;
-              toRegister.push({ path: filePath, ...prepared });
-              src = prepared;
+        await sourcePathOperations.current.run(filePaths, async () => {
+          const toRegister: {
+            path: string;
+            workingPath: string;
+            name: string;
+            pageCount: number;
+            buffer: PdfBuffer;
+            security: DocumentSecurity;
+          }[] = [];
+          let registered = false;
+          try {
+            const allPages: PageRef[] = [];
+            const sources: { path: string; buffer: PdfBuffer }[] = [];
+            for (const filePath of filePaths) {
+              // Read only after the shared path lock: an open/import that ran
+              // first has now published its bytes and page references, while a
+              // later open cannot replace these bytes before IMPORT_PAGES lands.
+              const existing = readState().files.get(filePath);
+              let src: { workingPath: string; name: string; buffer: PdfBuffer; pageCount: number };
+              if (existing?.buffer) {
+                src = {
+                  workingPath: existing.workingPath,
+                  name: existing.name,
+                  buffer: existing.buffer,
+                  pageCount: existing.pageCount,
+                };
+              } else {
+                const prepared = await prepareFileBytes(filePath);
+                if (!prepared) continue;
+                toRegister.push({ path: filePath, ...prepared });
+                src = prepared;
+              }
+              const docs = await indexImportSource({
+                path: filePath,
+                workingPath: src.workingPath,
+                name: src.name,
+                pageCount: src.pageCount,
+                buffer: src.buffer,
+                dirty: false,
+                undoStack: [],
+                redoStack: [],
+                importOnly: true,
+              });
+              for (const d of docs) allPages.push(...d.pages);
+              sources.push({ path: filePath, buffer: src.buffer });
             }
-            const docs = await indexImportSource({
-              path: filePath,
-              workingPath: src.workingPath,
-              name: src.name,
-              pageCount: src.pageCount,
-              buffer: src.buffer,
-              dirty: false,
-              undoStack: [],
-              redoStack: [],
-              importOnly: true,
-            });
-            for (const d of docs) allPages.push(...d.pages);
-            sources.push({ path: filePath, buffer: src.buffer });
+            if (allPages.length === 0) return;
+            for (const reg of toRegister) dispatch({ type: 'REGISTER_IMPORT_SOURCE', ...reg });
+            registered = true;
+            dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages, sources });
+          } finally {
+            // A source prepared and never registered has no `files` entry for
+            // the release effect to notice.
+            if (!registered) {
+              await Promise.all(toRegister.map((reg) => discardDocumentWorkingCopy(reg.path, reg.workingPath, {
+                releaseCredentials,
+                removeWorkingCopy: file.remove,
+              })));
+            }
           }
-          if (allPages.length === 0) return;
-          for (const reg of toRegister) dispatch({ type: 'REGISTER_IMPORT_SOURCE', ...reg });
-          registered = true;
-          dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages, sources });
-        } finally {
-          // A source prepared and never registered has no `files` entry for
-          // the release effect to notice.
-          if (!registered) {
-            await Promise.all(toRegister.map((reg) => discardDocumentWorkingCopy(reg.path, reg.workingPath, {
-              releaseCredentials,
-              removeWorkingCopy: file.remove,
-            })));
-          }
-        }
+        });
       } finally {
         claimHolds.current.drop(canonicalImports);
         // A claim outlives only what it protects. A path this window uses by
