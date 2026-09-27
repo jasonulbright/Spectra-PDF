@@ -43,6 +43,7 @@ batch_ocr.placeModeCannotAlso	exact	batch_ocr,guided_actions,preflight_sweep	In-
 batch_ocr.placeModeTakesDestination	exact	batch_ocr,guided_actions,preflight_sweep	In-place mode takes no destination -- the originals are replaced.
 batch_ocr.sourceDestinationSameFile	exact	batch_ocr	source and destination are the same file
 batch_ocr.sourceFolderFound	pattern	batch_ocr,create_pdf_folders,guided_actions,preflight_sweep	Source folder not found: {{source}}
+budget.subprocessOutputLimitCannot	exact	budget	a subprocess output limit cannot be negative
 budget.timeBudgetNeedsPositive	exact	budget	a time budget needs a positive floor
 check.fileFound	pattern	check,document_health,rebuild,recognize,recover,repair	File not found: {{file}}
 clause_map.checkCitesClause	pattern	clause_map	No check cites a clause of {{part}}.
@@ -336,6 +337,8 @@ ink_manager.inkUsedPatternTool	pattern	ink_manager	Ink "{{name}}" is used by a p
 ink_manager.nameLeastOneInk	exact	ink_manager	Name at least one ink to convert.
 ink_manager.processInksCannotAliased	exact	ink_manager	Process inks cannot be aliased to a spot colour.
 inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
+ipc.circularReferenceDetected	exact	ipc	Circular reference detected
+ipc.invalidJsonConstant	pattern	ipc	Invalid JSON constant: {{value}}
 layers.layerConfigurationCannotRead	exact	layers	Layer configuration cannot be read completely.
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 layers.layerLockedDefaultConfiguration	exact	layers	Layer is locked in the default configuration.
@@ -633,6 +636,7 @@ sanitize.documentContainsXmlForm	exact	sanitize	This document contains an XML fo
 sanitize.formFieldsModeMust	exact	sanitize	form_fields_mode must be 'remove' or 'flatten'.
 sanitize.reportedNeverRemovedTake	pattern	sanitize	{{name}} is reported and never removed — take it out of the selection.
 sanitize.unknownCategoryCategories	pattern	sanitize	Unknown category {{name}}. The categories are: {{v1}}.
+sanitize_content.sanitizeCannotRemoveText	exact	sanitize_content	Sanitize cannot remove text that defines a clipping path because doing so could change visible page content.
 sealed_edit.editLeavesDocumentPages	exact	sealed_edit	the edit leaves the document with no pages, so it was not written
 search_redact.documentCertifiedAllowChanges	exact	search_redact	this document is certified to allow no changes, so redacting it would produce a file that reports as illegally modified
 search_redact.documentSignedEditInvalidates	exact	search_redact	this document is signed and this edit invalidates its signatures -- the run must state that signed documents are included before it will touch one

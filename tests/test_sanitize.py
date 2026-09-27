@@ -1011,6 +1011,40 @@ class TestHiddenLayerRemoval:
 
 
 class TestHiddenTextRemoval:
+    def test_removing_text_clip_refuses_without_replacing_the_output(self, tmp_dir):
+        source = os.path.join(tmp_dir, "text-clip.pdf")
+        output = os.path.join(tmp_dir, "existing-output.pdf")
+        pdf = pikepdf.new()
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Font,
+                Subtype=Name.Type1,
+                BaseFont=Name("/Helvetica"),
+                Encoding=Name.WinAnsiEncoding,
+            )
+        )
+        content = (
+            b"BT /F1 12 Tf 30 30 Td (Visible text) Tj ET "
+            b"q BT 7 Tr /F1 12 Tf 10 10 Td (clip) Tj ET "
+            b"1 1 1 rg 0 0 300 300 re f Q"
+        )
+        page = Dictionary(
+            Type=Name.Page,
+            MediaBox=Array([0, 0, 300, 300]),
+            Resources=Dictionary(Font=Dictionary(F1=font)),
+            Contents=pdf.make_stream(content),
+        )
+        pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
+        pdf.save(source)
+        with open(output, "wb") as stream:
+            stream.write(b"existing output must survive a refusal")
+
+        with pytest.raises(ValueError, match="clipping path"):
+            sanitize_pdf(source, output, categories=["hidden_text"])
+
+        with open(output, "rb") as stream:
+            assert stream.read() == b"existing output must survive a refusal"
+
     def test_the_four_removable_kinds_go_and_partial_coverage_stays(
         self, hidden_pdf, tmp_dir
     ):

@@ -1176,6 +1176,11 @@ def _rewrite_runs(
                         state.char_spacing = float(operands[1])
                     except (TypeError, ValueError):
                         pass
+            if removal.index in removal.targets and 4 <= state.render_mode <= 7:
+                raise ValueError(
+                    "Sanitize cannot remove text that defines a clipping path because "
+                    "doing so could change visible page content."
+                )
             cap = removal.fonts.capability_of(state.font)
             data = show_bytes(operator, operands)
             if measurable(cap, data):
