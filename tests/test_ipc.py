@@ -3,6 +3,7 @@
 import json
 from io import StringIO
 
+from engine import ipc
 from engine.ipc import JsonRpcServer
 
 
@@ -63,6 +64,24 @@ def test_a_deep_result_becomes_an_error_without_ending_the_server():
     assert first["id"] == 1
     assert first["error"]["code"] == -32603
     assert second == {"jsonrpc": "2.0", "result": "alive", "id": 2}
+
+
+def test_an_oversized_response_becomes_a_bounded_error_and_server_continues(monkeypatch):
+    monkeypatch.setattr(ipc, "MAX_JSONRPC_LINE_BYTES", 256)
+    server = JsonRpcServer()
+    server.register("large", lambda: "x" * 1024)
+    server.register("ping", lambda: "alive")
+    output = StringIO()
+
+    server.run(StringIO(_request(1, "large") + _request(2, "ping")), output)
+
+    first, second = output.getvalue().splitlines()
+    response = json.loads(first)
+    assert response["id"] == 1
+    assert response["error"]["code"] == -32603
+    assert response["error"]["message"] == "Result exceeds the JSON-RPC response size limit."
+    assert len(first.encode("utf-8")) <= 256
+    assert json.loads(second) == {"jsonrpc": "2.0", "result": "alive", "id": 2}
 
 
 def test_handler_progress_does_not_mix_with_json_rpc_stdout(capsys):

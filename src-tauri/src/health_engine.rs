@@ -286,6 +286,8 @@ impl Default for HealthEngineState {
 /// is killed. English at the boundary, like every engine refusal; the ledger
 /// records the run as failed (undetermined) and never renders this as UI copy.
 const DEADLINE_REFUSAL: &str = "health inspection exceeded its deadline";
+const WORKER_STOP_REFUSAL: &str = "health worker stopped before completing the inspection";
+const RPC_SIZE_REFUSAL: &str = "health response exceeded the JSON-RPC size limit";
 
 /// Answer every outstanding health request with a refusal.
 ///
@@ -293,7 +295,7 @@ const DEADLINE_REFUSAL: &str = "health inspection exceeded its deadline";
 /// pending entry waits forever and the ledger row never settles. Addressed
 /// per window with `emit_to`: `Emitter::emit` is an app-wide broadcast, and
 /// one window's refusal is not another's.
-fn refuse_outstanding<R: Runtime>(app: &AppHandle<R>) {
+fn refuse_outstanding_with_message<R: Runtime>(app: &AppHandle<R>, message: &str) {
     let routes = app.state::<HealthRouter>().0.take_all();
     for (outer, label, inner) in routes {
         app.state::<HealthEngineState>()
@@ -302,17 +304,24 @@ fn refuse_outstanding<R: Runtime>(app: &AppHandle<R>) {
         let refusal = serde_json::json!({
             "jsonrpc": "2.0",
             "id": inner,
-            "error": { "message": DEADLINE_REFUSAL },
+            "error": { "message": message },
         });
         let _ = app.emit_to(label.as_str(), "engine:response", refusal);
     }
 }
 
 async fn kill_locked<R: Runtime>(app: &AppHandle<R>) -> bool {
+    kill_locked_with_refusal(app, DEADLINE_REFUSAL).await
+}
+
+async fn kill_locked_with_refusal<R: Runtime>(
+    app: &AppHandle<R>,
+    refusal: &'static str,
+) -> bool {
     let state = app.state::<HealthEngineState>();
     let Some(child) = state.child.lock().await.take() else {
         state.watchdog.cleared();
-        refuse_outstanding(app);
+        refuse_outstanding_with_message(app, refusal);
         return false;
     };
 
@@ -329,7 +338,7 @@ async fn kill_locked<R: Runtime>(app: &AppHandle<R>) -> bool {
     let notified = terminated.notified();
     let kill_result = child.kill();
     state.watchdog.cleared();
-    refuse_outstanding(app);
+    refuse_outstanding_with_message(app, refusal);
 
     if let Err(error) = kill_result {
         eprintln!("[health] failed to kill worker generation {generation}: {error}");
@@ -428,7 +437,11 @@ async fn route_response<R: Runtime>(
     let _ = app.emit_to(label.as_str(), "engine:response", json);
 }
 
-async fn retire_generation<R: Runtime>(app: &AppHandle<R>, generation: u64) {
+async fn retire_generation<R: Runtime>(
+    app: &AppHandle<R>,
+    generation: u64,
+    refusal: &'static str,
+) {
     let state = app.state::<HealthEngineState>();
     if let Ok(map) = state.terminations.lock() {
         if let Some(terminated) = map.get(&generation) {
@@ -447,7 +460,7 @@ async fn retire_generation<R: Runtime>(app: &AppHandle<R>, generation: u64) {
     state.generation.fetch_add(1, Ordering::SeqCst);
     *state.child.lock().await = None;
     state.watchdog.cleared();
-    refuse_outstanding(app);
+    refuse_outstanding_with_message(app, refusal);
     state.terminating.store(false, Ordering::SeqCst);
     if let Ok(mut map) = state.terminations.lock() {
         map.remove(&generation);
@@ -475,6 +488,9 @@ async fn start_locked<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
                 .into_iter()
                 .collect::<HashMap<String, String>>(),
         )
+        // The plugin's default line reader buffers until newline with no cap.
+        // Read raw chunks so this process can bound each JSON-RPC frame.
+        .set_raw_out(true)
         .spawn()
         .map_err(|e| format!("Failed to start health worker: {}", e))?;
 
@@ -488,20 +504,58 @@ async fn start_locked<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
 
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let mut saw_termination = false;
+        let mut retired_generation = false;
+        let mut oversized_stdout = false;
+        let mut stdout_line = Vec::new();
         while let Some(event) = rx.recv().await {
             match event {
-                tauri_plugin_shell::process::CommandEvent::Stdout(line) => {
-                    let line_str = String::from_utf8_lossy(&line);
-                    let trimmed = line_str.trim();
-                    if !trimmed.is_empty() {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                            route_response(&app_handle, generation, json).await;
+                tauri_plugin_shell::process::CommandEvent::Stdout(bytes) => {
+                    if oversized_stdout {
+                        continue;
+                    }
+                    match crate::engine::append_stdout_chunk(
+                        &mut stdout_line,
+                        &bytes,
+                        crate::engine::MAX_ENGINE_RPC_LINE_BYTES,
+                    ) {
+                        Ok(lines) => {
+                            for line in lines {
+                                if !line.iter().all(u8::is_ascii_whitespace) {
+                                    if let Ok(json) =
+                                        serde_json::from_slice::<serde_json::Value>(&line)
+                                    {
+                                        route_response(&app_handle, generation, json).await;
+                                    }
+                                }
+                            }
+                        }
+                        Err(()) => {
+                            eprintln!(
+                                "[health] response line exceeded the {} MiB limit; retiring generation {generation}",
+                                crate::engine::MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
+                            );
+                            oversized_stdout = true;
+                            let state = app_handle.state::<HealthEngineState>();
+                            if state.generation.load(Ordering::SeqCst) == generation
+                                && state
+                                    .child
+                                    .lock()
+                                    .await
+                                    .as_ref()
+                                    .is_some_and(|child| child.pid() == pid)
+                            {
+                                let app = app_handle.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    let state = app.state::<HealthEngineState>();
+                                    let _lifecycle = state.lifecycle.lock().await;
+                                    kill_locked_with_refusal(&app, RPC_SIZE_REFUSAL).await;
+                                });
+                            }
                         }
                     }
                 }
-                tauri_plugin_shell::process::CommandEvent::Stderr(line) => {
-                    let msg = String::from_utf8_lossy(&line);
+                tauri_plugin_shell::process::CommandEvent::Stderr(bytes) => {
+                    let msg = String::from_utf8_lossy(&bytes);
                     let trimmed = msg.trim();
                     if !trimmed.is_empty() {
                         eprintln!("[health] {}", trimmed);
@@ -509,15 +563,25 @@ async fn start_locked<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
                 }
                 tauri_plugin_shell::process::CommandEvent::Terminated(status) => {
                     eprintln!("[health] generation {generation} exited with {:?}", status);
-                    saw_termination = true;
-                    retire_generation(&app_handle, generation).await;
+                    retired_generation = true;
+                    let refusal = if oversized_stdout {
+                        RPC_SIZE_REFUSAL
+                    } else {
+                        WORKER_STOP_REFUSAL
+                    };
+                    retire_generation(&app_handle, generation, refusal).await;
                     break;
                 }
                 _ => {}
             }
         }
-        if !saw_termination {
-            retire_generation(&app_handle, generation).await;
+        if !retired_generation {
+            let refusal = if oversized_stdout {
+                RPC_SIZE_REFUSAL
+            } else {
+                WORKER_STOP_REFUSAL
+            };
+            retire_generation(&app_handle, generation, refusal).await;
         }
     });
 
@@ -590,6 +654,13 @@ pub async fn send<R: Runtime>(
             return Err(format!("Serialize error: {}", e));
         }
     };
+    if msg.len() > crate::engine::MAX_ENGINE_RPC_LINE_BYTES {
+        unroute(app);
+        return Err(format!(
+            "Health request exceeds the {} MiB limit.",
+            crate::engine::MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
+        ));
+    }
     // Arm BEFORE the write while the lifecycle lock excludes response routing.
     // A fast reply therefore removes this exact entry after the write returns;
     // it can never answer first and leave a phantom watchdog deadline behind.

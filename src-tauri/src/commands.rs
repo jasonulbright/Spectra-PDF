@@ -1730,6 +1730,13 @@ pub async fn send_to_engine(
                 return Err(format!("Serialize error: {}", e));
             }
         };
+        if msg.len() > engine::MAX_ENGINE_RPC_LINE_BYTES {
+            unroute(&app);
+            return Err(format!(
+                "Engine request exceeds the {} MiB limit.",
+                engine::MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
+            ));
+        }
         if let Err(e) = child.child.write((msg + "\n").as_bytes()) {
             unroute(&app);
             return Err(format!("Failed to write to engine: {}", e));

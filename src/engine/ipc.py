@@ -19,6 +19,7 @@ from contextlib import redirect_stdout
 from typing import Any, Callable, TextIO
 
 _LONE_SURROGATE = re.compile("[\ud800-\udfff]")
+MAX_JSONRPC_LINE_BYTES = 256 * 1024 * 1024
 
 
 def _escaped(text: str) -> str:
@@ -132,6 +133,18 @@ class JsonRpcServer:
                     "jsonrpc": "2.0",
                     "error": {"code": -32603,
                               "message": "Result exceeds JSON encoding limits."},
+                    "id": _representable_id(response.get("id")),
+                })
+            if len(encoded) > MAX_JSONRPC_LINE_BYTES:
+                # json.dumps uses ensure_ascii=True, so each character here is
+                # one wire byte. Return a small error instead of sending a
+                # frame the native reader is required to refuse.
+                encoded = encode_response({
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": "Result exceeds the JSON-RPC response size limit.",
+                    },
                     "id": _representable_id(response.get("id")),
                 })
             output_stream.write(encoded + "\n")

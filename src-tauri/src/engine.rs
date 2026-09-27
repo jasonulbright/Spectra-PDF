@@ -1,15 +1,20 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 use tokio::sync::Mutex;
 
+/// Maximum content bytes in one JSON-RPC frame in either direction, excluding
+/// its newline delimiter. All three engine transports use the same wire limit.
+pub(crate) const MAX_ENGINE_RPC_LINE_BYTES: usize = 256 * 1024 * 1024;
+
 /// Manages the Python JSON-RPC engine sidecar process.
 pub struct EngineState {
     pub child: Arc<Mutex<Option<EngineChild>>>,
+    retiring: AtomicBool,
 }
 
 pub struct EngineChild {
@@ -21,6 +26,7 @@ impl EngineState {
     pub fn new() -> Self {
         Self {
             child: Arc::new(Mutex::new(None)),
+            retiring: AtomicBool::new(false),
         }
     }
 }
@@ -451,6 +457,9 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
 
     // Hold the startup lock until the child and its lifetime guard are ready.
     let mut guard = state.child.lock().await;
+    if state.retiring.load(Ordering::SeqCst) {
+        return Err("The document engine is stopping after an oversized response.".to_string());
+    }
     if guard.is_some() {
         return Ok(());
     }
@@ -463,6 +472,9 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
         .command(&python_path)
         .args(python_args(&script_path))
         .envs(python_env().into_iter().collect::<HashMap<String, String>>())
+        // The plugin's default line reader buffers until newline with no cap.
+        // Read raw chunks so this process can bound each JSON-RPC frame.
+        .set_raw_out(true)
         .spawn()
         .map_err(|e| format!("Failed to start engine: {}", e))?;
 
@@ -479,19 +491,57 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
     // Forward stdout lines to the webview as engine:response events
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
+        let mut stdout_line = Vec::new();
+        let mut oversized_stdout = false;
+        let mut claimed_oversize = false;
+        let mut retiring_job = None;
         while let Some(event) = rx.recv().await {
             match event {
-                tauri_plugin_shell::process::CommandEvent::Stdout(line) => {
-                    let line_str = String::from_utf8_lossy(&line);
-                    let trimmed = line_str.trim();
-                    if !trimmed.is_empty() {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                            route_response(&app_handle, json);
+                tauri_plugin_shell::process::CommandEvent::Stdout(bytes) => {
+                    if oversized_stdout {
+                        continue;
+                    }
+                    match append_stdout_chunk(&mut stdout_line, &bytes, MAX_ENGINE_RPC_LINE_BYTES) {
+                        Ok(lines) => {
+                            for line in lines {
+                                if !line.iter().all(u8::is_ascii_whitespace) {
+                                    if let Ok(json) =
+                                        serde_json::from_slice::<serde_json::Value>(&line)
+                                    {
+                                        route_response(&app_handle, json);
+                                    }
+                                }
+                            }
+                        }
+                        Err(()) => {
+                            eprintln!(
+                                "[engine] response line exceeded the {} MiB limit; stopping the engine",
+                                MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
+                            );
+                            oversized_stdout = true;
+                            let state = app_handle.state::<EngineState>();
+                            let mut guard = state.child.lock().await;
+                            if guard
+                                .as_ref()
+                                .is_some_and(|current| current.child.pid() == pid)
+                            {
+                                state.retiring.store(true, Ordering::SeqCst);
+                                let current = guard.take().expect("matched engine child");
+                                let EngineChild { child, _job } = current;
+                                retiring_job = Some(_job);
+                                claimed_oversize = true;
+                                if let Err(error) = child.kill() {
+                                    eprintln!("[engine] failed to stop oversized worker: {error}");
+                                    // Closing the kill-on-close job is the
+                                    // fallback if the direct process kill fails.
+                                    drop(retiring_job.take());
+                                }
+                            }
                         }
                     }
                 }
-                tauri_plugin_shell::process::CommandEvent::Stderr(line) => {
-                    let msg = String::from_utf8_lossy(&line);
+                tauri_plugin_shell::process::CommandEvent::Stderr(bytes) => {
+                    let msg = String::from_utf8_lossy(&bytes);
                     let trimmed = msg.trim();
                     if !trimmed.is_empty() {
                         eprintln!("[engine] {}", trimmed);
@@ -503,6 +553,22 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
                 }
                 _ => {}
             }
+        }
+        if claimed_oversize {
+            // The Terminated event has arrived (or the stream closed), so no
+            // replacement may overlap this worker. Drain its routes before
+            // allowing the next start to create a child.
+            drop(retiring_job.take());
+            let stopped = stopped_responses_with_message(
+                &app_handle.state::<EngineRouter>(),
+                "The engine response exceeded the 256 MiB limit. The operation was stopped.",
+            );
+            deliver_stopped(&app_handle, stopped);
+            app_handle
+                .state::<EngineState>()
+                .retiring
+                .store(false, Ordering::SeqCst);
+            return;
         }
         // A closed event stream also means the worker cannot answer. Ignore a
         // previous worker's late termination after an intentional restart.
@@ -517,6 +583,93 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
     });
 
     Ok(())
+}
+
+/// Add raw sidecar bytes to a partial frame, returning completed frames and
+/// refusing before the pending frame can exceed its limit. CR and LF are both
+/// accepted as line endings; the engine emits LF.
+pub(crate) fn append_stdout_chunk(
+    pending: &mut Vec<u8>,
+    chunk: &[u8],
+    max_line_bytes: usize,
+) -> Result<Vec<Vec<u8>>, ()> {
+    let mut completed = Vec::new();
+    let mut start = 0;
+    while start < chunk.len() {
+        let delimiter = chunk[start..]
+            .iter()
+            .position(|byte| *byte == b'\n' || *byte == b'\r');
+        let end = delimiter.map_or(chunk.len(), |offset| start + offset);
+        let segment = &chunk[start..end];
+        if segment.len() > max_line_bytes.saturating_sub(pending.len()) {
+            return Err(());
+        }
+        pending.extend_from_slice(segment);
+        if delimiter.is_some() {
+            completed.push(std::mem::take(pending));
+            start = end + 1;
+        } else {
+            break;
+        }
+    }
+    Ok(completed)
+}
+
+#[derive(Debug)]
+pub(crate) enum BoundedLineError {
+    TooLong,
+    Io(std::io::Error),
+}
+
+/// Read one newline-delimited protocol frame without letting `read_line`
+/// grow its destination beyond the shared engine RPC limit. A final frame at
+/// EOF is returned without a newline, matching `BufRead::read_line`.
+pub(crate) fn read_bounded_line<R: std::io::BufRead>(
+    reader: &mut R,
+    max_line_bytes: usize,
+) -> Result<Option<Vec<u8>>, BoundedLineError> {
+    let mut line = Vec::new();
+    loop {
+        let available = reader.fill_buf().map_err(BoundedLineError::Io)?;
+        if available.is_empty() {
+            return Ok((!line.is_empty()).then_some(line));
+        }
+        // Match the raw sidecar readers: CR and LF each delimit a frame. A
+        // CRLF pair is seen as an extra empty frame on the next call, which
+        // the CLI already ignores; this keeps the content limit independent
+        // of Windows newline translation.
+        let delimiter = available
+            .iter()
+            .position(|byte| *byte == b'\n' || *byte == b'\r');
+        let content_len = delimiter.unwrap_or(available.len());
+        if content_len > max_line_bytes.saturating_sub(line.len()) {
+            return Err(BoundedLineError::TooLong);
+        }
+        line.extend_from_slice(&available[..content_len]);
+        let consumed = content_len + usize::from(delimiter.is_some());
+        reader.consume(consumed);
+        if delimiter.is_some() {
+            return Ok(Some(line));
+        }
+    }
+}
+
+fn stopped_responses_with_message(
+    router: &EngineRouter,
+    message: &str,
+) -> Vec<(String, serde_json::Value)> {
+    router
+        .take_all()
+        .into_iter()
+        .map(|(_, label, inner)| {
+            (
+                label,
+                serde_json::json!({
+                    "id": inner, "error": { "message": message }
+                }),
+            )
+        })
+        .collect()
 }
 
 /// Drops the running engine so the next call spawns one carrying the current
@@ -551,9 +704,10 @@ fn stop_and_drain<T>(slot: &mut Option<T>, router: &EngineRouter, kill: impl FnO
 /// The "engine stopped" error for every request still routed, keyed by the
 /// window that asked. Dropping the routes also releases their leases.
 fn stopped_responses(router: &EngineRouter) -> Vec<(String, serde_json::Value)> {
-    router.take_all().into_iter().map(|(_, label, inner)| (label, serde_json::json!({
-        "id": inner, "error": { "message": "The document engine stopped before completing the operation." }
-    }))).collect()
+    stopped_responses_with_message(
+        router,
+        "The document engine stopped before completing the operation.",
+    )
 }
 
 fn deliver_stopped(app: &AppHandle, stopped: Vec<(String, serde_json::Value)>) {
@@ -602,6 +756,41 @@ mod start_tests {
         let env = python_env();
         assert!(env.iter().any(|(k, v)| k == "PYTHONNOUSERSITE" && v == "1"));
         assert!(env.iter().any(|(k, v)| k == "PYTHONUTF8" && v == "1"));
+    }
+
+    #[test]
+    fn raw_stdout_framing_handles_split_lines_and_enforces_the_limit() {
+        let mut pending = Vec::new();
+        assert!(
+            append_stdout_chunk(&mut pending, b"{\"id", 8)
+                .unwrap()
+                .is_empty()
+        );
+        let lines = append_stdout_chunk(&mut pending, b"\":1}\r\n{}\n", 8).unwrap();
+        assert_eq!(lines, vec![b"{\"id\":1}".to_vec(), b"".to_vec(), b"{}".to_vec()]);
+        assert!(pending.is_empty());
+
+        assert!(append_stdout_chunk(&mut pending, b"1234", 4).unwrap().is_empty());
+        assert!(append_stdout_chunk(&mut pending, b"5", 4).is_err());
+        assert_eq!(pending, b"1234");
+    }
+
+    #[test]
+    fn buffered_rpc_reads_are_bounded_and_leave_later_frames_available() {
+        let mut reader = std::io::BufReader::new(std::io::Cursor::new(b"four\r\nlast"));
+        assert_eq!(
+            read_bounded_line(&mut reader, 4).unwrap(),
+            Some(b"four".to_vec())
+        );
+        assert_eq!(read_bounded_line(&mut reader, 4).unwrap(), Some(Vec::new()));
+        assert_eq!(read_bounded_line(&mut reader, 4).unwrap(), Some(b"last".to_vec()));
+        assert_eq!(read_bounded_line(&mut reader, 4).unwrap(), None);
+
+        let mut oversized = std::io::BufReader::new(std::io::Cursor::new(b"fives\n"));
+        assert!(matches!(
+            read_bounded_line(&mut oversized, 4),
+            Err(BoundedLineError::TooLong)
+        ));
     }
 
     #[tokio::test]
