@@ -78,13 +78,39 @@ export function SplitPanel(): React.ReactElement {
       const destination = await choose();
       if (!destination) { if (run.visible()) setStatus(''); return; }
       run.assertCurrent();
-      const r = await call('split', {
+      const params = {
         file: run.source.workingPath,
         ...destination,
         mode,
         ...(mode === 'ranges' ? { ranges } : {}),
         ...(mode === 'every_n' ? { every_n: everyN } : {}),
         ...(mode === 'size' ? { max_mb: maxMb } : {}),
+      };
+      let outputPaths: string[] | undefined;
+      let splitPlanId: string | undefined;
+      if (mode !== 'ranges') {
+        if (!('output_dir' in destination)) {
+          throw new Error('A multi-file split needs a destination folder.');
+        }
+        const planned = await call('split_plan', {
+          file: run.source.workingPath,
+          destination_dir: destination.output_dir,
+          mode,
+          ...(mode === 'every_n' ? { every_n: everyN } : {}),
+          ...(mode === 'size' ? { max_mb: maxMb } : {}),
+        }, { assertCurrent: run.assertCurrent });
+        run.assertCurrent();
+        if (typeof planned.plan_id !== 'string' || !planned.plan_id
+            || !Array.isArray(planned.outputs) || planned.outputs.length === 0) {
+          throw new Error('The split engine returned no planned output files.');
+        }
+        splitPlanId = planned.plan_id;
+        outputPaths = planned.outputs;
+      }
+      const r = await call('split', {
+        ...params,
+        ...(outputPaths ? { output_paths: outputPaths } : {}),
+        ...(splitPlanId ? { plan_id: splitPlanId } : {}),
       }, { assertCurrent: run.assertCurrent });
       if (!run.visible()) return;
       const parts = (r as unknown as { parts: number }).parts;

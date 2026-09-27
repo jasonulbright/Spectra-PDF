@@ -16,7 +16,7 @@ from pikepdf import Array, Dictionary, Name
 from engine.forms import read_form_fields
 from engine.fs_names import safe_file_name, unique_name
 from engine.outline import set_outline
-from engine.split import split
+from engine.split import plan_split, split
 
 
 def _pages_pdf(path: str, count: int, filler: int = 0) -> None:
@@ -55,6 +55,134 @@ def _page_counts(result: dict) -> list[int]:
 
 
 class TestEveryN:
+    def test_output_plan_reserves_exact_paths_before_publication(self, tmp_dir):
+        src = os.path.join(tmp_dir, "in.pdf")
+        out = os.path.join(tmp_dir, "out")
+        _pages_pdf(src, 4)
+
+        plan = plan_split(file=src, destination_dir=out, mode="every_n", every_n=2)
+
+        assert [os.path.basename(path) for path in plan["outputs"]] == ["in_1-2.pdf", "in_3-4.pdf"]
+        assert not os.path.exists(out)
+        result = split(
+            file=src, output_dir=out, mode="every_n", every_n=2,
+            output_paths=plan["outputs"], plan_id=plan["plan_id"],
+        )
+        assert result["outputs"] == plan["outputs"]
+        assert _page_counts(result) == [2, 2]
+
+    def test_changed_output_plan_refuses_before_creating_destination(self, tmp_dir):
+        src = os.path.join(tmp_dir, "in.pdf")
+        out = os.path.join(tmp_dir, "out")
+        _pages_pdf(src, 4)
+        plan = plan_split(file=src, destination_dir=out, mode="every_n", every_n=2)
+
+        with pytest.raises(ValueError, match="changed after they were reserved"):
+            split(file=src, output_dir=out, mode="every_n", every_n=2,
+                  output_paths=[os.path.join(out, "different.pdf")], plan_id=plan["plan_id"])
+        assert not os.path.exists(out)
+
+    def test_a_split_plan_is_one_use(self, tmp_dir):
+        src = os.path.join(tmp_dir, "in.pdf")
+        out = os.path.join(tmp_dir, "out")
+        _pages_pdf(src, 2)
+        plan = plan_split(file=src, destination_dir=out, mode="every_n", every_n=2)
+
+        split(file=src, output_dir=out, mode="every_n", every_n=2,
+              output_paths=plan["outputs"], plan_id=plan["plan_id"])
+        with pytest.raises(ValueError, match="already used"):
+            split(file=src, output_dir=out, mode="every_n", every_n=2,
+                  output_paths=plan["outputs"], plan_id=plan["plan_id"])
+
+    def test_a_changed_source_invalidates_its_split_plan_before_writing(self, tmp_dir):
+        src = os.path.join(tmp_dir, "in.pdf")
+        out = os.path.join(tmp_dir, "out")
+        _pages_pdf(src, 2)
+        plan = plan_split(file=src, destination_dir=out, mode="every_n", every_n=2)
+        with open(src, "ab") as stream:
+            stream.write(b"changed")
+
+        with pytest.raises(ValueError, match="source changed after output planning"):
+            split(file=src, output_dir=out, mode="every_n", every_n=2,
+                  output_paths=plan["outputs"], plan_id=plan["plan_id"])
+        assert not os.path.exists(out)
+
+    def test_the_pending_plan_cache_is_bounded(self, tmp_dir, monkeypatch):
+        import engine.split as split_module
+
+        src = os.path.join(tmp_dir, "in.pdf")
+        out_a = os.path.join(tmp_dir, "out-a")
+        out_b = os.path.join(tmp_dir, "out-b")
+        _pages_pdf(src, 2)
+        monkeypatch.setattr(split_module, "_SPLIT_PLAN_MAX_COUNT", 1)
+        first = plan_split(file=src, destination_dir=out_a, mode="every_n", every_n=2)
+        second = plan_split(file=src, destination_dir=out_b, mode="every_n", every_n=2)
+
+        with pytest.raises(ValueError, match="expired or was already used"):
+            split(file=src, output_dir=out_a, mode="every_n", every_n=2,
+                  output_paths=first["outputs"], plan_id=first["plan_id"])
+        split(file=src, output_dir=out_b, mode="every_n", every_n=2,
+              output_paths=second["outputs"], plan_id=second["plan_id"])
+
+    def test_expired_plans_cannot_write(self, tmp_dir, monkeypatch):
+        import engine.split as split_module
+
+        src = os.path.join(tmp_dir, "in.pdf")
+        out = os.path.join(tmp_dir, "out")
+        _pages_pdf(src, 2)
+        plan = plan_split(file=src, destination_dir=out, mode="every_n", every_n=2)
+        monkeypatch.setattr(split_module, "_SPLIT_PLAN_MAX_AGE", -1.0)
+
+        with pytest.raises(ValueError, match="expired or was already used"):
+            split(file=src, output_dir=out, mode="every_n", every_n=2,
+                  output_paths=plan["outputs"], plan_id=plan["plan_id"])
+        assert not os.path.exists(out)
+
+    def test_size_mode_reuses_the_bounded_plan_results(self, tmp_dir, monkeypatch):
+        import engine.split as split_module
+
+        src = os.path.join(tmp_dir, "in.pdf")
+        out = os.path.join(tmp_dir, "out")
+        _pages_pdf(src, 4)
+        original_size_parts = split_module._size_parts
+        calls = 0
+
+        def counted_size_parts(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return original_size_parts(*args, **kwargs)
+
+        monkeypatch.setattr(split_module, "_size_parts", counted_size_parts)
+        plan = plan_split(file=src, destination_dir=out, mode="size", max_mb=10)
+        assert calls == 1
+        split(file=src, output_dir=out, mode="size", max_mb=10,
+              output_paths=plan["outputs"], plan_id=plan["plan_id"])
+        assert calls == 1
+
+    def test_large_size_plan_rebuilds_exact_parts_after_reservation(self, tmp_dir, monkeypatch):
+        import engine.split as split_module
+
+        src = os.path.join(tmp_dir, "in.pdf")
+        out = os.path.join(tmp_dir, "out")
+        _pages_pdf(src, 4)
+        original_size_parts = split_module._size_parts
+        calls = 0
+
+        def counted_size_parts(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return original_size_parts(*args, **kwargs)
+
+        monkeypatch.setattr(split_module, "_size_parts", counted_size_parts)
+        monkeypatch.setattr(split_module, "_SPLIT_PLAN_MAX_DATA_BYTES", 0)
+        plan = plan_split(file=src, destination_dir=out, mode="size", max_mb=10)
+        assert calls == 1
+        result = split(file=src, output_dir=out, mode="size", max_mb=10,
+                       output_paths=plan["outputs"], plan_id=plan["plan_id"])
+        assert calls == 2
+        assert result["outputs"] == plan["outputs"]
+        assert _page_counts(result) == [4]
+
     def test_exact_division(self, tmp_dir):
         src = os.path.join(tmp_dir, "in.pdf")
         out = os.path.join(tmp_dir, "out")

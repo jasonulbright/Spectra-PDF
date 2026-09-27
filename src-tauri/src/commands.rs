@@ -1650,21 +1650,69 @@ pub async fn open_batch_log_folder(app: AppHandle, dir: Option<String>) -> Resul
 
 // ── Engine (Python sidecar) ───────────────────────────────────────────────
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EngineOutputTarget<'a> {
-    File(&'a str),
-    Folder(&'a str),
+#[derive(Debug, PartialEq, Eq)]
+enum EngineOutputTarget {
+    File(String),
+    Folder(String),
+    SplitFolder {
+        folder: String,
+        outputs: Vec<String>,
+    },
 }
 
 fn engine_output_path(
     request: &serde_json::Value,
-) -> Result<Option<EngineOutputTarget<'_>>, String> {
+) -> Result<Option<EngineOutputTarget>, String> {
     let Some(params) = request.get("params") else {
         return Ok(None);
     };
 
-    let output = params.get("output");
     let output_dir = params.get("output_dir");
+    let folder_split =
+        request.get("method").and_then(serde_json::Value::as_str) == Some("split")
+        && params.get("mode").and_then(serde_json::Value::as_str)
+            .is_some_and(|mode| mode != "ranges");
+    if folder_split {
+        let Some(folder) = output_dir.and_then(serde_json::Value::as_str) else {
+            return Err("A folder split must provide an output folder.".to_string());
+        };
+        if folder.is_empty() {
+            return Err("A folder split must provide an output folder.".to_string());
+        }
+        if !Path::new(folder).is_absolute() {
+            return Err("An engine output path or folder must be absolute.".to_string());
+        }
+        if params.get("output").and_then(serde_json::Value::as_str)
+            .is_some_and(|output| !output.is_empty())
+        {
+            return Err("Choose either an engine output path or folder.".to_string());
+        }
+        let outputs = params
+            .get("output_paths")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| "A folder split must provide its planned output paths.".to_string())?;
+        if outputs.is_empty() {
+            return Err("A folder split must reserve at least one output file.".to_string());
+        }
+        let outputs = outputs
+            .iter()
+            .map(|value| {
+                let path = value
+                    .as_str()
+                    .ok_or_else(|| "Every planned split output path must be text.".to_string())?;
+                if path.is_empty() || !Path::new(path).is_absolute() {
+                    return Err("Every planned split output path must be absolute.".to_string());
+                }
+                Ok(path)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        return Ok(Some(EngineOutputTarget::SplitFolder {
+            folder: folder.to_string(),
+            outputs: outputs.into_iter().map(str::to_string).collect(),
+        }));
+    }
+
+    let output = params.get("output");
     let (path, target) = if let Some(output) = output {
         let Some(path) = output.as_str() else {
             return Err("An engine output path must be text.".to_string());
@@ -1678,12 +1726,12 @@ fn engine_output_path(
                     return Err("Choose either an engine output path or folder.".to_string());
                 }
             }
-            (path, EngineOutputTarget::File(path))
+            (path, EngineOutputTarget::File(path.to_string()))
         } else if let Some(output_dir) = output_dir {
             let Some(path) = output_dir.as_str() else {
                 return Err("An engine output folder must be text.".to_string());
             };
-            (path, EngineOutputTarget::Folder(path))
+            (path, EngineOutputTarget::Folder(path.to_string()))
         } else {
             return Ok(None);
         }
@@ -1691,7 +1739,7 @@ fn engine_output_path(
         let Some(path) = output_dir.as_str() else {
             return Err("An engine output folder must be text.".to_string());
         };
-        (path, EngineOutputTarget::Folder(path))
+        (path, EngineOutputTarget::Folder(path.to_string()))
     } else {
         return Ok(None);
     };
@@ -1726,20 +1774,25 @@ pub async fn send_to_engine(
     if let Some(ref mut child) = *guard {
         let label = window.label().to_string();
         let output_reservation = if let Some(target) = engine_output_path(&request)? {
-            let (path, is_folder) = match target {
-                EngineOutputTarget::File(path) => (path, false),
-                EngineOutputTarget::Folder(path) => (path, true),
-            };
-            let path = canonical_path(path);
             let claim_app = app.clone();
             let claim_label = label.clone();
             Some(
                 tauri::async_runtime::spawn_blocking(move || {
                     let claims = claim_app.state::<crate::app_windows::ClaimState>();
-                    if is_folder {
-                        claims.claim_engine_output_folder(&path, &claim_label)
-                    } else {
-                        claims.claim_engine_output(&path, &claim_label)
+                    match target {
+                        EngineOutputTarget::File(path) => claims.claim_engine_output(
+                            &canonical_path(&path), &claim_label,
+                        ),
+                        EngineOutputTarget::Folder(path) => claims.claim_engine_output_folder(
+                            &canonical_path(&path), &claim_label,
+                        ),
+                        EngineOutputTarget::SplitFolder { folder, outputs } => {
+                            let folder = canonical_path(&folder);
+                            let outputs = outputs.into_iter()
+                                .map(|path| canonical_path(&path))
+                                .collect::<Vec<_>>();
+                            claims.claim_engine_output_split(&folder, &outputs, &claim_label)
+                        }
                     }
                 })
                 .await
@@ -2488,24 +2541,47 @@ mod tests {
         let request = serde_json::json!({"id": 1, "params": {"output": r"C:\out\result.pdf"}});
         assert_eq!(
             engine_output_path(&request).unwrap(),
-            Some(EngineOutputTarget::File(r"C:\out\result.pdf"))
+            Some(EngineOutputTarget::File(r"C:\out\result.pdf".to_string()))
         );
 
         let folder_split = serde_json::json!({
             "id": 2,
             "method": "split",
-            "params": {"file": r"C:\in.pdf", "mode": "every_n", "output_dir": r"C:\out"}
+            "params": {
+                "file": r"C:\in.pdf", "mode": "every_n", "output_dir": r"C:\out",
+                "output_paths": [r"C:\out\in_1-2.pdf"]
+            }
         });
         assert_eq!(
             engine_output_path(&folder_split).unwrap(),
-            Some(EngineOutputTarget::Folder(r"C:\out"))
+            Some(EngineOutputTarget::SplitFolder {
+                folder: r"C:\out".to_string(),
+                outputs: vec![r"C:\out\in_1-2.pdf".to_string()],
+            })
         );
 
-        let relative = serde_json::json!({"id": 3, "params": {"output": "result.pdf"}});
+        let unplanned_split = serde_json::json!({
+            "id": 3,
+            "method": "split",
+            "params": {"mode": "every_n", "output_dir": r"C:\out"}
+        });
+        assert!(engine_output_path(&unplanned_split).unwrap_err().contains("planned output paths"));
+
+        let relative_split_output = serde_json::json!({
+            "id": 4,
+            "method": "split",
+            "params": {
+                "mode": "every_n", "output_dir": r"C:\out",
+                "output_paths": ["out.pdf"]
+            }
+        });
+        assert!(engine_output_path(&relative_split_output).unwrap_err().contains("absolute"));
+
+        let relative = serde_json::json!({"id": 5, "params": {"output": "result.pdf"}});
         assert!(engine_output_path(&relative).unwrap_err().contains("absolute"));
-        let relative_folder = serde_json::json!({"id": 4, "params": {"output_dir": "out"}});
+        let relative_folder = serde_json::json!({"id": 6, "params": {"output_dir": "out"}});
         assert!(engine_output_path(&relative_folder).unwrap_err().contains("absolute"));
-        let absent = serde_json::json!({"id": 5, "params": {"file": r"C:\in.pdf"}});
+        let absent = serde_json::json!({"id": 7, "params": {"file": r"C:\in.pdf"}});
         assert_eq!(engine_output_path(&absent).unwrap(), None);
     }
 

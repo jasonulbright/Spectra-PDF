@@ -22,7 +22,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from engine.ipc import JsonRpcServer
 from engine.merge import merge
-from engine.split import split
+from engine.split import plan_split, split
 from engine.rotate import rotate
 from engine.delete import delete
 from engine.compress import compress
@@ -243,6 +243,7 @@ def main() -> None:
     server.register("ping", ping)
     server.register("merge", merge)
     server.register("split", split)
+    server.register("split_plan", plan_split)
     server.register("rotate", rotate)
     server.register("delete", delete)
     server.register("compress", compress)

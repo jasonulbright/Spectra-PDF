@@ -65,6 +65,12 @@ export interface EngineResult {
   truncated: boolean;
   pages: number;
   pages_extracted: number;
+  /** split and split_plan: exact generated file paths. */
+  outputs?: string[];
+  /** split_plan: one-use token for the reserved output and source snapshot. */
+  plan_id?: string;
+  parts?: number;
+  oversize?: unknown[];
   size_bytes: number;
   compressed_size: number;
   output_size: number;

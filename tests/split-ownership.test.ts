@@ -34,8 +34,9 @@ function fixture(mode = 'ranges') {
   const runs = createOwnedDocumentRuns(() => state);
   const status = vi.fn(), busy = vi.fn();
   const gate = vi.fn(async () => {}), beforeDispatch = vi.fn(async () => {});
-  const transport = vi.fn(async (_method: string, params: Record<string, unknown>) =>
-    ({ ok: true, parts: 1, pages_extracted: 1, outputs: [params.output], oversize: [], retained_files: [] as string[] }));
+  const transport = vi.fn(async (method: string, params: Record<string, unknown>) => method === 'split_plan'
+    ? ({ outputs: ['Chosen folder\\source_1-2.pdf'], plan_id: 'plan-token' })
+    : ({ ok: true, parts: 1, pages_extracted: 1, outputs: [params.output], oversize: [], retained_files: [] as string[] }));
   const call = async (method: string, params: Record<string, unknown>, options: { assertCurrent(): void }) => {
     await beforeDispatch(); options.assertCurrent(); return transport(method, params);
   };
@@ -63,8 +64,16 @@ describe('Split owns its source and exact picker destination', () => {
   it.each(['every_n', 'size', 'bookmarks'])('retains folder semantics for %s', async mode => {
     const f = fixture(mode); await f.handle();
     expect(f.saveFile).not.toHaveBeenCalled();
-    expect(f.transport.mock.calls[0][1]).toMatchObject({ file: 'working.pdf', output_dir: 'Chosen folder', mode });
-    expect(f.transport.mock.calls[0][1]).not.toHaveProperty('output');
+    expect(f.transport.mock.calls[0]).toMatchObject(['split_plan', {
+      file: 'working.pdf', destination_dir: 'Chosen folder', mode,
+    }]);
+    expect(f.transport.mock.calls[1][0]).toBe('split');
+    expect(f.transport.mock.calls[1][1]).toMatchObject({
+      file: 'working.pdf', output_dir: 'Chosen folder', mode,
+      output_paths: ['Chosen folder\\source_1-2.pdf'],
+      plan_id: 'plan-token',
+    });
+    expect(f.transport.mock.calls[1][1]).not.toHaveProperty('output');
   });
   it('reserves before the picker and releases after cancellation', async () => {
     const f = fixture(), answer = deferred<string | null>(); f.saveFile.mockImplementationOnce(() => answer.promise);
