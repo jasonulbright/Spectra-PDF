@@ -1,10 +1,20 @@
+import type { AppState } from '../state/types';
+
 /** Snapshot of the unsaved state named by a close or exit confirmation. */
 export interface DirtyPromptSnapshot {
   path: string;
-  /** The current OpenFile object; a replacement means the user is seeing new bytes. */
-  fileRevision: object;
-  /** Workspace documents for this path; page edits replace their objects. */
-  pageRevisions: readonly object[];
+  /** User-visible edits, excluding an indexer's read-back of committed bytes. */
+  editRevision: number;
+  /** Byte identity also catches a reopen or replacement at the same path. */
+  bufferRevision: object | null;
+}
+
+export function dirtyPromptSnapshots(state: AppState, paths: readonly string[]): DirtyPromptSnapshot[] {
+  return paths.flatMap((path) => {
+    const file = state.files.get(path);
+    if (!file || !(file.dirty || state.pageDirtyPaths.includes(path))) return [];
+    return [{ path, editRevision: file.editRevision ?? 0, bufferRevision: file.buffer }];
+  });
 }
 
 export type DirtyPromptChoice = 'save' | 'discard' | 'cancel';
@@ -15,9 +25,8 @@ export function sameDirtyPromptSnapshot(
 ): boolean {
   return (
     left.path === right.path &&
-    left.fileRevision === right.fileRevision &&
-    left.pageRevisions.length === right.pageRevisions.length &&
-    left.pageRevisions.every((page, index) => page === right.pageRevisions[index])
+    left.editRevision === right.editRevision &&
+    left.bufferRevision === right.bufferRevision
   );
 }
 

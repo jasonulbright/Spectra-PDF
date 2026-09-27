@@ -28,7 +28,8 @@ vi.mock('../src/renderer/lib/tauri-bridge', () => ({
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { claimPaths, createClaimHolds, departedImportSources, downgradeImportSourceClaims, releasePaths, retainedImportSources, soleOwner } from '../src/renderer/lib/window-claims';
-import type { OpenFile } from '../src/renderer/state/types';
+import type { AppState, OpenFile } from '../src/renderer/state/types';
+import { appReducer, initialState } from '../src/renderer/state/reducer';
 import { mergeRecent, sameRecent, type RecentEntry } from '../src/renderer/lib/recent-files';
 import { scopedKeyFor, PRIMARY_WINDOW_LABEL } from '../src/renderer/lib/window-label';
 
@@ -302,6 +303,30 @@ describe('retainedImportSources', () => {
     const next = new Map([entry('closed.pdf', true), entry('still-open.pdf'), entry('source.pdf', true)]);
 
     expect(retainedImportSources(previous, next)).toEqual(['closed.pdf']);
+  });
+
+  it('downgrades a newly registered import source when it inherits a close-held claim', () => {
+    const previous = new Map([entry('destination.pdf')]);
+    const next = new Map([entry('destination.pdf'), entry('closed-source.pdf', true)]);
+
+    expect(retainedImportSources(previous, next)).toEqual(['closed-source.pdf']);
+  });
+
+  it('downgrades a source registered after CLOSE_FILE removed its former document', async () => {
+    const source = {
+      path: 'closed-source.pdf', workingPath: 'closed-source.w', name: 'closed-source.pdf',
+      pageCount: 1, buffer: [1], dirty: false, undoStack: [], redoStack: [],
+    };
+    let state: AppState = { ...initialState, files: new Map([[source.path, source]]) };
+    state = appReducer(state, { type: 'CLOSE_FILE', path: source.path });
+    const afterClose = state.files;
+    state = appReducer(state, { type: 'REGISTER_IMPORT_SOURCE', ...source });
+    const registered = retainedImportSources(afterClose, state.files);
+
+    await downgradeImportSourceClaims(registered, (path) => state.files.get(path)?.importOnly === true);
+
+    expect(registered).toEqual([source.path]);
+    expect(downgrade).toHaveBeenCalledWith(source.path);
   });
 
   it('checks current state at its ordered turn so a reopen keeps its write claim', async () => {

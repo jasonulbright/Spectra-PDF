@@ -131,14 +131,16 @@ export function departedImportSources(
   return [...previous.values()].filter((f) => f.importOnly && !next.has(f.path)).map((f) => f.path);
 }
 
-/** Real documents retained as byte-only sources after close now need a READ
- * claim. They still back imported pages, but no longer own an editable tab. */
+/** Import-only paths that have just entered the state need a READ claim.
+ * Usually imports claim READ before registering the source. If an in-flight
+ * import inherits a document's WRITE claim while a close prompt is open, this
+ * also catches the source's later registration after the close removed it. */
 export function retainedImportSources(
   previous: ReadonlyMap<string, OpenFile>,
   next: ReadonlyMap<string, OpenFile>,
 ): string[] {
-  return [...previous.values()]
-    .filter((file) => !file.importOnly && next.get(file.path)?.importOnly)
+  return [...next.values()]
+    .filter((file) => file.importOnly && previous.get(file.path)?.importOnly !== true)
     .map((file) => file.path);
 }
 
