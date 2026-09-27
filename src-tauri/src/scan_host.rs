@@ -38,7 +38,7 @@
 //! open until a person closes it. Its teardown is bounded like every other.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -87,6 +87,12 @@ pub const HANDSHAKE_DEADLINE: Duration = Duration::from_secs(30);
 /// take a request down with it; this is the window in which such a request
 /// is sent again rather than refused.
 pub const RESEND_BUDGET: Duration = Duration::from_secs(30);
+
+/// Bound each side of the scanner child protocol. The largest ordinary reply
+/// is the complete device inventory; 16 MiB leaves ample room for unusually
+/// long driver metadata while preventing one line from consuming unbounded
+/// memory in either process.
+const MAX_PROTOCOL_LINE_BYTES: usize = 16 * 1024 * 1024;
 
 /// True inside a host child. The WIA code paths branch on it: in the child
 /// they call the driver, in the parent they call this module.
@@ -141,6 +147,38 @@ fn protocol_line(line: &str) -> Option<Value> {
     let start = line.find('{')?;
     let value = serde_json::from_str::<Value>(&line[start..]).ok()?;
     value.is_object().then_some(value)
+}
+
+/// Read one line without allowing the input to grow past `limit` bytes.
+/// Returns false only when EOF arrives before any bytes of another line.
+fn read_bounded_line<R: BufRead>(
+    reader: &mut R,
+    line: &mut Vec<u8>,
+    limit: usize,
+) -> io::Result<bool> {
+    line.clear();
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok(!line.is_empty());
+        }
+        let take = available
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(available.len(), |index| index + 1);
+        if take > limit.saturating_sub(line.len()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "scanner protocol line exceeds the size limit",
+            ));
+        }
+        let complete = available[take - 1] == b'\n';
+        line.extend_from_slice(&available[..take]);
+        reader.consume(take);
+        if complete {
+            return Ok(true);
+        }
+    }
 }
 
 /// Rebuild a refusal that crossed the pipe.
@@ -371,9 +409,23 @@ fn spawn_host_with(
         .name("scanner-host-reader".to_string())
         .spawn(move || {
             let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                let Ok(line) = line else { break };
-                let Some(message) = protocol_line(&line) else {
+            let mut reader = reader;
+            let mut bytes = Vec::new();
+            loop {
+                let Ok(has_line) = read_bounded_line(
+                    &mut reader,
+                    &mut bytes,
+                    MAX_PROTOCOL_LINE_BYTES,
+                ) else {
+                    break;
+                };
+                if !has_line {
+                    break;
+                }
+                let Ok(line) = std::str::from_utf8(&bytes) else {
+                    break;
+                };
+                let Some(message) = protocol_line(line) else {
                     // Anything that is not a protocol line is the host's own
                     // stream noise and carries no reply.
                     continue;
@@ -831,9 +883,23 @@ pub fn serve() -> i32 {
     let sessions = Arc::new(ScannerSessions::new());
 
     let stdin = std::io::stdin();
+    let mut reader = BufReader::new(stdin.lock());
+    let mut bytes = Vec::new();
     let mut workers: Vec<std::thread::JoinHandle<()>> = Vec::new();
-    for line in BufReader::new(stdin.lock()).lines() {
-        let Ok(line) = line else { break };
+    loop {
+        let Ok(has_line) = read_bounded_line(
+            &mut reader,
+            &mut bytes,
+            MAX_PROTOCOL_LINE_BYTES,
+        ) else {
+            break;
+        };
+        if !has_line {
+            break;
+        }
+        let Ok(line) = std::str::from_utf8(&bytes) else {
+            break;
+        };
         let Ok(message) = serde_json::from_str::<Value>(line.trim()) else {
             continue;
         };
@@ -1197,6 +1263,28 @@ mod tests {
             protocol_line("{\"id\":4,\"ok\":null}"),
             Some(json!({ "id": 4, "ok": null }))
         );
+    }
+
+    #[test]
+    fn bounded_protocol_reader_accepts_the_exact_limit_and_eof_line() {
+        let input = std::io::Cursor::new(b"1234\nlast");
+        let mut reader = BufReader::with_capacity(3, input);
+        let mut line = Vec::new();
+        assert!(read_bounded_line(&mut reader, &mut line, 5).unwrap());
+        assert_eq!(line, b"1234\n");
+        assert!(read_bounded_line(&mut reader, &mut line, 4).unwrap());
+        assert_eq!(line, b"last");
+        assert!(!read_bounded_line(&mut reader, &mut line, 4).unwrap());
+    }
+
+    #[test]
+    fn bounded_protocol_reader_refuses_a_line_before_it_exceeds_the_limit() {
+        let input = std::io::Cursor::new(b"12345\n");
+        let mut reader = BufReader::with_capacity(4, input);
+        let mut line = Vec::new();
+        let error = read_bounded_line(&mut reader, &mut line, 5).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(line.len() <= 5, "the reader never stores bytes past its limit");
     }
 
     #[test]
