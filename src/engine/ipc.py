@@ -12,6 +12,7 @@ with in the file.
 """
 
 import json
+import math
 import re
 import sys
 from typing import Any, Callable, TextIO
@@ -45,6 +46,10 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Invalid JSON constant: {value}")
+
+
 def encode_response(response: dict) -> str:
     """One response as the line the host reads.
 
@@ -60,9 +65,20 @@ def encode_response(response: dict) -> str:
 
 def _representable_id(req_id: Any) -> Any:
     """`req_id` when it can be written back as JSON, else None."""
-    if isinstance(req_id, bool) or not isinstance(req_id, (int, str)):
+    if isinstance(req_id, bool) or not isinstance(req_id, (int, float, str)):
+        return None
+    if isinstance(req_id, float) and not math.isfinite(req_id):
         return None
     return _json_safe(req_id)
+
+
+def _valid_request_id(req_id: Any) -> bool:
+    return (
+        req_id is None
+        or isinstance(req_id, str)
+        or (isinstance(req_id, int) and not isinstance(req_id, bool))
+        or (isinstance(req_id, float) and math.isfinite(req_id))
+    )
 
 
 class JsonRpcServer:
@@ -80,7 +96,7 @@ class JsonRpcServer:
             if not line:
                 continue
             try:
-                request = json.loads(line)
+                request = json.loads(line, parse_constant=_reject_json_constant)
             except (ValueError, RecursionError):
                 self._write_error(output_stream, None, -32700, "Parse error")
                 continue
@@ -90,6 +106,8 @@ class JsonRpcServer:
                 self._write_error(output_stream, None, -32600, "Invalid Request")
                 continue
             response = self._handle(request)
+            if response is None:
+                continue
             try:
                 encoded = encode_response(response)
             except (TypeError, ValueError) as exc:
@@ -115,25 +133,52 @@ class JsonRpcServer:
             output_stream.flush()
 
     def _handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
+        has_id = "id" in request
         req_id = request.get("id")
-        method = request.get("method", "")
+        response_id = (
+            _representable_id(req_id)
+            if has_id and _valid_request_id(req_id)
+            else None
+        )
+        method = request.get("method")
         params = request.get("params", {})
 
-        if not isinstance(method, str) or method not in self._methods:
+        if (
+            request.get("jsonrpc") != "2.0"
+            or not isinstance(method, str)
+            or not isinstance(params, (dict, list))
+            or (has_id and not _valid_request_id(req_id))
+        ):
+            return {
+                "jsonrpc": "2.0",
+                "error": {"code": -32600, "message": "Invalid Request"},
+                "id": response_id,
+            }
+
+        if method not in self._methods:
+            if not has_id:
+                return None
             return {
                 "jsonrpc": "2.0",
                 "error": {"code": -32601, "message": f"Method not found: {method}"},
-                "id": req_id,
+                "id": response_id,
             }
 
         try:
-            result = self._methods[method](**params)
-            return {"jsonrpc": "2.0", "result": result, "id": req_id}
+            if isinstance(params, dict):
+                result = self._methods[method](**params)
+            else:
+                result = self._methods[method](*params)
+            if not has_id:
+                return None
+            return {"jsonrpc": "2.0", "result": result, "id": response_id}
         except Exception as exc:
+            if not has_id:
+                return None
             return {
                 "jsonrpc": "2.0",
                 "error": {"code": -32000, "message": str(exc)},
-                "id": req_id,
+                "id": response_id,
             }
 
     @staticmethod

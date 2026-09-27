@@ -1,4 +1,4 @@
-"""The JSON-RPC loop answers every line and survives every line.
+"""The JSON-RPC loop validates each line and survives malformed calls.
 
 One engine process serves every window, so a request that raises out of
 the loop ends every in-flight call; and the host drops a response line it
@@ -38,35 +38,112 @@ def test_non_object_request_is_answered_and_the_loop_continues():
         assert replies[1] == {"jsonrpc": "2.0", "result": {"a": 1}, "id": 99}
 
 
-def test_unhashable_method_is_method_not_found():
+def test_non_string_method_is_an_invalid_request():
     for method in ("[1]", "{}"):
-        replies = _serve([f'{{"id":7,"method":{method}}}', _SENTINEL])
-        assert replies[0]["error"]["code"] == -32601
+        replies = _serve([f'{{"jsonrpc":"2.0","id":7,"method":{method}}}', _SENTINEL])
+        assert replies[0]["error"]["code"] == -32600
         assert replies[0]["id"] == 7
         assert replies[1]["id"] == 99
 
 
 def test_non_finite_result_is_an_error_for_its_id():
-    replies = _serve(['{"id":5,"method":"nan"}', '{"id":6,"method":"inf"}', _SENTINEL])
+    replies = _serve(
+        ['{"jsonrpc":"2.0","id":5,"method":"nan"}',
+         '{"jsonrpc":"2.0","id":6,"method":"inf"}', _SENTINEL]
+    )
     assert [r["id"] for r in replies] == [5, 6, 99]
     assert replies[0]["error"]["code"] == -32603
     assert replies[1]["error"]["code"] == -32603
 
 
 def test_unserializable_result_is_an_error_for_its_id():
-    replies = _serve(['{"id":4,"method":"raw"}', _SENTINEL])
+    replies = _serve(['{"jsonrpc":"2.0","id":4,"method":"raw"}', _SENTINEL])
     assert replies[0]["error"]["code"] == -32603
     assert replies[0]["id"] == 4
     assert replies[1]["id"] == 99
 
 
 def test_escaped_nul_in_a_string_round_trips():
-    replies = _serve(['{"id":1,"method":"echo","params":{"a":"x\\u0000y"}}'])
+    replies = _serve(
+        ['{"jsonrpc":"2.0","id":1,"method":"echo","params":{"a":"x\\u0000y"}}']
+    )
     assert replies[0]["result"] == {"a": "x\x00y"}
 
 
 def test_control_calls_are_unchanged():
-    replies = _serve(["not json", '{"id":2,"method":"echo","params":[1]}', _SENTINEL])
+    replies = _serve(
+        ["not json", '{"jsonrpc":"2.0","id":2,"method":"echo","params":[1]}', _SENTINEL]
+    )
     assert replies[0]["error"]["code"] == -32700
     assert replies[1]["error"]["code"] == -32000 and replies[1]["id"] == 2
     assert replies[2]["id"] == 99
+
+
+def test_invalid_request_metadata_never_dispatches():
+    calls = []
+    server = JsonRpcServer()
+    server.register("effect", lambda **params: calls.append(params) or "done")
+    requests = [
+        '{"jsonrpc":"1.0","id":1,"method":"effect","params":{}}',
+        '{"id":2,"method":"effect","params":{}}',
+        '{"jsonrpc":"2.0","id":3,"method":1}',
+        '{"jsonrpc":"2.0","id":4,"method":"effect","params":"bad"}',
+        '{"jsonrpc":"2.0","id":[],"method":"effect","params":{}}',
+        '{"jsonrpc":"2.0","id":true,"method":"effect","params":{}}',
+        '{"jsonrpc":"2.0","id":5,"method":"effect","params":{}}',
+    ]
+    out = io.StringIO()
+    server.run(io.StringIO("\n".join(requests) + "\n"), out)
+
+    replies = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert [reply["error"]["code"] for reply in replies[:6]] == [-32600] * 6
+    assert [reply["id"] for reply in replies[:6]] == [1, 2, 3, 4, None, None]
+    assert replies[6] == {"jsonrpc": "2.0", "result": "done", "id": 5}
+    assert calls == [{}]
+
+
+def test_notifications_are_dispatched_without_responses():
+    calls = []
+    server = JsonRpcServer()
+    server.register("effect", lambda: calls.append("effect"))
+    server.register("echo", lambda **params: params)
+    requests = (
+        '{"jsonrpc":"2.0","method":"effect"}\n'
+        '{"jsonrpc":"2.0","method":"unknown"}\n'
+        '{"jsonrpc":"2.0","id":null,"method":"echo","params":{"x":0}}\n'
+        '{"jsonrpc":"2.0","id":8,"method":"echo","params":{"x":1}}\n'
+    )
+    out = io.StringIO()
+    server.run(io.StringIO(requests), out)
+
+    replies = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert replies == [
+        {"jsonrpc": "2.0", "result": {"x": 0}, "id": None},
+        {"jsonrpc": "2.0", "result": {"x": 1}, "id": 8},
+    ]
+    assert calls == ["effect"]
+
+
+def test_positional_parameter_arrays_are_supported():
+    server = JsonRpcServer()
+    server.register("subtract", lambda left, right: left - right)
+    out = io.StringIO()
+    server.run(
+        io.StringIO('{"jsonrpc":"2.0","id":1,"method":"subtract","params":[9,4]}\n'),
+        out,
+    )
+    assert json.loads(out.getvalue()) == {"jsonrpc": "2.0", "result": 5, "id": 1}
+
+
+def test_non_json_constants_are_parse_errors():
+    replies = _serve(
+        ['{"jsonrpc":"2.0","id":5,"method":"echo","params":{"x":NaN}}', _SENTINEL]
+    )
+    assert replies[0]["error"]["code"] == -32700
+    assert replies[1]["id"] == 99
+
+
+def test_numeric_id_is_preserved_in_result_serialization_error():
+    replies = _serve(['{"jsonrpc":"2.0","id":4.5,"method":"raw"}'])
+    assert replies[0]["error"]["code"] == -32603
+    assert replies[0]["id"] == 4.5
