@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppModal } from '../hooks/useAppModal';
 import { app } from '../lib/tauri-bridge';
@@ -7,6 +7,8 @@ import {
   WEB_URL_REFUSAL_KEYS,
   downloadStem,
   isPrivateHost,
+  type OpenDownloadResult,
+  routeWebResponse,
   readWebUrl,
 } from '../lib/web-open';
 
@@ -33,42 +35,49 @@ export function OpenFromWebDialog({
   initialUrl,
   onClose,
   onDownloaded,
+  discard,
 }: {
   /** Pre-filled address: a re-open from the recent list, or a dropped URL.
    * Pre-filled, never pre-fetched. */
   initialUrl?: string;
   onClose: () => void;
   /**
-   * Hand the downloaded copy to the caller's open funnel. It resolves to an
-   * error message when the funnel refused the file (a response that is not a
-   * document it can read), so the refusal is shown HERE, beside the address
-   * that produced it, rather than as a detached notice.
+   * Hand the downloaded copy to the caller's open funnel. A refusal is shown
+   * HERE, beside the address that produced it, rather than as a detached
+   * notice; a canceled open leaves this dialog in place.
    */
-  onDownloaded: (result: OpenFromWebResult) => Promise<string | null>;
+  onDownloaded: (result: OpenFromWebResult) => Promise<OpenDownloadResult>;
+  /** Remove a network scratch response that did not become an open document. */
+  discard: (path: string) => Promise<void>;
 }): React.JSX.Element {
   useTranslation();
   const [url, setUrl] = useState(initialUrl ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // The reentrancy window opens before any state update lands (the Create PDF
-  // / Web Capture discipline), and the same ref carries the abandon flag: a
-  // response that arrives after Cancel is discarded rather than opened.
-  const runRef = useRef<{ busy: boolean; abandoned: boolean }>({
-    busy: false,
-    abandoned: false,
-  });
+  // The reentrancy window opens before any state update lands. Each request
+  // keeps its own abandon flag, so a later request cannot revive an old one.
+  const runRef = useRef<{ abandoned: boolean } | null>(null);
+
+  useEffect(
+    () => () => {
+      if (runRef.current) runRef.current.abandoned = true;
+      runRef.current = null;
+    },
+    [],
+  );
 
   const verdict = useMemo(() => readWebUrl(url), [url]);
 
   const download = useCallback(async () => {
-    if (runRef.current.busy) return;
+    if (runRef.current) return;
     const read = readWebUrl(url);
     if (!read.ok) {
       setError(tChrome(WEB_URL_REFUSAL_KEYS[read.reason], { url: url.trim() }));
       return;
     }
-    runRef.current = { busy: true, abandoned: false };
+    const run = { abandoned: false };
+    runRef.current = run;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -83,40 +92,35 @@ export function OpenFromWebDialog({
         // lands private — that hop was never seen.
         refusePrivate: false,
       });
-      if (runRef.current.abandoned) return;
-      if (response.status < 200 || response.status >= 300) {
+      const outcome = await routeWebResponse(response, read.url, {
+        isAbandoned: () => run.abandoned,
+        open: onDownloaded,
+        discard,
+      });
+      if (run.abandoned || outcome.kind === 'abandoned') return;
+      if (outcome.kind === 'rejected') {
         setError(
           tChrome('dialog.openWeb.rejected', {
             url: read.url,
-            status: response.status,
+            status: outcome.status,
           }),
         );
         return;
       }
-      if (response.bytes === 0) {
+      if (outcome.kind === 'empty') {
         setError(tChrome('dialog.openWeb.empty', { url: read.url }));
         return;
       }
-      // The funnel decides whether these bytes are a document. A refusal comes
-      // back as its own text and is shown; it is not a crash and not a second
-      // opinion formed here from the content type.
-      // Provenance is the address the bytes actually came from — a same-origin
-      // redirect moves it, and recording the typed one would name a place the
-      // document did not come from.
-      const refusal = await onDownloaded({
-        path: response.path,
-        url: response.finalUrl || read.url,
-      });
-      if (runRef.current.abandoned) return;
-      if (refusal) {
+      if (outcome.kind === 'notOpened') return;
+      if (outcome.kind === 'refused') {
         setError(
-          tChrome('dialog.openWeb.notADocument', { url: read.url, detail: refusal }),
+          tChrome('dialog.openWeb.notADocument', { url: read.url, detail: outcome.detail }),
         );
         return;
       }
       onClose();
     } catch (err) {
-      if (runRef.current.abandoned) return;
+      if (run.abandoned) return;
       setError(
         tChrome('dialog.openWeb.failed', {
           url: read.url,
@@ -124,15 +128,17 @@ export function OpenFromWebDialog({
         }),
       );
     } finally {
-      runRef.current.busy = false;
-      setBusy(false);
+      if (runRef.current === run) {
+        runRef.current = null;
+        setBusy(false);
+      }
     }
-  }, [url, onDownloaded, onClose]);
+  }, [url, onDownloaded, onClose, discard]);
 
   const cancel = useCallback(() => {
-    if (runRef.current.busy) {
+    if (runRef.current) {
       runRef.current.abandoned = true;
-      runRef.current.busy = false;
+      runRef.current = null;
       setBusy(false);
       setNotice(tChrome('dialog.openWeb.cancelled'));
       return;

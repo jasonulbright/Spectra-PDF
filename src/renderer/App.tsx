@@ -169,7 +169,7 @@ import { WatchedFoldersDialog } from './components/WatchedFoldersDialog';
 import { CreatePdfDialog } from './components/CreatePdfDialog';
 import { CombineDialog } from './components/CombineDialog';
 import { OpenFromWebDialog, type OpenFromWebResult } from './components/OpenFromWebDialog';
-import { saveRouteFor } from './lib/web-open';
+import { saveRouteFor, type OpenDownloadResult } from './lib/web-open';
 import { classify as classifySource } from './lib/create-pdf';
 import type { CombineDestination } from './lib/combine';
 import { ExportImagesDialog } from './components/ExportImagesDialog';
@@ -1447,19 +1447,32 @@ function AppContent(): React.ReactElement {
   // and its refusal comes back as text for the dialog to show beside the
   // address rather than as a throw nobody catches.
   const openDownloadedFile = useCallback(
-    async ({ path, url }: OpenFromWebResult): Promise<string | null> => {
+    async ({ path, url }: OpenFromWebResult): Promise<OpenDownloadResult> => {
+      let didOpen = false;
       try {
         // The funnel's own notice is suppressed here and only here: this
         // dialog shows the refusal beside the address the user typed, and two
         // surfaces for one refusal is the noise the open path does not have.
-        const summary = await openByPaths([path], { webOrigin: url, reportFailures: false });
-        if (summary.kind === 'single') return summary.reason;
+        const summary = await openByPaths([path], {
+          webOrigin: url,
+          reportFailures: false,
+          onPathOpenResult: (_openedPath, opened) => { didOpen = opened; },
+        });
+        if (didOpen) return { kind: 'opened' };
+        if (summary.kind === 'single') return { kind: 'refused', detail: summary.reason };
         if (summary.kind === 'batch' && summary.failures.length > 0) {
-          return summary.failures[0].reason;
+          return { kind: 'refused', detail: summary.failures[0].reason };
         }
-        return null;
+        return { kind: 'notOpened' };
       } catch (err) {
-        return err instanceof Error ? err.message : String(err);
+        // Once OPEN_FILE has landed, a later courtesy step (such as the
+        // initial-view preference) must not make the caller discard the temp
+        // source that now backs this tab.
+        if (didOpen) return { kind: 'opened' };
+        return {
+          kind: 'refused',
+          detail: err instanceof Error ? err.message : String(err),
+        };
       }
     },
     [openByPaths],
@@ -3652,6 +3665,7 @@ function AppContent(): React.ReactElement {
           initialUrl={openWebUrl}
           onClose={() => setOpenWebUrl(null)}
           onDownloaded={openDownloadedFile}
+          discard={file.remove}
         />
       )}
       {showCreatePdf && (
