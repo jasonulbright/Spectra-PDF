@@ -384,6 +384,32 @@ def test_extraction_follows_the_copy_permission(readable):
     assert "Hello reader" in extract_text(readable)["text"]
 
 
+def test_xfdf_export_refuses_when_copy_is_denied(tmp_dir):
+    from engine.xfdf import export_xfdf
+
+    source = os.path.join(tmp_dir, "comments.pdf")
+    output = os.path.join(tmp_dir, "comments.xfdf")
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page()
+    annotation = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name.Annot,
+        Subtype=pikepdf.Name.Text,
+        Rect=pikepdf.Array([10, 10, 30, 30]),
+        Contents=pikepdf.String("private review note"),
+    ))
+    page.obj["/Annots"] = pdf.make_indirect(pikepdf.Array([annotation]))
+    pdf.save(source, encryption=pikepdf.Encryption(
+        user=USER, owner=OWNER, R=6, allow=_allow()))
+    pdf.close()
+    assert open_document(source, USER)["opener"] == "user"
+    try:
+        with pytest.raises(PermissionError, match="held by an owner password"):
+            export_xfdf(source, output)
+        assert not os.path.exists(output)
+    finally:
+        close_document(source)
+
+
 def test_every_pdfminer_door_reads_a_user_opened_copy(readable, tmp_dir):
     from engine.compare import compare_text
     from engine.search_in_files import search_in_files
