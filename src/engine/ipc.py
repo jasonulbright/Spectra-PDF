@@ -48,6 +48,31 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _contains_lone_surrogate(value: Any, ancestors: set[int] | None = None) -> bool:
+    """Check JSON data before encoding; escaped non-BMP scalars are valid."""
+    if isinstance(value, str):
+        return _LONE_SURROGATE.search(value) is not None
+    if not isinstance(value, (dict, list, tuple)):
+        return False
+
+    if ancestors is None:
+        ancestors = set()
+    identity = id(value)
+    if identity in ancestors:
+        raise ValueError("Circular reference detected")
+    ancestors.add(identity)
+    try:
+        if isinstance(value, dict):
+            return any(
+                (isinstance(key, str) and _contains_lone_surrogate(key, ancestors))
+                or _contains_lone_surrogate(item, ancestors)
+                for key, item in value.items()
+            )
+        return any(_contains_lone_surrogate(item, ancestors) for item in value)
+    finally:
+        ancestors.remove(identity)
+
+
 def _reject_json_constant(value: str) -> None:
     raise ValueError(f"Invalid JSON constant: {value}")
 
@@ -55,14 +80,15 @@ def _reject_json_constant(value: str) -> None:
 def encode_response(response: dict) -> str:
     """One response as the line the host reads.
 
-    `json.dumps` writes a lone surrogate as `\\udcXX` and a character past
-    the BMP as a surrogate PAIR, so a line without `\\ud` holds neither and
-    is written as dumped.
+    Detect lone surrogates in the source tree before encoding. Looking for
+    `\\ud` in the encoded line also matches valid non-BMP characters, which
+    need no repair and should not cause a full response copy and second dump.
     """
-    line = json.dumps(response, allow_nan=False)
-    if "\\ud" in line:
-        line = json.dumps(_json_safe(response), allow_nan=False)
-    return line
+    if _contains_lone_surrogate(response):
+        safe_response = _json_safe(response)
+    else:
+        safe_response = response
+    return json.dumps(safe_response, allow_nan=False)
 
 
 def _representable_id(req_id: Any) -> Any:

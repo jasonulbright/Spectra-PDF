@@ -3,6 +3,8 @@
 import json
 from io import StringIO
 
+import pytest
+
 from engine import ipc
 from engine.ipc import JsonRpcServer
 
@@ -82,6 +84,17 @@ def test_an_oversized_response_becomes_a_bounded_error_and_server_continues(monk
     assert response["error"]["message"] == "Result exceeds the JSON-RPC response size limit."
     assert len(first.encode("utf-8")) <= 256
     assert json.loads(second) == {"jsonrpc": "2.0", "result": "alive", "id": 2}
+
+
+def test_valid_non_bmp_result_does_not_copy_the_response_for_surrogate_repair(monkeypatch):
+    def reject_surrogate_repair(_value):
+        pytest.fail("valid Unicode must not take the surrogate repair path")
+
+    monkeypatch.setattr(ipc, "_json_safe", reject_surrogate_repair)
+
+    encoded = ipc.encode_response({"text": "page 😀 title"})
+
+    assert json.loads(encoded) == {"text": "page 😀 title"}
 
 
 def test_handler_progress_does_not_mix_with_json_rpc_stdout(capsys):
