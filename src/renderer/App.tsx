@@ -1796,6 +1796,7 @@ function AppContent(): React.ReactElement {
                   include_empty: action.includeEmpty,
                 })) as unknown as { count?: number },
               payloadBytes: (payload) => app.netPayloadBytes(payload),
+              payloadSize: (payload) => app.netPayloadSize(payload),
               send: (request) => app.netRequest(request),
               saveTarget: (suggested) => dialog.saveFormDataFile(suggested),
               copyFile: (from, to) => batch.copyFile(from, to),

@@ -56,6 +56,8 @@ export interface SubmissionIo {
   /** Write the form's data to `output`; the count of fields it holds. */
   buildPayload: (output: string) => Promise<{ count?: number }>;
   payloadBytes: (path: string) => Promise<Uint8Array>;
+  /** Read metadata only, for a PDF preview that displays only its byte count. */
+  payloadSize: (path: string) => Promise<number>;
   send: (request: SubmitRequest) => Promise<SubmissionReply>;
   /** The save dialog; null when the user cancels it. */
   saveTarget: (suggestedName: string) => Promise<string | null>;
@@ -121,7 +123,9 @@ export async function runSubmission(
       url: action.url,
       format: action.format,
       method: action.method,
-      preview: payloadPreview(action.format, await io.payloadBytes(payloadPath)),
+      preview: action.format === 'pdf'
+        ? { kind: 'document', bytes: await io.payloadSize(payloadPath) }
+        : payloadPreview(action.format, await io.payloadBytes(payloadPath)),
       fieldCount: built.count ?? 0,
     });
     if (answer === 'cancel') return;

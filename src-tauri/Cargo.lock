@@ -3995,6 +3995,7 @@ dependencies = [
  "tauri-plugin-webdriver",
  "tempfile",
  "tokio",
+ "tokio-util",
  "url",
  "uuid",
  "webview2-com",
