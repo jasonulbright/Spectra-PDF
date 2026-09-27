@@ -413,6 +413,36 @@ function keepPathsOpenedSinceSnapshot(snapshot: OpenDocument[], live: OpenDocume
   return newlyOpened.length > 0 ? [...snapshot, ...newlyOpened] : snapshot;
 }
 
+/** Closing an unrelated file need not erase page edits in the rest of the
+ * workspace. Preserve history only when recorded actions and source references
+ * are independent of the path being closed. */
+function pageHistoryIndependentOfPath(state: AppState, path: string): boolean {
+  const history = [...state.pageUndoStack, ...state.pageRedoStack];
+  if (state.pageDirtyPaths.includes(path) || history.some((entry) => entry.dirtyPaths.includes(path))) return false;
+  const compositions = [state.workspace.documents, ...history.map((entry) => entry.documents)];
+  const seenDocuments = new Set<OpenDocument>();
+  for (const docs of compositions) {
+    for (const doc of docs) {
+      if (doc.path === path || seenDocuments.has(doc)) continue;
+      seenDocuments.add(doc);
+      if (doc.pages.some((page) => page.sourceDocId === path)) return false;
+    }
+  }
+  return history.every((entry) => {
+    const snapshot = { ...state, workspace: { documents: entry.documents } };
+    const touched = editedDocuments(snapshot, entry.action);
+    return touched !== undefined && touched !== null && touched.every((doc) => doc.path !== path);
+  });
+}
+
+function dropPathFromHistory(history: AppState['pageUndoStack'], path: string): AppState['pageUndoStack'] {
+  return history.map((entry) => ({
+    ...entry,
+    documents: entry.documents.filter((doc) => doc.path !== path),
+    dirtyPaths: entry.dirtyPaths.filter((dirtyPath) => dirtyPath !== path),
+  }));
+}
+
 type PageTier = Pick<AppState, 'workspace' | 'pageUndoStack' | 'pageRedoStack' | 'pageDirtyPaths'>;
 
 /** Replay recorded page edits onto `base` and rebuild both stacks from them.
@@ -846,6 +876,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // strips this path's SOURCED pages out of other documents below, so
       // their ids leave the workspace with it (regression phantom).
       const base = pruneSelectionForPaths(state, [action.path], true);
+      const preservePageHistory = pageHistoryIndependentOfPath(state, action.path);
       const files = new Map(state.files);
       files.delete(action.path);
       // Fall back to the next file the user can actually SEE — never a
@@ -866,10 +897,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         : state.activeFileId;
       // Drop the file's documents, and strip its pages out of every other
       // document — pending cross-file moves referencing it could never be
-      // committed once the source bytes are gone. Page-edit history may
-      // reference those pages too, so the tier resets. Paths stripped all the
-      // way to zero pages are reset to their on-disk composition instead of
-      // keeping an uncommittable empty strip.
+      // committed once the source bytes are gone. History that references the
+      // closing path resets; independent page history survives with that
+      // path removed from its snapshots. Paths stripped all the way to zero
+      // pages are reset to their on-disk composition instead of keeping an
+      // uncommittable empty strip.
       const stripped = pruneEmptyDocs(
         state.workspace.documents
           .filter((d) => d.path !== action.path)
@@ -905,8 +937,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         activeFileId,
         ui,
         workspace: { documents },
-        pageUndoStack: [],
-        pageRedoStack: [],
+        pageUndoStack: preservePageHistory ? dropPathFromHistory(state.pageUndoStack, action.path) : [],
+        pageRedoStack: preservePageHistory ? dropPathFromHistory(state.pageRedoStack, action.path) : [],
         pageDirtyPaths: dirtyPaths,
       };
     }

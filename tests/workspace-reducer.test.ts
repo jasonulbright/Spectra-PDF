@@ -103,6 +103,33 @@ describe('CLOSE_FILE', () => {
     const next = appReducer(stateWith([a, b], docs), { type: 'CLOSE_FILE', path: 'a.pdf' });
     expect(next.workspace.documents.map((d) => d.id)).toEqual(['b.pdf#0']);
   });
+
+  it('preserves another file\'s undo history when closing an unrelated clean file', () => {
+    const a = makeFile('a.pdf', 1);
+    const b = makeFile('b.pdf', 1);
+    const aDoc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1));
+    const bDoc = makeDoc(b, 'b.pdf#0', makePages('b.pdf', 1));
+    const rotated = appReducer(stateWith([a, b], [aDoc, bDoc]), {
+      type: 'ROTATE_PAGE_REF', docId: bDoc.id, pageId: 'b.pdf#p0', rotation: 90,
+    });
+
+    const closed = appReducer(rotated, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect(closed.pageUndoStack).toHaveLength(1);
+    expect(closed.pageDirtyPaths).toEqual(['b.pdf']);
+    expect(closed.workspace.documents.map((doc) => doc.path)).toEqual(['b.pdf']);
+
+    const undone = appReducer(closed, { type: 'UNDO_PAGE_OP' });
+    expect(undone.workspace.documents.map((doc) => doc.path)).toEqual(['b.pdf']);
+    expect(undone.workspace.documents[0].pages[0].rotation).toBe(0);
+    expect(undone.pageDirtyPaths).toEqual([]);
+
+    const undoneBeforeClose = appReducer(rotated, { type: 'UNDO_PAGE_OP' });
+    const closedWithRedo = appReducer(undoneBeforeClose, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect(closedWithRedo.pageRedoStack).toHaveLength(1);
+    const redone = appReducer(closedWithRedo, { type: 'REDO_PAGE_OP' });
+    expect(redone.workspace.documents.map((doc) => doc.path)).toEqual(['b.pdf']);
+    expect(redone.workspace.documents[0].pages[0].rotation).toBe(90);
+  });
 });
 
 describe('REORDER_PAGES', () => {
