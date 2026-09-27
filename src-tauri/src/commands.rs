@@ -3180,9 +3180,25 @@ mod tests {
         let dir = scratch("log-stages");
         let (_child, dead) = stopped_process();
         let own = std::process::id();
+        let dead_stage = crate::staging::stage_path(
+            Path::new("batch-ocr-2026-01-02_030405.log"),
+            dead,
+        )
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+        let own_stage = crate::staging::stage_path(
+            Path::new("batch-ocr-2026-01-02_030406.log"),
+            own,
+        )
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
         let names = [
-            format!("batch-ocr-2026-01-02_030405.log.{dead}.tmp"),
-            format!("batch-ocr-2026-01-02_030406.log.{own}.tmp"),
+            dead_stage.clone(),
+            own_stage,
             format!("notes.txt.{dead}.tmp"),
             "batch-ocr-2026-01-02_030405.log".to_string(),
         ];
@@ -3195,7 +3211,7 @@ mod tests {
 
         assert_eq!(std::fs::read(&written).unwrap(), b"whole log");
         let mut kept: std::collections::BTreeSet<String> = names.into_iter().collect();
-        kept.remove(&format!("batch-ocr-2026-01-02_030405.log.{dead}.tmp"));
+        kept.remove(&dead_stage);
         kept.insert("action-run-2026-01-02_030407.log".to_string());
         assert_eq!(listing(&dir), kept);
         assert_eq!(

@@ -2316,8 +2316,23 @@ mod tests {
 
     // ── The file itself ───────────────────────────────────────────────────
 
-    fn staging_path(path: &Path) -> PathBuf {
-        crate::staging::stage_path(path, std::process::id())
+    fn staging_paths(path: &Path) -> Vec<PathBuf> {
+        let Some(parent) = path.parent() else {
+            return Vec::new();
+        };
+        let Some(record) = path.file_name().and_then(|name| name.to_str()) else {
+            return Vec::new();
+        };
+        std::fs::read_dir(parent)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                crate::staging::stage_owner(record, &entry.file_name().to_string_lossy())
+                    .filter(|pid| *pid == std::process::id())
+                    .map(|_| entry.path())
+            })
+            .collect()
     }
 
     #[test]
@@ -2332,7 +2347,7 @@ mod tests {
         crate::staging::write_record(&path, b"{\"version\":2}").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"version\":2}");
         // And nothing is left beside the record.
-        assert!(!staging_path(&path).exists());
+        assert!(staging_paths(&path).is_empty());
     }
 
     #[test]
@@ -2355,16 +2370,17 @@ mod tests {
     }
 
     #[test]
-    fn a_write_that_fails_leaves_the_previous_record_readable() {
+    fn a_preexisting_stage_name_does_not_block_or_replace_a_session_write() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(SESSION_FILE);
         crate::staging::write_record(&path, b"{\"version\":1}").unwrap();
 
-        // Staging cannot be created. A write straight over the record would
-        // have truncated it first and left neither session on disk.
-        std::fs::create_dir(staging_path(&path)).unwrap();
-        assert!(crate::staging::write_record(&path, b"{\"version\":2}").is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"version\":1}");
+        // A pre-existing stage-looking path is not assumed to belong to us.
+        let unrelated = crate::staging::stage_path(&path, std::process::id());
+        std::fs::create_dir(&unrelated).unwrap();
+        crate::staging::write_record(&path, b"{\"version\":2}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"version\":2}");
+        assert!(unrelated.is_dir());
     }
 
     /// The session lands through the staged writer, which is also what
@@ -2501,12 +2517,25 @@ mod tests {
         let path = dir.path().join(SESSION_FILE);
         let record = serde_json::to_string(&saved_session()).unwrap();
         std::fs::write(&path, &record).unwrap();
-        let beside = [
+        let stage_name = |pid| {
+            crate::staging::stage_path(&path, pid)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        };
+        let own_stage = stage_name(OWN);
+        let live_stage = stage_name(LIVE);
+        let dead_stage = stage_name(DEAD);
+        let beside = vec![
             "session.json.bak".to_string(),
             "session.json.abc.tmp".to_string(),
             format!("session.json.{OWN}.tmp"),
             format!("session.json.{LIVE}.tmp"),
             format!("session.json.{DEAD}.tmp"),
+            own_stage,
+            live_stage,
+            dead_stage.clone(),
         ];
         for name in &beside {
             std::fs::write(dir.path().join(name), "{\"version\":9}").unwrap();
@@ -2524,14 +2553,14 @@ mod tests {
             .collect();
         let mut kept: std::collections::BTreeSet<String> = beside.into_iter().collect();
         kept.insert(SESSION_FILE.to_string());
-        kept.remove(&format!("session.json.{DEAD}.tmp"));
+        kept.remove(&dead_stage);
         assert_eq!(left, kept);
     }
 
     #[test]
     fn the_reclaim_recognises_exactly_the_names_the_writer_stages() {
         let path = Path::new("C:\\data").join(SESSION_FILE);
-        let staged = staging_path(&path);
+        let staged = crate::staging::stage_path(&path, std::process::id());
         let name = staged.file_name().unwrap().to_str().unwrap();
         assert_eq!(
             crate::staging::stage_owner(SESSION_FILE, name),
