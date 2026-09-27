@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -186,7 +186,12 @@ pub struct CapturedPage {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CaptureResult {
+    /// Opaque identity used to release this run's temporary PDFs. Its
+    /// directory is confined to this process and is also reclaimed after a
+    /// crashed process exits.
+    pub capture_id: String,
     pub pages: Vec<CapturedPage>,
     /// How many URLs were reached, including any that failed.
     pub visited: usize,
@@ -333,15 +338,93 @@ fn admits(
     in_scope && !seen.iter().any(|s| s == link)
 }
 
-fn scratch_path(index: usize) -> Result<std::path::PathBuf, String> {
-    let dir = std::env::temp_dir().join("spectrapdf").join("web-capture");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Cannot create the capture scratch folder: {e}"))?;
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    Ok(dir.join(format!("capture-{stamp}-{index:03}.pdf")))
+fn capture_root() -> PathBuf {
+    std::env::temp_dir().join("spectrapdf").join("web-capture")
+}
+
+/// One capture's files. The process id lets startup reclaim a killed
+/// process's directory without touching another live app instance; the UUID
+/// prevents runs in this process from sharing or replacing files.
+struct CaptureScratch {
+    id: uuid::Uuid,
+    dir: PathBuf,
+    retained: bool,
+}
+
+impl CaptureScratch {
+    fn new() -> Result<Self, String> {
+        Self::new_at(&capture_root(), std::process::id())
+    }
+
+    fn new_at(root: &Path, pid: u32) -> Result<Self, String> {
+        std::fs::create_dir_all(root)
+            .map_err(|e| format!("Cannot create the capture scratch folder: {e}"))?;
+        let id = uuid::Uuid::new_v4();
+        let dir = root.join(format!("{id}.{pid}"));
+        std::fs::create_dir(&dir)
+            .map_err(|e| format!("Cannot create the capture's private folder: {e}"))?;
+        Ok(Self {
+            id,
+            dir,
+            retained: false,
+        })
+    }
+
+    fn capture_id(&self) -> String {
+        self.id.to_string()
+    }
+
+    fn retain(&mut self) {
+        self.retained = true;
+    }
+}
+
+impl Drop for CaptureScratch {
+    fn drop(&mut self) {
+        if !self.retained {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+}
+
+fn discard_capture_at(root: &Path, capture_id: &str, pid: u32) -> Result<(), String> {
+    let id = uuid::Uuid::parse_str(capture_id)
+        .map_err(|_| "The capture scratch identity is invalid".to_string())?;
+    if id.get_version_num() != 4 || id.to_string() != capture_id {
+        return Err("The capture scratch identity is invalid".to_string());
+    }
+    let dir = root.join(format!("{id}.{pid}"));
+    let metadata = match std::fs::symlink_metadata(&dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!("Could not inspect the capture scratch folder: {error}"))
+        }
+    };
+    if !metadata.file_type().is_dir() {
+        return Err("The capture scratch path is not a regular folder".to_string());
+    }
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|e| format!("Cannot locate the capture scratch folder: {e}"))?;
+    let parent = dir
+        .parent()
+        .ok_or_else(|| "The capture scratch path is invalid".to_string())?
+        .canonicalize()
+        .map_err(|e| format!("Cannot locate the capture scratch folder: {e}"))?;
+    if parent != canonical_root {
+        return Err("The capture scratch path is outside its folder".to_string());
+    }
+    std::fs::remove_dir_all(&dir)
+        .map_err(|e| format!("Could not remove the capture scratch folder: {e}"))
+}
+
+/// Release the temporary PDFs for one completed capture from this process.
+/// The renderer can name only an opaque UUID; the command supplies its own
+/// process id and never accepts a filesystem path.
+#[tauri::command]
+pub fn discard_web_capture(capture_id: String) -> Result<(), String> {
+    discard_capture_at(&capture_root(), &capture_id, std::process::id())
 }
 
 /// Why a capture step did not succeed. Cancellation is separated from failure
@@ -680,7 +763,30 @@ pub async fn capture_web_page(
     }
     // A close seen while no capture was running must not cancel this one.
     clear_cancel();
-    let result = run_capture(&app, options, start, scheme, host, local_root, depth, budget).await;
+    let mut scratch = match CaptureScratch::new() {
+        Ok(scratch) => scratch,
+        Err(error) => {
+            CAPTURING.store(false, Ordering::SeqCst);
+            return Err(error);
+        }
+    };
+    let capture_id = scratch.capture_id();
+    let result = run_capture(
+        &app,
+        options,
+        start,
+        scheme,
+        host,
+        local_root,
+        depth,
+        budget,
+        scratch.dir.clone(),
+        capture_id,
+    )
+    .await;
+    if matches!(&result, Ok(result) if !result.cancelled && !result.pages.is_empty()) {
+        scratch.retain();
+    }
     CAPTURING.store(false, Ordering::SeqCst);
     // Every exit path — success, refusal, cancellation, a cancel that raced
     // completion. No interface into this window's browser outlives the
@@ -702,6 +808,8 @@ async fn run_capture(
     local_root: Option<PathBuf>,
     depth: u32,
     budget: u32,
+    scratch_dir: PathBuf,
+    capture_id: String,
 ) -> Result<CaptureResult, String> {
     if app.get_webview_window(CAPTURE_LABEL).is_some() {
         return Err("A capture window is already open".to_string());
@@ -736,6 +844,8 @@ async fn run_capture(
 
     let worker = window.clone();
     let opts = options.clone();
+    let worker_scratch = scratch_dir;
+    let worker_capture_id = capture_id.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || -> Result<CaptureResult, String> {
         // Reach the browser once before the crawl, so a runtime that cannot
         // render to PDF refuses BY NAME here rather than as a page that
@@ -750,7 +860,7 @@ async fn run_capture(
             },
         ) {
             Ok(()) => {}
-            Err(StepError::Cancelled) => return Ok(cancelled_result()),
+            Err(StepError::Cancelled) => return Ok(cancelled_result(worker_capture_id)),
             Err(StepError::Failed(err)) => return Err(err),
         }
         Ok(crawl(
@@ -762,12 +872,18 @@ async fn run_capture(
             local_root.as_deref(),
             depth,
             budget,
+            &worker_scratch,
+            worker_capture_id,
         ))
     })
     .await
     .map_err(|e| format!("The capture did not run: {e}"))?;
 
-    let result = outcome?;
+    let mut result = outcome?;
+    if result.cancelled {
+        result.pages.clear();
+        return Ok(result);
+    }
     // A cancelled run reports itself rather than refusing: the refusal below
     // names a capture that was tried and produced nothing, which is a
     // different thing from one that was stopped.
@@ -784,8 +900,8 @@ async fn run_capture(
 
 /// A cancellation no crawl answered: the window was closed before the crawl
 /// reached it, so there is nothing to report but the cancellation itself.
-fn cancelled_result() -> CaptureResult {
-    finish(true, 0, 0, Vec::new(), 0, Vec::new())
+fn cancelled_result(capture_id: String) -> CaptureResult {
+    finish(capture_id, true, 0, 0, Vec::new(), 0, Vec::new())
 }
 
 /// Assemble the run's verdict. Apart from the loop so the relationship between
@@ -793,6 +909,7 @@ fn cancelled_result() -> CaptureResult {
 /// did not reach the page limit, and saying it did reports the wrong reason
 /// for a short capture.
 fn finish(
+    capture_id: String,
     stopped: bool,
     cursor: usize,
     frontier: usize,
@@ -801,6 +918,7 @@ fn finish(
     failures: Vec<String>,
 ) -> CaptureResult {
     CaptureResult {
+        capture_id,
         truncated: !stopped && cursor < frontier,
         cancelled: stopped,
         pages,
@@ -820,6 +938,8 @@ fn crawl(
     local_root: Option<&Path>,
     depth: u32,
     budget: u32,
+    scratch_dir: &Path,
+    capture_id: String,
 ) -> CaptureResult {
     let mut seen: Vec<String> = vec![start.to_string()];
     let mut frontier: Vec<(String, u32)> = vec![(start.to_string(), 0)];
@@ -857,13 +977,7 @@ fn crawl(
             break;
         }
 
-        let path = match scratch_path(pages.len()) {
-            Ok(p) => p,
-            Err(err) => {
-                failures.push(format!("{url}: {err}"));
-                continue;
-            }
-        };
+        let path = scratch_dir.join(format!("page-{:03}.pdf", pages.len()));
         match print_page(window, &path, options) {
             Ok(()) => {}
             Err(StepError::Cancelled) => {
@@ -871,6 +985,7 @@ fn crawl(
                 break;
             }
             Err(StepError::Failed(err)) => {
+                let _ = std::fs::remove_file(&path);
                 failures.push(format!("{url}: {err}"));
                 continue;
             }
@@ -897,15 +1012,25 @@ fn crawl(
         abandon_navigation(window);
     }
 
-    finish(stopped, cursor, frontier.len(), pages, visited, failures)
+    finish(
+        capture_id,
+        stopped,
+        cursor,
+        frontier.len(),
+        pages,
+        visited,
+        failures,
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{admits, cancelled, cancelled_result, clamp, clear_cancel, finish, frontier_cap,
-                local_file_root, same_origin, validate_url, window_close_requested,
-                CaptureOptions, CapturedPage, CAPTURE_LABEL, MAX_DEPTH_CEILING,
-                MAX_PAGES_CEILING};
+    use super::{
+        admits, cancelled, cancelled_result, clamp, clear_cancel, discard_capture_at, finish,
+        frontier_cap, local_file_root, same_origin, validate_url, window_close_requested,
+        CaptureOptions, CaptureScratch, CapturedPage, CAPTURE_LABEL, MAX_DEPTH_CEILING,
+        MAX_PAGES_CEILING,
+    };
 
     fn options(depth: u32, max_pages: u32) -> CaptureOptions {
         CaptureOptions {
@@ -1028,7 +1153,7 @@ mod tests {
 
     #[test]
     fn a_cancelled_capture_is_neither_truncated_nor_a_failure() {
-        let result = cancelled_result();
+        let result = cancelled_result(uuid::Uuid::new_v4().to_string());
         assert!(result.cancelled);
         // Truncation names a run that hit the page limit, and a failure list
         // names pages that could not be captured. A cancel is neither.
@@ -1046,18 +1171,75 @@ mod tests {
             path: String::new(),
         };
         // Frontier left over and NOT stopped: that is truncation.
-        let hit_limit = finish(false, 2, 9, vec![page("a"), page("b")], 2, Vec::new());
+        let hit_limit = finish(
+            "capture".to_string(),
+            false,
+            2,
+            9,
+            vec![page("a"), page("b")],
+            2,
+            Vec::new(),
+        );
         assert!(hit_limit.truncated);
         assert!(!hit_limit.cancelled);
 
         // The same leftover frontier, stopped: cancelled, never truncated.
-        let stopped = finish(true, 2, 9, vec![page("a"), page("b")], 2, Vec::new());
+        let stopped = finish(
+            "capture".to_string(),
+            true,
+            2,
+            9,
+            vec![page("a"), page("b")],
+            2,
+            Vec::new(),
+        );
         assert!(stopped.cancelled);
         assert!(!stopped.truncated);
 
         // Nothing left over and not stopped: a complete run.
-        let complete = finish(false, 3, 3, vec![page("a")], 3, Vec::new());
+        let complete = finish(
+            "capture".to_string(),
+            false,
+            3,
+            3,
+            vec![page("a")],
+            3,
+            Vec::new(),
+        );
         assert!(!complete.truncated);
         assert!(!complete.cancelled);
+    }
+
+    #[test]
+    fn capture_scratch_is_unique_and_removed_unless_retained() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("web-capture");
+        let first = CaptureScratch::new_at(&root, 4100).unwrap();
+        let first_dir = first.dir.clone();
+        std::fs::write(first.dir.join("page-000.pdf"), b"first").unwrap();
+
+        let mut second = CaptureScratch::new_at(&root, 4100).unwrap();
+        let second_dir = second.dir.clone();
+        let second_id = second.capture_id();
+        assert_ne!(first_dir, second_dir);
+        assert!(first_dir
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with(".4100"));
+
+        drop(first);
+        assert!(!first_dir.exists(), "an unretained run cleans its partial output");
+        std::fs::write(second.dir.join("page-000.pdf"), b"second").unwrap();
+        second.retain();
+        drop(second);
+        assert!(second_dir.exists(), "a completed run stays available to Create PDF");
+
+        assert!(discard_capture_at(&root, "../outside", 4100).is_err());
+        assert!(discard_capture_at(&root, &second_id, 4101).is_ok());
+        assert!(second_dir.exists(), "one process cannot release another PID's run");
+        discard_capture_at(&root, &second_id, 4100).unwrap();
+        assert!(!second_dir.exists());
     }
 }

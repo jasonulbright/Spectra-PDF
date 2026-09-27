@@ -62,6 +62,8 @@ export interface CapturedPage {
 }
 
 export interface CaptureResult {
+  /** Opaque Rust-owned scratch identity, released when its source rows leave Create PDF. */
+  captureId: string;
   pages: CapturedPage[];
   visited: number;
   truncated: boolean;

@@ -20,6 +20,7 @@ import {
   addPaths,
   baseName,
   blankRow,
+  captureIdToReleaseOnRowRemoval,
   rowFromPath,
   defaultOutputPath,
   hasUnsupported,
@@ -100,6 +101,7 @@ export function CreatePdfDialog({
   // from the scratch path.
   const [clipboardInfo, setClipboardInfo] = useState<Record<string, ClipboardSourceResult>>({});
   const clipboardScratchPaths = useRef(new Set<string>());
+  const webCaptureIds = useRef(new Set<string>());
   const clipboardDialogMounted = useRef(true);
   const dragFrom = useRef<number | null>(null);
   // Ref, not state: convert()'s reentrancy window opens BEFORE any state
@@ -111,12 +113,18 @@ export function CreatePdfDialog({
 
   React.useEffect(() => {
     clipboardDialogMounted.current = true;
+    const clipboardPaths = clipboardScratchPaths.current;
+    const captureIds = webCaptureIds.current;
     return () => {
       clipboardDialogMounted.current = false;
-      for (const path of clipboardScratchPaths.current) {
+      for (const path of clipboardPaths) {
         void app.discardClipboardSource(path).catch(() => {});
       }
-      clipboardScratchPaths.current.clear();
+      clipboardPaths.clear();
+      for (const captureId of captureIds) {
+        void app.discardWebCapture(captureId).catch(() => {});
+      }
+      captureIds.clear();
     };
   }, []);
 
@@ -190,6 +198,13 @@ export function CreatePdfDialog({
     }
   }, []);
 
+  const releaseWebCapture = useCallback((captureId: string) => {
+    void app.discardWebCapture(captureId).then(
+      () => webCaptureIds.current.delete(captureId),
+      () => {},
+    );
+  }, []);
+
   const removeSourceRow = useCallback((rowId: string) => {
     const clipboardSource = clipboardInfo[rowId];
     if (clipboardSource) {
@@ -200,19 +215,23 @@ export function CreatePdfDialog({
         return next;
       });
     }
+    const captureId = captureIdToReleaseOnRowRemoval(rows, rowId);
+    if (captureId) releaseWebCapture(captureId);
     setRows((prev) => removeRow(prev, rowId));
-  }, [clipboardInfo, releaseClipboardScratch]);
+  }, [rows, clipboardInfo, releaseClipboardScratch, releaseWebCapture]);
 
   // A capture arrives as one row per captured page, in capture order, each
   // carrying the title its bookmark will use.
   const addCaptured = useCallback((capture: CaptureResult) => {
     setError(null);
     setResult(null);
+    if (capture.pages.length > 0) webCaptureIds.current.add(capture.captureId);
     setRows((prev) => [
       ...prev,
       ...capture.pages.map((page) => ({
         ...rowFromPath(page.path),
         origin: 'web' as const,
+        captureId: capture.captureId,
         captureUrl: page.url,
         captureTitle: page.title,
       })),

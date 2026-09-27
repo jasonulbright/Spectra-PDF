@@ -13,8 +13,8 @@
 //! held open, and only while no other process of the app runs on the machine:
 //! a live window of another process is the one user they can still have.
 //!
-//! Other folders in the tree belong to their own features and are never
-//! entered here.
+//! The exact `net` and `web-capture` feature roots are also visited. Other
+//! folders in the tree belong to their own features and are never entered.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -25,6 +25,7 @@ use crate::staging::{decimal_pid, held_open, reclaim, reclaim_aged, LEGACY_STAGE
 const APP_IMAGE: &str = "spectrapdf.exe";
 
 const NET: &str = "net";
+const WEB_CAPTURE: &str = "web-capture";
 
 pub(crate) fn root() -> PathBuf {
     std::env::temp_dir().join("spectrapdf")
@@ -141,8 +142,10 @@ pub(crate) fn is_net_file_in(path: &Path, dir: &Path) -> bool {
 struct Reclaimed {
     folders: usize,
     net: usize,
+    web_capture: usize,
     legacy_folders: usize,
     legacy_net: usize,
+    legacy_web_capture: usize,
 }
 
 /// Remove what processes of the app that no longer run left in the temp
@@ -174,17 +177,52 @@ fn reclaim_tree(
     now: SystemTime,
 ) -> Reclaimed {
     let net = root.join(NET);
+    let web_capture = root.join(WEB_CAPTURE);
     let mut done = Reclaimed {
         folders: reclaim_folders(root, own, working_folder_owner, &running),
         net: reclaim(&net, own, net_file_owner, &running),
+        web_capture: if plain_directory(&web_capture) {
+            reclaim_folders(&web_capture, own, working_folder_owner, &running)
+        } else {
+            0
+        },
         ..Reclaimed::default()
     };
     if alone() {
         done.legacy_folders =
             reclaim_aged_folders(root, legacy_working_folder, LEGACY_STAGE_AGE, now);
         done.legacy_net = reclaim_aged(&net, legacy_net_file, LEGACY_STAGE_AGE, now);
+        if plain_directory(&web_capture) {
+            done.legacy_web_capture =
+                reclaim_aged(&web_capture, legacy_web_capture_file, LEGACY_STAGE_AGE, now);
+        }
     }
     done
+}
+
+/// The pre-ownership web-capture files were `capture-<millis>-<index>.pdf`
+/// directly under the feature folder. They are eligible for age-based cleanup
+/// only when no other app process is running.
+fn legacy_web_capture_file(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("capture-") else {
+        return false;
+    };
+    let Some((stamp, tail)) = rest.split_once('-') else {
+        return false;
+    };
+    let Some((index, extension)) = tail.split_once('.') else {
+        return false;
+    };
+    !stamp.is_empty()
+        && stamp.bytes().all(|byte| byte.is_ascii_digit())
+        && index.len() == 3
+        && index.bytes().all(|byte| byte.is_ascii_digit())
+        && extension == "pdf"
+}
+
+/// Never walk a feature scratch root through a symlink.
+fn plain_directory(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_dir())
 }
 
 /// A folder entry itself, not a link to one.
@@ -477,6 +515,38 @@ mod tests {
     }
 
     #[test]
+    fn legacy_web_capture_names_are_exact() {
+        assert!(legacy_web_capture_file("capture-1760000000123-000.pdf"));
+        for name in [
+            "capture-1760000000123-000.PDF",
+            "capture-x-000.pdf",
+            "capture-1760000000123-00.pdf",
+            "capture-1760000000123-000.pdf.bak",
+            "other-1760000000123-000.pdf",
+        ] {
+            assert!(!legacy_web_capture_file(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn legacy_capture_outputs_are_reclaimed_only_when_alone_and_old() {
+        let root = tempfile::tempdir().unwrap();
+        let web_capture = root.path().join(WEB_CAPTURE);
+        std::fs::create_dir(&web_capture).unwrap();
+        let output = web_capture.join("capture-1760000000123-000.pdf");
+        std::fs::write(&output, b"old capture").unwrap();
+        let later = SystemTime::now() + LEGACY_STAGE_AGE + Duration::from_secs(1);
+
+        let with_company = reclaim_tree(root.path(), OWN, |_| false, || false, later);
+        assert_eq!(with_company, Reclaimed::default());
+        assert!(output.exists(), "another app process may still own a legacy run");
+
+        let alone = reclaim_tree(root.path(), OWN, |_| false, || true, later);
+        assert_eq!(alone.legacy_web_capture, 1);
+        assert!(!output.exists());
+    }
+
+    #[test]
     fn a_launch_removes_only_what_stopped_processes_left() {
         let root = tempfile::tempdir().unwrap();
         let own = working_folder(root.path(), OWN);
@@ -490,9 +560,14 @@ mod tests {
         std::fs::write(dead.join("nested").join("stage.pdf"), b"%PDF").unwrap();
         let not_a_folder = root.path().join(format!("{}.{DEAD}", uuid()));
         std::fs::write(&not_a_folder, b"a file under a folder's name").unwrap();
-        for other in ["batch-scratch", "web-capture", "e2e-combine-out-0qs6Vp"] {
+        for other in ["batch-scratch", "e2e-combine-out-0qs6Vp"] {
             std::fs::create_dir(root.path().join(other)).unwrap();
         }
+        let web_capture_root = root.path().join(WEB_CAPTURE);
+        std::fs::create_dir(&web_capture_root).unwrap();
+        let web_own = working_folder(&web_capture_root, OWN);
+        let web_live = working_folder(&web_capture_root, LIVE);
+        let web_dead = working_folder(&web_capture_root, DEAD);
         let net_own = net_file(root.path(), &net_file_name("a", OWN, "fdf"));
         let net_live = net_file(root.path(), &net_file_name("a", LIVE, "fdf"));
         let net_dead = net_file(root.path(), &net_file_name("a", DEAD, "pdf"));
@@ -512,6 +587,7 @@ mod tests {
             Reclaimed {
                 folders: 1,
                 net: 1,
+                web_capture: 1,
                 ..Reclaimed::default()
             }
         );
@@ -519,6 +595,8 @@ mod tests {
         kept.remove(dead.file_name().unwrap().to_str().unwrap());
         assert_eq!(names(root.path()), kept);
         assert!(own.exists() && live.exists() && not_a_folder.exists());
+        assert!(web_own.exists() && web_live.exists());
+        assert!(!web_dead.exists());
         assert!(net_own.exists() && net_live.exists() && net_other.exists());
         assert!(!net_dead.exists());
     }

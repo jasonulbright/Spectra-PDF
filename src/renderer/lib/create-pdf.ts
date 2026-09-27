@@ -114,6 +114,8 @@ export interface SourceRow {
    * page gave itself — which is what its bookmark is called. */
   captureUrl?: string;
   captureTitle?: string;
+  /** Shared temporary directory identity for pages from one capture run. */
+  captureId?: string;
 }
 
 let nextRowId = 0;
@@ -146,6 +148,18 @@ export function addPaths(rows: readonly SourceRow[], paths: readonly string[]): 
 
 export function removeRow(rows: readonly SourceRow[], id: string): SourceRow[] {
   return rows.filter((r) => r.id !== id);
+}
+
+/** The capture scratch group that becomes unreferenced when `id` is removed. */
+export function captureIdToReleaseOnRowRemoval(
+  rows: readonly SourceRow[],
+  id: string,
+): string | null {
+  const removed = rows.find((row) => row.id === id);
+  if (!removed?.captureId) return null;
+  return rows.some((row) => row.id !== id && row.captureId === removed.captureId)
+    ? null
+    : removed.captureId;
 }
 
 /**
