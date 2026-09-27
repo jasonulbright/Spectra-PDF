@@ -14,8 +14,8 @@
 //!
 //! Enforced here rather than assumed:
 //!   * `http` / `https` / `file` only — every other scheme refuses by name;
-//!   * a crawl follows only links whose HOST AND SCHEME match the start, so a
-//!     capture of one site cannot walk onto another;
+//!   * a web crawl follows only links whose HOST AND SCHEME match the start;
+//!     a local-file crawl stays under the selected page's canonical parent;
 //!   * one window, navigated in turn — never a fan-out of hidden webviews;
 //!   * one capture at a time, and the window is destroyed on every exit path;
 //!   * closing the window cancels the run, and a cancelled run SAYS so rather
@@ -27,6 +27,7 @@
 
 use std::cell::Cell;
 use std::ffi::c_void;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -252,9 +253,48 @@ pub fn validate_url(raw: &str) -> Result<(String, String, String), String> {
 /// would silently downgrade the transport for every page after the first.
 pub fn same_origin(candidate: &str, scheme: &str, host: &str) -> bool {
     match validate_url(candidate) {
-        Ok((_, s, h)) => s == scheme && h == host,
+        // File URLs all have an empty host; treating that as an origin would
+        // let a local page crawl into every readable path on the machine.
+        Ok((_, s, h)) => s != "file" && s == scheme && h == host,
         Err(_) => false,
     }
+}
+
+/// The canonical directory containing a local file selected for capture.
+///
+/// A `file:` URL has no network origin. Its crawl boundary is instead the
+/// selected file's parent directory, resolved through any symlink or
+/// junction in that directory so later links cannot escape through one.
+fn local_file_root(start: &str) -> Result<PathBuf, String> {
+    let url = url::Url::parse(start)
+        .map_err(|_| "The local page address could not be read".to_string())?;
+    let path = url
+        .to_file_path()
+        .map_err(|_| "The local page address does not name a local file".to_string())?;
+    if !std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
+        return Err("The local page address does not name an existing file".to_string());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "The local page has no containing folder".to_string())?;
+    std::fs::canonicalize(parent)
+        .map_err(|_| "The local page's containing folder could not be resolved".to_string())
+}
+
+/// Whether a candidate `file:` URL resolves below the selected page's
+/// directory. Canonicalization follows links before containment is checked;
+/// `Path::starts_with` compares complete path components.
+fn local_file_below(root: &Path, candidate: &str) -> bool {
+    let Ok(url) = url::Url::parse(candidate) else {
+        return false;
+    };
+    if url.scheme() != "file" {
+        return false;
+    }
+    let Ok(path) = url.to_file_path() else {
+        return false;
+    };
+    std::fs::canonicalize(path).is_ok_and(|path| path.starts_with(root))
 }
 
 fn clamp(options: &CaptureOptions) -> (u32, u32) {
@@ -274,11 +314,23 @@ fn frontier_cap(budget: u32) -> u32 {
 }
 
 /// Whether a harvested link joins the frontier.
-fn admits(link: &str, scheme: &str, host: &str, seen: &[String], budget: u32) -> bool {
+fn admits(
+    link: &str,
+    scheme: &str,
+    host: &str,
+    local_root: Option<&Path>,
+    seen: &[String],
+    budget: u32,
+) -> bool {
     if seen.len() as u32 >= frontier_cap(budget) {
         return false;
     }
-    same_origin(link, scheme, host) && !seen.iter().any(|s| s == link)
+    let in_scope = if scheme == "file" {
+        local_root.is_some_and(|root| local_file_below(root, link))
+    } else {
+        same_origin(link, scheme, host)
+    };
+    in_scope && !seen.iter().any(|s| s == link)
 }
 
 fn scratch_path(index: usize) -> Result<std::path::PathBuf, String> {
@@ -616,6 +668,11 @@ pub async fn capture_web_page(
     options: CaptureOptions,
 ) -> Result<CaptureResult, String> {
     let (start, scheme, host) = validate_url(&options.url)?;
+    let local_root = if scheme == "file" {
+        Some(local_file_root(&start)?)
+    } else {
+        None
+    };
     let (depth, budget) = clamp(&options);
 
     if CAPTURING.swap(true, Ordering::SeqCst) {
@@ -623,7 +680,7 @@ pub async fn capture_web_page(
     }
     // A close seen while no capture was running must not cancel this one.
     clear_cancel();
-    let result = run_capture(&app, options, start, scheme, host, depth, budget).await;
+    let result = run_capture(&app, options, start, scheme, host, local_root, depth, budget).await;
     CAPTURING.store(false, Ordering::SeqCst);
     // Every exit path — success, refusal, cancellation, a cancel that raced
     // completion. No interface into this window's browser outlives the
@@ -642,6 +699,7 @@ async fn run_capture(
     start: String,
     scheme: String,
     host: String,
+    local_root: Option<PathBuf>,
     depth: u32,
     budget: u32,
 ) -> Result<CaptureResult, String> {
@@ -695,7 +753,16 @@ async fn run_capture(
             Err(StepError::Cancelled) => return Ok(cancelled_result()),
             Err(StepError::Failed(err)) => return Err(err),
         }
-        Ok(crawl(&worker, &opts, &start, &scheme, &host, depth, budget))
+        Ok(crawl(
+            &worker,
+            &opts,
+            &start,
+            &scheme,
+            &host,
+            local_root.as_deref(),
+            depth,
+            budget,
+        ))
     })
     .await
     .map_err(|e| format!("The capture did not run: {e}"))?;
@@ -750,6 +817,7 @@ fn crawl(
     start: &str,
     scheme: &str,
     host: &str,
+    local_root: Option<&Path>,
     depth: u32,
     budget: u32,
 ) -> CaptureResult {
@@ -816,7 +884,7 @@ fn crawl(
 
         if level < depth {
             for link in harvest_links(window) {
-                if !admits(&link, scheme, host, &seen, budget) {
+                if !admits(&link, scheme, host, local_root, &seen, budget) {
                     continue;
                 }
                 seen.push(link.clone());
@@ -835,8 +903,9 @@ fn crawl(
 #[cfg(test)]
 mod tests {
     use super::{admits, cancelled, cancelled_result, clamp, clear_cancel, finish, frontier_cap,
-                same_origin, validate_url, window_close_requested, CaptureOptions, CapturedPage,
-                CAPTURE_LABEL, MAX_DEPTH_CEILING, MAX_PAGES_CEILING};
+                local_file_root, same_origin, validate_url, window_close_requested,
+                CaptureOptions, CapturedPage, CAPTURE_LABEL, MAX_DEPTH_CEILING,
+                MAX_PAGES_CEILING};
 
     fn options(depth: u32, max_pages: u32) -> CaptureOptions {
         CaptureOptions {
@@ -884,6 +953,8 @@ mod tests {
         // Scheme too: an https start must not follow http.
         assert!(!same_origin("http://example.test/b", "https", "example.test"));
         assert!(!same_origin("javascript:void(0)", "https", "example.test"));
+        // File URLs have no host, but they do not share one filesystem-wide origin.
+        assert!(!same_origin("file:///C:/Users/Public/secret.pdf", "file", ""));
     }
 
     #[test]
@@ -903,15 +974,40 @@ mod tests {
     #[test]
     fn the_frontier_admits_only_unseen_same_origin_links() {
         let seen = vec!["https://example.test/a".to_string()];
-        assert!(admits("https://example.test/b", "https", "example.test", &seen, 10));
+        assert!(admits("https://example.test/b", "https", "example.test", None, &seen, 10));
         // Already queued.
-        assert!(!admits("https://example.test/a", "https", "example.test", &seen, 10));
+        assert!(!admits("https://example.test/a", "https", "example.test", None, &seen, 10));
         // Another site, and a downgraded transport.
-        assert!(!admits("https://other.test/b", "https", "example.test", &seen, 10));
-        assert!(!admits("http://example.test/b", "https", "example.test", &seen, 10));
+        assert!(!admits("https://other.test/b", "https", "example.test", None, &seen, 10));
+        assert!(!admits("http://example.test/b", "https", "example.test", None, &seen, 10));
         // A full frontier admits nothing, however legal the link.
         let full: Vec<String> = (0..frontier_cap(10)).map(|i| format!("u{i}")).collect();
-        assert!(!admits("https://example.test/b", "https", "example.test", &full, 10));
+        assert!(!admits("https://example.test/b", "https", "example.test", None, &full, 10));
+    }
+
+    #[test]
+    fn a_local_file_crawl_stays_under_the_starting_page_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let site = temp.path().join("site");
+        std::fs::create_dir_all(site.join("nested")).unwrap();
+        let start = site.join("index.html");
+        let inside = site.join("nested").join("page.html");
+        let outside = temp.path().join("private.html");
+        std::fs::write(&start, "start").unwrap();
+        std::fs::write(&inside, "inside").unwrap();
+        std::fs::write(&outside, "private").unwrap();
+
+        let start_url = url::Url::from_file_path(&start).unwrap().to_string();
+        let inside_url = url::Url::from_file_path(&inside).unwrap().to_string();
+        let outside_url = url::Url::from_file_path(&outside).unwrap().to_string();
+        let case_variant_url = inside_url.replace("/site/", "/SITE/");
+        let root = local_file_root(&start_url).unwrap();
+        let seen = vec![start_url];
+
+        assert!(admits(&inside_url, "file", "", Some(&root), &seen, 10));
+        assert!(admits(&case_variant_url, "file", "", Some(&root), &seen, 10));
+        assert!(!admits(&outside_url, "file", "", Some(&root), &seen, 10));
+        assert!(!admits(&outside_url, "file", "", None, &seen, 10));
     }
 
     #[test]
