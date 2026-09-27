@@ -67,13 +67,20 @@ export async function openWithCredentials(
     for (;;) {
       const answer = await io.askPassword(fileName, error);
       if (answer === 'cancel') return null;
-      try {
-        opened = await io.call('open_document', { path: workingPath, password: answer.password });
-        password = answer.password;
-        break;
-      } catch {
+      const attempt = await io.call('open_document_attempt', {
+        path: workingPath,
+        password: answer.password,
+      });
+      if (attempt.status === 'wrong_password') {
         error = io.wrongPassword();
+        continue;
       }
+      if (attempt.status !== 'opened' || !attempt.document || typeof attempt.document !== 'object') {
+        throw new Error('invalid open_document_attempt response');
+      }
+      opened = attempt.document as Reply;
+      password = answer.password;
+      break;
     }
   } else {
     // A document encrypted with an empty user password opens without a prompt

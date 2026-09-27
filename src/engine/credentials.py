@@ -296,20 +296,21 @@ def _decoded_permissions(pdf) -> dict:
     return {name: bool(getattr(pdf.allow, attr)) for name, attr in _PERMISSION_KEYS}
 
 
-def open_document(path: str, password: str = "") -> dict:
-    """Open the working copy at `path` with `password` and remember it.
-
-    The owner password removes the protection from the working copy, as the
-    open path always has. The user password leaves the working copy byte for
-    byte as it is and records the password for every later read. A wrong
-    password raises `pikepdf.PasswordError` and records nothing."""
+def _open_document(path: str, password: str, *, report_wrong_password: bool) -> dict | None:
+    import pikepdf
     from engine.inspect import _decrypt_in_place
 
     previous = _documents.pop(_key(path), None)
     try:
         pdf = open_pdf(path, password=password)
-    except Exception:
+    except pikepdf.PasswordError:
         # A wrong password on an open document leaves its record as it was.
+        if previous is not None:
+            _documents[_key(path)] = previous
+        if report_wrong_password:
+            return None
+        raise
+    except Exception:
         if previous is not None:
             _documents[_key(path)] = previous
         raise
@@ -335,6 +336,27 @@ def open_document(path: str, password: str = "") -> dict:
         return {"encrypted": True, "opener": "owner", "encryption_kept": False}
     _documents[_key(path)] = _Credential("user", password, permissions, revision, p, _key(path))
     return {"encrypted": True, "opener": "user", "encryption_kept": True}
+
+
+def open_document(path: str, password: str = "") -> dict:
+    """Open the working copy at `path` with `password` and remember it.
+
+    The owner password removes the protection from the working copy. The
+    user password leaves it byte for byte as it is and records the password
+    for later reads. A wrong password raises `pikepdf.PasswordError`."""
+    result = _open_document(path, password, report_wrong_password=False)
+    assert result is not None
+    return result
+
+
+def open_document_attempt(path: str, password: str = "") -> dict:
+    """Open a prompted document, reporting a bad password as data so the UI
+    can retry without mistaking unrelated engine failures for authentication
+    failures."""
+    result = _open_document(path, password, report_wrong_password=True)
+    if result is None:
+        return {"status": "wrong_password"}
+    return {"status": "opened", "document": result}
 
 
 class CredentialConflict(RuntimeError):

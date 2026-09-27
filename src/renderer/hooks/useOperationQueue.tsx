@@ -106,6 +106,7 @@ const INTERNAL_METHODS = new Set([
   // another document's pending page edits, and the password never belongs in
   // a queue entry.
   'open_document',
+  'open_document_attempt',
   'close_document',
   'document_permissions',
   'get_metadata',

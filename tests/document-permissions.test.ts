@@ -254,9 +254,12 @@ describe('the open loop', () => {
     switch (method) {
       case 'check_encrypted':
         return { encrypted: true, kind: 'password' };
-      case 'open_document':
-        if (params.password !== USER_PASSWORD) throw new Error('invalid password');
-        return { encrypted: true, opener: 'user', encryption_kept: true };
+      case 'open_document_attempt':
+        if (params.password !== USER_PASSWORD) return { status: 'wrong_password' };
+        return {
+          status: 'opened',
+          document: { encrypted: true, opener: 'user', encryption_kept: true },
+        };
       case 'document_permissions':
         return { opener: 'user', permissions: { print: false, copy: true }, revision: 6, p: -3904 };
       default:
@@ -271,10 +274,21 @@ describe('the open loop', () => {
     expect(opened?.password).toBe(USER_PASSWORD);
   });
 
-  it('ends on open_document, never asking check_encrypted again', async () => {
+  it('surfaces engine failures instead of labeling them wrong passwords', async () => {
+    const { io, prompts } = openIo(['valid-password'], (method) => {
+      if (method === 'check_encrypted') return { encrypted: true, kind: 'password' };
+      if (method === 'open_document_attempt') throw new Error('disk full');
+      throw new Error(`unexpected ${method}`);
+    });
+
+    await expect(openWithCredentials('w.pdf', 'locked.pdf', io)).rejects.toThrow('disk full');
+    expect(prompts).toEqual([undefined]);
+  });
+
+  it('ends on open_document_attempt, never asking check_encrypted again', async () => {
     const { io, calls } = openIo([USER_PASSWORD], engine);
     const opened = await openWithCredentials('w.pdf', 'locked.pdf', io);
-    expect(calls.map((c) => c.method)).toEqual(['check_encrypted', 'open_document', 'document_permissions']);
+    expect(calls.map((c) => c.method)).toEqual(['check_encrypted', 'open_document_attempt', 'document_permissions']);
     expect(calls[1].params).toEqual({ path: 'w.pdf', password: USER_PASSWORD });
     expect(opened?.security.opener).toBe('user');
     expect(opened?.security.permissions.print).toBe(false);
@@ -310,7 +324,12 @@ describe('the open loop', () => {
   it('keeps the owner opener unrestricted and holds no password for it', async () => {
     const { io } = openIo(['owner-pw'], (method) => {
       if (method === 'check_encrypted') return { encrypted: true, kind: 'password' };
-      if (method === 'open_document') return { encrypted: true, opener: 'owner', encryption_kept: false };
+      if (method === 'open_document_attempt') {
+        return {
+          status: 'opened',
+          document: { encrypted: true, opener: 'owner', encryption_kept: false },
+        };
+      }
       return { opener: 'owner', permissions: {} };
     });
     const opened = await openWithCredentials('w.pdf', 'locked.pdf', io);
