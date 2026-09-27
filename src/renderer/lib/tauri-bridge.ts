@@ -833,6 +833,9 @@ export const app = {
         scale: options.scale,
       },
     }),
+  /** Remove the private temporary files from one completed web capture. */
+  discardWebCapture: (captureId: string) =>
+    invoke<void>('discard_web_capture', { captureId }),
   /** File ▸ Send To ▸ Email stages a copy of the
    * working file under the document's real name (mail clients may read the
    * attachment lazily — the live working copy would race later edits)… */

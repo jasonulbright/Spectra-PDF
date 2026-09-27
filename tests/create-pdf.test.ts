@@ -17,6 +17,7 @@ import {
   addPaths,
   baseName,
   blankRow,
+  captureIdToReleaseOnRowRemoval,
   classify,
   defaultOutputPath,
   extensionOf,
@@ -210,6 +211,18 @@ describe('the source list', () => {
     const rows = addPaths([], ['a.png', 'b.docx']);
     expect(removeRow(rows, rows[0].id).map((r) => r.path)).toEqual(['b.docx']);
     expect(removeRow(rows, 'nope')).toHaveLength(2);
+  });
+
+  it('releases a web capture only after its last source row is removed', () => {
+    const rows = [
+      { ...rowFromPath('page-1.pdf'), captureId: 'capture-a' },
+      { ...rowFromPath('page-2.pdf'), captureId: 'capture-a' },
+      { ...rowFromPath('page-3.pdf'), captureId: 'capture-b' },
+    ];
+    expect(captureIdToReleaseOnRowRemoval(rows, rows[0].id)).toBeNull();
+    expect(captureIdToReleaseOnRowRemoval(rows, rows[1].id)).toBeNull();
+    expect(captureIdToReleaseOnRowRemoval(rows, rows[2].id)).toBe('capture-b');
+    expect(captureIdToReleaseOnRowRemoval(rows, 'missing')).toBeNull();
   });
 
   it('reorders by drag using ORIGINAL-list indices', () => {

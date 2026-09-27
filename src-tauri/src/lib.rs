@@ -291,6 +291,7 @@ pub fn run() {
             clipboard_read::read_clipboard_source,
             clipboard_read::discard_clipboard_source,
             web_capture::capture_web_page,
+            web_capture::discard_web_capture,
             net::net_request,
             net::net_payload_path,
             net::net_payload_size,
