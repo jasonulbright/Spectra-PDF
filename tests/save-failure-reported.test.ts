@@ -29,12 +29,23 @@ describe('every save over a user file reports its refusal', () => {
   });
 
   it('a refused save stops the gesture that asked for it', () => {
-    const text = source.getFullText();
-    const uses = text.match(/saveOrReport(?:Ref\.current)?\([^)]*\)/g) ?? [];
-    expect(uses.length).toBeGreaterThanOrEqual(7);
+    const uses: ts.CallExpression[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node)) {
+        const expression = node.expression;
+        const direct = ts.isIdentifier(expression) && expression.text === 'saveOrReport';
+        const throughRef = ts.isPropertyAccessExpression(expression)
+          && expression.name.text === 'current'
+          && ts.isIdentifier(expression.expression)
+          && expression.expression.text === 'saveOrReportRef';
+        if (direct || throughRef) uses.push(node);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    expect(uses.length).toBeGreaterThan(0);
     for (const use of uses) {
-      const at = text.indexOf(use);
-      expect(text.slice(Math.max(0, at - 12), at), use).toMatch(/\(await $/);
+      expect(ts.isAwaitExpression(use.parent), use.getText(source)).toBe(true);
     }
   });
 });

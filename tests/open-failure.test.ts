@@ -155,13 +155,20 @@ describe('a restored tab whose downloaded file is gone', () => {
   const app = readFileSync(resolve(__dirname, '../src/renderer/App.tsx'), 'utf8').replace(/\r\n/g, '\n');
 
   it('reaches the notice from the queued opens a restore delivers', () => {
-    expect(app).toContain(
-      'for (const pending of await app.takePendingOpens()) {\n        if (cancelled) return;',
+    const start = app.indexOf('for (const pending of await app.takePendingOpens())');
+    const end = app.indexOf('}, [openByPaths]);', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const drain = app.slice(start, end).replace(/\s+/g, ' ');
+    expect(drain).toContain(
+      'if (cancelled) { await completeHandover(false); continue; }',
     );
-    expect(app).toContain(
-      'await openByPaths(\n          pending.files,\n          pending.index === null ? undefined : { index: pending.index },\n        );',
+    expect(drain).toContain(
+      'await openByPaths( pending.files, { ...(pending.index === null ? {} : { index: pending.index }),',
     );
-    expect(app).toContain('if (opts?.reportFailures !== false) void reportOpenSummary(summary);');
+    expect(app.replace(/\s+/g, ' ')).toContain(
+      'if (opts?.reportFailures !== false) void reportOpenSummary(summary);',
+    );
   });
 
   it('turns a working copy that cannot be made into that file’s outcome, not a thrown batch', () => {
