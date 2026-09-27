@@ -183,17 +183,35 @@ const ACCEPT_POLL: Duration = Duration::from_millis(100);
 /// browser's speculative favicon fetch is the common one) is answered and the
 /// listener keeps waiting, because giving up on the first stray request would
 /// make the sign-in fail for a reason the user cannot see.
-fn read_code(stream: &mut TcpStream, state: &str) -> Result<Option<String>, String> {
+fn read_code(
+    stream: &mut TcpStream,
+    state: &str,
+    read_timeout: Duration,
+) -> Result<Option<String>, String> {
     stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
+        .set_read_timeout(Some(read_timeout))
         .map_err(|e| e.to_string())?;
     let mut line = String::new();
     let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
-    reader
+    let bytes_read = match reader
         .by_ref()
         .take(MAX_REQUEST_LINE)
         .read_line(&mut line)
-        .map_err(|e| format!("The sign-in response could not be read: {}", e))?;
+    {
+        Ok(n) => n,
+        Err(_) => {
+            // A local process can connect to the loopback port before the
+            // browser and then stall or send a malformed request. That
+            // connection is not this sign-in's callback; discard it and keep
+            // waiting for the one whose state matches.
+            let _ = stream.write_all(&done_page());
+            return Ok(None);
+        }
+    };
+    if bytes_read == 0 || !line.ends_with('\n') {
+        let _ = stream.write_all(&done_page());
+        return Ok(None);
+    }
     let target = line.split_whitespace().nth(1).unwrap_or("");
     let pairs = query_pairs(target);
     let get = |name: &str| {
@@ -246,6 +264,15 @@ fn wait_for_code(
     state: &str,
     deadline: Instant,
 ) -> Result<String, String> {
+    wait_for_code_with_read_timeout(listener, state, deadline, Duration::from_secs(10))
+}
+
+fn wait_for_code_with_read_timeout(
+    listener: &TcpListener,
+    state: &str,
+    deadline: Instant,
+    read_timeout: Duration,
+) -> Result<String, String> {
     loop {
         if Instant::now() >= deadline {
             return Err("The signing service sign-in was not completed in time.".to_string());
@@ -261,7 +288,11 @@ fn wait_for_code(
         // An accepted socket can inherit the listener's non-blocking mode;
         // `read_code` relies on a blocking read with a timeout.
         stream.set_nonblocking(false).map_err(|e| e.to_string())?;
-        if let Some(code) = read_code(&mut stream, state)? {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("The signing service sign-in was not completed in time.".to_string());
+        }
+        if let Some(code) = read_code(&mut stream, state, read_timeout.min(remaining))? {
             return Ok(code);
         }
     }
@@ -478,6 +509,47 @@ mod tests {
             &listener,
             "the-state",
             Instant::now() + Duration::from_secs(20),
+        )
+        .unwrap();
+        assert_eq!(code, "the-code");
+    }
+
+    #[test]
+    fn a_stalled_request_line_cannot_abort_the_real_sign_in() {
+        let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        std::thread::spawn(move || {
+            let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+            let mut stalled = TcpStream::connect(address).unwrap();
+            stalled
+                .write_all(b"GET /callback?code=partial&state=the-state")
+                .unwrap();
+            let mut sink = Vec::new();
+            let _ = stalled.read_to_end(&mut sink);
+
+            let mut incomplete = TcpStream::connect(address).unwrap();
+            incomplete
+                .write_all(b"GET /callback?code=partial&state=the-state")
+                .unwrap();
+            incomplete
+                .shutdown(std::net::Shutdown::Write)
+                .unwrap();
+            sink.clear();
+            let _ = incomplete.read_to_end(&mut sink);
+
+            let mut valid = TcpStream::connect(address).unwrap();
+            valid
+                .write_all(b"GET /callback?code=the-code&state=the-state HTTP/1.1\r\n\r\n")
+                .unwrap();
+            sink.clear();
+            let _ = valid.read_to_end(&mut sink);
+        });
+        let code = wait_for_code_with_read_timeout(
+            &listener,
+            "the-state",
+            Instant::now() + Duration::from_secs(2),
+            Duration::from_millis(50),
         )
         .unwrap();
         assert_eq!(code, "the-code");
