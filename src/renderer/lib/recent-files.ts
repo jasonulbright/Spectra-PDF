@@ -77,6 +77,10 @@ function isSequence(value: unknown): value is number {
   );
 }
 
+function isDateTimestamp(value: number): boolean {
+  return Number.isFinite(value) && Number.isFinite(new Date(value).getTime());
+}
+
 // Pure, testable core: JSON-valid-but-wrong-shape (object, string, null) →
 // [], never a non-array that would crash HomeTab's .map (regression).
 // Accepts both shapes: the legacy string[] and the entry form.
@@ -99,7 +103,7 @@ export function parseRecent(raw: string | null): RecentEntry[] {
         const seq = (item as { seq?: unknown }).seq;
         out.push({
           path: (item as { path: string }).path,
-          openedAt: typeof at === 'number' && Number.isFinite(at) ? at : null,
+          openedAt: typeof at === 'number' && isDateTimestamp(at) ? at : null,
           // A stored address that is not a string is dropped rather than
           // coerced: it drives a pre-filled request, so a wrong shape must
           // read as "no provenance", never as an address.
@@ -612,6 +616,7 @@ export function formatOpenedAt(openedAt: number | null, now: number): string {
   if (openedAt === null) return '—';
   const then = new Date(openedAt);
   const today = new Date(now);
+  if (!Number.isFinite(then.getTime()) || !Number.isFinite(today.getTime())) return '—';
   const sameDay = (a: Date, b: Date): boolean =>
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
