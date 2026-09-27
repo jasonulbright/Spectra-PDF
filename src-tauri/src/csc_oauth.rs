@@ -202,6 +202,14 @@ fn read_code(stream: &mut TcpStream, state: &str) -> Result<Option<String>, Stri
             .find(|(k, _)| k == name)
             .map(|(_, v)| v.clone())
     };
+    // A loopback port is local, not private. Any local process can race the
+    // browser to it, so neither an authorization error nor a code is trusted
+    // until it carries this sign-in's CSRF state. A foreign callback is stray
+    // traffic; keep listening for the browser's real response.
+    if get("state").as_deref() != Some(state) {
+        let _ = stream.write_all(&done_page());
+        return Ok(None);
+    }
     if let Some(error) = get("error") {
         let _ = stream.write_all(&done_page());
         let description = get("error_description").unwrap_or_default();
@@ -223,17 +231,6 @@ fn read_code(stream: &mut TcpStream, state: &str) -> Result<Option<String>, Stri
             return Ok(None);
         }
     };
-    // The state is the CSRF binding (RFC 6749 §10.12): a code arriving without
-    // the value this sign-in generated did not come from this sign-in, and
-    // exchanging it would attach somebody else's authorization to this user.
-    if get("state").as_deref() != Some(state) {
-        let _ = stream.write_all(&done_page());
-        return Err(
-            "The sign-in response did not match the request this application made. \
-             Nothing was authorized."
-                .to_string(),
-        );
-    }
     let _ = stream.write_all(&done_page());
     Ok(Some(code))
 }
@@ -461,15 +458,41 @@ mod tests {
     }
 
     #[test]
-    fn a_redirect_carrying_a_foreign_state_authorizes_nothing() {
+    fn a_forged_callback_cannot_abort_the_real_sign_in() {
         let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).unwrap();
         let port = listener.local_addr().unwrap().port();
         listener.set_nonblocking(true).unwrap();
         std::thread::spawn(move || {
-            let mut client =
-                TcpStream::connect(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).unwrap();
+            for request in [
+                b"GET /callback?error=access_denied&state=forged HTTP/1.1\r\n\r\n".as_slice(),
+                b"GET /callback?code=the-code&state=the-state HTTP/1.1\r\n\r\n".as_slice(),
+            ] {
+                let mut client =
+                    TcpStream::connect(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).unwrap();
+                client.write_all(request).unwrap();
+                let mut sink = Vec::new();
+                let _ = client.read_to_end(&mut sink);
+            }
+        });
+        let code = wait_for_code(
+            &listener,
+            "the-state",
+            Instant::now() + Duration::from_secs(20),
+        )
+        .unwrap();
+        assert_eq!(code, "the-code");
+    }
+
+    #[test]
+    fn a_provider_error_with_matching_state_is_reported() {
+        let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        std::thread::spawn(move || {
+            let mut client = TcpStream::connect(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))
+                .unwrap();
             client
-                .write_all(b"GET /callback?code=the-code&state=forged HTTP/1.1\r\n\r\n")
+                .write_all(b"GET /callback?error=access_denied&state=the-state HTTP/1.1\r\n\r\n")
                 .unwrap();
             let mut sink = Vec::new();
             let _ = client.read_to_end(&mut sink);
@@ -480,6 +503,6 @@ mod tests {
             Instant::now() + Duration::from_secs(20),
         )
         .unwrap_err();
-        assert!(err.contains("Nothing was authorized"), "{}", err);
+        assert!(err.contains("access_denied"), "{}", err);
     }
 }

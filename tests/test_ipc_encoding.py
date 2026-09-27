@@ -72,6 +72,25 @@ def test_non_ascii_metadata_roundtrips_exactly(tmp_dir):
     assert by_id[2]["result"]["title"] == title
 
 
+def test_control_characters_roundtrip_through_the_real_sidecar():
+    method = "probe\x00\x01"
+    request_id = "request\x00\x01"
+    responses = _rpc_roundtrip(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+                "params": {"text": "left\x00\x01right"},
+            }
+        ]
+    )
+
+    assert len(responses) == 1
+    assert responses[0]["id"] == request_id
+    assert responses[0]["error"]["message"] == f"Method not found: {method}"
+
+
 def test_forms_winansi_check_holds_over_the_wire(tmp_dir):
     fixture = os.path.join(os.path.dirname(__file__), "fixtures", "form-pdflib.pdf")
     out = os.path.join(tmp_dir, "filled.pdf")
