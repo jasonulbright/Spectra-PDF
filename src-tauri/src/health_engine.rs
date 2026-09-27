@@ -513,44 +513,39 @@ async fn start_locked<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
                     if oversized_stdout {
                         continue;
                     }
-                    match crate::engine::append_stdout_chunk(
+                    let chunk = crate::engine::append_stdout_chunk(
                         &mut stdout_line,
                         &bytes,
                         crate::engine::MAX_ENGINE_RPC_LINE_BYTES,
-                    ) {
-                        Ok(lines) => {
-                            for line in lines {
-                                if !line.iter().all(u8::is_ascii_whitespace) {
-                                    if let Ok(json) =
-                                        serde_json::from_slice::<serde_json::Value>(&line)
-                                    {
-                                        route_response(&app_handle, generation, json).await;
-                                    }
-                                }
+                    );
+                    for line in chunk.completed {
+                        if !line.iter().all(u8::is_ascii_whitespace) {
+                            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&line) {
+                                route_response(&app_handle, generation, json).await;
                             }
                         }
-                        Err(()) => {
-                            eprintln!(
-                                "[health] response line exceeded the {} MiB limit; retiring generation {generation}",
-                                crate::engine::MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
-                            );
-                            oversized_stdout = true;
-                            let state = app_handle.state::<HealthEngineState>();
-                            if state.generation.load(Ordering::SeqCst) == generation
-                                && state
-                                    .child
-                                    .lock()
-                                    .await
-                                    .as_ref()
-                                    .is_some_and(|child| child.pid() == pid)
-                            {
-                                let app = app_handle.clone();
-                                tauri::async_runtime::spawn(async move {
-                                    let state = app.state::<HealthEngineState>();
-                                    let _lifecycle = state.lifecycle.lock().await;
-                                    kill_locked_with_refusal(&app, RPC_SIZE_REFUSAL).await;
-                                });
-                            }
+                    }
+                    if chunk.oversized {
+                        eprintln!(
+                            "[health] response line exceeded the {} MiB limit; retiring generation {generation}",
+                            crate::engine::MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
+                        );
+                        oversized_stdout = true;
+                        let state = app_handle.state::<HealthEngineState>();
+                        if state.generation.load(Ordering::SeqCst) == generation
+                            && state
+                                .child
+                                .lock()
+                                .await
+                                .as_ref()
+                                .is_some_and(|child| child.pid() == pid)
+                        {
+                            let app = app_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let state = app.state::<HealthEngineState>();
+                                let _lifecycle = state.lifecycle.lock().await;
+                                kill_locked_with_refusal(&app, RPC_SIZE_REFUSAL).await;
+                            });
                         }
                     }
                 }
