@@ -37,7 +37,11 @@ import {
   type ClipboardKind,
   type ClipboardSourceResult,
 } from '../lib/clipboard-source';
-import { outlineFromRows, type CaptureResult } from '../lib/web-capture';
+import {
+  captureFailureNotice,
+  outlineFromRows,
+  type CaptureResult,
+} from '../lib/web-capture';
 import { WebCaptureDialog } from './WebCaptureDialog';
 
 // File ▸ Create PDF: ONE door for images, Office /
@@ -94,6 +98,7 @@ export function CreatePdfDialog({
   const [preset, setPreset] = useState('printer');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [result, setResult] = useState<CreatePdfResult | null>(null);
   const [showWebCapture, setShowWebCapture] = useState(false);
   // What each clipboard row actually carried, keyed by row id — the summary
@@ -163,6 +168,7 @@ export function CreatePdfDialog({
     if (picked.length > 0) {
       setRows((prev) => addPaths(prev, picked));
       setError(null);
+      setNotice(null);
       setResult(null);
     }
   }, []);
@@ -170,6 +176,7 @@ export function CreatePdfDialog({
   const addBlank = useCallback(() => {
     setRows((prev) => [...prev, blankRow()]);
     setError(null);
+    setNotice(null);
     setResult(null);
   }, []);
 
@@ -178,6 +185,7 @@ export function CreatePdfDialog({
   // converts and nothing in the engine had to learn what a clipboard is.
   const addClipboard = useCallback(async () => {
     setError(null);
+    setNotice(null);
     setResult(null);
     try {
       const clip = await app.readClipboardSource();
@@ -221,9 +229,21 @@ export function CreatePdfDialog({
   }, [rows, clipboardInfo, releaseClipboardScratch, releaseWebCapture]);
 
   // A capture arrives as one row per captured page, in capture order, each
-  // carrying the title its bookmark will use.
+  // carrying the title its bookmark will use. Partial-crawl status moves to
+  // this dialog because the capture sub-dialog closes after handing rows up.
   const addCaptured = useCallback((capture: CaptureResult) => {
-    setError(null);
+    const failureNotice = captureFailureNotice(capture.failures);
+    setError(failureNotice
+      ? [
+          ...failureNotice.examples,
+          ...(failureNotice.omitted > 0 ? ['…'] : []),
+        ].join('\n')
+      : null);
+    setNotice(
+      capture.truncated
+        ? tChromeCount('dialog.webCapture.truncated', capture.pages.length)
+        : null,
+    );
     setResult(null);
     if (capture.pages.length > 0) webCaptureIds.current.add(capture.captureId);
     setRows((prev) => [
@@ -259,6 +279,7 @@ export function CreatePdfDialog({
       convertingRef.current = true;
       setBusy(true);
       setError(null);
+      setNotice(null);
       setResult(null);
       try {
         // Both converters resolve up front: which arms a run needs depends on
@@ -584,8 +605,13 @@ export function CreatePdfDialog({
         )}
 
         {error && (
-          <p className="text-sm text-red-400" data-testid="create-pdf-error" aria-live="polite">
+          <p className="text-sm text-red-400 whitespace-pre-line break-words" data-testid="create-pdf-error" aria-live="polite">
             {error}
+          </p>
+        )}
+        {notice && (
+          <p className="text-xs text-amber-400" data-testid="create-pdf-notice" aria-live="polite">
+            {notice}
           </p>
         )}
 

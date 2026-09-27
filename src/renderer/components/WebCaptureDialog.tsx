@@ -93,9 +93,6 @@ export function WebCaptureDialog({
           setNotice(tChrome('dialog.webCapture.cancelled'));
           return null;
         }
-        if (result.truncated) {
-          setNotice(tChromeCount('dialog.webCapture.truncated', result.pages.length));
-        }
         onCaptured(result);
         return result;
       } catch (err) {

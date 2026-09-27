@@ -195,7 +195,7 @@ pub struct CaptureResult {
     pub pages: Vec<CapturedPage>,
     /// How many URLs were reached, including any that failed.
     pub visited: usize,
-    /// The frontier still had URLs when the budget ran out.
+    /// The frontier still had URLs when the page budget ran out.
     pub truncated: bool,
     /// The capture window was closed before the run finished. Structured
     /// rather than an error string: a cancelled run is not a failure, and the
@@ -203,6 +203,12 @@ pub struct CaptureResult {
     pub cancelled: bool,
     /// Per-URL failures. A capture that lost a page SAYS which one.
     pub failures: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct HarvestedLinks {
+    links: Vec<String>,
+    truncated: bool,
 }
 
 /// A URL this capture may load, normalised.
@@ -318,24 +324,50 @@ fn frontier_cap(budget: u32) -> u32 {
     budget * 4 + 16
 }
 
-/// Whether a harvested link joins the frontier.
-fn admits(
-    link: &str,
-    scheme: &str,
-    host: &str,
-    local_root: Option<&Path>,
-    seen: &[String],
-    budget: u32,
-) -> bool {
-    if seen.len() as u32 >= frontier_cap(budget) {
-        return false;
-    }
-    let in_scope = if scheme == "file" {
+fn link_in_scope(link: &str, scheme: &str, host: &str, local_root: Option<&Path>) -> bool {
+    if scheme == "file" {
         local_root.is_some_and(|root| local_file_below(root, link))
     } else {
         same_origin(link, scheme, host)
-    };
-    in_scope && !seen.iter().any(|s| s == link)
+    }
+}
+
+/// Queue eligible links and say when the bounded frontier omitted any.
+fn enqueue_links(
+    links: Vec<String>,
+    scheme: &str,
+    host: &str,
+    local_root: Option<&Path>,
+    next_level: u32,
+    budget: u32,
+    seen: &mut Vec<String>,
+    frontier: &mut Vec<(String, u32)>,
+) -> bool {
+    let cap = frontier_cap(budget);
+    let mut truncated = false;
+    for link in links {
+        if !link_in_scope(&link, scheme, host, local_root)
+            || seen.iter().any(|known| known == &link)
+        {
+            continue;
+        }
+        if seen.len() as u32 >= cap {
+            truncated = true;
+            continue;
+        }
+        seen.push(link.clone());
+        frontier.push((link, next_level));
+    }
+    truncated
+}
+
+fn decode_harvested_links(raw: &str) -> Result<HarvestedLinks, String> {
+    // ExecuteScript returns JSON for the script result; the script itself
+    // returns a JSON string, so this boundary deliberately parses twice.
+    let encoded: String = serde_json::from_str(raw)
+        .map_err(|e| format!("the page's link result was not readable: {e}"))?;
+    serde_json::from_str(&encoded)
+        .map_err(|e| format!("the page's link list was not readable: {e}"))
 }
 
 fn capture_root() -> PathBuf {
@@ -629,8 +661,8 @@ fn print_page(
 
 /// Same-document links, in document order, de-duplicated by the script so the
 /// frontier does not carry a hundred copies of a nav bar.
-fn harvest_links(window: &WebviewWindow) -> Vec<String> {
-    let outcome = run_step(
+fn harvest_links(window: &WebviewWindow) -> Result<HarvestedLinks, StepError> {
+    let raw = run_step(
         window,
         SCRIPT_TIMEOUT,
         "the page's links did not arrive in time",
@@ -640,29 +672,26 @@ fn harvest_links(window: &WebviewWindow) -> Vec<String> {
                 Ok(())
             }));
             let script: HSTRING = HSTRING::from(
-                "(function(){var s=new Set(),o=[];\
-                 for (const a of document.querySelectorAll('a[href]')) {\
-                   let h; try { h = new URL(a.href, document.baseURI).href; } catch (e) { continue; }\
-                   h = h.split('#')[0];\
-                   if (!h || s.has(h)) continue; s.add(h); o.push(h);\
-                   if (o.length >= 400) break;\
-                 } return JSON.stringify(o);})()",
+                r#"(function(){var a=document.links,s=new Set(),o=[],n=Math.min(a.length,10000),t=a.length>n;
+                   for(let i=0;i<n;i++){
+                     let h;try{h=new URL(a[i].href,document.baseURI).href;}catch(e){continue;}
+                     h=h.split('#')[0];if(!h||s.has(h))continue;
+                     if(h.length>2048){t=true;continue;}
+                     if(o.length>=400){t=true;break;}
+                     s.add(h);o.push(h);
+                   }
+                   return JSON.stringify({links:o,truncated:t});})()"#,
             );
-            unsafe { browser.webview.ExecuteScript(PCWSTR(script.as_ptr()), &handler) }
-                .map_err(|e| format!("Could not read the page's links: {e}"))?;
+            unsafe {
+                browser
+                    .webview
+                    .ExecuteScript(PCWSTR(script.as_ptr()), &handler)
+            }
+            .map_err(|e| format!("Could not read the page's links: {e}"))?;
             Ok(())
         },
-    );
-    let Ok(raw) = outcome else {
-        return Vec::new();
-    };
-    // ExecuteScript returns the result as JSON, so a string result arrives
-    // JSON-encoded twice.
-    let once: String = match serde_json::from_str(&raw) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    serde_json::from_str::<Vec<String>>(&once).unwrap_or_default()
+    )?;
+    decode_harvested_links(&raw).map_err(StepError::Failed)
 }
 
 fn page_title(window: &WebviewWindow) -> String {
@@ -948,6 +977,7 @@ fn crawl(
     let mut visited = 0usize;
     let mut cursor = 0usize;
     let mut stopped = false;
+    let mut link_limit_reported = false;
 
     while cursor < frontier.len() {
         if pages.len() as u32 >= budget {
@@ -998,12 +1028,36 @@ fn crawl(
         });
 
         if level < depth {
-            for link in harvest_links(window) {
-                if !admits(&link, scheme, host, local_root, &seen, budget) {
-                    continue;
+            match harvest_links(window) {
+                Ok(harvested) => {
+                    if harvested.truncated && !link_limit_reported {
+                        failures.push(format!(
+                            "{url}: the page's link list reached its capture limit; some linked pages may be missing"
+                        ));
+                        link_limit_reported = true;
+                    }
+                    if enqueue_links(
+                        harvested.links,
+                        scheme,
+                        host,
+                        local_root,
+                        level + 1,
+                        budget,
+                        &mut seen,
+                        &mut frontier,
+                    ) && !link_limit_reported
+                    {
+                        failures.push(format!(
+                            "{url}: the crawl's link frontier reached its capture limit; some linked pages may be missing"
+                        ));
+                        link_limit_reported = true;
+                    }
                 }
-                seen.push(link.clone());
-                frontier.push((link, level + 1));
+                Err(StepError::Cancelled) => {
+                    stopped = true;
+                    break;
+                }
+                Err(StepError::Failed(err)) => failures.push(format!("{url}: {err}")),
             }
         }
     }
@@ -1026,10 +1080,10 @@ fn crawl(
 #[cfg(test)]
 mod tests {
     use super::{
-        admits, cancelled, cancelled_result, clamp, clear_cancel, discard_capture_at, finish,
-        frontier_cap, local_file_root, same_origin, validate_url, window_close_requested,
-        CaptureOptions, CaptureScratch, CapturedPage, CAPTURE_LABEL, MAX_DEPTH_CEILING,
-        MAX_PAGES_CEILING,
+        cancelled, cancelled_result, clamp, clear_cancel, decode_harvested_links,
+        discard_capture_at, enqueue_links, finish, frontier_cap, local_file_root, same_origin,
+        validate_url, window_close_requested, CaptureOptions, CaptureScratch, CapturedPage,
+        CAPTURE_LABEL, MAX_DEPTH_CEILING, MAX_PAGES_CEILING,
     };
 
     fn options(depth: u32, max_pages: u32) -> CaptureOptions {
@@ -1098,16 +1152,87 @@ mod tests {
 
     #[test]
     fn the_frontier_admits_only_unseen_same_origin_links() {
-        let seen = vec!["https://example.test/a".to_string()];
-        assert!(admits("https://example.test/b", "https", "example.test", None, &seen, 10));
-        // Already queued.
-        assert!(!admits("https://example.test/a", "https", "example.test", None, &seen, 10));
-        // Another site, and a downgraded transport.
-        assert!(!admits("https://other.test/b", "https", "example.test", None, &seen, 10));
-        assert!(!admits("http://example.test/b", "https", "example.test", None, &seen, 10));
-        // A full frontier admits nothing, however legal the link.
-        let full: Vec<String> = (0..frontier_cap(10)).map(|i| format!("u{i}")).collect();
-        assert!(!admits("https://example.test/b", "https", "example.test", None, &full, 10));
+        let mut seen = vec!["https://example.test/a".to_string()];
+        let mut frontier = Vec::new();
+        assert!(!enqueue_links(
+            [
+                "https://example.test/b",
+                "https://example.test/a", // Already queued.
+                "https://other.test/b",   // Another site.
+                "http://example.test/b",  // Downgraded transport.
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+            "https",
+            "example.test",
+            None,
+            1,
+            10,
+            &mut seen,
+            &mut frontier,
+        ));
+        assert_eq!(seen, ["https://example.test/a", "https://example.test/b"]);
+        assert_eq!(frontier, [("https://example.test/b".to_string(), 1)]);
+
+        // A full frontier refuses another legal link and reports the loss.
+        let mut full: Vec<String> = (0..frontier_cap(10))
+            .map(|i| format!("https://example.test/{i}"))
+            .collect();
+        let mut no_room = Vec::new();
+        assert!(enqueue_links(
+            vec!["https://example.test/overflow".to_string()],
+            "https",
+            "example.test",
+            None,
+            1,
+            10,
+            &mut full,
+            &mut no_room,
+        ));
+        assert!(no_room.is_empty());
+    }
+
+    #[test]
+    fn link_harvest_reports_capped_and_malformed_results() {
+        let payload = r#"{"links":["https://example.test/next"],"truncated":true}"#;
+        let raw = serde_json::to_string(payload).unwrap();
+        let harvested = decode_harvested_links(&raw).unwrap();
+        assert_eq!(harvested.links, ["https://example.test/next"]);
+        assert!(harvested.truncated);
+        assert!(decode_harvested_links("not json").is_err());
+        assert!(decode_harvested_links("\"[]\"").is_err());
+    }
+
+    #[test]
+    fn an_omitted_eligible_link_marks_the_crawl_truncated() {
+        let mut seen: Vec<String> = (0..frontier_cap(10))
+            .map(|i| format!("https://example.test/{i}"))
+            .collect();
+        let mut frontier = Vec::new();
+        assert!(enqueue_links(
+            vec!["https://example.test/omitted".to_string()],
+            "https",
+            "example.test",
+            None,
+            1,
+            10,
+            &mut seen,
+            &mut frontier,
+        ));
+        assert!(frontier.is_empty());
+
+        // Out-of-scope links do not claim the crawl lost an eligible page.
+        assert!(!enqueue_links(
+            vec!["https://other.test/".to_string()],
+            "https",
+            "example.test",
+            None,
+            1,
+            10,
+            &mut seen,
+            &mut frontier,
+        ));
     }
 
     #[test]
@@ -1127,12 +1252,50 @@ mod tests {
         let outside_url = url::Url::from_file_path(&outside).unwrap().to_string();
         let case_variant_url = inside_url.replace("/site/", "/SITE/");
         let root = local_file_root(&start_url).unwrap();
-        let seen = vec![start_url];
+        let mut seen = vec![start_url];
+        let mut frontier = Vec::new();
 
-        assert!(admits(&inside_url, "file", "", Some(&root), &seen, 10));
-        assert!(admits(&case_variant_url, "file", "", Some(&root), &seen, 10));
-        assert!(!admits(&outside_url, "file", "", Some(&root), &seen, 10));
-        assert!(!admits(&outside_url, "file", "", None, &seen, 10));
+        assert!(!enqueue_links(
+            vec![inside_url.clone()],
+            "file",
+            "",
+            Some(&root),
+            1,
+            10,
+            &mut seen,
+            &mut frontier,
+        ));
+        assert_eq!(frontier[0].0, inside_url);
+        assert!(!enqueue_links(
+            vec![case_variant_url],
+            "file",
+            "",
+            Some(&root),
+            1,
+            10,
+            &mut seen,
+            &mut frontier,
+        ));
+        assert!(!enqueue_links(
+            vec![outside_url.clone()],
+            "file",
+            "",
+            Some(&root),
+            1,
+            10,
+            &mut seen,
+            &mut frontier,
+        ));
+        assert!(!enqueue_links(
+            vec![outside_url],
+            "file",
+            "",
+            None,
+            1,
+            10,
+            &mut seen,
+            &mut frontier,
+        ));
     }
 
     #[test]

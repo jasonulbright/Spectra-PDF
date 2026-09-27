@@ -17,6 +17,7 @@ import {
   MAX_DEPTH_CEILING,
   MAX_PAGES_CEILING,
   buildRequest,
+  captureFailureNotice,
   outlineFromRows,
   paperInches,
   previewHost,
@@ -53,6 +54,18 @@ describe('web capture', () => {
     for (const raw of ['', '   ', 'javascript:alert(1)', 'data:text/html,x', 'mailto:a@b.test']) {
       expect(previewHost(raw), `${raw} must not name a host`).toBeNull();
     }
+  });
+
+  it('bounds displayed failure details but keeps the total failure count', () => {
+    expect(captureFailureNotice([])).toBeNull();
+    const failures = Array.from({ length: 7 }, (_, i) => `page-${i} failed`);
+    expect(captureFailureNotice(failures)).toEqual({
+      examples: failures.slice(0, 5),
+      omitted: 2,
+    });
+    expect(captureFailureNotice(['x'.repeat(1300)])?.examples[0]).toBe(
+      `${'x'.repeat(1199)}…`,
+    );
   });
 
   it('names the FILE for a file: address, which has no host', () => {
