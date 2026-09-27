@@ -6165,5 +6165,17 @@
   "tools.sub": "Scegliere che cosa fare con il proprio documento.",
   "engine.redact.pageContainsMalformedDrawing": "La pagina contiene un tracciato di disegno non valido. L’oscuramento non è stato applicato.",
   "engine.redact_document.documentStructureTooComplex": "La struttura del documento è troppo complessa per un oscuramento sicuro.",
-  "refusal.scan.pageUnreadable": "Impossibile leggere la pagina acquisita: {{folder}}."
+  "refusal.scan.pageUnreadable": "Impossibile leggere la pagina acquisita: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "L'oscuramento non può rimuovere il testo che definisce un tracciato di ritaglio, perché ciò potrebbe modificare il contenuto visibile della pagina.",
+  "engine.split.cachedSplitPlanInconsistent": "Il piano di suddivisione memorizzato nella cache contiene dati di output incoerenti",
+  "engine.split.cachedSplitPlanOnly": "Un piano di suddivisione memorizzato nella cache è valido solo per una suddivisione in cartelle",
+  "engine.split.folderOutputPlanOnly": "Un piano di output in cartelle è valido solo per le modalità di suddivisione in più file",
+  "engine.split.folderSplitProducedNon": "Una suddivisione in cartelle ha prodotto una parte di output non contigua",
+  "engine.split.reservedSplitOutputsMust": "Gli output di suddivisione riservati devono essere un elenco di percorsi",
+  "engine.split.reservedSplitOutputsMust2": "Gli output di suddivisione riservati devono essere un elenco di percorsi",
+  "engine.split.splitOutputsChangedAfter": "Gli output della suddivisione sono cambiati dopo la prenotazione",
+  "engine.split.splitPlanExpiredAlready": "Il piano di suddivisione è scaduto o è già stato usato; pianificare di nuovo gli output",
+  "engine.split.splitPlanIdRequired": "È richiesto un ID del piano di suddivisione",
+  "engine.split.splitRequestLongerMatches": "La richiesta di suddivisione non corrisponde più al piano di output",
+  "engine.split.splitSourceChangedAfter": "La sorgente della suddivisione è cambiata dopo la pianificazione degli output"
 }

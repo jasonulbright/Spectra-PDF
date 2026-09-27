@@ -6301,5 +6301,17 @@
   "tools.sub": "Zvoľte, čo chcete so svojím dokumentom urobiť.",
   "engine.redact.pageContainsMalformedDrawing": "Stránka obsahuje chybnú kresliacu cestu. Redakcia sa nevykonala.",
   "engine.redact_document.documentStructureTooComplex": "Štruktúra dokumentu je príliš zložitá na bezpečnú redakciu.",
-  "refusal.scan.pageUnreadable": "Naskenovanú stranu sa nepodarilo prečítať: {{folder}}."
+  "refusal.scan.pageUnreadable": "Naskenovanú stranu sa nepodarilo prečítať: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Text, ktorý definuje orezovú cestu, nemožno odstrániť, pretože by to mohlo zmeniť viditeľný obsah strany.",
+  "engine.split.cachedSplitPlanInconsistent": "Uložený plán rozdelenia obsahuje nekonzistentné výstupné údaje",
+  "engine.split.cachedSplitPlanOnly": "Uložený plán rozdelenia je platný iba pre rozdelenie do priečinkov",
+  "engine.split.folderOutputPlanOnly": "Plán výstupu do priečinka je platný iba pre režimy rozdelenia do viacerých súborov",
+  "engine.split.folderSplitProducedNon": "Rozdelenie do priečinkov vytvorilo nesúvislú časť výstupu",
+  "engine.split.reservedSplitOutputsMust": "Rezervované výstupy rozdelenia musia byť zoznamom ciest",
+  "engine.split.reservedSplitOutputsMust2": "Rezervované výstupy rozdelenia musia byť zoznamom ciest",
+  "engine.split.splitOutputsChangedAfter": "Výstupy rozdelenia sa po rezervácii zmenili",
+  "engine.split.splitPlanExpiredAlready": "Platnosť plánu rozdelenia vypršala alebo už bol použitý; naplánujte výstupy znova",
+  "engine.split.splitPlanIdRequired": "Vyžaduje sa ID plánu rozdelenia",
+  "engine.split.splitRequestLongerMatches": "Požiadavka na rozdelenie už nezodpovedá plánu výstupu",
+  "engine.split.splitSourceChangedAfter": "Zdroj rozdelenia sa po naplánovaní výstupov zmenil"
 }

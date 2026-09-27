@@ -6165,5 +6165,17 @@
   "tools.sub": "Choisissez ce que vous voulez faire avec votre document.",
   "engine.redact.pageContainsMalformedDrawing": "La page contient un tracé de dessin mal formé. Le caviardage n’a pas été appliqué.",
   "engine.redact_document.documentStructureTooComplex": "La structure du document est trop complexe pour être caviardée en toute sécurité.",
-  "refusal.scan.pageUnreadable": "La page numérisée n’a pas pu être lue : {{folder}}."
+  "refusal.scan.pageUnreadable": "La page numérisée n’a pas pu être lue : {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "La rédaction ne peut pas supprimer le texte qui définit un tracé de détourage, car cela pourrait modifier le contenu visible de la page.",
+  "engine.split.cachedSplitPlanInconsistent": "Le plan de fractionnement mis en cache contient des données de sortie incohérentes",
+  "engine.split.cachedSplitPlanOnly": "Un plan de fractionnement mis en cache n'est valide que pour un fractionnement par dossier",
+  "engine.split.folderOutputPlanOnly": "Un plan de sortie par dossier n'est valide que pour les modes de fractionnement en plusieurs fichiers",
+  "engine.split.folderSplitProducedNon": "Un fractionnement par dossier a produit une partie de sortie non contiguë",
+  "engine.split.reservedSplitOutputsMust": "Les sorties de fractionnement réservées doivent être une liste de chemins",
+  "engine.split.reservedSplitOutputsMust2": "Les sorties de fractionnement réservées doivent être une liste de chemins",
+  "engine.split.splitOutputsChangedAfter": "Les sorties de fractionnement ont changé après leur réservation",
+  "engine.split.splitPlanExpiredAlready": "Le plan de fractionnement a expiré ou a déjà été utilisé ; planifiez à nouveau les sorties",
+  "engine.split.splitPlanIdRequired": "Un identifiant de plan de fractionnement est requis",
+  "engine.split.splitRequestLongerMatches": "La demande de fractionnement ne correspond plus à son plan de sortie",
+  "engine.split.splitSourceChangedAfter": "La source du fractionnement a changé après la planification des sorties"
 }

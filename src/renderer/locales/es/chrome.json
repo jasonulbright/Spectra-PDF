@@ -6165,5 +6165,17 @@
   "tools.sub": "Elija qué quiere hacer con el documento.",
   "engine.redact.pageContainsMalformedDrawing": "La página contiene un trazado de dibujo incorrecto. No se aplicó la censura.",
   "engine.redact_document.documentStructureTooComplex": "La estructura del documento es demasiado compleja para censurarlo de forma segura.",
-  "refusal.scan.pageUnreadable": "No se pudo leer la página escaneada: {{folder}}."
+  "refusal.scan.pageUnreadable": "No se pudo leer la página escaneada: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "La redacción no puede quitar texto que define un trazado de recorte, porque hacerlo podría cambiar el contenido visible de la página.",
+  "engine.split.cachedSplitPlanInconsistent": "El plan de división almacenado en caché contiene datos de salida incoherentes",
+  "engine.split.cachedSplitPlanOnly": "Un plan de división almacenado en caché solo es válido para una división en carpetas",
+  "engine.split.folderOutputPlanOnly": "Un plan de salida de carpeta solo es válido para modos de división en varios archivos",
+  "engine.split.folderSplitProducedNon": "Una división en carpetas produjo una parte de salida no contigua",
+  "engine.split.reservedSplitOutputsMust": "Las salidas reservadas de la división deben ser una lista de rutas",
+  "engine.split.reservedSplitOutputsMust2": "Las salidas reservadas de la división deben ser una lista de rutas",
+  "engine.split.splitOutputsChangedAfter": "Las salidas de la división cambiaron después de reservarlas",
+  "engine.split.splitPlanExpiredAlready": "El plan de división expiró o ya se usó; vuelva a planificar las salidas",
+  "engine.split.splitPlanIdRequired": "Se requiere un id de plan de división",
+  "engine.split.splitRequestLongerMatches": "La solicitud de división ya no coincide con su plan de salida",
+  "engine.split.splitSourceChangedAfter": "El origen de la división cambió después de planificar las salidas"
 }

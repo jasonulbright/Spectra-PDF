@@ -6165,5 +6165,17 @@
   "tools.sub": "Escolha o que você quer fazer com o seu documento.",
   "engine.redact.pageContainsMalformedDrawing": "A página contém um caminho de desenho inválido. A redação não foi aplicada.",
   "engine.redact_document.documentStructureTooComplex": "A estrutura do documento é complexa demais para aplicar a redação com segurança.",
-  "refusal.scan.pageUnreadable": "Não foi possível ler a página digitalizada: {{folder}}."
+  "refusal.scan.pageUnreadable": "Não foi possível ler a página digitalizada: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "A redação não pode remover o texto que define um caminho de recorte, pois isso pode alterar o conteúdo visível da página.",
+  "engine.split.cachedSplitPlanInconsistent": "O plano de divisão em cache contém dados de saída inconsistentes",
+  "engine.split.cachedSplitPlanOnly": "Um plano de divisão em cache só é válido para uma divisão por pasta",
+  "engine.split.folderOutputPlanOnly": "Um plano de saída por pasta só é válido para modos de divisão em vários arquivos",
+  "engine.split.folderSplitProducedNon": "Uma divisão por pasta produziu uma parte de saída não contígua",
+  "engine.split.reservedSplitOutputsMust": "As saídas de divisão reservadas devem ser uma lista de caminhos",
+  "engine.split.reservedSplitOutputsMust2": "As saídas de divisão reservadas devem ser uma lista de caminhos",
+  "engine.split.splitOutputsChangedAfter": "As saídas da divisão mudaram depois de serem reservadas",
+  "engine.split.splitPlanExpiredAlready": "O plano de divisão expirou ou já foi usado; planeje as saídas novamente",
+  "engine.split.splitPlanIdRequired": "É necessário um ID de plano de divisão",
+  "engine.split.splitRequestLongerMatches": "A solicitação de divisão não corresponde mais ao plano de saída",
+  "engine.split.splitSourceChangedAfter": "A origem da divisão mudou após o planejamento das saídas"
 }

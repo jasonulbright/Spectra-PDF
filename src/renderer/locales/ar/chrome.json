@@ -6573,5 +6573,17 @@
   "tools.sub": "اختر ما تريد فعله بمستندك.",
   "engine.redact.pageContainsMalformedDrawing": "تحتوي الصفحة على مسار رسم غير سليم. لم يتم تطبيق التنقيح.",
   "engine.redact_document.documentStructureTooComplex": "بنية المستند معقدة للغاية ولا يمكن تنقيحه بأمان.",
-  "refusal.scan.pageUnreadable": "تعذرت قراءة الصفحة الممسوحة ضوئيًا: {{folder}}."
+  "refusal.scan.pageUnreadable": "تعذرت قراءة الصفحة الممسوحة ضوئيًا: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "لا يمكن للتنقيح إزالة النص الذي يعرّف مسار قص، لأن ذلك قد يغيّر محتوى الصفحة المرئي.",
+  "engine.split.cachedSplitPlanInconsistent": "تحتوي خطة التقسيم المخزنة مؤقتًا على بيانات إخراج غير متسقة",
+  "engine.split.cachedSplitPlanOnly": "تكون خطة التقسيم المخزنة مؤقتًا صالحة لتقسيم المجلدات فقط",
+  "engine.split.folderOutputPlanOnly": "تكون خطة إخراج المجلد صالحة لأنماط التقسيم إلى ملفات متعددة فقط",
+  "engine.split.folderSplitProducedNon": "أنتج تقسيم المجلد جزء إخراج غير متصل",
+  "engine.split.reservedSplitOutputsMust": "يجب أن تكون مخرجات التقسيم المحجوزة قائمة من المسارات",
+  "engine.split.reservedSplitOutputsMust2": "يجب أن تكون مخرجات التقسيم المحجوزة قائمة من المسارات",
+  "engine.split.splitOutputsChangedAfter": "تغيّرت مخرجات التقسيم بعد حجزها",
+  "engine.split.splitPlanExpiredAlready": "انتهت صلاحية خطة التقسيم أو استُخدمت بالفعل؛ خطط للمخرجات مرة أخرى",
+  "engine.split.splitPlanIdRequired": "معرّف خطة التقسيم مطلوب",
+  "engine.split.splitRequestLongerMatches": "لم يعد طلب التقسيم مطابقًا لخطة الإخراج",
+  "engine.split.splitSourceChangedAfter": "تغيّر مصدر التقسيم بعد تخطيط المخرجات"
 }

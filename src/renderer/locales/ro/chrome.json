@@ -6165,5 +6165,17 @@
   "tools.sub": "Alegeți ce doriți să faceți cu documentul dumneavoastră.",
   "engine.redact.pageContainsMalformedDrawing": "Pagina conține o cale de desenare incorectă. Redactarea nu a fost aplicată.",
   "engine.redact_document.documentStructureTooComplex": "Structura documentului este prea complexă pentru o redactare sigură.",
-  "refusal.scan.pageUnreadable": "Pagina scanată nu a putut fi citită: {{folder}}."
+  "refusal.scan.pageUnreadable": "Pagina scanată nu a putut fi citită: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Cenzurarea nu poate elimina textul care definește o cale de decupare, deoarece acest lucru ar putea modifica conținutul vizibil al paginii.",
+  "engine.split.cachedSplitPlanInconsistent": "Planul de divizare din cache conține date de ieșire neconcordante",
+  "engine.split.cachedSplitPlanOnly": "Un plan de divizare din cache este valabil doar pentru divizarea în foldere",
+  "engine.split.folderOutputPlanOnly": "Un plan de ieșire în foldere este valabil doar pentru modurile de divizare în mai multe fișiere",
+  "engine.split.folderSplitProducedNon": "Divizarea în foldere a produs o parte de ieșire necontiguă",
+  "engine.split.reservedSplitOutputsMust": "Ieșirile de divizare rezervate trebuie să fie o listă de căi",
+  "engine.split.reservedSplitOutputsMust2": "Ieșirile de divizare rezervate trebuie să fie o listă de căi",
+  "engine.split.splitOutputsChangedAfter": "Ieșirile de divizare s-au schimbat după rezervare",
+  "engine.split.splitPlanExpiredAlready": "Planul de divizare a expirat sau a fost deja folosit; planificați din nou ieșirile",
+  "engine.split.splitPlanIdRequired": "Este necesar un ID al planului de divizare",
+  "engine.split.splitRequestLongerMatches": "Solicitarea de divizare nu mai corespunde planului de ieșire",
+  "engine.split.splitSourceChangedAfter": "Sursa divizării s-a schimbat după planificarea ieșirilor"
 }

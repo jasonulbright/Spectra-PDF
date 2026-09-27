@@ -6165,5 +6165,17 @@
   "tools.sub": "Trieu què voleu fer amb el vostre document.",
   "engine.redact.pageContainsMalformedDrawing": "La pàgina conté un traçat de dibuix mal format. No s’ha aplicat la censura.",
   "engine.redact_document.documentStructureTooComplex": "L’estructura del document és massa complexa per censurar-lo amb seguretat.",
-  "refusal.scan.pageUnreadable": "No s’ha pogut llegir la pàgina escanejada: {{folder}}."
+  "refusal.scan.pageUnreadable": "No s’ha pogut llegir la pàgina escanejada: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "La censura no pot eliminar el text que defineix un traçat de retall, perquè això podria canviar el contingut visible de la pàgina.",
+  "engine.split.cachedSplitPlanInconsistent": "El pla de divisió emmagatzemat a la memòria cau conté dades de sortida incoherents",
+  "engine.split.cachedSplitPlanOnly": "Un pla de divisió emmagatzemat a la memòria cau només és vàlid per a una divisió en carpetes",
+  "engine.split.folderOutputPlanOnly": "Un pla de sortida en carpetes només és vàlid per als modes de divisió en diversos fitxers",
+  "engine.split.folderSplitProducedNon": "Una divisió en carpetes ha produït una part de sortida no contigua",
+  "engine.split.reservedSplitOutputsMust": "Les sortides de divisió reservades han de ser una llista de camins",
+  "engine.split.reservedSplitOutputsMust2": "Les sortides de divisió reservades han de ser una llista de camins",
+  "engine.split.splitOutputsChangedAfter": "Les sortides de divisió han canviat després de reservar-les",
+  "engine.split.splitPlanExpiredAlready": "El pla de divisió ha caducat o ja s'ha utilitzat; torneu a planificar les sortides",
+  "engine.split.splitPlanIdRequired": "Cal un identificador del pla de divisió",
+  "engine.split.splitRequestLongerMatches": "La sol·licitud de divisió ja no coincideix amb el pla de sortida",
+  "engine.split.splitSourceChangedAfter": "L'origen de la divisió ha canviat després de planificar les sortides"
 }

@@ -6029,5 +6029,17 @@
   "tools.sub": "Velg hva du vil gjøre med dokumentet ditt.",
   "engine.redact.pageContainsMalformedDrawing": "Siden inneholder en ugyldig tegnesti. Sladding ble ikke utført.",
   "engine.redact_document.documentStructureTooComplex": "Dokumentstrukturen er for kompleks til å sladdes trygt.",
-  "refusal.scan.pageUnreadable": "Den skannede siden kunne ikke leses: {{folder}}."
+  "refusal.scan.pageUnreadable": "Den skannede siden kunne ikke leses: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Sladding kan ikke fjerne tekst som definerer en klippebane, fordi det kan endre sidens synlige innhold.",
+  "engine.split.cachedSplitPlanInconsistent": "Den mellomlagrede oppdelingsplanen har inkonsistente utdata",
+  "engine.split.cachedSplitPlanOnly": "En mellomlagret oppdelingsplan gjelder bare for mappeoppdeling",
+  "engine.split.folderOutputPlanOnly": "En mappeutdataplan gjelder bare for oppdelingsmoduser med flere filer",
+  "engine.split.folderSplitProducedNon": "En mappeoppdeling opprettet en ikke-sammenhengende utdel",
+  "engine.split.reservedSplitOutputsMust": "Reserverte oppdelingsutdata må være en liste med baner",
+  "engine.split.reservedSplitOutputsMust2": "De reserverte oppdelingsutdataene må være en liste med baner",
+  "engine.split.splitOutputsChangedAfter": "Oppdelingsutdataene ble endret etter at de ble reservert",
+  "engine.split.splitPlanExpiredAlready": "Oppdelingsplanen er utløpt eller allerede brukt; planlegg utdataene på nytt",
+  "engine.split.splitPlanIdRequired": "En id for oppdelingsplanen kreves",
+  "engine.split.splitRequestLongerMatches": "Oppdelingsforespørselen samsvarer ikke lenger med utdataene i planen",
+  "engine.split.splitSourceChangedAfter": "Oppdelingskilden ble endret etter at utdataene ble planlagt"
 }

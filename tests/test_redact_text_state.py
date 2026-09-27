@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
 
 import numpy as np
 import pikepdf
+import pytest
 from pikepdf import Array, Dictionary, Name, String
 
 from engine.redact import redact
@@ -156,6 +158,69 @@ def _page(doc, resources, content: bytes):
     page.Resources = resources
     page.Contents = doc.make_stream(content)
     return page
+
+
+@pytest.mark.parametrize("render_mode", [4, 5, 6, 7])
+@pytest.mark.parametrize("in_place", [False, True])
+def test_redaction_refuses_to_remove_clip_text_before_writing(render_mode, in_place, tmp_dir):
+    src = os.path.join(tmp_dir, f"clip_{render_mode}_{in_place}.pdf")
+    out = src if in_place else os.path.join(tmp_dir, f"clip_{render_mode}_{in_place}_out.pdf")
+    doc = pikepdf.new()
+    font = _simple_font(doc, ADVANCE, "ClipFont")
+    _page(
+        doc,
+        Dictionary(Font=Dictionary(F1=font)),
+        f"BT /F1 12 Tf 60 300 Td {render_mode} Tr (PUBLIC SECRET WORDS) Tj ET ".encode()
+        + b"1 1 1 rg 0 0 300 300 re f",
+    )
+    doc.save(src)
+    doc.close()
+    original = Path(src).read_bytes()
+    if not in_place:
+        Path(out).write_bytes(b"existing destination")
+
+    with pytest.raises(ValueError, match="Redaction cannot remove text that defines a clipping path"):
+        redact(src, out, [{"page": 1, "rect": MARK}])
+
+    assert Path(src).read_bytes() == original
+    if not in_place:
+        assert Path(out).read_bytes() == b"existing destination"
+
+
+def test_redaction_keeps_clip_text_when_region_misses_its_glyphs(tmp_dir):
+    src = os.path.join(tmp_dir, "clip_miss.pdf")
+    out = os.path.join(tmp_dir, "clip_miss_out.pdf")
+    doc = pikepdf.new()
+    font = _simple_font(doc, ADVANCE, "ClipFont")
+    _page(doc, Dictionary(Font=Dictionary(F1=font)), b"BT /F1 12 Tf 60 300 Td 7 Tr (PUBLIC SECRET WORDS) Tj ET")
+    doc.save(src)
+    doc.close()
+
+    result = redact(src, out, [{"page": 1, "rect": [300, 300, 350, 350]}])
+
+    assert result["text_runs_removed"] == 0
+    assert _drawn(_shows(out)) == b"PUBLIC SECRET WORDS"
+
+
+def test_redaction_refuses_to_remove_clip_text_inside_a_form(tmp_dir):
+    src = os.path.join(tmp_dir, "clip_form.pdf")
+    out = os.path.join(tmp_dir, "clip_form_out.pdf")
+    doc = pikepdf.new()
+    form = doc.make_stream(
+        b"BT /F1 12 Tf 60 300 Td 7 Tr (PUBLIC SECRET WORDS) Tj ET"
+    )
+    form["/Type"] = Name.XObject
+    form["/Subtype"] = Name.Form
+    form["/BBox"] = Array([0, 0, 400, 400])
+    form["/Resources"] = Dictionary(Font=Dictionary(F1=_simple_font(doc, ADVANCE, "ClipFont")))
+    _page(doc, Dictionary(XObject=Dictionary(Fm0=doc.make_indirect(form))), b"/Fm0 Do")
+    doc.save(src)
+    doc.close()
+
+    with pytest.raises(ValueError, match="Redaction cannot remove text that defines a clipping path"):
+        redact(src, out, [{"page": 1, "rect": MARK}])
+
+    assert not Path(out).exists()
 
 
 # ── the font an ExtGState sets ────────────────────────────────────────────

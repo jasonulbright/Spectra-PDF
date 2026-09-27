@@ -6029,5 +6029,17 @@
   "tools.sub": "Wählen Sie, was Sie mit Ihrem Dokument tun möchten.",
   "engine.redact.pageContainsMalformedDrawing": "Die Seite enthält einen fehlerhaften Zeichenpfad. Die Schwärzung wurde nicht angewendet.",
   "engine.redact_document.documentStructureTooComplex": "Die Dokumentstruktur ist zu komplex für eine sichere Schwärzung.",
-  "refusal.scan.pageUnreadable": "Die gescannte Seite konnte nicht gelesen werden: {{folder}}."
+  "refusal.scan.pageUnreadable": "Die gescannte Seite konnte nicht gelesen werden: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Die Schwärzung kann Text, der einen Beschneidungspfad definiert, nicht entfernen, da dies sichtbare Seiteninhalte verändern könnte.",
+  "engine.split.cachedSplitPlanInconsistent": "Der zwischengespeicherte Aufteilungsplan enthält widersprüchliche Ausgabedaten",
+  "engine.split.cachedSplitPlanOnly": "Ein zwischengespeicherter Aufteilungsplan ist nur für eine Ordneraufteilung gültig",
+  "engine.split.folderOutputPlanOnly": "Ein Ordner-Ausgabeplan ist nur für Aufteilungsmodi mit mehreren Dateien gültig",
+  "engine.split.folderSplitProducedNon": "Eine Ordneraufteilung hat einen nicht zusammenhängenden Ausgabeteil erzeugt",
+  "engine.split.reservedSplitOutputsMust": "Reservierte Aufteilungsausgaben müssen eine Liste von Pfaden sein",
+  "engine.split.reservedSplitOutputsMust2": "Die reservierten Aufteilungsausgaben müssen eine Liste von Pfaden sein",
+  "engine.split.splitOutputsChangedAfter": "Die Aufteilungsausgaben haben sich nach der Reservierung geändert",
+  "engine.split.splitPlanExpiredAlready": "Der Aufteilungsplan ist abgelaufen oder wurde bereits verwendet; planen Sie die Ausgaben erneut",
+  "engine.split.splitPlanIdRequired": "Eine Aufteilungsplan-ID ist erforderlich",
+  "engine.split.splitRequestLongerMatches": "Die Aufteilungsanforderung stimmt nicht mehr mit ihrem Ausgabeplan überein",
+  "engine.split.splitSourceChangedAfter": "Die Aufteilungsquelle hat sich nach der Ausgabeplanung geändert"
 }

@@ -6301,5 +6301,17 @@
   "tools.sub": "Выберите, что вы хотите сделать с документом.",
   "engine.redact.pageContainsMalformedDrawing": "Страница содержит некорректный контур рисования. Редактирование конфиденциальных данных не выполнено.",
   "engine.redact_document.documentStructureTooComplex": "Структура документа слишком сложна для безопасного удаления конфиденциальных данных.",
-  "refusal.scan.pageUnreadable": "Не удалось прочитать отсканированную страницу: {{folder}}."
+  "refusal.scan.pageUnreadable": "Не удалось прочитать отсканированную страницу: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Нельзя удалить текст, задающий контур отсечения: это может изменить видимое содержимое страницы.",
+  "engine.split.cachedSplitPlanInconsistent": "В кэшированном плане разделения содержатся несогласованные выходные данные",
+  "engine.split.cachedSplitPlanOnly": "Кэшированный план разделения действителен только для разделения по папкам",
+  "engine.split.folderOutputPlanOnly": "План вывода по папкам действителен только для режимов разделения на несколько файлов",
+  "engine.split.folderSplitProducedNon": "При разделении по папкам создана несмежная часть выходных данных",
+  "engine.split.reservedSplitOutputsMust": "Зарезервированные выходные файлы разделения должны быть списком путей",
+  "engine.split.reservedSplitOutputsMust2": "Зарезервированные выходные файлы разделения должны быть списком путей",
+  "engine.split.splitOutputsChangedAfter": "Выходные файлы разделения изменились после резервирования",
+  "engine.split.splitPlanExpiredAlready": "Срок действия плана разделения истёк или он уже использован; запланируйте вывод заново",
+  "engine.split.splitPlanIdRequired": "Требуется идентификатор плана разделения",
+  "engine.split.splitRequestLongerMatches": "Запрос на разделение больше не соответствует плану вывода",
+  "engine.split.splitSourceChangedAfter": "Источник разделения изменился после планирования вывода"
 }

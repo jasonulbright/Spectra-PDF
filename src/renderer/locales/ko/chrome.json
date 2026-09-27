@@ -5893,5 +5893,17 @@
   "tools.sub": "문서로 무엇을 할지 고르십시오.",
   "engine.redact.pageContainsMalformedDrawing": "페이지에 잘못된 그리기 경로가 있습니다. 교정 삭제가 적용되지 않았습니다.",
   "engine.redact_document.documentStructureTooComplex": "문서 구조가 너무 복잡하여 안전하게 교정 삭제할 수 없습니다.",
-  "refusal.scan.pageUnreadable": "스캔한 페이지를 읽을 수 없습니다: {{folder}}."
+  "refusal.scan.pageUnreadable": "스캔한 페이지를 읽을 수 없습니다: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "클리핑 경로를 정의하는 텍스트를 제거하면 페이지의 보이는 내용이 바뀔 수 있으므로 삭제할 수 없습니다.",
+  "engine.split.cachedSplitPlanInconsistent": "캐시된 분할 계획의 출력 데이터가 일치하지 않습니다",
+  "engine.split.cachedSplitPlanOnly": "캐시된 분할 계획은 폴더 분할에만 유효합니다",
+  "engine.split.folderOutputPlanOnly": "폴더 출력 계획은 여러 파일로 분할하는 모드에만 유효합니다",
+  "engine.split.folderSplitProducedNon": "폴더 분할에서 연속되지 않은 출력 부분이 생성되었습니다",
+  "engine.split.reservedSplitOutputsMust": "예약된 분할 출력은 경로 목록이어야 합니다",
+  "engine.split.reservedSplitOutputsMust2": "예약된 분할 출력은 경로 목록이어야 합니다",
+  "engine.split.splitOutputsChangedAfter": "예약 후 분할 출력이 변경되었습니다",
+  "engine.split.splitPlanExpiredAlready": "분할 계획이 만료되었거나 이미 사용되었습니다. 출력을 다시 계획하세요",
+  "engine.split.splitPlanIdRequired": "분할 계획 ID가 필요합니다",
+  "engine.split.splitRequestLongerMatches": "분할 요청이 더 이상 출력 계획과 일치하지 않습니다",
+  "engine.split.splitSourceChangedAfter": "출력을 계획한 후 분할 원본이 변경되었습니다"
 }

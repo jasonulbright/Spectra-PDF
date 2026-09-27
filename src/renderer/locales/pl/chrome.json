@@ -6301,5 +6301,17 @@
   "tools.sub": "Wybierz, co chcesz zrobić z dokumentem.",
   "engine.redact.pageContainsMalformedDrawing": "Strona zawiera nieprawidłową ścieżkę rysowania. Redakcja nie została zastosowana.",
   "engine.redact_document.documentStructureTooComplex": "Struktura dokumentu jest zbyt złożona, aby bezpiecznie przeprowadzić redakcję.",
-  "refusal.scan.pageUnreadable": "Nie można odczytać zeskanowanej strony: {{folder}}."
+  "refusal.scan.pageUnreadable": "Nie można odczytać zeskanowanej strony: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Nie można usunąć tekstu definiującego ścieżkę przycinania, ponieważ może to zmienić widoczną zawartość strony.",
+  "engine.split.cachedSplitPlanInconsistent": "Buforowany plan podziału zawiera niespójne dane wyjściowe",
+  "engine.split.cachedSplitPlanOnly": "Buforowany plan podziału jest prawidłowy tylko dla podziału na foldery",
+  "engine.split.folderOutputPlanOnly": "Plan wyjściowy folderu jest prawidłowy tylko dla trybów podziału na wiele plików",
+  "engine.split.folderSplitProducedNon": "Podział na foldery utworzył nieciągłą część wyjściową",
+  "engine.split.reservedSplitOutputsMust": "Zarezerwowane pliki wyjściowe podziału muszą być listą ścieżek",
+  "engine.split.reservedSplitOutputsMust2": "Zarezerwowane pliki wyjściowe podziału muszą być listą ścieżek",
+  "engine.split.splitOutputsChangedAfter": "Pliki wyjściowe podziału zmieniły się po ich zarezerwowaniu",
+  "engine.split.splitPlanExpiredAlready": "Plan podziału wygasł lub został już użyty; zaplanuj pliki wyjściowe ponownie",
+  "engine.split.splitPlanIdRequired": "Wymagany jest identyfikator planu podziału",
+  "engine.split.splitRequestLongerMatches": "Żądanie podziału nie pasuje już do planu wyjściowego",
+  "engine.split.splitSourceChangedAfter": "Źródło podziału zmieniło się po zaplanowaniu plików wyjściowych"
 }

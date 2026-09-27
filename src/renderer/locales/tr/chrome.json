@@ -6029,5 +6029,17 @@
   "tools.sub": "Belgenizle ne yapmak istediğinizi seçin.",
   "engine.redact.pageContainsMalformedDrawing": "Sayfa hatalı bir çizim yolu içeriyor. Karartma uygulanmadı.",
   "engine.redact_document.documentStructureTooComplex": "Belge yapısı güvenli karartma için çok karmaşık.",
-  "refusal.scan.pageUnreadable": "Taranan sayfa okunamadı: {{folder}}."
+  "refusal.scan.pageUnreadable": "Taranan sayfa okunamadı: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Karartma, kırpma yolu tanımlayan metni kaldıramaz; bu, sayfanın görünen içeriğini değiştirebilir.",
+  "engine.split.cachedSplitPlanInconsistent": "Önbelleğe alınan bölme planının çıktı verileri tutarsız",
+  "engine.split.cachedSplitPlanOnly": "Önbelleğe alınan bölme planı yalnızca klasör bölme için geçerlidir",
+  "engine.split.folderOutputPlanOnly": "Klasör çıktı planı yalnızca birden çok dosyaya bölme kipleri için geçerlidir",
+  "engine.split.folderSplitProducedNon": "Klasör bölme işleminde bitişik olmayan bir çıktı bölümü oluşturuldu",
+  "engine.split.reservedSplitOutputsMust": "Ayrılmış bölme çıktıları bir yol listesi olmalıdır",
+  "engine.split.reservedSplitOutputsMust2": "Ayrılmış bölme çıktıları bir yol listesi olmalıdır",
+  "engine.split.splitOutputsChangedAfter": "Ayrıldıktan sonra bölme çıktıları değişti",
+  "engine.split.splitPlanExpiredAlready": "Bölme planının süresi doldu veya plan zaten kullanıldı; çıktıları yeniden planlayın",
+  "engine.split.splitPlanIdRequired": "Bir bölme planı kimliği gerekli",
+  "engine.split.splitRequestLongerMatches": "Bölme isteği artık çıktı planıyla eşleşmiyor",
+  "engine.split.splitSourceChangedAfter": "Çıktılar planlandıktan sonra bölme kaynağı değişti"
 }

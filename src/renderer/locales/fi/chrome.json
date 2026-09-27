@@ -6029,5 +6029,17 @@
   "tools.sub": "Valitse, mitä haluat tehdä asiakirjallesi.",
   "engine.redact.pageContainsMalformedDrawing": "Sivu sisältää virheellisen piirtopolun. Peittämistä ei tehty.",
   "engine.redact_document.documentStructureTooComplex": "Asiakirjan rakenne on liian monimutkainen turvalliseen peittämiseen.",
-  "refusal.scan.pageUnreadable": "Skannattua sivua ei voitu lukea: {{folder}}."
+  "refusal.scan.pageUnreadable": "Skannattua sivua ei voitu lukea: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Peittäminen ei voi poistaa leikkauspolun määrittävää tekstiä, koska se voi muuttaa sivun näkyvää sisältöä.",
+  "engine.split.cachedSplitPlanInconsistent": "Välimuistiin tallennetun jakosuunnitelman tulostiedot ovat ristiriitaisia",
+  "engine.split.cachedSplitPlanOnly": "Välimuistiin tallennettu jakosuunnitelma kelpaa vain kansiojakoon",
+  "engine.split.folderOutputPlanOnly": "Kansion tulossuunnitelma kelpaa vain useaan tiedostoon jakaville tiloille",
+  "engine.split.folderSplitProducedNon": "Kansiojako tuotti epäyhtenäisen tulososan",
+  "engine.split.reservedSplitOutputsMust": "Varattujen jakotulosteiden on oltava polkujen luettelo",
+  "engine.split.reservedSplitOutputsMust2": "Varattujen jakotulosteiden on oltava polkujen luettelo",
+  "engine.split.splitOutputsChangedAfter": "Jakotulosteet muuttuivat niiden varaamisen jälkeen",
+  "engine.split.splitPlanExpiredAlready": "Jakosuunnitelma vanheni tai sitä on jo käytetty; suunnittele tulosteet uudelleen",
+  "engine.split.splitPlanIdRequired": "Jakosuunnitelman tunnus vaaditaan",
+  "engine.split.splitRequestLongerMatches": "Jakopyyntö ei enää vastaa tulossuunnitelmaa",
+  "engine.split.splitSourceChangedAfter": "Jaon lähde muuttui tulosteiden suunnittelun jälkeen"
 }

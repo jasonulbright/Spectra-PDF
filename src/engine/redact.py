@@ -911,6 +911,11 @@ def _walk(
                         )
                     }
                     if removed_clusters:
+                        if 4 <= state.render_mode <= 7:
+                            raise ValueError(
+                                "Redaction cannot remove text that defines a clipping path because "
+                                "doing so could change visible page content."
+                            )
                         emitted = _split_instructions(
                             operator, operands, items, clusters,
                             removed_clusters, state, vertical,
@@ -926,6 +931,11 @@ def _walk(
                     # Unmeasurable (or the slack has already blurred where this
                     # run sits): the whole operator goes, the over-removing
                     # direction. The line-advance side effect of ' and " stays.
+                    if 4 <= state.render_mode <= 7:
+                        raise ValueError(
+                            "Redaction cannot remove text that defines a clipping path because "
+                            "doing so could change visible page content."
+                        )
                     runs_removed_whole += 1
                     text_runs_removed += 1
                     kept.extend(_state_only_instructions(operator, operands))
