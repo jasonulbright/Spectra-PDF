@@ -289,11 +289,16 @@ fn scan_pdfs(dir: &Path) -> HashMap<String, PdfStamp> {
 
 /// The ONE place a watcher id becomes a path. Each watcher instance gets an
 /// immutable action file so a run already starting cannot pick up a later
-/// edit to the same watcher's configuration.
+/// edit to the same watcher's configuration. The owning process id lets the
+/// next launch reclaim files left when the process exits before its thread.
 fn action_file_in(dir: &Path, id: &str) -> Result<PathBuf, String> {
     validate_watcher_id(id)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("Cannot create the actions folder: {e}"))?;
-    let file = dir.join(format!("{id}-{}.json", uuid::Uuid::new_v4().simple()));
+    let file = dir.join(action_file_name(
+        id,
+        std::process::id(),
+        &uuid::Uuid::new_v4().simple().to_string(),
+    ));
     // Belt and braces: even with the charset check above, assert the result
     // really is a direct child of the actions folder before anyone writes or
     // deletes through it.
@@ -303,9 +308,89 @@ fn action_file_in(dir: &Path, id: &str) -> Result<PathBuf, String> {
     Ok(file)
 }
 
+fn action_file_name(id: &str, pid: u32, nonce: &str) -> String {
+    format!("{id}-{pid}-{nonce}.json")
+}
+
+fn action_dir_for(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(crate::portable::config_root(app)?.join("watched-actions"))
+}
+
 fn action_file_for(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
-    let dir = crate::portable::config_root(app)?.join("watched-actions");
+    let dir = action_dir_for(app)?;
     action_file_in(&dir, id)
+}
+
+fn action_file_owner_pid(file_name: &std::ffi::OsStr) -> Option<u32> {
+    let stem = file_name.to_str()?.strip_suffix(".json")?;
+    let (id_and_pid, nonce) = stem.rsplit_once('-')?;
+    if nonce.len() != 32 || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let (id, pid) = id_and_pid.rsplit_once('-')?;
+    validate_watcher_id(id).ok()?;
+    crate::staging::decimal_pid(pid)
+}
+
+fn is_legacy_action_file(file_name: &std::ffi::OsStr) -> bool {
+    let Some(stem) = file_name.to_str().and_then(|name| name.strip_suffix(".json")) else {
+        return false;
+    };
+    if validate_watcher_id(stem).is_ok() {
+        return true;
+    }
+    let Some((id, nonce)) = stem.rsplit_once('-') else {
+        return false;
+    };
+    nonce.len() == 32
+        && nonce.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && validate_watcher_id(id).is_ok()
+}
+
+fn reclaim_action_files_in(
+    dir: &Path,
+    mut process_running: impl FnMut(u32) -> bool,
+) -> std::io::Result<usize> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error),
+    };
+    let mut removed = 0;
+    for entry in entries {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if !file_type.is_file() && !file_type.is_symlink() {
+            continue;
+        }
+        let name = entry.file_name();
+        let stale = match action_file_owner_pid(&name) {
+            Some(pid) => !process_running(pid),
+            None => is_legacy_action_file(&name),
+        };
+        let path = entry.path();
+        if stale && !crate::staging::held_open(&path) {
+            std::fs::remove_file(path)?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn remove_legacy_action_file_in(dir: &Path, id: &str) -> Result<(), String> {
+    validate_watcher_id(id)?;
+    let file = dir.join(format!("{id}.json"));
+    if file.parent() != Some(dir) {
+        return Err("Refusing a watched-folder id that escapes its folder.".into());
+    }
+    if crate::staging::held_open(&file) {
+        return Ok(());
+    }
+    match std::fs::remove_file(file) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Cannot remove the legacy watched action: {error}")),
+    }
 }
 
 /// Write the frozen action a watcher instance's runs read.
@@ -506,6 +591,14 @@ fn stop_watcher(app: &AppHandle, id: &str) {
 pub fn start_all(app: &AppHandle) {
     let state = app.state::<WatcherState>();
     state.with_lifecycle(|| {
+        match action_dir_for(app) {
+            Ok(dir) => {
+                if let Err(error) = reclaim_action_files_in(&dir, crate::staging::process_running) {
+                    eprintln!("watched folders: could not reclaim old action files: {error}");
+                }
+            }
+            Err(error) => eprintln!("watched folders: could not resolve the action folder: {error}"),
+        }
         let folders = match read_config(app) {
             Ok(folders) => folders,
             Err(e) => {
@@ -559,11 +652,12 @@ pub async fn delete_watched_folder(app: AppHandle, id: String) -> Result<(), Str
     // A renderer-supplied string otherwise reaches `remove_file` unchecked.
     validate_watcher_id(&id)?;
     let path = config_path(&app)?;
+    let action_dir = action_dir_for(&app)?;
     let state = app.state::<WatcherState>();
     state.with_lifecycle(|| {
         remove_at(&path, &id)?;
         stop_watcher(&app, &id);
-        Ok(())
+        remove_legacy_action_file_in(&action_dir, &id)
     })
 }
 
@@ -788,6 +882,64 @@ mod tests {
                 .unwrap(),
             second
         );
+    }
+
+    #[test]
+    fn startup_reclaims_dead_and_legacy_actions_but_keeps_live_actions() {
+        let dir = tempfile::tempdir().unwrap();
+        let dead = dir
+            .path()
+            .join(action_file_name("watch-id", 101, &"a".repeat(32)));
+        let live = dir
+            .path()
+            .join(action_file_name("watch-id", 102, &"b".repeat(32)));
+        let legacy = dir.path().join("legacy-id.json");
+        let legacy_instance = dir.path().join(format!("older-id-{}.json", "c".repeat(32)));
+        let unknown = dir.path().join("keep-this.txt");
+        for path in [&dead, &live, &legacy, &legacy_instance, &unknown] {
+            std::fs::write(path, b"{}").unwrap();
+        }
+
+        assert_eq!(action_file_owner_pid(dead.file_name().unwrap()), Some(101));
+        assert_eq!(
+            reclaim_action_files_in(dir.path(), |pid| pid == 102).unwrap(),
+            3
+        );
+        assert!(!dead.exists());
+        assert!(live.exists());
+        assert!(!legacy.exists());
+        assert!(!legacy_instance.exists());
+        assert!(unknown.exists());
+
+        let legacy = dir.path().join("watch-id.json");
+        std::fs::write(&legacy, b"{}").unwrap();
+        remove_legacy_action_file_in(dir.path(), "watch-id").unwrap();
+        assert!(!legacy.exists());
+        assert!(live.exists(), "deleting a watcher must keep its in-flight file");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn startup_keeps_a_dead_owners_action_while_a_runner_holds_it_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join(action_file_name("watch-id", 101, &"d".repeat(32)));
+        std::fs::write(&path, b"{}").unwrap();
+        let runner = std::fs::File::open(&path).unwrap();
+
+        assert_eq!(
+            reclaim_action_files_in(dir.path(), |_| false).unwrap(),
+            0
+        );
+        assert!(path.exists());
+
+        drop(runner);
+        assert_eq!(
+            reclaim_action_files_in(dir.path(), |_| false).unwrap(),
+            1
+        );
+        assert!(!path.exists());
     }
 
     #[test]
