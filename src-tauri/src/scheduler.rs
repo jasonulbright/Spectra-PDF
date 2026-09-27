@@ -898,7 +898,12 @@ fn parse_weekly_days(days: &str) -> Result<Vec<&'static str>, String> {
 /// produces exactly the failure this whole logging feature exists to prevent —
 /// an unattended run with no findable audit trail.
 pub fn validate_profile(p: &ScheduleProfile) -> Result<(), String> {
-    if p.run_type != "action" && p.run_type != "batch-ocr" {
+    let run_type = if p.run_type.is_empty() {
+        "batch-ocr"
+    } else {
+        p.run_type.as_str()
+    };
+    if run_type != "action" && run_type != "batch-ocr" {
         return Err("A scheduled run must be a batch OCR run or a guided action.".into());
     }
     if p.frequency != "daily" && p.frequency != "weekly" {
@@ -915,7 +920,7 @@ pub fn validate_profile(p: &ScheduleProfile) -> Result<(), String> {
     }
     // In-place replaces each original, so a destination would name a mirror
     // that is never written; a guided action still needs one.
-    if p.in_place && p.run_type == "action" {
+    if p.in_place && run_type == "action" {
         return Err("A guided action cannot be scheduled in place from here.".into());
     }
     if p.in_place && !p.dest.trim().is_empty() {
@@ -940,7 +945,7 @@ pub fn validate_profile(p: &ScheduleProfile) -> Result<(), String> {
     if p.frequency == "weekly" {
         parse_weekly_days(&p.days)?;
     }
-    if p.run_type == "batch-ocr" {
+    if run_type == "batch-ocr" {
         if !p.lang.is_empty()
             && !p.lang.split('+').all(|part| {
                 !part.is_empty()
@@ -1451,6 +1456,7 @@ fn profile_from_task_xml(
     name: &str,
     xml: &str,
     expected_exe: &Path,
+    current_user_sid: Option<&str>,
 ) -> Option<ScheduleProfile> {
     let executable = extract_tag(xml, "Command")?;
     if !same_file::is_same_file(&executable, expected_exe).unwrap_or(false) {
@@ -1475,10 +1481,11 @@ fn profile_from_task_xml(
         ]
         .iter()
         .any(|trigger| triggers.contains(&format!("<{trigger}")))
+        || !supported_calendar_trigger_markup(&triggers)
     {
         return None;
     }
-    if !extract_tag(&triggers, "Enabled")?.eq_ignore_ascii_case("true") {
+    if !tag_or_default(&triggers, "Enabled", "true")?.eq_ignore_ascii_case("true") {
         return None;
     }
     let boundary = extract_tag(&triggers, "StartBoundary")?;
@@ -1513,16 +1520,16 @@ fn profile_from_task_xml(
     };
 
     let settings = extract_tag(xml, "Settings")?;
-    let enabled = match extract_tag(&settings, "Enabled")?.as_str() {
+    let enabled = match tag_or_default(&settings, "Enabled", "true")?.as_str() {
         "true" => true,
         "false" => false,
         _ => return None,
     };
-    if extract_tag(&settings, "MultipleInstancesPolicy")?.as_str() != "IgnoreNew"
+    if tag_or_default(&settings, "MultipleInstancesPolicy", "IgnoreNew")?.as_str() != "IgnoreNew"
         || extract_tag(&settings, "DisallowStartIfOnBatteries")?.as_str() != "false"
         || extract_tag(&settings, "StopIfGoingOnBatteries")?.as_str() != "false"
         || extract_tag(&settings, "StartWhenAvailable")?.as_str() != "true"
-        || extract_tag(&settings, "Hidden")?.as_str() != "false"
+        || tag_or_default(&settings, "Hidden", "false")?.as_str() != "false"
         || extract_tag(&settings, "ExecutionTimeLimit")?.as_str() != "PT0S"
         || extract_tag(&settings, "AllowStartOnDemand")
             .as_deref()
@@ -1566,11 +1573,17 @@ fn profile_from_task_xml(
     {
         return None;
     }
-    if extract_tag(&principals, "RunLevel")?.as_str() != "LeastPrivilege" {
+    if tag_or_default(&principals, "RunLevel", "LeastPrivilege")?.as_str() != "LeastPrivilege" {
         return None;
     }
     let (account, password_required) = match extract_tag(&principals, "LogonType")?.as_str() {
-        "InteractiveToken" => (String::new(), false),
+        "InteractiveToken" => {
+            let user_id = optional_tag(&principals, "UserId")?;
+            if !interactive_user_matches(user_id.as_deref(), current_user_sid) {
+                return None;
+            }
+            (String::new(), false)
+        }
         "Password" => (extract_tag(&principals, "UserId")?, true),
         "S4U" => (extract_tag(&principals, "UserId")?, false),
         _ => return None,
@@ -1597,6 +1610,83 @@ fn profile_from_task_xml(
     profile.account_password_required = password_required;
     profile.enabled = enabled;
     Some(profile)
+}
+
+fn interactive_user_matches(user_id: Option<&str>, current_user_sid: Option<&str>) -> bool {
+    match user_id {
+        None => true,
+        Some(user_id) => current_user_sid
+            .is_some_and(|current| user_id.trim().eq_ignore_ascii_case(current.trim())),
+    }
+}
+
+/// SID for the user whose interactive token will bind an InteractiveToken task.
+#[cfg(windows)]
+fn current_user_sid() -> Option<String> {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::{GetTokenInformation, SID, TOKEN_QUERY, TOKEN_USER, TokenUser};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut token = HANDLE::default();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.is_err() {
+        return None;
+    }
+    let sid = (|| {
+        let mut length = 0u32;
+        let _ = unsafe { GetTokenInformation(token, TokenUser, None, 0, &mut length) };
+        if length == 0 {
+            return None;
+        }
+        let mut buffer = vec![0usize; (length as usize).div_ceil(std::mem::size_of::<usize>())];
+        if unsafe {
+            GetTokenInformation(
+                token,
+                TokenUser,
+                Some(buffer.as_mut_ptr().cast()),
+                length,
+                &mut length,
+            )
+        }
+        .is_err()
+        {
+            return None;
+        }
+        let user = unsafe { &*(buffer.as_ptr() as *const TOKEN_USER) };
+        if user.User.Sid.0.is_null() {
+            return None;
+        }
+        let sid = unsafe { &*(user.User.Sid.0 as *const SID) };
+        let count = usize::from(sid.SubAuthorityCount);
+        if count > 15 {
+            return None;
+        }
+        let authority = sid
+            .IdentifierAuthority
+            .Value
+            .iter()
+            .fold(0u64, |value, byte| (value << 8) | u64::from(*byte));
+        let sub_authorities = unsafe {
+            std::slice::from_raw_parts(std::ptr::addr_of!(sid.SubAuthority).cast::<u32>(), count)
+        };
+        Some(format!(
+            "S-{}-{}{}",
+            sid.Revision,
+            authority,
+            sub_authorities
+                .iter()
+                .map(|part| format!("-{part}"))
+                .collect::<String>()
+        ))
+    })();
+    unsafe {
+        let _ = CloseHandle(token);
+    }
+    sid
+}
+
+#[cfg(not(windows))]
+fn current_user_sid() -> Option<String> {
+    None
 }
 
 /// What the frozen action file says it does — for the list. A missing or
@@ -1642,6 +1732,66 @@ fn extract_tag(xml: &str, tag: &str) -> Option<String> {
     let start = xml.find(&open)? + open.len();
     let end = xml[start..].find(&close)? + start;
     Some(xml_unescape(xml[start..end].trim()))
+}
+
+/// Read an optional element while distinguishing absence from malformed XML.
+/// Task Scheduler omits default-valued elements in `/Query /XML`; an element
+/// that is present but not in the shape this reader understands still refuses.
+fn optional_tag(xml: &str, tag: &str) -> Option<Option<String>> {
+    let prefix = format!("<{tag}");
+    let present = xml.match_indices(&prefix).any(|(start, _)| {
+        xml.as_bytes()
+            .get(start + prefix.len())
+            .is_some_and(|next| *next == b'>' || next.is_ascii_whitespace() || *next == b'/')
+    });
+    if present {
+        extract_tag(xml, tag).map(Some)
+    } else {
+        Some(None)
+    }
+}
+
+fn tag_or_default(xml: &str, tag: &str, default: &str) -> Option<String> {
+    optional_tag(xml, tag)?.or_else(|| Some(default.to_string()))
+}
+
+fn supported_calendar_trigger_markup(triggers: &str) -> bool {
+    const ELEMENTS: [&str; 15] = [
+        "CalendarTrigger",
+        "StartBoundary",
+        "Enabled",
+        "ScheduleByDay",
+        "DaysInterval",
+        "ScheduleByWeek",
+        "WeeksInterval",
+        "DaysOfWeek",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ];
+    let mut remaining = triggers;
+    while let Some(start) = remaining.find('<') {
+        let Some(end) = remaining[start..].find('>') else {
+            return false;
+        };
+        let element = remaining[start + 1..start + end].trim();
+        let name = element
+            .strip_prefix('/')
+            .unwrap_or(element)
+            .trim_end_matches('/')
+            .split_ascii_whitespace()
+            .next()
+            .unwrap_or("");
+        if element.contains('=') || !ELEMENTS.contains(&name) {
+            return false;
+        }
+        remaining = &remaining[start + end + 1..];
+    }
+    true
 }
 
 /// The task definition, read from its XML rather than the truncation-prone CSV.
@@ -1733,6 +1883,7 @@ pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
 
     let prefix = format!("\\{TASK_FOLDER}\\");
     let current_exe = std::env::current_exe().ok();
+    let current_sid = current_user_sid();
     let mut runs = Vec::new();
     for line in lines {
         let record = parse_csv_line(line);
@@ -1762,7 +1913,7 @@ pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
             .and_then(|(_, xml)| {
                 current_exe
                     .as_deref()
-                    .and_then(|exe| profile_from_task_xml(&name, xml, exe))
+                    .and_then(|exe| profile_from_task_xml(&name, xml, exe, current_sid.as_deref()))
             });
         let (action_name, action_steps, action_missing) = read_action_summary(profile.as_ref());
         runs.push(ScheduledRun {
@@ -2125,8 +2276,16 @@ mod tests {
     }
 
     fn parse_test_task_xml(name: &str, xml: &str) -> Option<ScheduleProfile> {
+        parse_test_task_xml_for_user(name, xml, None)
+    }
+
+    fn parse_test_task_xml_for_user(
+        name: &str,
+        xml: &str,
+        current_sid: Option<&str>,
+    ) -> Option<ScheduleProfile> {
         let exe = std::env::current_exe().ok()?;
-        profile_from_task_xml(name, xml, &exe)
+        profile_from_task_xml(name, xml, &exe, current_sid)
     }
 
     #[test]
@@ -2146,6 +2305,27 @@ mod tests {
         assert_eq!(loaded.account, p.account);
         assert!(loaded.account_password_required);
         assert!(loaded.enabled);
+    }
+
+    #[test]
+    fn empty_run_type_uses_the_documented_batch_ocr_default() {
+        let source = tempfile::tempdir().expect("source folder");
+        let profile: ScheduleProfile = serde_json::from_value(serde_json::json!({
+            "name": "Legacy OCR",
+            "source": source.path(),
+            "dest": r"C:\\searchable",
+            "frequency": "daily",
+            "time": "03:00"
+        }))
+        .expect("profile without runType deserializes");
+
+        assert_eq!(profile.run_type, "");
+        assert!(validate_profile(&profile).is_ok());
+        assert!(build_arguments("app.exe", &profile).starts_with("batch-ocr "));
+
+        let mut invalid = profile;
+        invalid.lang = "eng --repair".into();
+        assert!(validate_profile(&invalid).is_err());
     }
 
     #[test]
@@ -2207,6 +2387,7 @@ mod tests {
             "<Repetition><Interval>PT5M</Interval><Duration>PT1H</Duration></Repetition>",
             "<RandomDelay>PT15M</RandomDelay>",
             "<Delay>PT15M</Delay>",
+            "<ExecutionTimeLimit>PT1H</ExecutionTimeLimit>",
         ] {
             let xml = base.replace(
                 "</CalendarTrigger>",
@@ -2291,6 +2472,72 @@ mod tests {
         let p = ocr_profile();
         let xml = build_task_xml("foreign.exe", &p, None).expect("valid task XML");
         assert!(parse_test_task_xml(&p.name, &xml).is_none());
+    }
+
+    #[test]
+    fn an_interactive_task_with_a_foreign_user_sid_is_not_offered_for_editing() {
+        let p = ocr_profile();
+        let current_sid = "S-1-5-21-1-2-3-1001";
+        let xml = build_test_task_xml(&p, None).replace(
+            "<LogonType>InteractiveToken</LogonType>",
+            "<UserId>S-1-5-21-1-2-3-1105</UserId><LogonType>InteractiveToken</LogonType>",
+        );
+
+        assert!(parse_test_task_xml_for_user(&p.name, &xml, Some(current_sid)).is_none());
+        assert!(parse_test_task_xml_for_user(&p.name, &xml, None).is_none());
+        let own = xml.replace("S-1-5-21-1-2-3-1105", current_sid);
+        let loaded = parse_test_task_xml_for_user(&p.name, &own, Some(current_sid))
+            .expect("an interactive task belonging to the current user is editable");
+        assert!(loaded.account.is_empty());
+    }
+
+    /// Uses Task Scheduler itself to produce the XML that the product reads.
+    /// This is ignored in the normal suite because it registers and removes a
+    /// uniquely named task in an isolated probe folder.
+    #[test]
+    #[ignore]
+    fn schtasks_readback_with_omitted_defaults_remains_editable() {
+        let suffix = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let folder = format!("Spectra PDF Probe {}-{suffix}", std::process::id());
+        let mut profile = action_profile();
+        profile.name = format!("Readback {}-{suffix}", std::process::id());
+        profile.enabled = false;
+        let exe = std::env::current_exe().expect("test executable path");
+        let xml = build_task_xml(&exe.to_string_lossy(), &profile, None).expect("valid task XML");
+        let full = format!("\\{folder}\\{}", profile.name);
+
+        let registered = register_task_com(full.clone(), xml, String::new(), None);
+        let readback = registered.and_then(|()| run(schtasks().args(["/Query", "/TN", &full, "/XML"])));
+        let _ = run(schtasks().args(["/Delete", "/F", "/TN", &full]));
+        delete_task_folder(&folder);
+
+        let readback = readback.expect("registered task's schtasks XML readback");
+        let trigger_xml = extract_tag(&readback, "Triggers").expect("readback triggers");
+        let settings_xml = extract_tag(&readback, "Settings").expect("readback settings");
+        let principals_xml = extract_tag(&readback, "Principals").expect("readback principals");
+        let omitted_defaults = [
+            optional_tag(&trigger_xml, "Enabled").expect("trigger Enabled shape"),
+            optional_tag(&settings_xml, "Enabled").expect("settings Enabled shape"),
+            optional_tag(&settings_xml, "Hidden").expect("Hidden shape"),
+            optional_tag(&principals_xml, "RunLevel").expect("RunLevel shape"),
+        ];
+        assert!(
+            omitted_defaults.iter().any(Option::is_none),
+            "Task Scheduler readback did not omit any of the default-valued elements"
+        );
+        let current_sid = current_user_sid();
+        let loaded = profile_from_task_xml(&profile.name, &readback, &exe, current_sid.as_deref())
+            .expect("real schtasks readback remains editable");
+        assert_eq!(loaded.run_type, profile.run_type);
+        assert_eq!(loaded.source, profile.source);
+        assert_eq!(loaded.dest, profile.dest);
+        assert_eq!(loaded.frequency, profile.frequency);
+        assert_eq!(loaded.time, profile.time);
+        assert_eq!(loaded.action_file, profile.action_file);
+        assert!(!loaded.enabled);
     }
 
     #[test]
