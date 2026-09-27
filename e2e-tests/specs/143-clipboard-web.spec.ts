@@ -274,6 +274,14 @@ async function slowSite(delayMs: number): Promise<{ server: Server; port: number
   return { server, port };
 }
 
+async function listenLocal(server: Server): Promise<number> {
+  await new Promise<void>((done, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => done());
+  });
+  return (server.address() as { port: number }).port;
+}
+
 /** Start a capture and DO NOT wait for it: the page keeps the promise. */
 async function startCaptureDetached(request: Record<string, unknown>): Promise<void> {
   await browser.execute(function (req) {
@@ -530,6 +538,62 @@ describe('create PDF from the clipboard and from a web page', () => {
     const assembled = await readPdf(out);
     expect(assembled.text).toContain(TOKEN);
     expect(assembled.outline).toEqual(['Captured Fixture']);
+  });
+
+  describe('redirect scope', function () {
+    // WDIO snapshots a test's timeout before entering its callback, so set the
+    // limit on the suite while Mocha is defining the test.
+    this.timeout(180_000);
+
+    it('blocks out-of-scope redirects and records the final in-scope page URL', async () => {
+      if (await $('[data-testid="create-pdf-close"]').isExisting()) {
+        await $('[data-testid="create-pdf-close"]').click();
+      }
+      expect(await invokeAppCommand('file.createFromWebPage')).toBe(true);
+      await $('[data-testid="web-capture-dialog"]').waitForDisplayed({ timeout: 15_000 });
+
+      const outside = createServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<!doctype html><title>Outside</title><p>must not load</p>');
+      });
+      const outsidePort = await listenLocal(outside);
+      const outsideUrl = `http://127.0.0.1:${outsidePort}/outside`;
+      const inside = createServer((req, res) => {
+        const path = (req.url ?? '/').split('?')[0];
+        if (path === '/entry') {
+          res.writeHead(302, { Location: '/start' });
+          res.end();
+        } else {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(
+            '<!doctype html><html><head><title>Allowed page</title></head><body>' +
+              `<h1>${TOKEN}</h1><script>setTimeout(() => location.replace(${JSON.stringify(outsideUrl)}), 100)</script></body></html>`,
+          );
+        }
+      });
+      const insidePort = await listenLocal(inside);
+      const requested = `http://127.0.0.1:${insidePort}/entry`;
+      const final = `http://127.0.0.1:${insidePort}/start`;
+
+      try {
+        await browser.setTimeout({ script: 180_000 });
+        const result = await webCaptureRun({ url: requested, depth: 0, maxPages: 1 });
+        expect(result).not.toBeNull();
+        expect(result!.pages.map((page) => page.url)).toEqual([final]);
+        expect(result!.pages[0].title).toBe('Allowed page');
+        const capturedText = (await readPdf(result!.pages[0].path)).text;
+        expect(capturedText).toContain(TOKEN);
+        expect(capturedText).not.toContain('must not load');
+      } finally {
+        await Promise.all([
+          new Promise<void>((done) => inside.close(() => done())),
+          new Promise<void>((done) => outside.close(() => done())),
+        ]);
+        if (await $('[data-testid="create-pdf-close"]').isExisting()) {
+          await $('[data-testid="create-pdf-close"]').click();
+        }
+      }
+    });
   });
 
   it('closing the capture window cancels the crawl and takes the window with it', async () => {
