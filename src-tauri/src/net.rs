@@ -35,6 +35,7 @@
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -55,7 +56,10 @@ pub const MAX_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_REDIRECTS: u32 = 10;
 
 const CONNECT_TIMEOUT_SECS: u64 = 15;
+#[cfg(not(test))]
 const TOTAL_TIMEOUT_SECS: u64 = 120;
+#[cfg(test)]
+const TOTAL_TIMEOUT_SECS: u64 = 1;
 
 /// One outbound request.
 ///
@@ -643,6 +647,7 @@ async fn fetch_into(
     allow_private: bool,
     scratch: &Path,
 ) -> Result<NetResponse, String> {
+    let deadline = Instant::now() + Duration::from_secs(TOTAL_TIMEOUT_SECS);
     let (start, scheme, authority) = validate_http_url(&request.url)?;
     let method = request.method.to_ascii_lowercase();
     if method != "get" && method != "post" {
@@ -699,6 +704,13 @@ async fn fetch_into(
     let mut first_hop_global = true;
 
     loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(format!(
+                "The request to {current} did not complete within the {} second total time limit",
+                TOTAL_TIMEOUT_SECS
+            ));
+        }
         // Resolve THIS hop's host and classify every address it names, then
         // connect only to an address that was checked: a hostname resolving to
         // a private IP is the bypass, so the name is resolved and validated
@@ -708,6 +720,13 @@ async fn fetch_into(
         let (_, cur_scheme, cur_authority) = validate_http_url(&current)?;
         let (host, port) = split_host_port(&cur_authority, &cur_scheme);
         let addrs = resolve_host(&host, port)?;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(format!(
+                "The request to {current} did not complete within the {} second total time limit",
+                TOTAL_TIMEOUT_SECS
+            ));
+        }
         let offending = addrs
             .iter()
             .map(|a| (a.ip(), classify_ip(a.ip())))
@@ -748,8 +767,8 @@ async fn fetch_into(
             // verifies the certificate against the hostname, so this narrows
             // WHERE the connection goes without weakening WHO it trusts.
             .resolve_to_addrs(&host, &addrs)
-            .connect_timeout(std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS))
-            .timeout(std::time::Duration::from_secs(TOTAL_TIMEOUT_SECS))
+            .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS).min(remaining))
+            .timeout(remaining)
             .build()
             .map_err(|e| format!("Cannot start the network client: {e}"))?;
 
@@ -886,6 +905,7 @@ mod tests {
     use super::*;
     use std::io::Read;
     use std::net::TcpListener;
+    use std::time::{Duration, Instant};
 
     /// A one-request-at-a-time HTTP/1.1 server, in-process, on a loopback port
     /// the OS picks. Every network test here talks to this and nothing else —
@@ -1583,6 +1603,40 @@ mod tests {
         assert_eq!(response.status, 200);
         assert!(response.final_url.ends_with("/thanks"));
         assert_eq!(server.requests().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn same_origin_redirects_share_the_total_request_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for reply in [
+                "HTTP/1.1 303 See Other\r\nLocation: /second\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buffer = [0u8; 8192];
+                let count = stream.read(&mut buffer).unwrap_or(0);
+                requests.push(String::from_utf8_lossy(&buffer[..count]).to_string());
+                std::thread::sleep(Duration::from_millis(700));
+                let _ = stream.write_all(reply.as_bytes());
+                let _ = stream.flush();
+            }
+            requests
+        });
+
+        let request = get_req(format!("http://127.0.0.1:{port}/first"));
+        let started = Instant::now();
+        let result = fetch_with_policy(&request, true).await;
+        let requests = server.join().unwrap();
+
+        assert_eq!(requests.len(), 2, "the request must reach both redirect hops");
+        assert!(
+            result.is_err(),
+            "the full redirect chain exceeded the one-second request budget"
+        );
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 
     #[tokio::test]
