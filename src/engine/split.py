@@ -13,6 +13,10 @@ import hashlib
 import os
 import stat
 import tempfile
+import time
+import uuid
+from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 
 import pikepdf
@@ -27,6 +31,140 @@ MODES = ("ranges", "every_n", "size", "bookmarks")
 
 # An upload limit is quoted in decimal megabytes, so that is what max_mb is.
 BYTES_PER_MB = 1_000_000
+_SPLIT_PLAN_MAX_AGE = 300.0
+_SPLIT_PLAN_MAX_COUNT = 16
+_SPLIT_PLAN_MAX_DATA_BYTES = 128 * 1024 * 1024
+
+
+@dataclass
+class _PendingSplitPlan:
+    created_at: float
+    file_key: str
+    output_dir_key: str
+    mode: str
+    every_n: int
+    max_mb: float
+    source_digest: bytes
+    spans: list[tuple[int, int]]
+    pages_written: int
+    oversize: list[dict]
+    outputs_digest: bytes
+    output_data: list[bytes | None] | None
+    data_bytes: int
+
+
+# The JSON-RPC sidecar processes one request at a time. Plans hold part
+# boundaries and source/output digests; size-mode bytes are retained only under
+# a process-wide cap. Entries expire and their count is bounded.
+_PENDING_SPLIT_PLANS: OrderedDict[str, _PendingSplitPlan] = OrderedDict()
+_PENDING_SPLIT_PLAN_DATA_BYTES = 0
+
+
+def _source_snapshot(file: str) -> bytes:
+    with open(file, 'rb') as stream:
+        before = os.fstat(stream.fileno())
+        data = stream.read()
+        after = os.fstat(stream.fileno())
+    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+        raise ValueError("Split source changed during preparation")
+    return data
+
+
+def _split_path_key(path: str) -> str:
+    return os.path.normcase(os.path.abspath(os.fspath(path)))
+
+
+def _outputs_digest(outputs: list[str]) -> bytes:
+    digest = hashlib.sha256()
+    for output in outputs:
+        encoded = os.fsencode(_split_path_key(output))
+        digest.update(len(encoded).to_bytes(8, 'big'))
+        digest.update(encoded)
+    return digest.digest()
+
+
+def _prune_split_plans(now: float | None = None) -> None:
+    global _PENDING_SPLIT_PLAN_DATA_BYTES
+    current = time.monotonic() if now is None else now
+    expired = [
+        key for key, plan in _PENDING_SPLIT_PLANS.items()
+        if current - plan.created_at > _SPLIT_PLAN_MAX_AGE
+    ]
+    for key in expired:
+        plan = _PENDING_SPLIT_PLANS.pop(key)
+        _PENDING_SPLIT_PLAN_DATA_BYTES -= plan.data_bytes
+
+
+def _remember_split_plan(plan: _PendingSplitPlan) -> str:
+    global _PENDING_SPLIT_PLAN_DATA_BYTES
+    _prune_split_plans(plan.created_at)
+    while _PENDING_SPLIT_PLANS and (
+            len(_PENDING_SPLIT_PLANS) >= _SPLIT_PLAN_MAX_COUNT
+            or _PENDING_SPLIT_PLAN_DATA_BYTES + plan.data_bytes > _SPLIT_PLAN_MAX_DATA_BYTES):
+        _, removed = _PENDING_SPLIT_PLANS.popitem(last=False)
+        _PENDING_SPLIT_PLAN_DATA_BYTES -= removed.data_bytes
+    token = uuid.uuid4().hex
+    _PENDING_SPLIT_PLANS[token] = plan
+    return token
+
+
+def _take_split_plan(
+    plan_id: str,
+    file: str,
+    output_dir: str,
+    mode: str,
+    every_n: int,
+    max_mb: float,
+    output_paths: list[str] | None,
+) -> tuple[Path, bytes, list[tuple[Path, list[int], bytes | None]], int, list[dict]]:
+    global _PENDING_SPLIT_PLAN_DATA_BYTES
+    if not isinstance(plan_id, str) or not plan_id:
+        raise ValueError("A split plan id is required")
+    _prune_split_plans()
+    plan = _PENDING_SPLIT_PLANS.get(plan_id)
+    if plan is None:
+        raise ValueError("The split plan expired or was already used; plan the outputs again")
+    if (plan.file_key != _split_path_key(file)
+            or plan.output_dir_key != _split_path_key(output_dir)
+            or plan.mode != mode
+            or plan.every_n != every_n
+            or plan.max_mb != max_mb):
+        raise ValueError("The split request no longer matches its output plan")
+    if not isinstance(output_paths, list) or any(not isinstance(path, str) for path in output_paths):
+        raise ValueError("The reserved split outputs must be a list of paths")
+    if (len(output_paths) != len(plan.spans)
+            or _outputs_digest(output_paths) != plan.outputs_digest):
+        raise ValueError("Split outputs changed after they were reserved")
+
+    source_bytes = _source_snapshot(file)
+    if hashlib.sha256(source_bytes).digest() != plan.source_digest:
+        _PENDING_SPLIT_PLANS.pop(plan_id)
+        _PENDING_SPLIT_PLAN_DATA_BYTES -= plan.data_bytes
+        raise ValueError("Split source changed after output planning")
+
+    _PENDING_SPLIT_PLANS.pop(plan_id)
+    _PENDING_SPLIT_PLAN_DATA_BYTES -= plan.data_bytes
+    if mode == "size" and plan.output_data is None:
+        # The bounded cache declined a large output set. Recompute its exact
+        # serialized parts after reservation, then verify the reserved names.
+        output_path, current_bytes, planned, pages_written, oversize = _plan_split(
+            file, "", output_dir, mode, every_n, max_mb, "",
+        )
+        if hashlib.sha256(current_bytes).digest() != plan.source_digest:
+            raise ValueError("Split source changed after output planning")
+        if _outputs_digest([str(path) for path, _, _ in planned]) != plan.outputs_digest:
+            raise ValueError("Split outputs changed after they were reserved")
+        return output_path, current_bytes, planned, pages_written, oversize
+
+    data = plan.output_data if plan.output_data is not None else [None] * len(plan.spans)
+    if len(data) != len(plan.spans):
+        raise RuntimeError("The cached split plan has inconsistent output data")
+    planned = [
+        (Path(output), list(range(start, end)), output_data)
+        for output, (start, end), output_data in zip(output_paths, plan.spans, data)
+    ]
+    return Path(output_dir), source_bytes, planned, plan.pages_written, plan.oversize
 
 
 def parse_ranges(range_str: str, max_page: int) -> list[int]:
@@ -315,31 +453,15 @@ def _publish_parts(file: str, planned: list[tuple[Path, list[int], bytes | None]
     return cleanup(True)
 
 
-def split(
+def _plan_split(
     file: str,
-    ranges: str = "",
-    output_dir: str = "",
-    mode: str = "ranges",
-    every_n: int = 0,
-    max_mb: float = 0.0,
-    output: str = "",
-) -> dict:
-    """Split a PDF into separate files.
-
-    Args:
-        file: Input PDF.
-        ranges: Range expression, e.g. ``"1-5,10-15"`` (``ranges`` mode).
-            Kept in the second position so the shipped positional call
-            ``split(file, ranges, output_dir)`` still means what it did.
-        output_dir: Destination folder (created if missing).
-        mode: One of ``ranges``, ``every_n``, ``size``, ``bookmarks``.
-        every_n: Pages per output (``every_n`` mode).
-        max_mb: Byte cap per output, in decimal MB (``size`` mode). A page
-            that exceeds the cap ON ITS OWN is written as its own output at
-            whatever size it comes to and reported in ``oversize``.
-        output: Exact destination selected for ``ranges`` mode. When absent,
-            directory-based callers retain the generated range filename.
-    """
+    ranges: str,
+    output_dir: str,
+    mode: str,
+    every_n: int,
+    max_mb: float,
+    output: str,
+) -> tuple[Path, bytes, list[tuple[Path, list[int], bytes | None]], int, list[dict]]:
     if not output_dir and not output:
         raise ValueError("split needs an output folder")
     if mode not in MODES:
@@ -349,8 +471,6 @@ def split(
     if output and output_dir:
         raise ValueError("Choose either an exact split output or an output folder")
     output_path = Path(output).parent if output else Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-    outputs: list[str] = []
     oversize: list[dict] = []
     used: set[str] = set()
     pages_written = 0
@@ -358,13 +478,7 @@ def split(
 
     # Each Pdf open gets a fresh stream over the same bytes: form pruning is
     # private, and a writer outside the app cannot change later split parts.
-    with open(file, 'rb') as stream:
-        before = os.fstat(stream.fileno())
-        source_bytes = stream.read()
-        after = os.fstat(stream.fileno())
-    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
-            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
-        raise ValueError("Split source changed during preparation")
+    source_bytes = _source_snapshot(file)
     with open_pdf(io.BytesIO(source_bytes), document=file) as pdf:
         refuse_user_opened_source(pdf)
         refuse_if_xfa(pdf, file, "splitting")
@@ -423,8 +537,117 @@ def split(
             planned.append((out_file, part, None))
             pages_written += len(part)
 
-    retained = _publish_parts(file, planned, source_bytes)
     outputs = [str(path) for path, _, _ in planned]
+    return output_path, source_bytes, planned, pages_written, oversize
+
+
+def plan_split(
+    file: str,
+    destination_dir: str,
+    mode: str = "every_n",
+    every_n: int = 0,
+    max_mb: float = 0.0,
+) -> dict:
+    """Return the exact folder outputs a split would publish, without writing them.
+
+    The caller reserves these file paths before asking ``split`` to publish.
+    Size mode does the same page serialization as the writer so its boundaries
+    and names are exact, rather than predicting output names from page counts.
+    """
+    if mode == "ranges":
+        raise ValueError("A folder output plan is only valid for multi-file split modes")
+    _, source_bytes, planned, pages_written, oversize = _plan_split(
+        file, "", destination_dir, mode, every_n, max_mb, "",
+    )
+    outputs = [str(path) for path, _, _ in planned]
+    spans: list[tuple[int, int]] = []
+    output_data: list[bytes | None] | None = []
+    data_bytes = 0
+    for _, pages, _ in planned:
+        if not pages or pages != list(range(pages[0], pages[-1] + 1)):
+            raise RuntimeError("A folder split produced a non-contiguous output part")
+        spans.append((pages[0], pages[-1] + 1))
+    for _, _, data in planned:
+        output_data.append(data)
+        if data is not None:
+            data_bytes += len(data)
+    if data_bytes > _SPLIT_PLAN_MAX_DATA_BYTES:
+        output_data = None
+        data_bytes = 0
+    plan = _PendingSplitPlan(
+        created_at=time.monotonic(),
+        file_key=_split_path_key(file),
+        output_dir_key=_split_path_key(destination_dir),
+        mode=mode,
+        every_n=every_n,
+        max_mb=max_mb,
+        source_digest=hashlib.sha256(source_bytes).digest(),
+        spans=spans,
+        pages_written=pages_written,
+        oversize=oversize,
+        outputs_digest=_outputs_digest(outputs),
+        output_data=output_data,
+        data_bytes=data_bytes,
+    )
+    plan_id = _remember_split_plan(plan)
+    return {
+        "outputs": outputs,
+        "pages_extracted": pages_written,
+        "mode": mode,
+        "parts": len(outputs),
+        "oversize": oversize,
+        "plan_id": plan_id,
+    }
+
+
+def split(
+    file: str,
+    ranges: str = "",
+    output_dir: str = "",
+    mode: str = "ranges",
+    every_n: int = 0,
+    max_mb: float = 0.0,
+    output: str = "",
+    output_paths: list[str] | None = None,
+    plan_id: str | None = None,
+) -> dict:
+    """Split a PDF into separate files.
+
+    Args:
+        file: Input PDF.
+        ranges: Range expression, e.g. ``"1-5,10-15"`` (``ranges`` mode).
+            Kept in the second position so the shipped positional call
+            ``split(file, ranges, output_dir)`` still means what it did.
+        output_dir: Destination folder (created if missing).
+        mode: One of ``ranges``, ``every_n``, ``size``, ``bookmarks``.
+        every_n: Pages per output (``every_n`` mode).
+        max_mb: Byte cap per output, in decimal MB (``size`` mode). A page
+            that exceeds the cap ON ITS OWN is written as its own output at
+            whatever size it comes to and reported in ``oversize``.
+        output: Exact destination selected for ``ranges`` mode. When absent,
+            directory-based callers retain the generated range filename.
+        output_paths: Previously reserved file names returned by ``plan_split``.
+        plan_id: The one-use, bounded plan token returned by ``plan_split``.
+    """
+    if plan_id is not None:
+        if mode == "ranges" or output or not output_dir:
+            raise ValueError("A cached split plan is only valid for a folder split")
+        output_path, source_bytes, planned, pages_written, oversize = _take_split_plan(
+            plan_id, file, output_dir, mode, every_n, max_mb, output_paths,
+        )
+    else:
+        output_path, source_bytes, planned, pages_written, oversize = _plan_split(
+            file, ranges, output_dir, mode, every_n, max_mb, output,
+        )
+    outputs = [str(path) for path, _, _ in planned]
+    if output_paths is not None:
+        normalize = lambda path: os.path.normcase(os.path.abspath(os.fspath(path)))
+        if not isinstance(output_paths, list) or any(not isinstance(path, str) for path in output_paths):
+            raise ValueError("Reserved split outputs must be a list of paths")
+        if [normalize(path) for path in output_paths] != [normalize(path) for path in outputs]:
+            raise ValueError("Split outputs changed after they were reserved")
+    output_path.mkdir(parents=True, exist_ok=True)
+    retained = _publish_parts(file, planned, source_bytes)
     return {
         "outputs": outputs,
         "pages_extracted": pages_written,

@@ -8,7 +8,7 @@
 //! counters) exists once per window, so a guarantee that has to hold app-wide
 //! lives in managed state on this side of the boundary.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(windows)]
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -874,7 +874,7 @@ impl ClaimState {
     /// run never conflict with each other.
     pub fn claim_roots(&self, roots: &[String], label: &str) -> Result<RunClaimOutcome, String> {
         let mut runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
-        self.claim_roots_locked(roots, label, &mut runs, RunClaimKind::Folder)
+        self.claim_roots_locked(roots, label, &mut runs, RunClaimKind::Folder, true, None)
     }
 
     /// Reserve one engine output until its routed response arrives. If the
@@ -924,7 +924,17 @@ impl ClaimState {
         }
 
         let mut runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        let scratch_root = crate::scratch::root().to_string_lossy().into_owned();
         if runs.held.iter().any(|run| {
+            let private_stage_under_held_root = !acquire_folder_lease
+                && run._lease.is_some()
+                && run
+                    .roots
+                    .iter()
+                    .any(|held| root_contains(held, &scratch_root));
+            if private_stage_under_held_root {
+                return false;
+            }
             run.kind == RunClaimKind::EngineOutput
                 && run.roots.iter().any(|held| {
                     roots_conflict(held, path)
@@ -980,9 +990,13 @@ impl ClaimState {
             label,
             &mut runs,
             RunClaimKind::EngineOutput,
+            true,
+            None,
         )?;
         if outcome.granted {
-            let token = outcome.token.expect("a granted output reservation has a token");
+            let token = outcome
+                .token
+                .expect("a granted output reservation has a token");
             return Ok(EngineOutputReservation {
                 runs: self.runs.clone(),
                 token,
@@ -995,7 +1009,81 @@ impl ClaimState {
                 outcome.document, outcome.owner
             ));
         }
-        Err(format!("Cannot write the output; {} is busy.", outcome.folder))
+        Err(format!(
+            "Cannot write the output; {} is busy.",
+            outcome.folder
+        ))
+    }
+
+    /// Reserve a folder split while allowing unrelated documents to remain
+    /// open inside it. The selected folder still blocks new opens and other
+    /// folder operations; exact output roots catch open-document and hard-link
+    /// collisions without refusing the split source merely because it shares
+    /// the destination folder.
+    pub(crate) fn claim_engine_output_split(
+        &self,
+        folder: &str,
+        output_paths: &[String],
+        label: &str,
+    ) -> Result<EngineOutputReservation, String> {
+        if output_paths.is_empty() {
+            return Err("A folder split must reserve at least one output file.".to_string());
+        }
+        let _identity_claim = self
+            .identity_claim
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut roots = vec![folder.to_string()];
+        let mut seen = HashSet::new();
+        for path in output_paths {
+            if !root_contains(folder, path) {
+                return Err(format!(
+                    "Split output {path} is outside its selected folder."
+                ));
+            }
+            if !seen.insert(path_comparison_key(path)) {
+                return Err(format!("Split output {path} was listed more than once."));
+            }
+            roots.push(path.clone());
+        }
+
+        let lease_roots = [folder.to_string()];
+        let mut runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        // Keep `runs` locked across the open-file check and reservation. The
+        // tab-handoff path can call `claim` directly, so the identity mutex
+        // alone would leave a check-to-reserve gap for that producer.
+        for path in output_paths {
+            let alias_owner = self
+                .claimed_alias(path)
+                .and_then(|alias| self.open_holder(&alias, None));
+            if let Some(owner) = self.open_holder(path, None).or(alias_owner) {
+                return Err(format!(
+                    "Cannot write the output {path} because it is open in {owner}."
+                ));
+            }
+        }
+        let outcome = self.claim_roots_locked(
+            &roots,
+            label,
+            &mut runs,
+            RunClaimKind::EngineOutput,
+            false,
+            Some(&lease_roots),
+        )?;
+        if !outcome.granted {
+            return Err(format!(
+                "Cannot write the output folder; {} is busy.",
+                outcome.folder
+            ));
+        }
+        let token = outcome
+            .token
+            .expect("a granted split reservation has a token");
+        Ok(EngineOutputReservation {
+            runs: self.runs.clone(),
+            token,
+            label: label.to_string(),
+        })
     }
 
     fn claim_roots_locked(
@@ -1004,6 +1092,8 @@ impl ClaimState {
         label: &str,
         runs: &mut RunClaims,
         kind: RunClaimKind,
+        check_open_documents: bool,
+        lease_roots: Option<&[String]>,
     ) -> Result<RunClaimOutcome, String> {
         // An empty value carries no root. Keep separator-only roots: on Unix,
         // `/` is the filesystem root, and on Windows a volume root is valid.
@@ -1033,32 +1123,35 @@ impl ClaimState {
         }
         // A run writing over an open document leaves that document's working
         // copy holding the old bytes, and its next save writes them back.
-        let map = self
-            .by_path
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        for wanted in &roots {
-            let open = map.iter().find_map(|(path, holders)| {
-                holders
-                    .iter()
-                    .find(|c| c.mode == ClaimMode::Write)
-                    .filter(|_| roots_conflict(wanted, path))
-                    .map(|c| (path.clone(), c.label.clone()))
-            });
-            if let Some((document, owner)) = open {
-                return Ok(RunClaimOutcome {
-                    granted: false,
-                    same_window: owner == label,
-                    owner,
-                    folder: wanted.clone(),
-                    document,
-                    token: None,
+        if check_open_documents {
+            let map = self
+                .by_path
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            for wanted in &roots {
+                let open = map.iter().find_map(|(path, holders)| {
+                    holders
+                        .iter()
+                        .find(|c| c.mode == ClaimMode::Write)
+                        .filter(|_| roots_conflict(wanted, path))
+                        .map(|c| (path.clone(), c.label.clone()))
                 });
+                if let Some((document, owner)) = open {
+                    return Ok(RunClaimOutcome {
+                        granted: false,
+                        same_window: owner == label,
+                        owner,
+                        folder: wanted.clone(),
+                        document,
+                        token: None,
+                    });
+                }
             }
         }
+        let lease_roots = lease_roots.unwrap_or(&roots);
         let lease = match &self.folder_registry {
-            Some(registry) => crate::folder_claims::claim_in(registry, &roots),
-            None => crate::folder_claims::claim(&roots),
+            Some(registry) => crate::folder_claims::claim_in(registry, lease_roots),
+            None => crate::folder_claims::claim(lease_roots),
         };
         let lease = match lease {
             Ok(lease) => std::sync::Arc::new(lease),
@@ -2597,6 +2690,134 @@ mod tests {
             .unwrap_err();
         assert!(error.contains(&open_path), "{error}");
         assert!(error.contains("doc-1"), "{error}");
+    }
+
+    #[test]
+    fn split_into_the_source_folder_allows_the_open_source_document() {
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path().join("report.pdf");
+        std::fs::write(&source_path, b"%PDF-1.7").unwrap();
+        let source = crate::commands::canonical_path(&source_path.to_string_lossy());
+        let folder = crate::commands::canonical_path(&dir.path().to_string_lossy());
+        let output =
+            crate::commands::canonical_path(&dir.path().join("report_1-2.pdf").to_string_lossy());
+        let unrelated =
+            crate::commands::canonical_path(&dir.path().join("other.pdf").to_string_lossy());
+        assert!(state
+            .claim_document(&source, "main", ClaimMode::Write)
+            .granted);
+        assert!(state
+            .claim_document(&unrelated, "doc-1", ClaimMode::Write)
+            .granted);
+
+        let reservation = state
+            .claim_engine_output_split(&folder, &[output], "main")
+            .expect("open documents that are not outputs remain usable");
+        drop(reservation);
+    }
+
+    #[test]
+    fn a_split_refuses_an_exact_generated_output_that_is_open() {
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let output_path = dir.path().join("report_1-2.pdf");
+        std::fs::write(&output_path, b"%PDF-1.7").unwrap();
+        let folder = crate::commands::canonical_path(&dir.path().to_string_lossy());
+        let output = crate::commands::canonical_path(&output_path.to_string_lossy());
+        assert!(state
+            .claim_document(&output, "doc-1", ClaimMode::Write)
+            .granted);
+
+        let error = state
+            .claim_engine_output_split(&folder, &[output], "main")
+            .unwrap_err();
+        assert!(error.contains("doc-1"), "{error}");
+    }
+
+    #[test]
+    fn a_split_refuses_an_exact_output_claimed_during_tab_handoff() {
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let output_path = dir.path().join("report_1-2.pdf");
+        std::fs::write(&output_path, b"%PDF-1.7").unwrap();
+        let folder = crate::commands::canonical_path(&dir.path().to_string_lossy());
+        let output = crate::commands::canonical_path(&output_path.to_string_lossy());
+        // Tab handoff claims directly, without the identity-scan wrapper.
+        assert!(state.claim(&output, "doc-1", ClaimMode::Write).granted);
+
+        let error = state
+            .claim_engine_output_split(&folder, &[output], "main")
+            .unwrap_err();
+        assert!(error.contains("doc-1"), "{error}");
+    }
+
+    #[test]
+    fn split_output_paths_must_be_unique_and_inside_the_selected_folder() {
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let folder = crate::commands::canonical_path(&dir.path().to_string_lossy());
+        let output = crate::commands::canonical_path(
+            &dir.path().join("report_1-2.pdf").to_string_lossy(),
+        );
+        let duplicate = state
+            .claim_engine_output_split(&folder, &[output.clone(), output.clone()], "main")
+            .unwrap_err();
+        assert!(duplicate.contains("listed more than once"), "{duplicate}");
+
+        let outside = crate::commands::canonical_path(
+            &dir.path().parent().unwrap().join("outside.pdf").to_string_lossy(),
+        );
+        let escaped = state
+            .claim_engine_output_split(&folder, &[outside], "main")
+            .unwrap_err();
+        assert!(escaped.contains("outside its selected folder"), "{escaped}");
+    }
+
+    #[test]
+    fn a_split_reservation_blocks_new_documents_in_its_folder() {
+        let state = test_claim_state();
+        let dir = tempfile::tempdir().unwrap();
+        let folder = crate::commands::canonical_path(&dir.path().to_string_lossy());
+        let output = crate::commands::canonical_path(
+            &dir.path().join("report_1-2.pdf").to_string_lossy(),
+        );
+        let reservation = state
+            .claim_engine_output_split(&folder, &[output], "main")
+            .unwrap();
+
+        let new_document =
+            crate::commands::canonical_path(&dir.path().join("unrelated.pdf").to_string_lossy());
+        let refused = state.claim_document(&new_document, "doc-1", ClaimMode::Write);
+        assert!(!refused.granted);
+        assert_eq!(refused.owner, "main");
+        drop(reservation);
+        assert!(state
+            .claim_document(&new_document, "doc-1", ClaimMode::Write)
+            .granted);
+    }
+
+    #[test]
+    fn a_split_into_a_temp_ancestor_allows_private_engine_staging() {
+        let state = test_claim_state();
+        let temp_root = crate::commands::canonical_path(&std::env::temp_dir().to_string_lossy());
+        let output = crate::commands::canonical_path(
+            &std::env::temp_dir()
+                .join(format!("spectrapdf-split-reserved-{}.pdf", std::process::id()))
+                .to_string_lossy(),
+        );
+        let reservation = state
+            .claim_engine_output_split(&temp_root, &[output], "main")
+            .unwrap();
+
+        let stage = crate::scratch::root()
+            .join(format!("split-stage-{}.pdf", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        let private_stage = state.claim_engine_output(&stage, "main");
+        assert!(private_stage.is_ok(), "{private_stage:?}");
+        drop(private_stage);
+        drop(reservation);
     }
 
     #[test]
