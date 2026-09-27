@@ -10,9 +10,10 @@
 //!
 //!   * **No ambient authority.** No cookie store (the `cookies` feature is not
 //!     enabled, so there is no jar to attach), no credential store, no
-//!     proxy-authentication prompt, no `Authorization` header, no persisted
-//!     session between requests. A request carries what its caller put in it
-//!     and nothing the machine happens to remember.
+//!     proxy configuration (an intermediary would resolve the destination
+//!     outside this module's address checks), no `Authorization` header, no
+//!     persisted session between requests. A request carries what its caller
+//!     put in it and nothing the machine happens to remember.
 //!   * **A plain user agent.** `SpectraPDF/<version>` — the product and the
 //!     version, no platform inventory.
 //!   * **Redirects are followed SAME-ORIGIN ONLY**, and origin includes the
@@ -760,6 +761,10 @@ async fn fetch_into(
 
         let client = reqwest::Client::builder()
             .user_agent(user_agent())
+            // Do not let an environment/system proxy resolve the destination
+            // itself. That would bypass the per-hop address check and the
+            // resolve_to_addrs pin below; this client always connects directly.
+            .no_proxy()
             // Redirects are resolved in the loop below so a cross-origin one can
             // be REFUSED BY NAME rather than reported as a transport error.
             .redirect(reqwest::redirect::Policy::none())
@@ -968,6 +973,43 @@ mod tests {
             file_name: Some("probe".to_string()),
             refuse_private: false,
         }
+    }
+
+    #[test]
+    fn environment_proxy_cannot_redirect_a_validated_request() {
+        let target = TestServer::start(vec![body_reply("text/plain", "target")]);
+        let proxy = TestServer::start(vec![body_reply("text/plain", "proxy")]);
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("net::tests::run_proxy_request_in_child")
+            .arg("--ignored")
+            .env("SPECTRAPDF_NET_PROXY_CHILD", "1")
+            .env("SPECTRAPDF_NET_PROXY_TARGET", target.url("/target"))
+            .env("HTTP_PROXY", proxy.url(""))
+            .env("NO_PROXY", "")
+            .env_remove("ALL_PROXY")
+            .env_remove("all_proxy")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "proxy probe child failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(proxy.requests().is_empty(), "request reached the ambient proxy");
+        assert_eq!(target.requests().len(), 1, "request missed its validated address");
+    }
+
+    #[tokio::test]
+    #[ignore = "invoked by the isolated environment-proxy regression"]
+    async fn run_proxy_request_in_child() {
+        assert!(std::env::var_os("SPECTRAPDF_NET_PROXY_CHILD").is_some());
+        let url = std::env::var("SPECTRAPDF_NET_PROXY_TARGET").unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let response = fetch_into(&get_req(url), true, scratch.path()).await.unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(std::fs::read(response.path).unwrap(), b"target");
     }
 
     #[test]
