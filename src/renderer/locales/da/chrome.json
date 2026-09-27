@@ -6029,5 +6029,17 @@
   "tools.sub": "Vælg, hvad du vil gøre med dit dokument.",
   "engine.redact.pageContainsMalformedDrawing": "Siden indeholder en ugyldig tegnesti. Overstregning blev ikke anvendt.",
   "engine.redact_document.documentStructureTooComplex": "Dokumentets struktur er for kompleks til sikker overstregning.",
-  "refusal.scan.pageUnreadable": "Den scannede side kunne ikke læses: {{folder}}."
+  "refusal.scan.pageUnreadable": "Den scannede side kunne ikke læses: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Redaktion kan ikke fjerne tekst, der definerer en udklipssti, da det kan ændre sidens synlige indhold.",
+  "engine.split.cachedSplitPlanInconsistent": "Den cachelagrede opdelingsplan har inkonsistente outputdata",
+  "engine.split.cachedSplitPlanOnly": "En cachelagret opdelingsplan gælder kun for mappeopdeling",
+  "engine.split.folderOutputPlanOnly": "En mappeoutputplan gælder kun for opdelingstilstande med flere filer",
+  "engine.split.folderSplitProducedNon": "En mappeopdeling oprettede en ikke-sammenhængende outputdel",
+  "engine.split.reservedSplitOutputsMust": "Reserverede opdelingsoutput skal være en liste over stier",
+  "engine.split.reservedSplitOutputsMust2": "De reserverede opdelingsoutput skal være en liste over stier",
+  "engine.split.splitOutputsChangedAfter": "Opdelingsoutputtet blev ændret, efter det blev reserveret",
+  "engine.split.splitPlanExpiredAlready": "Opdelingsplanen er udløbet eller allerede brugt; planlæg outputtet igen",
+  "engine.split.splitPlanIdRequired": "Der kræves et id for opdelingsplanen",
+  "engine.split.splitRequestLongerMatches": "Opdelingsanmodningen stemmer ikke længere overens med outputplanen",
+  "engine.split.splitSourceChangedAfter": "Opdelingskilden blev ændret efter planlægningen af outputtet"
 }

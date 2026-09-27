@@ -6301,5 +6301,17 @@
   "tools.sub": "Izberite, kaj želite narediti s svojim dokumentom.",
   "engine.redact.pageContainsMalformedDrawing": "Stran vsebuje nepravilno risalno pot. Prekrivanje ni bilo izvedeno.",
   "engine.redact_document.documentStructureTooComplex": "Struktura dokumenta je prezapletena za varno prekrivanje.",
-  "refusal.scan.pageUnreadable": "Optično prebrane strani ni bilo mogoče prebrati: {{folder}}."
+  "refusal.scan.pageUnreadable": "Optično prebrane strani ni bilo mogoče prebrati: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Redakcija ne more odstraniti besedila, ki določa izrezno pot, ker bi to lahko spremenilo vidno vsebino strani.",
+  "engine.split.cachedSplitPlanInconsistent": "Predpomnjeni načrt razdelitve vsebuje neskladne izhodne podatke",
+  "engine.split.cachedSplitPlanOnly": "Predpomnjeni načrt razdelitve velja samo za razdelitev v mape",
+  "engine.split.folderOutputPlanOnly": "Načrt izhoda v mape velja samo za načine razdelitve na več datotek",
+  "engine.split.folderSplitProducedNon": "Razdelitev v mape je ustvarila nepovezan izhodni del",
+  "engine.split.reservedSplitOutputsMust": "Rezervirani izhodi razdelitve morajo biti seznam poti",
+  "engine.split.reservedSplitOutputsMust2": "Rezervirani izhodi razdelitve morajo biti seznam poti",
+  "engine.split.splitOutputsChangedAfter": "Izhodi razdelitve so se po rezervaciji spremenili",
+  "engine.split.splitPlanExpiredAlready": "Načrt razdelitve je potekel ali je bil že uporabljen; znova načrtujte izhode",
+  "engine.split.splitPlanIdRequired": "Zahtevan je ID načrta razdelitve",
+  "engine.split.splitRequestLongerMatches": "Zahteva za razdelitev se ne ujema več z načrtom izhoda",
+  "engine.split.splitSourceChangedAfter": "Vir razdelitve se je spremenil po načrtovanju izhodov"
 }

@@ -6029,5 +6029,17 @@
   "tools.sub": "Επιλέξτε τι θέλετε να κάνετε με το έγγραφό σας.",
   "engine.redact.pageContainsMalformedDrawing": "Η σελίδα περιέχει μια εσφαλμένη διαδρομή σχεδίασης. Η απόκρυψη δεν εφαρμόστηκε.",
   "engine.redact_document.documentStructureTooComplex": "Η δομή του εγγράφου είναι υπερβολικά σύνθετη για ασφαλή απόκρυψη.",
-  "refusal.scan.pageUnreadable": "Δεν ήταν δυνατή η ανάγνωση της σαρωμένης σελίδας: {{folder}}."
+  "refusal.scan.pageUnreadable": "Δεν ήταν δυνατή η ανάγνωση της σαρωμένης σελίδας: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Η απόκρυψη δεν μπορεί να αφαιρέσει κείμενο που ορίζει διαδρομή αποκοπής, επειδή αυτό μπορεί να αλλάξει το ορατό περιεχόμενο της σελίδας.",
+  "engine.split.cachedSplitPlanInconsistent": "Το αποθηκευμένο σχέδιο διαχωρισμού περιέχει ασυνεπή δεδομένα εξόδου",
+  "engine.split.cachedSplitPlanOnly": "Ένα αποθηκευμένο σχέδιο διαχωρισμού ισχύει μόνο για διαχωρισμό σε φακέλους",
+  "engine.split.folderOutputPlanOnly": "Ένα σχέδιο εξόδου φακέλου ισχύει μόνο για λειτουργίες διαχωρισμού σε πολλά αρχεία",
+  "engine.split.folderSplitProducedNon": "Ο διαχωρισμός σε φακέλους δημιούργησε μη συνεχόμενο τμήμα εξόδου",
+  "engine.split.reservedSplitOutputsMust": "Οι δεσμευμένες έξοδοι διαχωρισμού πρέπει να είναι λίστα διαδρομών",
+  "engine.split.reservedSplitOutputsMust2": "Οι δεσμευμένες έξοδοι διαχωρισμού πρέπει να είναι λίστα διαδρομών",
+  "engine.split.splitOutputsChangedAfter": "Οι έξοδοι διαχωρισμού άλλαξαν μετά τη δέσμευσή τους",
+  "engine.split.splitPlanExpiredAlready": "Το σχέδιο διαχωρισμού έληξε ή χρησιμοποιήθηκε ήδη· σχεδιάστε ξανά τις εξόδους",
+  "engine.split.splitPlanIdRequired": "Απαιτείται αναγνωριστικό σχεδίου διαχωρισμού",
+  "engine.split.splitRequestLongerMatches": "Το αίτημα διαχωρισμού δεν αντιστοιχεί πλέον στο σχέδιο εξόδου",
+  "engine.split.splitSourceChangedAfter": "Η πηγή διαχωρισμού άλλαξε μετά τον σχεδιασμό των εξόδων"
 }

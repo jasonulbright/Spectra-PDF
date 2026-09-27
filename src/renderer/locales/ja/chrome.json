@@ -5893,5 +5893,17 @@
   "tools.sub": "文書に対して行いたい操作を選んでください。",
   "engine.redact.pageContainsMalformedDrawing": "ページに不正な描画パスが含まれています。墨消しは適用されませんでした。",
   "engine.redact_document.documentStructureTooComplex": "文書の構造が複雑すぎるため、安全に墨消しできません。",
-  "refusal.scan.pageUnreadable": "スキャンしたページを読み取れませんでした: {{folder}}。"
+  "refusal.scan.pageUnreadable": "スキャンしたページを読み取れませんでした: {{folder}}。",
+  "engine.redact.redactionCannotRemoveText": "墨消しでは、クリッピングパスを定義するテキストを削除できません。削除するとページの表示内容が変わる可能性があります。",
+  "engine.split.cachedSplitPlanInconsistent": "キャッシュされた分割プランの出力データに矛盾があります",
+  "engine.split.cachedSplitPlanOnly": "キャッシュされた分割プランはフォルダー分割でのみ有効です",
+  "engine.split.folderOutputPlanOnly": "フォルダー出力プランは複数ファイルへの分割モードでのみ有効です",
+  "engine.split.folderSplitProducedNon": "フォルダー分割で連続していない出力部分が生成されました",
+  "engine.split.reservedSplitOutputsMust": "予約済みの分割出力はパスのリストである必要があります",
+  "engine.split.reservedSplitOutputsMust2": "予約済みの分割出力はパスのリストである必要があります",
+  "engine.split.splitOutputsChangedAfter": "予約後に分割出力が変更されました",
+  "engine.split.splitPlanExpiredAlready": "分割プランの有効期限が切れたか、すでに使用されています。出力を再計画してください",
+  "engine.split.splitPlanIdRequired": "分割プラン ID が必要です",
+  "engine.split.splitRequestLongerMatches": "分割リクエストが出力プランと一致しなくなりました",
+  "engine.split.splitSourceChangedAfter": "出力の計画後に分割元が変更されました"
 }

@@ -6301,5 +6301,17 @@
   "tools.sub": "Виберіть, що ви хочете зробити з документом.",
   "engine.redact.pageContainsMalformedDrawing": "Сторінка містить некоректний контур малювання. Вилучення конфіденційних даних не виконано.",
   "engine.redact_document.documentStructureTooComplex": "Структура документа надто складна для безпечного вилучення конфіденційних даних.",
-  "refusal.scan.pageUnreadable": "Не вдалося прочитати відскановану сторінку: {{folder}}."
+  "refusal.scan.pageUnreadable": "Не вдалося прочитати відскановану сторінку: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Не можна видалити текст, що задає контур відсікання: це може змінити видимий вміст сторінки.",
+  "engine.split.cachedSplitPlanInconsistent": "Кешований план розділення містить неузгоджені дані виводу",
+  "engine.split.cachedSplitPlanOnly": "Кешований план розділення дійсний лише для розділення за папками",
+  "engine.split.folderOutputPlanOnly": "План виводу за папками дійсний лише для режимів розділення на кілька файлів",
+  "engine.split.folderSplitProducedNon": "Під час розділення за папками створено незв’язну частину виводу",
+  "engine.split.reservedSplitOutputsMust": "Зарезервовані вихідні файли розділення мають бути списком шляхів",
+  "engine.split.reservedSplitOutputsMust2": "Зарезервовані вихідні файли розділення мають бути списком шляхів",
+  "engine.split.splitOutputsChangedAfter": "Вихідні файли розділення змінилися після резервування",
+  "engine.split.splitPlanExpiredAlready": "Термін дії плану розділення минув або його вже використано; сплануйте вивід знову",
+  "engine.split.splitPlanIdRequired": "Потрібен ідентифікатор плану розділення",
+  "engine.split.splitRequestLongerMatches": "Запит на розділення більше не відповідає плану виводу",
+  "engine.split.splitSourceChangedAfter": "Джерело розділення змінилося після планування виводу"
 }

@@ -618,6 +618,7 @@ redact.alignMustLeftCentred	exact	redact	align must be 0 (left), 1 (centred) or 
 redact.fontSizeMustNegative	exact	redact	font size must not be negative
 redact.overlayTextNeedsEmbedded	exact	redact	this overlay text needs an embedded font and no font directory was given
 redact.pageContainsMalformedDrawing	exact	redact	The page contains a malformed drawing path. Redaction was not applied.
+redact.redactionCannotRemoveText	exact	redact	Redaction cannot remove text that defines a clipping path because doing so could change visible page content.
 redact_document.documentStructureTooComplex	exact	redact_document	The document structure is too complex to redact safely.
 redact_marks.redactionMarkSDocument	pattern	redact_marks	{{count}} redaction mark(s) in this document cannot be read (page(s) {{location}}). A mark whose annotation or /Rect will not resolve is neither shown nor applied, so redacting now would leave marked content in place. Repair the document first.
 repair.pdfEncryptedDecryptBefore	exact	repair	PDF is encrypted -- decrypt before repairing
@@ -731,22 +732,33 @@ spelling.spellingDictionary	pattern	spelling	No spelling dictionary for {{langua
 spelling.unknownSpellCheckSource	pattern	spelling	unknown spell-check source {{v0}} — use text, comments or fields
 spelling.usableDictionaryNameUse	pattern	spelling	{{name}} is not a usable dictionary name — use letters, digits and underscores.
 spelling.wordSuggest	exact	spelling	No word to suggest for.
+split.cachedSplitPlanInconsistent	exact	split	The cached split plan has inconsistent output data
+split.cachedSplitPlanOnly	exact	split	A cached split plan is only valid for a folder split
 split.cannotReplaceNonRegular	pattern	split	Cannot replace a non-regular split destination: {{path}}
 split.cannotSplitDocumentWithout	exact	split	Cannot split a document without pages
 split.chooseEitherExactSplit	exact	split	Choose either an exact split output or an output folder
 split.documentTopLevelBookmarks	exact	split	this document has no top-level bookmarks to split at
 split.exactSplitOutputOnly	exact	split	An exact split output is only valid for page ranges
+split.folderOutputPlanOnly	exact	split	A folder output plan is only valid for multi-file split modes
+split.folderSplitProducedNon	exact	split	A folder split produced a non-contiguous output part
 split.maximumFileSizeMust	pattern	split	maximum file size must be a number, got {{max_mb}}
 split.maximumFileSizeMust2	pattern	split	maximum file size must be greater than 0, got {{max_mb}}
 split.pagesPerFileMust	pattern	split	pages per file must be a whole number, got {{every_n}}
 split.pagesPerFileMust2	pattern	split	pages per file must be at least 1, got {{every_n}}
+split.reservedSplitOutputsMust	exact	split	Reserved split outputs must be a list of paths
+split.reservedSplitOutputsMust2	exact	split	The reserved split outputs must be a list of paths
 split.splitDestinationChangedBefore	pattern	split	Split destination changed before publication: {{path}}
 split.splitDestinationsMustIdentify	pattern	split	Split destinations must identify different files: {{path}}
 split.splitModeMustOne	pattern	split	split mode must be one of {{v0}}, got {{mode}}
 split.splitNeedsOutputFolder	exact	split	split needs an output folder
 split.splitOutputMustReplace	pattern	split	Split output must not replace its source: {{path}}
+split.splitOutputsChangedAfter	exact	split	Split outputs changed after they were reserved
+split.splitPlanExpiredAlready	exact	split	The split plan expired or was already used; plan the outputs again
+split.splitPlanIdRequired	exact	split	A split plan id is required
 split.splitPublicationFailedRetained	pattern	split	Split publication failed; retained recovery files: {{details}}
 split.splitRangeSelectsPages	exact	split	The split range selects no pages
+split.splitRequestLongerMatches	exact	split	The split request no longer matches its output plan
+split.splitSourceChangedAfter	exact	split	Split source changed after output planning
 split.splitSourceChangedDuring	exact	split	Split source changed during preparation
 stamp_appearance.chosenSignatureFaceCannot	exact	stamp_appearance	The chosen signature face cannot set that name — choose another face, or draw or import the signature instead.
 stamp_appearance.chosenSignatureStrokesDraw	exact	stamp_appearance	The chosen signature has no strokes to draw.

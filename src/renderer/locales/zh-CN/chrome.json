@@ -5893,5 +5893,17 @@
   "tools.sub": "选择你想对文档做什么。",
   "engine.redact.pageContainsMalformedDrawing": "页面包含格式错误的绘图路径。未应用密文遮盖。",
   "engine.redact_document.documentStructureTooComplex": "文档结构过于复杂，无法安全地应用密文遮盖。",
-  "refusal.scan.pageUnreadable": "无法读取扫描的页面：{{folder}}。"
+  "refusal.scan.pageUnreadable": "无法读取扫描的页面：{{folder}}。",
+  "engine.redact.redactionCannotRemoveText": "涂黑操作无法删除定义剪切路径的文本，因为这样可能会改变页面的可见内容。",
+  "engine.split.cachedSplitPlanInconsistent": "缓存的拆分计划包含不一致的输出数据",
+  "engine.split.cachedSplitPlanOnly": "缓存的拆分计划仅适用于文件夹拆分",
+  "engine.split.folderOutputPlanOnly": "文件夹输出计划仅适用于拆分为多个文件的模式",
+  "engine.split.folderSplitProducedNon": "文件夹拆分生成了不连续的输出部分",
+  "engine.split.reservedSplitOutputsMust": "预留的拆分输出必须是路径列表",
+  "engine.split.reservedSplitOutputsMust2": "预留的拆分输出必须是路径列表",
+  "engine.split.splitOutputsChangedAfter": "预留后拆分输出发生了变化",
+  "engine.split.splitPlanExpiredAlready": "拆分计划已过期或已使用；请重新规划输出",
+  "engine.split.splitPlanIdRequired": "必须提供拆分计划 ID",
+  "engine.split.splitRequestLongerMatches": "拆分请求已与其输出计划不匹配",
+  "engine.split.splitSourceChangedAfter": "规划输出后，拆分源已发生变化"
 }

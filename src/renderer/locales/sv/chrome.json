@@ -6029,5 +6029,17 @@
   "tools.sub": "Välj vad du vill göra med ditt dokument.",
   "engine.redact.pageContainsMalformedDrawing": "Sidan innehåller en felaktig ritbana. Maskeringen tillämpades inte.",
   "engine.redact_document.documentStructureTooComplex": "Dokumentstrukturen är för komplex för säker maskering.",
-  "refusal.scan.pageUnreadable": "Den skannade sidan kunde inte läsas: {{folder}}."
+  "refusal.scan.pageUnreadable": "Den skannade sidan kunde inte läsas: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Maskering kan inte ta bort text som definierar en klippbana, eftersom det kan ändra sidans synliga innehåll.",
+  "engine.split.cachedSplitPlanInconsistent": "Den cachade delningsplanen innehåller motstridiga utdata",
+  "engine.split.cachedSplitPlanOnly": "En cachad delningsplan gäller bara för mappdelning",
+  "engine.split.folderOutputPlanOnly": "En utdataplan för mappar gäller bara för delningslägen med flera filer",
+  "engine.split.folderSplitProducedNon": "En mappdelning skapade en icke sammanhängande utdel",
+  "engine.split.reservedSplitOutputsMust": "Reserverade delningsutdata måste vara en lista med sökvägar",
+  "engine.split.reservedSplitOutputsMust2": "De reserverade delningsutdata måste vara en lista med sökvägar",
+  "engine.split.splitOutputsChangedAfter": "Delningsutdata ändrades efter att de reserverades",
+  "engine.split.splitPlanExpiredAlready": "Delningsplanen har gått ut eller har redan använts; planera utdata igen",
+  "engine.split.splitPlanIdRequired": "Ett id för delningsplanen krävs",
+  "engine.split.splitRequestLongerMatches": "Delningsbegäran stämmer inte längre överens med utdataplanen",
+  "engine.split.splitSourceChangedAfter": "Delningskällan ändrades efter att utdata planerades"
 }

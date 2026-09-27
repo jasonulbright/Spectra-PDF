@@ -5893,5 +5893,17 @@
   "tools.sub": "選擇您想對文件做什麼。",
   "engine.redact.pageContainsMalformedDrawing": "頁面包含格式錯誤的繪圖路徑。未套用密文遮蓋。",
   "engine.redact_document.documentStructureTooComplex": "文件結構過於複雜，無法安全地套用密文遮蓋。",
-  "refusal.scan.pageUnreadable": "無法讀取掃描的頁面：{{folder}}。"
+  "refusal.scan.pageUnreadable": "無法讀取掃描的頁面：{{folder}}。",
+  "engine.redact.redactionCannotRemoveText": "遮蔽作業無法移除定義裁切路徑的文字，因為這可能會改變頁面的可見內容。",
+  "engine.split.cachedSplitPlanInconsistent": "快取的分割計畫含有不一致的輸出資料",
+  "engine.split.cachedSplitPlanOnly": "快取的分割計畫僅適用於資料夾分割",
+  "engine.split.folderOutputPlanOnly": "資料夾輸出計畫僅適用於分割成多個檔案的模式",
+  "engine.split.folderSplitProducedNon": "資料夾分割產生了不連續的輸出部分",
+  "engine.split.reservedSplitOutputsMust": "保留的分割輸出必須是路徑清單",
+  "engine.split.reservedSplitOutputsMust2": "保留的分割輸出必須是路徑清單",
+  "engine.split.splitOutputsChangedAfter": "保留後分割輸出發生變更",
+  "engine.split.splitPlanExpiredAlready": "分割計畫已過期或已使用；請重新規劃輸出",
+  "engine.split.splitPlanIdRequired": "必須提供分割計畫 ID",
+  "engine.split.splitRequestLongerMatches": "分割要求已不再符合其輸出計畫",
+  "engine.split.splitSourceChangedAfter": "規劃輸出後，分割來源已變更"
 }

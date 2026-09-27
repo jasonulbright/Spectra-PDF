@@ -6165,5 +6165,17 @@
   "tools.sub": "בחר מה ברצונך לעשות עם המסמך שלך.",
   "engine.redact.pageContainsMalformedDrawing": "העמוד מכיל נתיב ציור פגום. ההשחרה לא הוחלה.",
   "engine.redact_document.documentStructureTooComplex": "מבנה המסמך מורכב מדי לביצוע השחרה בטוחה.",
-  "refusal.scan.pageUnreadable": "לא ניתן לקרוא את הדף שנסרק: {{folder}}."
+  "refusal.scan.pageUnreadable": "לא ניתן לקרוא את הדף שנסרק: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "השחרה אינה יכולה להסיר טקסט שמגדיר נתיב חיתוך, מפני שהדבר עלול לשנות את התוכן הגלוי בעמוד.",
+  "engine.split.cachedSplitPlanInconsistent": "תוכנית הפיצול שבמטמון מכילה נתוני פלט לא עקביים",
+  "engine.split.cachedSplitPlanOnly": "תוכנית פיצול שבמטמון תקפה לפיצול לתיקיות בלבד",
+  "engine.split.folderOutputPlanOnly": "תוכנית פלט לתיקיות תקפה רק למצבי פיצול למספר קבצים",
+  "engine.split.folderSplitProducedNon": "פיצול לתיקיות יצר חלק פלט שאינו רציף",
+  "engine.split.reservedSplitOutputsMust": "פלטי הפיצול השמורים חייבים להיות רשימת נתיבים",
+  "engine.split.reservedSplitOutputsMust2": "פלטי הפיצול השמורים חייבים להיות רשימת נתיבים",
+  "engine.split.splitOutputsChangedAfter": "פלטי הפיצול השתנו לאחר שמירתם",
+  "engine.split.splitPlanExpiredAlready": "תוקף תוכנית הפיצול פג או שהיא כבר נוצלה; יש לתכנן את הפלטים מחדש",
+  "engine.split.splitPlanIdRequired": "נדרש מזהה של תוכנית הפיצול",
+  "engine.split.splitRequestLongerMatches": "בקשת הפיצול כבר אינה תואמת לתוכנית הפלט",
+  "engine.split.splitSourceChangedAfter": "מקור הפיצול השתנה לאחר תכנון הפלטים"
 }

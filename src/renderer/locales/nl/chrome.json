@@ -6029,5 +6029,17 @@
   "tools.sub": "Kies wat u met uw document wilt doen.",
   "engine.redact.pageContainsMalformedDrawing": "De pagina bevat een ongeldig tekenpad. Het zwartlakken is niet toegepast.",
   "engine.redact_document.documentStructureTooComplex": "De documentstructuur is te complex om veilig zwart te lakken.",
-  "refusal.scan.pageUnreadable": "De gescande pagina kon niet worden gelezen: {{folder}}."
+  "refusal.scan.pageUnreadable": "De gescande pagina kon niet worden gelezen: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "Redactie kan tekst die een clippingpad definieert niet verwijderen, omdat dit de zichtbare pagina-inhoud kan wijzigen.",
+  "engine.split.cachedSplitPlanInconsistent": "Het opgeslagen splitsingsplan bevat inconsistente uitvoergegevens",
+  "engine.split.cachedSplitPlanOnly": "Een opgeslagen splitsingsplan is alleen geldig voor splitsing naar mappen",
+  "engine.split.folderOutputPlanOnly": "Een uitvoerplan voor mappen is alleen geldig voor splitsingsmodi met meerdere bestanden",
+  "engine.split.folderSplitProducedNon": "Een splitsing naar mappen heeft een niet-aaneengesloten uitvoerdeel opgeleverd",
+  "engine.split.reservedSplitOutputsMust": "Gereserveerde splitsingsuitvoer moet een lijst met paden zijn",
+  "engine.split.reservedSplitOutputsMust2": "De gereserveerde splitsingsuitvoer moet een lijst met paden zijn",
+  "engine.split.splitOutputsChangedAfter": "De splitsingsuitvoer is gewijzigd nadat deze was gereserveerd",
+  "engine.split.splitPlanExpiredAlready": "Het splitsingsplan is verlopen of al gebruikt; plan de uitvoer opnieuw",
+  "engine.split.splitPlanIdRequired": "Een splitsingsplan-id is vereist",
+  "engine.split.splitRequestLongerMatches": "De splitsingsaanvraag komt niet meer overeen met het uitvoerplan",
+  "engine.split.splitSourceChangedAfter": "De bron voor de splitsing is gewijzigd nadat de uitvoer was gepland"
 }

@@ -6029,5 +6029,17 @@
   "tools.sub": "Válassza ki, mit szeretne tenni a dokumentumával.",
   "engine.redact.pageContainsMalformedDrawing": "Az oldal hibás rajzolási útvonalat tartalmaz. A kitakarás nem történt meg.",
   "engine.redact_document.documentStructureTooComplex": "A dokumentum szerkezete túl összetett a biztonságos kitakaráshoz.",
-  "refusal.scan.pageUnreadable": "A beolvasott oldal nem olvasható: {{folder}}."
+  "refusal.scan.pageUnreadable": "A beolvasott oldal nem olvasható: {{folder}}.",
+  "engine.redact.redactionCannotRemoveText": "A kitakarás nem távolíthatja el a vágóösvényt meghatározó szöveget, mert ez megváltoztathatja az oldal látható tartalmát.",
+  "engine.split.cachedSplitPlanInconsistent": "A gyorsítótárazott felosztási terv kimeneti adatai ellentmondásosak",
+  "engine.split.cachedSplitPlanOnly": "A gyorsítótárazott felosztási terv csak mappák szerinti felosztásnál érvényes",
+  "engine.split.folderOutputPlanOnly": "A mappakimeneti terv csak több fájlt létrehozó felosztási módoknál érvényes",
+  "engine.split.folderSplitProducedNon": "A mappák szerinti felosztás nem összefüggő kimeneti részt hozott létre",
+  "engine.split.reservedSplitOutputsMust": "A fenntartott felosztási kimeneteknek útvonalak listájának kell lenniük",
+  "engine.split.reservedSplitOutputsMust2": "A fenntartott felosztási kimeneteknek útvonalak listájának kell lenniük",
+  "engine.split.splitOutputsChangedAfter": "A felosztási kimenetek a fenntartásuk után megváltoztak",
+  "engine.split.splitPlanExpiredAlready": "A felosztási terv lejárt vagy már felhasználták; tervezze meg újra a kimeneteket",
+  "engine.split.splitPlanIdRequired": "Felosztási tervazonosító szükséges",
+  "engine.split.splitRequestLongerMatches": "A felosztási kérés már nem egyezik a kimeneti tervvel",
+  "engine.split.splitSourceChangedAfter": "A felosztás forrása a kimenetek megtervezése után megváltozott"
 }
