@@ -149,6 +149,62 @@ export function downloadStem(url: string): string {
   return stem || 'download';
 }
 
+export interface DownloadedWebResponse {
+  status: number;
+  bytes: number;
+  path: string;
+  finalUrl: string;
+}
+
+export type WebResponseOutcome =
+  | { kind: 'abandoned' }
+  | { kind: 'rejected'; status: number }
+  | { kind: 'empty' }
+  | { kind: 'notOpened' }
+  | { kind: 'refused'; detail: string }
+  | { kind: 'opened' };
+
+export type OpenDownloadResult =
+  | { kind: 'notOpened' }
+  | { kind: 'refused'; detail: string }
+  | { kind: 'opened' };
+
+/**
+ * Hand a downloaded file to the open funnel and release it on every path that
+ * does not leave it backing an open document. A request may finish after the
+ * user cancels; its per-run abandonment flag prevents an old response from
+ * being opened by a later run.
+ */
+export async function routeWebResponse(
+  response: DownloadedWebResponse,
+  fallbackUrl: string,
+  io: {
+    isAbandoned: () => boolean;
+    open: (result: { path: string; url: string }) => Promise<OpenDownloadResult>;
+    discard: (path: string) => Promise<void>;
+  },
+): Promise<WebResponseOutcome> {
+  let opened = false;
+  try {
+    if (io.isAbandoned()) return { kind: 'abandoned' };
+    if (response.status < 200 || response.status >= 300) {
+      return { kind: 'rejected', status: response.status };
+    }
+    if (response.bytes === 0) return { kind: 'empty' };
+
+    const result = await io.open({
+      path: response.path,
+      url: response.finalUrl || fallbackUrl,
+    });
+    if (result.kind === 'refused') return result;
+    if (result.kind === 'notOpened') return result;
+    opened = true;
+    return { kind: 'opened' };
+  } finally {
+    if (!opened) await io.discard(response.path).catch(() => {});
+  }
+}
+
 /**
  * Where File ▸ Save goes for a given open file.
  *

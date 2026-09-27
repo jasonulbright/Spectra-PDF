@@ -5,11 +5,12 @@
 //   • where File ▸ Save goes for a document whose path is a temp download;
 //   • that a downloaded document's recent entry carries where it came from,
 //     because re-opening one re-asks instead of re-fetching.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   WEB_URL_REFUSAL_KEYS,
   downloadStem,
   isPrivateHost,
+  routeWebResponse,
   readWebUrl,
   saveRouteFor,
 } from '../src/renderer/lib/web-open';
@@ -117,6 +118,139 @@ describe('downloadStem', () => {
     expect(downloadStem('https://example.com/docs/')).toBe('docs');
     expect(downloadStem('https://example.com')).toBe('example.com');
     expect(downloadStem('not a url')).toBe('download');
+  });
+});
+
+describe('downloaded response ownership', () => {
+  const response = (changes: Partial<{
+    status: number;
+    bytes: number;
+    path: string;
+    finalUrl: string;
+  }> = {}) => ({
+    status: 200,
+    bytes: 12,
+    path: 'C:\\Temp\\spectrapdf\\net\\report-1-abcdef01.1234.pdf',
+    finalUrl: 'https://example.com/report.pdf',
+    ...changes,
+  });
+
+  it('discards an unsuccessful response without opening it', async () => {
+    const open = vi.fn(async () => ({ kind: 'opened' as const }));
+    const discard = vi.fn(async () => {});
+    const result = await routeWebResponse(response({ status: 503 }), 'https://typed.test/', {
+      isAbandoned: () => false,
+      open,
+      discard,
+    });
+
+    expect(result).toEqual({ kind: 'rejected', status: 503 });
+    expect(open).not.toHaveBeenCalled();
+    expect(discard).toHaveBeenCalledWith(response().path);
+  });
+
+  it('discards empty and abandoned responses', async () => {
+    const discard = vi.fn(async () => {});
+    const open = vi.fn(async () => ({ kind: 'opened' as const }));
+
+    await expect(
+      routeWebResponse(response({ bytes: 0 }), 'https://typed.test/', {
+        isAbandoned: () => false,
+        open,
+        discard,
+      }),
+    ).resolves.toEqual({ kind: 'empty' });
+    await expect(
+      routeWebResponse(response(), 'https://typed.test/', {
+        isAbandoned: () => true,
+        open,
+        discard,
+      }),
+    ).resolves.toEqual({ kind: 'abandoned' });
+
+    expect(open).not.toHaveBeenCalled();
+    expect(discard).toHaveBeenCalledTimes(2);
+  });
+
+  it('discards a refused response but retains one the open funnel accepts', async () => {
+    const discard = vi.fn(async () => {});
+    const refuse = await routeWebResponse(response(), 'https://typed.test/', {
+      isAbandoned: () => false,
+      open: vi.fn(async () => ({ kind: 'refused' as const, detail: 'not a PDF' })),
+      discard,
+    });
+    expect(refuse).toEqual({ kind: 'refused', detail: 'not a PDF' });
+    expect(discard).toHaveBeenCalledTimes(1);
+
+    const accept = await routeWebResponse(response(), 'https://typed.test/', {
+      isAbandoned: () => false,
+      open: vi.fn(async () => ({ kind: 'opened' as const })),
+      discard,
+    });
+    expect(accept).toEqual({ kind: 'opened' });
+    expect(discard).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the source if cancellation arrives while the open funnel is running', async () => {
+    let abandoned = false;
+    const discard = vi.fn(async () => {});
+    const result = await routeWebResponse(response(), 'https://typed.test/', {
+      isAbandoned: () => abandoned,
+      open: async () => {
+        abandoned = true;
+        return { kind: 'opened' };
+      },
+      discard,
+    });
+
+    expect(result).toEqual({ kind: 'opened' });
+    expect(discard).not.toHaveBeenCalled();
+  });
+
+  it('does not let a replacement request revive a canceled response', async () => {
+    const canceledRun = { abandoned: true };
+    let currentRun = canceledRun;
+    const originalRun = currentRun;
+    currentRun = { abandoned: false };
+    const open = vi.fn(async () => ({ kind: 'opened' as const }));
+    const discard = vi.fn(async () => {});
+
+    const result = await routeWebResponse(response(), 'https://typed.test/', {
+      isAbandoned: () => originalRun.abandoned,
+      open,
+      discard,
+    });
+
+    expect(currentRun.abandoned).toBe(false);
+    expect(result).toEqual({ kind: 'abandoned' });
+    expect(open).not.toHaveBeenCalled();
+    expect(discard).toHaveBeenCalledWith(response().path);
+  });
+
+  it('discards a response when an open prompt was canceled without opening', async () => {
+    const discard = vi.fn(async () => {});
+    const result = await routeWebResponse(response(), 'https://typed.test/', {
+      isAbandoned: () => false,
+      open: async () => ({ kind: 'notOpened' }),
+      discard,
+    });
+
+    expect(result).toEqual({ kind: 'notOpened' });
+    expect(discard).toHaveBeenCalledWith(response().path);
+  });
+
+  it('discards the response if handing it to the open funnel throws', async () => {
+    const discard = vi.fn(async () => {});
+    await expect(
+      routeWebResponse(response(), 'https://typed.test/', {
+        isAbandoned: () => false,
+        open: async () => {
+          throw new Error('open failed');
+        },
+        discard,
+      }),
+    ).rejects.toThrow('open failed');
+    expect(discard).toHaveBeenCalledWith(response().path);
   });
 });
 
