@@ -45,9 +45,88 @@ const MAX_CERT_EKU_OIDS: usize = 4096;
 #[cfg(windows)]
 const MAX_CERT_EKU_OID_BYTES: usize = 4096;
 #[cfg(windows)]
+const MAX_CERT_USAGE_EXTENSIONS: usize = 4096;
+#[cfg(windows)]
 const CRYPT_E_NOT_FOUND: u32 = 0x8009_2004;
 #[cfg(windows)]
 const ERROR_MORE_DATA: u32 = 234;
+
+/// Decode one strict DER TLV without allocating. Returns its tag and the
+/// content range; BER indefinite lengths and non-minimal DER lengths refuse.
+#[cfg(windows)]
+fn der_tlv(data: &[u8], offset: usize) -> Option<(u8, usize, usize)> {
+    let tag = *data.get(offset)?;
+    let first_len = *data.get(offset.checked_add(1)?)?;
+    let content_start = offset.checked_add(2)?;
+    let (length, content_start) = if first_len & 0x80 == 0 {
+        (first_len as usize, content_start)
+    } else {
+        let byte_count = (first_len & 0x7f) as usize;
+        if byte_count == 0 || byte_count > std::mem::size_of::<usize>() {
+            return None;
+        }
+        let len_end = content_start.checked_add(byte_count)?;
+        let len_bytes = data.get(content_start..len_end)?;
+        if len_bytes[0] == 0 {
+            return None;
+        }
+        let mut length = 0usize;
+        for byte in len_bytes {
+            length = length.checked_mul(256)?.checked_add(*byte as usize)?;
+        }
+        if length < 128 {
+            return None;
+        }
+        (length, len_end)
+    };
+    let content_end = content_start.checked_add(length)?;
+    (content_end <= data.len()).then_some((tag, content_start, content_end))
+}
+
+#[cfg(windows)]
+fn der_single_value_has_tag(data: &[u8], expected_tag: u8) -> bool {
+    matches!(der_tlv(data, 0), Some((tag, _, end)) if tag == expected_tag && end == data.len())
+}
+
+/// CryptoAPI accepts a dangling base-128 OID octet in an EKU on current
+/// Windows builds. Validate the DER sequence and each OID encoding ourselves
+/// before trusting its parsed purpose list.
+#[cfg(windows)]
+fn enhanced_key_usage_der_is_well_formed(data: &[u8]) -> bool {
+    let Some((0x30, sequence_start, sequence_end)) = der_tlv(data, 0) else {
+        return false;
+    };
+    if sequence_end != data.len() || sequence_start == sequence_end {
+        return false;
+    }
+    let mut offset = sequence_start;
+    let mut count = 0usize;
+    while offset < sequence_end {
+        let Some((0x06, oid_start, oid_end)) = der_tlv(data, offset) else {
+            return false;
+        };
+        if oid_start == oid_end || oid_end > sequence_end {
+            return false;
+        }
+        let oid = &data[oid_start..oid_end];
+        let mut at_component_start = true;
+        for byte in oid {
+            if at_component_start && *byte == 0x80 {
+                return false;
+            }
+            at_component_start = byte & 0x80 == 0;
+        }
+        if !at_component_start {
+            return false;
+        }
+        let Some(next_count) = count.checked_add(1) else {
+            return false;
+        };
+        count = next_count;
+        offset = oid_end;
+    }
+    count > 0
+}
 
 /// One certificate the picker can offer.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -249,6 +328,75 @@ unsafe fn thumbprint(cert: *const CERT_CONTEXT) -> Option<String> {
 unsafe fn has_private_key(cert: *const CERT_CONTEXT) -> bool {
     let mut size: u32 = 0;
     CertGetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, None, &mut size).is_ok()
+}
+
+/// Validate every extension from which `CertGetIntendedKeyUsage` or
+/// `CertGetEnhancedKeyUsage` may obtain its answer before trusting their
+/// absent-extension results. Those convenience APIs can collapse malformed
+/// extension data into the same result they use for absence.
+#[cfg(windows)]
+unsafe fn usage_extensions_are_decodable(cert: *const CERT_CONTEXT) -> bool {
+    if cert.is_null() || (*cert).pCertInfo.is_null() {
+        return false;
+    }
+    let info = &*(*cert).pCertInfo;
+    let count = info.cExtension as usize;
+    if count > MAX_CERT_USAGE_EXTENSIONS || (count > 0 && info.rgExtension.is_null()) {
+        return false;
+    }
+    if count == 0 {
+        return true;
+    }
+
+    let mut seen_key_usage = false;
+    let mut seen_key_attributes = false;
+    let mut seen_eku = false;
+    for extension in std::slice::from_raw_parts(info.rgExtension, count) {
+        if extension.pszObjId.0.is_null() {
+            return false;
+        }
+        let oid = std::ffi::CStr::from_ptr(extension.pszObjId.0.cast()).to_bytes();
+        let (seen, structure) = match oid {
+            b"2.5.29.15" => (&mut seen_key_usage, X509_KEY_USAGE),
+            // CertGetIntendedKeyUsage also reads this legacy extension.
+            b"2.5.29.2" => (&mut seen_key_attributes, X509_KEY_ATTRIBUTES),
+            b"2.5.29.37" => (&mut seen_eku, X509_ENHANCED_KEY_USAGE),
+            _ => continue,
+        };
+        if *seen {
+            // RFC 5280 extensions are unique by OID. Avoid giving a malformed
+            // duplicate a different interpretation from the Windows reader.
+            return false;
+        }
+        *seen = true;
+
+        let value_len = extension.Value.cbData as usize;
+        if value_len == 0 || value_len > MAX_CERT_EKU_BYTES || extension.Value.pbData.is_null() {
+            return false;
+        }
+        let value = std::slice::from_raw_parts(extension.Value.pbData, value_len);
+        match oid {
+            b"2.5.29.15" if !der_single_value_has_tag(value, 0x03) => return false,
+            b"2.5.29.2" if !der_single_value_has_tag(value, 0x30) => return false,
+            b"2.5.29.37" if !enhanced_key_usage_der_is_well_formed(value) => return false,
+            _ => {}
+        }
+        let mut decoded_size = 0u32;
+        if CryptDecodeObjectEx(
+            (*cert).dwCertEncodingType,
+            structure,
+            value,
+            0,
+            None,
+            None,
+            &mut decoded_size,
+        )
+        .is_err()
+        {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(windows)]
@@ -472,6 +620,9 @@ fn read_store(machine_store: bool) -> Result<Vec<StoreCertificate>, StoreReadErr
                 filetime_u64(&info.NotAfter),
                 now,
             );
+            if !usage_extensions_are_decodable(cert) {
+                continue;
+            }
             let usage = intended_key_usage(cert);
             let Some(eku) = enhanced_key_usage(cert) else {
                 continue;
@@ -643,6 +794,93 @@ mod tests {
         assert_eq!(v["reason"], "open-failed");
         assert_eq!(v["code"], "0x80070005");
         assert!(v["message"].as_str().is_some());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn malformed_usage_extensions_are_not_treated_as_absent() {
+        fn extension(oid: &'static [u8], value: &[u8]) -> CERT_EXTENSION {
+            CERT_EXTENSION {
+                pszObjId: PSTR(oid.as_ptr() as *mut u8),
+                fCritical: windows::core::BOOL(0),
+                Value: CRYPT_INTEGER_BLOB {
+                    cbData: value.len() as u32,
+                    pbData: value.as_ptr() as *mut u8,
+                },
+            }
+        }
+
+        fn readable(extensions: &mut [CERT_EXTENSION]) -> bool {
+            let mut info = CERT_INFO {
+                cExtension: extensions.len() as u32,
+                rgExtension: extensions.as_mut_ptr(),
+                ..CERT_INFO::default()
+            };
+            let cert = CERT_CONTEXT {
+                dwCertEncodingType: X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
+                pCertInfo: &mut info,
+                ..CERT_CONTEXT::default()
+            };
+            unsafe { usage_extensions_are_decodable(&cert) }
+        }
+
+        const KEY_USAGE: &[u8] = b"2.5.29.15\0";
+        const KEY_ATTRIBUTES: &[u8] = b"2.5.29.2\0";
+        const EKU: &[u8] = b"2.5.29.37\0";
+        let key_usage = [0x03, 0x02, 0x07, 0x80];
+        let key_attributes = [0x30, 0x00];
+        let eku = [
+            0x30, 0x0a, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x04,
+        ];
+        let mut absent = [];
+        assert!(readable(&mut absent));
+        let mut valid = [
+            extension(KEY_USAGE, &key_usage),
+            extension(KEY_ATTRIBUTES, &key_attributes),
+            extension(EKU, &eku),
+        ];
+        assert!(readable(&mut valid));
+
+        for (oid, malformed) in [
+            (KEY_USAGE, &[0x04, 0x02, 0xff, 0xff][..]),
+            (KEY_USAGE, &[0x03, 0x03, 0x09, 0xff, 0xff][..]),
+            (KEY_USAGE, &[0x03, 0x81, 0x02, 0x07, 0x80][..]),
+            (KEY_ATTRIBUTES, &[0x04, 0x02, 0xff, 0xff][..]),
+            (KEY_ATTRIBUTES, &[0x30, 0x81, 0x00][..]),
+            (EKU, &[0x04, 0x02, 0xff, 0xff][..]),
+            (EKU, &[0x30, 0x03, 0x06, 0x01, 0x80][..]),
+            (EKU, &[0x30, 0x04, 0x06, 0x02, 0x80, 0x00][..]),
+            (
+                EKU,
+                &[
+                    0x30, 0x10, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x04,
+                ][..],
+            ),
+        ] {
+            let mut extensions = [extension(oid, malformed)];
+            assert!(!readable(&mut extensions), "accepted malformed OID {oid:?}");
+        }
+
+        let mut duplicate = [
+            extension(KEY_USAGE, &key_usage),
+            extension(KEY_USAGE, &key_usage),
+        ];
+        assert!(
+            !readable(&mut duplicate),
+            "accepted duplicate key-usage extensions"
+        );
+
+        let mut too_many = vec![CERT_EXTENSION::default(); MAX_CERT_USAGE_EXTENSIONS + 1];
+        assert!(
+            !readable(&mut too_many),
+            "accepted an excessive extension count"
+        );
+        let oversized_value = vec![0; MAX_CERT_EKU_BYTES + 1];
+        let mut oversized = [extension(KEY_USAGE, &oversized_value)];
+        assert!(
+            !readable(&mut oversized),
+            "accepted an oversized usage extension"
+        );
     }
 
     #[cfg(windows)]
