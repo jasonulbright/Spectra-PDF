@@ -63,3 +63,25 @@ def test_a_deep_result_becomes_an_error_without_ending_the_server():
     assert first["id"] == 1
     assert first["error"]["code"] == -32603
     assert second == {"jsonrpc": "2.0", "result": "alive", "id": 2}
+
+
+def test_handler_progress_does_not_mix_with_json_rpc_stdout(capsys):
+    server = JsonRpcServer()
+
+    def report_progress():
+        print("[1/1] sample.pdf", flush=True)
+        return "done"
+
+    server.register("progress", report_progress)
+    output = StringIO()
+
+    server.run(StringIO(_request(1, "progress")), output)
+
+    assert json.loads(output.getvalue()) == {
+        "jsonrpc": "2.0",
+        "result": "done",
+        "id": 1,
+    }
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "[1/1] sample.pdf\n"

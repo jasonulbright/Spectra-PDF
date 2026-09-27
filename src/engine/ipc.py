@@ -15,6 +15,7 @@ import json
 import math
 import re
 import sys
+from contextlib import redirect_stdout
 from typing import Any, Callable, TextIO
 
 _LONE_SURROGATE = re.compile("[\ud800-\udfff]")
@@ -105,7 +106,11 @@ class JsonRpcServer:
             if not isinstance(request, dict):
                 self._write_error(output_stream, None, -32600, "Invalid Request")
                 continue
-            response = self._handle(request)
+            # Handler progress and diagnostics are not JSON-RPC frames. Keep
+            # synchronous prints off stdout, which is the line-framed protocol
+            # channel consumed by both the desktop app and the CLI.
+            with redirect_stdout(sys.stderr):
+                response = self._handle(request)
             if response is None:
                 continue
             try:
