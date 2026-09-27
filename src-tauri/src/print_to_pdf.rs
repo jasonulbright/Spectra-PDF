@@ -13,8 +13,9 @@
 //! posture as watched folders.
 //!
 //! Printer/port INSTALLATION needs admin (ports are machine objects), so
-//! Install/Remove run a visible, user-initiated UAC elevation over a staged
-//! pure-ASCII PowerShell script — never a silent elevation. A print sent
+//! Install/Remove run a visible, user-initiated UAC elevation with a
+//! UTF-16LE-encoded PowerShell command — never a silent elevation or a
+//! swappable script file. A print sent
 //! while the app is closed sits in the Windows queue erroring-retrying until
 //! the app (and so the listener) is back; the Settings block says exactly
 //! that.
@@ -26,6 +27,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use base64::Engine as _;
 use tauri::{AppHandle, Manager};
 
 pub const PRINTER_NAME: &str = "Spectra PDF";
@@ -463,46 +465,24 @@ fn run_powershell(args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// Where an elevation reads its script. Pid-suffixed: a fixed path executed
-/// under RunAs leaves a same-user swap window between write and read.
-fn elevated_script_path(dir: &Path, label: &str, pid: u32) -> PathBuf {
-    dir.join(format!("opdfs-printer-{label}-{pid}.ps1"))
+fn encode_powershell_command(script_body: &str) -> String {
+    let utf16le: Vec<u8> = script_body
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    base64::engine::general_purpose::STANDARD.encode(utf16le)
 }
 
-fn write_elevated_script(path: &Path, body: &str) -> std::io::Result<std::fs::File> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        // The elevated PowerShell child may read the file, but another process
-        // cannot replace or edit it while the administrator prompt is open.
-        options.share_mode(1); // FILE_SHARE_READ
-    }
-    let mut file = options.open(path)?;
-    if let Err(error) = file.write_all(body.as_bytes()).and_then(|()| file.flush()) {
-        drop(file);
-        let _ = std::fs::remove_file(path);
-        return Err(error);
-    }
-    Ok(file)
-}
-
-fn powershell_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
-fn elevation_command(script_path: &Path) -> String {
-    let script_path = powershell_literal(&script_path.to_string_lossy());
+fn elevation_command(script_body: &str) -> String {
+    let encoded = encode_powershell_command(script_body);
     format!(
-        "$scriptPath = {script_path}; \
-         $argumentList = '-NoProfile -ExecutionPolicy Bypass -File \"' + $scriptPath + '\"'; \
+        "$argumentList = '-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}'; \
          $p = Start-Process -Verb RunAs -Wait -PassThru -FilePath 'powershell.exe' \
          -ArgumentList $argumentList; exit $p.ExitCode"
     )
 }
 
-/// The process whose `elevated_script_path` produced `entry`.
+/// A legacy staged-script name left by a process killed during elevation.
 fn elevated_script_owner(entry: &str) -> Option<u32> {
     let (label, pid) = entry
         .strip_prefix("opdfs-printer-")?
@@ -519,21 +499,21 @@ fn reclaim_elevated_scripts(dir: &Path, own: u32, running: impl Fn(u32) -> bool)
     crate::staging::reclaim(dir, own, elevated_script_owner, running)
 }
 
-/// Stage a pure-ASCII script and run it through ONE visible UAC elevation.
-fn run_elevated_script(script_body: &str, label: &str) -> Result<(), String> {
+/// Run a PowerShell script through ONE visible UAC elevation. Passing the
+/// script as encoded command text removes the disk path and its swap window.
+fn run_elevated_script(script_body: &str) -> Result<(), String> {
     let dir = std::env::temp_dir();
     let own = std::process::id();
     reclaim_elevated_scripts(&dir, own, crate::staging::process_running);
-    let path = elevated_script_path(&dir, label, own);
-    if !script_body.is_ascii() {
-        return Err("internal: the printer script must be pure ASCII".to_string());
+    let command = elevation_command(script_body);
+    // Leave room for powershell.exe, its switches and CreateProcess quoting.
+    // Windows rejects process command lines at 32,767 UTF-16 code units.
+    if command.encode_utf16().count().saturating_add(512) >= 32_767 {
+        return Err(
+            "The printer setup command exceeds the Windows command-line limit.".to_string(),
+        );
     }
-    let script_file = write_elevated_script(&path, script_body)
-        .map_err(|e| format!("Could not stage the script: {e}"))?;
-    let command = elevation_command(&path);
     let result = run_powershell(&[&command]);
-    drop(script_file);
-    let _ = std::fs::remove_file(&path);
     result.map(|_| ()).map_err(|e| {
         if e.contains("canceled") || e.contains("cancelled") || e.contains("The operation was") {
             "The administrator prompt was declined — the printer was not changed.".to_string()
@@ -655,13 +635,13 @@ pub async fn virtual_printer_status(app: AppHandle) -> Result<VirtualPrinterStat
 #[tauri::command]
 pub async fn install_virtual_printer() -> Result<(), String> {
     let script = install_printer_script();
-    run_elevated_script(&script, "install")
+    run_elevated_script(&script)
 }
 
 #[tauri::command]
 pub async fn uninstall_virtual_printer() -> Result<(), String> {
     let script = uninstall_printer_script();
-    run_elevated_script(&script, "remove")
+    run_elevated_script(&script)
 }
 
 #[cfg(test)]
@@ -841,45 +821,43 @@ try {
     }
 
     #[test]
-    fn elevation_command_keeps_a_quoted_script_path_as_one_argument() {
-        let path = Path::new(r"C:\Users\O'; Start-Process calc;#\printer.ps1");
-        let command = elevation_command(path);
-        assert!(command.contains("'C:\\Users\\O''; Start-Process calc;#\\printer.ps1'"));
-        assert!(command.contains("-File \"' + $scriptPath + '\""));
-        assert!(!command.contains("O'Brien"));
-    }
+    fn elevation_command_carries_the_exact_utf16le_script_without_a_file_path() {
+        let script = "$value = 'O''; Start-Process calc;#'; exit 7";
+        let encoded = encode_powershell_command(script);
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded.as_bytes())
+            .unwrap();
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        assert_eq!(String::from_utf16(&units).unwrap(), script);
 
-    #[test]
-    fn an_existing_elevated_script_is_never_overwritten() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("printer.ps1");
-        std::fs::write(&path, b"keep this file").unwrap();
-
-        assert!(write_elevated_script(&path, "Remove-Printer").is_err());
-        assert_eq!(std::fs::read(path).unwrap(), b"keep this file");
+        let command = elevation_command(script);
+        assert!(command.contains(&format!("-EncodedCommand {encoded}")));
+        assert!(!command.contains(" -File "));
+        assert!(!command.contains(".ps1"));
     }
 
     #[cfg(windows)]
     #[test]
-    fn an_elevated_script_stays_readable_but_cannot_be_replaced_while_in_use() {
-        use std::io::Read;
-        use std::os::windows::fs::OpenOptionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("printer.ps1");
-        let held = write_elevated_script(&path, "Remove-Printer").unwrap();
+    fn elevated_child_executes_encoded_script_and_returns_its_exit_code() {
+        use std::process::Command;
 
-        let mut reader = std::fs::OpenOptions::new().read(true).open(&path).unwrap();
-        let mut body = String::new();
-        reader.read_to_string(&mut body).unwrap();
-        assert_eq!(body, "Remove-Printer");
-        assert!(std::fs::remove_file(&path).is_err());
-        assert!(std::fs::OpenOptions::new()
-            .write(true)
-            .share_mode(1)
-            .open(&path)
-            .is_err());
-        drop(held);
-        std::fs::remove_file(path).unwrap();
+        let command = elevation_command("exit 7\r\n").replace("-Verb RunAs ", "");
+        let output = Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg(command)
+            .output()
+            .unwrap();
+
+        assert_eq!(
+            output.status.code(),
+            Some(7),
+            "stdout: {}; stderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
@@ -972,14 +950,7 @@ try {
         const LIVE: u32 = 4200;
         const DEAD: u32 = 4300;
         let dir = tempfile::tempdir().unwrap();
-        let script = |label: &str, pid: u32| {
-            elevated_script_path(dir.path(), label, pid)
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_string()
-        };
+        let script = |label: &str, pid: u32| format!("opdfs-printer-{label}-{pid}.ps1");
         let kept = [
             script("install", OWN),
             script("remove", LIVE),

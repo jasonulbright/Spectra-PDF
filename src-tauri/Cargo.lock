@@ -3978,6 +3978,7 @@ dependencies = [
 name = "spectrapdf"
 version = "1.2.6"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "dunce",
  "reqwest",
