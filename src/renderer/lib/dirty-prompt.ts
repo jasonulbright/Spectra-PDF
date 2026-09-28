@@ -47,8 +47,9 @@ export async function confirmDirtySnapshots(
   current: () => readonly DirtyPromptSnapshot[],
   decide: (pending: readonly DirtyPromptSnapshot[]) => Promise<DirtyPromptChoice>,
   save: (pending: readonly DirtyPromptSnapshot[]) => Promise<boolean>,
+  previouslyConfirmed: readonly DirtyPromptSnapshot[] = [],
 ): Promise<boolean> {
-  const confirmed = new Map<string, DirtyPromptSnapshot>();
+  const confirmed = new Map(previouslyConfirmed.map((snapshot) => [snapshot.path, snapshot]));
   while (true) {
     const pending = unconfirmedDirtySnapshots(confirmed, current());
     if (pending.length === 0) return true;

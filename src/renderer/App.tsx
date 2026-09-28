@@ -113,7 +113,7 @@ import { hasPendingPageCommit, recoverPendingPageCommit } from './lib/page-commi
 import { pageEditDecision, type PageDelta } from './lib/page-edit-gate';
 import { opCapability, sequenceEditClass, type OpMethod } from './lib/op-edit-class';
 import type { PreserveOutcome, PreserveRefusal } from './lib/preserve-reason';
-import { sealBeforeClose, shouldMinimizeToTrayOnClose } from './lib/close-sequence';
+import { finishCoordinatedExit, sealBeforeClose, shouldMinimizeToTrayOnClose } from './lib/close-sequence';
 import { setCommitGate, runCommitGate } from './lib/commit-gate';
 import { initialViewPlan, parseInitialView, planIsInert } from './lib/initial-view';
 import type { FormFieldValue } from './lib/forms';
@@ -190,7 +190,7 @@ import {
   sweepDeadRecents,
 } from './lib/recent-files';
 import { claimPaths, createClaimHolds, departedImportSources, downgradeImportSourceClaims, releasePaths, retainedImportSources, soleOwner, type ClaimRefusal } from './lib/window-claims';
-import { confirmDirtySnapshots, dirtyPromptSnapshots, sameDirtyPromptSnapshot } from './lib/dirty-prompt';
+import { confirmDirtySnapshots, dirtyPromptSnapshots, sameDirtyPromptSnapshot, type DirtyPromptSnapshot } from './lib/dirty-prompt';
 import { createOpenFlights, createPathOperationLock, openPathOnce } from './lib/open-flights';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
@@ -2538,6 +2538,7 @@ function AppContent(): React.ReactElement {
   const confirmCurrentDirtyFiles = useCallback(async (
     paths: () => readonly string[],
     message: (names: string) => string,
+    previouslyConfirmed: readonly DirtyPromptSnapshot[] = [],
   ): Promise<boolean> => {
     const snapshots = () => dirtyPromptSnapshots(readState(), paths());
     return confirmDirtySnapshots(
@@ -2562,6 +2563,7 @@ function AppContent(): React.ReactElement {
         }
         return true;
       },
+      previouslyConfirmed,
     );
   }, [readState, showConfirm, commitOrAbort, saveOrReport, dispatch]);
 
@@ -2692,10 +2694,15 @@ function AppContent(): React.ReactElement {
   // Exit the app (File ▸ Exit / Ctrl+Q) — always quits when clean; the
   // tray-minimize setting governs the window × (below), not an explicit Exit.
   const handleExit = useCallback(async () => {
+    const paths = () => [...readState().files.keys()];
     if (!(await confirmCurrentDirtyFiles(
-      () => [...readState().files.keys()],
+      paths,
       (names) => tChrome('app.exit.unsaved', { names }),
     ))) return;
+    // The initiating window stays open and interactive while peers complete
+    // their own prompts. Carry forward the exact dirty revisions answered
+    // here so the final check asks only about later edits.
+    const alreadyAnswered = dirtyPromptSnapshots(readState(), paths());
     // The quit SEALS the session record, and the seal takes whatever tab order
     // arrived last. The order publishes serially and nothing waits on it — a
     // reorder made in the seconds before Exit can still be behind an in-flight
@@ -2720,19 +2727,20 @@ function AppContent(): React.ReactElement {
     // window that never answers has not heard it and will not close, and this
     // window closing anyway would leave it standing behind a session record
     // that stopped being written the moment Exit was chosen.
-    if (!(await app.requestQuit())) {
-      // Fail-closed, and said out loud. The quit unsealed itself and nothing
-      // closed; without a word the user sees Exit do nothing at all, which is
-      // indistinguishable from a hung menu — and the remedy (close the
-      // unresponsive window first) is not guessable.
-      await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
-      return;
-    }
-    // The last window out captures the session on its way down. A capture that
-    // did not reach disk leaves this window standing rather than exiting with
-    // an older run's record on the file — said out loud for the same reason the
-    // abort above is.
-    if (!(await app.confirmClose())) {
+    const result = await finishCoordinatedExit(
+      () => app.requestQuit(),
+      () => confirmCurrentDirtyFiles(
+        paths,
+        (names) => tChrome('app.exit.unsaved', { names }),
+        alreadyAnswered,
+      ),
+      (sessionId) => app.quitCancelled(sessionId),
+      () => app.confirmClose(),
+    );
+    if (result === 'cancelled') return;
+    // A missing peer receipt, malformed quit result, or failed session
+    // capture leaves the window open and is reported through the normal path.
+    if (result === 'aborted') {
       await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
     }
   }, [readState, confirmCurrentDirtyFiles, showNotice]);

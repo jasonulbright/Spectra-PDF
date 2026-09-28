@@ -1934,6 +1934,15 @@ const PREPARE_CLOSE_EVENT: &str = "app:prepareClose";
 /// The round that asks every peer to run its own close flow.
 const BEFORE_CLOSE_EVENT: &str = "app:beforeClose";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuitRequestResult {
+    pub proceed: bool,
+    /// The seal token lets the initiating renderer revoke this exact quit if
+    /// new dirty edits are made while peer windows handle their prompts.
+    pub session_id: Option<u64>,
+}
+
 /// Ask every peer one question and wait for its receipt.
 ///
 /// `session_id` identifies a sealed close round. An abort there returns the
@@ -1971,7 +1980,10 @@ fn ack_round(
 }
 
 #[tauri::command]
-pub async fn request_quit(app: AppHandle, window: tauri::WebviewWindow) -> Result<bool, String> {
+pub async fn request_quit(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<QuitRequestResult, String> {
     let peers: Vec<String> = crate::app_windows::app_window_labels(&app)
         .into_iter()
         .filter(|l| l != window.label())
@@ -1993,13 +2005,16 @@ pub async fn request_quit(app: AppHandle, window: tauri::WebviewWindow) -> Resul
     })
     .await;
     match sequenced {
-        Ok(proceed) => Ok(proceed),
+        Ok(proceed) => Ok(QuitRequestResult {
+            proceed,
+            session_id: proceed.then_some(session_id),
+        }),
         // A sequence whose answer never arrived is not an answer of yes, and
         // whatever it had taken has to come off: the run would otherwise carry
         // on behind a record frozen at the moment Exit was chosen.
         Err(_) => {
             crate::session::unseal_for(&app, session_id);
-            Ok(false)
+            Ok(QuitRequestResult { proceed: false, session_id: None })
         }
     }
 }
@@ -2522,7 +2537,7 @@ mod tests {
         reclaim_batch_log_stages, run_key_action, save_as, select_argument, working_copy_in,
         write_action_file, write_batch_log_at, write_profile_file, write_report_file,
         write_startup_flag_at, EngineOutputTarget, LaunchRecord, PathStatus, RunKeyAction,
-        StartupConfig,
+        QuitRequestResult, StartupConfig,
         UnreadableRecord, UnreadableRecords, CLASSIFY_MAX_BATCH,
     };
     use std::path::Path;
@@ -2583,6 +2598,15 @@ mod tests {
         assert!(engine_output_path(&relative_folder).unwrap_err().contains("absolute"));
         let absent = serde_json::json!({"id": 7, "params": {"file": r"C:\in.pdf"}});
         assert_eq!(engine_output_path(&absent).unwrap(), None);
+    }
+
+    #[test]
+    fn quit_result_serializes_the_session_token_for_the_renderer() {
+        let value = serde_json::to_value(QuitRequestResult {
+            proceed: true,
+            session_id: Some(17),
+        }).unwrap();
+        assert_eq!(value, serde_json::json!({ "proceed": true, "sessionId": 17 }));
     }
 
     #[test]
