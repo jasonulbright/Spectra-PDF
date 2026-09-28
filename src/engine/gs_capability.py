@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -135,6 +136,16 @@ class GsUnavailable(RuntimeError):
 # --------------------------------------------------------------------------
 
 _CACHE: dict[tuple[str, int, int], GsCapability] = {}
+VERSION_BUDGET = 30.0
+SMOKE_BUDGET = 60.0
+RESOLUTION_BUDGET = 90.0
+
+
+def _remember_probe_result(key, answer: GsCapability, budget: float) -> None:
+    # A failure under the shorter remainder of auto-discovery must not poison
+    # a later explicit check that gets the full probe window.
+    if budget >= RESOLUTION_BUDGET or answer.reason != PROBE_FAILED:
+        _CACHE[key] = answer
 
 
 def clear_cache() -> None:
@@ -169,7 +180,7 @@ def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
     )
 
 
-def _smoke(path: str) -> tuple[bool, str]:
+def _smoke(path: str, *, timeout: float = SMOKE_BUDGET) -> tuple[bool, str]:
     """Render one tiny page. True when a raster actually came out.
 
     `--version` proves a file answers; it does not prove the interpreter can
@@ -186,7 +197,7 @@ def _smoke(path: str) -> tuple[bool, str]:
                     f"-sOutputFile={png}",
                     "-c", "0 0 moveto 16 16 lineto 0.5 setlinewidth stroke showpage",
                 ],
-                timeout=60.0,
+                timeout=timeout,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             return False, str(exc)
@@ -199,6 +210,11 @@ def _smoke(path: str) -> tuple[bool, str]:
 
 def probe(path: str | Path) -> GsCapability:
     """Validate ONE candidate path. Cached per path + mtime + size."""
+    return _probe_with_budget(path, RESOLUTION_BUDGET)
+
+
+def _probe_with_budget(path: str | Path, budget: float) -> GsCapability:
+    started = time.monotonic()
     text = str(path or "")
     if not text:
         return GsCapability(False, "", "", NOT_CONFIGURED)
@@ -215,10 +231,10 @@ def probe(path: str | Path) -> GsCapability:
         return cached
 
     try:
-        version_run = _run([text, "--version"], timeout=30.0)
+        version_run = _run([text, "--version"], timeout=min(VERSION_BUDGET, budget))
     except (OSError, subprocess.SubprocessError) as exc:
         answer = GsCapability(False, text, "", PROBE_FAILED, str(exc))
-        _CACHE[key] = answer
+        _remember_probe_result(key, answer, budget)
         return answer
 
     version = (version_run.stdout or "").strip().splitlines()
@@ -228,22 +244,31 @@ def probe(path: str | Path) -> GsCapability:
             False, text, "", PROBE_FAILED,
             (version_run.stderr or "").strip() or "no version was reported",
         )
-        _CACHE[key] = answer
+        _remember_probe_result(key, answer, budget)
         return answer
 
     parsed = parse_version(version_text)
     if not parsed or parsed[:2] < MINIMUM_VERSION:
         answer = GsCapability(False, text, version_text, VERSION_BELOW_MINIMUM)
-        _CACHE[key] = answer
+        _remember_probe_result(key, answer, budget)
         return answer
 
-    ok, detail = _smoke(text)
+    smoke_budget = min(SMOKE_BUDGET, budget - (time.monotonic() - started))
+    if smoke_budget <= 0:
+        answer = GsCapability(
+            False, text, version_text, PROBE_FAILED,
+            "the capability check exceeded its total time budget",
+        )
+        _remember_probe_result(key, answer, budget)
+        return answer
+
+    ok, detail = _smoke(text, timeout=smoke_budget)
     answer = (
         GsCapability(True, text, version_text, "")
         if ok
         else GsCapability(False, text, version_text, PROBE_FAILED, detail)
     )
-    _CACHE[key] = answer
+    _remember_probe_result(key, answer, budget)
     return answer
 
 
@@ -298,12 +323,35 @@ def resolve(path: str | Path | None = None) -> GsCapability:
             False, text, "", NOT_EXECUTABLE
         )
 
-    candidates = discover()
+    return _resolve_candidates_with(discover(), RESOLUTION_BUDGET, _probe_with_budget)
+
+
+def _resolve_candidates_with(candidates, budget: float, probe_candidate) -> GsCapability:
+    deadline = time.monotonic() + budget
     first_failure: GsCapability | None = None
+    first_candidate = True
     for candidate in candidates:
-        answer = probe(candidate)
+        remaining = budget if first_candidate else deadline - time.monotonic()
+        if remaining <= 0:
+            return GsCapability(
+                False,
+                first_failure.path if first_failure else "",
+                "",
+                PROBE_FAILED,
+                "Ghostscript discovery exceeded its total time budget.",
+            )
+        first_candidate = False
+        answer = probe_candidate(candidate, remaining)
         if answer.available:
             return answer
+        if time.monotonic() >= deadline:
+            return GsCapability(
+                False,
+                candidate,
+                answer.version,
+                PROBE_FAILED,
+                "Ghostscript discovery exceeded its total time budget.",
+            )
         if first_failure is None:
             first_failure = answer
     return first_failure or GsCapability(False, "", "", NOT_CONFIGURED)

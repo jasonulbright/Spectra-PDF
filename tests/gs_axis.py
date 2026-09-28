@@ -91,6 +91,9 @@ def force_absent(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(gc, "discover", lambda: [])
     monkeypatch.setattr(gc, "probe", _probe)
+    monkeypatch.setattr(
+        gc, "_probe_with_budget", lambda path, _budget: _probe(path)
+    )
     monkeypatch.setattr(gc, "_run", _never_runs)
     monkeypatch.setattr(gc.shutil, "which", lambda *_a, **_k: None)
 
@@ -124,6 +127,9 @@ def force_available(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
 
     monkeypatch.setattr(gc, "discover", lambda: [path])
     monkeypatch.setattr(gc, "probe", _probe)
+    monkeypatch.setattr(
+        gc, "_probe_with_budget", lambda candidate, _budget: _probe(candidate)
+    )
     monkeypatch.setattr(gc, "_run", _never_runs)
     monkeypatch.setattr(
         gc.shutil, "which", lambda name, *_a, **_k: path if name == path else None
