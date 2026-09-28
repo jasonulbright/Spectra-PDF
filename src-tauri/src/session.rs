@@ -171,16 +171,76 @@ pub fn place_rect(saved: Rect, monitors: &[Rect], primary_work_area: Rect) -> Re
     if area <= 0 {
         return center_in(saved, primary_work_area);
     }
-    let visible: i128 = monitors
-        .iter()
-        .map(|m| i128::from(saved.intersection_area(m)))
-        .sum();
+    let visible = union_intersection_area(saved, monitors);
     if visible * i128::from(MIN_VISIBLE_DENOMINATOR)
         >= i128::from(area) * i128::from(MIN_VISIBLE_NUMERATOR)
     {
         return saved;
     }
     center_in(saved, primary_work_area)
+}
+
+/// Measure the part of `saved` covered by at least one monitor.
+///
+/// Monitor rectangles usually do not overlap, but Windows can enumerate
+/// mirror-driver monitors at the same virtual-screen coordinates. Summing
+/// intersections would count those pixels more than once and could leave a
+/// mostly off-screen window at its saved position.
+fn union_intersection_area(saved: Rect, monitors: &[Rect]) -> i128 {
+    let mut intersections: Vec<(i64, i64, i64, i64)> = monitors
+        .iter()
+        .filter_map(|monitor| {
+            let left = (saved.x as i64).max(monitor.x as i64);
+            let right = (saved.x as i64 + saved.width as i64)
+                .min(monitor.x as i64 + monitor.width as i64);
+            let top = (saved.y as i64).max(monitor.y as i64);
+            let bottom = (saved.y as i64 + saved.height as i64)
+                .min(monitor.y as i64 + monitor.height as i64);
+            (left < right && top < bottom).then_some((left, right, top, bottom))
+        })
+        .collect();
+    if intersections.is_empty() {
+        return 0;
+    }
+
+    let mut x_edges: Vec<i64> = intersections
+        .iter()
+        .flat_map(|(left, right, _, _)| [*left, *right])
+        .collect();
+    x_edges.sort_unstable();
+    x_edges.dedup();
+
+    let mut area = 0i128;
+    for pair in x_edges.windows(2) {
+        let (left, right) = (pair[0], pair[1]);
+        if left == right {
+            continue;
+        }
+        let mut y_ranges: Vec<(i64, i64)> = intersections
+            .iter()
+            .filter(|(x0, x1, _, _)| *x0 <= left && *x1 >= right)
+            .map(|(_, _, top, bottom)| (*top, *bottom))
+            .collect();
+        y_ranges.sort_unstable();
+
+        let mut covered = 0i64;
+        let mut current: Option<(i64, i64)> = None;
+        for (top, bottom) in y_ranges {
+            match current {
+                Some((start, end)) if top <= end => current = Some((start, end.max(bottom))),
+                Some((start, end)) => {
+                    covered += end - start;
+                    current = Some((top, bottom));
+                }
+                None => current = Some((top, bottom)),
+            }
+        }
+        if let Some((start, end)) = current {
+            covered += end - start;
+        }
+        area += i128::from(right - left) * i128::from(covered);
+    }
+    area
 }
 
 // ── Pure launch decision ──────────────────────────────────────────────────
@@ -1384,6 +1444,29 @@ mod tests {
         assert_eq!(
             place_rect(under, &two_monitors(), primary()),
             rect(460, 120, 1000, 800)
+        );
+    }
+
+    #[test]
+    fn overlapping_monitor_bounds_are_counted_once_for_visibility() {
+        let saved = rect(1770, 100, 1000, 800);
+        let mirrored = rect(0, 0, 1920, 1080);
+        assert_eq!(saved.intersection_area(&mirrored), 150 * 800);
+        assert_eq!(
+            place_rect(saved, &[mirrored, mirrored], primary()),
+            rect(460, 120, 1000, 800),
+            "two monitor records for the same screen pixels must not make an otherwise unreachable window appear visible"
+        );
+
+        // Separate monitors still contribute their distinct pixels together.
+        let spanning = rect(1500, 100, 1000, 800);
+        assert_eq!(
+            place_rect(
+                spanning,
+                &[rect(0, 0, 1700, 1080), rect(1700, 0, 200, 1080)],
+                primary()
+            ),
+            spanning
         );
     }
 
