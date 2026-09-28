@@ -1,10 +1,25 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { shouldMinimizeToTrayOnClose } from '../src/renderer/lib/close-sequence';
 
 const source = readFileSync(resolve(process.cwd(), 'src/renderer/App.tsx'), 'utf8');
 
 describe('tray Quit', () => {
+  it('only applies the tray preference to a plain window close', () => {
+    expect(shouldMinimizeToTrayOnClose(null, true)).toBe(true);
+    expect(shouldMinimizeToTrayOnClose(17, true)).toBe(false);
+    expect(shouldMinimizeToTrayOnClose(null, false)).toBe(false);
+
+    const closeStart = source.indexOf('const unlisten = app.onBeforeClose(');
+    const closeEnd = source.indexOf('// Leaving doc-tab-land', closeStart);
+    expect(closeStart).toBeGreaterThanOrEqual(0);
+    expect(closeEnd).toBeGreaterThan(closeStart);
+    expect(source.slice(closeStart, closeEnd)).toMatch(
+      /shouldMinimizeToTrayOnClose\(\s*sessionId,\s*getSettings\(\)\.minimizeToTray === true,\s*\)/,
+    );
+  });
+
   it('uses the same unsaved-work and acknowledged close flow as File Exit', () => {
     const listenerStart = source.indexOf('const unlisten = app.onTrayAction(');
     const listenerEnd = source.indexOf('// Handle files opened via file association', listenerStart);

@@ -113,7 +113,7 @@ import { hasPendingPageCommit, recoverPendingPageCommit } from './lib/page-commi
 import { pageEditDecision, type PageDelta } from './lib/page-edit-gate';
 import { opCapability, sequenceEditClass, type OpMethod } from './lib/op-edit-class';
 import type { PreserveOutcome, PreserveRefusal } from './lib/preserve-reason';
-import { sealBeforeClose } from './lib/close-sequence';
+import { sealBeforeClose, shouldMinimizeToTrayOnClose } from './lib/close-sequence';
 import { setCommitGate, runCommitGate } from './lib/commit-gate';
 import { initialViewPlan, parseInitialView, planIsInert } from './lib/initial-view';
 import type { FormFieldValue } from './lib/forms';
@@ -3136,7 +3136,10 @@ function AppContent(): React.ReactElement {
       // is never refused this way: it has no quit to withhold from.
       if (!(await sealBeforeClose(quitId, { flush: flushTabOrder, ack: app.quitAck }))) return;
       await handOffGate.current.settled();
-      const minimizeToTray = getSettings().minimizeToTray === true;
+      const minimizeToTray = shouldMinimizeToTrayOnClose(
+        sessionId,
+        getSettings().minimizeToTray === true,
+      );
       // Rust decides between hiding and closing, because only it knows whether
       // this is the last workspace window: tray residency is an app-level
       // state, so a second window's × closes that window rather than hiding
