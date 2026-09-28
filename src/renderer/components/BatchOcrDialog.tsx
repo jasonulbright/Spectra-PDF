@@ -13,13 +13,15 @@ import {
   runBatchOcr,
   destConflictsWithSource,
   summarize,
+  BatchPauseGate,
+  type BatchPauseState,
   type BatchProgress,
   type BatchReport,
   type EmptyFolderReport,
   emptyFolderRefusal,
 } from '../lib/batch-ocr';
 import { REFUSAL_STRINGS } from '../i18n-refusals';
-import { createBatchIo } from '../lib/batch-ocr-io';
+import { createBatchIo, type RepairReport } from '../lib/batch-ocr-io';
 import { claimOutputRoots, writtenRoots } from '../lib/output-root-claim';
 import { formatBatchLog, batchLogFileName } from '../lib/batch-log';
 import { getSettings } from '../lib/app-settings';
@@ -103,6 +105,9 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const [enhance, setEnhance] = useState(false);
   const [enhanceOrientation, setEnhanceOrientation] = useState(true);
   const [removeEmptyFolders, setRemoveEmptyFolders] = useState(false);
+  // Repair every file and recognise nothing. The recognition-only controls
+  // stay visible but disabled, with the note saying why.
+  const [repairOnly, setRepairOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
   const [report, setReport] = useState<BatchReport | null>(null);
@@ -125,6 +130,10 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     saveBatchOcrPresets(next);
   };
 
+  // Replacing the original needs repaired bytes: the damaged-file repair makes
+  // them in an OCR run, and every file of a repair-only run has them.
+  const replaceArmed = (repairDamaged || repairOnly) && replaceRepaired;
+
   /** Everything the dialog is set to, as the stored shape. */
   const currentSettings = (): BatchOcrSettings => ({
     source: source ?? '',
@@ -134,13 +143,14 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     movedRoot: movedRoot ?? '',
     errorRoot: errorRoot ?? '',
     repairDamaged,
-    replaceRepairedOriginals: repairDamaged && replaceRepaired,
+    replaceRepairedOriginals: replaceArmed,
     mrc,
     mrcPreset,
     mrcVerifyText: mrcVerify,
     enhance,
     enhanceOrientation,
     removeEmptyFolders,
+    repairOnly,
   });
 
   // Applying a preset re-enumerates the source rather than trusting a stored
@@ -168,6 +178,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     setEnhance(s.enhance);
     setEnhanceOrientation(s.enhanceOrientation);
     setRemoveEmptyFolders(s.removeEmptyFolders);
+    setRepairOnly(s.repairOnly);
     if (s.source === '') {
       setSource(null);
       setEntries(null);
@@ -238,6 +249,20 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const cancelOcrRef = useRef<(() => void) | null>(null);
   const phaseRef = useRef<Phase>('setup');
   phaseRef.current = phase;
+  // One gate per mirror run. Pause takes effect between files; the gate is
+  // released on Stop and on unmount, so a closed dialog never leaves a run
+  // parked with its folder claims held.
+  const pauseGateRef = useRef<BatchPauseGate | null>(null);
+  const [pauseState, setPauseState] = useState<BatchPauseState>('running');
+  const pauseStateRef = useRef(pauseState);
+  pauseStateRef.current = pauseState;
+  useEffect(
+    () => () => {
+      cancelledRef.current = true;
+      pauseGateRef.current?.release();
+    },
+    [],
+  );
 
   // The three phases render as mutually exclusive subtrees, so a transition
   // unmounts the node holding focus and Chromium drops focus to <body> —
@@ -354,8 +379,9 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     phase === 'setup' &&
     // Batch OCR runs OUTSIDE the workspace — no panel, no commit gate, no op
     // queue — so its refusal is taken here, before a single source folder is
-    // walked, rather than inherited from a panel's disabled state.
-    !gsBlocked(gs) &&
+    // walked, rather than inherited from a panel's disabled state. A
+    // repair-only run renders nothing, so it never needs Ghostscript.
+    (repairOnly || !gsBlocked(gs)) &&
     !scanning &&
     source !== null &&
     (inPlace || (dest !== null && !conflict && movedConflict === null)) &&
@@ -379,6 +405,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     src: string,
     dst: string,
     fatalError?: string,
+    pausedMs = 0,
   ): Promise<void> => {
     const settings = getSettings();
     if (!settings.batchLogEnabled) return;
@@ -396,10 +423,12 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
           filing: {
             ...(movedRoot ? { movedRoot } : {}),
             ...(errorRoot ? { errorRoot } : {}),
-            repairDamaged,
-            replaceRepairedOriginals: repairDamaged && replaceRepaired,
+            repairDamaged: repairDamaged && !repairOnly,
+            replaceRepairedOriginals: replaceArmed,
           },
           ...(fatalError ? { fatalError } : {}),
+          ...(repairOnly ? { repairOnly: true } : {}),
+          ...(pausedMs > 0 ? { pausedMs } : {}),
         }),
         settings.batchLogDir,
       );
@@ -449,19 +478,20 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         dest: '',
         lang: toTesseractLang(langs),
         tesseract_path: await tesseractPath(),
-        gs_path: await requireGsPath(),
+        gs_path: repairOnly ? '' : await requireGsPath(),
         error_root: errorRoot ?? '',
-        repair_damaged: repairDamaged,
-        replace_repaired_originals: repairDamaged && replaceRepaired,
+        repair_damaged: repairDamaged && !repairOnly,
+        replace_repaired_originals: replaceArmed,
         log_dir: logDir,
         in_place: true,
-        mrc,
+        mrc: mrc && !repairOnly,
         mrc_preset: mrcPreset,
-        mrc_verify_text: mrcVerify,
-        enhance,
+        mrc_verify_text: mrcVerify && !repairOnly,
+        enhance: enhance && !repairOnly,
         enhance_orientation: enhanceOrientation,
         font_dir: await app.getEditFontPath(),
         remove_empty_folders: removeEmptyFolders,
+        repair_only: repairOnly,
       })) as unknown as BatchReport & { logPath?: string };
       setReport(rep);
       setLogPath(rep.logPath ?? null);
@@ -488,7 +518,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         changesSource:
           Boolean(movedRoot) ||
           Boolean(errorRoot) ||
-          (repairDamaged && replaceRepaired) ||
+          replaceArmed ||
           removeEmptyFolders,
       }),
     );
@@ -503,6 +533,9 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     setLogPath(null);
     setLogError(null);
     cancelledRef.current = false;
+    const gate = new BatchPauseGate(setPauseState);
+    pauseGateRef.current = gate;
+    setPauseState('running');
     const startedAt = new Date();
     // Recognition is a subprocess in the ENGINE now, so there is no worker to
     // construct (and no `new Worker` that could throw synchronously and strand
@@ -516,9 +549,8 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         applyOcrLayer: async (src, out, pages) => {
           await callRaw('apply_ocr_layer', { file: src, output: out, pages });
         },
-        repair: async (src, out) => {
-          await callRaw('repair', { file: src, output: out });
-        },
+        repair: async (src, out) =>
+          (await callRaw('repair', { file: src, output: out })) as unknown as RepairReport,
         recognize: (path, pageIndex) => recognizePage(callRaw, path, pageIndex, lang),
         // The mirror OUTPUT is the input here, which is what makes the
         // recognize-then-MRC order structural. `callRaw` for the same reason
@@ -552,15 +584,17 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
       const rep = await runBatchOcr(entries, dest, skippedDirs, io, {
         onProgress: setProgress,
         isCancelled: () => cancelledRef.current,
-        ...(mrc ? { mrc: { preset: mrcPreset, verifyText: mrcVerify } } : {}),
-        ...(enhance ? { enhance: { orientation: enhanceOrientation } } : {}),
+        pause: gate,
+        ...(repairOnly ? { repairOnly: true } : {}),
+        ...(mrc && !repairOnly ? { mrc: { preset: mrcPreset, verifyText: mrcVerify } } : {}),
+        ...(enhance && !repairOnly ? { enhance: { orientation: enhanceOrientation } } : {}),
         // All four default to off. Batch OCR's standing guarantee is that it
         // does not modify the source tree; these are the opt-ins that invert
         // it, and nothing turns them on but the user.
         ...(movedRoot ? { movedRoot } : {}),
         ...(errorRoot ? { errorRoot } : {}),
-        repairDamaged,
-        replaceRepairedOriginals: repairDamaged && replaceRepaired,
+        repairDamaged: repairDamaged && !repairOnly,
+        replaceRepairedOriginals: replaceArmed,
       });
       // After every file, and never after a stop: a stopped run leaves the
       // tree mid-way, and removing folders then would act on a partial state.
@@ -584,7 +618,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         }
       }
       setReport(rep);
-      await writeLog(startedAt, rep, source, dest);
+      await writeLog(startedAt, rep, source, dest, undefined, gate.pausedMs());
       setPhase('done');
     } catch (e: unknown) {
       // The driver isolates per-file failures; reaching here means something
@@ -599,10 +633,13 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         source,
         dest,
         message,
+        gate.pausedMs(),
       );
       setPhase('setup');
     } finally {
       cancelOcrRef.current = null;
+      gate.release();
+      if (pauseGateRef.current === gate) pauseGateRef.current = null;
       await root.release();
     }
   };
@@ -611,6 +648,14 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     setStopping(true);
     cancelledRef.current = true;
     cancelOcrRef.current?.();
+    pauseGateRef.current?.release();
+  };
+
+  const togglePause = (): void => {
+    const gate = pauseGateRef.current;
+    if (!gate) return;
+    if (gate.current === 'running') gate.pause();
+    else gate.resume();
   };
 
   // Run-again from the report: source/dest/language/entries are all still
@@ -655,6 +700,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         fileCount: entriesRef.current?.length ?? null,
         report: reportRef.current,
         logPath: logPathRef.current,
+        pauseState: pauseStateRef.current,
       }),
     });
     return () => registerBatchOcr(null);
@@ -672,16 +718,21 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const summary = report ? summarize(report) : null;
   const skippedResults = report?.results.filter((r) => r.status === 'skipped') ?? [];
   const movedCount = report?.results.filter((r) => r.movedTo).length ?? 0;
-  const repairedCount = report?.results.filter((r) => r.repaired).length ?? 0;
+  // A repair-only summary already counts repaired files and files that needed
+  // no repair, so neither is listed a second time below it.
+  const repairedCount = repairOnly ? 0 : (report?.results.filter((r) => r.repaired).length ?? 0);
   // A move the user asked for that did not happen. Surfaced at the TOP of the
   // report rather than folded into a list, because it is the only outcome here
   // where the user's own folders are not in the state they asked for.
   const moveFailures = report?.results.filter((r) => r.moveError) ?? [];
-  const notedCopies = report?.results.filter((r) => r.status === 'copied' && r.reason) ?? [];
+  const notedCopies = repairOnly
+    ? []
+    : (report?.results.filter((r) => r.status === 'copied' && r.reason) ?? []);
   // 'ocr' rows carry a reason too when SOME scanned pages had no
   // recognizable text — the mixed-file honesty note (regression).
   const notedOcr = report?.results.filter((r) => r.status === 'ocr' && r.reason) ?? [];
   const notedMrc = report?.results.filter((r) => r.mrc) ?? [];
+  const signaturesLost = report?.results.filter((r) => (r.signaturesRemoved ?? 0) > 0) ?? [];
   const notedEnhance = report?.results.filter((r) => r.enhance) ?? [];
 
   return (
@@ -838,6 +889,23 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               note={null}
             />
           )}
+          <div className="flex flex-col gap-1">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="batch-repair-only"
+                checked={repairOnly}
+                onChange={() => setRepairOnly((v) => !v)}
+                className="rounded bg-neutral-900 border-neutral-600"
+              />
+              <span className="text-sm text-neutral-300">{tChrome('dialog.batch.repairOnly')}</span>
+            </label>
+            {repairOnly && (
+              <p className="text-xs text-neutral-500 ps-6" data-testid="batch-repair-only-note">
+                {tChrome('dialog.batch.repairOnlyNote')}
+              </p>
+            )}
+          </div>
           {conflict && (
             <p className="text-sm text-red-400" data-testid="batch-ocr-conflict">
               {tChrome(
@@ -847,6 +915,15 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               )}
             </p>
           )}
+          {/* Recognition-only controls. Disabled rather than hidden under
+              repair-only, so the stored values stay visible and the note
+              above says why they do not apply. */}
+          <fieldset
+            disabled={repairOnly}
+            data-testid="batch-ocr-only-options"
+            title={repairOnly ? tChrome('dialog.batch.repairOnlyNote') : undefined}
+            className={`flex flex-col gap-4 ${repairOnly ? 'opacity-50' : ''}`}
+          >
           <div>
             <label className="block text-sm text-neutral-400 mb-1">
               {/* One whole label: where the summary sits in the phrase is
@@ -970,6 +1047,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               </div>
             )}
           </div>
+          </fieldset>
 
           {/* Requests 2 and 3. Presented as one clearly-fenced section because
               everything in it BREAKS the promise stated directly above it —
@@ -1009,11 +1087,15 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                 onClear={() => setErrorRoot(null)}
                 note={tChrome('dialog.batch.errorsNote')}
               />
-              <label className="flex items-start gap-2 cursor-pointer">
+              <label
+                className={`flex items-start gap-2 ${repairOnly ? 'opacity-50' : 'cursor-pointer'}`}
+                title={repairOnly ? tChrome('dialog.batch.repairOnlyNote') : undefined}
+              >
                 <input
                   type="checkbox"
                   data-testid="batch-ocr-repair"
                   checked={repairDamaged}
+                  disabled={repairOnly}
                   onChange={() => setRepairDamaged((v) => !v)}
                   className="mt-0.5 rounded bg-neutral-900 border-neutral-600"
                 />
@@ -1025,13 +1107,13 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                 </span>
               </label>
               <label
-                className={`flex items-start gap-2 ${repairDamaged ? 'cursor-pointer' : 'opacity-50'}`}
+                className={`flex items-start gap-2 ${repairDamaged || repairOnly ? 'cursor-pointer' : 'opacity-50'}`}
               >
                 <input
                   type="checkbox"
                   data-testid="batch-ocr-replace-repaired"
-                  checked={repairDamaged && replaceRepaired}
-                  disabled={!repairDamaged}
+                  checked={replaceArmed}
+                  disabled={!(repairDamaged || repairOnly)}
                   onChange={() => setReplaceRepaired((v) => !v)}
                   className="mt-0.5 rounded bg-neutral-900 border-neutral-600"
                 />
@@ -1119,9 +1201,18 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
 
       {phase === 'running' && (
         <div className="flex flex-col gap-4" data-testid="batch-ocr-running">
-          <ProgressLine progress={progress} stopping={stopping} />
+          <ProgressLine progress={progress} stopping={stopping} pauseState={pauseState} />
           <ProgressBar progress={progress} />
-          <div className="flex justify-end pt-1">
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              data-testid="batch-ocr-pause"
+              onClick={togglePause}
+              disabled={stopping || inPlace}
+              title={inPlace ? tChrome('dialog.batch.noPauseInPlace') : undefined}
+              className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium disabled:opacity-60"
+            >
+              {tChrome(pauseState === 'running' ? 'dialog.batch.pause' : 'dialog.batch.resume')}
+            </button>
             <button
               ref={stopBtnRef}
               data-testid="batch-ocr-stop"
@@ -1144,7 +1235,13 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                 OCR-ran-but-found-nothing copies (regression mislabel) —
                 those carry a reason and get their own segment. */}
             {(() => {
-              const parts = [
+              const parts = (repairOnly
+                ? [
+                    tChrome('dialog.batch.sumRepaired', { count: tNumber(summary.repaired) }),
+                    tChrome('dialog.batch.sumNoRepair', { count: tNumber(summary.copied) }),
+                    tChrome('dialog.batch.sumSkipped', { count: tNumber(summary.skipped) }),
+                  ]
+                : [
                 tChrome('dialog.batch.sumOcrd', { count: tNumber(summary.ocrd) }),
                 tChrome('dialog.batch.sumCopied', {
                   count: tNumber(summary.copied - notedCopies.length),
@@ -1153,7 +1250,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                   ? [tChrome('dialog.batch.sumNoText', { count: tNumber(notedCopies.length) })]
                   : []),
                 tChrome('dialog.batch.sumSkipped', { count: tNumber(summary.skipped) }),
-              ].join(' · ');
+              ]).join(' · ');
               return report.cancelled
                 ? tChrome('dialog.batch.stoppedPrefix', { summary: parts })
                 : parts;
@@ -1175,6 +1272,21 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                   : []),
               ].join(' · ')}
             </p>
+          )}
+          {signaturesLost.length > 0 && (
+            <div
+              className="border border-amber-500/40 rounded p-2 max-h-32 overflow-y-auto"
+              data-testid="batch-ocr-signatures-removed"
+            >
+              {signaturesLost.map((r) => (
+                <p key={r.rel} className="text-xs text-amber-400">
+                  {tChrome('dialog.batch.rowSignaturesRemoved', {
+                    rel: r.rel,
+                    count: tNumber(r.signaturesRemoved ?? 0),
+                  })}
+                </p>
+              ))}
+            </div>
           )}
           {moveFailures.length > 0 && (
             <div
@@ -1315,9 +1427,11 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
 function ProgressLine({
   progress,
   stopping,
+  pauseState,
 }: {
   progress: BatchProgress | null;
   stopping: boolean;
+  pauseState: BatchPauseState;
 }): React.JSX.Element {
   // aria-live: this narration increments for minutes across many files —
   // the FindBar/SearchPanel precedent for exactly this shape (a count that
@@ -1326,6 +1440,23 @@ function ProgressLine({
     return (
       <p className="text-sm text-neutral-300" data-testid="batch-ocr-progress" aria-live="polite">
         {tChrome('dialog.batch.progressStopping')}
+      </p>
+    );
+  }
+  if (pauseState === 'paused') {
+    return (
+      <p className="text-sm text-amber-400" data-testid="batch-ocr-progress" aria-live="polite">
+        {tChrome('dialog.batch.progressPaused', {
+          done: tNumber(progress ? progress.fileIndex + 1 : 0),
+          count: tNumber(progress?.fileCount ?? 0),
+        })}
+      </p>
+    );
+  }
+  if (pauseState === 'pausing') {
+    return (
+      <p className="text-sm text-neutral-300" data-testid="batch-ocr-progress" aria-live="polite">
+        {tChrome('dialog.batch.progressPausing')}
       </p>
     );
   }
@@ -1351,7 +1482,11 @@ function ProgressLine({
             ? tChrome('dialog.batch.verbCompressing')
             : phase === 'scanning'
               ? tChrome('dialog.batch.verbScanning')
-              : tChrome('dialog.batch.verbLoading');
+              : phase === 'repairing'
+                ? tChrome('dialog.batch.verbRepairing')
+                : phase === 'moving'
+                  ? tChrome('dialog.batch.verbMoving')
+                  : tChrome('dialog.batch.verbLoading');
   return (
     <p className="text-sm text-neutral-300" data-testid="batch-ocr-progress" aria-live="polite">
       {/* One whole narration — the file name and the verb used to sit in

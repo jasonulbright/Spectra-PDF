@@ -314,3 +314,69 @@ describe('formatBatchLog', () => {
     expect(text.endsWith('\r\n')).toBe(true);
   });
 });
+
+describe('a repair-only run', () => {
+  const report: BatchReport = {
+    cancelled: false,
+    skippedDirs: [],
+    results: [
+      { rel: 'bad.pdf', status: 'repaired', repaired: true, repairFixes: 2 },
+      { rel: 'one.pdf', status: 'repaired', repaired: true, repairFixes: 1, repairedOriginalReplaced: true },
+      { rel: 'fine.pdf', status: 'copied', reason: 'no repair needed' },
+      { rel: 'dead.pdf', status: 'skipped', reason: 'repair failed: too damaged' },
+    ],
+  };
+  const log = formatBatchLog(
+    run(report, { repairOnly: true, filing: { replaceRepairedOriginals: true } }),
+  );
+  const lines = log.split('\r\n');
+
+  it('names the mode and says languages were not used', () => {
+    expect(lines).toContain('Mode:         repair only (no OCR)');
+    expect(lines).toContain('Languages:    not used (repair only)');
+    expect(log).not.toContain('eng+fra');
+    expect(lines).toContain('Filing:       repaired files replace the originals');
+  });
+
+  it('counts repairs, never searchable copies', () => {
+    expect(lines).toContain('Files: 4 processed — 2 repaired · 1 no repair needed · 1 skipped');
+    expect(log).not.toContain('made searchable');
+    expect(log).not.toContain('already searchable');
+  });
+
+  it('writes one greppable line per file', () => {
+    expect(lines).toContain('[repaired] bad.pdf — 2 problems fixed');
+    expect(lines).toContain('[repaired] one.pdf — 1 problem fixed [original replaced]');
+    expect(lines).toContain('[copied]  fine.pdf — no repair needed');
+    expect(lines).toContain('[skipped] dead.pdf — repair failed: too damaged');
+  });
+});
+
+describe('a paused run', () => {
+  it('reports the active duration and the paused time separately', () => {
+    const log = formatBatchLog(run(empty, { pausedMs: 6 * 60_000 + 51_000 }));
+    expect(log).toContain('Finished:     2026-07-25 09:47:03  (10m 00s, paused 6m 51s)');
+  });
+
+  it('keeps the unpaused line byte-identical', () => {
+    expect(formatBatchLog(run(empty))).toContain('Finished:     2026-07-25 09:47:03  (16m 51s)');
+  });
+});
+
+describe('a repaired file that lost signatures', () => {
+  it('says so on its line', () => {
+    const log = formatBatchLog(
+      run(
+        {
+          cancelled: false,
+          skippedDirs: [],
+          results: [
+            { rel: 'signed.pdf', status: 'repaired', repaired: true, repairFixes: 3, signaturesRemoved: 1 },
+          ],
+        },
+        { repairOnly: true },
+      ),
+    );
+    expect(log.split('\r\n')).toContain('[repaired] signed.pdf — 3 problems fixed; 1 signature removed');
+  });
+});

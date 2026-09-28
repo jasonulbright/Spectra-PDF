@@ -49,6 +49,9 @@ export interface BatchOcrSettings {
   /** OPT-IN: after the run, delete folders inside the source root that are
    * empty. Never the root itself. */
   removeEmptyFolders: boolean;
+  /** Repair every file and recognise nothing. Languages, enhancement, MRC and
+   * `repairDamaged` are kept as stored but do not apply while it is on. */
+  repairOnly: boolean;
 }
 
 export interface BatchOcrPreset {
@@ -85,6 +88,7 @@ export function defaultBatchOcrSettings(): BatchOcrSettings {
     enhance: false,
     enhanceOrientation: true,
     removeEmptyFolders: false,
+    repairOnly: false,
   };
 }
 
@@ -135,7 +139,7 @@ export function normalizeBatchOcrSettings(raw: unknown): BatchOcrSettings {
     movedRoot: inPlace ? '' : str(r.movedRoot),
     errorRoot: str(r.errorRoot),
     repairDamaged,
-    replaceRepairedOriginals: repairDamaged && flag(r.replaceRepairedOriginals),
+    replaceRepairedOriginals: (repairDamaged || flag(r.repairOnly)) && flag(r.replaceRepairedOriginals),
     mrc: flag(r.mrc),
     mrcPreset: normalizeMrcPreset(typeof r.mrcPreset === 'string' ? r.mrcPreset : undefined),
     mrcVerifyText: flag(r.mrcVerifyText),
@@ -144,6 +148,7 @@ export function normalizeBatchOcrSettings(raw: unknown): BatchOcrSettings {
     // half of what enhancement means, and it is inert unless `enhance` is on.
     enhanceOrientation: r.enhanceOrientation === undefined ? true : flag(r.enhanceOrientation),
     removeEmptyFolders: flag(r.removeEmptyFolders),
+    repairOnly: flag(r.repairOnly),
   };
 }
 
@@ -317,22 +322,27 @@ export function presetScheduleFields(settings: BatchOcrSettings): {
   enhance: boolean;
   enhanceOrientation: boolean;
   removeEmptyFolders: boolean;
+  repairOnly: boolean;
 } {
   const s = normalizeBatchOcrSettings(settings);
+  // A repair-only task runs no recognition, and the CLI refuses the OCR-only
+  // switches beside it, so they are not expanded into its command line.
+  const ocr = !s.repairOnly;
   return {
     source: s.source,
     dest: s.dest,
     lang: s.langs.join('+'),
     movedRoot: s.movedRoot,
     errorRoot: s.errorRoot,
-    repairDamaged: s.repairDamaged,
+    repairDamaged: ocr && s.repairDamaged,
     replaceRepairedOriginals: s.replaceRepairedOriginals,
     inPlace: s.inPlace,
-    mrc: s.mrc,
+    mrc: ocr && s.mrc,
     mrcPreset: s.mrcPreset,
-    mrcVerifyText: s.mrcVerifyText,
-    enhance: s.enhance,
-    enhanceOrientation: s.enhanceOrientation,
+    mrcVerifyText: ocr ? s.mrcVerifyText : false,
+    enhance: ocr && s.enhance,
+    enhanceOrientation: ocr ? s.enhanceOrientation : true,
     removeEmptyFolders: s.removeEmptyFolders,
+    repairOnly: s.repairOnly,
   };
 }

@@ -218,6 +218,7 @@ export interface BatchOcrHandlers {
   start: () => Promise<void>;
   snapshot: () => {
     phase: 'setup' | 'running' | 'done';
+    pauseState: 'running' | 'pausing' | 'paused';
     fileCount: number | null;
     report: {
       cancelled: boolean;
@@ -230,6 +231,7 @@ export interface BatchOcrHandlers {
         moveError?: string;
         repaired?: boolean;
         repairedOriginalReplaced?: boolean;
+        repairFixes?: number;
       }[];
       skippedDirs: string[];
     } | null;

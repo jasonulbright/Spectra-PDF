@@ -5,6 +5,7 @@ import {
   destConflictsWithSource,
   classifyLoadError,
   summarize,
+  BatchPauseGate,
   type BatchEntry,
   type BatchIo,
   type BatchPdfDoc,
@@ -66,6 +67,9 @@ interface IoOpts {
   enhanceProduces?: Record<string, string>;
   /** Source paths whose enhancement itself throws (no scanned page). */
   enhanceFails?: string[];
+  /** Repair-only runs: src -> the engine's verdict. A source with no entry
+   * makes the repair throw. */
+  inspect?: Record<string, { damaged: boolean; fixes?: number; pages?: number }>;
 }
 
 function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
@@ -78,6 +82,7 @@ function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
   const discarded: string[] = [];
   const compressed: [string, string, boolean][] = [];
   const enhancedFrom: string[] = [];
+  const inspected: string[] = [];
   const io: BatchIo = {
     load: async (abs) => {
       const spec = specs[abs];
@@ -125,10 +130,22 @@ function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
     discardScratch: async (path) => {
       discarded.push(path);
     },
+    repairInspect: async (src) => {
+      inspected.push(src);
+      const verdict = opts.inspect?.[src];
+      if (!verdict) throw new Error('PDF is too damaged for Tier 1 repair');
+      return {
+        path: `${src}.repaired.tmp`,
+        damaged: verdict.damaged,
+        fixes: verdict.fixes ?? 0,
+        pages: verdict.pages ?? 1,
+        signaturesRemoved: 0,
+      };
+    },
   };
   return {
     io, destroyed, copies, applied, ensured, moves, verified, discarded, compressed,
-    enhancedFrom,
+    enhancedFrom, inspected,
   };
 }
 
@@ -144,6 +161,7 @@ function noFiling(): Pick<
   | 'discardScratch'
   | 'compressMrc'
   | 'enhanceToScratch'
+  | 'repairInspect'
 > {
   const nope = (name: string) => () => {
     throw new Error(`${name} must not run without the matching opt-in`);
@@ -155,6 +173,7 @@ function noFiling(): Pick<
     discardScratch: nope('discardScratch') as unknown as BatchIo['discardScratch'],
     compressMrc: nope('compressMrc') as unknown as BatchIo['compressMrc'],
     enhanceToScratch: nope('enhanceToScratch') as unknown as BatchIo['enhanceToScratch'],
+    repairInspect: nope('repairInspect') as unknown as BatchIo['repairInspect'],
   };
 }
 
@@ -221,7 +240,7 @@ describe('runBatchOcr', () => {
       { source: 'C:\\src\\a\\scan.pdf', output: 'C:\\out\\a\\scan.pdf', pages: [1, 3] },
     ]);
     expect(copies).toEqual([['C:\\src\\born.pdf', 'C:\\out\\born.pdf']]);
-    expect(summarize(report)).toEqual({ ocrd: 1, copied: 1, skipped: 1 });
+    expect(summarize(report)).toEqual({ ocrd: 1, copied: 1, skipped: 1, repaired: 0 });
   });
 
   it('destroys the doc even when apply fails, and isolates the failure to that file', async () => {
@@ -695,7 +714,7 @@ describe('runBatchOcr — MRC', () => {
     });
     expect(report.results[0].status).toBe('copied');
     expect(report.results[0].mrc).toContain('nothing to separate');
-    expect(summarize(report)).toEqual({ ocrd: 0, copied: 1, skipped: 0 });
+    expect(summarize(report)).toEqual({ ocrd: 0, copied: 1, skipped: 0, repaired: 0 });
   });
 
   it('a skipped file is never compressed', async () => {
@@ -844,5 +863,234 @@ describe('runBatchOcr — scan enhancement', () => {
       onProgress: (p) => phases.push(p.phase),
     });
     expect(phases).toContain('enhancing');
+  });
+});
+
+describe('runBatchOcr — repair only', () => {
+  it('repairs damaged files, copies undamaged ones unchanged, skips unrepairable ones, recognises nothing', async () => {
+    const entries = [entry('bad.pdf'), entry('fine.pdf'), entry('dead.pdf')];
+    const { io, copies, applied, inspected, discarded } = makeIo(
+      {},
+      {
+        inspect: {
+          'C:\\src\\bad.pdf': { damaged: true, fixes: 2, pages: 3 },
+          'C:\\src\\fine.pdf': { damaged: false },
+        },
+      },
+    );
+    const phases: string[] = [];
+    const report = await runBatchOcr(entries, 'C:\\out', [], io, {
+      repairOnly: true,
+      onProgress: (p) => phases.push(p.phase),
+      // Ignored under repair-only: recognition never runs.
+      mrc: { preset: 'balanced', verifyText: false },
+      enhance: { orientation: true },
+      repairDamaged: true,
+    });
+
+    expect(inspected).toEqual(['C:\\src\\bad.pdf', 'C:\\src\\fine.pdf', 'C:\\src\\dead.pdf']);
+    expect(applied).toEqual([]);
+    expect(phases).not.toContain('recognizing');
+    expect(phases).not.toContain('enhancing');
+    expect(phases).not.toContain('compressing');
+    expect(report.results).toEqual([
+      { rel: 'bad.pdf', status: 'repaired', repaired: true, repairFixes: 2 },
+      { rel: 'fine.pdf', status: 'copied', reason: 'no repair needed' },
+      {
+        rel: 'dead.pdf',
+        status: 'skipped',
+        reason: 'repair failed: PDF is too damaged for Tier 1 repair',
+      },
+    ]);
+    expect(copies).toEqual([
+      ['C:\\src\\bad.pdf.repaired.tmp', 'C:\\out\\bad.pdf'],
+      ['C:\\src\\fine.pdf', 'C:\\out\\fine.pdf'],
+    ]);
+    expect(discarded).toEqual(['C:\\src\\bad.pdf.repaired.tmp', 'C:\\src\\fine.pdf.repaired.tmp']);
+    expect(summarize(report)).toEqual({ ocrd: 0, copied: 1, skipped: 1, repaired: 1 });
+  });
+
+  it('verifies a repaired copy before it is used, and never replaces from one that fails', async () => {
+    const { io, copies } = makeIo(
+      {},
+      {
+        inspect: { 'C:\\src\\bad.pdf': { damaged: true, fixes: 1, pages: 2 } },
+        verifyFails: ['C:\\src\\bad.pdf.repaired.tmp'],
+      },
+    );
+    const report = await runBatchOcr([entry('bad.pdf')], 'C:\\out', [], io, {
+      repairOnly: true,
+      replaceRepairedOriginals: true,
+    });
+    expect(report.results[0].status).toBe('skipped');
+    expect(copies).toEqual([]);
+  });
+
+  it('replaces damaged originals and files moved/failed originals when asked', async () => {
+    const { io, copies, moves } = makeIo(
+      {},
+      { inspect: { 'C:\\src\\bad.pdf': { damaged: true, fixes: 1 }, 'C:\\src\\ok.pdf': { damaged: false } } },
+    );
+    const report = await runBatchOcr(
+      [entry('bad.pdf'), entry('ok.pdf'), entry('dead.pdf')],
+      'C:\\out',
+      [],
+      io,
+      {
+        repairOnly: true,
+        replaceRepairedOriginals: true,
+        movedRoot: 'C:\\done',
+        errorRoot: 'C:\\failed',
+      },
+    );
+    expect(report.results[0].repairedOriginalReplaced).toBe(true);
+    // The undamaged original is never rewritten.
+    expect(report.results[1].repairedOriginalReplaced).toBeUndefined();
+    expect(copies).toContainEqual(['C:\\src\\bad.pdf.repaired.tmp', 'C:\\src\\bad.pdf']);
+    expect(copies).not.toContainEqual(['C:\\src\\ok.pdf.repaired.tmp', 'C:\\src\\ok.pdf']);
+    expect(moves).toEqual([
+      ['C:\\src\\bad.pdf', 'C:\\done\\bad.pdf'],
+      ['C:\\src\\ok.pdf', 'C:\\done\\ok.pdf'],
+      ['C:\\src\\dead.pdf', 'C:\\failed\\dead.pdf'],
+    ]);
+  });
+});
+
+describe('BatchPauseGate and the run loop', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it('starts no file while paused, and resume continues the same run', async () => {
+    const specs = {
+      'C:\\src\\a.pdf': { pages: [false] },
+      'C:\\src\\b.pdf': { pages: [false] },
+      'C:\\src\\c.pdf': { pages: [false] },
+    };
+    const { io, copies } = makeIo(specs);
+    const states: string[] = [];
+    let clock = 0;
+    const gate = new BatchPauseGate((s) => states.push(s), () => clock);
+    const started: string[] = [];
+    const run = runBatchOcr(
+      [entry('a.pdf'), entry('b.pdf'), entry('c.pdf')],
+      'C:\\out',
+      [],
+      io,
+      {
+        pause: gate,
+        onProgress: (p) => {
+          if (p.phase === 'loading') {
+            started.push(p.rel);
+            // Pause while the first file is in flight: it must still finish.
+            if (p.rel === 'a.pdf') gate.pause();
+          }
+        },
+      },
+    );
+    for (let i = 0; i < 20; i++) await tick();
+    expect(started).toEqual(['a.pdf']);
+    expect(copies.map(([, d]) => d)).toEqual(['C:\\out\\a.pdf']);
+    expect(gate.current).toBe('paused');
+    clock = 5_000;
+    expect(gate.pausedMs()).toBe(5_000);
+
+    gate.resume();
+    const report = await run;
+    expect(started).toEqual(['a.pdf', 'b.pdf', 'c.pdf']);
+    expect(report.cancelled).toBe(false);
+    expect(report.results.map((r) => r.status)).toEqual(['copied', 'copied', 'copied']);
+    expect(states).toEqual(['pausing', 'paused', 'running']);
+    clock = 9_000;
+    expect(gate.pausedMs()).toBe(5_000);
+  });
+
+  it('stop while paused ends the run without starting another file', async () => {
+    const specs = {
+      'C:\\src\\a.pdf': { pages: [false] },
+      'C:\\src\\b.pdf': { pages: [false] },
+    };
+    const { io } = makeIo(specs);
+    const gate = new BatchPauseGate();
+    let cancelled = false;
+    const started: string[] = [];
+    const run = runBatchOcr([entry('a.pdf'), entry('b.pdf')], 'C:\\out', [], io, {
+      pause: gate,
+      isCancelled: () => cancelled,
+      onProgress: (p) => {
+        if (p.phase === 'loading') {
+          started.push(p.rel);
+          gate.pause();
+        }
+      },
+    });
+    for (let i = 0; i < 20; i++) await tick();
+    expect(gate.current).toBe('paused');
+    cancelled = true;
+    gate.release();
+    const report = await run;
+    expect(report.cancelled).toBe(true);
+    expect(started).toEqual(['a.pdf']);
+    expect(report.results.map((r) => r.rel)).toEqual(['a.pdf']);
+  });
+
+  it('a released gate never holds again', async () => {
+    const gate = new BatchPauseGate();
+    gate.release();
+    gate.pause();
+    expect(gate.current).toBe('running');
+    await gate.wait();
+  });
+});
+
+describe('repair-only follow-ups', () => {
+  it('carries removed signatures onto the repaired result only', async () => {
+    const { io } = makeIo(
+      {},
+      { inspect: { 'C:\\src\\bad.pdf': { damaged: true, fixes: 1 }, 'C:\\src\\ok.pdf': { damaged: false } } },
+    );
+    const original = io.repairInspect;
+    io.repairInspect = async (src) => ({ ...(await original(src)), signaturesRemoved: 2 });
+    const report = await runBatchOcr([entry('bad.pdf'), entry('ok.pdf')], 'C:\\out', [], io, {
+      repairOnly: true,
+    });
+    expect(report.results[0].signaturesRemoved).toBe(2);
+    expect(report.results[1].signaturesRemoved).toBeUndefined();
+  });
+
+  it('OCR-run repair and repair-only both heal the original before filing it', async () => {
+    const order: string[] = [];
+    const { io } = makeIo(
+      { 'C:\\src\\a.pdf': { pages: [false], loadError: new Error('bad xref') }, 'C:\\scratch': { pages: [false] } },
+      { repairProduces: { 'C:\\src\\a.pdf': 'C:\\scratch' } },
+    );
+    const copy = io.copyFile;
+    const move = io.moveFile;
+    io.copyFile = async (s, d) => {
+      order.push(`copy ${s} -> ${d}`);
+      return copy(s, d);
+    };
+    io.moveFile = async (s, d) => {
+      order.push(`move ${s} -> ${d}`);
+      return move(s, d);
+    };
+    await runBatchOcr([entry('a.pdf')], 'C:\\out', [], io, {
+      repairDamaged: true,
+      replaceRepairedOriginals: true,
+      movedRoot: 'C:\\done',
+    });
+    expect(order.slice(-2)).toEqual([
+      'copy C:\\scratch -> C:\\src\\a.pdf',
+      'move C:\\src\\a.pdf -> C:\\done\\a.pdf',
+    ]);
+  });
+
+  it('a pause request can be withdrawn before the run holds', async () => {
+    const states: string[] = [];
+    const gate = new BatchPauseGate((s) => states.push(s));
+    gate.pause();
+    gate.resume();
+    await gate.wait();
+    expect(gate.current).toBe('running');
+    expect(gate.pausedMs()).toBe(0);
+    expect(states).toEqual(['pausing', 'running']);
   });
 });

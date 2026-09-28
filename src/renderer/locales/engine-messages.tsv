@@ -41,6 +41,7 @@ batch_ocr.folderMustOutsideSource	pattern	batch_ocr	The {{label}} folder must be
 batch_ocr.moveAbortedShortCopy	pattern	batch_ocr	move aborted: short copy to {{target}} -- the original was left in place
 batch_ocr.placeModeCannotAlso	exact	batch_ocr,guided_actions,preflight_sweep	In-place mode cannot also move processed originals -- the processed file IS the original.
 batch_ocr.placeModeTakesDestination	exact	batch_ocr,guided_actions,preflight_sweep	In-place mode takes no destination -- the originals are replaced.
+batch_ocr.repairOnlyModeRuns	exact	batch_ocr	Repair-only mode runs no OCR -- MRC compression, scan enhancement and image files cannot be combined with it.
 batch_ocr.sourceDestinationSameFile	exact	batch_ocr	source and destination are the same file
 batch_ocr.sourceFolderFound	pattern	batch_ocr,create_pdf_folders,guided_actions,preflight_sweep	Source folder not found: {{source}}
 budget.subprocessOutputLimitCannot	exact	budget	a subprocess output limit cannot be negative

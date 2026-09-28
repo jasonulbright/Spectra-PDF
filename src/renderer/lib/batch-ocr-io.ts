@@ -9,6 +9,14 @@ import { batch } from './tauri-bridge';
 import { mrcBatchNote, type MrcReport } from './mrc-presets';
 import { enhanceBatchNote, type ScanEnhanceReport } from './scan-enhance';
 import type { BatchIo, BatchPdfDoc } from './batch-ocr';
+
+/** The fields of the engine `repair` report a batch reads. */
+export interface RepairReport {
+  pages: number;
+  damaged: boolean;
+  damage?: string[];
+  signatures_removed?: number;
+}
 import type { OcrApplyPage } from './ocr-apply';
 import type { OcrResult } from '../ocr/types';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
@@ -49,7 +57,7 @@ export function createBatchIo(
      * chosen over the heavier rebuild/recover tiers because it is fast and
      * NON-DESTRUCTIVE: annotations, bookmarks and metadata survive. An
      * unattended batch must not quietly downgrade a document to make it open. */
-    repair: (source: string, output: string) => Promise<void>;
+    repair: (source: string, output: string) => Promise<RepairReport>;
     /** Recognise one page of `path` (0-based index). */
     recognize: (path: string, pageIndex: number) => Promise<OcrResult>;
     /** `compress` with `quality="mrc"` over `path`, in place. Resolves to
@@ -108,6 +116,22 @@ export function createBatchIo(
         throw err;
       }
       return scratch;
+    },
+    async repairInspect(src) {
+      const scratch = await batch.createScratch('repair');
+      try {
+        const report = await engine.repair(src, scratch);
+        return {
+          path: scratch,
+          damaged: report.damaged === true,
+          fixes: report.damage?.length ?? 0,
+          signaturesRemoved: report.signatures_removed ?? 0,
+          pages: report.pages,
+        };
+      } catch (err) {
+        await batch.deleteScratch(scratch).catch(() => {});
+        throw err;
+      }
     },
     async enhanceToScratch(src, orientation) {
       const scratch = await batch.createScratch('enhance');

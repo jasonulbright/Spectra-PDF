@@ -63,6 +63,7 @@ const EMPTY: ScheduleProfile = {
   enhance: false,
   enhanceOrientation: true,
   removeEmptyFolders: false,
+  repairOnly: false,
   runType: 'batch-ocr',
   actionFile: '',
 };
@@ -493,7 +494,11 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
 
           {editing.runType !== 'action' && (
             <Field label={tChrome('dialog.schedule.languages', { summary: describeLanguages(langs) })}>
-              <div className="max-h-28 overflow-y-auto rounded border border-neutral-700 bg-neutral-800 p-2 grid grid-cols-3 gap-x-3 gap-y-1">
+              <fieldset
+                disabled={editing.repairOnly}
+                title={editing.repairOnly ? tChrome('dialog.batch.repairOnlyNote') : undefined}
+                className={`max-h-28 overflow-y-auto rounded border border-neutral-700 bg-neutral-800 p-2 grid grid-cols-3 gap-x-3 gap-y-1 ${editing.repairOnly ? 'opacity-50' : ''}`}
+              >
                 {OCR_LANGUAGES.map((l) => (
                   <label key={l.code} className="flex items-center gap-1.5 text-xs cursor-pointer">
                     <input
@@ -510,10 +515,43 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                     <span className="text-neutral-300">{tOcrLanguage(l.code)}</span>
                   </label>
                 ))}
-              </div>
+              </fieldset>
             </Field>
           )}
 
+          {editing.runType !== 'action' && (
+            <div className="flex flex-col gap-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  data-testid="schedule-repair-only"
+                  checked={editing.repairOnly}
+                  onChange={() =>
+                    setEditing(
+                      editing.repairOnly
+                        ? { ...editing, repairOnly: false }
+                        : {
+                            ...editing,
+                            repairOnly: true,
+                            mrc: false,
+                            mrcVerifyText: false,
+                            enhance: false,
+                            enhanceOrientation: true,
+                            repairDamaged: false,
+                          },
+                    )
+                  }
+                  className="rounded bg-neutral-900 border-neutral-600"
+                />
+                <span className="text-sm text-neutral-300">{tChrome('dialog.batch.repairOnly')}</span>
+              </label>
+              {editing.repairOnly && (
+                <p className="text-xs text-neutral-500 ps-6" data-testid="schedule-repair-only-note">
+                  {tChrome('dialog.batch.repairOnlyNote')}
+                </p>
+              )}
+            </div>
+          )}
           {editing.runType !== 'action' && (
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -534,7 +572,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
               what will be read, MRC replaces what was read. Both belong on
               this form as well as in the dialog — a schedule read back from a
               task that carries them must be re-savable without dropping them. */}
-          {editing.runType !== 'action' && (
+          {editing.runType !== 'action' && !editing.repairOnly && (
             <div className="flex flex-col gap-2">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -667,10 +705,14 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                     onPick={() => void pick(tChrome('dialog.schedule.pickErrors'), (p) => setEditing({ ...editing, errorRoot: p }))}
                     onClear={() => setEditing({ ...editing, errorRoot: '' })}
                   />
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label
+                    className={`flex items-center gap-2 ${editing.repairOnly ? 'opacity-50' : 'cursor-pointer'}`}
+                    title={editing.repairOnly ? tChrome('dialog.batch.repairOnlyNote') : undefined}
+                  >
                     <input
                       type="checkbox"
                       data-testid="schedule-repair"
+                      disabled={editing.repairOnly}
                       checked={editing.repairDamaged}
                       onChange={() => setEditing({ ...editing, repairDamaged: !editing.repairDamaged })}
                       className="rounded bg-neutral-900 border-neutral-600"
