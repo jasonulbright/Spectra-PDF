@@ -9,6 +9,7 @@ ONE named refusal rather than as a spawn failure at whichever door was asked.
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -134,6 +135,29 @@ def test_the_answer_is_cached_per_path_and_remint_on_clear(tmp_path, monkeypatch
         gc.probe(stub)
 
 
+def test_a_short_discovery_timeout_does_not_poison_a_full_probe(tmp_path, monkeypatch):
+    stub = tmp_path / "gswin64c.exe"
+    stub.write_bytes(b"candidate")
+
+    def timeout(args, *, timeout):
+        raise subprocess.TimeoutExpired(args, timeout)
+
+    monkeypatch.setattr(gc, "_run", timeout)
+    short = gc._probe_with_budget(stub, 0.005)
+    assert short.reason == gc.PROBE_FAILED
+    assert not gc._CACHE
+
+    monkeypatch.setattr(
+        gc,
+        "_run",
+        lambda args, *, timeout: subprocess.CompletedProcess(
+            args, 0, "GPL Ghostscript 10.07.1\n", ""
+        ),
+    )
+    monkeypatch.setattr(gc, "_smoke", lambda _p, *, timeout: (True, ""))
+    assert gc.probe(stub).available
+
+
 def test_a_replaced_binary_at_the_same_path_re_probes(tmp_path):
     stub = stub_gs(str(tmp_path), "9.50")
     assert gc.probe(stub).reason == gc.VERSION_BELOW_MINIMUM
@@ -182,6 +206,24 @@ def test_no_candidate_at_all_is_not_configured(monkeypatch):
     answer = gc.resolve("")
     assert not answer.available
     assert answer.reason == gc.NOT_CONFIGURED
+
+
+def test_auto_discovery_shares_one_probe_time_budget():
+    attempts = []
+
+    def slow_probe(candidate, remaining):
+        attempts.append((candidate, remaining))
+        time.sleep(0.02)
+        return gc.GsCapability(False, candidate, "", gc.NOT_EXECUTABLE)
+
+    answer = gc._resolve_candidates_with(
+        ["slow-candidate", "later-candidate"], 0.005, slow_probe
+    )
+    assert [candidate for candidate, _ in attempts] == ["slow-candidate"]
+    assert attempts[0][1] <= 0.005
+    assert answer.reason == gc.PROBE_FAILED
+    assert answer.path == "slow-candidate"
+    assert "total time budget" in answer.detail
 
 
 def test_a_blank_path_is_nothing_configured_and_searches(monkeypatch):
@@ -533,7 +575,7 @@ def test_an_absent_default_still_reaches_discovery(monkeypatch, tmp_path):
     """
     stub = stub_gs(str(tmp_path), "10.07.1", renders=True)
     monkeypatch.setenv(gc.PATH_ENV_VAR, stub)
-    monkeypatch.setattr(gc, "_smoke", lambda _p: (True, ""))
+    monkeypatch.setattr(gc, "_smoke", lambda _p, *, timeout: (True, ""))
     gc.clear_cache()
     answer = gc.resolve("")
     assert answer.available

@@ -124,6 +124,10 @@ fn remember(key: CacheKey, answer: &GsAnswer) {
     }
 }
 
+fn cacheable_probe_result(answer: &GsAnswer, budget: Duration) -> bool {
+    budget >= RESOLUTION_BUDGET || answer.reason != PROBE_FAILED
+}
+
 fn command(exe: &str) -> std::process::Command {
     let mut cmd = std::process::Command::new(exe);
     #[cfg(windows)]
@@ -142,6 +146,14 @@ fn command(exe: &str) -> std::process::Command {
 /// surface waiting on it, for as long as it runs.
 const VERSION_BUDGET: Duration = Duration::from_secs(30);
 const SMOKE_BUDGET: Duration = Duration::from_secs(60);
+const RESOLUTION_BUDGET: Duration = Duration::from_secs(90);
+const MAX_PATH_DIRECTORIES: usize = 1024;
+const MAX_PATH_CANDIDATES: usize = 64;
+#[cfg(windows)]
+const MAX_REGISTRY_KEYS: usize = 1024;
+#[cfg(windows)]
+const MAX_REGISTRY_CANDIDATES: usize = 32;
+const MAX_DISCOVERY_CANDIDATES: usize = 128;
 const MAX_CAPTURED_OUTPUT: usize = 1024 * 1024;
 const PIPE_DRAIN_GRACE: Duration = Duration::from_millis(500);
 
@@ -337,7 +349,7 @@ fn probe_dir() -> std::io::Result<tempfile::TempDir> {
 }
 
 /// Render one tiny page. `Ok(())` only when a raster actually came out.
-fn smoke(exe: &str) -> Result<(), String> {
+fn smoke(exe: &str, budget: Duration) -> Result<(), String> {
     let dir = probe_dir().map_err(|e| format!("cannot create a probe directory: {}", e))?;
     let png = dir.path().join("probe.png");
     let mut render = command(exe);
@@ -356,7 +368,7 @@ fn smoke(exe: &str) -> Result<(), String> {
             "-c",
             "0 0 moveto 16 16 lineto 0.5 setlinewidth stroke showpage",
         ]);
-    let outcome = output_within(render, SMOKE_BUDGET);
+    let outcome = output_within(render, budget);
     let verdict = match outcome {
         Err(e) => Err(format!("{}", e)),
         Ok(out) if !out.status.success() => {
@@ -378,6 +390,11 @@ fn smoke(exe: &str) -> Result<(), String> {
 
 /// Validate ONE candidate path.
 pub fn probe(path: &str) -> GsAnswer {
+    probe_with_budget(path, RESOLUTION_BUDGET)
+}
+
+fn probe_with_budget(path: &str, budget: Duration) -> GsAnswer {
+    let started = Instant::now();
     if path.trim().is_empty() {
         return GsAnswer::unavailable("", NOT_CONFIGURED, "");
     }
@@ -391,7 +408,7 @@ pub fn probe(path: &str) -> GsAnswer {
 
     let mut version = command(path);
     version.arg("--version");
-    let answer = match output_within(version, VERSION_BUDGET) {
+    let answer = match output_within(version, budget.min(VERSION_BUDGET)) {
         Err(e) => GsAnswer::unavailable(path, PROBE_FAILED, &format!("{}", e)),
         Ok(out) => {
             let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -416,26 +433,39 @@ pub fn probe(path: &str) -> GsAnswer {
                     detail: String::new(),
                 }
             } else {
-                match smoke(path) {
-                    Ok(()) => GsAnswer {
-                        available: true,
-                        path: path.to_string(),
-                        version,
-                        reason: String::new(),
-                        detail: String::new(),
-                    },
-                    Err(detail) => GsAnswer {
-                        available: false,
-                        path: path.to_string(),
-                        version,
-                        reason: PROBE_FAILED.to_string(),
-                        detail,
-                    },
+                let smoke_budget = budget
+                    .saturating_sub(started.elapsed())
+                    .min(SMOKE_BUDGET);
+                if smoke_budget.is_zero() {
+                    GsAnswer::unavailable(
+                        path,
+                        PROBE_FAILED,
+                        "the capability check exceeded its total time budget",
+                    )
+                } else {
+                    match smoke(path, smoke_budget) {
+                        Ok(()) => GsAnswer {
+                            available: true,
+                            path: path.to_string(),
+                            version,
+                            reason: String::new(),
+                            detail: String::new(),
+                        },
+                        Err(detail) => GsAnswer {
+                            available: false,
+                            path: path.to_string(),
+                            version,
+                            reason: PROBE_FAILED.to_string(),
+                            detail,
+                        },
+                    }
                 }
             }
         }
     };
-    remember(key, &answer);
+    if cacheable_probe_result(&answer, budget) {
+        remember(key, &answer);
+    }
     answer
 }
 
@@ -462,7 +492,7 @@ pub fn which(name: &str) -> Option<String> {
     } else {
         vec![name.to_string()]
     };
-    for dir in std::env::split_paths(&path_var) {
+    for dir in std::env::split_paths(&path_var).take(MAX_PATH_DIRECTORIES) {
         for candidate in &names {
             let full = dir.join(candidate);
             if full.is_file() {
@@ -479,13 +509,16 @@ pub fn path_candidates() -> Vec<String> {
     let Some(path_var) = std::env::var_os("PATH") else {
         return found;
     };
-    for dir in std::env::split_paths(&path_var) {
+    for dir in std::env::split_paths(&path_var).take(MAX_PATH_DIRECTORIES) {
         for name in exe_names() {
             let candidate = dir.join(&name);
             if candidate.is_file() {
                 let text = candidate.to_string_lossy().to_string();
                 if !found.contains(&text) {
                     found.push(text);
+                    if found.len() >= MAX_PATH_CANDIDATES {
+                        return found;
+                    }
                 }
             }
         }
@@ -504,6 +537,7 @@ pub fn registry_candidates() -> Vec<(String, String, String)> {
     use winreg::RegKey;
 
     let mut found: Vec<(String, String, String)> = Vec::new();
+    let mut scanned = 0usize;
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let uninstall_paths = [
         "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
@@ -514,7 +548,14 @@ pub fn registry_candidates() -> Vec<(String, String, String)> {
         let Ok(key) = hklm.open_subkey_with_flags(uninstall_path, KEY_READ) else {
             continue;
         };
-        for name in key.enum_keys().flatten() {
+        for entry in key
+            .enum_keys()
+            .take(MAX_REGISTRY_KEYS.saturating_sub(scanned))
+        {
+            scanned += 1;
+            let Ok(name) = entry else {
+                continue;
+            };
             if !name.to_lowercase().contains("ghostscript") {
                 continue;
             }
@@ -548,6 +589,9 @@ pub fn registry_candidates() -> Vec<(String, String, String)> {
                         display_name.clone(),
                         publisher.clone(),
                     ));
+                    if found.len() >= MAX_REGISTRY_CANDIDATES {
+                        return found;
+                    }
                     break;
                 }
             }
@@ -566,7 +610,10 @@ pub fn registry_candidates() -> Vec<(String, String, String)> {
 pub fn candidates(explicit: Option<&str>, bundled: Option<&Path>) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     let mut push = |text: String| {
-        if !text.trim().is_empty() && !found.contains(&text) {
+        if found.len() < MAX_DISCOVERY_CANDIDATES
+            && !text.trim().is_empty()
+            && !found.contains(&text)
+        {
             found.push(text);
         }
     };
@@ -609,11 +656,45 @@ pub fn resolve(explicit: Option<&str>, bundled: Option<&Path>) -> GsAnswer {
             };
         }
     }
+    resolve_candidates_with(
+        candidates(None, bundled),
+        RESOLUTION_BUDGET,
+        probe_with_budget,
+    )
+}
+
+fn resolve_candidates_with(
+    candidates: impl IntoIterator<Item = String>,
+    budget: Duration,
+    mut probe_candidate: impl FnMut(&str, Duration) -> GsAnswer,
+) -> GsAnswer {
+    let deadline = Instant::now() + budget;
     let mut first_failure: Option<GsAnswer> = None;
-    for candidate in candidates(None, bundled) {
-        let answer = probe(&candidate);
+    let mut first_candidate = true;
+    for candidate in candidates.into_iter().take(MAX_DISCOVERY_CANDIDATES) {
+        let remaining = if first_candidate {
+            budget
+        } else {
+            deadline.saturating_duration_since(Instant::now())
+        };
+        if remaining.is_zero() {
+            return GsAnswer::unavailable(
+                first_failure.as_ref().map_or("", |answer| answer.path.as_str()),
+                PROBE_FAILED,
+                "Ghostscript discovery exceeded its total time budget.",
+            );
+        }
+        first_candidate = false;
+        let answer = probe_candidate(&candidate, remaining);
         if answer.available {
             return answer;
+        }
+        if Instant::now() >= deadline {
+            return GsAnswer::unavailable(
+                &candidate,
+                PROBE_FAILED,
+                "Ghostscript discovery exceeded its total time budget.",
+            );
         }
         if first_failure.is_none() {
             first_failure = Some(answer);
@@ -746,6 +827,59 @@ mod tests {
         assert!(found
             .iter()
             .all(|p| !p.contains("\\ghostscript\\gswin64c.exe") || !p.starts_with("C:\\app")));
+    }
+
+    #[test]
+    fn discovery_stops_after_its_total_time_budget() {
+        let candidates = vec!["slow-candidate".to_string(), "later-candidate".to_string()];
+        let mut attempts = 0;
+        let answer = resolve_candidates_with(
+            candidates,
+            Duration::from_millis(1),
+            |path, _remaining| {
+                attempts += 1;
+                std::thread::sleep(Duration::from_millis(10));
+                GsAnswer::unavailable(path, NOT_EXECUTABLE, "")
+            },
+        );
+        assert_eq!(attempts, 1);
+        assert_eq!(answer.reason, PROBE_FAILED);
+        assert!(answer.detail.contains("total time budget"));
+    }
+
+    #[test]
+    fn a_short_probe_failure_is_not_cached_as_a_full_capability_answer() {
+        let failed = GsAnswer::unavailable("gs.exe", PROBE_FAILED, "timed out");
+        assert!(!cacheable_probe_result(
+            &failed,
+            Duration::from_secs(RESOLUTION_BUDGET.as_secs() - 1),
+        ));
+        assert!(cacheable_probe_result(&failed, RESOLUTION_BUDGET));
+
+        let old = GsAnswer {
+            available: false,
+            path: "gs.exe".into(),
+            version: "9.50".into(),
+            reason: VERSION_BELOW_MINIMUM.into(),
+            detail: String::new(),
+        };
+        assert!(cacheable_probe_result(
+            &old,
+            Duration::from_secs(1),
+        ));
+    }
+
+    #[test]
+    fn discovery_caps_the_number_of_candidates_it_probes() {
+        let candidates = (0..MAX_DISCOVERY_CANDIDATES + 1)
+            .map(|index| format!("candidate-{index}"));
+        let mut attempts = 0;
+        let answer = resolve_candidates_with(candidates, Duration::from_secs(10), |path, _| {
+            attempts += 1;
+            GsAnswer::unavailable(path, NOT_EXECUTABLE, "")
+        });
+        assert_eq!(attempts, MAX_DISCOVERY_CANDIDATES);
+        assert_eq!(answer.path, "candidate-0");
     }
 
     #[test]
