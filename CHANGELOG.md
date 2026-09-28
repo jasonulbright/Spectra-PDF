@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.7
+
+*Released 2026-09-28*
+
+Various bug fixes.
+
 ## 1.2.6
 
 *Released 2026-09-19*
@@ -1073,7 +1079,7 @@ Maintenance Release: Various Bug Fixes
 ### Scheduling and Building
 - **Schedule task folder** — creation guaranteed, proven by a live round-trip every build
 - **Stalled-printer fix** — proven with real connections every test run
-- **Local installer build** — one npm command builds the full installer on a developer machine; README documents the steps
+- **Unsigned build** — `npm run package:unsigned` produces the full installer with no signing key; README documents both build paths
 - **Plain-window fallback** — remote desktop / transparency-off path exercised live by the test battery
 - **Documentation** — corrected where it described retired components or overstated what publishing runs
 
