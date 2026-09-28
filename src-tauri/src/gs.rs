@@ -207,7 +207,7 @@ fn drain_bounded(
 }
 
 fn output_within_using(
-    mut cmd: std::process::Command,
+    cmd: std::process::Command,
     budget: Duration,
     contain_process_tree: bool,
     mut drain: impl FnMut(
@@ -221,28 +221,23 @@ fn output_within_using(
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    let mut child = cmd
-        .stdin(Stdio::null())
+    let mut cmd = cmd;
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let pid = child.id();
+        .stderr(Stdio::piped());
     #[cfg(windows)]
-    let job = if contain_process_tree {
-        match crate::process_job::ProcessJob::attach(child.id()) {
-            Ok(job) => Some(job),
-            Err(error) => {
-                stop_process(&mut child, pid);
-                return Err(std::io::Error::other(format!(
-                    "could not contain the child process: {error}"
-                )));
-            }
-        }
+    let (mut child, job) = if contain_process_tree {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let (child, job) = crate::process_job::ProcessJob::spawn(cmd, CREATE_NO_WINDOW)?;
+        (child, Some(job))
     } else {
-        None
+        (cmd.spawn()?, None)
     };
     #[cfg(not(windows))]
+    let mut child = cmd.spawn()?;
+    #[cfg(not(windows))]
     let job: Option<()> = None;
+    let pid = child.id();
 
     let stdout = match drain(
         child
