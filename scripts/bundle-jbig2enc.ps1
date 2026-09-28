@@ -1,4 +1,4 @@
-# Installs the source-built jbig2enc into resources/jbig2enc/.
+# Vendors the official upstream jbig2enc binary into resources/jbig2enc/.
 #
 # The MRC pass writes its 1-bit text stencil as /JBIG2Decode, and
 # nothing in the shipped stack can encode JBIG2: qpdf decodes only, Ghostscript
@@ -8,11 +8,10 @@
 # ~8.4 million pixel contexts per page, which is minutes per page for a step
 # that must be milliseconds.
 #
-# So the encoder is native, VENDORED, and invoked as a subprocess. The binary is
-# scripts/jbig2enc-build/jbig2.exe, built by build-jbig2enc.ps1 from the 0.32
-# source tag without giflib and on zlib 1.3.2 (PROVENANCE.txt there), committed
-# and SHA-256 pinned below. Apache-2.0; the statically-linked components are
-# enumerated by the depmf.json committed beside it.
+# So the encoder is native, and it is VENDORED and invoked as a subprocess --
+# byte-for-byte the Ghostscript pattern. jbig2enc 0.32 publishes official
+# prebuilt Windows x64 MSVC release assets, so no compiler enters the packaging
+# chain. Apache-2.0; the statically-linked components are enumerated below.
 #
 # Run before packaging: powershell -ExecutionPolicy Bypass -File scripts\bundle-jbig2enc.ps1
 
@@ -28,12 +27,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# The committed build and the hashes it must have. Update both deliberately,
-# from what build-jbig2enc.ps1 prints, and re-run fetch-jbig2enc-licenses.ps1
-# when the component set moves.
-$BuildDir = Join-Path $PSScriptRoot "jbig2enc-build"
-$ExpectedExeSha256 = "815779D2DE391676016B5596C58D02008D9AD63C3857A3FCBF969653082A706C"
-$ExpectedDepmfSha256 = "E4BEA943671FEBE90FEC16BD528251B9D874AFDC3D0550A919090A2AA1D2F120"
+# Pinned release-asset checksum -- update deliberately alongside $Version, and
+# re-run fetch-jbig2enc-licenses.ps1 when you do (the notices are pinned to the
+# component versions frozen inside this exact binary).
+$ExpectedSha256 = "64C3D913B84C849148B965531732AF1D7875E0E1448D98F106D7F8AA992C05E0"
+$Asset = "jbig2enc-$Version-Windows-X64-MSVC.zip"
+$Url = "https://github.com/agl/jbig2enc/releases/download/$Version/$Asset"
 
 # ---------------------------------------------------------------------------
 # Manifest reader. Returns component -> @{ version; notice } and, separately,
@@ -59,7 +58,7 @@ function Read-Manifest {
 #
 #   (a) every shipped binary resolves to at least one manifest row whose
 #       notice file is actually present -- the tesseract-licenses precedent;
-#   (b) every project named in the BUILD'S OWN depmf.json has a row, at the
+#   (b) every project named in UPSTREAM'S OWN depmf.json has a row, at the
 #       version depmf reports. Half (b) is the one that cannot rot: the
 #       component list is enumerated from the artifact rather than hand-kept,
 #       so a pin bump that swaps a dependency stops the build instead of
@@ -91,7 +90,7 @@ function Get-NoticeProblems {
         }
     }
 
-    # every row's notice must exist. jbig2enc's own text comes from the source and
+    # every row's notice must exist. jbig2enc's own text comes from the zip and
     # ships at the top level; the fetched component texts live in licenses/.
     foreach ($component in $rows.Keys) {
         $notice = $rows[$component].notice
@@ -105,10 +104,10 @@ function Get-NoticeProblems {
         }
     }
 
-    # (b) the build's dependency manifest
+    # (b) upstream's dependency manifest
     $depmf = Join-Path $Root "depmf.json"
     if (-not (Test-Path $depmf)) {
-        $problems += "  depmf.json missing -- the build's own component list is what the manifest is checked against"
+        $problems += "  depmf.json missing -- upstream's own component list is what the manifest is checked against"
     } else {
         $dep = Get-Content $depmf -Raw | ConvertFrom-Json
         foreach ($name in $dep.projects.PSObject.Properties.Name) {
@@ -125,7 +124,7 @@ function Get-NoticeProblems {
         # JBIG2 is a patented process and upstream ships a note saying so. It
         # is not a licence, but redistributing the encoder without it drops
         # information the user is entitled to have.
-        $problems += "  PATENTS-jbig2enc.txt missing (scripts/jbig2enc-build/PATENTS supplies it)"
+        $problems += "  PATENTS-jbig2enc.txt missing (the release zip supplies it)"
     }
     return $problems
 }
@@ -154,12 +153,11 @@ if (Test-Path $exe) {
     # an incomplete notice tree, and a presence-only check would skip forever.
     $current = Get-Jbig2Version $exe
     $noticeProblems = @(Get-NoticeProblems -Root $DestDir)
-    $shipped = (Get-FileHash $exe -Algorithm SHA256).Hash
-    if ($current -eq "jbig2enc $Version" -and $shipped -eq $ExpectedExeSha256 -and $noticeProblems.Count -eq 0) {
+    if ($current -eq "jbig2enc $Version" -and $noticeProblems.Count -eq 0) {
         Write-Host "jbig2enc $Version already vendored at $DestDir (notices complete)"
         return
     }
-    Write-Host "Re-vendoring: existing tree does not match the pin (version='$current' sha256=$shipped notices=$($noticeProblems.Count -eq 0))"
+    Write-Host "Re-vendoring: existing tree is incomplete (version='$current' notices=$($noticeProblems.Count -eq 0))"
     $noticeProblems | Select-Object -First 5 | ForEach-Object { Write-Host $_ }
 }
 
@@ -168,28 +166,48 @@ if (-not (Test-Path $LicenseSrc)) {
     exit 1
 }
 
-Write-Host "Vendoring jbig2enc $Version (source build, Apache-2.0)..."
-$pins = @(
-    @((Join-Path $BuildDir "jbig2.exe"), $ExpectedExeSha256),
-    @((Join-Path $BuildDir "depmf.json"), $ExpectedDepmfSha256)
-)
-foreach ($pin in $pins) {
-    if (-not (Test-Path $pin[0])) {
-        Write-Error "Committed build missing: $($pin[0]) -- run build-jbig2enc.ps1 and commit the result."
-        exit 1
+$Work = Join-Path $env:TEMP "jbig2enc-vendor-$Version"
+$Zip = Join-Path $Work $Asset
+$Extracted = Join-Path $Work "extracted"
+Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $Work | Out-Null
+
+Write-Host "Vendoring jbig2enc $Version (upstream prebuilt, Apache-2.0)..."
+. (Join-Path $PSScriptRoot "download-retry.ps1")
+Write-Host "Downloading $Url..."
+try {
+    Invoke-DownloadWithRetry -Description "jbig2enc $Version" -OutFile $Zip -Download {
+        Invoke-WebRequest -Uri $Url -OutFile $Zip -MaximumRedirection 5 `
+            -TimeoutSec $DownloadRetryTimeoutSeconds
     }
-    $actual = (Get-FileHash $pin[0] -Algorithm SHA256).Hash
-    if ($actual -ne $pin[1]) {
-        Write-Error "Checksum mismatch for $($pin[0]).`n  expected: $($pin[1])`n  actual:   $actual"
-        exit 1
-    }
+} catch {
+    Write-Error "Download failed: $($_.Exception.Message)"
+    exit 1
 }
-Write-Host "Checksums verified ($ExpectedExeSha256)."
+
+$actual = (Get-FileHash $Zip -Algorithm SHA256).Hash
+if ($actual -ne $ExpectedSha256) {
+    Write-Error "Checksum mismatch for $Asset.`n  expected: $ExpectedSha256`n  actual:   $actual"
+    exit 1
+}
+Write-Host "Checksum verified ($ExpectedSha256)."
+
+# A plain zip -- no NSIS, so no 7-Zip dependency (unlike Ghostscript/Tesseract).
+Expand-Archive -Path $Zip -DestinationPath $Extracted -Force
 
 if (Test-Path $DestDir) { Remove-Item $DestDir -Recurse -Force }
 New-Item -ItemType Directory -Force $DestDir | Out-Null
 
-Copy-Item (Join-Path $BuildDir "jbig2.exe") -Destination $DestDir -Force
+# The zip also carries include/ and lib/ (static libraries and headers for
+# BUILDING against jbig2enc) and bin/jbig2topdf.py, a helper that wraps output
+# into a PDF. None of that ships: the engine drives the executable directly and
+# does its own PDF surgery, and 90 MB of .a archives are not a runtime.
+$exeSrc = Join-Path $Extracted "bin\jbig2.exe"
+if (-not (Test-Path $exeSrc)) {
+    Write-Error "bin\jbig2.exe not found in the release asset -- the layout changed."
+    exit 1
+}
+Copy-Item $exeSrc -Destination $DestDir -Force
 Write-Host "  Copied jbig2.exe"
 
 # Keep the directory tracked even when binaries are gitignored. Written here
@@ -197,12 +215,13 @@ Write-Host "  Copied jbig2.exe"
 # the way the other vendoring scripts leave theirs.
 New-Item -ItemType File -Force (Join-Path $DestDir ".gitkeep") | Out-Null
 
-# jbig2enc's own notices come from the source tag. depmf.json is the build's
-# dependency manifest: it SHIPS (provenance for the statically-linked set) and
-# the notice gate checks the manifest against it, so it lands first.
-Copy-Item (Join-Path $BuildDir "COPYING") -Destination (Join-Path $DestDir "LICENSE-jbig2enc.txt") -Force
-Copy-Item (Join-Path $BuildDir "PATENTS") -Destination (Join-Path $DestDir "PATENTS-jbig2enc.txt") -Force
-Copy-Item (Join-Path $BuildDir "depmf.json") -Destination $DestDir -Force
+# Upstream's own notices, straight from the pinned zip.
+Copy-Item (Join-Path $Extracted "COPYING") -Destination (Join-Path $DestDir "LICENSE-jbig2enc.txt") -Force
+Copy-Item (Join-Path $Extracted "share\doc\jbig2enc\PATENTS") -Destination (Join-Path $DestDir "PATENTS-jbig2enc.txt") -Force
+# depmf.json is upstream's dependency manifest. It SHIPS (provenance for the
+# statically-linked set) and it is what the notice gate checks the manifest
+# against, so it must land before Get-NoticeProblems runs.
+Copy-Item (Join-Path $Extracted "depmf.json") -Destination $DestDir -Force
 Write-Host "  Copied LICENSE-jbig2enc.txt, PATENTS-jbig2enc.txt, depmf.json"
 
 $LicenseDir = Join-Path $DestDir "licenses"
@@ -230,6 +249,8 @@ if ($problems) {
     exit 1
 }
 Write-Host "  Notice gate: every shipped binary and every statically-linked component resolves to a present notice."
+
+Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 
 $sizeMB = [math]::Round(((Get-ChildItem $DestDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
 Write-Host "Done. Vendored jbig2enc ${Version}: ${sizeMB}MB"

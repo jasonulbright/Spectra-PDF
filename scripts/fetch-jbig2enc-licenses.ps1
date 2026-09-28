@@ -1,9 +1,9 @@
 # MAINTENANCE TOOL, not a build step. Run only when the jbig2enc pin in
 # bundle-jbig2enc.ps1 changes; review the git diff and commit the result.
 #
-# The committed jbig2enc build is SHA-256 pinned and its `jbig2.exe` is a STATIC
-# build — leptonica, libtiff, libjpeg-turbo, libpng, zlib, openjpeg and libwebp
-# are linked INSIDE the one binary. So the applicable licences are
+# The jbig2enc release asset is SHA-256 pinned and its `jbig2.exe` is a STATIC
+# build — leptonica, libtiff, libjpeg-turbo, libpng, zlib-ng, openjpeg, libwebp
+# and giflib are linked INSIDE the one binary. So the applicable licences are
 # those of the exact versions frozen in that executable and they cannot change,
 # because the binary cannot change. Fetching at build time would be worse than
 # unnecessary: upstream HEAD can carry the licence for a DIFFERENT version than
@@ -13,10 +13,9 @@
 # copies them, offline.
 #
 # Every URL below is pinned to the component VERSION the artifact actually
-# carries (the build's own `depmf.json`, cross-checked against `jbig2.exe
+# carries (upstream's own `depmf.json`, cross-checked against `jbig2.exe
 # --version`), not to a moving branch. jbig2enc's own Apache-2.0 COPYING and
-# its PATENTS note come from the source tag (scripts/jbig2enc-build/), so they
-# are not fetched here.
+# its PATENTS note ship inside the zip, so they are not fetched here.
 #
 # scripts/jbig2enc-licenses.tsv is the manifest: its notice column says what
 # must exist, this table says where each came from.
@@ -38,15 +37,21 @@ $UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 # names three licences and the IJG terms live in a separate README). A part may
 # itself be an array of ALTERNATES: the first that fetches wins.
 $Sources = [ordered]@{
+    # giflib is on SourceForge, which serves the raw file to a plain client and
+    # 403s a browser User-Agent — the opposite of every other host here — so
+    # the GitHub mirror is primary and SourceForge is the alternate. Byte
+    # counts were compared: the two are the same file.
+    "LICENSE-giflib.txt"        = @(,@("https://raw.githubusercontent.com/mirrorer/giflib/master/COPYING",
+                                       "https://sourceforge.net/p/giflib/code/ci/5.2.2/tree/COPYING?format=raw"))
     "LICENSE-leptonica.txt"     = @("https://raw.githubusercontent.com/DanBloomberg/leptonica/1.87.0/leptonica-license.txt")
     "LICENSE-openjpeg.txt"      = @("https://raw.githubusercontent.com/uclouvain/openjpeg/v2.5.4/LICENSE")
     # BSD-3-Clause AND IJG: LICENSE.md is the statement over three licences and
     # README.ijg carries the IJG terms it refers to, so both ship.
-    "LICENSE-libjpeg-turbo.txt" = @("https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.2.0/LICENSE.md",
-                                    "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.2.0/README.ijg")
+    "LICENSE-libjpeg-turbo.txt" = @("https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.1.4/LICENSE.md",
+                                    "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.1.4/README.ijg")
     "LICENSE-libpng.txt"        = @("https://raw.githubusercontent.com/pnggroup/libpng/v1.6.58/LICENSE")
-    "LICENSE-zlib.txt"          = @("https://raw.githubusercontent.com/madler/zlib/v1.3.2/LICENSE")
-    "LICENSE-libtiff.txt"       = @(,@("https://gitlab.com/libtiff/libtiff/-/raw/v4.7.2/LICENSE.md",
+    "LICENSE-zlib-ng.txt"       = @("https://raw.githubusercontent.com/zlib-ng/zlib-ng/2.3.3/LICENSE.md")
+    "LICENSE-libtiff.txt"       = @(,@("https://gitlab.com/libtiff/libtiff/-/raw/v4.7.1/LICENSE.md",
                                        "https://raw.githubusercontent.com/libsdl-org/libtiff/main/LICENSE.md"))
     "LICENSE-libwebp.txt"       = @("https://raw.githubusercontent.com/webmproject/libwebp/v1.6.0/COPYING")
 }
@@ -70,7 +75,13 @@ foreach ($notice in $Sources.Keys) {
             $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("jblic-" + [System.Guid]::NewGuid().ToString("N") + ".tmp")
             foreach ($attempt in 1..3) {
                 try {
-                    Invoke-WebRequest -Uri $url -UserAgent $UA -MaximumRedirection 5 -TimeoutSec 60 -OutFile $tmp
+                    # SourceForge is the one host here that PREFERS the default
+                    # agent, so the alternate is fetched without the override.
+                    if ($url -like "*sourceforge.net*") {
+                        Invoke-WebRequest -Uri $url -MaximumRedirection 5 -TimeoutSec 60 -OutFile $tmp
+                    } else {
+                        Invoke-WebRequest -Uri $url -UserAgent $UA -MaximumRedirection 5 -TimeoutSec 60 -OutFile $tmp
+                    }
                     $got = [System.IO.File]::ReadAllText($tmp, [System.Text.Encoding]::UTF8)
                     if ($got.Trim().Length -eq 0) { throw "empty body" }
                     if ($got.Trim().Length -lt $MinNoticeBytes) {

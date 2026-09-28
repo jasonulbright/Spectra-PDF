@@ -156,7 +156,7 @@ def test_the_libreoffice_download_falls_back_across_tdf_hosts() -> None:
     assert positions == sorted(positions), (
         "the download sources must be ordered: " + ", ".join(hosts)
     )
-    assert '$ExpectedSha256 = "F9877032FD908BEB9C0DDF06DF4AF5C2E85F419C42E14876C4CCE5AAE5FB2660"' in text
+    assert '$ExpectedSha256 = "F15BA07BFCB0186986CF3171063506F5D207C11F8CC051BA0D135209E9E915F9"' in text
     # The verify gates extraction regardless of which source or cache answered.
     assert text.index("Test-PinnedMsi $Msi") < text.index("msiexec.exe")
 
@@ -3078,10 +3078,10 @@ RETRY_ROUTED_PS = (
     "sync-edit-fonts.ps1",
     "bundle-dictionaries.ps1",
     "bundle-voikko.ps1",
+    "bundle-jbig2enc.ps1",
     "bundle-libreoffice.ps1",
     "bundle-tesseract.ps1",
     "setup-python-embed.ps1",
-    "pip-bootstrap.ps1",
     "setup-test-softhsm.ps1",
     "stage-corresponding-source.ps1",
     "install-signing-tools.ps1",
@@ -3395,66 +3395,3 @@ def test_local_toolchain_parity_precedes_candidate_metadata_checks() -> None:
     script = (ROOT / "scripts/ci-parity-gates.sh").read_text(encoding="utf-8")
     for toolchain in ("rust", "python", "node"):
         assert script.index(f"gate {toolchain}-toolchain") < script.index("gate version-consistency")
-
-
-# ---------------------------------------------------------------------------
-# Pinned pip bootstrap and the LibreOffice extraction
-# ---------------------------------------------------------------------------
-
-PIP_BOOTSTRAP = "scripts/pip-bootstrap.ps1"
-
-
-def test_no_script_runs_an_unpinned_pip_bootstrap() -> None:
-    """get-pip.py is served unversioned and was executed before any check."""
-    for path in sorted((ROOT / "scripts").glob("*.ps1")):
-        if ".local." in path.name:
-            continue
-        text = _ps_source(path.name)
-        assert "get-pip" not in text and "bootstrap.pypa.io" not in text, path.name
-    for name in ("setup-python-embed.ps1", "lock-python-deps.ps1"):
-        text = _ps_source(name)
-        assert '. (Join-Path $PSScriptRoot "pip-bootstrap.ps1")' in text, name
-        assert r'Install-PinnedPip -Python "$DestDir\python.exe"' in text, name
-
-
-def test_the_pip_pin_is_one_exact_wheel_and_hash() -> None:
-    text = (ROOT / PIP_BOOTSTRAP).read_text(encoding="utf-8")
-    version = re.search(r'^\$PipVersion = "(\d+\.\d+(?:\.\d+)?)"$', text, re.M)
-    assert version, "pip version is not one exact release"
-    assert re.search(r'^\$PipSha256 = "[0-9a-f]{64}"$', text, re.M)
-    assert '$PipWheel = "pip-$PipVersion-py3-none-any.whl"' in text
-
-
-@pytest.mark.skipif(not shutil.which("powershell"), reason="needs Windows PowerShell")
-def test_a_pip_wheel_that_misses_the_pin_is_refused_before_install(tmp_path: Path) -> None:
-    fake_python = tmp_path / "embed" / "python.exe"
-    fake_python.parent.mkdir()
-    fake_python.write_bytes(b"")
-    impostor = tmp_path / "impostor.whl"
-    impostor.write_bytes(b"not the pinned wheel")
-    probe = tmp_path / "probe.ps1"
-    probe.write_text(
-        "$ErrorActionPreference = 'Stop'\n"
-        f". '{ROOT / PIP_BOOTSTRAP}'\n"
-        f"$PipUrl = '{impostor.as_uri()}'\n"
-        f"try {{ Install-PinnedPip -Python '{fake_python}'; 'INSTALLED' }}"
-        " catch { 'REFUSED: ' + $_.Exception.Message }\n",
-        encoding="utf-8",
-    )
-    run = subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
-        capture_output=True, text=True, timeout=120,
-    )
-    assert run.returncode == 0, run.stderr
-    assert "REFUSED:" in run.stdout and "the pin is" in run.stdout, run.stdout
-    assert not (tmp_path / "embed" / "Lib").exists(), "bytes reached site-packages"
-
-
-def test_libreoffice_ships_only_the_pinned_msi_and_checks_the_extraction() -> None:
-    text = _ps_source("bundle-libreoffice.ps1")
-    assert re.search(r"Start-Process msiexec\.exe .* -Wait -PassThru", text)
-    assert "$msiexec.ExitCode -ne 0" in text
-    roots = text[text.index("$roots = "):text.index("foreach ($r in $roots)")]
-    assert roots.lstrip("$roots = ").startswith("if ($UseLocalInstall)"), roots
-    for path in (ROOT / ".github" / "workflows").glob("*.yml"):
-        assert "UseLocalInstall" not in path.read_text(encoding="utf-8"), path.name

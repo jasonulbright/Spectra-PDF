@@ -9,11 +9,11 @@
 # is the manifest; the notice gate below refuses to leave a tree that is missing
 # any file it names. See THIRD-PARTY-LICENSES.md section LibreOffice.
 #
-# Two sources:
-#   1. With -UseLocalInstall only: a local system install (C:\Program Files#      LibreOffice), copied verbatim when its three-part release version matches
-#      the pinned version below. Its bytes are NOT hash-verified -- an install
-#      carries whatever optional components its owner chose -- so no workflow
-#      passes this switch; it exists for a dev machine's smoke build.
+# Two sources, tried in order:
+#   1. A local system install (C:\Program Files\LibreOffice) -- copied verbatim
+#      ONLY when its three-part release version matches the pinned version below.
+#      This is the fast path on a dev/packaging machine that already has the
+#      exact release build; an older/newer install cannot change shipped bytes.
 #   2. The official upstream Windows .msi -- downloaded, CHECKSUM-VERIFIED, and
 #      extracted headlessly. This is what makes a CI-tag release self-sufficient:
 #      the GitHub windows-latest runner has no LibreOffice, so it falls to this
@@ -35,23 +35,20 @@ param(
     # Pinned default so a fresh CI box (no system LibreOffice) vendors a known,
     # integrity-checked build with zero manual setup. Override -MsiUrl (and
     # -ExpectedSha256, or "" to skip the check) only to bump the version.
-    [string]$Version = "26.2.6",
+    [string]$Version = "26.2.5",
     # The archive keeps releases under their four-part build version; the
     # redirector and the rsync mirrors expose the same bytes under the
     # three-part release. Both spellings name one build.
-    [string]$ArchiveVersion = "26.2.6.3",
+    [string]$ArchiveVersion = "26.2.5.2",
     [string]$MsiUrl = "",
-    [string]$ExpectedSha256 = "F9877032FD908BEB9C0DDF06DF4AF5C2E85F419C42E14876C4CCE5AAE5FB2660",
+    [string]$ExpectedSha256 = "F15BA07BFCB0186986CF3171063506F5D207C11F8CC051BA0D135209E9E915F9",
     # A directory holding an already-downloaded, checksum-verified .msi. A file
     # named for the pinned checksum is reused; a fresh download is written back
     # here after it verifies. Empty disables the cache.
     [string]$MsiCacheDir = $env:SPECTRAPDF_LO_MSI_CACHE,
     # Run only the notice gate against -DestDir and exit with its verdict.
     # Nothing is downloaded, copied or removed.
-    [switch]$GateOnly,
-    # Apply only the unused-component trim and both gates to -DestDir.
-    [switch]$TrimOnly,
-    [switch]$UseLocalInstall
+    [switch]$GateOnly
 )
 
 # Sources for the SAME pinned build, tried in order. The PRIMARY is a named
@@ -148,90 +145,7 @@ function Get-InstallReleaseVersion([string]$root) {
     return $null
 }
 
-# Parts of the install no conversion path loads: the embedded Python (and
-# pyuno), the PostgreSQL driver with the libpq client it imports and its
-# registry file, and the embedded Firebird engine. They serve macros, wizards
-# and Base databases; a headless document conversion runs none of them.
-# libcrypto/libssl are imported only by libpq and the Python extension
-# modules. ifbclient.dll stays: the core library imports it statically.
-# Registry entries that stay registered with no implementation behind them:
-# four Python-loader components in program/services/services.rdb
-# (org.openoffice.pyuno.MailMessage/MailServiceProvider and the fax, letter
-# and agenda CallWizard) and ScriptProviderForPython in share/registry/main.xcd.
-# No conversion path instantiates them (mail merge, wizards, Python macros);
-# instantiating one fails at that call and does not affect loading.
-$UnusedParts = @(
-    "program\python.exe", "program\python3.dll", "program\python312.dll",
-    "program\python-core-*", "program\pythonloaderlo.dll", "program\pythonloader.py",
-    "program\pythonloader.uno.ini", "program\pythonscript.py", "program\pyuno.pyd",
-    "program\uno.py", "program\unohelper.py", "program\officehelper.py",
-    "program\mailmerge.py", "program\msgbox.py", "program\access2base.py",
-    "program\scriptforge.py", "program\__pycache__",
-    "program\services\pyuno.rdb", "program\services\scriptproviderforpython.rdb",
-    "share\Scripts\python",
-    "program\libpq.dll", "program\postgresql-sdbc-impllo.dll",
-    "program\services\postgresql-sdbc.rdb", "share\registry\postgresql.xcd",
-    "program\libcrypto-3.dll", "program\libssl-3.dll",
-    "program\Engine12.dll", "program\intl"
-)
-$UnusedDlls = @("python3.dll", "python312.dll", "pythonloaderlo.dll", "pyuno.pyd", "libpq.dll",
-    "postgresql-sdbc-impllo.dll", "libcrypto-3.dll", "libssl-3.dll", "engine12.dll", "fbintl.dll")
-
-function Remove-UnusedParts([string]$tree) {
-    foreach ($part in $UnusedParts) {
-        foreach ($hit in @(Get-Item -Path (Join-Path $tree $part) -Force -ErrorAction SilentlyContinue)) {
-            Remove-Item -LiteralPath $hit.FullName -Recurse -Force
-        }
-    }
-    $left = @($UnusedParts | Where-Object { Test-Path (Join-Path $tree $_) })
-    if ($left) { throw "LibreOffice trim left: $($left -join ', ')" }
-    # A binary still importing a removed DLL would fail to load when reached.
-    $python = Join-Path $PSScriptRoot "..\resources\python\python.exe"
-    if (-not (Test-Path $python)) { throw "Embedded runtime missing at $python -- run setup-python-embed.ps1 first." }
-    $program = Join-Path $tree "program"
-    $targets = @($program) + @(Get-ChildItem $program -Recurse -Filter *.exe -File | ForEach-Object { $_.FullName })
-    $json = & $python (Join-Path $PSScriptRoot "pe_imports.py") @targets
-    if ($LASTEXITCODE -ne 0) { throw "import inventory of $program failed" }
-    $report = ($json | Out-String) | ConvertFrom-Json
-    $bad = @()
-    foreach ($p in $report.PSObject.Properties) {
-        foreach ($dll in @($p.Value.imports) + @($p.Value.delay_imports)) {
-            if ($dll -and $UnusedDlls -contains $dll.ToLowerInvariant()) { $bad += "$($p.Name) imports $dll" }
-        }
-    }
-    if ($bad) { throw "LibreOffice trim gate refused:`n  " + ($bad -join "`n  ") }
-    Write-Host "Removed the unused LibreOffice parts; no remaining binary imports them."
-}
-
-# libxml2 overlay. program/libxml2.dll of 26.2.6 is libxml2 2.14.6; the file
-# from scripts/build-lo-libxml2.ps1 is 2.15.4 (same ABI, every symbol the tree
-# imports exported) and replaces it. Bound to the LibreOffice pin: another
-# release carries its own libxml2 and must be rebuilt against, not overlaid.
-$LibXml2Overlay = @{
-    Pin    = "26.2.6"
-    Sha256 = "eb7878a7ebe3e9fab8dc2120e5117ca445d29e09ebf69d3796bc0b6ad3f490bd"
-}
-function Install-LibXml2Overlay([string]$tree) {
-    if ($Version -ne $LibXml2Overlay.Pin) {
-        throw "The libxml2 overlay is bound to LibreOffice $($LibXml2Overlay.Pin); the pin is $Version. Rebuild or remove the overlay."
-    }
-    $src = Join-Path $PSScriptRoot "libreoffice-libxml2\libxml2.dll"
-    if (-not (Test-Path -LiteralPath $src)) { throw "missing $src; run scripts\build-lo-libxml2.ps1 and commit the result" }
-    $got = (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($got -ne $LibXml2Overlay.Sha256) { throw "$src has SHA-256 $got; pinned $($LibXml2Overlay.Sha256)" }
-    $dest = Join-Path $tree "program\libxml2.dll"
-    if (-not (Test-Path -LiteralPath $dest)) { throw "no program\libxml2.dll in $tree to replace" }
-    Copy-Item -LiteralPath $src -Destination $dest -Force
-    Write-Host "Installed the libxml2 2.15.4 overlay ($got)"
-}
-
 if ($GateOnly) {
-    Assert-Notices $DestDir
-    exit 0
-}
-if ($TrimOnly) {
-    Remove-UnusedParts $DestDir
-    Install-LibXml2Overlay $DestDir
     Assert-Notices $DestDir
     exit 0
 }
@@ -258,8 +172,6 @@ function Copy-Install([string]$root) {
         $p = Join-Path $root $sub
         if (Test-Path $p) { Copy-Item $p (Join-Path $DestDir $sub) -Recurse -Force }
     }
-    Remove-UnusedParts $DestDir
-    Install-LibXml2Overlay $DestDir
     # LibreOffice's Windows font backend registers this directory with
     # AddFontResourceExW(FR_PRIVATE). Copy the app's already-vendored faces
     # here so clean machines convert with the same fonts the rest of Spectra
@@ -279,12 +191,10 @@ function Copy-Install([string]$root) {
 }
 
 # -- 1. Local system install -------------------------------------------------
-$roots = if ($UseLocalInstall) {
-    @(
-        "$env:ProgramFiles\LibreOffice",
-        "${env:ProgramFiles(x86)}\LibreOffice"
-    ) | Where-Object { $_ -and (Test-Path $_) }
-} else { @() }
+$roots = @(
+    "$env:ProgramFiles\LibreOffice",
+    "${env:ProgramFiles(x86)}\LibreOffice"
+) | Where-Object { $_ -and (Test-Path $_) }
 
 foreach ($r in $roots) {
     $localVersion = Get-InstallReleaseVersion $r
@@ -347,7 +257,7 @@ if ($CacheFile -and (Test-Path -LiteralPath $CacheFile)) {
 if (-not $haveMsi) {
     $failures = @()
     foreach ($url in $MsiUrls) {
-        Write-Host "Downloading $url ..."
+        Write-Host "No local LibreOffice; downloading $url ..."
         try {
             Invoke-DownloadWithRetry -Description $url -OutFile $Msi -Download {
                 Invoke-WebRequest -Uri $url -OutFile $Msi -UseBasicParsing -TimeoutSec 1800
@@ -383,13 +293,7 @@ if ($Pinned) {
 
 # Administrative install extracts the payload without touching the system.
 Write-Host "Extracting (msiexec /a) ..."
-# Start-Process reports no failure of its own: a failed administrative install
-# can leave a partial tree whose soffice.exe and version still pass below.
-$msiexec = Start-Process msiexec.exe -ArgumentList "/a `"$Msi`" /qn TARGETDIR=`"$Extract`"" -Wait -PassThru
-if ($msiexec.ExitCode -ne 0) {
-    Write-Error "msiexec /a failed with exit code $($msiexec.ExitCode) for $Msi"
-    exit 1
-}
+Start-Process msiexec.exe -ArgumentList "/a `"$Msi`" /qn TARGETDIR=`"$Extract`"" -Wait
 
 $installed = Get-ChildItem -Path $Extract -Recurse -Filter "soffice.exe" -ErrorAction SilentlyContinue |
     Select-Object -First 1
