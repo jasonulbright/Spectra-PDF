@@ -8,6 +8,12 @@ export type EngineCall = (
   options?: EngineCallOptions,
 ) => Promise<unknown>;
 
-/** A caller-owned revision check. It runs again inside the file lock, after
- * the commit gate, immediately before dispatch; a throw prevents the RPC. */
-export interface EngineCallOptions { assertCurrent?: () => void }
+export interface EngineCallOptions {
+  /** A caller-owned revision check. It runs again inside the file lock, after
+   * the commit gate, immediately before dispatch; a throw prevents the RPC. */
+  assertCurrent?: () => void;
+  /** Aborting asks the interactive engine to stop the request at its next
+   * safe point. The promise still settles with the engine's own answer: a
+   * handler that honours the cancel returns a partial result, not an error. */
+  signal?: AbortSignal;
+}

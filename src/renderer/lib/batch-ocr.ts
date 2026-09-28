@@ -71,6 +71,8 @@ export interface BatchFileResult {
 
 export interface BatchReport {
   cancelled: boolean;
+  /** Set by the engine's in-place run: the results replaced originals. */
+  inPlace?: boolean;
   results: BatchFileResult[];
   /** Directories the enumeration could not read (from the Rust walk) —
    * carried into the report so the run never has silent holes. */
@@ -759,4 +761,28 @@ export function summarize(report: BatchReport): BatchSummary {
     else skipped += 1;
   }
   return { ocrd, copied, skipped, repaired };
+}
+
+/** Run-phase controls. Stop works for both run kinds: a mirror run stops
+ * between files in the driver, an in-place run stops in the engine between
+ * files and pages. Pause stays mirror-only: the in-place run is one engine
+ * request, and holding it would hold every window's engine work behind it. */
+export function batchRunControls(inPlace: boolean, stopping: boolean): {
+  pauseDisabled: boolean;
+  pauseTitleKey: 'dialog.batch.noPauseInPlace' | null;
+  stopDisabled: boolean;
+} {
+  return {
+    pauseDisabled: stopping || inPlace,
+    pauseTitleKey: inPlace ? 'dialog.batch.noPauseInPlace' : null,
+    stopDisabled: stopping,
+  };
+}
+
+/** What a stopped run says about the files it did not reach. */
+export function cancelledNoteKey(
+  report: Pick<BatchReport, 'cancelled' | 'inPlace'>,
+): 'dialog.batch.cancelledNote' | 'dialog.batch.cancelledNoteInPlace' | null {
+  if (!report.cancelled) return null;
+  return report.inPlace ? 'dialog.batch.cancelledNoteInPlace' : 'dialog.batch.cancelledNote';
 }

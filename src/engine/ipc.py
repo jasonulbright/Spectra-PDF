@@ -13,10 +13,13 @@ with in the file.
 
 import json
 import math
+import queue
 import re
 import sys
-from contextlib import redirect_stdout
-from typing import Any, Callable, TextIO
+import threading
+from contextlib import contextmanager, redirect_stdout
+from contextvars import ContextVar
+from typing import Any, Callable, Iterator, TextIO
 
 _LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 MAX_JSONRPC_LINE_BYTES = 256 * 1024 * 1024
@@ -73,6 +76,106 @@ def _contains_lone_surrogate(value: Any, ancestors: set[int] | None = None) -> b
         ancestors.remove(identity)
 
 
+# ── cooperative cancel ────────────────────────────────────────────────────
+#
+# The reader thread receives a `$/cancelRequest` notification while the main
+# thread is still inside a handler. A cancel is recorded only for an id that
+# is queued or running, so a cancel that arrives after its response leaves
+# nothing behind. A handler never sees an id: it asks `cancelled()` about the
+# request it is serving, and only at its own safe points.
+
+CANCEL_METHOD = "$/cancelRequest"
+
+
+class RequestCancelled(Exception):
+    """Raised at a safe point when the request being served was cancelled."""
+
+
+def cancel_key(req_id: Any) -> Any:
+    """A hashable key for a JSON-RPC id; bool is not an id and never matches."""
+    if isinstance(req_id, bool):
+        return None
+    if isinstance(req_id, (int, str)):
+        return (type(req_id).__name__, req_id)
+    if isinstance(req_id, float):
+        return ("int", int(req_id)) if req_id.is_integer() else ("float", req_id)
+    return None
+
+
+class CancelRegistry:
+    """Ids that are queued or running, and which of them were cancelled."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._live: dict[Any, int] = {}
+        self._cancelled: set[Any] = set()
+
+    def admit(self, req_id: Any) -> None:
+        key = cancel_key(req_id)
+        if key is None:
+            return
+        with self._lock:
+            self._live[key] = self._live.get(key, 0) + 1
+
+    def retire(self, req_id: Any) -> None:
+        key = cancel_key(req_id)
+        if key is None:
+            return
+        with self._lock:
+            count = self._live.get(key, 0) - 1
+            if count > 0:
+                self._live[key] = count
+            else:
+                self._live.pop(key, None)
+                self._cancelled.discard(key)
+
+    def request(self, req_id: Any) -> bool:
+        """Record a cancel. False when no such request is queued or running."""
+        key = cancel_key(req_id)
+        if key is None:
+            return False
+        with self._lock:
+            if key not in self._live:
+                return False
+            self._cancelled.add(key)
+            return True
+
+    def is_cancelled(self, req_id: Any) -> bool:
+        key = cancel_key(req_id)
+        if key is None:
+            return False
+        with self._lock:
+            return key in self._cancelled
+
+    def live_count(self) -> int:
+        with self._lock:
+            return len(self._live)
+
+
+_current: ContextVar[Callable[[], bool] | None] = ContextVar("_current_cancel", default=None)
+
+
+def cancelled() -> bool:
+    """True when the request this handler is serving has been cancelled."""
+    check = _current.get()
+    return bool(check and check())
+
+
+def raise_if_cancelled() -> None:
+    if cancelled():
+        raise RequestCancelled()
+
+
+@contextmanager
+def serving(check: Callable[[], bool]) -> Iterator[None]:
+    """Bind `check` as the cancel test for the handler run inside the scope."""
+    token = _current.set(check)
+    try:
+        yield
+    finally:
+        _current.reset(token)
+
+
 def _reject_json_constant(value: str) -> None:
     raise ValueError(f"Invalid JSON constant: {value}")
 
@@ -114,18 +217,55 @@ class JsonRpcServer:
 
     def __init__(self) -> None:
         self._methods: dict[str, Callable[..., Any]] = {}
+        self.cancels = CancelRegistry()
 
     def register(self, name: str, handler: Callable[..., Any]) -> None:
         self._methods[name] = handler
 
+    def _read(self, input_stream: TextIO, inbox: "queue.Queue[tuple[str, Any]]") -> None:
+        """Reader thread. A cancel is applied here, while the main thread may
+        be inside the handler it cancels; every other line is queued in
+        arrival order. The last item is always ("eof", exception-or-None)."""
+        failure: BaseException | None = None
+        try:
+            for line in input_stream:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    request = json.loads(line, parse_constant=_reject_json_constant)
+                except (ValueError, RecursionError):
+                    inbox.put(("parse-error", None))
+                    continue
+                if (
+                    isinstance(request, dict)
+                    and request.get("method") == CANCEL_METHOD
+                    and "id" not in request
+                ):
+                    params = request.get("params")
+                    if isinstance(params, dict):
+                        self.cancels.request(params.get("id"))
+                    continue
+                if isinstance(request, dict) and "id" in request:
+                    self.cancels.admit(request.get("id"))
+                inbox.put(("request", request))
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the main thread
+            failure = exc
+        finally:
+            inbox.put(("eof", failure))
+
     def run(self, input_stream: TextIO, output_stream: TextIO) -> None:
-        for line in input_stream:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                request = json.loads(line, parse_constant=_reject_json_constant)
-            except (ValueError, RecursionError):
+        inbox: "queue.Queue[tuple[str, Any]]" = queue.Queue()
+        threading.Thread(
+            target=self._read, args=(input_stream, inbox), name="jsonrpc-reader", daemon=True
+        ).start()
+        while True:
+            kind, request = inbox.get()
+            if kind == "eof":
+                if request is not None:
+                    raise request
+                return
+            if kind == "parse-error":
                 self._write_error(output_stream, None, -32700, "Parse error")
                 continue
             # An exception that escapes this loop ends the process, and every
@@ -133,11 +273,19 @@ class JsonRpcServer:
             if not isinstance(request, dict):
                 self._write_error(output_stream, None, -32600, "Invalid Request")
                 continue
+            has_id = "id" in request
+            req_id = request.get("id")
             # Handler progress and diagnostics are not JSON-RPC frames. Keep
             # synchronous prints off stdout, which is the line-framed protocol
             # channel consumed by both the desktop app and the CLI.
-            with redirect_stdout(sys.stderr):
-                response = self._handle(request)
+            try:
+                with redirect_stdout(sys.stderr), serving(
+                    lambda: has_id and self.cancels.is_cancelled(req_id)
+                ):
+                    response = self._handle(request)
+            finally:
+                if has_id:
+                    self.cancels.retire(req_id)
             if response is None:
                 continue
             try:

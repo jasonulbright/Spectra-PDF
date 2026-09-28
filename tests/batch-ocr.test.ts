@@ -6,6 +6,8 @@ import {
   classifyLoadError,
   summarize,
   BatchPauseGate,
+  batchRunControls,
+  cancelledNoteKey,
   type BatchEntry,
   type BatchIo,
   type BatchPdfDoc,
@@ -1092,5 +1094,31 @@ describe('repair-only follow-ups', () => {
     expect(gate.current).toBe('running');
     expect(gate.pausedMs()).toBe(0);
     expect(states).toEqual(['pausing', 'running']);
+  });
+});
+
+describe('run controls', () => {
+  it('Stop works for both run kinds until a stop is pending', () => {
+    expect(batchRunControls(false, false).stopDisabled).toBe(false);
+    expect(batchRunControls(true, false).stopDisabled).toBe(false);
+    expect(batchRunControls(true, true).stopDisabled).toBe(true);
+    expect(batchRunControls(false, true).stopDisabled).toBe(true);
+  });
+
+  it('Pause is mirror-only and says why on an in-place run', () => {
+    expect(batchRunControls(false, false)).toMatchObject({ pauseDisabled: false, pauseTitleKey: null });
+    expect(batchRunControls(true, false)).toMatchObject({
+      pauseDisabled: true,
+      pauseTitleKey: 'dialog.batch.noPauseInPlace',
+    });
+    expect(batchRunControls(false, true).pauseDisabled).toBe(true);
+  });
+
+  it('a stopped run names what happened to the files it did not reach', () => {
+    expect(cancelledNoteKey({ cancelled: false })).toBeNull();
+    expect(cancelledNoteKey({ cancelled: false, inPlace: true })).toBeNull();
+    expect(cancelledNoteKey({ cancelled: true })).toBe('dialog.batch.cancelledNote');
+    expect(cancelledNoteKey({ cancelled: true, inPlace: false })).toBe('dialog.batch.cancelledNote');
+    expect(cancelledNoteKey({ cancelled: true, inPlace: true })).toBe('dialog.batch.cancelledNoteInPlace');
   });
 });

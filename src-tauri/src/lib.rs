@@ -254,6 +254,7 @@ pub fn run() {
             commands::send_to_engine,
             commands::send_to_health_engine,
             engine::other_window_work,
+            engine::cancel_engine_request,
             commands::check_auto_update_disabled,
             commands::check_field_scripts_disabled,
             commands::get_startup_enabled,

@@ -41,6 +41,11 @@ export const engine = {
    * window that asked. */
   healthRequest: (req: object) => invoke('send_to_health_engine', { request: req }),
 
+  /** Ask the interactive engine to stop one of THIS window's requests, named
+   * by the id this renderer issued. Resolves false when no such request is in
+   * flight. The request still answers under its own id. */
+  cancelRequest: (id: number) => invoke<boolean>('cancel_engine_request', { id }),
+
   /** Listen for JSON-RPC responses from the engine. Rust addresses each one
    * to the window that sent the request, so a response can never satisfy
    * another window's pending entry for the same id. */

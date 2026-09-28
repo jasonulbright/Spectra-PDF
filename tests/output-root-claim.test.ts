@@ -275,7 +275,11 @@ describe('the folder runs claim what they write', () => {
     expect(inPlace.indexOf('claimOutputRoots(')).toBeLessThan(inPlace.indexOf("callRaw('batch_ocr'"));
     expect(inPlace.indexOf('claimOutputRoots(')).toBeLessThan(inPlace.indexOf("setPhase('running')"));
     expect(inPlace).toContain("writtenRoots({ source, dest: '', inPlace: true, filing: [errorRoot] })");
-    expect(inPlace).toMatch(/\} finally \{\n\s+await root\.release\(\);/);
+    // A stopped run returns its partial report through the same path, so the
+    // finally releases the claim on a cancel too.
+    expect(inPlace).toMatch(
+      /\} finally \{\n\s+if \(inPlaceAbortRef\.current === abort\) inPlaceAbortRef\.current = null;\n\s+await root\.release\(\);/,
+    );
 
     const mirror = between(dialog, 'const start = async', 'const cancel = ');
     expect(mirror).toContain('filing: [movedRoot, errorRoot],');
