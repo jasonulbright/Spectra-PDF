@@ -5905,5 +5905,7 @@
   "engine.split.splitPlanExpiredAlready": "分割プランの有効期限が切れたか、すでに使用されています。出力を再計画してください",
   "engine.split.splitPlanIdRequired": "分割プラン ID が必要です",
   "engine.split.splitRequestLongerMatches": "分割リクエストが出力プランと一致しなくなりました",
-  "engine.split.splitSourceChangedAfter": "出力の計画後に分割元が変更されました"
+  "engine.split.splitSourceChangedAfter": "出力の計画後に分割元が変更されました",
+  "engine.text_paragraphs.textDefinesClippingPath": "クリッピングパスを定義するテキストは、変更するとページの表示内容が変わる可能性があるため編集できません。",
+  "engine.flattener.pageContainsTextDefines": "ページ {{page}} にはクリッピングパスを定義するテキストが含まれているため、透明部分の統合でページの表示内容が変わる可能性があります。"
 }

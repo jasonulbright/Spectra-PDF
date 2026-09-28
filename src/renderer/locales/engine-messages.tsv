@@ -202,6 +202,7 @@ enhance_scan.speckSizeMustInches	pattern	enhance_scan	the speck size must be 0.0
 fieldmdp.signatureFieldCannotLock	pattern	fieldmdp	Signature field "{{own_name}}" cannot lock itself. A field lock names the form fields that may no longer change, not the field being signed.
 flattener.flatteningRegionDpiWould	pattern	flattener	Flattening region {{region_number}} at {{dpi}} dpi would need {{width}}x{{height}} pixels.
 flattener.ghostscriptRegionRasterizationFailed	pattern	flattener	Ghostscript region rasterization failed: {{detail}}
+flattener.pageContainsTextDefines	pattern	flattener	Page {{page}} contains text that defines a clipping path, so flattening could change visible page content.
 flattener.pageMediaBox	exact	flattener,object_inspector	This page has no media box.
 flattener.pageNamesGraphicsState	pattern	flattener	Page {{page}} names a graphics state this engine cannot read, so whether it paints transparency is unknown.
 flattener.pagePlacesFormXobject	pattern	flattener	Page {{page}} places a form XObject this engine cannot read, so whether it paints transparency is unknown.
@@ -901,6 +902,7 @@ text_paragraphs.splitGapMustNumber	exact	text_paragraphs	split gap must be a num
 text_paragraphs.splitGapRequiresSplit	exact	text_paragraphs	split gap requires a split position
 text_paragraphs.splitPositionMustInside	exact	text_paragraphs	split position must be inside the text
 text_paragraphs.splitPositionMustNumber	exact	text_paragraphs	split position must be a number
+text_paragraphs.textDefinesClippingPath	exact	text_paragraphs,text_runs	Text that defines a clipping path cannot be edited because changing it could change visible page content.
 text_paragraphs.verticalTextCannotConverted	exact	text_paragraphs,text_runs	vertical text cannot be converted to the fallback font
 text_paragraphs.verticalTextRaisedCharacters	exact	text_paragraphs	vertical text with raised characters does not reflow
 text_runs.colorMustRG	exact	text_runs	color must be [r, g, b] with components in 0..1

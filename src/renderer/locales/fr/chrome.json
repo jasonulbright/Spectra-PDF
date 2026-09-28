@@ -6177,5 +6177,7 @@
   "engine.split.splitPlanExpiredAlready": "Le plan de fractionnement a expiré ou a déjà été utilisé ; planifiez à nouveau les sorties",
   "engine.split.splitPlanIdRequired": "Un identifiant de plan de fractionnement est requis",
   "engine.split.splitRequestLongerMatches": "La demande de fractionnement ne correspond plus à son plan de sortie",
-  "engine.split.splitSourceChangedAfter": "La source du fractionnement a changé après la planification des sorties"
+  "engine.split.splitSourceChangedAfter": "La source du fractionnement a changé après la planification des sorties",
+  "engine.text_paragraphs.textDefinesClippingPath": "Le texte qui définit un tracé de détourage ne peut pas être modifié, car cela pourrait changer le contenu visible de la page.",
+  "engine.flattener.pageContainsTextDefines": "La page {{page}} contient du texte qui définit un tracé de détourage ; l’aplatissement pourrait donc modifier le contenu visible de la page."
 }

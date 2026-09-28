@@ -6041,5 +6041,7 @@
   "engine.split.splitPlanExpiredAlready": "A felosztási terv lejárt vagy már felhasználták; tervezze meg újra a kimeneteket",
   "engine.split.splitPlanIdRequired": "Felosztási tervazonosító szükséges",
   "engine.split.splitRequestLongerMatches": "A felosztási kérés már nem egyezik a kimeneti tervvel",
-  "engine.split.splitSourceChangedAfter": "A felosztás forrása a kimenetek megtervezése után megváltozott"
+  "engine.split.splitSourceChangedAfter": "A felosztás forrása a kimenetek megtervezése után megváltozott",
+  "engine.text_paragraphs.textDefinesClippingPath": "A vágóösvényt meghatározó szöveg nem szerkeszthető, mert a módosítása megváltoztathatja az oldal látható tartalmát.",
+  "engine.flattener.pageContainsTextDefines": "A(z) {{page}}. oldal vágóösvényt meghatározó szöveget tartalmaz, ezért az átlátszóságok egyesítése módosíthatja az oldal látható tartalmát."
 }

@@ -6041,5 +6041,7 @@
   "engine.split.splitPlanExpiredAlready": "Der Aufteilungsplan ist abgelaufen oder wurde bereits verwendet; planen Sie die Ausgaben erneut",
   "engine.split.splitPlanIdRequired": "Eine Aufteilungsplan-ID ist erforderlich",
   "engine.split.splitRequestLongerMatches": "Die Aufteilungsanforderung stimmt nicht mehr mit ihrem Ausgabeplan überein",
-  "engine.split.splitSourceChangedAfter": "Die Aufteilungsquelle hat sich nach der Ausgabeplanung geändert"
+  "engine.split.splitSourceChangedAfter": "Die Aufteilungsquelle hat sich nach der Ausgabeplanung geändert",
+  "engine.text_paragraphs.textDefinesClippingPath": "Text, der einen Beschneidungspfad definiert, kann nicht bearbeitet werden, da dies sichtbare Seiteninhalte verändern könnte.",
+  "engine.flattener.pageContainsTextDefines": "Seite {{page}} enthält Text, der einen Beschneidungspfad definiert. Beim Reduzieren könnten sich dadurch sichtbare Seiteninhalte ändern."
 }

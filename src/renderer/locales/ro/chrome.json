@@ -6177,5 +6177,7 @@
   "engine.split.splitPlanExpiredAlready": "Planul de divizare a expirat sau a fost deja folosit; planificați din nou ieșirile",
   "engine.split.splitPlanIdRequired": "Este necesar un ID al planului de divizare",
   "engine.split.splitRequestLongerMatches": "Solicitarea de divizare nu mai corespunde planului de ieșire",
-  "engine.split.splitSourceChangedAfter": "Sursa divizării s-a schimbat după planificarea ieșirilor"
+  "engine.split.splitSourceChangedAfter": "Sursa divizării s-a schimbat după planificarea ieșirilor",
+  "engine.text_paragraphs.textDefinesClippingPath": "Textul care definește o cale de decupare nu poate fi editat, deoarece modificarea lui poate schimba conținutul vizibil al paginii.",
+  "engine.flattener.pageContainsTextDefines": "Pagina {{page}} conține text care definește o cale de decupare, astfel că aplatizarea poate modifica conținutul vizibil al paginii."
 }

@@ -6585,5 +6585,7 @@
   "engine.split.splitPlanExpiredAlready": "انتهت صلاحية خطة التقسيم أو استُخدمت بالفعل؛ خطط للمخرجات مرة أخرى",
   "engine.split.splitPlanIdRequired": "معرّف خطة التقسيم مطلوب",
   "engine.split.splitRequestLongerMatches": "لم يعد طلب التقسيم مطابقًا لخطة الإخراج",
-  "engine.split.splitSourceChangedAfter": "تغيّر مصدر التقسيم بعد تخطيط المخرجات"
+  "engine.split.splitSourceChangedAfter": "تغيّر مصدر التقسيم بعد تخطيط المخرجات",
+  "engine.text_paragraphs.textDefinesClippingPath": "لا يمكن تعديل النص الذي يعرّف مسار قص، لأن تغييره قد يغيّر محتوى الصفحة المرئي.",
+  "engine.flattener.pageContainsTextDefines": "تحتوي الصفحة {{page}} على نص يعرّف مسار قص، لذا قد يؤدي التسطيح إلى تغيير محتوى الصفحة المرئي."
 }

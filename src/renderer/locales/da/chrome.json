@@ -6041,5 +6041,7 @@
   "engine.split.splitPlanExpiredAlready": "Opdelingsplanen er udløbet eller allerede brugt; planlæg outputtet igen",
   "engine.split.splitPlanIdRequired": "Der kræves et id for opdelingsplanen",
   "engine.split.splitRequestLongerMatches": "Opdelingsanmodningen stemmer ikke længere overens med outputplanen",
-  "engine.split.splitSourceChangedAfter": "Opdelingskilden blev ændret efter planlægningen af outputtet"
+  "engine.split.splitSourceChangedAfter": "Opdelingskilden blev ændret efter planlægningen af outputtet",
+  "engine.text_paragraphs.textDefinesClippingPath": "Tekst, der definerer en udklipssti, kan ikke redigeres, fordi ændringer kan påvirke sidens synlige indhold.",
+  "engine.flattener.pageContainsTextDefines": "Side {{page}} indeholder tekst, der definerer en udklipssti, så udfladning kan ændre sidens synlige indhold."
 }

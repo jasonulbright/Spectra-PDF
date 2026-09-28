@@ -6041,5 +6041,7 @@
   "engine.split.splitPlanExpiredAlready": "Jakosuunnitelma vanheni tai sitä on jo käytetty; suunnittele tulosteet uudelleen",
   "engine.split.splitPlanIdRequired": "Jakosuunnitelman tunnus vaaditaan",
   "engine.split.splitRequestLongerMatches": "Jakopyyntö ei enää vastaa tulossuunnitelmaa",
-  "engine.split.splitSourceChangedAfter": "Jaon lähde muuttui tulosteiden suunnittelun jälkeen"
+  "engine.split.splitSourceChangedAfter": "Jaon lähde muuttui tulosteiden suunnittelun jälkeen",
+  "engine.text_paragraphs.textDefinesClippingPath": "Leikkauspolun määrittävää tekstiä ei voi muokata, koska sen muuttaminen voi muuttaa sivun näkyvää sisältöä.",
+  "engine.flattener.pageContainsTextDefines": "Sivu {{page}} sisältää leikkauspolun määrittävää tekstiä, joten litistäminen voi muuttaa sivun näkyvää sisältöä."
 }

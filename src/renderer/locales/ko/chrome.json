@@ -5905,5 +5905,7 @@
   "engine.split.splitPlanExpiredAlready": "분할 계획이 만료되었거나 이미 사용되었습니다. 출력을 다시 계획하세요",
   "engine.split.splitPlanIdRequired": "분할 계획 ID가 필요합니다",
   "engine.split.splitRequestLongerMatches": "분할 요청이 더 이상 출력 계획과 일치하지 않습니다",
-  "engine.split.splitSourceChangedAfter": "출력을 계획한 후 분할 원본이 변경되었습니다"
+  "engine.split.splitSourceChangedAfter": "출력을 계획한 후 분할 원본이 변경되었습니다",
+  "engine.text_paragraphs.textDefinesClippingPath": "클리핑 경로를 정의하는 텍스트는 수정할 수 없습니다. 변경하면 페이지의 보이는 내용이 바뀔 수 있습니다.",
+  "engine.flattener.pageContainsTextDefines": "페이지 {{page}}에 클리핑 경로를 정의하는 텍스트가 있어 투명도 병합 시 페이지의 보이는 내용이 바뀔 수 있습니다."
 }

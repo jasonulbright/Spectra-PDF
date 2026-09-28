@@ -5905,5 +5905,7 @@
   "engine.split.splitPlanExpiredAlready": "分割計畫已過期或已使用；請重新規劃輸出",
   "engine.split.splitPlanIdRequired": "必須提供分割計畫 ID",
   "engine.split.splitRequestLongerMatches": "分割要求已不再符合其輸出計畫",
-  "engine.split.splitSourceChangedAfter": "規劃輸出後，分割來源已變更"
+  "engine.split.splitSourceChangedAfter": "規劃輸出後，分割來源已變更",
+  "engine.text_paragraphs.textDefinesClippingPath": "無法編輯定義剪裁路徑的文字，因為變更文字可能會改變頁面的可見內容。",
+  "engine.flattener.pageContainsTextDefines": "第 {{page}} 頁包含定義剪裁路徑的文字，因此扁平化可能會變更頁面的可見內容。"
 }

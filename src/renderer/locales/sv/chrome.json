@@ -6041,5 +6041,7 @@
   "engine.split.splitPlanExpiredAlready": "Delningsplanen har gått ut eller har redan använts; planera utdata igen",
   "engine.split.splitPlanIdRequired": "Ett id för delningsplanen krävs",
   "engine.split.splitRequestLongerMatches": "Delningsbegäran stämmer inte längre överens med utdataplanen",
-  "engine.split.splitSourceChangedAfter": "Delningskällan ändrades efter att utdata planerades"
+  "engine.split.splitSourceChangedAfter": "Delningskällan ändrades efter att utdata planerades",
+  "engine.text_paragraphs.textDefinesClippingPath": "Text som definierar en klippbana kan inte redigeras eftersom ändringar kan påverka sidans synliga innehåll.",
+  "engine.flattener.pageContainsTextDefines": "Sida {{page}} innehåller text som definierar en klippbana, så utplattning kan ändra sidans synliga innehåll."
 }

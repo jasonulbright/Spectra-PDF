@@ -6177,5 +6177,7 @@
   "engine.split.splitPlanExpiredAlready": "El plan de división expiró o ya se usó; vuelva a planificar las salidas",
   "engine.split.splitPlanIdRequired": "Se requiere un id de plan de división",
   "engine.split.splitRequestLongerMatches": "La solicitud de división ya no coincide con su plan de salida",
-  "engine.split.splitSourceChangedAfter": "El origen de la división cambió después de planificar las salidas"
+  "engine.split.splitSourceChangedAfter": "El origen de la división cambió después de planificar las salidas",
+  "engine.text_paragraphs.textDefinesClippingPath": "El texto que define un trazado de recorte no se puede editar porque cambiarlo podría cambiar el contenido visible de la página.",
+  "engine.flattener.pageContainsTextDefines": "La página {{page}} contiene texto que define un trazado de recorte, por lo que el aplanado podría cambiar el contenido visible de la página."
 }

@@ -75,6 +75,7 @@ from engine.redact import (
 )
 from engine.text_metrics import writing_sign
 from engine.text_runs import (
+    CLIPPING_TEXT_REFUSAL,
     SHOW_OPS,
     _child_state,
     _FontCache,
@@ -1911,7 +1912,10 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
         blocker = next((m for m in p.members if m.blocking_reason), None)
         if blocker is not None:
             p.editable = False
-            p.reason = f"contains text that cannot be edited ({blocker.blocking_reason})"
+            if blocker.blocking_reason == CLIPPING_TEXT_REFUSAL:
+                p.reason = CLIPPING_TEXT_REFUSAL
+            else:
+                p.reason = f"contains text that cannot be edited ({blocker.blocking_reason})"
         elif bidi_failed:
             # The refusal that REPLACED "right-to-left text does not
             # reflow". RTL now reflows; what is refused is the narrow case
@@ -4887,6 +4891,8 @@ def _rewrite_paragraph_stream(
 
         if operator in SHOW_OPS:
             is_member = show_ordinal in tgt.member_ordinals
+            if is_member and 4 <= orig.render_mode <= 7:
+                raise ValueError(CLIPPING_TEXT_REFUSAL)
             if is_member and show_ordinal == tgt.first_ordinal:
                 pending_setters.clear()  # they styled the removed member
             else:

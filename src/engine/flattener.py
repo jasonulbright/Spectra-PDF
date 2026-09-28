@@ -107,6 +107,7 @@ _UNKNOWN_READ = "read"
 _UNKNOWN_DEPTH = "depth"
 _UNKNOWN_BBOX = "bbox"
 _UNKNOWN_GSTATE = "gstate"
+_UNKNOWN_CLIPPING_TEXT = "clipping-text"
 
 # Resolutions the flattener offers. 150 is the working default; the arithmetic
 # is resolution-independent, so a higher number buys sharper raster edges at a
@@ -469,6 +470,11 @@ def _refuse_unknown(page: int, reason: str) -> None:
             f"Page {page} names a graphics state this engine cannot read, so "
             "whether it paints transparency is unknown."
         )
+    if reason == _UNKNOWN_CLIPPING_TEXT:
+        raise ValueError(
+            f"Page {page} contains text that defines a clipping path, so "
+            "flattening could change visible page content."
+        )
     raise ValueError(
         f"Page {page} places a form XObject this engine cannot read, so "
         "whether it paints transparency is unknown."
@@ -603,7 +609,7 @@ def page_objects(pdf, page) -> tuple[list[dict], list[str]]:
             unknowns.append(reason)
 
     def emit(kind: str, rect, drop_idxs, transparent: bool, pattern: bool,
-             unknown: bool) -> None:
+             unknown: bool, clipping_text: bool = False) -> None:
         if rect is None or not all(math.isfinite(float(v)) for v in rect):
             # An overflowing coordinate still paints only inside the page.
             rect = list(box)
@@ -616,6 +622,7 @@ def page_objects(pdf, page) -> tuple[list[dict], list[str]]:
             "pattern": bool(pattern),
             "clipped": bool(clips.clips_away(tuple(rect))),
             "unknown": bool(unknown),
+            "_clipping_text": bool(clipping_text),
         })
 
     for idx, instruction in enumerate(instructions):
@@ -654,11 +661,11 @@ def page_objects(pdf, page) -> tuple[list[dict], list[str]]:
         # never sees either one and every text block goes unlisted.
         if operator == "BT":
             text = {"rect": None, "shows": [], "transparent": False,
-                    "pattern": False, "unknown": False}
+                    "pattern": False, "unknown": False, "clipping_text": False}
         elif operator == "ET" and text is not None:
             if text["rect"] is not None:
                 emit("text", text["rect"], text["shows"], text["transparent"],
-                     text["pattern"], text["unknown"])
+                     text["pattern"], text["unknown"], text["clipping_text"])
             text = None
         if state.feed(operator, operands):
             continue
@@ -673,6 +680,7 @@ def page_objects(pdf, page) -> tuple[list[dict], list[str]]:
             paint = text_paint(state)
             if text is not None:
                 text["shows"].append(idx)
+                text["clipping_text"] = text["clipping_text"] or 4 <= state.render_mode <= 7
                 if paint and rect is not None:
                     text["rect"] = rect if text["rect"] is None else _union(text["rect"], rect)
                     text["transparent"] = text["transparent"] or alpha.transparent_for(paint)
@@ -955,7 +963,19 @@ def _page_numbers(pdf, pages) -> list[int]:
 
 
 def _public(obj: dict) -> dict:
-    return {key: value for key, value in obj.items() if key != "drop_idxs"}
+    return {
+        key: value
+        for key, value in obj.items()
+        if key not in {"drop_idxs", "_clipping_text"}
+    }
+
+
+def _drops_clipping_text(objects: list[dict], plan: dict) -> bool:
+    return any(
+        objects[index].get("_clipping_text", False)
+        for group in plan["members"]
+        for index in group
+    )
 
 
 def list_transparency(
@@ -1006,6 +1026,8 @@ def list_transparency(
                 })
                 continue
             plan = compute_regions(objects, box, balance, dpi)
+            if _drops_clipping_text(objects, plan):
+                unknowns.append(_UNKNOWN_CLIPPING_TEXT)
             _categorize(objects, plan["members"])
             report.append({
                 "page": number,
@@ -1240,6 +1262,8 @@ def flatten_transparency(
                 if unknowns:
                     _refuse_unknown(number, unknowns[0])
                 plan = compute_regions(objects, box, balance, dpi)
+                if _drops_clipping_text(objects, plan):
+                    _refuse_unknown(number, _UNKNOWN_CLIPPING_TEXT)
                 regions = plan["regions"]
                 if not regions:
                     entry = {"page": number, "regions": 0, "removed": 0,

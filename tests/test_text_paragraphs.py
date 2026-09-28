@@ -559,6 +559,34 @@ class TestGrouping:
 
 
 class TestReplaceParagraphText:
+    @pytest.mark.parametrize("render_mode", range(4, 8))
+    def test_clipping_text_cannot_be_replaced_or_merged(self, tmp_dir, render_mode):
+        src = _build(
+            tmp_dir,
+            (
+                f"BT /F1 12 Tf {render_mode} Tr 72 700 Td (Clip words) Tj "
+                "0 Tr 0 -60 Td (Normal paragraph words) Tj ET"
+            ).encode(),
+        )
+        paras = _paras(src)
+        assert len(paras) == 2
+        clipped = paras[0]
+        assert clipped["editable"] is False
+        assert clipped["reason"] == (
+            "Text that defines a clipping path cannot be edited because "
+            "changing it could change visible page content."
+        )
+
+        replace_out = os.path.join(tmp_dir, "replace.pdf")
+        with pytest.raises(ValueError, match="defines a clipping path"):
+            _apply(src, replace_out, clipped, "Changed words")
+        assert not os.path.exists(replace_out)
+
+        merge_out = os.path.join(tmp_dir, "merge.pdf")
+        with pytest.raises(ValueError, match="defines a clipping path"):
+            _merge(src, merge_out, paras, 1)
+        assert not os.path.exists(merge_out)
+
     def test_grow_rewraps_at_the_box_width(self, tmp_dir):
         src = _build(
             tmp_dir,

@@ -6177,5 +6177,7 @@
   "engine.split.splitPlanExpiredAlready": "El pla de divisió ha caducat o ja s'ha utilitzat; torneu a planificar les sortides",
   "engine.split.splitPlanIdRequired": "Cal un identificador del pla de divisió",
   "engine.split.splitRequestLongerMatches": "La sol·licitud de divisió ja no coincideix amb el pla de sortida",
-  "engine.split.splitSourceChangedAfter": "L'origen de la divisió ha canviat després de planificar les sortides"
+  "engine.split.splitSourceChangedAfter": "L'origen de la divisió ha canviat després de planificar les sortides",
+  "engine.text_paragraphs.textDefinesClippingPath": "El text que defineix un traçat de retall no es pot editar perquè canviar-lo podria modificar el contingut visible de la pàgina.",
+  "engine.flattener.pageContainsTextDefines": "La pàgina {{page}} conté text que defineix un traçat de retall, de manera que l'aplanament podria canviar el contingut visible de la pàgina."
 }
