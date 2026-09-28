@@ -30,6 +30,18 @@ export interface CloseSequenceDeps {
 }
 
 /**
+ * Minimize-to-tray applies to a plain window × only. A non-null session id
+ * means this close is part of an app-wide Exit, which must close every window
+ * even when the preference is enabled.
+ */
+export function shouldMinimizeToTrayOnClose(
+  sessionId: number | null,
+  minimizeToTray: boolean,
+): boolean {
+  return sessionId === null && minimizeToTray;
+}
+
+/**
  * The prologue of every close request — run before anything that can show a
  * dialog. Returns whether this window may go on and close.
  *
