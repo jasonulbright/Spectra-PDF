@@ -23,7 +23,7 @@
 # So neither can be trimmed, and both ship with their notices. Corresponding
 # Source for the object code is the LibreOffice source release for the pinned
 # version (it carries the external poppler tarball the build consumed):
-# https://download.documentfoundation.org/libreoffice/src/26.2.6/
+# https://download.documentfoundation.org/libreoffice/src/26.2.5/
 # GAP: the exact upstream poppler and poppler-data version numbers are not
 # recorded in the shipped binary or data; the pin is the sha256 below plus the
 # LibreOffice source release above.
@@ -40,7 +40,7 @@ LICENSE	LibreOffice aggregated third-party notices (carries poppler's notice and
 share/xpdfimport/poppler_data/COPYING	poppler-data license summary	notice	-	-	-	https://poppler.freedesktop.org/
 share/xpdfimport/poppler_data/COPYING.gpl2	GNU General Public License version 2 text	notice	-	-	-	https://poppler.freedesktop.org/
 share/xpdfimport/poppler_data/COPYING.adobe	Adobe CMap license text	notice	-	-	-	https://poppler.freedesktop.org/
-program/xpdfimport.exe	poppler, statically linked into LibreOffice's PDF import helper	binary	18c3053c165380066b73ae3472d5188bfed1b59f43bc16637d207b542300da9e	GPL-2.0-or-later	LICENSE	https://www.libreoffice.org/about-us/source-code/
+program/xpdfimport.exe	poppler, statically linked into LibreOffice's PDF import helper	binary	134bea5bfd6311ef0a258d45810d262b091daf39c618f4a223adac069a199e0b	GPL-2.0-or-later	LICENSE	https://www.libreoffice.org/about-us/source-code/
 share/xpdfimport/poppler_data/cidToUnicode	poppler-data CID-to-Unicode tables	data	-	GPL-2.0-or-later	COPYING.gpl2	https://poppler.freedesktop.org/
 share/xpdfimport/poppler_data/nameToUnicode	poppler-data glyph-name tables	data	-	GPL-2.0-or-later	COPYING.gpl2	https://poppler.freedesktop.org/
 share/xpdfimport/poppler_data/unicodeMap	poppler-data Unicode output maps	data	-	GPL-2.0-or-later	COPYING.gpl2	https://poppler.freedesktop.org/

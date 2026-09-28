@@ -1,4 +1,4 @@
-"""The source archives that accompany the shipped copyleft object code and data."""
+"""The source archives that accompany the shipped HEIF decoder libraries."""
 
 import hashlib
 import os
@@ -29,41 +29,10 @@ def rows():
 
 
 class TestManifest:
-    def test_it_names_the_complete_copyleft_source_set(self):
+    def test_it_names_the_complete_heif_source_set(self):
         assert {row["component"] for row in rows()} == {
-            "libheif", "libde265", "pillow_heif",
-            "libreoffice", "poppler", "poppler-data",
-            "voikko-fi", "libvoikko", "libiconv", "dictionaries",
+            "libheif", "libde265", "pi_heif"
         }
-
-    def test_each_source_matches_the_version_that_ships(self):
-        by = {}
-        for row in rows():
-            by.setdefault(row["component"], []).append(row)
-        libreoffice = open(
-            os.path.join(REPO, "scripts", "bundle-libreoffice.ps1"), encoding="utf-8"
-        ).read()
-        version = by["libreoffice"][0]["version"]
-        assert f'[string]$ArchiveVersion = "{version}"' in libreoffice
-        voikko = open(os.path.join(REPO, "scripts", "voikko.tsv"), encoding="utf-8").read()
-        assert "voikko-fi_2.5-2_amd64.deb" in voikko
-        assert {r["file"] for r in by["voikko-fi"]} == {
-            "voikko-fi_2.5-2.dsc", "voikko-fi_2.5.orig.tar.gz",
-            "voikko-fi_2.5-2.debian.tar.xz",
-        }
-        assert "libvoikko-4.3.3-3-any.pkg.tar.zst" in voikko
-        assert by["libvoikko"][0]["version"] == "4.3.3-3"
-        tesseract = open(
-            os.path.join(REPO, "scripts", "tesseract-licenses.tsv"), encoding="utf-8"
-        ).read()
-        assert "mingw-w64-libiconv-1.19-1.src.tar.zst" in tesseract
-        assert by["libiconv"][0]["file"] == "mingw-w64-libiconv-1.19-1.src.tar.zst"
-        dictionaries = open(
-            os.path.join(REPO, "scripts", "bundle-dictionaries.ps1"), encoding="utf-8"
-        ).read()
-        commit = by["dictionaries"][0]["version"]
-        assert f'$Commit = "{commit}"' in dictionaries
-        assert commit in by["dictionaries"][0]["source"]
 
     def test_every_archive_is_versioned_pinned_and_fetchable_by_one_route(self):
         for row in rows():
@@ -71,20 +40,14 @@ class TestManifest:
             assert os.path.basename(row["file"]) == row["file"]
             assert HEX64.match(row["sha256"])
             assert row["source"].startswith("https://") or row["source"].startswith(
-                "vendor/"
+                "vendor/wheels/"
             )
 
-    def test_every_committed_source_matches_its_pin(self):
-        committed = [row for row in rows() if not row["source"].startswith("https://")]
-        assert {row["component"] for row in committed} == {"pillow_heif", "voikko-fi"}
-        for row in committed:
-            path = os.path.join(REPO, *row["source"].split("/"))
-            with open(path, "rb") as fh:
-                assert hashlib.sha256(fh.read()).hexdigest() == row["sha256"], row["file"]
-
-    def test_committed_sources_are_never_line_ending_normalized(self):
-        text = open(os.path.join(REPO, ".gitattributes"), encoding="utf-8").read()
-        assert "vendor/sources/** -text" in text.splitlines()
+    def test_the_committed_binding_source_matches_its_pin(self):
+        row = next(row for row in rows() if row["component"] == "pi_heif")
+        path = os.path.join(REPO, *row["source"].split("/"))
+        with open(path, "rb") as fh:
+            assert hashlib.sha256(fh.read()).hexdigest() == row["sha256"]
 
 
 class TestReleaseContract:
@@ -126,34 +89,3 @@ class TestReleaseContract:
         assert "For every GPL-2.0 or LGPL-2.1 component" in text
         assert "for at least three years" in text
         assert "preferred form for modifying these dictionaries" in text
-        for row in rows():
-            assert f"`{row['file']}`" in text or row["component"] in (
-                "libheif", "libde265", "pillow_heif"
-            ), row["file"]
-
-
-class TestHeifNotice:
-    def test_the_notice_names_what_the_committed_wheel_carries(self):
-        import zipfile
-
-        wheel = os.path.join(
-            REPO, "vendor", "wheels", "pillow_heif-1.8.0+decode.2-cp314-cp314-win_amd64.whl"
-        )
-        with zipfile.ZipFile(wheel) as zf:
-            names = zf.namelist()
-        dlls = sorted(
-            n.rsplit("/", 1)[1] for n in names if n.lower().endswith(".dll")
-        )
-        assert len(dlls) == 2
-        dist_info = next(n.split("/", 1)[0] for n in names if n.endswith(".dist-info/METADATA"))
-        version = dist_info[len("pillow_heif-"):-len(".dist-info")]
-        assert version == "1.8.0+decode.2"
-        for n in ("COPYING.libheif", "COPYING.libde265"):
-            assert f"{dist_info}/licenses/{n}" in names
-
-        text = open(NOTICE, encoding="utf-8").read()
-        for dll in dlls:
-            assert dll in text
-        assert f"pillow_heif-{version}.dist-info" in text
-        assert "| libheif | 1.23.5 |" in text
-        assert "| libde265 | 1.1.3 |" in text

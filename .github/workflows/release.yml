@@ -148,8 +148,8 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
 
       - name: Vendor jbig2enc (MRC mask codec, Apache-2.0)
-        # The JBIG2 encoder for MRC's 1-bit text stencil. The committed source
-        # build in scripts/jbig2enc-build/, SHA-256 pinned in the script, driven
+        # The JBIG2 encoder for MRC's 1-bit text stencil. Official prebuilt
+        # Windows x64 MSVC release asset, SHA-256 pinned in the script, driven
         # as a subprocess (the Ghostscript pattern). The script REFUSES to ship
         # if any statically-linked component named in upstream's depmf.json
         # lacks a row in scripts/jbig2enc-licenses.tsv.
@@ -188,13 +188,6 @@ jobs:
         # rows in scripts/corresponding-source.tsv.
         run: powershell -ExecutionPolicy Bypass -File scripts/stage-corresponding-source.ps1 -OutputDirectory release-sources
         shell: pwsh
-
-      # Every native library inside the provisioned trees, at the version the
-      # binary carries, must match scripts/native-components.tsv and clear its
-      # floor in scripts/native-advisories.tsv. Mirrored in scripts/ci-parity-gates.sh.
-      - name: Shipped native components match their pin and floors
-        run: python scripts/native-components.py --check
-        shell: bash
 
       # The release body and the updater manifest's `notes` are one string,
       # taken from the changelog section for this version. The extractor

@@ -49,22 +49,21 @@ download, launch, install or accept terms for Ghostscript.
 
 ## JBIG2 encoder (jbig2enc)
 
-- **Version:** 0.32, built from the upstream source tag by
-  `scripts/build-jbig2enc.ps1` with upstream's release recipe, without GIF
-  support and on zlib 1.3.2; the committed build is SHA-256-pinned and
-  installed by `scripts/bundle-jbig2enc.ps1`
+- **Version:** 0.32 (unmodified upstream prebuilt; version- and SHA-256-pinned
+  — vendored by `scripts/bundle-jbig2enc.ps1`, which verifies the official
+  release asset's SHA-256 before extracting it)
 - **License:** Apache License 2.0
 - **Role:** Invoked by Spectra PDF as a separate process (no linking) to encode
   the 1-bit text stencil of an MRC-compressed scan as `/JBIG2Decode`. Nothing
   else in the stack can encode JBIG2 — qpdf decodes only.
-- **Source:** <https://github.com/agl/jbig2enc/tree/0.32>; build inputs in
-  `scripts/jbig2enc-build/PROVENANCE.txt`
+- **Binary source:** <https://github.com/agl/jbig2enc/releases/tag/0.32>
+- **Corresponding source:** <https://github.com/agl/jbig2enc>
 - **License text shipped at:** `resources/jbig2enc/LICENSE-jbig2enc.txt`
 - **Patent note shipped at:** `resources/jbig2enc/PATENTS-jbig2enc.txt` —
   upstream's own note that JBIG2 describes processes which may be patented.
 
 The shipped `jbig2.exe` is a STATIC build: the libraries below are linked
-inside that single executable rather than sitting beside it. The build's own
+inside that single executable rather than sitting beside it. Upstream's own
 dependency manifest ships with it as `resources/jbig2enc/depmf.json` and is
 what `scripts/jbig2enc-licenses.tsv` is checked against at build time — the
 bundling script refuses to ship when a component named there has no row, or
@@ -74,12 +73,13 @@ when a row's version disagrees with it.
 |---|---|---|---|
 | jbig2enc | 0.32 | Apache-2.0 | `resources/jbig2enc/LICENSE-jbig2enc.txt` |
 | leptonica | 1.87.0 | BSD-2-Clause | `resources/jbig2enc/licenses/LICENSE-leptonica.txt` |
-| libtiff | 4.7.2 | libtiff AND BSD-4.3TAHOE | `.../LICENSE-libtiff.txt` |
-| libjpeg-turbo | 3.2.0 | BSD-3-Clause AND IJG | `.../LICENSE-libjpeg-turbo.txt` |
+| libtiff | 4.7.1 | libtiff AND BSD-4.3TAHOE | `.../LICENSE-libtiff.txt` |
+| libjpeg-turbo | 3.1.4.1 | BSD-3-Clause AND IJG | `.../LICENSE-libjpeg-turbo.txt` |
 | libpng | 1.6.58 | libpng-2.0 | `.../LICENSE-libpng.txt` |
-| zlib | 1.3.2 | Zlib | `.../LICENSE-zlib.txt` |
+| zlib-ng | 2.3.3 | Zlib | `.../LICENSE-zlib-ng.txt` |
 | openjp2 (OpenJPEG) | 2.5.4 | BSD-2-Clause | `.../LICENSE-openjpeg.txt` |
 | libwebp | 1.6.0 | BSD-3-Clause | `.../LICENSE-libwebp.txt` |
+| giflib | 5.2.2 | MIT | `.../LICENSE-giflib.txt` |
 
 Each notice was fetched ONCE, from a URL pinned to the component version above,
 reviewed as a git diff and committed at `scripts/jbig2enc-licenses/`; the build
@@ -89,11 +89,9 @@ a maintenance tool run only when the pin moves.
 
 ## LibreOffice
 
-- **Version:** 26.2.6 (upstream release; version- and sha256-pinned — vendored
+- **Version:** 26.2.5 (unmodified upstream; version- and sha256-pinned — vendored
   by `scripts/bundle-libreoffice.ps1`, which verifies the official installer's
-  SHA-256 before extracting it). One file differs from the release:
-  `program/libxml2.dll` is libxml2 2.15.4 (MIT), built from the GNOME release by
-  `scripts/build-lo-libxml2.ps1` in place of the release's 2.14.6.
+  SHA-256 before extracting it)
 - **License:** Mozilla Public License v2.0 (MPL-2.0), except for the PDF-import
   helper covered in the table below
 - **Role:** Invoked by Spectra PDF as a separate process (`soffice
@@ -106,9 +104,8 @@ a maintenance tool run only when the pin moves.
   notice and the GNU GPL version 2 text.
 
 LibreOffice is invoked as an independent program (mere aggregation), so the two
-may be distributed together. LibreOffice itself remains under the MPL-2.0. Its
-complete source release, `libreoffice-26.2.6.3.tar.xz`, is attached to every
-release as a release asset.
+may be distributed together. LibreOffice itself remains under the MPL-2.0; its
+complete corresponding source is available at the link above.
 
 ### PDF-import helper (poppler)
 
@@ -127,22 +124,19 @@ load their input; without the GPL encoding tables, the exports succeed but drop
 the text of any PDF that draws a CJK font through a predefined CMap encoding —
 the permissive cMap tables alone do not restore it.
 
-Complete corresponding source for the helper's object code and the encoding
-tables is attached to every release as release assets: the LibreOffice source
-release for the pinned version (`libreoffice-26.2.6.3.tar.xz`, which carries the
-helper's own source and the build scripts) and the two external archives its
-`download.lst` names, `poppler-26.06.0.tar.xz` and `poppler-data-0.4.12.tar.gz`.
-The same files are at
-<https://download.documentfoundation.org/libreoffice/src/26.2.6/> and
-<https://dev-www.libreoffice.org/src/>. The shipped helper is pinned by the
-SHA-256 in `scripts/libreoffice-notices.tsv`; `scripts/bundle-libreoffice.ps1`
-refuses to vendor a tree that is missing any file that manifest names.
+Complete corresponding source for the helper's object code is the LibreOffice
+source release for the pinned version, which carries the poppler sources the
+build consumed:
+<https://download.documentfoundation.org/libreoffice/src/26.2.5/>. The upstream
+poppler and poppler-data version numbers are not recorded in the shipped files;
+the pin is the SHA-256 in `scripts/libreoffice-notices.tsv` together with that
+source release. `scripts/bundle-libreoffice.ps1` refuses to vendor a tree that
+is missing any file the manifest names. The source is available under the
+written source offer below.
 
 ## Embedded Python runtime
 
 - **CPython 3.14.7** — Python Software Foundation License (PSF) — <https://www.python.org/>
-
-`pyexpat.pyd` is rebuilt from the CPython 3.14.7 source release with Expat 2.8.5 (MIT; the notice is in the runtime's `LICENSE.txt`) by `scripts/build-pyexpat-expat285.ps1`. The lxml wheel is `lxml-6.1.2+libxml215.1`, built by `scripts/build-lxml-libxml215.ps1` from the committed sdist with libxml2 2.15.4 (MIT), libxslt 1.1.45 (MIT), zlib 1.3.2 (Zlib) and win-iconv 0.0.10 (public domain) linked statically; their notices ship in the wheel's `dist-info/licenses/`.
 
 Bundled Python packages (installed into the embedded runtime; exact versions are
 hash-pinned in `scripts/python-requirements.txt`, or in
@@ -168,7 +162,7 @@ directory — license fields below were read from those wheels' METADATA):
 | pdfminer.six | MIT | <https://github.com/pdfminer/pdfminer.six> |
 | pikepdf | MPL-2.0 (source at the link) | <https://github.com/pikepdf/pikepdf> |
 | pillow | MIT-CMU | <https://github.com/python-pillow/Pillow> |
-| pillow_heif | BSD-3-Clause (built decode-only; the wheel's bundled libraries are listed below) | <https://github.com/bigcat88/pillow_heif> |
+| pi-heif | BSD-3-Clause (the wheel's bundled libraries are listed below) | <https://github.com/bigcat88/pillow_heif> |
 | pycparser | BSD-3-Clause | <https://github.com/eliben/pycparser> |
 | pyHanko | MIT | <https://github.com/MatthiasValvekens/pyHanko> |
 | pyhanko-certvalidator | MIT | <https://github.com/MatthiasValvekens/pyHanko/tree/master/pkgs/pyhanko-certvalidator> |
@@ -189,68 +183,54 @@ pikepdf's binary wheel embeds the **qpdf** library (Apache-2.0,
 `licenses-for-wheels.txt` (shipped in pikepdf's dist-info) carries the
 corresponding notices.
 
-### HEIF decoding (pillow_heif)
+### HEIF decoding (pi-heif)
 
-HEIC/HEIF camera images are decoded by **pillow_heif 1.8.0**, installed as the
-wheel `pillow_heif-1.8.0+decode.2`. That wheel is not the one the package index
-serves: `scripts/build-pillow-heif-decode-only.ps1` builds it from the binding's
-source distribution, which is committed to this repository at
-`vendor/wheels/pillow_heif-1.8.0.tar.gz`, and from the libheif and libde265
-release archives, each verified by SHA-256 before use. The built wheel and the
-source distribution are pinned by SHA-256 in `scripts/vendored-wheels.tsv`;
-nothing about either is fetched at build time.
+HEIC/HEIF camera images are decoded by **pi-heif 1.4.0**, the decode-only
+distribution of the same upstream project. Its wheel and the matching source
+distribution are committed to this repository under `vendor/wheels/` and pinned
+by SHA-256 in `scripts/vendored-wheels.tsv`; nothing about it is fetched at
+build time. It is decode-only deliberately: the encoder-carrying distribution
+of the same project links a **GPL-2.0** video encoder that is mapped into the
+engine process on every HEIF import, and nothing in Spectra PDF encodes HEIF.
 
-The wheel is decode-only by construction. The index wheel links libheif against
-a **GPL-2.0** HEVC encoder (x265) that loads into the engine process on every
-HEIF import, and nothing in Spectra PDF encodes HEIF. The build compiles libheif
-with every encoder off, so no encoder library is present and libheif does not
-import one. libheif and libde265 are compiled with MSVC and the static C
-runtime; no MinGW runtime library ships.
-
-The wheel ships two libraries. delvewheel installs `.data/platlib` content to
-the site-packages root, so they sit directly in
+The wheel ships five prebuilt libraries. delvewheel installs `.data/platlib`
+content to the site-packages root, so they sit directly in
 `resources/python/Lib/site-packages/`, not in a `.data` subdirectory. The
 versions below are the ones the shipped libraries **report at run time**;
-upstream's own `LICENSES_bundled.txt` in the wheel's dist-info describes the
-index wheel and is not the authority for this artifact:
+upstream's own `LICENSES_bundled.txt` in the wheel's dist-info names older ones
+and is not the authority for this artifact:
 
 | Bundled library | Version | License | Corresponding source |
 |---|---|---|---|
-| libheif | 1.23.5 | LGPL-3.0-or-later | <https://github.com/strukturag/libheif/releases/download/v1.23.5/libheif-1.23.5.tar.gz> |
-| libde265 | 1.1.3 | LGPL-3.0-or-later | <https://github.com/strukturag/libde265/releases/download/v1.1.3/libde265-1.1.3.tar.gz> |
+| libheif | 1.23.0 | LGPL-3.0-or-later | <https://github.com/strukturag/libheif/releases/download/v1.23.0/libheif-1.23.0.tar.gz> |
+| libde265 | 1.1.1 | LGPL-3.0-or-later | <https://github.com/strukturag/libde265/releases/download/v1.1.1/libde265-1.1.1.tar.gz> |
+| libgcc / libstdc++ (MinGW-w64 GCC runtime) | – | GPL-3.0-or-later WITH GCC-exception-3.1 | <https://gcc.gnu.org/> |
+| libwinpthread (MinGW-w64) | – | MIT AND Zope-2.1 | <https://www.mingw-w64.org/> |
 
-The run-time inventory reports one decoder (libde265) and no encoder other
-than libheif's built-in `mask` stub. AVIF files are decoded by Pillow itself,
-not by this wheel.
+There is no x265 and no libaom in this wheel: the run-time inventory reports one
+decoder (libde265) and no encoder other than libheif's built-in `mask` stub.
 
 libheif and libde265 are **LGPL-3.0** libraries combined with the application.
 The obligations that follow, and how each is met:
 
-- **Notice.** `COPYING.libheif` and `COPYING.libde265` ship in
-  `pillow_heif-1.8.0+decode.2.dist-info/licenses/` inside the installed
-  runtime, alongside this file. Each is the unmodified `COPYING` file of that
-  library's pinned release archive: the LGPL-3.0 text followed by the GPL-3.0
-  text it incorporates. The `LICENSES_bundled.txt` in the same directory is
-  upstream's, and describes upstream's general-purpose wheel (a GPLv2
-  classifier, x265 and the MinGW runtime); it does not describe this
-  decode-only build.
+- **Notice.** The LGPL-3.0 text and the GPL-3.0 text it incorporates ship in
+  the wheel's dist-info (`pi_heif-1.4.0.dist-info/licenses/`) inside the
+  installed runtime, alongside this file.
 - **Replacement.** Both libraries are ordinary DLLs loaded by the Windows
   loader from the site-packages directory, so a recipient may replace either
   with their own build. One practical condition: delvewheel renamed them with a
-  content hash (`heif-876f3a80218b1a207d7419d7664b9497.dll` and
-  `libde265-f4739cb4844efa5930bf0764c71d55e2.dll`), and the importing modules
+  content hash — `libheif-75127e764628a95f6db9f5070bfc87cb.dll` and
+  `libde265-0-aa0625e0aec56a9d4310a2447674dd8a.dll` — and the importing modules
   bind to those exact names, so a replacement must be installed under the same
   filename. The wheel's `DELVEWHEEL` file records that the renaming happened
   and ships in the dist-info for the same reason.
 - **Corresponding source.** The archives linked in the table above are the
   source for these exact versions. The release workflow accompanies each
   installer it publishes with those two archives and the binding's own source
-  distribution as release assets; `scripts/corresponding-source.tsv` pins them
-  by SHA-256 and `scripts/stage-corresponding-source.ps1` stages them.
-  They are also available from us on request. The scripts used to control
-  compilation are `scripts/build-pillow-heif-decode-only.ps1` in this
-  repository, under this repository's MIT license; it records every build
-  option, and it reproduces the shipped wheel from the pinned archives.
+  distribution as release assets; `scripts/corresponding-source.tsv` pins all
+  three by SHA-256 and `scripts/stage-corresponding-source.ps1` stages them.
+  They are also available from us on request. The binding source is committed
+  in this repository at `vendor/wheels/pi_heif-1.4.0.tar.gz`.
 
 ### Written source offer
 
@@ -409,18 +389,12 @@ License text shipped at: `resources/fonts/LICENSE-Parisienne-OFL.txt`
 
 ### Bundled OCR runtime components
 
-`bundle-tesseract.ps1` ships `tesseract.exe` plus **the DLLs it loads** — the
-import closure of `tesseract.exe`, 24 today — computed from the import tables
-rather than hand-listed so the copy set cannot go stale when upstream changes
-its dependencies. The installer's other DLLs serve its training tools and do
-not ship. Eleven of the shipped libraries (libarchive, Expat, libpng, OpenJPEG,
-zlib, XZ Utils, Zstandard, LZ4, bzip2, libb2, libiconv) are replaced with
-released MSYS2 package builds, pinned by SHA-256 in `bundle-tesseract.ps1`;
-`scripts/tesseract-licenses.tsv` names the exact source archive of each. The
-upstream installer supplies notices for only two of those 25 binaries. The
-rest were collected once from their canonical upstreams by
-`scripts/fetch-tesseract-licenses.ps1` — a maintenance tool run only when the
-pinned Tesseract build changes — reviewed, and checked
+`bundle-tesseract.ps1` ships `tesseract.exe` plus **every DLL beside it** — 50
+today — enumerated rather than hand-listed so the copy set cannot go stale when
+upstream changes its dependencies. The upstream installer supplies notices for
+only two of those 51 binaries. The rest were collected once from their
+canonical upstreams by `scripts/fetch-tesseract-licenses.ps1` — a maintenance
+tool run only when the pinned Tesseract build changes — reviewed, and checked
 in at `scripts/tesseract-licenses/`, each file naming its source URL on its
 first line; the build copies them, offline, to
 **`resources/tesseract/licenses/`**. Git is the integrity record for those
@@ -432,15 +406,13 @@ The mapping from each shipped file to its component and notice is
 installer if any shipped binary lacks a row there or its notice file is
 absent** — so this list cannot silently drift from what is actually in the box.
 
-One component, GNU libiconv, is weak-copyleft (LGPL). It is listed here on
-exactly the same footing as the permissive ones, and its entry names the
-upstream its source comes from; it is a separate dynamically loaded DLL, so a
-recipient can substitute a modified build. Every other DLL in this tree is a build of an MSYS2
+Several components are weak-copyleft (LGPL). They are listed here on exactly
+the same footing as the permissive ones, and each entry names the upstream its
+source comes from; each is a separate dynamically loaded DLL, so a recipient
+can substitute a modified build. Every DLL in this tree is a build of an MSYS2
 mingw-w64 package, and MSYS2 publishes both the build recipe and a per-version
 source package for each — `scripts/tesseract-licenses.tsv` records the recipe
-URL per binary. The MSYS2 source package for libiconv,
-`mingw-w64-libiconv-1.19-1.src.tar.zst`, is attached to every release as a
-release asset.
+URL per binary. Their source is available under the written source offer above.
 
 **No GPL object code ships in this tree.** The upstream build's `libtiff-6.dll`
 imports `libjbig-0.dll` (JBIG-KIT, GPL-2.0-or-later), so `libtiff` is rebuilt
@@ -450,29 +422,40 @@ build refuses if any shipped binary references it. Nothing in this program can
 reach JBIG: TIFF compression 34661 is the only carrier, and the OCR engine is
 only ever handed a PNG this program rendered.
 
-`libgif-7.dll` is not giflib. It is an export stub built from
-`scripts/tesseract-giflib-stub/libgif-stub.c` by `scripts/build-giflib-stub.ps1`:
-it exports the eleven giflib functions that Leptonica imports, and each returns
-giflib's documented failure value. It contains no giflib code. The giflib notice
-below stays because the stub reproduces giflib's interface.
-
+- **Brotli** — MIT — <https://github.com/google/brotli> — `licenses/LICENSE-brotli.txt`
 - **bzip2** — bzip2-1.0.6 — <https://gitlab.com/bzip2/bzip2> — `licenses/LICENSE-bzip2.txt`
+- **Cairo** — LGPL-2.1-only OR MPL-1.1 — <https://gitlab.freedesktop.org/cairo/cairo> — `licenses/LICENSE-cairo.txt`
 - **Expat** — MIT — <https://github.com/libexpat/libexpat> — `licenses/LICENSE-expat.txt`
+- **fontconfig** — MIT — <https://gitlab.freedesktop.org/fontconfig/fontconfig> — `licenses/LICENSE-fontconfig.txt`
+- **FreeType** — FTL OR GPL-2.0-or-later — <https://gitlab.freedesktop.org/freetype/freetype> — `licenses/LICENSE-freetype.txt`
 - **GCC runtime library** (libgcc, libstdc++) — GPL-3.0-or-later WITH GCC-exception-3.1 — <https://gcc.gnu.org/> — `licenses/LICENSE-gcc-runtime.txt`
-- **giflib** (interface of the `libgif-7.dll` stub) — MIT — <https://sourceforge.net/projects/giflib/> — `licenses/LICENSE-giflib.txt`
+- **giflib** — MIT — <https://sourceforge.net/projects/giflib/> — `licenses/LICENSE-giflib.txt`
+- **GLib** (glib, gio, gobject, gmodule) — LGPL-2.1-or-later — <https://gitlab.gnome.org/GNOME/glib> — `licenses/LICENSE-glib.txt`
+- **GNU FriBidi** — LGPL-2.1-or-later — <https://github.com/fribidi/fribidi> — `licenses/LICENSE-fribidi.txt`
+- **GNU gettext** (libintl) — LGPL-2.1-or-later — <https://savannah.gnu.org/projects/gettext/> — `licenses/LICENSE-gettext-runtime.txt`
 - **GNU libiconv** — LGPL-2.1-or-later — <https://savannah.gnu.org/projects/libiconv/> — `licenses/LICENSE-libiconv.txt`
+- **Graphite2** — LGPL-2.1-or-later OR MPL-2.0 OR GPL-2.0-or-later — <https://github.com/silnrsi/graphite> — `licenses/LICENSE-graphite2.txt`
+- **HarfBuzz** — MIT — <https://github.com/harfbuzz/harfbuzz> — `licenses/LICENSE-harfbuzz.txt`
+- **ICU** — Unicode-DFS-2016 — <https://github.com/unicode-org/icu> — `licenses/LICENSE-icu.txt`
 - **Leptonica** — BSD-2-Clause — <https://github.com/DanBloomberg/leptonica> — `licenses/LICENSE-leptonica.txt`
 - **LERC** — Apache-2.0 — <https://github.com/Esri/lerc> — `licenses/LICENSE-LERC.txt`
 - **libarchive** — BSD-2-Clause — <https://github.com/libarchive/libarchive> — `licenses/LICENSE-libarchive.txt`
 - **libb2 (BLAKE2)** — CC0-1.0 — <https://github.com/BLAKE2/libb2> — `licenses/LICENSE-libb2.txt`
+- **libdatrie** — LGPL-2.1-or-later — <https://github.com/tlwg/libdatrie> — `licenses/LICENSE-libdatrie.txt`
 - **libdeflate** — MIT — <https://github.com/ebiggers/libdeflate> — `licenses/LICENSE-libdeflate.txt`
+- **libffi** — MIT — <https://github.com/libffi/libffi> — `licenses/LICENSE-libffi.txt`
 - **libjpeg-turbo** — IJG AND BSD-3-Clause AND Zlib — <https://github.com/libjpeg-turbo/libjpeg-turbo> — `licenses/LICENSE-libjpeg-turbo.txt`
 - **libpng** — libpng-2.0 — <https://github.com/pnggroup/libpng> — `licenses/LICENSE-libpng.txt`
+- **libthai** — LGPL-2.1-or-later — <https://github.com/tlwg/libthai> — `licenses/LICENSE-libthai.txt`
 - **libtiff** (rebuilt without JBIG support) — libtiff — <https://gitlab.com/libtiff/libtiff> — `licenses/LICENSE-libtiff.txt`
 - **libwebp** (webp, webpmux, sharpyuv) — BSD-3-Clause — <https://github.com/webmproject/libwebp> — `licenses/LICENSE-libwebp.txt`
 - **LZ4** — BSD-2-Clause — <https://github.com/lz4/lz4> — `licenses/LICENSE-lz4.txt`
 - **mingw-w64** (winpthreads) — MIT AND Zope-2.1 — <https://www.mingw-w64.org/> — `licenses/LICENSE-mingw-w64.txt`
 - **OpenJPEG** — BSD-2-Clause — <https://github.com/uclouvain/openjpeg> — `licenses/LICENSE-openjpeg.txt`
+- **OpenSSL** — Apache-2.0 — <https://github.com/openssl/openssl> — `licenses/LICENSE-openssl.txt`
+- **Pango** (pango, pangocairo, pangoft2, pangowin32) — LGPL-2.1-or-later — <https://gitlab.gnome.org/GNOME/pango> — `licenses/LICENSE-pango.txt`
+- **PCRE2** — BSD-3-Clause — <https://github.com/PCRE2Project/pcre2> — `licenses/LICENSE-pcre2.txt`
+- **Pixman** — MIT — <https://gitlab.freedesktop.org/pixman/pixman> — `licenses/LICENSE-pixman.txt`
 - **XZ Utils** (liblzma) — 0BSD — <https://github.com/tukaani-project/xz> — `licenses/LICENSE-xz.txt`
 - **zlib** — Zlib — <https://github.com/madler/zlib> — `licenses/LICENSE-zlib.txt`
 - **Zstandard** — BSD-3-Clause OR GPL-2.0-only — <https://github.com/facebook/zstd> — `licenses/LICENSE-zstd.txt`
@@ -505,10 +488,7 @@ upstream licence and readme files ship verbatim beside its word list in
 Several of these are copyleft. The shipped `.aff` and `.dic` text files, plus
 the per-language build/readme material copied beside them, are themselves the
 preferred form for modifying these dictionaries, so their corresponding source
-accompanies every installer. The complete LibreOffice `dictionaries` repository
-at the pinned commit is also attached to every release as a release asset,
-`LibreOffice-dictionaries-f2ff99058268502bdcf4cad25c1ca2935ad8aa7d.tar.gz`. The
-table records the pinned upstream provenance.
+accompanies every installer. The table records the pinned upstream provenance.
 
 | Tag | Language | License | Source |
 |---|---|---|---|
@@ -566,11 +546,9 @@ ship verbatim in `dictionaries/fi/notices/`.
 
 libvoikko is tri-licensed; MPL-1.1 is the option this project exercises, and
 all three are recorded because upstream's notice files carry all three.
-voikko-fi is copyleft (GPL-2.0-or-later). Its complete Debian source package
-(`voikko-fi_2.5-2.dsc`, `voikko-fi_2.5.orig.tar.gz`,
-`voikko-fi_2.5-2.debian.tar.xz`) is attached to every release as release
-assets, and so is the MSYS2 source package for libvoikko,
-`mingw-w64-libvoikko-4.3.3-3.src.tar.zst`.
+voikko-fi is copyleft (GPL-2.0-or-later); its complete Debian source package is
+available at the exact source location named in the row and under the written
+source offer above.
 
 `libvoikko-1.dll` links the same three mingw runtime DLLs the OCR runtime does
 (`libgcc_s_seh-1.dll`, `libstdc++-6.dll`, `libwinpthread-1.dll`). A DLL loaded

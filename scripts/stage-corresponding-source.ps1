@@ -1,8 +1,7 @@
-# Stages the exact source archives that accompany the release's copyleft object
-# code and data, as listed in corresponding-source.tsv. Remote bytes are
-# version-pinned and SHA-256-pinned; repository rows are copied from reviewed
-# files committed under vendor/. The release workflow uploads every staged file
-# and includes it in SHA256SUMS.txt.
+# Stages the exact source archives that accompany the release's HEIF decoder.
+# Remote bytes are version-pinned and SHA-256-pinned; the binding source is the
+# already-reviewed sdist committed under vendor/wheels. The release workflow
+# uploads every staged file and includes it in SHA256SUMS.txt.
 
 param(
     [Parameter(Mandatory = $true)]
