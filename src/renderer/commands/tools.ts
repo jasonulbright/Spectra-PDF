@@ -71,6 +71,12 @@ export interface ToolDef {
    * `'select'` belongs to no tool; it is the absence of one.
    */
   canvasTools?: CanvasTool[];
+  /**
+   * The armed mode's gesture commits nothing on its own: the drawn band lands
+   * in this tool's pane, and only the pane applies it. Opening such a tool
+   * opens the dock with the mode, or the band has nowhere to go.
+   */
+  modeLandsInPane?: true;
 }
 
 export const TOOL_DEFS: readonly ToolDef[] = [
@@ -226,6 +232,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     // the page the moment you pick Crop — the numeric fields in the dock are
     // where the drag LANDS, not a second way to do the same job.
     canvasTools: ['cropdraw'],
+    modeLandsInPane: true,
   },
   {
     id: 'snapshot',
@@ -285,6 +292,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     // moment Links is picked — the crop tool's shape. The band is where the
     // link GOES; the panel is where it is targeted and styled.
     canvasTools: ['linkdraw'],
+    modeLandsInPane: true,
   },
   {
     id: 'export',

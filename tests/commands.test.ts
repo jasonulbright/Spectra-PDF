@@ -26,6 +26,7 @@ import {
 } from '../src/renderer/commands/context';
 import { showableDoc, showableFile, tabFiles } from '../src/renderer/state/selectors';
 import { KEY_BINDINGS } from '../src/renderer/commands/standard-keys';
+import { TOOL_DEFS } from '../src/renderer/commands/tools';
 import { resetPendingFind } from '../src/renderer/commands/find-intent';
 import type { AppCommandHandlers } from '../src/renderer/commands/types';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
@@ -599,6 +600,29 @@ describe('invokeCommand', () => {
     expect(invokeCommand('tools.open.comment')).toBe(true);
     expect(finalState().ui.focusedTab).toEqual({ doc: 'a.pdf' });
     expect(finalState().ui.tool).toBe('highlight');
+  });
+
+  it('a tool whose band lands in its pane opens the dock on that pane (issue #39)', () => {
+    for (const [command, op, mode] of [
+      ['tools.open.pagebox', 'pagebox', 'cropdraw'],
+      ['tools.cropdraw', 'pagebox', 'cropdraw'],
+      ['tools.open.links', 'links', 'linkdraw'],
+    ] as const) {
+      const { finalState } = wire(dockedState());
+      expect(invokeCommand(command as CommandId), command).toBe(true);
+      expect(finalState().ui.toolDock.open, command).toBe(true);
+      expect(finalState().ui.activeOp, command).toBe(op);
+      expect(finalState().ui.tool, command).toBe(mode);
+    }
+  });
+
+  it('exactly Crop and Links open their pane with their mode, and each has both', () => {
+    const flagged = TOOL_DEFS.filter((t) => t.modeLandsInPane);
+    expect(flagged.map((t) => t.id).sort()).toEqual(['links', 'pagebox']);
+    for (const tool of flagged) {
+      expect(tool.ops.length, tool.id).toBeGreaterThan(0);
+      expect(tool.canvasTools?.length ?? 0, tool.id).toBeGreaterThan(0);
+    }
   });
 
   it('a canvas-mode tool opens the ACTIVE file, not the focused tab’s file', () => {
