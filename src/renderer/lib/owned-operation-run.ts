@@ -7,6 +7,16 @@ import type { OpMethod } from './op-edit-class';
 import { captureOperationIntent, assertOperationIntent, assertOperationGateResult, type OperationIntent } from './operation-intent';
 import { tChrome } from '../i18n';
 
+/** A page-tier edit republishes its file with only `editRevision` advanced by
+ * one; any other field change means a different step replaced the file. */
+function isRevisionStep(before: OpenFile, after: OpenFile): boolean {
+  if (after.editRevision !== (before.editRevision ?? 0) + 1) return false;
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)] as (keyof OpenFile)[]);
+  keys.delete('editRevision');
+  for (const key of keys) if (before[key] !== after[key]) return false;
+  return true;
+}
+
 /** A write owns its gesture, then its transaction, then its exact publication.
  * Unlike a read run, its own commit/publication must not invalidate its result. */
 export function createOwnedOperationRuns(readState: () => AppState) {
@@ -111,10 +121,11 @@ export function createOwnedOperationRuns(readState: () => AppState) {
         const after = readState(), snapshot = after.pageUndoStack.at(-1);
         const edited = after.workspace.documents.find(doc => doc.id === target.docId)?.pages
           .find(page => page.id === target.pageId)?.annotations?.find(a => a.id === target.annotationId);
-        if (after.files.get(file.path) !== intent.source || after.pageUndoStack.length !== before.pageUndoStack.length + 1
+        const editedFile = after.files.get(file.path);
+        if (!editedFile || !isRevisionStep(intent.source, editedFile) || after.pageUndoStack.length !== before.pageUndoStack.length + 1
             || snapshot?.documents !== before.workspace.documents || snapshot.dirtyPaths !== before.pageDirtyPaths
             || edited?.note !== note) throw new Error(tChrome('app.history.changed'));
-        intent = captureOperationIntent(after, intent.source);
+        intent = captureOperationIntent(after, editedFile);
       },
       finish: () => { if (active === ticket) active = null; },
     };
