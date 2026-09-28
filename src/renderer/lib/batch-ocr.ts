@@ -68,6 +68,30 @@ export interface BatchReport {
   /** Directories the enumeration could not read (from the Rust walk) —
    * carried into the report so the run never has silent holes. */
   skippedDirs: string[];
+  /** Present when the run was asked to remove empty source folders and
+   * finished without a stop. */
+  emptyFolders?: EmptyFolderReport;
+}
+
+export interface EmptyFolderReport {
+  removed: string[];
+  /** `reason` is the English log text; `refusal` is set when the whole
+   * removal was refused, for the on-screen message. */
+  skipped: { path: string; reason: string; refusal?: EmptyFolderRefusal }[];
+}
+
+export type EmptyFolderRefusal =
+  | 'refusal.emptyFolders.rootNotAbsolute'
+  | 'refusal.emptyFolders.rootNotClaimed';
+
+const EMPTY_FOLDER_REFUSALS: Record<string, EmptyFolderRefusal> = {
+  'emptyFolders.rootNotAbsolute': 'refusal.emptyFolders.rootNotAbsolute',
+  'emptyFolders.rootNotClaimed': 'refusal.emptyFolders.rootNotClaimed',
+};
+
+/** The refusal key for a native refusal code, or undefined. */
+export function emptyFolderRefusal(message: string): EmptyFolderRefusal | undefined {
+  return EMPTY_FOLDER_REFUSALS[message];
 }
 
 export interface BatchProgress {

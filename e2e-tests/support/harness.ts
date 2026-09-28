@@ -2204,6 +2204,7 @@ export interface BatchOcrSnapshot {
       repairedOriginalReplaced?: boolean;
     }[];
     skippedDirs: string[];
+    emptyFolders?: { removed: string[]; skipped: { path: string; reason: string }[] };
   } | null;
   /** Full path of the log the run wrote, or null when logging is
    * off or the write failed. The spec reads the file back from disk. */

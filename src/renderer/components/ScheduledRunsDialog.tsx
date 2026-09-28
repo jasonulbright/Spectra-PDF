@@ -62,6 +62,7 @@ const EMPTY: ScheduleProfile = {
   mrcVerifyText: false,
   enhance: false,
   enhanceOrientation: true,
+  removeEmptyFolders: false,
   runType: 'batch-ocr',
   actionFile: '',
 };
@@ -513,6 +514,22 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
             </Field>
           )}
 
+          {editing.runType !== 'action' && (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="schedule-remove-empty-folders"
+                checked={editing.removeEmptyFolders}
+                onChange={() =>
+                  setEditing({ ...editing, removeEmptyFolders: !editing.removeEmptyFolders })
+                }
+                className="rounded bg-neutral-900 border-neutral-600"
+              />
+              <span className="text-sm text-neutral-300">
+                {tChrome('dialog.batch.removeEmptyFolders')}
+              </span>
+            </label>
+          )}
           {/* The two page-image options, in run order: enhancement corrects
               what will be read, MRC replaces what was read. Both belong on
               this form as well as in the dialog — a schedule read back from a

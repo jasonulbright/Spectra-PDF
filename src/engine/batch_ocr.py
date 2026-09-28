@@ -24,6 +24,7 @@ the same and the reasons are the same:
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 from datetime import datetime
@@ -474,6 +475,7 @@ def batch_ocr(
     enhance: bool = False,
     enhance_orientation: bool = True,
     font_dir: str = "",
+    remove_empty_folders: bool = False,
 ) -> dict:
     """Mirror a folder of PDFs into searchable copies — or, with `in_place`,
     REPLACE each original with its searchable version (in-place batch
@@ -506,7 +508,11 @@ def batch_ocr(
     `enhance` deskews, despeckles, whitens and re-orients each file BEFORE
     recognition — the same structural order as `mrc`'s, seen from the other
     end (`_enhance_step`). It stages into its own temp beside the output, so
-    the source is never modified, and like MRC it never fails a file."""
+    the source is never modified, and like MRC it never fails a file.
+
+    `remove_empty_folders` deletes, after every file is done, the folders
+    inside the source root that are empty at that point
+    (`plan_empty_folders` defines which qualify). The source root itself is never removed."""
     source_path = Path(source).resolve()
     if not source_path.is_dir():
         raise ValueError(f"Source folder not found: {source}")
@@ -816,6 +822,10 @@ def batch_ocr(
             results.append(result)
 
     report = {"cancelled": False, "results": results, "skippedDirs": skipped_dirs, "inPlace": in_place}
+    if remove_empty_folders:
+        protected = [str(dest_path)] if not in_place else []
+        protected += [str(Path(r).resolve()) for r in (moved_root, error_root) if r]
+        report["emptyFolders"] = remove_empty_folders_in(str(source_path), protected)
     log_path = _write_log(
         started_at,
         datetime.now(),
@@ -832,6 +842,202 @@ def batch_ocr(
     if log_path:
         report["logPath"] = log_path
     return report
+
+
+# ── Empty source folders ──────────────────────────────────────────────────
+#
+# Remove empty folders left in a batch SOURCE tree after a run.
+#
+# A folder qualifies when it lies strictly inside the source root, is reached
+# without crossing a reparse point (junction, symbolic link, mount point, cloud
+# placeholder), and holds nothing at deletion time except folders that qualify
+# themselves. The root is never removed. A reparse point is never entered and
+# never removed: it counts as content, so every folder above it stays.
+#
+# Planning and deletion are separate steps. The plan is bottom-up (a parent
+# after all its children), and deletion uses `os.rmdir`, which refuses a folder
+# that is not empty -- so a file that appears between the plan and the delete
+# makes that delete fail and be reported, never removes the file.
+
+
+def _is_reparse(st: os.stat_result) -> bool:
+    attrs = getattr(st, "st_file_attributes", 0)
+    if attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+        return True
+    return stat.S_ISLNK(st.st_mode)
+
+
+_LINK_TAGS = frozenset({0xA000000C, 0xA0000003})  # symbolic link, mount point / junction
+
+
+def _is_link(st: os.stat_result) -> bool:
+    """A reparse point that redirects to another path. Cloud-file placeholders
+    and other tagged folders are reparse points too, but stay where they are."""
+    if stat.S_ISLNK(st.st_mode):
+        return True
+    return _is_reparse(st) and getattr(st, "st_reparse_tag", 0) in _LINK_TAGS
+
+
+def _norm_path(path: str) -> str:
+    return os.path.normcase(os.path.normpath(path))
+
+
+# Shell-written metadata files. Their presence keeps a folder; the report
+# names them so a kept folder that looks empty in Explorer is explained.
+_SYSTEM_FILE_NAMES = frozenset({"desktop.ini", "thumbs.db", ".ds_store"})
+
+
+def plan_empty_folders(root: str, protected: list[str] | tuple[str, ...] = ()) -> dict:
+    """Plan which folders under `root` qualify for removal.
+
+    Returns {"candidates": [...], "skipped": [{"path", "reason"}]}. Candidates
+    are ordered deepest first, each with its lstat identity, so the executor
+    can confirm it deletes the folder that was planned."""
+    root_path = os.path.realpath(root)
+    protected_set = {_norm_path(os.path.realpath(p)) for p in protected if p}
+    candidates: list[dict] = []
+    skipped: list[dict] = []
+
+    def visit(path: str) -> bool:
+        """True when `path` holds nothing but qualifying folders."""
+        try:
+            with os.scandir(path) as it:
+                entries = list(it)
+        except OSError as exc:
+            skipped.append({"path": path, "reason": f"could not be read: {exc.strerror or exc}"})
+            return False
+        empty = True
+        # Set by anything except a system file or a folder that qualifies.
+        other_content = False
+        system_files: list[str] = []
+        for entry in sorted(entries, key=lambda e: e.name):
+            try:
+                st = os.lstat(entry.path)
+            except OSError as exc:
+                skipped.append(
+                    {"path": entry.path, "reason": f"could not be read: {exc.strerror or exc}"}
+                )
+                empty = False
+                other_content = True
+                continue
+            if _is_link(st):
+                skipped.append({"path": entry.path, "reason": "link or junction, not followed"})
+                empty = False
+                other_content = True
+                continue
+            if _is_reparse(st):
+                # Entering a cloud placeholder can download its contents, and
+                # an online-only folder reads as empty; it counts as content.
+                if stat.S_ISDIR(st.st_mode):
+                    skipped.append(
+                        {"path": entry.path, "reason": "cloud or other placeholder folder, not entered"}
+                    )
+                empty = False
+                other_content = True
+                continue
+            if not stat.S_ISDIR(st.st_mode):
+                if entry.name.lower() in _SYSTEM_FILE_NAMES:
+                    system_files.append(entry.name)
+                empty = False
+                other_content = other_content or entry.name.lower() not in _SYSTEM_FILE_NAMES
+                continue
+            if _norm_path(entry.path) in protected_set:
+                skipped.append({"path": entry.path, "reason": "output folder of this run"})
+                empty = False
+                other_content = True
+                continue
+            if visit(entry.path):
+                candidates.append(
+                    {"path": entry.path, "ino": st.st_ino, "dev": st.st_dev}
+                )
+            else:
+                empty = False
+                other_content = True
+        if system_files and not other_content and path != root_path:
+            skipped.append(
+                {"path": path, "reason": "holds only system files: " + ", ".join(system_files)}
+            )
+        return empty
+
+    try:
+        root_st = os.lstat(root_path)
+    except OSError as exc:
+        return {
+            "candidates": [],
+            "skipped": [{"path": root_path, "reason": f"could not be read: {exc.strerror or exc}"}],
+        }
+    if not stat.S_ISDIR(root_st.st_mode) or _is_link(root_st):
+        return {"candidates": [], "skipped": [{"path": root_path, "reason": "not a plain folder"}]}
+    visit(root_path)
+    return {"candidates": candidates, "skipped": skipped}
+
+
+def _root_refusal(root: str) -> str:
+    """Why nothing may be removed under `root`, or ''.
+
+    The caller's authority covers `root` as spelled. A link or junction at the
+    root or above it would move the walk into another tree."""
+    absolute = os.path.abspath(root)
+    current = absolute
+    while True:
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        try:
+            if _is_link(os.lstat(current)):
+                return f"not removed: {current} is a link or junction"
+        except OSError as exc:
+            return f"could not be read: {exc.strerror or exc}"
+        current = parent
+    if _norm_path(os.path.realpath(absolute)) != _norm_path(absolute):
+        return "not removed: the source folder resolves to another location"
+    return ""
+
+
+def _remove_planned(cand: dict) -> dict | None:
+    """Delete one planned folder. None on success, else its skipped entry."""
+    path = cand["path"]
+    try:
+        st = os.lstat(path)
+    except OSError as exc:
+        return {"path": path, "reason": f"could not be read: {exc.strerror or exc}"}
+    if _is_reparse(st) or not stat.S_ISDIR(st.st_mode):
+        return {"path": path, "reason": "changed into a link or file after planning"}
+    if (st.st_ino, st.st_dev) != (cand["ino"], cand["dev"]):
+        return {"path": path, "reason": "replaced by another folder after planning"}
+    try:
+        os.rmdir(path)
+    except OSError as exc:
+        return {"path": path, "reason": f"not removed: {exc.strerror or exc}"}
+    return None
+
+
+def remove_empty_folders_in(root: str, protected: list[str] | None = None) -> dict:
+    """Plan, then delete. Returns {"removed": [...], "skipped": [{"path", "reason"}]}.
+
+    `protected` names folders that are never removed even when empty (the
+    run's destination and filing roots)."""
+    refusal = _root_refusal(root)
+    if refusal:
+        return {"removed": [], "skipped": [{"path": root, "reason": refusal}]}
+    plan = plan_empty_folders(root, tuple(protected or ()))
+    removed: list[str] = []
+    skipped: list[dict] = list(plan["skipped"])
+    # Parents of folders that were not removed: still non-empty, and the
+    # child's entry already explains why.
+    blocked: set[str] = set()
+    for cand in plan["candidates"]:
+        path = cand["path"]
+        if _norm_path(path) in blocked:
+            blocked.add(_norm_path(os.path.dirname(path)))
+            continue
+        entry = _remove_planned(cand)
+        if entry is None:
+            removed.append(path)
+            continue
+        skipped.append(entry)
+        blocked.add(_norm_path(os.path.dirname(path)))
+    return {"removed": removed, "skipped": skipped}
 
 
 def _to_pdf_rects(file: str, page_index: int, words: list[dict]) -> list[dict]:
@@ -989,6 +1195,15 @@ def _write_log(
         lines.append("")
         lines.append("Unreadable subfolders (missing from the mirror):")
         lines.extend(f"  {d}" for d in report["skippedDirs"])
+    empty = report.get("emptyFolders")
+    if empty is not None:
+        lines.append("")
+        lines.append(
+            f"Empty source folders: {len(empty['removed'])} removed · "
+            f"{len(empty['skipped'])} left in place"
+        )
+        lines.extend(f"  removed  {d}" for d in empty["removed"])
+        lines.extend(f"  kept     {d['path']} — {d['reason']}" for d in empty["skipped"])
     lines.append("")
 
     try:

@@ -1196,6 +1196,16 @@ impl ClaimState {
         runs.held.len() != before
     }
 
+    /// Whether `label` holds a folder run whose roots name or contain `path`.
+    pub fn holds_folder_run(&self, label: &str, path: &str) -> bool {
+        let runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        runs.held.iter().any(|run| {
+            run.label == label
+                && run.kind == RunClaimKind::Folder
+                && run.roots.iter().any(|root| root_contains(root, path))
+        })
+    }
+
     /// A submitted engine request keeps its writer leases until its response,
     /// even if the window that submitted it disappears in the meantime.
     pub(crate) fn folder_leases(
@@ -2554,6 +2564,23 @@ mod tests {
 
         drop(reservation);
         assert!(state.claim_document(path, "doc-1", ClaimMode::Write).granted);
+    }
+
+    #[test]
+    fn only_the_window_holding_a_folder_run_holds_its_subtree() {
+        let state = test_claim_state();
+        let root = std::env::temp_dir()
+            .join(format!("empty-folder-authority-{}", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        let inside = format!(r"{root}\sub");
+        assert!(!state.holds_folder_run("batch", &root));
+        let run = state.claim_roots(&[root.clone()], "batch").unwrap();
+        assert!(run.granted);
+        assert!(state.holds_folder_run("batch", &root));
+        assert!(state.holds_folder_run("batch", &inside));
+        assert!(!state.holds_folder_run("main", &root));
+        assert!(!state.holds_folder_run("batch", &std::env::temp_dir().to_string_lossy()));
     }
 
     #[test]
