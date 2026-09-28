@@ -1640,6 +1640,9 @@ export interface TestHarness {
    * the add-page ghost / per-position drop run, bypassing the native picker.
    * Resolves once the byte-only source is registered and the pages spliced. */
   importPagesIntoDoc: (filePath: string, toDocId: string, toIndex: number) => Promise<void>;
+  /** Files dropped on a document's page at an index — the route the canvas
+   * drop takes once its resolver has hit a page. */
+  dropFilesOntoDoc: (paths: string[], toDocId: string, toIndex: number) => Promise<void>;
   /**
    * Add a pending redaction mark to the active file's first workspace page,
    * bypassing pointer-drag simulation (same WebDriver constraint as
@@ -2412,6 +2415,7 @@ export interface TestHarnessDeps {
   commitPendingEdits: () => Promise<void>;
   closeAllFiles: () => Promise<void>;
   importPagesIntoDoc: (filePath: string, toDocId: string, toIndex: number) => Promise<void>;
+  dropFilesOntoDoc: (paths: string[], toDocId: string, toIndex: number) => Promise<void>;
   /** Export via the engine, with an explicit destination (no dialog). */
   exportActiveDocument: (destPath: string, format: string, options?: Record<string, unknown>) => Promise<unknown>;
 }
@@ -2749,6 +2753,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         await deps.importPagesIntoDoc(filePath, toDocId, toIndex);
       } catch (err) {
         captureError('importPagesIntoDoc', err);
+        throw err;
+      }
+    },
+    dropFilesOntoDoc: async (paths, toDocId, toIndex) => {
+      try {
+        await deps.dropFilesOntoDoc(paths, toDocId, toIndex);
+      } catch (err) {
+        captureError('dropFilesOntoDoc', err);
         throw err;
       }
     },

@@ -182,6 +182,7 @@ pub fn run() {
             commands::ensure_parent_dirs,
             commands::paths_same_file,
             commands::read_file_binary,
+            commands::read_file_binary_capped,
             commands::pick_image_file,
             commands::save_image_file_dialog,
             commands::pick_form_data_file,

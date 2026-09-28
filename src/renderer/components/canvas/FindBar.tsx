@@ -25,6 +25,15 @@ interface FindBarProps {
   onNext: () => void;
   onPrev: () => void;
   onApplyOcr: () => void;
+  /** A clean "Make searchable" just finished on this workspace. */
+  ocrApplied: boolean;
+  /** How many files that apply wrote a text layer into. */
+  ocrFileCount: number;
+  /** Any of those files still holds unsaved changes. */
+  ocrUnsaved: boolean;
+  ocrTextState: 'idle' | 'copying' | 'copied';
+  onSaveAfterOcr: () => void;
+  onCopyOcrText: () => void;
   onClose: () => void;
 }
 
@@ -61,6 +70,12 @@ export function FindBar({
   onNext,
   onPrev,
   onApplyOcr,
+  ocrApplied,
+  ocrFileCount,
+  ocrUnsaved,
+  ocrTextState,
+  onSaveAfterOcr,
+  onCopyOcrText,
   onClose,
 }: FindBarProps): React.ReactElement {
   useTranslation();
@@ -178,6 +193,30 @@ export function FindBar({
         >
           {tChrome(applyingOcr ? 'canvas.find.applying' : 'canvas.find.makeSearchable')}
         </button>
+      )}
+      {ocrApplied && (
+        <>
+          {ocrUnsaved && (
+            <button
+              data-testid="find-ocr-save"
+              data-files={ocrFileCount}
+              onClick={onSaveAfterOcr}
+              title={tChrome(ocrFileCount > 1 ? 'canvas.find.saveAllAfterOcrTitle' : 'canvas.find.saveAfterOcrTitle')}
+              className="px-2 py-0.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded font-medium whitespace-nowrap"
+            >
+              {tChrome(ocrFileCount > 1 ? 'canvas.find.saveAll' : 'dialog.common.save')}
+            </button>
+          )}
+          <button
+            data-testid="find-ocr-copy"
+            disabled={ocrTextState === 'copying'}
+            onClick={onCopyOcrText}
+            title={tChrome('canvas.find.copyTextTitle')}
+            className="px-2 py-0.5 text-xs bg-neutral-800 text-neutral-200 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-60 rounded font-medium whitespace-nowrap"
+          >
+            {tChrome(ocrTextState === 'copied' ? 'canvas.find.textCopied' : 'canvas.find.copyText')}
+          </button>
+        </>
       )}
       <button title={tChrome('canvas.find.close')} onClick={onClose} className="px-1.5 py-0.5 text-xs text-neutral-400 hover:text-neutral-200">
         ×

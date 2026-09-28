@@ -1215,6 +1215,24 @@ export async function importPagesIntoDoc(
   }
 }
 
+/** Files dropped on a document's page at an index — the canvas drop's route
+ * once its resolver hit a page. */
+export async function dropFilesOntoDoc(paths: string[], toDocId: string, toIndex: number): Promise<void> {
+  const result = await browser.executeAsync<string | null, [string[], string, number]>(
+    function (ps, doc, idx, done) {
+      (window as any).__SPECTRA_TEST__.dropFilesOntoDoc(ps, doc, idx)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    paths,
+    toDocId,
+    toIndex,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`dropFilesOntoDoc failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
 /** Test-only: close every open file so the next case starts clean. */
 export async function closeAllFiles(): Promise<void> {
   await browser.execute(async function () {

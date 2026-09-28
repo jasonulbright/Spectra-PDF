@@ -289,6 +289,13 @@ export const CANVAS_STRINGS = {
     'Write the recognized text into the scanned pages as an invisible, searchable text layer',
   'canvas.find.applying': 'Applying…',
   'canvas.find.makeSearchable': 'Make searchable',
+  'canvas.find.saveAfterOcrTitle': 'Save the document with its recognized text',
+  'canvas.find.saveAll': 'Save all',
+  'canvas.find.saveAllAfterOcrTitle': 'Save every document that received recognized text',
+  'canvas.find.copyText': 'Copy text',
+  'canvas.find.copyTextTitle': 'Copy the recognized text to the clipboard',
+  'canvas.find.textCopied': 'Text copied',
+  'canvas.find.copyTextFailed': 'The text could not be copied: {{message}}',
   'canvas.find.close': 'Close (Esc)',
 
   // ── Read Out Loud ────────────────────────────────────────────────────

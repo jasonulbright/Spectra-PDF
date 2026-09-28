@@ -17,19 +17,27 @@ import {
   addPaths,
   baseName,
   blankRow,
+  createLimiter,
   captureIdToReleaseOnRowRemoval,
   classify,
   defaultOutputPath,
+  dragTargetIndex,
+  edgeScrollStep,
   extensionOf,
+  hasThumbnail,
   hasUnsupported,
   moveRow,
   needsQualityPreset,
+  orderSelection,
   removeRow,
   reorderRows,
   rowFromPath,
   toEngineSources,
 } from '../src/renderer/lib/create-pdf';
 import { DIALOG_STRINGS } from '../src/renderer/i18n-dialogs';
+import { initialState } from '../src/renderer/state/reducer';
+import { unsavedAmong } from '../src/renderer/state/selectors';
+import type { AppState } from '../src/renderer/state/types';
 
 const ENGINE_CREATE_PDF = readFileSync(
   resolve(__dirname, '../src/engine/create_pdf.py'),
@@ -309,5 +317,118 @@ describe('the dialog catalog covers every option the dialog renders', () => {
     expect(DIALOG_STRINGS).not.toHaveProperty('dialog.createPdf.noFile');
     expect(DIALOG_STRINGS).not.toHaveProperty('dialog.createPdf.pick');
     expect(DIALOG_STRINGS['dialog.createPdf.title']).toBe('Create PDF');
+  });
+});
+
+describe('a picked batch keeps the order the folder listed it (issue 39)', () => {
+  it('does not make the last-clicked image page 1', () => {
+    // The Windows picker delivers the focused (last-clicked) item first.
+    const delivered = ['C:/scans/p3.png', 'C:/scans/p1.png', 'C:/scans/p2.png'];
+    const rows = addPaths([], orderSelection(delivered));
+    expect(toEngineSources(rows)).toEqual([
+      { path: 'C:/scans/p1.png' },
+      { path: 'C:/scans/p2.png' },
+      { path: 'C:/scans/p3.png' },
+    ]);
+  });
+
+  it('orders numbered names numerically and ignores case', () => {
+    expect(orderSelection(['C:/s/IMG10.png', 'C:/s/img2.png', 'C:/s/Img1.png'])).toEqual([
+      'C:/s/Img1.png',
+      'C:/s/img2.png',
+      'C:/s/IMG10.png',
+    ]);
+  });
+
+  it('keeps rows already in the list where they are', () => {
+    const first = addPaths([], ['C:/s/z.png']);
+    const next = addPaths(first, orderSelection(['C:/s/b.png', 'C:/s/a.png']));
+    expect(next.map((r) => r.path)).toEqual(['C:/s/z.png', 'C:/s/a.png', 'C:/s/b.png']);
+  });
+});
+
+describe('pointer reorder of the source list', () => {
+  const mids = [10, 30, 50, 70];
+  it('lands the dragged row after every other row whose middle is above the pointer', () => {
+    expect(dragTargetIndex(mids, 0, 55)).toBe(2);
+    expect(dragTargetIndex(mids, 3, 5)).toBe(0);
+    expect(dragTargetIndex(mids, 1, 29)).toBe(1);
+    expect(dragTargetIndex(mids, 0, 100)).toBe(3);
+  });
+
+  it('matches reorderRows so a drop moves the row to the index shown', () => {
+    const rows = addPaths([], ['C:/a.png', 'C:/b.png', 'C:/c.png', 'C:/d.png']);
+    const moved = reorderRows(rows, 0, dragTargetIndex(mids, 0, 55));
+    expect(moved.map((r) => baseName(r.path ?? ''))).toEqual(['b.png', 'c.png', 'a.png', 'd.png']);
+  });
+});
+
+describe('list thumbnails', () => {
+  it('shows one only for images the webview decodes', () => {
+    expect(hasThumbnail(rowFromPath('C:/a.PNG'))).toBe(true);
+    expect(hasThumbnail(rowFromPath('C:/a.jpeg'))).toBe(true);
+    expect(hasThumbnail(rowFromPath('C:/a.tiff'))).toBe(false);
+    expect(hasThumbnail(rowFromPath('C:/a.pdf'))).toBe(false);
+    expect(hasThumbnail(blankRow())).toBe(false);
+  });
+});
+
+describe('thumbnail reads are bounded', () => {
+  it('never runs more than the limit at once and skips a task no longer wanted', async () => {
+    const run = createLimiter(2);
+    let active = 0;
+    let peak = 0;
+    const releases: (() => void)[] = [];
+    const task = () =>
+      new Promise<number>((resolve) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        releases.push(() => {
+          active -= 1;
+          resolve(1);
+        });
+      });
+    const results = [run(task), run(task), run(task), run(task, () => false)];
+    await Promise.resolve();
+    expect(peak).toBe(2);
+    while (releases.length > 0) {
+      releases.shift()!();
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    expect(await Promise.all(results)).toEqual([1, 1, 1, null]);
+    expect(peak).toBe(2);
+  });
+});
+
+describe('edge auto-scroll during a row drag', () => {
+  it('scrolls up near the top, down near the bottom, and not in between', () => {
+    expect(edgeScrollStep(100, 300, 102)).toBeLessThan(0);
+    expect(edgeScrollStep(100, 300, 298)).toBeGreaterThan(0);
+    expect(edgeScrollStep(100, 300, 200)).toBe(0);
+    expect(edgeScrollStep(100, 300, 50)).toBe(-12);
+  });
+});
+
+describe('post-OCR save covers every changed file', () => {
+  it('lists the open files among the given paths that hold unsaved changes', () => {
+    const file = (path: string, dirty: boolean) => [path, { path, dirty }] as const;
+    const state = {
+      ...initialState,
+      files: new Map([file('C:/a.pdf', true), file('C:/b.pdf', false), file('C:/c.pdf', false)]),
+      pageDirtyPaths: ['C:/c.pdf'],
+    } as unknown as AppState;
+    expect(unsavedAmong(state, ['C:/a.pdf', 'C:/b.pdf', 'C:/c.pdf', 'C:/gone.pdf'])).toEqual([
+      'C:/a.pdf',
+      'C:/c.pdf',
+    ]);
+  });
+
+  it('never lists an import-only source', () => {
+    const state = {
+      ...initialState,
+      files: new Map([['C:/ghost.pdf', { path: 'C:/ghost.pdf', dirty: true, importOnly: true }]]),
+      pageDirtyPaths: ['C:/ghost.pdf'],
+    } as unknown as AppState;
+    expect(unsavedAmong(state, ['C:/ghost.pdf'])).toEqual([]);
   });
 });

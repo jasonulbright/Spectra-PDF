@@ -445,6 +445,8 @@ export const DIALOG_STRINGS = {
   'dialog.createPdf.blankPage': 'Blank page',
   'dialog.createPdf.moveUp': 'Move up',
   'dialog.createPdf.moveDown': 'Move down',
+  'dialog.createPdf.dragHandle': 'Drag to reorder',
+  'dialog.createPdf.openAndOcr': 'Open and recognize text',
   'dialog.createPdf.remove': 'Remove',
   'dialog.createPdf.kindPdf': 'PDF',
   'dialog.createPdf.kindImage': 'Image',

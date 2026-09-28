@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { confirmDirtySnapshots, dirtyPromptSnapshots, sameDirtyPromptSnapshot, unconfirmedDirtySnapshots } from '../src/renderer/lib/dirty-prompt';
+import { confirmDirtySnapshots, dirtyPromptSnapshots, sameDirtyPromptSnapshot, saveKeepingLaterEdits, unconfirmedDirtySnapshots } from '../src/renderer/lib/dirty-prompt';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
 import type { AppState, OpenDocument, OpenFile, PageRef, PdfBuffer } from '../src/renderer/state/types';
 
@@ -117,5 +117,31 @@ describe('dirty prompt snapshots', () => {
     expect(sameDirtyPromptSnapshot(before, after)).toBe(false);
     expect(afterUndo.editRevision).toBeGreaterThan(after.editRevision);
     expect(sameDirtyPromptSnapshot(after, afterUndo)).toBe(false);
+  });
+});
+
+describe('saving in place keeps edits made during the write', () => {
+  const dirtyState = (editRevision: number): AppState => ({
+    ...initialState,
+    files: new Map([['a.pdf', { ...file('a.pdf', new Uint8Array([1]) as unknown as PdfBuffer), dirty: true, editRevision }]]),
+  });
+
+  it('marks saved when nothing changed during the write', async () => {
+    const state = dirtyState(1);
+    expect(await saveKeepingLaterEdits(() => state, 'a.pdf', async () => true)).toEqual({ written: true, markSaved: true });
+  });
+
+  it('does not mark saved when an edit landed while writing', async () => {
+    let state = dirtyState(1);
+    const result = await saveKeepingLaterEdits(() => state, 'a.pdf', async () => {
+      state = dirtyState(2);
+      return true;
+    });
+    expect(result).toEqual({ written: true, markSaved: false });
+  });
+
+  it('marks nothing when the write is refused', async () => {
+    const state = dirtyState(1);
+    expect(await saveKeepingLaterEdits(() => state, 'a.pdf', async () => false)).toEqual({ written: false, markSaved: false });
   });
 });

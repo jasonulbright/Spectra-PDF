@@ -101,7 +101,7 @@ import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
 import { indexImportSource, readPublishedBytes } from './lib/workspace';
 import type { AppState, PageRef, PdfBuffer } from './state/types';
 import { isDocTab, viewOf } from './state/types';
-import { documentPermissions, showableDoc, showableDocuments, tabFiles } from './state/selectors';
+import { documentPermissions, showableDoc, showableDocuments, tabFiles, unsavedAmong } from './state/selectors';
 import type { CanvasTool } from './state/types';
 import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
 import { PresentationView } from './components/canvas/PresentationView';
@@ -190,12 +190,13 @@ import {
   sweepDeadRecents,
 } from './lib/recent-files';
 import { claimPaths, createClaimHolds, departedImportSources, downgradeImportSourceClaims, releasePaths, retainedImportSources, soleOwner, type ClaimRefusal } from './lib/window-claims';
-import { confirmDirtySnapshots, dirtyPromptSnapshots, sameDirtyPromptSnapshot, type DirtyPromptSnapshot } from './lib/dirty-prompt';
+import { confirmDirtySnapshots, dirtyPromptSnapshots, sameDirtyPromptSnapshot, saveKeepingLaterEdits, type DirtyPromptSnapshot } from './lib/dirty-prompt';
 import { createOpenFlights, createPathOperationLock, openPathOnce } from './lib/open-flights';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
 import type { TestStateSnapshot } from './testHarness';
 import {
+  commandBlockText,
   getCanvasServices,
   pushEscapeInterceptor,
   invokeCommand,
@@ -1407,8 +1408,43 @@ function AppContent(): React.ReactElement {
     ],
   );
 
+  // A created PDF opens through the funnel; `recognize` then opens Scan & OCR
+  // on it only when the open left THAT document showable, so a refused open
+  // cannot arm OCR on whatever document was already active.
+  const openCreatedPdf = useCallback(
+    async (path: string, options?: { recognize?: boolean }) => {
+      await openByPaths([path]);
+      if (!options?.recognize) return;
+      const [target] = await app.canonicalizePaths([path]);
+      // A refused open has already reported itself through the funnel.
+      if (!target || showableDoc(readState()) !== target) return;
+      if (invokeCommand('tools.open.ocr')) return;
+      void showNotice(
+        tChrome('app.recognize.title'),
+        commandBlockText('tools.open.ocr') ?? tChrome('app.recognize.unavailable'),
+      );
+    },
+    [openByPaths, readState, showNotice],
+  );
+
   // The canvas publishes its drop resolver here.
   const dropResolverRef = useRef<CanvasDropResolver | null>(null);
+
+  // Only PDFs enter the page tier. Images and other convertible sources
+  // dropped on a page open the Create PDF dialog instead of failing inside the
+  // import.
+  const dropOntoDoc = useCallback(
+    async (paths: string[], docId: string, index: number) => {
+      const convertible = paths.filter((p) => classifySource(p) !== '' && classifySource(p) !== 'pdf');
+      const importable = paths.filter((p) => !convertible.includes(p));
+      if (convertible.length > 0) {
+        setCreatePdfSeed(convertible);
+        setShowCreatePdf(true);
+      }
+      if (importable.length > 0) await importFilesIntoDoc(importable, docId, index);
+    },
+    [importFilesIntoDoc],
+  );
 
   const handleFilesDropped = useCallback(
     async (paths: string[], position?: { x: number; y: number }) => {
@@ -1424,7 +1460,7 @@ function AppContent(): React.ReactElement {
         const dpr = window.devicePixelRatio || 1;
         const target = dropResolverRef.current(position.x / dpr, position.y / dpr);
         if (target && 'docId' in target) {
-          await importFilesIntoDoc(paths, target.docId, target.index);
+          await dropOntoDoc(paths, target.docId, target.index);
           return;
         }
         if (target) refusedZoom = true;
@@ -1463,7 +1499,7 @@ function AppContent(): React.ReactElement {
         }
       }
     },
-    [openByPaths, importFilesIntoDoc, inDocTab, showNotice],
+    [openByPaths, dropOntoDoc, inDocTab, showNotice],
   );
 
   const handleOpenFile = useCallback(async (): Promise<boolean> => {
@@ -2583,6 +2619,26 @@ function AppContent(): React.ReactElement {
     dispatch({ type: 'MARK_SAVED', path: activeFile.path });
   }, [activeFile, dispatch, commitOrAbort, saveOrReport]);
 
+  // Saves every listed file that holds unsaved changes, in place. A document
+  // whose Save routes to Save As (downloaded from an address) is saved only
+  // when it is the active one, through the same Save As dialog.
+  const handleSaveFiles = useCallback(async (paths: readonly string[]) => {
+    const pending = unsavedAmong(readState(), paths);
+    if (pending.length === 0) return;
+    if (!(await commitOrAbort())) return;
+    for (const path of pending) {
+      const f = readState().files.get(path);
+      if (!f) continue;
+      if (saveRouteFor(f) === 'saveAs') {
+        if (showableDoc(readState()) === path) await handleSaveAsRef.current();
+        continue;
+      }
+      const saved = await saveKeepingLaterEdits(readState, path, async () => await saveOrReport(f.workingPath, path));
+      if (!saved.written) return;
+      if (saved.markSaved) dispatch({ type: 'MARK_SAVED', path });
+    }
+  }, [readState, commitOrAbort, saveOrReport, dispatch]);
+
   const handleSaveAs = useCallback(async () => {
     if (!activeFile) return;
     const dest = await dialog.saveFile({ defaultPath: activeFile.name, ownPath: activeFile.path });
@@ -3469,6 +3525,7 @@ function AppContent(): React.ReactElement {
       },
       importPagesIntoDoc: (filePath, toDocId, toIndex) =>
         importFilesIntoDoc([filePath], toDocId, toIndex),
+      dropFilesOntoDoc: (paths, toDocId, toIndex) => dropOntoDoc(paths, toDocId, toIndex),
       exportActiveDocument: async (destPath, format, options) => {
         const af = stateRef.current.activeFileId
           ? stateRef.current.files.get(stateRef.current.activeFileId)
@@ -3485,7 +3542,7 @@ function AppContent(): React.ReactElement {
         });
       },
     });
-  }, [openByPaths, dispatch, importFilesIntoDoc, harnessSetView, setActiveOp, call, readState, subscribeState, pathInUse]);
+  }, [openByPaths, dispatch, importFilesIntoDoc, dropOntoDoc, harnessSetView, setActiveOp, call, readState, subscribeState, pathInUse]);
 
   // Notify harness subscribers on every state-relevant change.
   useEffect(() => {
@@ -3630,6 +3687,7 @@ function AppContent(): React.ReactElement {
                   onWidgetAction={handleWidgetAction}
                   onAddLinks={handleAddLinks}
                   onApplyOcrLayer={handleApplyOcrLayer}
+                  onSaveFiles={handleSaveFiles}
                   onEditImage={handleEditImage}
                   onEditImagesGroup={handleEditImagesGroup}
                   onEditVector={handleEditVector}
@@ -3728,7 +3786,7 @@ function AppContent(): React.ReactElement {
             setCreatePdfSeed([]);
             setCreatePdfAutoStart(null);
           }}
-          onOpenResult={async (path) => { await openByPaths([path]); }}
+          onOpenResult={openCreatedPdf}
         />
       )}
       {showCombine && (

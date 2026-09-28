@@ -706,6 +706,10 @@ export const file = {
    * same command the batch driver uses for its out-of-workspace sources. */
   readExternalBuffer: async (filePath: string) =>
     new Uint8Array(await invoke<ArrayBuffer>('read_file_binary', { filePath })),
+  /** Like `readExternalBuffer`, but a file larger than `maxBytes` is never
+   * read and resolves to an empty array. */
+  readExternalBufferCapped: async (filePath: string, maxBytes: number) =>
+    new Uint8Array(await invoke<ArrayBuffer>('read_file_binary_capped', { filePath, maxBytes })),
   writeBuffer: (filePath: string, bytes: Uint8Array) => withFileLock([filePath], () => fsWriteFile(filePath, bytes)),
   rename: (fromPath: string, toPath: string) => withFileLock([fromPath, toPath], () => fsRename(fromPath, toPath)),
   remove: (filePath: string) => withFileLock([filePath], () => fsRemove(filePath)),

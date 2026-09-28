@@ -190,6 +190,8 @@ export const WORKBENCH_STRINGS = {
   'app.prefs.title': 'Preferences',
   'app.prefs.close': 'Close',
 
+  'app.recognize.title': 'Recognize text',
+  'app.recognize.unavailable': 'The PDF is open, but text recognition could not start on it.',
   'app.formButton.title': 'Form button',
   'app.formButton.externalTitle': 'Form button — external link',
   'app.formButton.noAction': '"{{field}}" has no action attached.',

@@ -59,3 +59,20 @@ export async function confirmDirtySnapshots(
     for (const snapshot of pending) confirmed.set(snapshot.path, snapshot);
   }
 }
+
+/**
+ * Write one file in place and report whether it may be marked saved: only when
+ * its dirty snapshot is unchanged across the write, so edits made while the
+ * write was in flight stay unsaved. `false` from `write` means the write was
+ * refused and nothing is marked.
+ */
+export async function saveKeepingLaterEdits(
+  readState: () => AppState,
+  path: string,
+  write: () => Promise<boolean>,
+): Promise<{ written: boolean; markSaved: boolean }> {
+  const before = dirtyPromptSnapshots(readState(), [path])[0];
+  if (!(await write())) return { written: false, markSaved: false };
+  const after = dirtyPromptSnapshots(readState(), [path])[0];
+  return { written: true, markSaved: !!before && !!after && sameDirtyPromptSnapshot(before, after) };
+}
