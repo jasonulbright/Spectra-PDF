@@ -24,7 +24,9 @@ export interface BatchEntry {
   rel: string;
 }
 
-export type BatchFileStatus = 'ocr' | 'copied' | 'skipped';
+/** `repaired` exists only in a repair-only run: the file was damaged and its
+ * repaired bytes are the output. */
+export type BatchFileStatus = 'ocr' | 'copied' | 'skipped' | 'repaired';
 
 export interface BatchFileResult {
   rel: string;
@@ -56,8 +58,13 @@ export interface BatchFileResult {
   /** Enhancement actually rewrote pages, so the recognised copy was made from
    * corrected bytes. */
   enhanceApplied?: boolean;
-  /** The source failed to load and tier-1 repair made it readable. */
+  /** The source failed to load and tier-1 repair made it readable, or — in a
+   * repair-only run — the repair found and fixed structural damage. */
   repaired?: boolean;
+  /** Repair-only runs: how many structural problems the repair fixed. */
+  repairFixes?: number;
+  /** Repair-only runs: signatures the repair rewrite invalidated and removed. */
+  signaturesRemoved?: number;
   /** The repaired bytes were written back over the damaged original. */
   repairedOriginalReplaced?: boolean;
 }
@@ -150,6 +157,10 @@ export interface BatchIo {
   /** Tier-1 engine repair of a damaged source into a scratch file; resolves to
    * the scratch path. Called only when `repairDamaged` is on. */
   repairToScratch(src: string): Promise<string>;
+  /** Tier-1 engine repair of ANY source into a scratch file, with the
+   * engine's verdict on whether the source was damaged. Called only by a
+   * repair-only run. The scratch file exists whenever this resolves. */
+  repairInspect(src: string): Promise<RepairInspection>;
   /** Scan-enhance a source into a scratch file BEFORE it is read for
    * recognition; resolves to the scratch path and the note that goes on the
    * result. A NULL path means the enhancement correctly decided to change
@@ -165,8 +176,26 @@ export interface BatchIo {
   discardScratch(path: string): Promise<void>;
 }
 
+export interface RepairInspection {
+  path: string;
+  /** False when the repair found no structural damage. */
+  damaged: boolean;
+  /** Structural problems the repair fixed. */
+  fixes: number;
+  /** Signatures the rewrite removed. */
+  signaturesRemoved: number;
+  pages: number;
+}
+
 export interface BatchRunOptions {
   onProgress?: (p: BatchProgress) => void;
+  /** Checked before each file starts. A paused gate holds the run between
+   * files; the file in flight always finishes first, so no output is ever
+   * left half-written by a pause. */
+  pause?: BatchPauseGate;
+  /** Repair every source with the tier-1 repair and recognise nothing.
+   * `mrc`, `enhance` and `repairDamaged` are ignored. */
+  repairOnly?: boolean;
   /** Polled between units of work; a true return stops after the in-flight
    * file (completed mirror files remain — the report says what finished). */
   isCancelled?: () => boolean;
@@ -194,6 +223,79 @@ export interface BatchRunOptions {
    * end: the pass that IMPROVES what recognition will read runs first, and
    * the pass that REPLACES what it read runs last. */
   enhance?: { orientation: boolean };
+}
+
+// ── Pause ─────────────────────────────────────────────────────────────────
+
+/** `pausing`: a pause was asked for and the file in flight is still running.
+ * `paused`: the run is held between files. */
+export type BatchPauseState = 'running' | 'pausing' | 'paused';
+
+/**
+ * Holds a run between files. Paused time is counted only while the run is
+ * actually held (`paused`), so the active duration a log reports is the wall
+ * time minus `pausedMs()`. `release()` ends every wait for good: a stop, or a
+ * dialog that goes away, must never leave the run parked with its folder
+ * claims held.
+ */
+export class BatchPauseGate {
+  private state: BatchPauseState = 'running';
+  private released = false;
+  private waiters: (() => void)[] = [];
+  private heldSince: number | null = null;
+  private heldTotal = 0;
+
+  constructor(
+    private readonly onChange: (state: BatchPauseState) => void = () => {},
+    private readonly now: () => number = () => Date.now(),
+  ) {}
+
+  get current(): BatchPauseState {
+    return this.state;
+  }
+
+  pause(): void {
+    if (this.released || this.state !== 'running') return;
+    this.set('pausing');
+  }
+
+  resume(): void {
+    if (this.state === 'running') return;
+    this.wake();
+  }
+
+  release(): void {
+    this.released = true;
+    this.wake();
+  }
+
+  pausedMs(): number {
+    return this.heldTotal + (this.heldSince === null ? 0 : this.now() - this.heldSince);
+  }
+
+  async wait(): Promise<void> {
+    if (this.released || this.state === 'running') return;
+    this.heldSince = this.now();
+    this.set('paused');
+    await new Promise<void>((resolve) => this.waiters.push(resolve));
+  }
+
+  private wake(): void {
+    if (this.heldSince !== null) {
+      this.heldTotal += this.now() - this.heldSince;
+      this.heldSince = null;
+    }
+    const waiters = this.waiters;
+    this.waiters = [];
+    this.set('running');
+    for (const w of waiters) w();
+  }
+
+  private set(state: BatchPauseState): void {
+    if (this.state === state) return;
+    this.state = state;
+    this.onChange(state);
+  }
 }
 
 // ── Path helpers (vitest-covered) ─────────────────────────────────────────
@@ -249,12 +351,15 @@ export async function runBatchOcr(
 ): Promise<BatchReport> {
   const onProgress = options.onProgress ?? (() => {});
   const isCancelled = options.isCancelled ?? (() => false);
-  const { movedRoot, errorRoot, repairDamaged, replaceRepairedOriginals, mrc, enhance } =
-    options;
+  const { movedRoot, errorRoot, replaceRepairedOriginals, repairOnly, pause } = options;
+  const repairDamaged = repairOnly ? false : options.repairDamaged;
+  const mrc = repairOnly ? undefined : options.mrc;
+  const enhance = repairOnly ? undefined : options.enhance;
   const results: BatchFileResult[] = [];
   let cancelled = false;
 
   for (let i = 0; i < entries.length; i++) {
+    if (pause) await pause.wait();
     if (isCancelled()) {
       cancelled = true;
       break;
@@ -262,6 +367,17 @@ export async function runBatchOcr(
     const entry = entries[i];
     const dest = joinDest(destRoot, entry.rel);
     const base = { fileIndex: i, fileCount: entries.length, rel: entry.rel };
+
+    if (repairOnly) {
+      results.push(
+        await repairOnlyEntry(entry, dest, io, onProgress, base, {
+          movedRoot,
+          errorRoot,
+          replaceRepairedOriginals,
+        }),
+      );
+      continue;
+    }
 
     let doc: BatchPdfDoc | null = null;
     // Set when tier-1 repair produced a readable copy: the file the run then
@@ -509,6 +625,92 @@ export async function runBatchOcr(
 }
 
 /**
+ * One file of a repair-only run. Mirrors `_repair_only_entry` in
+ * engine/batch_ocr.py: an undamaged source is byte-copied (the rewrite would
+ * still strip signatures and renumber objects, which is a change, not a
+ * repair); a damaged one is verified, then its repaired bytes are copied into
+ * the mirror through the staged copy.
+ */
+async function repairOnlyEntry(
+  entry: BatchEntry,
+  dest: string,
+  io: BatchIo,
+  onProgress: (p: BatchProgress) => void,
+  base: { fileIndex: number; fileCount: number; rel: string },
+  filing: { movedRoot?: string; errorRoot?: string; replaceRepairedOriginals?: boolean },
+): Promise<BatchFileResult> {
+  let scratch: string | null = null;
+  let result: BatchFileResult;
+  try {
+    onProgress({ ...base, phase: 'repairing' });
+    let inspection: RepairInspection | null = null;
+    try {
+      inspection = await io.repairInspect(entry.abs);
+      scratch = inspection.path;
+    } catch (err) {
+      result = { rel: entry.rel, status: 'skipped', reason: `repair failed: ${messageOf(err)}` };
+    }
+    if (inspection) {
+      if (!inspection.damaged) {
+        onProgress({ ...base, phase: 'copying' });
+        await io.copyFile(entry.abs, dest);
+        result = { rel: entry.rel, status: 'copied', reason: 'no repair needed' };
+      } else if (!(await io.verifyOutput(inspection.path, inspection.pages).catch(() => false))) {
+        result = {
+          rel: entry.rel,
+          status: 'skipped',
+          reason:
+            'the repaired copy could not be read back as a valid PDF — the original was left untouched',
+        };
+      } else {
+        onProgress({ ...base, phase: 'copying' });
+        await io.copyFile(inspection.path, dest);
+        result = {
+          rel: entry.rel,
+          status: 'repaired',
+          repaired: true,
+          repairFixes: inspection.fixes,
+          ...(inspection.signaturesRemoved > 0
+            ? { signaturesRemoved: inspection.signaturesRemoved }
+            : {}),
+        };
+        if (filing.replaceRepairedOriginals) {
+          try {
+            await io.copyFile(inspection.path, entry.abs);
+            result.repairedOriginalReplaced = true;
+          } catch (err) {
+            result.moveError = `the repaired copy could not replace the original: ${messageOf(err)}`;
+          }
+        }
+      }
+    }
+    const moveRoot = result!.status === 'skipped' ? filing.errorRoot : filing.movedRoot;
+    if (moveRoot) {
+      onProgress({ ...base, phase: 'moving' });
+      try {
+        result!.movedTo = await io.moveFile(entry.abs, joinDest(moveRoot, entry.rel));
+      } catch (err) {
+        result!.moveError = result!.moveError
+          ? `${result!.moveError}; move failed: ${messageOf(err)}`
+          : messageOf(err);
+      }
+    }
+  } catch (err) {
+    result = { rel: entry.rel, status: 'skipped', reason: messageOf(err) };
+    if (filing.errorRoot) {
+      try {
+        result.movedTo = await io.moveFile(entry.abs, joinDest(filing.errorRoot, entry.rel));
+      } catch (moveErr) {
+        result.moveError = messageOf(moveErr);
+      }
+    }
+  } finally {
+    if (scratch) await io.discardScratch(scratch).catch(() => {});
+  }
+  return result!;
+}
+
+/**
  * The ENGLISH text of a failure, for the batch REPORT.
  *
  * A report `reason` is written byte-identically into the batch
@@ -542,16 +744,19 @@ export interface BatchSummary {
   ocrd: number;
   copied: number;
   skipped: number;
+  repaired: number;
 }
 
 export function summarize(report: BatchReport): BatchSummary {
   let ocrd = 0;
   let copied = 0;
   let skipped = 0;
+  let repaired = 0;
   for (const r of report.results) {
     if (r.status === 'ocr') ocrd += 1;
     else if (r.status === 'copied') copied += 1;
+    else if (r.status === 'repaired') repaired += 1;
     else skipped += 1;
   }
-  return { ocrd, copied, skipped };
+  return { ocrd, copied, skipped, repaired };
 }

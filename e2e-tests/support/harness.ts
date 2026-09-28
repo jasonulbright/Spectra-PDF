@@ -2188,6 +2188,7 @@ export async function mergeNoticeText(): Promise<string | null> {
 
 export interface BatchOcrSnapshot {
   phase: 'setup' | 'running' | 'done';
+  pauseState: 'running' | 'pausing' | 'paused';
   fileCount: number | null;
   report: {
     cancelled: boolean;
@@ -2202,6 +2203,7 @@ export interface BatchOcrSnapshot {
       moveError?: string;
       repaired?: boolean;
       repairedOriginalReplaced?: boolean;
+      repairFixes?: number;
     }[];
     skippedDirs: string[];
     emptyFolders?: { removed: string[]; skipped: { path: string; reason: string }[] };

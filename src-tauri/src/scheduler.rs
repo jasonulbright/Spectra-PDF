@@ -97,6 +97,9 @@ pub struct ScheduleProfile {
     /// After the run, delete folders inside the source root that are empty.
     #[serde(default)]
     pub remove_empty_folders: bool,
+    /// Repair every file and run no OCR. Refused beside `mrc` and `enhance`.
+    #[serde(default)]
+    pub repair_only: bool,
     /// Which CLI arm the task invokes: "batch-ocr" (the default, also for
     /// empty) or "action" — a guided-action run over the source tree.
     #[serde(default)]
@@ -965,6 +968,13 @@ pub fn validate_profile(p: &ScheduleProfile) -> Result<(), String> {
         {
             return Err("A scheduled MRC preset must be archival, balanced or smallest.".into());
         }
+        if p.repair_only && (p.mrc || p.enhance || p.repair_damaged) {
+            return Err(
+                "A repair-only run performs no OCR, so it cannot also use MRC compression, \
+                 scan enhancement or the damaged-file repair option."
+                    .into(),
+            );
+        }
     }
     if !p.account.trim().is_empty() && p.log_dir.trim().is_empty() {
         return Err(
@@ -1015,6 +1025,9 @@ fn build_arguments(exe: &str, p: &ScheduleProfile) -> String {
             quote_windows_arg(if p.lang.is_empty() { "eng" } else { &p.lang }),
         ]
     };
+    if p.repair_only {
+        args.push("--repair-only".to_string());
+    }
     if p.mrc {
         args.push("--mrc".to_string());
         if !p.mrc_preset.is_empty() {
@@ -1036,7 +1049,7 @@ fn build_arguments(exe: &str, p: &ScheduleProfile) -> String {
     if !p.error_root.is_empty() {
         args.extend(["--errors".to_string(), quote_windows_arg(&p.error_root)]);
     }
-    if p.repair_damaged {
+    if p.repair_damaged && !p.repair_only {
         args.push("--repair".to_string());
     }
     if p.replace_repaired_originals {
@@ -1378,6 +1391,7 @@ fn profile_from_tokens(
         // Its shipped default is ON; only the explicit off-flag lowers it.
         enhance_orientation: true,
         remove_empty_folders: false,
+        repair_only: false,
         run_type: run_type.to_string(),
         action_file: String::new(),
     };
@@ -1402,6 +1416,7 @@ fn profile_from_tokens(
             "--enhance" if run_type == "batch-ocr" => p.enhance = true,
             "--no-enhance-orientation" if run_type == "batch-ocr" => p.enhance_orientation = false,
             "--remove-empty-folders" if run_type == "batch-ocr" => p.remove_empty_folders = true,
+            "--repair-only" if run_type == "batch-ocr" => p.repair_only = true,
             other if !other.starts_with("--") && p.source.is_empty() => {
                 p.source = other.to_string();
             }
@@ -1416,6 +1431,7 @@ fn profile_from_tokens(
         || (p.mrc_verify_text && !p.mrc)
         || (!p.mrc_preset.is_empty() && !p.mrc)
         || (!p.enhance_orientation && !p.enhance)
+        || (p.repair_only && (p.mrc || p.enhance || p.repair_damaged))
     {
         return None;
     }
@@ -2017,6 +2033,7 @@ mod tests {
             enhance: false,
             enhance_orientation: true,
             remove_empty_folders: false,
+            repair_only: false,
             run_type: "action".into(),
             action_file: r"C:\ProgramData\Spectra PDF\scheduled-actions\Nightly Strip.json"
                 .into(),
@@ -2274,6 +2291,7 @@ mod tests {
             enhance: true,
             enhance_orientation: false,
             remove_empty_folders: true,
+            repair_only: false,
             run_type: "batch-ocr".into(),
             action_file: String::new(),
         }
@@ -2583,10 +2601,69 @@ mod tests {
         assert!(!parsed.enhance_orientation);
         assert!(parsed.remove_empty_folders);
         assert!(!parsed.in_place);
+        assert!(!parsed.repair_only);
         let mut off = p.clone();
         off.remove_empty_folders = false;
         let args = build_arguments("exe", &off);
         assert!(!args.contains("--remove-empty-folders"), "{args}");
+        assert!(!args.contains("--repair-only"), "{args}");
+    }
+
+    #[test]
+    fn a_repair_only_schedule_round_trips_and_refuses_ocr_switches() {
+        let mut p = ocr_profile();
+        p.repair_only = true;
+        p.mrc = false;
+        p.mrc_preset = String::new();
+        p.mrc_verify_text = false;
+        p.enhance = false;
+        p.enhance_orientation = true;
+        p.repair_damaged = false;
+        p.source = std::env::temp_dir().to_string_lossy().to_string();
+        assert!(validate_profile(&p).is_ok());
+        let args = build_arguments("exe", &p);
+        assert!(args.contains("--repair-only"), "{args}");
+        assert!(!args.contains("--repair "), "{args}");
+        assert!(!args.ends_with("--repair"), "{args}");
+        let command = format!("\"C:\\Program Files\\app.exe\" {args}");
+        let parsed = profile_from_command(&p.name, &command).expect("parses");
+        assert!(parsed.repair_only);
+        assert!(parsed.replace_repaired_originals);
+        assert!(!parsed.repair_damaged && !parsed.mrc && !parsed.enhance);
+        assert_eq!(parsed.moved_root, p.moved_root);
+        assert_eq!(parsed.error_root, p.error_root);
+
+        let mut in_place = p.clone();
+        in_place.in_place = true;
+        in_place.dest = String::new();
+        in_place.moved_root = String::new();
+        let command = format!(
+            "\"C:\\Program Files\\app.exe\" {}",
+            build_arguments("exe", &in_place)
+        );
+        let parsed = profile_from_command(&p.name, &command).expect("parses");
+        assert!(parsed.repair_only && parsed.in_place);
+
+        let mut with_mrc = p.clone();
+        with_mrc.mrc = true;
+        let error = validate_profile(&with_mrc).unwrap_err();
+        assert!(error.contains("repair-only"), "{error}");
+        let mut with_enhance = p.clone();
+        with_enhance.enhance = true;
+        assert!(validate_profile(&with_enhance).is_err());
+        let mut with_repair = p.clone();
+        with_repair.repair_damaged = true;
+        assert!(validate_profile(&with_repair).is_err());
+        assert!(profile_from_command(
+            &p.name,
+            &format!("\"C:\\app.exe\" {} --repair", build_arguments("exe", &p)),
+        )
+        .is_none());
+        assert!(profile_from_command(
+            &p.name,
+            &format!("\"C:\\app.exe\" {} --mrc", build_arguments("exe", &p)),
+        )
+        .is_none());
     }
 
     #[test]

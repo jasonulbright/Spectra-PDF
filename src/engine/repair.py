@@ -11,6 +11,18 @@ from pathlib import Path
 from engine.acroform import strip_signatures
 from engine.pdf_save import save_pdf
 
+# QPDF warnings that describe input every reader accepts as written. QPDF
+# labels the first class itself; the second is a Flate stream with bytes after
+# its end marker, which decodes completely. Neither makes a file damaged.
+_BENIGN_WARNINGS = (
+    "a common error handled correctly by qpdf and most other applications",
+    "input stream is complete but output may still be valid",
+)
+
+
+def _is_damage(warning: str) -> bool:
+    return not any(marker in warning for marker in _BENIGN_WARNINGS)
+
 
 def repair(file: str, output: str) -> dict:
     """Repair a PDF by rewriting it through pikepdf (QPDF backend).
@@ -31,6 +43,9 @@ def repair(file: str, output: str) -> dict:
 
     original_size = input_path.stat().st_size
     issues_found = []
+    # Structural damage only: linearization data and stripped signatures are
+    # rewrite side effects, not defects in the source.
+    damage_found = []
 
     # QPDF reconstructs a damaged xref, stream lengths and object streams at
     # open and while objects resolve; each reconstruction is a warning, and the
@@ -56,6 +71,7 @@ def repair(file: str, output: str) -> dict:
                 _ = page.get("/MediaBox")
             except Exception as e:
                 issues_found.append(f"Page {i + 1} has damaged MediaBox: {e}")
+                damage_found.append(issues_found[-1])
 
         # Check for common structural issues
         if pdf.is_linearized:
@@ -81,6 +97,8 @@ def repair(file: str, output: str) -> dict:
             text = str(warning).strip()
             if text and text not in issues_found:
                 issues_found.append(text)
+            if text and _is_damage(text) and text not in damage_found:
+                damage_found.append(text)
 
     output_size = output_path.stat().st_size
 
@@ -91,5 +109,7 @@ def repair(file: str, output: str) -> dict:
         "repaired_size": output_size,
         "issues_found": issues_found,
         "signatures_removed": signatures_removed,
+        "damaged": bool(damage_found),
+        "damage": damage_found,
         "tier": "repair",
     }

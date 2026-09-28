@@ -418,4 +418,172 @@ describe('batch OCR folder mirror', () => {
 
     await $('[data-testid="batch-ocr-cancel"]').click();
   });
+
+  // Repair-only: every file goes through the damaged-file repair and nothing
+  // is recognised. A damaged file lands repaired, an undamaged one is copied
+  // byte for byte, and garbage is reported.
+  it('repair only: repairs the damaged file, copies the sound one unchanged, recognises nothing', async function () {
+    this.timeout(120_000);
+    const tree = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-batch-repair-'));
+    const rSrc = resolve(tree, 'in');
+    const rDest = resolve(tree, 'out');
+    mkdirSync(resolve(rSrc, 'sub'), { recursive: true });
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    doc.addPage([400, 300]).drawText('Sound file', { x: 40, y: 200, size: 14, font });
+    doc.addPage([400, 300]);
+    const sound = Buffer.from(await doc.save());
+    writeFileSync(resolve(rSrc, 'sound.pdf'), sound);
+    // Same document with its cross-reference offset broken.
+    const damaged = Buffer.from(
+      sound.toString('latin1').replace(/startxref\s+\d+/, 'startxref\n12'),
+      'latin1',
+    );
+    writeFileSync(resolve(rSrc, 'sub', 'damaged.pdf'), damaged);
+    writeFileSync(resolve(rSrc, 'rubbish.pdf'), 'not a pdf at all');
+
+    await waitForHarness();
+    expect(await invokeAppCommand('tools.batchOcr')).toBe(true);
+    await $('[data-testid="batch-ocr-dialog"]').waitForDisplayed({ timeout: 10_000 });
+    await batchOcrSetFolders(rSrc, rDest);
+    await browser.waitUntil(async () => (await batchOcrSnapshot())?.fileCount === 3, {
+      timeout: 15_000,
+      timeoutMsg: 'enumeration never found the 3 repair fixtures',
+    });
+
+    const repairOnly = $('[data-testid="batch-repair-only"]');
+    expect(await repairOnly.isSelected()).toBe(false); // OFF by default
+    await repairOnly.click();
+    await $('[data-testid="batch-repair-only-note"]').waitForDisplayed({ timeout: 5_000 });
+    // The recognition-only options stay visible and are disabled.
+    expect(await $('[data-testid="batch-ocr-only-options"]').getAttribute('disabled')).not.toBeNull();
+    expect(await $('[data-testid="batch-enhance"]').isEnabled()).toBe(false);
+    expect(await $('[data-testid="batch-mrc"]').isEnabled()).toBe(false);
+
+    await batchOcrStart();
+    await browser.waitUntil(async () => (await batchOcrSnapshot())?.phase === 'done', {
+      timeout: 100_000,
+      interval: 500,
+      timeoutMsg:
+        'repair-only run never reached done — snapshot: ' + JSON.stringify(await batchOcrSnapshot()),
+    });
+
+    const snapshot = (await batchOcrSnapshot())!;
+    const byRel = new Map(snapshot.report!.results.map((r) => [r.rel, r]));
+    const fixed = byRel.get('sub\\damaged.pdf');
+    expect(`${fixed?.status} — ${fixed?.reason ?? ''}`).toBe('repaired — ');
+    expect(fixed?.repairFixes).toBeGreaterThan(0);
+    expect(byRel.get('sound.pdf')?.status).toBe('copied');
+    expect(byRel.get('sound.pdf')?.reason).toBe('no repair needed');
+    expect(byRel.get('rubbish.pdf')?.status).toBe('skipped');
+
+    expect(readFileSync(resolve(rDest, 'sound.pdf')).equals(sound)).toBe(true);
+    const repairedText = (await extractAllText(resolve(rDest, 'sub', 'damaged.pdf'))).trim();
+    expect(repairedText).toContain('Sound file');
+    expect(existsSync(resolve(rDest, 'rubbish.pdf'))).toBe(false);
+    // The source tree is untouched.
+    expect(readFileSync(resolve(rSrc, 'sub', 'damaged.pdf')).equals(damaged)).toBe(true);
+
+    await expect($('[data-testid="batch-ocr-summary"]')).toHaveText(
+      '1 repaired · 1 needed no repair · 1 skipped',
+    );
+    const log = readFileSync(snapshot.logPath!, 'utf8');
+    expect(log).toContain('Mode:         repair only (no OCR)');
+    expect(log).toContain('Languages:    not used (repair only)');
+    expect(log).toContain('Files: 3 processed — 1 repaired · 1 no repair needed · 1 skipped');
+    expect(log).toMatch(/\[repaired\] sub\\damaged\.pdf — \d+ problems? fixed/);
+    expect(log).not.toContain('made searchable');
+
+    // Leave the shared dialog state as the other tests expect it.
+    await $('[data-testid="batch-ocr-again"]').click();
+    await $('[data-testid="batch-repair-only"]').click();
+    await $('[data-testid="batch-ocr-cancel"]').click();
+    rmSync(tree, { recursive: true, force: true });
+  });
+
+  // Pause holds the run between files; Resume continues the same run; Stop
+  // while paused ends it with the report of what finished. The assertions count
+  // files rather than assume which one the first click landed in. The second
+  // hold is exact: Resume and Pause are pressed in one browser task, so the run
+  // holds after exactly one more file. When the first hold leaves no file for
+  // that, the test stops from the first hold instead.
+  it('pauses between files, resumes the same run, and stops while paused', async function () {
+    this.timeout(300_000);
+    const tree = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-batch-pause-'));
+    const pSrc = resolve(tree, 'in');
+    const pDest = resolve(tree, 'out');
+    mkdirSync(pSrc, { recursive: true });
+    const names = ['1.pdf', '2.pdf', '3.pdf', '4.pdf', '5.pdf', '6.pdf'];
+    for (const name of names) copyFileSync(SCANNED, resolve(pSrc, name));
+
+    await waitForHarness();
+    expect(await invokeAppCommand('tools.batchOcr')).toBe(true);
+    await $('[data-testid="batch-ocr-dialog"]').waitForDisplayed({ timeout: 10_000 });
+    await batchOcrSetFolders(pSrc, pDest);
+    await browser.waitUntil(async () => (await batchOcrSnapshot())?.fileCount === 6, {
+      timeout: 15_000,
+      timeoutMsg: 'enumeration never found the 6 pause fixtures',
+    });
+
+    await batchOcrStart();
+    const pause = $('[data-testid="batch-ocr-pause"]');
+    await pause.waitForDisplayed({ timeout: 10_000 });
+    await browser.waitUntil(async () => await pause.isEnabled(), { timeout: 10_000 });
+    await pause.click();
+    await browser.waitUntil(async () => (await batchOcrSnapshot())?.pauseState === 'paused', {
+      timeout: 120_000,
+      interval: 250,
+      timeoutMsg: 'the run never paused — snapshot: ' + JSON.stringify(await batchOcrSnapshot()),
+    });
+    expect(await pause.getText()).toBe('Resume');
+    const written = (): number => names.filter((n) => existsSync(resolve(pDest, n))).length;
+    const firstHold = written();
+    expect(firstHold).toBeGreaterThanOrEqual(1);
+    expect(firstHold).toBeLessThan(names.length);
+    await expect($('[data-testid="batch-ocr-progress"]')).toHaveText(
+      new RegExp(`Paused after ${firstHold} of 6 files`),
+    );
+    // Held: no further file is written while paused.
+    await browser.pause(3_000);
+    expect(written()).toBe(firstHold);
+    expect((await batchOcrSnapshot())?.phase).toBe('running');
+
+    let secondHold = firstHold;
+    if (firstHold <= names.length - 2) {
+      await browser.execute(function () {
+        const button = document.querySelector<HTMLButtonElement>('[data-testid="batch-ocr-pause"]')!;
+        button.click(); // Resume
+        button.click(); // Pause again before the next file ends
+      });
+      await browser.waitUntil(
+        async () => written() === firstHold + 1 && (await batchOcrSnapshot())?.pauseState === 'paused',
+        {
+          timeout: 120_000,
+          interval: 250,
+          timeoutMsg: 'the run never paused again — snapshot: ' + JSON.stringify(await batchOcrSnapshot()),
+        },
+      );
+      secondHold = firstHold + 1;
+    }
+
+    // Stop while paused: the run ends without starting another file.
+    await $('[data-testid="batch-ocr-stop"]').click();
+    await browser.waitUntil(async () => (await batchOcrSnapshot())?.phase === 'done', {
+      timeout: 30_000,
+      interval: 250,
+      timeoutMsg: 'stop while paused never ended the run',
+    });
+    const snapshot = (await batchOcrSnapshot())!;
+    expect(snapshot.report!.cancelled).toBe(true);
+    expect(snapshot.report!.results.map((r) => `${r.rel}:${r.status}`)).toEqual(
+      names.slice(0, secondHold).map((n) => `${n}:ocr`),
+    );
+    expect(written()).toBe(secondHold);
+    const log = readFileSync(snapshot.logPath!, 'utf8');
+    expect(log).toMatch(/Finished: +\S+ \S+ +\(\S.*, paused \d/);
+    expect(log).toContain('STOPPED by the user');
+
+    await $('[data-testid="batch-ocr-close"]').click();
+    rmSync(tree, { recursive: true, force: true });
+  });
 });

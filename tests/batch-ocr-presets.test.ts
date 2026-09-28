@@ -49,6 +49,7 @@ function filled(): BatchOcrSettings {
     enhance: true,
     enhanceOrientation: false,
     removeEmptyFolders: true,
+    repairOnly: false,
   };
 }
 
@@ -292,12 +293,59 @@ describe('what a schedule freezes', () => {
       enhance: true,
       enhanceOrientation: false,
       removeEmptyFolders: true,
+      repairOnly: false,
     });
+  });
+
+  it('expands a repair-only preset without the recognition-only switches', () => {
+    const fields = presetScheduleFields({ ...filled(), repairOnly: true });
+    expect(fields.repairOnly).toBe(true);
+    expect(fields.mrc).toBe(false);
+    expect(fields.mrcVerifyText).toBe(false);
+    expect(fields.enhance).toBe(false);
+    expect(fields.enhanceOrientation).toBe(true);
+    expect(fields.repairDamaged).toBe(false);
+    expect(fields.replaceRepairedOriginals).toBe(true);
   });
 
   it('normalizes on the way out, so a schedule cannot be built from a shape the run refuses', () => {
     const fields = presetScheduleFields({ ...filled(), inPlace: true });
     expect(fields.dest).toBe('');
     expect(fields.movedRoot).toBe('');
+  });
+});
+
+describe('repair-only mode', () => {
+  it('is off by default and for a preset saved before it existed', () => {
+    expect(defaultBatchOcrSettings().repairOnly).toBe(false);
+    const { repairOnly: _dropped, ...old } = filled();
+    void _dropped;
+    expect(normalizeBatchOcrSettings(old).repairOnly).toBe(false);
+    expect(normalizeBatchOcrSettings({ ...old, repairOnly: 'yes' }).repairOnly).toBe(false);
+  });
+
+  it('survives a save and a reload, keeping the stored recognition settings', () => {
+    const saved = upsertPreset([], 'Repair nightly', { ...filled(), repairOnly: true });
+    saveBatchOcrPresets(saved);
+    const [back] = loadBatchOcrPresets();
+    expect(back.settings.repairOnly).toBe(true);
+    expect(back.settings.mrc).toBe(true);
+    expect(back.settings.langs).toEqual(['eng', 'fra']);
+  });
+
+  it('keeps "replace the original" armed without the damaged-file switch', () => {
+    const s = normalizeBatchOcrSettings({
+      ...filled(),
+      repairOnly: true,
+      repairDamaged: false,
+      replaceRepairedOriginals: true,
+    });
+    expect(s.replaceRepairedOriginals).toBe(true);
+    const ocr = normalizeBatchOcrSettings({
+      ...filled(),
+      repairDamaged: false,
+      replaceRepairedOriginals: true,
+    });
+    expect(ocr.replaceRepairedOriginals).toBe(false);
   });
 });

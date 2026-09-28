@@ -335,6 +335,89 @@ def _copy_file(src: Path, dest: Path) -> None:
     publish_copy(src, dest)
 
 
+def _repair_only_entry(
+    abs_path: Path,
+    rel: str,
+    out_path: Path,
+    in_place: bool,
+    moved_root: str,
+    error_root: str,
+    replace_repaired_originals: bool,
+) -> dict:
+    """One file of a repair-only run: tier-1 repair, no recognition.
+
+    The repair always writes to a scratch file beside the output. A file the
+    repair reports as undamaged keeps its own bytes -- the rewrite would still
+    strip signatures and renumber objects, which is a change, not a repair --
+    so the mirror receives a byte copy and in-place leaves the original alone.
+    A damaged file's repaired bytes land through a staged write: `publish_copy`
+    in the mirror, verify-then-`os.replace` in place.
+    """
+    scratch = out_path.parent / f".{out_path.stem}.repaired.tmp"
+    result: dict
+    try:
+        scratch.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            report = repair(str(abs_path), str(scratch))
+        except Exception as exc:  # noqa: BLE001 - per-file isolation
+            result = {"rel": rel, "status": "skipped", "reason": f"repair failed: {exc}"}
+        else:
+            if not report.get("damaged"):
+                if in_place:
+                    result = {"rel": rel, "status": "copied", "reason": "no repair needed -- unchanged"}
+                else:
+                    _copy_file(abs_path, out_path)
+                    result = {"rel": rel, "status": "copied", "reason": "no repair needed"}
+            elif not _verify_output(scratch, int(report.get("pages", 0))):
+                result = {
+                    "rel": rel,
+                    "status": "skipped",
+                    "reason": (
+                        "the repaired copy could not be read back as a valid PDF -- "
+                        "the original was left untouched"
+                    ),
+                }
+            else:
+                result = {
+                    "rel": rel,
+                    "status": "repaired",
+                    "repaired": True,
+                    "repairFixes": len(report.get("damage") or []),
+                }
+                if report.get("signatures_removed"):
+                    result["signaturesRemoved"] = int(report["signatures_removed"])
+                if in_place:
+                    os.replace(scratch, abs_path)
+                    result["inPlace"] = True
+                else:
+                    _copy_file(scratch, out_path)
+                    if replace_repaired_originals:
+                        try:
+                            publish_copy(scratch, abs_path)
+                            result["repairedOriginalReplaced"] = True
+                        except Exception as exc:  # noqa: BLE001
+                            result["moveError"] = (
+                                f"the repaired copy could not replace the original: {exc}"
+                            )
+        root = error_root if result["status"] == "skipped" else moved_root
+        if root:
+            try:
+                result["movedTo"] = _move_file(abs_path, Path(root) / rel)
+            except Exception as exc:  # noqa: BLE001
+                prior = result.get("moveError")
+                result["moveError"] = f"{prior}; move failed: {exc}" if prior else str(exc)
+    except Exception as exc:  # noqa: BLE001 - per-file isolation is the point
+        result = {"rel": rel, "status": "skipped", "reason": str(exc)}
+        if error_root:
+            try:
+                result["movedTo"] = _move_file(abs_path, Path(error_root) / rel)
+            except Exception as move_exc:  # noqa: BLE001
+                result["moveError"] = str(move_exc)
+    finally:
+        scratch.unlink(missing_ok=True)
+    return result
+
+
 def ocr_file(
     file: str,
     output: str,
@@ -476,6 +559,7 @@ def batch_ocr(
     enhance_orientation: bool = True,
     font_dir: str = "",
     remove_empty_folders: bool = False,
+    repair_only: bool = False,
 ) -> dict:
     """Mirror a folder of PDFs into searchable copies — or, with `in_place`,
     REPLACE each original with its searchable version (in-place batch
@@ -512,10 +596,19 @@ def batch_ocr(
 
     `remove_empty_folders` deletes, after every file is done, the folders
     inside the source root that are empty at that point
-    (`plan_empty_folders` defines which qualify). The source root itself is never removed."""
+    (`plan_empty_folders` defines which qualify). The source root itself is never removed.
+
+    `repair_only` runs the tier-1 repair on every PDF and no recognition
+    (`_repair_only_entry`). MRC, enhancement and image sources exist only for
+    recognition, so a request that combines them with it is refused."""
     source_path = Path(source).resolve()
     if not source_path.is_dir():
         raise ValueError(f"Source folder not found: {source}")
+    if repair_only and (mrc or enhance or include_images):
+        raise ValueError(
+            "Repair-only mode runs no OCR -- MRC compression, scan enhancement and "
+            "image files cannot be combined with it."
+        )
     if in_place:
         if dest:
             raise ValueError("In-place mode takes no destination -- the originals are replaced.")
@@ -564,6 +657,14 @@ def batch_ocr(
         out_path = (
             abs_path.parent / f".{abs_path.name}.inplace.tmp" if in_place else dest_path / out_rel
         )
+        if repair_only:
+            results.append(
+                _repair_only_entry(
+                    abs_path, rel, out_path, in_place, moved_root, error_root,
+                    replace_repaired_originals,
+                )
+            )
+            continue
         result: dict | None = None
         scratch: Path | None = None
         # An image's PDF wrapping is not a repair: `scratch` alone may replace
@@ -838,6 +939,7 @@ def batch_ocr(
         repair_damaged,
         replace_repaired_originals,
         log_dir,
+        repair_only,
     )
     if log_path:
         report["logPath"] = log_path
@@ -1097,8 +1199,14 @@ def _format_duration(ms: float) -> str:
 
 
 def _file_line(r: dict) -> str:
-    tag = f"[{r['status']}]".ljust(10)
-    if r["status"] == "ocr":
+    tag = f"[{r['status']}]".ljust(max(10, len(r["status"]) + 3))
+    if r["status"] == "repaired":
+        fixes = r.get("repairFixes", 0)
+        line = f"{tag}{r['rel']} — {fixes} problem{'' if fixes == 1 else 's'} fixed"
+        signatures = r.get("signaturesRemoved", 0)
+        if signatures:
+            line += f"; {signatures} signature{'' if signatures == 1 else 's'} removed"
+    elif r["status"] == "ocr":
         pages = r.get("pagesOcrd", 0)
         line = f"{tag}{r['rel']} — {pages} page{'' if pages == 1 else 's'} made searchable"
         if r.get("reason"):
@@ -1113,7 +1221,10 @@ def _file_line(r: dict) -> str:
         # The size saving — or the reason there was none — is the whole
         # point of having asked for MRC, so it is never left to inference.
         line += f" [{r['mrc']}]"
-    if r.get("repaired"):
+    if r.get("repaired") and r["status"] == "repaired":
+        if r.get("repairedOriginalReplaced"):
+            line += " [original replaced]"
+    elif r.get("repaired"):
         line += (
             " [repaired; original replaced]"
             if r.get("repairedOriginalReplaced")
@@ -1126,13 +1237,18 @@ def _file_line(r: dict) -> str:
     return line
 
 
-def _describe_filing(moved: str, errors: str, repair_on: bool, replace_on: bool) -> str:
+def _describe_filing(
+    moved: str, errors: str, repair_on: bool, replace_on: bool, repair_only: bool = False
+) -> str:
     parts = []
     if moved:
         parts.append(f"processed originals -> {moved}")
     if errors:
         parts.append(f"failed originals -> {errors}")
-    if repair_on:
+    if repair_only:
+        if replace_on:
+            parts.append("repaired files replace the originals")
+    elif repair_on:
         parts.append(
             "repair damaged files (replacing the originals)"
             if replace_on
@@ -1153,6 +1269,7 @@ def _write_log(
     repair_damaged: bool,
     replace_repaired: bool,
     log_dir: str,
+    repair_only: bool = False,
 ) -> str:
     """Write the run log. Best-effort: a failed log never fails the batch."""
     if not log_dir:
@@ -1162,21 +1279,30 @@ def _write_log(
     copied_clean = sum(1 for r in results if r["status"] == "copied" and not r.get("reason"))
     copied_notext = sum(1 for r in results if r["status"] == "copied" and r.get("reason"))
     skipped = sum(1 for r in results if r["status"] == "skipped")
+    repaired_files = sum(1 for r in results if r["status"] == "repaired")
+    unchanged = sum(1 for r in results if r["status"] == "copied")
 
     duration = (finished_at - started_at).total_seconds() * 1000
+    filing = _describe_filing(moved_root, error_root, repair_damaged, replace_repaired, repair_only)
     lines = [
         "Spectra PDF — Batch OCR log",
         f"Started:      {_format_timestamp(started_at)}",
         f"Finished:     {_format_timestamp(finished_at)}  ({_format_duration(duration)})",
         f"Source:       {source}",
         f"Destination:  {dest}",
-        f"Languages:    {lang}",
-        f"Filing:       {_describe_filing(moved_root, error_root, repair_damaged, replace_repaired)}",
+        *(["Mode:         repair only (no OCR)"] if repair_only else []),
+        f"Languages:    {'not used (repair only)' if repair_only else lang}",
+        f"Filing:       {filing}",
         "Result:       completed",
         "",
-        f"Files: {len(results)} processed — {ocrd} made searchable · "
-        f"{copied_clean} copied (already searchable) · "
-        f"{copied_notext} copied (no text recognized) · {skipped} skipped",
+        (
+            f"Files: {len(results)} processed — {repaired_files} repaired · "
+            f"{unchanged} no repair needed · {skipped} skipped"
+            if repair_only
+            else f"Files: {len(results)} processed — {ocrd} made searchable · "
+            f"{copied_clean} copied (already searchable) · "
+            f"{copied_notext} copied (no text recognized) · {skipped} skipped"
+        ),
     ]
     moved = sum(1 for r in results if r.get("movedTo"))
     not_moved = sum(1 for r in results if r.get("moveError"))

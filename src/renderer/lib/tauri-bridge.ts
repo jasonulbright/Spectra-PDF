@@ -593,6 +593,9 @@ export interface ScheduleProfile {
   enhanceOrientation: boolean;
   /** After the run, delete folders inside the source root that are empty. */
   removeEmptyFolders: boolean;
+  /** Repair every file and run no OCR. Rust refuses it beside `mrc` or
+   * `enhance`. */
+  repairOnly: boolean;
   /** Which CLI arm the task invokes: 'batch-ocr' (default; also for '') or
    * 'action' — a guided-action run over the source tree. */
   runType: string;

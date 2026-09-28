@@ -45,6 +45,10 @@ export interface BatchLogRun {
   };
   /** Set when the run ended on a structural failure rather than finishing. */
   fatalError?: string;
+  /** The run repaired every file and recognised nothing. */
+  repairOnly?: boolean;
+  /** Time the run spent held by Pause. The logged duration excludes it. */
+  pausedMs?: number;
 }
 
 /** Two digits, zero-padded — the only number shaping a log name needs. */
@@ -91,9 +95,14 @@ export function formatDuration(ms: number): string {
 /** One file's line. `status` is padded so the paths align in a fixed-width
  * viewer — the whole point of reading a log in Notepad. */
 function fileLine(r: BatchFileResult): string {
-  const tag = `[${r.status}]`.padEnd(10);
+  const tag = `[${r.status}]`.padEnd(Math.max(10, r.status.length + 3));
   let line: string;
-  if (r.status === 'ocr') {
+  if (r.status === 'repaired') {
+    const fixes = r.repairFixes ?? 0;
+    line = `${tag}${r.rel} — ${fixes} problem${fixes === 1 ? '' : 's'} fixed`;
+    const signatures = r.signaturesRemoved ?? 0;
+    if (signatures > 0) line += `; ${signatures} signature${signatures === 1 ? '' : 's'} removed`;
+  } else if (r.status === 'ocr') {
     const pages = r.pagesOcrd ?? 0;
     line = `${tag}${r.rel} — ${pages} page${pages === 1 ? '' : 's'} made searchable`;
     if (r.reason) line += ` (${r.reason})`;
@@ -105,7 +114,9 @@ function fileLine(r: BatchFileResult): string {
   // to engine/batch_ocr.py's `_file_line`, like every other field here.
   if (r.enhance) line += ` [${r.enhance}]`;
   if (r.mrc) line += ` [${r.mrc}]`;
-  if (r.repaired) {
+  if (r.repaired && r.status === 'repaired') {
+    if (r.repairedOriginalReplaced) line += ' [original replaced]';
+  } else if (r.repaired) {
     line += r.repairedOriginalReplaced
       ? ' [repaired; original replaced]'
       : ' [repaired]';
@@ -118,12 +129,14 @@ function fileLine(r: BatchFileResult): string {
   return line;
 }
 
-function describeFiling(filing: BatchLogRun['filing']): string {
+function describeFiling(filing: BatchLogRun['filing'], repairOnly: boolean): string {
   if (!filing) return 'none (source folder untouched)';
   const parts: string[] = [];
   if (filing.movedRoot) parts.push(`processed originals -> ${filing.movedRoot}`);
   if (filing.errorRoot) parts.push(`failed originals -> ${filing.errorRoot}`);
-  if (filing.repairDamaged) {
+  if (repairOnly) {
+    if (filing.replaceRepairedOriginals) parts.push('repaired files replace the originals');
+  } else if (filing.repairDamaged) {
     parts.push(
       filing.replaceRepairedOriginals
         ? 'repair damaged files (replacing the originals)'
@@ -139,13 +152,22 @@ export function formatBatchLog(run: BatchLogRun): string {
   let copiedClean = 0;
   let copiedNoText = 0;
   let skipped = 0;
+  let repairedFiles = 0;
   for (const r of report.results) {
     if (r.status === 'ocr') ocrd += 1;
+    else if (r.status === 'repaired') repairedFiles += 1;
     else if (r.status === 'copied') {
       if (r.reason) copiedNoText += 1;
       else copiedClean += 1;
     } else skipped += 1;
   }
+  const repairOnly = run.repairOnly === true;
+  const pausedMs = run.pausedMs ?? 0;
+  const wallMs = run.finishedAt.getTime() - run.startedAt.getTime();
+  const duration =
+    pausedMs > 0
+      ? `${formatDuration(wallMs - pausedMs)}, paused ${formatDuration(pausedMs)}`
+      : formatDuration(wallMs);
 
   const outcome = run.fatalError
     ? `FAILED — ${run.fatalError}`
@@ -156,13 +178,14 @@ export function formatBatchLog(run: BatchLogRun): string {
   const lines: string[] = [
     'Spectra PDF — Batch OCR log',
     `Started:      ${formatTimestamp(run.startedAt)}`,
-    `Finished:     ${formatTimestamp(run.finishedAt)}  (${formatDuration(
-      run.finishedAt.getTime() - run.startedAt.getTime(),
-    )})`,
+    `Finished:     ${formatTimestamp(run.finishedAt)}  (${duration})`,
     `Source:       ${run.sourceRoot}`,
     `Destination:  ${run.destRoot}`,
-    `Languages:    ${run.lang} (${run.langLabel})`,
-    `Filing:       ${describeFiling(run.filing)}`,
+    ...(repairOnly ? ['Mode:         repair only (no OCR)'] : []),
+    repairOnly
+      ? 'Languages:    not used (repair only)'
+      : `Languages:    ${run.lang} (${run.langLabel})`,
+    `Filing:       ${describeFiling(run.filing, repairOnly)}`,
     `Result:       ${outcome}`,
     '',
   ];
@@ -178,9 +201,12 @@ export function formatBatchLog(run: BatchLogRun): string {
     lines.push('written before the failure remain in the destination folder.');
   } else {
     lines.push(
-      `Files: ${report.results.length} processed — ${ocrd} made searchable · ` +
-        `${copiedClean} copied (already searchable) · ` +
-        `${copiedNoText} copied (no text recognized) · ${skipped} skipped`,
+      repairOnly
+        ? `Files: ${report.results.length} processed — ${repairedFiles} repaired · ` +
+            `${copiedClean + copiedNoText} no repair needed · ${skipped} skipped`
+        : `Files: ${report.results.length} processed — ${ocrd} made searchable · ` +
+            `${copiedClean} copied (already searchable) · ` +
+            `${copiedNoText} copied (no text recognized) · ${skipped} skipped`,
     );
     // The originals line only exists when the run was allowed to touch them.
     // A count of files that did NOT move is carried even at zero: "0 not moved"

@@ -2550,6 +2550,15 @@ pub struct BatchOcrArgs {
     /// empty (never SOURCE itself; links and junctions are not followed)
     #[arg(long)]
     pub remove_empty_folders: bool,
+    /// Repair every PDF (tier-1 rewrite) and run no OCR. A file with no
+    /// structural damage is copied unchanged (left unchanged with --in-place).
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "repair", "mrc", "mrc_verify_text", "enhance", "no_enhance_orientation", "images",
+        ]
+    )]
+    pub repair_only: bool,
     /// Print per-file progress
     #[arg(short, long)]
     pub verbose: bool,
@@ -6033,6 +6042,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "enhance": args.enhance,
                     "enhance_orientation": !args.no_enhance_orientation,
                     "remove_empty_folders": args.remove_empty_folders,
+                    "repair_only": args.repair_only,
                     "font_dir": resolve_fonts().to_string_lossy().to_string(),
                     "passwords": args
                         .passwords
@@ -6791,6 +6801,40 @@ mod tests {
             "spectrapdf", "batch-ocr", "scans", "--in-place", "--dest", "out",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn batch_ocr_repair_only_is_opt_in_and_refuses_ocr_switches() {
+        match parse(&["spectrapdf", "batch-ocr", "scans", "--dest", "out"]).command {
+            Some(CliCommand::BatchOcr(args)) => assert!(!args.repair_only),
+            _ => panic!("not the batch-ocr arm"),
+        }
+        match parse(&[
+            "spectrapdf", "batch-ocr", "scans", "--dest", "out", "--repair-only",
+            "--replace-repaired", "--errors", "bad",
+        ])
+        .command
+        {
+            Some(CliCommand::BatchOcr(args)) => {
+                assert!(args.repair_only && args.replace_repaired);
+            }
+            _ => panic!("not the batch-ocr arm"),
+        }
+        match parse(&["spectrapdf", "batch-ocr", "scans", "--in-place", "--repair-only"]).command {
+            Some(CliCommand::BatchOcr(args)) => assert!(args.repair_only && args.in_place),
+            _ => panic!("not the batch-ocr arm"),
+        }
+        for flag in [
+            "--repair", "--mrc", "--mrc-verify-text", "--enhance", "--no-enhance-orientation", "--images",
+        ] {
+            assert!(
+                Cli::try_parse_from([
+                    "spectrapdf", "batch-ocr", "scans", "--dest", "out", "--repair-only", flag,
+                ])
+                .is_err(),
+                "{flag} must be refused beside --repair-only"
+            );
+        }
     }
 
     #[test]

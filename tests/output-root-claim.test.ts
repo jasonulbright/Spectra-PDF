@@ -280,9 +280,18 @@ describe('the folder runs claim what they write', () => {
     const mirror = between(dialog, 'const start = async', 'const cancel = ');
     expect(mirror).toContain('filing: [movedRoot, errorRoot],');
     expect(mirror.replace(/\s+/g, ' ')).toContain(
-      'changesSource: Boolean(movedRoot) || Boolean(errorRoot) || (repairDamaged && replaceRepaired) || removeEmptyFolders,',
+      'changesSource: Boolean(movedRoot) || Boolean(errorRoot) || replaceArmed || removeEmptyFolders,',
     );
-    expect(mirror).toMatch(/\} finally \{\n\s+cancelOcrRef\.current = null;\n\s+await root\.release\(\);/);
+    // Replacing originals writes the source tree in an OCR run with repair on
+    // and in every repair-only run.
+    expect(dialog.replace(/\s+/g, ' ')).toContain(
+      'const replaceArmed = (repairDamaged || repairOnly) && replaceRepaired;',
+    );
+    // The pause gate is released before the claim, so a paused run never
+    // keeps its claim past the end of the run.
+    expect(mirror).toMatch(
+      /\} finally \{\n\s+cancelOcrRef\.current = null;\n\s+gate\.release\(\);\n[^\n]*\n\s+await root\.release\(\);/,
+    );
   });
 
   it('a Guided Actions folder run claims before its engine call and releases after', () => {
