@@ -5905,5 +5905,7 @@
   "engine.split.splitPlanExpiredAlready": "拆分计划已过期或已使用；请重新规划输出",
   "engine.split.splitPlanIdRequired": "必须提供拆分计划 ID",
   "engine.split.splitRequestLongerMatches": "拆分请求已与其输出计划不匹配",
-  "engine.split.splitSourceChangedAfter": "规划输出后，拆分源已发生变化"
+  "engine.split.splitSourceChangedAfter": "规划输出后，拆分源已发生变化",
+  "engine.text_paragraphs.textDefinesClippingPath": "无法编辑定义剪切路径的文本，因为更改它可能会改变页面的可见内容。",
+  "engine.flattener.pageContainsTextDefines": "第 {{page}} 页包含定义剪切路径的文本，因此扁平化可能会更改页面的可见内容。"
 }

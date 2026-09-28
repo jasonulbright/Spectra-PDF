@@ -6041,5 +6041,7 @@
   "engine.split.splitPlanExpiredAlready": "Το σχέδιο διαχωρισμού έληξε ή χρησιμοποιήθηκε ήδη· σχεδιάστε ξανά τις εξόδους",
   "engine.split.splitPlanIdRequired": "Απαιτείται αναγνωριστικό σχεδίου διαχωρισμού",
   "engine.split.splitRequestLongerMatches": "Το αίτημα διαχωρισμού δεν αντιστοιχεί πλέον στο σχέδιο εξόδου",
-  "engine.split.splitSourceChangedAfter": "Η πηγή διαχωρισμού άλλαξε μετά τον σχεδιασμό των εξόδων"
+  "engine.split.splitSourceChangedAfter": "Η πηγή διαχωρισμού άλλαξε μετά τον σχεδιασμό των εξόδων",
+  "engine.text_paragraphs.textDefinesClippingPath": "Δεν είναι δυνατή η επεξεργασία κειμένου που ορίζει διαδρομή αποκοπής, επειδή η αλλαγή του μπορεί να αλλάξει το ορατό περιεχόμενο της σελίδας.",
+  "engine.flattener.pageContainsTextDefines": "Η σελίδα {{page}} περιέχει κείμενο που ορίζει διαδρομή αποκοπής, επομένως η ισοπέδωση μπορεί να αλλάξει το ορατό περιεχόμενο της σελίδας."
 }

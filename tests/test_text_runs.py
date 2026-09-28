@@ -48,6 +48,25 @@ HI_W = (722 + 222) / 1000 * 12  # 11.328
 
 
 class TestListTextRuns:
+    @pytest.mark.parametrize("render_mode", range(4, 8))
+    def test_text_that_defines_a_clipping_path_is_not_editable(self, tmp_dir, render_mode):
+        src = os.path.join(tmp_dir, "clip-text.pdf")
+        pdf = pikepdf.new()
+        _page(
+            pdf,
+            f"BT /F1 12 Tf {render_mode} Tr 72 700 Td (Clip) Tj ET".encode(),
+            {"/F1": _helv(pdf)},
+        )
+        pdf.save(src)
+        pdf.close()
+
+        (run,) = list_text_runs(src, 1)["runs"]
+        assert run["editable"] is False
+        assert run["reason"] == (
+            "Text that defines a clipping path cannot be edited because "
+            "changing it could change visible page content."
+        )
+
     def test_lists_word_per_td_runs_with_geometry(self, tmp_dir):
         src = os.path.join(tmp_dir, "t.pdf")
         pdf = pikepdf.new()
@@ -114,6 +133,45 @@ class TestListTextRuns:
 
 
 class TestReplaceTextRun:
+    @pytest.mark.parametrize("render_mode", range(4, 8))
+    @pytest.mark.parametrize("operation", ("replace", "restyle", "convert"))
+    def test_mutating_clipping_text_refuses_without_writing(
+        self, tmp_dir, render_mode, operation
+    ):
+        from engine.text_runs import convert_text_run, restyle_text_run
+
+        src = os.path.join(tmp_dir, "clip-text.pdf")
+        pdf = pikepdf.new()
+        _page(
+            pdf,
+            (
+                f"BT /F1 80 Tf {render_mode} Tr 72 500 Td (A) Tj ET\n"
+                "1 0 0 rg 0 0 612 792 re f\n"
+            ).encode(),
+            {"/F1": _helv(pdf)},
+        )
+        pdf.save(src)
+        pdf.close()
+        original = open(src, "rb").read()
+        out = os.path.join(tmp_dir, f"{operation}-out.pdf")
+        fallback_font = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "resources",
+            "fonts",
+            "LiberationSans-Regular.ttf",
+        )
+
+        with pytest.raises(ValueError, match="defines a clipping path"):
+            if operation == "replace":
+                replace_text_run(src, out, 1, 0, "")
+            elif operation == "restyle":
+                restyle_text_run(src, out, 1, 0, size=24)
+            else:
+                convert_text_run(src, out, 1, 0, "B", fallback_font)
+
+        assert not os.path.exists(out)
+        assert open(src, "rb").read() == original
+
     def test_replace_shifts_same_line_td_anchor(self, tmp_dir):
         src = os.path.join(tmp_dir, "t.pdf")
         out = os.path.join(tmp_dir, "o.pdf")

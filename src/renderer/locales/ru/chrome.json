@@ -6313,5 +6313,7 @@
   "engine.split.splitPlanExpiredAlready": "Срок действия плана разделения истёк или он уже использован; запланируйте вывод заново",
   "engine.split.splitPlanIdRequired": "Требуется идентификатор плана разделения",
   "engine.split.splitRequestLongerMatches": "Запрос на разделение больше не соответствует плану вывода",
-  "engine.split.splitSourceChangedAfter": "Источник разделения изменился после планирования вывода"
+  "engine.split.splitSourceChangedAfter": "Источник разделения изменился после планирования вывода",
+  "engine.text_paragraphs.textDefinesClippingPath": "Текст, задающий контур отсечения, нельзя редактировать: его изменение может повлиять на видимое содержимое страницы.",
+  "engine.flattener.pageContainsTextDefines": "Страница {{page}} содержит текст, задающий контур отсечения, поэтому сведение прозрачности может изменить видимое содержимое страницы."
 }

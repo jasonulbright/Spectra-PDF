@@ -209,6 +209,51 @@ def test_every_object_a_region_touches_is_absorbed(tmp_dir):
             assert obj["index"] in members
 
 
+@pytest.mark.parametrize("render_mode", range(4, 8))
+def test_flatten_refuses_to_drop_text_that_defines_a_clipping_path(
+    tmp_dir, gs_path, render_mode
+):
+    source = os.path.join(tmp_dir, "clip-text.pdf")
+    output = os.path.join(tmp_dir, "existing-output.pdf")
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    font = pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name.Font,
+            Subtype=pikepdf.Name.Type1,
+            BaseFont=pikepdf.Name.Helvetica,
+            Encoding=pikepdf.Name.WinAnsiEncoding,
+        )
+    )
+    page.obj["/Resources"] = pikepdf.Dictionary(
+        Font=pikepdf.Dictionary(F1=font),
+        ExtGState=pikepdf.Dictionary(
+            GS1=pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, ca=0.5),
+            GS0=pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, ca=1),
+        ),
+    )
+    page.Contents = pdf.make_stream(
+        (
+            f"/GS1 gs\nBT /F1 80 Tf {render_mode} Tr "
+            "1 0 0 1 72 500 Tm (A) Tj 0 Tr "
+            "1 0 0 1 400 700 Tm (T) Tj ET\n"
+            "/GS0 gs 1 0 0 rg 250 450 80 80 re f\n"
+        ).encode()
+    )
+    pdf.save(source)
+    pdf.close()
+    with open(output, "wb") as existing:
+        existing.write(b"preserve this destination")
+
+    page_report = _page(list_transparency(source, balance=0.0))
+    assert page_report["unknown"]
+    assert any("defines a clipping path" in reason for reason in page_report["unknown"])
+    with pytest.raises(ValueError, match="defines a clipping path"):
+        flatten_transparency(source, output, balance=0.0, gs_path=gs_path)
+    with open(output, "rb") as existing:
+        assert existing.read() == b"preserve this destination"
+
+
 def test_a_page_with_no_usable_media_box_refuses():
     from engine.flattener import _page_box
 

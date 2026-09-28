@@ -6177,5 +6177,7 @@
   "engine.split.splitPlanExpiredAlready": "תוקף תוכנית הפיצול פג או שהיא כבר נוצלה; יש לתכנן את הפלטים מחדש",
   "engine.split.splitPlanIdRequired": "נדרש מזהה של תוכנית הפיצול",
   "engine.split.splitRequestLongerMatches": "בקשת הפיצול כבר אינה תואמת לתוכנית הפלט",
-  "engine.split.splitSourceChangedAfter": "מקור הפיצול השתנה לאחר תכנון הפלטים"
+  "engine.split.splitSourceChangedAfter": "מקור הפיצול השתנה לאחר תכנון הפלטים",
+  "engine.text_paragraphs.textDefinesClippingPath": "אי אפשר לערוך טקסט שמגדיר נתיב חיתוך, כי שינוי שלו עלול לשנות את התוכן הגלוי בעמוד.",
+  "engine.flattener.pageContainsTextDefines": "עמוד {{page}} מכיל טקסט שמגדיר נתיב חיתוך, ולכן השיטוח עלול לשנות את התוכן הגלוי בעמוד."
 }

@@ -6313,5 +6313,7 @@
   "engine.split.splitPlanExpiredAlready": "Platnost plánu rozdělení vypršela nebo už byl použit; naplánujte výstupy znovu",
   "engine.split.splitPlanIdRequired": "Je vyžadováno ID plánu rozdělení",
   "engine.split.splitRequestLongerMatches": "Požadavek na rozdělení už neodpovídá plánu výstupu",
-  "engine.split.splitSourceChangedAfter": "Zdroj rozdělení se po naplánování výstupů změnil"
+  "engine.split.splitSourceChangedAfter": "Zdroj rozdělení se po naplánování výstupů změnil",
+  "engine.text_paragraphs.textDefinesClippingPath": "Text definující ořezovou cestu nelze upravit, protože změna může ovlivnit viditelný obsah stránky.",
+  "engine.flattener.pageContainsTextDefines": "Stránka {{page}} obsahuje text definující ořezovou cestu, takže sloučení průhlednosti může změnit viditelný obsah stránky."
 }

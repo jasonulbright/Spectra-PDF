@@ -6313,5 +6313,7 @@
   "engine.split.splitPlanExpiredAlready": "Plan podziału wygasł lub został już użyty; zaplanuj pliki wyjściowe ponownie",
   "engine.split.splitPlanIdRequired": "Wymagany jest identyfikator planu podziału",
   "engine.split.splitRequestLongerMatches": "Żądanie podziału nie pasuje już do planu wyjściowego",
-  "engine.split.splitSourceChangedAfter": "Źródło podziału zmieniło się po zaplanowaniu plików wyjściowych"
+  "engine.split.splitSourceChangedAfter": "Źródło podziału zmieniło się po zaplanowaniu plików wyjściowych",
+  "engine.text_paragraphs.textDefinesClippingPath": "Tekstu definiującego ścieżkę przycinania nie można edytować, ponieważ zmiana może wpłynąć na widoczną zawartość strony.",
+  "engine.flattener.pageContainsTextDefines": "Strona {{page}} zawiera tekst definiujący ścieżkę przycinania, więc spłaszczenie może zmienić widoczną zawartość strony."
 }

@@ -6041,5 +6041,7 @@
   "engine.split.splitPlanExpiredAlready": "Bölme planının süresi doldu veya plan zaten kullanıldı; çıktıları yeniden planlayın",
   "engine.split.splitPlanIdRequired": "Bir bölme planı kimliği gerekli",
   "engine.split.splitRequestLongerMatches": "Bölme isteği artık çıktı planıyla eşleşmiyor",
-  "engine.split.splitSourceChangedAfter": "Çıktılar planlandıktan sonra bölme kaynağı değişti"
+  "engine.split.splitSourceChangedAfter": "Çıktılar planlandıktan sonra bölme kaynağı değişti",
+  "engine.text_paragraphs.textDefinesClippingPath": "Kırpma yolu tanımlayan metin düzenlenemez; değiştirilmesi sayfanın görünen içeriğini değiştirebilir.",
+  "engine.flattener.pageContainsTextDefines": "Sayfa {{page}}, bir kırpma yolu tanımlayan metin içeriyor; bu nedenle düzleştirme sayfanın görünen içeriğini değiştirebilir."
 }

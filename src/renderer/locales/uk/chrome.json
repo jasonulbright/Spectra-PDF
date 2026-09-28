@@ -6313,5 +6313,7 @@
   "engine.split.splitPlanExpiredAlready": "Термін дії плану розділення минув або його вже використано; сплануйте вивід знову",
   "engine.split.splitPlanIdRequired": "Потрібен ідентифікатор плану розділення",
   "engine.split.splitRequestLongerMatches": "Запит на розділення більше не відповідає плану виводу",
-  "engine.split.splitSourceChangedAfter": "Джерело розділення змінилося після планування виводу"
+  "engine.split.splitSourceChangedAfter": "Джерело розділення змінилося після планування виводу",
+  "engine.text_paragraphs.textDefinesClippingPath": "Текст, що задає контур відсікання, не можна редагувати: його зміна може вплинути на видимий вміст сторінки.",
+  "engine.flattener.pageContainsTextDefines": "Сторінка {{page}} містить текст, що задає контур відсікання, тому зведення прозорості може змінити видимий вміст сторінки."
 }

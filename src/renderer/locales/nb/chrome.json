@@ -6041,5 +6041,7 @@
   "engine.split.splitPlanExpiredAlready": "Oppdelingsplanen er utløpt eller allerede brukt; planlegg utdataene på nytt",
   "engine.split.splitPlanIdRequired": "En id for oppdelingsplanen kreves",
   "engine.split.splitRequestLongerMatches": "Oppdelingsforespørselen samsvarer ikke lenger med utdataene i planen",
-  "engine.split.splitSourceChangedAfter": "Oppdelingskilden ble endret etter at utdataene ble planlagt"
+  "engine.split.splitSourceChangedAfter": "Oppdelingskilden ble endret etter at utdataene ble planlagt",
+  "engine.text_paragraphs.textDefinesClippingPath": "Tekst som definerer en klippebane, kan ikke redigeres fordi endringer kan påvirke sidens synlige innhold.",
+  "engine.flattener.pageContainsTextDefines": "Side {{page}} inneholder tekst som definerer en klippebane, så utflating kan endre sidens synlige innhold."
 }

@@ -6313,5 +6313,7 @@
   "engine.split.splitPlanExpiredAlready": "Načrt razdelitve je potekel ali je bil že uporabljen; znova načrtujte izhode",
   "engine.split.splitPlanIdRequired": "Zahtevan je ID načrta razdelitve",
   "engine.split.splitRequestLongerMatches": "Zahteva za razdelitev se ne ujema več z načrtom izhoda",
-  "engine.split.splitSourceChangedAfter": "Vir razdelitve se je spremenil po načrtovanju izhodov"
+  "engine.split.splitSourceChangedAfter": "Vir razdelitve se je spremenil po načrtovanju izhodov",
+  "engine.text_paragraphs.textDefinesClippingPath": "Besedila, ki določa pot izrezovanja, ni mogoče urejati, ker lahko sprememba vpliva na vidno vsebino strani.",
+  "engine.flattener.pageContainsTextDefines": "Stran {{page}} vsebuje besedilo, ki določa pot izrezovanja, zato lahko sploščitev spremeni vidno vsebino strani."
 }

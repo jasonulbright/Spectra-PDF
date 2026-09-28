@@ -95,6 +95,10 @@ SHOW_OPS = ("Tj", "'", '"', "TJ")
 # must compare against this constant rather than re-spell the sentence, because
 # a blank run is evidence about the text and none at all about the mapping.
 NOTHING_TO_EDIT = "nothing to edit"
+CLIPPING_TEXT_REFUSAL = (
+    "Text that defines a clipping path cannot be edited because "
+    "changing it could change visible page content."
+)
 
 # The font an edit writes with is selected by a `Tf` naming a resource of the
 # run's own stream. A run drawn with a font that no name of its stream selects
@@ -446,9 +450,14 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                 raw_width = 0.0
                 x0, y0, x1, y1 = _click_box(operator, operands, None, state, combined, 0.0, vertical)
             named = _names_its_font(state)
-            editable = bool(cap and cap.editable and text.strip() and named)
+            clipping_text = 4 <= state.render_mode <= 7
+            editable = bool(
+                not clipping_text and cap and cap.editable and text.strip() and named
+            )
             reason = None
-            if cap is None:
+            if clipping_text:
+                reason = CLIPPING_TEXT_REFUSAL
+            elif cap is None:
                 reason = "no font is active for this text"
             elif not cap.editable:
                 reason = cap.reason
@@ -695,6 +704,8 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
 
         if operator in SHOW_OPS and not edit.done:
             if edit.seen == edit.target:
+                if 4 <= gts.render_mode <= 7:
+                    raise ValueError(CLIPPING_TEXT_REFUSAL)
                 edit.done = True
                 changed = True
                 if operator in ("'", '"'):

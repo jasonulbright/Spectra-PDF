@@ -6177,5 +6177,7 @@
   "engine.split.splitPlanExpiredAlready": "Il piano di suddivisione è scaduto o è già stato usato; pianificare di nuovo gli output",
   "engine.split.splitPlanIdRequired": "È richiesto un ID del piano di suddivisione",
   "engine.split.splitRequestLongerMatches": "La richiesta di suddivisione non corrisponde più al piano di output",
-  "engine.split.splitSourceChangedAfter": "La sorgente della suddivisione è cambiata dopo la pianificazione degli output"
+  "engine.split.splitSourceChangedAfter": "La sorgente della suddivisione è cambiata dopo la pianificazione degli output",
+  "engine.text_paragraphs.textDefinesClippingPath": "Il testo che definisce un tracciato di ritaglio non può essere modificato, perché ciò potrebbe cambiare il contenuto visibile della pagina.",
+  "engine.flattener.pageContainsTextDefines": "La pagina {{page}} contiene testo che definisce un tracciato di ritaglio, quindi l'appiattimento potrebbe modificare il contenuto visibile della pagina."
 }

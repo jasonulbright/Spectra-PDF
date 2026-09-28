@@ -6041,5 +6041,7 @@
   "engine.split.splitPlanExpiredAlready": "Het splitsingsplan is verlopen of al gebruikt; plan de uitvoer opnieuw",
   "engine.split.splitPlanIdRequired": "Een splitsingsplan-id is vereist",
   "engine.split.splitRequestLongerMatches": "De splitsingsaanvraag komt niet meer overeen met het uitvoerplan",
-  "engine.split.splitSourceChangedAfter": "De bron voor de splitsing is gewijzigd nadat de uitvoer was gepland"
+  "engine.split.splitSourceChangedAfter": "De bron voor de splitsing is gewijzigd nadat de uitvoer was gepland",
+  "engine.text_paragraphs.textDefinesClippingPath": "Tekst die een clippingpad definieert, kan niet worden bewerkt omdat wijzigingen de zichtbare pagina-inhoud kunnen veranderen.",
+  "engine.flattener.pageContainsTextDefines": "Pagina {{page}} bevat tekst die een clippingpad definieert. Afvlakken kan daardoor de zichtbare pagina-inhoud wijzigen."
 }

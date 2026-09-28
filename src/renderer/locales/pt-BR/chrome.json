@@ -6177,5 +6177,7 @@
   "engine.split.splitPlanExpiredAlready": "O plano de divisão expirou ou já foi usado; planeje as saídas novamente",
   "engine.split.splitPlanIdRequired": "É necessário um ID de plano de divisão",
   "engine.split.splitRequestLongerMatches": "A solicitação de divisão não corresponde mais ao plano de saída",
-  "engine.split.splitSourceChangedAfter": "A origem da divisão mudou após o planejamento das saídas"
+  "engine.split.splitSourceChangedAfter": "A origem da divisão mudou após o planejamento das saídas",
+  "engine.text_paragraphs.textDefinesClippingPath": "O texto que define um caminho de recorte não pode ser editado porque alterá-lo pode mudar o conteúdo visível da página.",
+  "engine.flattener.pageContainsTextDefines": "A página {{page}} contém texto que define um caminho de recorte, então o achatamento pode alterar o conteúdo visível da página."
 }
