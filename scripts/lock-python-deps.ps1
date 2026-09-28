@@ -35,8 +35,8 @@ try {
 if ($LASTEXITCODE -ne 0) {
     $hadPip = $false
     Write-Host "Bootstrapping pip into the embedded runtime (temporary)..."
-    Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$env:TEMP\get-pip.py" -UseBasicParsing
-    & $DestDir\python.exe "$env:TEMP\get-pip.py" --no-warn-script-location 2>&1 | Out-Null
+    . (Join-Path $PSScriptRoot "pip-bootstrap.ps1")
+    Install-PinnedPip -Python "$DestDir\python.exe"
 }
 
 Write-Host "Resolving the full dependency tree with hashes..."

@@ -76,3 +76,14 @@ def test_override_cannot_bypass_the_checksum_pin(tmp_path: Path) -> None:
     )
     assert proc.returncode == 1
     assert "Checksum mismatch" in proc.stdout + proc.stderr
+
+
+def test_a_failed_installer_extraction_stops_the_vendoring() -> None:
+    # 7-Zip reports a truncated or unreadable member only through its exit code;
+    # a DLL it wrote partially would otherwise ship beside a tesseract.exe that
+    # still answers --version.
+    call = '& $SevenZip x $Installer "-o$Extracted" -y | Out-Null'
+    assert TEXT.count(call) == 1
+    after = TEXT[TEXT.index(call) + len(call):].lstrip().splitlines()[0]
+    assert after.startswith("if ($LASTEXITCODE -ne 0)"), after
+    assert "exit 1" in after or "throw" in after, after

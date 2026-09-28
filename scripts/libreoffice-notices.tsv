@@ -24,9 +24,8 @@
 # Source for the object code is the LibreOffice source release for the pinned
 # version (it carries the external poppler tarball the build consumed):
 # https://download.documentfoundation.org/libreoffice/src/26.2.5/
-# GAP: the exact upstream poppler and poppler-data version numbers are not
-# recorded in the shipped binary or data; the pin is the sha256 below plus the
-# LibreOffice source release above.
+# The LibreOffice 26.2.5.2 download.lst names poppler 26.06.0 and poppler-data
+# 0.4.12 as the external tarballs; scripts/corresponding-source.tsv pins both.
 #
 # Gate rules (scripts/bundle-libreoffice.ps1 and tests/test_libreoffice_notices.py
 # both read this file):
