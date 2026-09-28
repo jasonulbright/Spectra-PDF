@@ -1,4 +1,4 @@
-"""The source archives that accompany the shipped HEIF decoder libraries."""
+"""The source archives that accompany the shipped copyleft object code and data."""
 
 import hashlib
 import os
@@ -29,10 +29,37 @@ def rows():
 
 
 class TestManifest:
-    def test_it_names_the_complete_heif_source_set(self):
+    def test_it_names_the_complete_copyleft_source_set(self):
         assert {row["component"] for row in rows()} == {
-            "libheif", "libde265", "pi_heif"
+            "libheif", "libde265", "pi_heif",
+            "libreoffice", "poppler", "poppler-data",
+            "voikko-fi", "libvoikko", "libiconv", "dictionaries",
         }
+
+    def test_each_source_matches_the_version_that_ships(self):
+        by = {}
+        for row in rows():
+            by.setdefault(row["component"], []).append(row)
+        libreoffice = open(
+            os.path.join(REPO, "scripts", "bundle-libreoffice.ps1"), encoding="utf-8"
+        ).read()
+        version = by["libreoffice"][0]["version"]
+        assert f'[string]$ArchiveVersion = "{version}"' in libreoffice
+        voikko = open(os.path.join(REPO, "scripts", "voikko.tsv"), encoding="utf-8").read()
+        assert "voikko-fi_2.5-2_amd64.deb" in voikko
+        assert {r["file"] for r in by["voikko-fi"]} == {
+            "voikko-fi_2.5-2.dsc", "voikko-fi_2.5.orig.tar.gz",
+            "voikko-fi_2.5-2.debian.tar.xz",
+        }
+        assert "libvoikko-4.3.3-3-any.pkg.tar.zst" in voikko
+        assert by["libvoikko"][0]["version"] == "4.3.3-3"
+        assert by["libiconv"][0]["version"] == "1.17"
+        dictionaries = open(
+            os.path.join(REPO, "scripts", "bundle-dictionaries.ps1"), encoding="utf-8"
+        ).read()
+        commit = by["dictionaries"][0]["version"]
+        assert f'$Commit = "{commit}"' in dictionaries
+        assert commit in by["dictionaries"][0]["source"]
 
     def test_every_archive_is_versioned_pinned_and_fetchable_by_one_route(self):
         for row in rows():
@@ -89,3 +116,7 @@ class TestReleaseContract:
         assert "For every GPL-2.0 or LGPL-2.1 component" in text
         assert "for at least three years" in text
         assert "preferred form for modifying these dictionaries" in text
+        for row in rows():
+            assert f"`{row['file']}`" in text or row["component"] in (
+                "libheif", "libde265", "pi_heif"
+            ), row["file"]

@@ -2,6 +2,7 @@
 # Run once before packaging: powershell -ExecutionPolicy Bypass -File scripts\setup-python-embed.ps1
 
 . (Join-Path $PSScriptRoot "download-retry.ps1")
+. (Join-Path $PSScriptRoot "pip-bootstrap.ps1")
 # The one Python pin: every setup-python step in the workflows reads the same
 # file, so CI tests on the runtime this script ships.
 $PinFile = Join-Path $PSScriptRoot "..\.python-version"
@@ -58,13 +59,8 @@ if ($pthFile) {
     Write-Host "Enabled site-packages in $($pthFile.Name)"
 }
 
-# Install pip
-Write-Host "Installing pip..."
-Invoke-DownloadWithRetry -Description "get-pip.py" -OutFile "$env:TEMP\get-pip.py" -Download {
-    Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$env:TEMP\get-pip.py" `
-        -TimeoutSec $DownloadRetryTimeoutSeconds
-}
-& $DestDir\python.exe "$env:TEMP\get-pip.py" --no-warn-script-location 2>&1 | Out-Null
+Write-Host "Installing pinned pip..."
+Install-PinnedPip -Python "$DestDir\python.exe"
 
 # Install the hash-pinned dependency tree. Every package -- top-level AND
 # transitive (cryptography, lxml, ...) -- is version- and hash-verified via
