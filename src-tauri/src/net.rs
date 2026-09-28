@@ -1669,6 +1669,64 @@ mod tests {
         assert_eq!(server.requests().len(), 1, "a file outside the scratch folder was transmitted");
     }
 
+    #[tokio::test]
+    async fn another_process_payload_is_neither_sent_nor_removed() {
+        let scratch = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let receiver = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let request = read_http_request(&mut stream);
+                        let _ = stream.write_all(body_reply("text/plain", "ok").as_bytes());
+                        return Some(request);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            return None;
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("local receiver failed: {error}"),
+                }
+            }
+        });
+        let other_pid = std::process::id().wrapping_add(1).max(1);
+        let payload = scratch.path().join(crate::scratch::net_file_name(
+            "another-window",
+            other_pid,
+            "fdf",
+        ));
+        std::fs::write(&payload, b"%FDF-1.2 another process's submission").unwrap();
+        let request = NetRequest {
+            url: format!("http://127.0.0.1:{port}/submit"),
+            method: "post".to_string(),
+            body_path: Some(payload.to_string_lossy().to_string()),
+            content_type: Some("application/vnd.fdf".to_string()),
+            file_name: Some("probe".to_string()),
+            refuse_private: true,
+        };
+
+        let outcome = transmit(&request, true, scratch.path()).await;
+        let received = receiver.join().unwrap();
+
+        assert!(
+            outcome
+                .as_ref()
+                .is_err_and(|error| error.contains("prepared submission")),
+            "a foreign payload was accepted; local request: {}",
+            received
+                .as_deref()
+                .map(String::from_utf8_lossy)
+                .unwrap_or_default()
+        );
+        assert!(payload.exists(), "another process's payload was deleted");
+        assert!(received.is_none(), "the foreign payload reached the network");
+    }
+
     /// The command itself: a payload the renderer built in the scratch folder
     /// is gone once the request is over, here refused before any byte left.
     #[tokio::test]
@@ -1714,6 +1772,17 @@ mod tests {
         let outside = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(outside.path(), b"1234567").unwrap();
         assert!(net_payload_size(outside.path().to_string_lossy().to_string()).is_err());
+
+        let other_pid = std::process::id().wrapping_add(1).max(1);
+        let other_process = crate::scratch::net_dir().join(crate::scratch::net_file_name(
+            "another-process-size",
+            other_pid,
+            "pdf",
+        ));
+        std::fs::write(&other_process, b"private submission").unwrap();
+        assert!(net_payload_size(other_process.to_string_lossy().to_string()).is_err());
+        assert!(other_process.exists(), "the other process's payload was removed");
+        let _ = std::fs::remove_file(other_process);
     }
 
     #[test]

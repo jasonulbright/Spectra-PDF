@@ -176,14 +176,15 @@ pub(crate) fn release_net_file(path: &Path, dir: &Path) -> bool {
     is_net_file_in(path, dir) && std::fs::remove_file(path).is_ok()
 }
 
-/// Whether `path` names a network scratch file directly in `dir`, judged by
-/// the name this app gives such files and by the physical identity of the
-/// parent folder, never by string prefix.
+/// Whether `path` names a network scratch file owned by this process directly
+/// in `dir`, judged by its owner id and the physical identity of the parent
+/// folder, never by string prefix. A same-folder file from another app process
+/// is not this request's payload and must not be read or removed here.
 pub(crate) fn is_net_file_in(path: &Path, dir: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
     };
-    if net_file_owner(name).is_none() && !legacy_net_file(name) {
+    if net_file_owner(name) != Some(std::process::id()) {
         return false;
     }
     path.parent()
@@ -949,19 +950,29 @@ mod tests {
     fn a_payload_is_released_only_from_the_scratch_folder_and_only_by_its_name() {
         let root = tempfile::tempdir().unwrap();
         let scratch = root.path().join(NET);
-        let payload = net_file(root.path(), &net_file_name("form-submission", OWN, "fdf"));
+        let payload = net_file(
+            root.path(),
+            &net_file_name("form-submission", std::process::id(), "fdf"),
+        );
         let legacy = net_file(root.path(), "form-submission-1789169309945-ae0175af.fdf");
+        let other_pid = std::process::id().wrapping_add(1).max(1);
+        let other_process = net_file(
+            root.path(),
+            &net_file_name("other-process", other_pid, "fdf"),
+        );
         let foreign = net_file(root.path(), "notes.txt");
         let elsewhere = tempfile::tempdir().unwrap();
         let outside = elsewhere.path().join(payload.file_name().unwrap());
         std::fs::write(&outside, b"a user's file").unwrap();
 
         assert!(release_net_file(&payload, &scratch));
-        assert!(release_net_file(&legacy, &scratch));
+        assert!(!release_net_file(&legacy, &scratch));
+        assert!(!release_net_file(&other_process, &scratch));
         assert!(!release_net_file(&foreign, &scratch));
         assert!(!release_net_file(&outside, &scratch));
         assert!(!release_net_file(&payload, &scratch));
-        assert!(!payload.exists() && !legacy.exists());
+        assert!(!payload.exists());
+        assert!(legacy.exists() && other_process.exists());
         assert!(foreign.exists() && outside.exists());
     }
 }
