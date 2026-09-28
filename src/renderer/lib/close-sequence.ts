@@ -29,6 +29,34 @@ export interface CloseSequenceDeps {
   ack: (quitId: number) => Promise<unknown>;
 }
 
+export interface CoordinatedQuitResult {
+  proceed: boolean;
+  sessionId: number | null;
+}
+
+export type CoordinatedExitResult = 'closed' | 'cancelled' | 'aborted';
+
+/**
+ * Finish an app-wide Exit after peer windows have acknowledged it. The
+ * initiator stays interactive while those windows finish their own prompts,
+ * so it must recheck edits before closing too. If that prompt is cancelled,
+ * undo the exact session seal created by this quit.
+ */
+export async function finishCoordinatedExit(
+  request: () => Promise<CoordinatedQuitResult>,
+  confirmDirty: () => Promise<boolean>,
+  cancelQuit: (sessionId: number) => Promise<unknown>,
+  close: () => Promise<boolean>,
+): Promise<CoordinatedExitResult> {
+  const result = await request();
+  if (!result.proceed || result.sessionId === null) return 'aborted';
+  if (!(await confirmDirty())) {
+    await cancelQuit(result.sessionId);
+    return 'cancelled';
+  }
+  return (await close()) ? 'closed' : 'aborted';
+}
+
 /**
  * Minimize-to-tray applies to a plain window × only. A non-null session id
  * means this close is part of an app-wide Exit, which must close every window

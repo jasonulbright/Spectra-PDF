@@ -977,12 +977,13 @@ export const app = {
   /** Ask every other window to run its own close flow. Each answers by closing
    * itself and the last one out exits, so a window that cancels keeps the app.
    *
-   * Resolves to whether this window may now close. The request is not assumed
+   * Resolves to whether this window may now close and the session id to revoke
+   * if new edits make the initiating window cancel. The request is not assumed
    * delivered: a window whose renderer has not installed its listener never
    * hears it and never closes, and closing anyway would leave it standing
    * behind a session record frozen at the moment Exit was chosen. False means
    * the quit is off — nothing closed, and the record is live again. */
-  requestQuit: () => invoke<boolean>('request_quit'),
+  requestQuit: () => invoke<{ proceed: boolean; sessionId: number | null }>('request_quit'),
 
   /** Acknowledge a beforeClose that belongs to a quit. Receipt only: it says
    * this renderer heard the request and is running its close flow, which is

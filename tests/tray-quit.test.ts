@@ -37,6 +37,7 @@ describe('tray Quit', () => {
     const requiredSteps = [
       'confirmCurrentDirtyFiles(',
       'flushTabOrder()',
+      'finishCoordinatedExit(',
       'app.requestQuit()',
       'app.confirmClose()',
     ];
@@ -44,6 +45,20 @@ describe('tray Quit', () => {
     for (const step of requiredSteps) {
       const position = exit.indexOf(step);
       expect(position, `missing ${step}`).toBeGreaterThan(prior);
+      prior = position;
+    }
+    const coordinated = exit.slice(exit.indexOf('finishCoordinatedExit('));
+    const completionSteps = [
+      'app.requestQuit()',
+      'confirmCurrentDirtyFiles(',
+      'alreadyAnswered',
+      'app.quitCancelled(sessionId)',
+      'app.confirmClose()',
+    ];
+    prior = -1;
+    for (const step of completionSteps) {
+      const position = coordinated.indexOf(step);
+      expect(position, `missing ${step} in coordinated completion`).toBeGreaterThan(prior);
       prior = position;
     }
   });

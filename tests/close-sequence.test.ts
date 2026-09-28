@@ -6,7 +6,8 @@
 // and the quit's own 3s abort bounds the wait — a flush that never finishes
 // withholds the receipt and the quit aborts, which is the fail-closed outcome.
 import { describe, expect, it, vi } from 'vitest';
-import { sealBeforeClose } from '../src/renderer/lib/close-sequence';
+import { finishCoordinatedExit, sealBeforeClose } from '../src/renderer/lib/close-sequence';
+import { confirmDirtySnapshots } from '../src/renderer/lib/dirty-prompt';
 
 describe('sealBeforeClose', () => {
   it('acknowledges only AFTER the flush has resolved', async () => {
@@ -102,5 +103,57 @@ describe('sealBeforeClose', () => {
     const ack = vi.fn(async () => {});
     expect(await sealBeforeClose(null, { flush: async () => false, ack })).toBe(true);
     expect(ack).not.toHaveBeenCalled();
+  });
+});
+
+describe('finishCoordinatedExit', () => {
+  it('re-prompts edits made while peer windows handle their close prompts and unseals on cancel', async () => {
+    const before = { path: 'a.pdf', editRevision: 1, bufferRevision: new Uint8Array([1]) };
+    const during = { ...before, editRevision: 2 };
+    let current = [before];
+    let releaseRequest: (() => void) | null = null;
+    const request = new Promise<{ proceed: boolean; sessionId: number | null }>((resolve) => {
+      releaseRequest = () => {
+        current = [during];
+        resolve({ proceed: true, sessionId: 17 });
+      };
+    });
+    const prompts: string[][] = [];
+    const cancelQuit = vi.fn(async () => {});
+    const close = vi.fn(async () => true);
+    const run = finishCoordinatedExit(
+      () => request,
+      () => confirmDirtySnapshots(
+        () => current,
+        async (pending) => {
+          prompts.push(pending.map(({ path }) => path));
+          return 'cancel';
+        },
+        async () => true,
+        [before],
+      ),
+      cancelQuit,
+      close,
+    );
+
+    releaseRequest!();
+    await expect(run).resolves.toBe('cancelled');
+    expect(prompts).toEqual([['a.pdf']]);
+    expect(cancelQuit).toHaveBeenCalledWith(17);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it('does not repeat a discard prompt when the confirmed edits did not change during peer negotiation', async () => {
+    const before = { path: 'a.pdf', editRevision: 1, bufferRevision: new Uint8Array([1]) };
+    const decide = vi.fn(async () => 'discard' as const);
+    const close = vi.fn(async () => true);
+    await expect(finishCoordinatedExit(
+      async () => ({ proceed: true, sessionId: 18 }),
+      () => confirmDirtySnapshots(() => [before], decide, async () => true, [before]),
+      async () => {},
+      close,
+    )).resolves.toBe('closed');
+    expect(decide).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
   });
 });
