@@ -458,14 +458,14 @@ impl SessionState {
     /// Returns whether the file was sealed. A quit prompted several windows
     /// and any number of them can cancel, so every cancel calls this and only
     /// the first one finds a seal to lift.
-    fn unseal_and_write(&self, sink: impl FnOnce() -> std::io::Result<()>) -> WriteOutcome {
+    fn unseal_and_write(&self, sink: impl FnMut() -> std::io::Result<()>) -> WriteOutcome {
         self.unseal_and_write_for(None, sink)
     }
 
     fn unseal_and_write_for(
         &self,
         session_id: Option<u64>,
-        sink: impl FnOnce() -> std::io::Result<()>,
+        mut sink: impl FnMut() -> std::io::Result<()>,
     ) -> WriteOutcome {
         let _guard = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         if !self.sealed.load(Ordering::SeqCst)
@@ -475,7 +475,7 @@ impl SessionState {
         }
         self.sealed_by.store(0, Ordering::SeqCst);
         self.sealed.store(false, Ordering::SeqCst);
-        match sink() {
+        match sink().or_else(|_| sink()) {
             Ok(()) => WriteOutcome::Written,
             // The seal is off either way — that half is what puts the run back
             // under live tracking, and the stale capture the write meant to
@@ -2216,6 +2216,33 @@ mod tests {
             WriteOutcome::Written
         );
         assert_eq!(windows.written(), vec!["main"]);
+    }
+
+    #[test]
+    fn a_cancelled_exit_retries_a_transient_snapshot_write_failure() {
+        let state = SessionState::new();
+        let session_id = state.new_seal_id();
+        assert_eq!(
+            state.seal_and_write_for(Some(session_id), || Ok(())),
+            WriteOutcome::Written
+        );
+
+        let attempts = Cell::new(0);
+        let outcome = state.unseal_and_write_for(Some(session_id), || {
+            attempts.set(attempts.get() + 1);
+            if attempts.get() == 1 {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "transient session-file lock",
+                ))
+            } else {
+                Ok(())
+            }
+        });
+
+        assert_eq!(outcome, WriteOutcome::Written);
+        assert_eq!(attempts.get(), 2);
+        assert!(!state.is_sealed());
     }
 
     #[test]
