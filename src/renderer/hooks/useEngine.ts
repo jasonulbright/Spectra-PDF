@@ -172,18 +172,42 @@ function ensureEngineResponses(): Promise<void> {
 
 /** One window-wide listener serves both workers and survives panel changes.
  * Register before sending: a fast reply must never outrun its listener. */
-export async function dispatchEngineRequest(method: string, params: Record<string, unknown>): Promise<EngineResult> {
+export async function dispatchEngineRequest(
+  method: string,
+  params: Record<string, unknown>,
+  options?: EngineCallOptions,
+): Promise<EngineResult> {
   await ensureEngineResponses();
   const id = nextEngineRequestId++;
   const request = { jsonrpc: '2.0', method, params, id };
-  const send = isHealthMethod(method) ? engine.healthRequest : engine.request;
+  const health = isHealthMethod(method);
+  const send = health ? engine.healthRequest : engine.request;
   return new Promise<EngineResult>((resolve, reject) => {
     pendingRequests.set(id, { resolve, reject });
-    void Promise.resolve().then(() => send(request)).catch((err: unknown) => {
+    void Promise.resolve().then(() => send(request)).then(() => {
+      if (!health && options?.signal) bindCancel(id, options.signal);
+    }).catch((err: unknown) => {
       pendingRequests.delete(id);
       reject(err instanceof Error ? err : new Error(String(err)));
     });
   });
+}
+
+/** Bound only after the send lands, so the cancel can never reach the engine
+ * before the request it names. */
+export function bindCancel(
+  id: number,
+  signal: AbortSignal,
+  cancel: (id: number) => Promise<unknown> = engine.cancelRequest,
+): void {
+  const fire = (): void => {
+    void cancel(id).catch(() => {});
+  };
+  if (signal.aborted) {
+    fire();
+    return;
+  }
+  signal.addEventListener('abort', fire, { once: true });
 }
 
 export function useEngine() {
@@ -209,8 +233,12 @@ export function useEngine() {
 
   // Every request a user's action produced is counted while it is outstanding,
   // which is what `interactiveInFlight` reports.
-  const rawCall = useCallback((method: string, params: Record<string, unknown> = {}): Promise<EngineResult> =>
-    trackInteractive(() => dispatch(method, params)), [dispatch]);
+  const rawCall = useCallback((
+    method: string,
+    params: Record<string, unknown> = {},
+    options?: EngineCallOptions,
+  ): Promise<EngineResult> =>
+    trackInteractive(() => dispatch(method, params, options)), [dispatch]);
 
   const call = useCallback(async (method: string, params: Record<string, unknown> = {}, options?: EngineCallOptions): Promise<EngineResult> => {
     options?.assertCurrent?.();
@@ -237,7 +265,7 @@ export function useEngine() {
           options?.assertCurrent?.();
           return track(method, params, async () => {
             options?.assertCurrent?.();
-            return rawCall(method, params);
+            return rawCall(method, params, options);
           });
         })) as EngineResult;
       } finally {

@@ -3350,32 +3350,25 @@ impl CliEngine {
     }
 
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.send(method, params)?;
+        self.receive()
+    }
+
+    /// Write one request line. The line goes out in a single write so that a
+    /// cancel frame written through a second handle can never land inside it.
+    fn send(&mut self, method: &str, params: Value) -> Result<(), String> {
         if self.failed {
             return Err("The engine stopped after an oversized response.".to_string());
         }
-        let request = json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-            "id": 1
-        });
-
+        let line = request_line(method, params)?;
         let stdin = self.child.stdin.as_mut().expect("stdin not captured");
-        let msg = serde_json::to_string(&request).unwrap();
-        if msg.len() > crate::engine::MAX_ENGINE_RPC_LINE_BYTES {
-            return Err(format!(
-                "Engine request exceeds the {} MiB limit.",
-                crate::engine::MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
-            ));
-        }
         stdin
-            .write_all(msg.as_bytes())
+            .write_all(line.as_bytes())
             .map_err(|e| format!("Write error: {}", e))?;
-        stdin
-            .write_all(b"\n")
-            .map_err(|e| format!("Write error: {}", e))?;
-        stdin.flush().map_err(|e| format!("Flush error: {}", e))?;
+        stdin.flush().map_err(|e| format!("Flush error: {}", e))
+    }
 
+    fn receive(&mut self) -> Result<Value, String> {
         // Read response lines until we get valid JSON
         loop {
             let line = match crate::engine::read_bounded_line(
@@ -3423,6 +3416,201 @@ impl CliEngine {
             drop(stdin); // close stdin → engine reads EOF → exits
         }
         let _ = self.child.wait();
+    }
+
+    /// A second write end of the engine's stdin, for a writer that runs while
+    /// `call` holds `self` blocked on the response.
+    fn stdin_writer(&self) -> Option<std::fs::File> {
+        use std::os::windows::io::AsHandle;
+        let stdin = self.child.stdin.as_ref()?;
+        stdin.as_handle().try_clone_to_owned().ok().map(std::fs::File::from)
+    }
+}
+
+/// The request line `CliEngine::call` writes, newline included.
+fn request_line(method: &str, params: Value) -> Result<String, String> {
+    let request = json!({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+        "id": 1
+    });
+    let mut line = serde_json::to_string(&request).unwrap();
+    if line.len() > crate::engine::MAX_ENGINE_RPC_LINE_BYTES {
+        return Err(format!(
+            "Engine request exceeds the {} MiB limit.",
+            crate::engine::MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
+        ));
+    }
+    line.push('\n');
+    Ok(line)
+}
+
+/// Ctrl+C during a CLI batch run stops it at the engine's next safe point
+/// instead of killing it, so the run still writes its report and log. The
+/// engine child has no console (CREATE_NO_WINDOW) and never sees the event
+/// itself. A second Ctrl+C falls through to the default handler, which ends
+/// this process; the job object then ends the engine, and an in-place
+/// original is still either untouched or fully replaced.
+mod batch_interrupt {
+    use std::io::Write;
+    use std::sync::Mutex;
+    use windows::core::BOOL;
+    use windows::Win32::System::Console::{SetConsoleCtrlHandler, CTRL_BREAK_EVENT, CTRL_C_EVENT};
+
+    /// `CliEngine::call` always sends id 1.
+    const CLI_REQUEST_ID: u64 = 1;
+
+    /// When a cancel frame may be written. A press before the request line
+    /// is written is held and sent by `sent`: a frame written first names an
+    /// id the engine has not seen, and the engine drops it.
+    #[derive(Default)]
+    pub(super) struct Latch {
+        presses: u32,
+        request_sent: bool,
+        cancel_sent: bool,
+    }
+
+    impl Latch {
+        /// `Some(true)`: write the cancel now. `Some(false)`: handled, the
+        /// cancel waits for the request. `None`: use the default handler.
+        pub(super) fn press(&mut self) -> Option<bool> {
+            self.presses += 1;
+            if self.presses > 1 {
+                return None;
+            }
+            Some(self.request_sent)
+        }
+
+        /// The request line is written. True when a held press must be sent.
+        pub(super) fn sent(&mut self) -> bool {
+            self.request_sent = true;
+            self.presses > 0 && !self.cancel_sent
+        }
+
+        pub(super) fn mark_cancel_sent(&mut self) {
+            self.cancel_sent = true;
+        }
+    }
+
+    struct State {
+        pipe: std::fs::File,
+        latch: Latch,
+    }
+
+    static STATE: Mutex<Option<State>> = Mutex::new(None);
+
+    fn write_cancel(state: &mut State) -> bool {
+        let frame = crate::engine::cancel_frame(CLI_REQUEST_ID);
+        let ok = state
+            .pipe
+            .write_all(frame.as_bytes())
+            .and_then(|()| state.pipe.flush())
+            .is_ok();
+        if ok {
+            state.latch.mark_cancel_sent();
+        }
+        ok
+    }
+
+    unsafe extern "system" fn on_ctrl(kind: u32) -> BOOL {
+        if kind != CTRL_C_EVENT && kind != CTRL_BREAK_EVENT {
+            return BOOL(0);
+        }
+        let mut guard = STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(state) = guard.as_mut() else {
+            return BOOL(0);
+        };
+        let handled = match state.latch.press() {
+            None => false,
+            Some(false) => true,
+            Some(true) => write_cancel(state),
+        };
+        if !handled {
+            return BOOL(0);
+        }
+        eprintln!("Stopping after the current page. Press Ctrl+C again to end the run now.");
+        BOOL(1)
+    }
+
+    pub(super) struct Armed;
+
+    impl Armed {
+        /// Call once the request line is written.
+        pub(super) fn request_sent(&self) {
+            let mut guard = STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(state) = guard.as_mut() {
+                if state.latch.sent() {
+                    write_cancel(state);
+                }
+            }
+        }
+    }
+
+    impl Drop for Armed {
+        fn drop(&mut self) {
+            // SAFETY: removes the handler this module registered.
+            let _ = unsafe { SetConsoleCtrlHandler(Some(on_ctrl), false) };
+            *STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        }
+    }
+
+    /// Route Ctrl+C to a cancel of the engine's request until the guard drops.
+    pub(super) fn arm(engine: &super::CliEngine) -> Option<Armed> {
+        let pipe = engine.stdin_writer()?;
+        *STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            Some(State { pipe, latch: Latch::default() });
+        // SAFETY: `on_ctrl` is a plain function with the PHANDLER_ROUTINE ABI.
+        match unsafe { SetConsoleCtrlHandler(Some(on_ctrl), true) } {
+            Ok(()) => Some(Armed),
+            Err(_) => {
+                *STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+                None
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::Latch;
+
+        #[test]
+        fn a_press_before_the_request_is_held_then_sent_once() {
+            let mut latch = Latch::default();
+            assert_eq!(latch.press(), Some(false));
+            assert!(latch.sent());
+            latch.mark_cancel_sent();
+            assert_eq!(latch.press(), None);
+        }
+
+        #[test]
+        fn a_press_after_the_request_is_sent_at_once_and_only_once() {
+            let mut latch = Latch::default();
+            assert!(!latch.sent());
+            assert_eq!(latch.press(), Some(true));
+            latch.mark_cancel_sent();
+            assert_eq!(latch.press(), None);
+        }
+
+        #[test]
+        fn without_a_press_nothing_is_sent() {
+            let mut latch = Latch::default();
+            assert!(!latch.sent());
+        }
+    }
+}
+
+#[cfg(test)]
+mod request_line_tests {
+    use super::*;
+
+    #[test]
+    fn the_request_is_one_newline_terminated_line() {
+        let line = request_line("batch_ocr", json!({"source": "a\nb"})).unwrap();
+        assert!(line.ends_with('\n'));
+        assert_eq!(line.matches('\n').count(), 1);
+        let frame: Value = serde_json::from_str(line.trim_end()).unwrap();
+        assert_eq!(frame["id"], 1);
     }
 }
 
@@ -6020,7 +6208,8 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             // log all live engine-side (engine/batch_ocr.py) so the CLI and a
             // scheduled run behave identically to each other -- and log
             // identically to the GUI.
-            engine.call(
+            let interrupt = batch_interrupt::arm(engine);
+            engine.send(
                 "batch_ocr",
                 json!({
                     "source": abs(&args.source).to_string_lossy(),
@@ -6055,7 +6244,11 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                         })
                         .collect::<serde_json::Map<_, _>>(),
                 }),
-            )
+            )?;
+            if let Some(interrupt) = &interrupt {
+                interrupt.request_sent();
+            }
+            engine.receive()
         }
 
         CliCommand::Rebuild(args) => {

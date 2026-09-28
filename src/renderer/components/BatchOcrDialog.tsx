@@ -14,6 +14,8 @@ import {
   destConflictsWithSource,
   summarize,
   BatchPauseGate,
+  batchRunControls,
+  cancelledNoteKey,
   type BatchPauseState,
   type BatchProgress,
   type BatchReport,
@@ -91,7 +93,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // options, so it is off by default, retires the destination/moved-root
   // machinery while on, and takes a two-step confirm. Runs as ONE engine
   // call (the guided-folder-run precedent) — the live per-file progress
-  // driver stays mirror-only, and there is no mid-run stop.
+  // driver stays mirror-only; Stop reaches the engine as a cancel.
   const [inPlace, setInPlace] = useState(false);
   const [confirmInPlace, setConfirmInPlace] = useState(false);
   // MRC-compress each processed file after recognition. Off by
@@ -247,6 +249,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
 
   const cancelledRef = useRef(false);
   const cancelOcrRef = useRef<(() => void) | null>(null);
+  const inPlaceAbortRef = useRef<AbortController | null>(null);
   const phaseRef = useRef<Phase>('setup');
   phaseRef.current = phase;
   // One gate per mirror run. Pause takes effect between files; the gate is
@@ -260,6 +263,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     () => () => {
       cancelledRef.current = true;
       pauseGateRef.current?.release();
+      inPlaceAbortRef.current?.abort();
     },
     [],
   );
@@ -467,6 +471,8 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     setStopping(false);
     setLogPath(null);
     setLogError(null);
+    const abort = new AbortController();
+    inPlaceAbortRef.current = abort;
     try {
       const settings = getSettings();
       const logDir = settings.batchLogEnabled ? await batch.logDir(settings.batchLogDir) : '';
@@ -492,7 +498,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         font_dir: await app.getEditFontPath(),
         remove_empty_folders: removeEmptyFolders,
         repair_only: repairOnly,
-      })) as unknown as BatchReport & { logPath?: string };
+      }, { signal: abort.signal })) as unknown as BatchReport & { logPath?: string };
       setReport(rep);
       setLogPath(rep.logPath ?? null);
       setPhase('done');
@@ -500,6 +506,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
       setError(e instanceof Error ? e.message : String(e));
       setPhase('setup');
     } finally {
+      if (inPlaceAbortRef.current === abort) inPlaceAbortRef.current = null;
       await root.release();
     }
   };
@@ -649,6 +656,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     cancelledRef.current = true;
     cancelOcrRef.current?.();
     pauseGateRef.current?.release();
+    inPlaceAbortRef.current?.abort();
   };
 
   const togglePause = (): void => {
@@ -715,6 +723,8 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // still disposes the worker.
   const guardedClose = phase === 'running' ? (stopping ? onClose : cancel) : onClose;
 
+  const controls = batchRunControls(inPlace, stopping);
+  const cancelledNote = report ? cancelledNoteKey(report) : null;
   const summary = report ? summarize(report) : null;
   const skippedResults = report?.results.filter((r) => r.status === 'skipped') ?? [];
   const movedCount = report?.results.filter((r) => r.movedTo).length ?? 0;
@@ -1207,8 +1217,8 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             <button
               data-testid="batch-ocr-pause"
               onClick={togglePause}
-              disabled={stopping || inPlace}
-              title={inPlace ? tChrome('dialog.batch.noPauseInPlace') : undefined}
+              disabled={controls.pauseDisabled}
+              title={controls.pauseTitleKey ? tChrome(controls.pauseTitleKey) : undefined}
               className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium disabled:opacity-60"
             >
               {tChrome(pauseState === 'running' ? 'dialog.batch.pause' : 'dialog.batch.resume')}
@@ -1217,8 +1227,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               ref={stopBtnRef}
               data-testid="batch-ocr-stop"
               onClick={cancel}
-              disabled={stopping || inPlace}
-              title={inPlace ? tChrome('dialog.batch.noStopInPlace') : undefined}
+              disabled={controls.stopDisabled}
               className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium disabled:opacity-60"
             >
               {tChrome(stopping ? 'dialog.batch.stopping' : 'dialog.batch.stop')}
@@ -1256,9 +1265,9 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                 : parts;
             })()}
           </p>
-          {report.cancelled && (
-            <p className="text-xs text-neutral-500">
-              {tChrome('dialog.batch.cancelledNote')}
+          {cancelledNote && (
+            <p className="text-xs text-neutral-500" data-testid="batch-ocr-cancelled-note">
+              {tChrome(cancelledNote)}
             </p>
           )}
           {(movedCount > 0 || repairedCount > 0) && (

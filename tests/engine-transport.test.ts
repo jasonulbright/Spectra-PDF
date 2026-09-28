@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocked = vi.hoisted(() => ({
-  listen: vi.fn(), request: vi.fn(), health: vi.fn(), start: vi.fn(),
+  listen: vi.fn(), request: vi.fn(), health: vi.fn(), start: vi.fn(), cancel: vi.fn(),
 }));
 vi.mock('../src/renderer/lib/tauri-bridge', () => ({
-  engine: { onResponse: mocked.listen, request: mocked.request, healthRequest: mocked.health, start: mocked.start },
+  engine: {
+    onResponse: mocked.listen, request: mocked.request, healthRequest: mocked.health,
+    start: mocked.start, cancelRequest: mocked.cancel,
+  },
   dialog: {}, batch: {}, file: {},
 }));
 
@@ -94,5 +97,66 @@ describe('window-owned engine response routing', () => {
     receive({ id: mocked.request.mock.calls[0][0].id, result: {} });
     await next;
     expect(mocked.listen).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('engine request cancel', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.resetAllMocks();
+    mocked.listen.mockImplementation(async (callback) => { receive = callback; return vi.fn(); });
+    mocked.request.mockResolvedValue(undefined);
+    mocked.health.mockResolvedValue(undefined);
+    mocked.cancel.mockResolvedValue(true);
+  });
+
+  it('names the id this window issued, and the request still settles with its own reply', async () => {
+    const { dispatchEngineRequest } = await import('../src/renderer/hooks/useEngine');
+    const abort = new AbortController();
+    const run = dispatchEngineRequest('batch_ocr', { source: 'C:/in', in_place: true }, { signal: abort.signal });
+    await flush();
+    const sent = mocked.request.mock.calls[0][0];
+    abort.abort();
+    expect(mocked.cancel).toHaveBeenCalledTimes(1);
+    expect(mocked.cancel).toHaveBeenCalledWith(sent.id);
+    receive({ id: sent.id, result: { cancelled: true, results: [] } });
+    expect(await run).toEqual({ cancelled: true, results: [] });
+  });
+
+  it('never sends a cancel before its request has been handed over', async () => {
+    let land!: () => void;
+    mocked.request.mockImplementation(() => new Promise<void>((resolve) => { land = resolve; }));
+    const { dispatchEngineRequest } = await import('../src/renderer/hooks/useEngine');
+    const abort = new AbortController();
+    const run = dispatchEngineRequest('batch_ocr', { source: 'C:/in' }, { signal: abort.signal });
+    await flush();
+    abort.abort();
+    await flush();
+    expect(mocked.cancel).not.toHaveBeenCalled();
+    land();
+    await flush();
+    expect(mocked.cancel).toHaveBeenCalledTimes(1);
+    receive({ id: mocked.request.mock.calls[0][0].id, result: { cancelled: true } });
+    await run;
+  });
+
+  it('does not route a cancel to the health worker', async () => {
+    const { dispatchEngineRequest } = await import('../src/renderer/hooks/useEngine');
+    const abort = new AbortController();
+    const run = dispatchEngineRequest('document_health_begin', { file: 'a.pdf' }, { signal: abort.signal });
+    await flush();
+    abort.abort();
+    expect(mocked.cancel).not.toHaveBeenCalled();
+    receive({ id: mocked.health.mock.calls[0][0].id, result: {} });
+    await run;
+  });
+
+  it('a request without a signal never cancels', async () => {
+    const { dispatchEngineRequest } = await import('../src/renderer/hooks/useEngine');
+    const run = dispatchEngineRequest('batch_ocr', { source: 'C:/in' });
+    await flush();
+    receive({ id: mocked.request.mock.calls[0][0].id, result: {} });
+    await run;
+    expect(mocked.cancel).not.toHaveBeenCalled();
   });
 });

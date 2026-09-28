@@ -141,6 +141,22 @@ impl EngineRouter {
         self.take_label(label);
     }
 
+    /// The process id of `label`'s own in-flight request `inner`. Only the
+    /// window that issued a request can address it: another window's inner
+    /// ids resolve to nothing, and a retired route resolves to nothing.
+    pub fn outer_for(&self, label: &str, inner: &serde_json::Value) -> Option<u64> {
+        if label.is_empty() || inner.is_null() {
+            return None;
+        }
+        self.by_outer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .filter(|(_, route)| route.label == label && route.inner == *inner)
+            .map(|(outer, _)| *outer)
+            .max()
+    }
+
     /// How many requests each window has in flight.
     pub fn outstanding(&self) -> HashMap<String, usize> {
         let mut counts: HashMap<String, usize> = HashMap::new();
@@ -252,6 +268,44 @@ fn route_with_leases(router: &EngineRouter, label: &str, request: &mut serde_jso
     let outer = router.register(label, inner, leases, workers, output_reservation);
     obj.insert("id".to_string(), serde_json::Value::from(outer));
     Some(outer)
+}
+
+/// The notification that asks the sidecar to stop request `outer` at its next
+/// safe point (`engine/cancel.py`). It carries no id, so nothing answers it;
+/// the cancelled request still answers under its own id.
+pub(crate) fn cancel_frame(outer: u64) -> String {
+    let mut line = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "$/cancelRequest",
+        "params": { "id": outer },
+    })
+    .to_string();
+    line.push('\n');
+    line
+}
+
+/// Ask the sidecar to stop one of the CALLING window's own requests, named by
+/// the id that window issued. Returns false when that window has no such
+/// request in flight.
+#[tauri::command]
+pub async fn cancel_engine_request(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    id: serde_json::Value,
+) -> Result<bool, String> {
+    let Some(outer) = app.state::<EngineRouter>().outer_for(window.label(), &id) else {
+        return Ok(false);
+    };
+    let state = app.state::<EngineState>();
+    let mut guard = state.child.lock().await;
+    let Some(child) = guard.as_mut() else {
+        return Ok(false);
+    };
+    child
+        .child
+        .write(cancel_frame(outer).as_bytes())
+        .map_err(|e| format!("Failed to write to engine: {}", e))?;
+    Ok(true)
 }
 
 /// Undo a routing when the request never reached the sidecar.
@@ -811,6 +865,51 @@ mod start_tests {
 
         assert!(router.take(outer).is_some());
         assert_eq!(other_window_work_count(&router.outstanding(), "doc-1"), 0);
+    }
+
+    #[test]
+    fn a_window_can_address_only_its_own_in_flight_request_for_cancel() {
+        let router = EngineRouter::new();
+        let mut mine = serde_json::json!({"id": 5});
+        let mut theirs = serde_json::json!({"id": 5});
+        let my_outer = route_with(&router, "main", &mut mine).unwrap();
+        let their_outer = route_with(&router, "doc-1", &mut theirs).unwrap();
+        assert_ne!(my_outer, their_outer);
+
+        let five = serde_json::json!(5);
+        assert_eq!(router.outer_for("main", &five), Some(my_outer));
+        assert_eq!(router.outer_for("doc-1", &five), Some(their_outer));
+        assert_eq!(router.outer_for("main", &serde_json::json!(6)), None);
+        assert_eq!(router.outer_for("main", &serde_json::json!("5")), None);
+        assert_eq!(router.outer_for("doc-2", &five), None);
+        assert_eq!(router.outer_for("", &five), None);
+        assert_eq!(router.outer_for("main", &serde_json::Value::Null), None);
+
+        // An outer id cannot be passed in place of an inner one.
+        assert_eq!(router.outer_for("main", &serde_json::json!(their_outer)), None);
+
+        assert!(router.take(my_outer).is_some());
+        assert_eq!(router.outer_for("main", &five), None);
+    }
+
+    #[test]
+    fn a_destroyed_windows_request_is_no_longer_addressable() {
+        let router = EngineRouter::new();
+        let mut request = serde_json::json!({"id": 1});
+        route_with(&router, "doc-1", &mut request).unwrap();
+        router.drop_label("doc-1");
+        assert_eq!(router.outer_for("doc-1", &serde_json::json!(1)), None);
+    }
+
+    #[test]
+    fn the_cancel_frame_is_an_id_less_notification_naming_the_outer_id() {
+        let line = cancel_frame(42);
+        assert!(line.ends_with('\n') && !line.trim_end().contains('\n'));
+        let frame: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
+        assert_eq!(frame["jsonrpc"], "2.0");
+        assert_eq!(frame["method"], "$/cancelRequest");
+        assert_eq!(frame["params"]["id"], 42);
+        assert!(frame.get("id").is_none());
     }
 
     #[test]

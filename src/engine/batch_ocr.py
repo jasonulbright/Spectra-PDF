@@ -31,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pikepdf
+from engine.ipc import RequestCancelled, cancelled, raise_if_cancelled
 from engine.credentials import open_pdf
 
 from engine.compress import compress
@@ -362,6 +363,7 @@ def _repair_only_entry(
         except Exception as exc:  # noqa: BLE001 - per-file isolation
             result = {"rel": rel, "status": "skipped", "reason": f"repair failed: {exc}"}
         else:
+            raise_if_cancelled()
             if not report.get("damaged"):
                 if in_place:
                     result = {"rel": rel, "status": "copied", "reason": "no repair needed -- unchanged"}
@@ -406,6 +408,8 @@ def _repair_only_entry(
             except Exception as exc:  # noqa: BLE001
                 prior = result.get("moveError")
                 result["moveError"] = f"{prior}; move failed: {exc}" if prior else str(exc)
+    except RequestCancelled:
+        raise
     except Exception as exc:  # noqa: BLE001 - per-file isolation is the point
         result = {"rel": rel, "status": "skipped", "reason": str(exc)}
         if error_root:
@@ -537,6 +541,34 @@ def ocr_file(
     })
 
 
+def _dirs_under(root: Path) -> set[str]:
+    """Every folder at or under `root` that exists now, not following links."""
+    found: set[str] = set()
+    if not root.is_dir():
+        return found
+    for top, dirs, _files in os.walk(root):
+        found.add(_norm_path(top))
+        found.update(_norm_path(os.path.join(top, d)) for d in dirs)
+    return found
+
+
+def _remove_new_empty_dirs(root: Path, before: set[str]) -> None:
+    """Remove empty folders at or under `root` that did not exist in `before`,
+    deepest first. `os.rmdir` refuses a folder with anything in it."""
+    if not root.is_dir():
+        return
+    created = sorted(
+        (d for d in _dirs_under(root) if d not in before),
+        key=lambda d: d.count(os.sep),
+        reverse=True,
+    )
+    for folder in created:
+        try:
+            os.rmdir(folder)
+        except OSError:
+            pass
+
+
 def batch_ocr(
     source: str,
     dest: str = "",
@@ -644,8 +676,14 @@ def batch_ocr(
         pw_map.setdefault(os.path.normcase(os.path.basename(norm)), str(value))
     entries, skipped_dirs = _list_sources(source_path, bool(include_images))
     results: list[dict] = []
+    stopped = False
+    # A stopped mirror run removes the empty folders its staging created.
+    dirs_before = set() if in_place else _dirs_under(dest_path)
 
     for index, (abs_path, rel) in enumerate(entries):
+        if cancelled():
+            stopped = True
+            break
         if progress:
             print(f"[{index + 1}/{len(entries)}] {rel}", flush=True)
         # In place: write to a staged temp BESIDE the original; the tail
@@ -658,12 +696,16 @@ def batch_ocr(
             abs_path.parent / f".{abs_path.name}.inplace.tmp" if in_place else dest_path / out_rel
         )
         if repair_only:
-            results.append(
-                _repair_only_entry(
-                    abs_path, rel, out_path, in_place, moved_root, error_root,
-                    replace_repaired_originals,
+            try:
+                results.append(
+                    _repair_only_entry(
+                        abs_path, rel, out_path, in_place, moved_root, error_root,
+                        replace_repaired_originals,
+                    )
                 )
-            )
+            except RequestCancelled:
+                stopped = True
+                break
             continue
         result: dict | None = None
         scratch: Path | None = None
@@ -773,10 +815,12 @@ def batch_ocr(
                 else:
                     pages: list[dict] = []
                     for i in needing:
+                        raise_if_cancelled()
                         got = recognize(str(working), i + 1, lang, tesseract_path, gs_path)
                         words = _to_pdf_rects(str(working), i, got["words"])
                         if words:
                             pages.append({"page": i + 1, "words": words})
+                    raise_if_cancelled()
                     if not pages:
                         if in_place:
                             result = {
@@ -899,6 +943,11 @@ def batch_ocr(
                         result["moveError"] = (
                             f"{prior}; move failed: {exc}" if prior else str(exc)
                         )
+        except RequestCancelled:
+            # Raised only before anything is written for this file: the
+            # original and its outputs are as they were, so it is not listed.
+            stopped = True
+            result = None
         except Exception as exc:  # noqa: BLE001 - per-file isolation is the point
             result = {"rel": rel, "status": "skipped", "reason": str(exc)}
             if error_root:
@@ -921,9 +970,13 @@ def batch_ocr(
 
         if result is not None:
             results.append(result)
+        if stopped:
+            break
 
-    report = {"cancelled": False, "results": results, "skippedDirs": skipped_dirs, "inPlace": in_place}
-    if remove_empty_folders:
+    if stopped and not in_place:
+        _remove_new_empty_dirs(dest_path, dirs_before)
+    report = {"cancelled": stopped, "results": results, "skippedDirs": skipped_dirs, "inPlace": in_place}
+    if remove_empty_folders and not stopped:
         protected = [str(dest_path)] if not in_place else []
         protected += [str(Path(r).resolve()) for r in (moved_root, error_root) if r]
         report["emptyFolders"] = remove_empty_folders_in(str(source_path), protected)
@@ -1257,6 +1310,17 @@ def _describe_filing(
     return " · ".join(parts) if parts else "none (source folder untouched)"
 
 
+def _outcome(report: dict) -> str:
+    if not report.get("cancelled"):
+        return "completed"
+    if report.get("inPlace"):
+        return (
+            "STOPPED by the user (files finished before the stop were replaced; "
+            "the rest are untouched)"
+        )
+    return "STOPPED by the user (files finished before the stop remain in the destination)"
+
+
 def _write_log(
     started_at: datetime,
     finished_at: datetime,
@@ -1293,7 +1357,7 @@ def _write_log(
         *(["Mode:         repair only (no OCR)"] if repair_only else []),
         f"Languages:    {'not used (repair only)' if repair_only else lang}",
         f"Filing:       {filing}",
-        "Result:       completed",
+        f"Result:       {_outcome(report)}",
         "",
         (
             f"Files: {len(results)} processed — {repaired_files} repaired · "

@@ -7,6 +7,7 @@ import {
   rmSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -582,6 +583,69 @@ describe('batch OCR folder mirror', () => {
     const log = readFileSync(snapshot.logPath!, 'utf8');
     expect(log).toMatch(/Finished: +\S+ \S+ +\(\S.*, paused \d/);
     expect(log).toContain('STOPPED by the user');
+
+    await $('[data-testid="batch-ocr-close"]').click();
+    rmSync(tree, { recursive: true, force: true });
+  });
+
+  // An in-place run is one engine request; Stop reaches it as a cancel. The
+  // stop is pressed once the first original has been replaced, so the report
+  // names at least one finished file and every other original is still its
+  // own bytes. Pause stays disabled for in-place runs.
+  it('stops an in-place run: finished originals replaced, the rest untouched', async function () {
+    this.timeout(300_000);
+    const tree = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-batch-inplace-stop-'));
+    const iSrc = resolve(tree, 'in');
+    mkdirSync(iSrc, { recursive: true });
+    const names = ['1.pdf', '2.pdf', '3.pdf', '4.pdf', '5.pdf', '6.pdf'];
+    for (const name of names) copyFileSync(SCANNED, resolve(iSrc, name));
+    const original = readFileSync(SCANNED);
+    const replaced = (): string[] =>
+      names.filter((n) => !readFileSync(resolve(iSrc, n)).equals(original));
+
+    await waitForHarness();
+    expect(await invokeAppCommand('tools.batchOcr')).toBe(true);
+    await $('[data-testid="batch-ocr-dialog"]').waitForDisplayed({ timeout: 10_000 });
+    await batchOcrSetFolders(iSrc, resolve(tree, 'unused'));
+    await browser.waitUntil(async () => (await batchOcrSnapshot())?.fileCount === 6, {
+      timeout: 15_000,
+      timeoutMsg: 'enumeration never found the 6 in-place fixtures',
+    });
+    await $('[data-testid="batch-inplace"]').click();
+    await $('[data-testid="batch-ocr-start"]').click();
+    await $('[data-testid="batch-inplace-replace"]').click();
+
+    const stop = $('[data-testid="batch-ocr-stop"]');
+    await stop.waitForDisplayed({ timeout: 10_000 });
+    expect(await stop.isEnabled()).toBe(true);
+    expect(await $('[data-testid="batch-ocr-pause"]').isEnabled()).toBe(false);
+    await browser.waitUntil(() => replaced().length >= 1, {
+      timeout: 120_000,
+      interval: 100,
+      timeoutMsg: 'no original was replaced',
+    });
+    await stop.click();
+    await browser.waitUntil(async () => (await batchOcrSnapshot())?.phase === 'done', {
+      timeout: 60_000,
+      interval: 250,
+      timeoutMsg: 'Stop never ended the in-place run — snapshot: ' + JSON.stringify(await batchOcrSnapshot()),
+    });
+
+    const snapshot = (await batchOcrSnapshot())!;
+    expect(snapshot.report!.cancelled).toBe(true);
+    const finished = snapshot.report!.results.map((r) => r.rel);
+    expect(finished.length).toBeGreaterThanOrEqual(1);
+    expect(finished.length).toBeLessThan(names.length);
+    expect(snapshot.report!.results.every((r) => r.status === 'ocr')).toBe(true);
+    // Every original is exactly one of: fully replaced and reported, or untouched.
+    expect(replaced().sort()).toEqual([...finished].sort());
+    for (const rel of finished) {
+      expect(await extractAllText(resolve(iSrc, rel))).toMatch(/\w{3,}/);
+    }
+    expect(readdirSync(iSrc).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+    await expect($('[data-testid="batch-ocr-cancelled-note"]')).toHaveText(
+      'Files finished before the stop were replaced. The other originals are untouched.',
+    );
 
     await $('[data-testid="batch-ocr-close"]').click();
     rmSync(tree, { recursive: true, force: true });

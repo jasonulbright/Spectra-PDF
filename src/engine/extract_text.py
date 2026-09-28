@@ -1,6 +1,7 @@
 """Text extraction from PDF using pikepdf and pdfminer.six."""
 
 import heapq
+import math
 from io import StringIO
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from pdfminer.layout import (
     LAParams,
     LTChar,
     LTFigure,
+    LTLayoutContainer,
     LTPage,
     LTTextBoxVertical,
     LTTextContainer,
@@ -125,11 +127,175 @@ class _DrawnOrderGrouping:
         return list(plane)
 
 
-class _DrawnOrderPage(_DrawnOrderGrouping, LTPage):
+AXIS_TOLERANCE = 3.0
+"""Degrees within which an angle counts as the nearest multiple of 90: a
+deskewed scan's text layer leans by a fraction of a degree per line."""
+
+CHAIN_TOLERANCE = 8.0
+"""Degrees between neighbouring off-axis angles that still read as one
+orientation: text set on an arc turns a few degrees per glyph."""
+
+MIN_ORIENTED_CHARS = 3
+"""An off-axis orientation with fewer characters reads with the upright text,
+so a stray glyph costs no layout pass of its own."""
+
+
+def _orientation(char: LTChar) -> tuple[float, bool]:
+    """The rotation of a character's glyph space in device space, in degrees
+    counter-clockwise in [0, 360), and whether that space is reflected.
+
+    The glyph x axis of the text rendering matrix is the direction a
+    horizontal font advances along its baseline (ISO 32000-2 §9.4.4). The
+    matrix already carries the CTM, and pdfminer folds the page's /Rotate
+    (§7.7.3.3) into the initial CTM, so page rotation and text-matrix rotation
+    arrive as one angle."""
+    a, b, c, d = char.matrix[0], char.matrix[1], char.matrix[2], char.matrix[3]
+    if a == 0 and b == 0:
+        return 0.0, False
+    angle = math.degrees(math.atan2(b, a)) % 360.0
+    return angle, a * d - b * c < 0
+
+
+def _circular_mean(angles: list[float]) -> float:
+    x = sum(math.cos(math.radians(angle)) for angle in angles)
+    y = sum(math.sin(math.radians(angle)) for angle in angles)
+    return round(math.degrees(math.atan2(y, x)) % 360.0, 6)
+
+
+def _partition(chars: list[LTChar]) -> dict[tuple[float, bool], list[LTChar]]:
+    """The characters grouped by reading orientation.
+
+    An angle within `AXIS_TOLERANCE` of a multiple of 90 is that multiple.
+    Other angles of one reflection sort around the circle and chain while
+    neighbours lie within `CHAIN_TOLERANCE`; a chain reads in the frame of its
+    mean angle. A chain under `MIN_ORIENTED_CHARS` joins the upright group."""
+    parts: dict[tuple[float, bool], list[LTChar]] = {}
+    loose: dict[bool, list[tuple[float, LTChar]]] = {}
+    for char in chars:
+        angle, reflected = _orientation(char)
+        axis = (round(angle / 90.0) * 90) % 360
+        if abs(((angle - axis + 180.0) % 360.0) - 180.0) <= AXIS_TOLERANCE:
+            parts.setdefault((float(axis), reflected), []).append(char)
+        else:
+            loose.setdefault(reflected, []).append((angle, char))
+    strays: list[LTChar] = []
+    for reflected in sorted(loose):
+        entries = sorted(loose[reflected], key=lambda entry: entry[0])
+        chains = [[entries[0]]]
+        for entry in entries[1:]:
+            if entry[0] - chains[-1][-1][0] <= CHAIN_TOLERANCE:
+                chains[-1].append(entry)
+            else:
+                chains.append([entry])
+        if len(chains) > 1 and entries[0][0] + 360.0 - entries[-1][0] <= CHAIN_TOLERANCE:
+            chains[0] = chains.pop() + chains[0]
+        for chain in chains:
+            members = [char for _angle, char in chain]
+            if len(members) < MIN_ORIENTED_CHARS:
+                strays.extend(members)
+                continue
+            key = (_circular_mean([angle for angle, _char in chain]), reflected)
+            parts.setdefault(key, []).extend(members)
+    if strays:
+        parts.setdefault((0.0, False), []).extend(strays)
+    order = {id(char): n for n, char in enumerate(chars)}
+    for members in parts.values():
+        members.sort(key=lambda char: order[id(char)])
+    return parts
+
+
+def _to_frame(box, angle: float, reflected: bool) -> tuple[float, float, float, float]:
+    """`box` in the frame where text of orientation (`angle`, `reflected`)
+    runs left to right with its glyph tops up: the axis-aligned bounds of the
+    box's corners rotated by `-angle`, then mirrored top to bottom when the
+    glyph space is reflected."""
+    theta = math.radians(angle)
+    cos, sin = math.cos(theta), math.sin(theta)
+    xs, ys = [], []
+    for x, y in ((box[0], box[1]), (box[0], box[3]), (box[2], box[1]), (box[2], box[3])):
+        u = x * cos + y * sin
+        v = -x * sin + y * cos
+        xs.append(u)
+        ys.append(-v if reflected else v)
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _refit(container) -> None:
+    """Every text container under `container` bounds exactly its own
+    children again, after the characters took back their device bounds."""
+    bounded = []
+    for child in container:
+        if isinstance(child, LTTextContainer):
+            _refit(child)
+        if hasattr(child, "x0"):
+            bounded.append(child)
+    if bounded:
+        container.set_bbox(
+            (
+                min(child.x0 for child in bounded),
+                min(child.y0 for child in bounded),
+                max(child.x1 for child in bounded),
+                max(child.y1 for child in bounded),
+            )
+        )
+
+
+class _Frame(_DrawnOrderGrouping, LTLayoutContainer):
+    """The characters of one orientation, laid out by pdfminer's analysis in
+    that orientation's upright frame."""
+
+
+class _OrientedAnalysis:
+    """pdfminer's layout analysis, run once per text orientation.
+
+    pdfminer groups characters into lines by their device-space bounds, so it
+    reads only text whose baseline runs left to right on the device: a page
+    with /Rotate, or text drawn at 90, 180, 270 or any other angle, reads one
+    character per line or with its lines reversed. Here the characters are
+    partitioned by orientation, and each part is analysed in the frame where
+    its own baselines run left to right; the resulting lines and boxes then
+    take back device-space bounds. Parts read in descending order of their
+    character count, so the orientation that carries most of the page leads
+    and a rotated side label follows it; equal counts read in ascending
+    angle. A page whose text is all upright takes pdfminer's analysis
+    unchanged.
+    """
+
+    def analyze(self, laparams) -> None:
+        if isinstance(self, LTFigure) and not laparams.all_texts:
+            return
+        parts = _partition([obj for obj in self if isinstance(obj, LTChar)])
+        if not parts or list(parts) == [(0.0, False)]:
+            LTLayoutContainer.analyze(self, laparams)
+            return
+        others = [obj for obj in self if not isinstance(obj, LTChar)]
+        for obj in others:
+            obj.analyze(laparams)
+        order = sorted(parts, key=lambda key: (-len(parts[key]), key[0], key[1]))
+        laid_out = []
+        for key in order:
+            chars = parts[key]
+            device = [(char.x0, char.y0, char.x1, char.y1) for char in chars]
+            for char in chars:
+                char.set_bbox(_to_frame(char.bbox, *key))
+            frame = _Frame(_to_frame(self.bbox, *key))
+            frame.extend(chars)
+            LTLayoutContainer.analyze(frame, laparams)
+            for char, bbox in zip(chars, device):
+                char.set_bbox(bbox)
+            for obj in frame:
+                if isinstance(obj, LTTextContainer):
+                    _refit(obj)
+                laid_out.append(obj)
+        self.groups = None
+        self._objs = laid_out + others
+
+
+class _DrawnOrderPage(_OrientedAnalysis, _DrawnOrderGrouping, LTPage):
     pass
 
 
-class _DrawnOrderFigure(_DrawnOrderGrouping, LTFigure):
+class _DrawnOrderFigure(_OrientedAnalysis, _DrawnOrderGrouping, LTFigure):
     pass
 
 

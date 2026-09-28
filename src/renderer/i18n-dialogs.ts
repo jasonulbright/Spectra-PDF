@@ -834,7 +834,7 @@ export const DIALOG_STRINGS = {
   'dialog.batch.notMoving': 'Not moving them (default)',
   'dialog.batch.inPlace': 'Replace the originals in place (no destination folder)',
   'dialog.batch.inPlaceNote':
-    'Each file is processed to a staged copy beside it, read back and verified, then swapped over the original. Already-searchable files are left untouched. Runs as one operation — there is no per-file stop.',
+    'Each file is processed to a staged copy beside it, read back and verified, then swapped over the original. Already-searchable files are left untouched.',
   'dialog.batch.conflictIdentity':
     'These are the same folder (reached by two different paths) — choose a separate destination for the searchable copies.',
   'dialog.batch.conflictInside':
@@ -884,7 +884,6 @@ export const DIALOG_STRINGS = {
   'dialog.batch.start': 'Start',
   'dialog.batch.stop': 'Stop',
   'dialog.batch.stopping': 'Stopping…',
-  'dialog.batch.noStopInPlace': 'An in-place run is one operation — it cannot stop per file',
   'dialog.batch.progressStopping':
     'Stopping — finishing the current file… (Close again to abandon the run.)',
   'dialog.batch.progressStarting': 'Starting…',
@@ -901,6 +900,8 @@ export const DIALOG_STRINGS = {
   'dialog.batch.sumNoText': '{{count}} copied (no text recognized)',
   'dialog.batch.sumSkipped': '{{count}} skipped',
   'dialog.batch.cancelledNote': 'Files finished before the stop remain in the destination.',
+  'dialog.batch.cancelledNoteInPlace':
+    'Files finished before the stop were replaced. The other originals are untouched.',
   'dialog.batch.movedCount_one': '{{count}} original moved',
   'dialog.batch.movedCount_other': '{{count}} originals moved',
   'dialog.batch.repairedCount': '{{count}} repaired',
@@ -918,7 +919,8 @@ export const DIALOG_STRINGS = {
   'dialog.batch.repairOnlyNote': 'Every file is repaired and no text is recognized. A file with no damage is copied unchanged, or left unchanged in place. Languages, scan enhancement, MRC compression and the damaged-file repair option do not apply.',
   'dialog.batch.pause': 'Pause',
   'dialog.batch.resume': 'Resume',
-  'dialog.batch.noPauseInPlace': 'An in-place run is one operation — it cannot pause per file',
+  'dialog.batch.noPauseInPlace':
+    'An in-place run cannot pause — it would hold up engine work in every window. Use Stop.',
   'dialog.batch.progressPausing': 'Pausing — finishing the current file…',
   'dialog.batch.progressPaused': 'Paused after {{done}} of {{count}} files. Resume continues with the next file.',
   'dialog.batch.verbRepairing': 'repairing',
