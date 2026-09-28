@@ -32,6 +32,14 @@ export function showableDoc(state: AppState): string | null {
   return f && !f.importOnly ? path : null;
 }
 
+/** The paths among `paths` that are open and hold unsaved changes, in order. */
+export function unsavedAmong(state: AppState, paths: readonly string[]): string[] {
+  return paths.filter((path) => {
+    const f = state.files.get(path);
+    return f !== undefined && !f.importOnly && (f.dirty || state.pageDirtyPaths.includes(path));
+  });
+}
+
 /** Who opened the file at `fileId` and what its /P bits allow. A file with no
  * record (unencrypted, or not open) allows everything. Every permission check
  * reads it here, never off `files` directly. */

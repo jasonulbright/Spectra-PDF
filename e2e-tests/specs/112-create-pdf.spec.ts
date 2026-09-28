@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { existsSync, rmSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, rmSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -12,6 +12,8 @@ import {
   getState,
   getWorkspacePageIds,
   invokeAppCommand,
+  getCanvasDocs,
+  dropFilesOntoDoc,
 } from '../support/harness.js';
 
 // Create PDF, through the REAL dialog and the REAL engine.
@@ -358,5 +360,80 @@ describe('Create PDF from any file', () => {
       reverse: true,
       timeout: 10_000,
     });
+  });
+
+  // ── Issue 39: list order, one-click OCR, images dropped on a page ───────
+
+  it('reorders rows with Move up and Move down, and builds pages in that order', async function () {
+    this.timeout(180_000);
+    const names = ['p1.png', 'p2.png', 'p3.png'];
+    for (const name of names) copyFileSync(pngPath, resolve(tmp, name));
+    expect(await invokeAppCommand('file.createPdf')).toBe(true);
+    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ timeout: 10_000 });
+
+    const first = await createPdfRun(names.map((n) => resolve(tmp, n)), resolve(tmp, 'order-a.pdf'));
+    expect(first).not.toBe(null);
+    const rowNames = async () =>
+      $$('[data-testid="create-pdf-row-name"]').map((name) => name.getText());
+    expect(await rowNames()).toEqual(names);
+
+    await $$('[data-testid="create-pdf-row-down"]')[0].click();
+    expect(await rowNames()).toEqual(['p2.png', 'p1.png', 'p3.png']);
+    await $$('[data-testid="create-pdf-row-up"]')[2].click();
+    expect(await rowNames()).toEqual(['p2.png', 'p3.png', 'p1.png']);
+
+    const out = resolve(tmp, 'order-b.pdf');
+    const second = await browser.executeAsync<CreatePdfRunResult | null, [string]>(
+      function (o, done) {
+        (window as any).__SPECTRA_TEST__.createPdfConvertCurrent(o)
+          .then((r: CreatePdfRunResult | null) => done(r))
+          .catch(() => done(null));
+      },
+      out,
+    );
+    expect(second).not.toBe(null);
+    expect(second!.pages).toBe(3);
+
+    await $('[data-testid="create-pdf-close"]').click();
+    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ reverse: true, timeout: 10_000 });
+  });
+
+  it('opens the created PDF with Scan & OCR armed in one click', async function () {
+    this.timeout(180_000);
+    expect(await invokeAppCommand('file.createPdf')).toBe(true);
+    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ timeout: 10_000 });
+    const result = await createPdfRun([pngPath], resolve(tmp, 'ocr-me.pdf'));
+    expect(result).not.toBe(null);
+    await $('[data-testid="create-pdf-open-ocr"]').waitForDisplayed({ timeout: 30_000 });
+    await $('[data-testid="create-pdf-open-ocr"]').click();
+
+    await browser.waitUntil(
+      async () => {
+        const state = await getState();
+        return (state.activeFile?.path ?? '').includes('ocr-me.pdf') && state.activeToolId === 'ocr';
+      },
+      { timeout: 30_000, timeoutMsg: 'the created PDF did not open with Scan & OCR armed' },
+    );
+    await $('[data-testid="find-bar"]').waitForDisplayed({ timeout: 15_000 });
+    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ reverse: true, timeout: 10_000 });
+  });
+
+  it('offers Create PDF when an image is dropped on a page', async function () {
+    this.timeout(120_000);
+    const docs = await getCanvasDocs(1);
+    const target = docs.find((d) => d.path.includes('ocr-me.pdf')) ?? docs[0];
+    expect(target).toBeDefined();
+    const before = target.pages;
+
+    await dropFilesOntoDoc([pngPath], target.id, 0);
+    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ timeout: 10_000 });
+    const kinds = await $$('[data-testid="create-pdf-row"]').map((row) => row.getAttribute('data-kind'));
+    expect(kinds).toEqual(['image']);
+    // The image did not enter the page tier.
+    const after = (await getCanvasDocs(1)).find((d) => d.id === target.id);
+    expect(after?.pages).toBe(before);
+
+    await $('[data-testid="create-pdf-close"]').click();
+    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ reverse: true, timeout: 10_000 });
   });
 });

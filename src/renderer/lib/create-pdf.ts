@@ -162,6 +162,25 @@ export function captureIdToReleaseOnRowRemoval(
     : removed.captureId;
 }
 
+const NAME_ORDER = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+/**
+ * One picked or dropped batch in the order the folder listed it.
+ *
+ * The Windows file dialog and the shell drop both report the FOCUSED item
+ * first — the file clicked last — and the rest after it, so appending a batch
+ * as delivered makes the last-clicked image page 1. Delivery order carries no
+ * user intent; the folder's name order (numeric-aware, so `img2` precedes
+ * `img10`) is what the user saw. Order within the list is set afterwards by
+ * the row controls.
+ */
+export function orderSelection(paths: readonly string[]): string[] {
+  const dirOf = (path: string) => path.slice(0, path.length - baseName(path).length);
+  return [...paths].sort(
+    (a, b) => NAME_ORDER.compare(dirOf(a), dirOf(b)) || NAME_ORDER.compare(baseName(a), baseName(b)),
+  );
+}
+
 /**
  * Move a row by `delta` positions, clamped.
  *
@@ -189,6 +208,62 @@ export function reorderRows(rows: readonly SourceRow[], from: number, to: number
   const [row] = next.splice(from, 1);
   next.splice(to, 0, row);
   return next;
+}
+
+/** The image suffixes the webview decodes itself; the rest get no thumbnail. */
+const PREVIEW_SUFFIXES = ['.png', '.jpg', '.jpeg', '.jpe', '.gif', '.bmp', '.dib', '.webp', '.avif'];
+
+export function hasThumbnail(row: SourceRow): boolean {
+  return row.kind === 'image' && !!row.path && PREVIEW_SUFFIXES.includes(extensionOf(row.path));
+}
+
+/**
+ * Runs at most `limit` tasks at once; the rest wait in call order. A task
+ * whose `live()` is false by its turn is dropped without running.
+ */
+export function createLimiter(limit: number) {
+  let running = 0;
+  const queue: (() => void)[] = [];
+  const pump = () => {
+    while (running < limit && queue.length > 0) queue.shift()!();
+  };
+  return function run<T>(task: () => Promise<T>, live: () => boolean = () => true): Promise<T | null> {
+    return new Promise((resolve, reject) => {
+      queue.push(() => {
+        if (!live()) {
+          resolve(null);
+          return;
+        }
+        running += 1;
+        task().then(resolve, reject).finally(() => {
+          running -= 1;
+          pump();
+        });
+      });
+      pump();
+    });
+  };
+}
+
+/** Scroll speed, in pixels per frame, for a drag held `distance` pixels from
+ * a list edge inside a `band`-pixel zone; 0 outside the zone. Negative scrolls
+ * up. */
+export function edgeScrollStep(top: number, bottom: number, y: number, band = 24, max = 12): number {
+  if (y < top + band) return -Math.ceil(max * Math.min(1, (top + band - y) / band));
+  if (y > bottom - band) return Math.ceil(max * Math.min(1, (y - (bottom - band)) / band));
+  return 0;
+}
+
+/**
+ * Where a dragged row lands: its final index is the number of OTHER rows whose
+ * vertical midpoint lies above the pointer. `midpoints` are in list order.
+ */
+export function dragTargetIndex(midpoints: readonly number[], from: number, y: number): number {
+  let to = 0;
+  midpoints.forEach((mid, i) => {
+    if (i !== from && y > mid) to += 1;
+  });
+  return to;
 }
 
 /** Is the quality preset meaningful for this list? It is a `distill` parameter

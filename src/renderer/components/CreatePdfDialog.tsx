@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useAppModal } from '../hooks/useAppModal';
 import { useEngine } from '../hooks/useEngine';
 import { useOperationQueue } from '../hooks/useOperationQueue';
-import { app, dialog } from '../lib/tauri-bridge';
+import { app, dialog, file } from '../lib/tauri-bridge';
 import { gsBlocked, gsPathIfAvailable, requireGsPath } from '../lib/gs-capability';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { GsRequiredNotice } from './GsRequiredNotice';
@@ -21,6 +21,11 @@ import {
   baseName,
   blankRow,
   captureIdToReleaseOnRowRemoval,
+  createLimiter,
+  dragTargetIndex,
+  edgeScrollStep,
+  hasThumbnail,
+  orderSelection,
   rowFromPath,
   defaultOutputPath,
   hasUnsupported,
@@ -79,7 +84,7 @@ export function CreatePdfDialog({
   /** Open the created PDF through the normal open funnel; rejection is
    * surfaced IN the dialog (the fire-and-forget shape lost failures once
    * the dialog had closed — regression). */
-  onOpenResult: (path: string) => Promise<void>;
+  onOpenResult: (path: string, options?: { recognize?: boolean }) => Promise<void>;
   /** Sources the dialog opens pre-populated with — a drop of non-PDF files
    * on the window lands here rather than doing nothing. */
   initialPaths?: readonly string[];
@@ -91,7 +96,7 @@ export function CreatePdfDialog({
   useTranslation();
   const { callRaw } = useEngine();
   const { track } = useOperationQueue();
-  const [rows, setRows] = useState<SourceRow[]>(() => addPaths([], initialPaths ?? []));
+  const [rows, setRows] = useState<SourceRow[]>(() => addPaths([], orderSelection(initialPaths ?? [])));
   const [pageSize, setPageSize] = useState<PageSize>('auto');
   const [orientation, setOrientation] = useState<Orientation>('auto');
   const [margin, setMargin] = useState('0');
@@ -108,7 +113,8 @@ export function CreatePdfDialog({
   const clipboardScratchPaths = useRef(new Set<string>());
   const webCaptureIds = useRef(new Set<string>());
   const clipboardDialogMounted = useRef(true);
-  const dragFrom = useRef<number | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const [drag, setDrag] = useState<{ from: number; to: number } | null>(null);
   // Ref, not state: convert()'s reentrancy window opens BEFORE any state
   // updates land (the whole native save-dialog round trip) — a second
   // click read a stale busy=false closure, both clicks awaited the SAME
@@ -150,7 +156,7 @@ export function CreatePdfDialog({
   React.useEffect(() => {
     const seeded = JSON.parse(seedKey) as string[];
     if (seeded.length === 0) return;
-    setRows((prev) => addPaths(prev, seeded));
+    setRows((prev) => addPaths(prev, orderSelection(seeded)));
   }, [seedKey]);
 
   const gs = useGsCapability();
@@ -166,7 +172,7 @@ export function CreatePdfDialog({
   const addSources = useCallback(async () => {
     const picked = await dialog.pickCreatePdfSources();
     if (picked.length > 0) {
-      setRows((prev) => addPaths(prev, picked));
+      setRows((prev) => addPaths(prev, orderSelection(picked)));
       setError(null);
       setNotice(null);
       setResult(null);
@@ -227,6 +233,61 @@ export function CreatePdfDialog({
     if (captureId) releaseWebCapture(captureId);
     setRows((prev) => removeRow(prev, rowId));
   }, [rows, clipboardInfo, releaseClipboardScratch, releaseWebCapture]);
+
+  // HTML5 drag-and-drop never completes in the webview while native file drop
+  // is enabled, so the reorder is pointer-driven with window-level listeners.
+  // Row positions are re-measured on every move and scroll, because the list
+  // scrolls under a held drag (wheel or edge auto-scroll).
+  const endDragRef = useRef<(() => void) | null>(null);
+  const startRowDrag = useCallback((event: React.PointerEvent, from: number) => {
+    const list = listRef.current;
+    if (event.button !== 0 || !list) return;
+    event.preventDefault();
+    endDragRef.current?.();
+    let to = from;
+    let pointerY = event.clientY;
+    let frame = 0;
+    const retarget = () => {
+      const midpoints = Array.from(
+        list.querySelectorAll<HTMLElement>('[data-testid="create-pdf-row"]'),
+      ).map((item) => {
+        const rect = item.getBoundingClientRect();
+        return rect.top + rect.height / 2;
+      });
+      to = dragTargetIndex(midpoints, from, pointerY);
+      setDrag({ from, to });
+    };
+    const tick = () => {
+      const box = list.getBoundingClientRect();
+      const step = edgeScrollStep(box.top, box.bottom, pointerY);
+      if (step !== 0) list.scrollTop += step;
+      frame = requestAnimationFrame(tick);
+    };
+    const onMove = (e: PointerEvent) => {
+      pointerY = e.clientY;
+      retarget();
+    };
+    const finish = (commit: boolean) => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      list.removeEventListener('scroll', retarget);
+      endDragRef.current = null;
+      setDrag(null);
+      if (commit && to !== from) setRows((prev) => reorderRows(prev, from, to));
+    };
+    const onUp = () => finish(true);
+    const onCancel = () => finish(false);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    list.addEventListener('scroll', retarget);
+    endDragRef.current = onCancel;
+    setDrag({ from, to });
+    frame = requestAnimationFrame(tick);
+  }, []);
+  React.useEffect(() => () => endDragRef.current?.(), []);
 
   // A capture arrives as one row per captured page, in capture order, each
   // carrying the title its bookmark will use. Partial-crawl status moves to
@@ -378,6 +439,19 @@ export function CreatePdfDialog({
     return () => registerCreatePdf(null);
   }, []);
 
+  // Close only when the open SETTLES — a failure (output deleted/locked since
+  // conversion) surfaces here instead of dying as an unhandled rejection after
+  // unmount.
+  const openResult = (path: string, recognize: boolean) => {
+    setBusy(true);
+    onOpenResult(path, { recognize })
+      .then(() => onClose())
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => setBusy(false));
+  };
+
   // Escape/backdrop obey the same busy discipline as the Close button —
   // a conversion has no cancel, and closing mid-call abandons an in-flight
   // engine job (the BatchOcr guardedClose rule; regression
@@ -433,6 +507,7 @@ export function CreatePdfDialog({
         ) : (
           <ul
             className="flex flex-col border border-neutral-800 rounded divide-y divide-neutral-800 max-h-56 overflow-y-auto"
+            ref={listRef}
             data-testid="create-pdf-list"
             aria-label={tChrome('dialog.createPdf.listLabel')}
           >
@@ -441,19 +516,27 @@ export function CreatePdfDialog({
                 key={row.id}
                 data-testid="create-pdf-row"
                 data-kind={row.kind || 'unsupported'}
-                draggable={!busy}
-                onDragStart={() => {
-                  dragFrom.current = index;
-                }}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const from = dragFrom.current;
-                  dragFrom.current = null;
-                  if (from !== null) setRows((prev) => reorderRows(prev, from, index));
-                }}
-                className="flex items-center gap-2 px-2 py-1.5 text-xs"
+                data-dragging={drag?.from === index ? 'yes' : undefined}
+                className={
+                  'flex items-center gap-2 px-2 py-1.5 text-xs ' +
+                  (drag?.from === index ? 'opacity-50 ' : '') +
+                  (drag && drag.from !== index && drag.to === index
+                    ? drag.to > drag.from
+                      ? 'border-b-2 border-b-blue-500'
+                      : 'border-t-2 border-t-blue-500'
+                    : '')
+                }
               >
+                <span
+                  data-testid="create-pdf-row-grip"
+                  aria-hidden="true"
+                  title={tChrome('dialog.createPdf.dragHandle')}
+                  className={`shrink-0 px-0.5 text-neutral-500 select-none touch-none ${busy ? '' : 'cursor-grab hover:text-neutral-300'}`}
+                  onPointerDown={busy ? undefined : (e) => startRowDrag(e, index)}
+                >
+                  ⋮⋮
+                </span>
+                <RowThumbnail row={row} />
                 <span
                   className={
                     'shrink-0 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide ' +
@@ -471,7 +554,7 @@ export function CreatePdfDialog({
                   className={`flex-1 min-w-0 ${row.kind ? 'text-neutral-300' : 'text-red-400'}`}
                   title={row.origin === 'web' ? (row.captureUrl ?? '') : (row.path ?? '')}
                 >
-                  <span className="block truncate">{rowName(row)}</span>
+                  <span className="block truncate" data-testid="create-pdf-row-name">{rowName(row)}</span>
                   {rowDetail(row, clipboardInfo[row.id]) && (
                     <span
                       className="block truncate text-[10px] text-neutral-500"
@@ -633,26 +716,26 @@ export function CreatePdfDialog({
 
         <div className="flex justify-end gap-2 pt-1">
           {result && (
-            <button
-              type="button"
-              data-testid="create-pdf-open"
-              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded font-medium"
-              disabled={busy}
-              onClick={() => {
-                // Close only when the open SETTLES — a failure (output
-                // deleted/locked since conversion) surfaces here instead
-                // of dying as an unhandled rejection after unmount.
-                setBusy(true);
-                onOpenResult(result.output)
-                  .then(() => onClose())
-                  .catch((err) => {
-                    setError(err instanceof Error ? err.message : String(err));
-                  })
-                  .finally(() => setBusy(false));
-              }}
-            >
-              {tChrome('dialog.common.open')}
-            </button>
+            <>
+              <button
+                type="button"
+                data-testid="create-pdf-open-ocr"
+                className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
+                disabled={busy}
+                onClick={() => openResult(result.output, true)}
+              >
+                {tChrome('dialog.createPdf.openAndOcr')}
+              </button>
+              <button
+                type="button"
+                data-testid="create-pdf-open"
+                className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded font-medium"
+                disabled={busy}
+                onClick={() => openResult(result.output, false)}
+              >
+                {tChrome('dialog.common.open')}
+              </button>
+            </>
           )}
           {psRefused && <GsRequiredNotice capability={gs} testId="create-pdf-gs" />}
           <button
@@ -714,6 +797,48 @@ function rowDetail(row: SourceRow, clip: ClipboardSourceResult | undefined): str
       : tChromeCount(summary.key as UiPluralKey, summary.count, summary.params);
   }
   return '';
+}
+
+/** Largest image read for a list thumbnail; a bigger one is never read and
+ * shows an empty tile. */
+const MAX_THUMBNAIL_BYTES = 24 * 1024 * 1024;
+/** Thumbnail reads in flight at once, across every row. */
+const thumbnailReads = createLimiter(3);
+
+function RowThumbnail({ row }: { row: SourceRow }): React.JSX.Element {
+  const [url, setUrl] = useState<string | null>(null);
+  const path = hasThumbnail(row) ? (row.path ?? null) : null;
+  React.useEffect(() => {
+    if (!path) return;
+    let live = true;
+    let objectUrl: string | null = null;
+    void thumbnailReads(() => file.readExternalBufferCapped(path, MAX_THUMBNAIL_BYTES), () => live).then(
+      (bytes) => {
+        if (!live || !bytes || bytes.byteLength === 0) return;
+        objectUrl = URL.createObjectURL(new Blob([bytes as BlobPart]));
+        setUrl(objectUrl);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setUrl(null);
+    };
+  }, [path]);
+  return (
+    <span className="shrink-0 w-10 h-10 flex items-center justify-center bg-neutral-800 rounded overflow-hidden">
+      {url && (
+        <img
+          src={url}
+          alt=""
+          data-testid="create-pdf-row-thumb"
+          draggable={false}
+          className="max-w-full max-h-full object-contain"
+        />
+      )}
+    </span>
+  );
 }
 
 function Shell({ children, onClose }: { children: React.ReactNode; onClose: () => void }): React.JSX.Element {

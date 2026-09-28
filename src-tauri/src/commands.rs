@@ -1118,6 +1118,27 @@ pub async fn read_file_binary(file_path: String) -> Result<tauri::ipc::Response,
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Bytes of a file no larger than `max_bytes`, or an empty body without
+/// reading when it is larger. The size comes from metadata, so an oversized
+/// file costs no read at all.
+#[tauri::command]
+pub async fn read_file_binary_capped(
+    file_path: String,
+    max_bytes: u64,
+) -> Result<tauri::ipc::Response, String> {
+    let meta =
+        fs::metadata(&file_path).map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
+    if !meta.is_file() || meta.len() > max_bytes {
+        return Ok(tauri::ipc::Response::new(Vec::new()));
+    }
+    let bytes =
+        fs::read(&file_path).map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
+    if bytes.len() as u64 > max_bytes {
+        return Ok(tauri::ipc::Response::new(Vec::new()));
+    }
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Create the parent directories of `path` — run before the engine writes a
 /// mirror output (`apply_ocr_layer` saves to the exact path it's given and
 /// does not create directories; the contract stays engine-unchanged).

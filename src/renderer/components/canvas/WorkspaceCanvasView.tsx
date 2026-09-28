@@ -11,7 +11,7 @@ import { PermissionRefusal, capabilityBlockText, signBlock } from '../../lib/doc
 import { useAppState, useAppDispatch, useReadAppState, useReadLinkDrafts, useSubscribeAppState } from '../../state/AppStateProvider';
 import { usePdfProxyState } from '../../hooks/usePdfProxies';
 import { isUnrenderable } from '../../lib/render-health';
-import { showableFile, tabFiles } from '../../state/selectors';
+import { showableFile, tabFiles, unsavedAmong } from '../../state/selectors';
 import { useDocumentHealth } from '../../hooks/useDocumentHealth';
 import { factsFor, isCollecting, verdictFor } from '../../lib/doc-health';
 import { useFlipReorder } from '../../hooks/useFlipReorder';
@@ -306,6 +306,8 @@ interface WorkspaceCanvasViewProps {
   // Persist OCR text layers into one file — same performOperation routing as
   // onRedactFile (gate flush -> snapshot -> engine apply_ocr_layer -> reload).
   onApplyOcrLayer: (path: string, pages: OcrApplyPage[]) => Promise<void>;
+  /** Save each listed file that holds unsaved changes, in place. */
+  onSaveFiles: (paths: readonly string[]) => Promise<void>;
   // Edit ▸ Images: one handler, three actions, all App-routed (delete/
   // replace via the snapshot→engine→reload shape — undoable; extract = gated
   // read + save, resolving to a user-facing notice naming the real output).
@@ -635,6 +637,7 @@ export function WorkspaceCanvasView({
   onWidgetAction,
   onAddLinks,
   onApplyOcrLayer,
+  onSaveFiles,
   onEditImage,
   onEditImagesGroup,
   onEditVector,
@@ -1425,6 +1428,10 @@ export function WorkspaceCanvasView({
   const find = useFind(searchIndex.search, searchIndex.version, docs, jumpToPage);
   const [applyingOcr, setApplyingOcr] = useState(false);
   const [ocrApplyError, setOcrApplyError] = useState<string | null>(null);
+  // The files the last clean "Make searchable" wrote a text layer into; the
+  // find bar offers Save and Copy text for exactly these.
+  const [ocrAppliedPaths, setOcrAppliedPaths] = useState<readonly string[]>([]);
+  const [ocrTextState, setOcrTextState] = useState<'idle' | 'copying' | 'copied'>('idle');
 
   // On-canvas forms: per-file field reads + widget projections, and
   // the pending-values map. Pending values are NAME-keyed per file —
@@ -3684,6 +3691,8 @@ export function WorkspaceCanvasView({
     applyingOcrRef.current = true;
     setApplyingOcr(true);
     setOcrApplyError(null);
+    setOcrAppliedPaths([]);
+    setOcrTextState('idle');
     try {
       const sources = searchIndex.ocrReadySources();
       const { files: payloads, skippedSources } = await buildOcrApplyPayload(
@@ -3724,6 +3733,8 @@ export function WorkspaceCanvasView({
       }
       if (failures.length > 0) {
         setOcrApplyError(tChrome('canvas.ocr.applyFailed', { reasons: failures.join('; ') }));
+      } else {
+        setOcrAppliedPaths(payloads.map((payload) => payload.path));
       }
       return failures;
     } catch (err) {
@@ -3735,6 +3746,32 @@ export function WorkspaceCanvasView({
       setApplyingOcr(false);
     }
   }, [docs, state.files, searchIndex, onApplyOcrLayer]);
+
+  // The recognized text is read back from the files through the gated engine
+  // call, so the clipboard holds what the saved document will contain.
+  const handleCopyOcrText = useCallback(async () => {
+    if (ocrAppliedPaths.length === 0) return;
+    setOcrTextState('copying');
+    setOcrApplyError(null);
+    try {
+      const texts: string[] = [];
+      for (const path of ocrAppliedPaths) {
+        const f = state.files.get(path);
+        if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+        const res = (await engineCall('extract_text', { file: f.workingPath, pages: 'all' })) as unknown as {
+          text: string;
+        };
+        texts.push(res.text);
+      }
+      await navigator.clipboard.writeText(texts.join('\n\n'));
+      setOcrTextState('copied');
+    } catch (err) {
+      setOcrTextState('idle');
+      setOcrApplyError(
+        tChrome('canvas.find.copyTextFailed', { message: err instanceof Error ? err.message : String(err) }),
+      );
+    }
+  }, [ocrAppliedPaths, state.files, engineCall]);
 
   // --- Edit ▸ Images: placements + selection --------------------------------
   // Placements come from the engine per page of the FOCUSED document (the
@@ -7669,7 +7706,17 @@ export function WorkspaceCanvasView({
           onNext={find.next}
           onPrev={find.prev}
           onApplyOcr={() => void handleApplyOcr()}
-          onClose={find.closeFind}
+          ocrApplied={ocrAppliedPaths.length > 0}
+          ocrFileCount={ocrAppliedPaths.length}
+          ocrUnsaved={unsavedAmong(state, ocrAppliedPaths).length > 0}
+          ocrTextState={ocrTextState}
+          onSaveAfterOcr={() => void onSaveFiles(ocrAppliedPaths)}
+          onCopyOcrText={() => void handleCopyOcrText()}
+          onClose={() => {
+            setOcrAppliedPaths([]);
+            setOcrTextState('idle');
+            find.closeFind();
+          }}
         />
       )}
       {reader.open && <ReadAloudBar reader={reader} />}
