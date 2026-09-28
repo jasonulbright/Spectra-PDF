@@ -446,7 +446,10 @@ fn copy_job<R: std::io::Read, W: Write>(
 }
 
 fn run_powershell(args: &[&str]) -> Result<String, String> {
-    let mut cmd = std::process::Command::new("powershell.exe");
+    let executable = powershell_executable()?;
+    let mut cmd = std::process::Command::new(&executable);
+    #[cfg(windows)]
+    configure_powershell_environment(&mut cmd, &executable)?;
     cmd.arg("-NoProfile").arg("-NonInteractive").arg("-Command");
     for a in args {
         cmd.arg(a);
@@ -465,6 +468,51 @@ fn run_powershell(args: &[&str]) -> Result<String, String> {
     }
 }
 
+fn powershell_executable_under(system_dir: &Path) -> PathBuf {
+    system_dir
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe")
+}
+
+fn powershell_modules_directory(executable: &Path) -> Result<PathBuf, String> {
+    executable
+        .parent()
+        .map(|directory| directory.join("Modules"))
+        .ok_or_else(|| "Could not locate the PowerShell module directory.".to_string())
+}
+
+#[cfg(windows)]
+fn configure_powershell_environment(
+    command: &mut std::process::Command,
+    executable: &Path,
+) -> Result<(), String> {
+    command.env("PSModulePath", powershell_modules_directory(executable)?);
+    Ok(())
+}
+
+fn powershell_executable() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+
+        let mut buffer = vec![0u16; 32_768];
+        let length = unsafe {
+            windows::Win32::System::SystemInformation::GetSystemDirectoryW(Some(&mut buffer))
+        } as usize;
+        if length == 0 || length >= buffer.len() {
+            return Err("Could not locate the Windows system directory.".to_string());
+        }
+        let system_dir = PathBuf::from(OsString::from_wide(&buffer[..length]));
+        Ok(powershell_executable_under(&system_dir))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(PathBuf::from("powershell.exe"))
+    }
+}
+
 fn encode_powershell_command(script_body: &str) -> String {
     let utf16le: Vec<u8> = script_body
         .encode_utf16()
@@ -473,11 +521,16 @@ fn encode_powershell_command(script_body: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(utf16le)
 }
 
+fn elevated_script_body(script_body: &str) -> String {
+    format!("$env:PSModulePath = Join-Path $PSHOME 'Modules'\r\n{script_body}")
+}
+
 fn elevation_command(script_body: &str) -> String {
-    let encoded = encode_powershell_command(script_body);
+    let encoded = encode_powershell_command(&elevated_script_body(script_body));
     format!(
         "$argumentList = '-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}'; \
-         $p = Start-Process -Verb RunAs -Wait -PassThru -FilePath 'powershell.exe' \
+         $systemPowerShell = Join-Path $PSHOME 'powershell.exe'; \
+         $p = Start-Process -Verb RunAs -Wait -PassThru -FilePath $systemPowerShell \
          -ArgumentList $argumentList; exit $p.ExitCode"
     )
 }
@@ -823,7 +876,11 @@ try {
     #[test]
     fn elevation_command_carries_the_exact_utf16le_script_without_a_file_path() {
         let script = "$value = 'O''; Start-Process calc;#'; exit 7";
-        let encoded = encode_powershell_command(script);
+        let elevated_script = elevated_script_body(script);
+        assert!(elevated_script.starts_with(
+            "$env:PSModulePath = Join-Path $PSHOME 'Modules'\r\n"
+        ));
+        let encoded = encode_powershell_command(&elevated_script);
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(encoded.as_bytes())
             .unwrap();
@@ -831,12 +888,64 @@ try {
             .chunks_exact(2)
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect();
-        assert_eq!(String::from_utf16(&units).unwrap(), script);
+        assert_eq!(String::from_utf16(&units).unwrap(), elevated_script);
 
         let command = elevation_command(script);
         assert!(command.contains(&format!("-EncodedCommand {encoded}")));
+        assert!(command.contains("Join-Path $PSHOME 'powershell.exe'"));
         assert!(!command.contains(" -File "));
         assert!(!command.contains(".ps1"));
+    }
+
+    #[test]
+    fn printer_powershell_path_is_rooted_in_the_windows_system_directory() {
+        let executable =
+            powershell_executable_under(Path::new(r"C:\Windows\System32"));
+        assert_eq!(
+            executable,
+            PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+        );
+        assert_eq!(
+            powershell_modules_directory(&executable).unwrap(),
+            PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules"),
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_executed_powershell_path_is_absolute_and_system_rooted() {
+        let path = powershell_executable().unwrap();
+        assert!(path.is_absolute(), "{path:?}");
+        assert!(path.ends_with(Path::new(
+            r"WindowsPowerShell\v1.0\powershell.exe"
+        )), "{path:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn powershell_does_not_load_modules_from_the_inherited_user_path() {
+        let executable = powershell_executable().unwrap();
+        let mut expected_modules = Vec::new();
+        if let Some(program_files) = std::env::var_os("ProgramFiles") {
+            expected_modules.push(
+                PathBuf::from(program_files)
+                    .join("WindowsPowerShell")
+                    .join("Modules"),
+            );
+        }
+        expected_modules.push(powershell_modules_directory(&executable).unwrap());
+        let mut command = std::process::Command::new(&executable);
+        command.env("PSModulePath", r"C:\Users\Public\UntrustedModules");
+        configure_powershell_environment(&mut command, &executable).unwrap();
+        let output = command
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg("[Console]::Out.Write($env:PSModulePath)")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let actual = String::from_utf8(output.stdout).unwrap();
+        let actual_modules: Vec<_> = std::env::split_paths(std::ffi::OsStr::new(&actual)).collect();
+        assert_eq!(actual_modules, expected_modules);
     }
 
     #[cfg(windows)]
@@ -845,7 +954,7 @@ try {
         use std::process::Command;
 
         let command = elevation_command("exit 7\r\n").replace("-Verb RunAs ", "");
-        let output = Command::new("powershell.exe")
+        let output = Command::new(powershell_executable().unwrap())
             .args(["-NoProfile", "-NonInteractive", "-Command"])
             .arg(command)
             .output()
