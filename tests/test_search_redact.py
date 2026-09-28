@@ -283,6 +283,7 @@ def test_with_nothing_configured_a_jbig2_decode_searches(
 
     monkeypatch.setattr(gc, "discover", lambda: [found])
     monkeypatch.setattr(gc, "probe", probe)
+    monkeypatch.setattr(gc, "_probe_with_budget", lambda candidate, _budget: probe(candidate))
     monkeypatch.setattr(gc, "_run", never_runs)
     out = tmp_path / "out.pdf"
 
