@@ -1773,6 +1773,70 @@ fn engine_output_path(
     Ok(Some(target))
 }
 
+/// `remove_empty_folders` deletes under a caller-named root, so it runs only
+/// inside a folder run the calling window holds on that root. The approved
+/// canonical path replaces `root`, so the engine acts on what was checked.
+fn require_source_tree_authority(
+    app: &AppHandle,
+    label: &str,
+    request: &mut serde_json::Value,
+) -> Result<(), String> {
+    if request.get("method").and_then(serde_json::Value::as_str) != Some("remove_empty_folders") {
+        return Ok(());
+    }
+    let root = request
+        .get("params")
+        .and_then(|p| p.get("root"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if root.is_empty() || !Path::new(root).is_absolute() {
+        return Err("emptyFolders.rootNotAbsolute".to_string());
+    }
+    let claims = app.state::<crate::app_windows::ClaimState>();
+    let canonical = canonical_path(root);
+    if !claims.holds_folder_run(label, &canonical) {
+        return Err("emptyFolders.rootNotClaimed".to_string());
+    }
+    request["params"]["root"] = serde_json::Value::from(canonical);
+    let protected: Vec<serde_json::Value> = request["params"]["protected"]
+        .as_array()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|p| !p.is_empty())
+                .map(|p| serde_json::Value::from(canonical_path_or_parent(p)))
+                .collect()
+        })
+        .unwrap_or_default();
+    request["params"]["protected"] = serde_json::Value::from(protected);
+    Ok(())
+}
+
+/// `canonical_path`, or for a path that does not exist yet, its nearest
+/// existing ancestor canonicalized with the remaining components appended.
+pub(crate) fn canonical_path_or_parent(p: &str) -> String {
+    let path = Path::new(p);
+    let mut rest: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut current = path;
+    loop {
+        if let Ok(found) = dunce::canonicalize(current) {
+            let mut out = found;
+            for part in rest.iter().rev() {
+                out.push(part);
+            }
+            return out.to_string_lossy().into_owned();
+        }
+        match (current.parent(), current.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name);
+                current = parent;
+            }
+            _ => return p.to_string(),
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn start_engine(app: AppHandle) -> Result<(), String> {
     engine::start(&app).await
@@ -1794,6 +1858,7 @@ pub async fn send_to_engine(
     let mut guard = engine::lock_started(&state.child, || engine::start(&app)).await?;
     if let Some(ref mut child) = *guard {
         let label = window.label().to_string();
+        require_source_tree_authority(&app, &label, &mut request)?;
         let output_reservation = if let Some(target) = engine_output_path(&request)? {
             let claim_app = app.clone();
             let claim_label = label.clone();
@@ -2572,6 +2637,27 @@ mod tests {
         dir
     }
 
+
+    #[test]
+    fn protected_folders_canonicalize_even_before_they_exist() {
+        let base = std::env::temp_dir().join(format!("canon-protected-{}", std::process::id()));
+        let existing = base.join("Done Folder");
+        std::fs::create_dir_all(&existing).unwrap();
+        let canonical_base = super::canonical_path(&base.to_string_lossy());
+        let upper = existing.to_string_lossy().to_uppercase();
+        assert_eq!(
+            super::canonical_path_or_parent(&upper),
+            super::canonical_path(&existing.to_string_lossy()),
+        );
+        let missing = base.join("DONE FOLDER").join("not yet").to_string_lossy().to_uppercase();
+        let expected = std::path::Path::new(&super::canonical_path(&existing.to_string_lossy()))
+            .join("NOT YET")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(super::canonical_path_or_parent(&missing), expected);
+        assert!(expected.starts_with(&canonical_base));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
     #[test]
     fn only_absolute_engine_output_paths_are_reserved() {
         let request = serde_json::json!({"id": 1, "params": {"output": r"C:\out\result.pdf"}});

@@ -205,6 +205,16 @@ export function formatBatchLog(run: BatchLogRun): string {
     for (const d of report.skippedDirs) lines.push(`  ${d}`);
   }
 
+  const empty = report.emptyFolders;
+  if (empty) {
+    lines.push('');
+    lines.push(
+      `Empty source folders: ${empty.removed.length} removed · ${empty.skipped.length} left in place`,
+    );
+    for (const d of empty.removed) lines.push(`  removed  ${d}`);
+    for (const d of empty.skipped) lines.push(`  kept     ${d.path} — ${d.reason}`);
+  }
+
   // Trailing newline: a log file that does not end in one appends badly and
   // reads badly in every tool that counts lines.
   lines.push('');

@@ -178,6 +178,10 @@ export const REFUSAL_STRINGS = {
   'refusal.scan.busy': 'A scan is already running on this scanner.',
   'refusal.scan.cancelledAtDevice': 'The scan was cancelled at the scanner.',
   'refusal.scan.coverOpen': 'Close the scanner cover.',
+  'refusal.emptyFolders.rootNotAbsolute':
+    'Empty folders were not removed: the source folder is not a full path.',
+  'refusal.emptyFolders.rootNotClaimed':
+    'Empty folders were not removed: this window is not processing that source folder.',
   'refusal.scan.deviceBusy': 'The scanner is busy. Try again in a moment.',
   'refusal.scan.deviceGone': 'The scanner is no longer connected.',
   'refusal.scan.deviceLocked': 'Another program is using the scanner.',

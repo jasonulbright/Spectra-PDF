@@ -279,8 +279,8 @@ describe('the folder runs claim what they write', () => {
 
     const mirror = between(dialog, 'const start = async', 'const cancel = ');
     expect(mirror).toContain('filing: [movedRoot, errorRoot],');
-    expect(mirror).toContain(
-      'changesSource: Boolean(movedRoot) || Boolean(errorRoot) || (repairDamaged && replaceRepaired),',
+    expect(mirror.replace(/\s+/g, ' ')).toContain(
+      'changesSource: Boolean(movedRoot) || Boolean(errorRoot) || (repairDamaged && replaceRepaired) || removeEmptyFolders,',
     );
     expect(mirror).toMatch(/\} finally \{\n\s+cancelOcrRef\.current = null;\n\s+await root\.release\(\);/);
   });

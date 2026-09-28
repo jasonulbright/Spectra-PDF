@@ -591,6 +591,8 @@ export interface ScheduleProfile {
   enhance: boolean;
   /** Shipped default ON; only read when `enhance` is set. */
   enhanceOrientation: boolean;
+  /** After the run, delete folders inside the source root that are empty. */
+  removeEmptyFolders: boolean;
   /** Which CLI arm the task invokes: 'batch-ocr' (default; also for '') or
    * 'action' — a guided-action run over the source tree. */
   runType: string;

@@ -212,6 +212,7 @@ describe('batch OCR folder mirror', () => {
     doc.addPage([400, 300]).drawText('Already searchable', { x: 40, y: 200, size: 14, font });
     writeFileSync(resolve(fSrc, 'nested', 'good.pdf'), await doc.save());
     writeFileSync(resolve(fSrc, 'rubbish.pdf'), 'not a pdf at all');
+    mkdirSync(resolve(fSrc, 'leftover'));
 
     await waitForHarness();
     expect(await invokeAppCommand('tools.batchOcr')).toBe(true);
@@ -233,6 +234,9 @@ describe('batch OCR folder mirror', () => {
     expect(await repairBox.isSelected()).toBe(false); // OFF by default
     await repairBox.click();
     await batchOcrSetFiling({ movedRoot: fMoved, errorRoot: fErrors });
+    const removeEmpty = $('[data-testid="batch-ocr-remove-empty-folders"]');
+    expect(await removeEmpty.isSelected()).toBe(false); // OFF by default
+    await removeEmpty.click();
     await $('[data-testid="batch-ocr-moved"]').waitForDisplayed({ timeout: 5_000 });
 
     await batchOcrStart();
@@ -275,6 +279,17 @@ describe('batch OCR folder mirror', () => {
     expect(log).toContain('repair damaged files');
     expect(log).toContain(`-> original moved to ${resolve(fMoved, 'nested', 'good.pdf')}`);
     expect(log).toContain('Originals: 2 moved · 0 NOT moved');
+
+    // `nested` emptied by the move and `leftover` empty from the start are
+    // removed; the source folder itself stays.
+    const empty = (await batchOcrSnapshot())!.report!.emptyFolders!;
+    expect([...empty.removed].sort()).toEqual(
+      [resolve(fSrc, 'leftover'), resolve(fSrc, 'nested')].sort(),
+    );
+    expect(empty.skipped).toEqual([]);
+    expect(existsSync(fSrc)).toBe(true);
+    expect(existsSync(resolve(fSrc, 'nested'))).toBe(false);
+    expect(log).toContain('Empty source folders: 2 removed · 0 left in place');
 
     await $('[data-testid="batch-ocr-close"]').click();
     rmSync(tree, { recursive: true, force: true });
@@ -371,6 +386,25 @@ describe('batch OCR folder mirror', () => {
       timeout: 15_000,
       timeoutMsg: 'recalling the preset did not re-list the source folder',
     });
+
+    // Duplicate adds an independent copy under a free name and selects it.
+    await $('[data-testid="batch-ocr-preset-duplicate"]').click();
+    await browser.waitUntil(
+      async () =>
+        (await $('[data-testid="batch-ocr-preset-name"]').getValue()) === 'E2E nightly (copy)',
+      { timeout: 5_000, timeoutMsg: 'the duplicate was not selected under its copy name' },
+    );
+    expect(await $('[data-testid="batch-ocr-preset-select"]').getText()).toContain(
+      'E2E nightly (copy)',
+    );
+    await $('[data-testid="batch-ocr-preset-delete"]').click();
+    await $('[data-testid="batch-ocr-preset-delete-confirm"]').click();
+    await browser.waitUntil(
+      async () =>
+        !(await $('[data-testid="batch-ocr-preset-select"]').getText()).includes('(copy)'),
+      { timeout: 5_000, timeoutMsg: 'the deleted copy is still listed' },
+    );
+    await $('[data-testid="batch-ocr-preset-select"]').selectByVisibleText('E2E nightly');
 
     // Delete takes a confirm, then the preset is gone from the list — leaving
     // the shared workspace as this test found it.

@@ -46,6 +46,9 @@ export interface BatchOcrSettings {
   mrcVerifyText: boolean;
   enhance: boolean;
   enhanceOrientation: boolean;
+  /** OPT-IN: after the run, delete folders inside the source root that are
+   * empty. Never the root itself. */
+  removeEmptyFolders: boolean;
 }
 
 export interface BatchOcrPreset {
@@ -81,6 +84,7 @@ export function defaultBatchOcrSettings(): BatchOcrSettings {
     mrcVerifyText: false,
     enhance: false,
     enhanceOrientation: true,
+    removeEmptyFolders: false,
   };
 }
 
@@ -139,6 +143,7 @@ export function normalizeBatchOcrSettings(raw: unknown): BatchOcrSettings {
     // The only switch whose SHIPPED default is on: orientation detection is
     // half of what enhancement means, and it is inert unless `enhance` is on.
     enhanceOrientation: r.enhanceOrientation === undefined ? true : flag(r.enhanceOrientation),
+    removeEmptyFolders: flag(r.removeEmptyFolders),
   };
 }
 
@@ -231,6 +236,52 @@ export function renamePreset(
   return presets.map((p) => (p.id === id ? { ...p, name: trimmed } : p));
 }
 
+/**
+ * The first free name for a copy of `name`. `copyName(n)` renders the n-th
+ * copy's name from the source name (n starts at 1); the base is shortened
+ * until the result fits PRESET_NAME_MAX. Null when no free name exists.
+ */
+export function duplicatePresetName(
+  name: string,
+  presets: readonly BatchOcrPreset[],
+  copyName: (base: string, n: number) => string,
+): string | null {
+  const taken = new Set(presets.map((p) => p.name.toLocaleLowerCase()));
+  for (let n = 1; n <= PRESET_MAX + 1; n++) {
+    let base = name.trim();
+    let candidate = copyName(base, n).trim();
+    while (candidate.length > PRESET_NAME_MAX && base.length > 0) {
+      base = base.slice(0, -1).trimEnd();
+      candidate = copyName(base, n).trim();
+    }
+    if (candidate === '' || candidate.length > PRESET_NAME_MAX) return null;
+    if (!taken.has(candidate.toLocaleLowerCase())) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Append a copy of preset `id` under a free name. The copy has its own id and
+ * its own settings object, so editing either never changes the other. Null
+ * when the source is missing, the library is full, or no free name exists.
+ */
+export function duplicatePreset(
+  presets: readonly BatchOcrPreset[],
+  id: string,
+  copyName: (base: string, n: number) => string,
+): { presets: BatchOcrPreset[]; id: string } | null {
+  const source = presets.find((p) => p.id === id);
+  if (!source || presets.length >= PRESET_MAX) return null;
+  const name = duplicatePresetName(source.name, presets, copyName);
+  if (name === null) return null;
+  const copy: BatchOcrPreset = {
+    id: crypto.randomUUID(),
+    name,
+    settings: normalizeBatchOcrSettings(source.settings),
+  };
+  return { presets: [...presets, copy], id: copy.id };
+}
+
 export function removePreset(
   presets: readonly BatchOcrPreset[],
   id: string,
@@ -265,6 +316,7 @@ export function presetScheduleFields(settings: BatchOcrSettings): {
   mrcVerifyText: boolean;
   enhance: boolean;
   enhanceOrientation: boolean;
+  removeEmptyFolders: boolean;
 } {
   const s = normalizeBatchOcrSettings(settings);
   return {
@@ -281,5 +333,6 @@ export function presetScheduleFields(settings: BatchOcrSettings): {
     mrcVerifyText: s.mrcVerifyText,
     enhance: s.enhance,
     enhanceOrientation: s.enhanceOrientation,
+    removeEmptyFolders: s.removeEmptyFolders,
   };
 }

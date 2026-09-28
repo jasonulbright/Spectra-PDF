@@ -2546,6 +2546,10 @@ pub struct BatchOcrArgs {
     /// runs with --enhance, so this is the flag that turns it off.
     #[arg(long)]
     pub no_enhance_orientation: bool,
+    /// OPT-IN: after every file is done, delete folders inside SOURCE that are
+    /// empty (never SOURCE itself; links and junctions are not followed)
+    #[arg(long)]
+    pub remove_empty_folders: bool,
     /// Print per-file progress
     #[arg(short, long)]
     pub verbose: bool,
@@ -6028,6 +6032,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "mrc_verify_text": args.mrc_verify_text,
                     "enhance": args.enhance,
                     "enhance_orientation": !args.no_enhance_orientation,
+                    "remove_empty_folders": args.remove_empty_folders,
                     "font_dir": resolve_fonts().to_string_lossy().to_string(),
                     "passwords": args
                         .passwords
@@ -6786,6 +6791,22 @@ mod tests {
             "spectrapdf", "batch-ocr", "scans", "--in-place", "--dest", "out",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn batch_ocr_empty_folder_removal_is_opt_in() {
+        match parse(&["spectrapdf", "batch-ocr", "scans", "--dest", "out"]).command {
+            Some(CliCommand::BatchOcr(args)) => assert!(!args.remove_empty_folders),
+            _ => panic!("not the batch-ocr arm"),
+        }
+        match parse(&[
+            "spectrapdf", "batch-ocr", "scans", "--dest", "out", "--remove-empty-folders",
+        ])
+        .command
+        {
+            Some(CliCommand::BatchOcr(args)) => assert!(args.remove_empty_folders),
+            _ => panic!("not the batch-ocr arm"),
+        }
     }
 
     /// The colour-profile directory is a SIBLING of the executable, exactly

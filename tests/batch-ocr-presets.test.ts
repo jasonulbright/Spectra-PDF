@@ -7,6 +7,8 @@ import {
   PRESET_MAX,
   PRESET_NAME_MAX,
   defaultBatchOcrSettings,
+  duplicatePreset,
+  duplicatePresetName,
   loadBatchOcrPresets,
   normalizeBatchOcrSettings,
   presetNameProblem,
@@ -46,6 +48,7 @@ function filled(): BatchOcrSettings {
     mrcVerifyText: true,
     enhance: true,
     enhanceOrientation: false,
+    removeEmptyFolders: true,
   };
 }
 
@@ -203,6 +206,74 @@ describe('the library', () => {
   });
 });
 
+describe('duplicating a preset', () => {
+  const copyName = (base: string, n: number): string =>
+    n === 1 ? `${base} (copy)` : `${base} (copy ${n})`;
+
+  it('removes empty folders only when the stored value is true', () => {
+    expect(defaultBatchOcrSettings().removeEmptyFolders).toBe(false);
+    expect(normalizeBatchOcrSettings({ removeEmptyFolders: 'yes' }).removeEmptyFolders).toBe(false);
+    expect(normalizeBatchOcrSettings({ removeEmptyFolders: true }).removeEmptyFolders).toBe(true);
+  });
+
+  it('adds a copy with identical settings under a new id and a free name', () => {
+    const presets = upsertPreset([], 'Weekly', filled());
+    const done = duplicatePreset(presets, presets[0].id, copyName);
+    expect(done).not.toBeNull();
+    expect(done!.presets).toHaveLength(2);
+    const copy = done!.presets.find((p) => p.id === done!.id)!;
+    expect(copy.id).not.toBe(presets[0].id);
+    expect(copy.name).toBe('Weekly (copy)');
+    expect(copy.settings).toEqual(presets[0].settings);
+  });
+
+  it('never shares mutable state with its source', () => {
+    const presets = upsertPreset([], 'Weekly', filled());
+    const done = duplicatePreset(presets, presets[0].id, copyName)!;
+    const copy = done.presets.find((p) => p.id === done.id)!;
+    expect(copy.settings).not.toBe(presets[0].settings);
+    expect(copy.settings.langs).not.toBe(presets[0].settings.langs);
+    copy.settings.langs.push('deu');
+    copy.settings.source = 'C:\\other';
+    expect(presets[0].settings.langs).toEqual(['eng', 'fra']);
+    expect(presets[0].settings.source).toBe('C:\\intake');
+  });
+
+  it('numbers further copies and compares names without case', () => {
+    let presets = upsertPreset([], 'Weekly', filled());
+    presets = upsertPreset(presets, 'WEEKLY (COPY)', filled());
+    expect(duplicatePresetName('Weekly', presets, copyName)).toBe('Weekly (copy 2)');
+    const done = duplicatePreset(presets, presets[0].id, copyName)!;
+    expect(duplicatePresetName('Weekly', done.presets, copyName)).toBe('Weekly (copy 3)');
+  });
+
+  it('shortens a long name so the copy still fits', () => {
+    const long = 'x'.repeat(PRESET_NAME_MAX);
+    const name = duplicatePresetName(long, [], copyName)!;
+    expect(name.length).toBeLessThanOrEqual(PRESET_NAME_MAX);
+    expect(name.endsWith(' (copy)')).toBe(true);
+    expect(presetNameProblem(name, [])).toBeNull();
+  });
+
+  it('refuses when the library is full or the source is missing', () => {
+    const full: BatchOcrPreset[] = Array.from({ length: PRESET_MAX }, (_, i) => ({
+      id: `id${i}`,
+      name: `P${i}`,
+      settings: filled(),
+    }));
+    expect(duplicatePreset(full, 'id0', copyName)).toBeNull();
+    expect(duplicatePreset([], 'missing', copyName)).toBeNull();
+  });
+
+  it('survives the store round trip as two independent presets', () => {
+    const presets = upsertPreset([], 'Weekly', filled());
+    saveBatchOcrPresets(duplicatePreset(presets, presets[0].id, copyName)!.presets);
+    const loaded = loadBatchOcrPresets();
+    expect(loaded.map((p) => p.name)).toEqual(['Weekly', 'Weekly (copy)']);
+    expect(new Set(loaded.map((p) => p.id)).size).toBe(2);
+  });
+});
+
 describe('what a schedule freezes', () => {
   it('hands every setting to the profile, with the languages joined', () => {
     const fields = presetScheduleFields(filled());
@@ -220,6 +291,7 @@ describe('what a schedule freezes', () => {
       mrcVerifyText: true,
       enhance: true,
       enhanceOrientation: false,
+      removeEmptyFolders: true,
     });
   });
 

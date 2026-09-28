@@ -812,6 +812,9 @@ export const DIALOG_STRINGS = {
   'dialog.batch.presetNamePlaceholder': 'Name these settings',
   'dialog.batch.presetSave': 'Save settings',
   'dialog.batch.presetRename': 'Rename',
+  'dialog.batch.presetDuplicate': 'Duplicate',
+  'dialog.batch.presetCopyName': '{{name}} (copy)',
+  'dialog.batch.presetCopyNameN': '{{name}} (copy {{n}})',
   // The scheduling surface is named through a placeholder resolved from its
   // own title, so this sentence never carries a second, drifting copy of it.
   'dialog.batch.presetNote':
@@ -819,6 +822,7 @@ export const DIALOG_STRINGS = {
   'dialog.batch.presetProblem.empty': 'Give these settings a name before saving them.',
   'dialog.batch.presetProblem.tooLong': 'That name is too long — 80 characters at most.',
   'dialog.batch.presetProblem.duplicate': 'Another set of settings already has that name.',
+  'dialog.batch.presetProblem.noCopyName': 'No free name is left for a copy — rename one of the copies first.',
   'dialog.batch.presetProblem.full': 'There is no room for another set of settings — delete one first.',
   'dialog.batch.sourceLabel': 'Source folder',
   'dialog.batch.destLabel': 'Destination folder',
@@ -907,6 +911,11 @@ export const DIALOG_STRINGS = {
   'dialog.batch.rowPartial': '{{rel}} — made searchable, but {{reason}}',
   'dialog.batch.rowMrc': '{{rel}} — {{note}}',
   'dialog.batch.rowEnhance': '{{rel}} — {{note}}',
+  'dialog.batch.removeEmptyFolders': 'Delete empty folders left in the source folder',
+  'dialog.batch.removeEmptyFoldersNote':
+    'After the last file, removes folders inside the source folder that are empty. A folder with any file in it is kept, including hidden system files such as desktop.ini or Thumbs.db. The source folder itself stays. Links and junctions are not followed. A stopped run removes nothing.',
+  'dialog.batch.emptyFoldersRemoved': 'Empty folders removed: {{count}}',
+  'dialog.batch.emptyFoldersKept': 'Folders not removed: {{dirs}}',
   'dialog.batch.unreadableDirs': 'Unreadable subfolders (missing from the mirror): {{dirs}}',
   'dialog.batch.logWritten': 'Log written: {{path}}',
   'dialog.batch.openFolder': 'Open folder',

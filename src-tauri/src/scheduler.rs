@@ -94,6 +94,9 @@ pub struct ScheduleProfile {
     /// `profile_from_command` starts from true.
     #[serde(default)]
     pub enhance_orientation: bool,
+    /// After the run, delete folders inside the source root that are empty.
+    #[serde(default)]
+    pub remove_empty_folders: bool,
     /// Which CLI arm the task invokes: "batch-ocr" (the default, also for
     /// empty) or "action" — a guided-action run over the source tree.
     #[serde(default)]
@@ -1039,6 +1042,9 @@ fn build_arguments(exe: &str, p: &ScheduleProfile) -> String {
     if p.replace_repaired_originals {
         args.push("--replace-repaired".to_string());
     }
+    if p.remove_empty_folders {
+        args.push("--remove-empty-folders".to_string());
+    }
     if !p.log_dir.is_empty() {
         args.extend(["--log-dir".to_string(), quote_windows_arg(&p.log_dir)]);
     }
@@ -1371,6 +1377,7 @@ fn profile_from_tokens(
         enhance: false,
         // Its shipped default is ON; only the explicit off-flag lowers it.
         enhance_orientation: true,
+        remove_empty_folders: false,
         run_type: run_type.to_string(),
         action_file: String::new(),
     };
@@ -1394,6 +1401,7 @@ fn profile_from_tokens(
             "--mrc-verify-text" if run_type == "batch-ocr" => p.mrc_verify_text = true,
             "--enhance" if run_type == "batch-ocr" => p.enhance = true,
             "--no-enhance-orientation" if run_type == "batch-ocr" => p.enhance_orientation = false,
+            "--remove-empty-folders" if run_type == "batch-ocr" => p.remove_empty_folders = true,
             other if !other.starts_with("--") && p.source.is_empty() => {
                 p.source = other.to_string();
             }
@@ -2008,6 +2016,7 @@ mod tests {
             mrc_verify_text: false,
             enhance: false,
             enhance_orientation: true,
+            remove_empty_folders: false,
             run_type: "action".into(),
             action_file: r"C:\ProgramData\Spectra PDF\scheduled-actions\Nightly Strip.json"
                 .into(),
@@ -2264,6 +2273,7 @@ mod tests {
             mrc_verify_text: true,
             enhance: true,
             enhance_orientation: false,
+            remove_empty_folders: true,
             run_type: "batch-ocr".into(),
             action_file: String::new(),
         }
@@ -2571,7 +2581,12 @@ mod tests {
         assert_eq!(parsed.mrc_preset, "smallest");
         assert!(parsed.enhance);
         assert!(!parsed.enhance_orientation);
+        assert!(parsed.remove_empty_folders);
         assert!(!parsed.in_place);
+        let mut off = p.clone();
+        off.remove_empty_folders = false;
+        let args = build_arguments("exe", &off);
+        assert!(!args.contains("--remove-empty-folders"), "{args}");
     }
 
     #[test]

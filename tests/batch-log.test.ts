@@ -165,6 +165,24 @@ describe('formatBatchLog', () => {
     expect(text).toContain('  C:\\scans\\inbox\\restricted');
   });
 
+  it('lists removed and kept empty source folders, and says nothing when not asked', () => {
+    const text = formatBatchLog(
+      run({
+        cancelled: false,
+        results: [],
+        skippedDirs: [],
+        emptyFolders: {
+          removed: ['C:\\scans\\a\\b', 'C:\\scans\\a'],
+          skipped: [{ path: 'C:\\scans\\link', reason: 'link or junction, not followed' }],
+        },
+      }),
+    );
+    expect(text).toContain('Empty source folders: 2 removed · 1 left in place');
+    expect(text).toContain('  removed  C:\\scans\\a\\b');
+    expect(text).toContain('  kept     C:\\scans\\link — link or junction, not followed');
+    expect(formatBatchLog(run(empty))).not.toContain('Empty source folders');
+  });
+
   it('never reports "0 processed" for a run that died mid-flight', () => {
     // The driver throws out without a per-file record, but files mirrored
     // before the failure are still on disk — "nothing happened" is the one

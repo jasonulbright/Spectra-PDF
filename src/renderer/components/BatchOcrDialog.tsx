@@ -15,7 +15,10 @@ import {
   summarize,
   type BatchProgress,
   type BatchReport,
+  type EmptyFolderReport,
+  emptyFolderRefusal,
 } from '../lib/batch-ocr';
+import { REFUSAL_STRINGS } from '../i18n-refusals';
 import { createBatchIo } from '../lib/batch-ocr-io';
 import { claimOutputRoots, writtenRoots } from '../lib/output-root-claim';
 import { formatBatchLog, batchLogFileName } from '../lib/batch-log';
@@ -29,6 +32,8 @@ import {
   loadBatchOcrPresets,
   presetNameProblem,
   removePreset,
+  duplicatePreset,
+  PRESET_MAX,
   renamePreset,
   saveBatchOcrPresets,
   upsertPreset,
@@ -97,6 +102,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const [mrcVerify, setMrcVerify] = useState(false);
   const [enhance, setEnhance] = useState(false);
   const [enhanceOrientation, setEnhanceOrientation] = useState(true);
+  const [removeEmptyFolders, setRemoveEmptyFolders] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
   const [report, setReport] = useState<BatchReport | null>(null);
@@ -134,6 +140,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     mrcVerifyText: mrcVerify,
     enhance,
     enhanceOrientation,
+    removeEmptyFolders,
   });
 
   // Applying a preset re-enumerates the source rather than trusting a stored
@@ -160,6 +167,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     setMrcVerify(s.mrcVerifyText);
     setEnhance(s.enhance);
     setEnhanceOrientation(s.enhanceOrientation);
+    setRemoveEmptyFolders(s.removeEmptyFolders);
     if (s.source === '') {
       setSource(null);
       setEntries(null);
@@ -192,6 +200,29 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
       return;
     }
     persist(renamePreset(presets, presetId, presetName));
+    setPresetProblem(null);
+  };
+
+  // The copy is selected with its generated name in the name box, so the
+  // next step is changing its folders and pressing Save.
+  const duplicateSelectedPreset = (): void => {
+    const done = duplicatePreset(presets, presetId, (name, n) =>
+      n === 1
+        ? tChrome('dialog.batch.presetCopyName', { name })
+        : tChrome('dialog.batch.presetCopyNameN', { name, n: tNumber(n) }),
+    );
+    if (!done) {
+      setPresetProblem(tChrome(
+          presets.length >= PRESET_MAX
+            ? 'dialog.batch.presetProblem.full'
+            : 'dialog.batch.presetProblem.noCopyName',
+        ));
+      return;
+    }
+    persist(done.presets);
+    setPresetId(done.id);
+    setPresetName(done.presets.find((p) => p.id === done.id)?.name ?? '');
+    setConfirmDeletePreset(false);
     setPresetProblem(null);
   };
 
@@ -430,6 +461,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         enhance,
         enhance_orientation: enhanceOrientation,
         font_dir: await app.getEditFontPath(),
+        remove_empty_folders: removeEmptyFolders,
       })) as unknown as BatchReport & { logPath?: string };
       setReport(rep);
       setLogPath(rep.logPath ?? null);
@@ -453,7 +485,11 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         dest,
         inPlace: false,
         filing: [movedRoot, errorRoot],
-        changesSource: Boolean(movedRoot) || Boolean(errorRoot) || (repairDamaged && replaceRepaired),
+        changesSource:
+          Boolean(movedRoot) ||
+          Boolean(errorRoot) ||
+          (repairDamaged && replaceRepaired) ||
+          removeEmptyFolders,
       }),
     );
     if (!root.granted) {
@@ -526,6 +562,27 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         repairDamaged,
         replaceRepairedOriginals: repairDamaged && replaceRepaired,
       });
+      // After every file, and never after a stop: a stopped run leaves the
+      // tree mid-way, and removing folders then would act on a partial state.
+      if (removeEmptyFolders && !rep.cancelled) {
+        try {
+          rep.emptyFolders = (await callRaw('remove_empty_folders', {
+            root: source,
+            protected: [dest, movedRoot ?? '', errorRoot ?? ''],
+          })) as unknown as EmptyFolderReport;
+        } catch (e: unknown) {
+          const message = e instanceof Error ? e.message : String(e);
+          const refusal = emptyFolderRefusal(message);
+          rep.emptyFolders = {
+            removed: [],
+            skipped: [
+              refusal
+                ? { path: source, reason: REFUSAL_STRINGS[refusal], refusal }
+                : { path: source, reason: message },
+            ],
+          };
+        }
+      }
       setReport(rep);
       await writeLog(startedAt, rep, source, dest);
       setPhase('done');
@@ -684,6 +741,15 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                   className="px-2.5 py-1 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium shrink-0"
                 >
                   {tChrome('dialog.batch.presetRename')}
+                </button>
+              )}
+              {presetId !== '' && (
+                <button
+                  data-testid="batch-ocr-preset-duplicate"
+                  onClick={duplicateSelectedPreset}
+                  className="px-2.5 py-1 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium shrink-0"
+                >
+                  {tChrome('dialog.batch.presetDuplicate')}
                 </button>
               )}
               {presetId !== '' &&
@@ -976,6 +1042,21 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                   </span>
                 </span>
               </label>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  data-testid="batch-ocr-remove-empty-folders"
+                  checked={removeEmptyFolders}
+                  onChange={() => setRemoveEmptyFolders((v) => !v)}
+                  className="mt-0.5 rounded bg-neutral-900 border-neutral-600"
+                />
+                <span className="text-sm text-neutral-300">
+                  {tChrome('dialog.batch.removeEmptyFolders')}
+                  <span className="block text-xs text-neutral-500">
+                    {tChrome('dialog.batch.removeEmptyFoldersNote')}
+                  </span>
+                </span>
+              </label>
             </div>
           </details>
           {skippedDirs.length > 0 && (
@@ -1166,6 +1247,24 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                   {tChrome('dialog.batch.rowMrc', { rel: r.rel, note: r.mrc ?? '' })}
                 </p>
               ))}
+            </div>
+          )}
+          {report.emptyFolders && (
+            <div className="text-xs text-neutral-400" data-testid="batch-ocr-empty-folders">
+              <p>
+                {tChrome('dialog.batch.emptyFoldersRemoved', {
+                  count: tNumber(report.emptyFolders.removed.length),
+                })}
+              </p>
+              {report.emptyFolders.skipped.length > 0 && (
+                <p className="text-amber-400">
+                  {tChrome('dialog.batch.emptyFoldersKept', {
+                    dirs: report.emptyFolders.skipped
+                      .map((d) => `${d.path} (${d.refusal ? tChrome(d.refusal) : d.reason})`)
+                      .join('; '),
+                  })}
+                </p>
+              )}
             </div>
           )}
           {report.skippedDirs.length > 0 && (
