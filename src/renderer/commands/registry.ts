@@ -314,6 +314,10 @@ function toolCommand(tool: CanvasTool): Command {
       if (next !== 'select') {
         const owner = toolForCanvasTool(next);
         if (owner) dispatch({ type: 'UI_OPEN_TOOL', toolId: owner.id });
+        if (owner?.modeLandsInPane) {
+          if (owner.ops.length > 0) dispatch({ type: 'UI_SET_ACTIVE_OP', op: owner.ops[0] });
+          dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+        }
       }
       dispatch({ type: 'UI_SET_TOOL', tool: next });
     },
@@ -1151,6 +1155,7 @@ const BASE_COMMANDS: Record<CommandId, Command> = {
             // — their pane is one dock-click away, already seated.
             if (tool.ops.length > 0) dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
             else dispatch({ type: 'UI_OPEN_TOOL', toolId: tool.id });
+            if (tool.modeLandsInPane) dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
             return;
           }
           // Focus FIRST, then open: leaving doc land resets the mode, so an arm
