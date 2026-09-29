@@ -3451,6 +3451,40 @@ def test_a_pip_wheel_that_misses_the_pin_is_refused_before_install(tmp_path: Pat
     assert not (tmp_path / "embed" / "Lib").exists(), "bytes reached site-packages"
 
 
+@pytest.mark.skipif(not shutil.which("powershell"), reason="needs Windows PowerShell")
+def test_pip_bootstrap_archive_is_private_to_the_run_and_always_removed(tmp_path: Path) -> None:
+    """Two bootstraps sharing TEMP must not touch each other's archive."""
+    text = (ROOT / PIP_BOOTSTRAP).read_text(encoding="utf-8")
+    wheel = "pip-%s-py3-none-any.whl" % re.search(r'^\$PipVersion = "([^"]+)"$', text, re.M).group(1)
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    other_run = temp / f"{wheel}.zip"
+    other_run.write_bytes(b"another bootstrap's archive")
+    fake_python = tmp_path / "embed" / "python.exe"
+    fake_python.parent.mkdir()
+    fake_python.write_bytes(b"")
+    impostor = tmp_path / "impostor.whl"
+    impostor.write_bytes(b"not the pinned wheel")
+    probe = tmp_path / "probe.ps1"
+    probe.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$env:TEMP = '{temp}'\n"
+        f". '{ROOT / PIP_BOOTSTRAP}'\n"
+        f"$PipUrl = '{impostor.as_uri()}'\n"
+        f"try {{ Install-PinnedPip -Python '{fake_python}'; 'INSTALLED' }}"
+        " catch { 'REFUSED: ' + $_.Exception.Message }\n",
+        encoding="utf-8",
+    )
+    run = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert run.returncode == 0, run.stderr
+    assert "REFUSED:" in run.stdout, run.stdout
+    assert other_run.read_bytes() == b"another bootstrap's archive"
+    assert sorted(p.name for p in temp.iterdir()) == [other_run.name]
+
+
 def test_libreoffice_ships_only_the_pinned_msi_and_checks_the_extraction() -> None:
     text = _ps_source("bundle-libreoffice.ps1")
     assert re.search(r"Start-Process msiexec\.exe .* -Wait -PassThru", text)

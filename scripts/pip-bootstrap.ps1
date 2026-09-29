@@ -35,18 +35,22 @@ function Install-PinnedPip {
     $pythonHome = Split-Path -Parent $Python
     $sitePackages = Join-Path $pythonHome "Lib\site-packages"
     # Expand-Archive in Windows PowerShell 5.1 accepts only a .zip extension.
-    $archive = Join-Path $env:TEMP "$PipWheel.zip"
-    Invoke-DownloadWithRetry -Description $PipWheel -OutFile $archive -Download {
-        Invoke-WebRequest -Uri $PipUrl -OutFile $archive -UseBasicParsing -TimeoutSec $DownloadRetryTimeoutSeconds
-    }
-    $actual = Get-PipWheelSha256 -Path $archive
-    if ($actual -ne $PipSha256) {
+    # A per-run name: concurrent bootstraps sharing TEMP would otherwise
+    # replace each other's archive between the hash check and the expand.
+    $archive = Join-Path $env:TEMP "$PipWheel.$([guid]::NewGuid().ToString('N')).zip"
+    try {
+        Invoke-DownloadWithRetry -Description $PipWheel -OutFile $archive -Download {
+            Invoke-WebRequest -Uri $PipUrl -OutFile $archive -UseBasicParsing -TimeoutSec $DownloadRetryTimeoutSeconds
+        }
+        $actual = Get-PipWheelSha256 -Path $archive
+        if ($actual -ne $PipSha256) {
+            throw "$PipWheel has SHA-256 $actual; the pin is $PipSha256"
+        }
+        New-Item -ItemType Directory -Force $sitePackages | Out-Null
+        Expand-Archive -LiteralPath $archive -DestinationPath $sitePackages -Force
+    } finally {
         Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
-        throw "$PipWheel has SHA-256 $actual; the pin is $PipSha256"
     }
-    New-Item -ItemType Directory -Force $sitePackages | Out-Null
-    Expand-Archive -LiteralPath $archive -DestinationPath $sitePackages -Force
-    Remove-Item -LiteralPath $archive -Force
     $reported = & $Python -m pip --version 2>&1
     if ($LASTEXITCODE -ne 0 -or ([string]$reported) -notmatch "^pip $([regex]::Escape($PipVersion)) ") {
         throw "pip $PipVersion did not install into ${Python}: $reported"
