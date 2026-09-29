@@ -6,7 +6,19 @@
 // apply. `open_document` records the opener engine-side and ends the prompt;
 // `check_encrypted` still reports the copy encrypted after a user open, so the
 // loop never asks it again.
-import { UNRESTRICTED, parseDocumentSecurity, type DocumentSecurity } from './document-permissions';
+//
+// 7.6.5: a certificate-encrypted (Adobe.PubSec) document opens with the
+// grants of the first recipient list that matches the key. Neither qpdf nor
+// pdf.js reads that handler, so its working copy is plaintext inside the
+// app's private working folder, and every save of it is resealed under the
+// original recipient lists (`saveWorkingCopy`).
+import { tChrome } from '../i18n';
+import {
+  UNRESTRICTED,
+  isRecipientOpened,
+  parseDocumentSecurity,
+  type DocumentSecurity,
+} from './document-permissions';
 import type { PdfBuffer } from '../state/types';
 
 type Reply = Record<string, unknown>;
@@ -21,6 +33,14 @@ export interface DocumentOpenIo {
   ) => Promise<{ pfx: string; password: string } | 'cancel'>;
   /** The prompt's line after a password that did not open the document. */
   wrongPassword: () => string;
+  /** Told which certificate opened a certificate-encrypted document. */
+  certificateOpened?: (fileName: string, recipient: CertificateRecipient) => void;
+}
+
+export interface CertificateRecipient {
+  subject: string;
+  issuer: string;
+  serial: string;
 }
 
 export interface OpenedCredentials {
@@ -82,7 +102,7 @@ export async function prepareDocumentWorkingCopy(
     } catch (cleanupError) {
       if (failed) {
         throw new AggregateError([failure, cleanupError],
-          'Document opening failed and its temporary working copy could not be removed.',
+          tChrome('app.open.cleanupFailed'),
           { cause: cleanupError });
       }
       throw cleanupError;
@@ -110,7 +130,7 @@ export async function discardDocumentWorkingCopy(
   } catch (removeError) {
     if (releaseError !== undefined) {
       throw new AggregateError([releaseError, removeError],
-        'The temporary working copy could not be fully discarded.', { cause: removeError });
+        tChrome('app.open.discardFailed'), { cause: removeError });
     }
     throw removeError;
   }
@@ -134,17 +154,21 @@ export async function openWithCredentials(
       const answer = await io.askCertificate(fileName, error, pfx);
       if (answer === 'cancel') return null;
       pfx = answer.pfx;
+      let reply: Reply;
       try {
-        await io.call('decrypt_pubkey', {
-          file: workingPath,
-          output: workingPath,
+        reply = await io.call('open_pubkey_document', {
+          path: workingPath,
           pfx: answer.pfx,
           password: answer.password,
         });
-        return { security: UNRESTRICTED, password: null };
       } catch (e) {
         error = e instanceof Error ? e.message : String(e);
+        continue;
       }
+      if (reply.opener !== 'recipient') throw new Error(tChrome('app.open.invalidReply'));
+      const recipient = readRecipient(reply.recipient);
+      if (recipient) io.certificateOpened?.(fileName, recipient);
+      return { security: parseDocumentSecurity(reply), password: null };
     }
   }
 
@@ -164,7 +188,7 @@ export async function openWithCredentials(
         continue;
       }
       if (attempt.status !== 'opened' || !attempt.document || typeof attempt.document !== 'object') {
-        throw new Error('invalid open_document_attempt response');
+        throw new Error(tChrome('app.open.invalidReply'));
       }
       opened = attempt.document as Reply;
       password = answer.password;
@@ -180,4 +204,72 @@ export async function openWithCredentials(
   if (opened.encrypted !== true) return { security: UNRESTRICTED, password: null };
   const security = parseDocumentSecurity(await io.call('document_permissions', { path: workingPath }));
   return { security, password: security.opener === 'user' && password !== '' ? password : null };
+}
+
+function readRecipient(raw: unknown): CertificateRecipient | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const text = (v: unknown): string => (typeof v === 'string' ? v : '');
+  return { subject: text(r.subject), issuer: text(r.issuer), serial: text(r.serial) };
+}
+
+export interface SaveWorkingCopyIo {
+  call: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+  saveAs: (source: string, dest: string) => Promise<unknown>;
+  remove: (path: string) => Promise<void>;
+  /** Asks whether to save a signed document whose signatures the rewrite
+   * breaks. Absent on a save nobody asked for (a tab hand-off), which then
+   * refuses. */
+  confirmSignatureBreak?: () => Promise<boolean>;
+  /** Authenticates the certificate again after an engine restart lost it;
+   * false when the user cancelled. */
+  reattach: () => Promise<boolean>;
+}
+
+let resealStage = 0;
+
+/** Write the working copy over `dest`; false when the user declined. A
+ * certificate-opened working copy is plaintext, so it is first resealed under
+ * the document's own recipient lists into a stage beside it; the plaintext
+ * never reaches `dest`. */
+export async function saveWorkingCopy(
+  workingPath: string,
+  security: DocumentSecurity | undefined,
+  dest: string,
+  io: SaveWorkingCopyIo,
+): Promise<boolean> {
+  // Without the renderer's record, the engine's record of the working folder
+  // decides: a certificate-opened copy is plaintext and never copied as is.
+  const known = security ?? parseDocumentSecurity(await io.call('document_permissions', { path: workingPath }));
+  if (!isRecipientOpened(known)) {
+    await io.saveAs(workingPath, dest);
+    return true;
+  }
+  resealStage += 1;
+  const stage = `${workingPath}.${Date.now()}-${resealStage}.sealed`;
+  try {
+    let breakSignatures = false;
+    let reattached = false;
+    for (;;) {
+      const raw = await io.call('pubkey_reseal', { path: workingPath, output: stage, break_signatures: breakSignatures });
+      const reply = raw && typeof raw === 'object' ? (raw as Reply) : null;
+      if (reply?.output === stage) break;
+      if (reply?.output === null && reply.needs_certificate === true && !reattached) {
+        if (!(await io.reattach())) return false;
+        reattached = true;
+        continue;
+      }
+      if (reply?.output === null && typeof reply.signatures === 'number' && !breakSignatures) {
+        if (!io.confirmSignatureBreak) throw new Error(tChrome('app.save.signedCertificateImplicit'));
+        if (!(await io.confirmSignatureBreak())) return false;
+        breakSignatures = true;
+        continue;
+      }
+      throw new Error(tChrome('app.save.invalidReply'));
+    }
+    await io.saveAs(stage, dest);
+    return true;
+  } finally {
+    await io.remove(stage).catch(() => {});
+  }
 }

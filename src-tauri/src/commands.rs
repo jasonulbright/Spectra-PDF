@@ -1213,9 +1213,28 @@ pub async fn restore_snapshot(
     .map_err(|e| e.to_string())?
 }
 
+/// The engine's record beside a certificate-opened working copy
+/// (`engine/credentials.py` `RECIPIENT_MARKER`).
+const RECIPIENT_MARKER: &str = "spectra-recipient.json";
+
+/// A certificate-opened working folder holds plaintext; only a resealed
+/// stage (`*.sealed`) from it may be published over a user's file.
+fn refuse_recipient_plaintext(source: &Path) -> Result<(), String> {
+    let marked = source
+        .parent()
+        .map(|folder| folder.join(RECIPIENT_MARKER).exists())
+        .unwrap_or(false);
+    let sealed = source.extension().is_some_and(|ext| ext == "sealed");
+    if marked && !sealed {
+        return Err("Failed to save: the document is encrypted to certificate recipients and was not resealed".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn save_as(working_path: String, dest_path: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
+        refuse_recipient_plaintext(Path::new(&working_path))?;
         crate::file_publication::replace_copy(Path::new(&working_path), Path::new(&dest_path))
             .map_err(|e| format!("Failed to save: {e}"))
     })
@@ -2635,6 +2654,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_certificate_opened_working_copy_is_published_only_resealed() {
+        let dir = scratch("recipient-save");
+        let working = dir.join("doc.pdf");
+        let sealed = dir.join("doc.pdf.1-1.sealed");
+        std::fs::write(&working, b"plain").unwrap();
+        std::fs::write(&sealed, b"sealed").unwrap();
+        assert!(super::refuse_recipient_plaintext(&working).is_ok());
+        std::fs::write(dir.join(super::RECIPIENT_MARKER), b"{}").unwrap();
+        assert!(super::refuse_recipient_plaintext(&working).is_err());
+        assert!(super::refuse_recipient_plaintext(&sealed).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
 

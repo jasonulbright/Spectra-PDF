@@ -261,6 +261,17 @@ export const WORKBENCH_STRINGS = {
   'app.permissions.denied': 'This document does not allow {{permission}}.',
   'app.permissions.ownerPasswordNeeded':
     'This edit needs the owner password. The document was opened with its user password, and this edit cannot be saved with its protection kept.',
+  'app.permissions.recipientListNeeded':
+    'This edit would move pages out of a document encrypted to certificate recipients. Their encryption cannot follow the pages, and your certificate does not allow removing it.',
+  'app.open.cleanupFailed': 'Document opening failed and its temporary working copy could not be removed.',
+  'app.open.discardFailed': 'The temporary working copy could not be fully discarded.',
+  'app.open.invalidReply': 'The document could not be opened because the engine returned an unreadable reply.',
+  'app.save.invalidReply': 'The document was not saved because the engine returned an unreadable reply.',
+  'app.save.signedCertificateTitle': 'Signatures will break',
+  'app.save.signedCertificate':
+    '"{{name}}" is signed. Saving rewrites the whole file under its certificate encryption, which breaks every signature in it. Save anyway?',
+  'app.save.signedCertificateImplicit':
+    'This document is signed and encrypted to certificate recipients. Saving it breaks its signatures, so it is saved only when you choose Save.',
   'app.permissions.name.print': 'printing',
   'app.permissions.name.print_high': 'high-quality printing',
   'app.permissions.name.modify': 'changes to its content',

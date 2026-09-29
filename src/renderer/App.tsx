@@ -48,7 +48,8 @@ import { createConfirmQueue } from './lib/confirm-queue';
 import { createUnlockPrompts, type UnlockPrompt } from './lib/unlock-prompts';
 import { reportLaunch } from './lib/launch-notices';
 import { PasswordDialog } from './components/PasswordDialog';
-import { discardDocumentWorkingCopy, prepareDocumentWorkingCopy } from './lib/document-open';
+import { copyBlock, selectionPageIds } from './lib/copy-permission';
+import { discardDocumentWorkingCopy, prepareDocumentWorkingCopy, saveWorkingCopy } from './lib/document-open';
 import { setStageCredentialCaller } from './lib/stage-credentials';
 import { setSealedReader } from './lib/sealed-edit';
 import { rememberDocumentPassword } from './lib/document-passwords';
@@ -488,10 +489,41 @@ function AppContent(): React.ReactElement {
   // it was and the document unsaved; the gestures that start one run from
   // fire-and-forget command handlers, so the refusal is shown here or nowhere.
   const saveOrReport = useCallback(
-    async (workingPath: string, dest: string): Promise<boolean> => {
+    async (workingPath: string, dest: string, asked = true): Promise<boolean> => {
       try {
-        await file.saveAs(workingPath, dest);
-        return true;
+        const record = [...readState().files.values()].find((f) => f.workingPath === workingPath);
+        const name = dest.split(/[\\/]/).pop() ?? dest;
+        return await saveWorkingCopy(workingPath, record?.security, dest, {
+          call: (method, params) => call(method, params),
+          saveAs: file.saveAs,
+          remove: file.remove,
+          ...(asked
+            ? {
+              confirmSignatureBreak: () => showProceedConfirm(
+                tChrome('app.save.signedCertificateTitle'),
+                tChrome('app.save.signedCertificate', { name }),
+              ),
+            }
+            : {}),
+          reattach: async () => {
+            if (!record) return false;
+            let error: string | undefined;
+            let pfx: string | undefined;
+            for (;;) {
+              const answer = await showCertUnlockPrompt(record.name, error, pfx);
+              if (answer === 'cancel') return false;
+              pfx = answer.pfx;
+              try {
+                await call('pubkey_reattach', {
+                  path: workingPath, source: record.path, pfx: answer.pfx, password: answer.password,
+                });
+                return true;
+              } catch (e) {
+                error = e instanceof Error ? e.message : String(e);
+              }
+            }
+          },
+        });
       } catch (e: unknown) {
         await showNotice(
           tChrome('app.save.failedTitle'),
@@ -503,7 +535,7 @@ function AppContent(): React.ReactElement {
         return false;
       }
     },
-    [showNotice],
+    [showNotice, showProceedConfirm, showCertUnlockPrompt, readState, call],
   );
   const saveOrReportRef = useRef(saveOrReport);
   saveOrReportRef.current = saveOrReport;
@@ -881,9 +913,15 @@ function AppContent(): React.ReactElement {
         askPassword: showPasswordPrompt,
         askCertificate: showCertUnlockPrompt,
         wrongPassword: () => tChrome('app.open.incorrectPassword'),
+        certificateOpened: (fileName, recipient) => {
+          void showNotice(
+            tChrome('dialog.certUnlock.openedTitle'),
+            tChrome('dialog.certUnlock.opened', { name: fileName, ...recipient }),
+          );
+        },
       });
     },
-    [call, releaseCredentials, showPasswordPrompt, showCertUnlockPrompt],
+    [call, releaseCredentials, showPasswordPrompt, showCertUnlockPrompt, showNotice],
   );
 
   const stateRef = useRef(state);
@@ -1676,12 +1714,12 @@ function AppContent(): React.ReactElement {
   useEffect(() => {
     const onCopy = (event: ClipboardEvent) => {
       const now = readState();
-      const path = showableDoc(now);
-      if (!path || !isDocTab(now.ui.focusedTab)) return;
+      const pageIds = selectionPageIds(window.getSelection());
+      if (pageIds.length === 0 && (!showableDoc(now) || !isDocTab(now.ui.focusedTab))) return;
       const target = event.target;
       if (target instanceof HTMLElement
           && (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
-      const block = capabilityBlock(documentPermissions(now, path), 'copy');
+      const block = copyBlock(now, pageIds);
       if (!block) return;
       event.preventDefault();
       void showNotice(tChrome('app.permissions.title'), capabilityBlockText(block));
@@ -2870,7 +2908,7 @@ function AppContent(): React.ReactElement {
           let moved: TabDragResult;
           try {
             if (plan.saveFirst) {
-              if (!(await saveOrReportRef.current(handed.workingPath, handed.path))) {
+              if (!(await saveOrReportRef.current(handed.workingPath, handed.path, false))) {
                 handOffsInFlight.current.delete(path);
                 await tabDrag.release(held.token).catch(() => {});
                 return false;

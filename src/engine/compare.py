@@ -229,6 +229,10 @@ def compare_text(file_a: str, file_b: str, context: int = 3) -> dict:
         context: Unchanged lines of context to keep around each change; longer
             equal runs collapse to a single gap marker.
     """
+    from engine.credentials import require_permission
+
+    require_permission(file_a, "copy")
+    require_permission(file_b, "copy")
     lines_a, page_a, count_a = _extract_lines(file_a)
     lines_b, page_b, count_b = _extract_lines(file_b)
 

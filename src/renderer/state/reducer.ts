@@ -9,7 +9,7 @@ import { toolById, toolForOp, armedModeOf, type ToolDef } from '../commands/tool
 // lives here because the reducer is the only place that holds a whole document.
 import { countContents, countMarksOf, groupOf, nextSequence } from '../lib/count-marks';
 import { documentPermissions, placeTabAt } from './selectors';
-import { capabilityBlock, type Capability, type CapabilityBlock } from '../lib/document-permissions';
+import { capabilityBlock, pageExportBlock, type Capability, type CapabilityBlock } from '../lib/document-permissions';
 
 // Re-project a display-normalized annotation rect when its page's display
 // rotates by `delta` quarter-turns clockwise: annotation coords always live
@@ -285,14 +285,16 @@ function pageEditBlock(state: AppState, action: AppAction, edited: readonly Open
     const block = capabilityBlock(documentPermissions(state, path), capability);
     if (block) return block;
   }
-  // The owner password that would protect those pages in another file is
-  // not held, so a user-opened document's pages never leave it.
+  // The owner password or recipient lists that protect those pages cannot
+  // be carried into another file.
   const destination = action.type === 'MOVE_PAGE' || action.type === 'MOVE_PAGES' || action.type === 'IMPORT_PAGES'
     ? state.workspace.documents.find((d) => d.id === action.toDocId)?.path
     : undefined;
   if (destination !== undefined) {
     for (const path of paths) {
-      if (path !== destination && documentPermissions(state, path).opener === 'user') return { kind: 'ownerPassword' };
+      if (path === destination) continue;
+      const exported = pageExportBlock(documentPermissions(state, path));
+      if (exported) return exported;
     }
   }
   return null;

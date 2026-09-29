@@ -2199,6 +2199,16 @@ EXCLUDED_DOORS = {
         "leaves it byte for byte. Both outcomes are pinned by "
         "tests/test_user_password_open.py"
     ),
+    "open_pubkey_document": (
+        "has no `output` at all: a certificate open always rewrites the "
+        "working copy it was given as its plaintext and records the "
+        "recipient's grants. Pinned by tests/test_pubkey_crypt.py"
+    ),
+    "pubkey_reseal": (
+        "its output is the renderer's stage beside the working copy and the "
+        "door refuses an output resolving to the working copy; Save publishes "
+        "the stage. Pinned by tests/test_pubkey_crypt.py"
+    ),
     "sealed_reseal": (
         "its output is the renderer's stage beside the working copy and the "
         "door refuses an output resolving to the working copy; the stage is "

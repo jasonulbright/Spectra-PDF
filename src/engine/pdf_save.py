@@ -1,5 +1,6 @@
 """The one document write, with a content-derived file identifier."""
 
+import os
 import re
 from typing import NamedTuple
 from xml.etree import ElementTree
@@ -191,6 +192,13 @@ def _effective_encrypt_metadata(enc, revision: int) -> bool:
     if value is None:
         return True
     return bool(value)
+
+
+def recipient_folder(pdf):
+    """The private working folder of a restricted certificate-opened
+    document `pdf` was read from, or None. Its plaintext may not be written
+    anywhere else: the recipient lists cannot be authored onto a new file."""
+    return getattr(pdf, "_spectra_recipient_folder", None)
 
 
 def _encryption_reproducibility(pdf):
@@ -390,6 +398,10 @@ def source_encryption(pdf):
     message as an English fragment interpolated into a translated sentence,
     and the caller is what the user just asked for anyway.
     """
+    if recipient_folder(pdf) is not None:
+        # Plaintext with nothing to re-apply; `save_pdf` keeps it inside its
+        # working folder.
+        return None
     descriptor = _descriptor(pdf)
     if descriptor is None:
         return None
@@ -419,6 +431,8 @@ def encryption_profile(pdf):
     here is what once let a difference the rewrite recreates be taken from
     whichever source was reached first.
     """
+    if recipient_folder(pdf) is not None:
+        return ("certificate-recipients", recipient_folder(pdf))
     return _descriptor(pdf)
 
 
@@ -429,6 +443,8 @@ def refuse_user_opened_source(pdf) -> None:
     output could carry the source's pages only unprotected."""
     if getattr(pdf, "_spectra_preserve_encryption", False):
         _refuse_unreproducible_encryption(False, True)
+    if recipient_folder(pdf) is not None:
+        _refuse_unreproducible_encryption(True, False)
 
 
 def refuse_encrypted_source(file, *, drop_encryption: bool = False) -> bool:
@@ -451,7 +467,10 @@ def refuse_encrypted_source(file, *, drop_encryption: bool = False) -> bool:
     """
     try:
         with open_pdf(file) as pdf:
-            state = _encryption_reproducibility(pdf)
+            if recipient_folder(pdf) is not None:
+                state = (True, False)
+            else:
+                state = _encryption_reproducibility(pdf)
     except pikepdf.PasswordError:
         raise
     except Exception:
@@ -467,6 +486,18 @@ def refuse_encrypted_source(file, *, drop_encryption: bool = False) -> bool:
         "which will not hand back an unprotected copy of a protected document. "
         "Decrypt it first if that is what you want."
     )
+
+
+def _refuse_recipient_escape(pdf, encryption_source, target) -> None:
+    """Refuse a write of a restricted certificate-opened document's plaintext
+    to a path outside its own working folder."""
+    from engine.credentials import open_recipient_folders, refuse_recipient_escape
+
+    folders = {recipient_folder(pdf)} | open_recipient_folders()
+    if encryption_source is not _SENTINEL and encryption_source is not None:
+        folders.add(recipient_folder(encryption_source))
+    folders.discard(None)
+    refuse_recipient_escape(target, folders)
 
 
 def save_pdf(
@@ -500,6 +531,7 @@ def save_pdf(
             Only for an operation whose whole purpose is removing protection,
             or one whose output is by construction not the source document.
     """
+    _refuse_recipient_escape(pdf, encryption_source, target)
     kept_user_encryption = False
     if "encryption" not in kwargs and not drop_encryption:
         source = pdf if encryption_source is _SENTINEL else encryption_source

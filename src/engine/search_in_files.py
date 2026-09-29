@@ -20,6 +20,7 @@ pages per file are returned, and any truncation or per-file extraction failure
 
 import re
 
+from engine.credentials import is_open_document, require_permission
 from engine.extract_text import layout_text, pdfminer_pages
 
 # The compile half moved to `text_match.py` so this module, the
@@ -102,6 +103,8 @@ def search_in_files(
     for path in scan:
         searched += 1
         try:
+            if is_open_document(path):
+                require_permission(path, "copy")
             per_file = 0
             for page_no, text in _page_texts(path):
                 if not text:
