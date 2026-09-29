@@ -69,23 +69,43 @@ def test_page_sizes_null_the_unreadable_box_and_keep_the_count(doc):
 def test_annotation_rect_is_unreadable_not_infinite(doc):
     result = annotations.list_annotations(doc)
     _encodes(result)
+    assert result["count"] == 1
+    assert [(a["page"], a["subtype"], a["rect"]) for a in result["annotations"]] == [(1, "Square", None)]
 
 
 def test_link_destination_keeps_its_readable_coordinates(doc):
     result = links.list_links(doc)
     _encodes(result)
-    assert result["links"], result
+    assert len(result["links"]) == 1
+    link = result["links"][0]
+    assert link["rect"] == [0.0, 0.0, 10.0, 10.0]
+    assert link["target_spec"]["page"] == 1
+    view = link["target_spec"]["view"]
+    assert view["mode"] == "xyz"
+    assert view["left"] is None
+    assert view["top"] == 5.0
 
 
 def test_outline_destination_keeps_its_readable_coordinates(doc):
     result = outline.get_outline(doc)
     _encodes(result)
-    assert json.dumps(result).count("null") >= 1
+    assert result["count"] == 1
+    (item,) = result["outline"]
+    assert item["title"] == "x" and item["page"] == 1
+    assert item["left"] is not None and item["left"] == 0
+    assert item["top"] is None
 
 
 def test_thread_bead_and_widget_rects(doc):
-    _encodes(threads.list_threads(doc))
-    _encodes(forms.read_form_fields(doc))
+    listed = threads.list_threads(doc)
+    _encodes(listed)
+    assert listed["count"] == 1
+    (thread,) = listed["threads"]
+    assert thread["index"] == 0
+    assert thread["beads"] == []
+    fields = forms.read_form_fields(doc)
+    _encodes(fields)
+    assert [(f["name"], f["type"], f["widgets"]) for f in fields["fields"]] == [("f", "text", [])]
 
 
 def test_vector_listings_omit_only_the_infinite_path(doc):

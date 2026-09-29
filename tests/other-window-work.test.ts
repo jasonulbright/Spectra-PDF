@@ -58,23 +58,45 @@ describe('cross-window engine activity', () => {
     watching();
   });
 
-  it('ignores late snapshots and removes a listener that resolves after unmount', async () => {
+  it('removes a listener that resolves after unmount without requesting a snapshot', async () => {
     const listener = deferred<() => void>();
-    const snapshot = deferred<number>();
     const stop = vi.fn();
     const count = vi.fn();
+    const snapshot = vi.fn(() => Promise.resolve(5));
     const watching = watchOtherWindowWork(
-      { listen: () => listener.promise, snapshot: () => snapshot.promise },
+      { listen: () => listener.promise, snapshot },
       count,
     );
 
     watching();
     listener.resolve(stop);
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((done) => setTimeout(done, 0));
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(count).not.toHaveBeenCalled();
+  });
+
+  it('ignores a snapshot that resolves after unmount', async () => {
+    const snapshot = deferred<number>();
+    const snapshotStarted = deferred<void>();
+    const stop = vi.fn();
+    const count = vi.fn();
+    const watching = watchOtherWindowWork(
+      {
+        listen: async () => stop,
+        snapshot: () => {
+          snapshotStarted.resolve();
+          return snapshot.promise;
+        },
+      },
+      count,
+    );
+
+    await snapshotStarted.promise;
+    watching();
     expect(stop).toHaveBeenCalledTimes(1);
     snapshot.resolve(5);
-    await Promise.resolve();
+    await new Promise((done) => setTimeout(done, 0));
     expect(count).not.toHaveBeenCalled();
   });
 });

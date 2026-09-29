@@ -7,6 +7,7 @@
 // next run's claim must not be processed ahead of it.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { codeText } from './helpers/code-text';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { tChrome } from '../src/renderer/i18n';
 
@@ -218,7 +219,7 @@ describe('writtenRoots', () => {
 
 describe('the folder runs claim what they write', () => {
   const source = (path: string): string =>
-    readFileSync(resolve(__dirname, '../src/renderer', path), 'utf8').replace(/\r\n/g, '\n');
+    codeText(resolve(__dirname, '../src/renderer', path));
 
   /** The text of one function, from its declaration to the next marker. */
   const between = (text: string, from: string, to: string): string => {
@@ -328,14 +329,15 @@ describe('the bridge sends what the arbiter declares', () => {
     // run time only: a claim that cannot be sent stops every folder run, and a
     // release that cannot be sent keeps its folders claimed until the window
     // closes.
-    const bridge = read('src/renderer/lib/tauri-bridge.ts');
+    const bridge = codeText(resolve(__dirname, '../src/renderer/lib/tauri-bridge.ts'));
     expect(bridge).toContain("invoke<RunClaimResult>('claim_output_roots', { paths })");
     expect(bridge).toContain("invoke<void>('release_output_roots', { token })");
+    // Rust lines are matched whole, so a `//` line cannot satisfy them.
     const arbiter = read('src-tauri/src/app_windows.rs');
-    expect(parameters(arbiter, 'claim_output_roots')).toContain('paths: Vec<String>,');
-    expect(parameters(arbiter, 'release_output_roots')).toContain('token: u64,');
+    expect(parameters(arbiter, 'claim_output_roots')).toMatch(/^\s*paths: Vec<String>,\s*$/m);
+    expect(parameters(arbiter, 'release_output_roots')).toMatch(/^\s*token: u64,\s*$/m);
     const handlers = read('src-tauri/src/lib.rs');
-    expect(handlers).toContain('app_windows::claim_output_roots,');
-    expect(handlers).toContain('app_windows::release_output_roots,');
+    expect(handlers).toMatch(/^\s*app_windows::claim_output_roots,\s*$/m);
+    expect(handlers).toMatch(/^\s*app_windows::release_output_roots,\s*$/m);
   });
 });

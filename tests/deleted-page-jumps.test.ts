@@ -252,7 +252,24 @@ describe.each(['pdf', 'pdfx'] as const)('a deleted page loses only the jumps int
   });
 
   it('saves with an unreferenced named destination to the deleted page', async () => {
-    await deletePageTwo(format, pdf => pdf.catalog.set(N('Names'), pdf.context.obj({ Dests: { Names: [PDFString.of('two'), fit(pdf, 1)] } })));
+    const out = await deletePageTwo(format, pdf => pdf.catalog.set(N('Names'), pdf.context.obj({
+      Dests: { Names: [PDFString.of('one'), fit(pdf, 0), PDFString.of('two'), fit(pdf, 1)] },
+    })));
+    const tree = out.catalog.lookupMaybe(N('Names'), PDFDict)?.lookupMaybe(N('Dests'), PDFDict);
+    const flat = tree?.lookupMaybe(N('Names'), PDFArray)?.asArray() ?? [];
+    expect(tree?.has(N('Kids'))).toBeFalsy();
+    const named = new Map<string, unknown>();
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      named.set((out.context.lookup(flat[i]) as PDFString).decodeText(), out.context.lookup(flat[i + 1]));
+    }
+    // ISO 32000-2 12.3.2.2: a destination's first element is a page of this document.
+    const pages = new Set(out.getPages().map(page => page.ref.tag));
+    for (const value of named.values()) {
+      expect(value).toBeInstanceOf(PDFArray);
+      expect(pages.has(((value as PDFArray).get(0) as PDFRef).tag)).toBe(true);
+    }
+    expect([...named.keys()]).toEqual(['one']);
+    expect(((named.get('one') as PDFArray).get(0) as PDFRef).tag).toBe(out.getPage(0).ref.tag);
   });
 
   it('omits a print range selecting only the deleted page and keeps every other preference', async () => {
