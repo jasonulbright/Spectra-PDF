@@ -2478,6 +2478,7 @@
   "engine.ink_manager.inkUsedPatternTool": "Črnilo »{{name}}« uporablja vzorec, ki ga to orodje ne more na novo zapisati.",
   "engine.ink_manager.nameLeastOneInk": "Imenujte vsaj eno črnilo za pretvorbo.",
   "engine.ink_manager.processInksCannotAliased": "Procesnih črnil ni mogoče združiti s posebno barvo.",
+  "engine.inplace.fileCouldReplacedBecause": "Datoteke ni bilo mogoče zamenjati, ker jo uporablja drug program. Zaprite jo tam in poskusite znova.",
   "engine.inspect.pageOutRange": "Stran {{page}} je zunaj obsega (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "kazalo sloja {{index}} je zunaj obsega (0-{{v1}})",
   "engine.links.documentDestinationNamed": "ta dokument nima cilja z imenom {{name}}",

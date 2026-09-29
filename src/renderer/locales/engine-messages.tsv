@@ -340,6 +340,7 @@ ink_manager.inkUsedDocument	pattern	ink_manager	Ink "{{name}}" is not used in th
 ink_manager.inkUsedPatternTool	pattern	ink_manager	Ink "{{name}}" is used by a pattern this tool cannot rewrite.
 ink_manager.nameLeastOneInk	exact	ink_manager	Name at least one ink to convert.
 ink_manager.processInksCannotAliased	exact	ink_manager	Process inks cannot be aliased to a spot colour.
+inplace.fileCouldReplacedBecause	exact	inplace	The file could not be replaced because another program is using it. Close it there and try again.
 inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 ipc.circularReferenceDetected	exact	ipc	Circular reference detected
 ipc.invalidJsonConstant	pattern	ipc	Invalid JSON constant: {{value}}

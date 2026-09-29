@@ -2415,6 +2415,7 @@
   "engine.ink_manager.inkUsedPatternTool": "A tinta “{{name}}” é usada por um padrão que esta ferramenta não consegue reescrever.",
   "engine.ink_manager.nameLeastOneInk": "Informe pelo menos uma tinta para converter.",
   "engine.ink_manager.processInksCannotAliased": "Tintas de escala não podem ser unidas a uma cor especial.",
+  "engine.inplace.fileCouldReplacedBecause": "Não foi possível substituir o arquivo porque outro programa o está usando. Feche-o lá e tente novamente.",
   "engine.inspect.pageOutRange": "Página {{page}} fora do intervalo (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "o índice de camada {{index}} está fora do intervalo (0-{{v1}})",
   "engine.links.documentDestinationNamed": "este documento não tem nenhum destino chamado {{name}}",

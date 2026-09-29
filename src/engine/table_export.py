@@ -44,6 +44,7 @@ import re
 from pathlib import Path
 
 import pikepdf
+from engine.inplace import atomic_output
 from engine.credentials import open_pdf
 
 from engine import bidi
@@ -992,7 +993,8 @@ def export_tables(
 
     out_path = Path(output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    book.save(str(out_path))
+    with atomic_output(out_path) as staged:
+        book.save(str(staged))
 
     return {
         "output": str(out_path),

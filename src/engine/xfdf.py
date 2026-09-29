@@ -54,7 +54,7 @@ from engine.annotations import (
     reply_relationship,
     usable_relationship_name,
 )
-from engine.inplace import is_same_file, staged_write
+from engine.inplace import is_same_file, staged_write, write_text_staged
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import token_text
 
@@ -525,8 +525,7 @@ def export_xfdf(file: str, output: str) -> dict:
         + "\n".join(parts)
         + "\n</annots>\n</xfdf>\n"
     )
-    with open(output, "w", encoding="utf-8") as f:
-        f.write(xml)
+    write_text_staged(output, xml)
     out = {
         "output": output,
         # `count` is what the file holds, `found` is what the document offered,

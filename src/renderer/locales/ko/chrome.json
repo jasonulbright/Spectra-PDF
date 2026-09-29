@@ -2289,6 +2289,7 @@
   "engine.ink_manager.inkUsedPatternTool": "\"{{name}}\" 잉크는 이 도구가 다시 쓸 수 없는 패턴에서 사용됩니다.",
   "engine.ink_manager.nameLeastOneInk": "변환할 잉크를 하나 이상 지정하십시오.",
   "engine.ink_manager.processInksCannotAliased": "원색 잉크는 별색의 별칭으로 묶을 수 없습니다.",
+  "engine.inplace.fileCouldReplacedBecause": "다른 프로그램에서 사용 중이므로 파일을 바꿀 수 없습니다. 해당 프로그램에서 파일을 닫고 다시 시도하세요.",
   "engine.inspect.pageOutRange": "{{page}}쪽이 범위를 벗어났습니다(1-{{v1}})",
   "engine.layers.layerIndexOutRange": "레이어 인덱스가 범위를 벗어났습니다: {{index}}(0-{{v1}})",
   "engine.links.documentDestinationNamed": "이 문서에는 {{name}}(이)라는 이름의 대상이 없습니다",

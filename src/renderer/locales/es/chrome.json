@@ -2415,6 +2415,7 @@
   "engine.ink_manager.inkUsedPatternTool": "La tinta «{{name}}» la usa un motivo que esta herramienta no puede reescribir.",
   "engine.ink_manager.nameLeastOneInk": "Indique al menos una tinta que convertir.",
   "engine.ink_manager.processInksCannotAliased": "Las tintas de proceso no pueden unirse a una tinta plana.",
+  "engine.inplace.fileCouldReplacedBecause": "No se pudo reemplazar el archivo porque otro programa lo está usando. Ciérrelo allí e inténtelo de nuevo.",
   "engine.inspect.pageOutRange": "La página {{page}} está fuera de rango (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "el índice de capa {{index}} está fuera de rango (0-{{v1}})",
   "engine.links.documentDestinationNamed": "este documento no tiene ningún destino llamado {{name}}",

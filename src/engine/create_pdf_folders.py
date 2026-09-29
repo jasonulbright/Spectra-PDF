@@ -23,6 +23,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from engine.inplace import write_text_staged
 from engine.batch_ocr import _format_duration, _format_timestamp, _pad, dest_conflicts_with_source
 from engine.create_pdf import IMAGE_SUFFIXES, accepted_suffixes, create_pdf
 
@@ -272,5 +273,5 @@ def _write_log(
     lines.append(
         f"{report['ok']} built · {report['failed']} failed · {report['total']} folder(s)"
     )
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_staged(path, "\n".join(lines) + "\n")
     return str(path)

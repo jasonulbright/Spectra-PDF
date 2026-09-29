@@ -2352,6 +2352,7 @@
   "engine.ink_manager.inkUsedPatternTool": "Blækket \"{{name}}\" bruges af et mønster, som dette værktøj ikke kan omskrive.",
   "engine.ink_manager.nameLeastOneInk": "Navngiv mindst ét blæk, der skal konverteres.",
   "engine.ink_manager.processInksCannotAliased": "Procesblæk kan ikke gøres til alias for en spotfarve.",
+  "engine.inplace.fileCouldReplacedBecause": "Filen kunne ikke erstattes, fordi et andet program bruger den. Luk den der, og prøv igen.",
   "engine.inspect.pageOutRange": "Side {{page}} ligger uden for intervallet (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "lagindekset {{index}} ligger uden for intervallet (0-{{v1}})",
   "engine.links.documentDestinationNamed": "dette dokument har ingen destination ved navn {{name}}",

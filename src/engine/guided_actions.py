@@ -35,6 +35,7 @@ import os
 import shutil
 
 import pikepdf
+from engine.inplace import write_text_staged
 from engine.credentials import open_pdf
 
 from engine import gs_capability
@@ -1041,5 +1042,5 @@ def _write_action_log(
             lines.append(f"{tag}{r['rel']} — {r['error']}")
     lines.append("")
     lines.append(f"{report['ok']} processed · {report['failed']} failed · {report['total']} total")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_staged(path, "\n".join(lines) + "\n")
     return str(path)

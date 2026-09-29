@@ -79,8 +79,6 @@ refuses instead of importing another copy of a page or registered field.
 """
 
 import io
-import os
-import tempfile
 from pathlib import Path
 
 import pikepdf
@@ -92,7 +90,7 @@ from pyhanko.pdf_utils.metadata.model import DocumentMetadata
 from .docmdp import certification_of_pdf, POLICY_UNREADABLE, refuse_unreadable_policy
 from .acroform import live_signature_fields
 from .fieldmdp import locked_fields, locks_of_pdf
-from .inplace import is_same_file
+from .inplace import is_same_file, staged_write
 from .validate import validate_pdf
 from .pdf_version import effective_version
 from .pdf_tree import exact_pyhanko_names, key_text, token_text
@@ -1549,19 +1547,9 @@ def transplant_incremental(original: str, modified: str, output: str, *,
     with open_pdf(io.BytesIO(result), document=original):
         pass
 
-    fd, tmp = tempfile.mkstemp(
-        dir=str(out_path.parent), suffix=".transplant-tmp"
-    )
-    try:
-        with os.fdopen(fd, "wb") as f:
+    with staged_write(out_path) as staged:
+        with open(str(staged), "wb") as f:
             f.write(result)
-        os.replace(tmp, output)
-    except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
 
     return {
         "applied": True,

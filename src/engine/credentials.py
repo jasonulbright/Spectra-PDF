@@ -21,6 +21,9 @@ import shutil
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from engine.inplace import atomic_output
 
 _PERMISSION_KEYS = (
     ("print", "print_lowres"),
@@ -199,7 +202,8 @@ def copy_document(source, target) -> None:
     if _is_path(source):
         folder = _restricted_recipient_folder(source)
         refuse_recipient_escape(target, {folder} if folder else set())
-    shutil.copyfile(source, target)
+    with atomic_output(Path(target)) as staged:
+        shutil.copyfile(source, staged)
     if _is_path(source):
         _lend(_documents.get(_key(source)), target)
 

@@ -48,6 +48,16 @@ STAGING_SCOPES = frozenset({
 #: written file over a name that may be its own input.
 SWAPS = frozenset({("os", "replace"), ("shutil", "move")})
 
+#: Landings every writer takes so a death mid-write never tears its output.
+#: They stage too, but reaching one says nothing about ``output == file``:
+#: the walk treats them as leaves, or every door that writes would count.
+ATOMIC_LANDINGS = frozenset({
+    ("engine.inplace", "atomic_output"),
+    ("engine.inplace", "write_bytes_staged"),
+    ("engine.inplace", "write_text_staged"),
+    ("engine.pdf_save", "save_pdf"),
+})
+
 
 def _module_trees() -> dict:
     trees = {}
@@ -135,6 +145,8 @@ def _reaching(graph: dict, swappers: set) -> set:
     while changed:
         changed = False
         for caller, callees in graph.items():
+            if caller in ATOMIC_LANDINGS:
+                continue
             if caller not in reached and callees & reached:
                 reached.add(caller)
                 changed = True

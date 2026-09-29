@@ -2352,6 +2352,7 @@
   "engine.ink_manager.inkUsedPatternTool": "Die Farbe „{{name}}“ wird von einem Muster verwendet, das dieses Werkzeug nicht umschreiben kann.",
   "engine.ink_manager.nameLeastOneInk": "Nennen Sie mindestens eine Farbe zum Konvertieren.",
   "engine.ink_manager.processInksCannotAliased": "Prozessfarben können nicht mit einer Sonderfarbe zusammengeführt werden.",
+  "engine.inplace.fileCouldReplacedBecause": "Die Datei konnte nicht ersetzt werden, weil ein anderes Programm sie verwendet. Schließen Sie sie dort und versuchen Sie es erneut.",
   "engine.inspect.pageOutRange": "Seite {{page}} außerhalb des gültigen Bereichs (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "der Ebenenindex {{index}} liegt außerhalb des gültigen Bereichs (0-{{v1}})",
   "engine.links.documentDestinationNamed": "dieses Dokument hat kein Ziel namens {{name}}",

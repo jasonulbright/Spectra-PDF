@@ -46,6 +46,7 @@ from engine import form_detect as form_detect_mod
 from engine import form_prepare as form_prepare_mod
 from engine import forms as forms_mod
 from engine import headers as headers_mod
+from engine import inplace as inplace_mod
 from engine import incremental as incremental_mod
 from engine import ink_manager as ink_manager_mod
 from engine import layers as layers_mod
@@ -1902,9 +1903,8 @@ CASES = (
         deterministic=False,
     ),
     Case(
-        # The transplant stages by hand as well: the appended revision is
-        # written to a temp beside the output and landed with `os.replace`,
-        # which is therefore the call the death test replaces.
+        # The appended revision is written to a stage beside the output and
+        # landed by `finish_staged`, which the death test replaces.
         "transplant_incremental",
         incremental_mod,
         _signed_and_modified,
@@ -1912,8 +1912,8 @@ CASES = (
         _signature_state,
         doors=("transplant_incremental",),
         leaves=(ORIGINAL_NAME, SIGNER_NAME),
-        dies_on=incremental_mod.os,
-        dies="replace",
+        dies_on=inplace_mod,
+        dies="finish_staged",
         staged_of=_first_argument,
         # The appended revision carries its own update `/ID`, drawn fresh per
         # run, so one input has more than one correct output.

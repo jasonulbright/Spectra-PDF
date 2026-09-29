@@ -2415,6 +2415,7 @@
   "engine.ink_manager.inkUsedPatternTool": "L’inchiostro «{{name}}» è usato da un motivo che questo strumento non può riscrivere.",
   "engine.ink_manager.nameLeastOneInk": "Indicare almeno un inchiostro da convertire.",
   "engine.ink_manager.processInksCannotAliased": "Gli inchiostri di quadricromia non possono essere uniti a una tinta piatta.",
+  "engine.inplace.fileCouldReplacedBecause": "Impossibile sostituire il file perché è in uso da un altro programma. Chiudilo lì e riprova.",
   "engine.inspect.pageOutRange": "Pagina {{page}} fuori intervallo (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "l’indice di livello {{index}} è fuori intervallo (0-{{v1}})",
   "engine.links.documentDestinationNamed": "questo documento non ha alcuna destinazione denominata {{name}}",
