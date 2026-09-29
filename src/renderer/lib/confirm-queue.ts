@@ -16,6 +16,8 @@ export interface ConfirmQueue<R extends { id: number }> {
    * the request shown after it.
    */
   answer(id: number): R | undefined;
+  /** Remove a request that is waiting behind the open one, unanswered. */
+  drop(id: number): R | undefined;
 }
 
 export function createConfirmQueue<R extends { id: number }>(
@@ -32,6 +34,10 @@ export function createConfirmQueue<R extends { id: number }>(
       const done = pending.shift();
       show(pending[0] ?? null);
       return done;
+    },
+    drop(id) {
+      const index = pending.findIndex((request, i) => i > 0 && request.id === id);
+      return index === -1 ? undefined : pending.splice(index, 1)[0];
     },
   };
 }

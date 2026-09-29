@@ -120,7 +120,7 @@ describe('finishCoordinatedExit', () => {
     });
     const prompts: string[][] = [];
     const cancelQuit = vi.fn(async () => {});
-    const close = vi.fn(async () => true);
+    const close = vi.fn(async () => 'closed' as const);
     const run = finishCoordinatedExit(
       () => request,
       () => confirmDirtySnapshots(
@@ -146,7 +146,7 @@ describe('finishCoordinatedExit', () => {
   it('does not repeat a discard prompt when the confirmed edits did not change during peer negotiation', async () => {
     const before = { path: 'a.pdf', editRevision: 1, bufferRevision: new Uint8Array([1]) };
     const decide = vi.fn(async () => 'discard' as const);
-    const close = vi.fn(async () => true);
+    const close = vi.fn(async () => 'closed' as const);
     await expect(finishCoordinatedExit(
       async () => ({ proceed: true, sessionId: 18 }),
       () => confirmDirtySnapshots(() => [before], decide, async () => true, [before]),
@@ -155,5 +155,16 @@ describe('finishCoordinatedExit', () => {
     )).resolves.toBe('closed');
     expect(decide).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('unseals the quit when the last window stays for running writes', async () => {
+    const cancelQuit = vi.fn(async () => {});
+    await expect(finishCoordinatedExit(
+      async () => ({ proceed: true, sessionId: 19 }),
+      async () => true,
+      cancelQuit,
+      async () => 'stayed' as const,
+    )).resolves.toBe('cancelled');
+    expect(cancelQuit).toHaveBeenCalledWith(19);
   });
 });

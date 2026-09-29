@@ -14,6 +14,11 @@ async function until(check: () => boolean) {
   const end = Date.now() + 15_000;
   while (!check()) { if (Date.now() > end) throw new Error('process fixture timed out'); await sleep(40); }
 }
+/** The receipt's pids, or null until the fixture has written a whole one. */
+function readReceipt(path: string): number[] | null {
+  if (!existsSync(path)) return null;
+  try { return JSON.parse(readFileSync(path, 'utf8')) as number[]; } catch { return null; }
+}
 function alive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
@@ -38,9 +43,9 @@ describe.skipIf(process.platform !== 'win32')('Windows E2E process ownership', (
     cleanups.push(async () => { unrelated.kill(); await unrelatedClosed; });
     const first = launch(); const independent = launch();
     await Promise.all([first.owned.ready, independent.owned.ready]);
-    await until(() => existsSync(first.receipt) && existsSync(independent.receipt));
-    const firstPids: number[] = JSON.parse(readFileSync(first.receipt, 'utf8'));
-    const otherPids: number[] = JSON.parse(readFileSync(independent.receipt, 'utf8'));
+    await until(() => readReceipt(first.receipt) !== null && readReceipt(independent.receipt) !== null);
+    const firstPids = readReceipt(first.receipt)!;
+    const otherPids = readReceipt(independent.receipt)!;
     expect(firstPids.every(alive)).toBe(true);
     await first.owned.stop();
     await until(() => firstPids.every(pid => !alive(pid)));
@@ -55,7 +60,8 @@ describe.skipIf(process.platform !== 'win32')('Windows E2E process ownership', (
     const run = launch('exit');
     await run.owned.ready;
     expect(await run.owned.closed).toBe(1);
-    const pids: number[] = JSON.parse(readFileSync(run.receipt, 'utf8'));
+    await until(() => readReceipt(run.receipt) !== null);
+    const pids = readReceipt(run.receipt)!;
     await until(() => pids.every(pid => !alive(pid)));
     await expect(run.owned.stop()).rejects.toThrow('cleanup failed');
   }, 40_000);
@@ -69,9 +75,9 @@ describe.skipIf(process.platform !== 'win32')('Windows E2E process ownership', (
     let error = ''; supervisor.stderr.on('data', chunk => { error += chunk.toString(); });
     supervisor.stdout.resume();
     supervisor.stdin.write(JSON.stringify({ executable: python, args: ['-B', fixture, receipt, 'wait'], ready: 'READY' }) + '\n');
-    await until(() => existsSync(receipt) || supervisor.exitCode !== null);
+    await until(() => readReceipt(receipt) !== null || supervisor.exitCode !== null);
     expect(error).toBe('');
-    const pids: number[] = JSON.parse(readFileSync(receipt, 'utf8'));
+    const pids = readReceipt(receipt) ?? [];
     if (mode === 'eof') supervisor.stdin.end(); else supervisor.kill();
     await until(() => pids.every(pid => !alive(pid)));
   }, 40_000);

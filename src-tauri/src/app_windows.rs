@@ -1765,8 +1765,7 @@ pub fn on_window_destroyed(app: &AppHandle, label: &str) {
     app.state::<ShowGate>().forget(label);
     app.state::<ComposeGate>().forget(label);
     app.state::<WindowRegistry>().forget(label);
-    app.state::<crate::engine::EngineRouter>().drop_label(label);
-    crate::engine::publish_activity(app);
+    crate::engine::retire_window(app, label);
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────
@@ -1779,7 +1778,6 @@ pub async fn open_new_window(app: AppHandle) -> Result<String, String> {
     build_app_window(&app, &label, crate::is_e2e_mode())
         .map_err(|e| format!("Failed to open a window: {}", e))?;
     show_when_ready(&app, &label, true);
-    crate::engine::publish_activity(&app);
     Ok(label)
 }
 

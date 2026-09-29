@@ -82,6 +82,7 @@ const BOOKMARKED_PDF = resolve(__dirname, '..', 'fixtures', 'bookmarked.pdf');
 const TAB_STRIP = '[data-testid="tab-strip"]';
 const CONFIRM_MESSAGE = '[data-testid="confirm-message"]';
 const CONFIRM_AFFIRM = '[data-testid="confirm-affirm"]';
+const NOTICE_OK = '[data-testid="notice-ok"]';
 const COMMIT_ERROR = '[data-testid="commit-error-bar"]';
 
 /** How far inside the drop point a torn-off window is placed. */
@@ -895,15 +896,19 @@ describe('cross-window tab drag', () => {
     const source = await readFrame();
     const point = physical(stripCssPoint(target, 40), source.dpr);
 
-    let failed = '';
+    // The drop resolves as soon as the document is given back; the refusal is
+    // reported afterwards, and waiting on the user holds nothing.
+    let moved: boolean;
     try {
-      await tabDragDrop(lockedPdf, point);
-    } catch (e) {
-      failed = String(e);
+      moved = await tabDragDrop(lockedPdf, point);
     } finally {
       chmodSync(lockedPdf, 0o666);
     }
-    expect(failed).not.toBe('');
+    expect(moved).toBe(false);
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 15_000 });
+    expect(await $(CONFIRM_MESSAGE).getText()).toContain('locked.pdf');
+    await $(NOTICE_OK).click();
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 10_000, reverse: true });
 
     // Nothing crossed: the tab is still here with its page edits pending, and
     // the file the write could not reach is the file it always was.

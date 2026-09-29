@@ -216,7 +216,7 @@ export function useEngine() {
 
   useEffect(() => {
     let mounted = true;
-    void Promise.all([ensureEngineResponses(), engine.start()]).then(() => {
+    void ensureEngineResponses().then(() => {
       if (mounted) setReady(true);
     }).catch((e: unknown) => console.error('[engine] Failed to start:', e));
     // The window owns the listener; native window teardown owns its lifetime.

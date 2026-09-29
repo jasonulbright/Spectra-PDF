@@ -1,7 +1,7 @@
 """The JSON-RPC loop validates each line and survives malformed calls.
 
-One engine process serves every window, so a request that raises out of
-the loop ends every in-flight call; and the host drops a response line it
+One engine process serves each window, so a request that raises out of
+the loop ends every call that window has in flight; and the host drops a response line it
 cannot parse, so a result that is not strict JSON leaves its call pending
 forever."""
 

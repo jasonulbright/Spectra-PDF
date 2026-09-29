@@ -225,7 +225,9 @@ class JsonRpcServer:
     def _read(self, input_stream: TextIO, inbox: "queue.Queue[tuple[str, Any]]") -> None:
         """Reader thread. A cancel is applied here, while the main thread may
         be inside the handler it cancels; every other line is queued in
-        arrival order. The last item is always ("eof", exception-or-None)."""
+        arrival order. The last item is always ("eof", exception-or-None), so
+        end of input is served only after every request queued before it:
+        the host retires a closed window's worker by closing its stdin."""
         failure: BaseException | None = None
         try:
             for line in input_stream:
@@ -269,7 +271,7 @@ class JsonRpcServer:
                 self._write_error(output_stream, None, -32700, "Parse error")
                 continue
             # An exception that escapes this loop ends the process, and every
-            # request any window has in flight with it.
+            # request its window has in flight with it.
             if not isinstance(request, dict):
                 self._write_error(output_stream, None, -32600, "Invalid Request")
                 continue
