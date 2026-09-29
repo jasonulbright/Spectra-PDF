@@ -31,6 +31,7 @@
 
 use std::cell::Cell;
 use std::ffi::c_void;
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,13 +49,14 @@ use windows::Win32::UI::WindowsAndMessaging::WM_CLOSE;
 use windows_core_webview2::{Interface, BOOL, HSTRING, PCWSTR, PWSTR};
 
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    ICoreWebView2Environment6, ICoreWebView2PrintSettings, ICoreWebView2_7,
-    COREWEBVIEW2_PRINT_ORIENTATION_LANDSCAPE, COREWEBVIEW2_PRINT_ORIENTATION_PORTRAIT,
-    COREWEBVIEW2_WEB_ERROR_STATUS,
+    ICoreWebView2Environment, ICoreWebView2Environment6, ICoreWebView2PrintSettings,
+    ICoreWebView2WebResourceResponse, ICoreWebView2_7, COREWEBVIEW2_PRINT_ORIENTATION_LANDSCAPE,
+    COREWEBVIEW2_PRINT_ORIENTATION_PORTRAIT, COREWEBVIEW2_WEB_ERROR_STATUS,
+    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT,
 };
 use webview2_com::{
     take_pwstr, ExecuteScriptCompletedHandler, NavigationCompletedEventHandler,
-    NavigationStartingEventHandler, PrintToPdfCompletedHandler,
+    NavigationStartingEventHandler, PrintToPdfCompletedHandler, WebResourceRequestedEventHandler,
 };
 
 /// The window a capture runs in. One label, so a second capture cannot open a
@@ -226,6 +228,25 @@ struct CaptureScope {
     settled: bool,
     load_observed: bool,
     refused_host: Option<String>,
+    /// Top-level targets this scope refused, fragment removed. The document
+    /// request for each is answered locally, because a cancelled navigation
+    /// can still have issued its request.
+    refused_documents: HashSet<String>,
+    /// Insertion order of `refused_documents`, oldest first, for the cap.
+    refused_order: VecDeque<String>,
+    /// A navigation was cancelled without a readable target: every document
+    /// request is answered locally until a navigation is admitted.
+    refused_unknown: bool,
+}
+
+/// Refused targets kept for request blocking; the oldest drops first.
+const REFUSED_DOCUMENTS_CAP: usize = 256;
+
+/// The request identity a document fetch and a navigation share. Both URIs
+/// arrive in the browser's canonical spelling; the resource filter removes the
+/// fragment, so only the fragment is cut here.
+fn document_key(target: &str) -> &str {
+    target.split('#').next().unwrap_or(target)
 }
 
 impl CaptureScope {
@@ -239,6 +260,31 @@ impl CaptureScope {
             settled: false,
             load_observed: false,
             refused_host: None,
+            refused_documents: HashSet::new(),
+            refused_order: VecDeque::new(),
+            refused_unknown: false,
+        }
+    }
+
+    /// Whether a document request must be answered locally instead of sent.
+    fn blocks_document(&self, uri: &str) -> bool {
+        self.refused_unknown || self.refused_documents.contains(document_key(uri))
+    }
+
+    /// Record a cancelled navigation whose target could not be read.
+    fn refuse_unknown(&mut self) {
+        self.refused_unknown = true;
+    }
+
+    fn remember_refused(&mut self, key: &str) {
+        if !self.refused_documents.insert(key.to_string()) {
+            return;
+        }
+        self.refused_order.push_back(key.to_string());
+        while self.refused_order.len() > REFUSED_DOCUMENTS_CAP {
+            if let Some(oldest) = self.refused_order.pop_front() {
+                self.refused_documents.remove(&oldest);
+            }
         }
     }
 
@@ -247,6 +293,20 @@ impl CaptureScope {
     /// A refusal before the crawl has seen the first load end records the
     /// target host, whether a redirect or a script caused it.
     fn admit(&mut self, target: &str, redirected: bool, local_root: Option<&Path>) -> bool {
+        let key = document_key(target);
+        let admitted = self.judge(target, redirected, local_root);
+        if admitted {
+            self.refused_unknown = false;
+            if self.refused_documents.remove(key) {
+                self.refused_order.retain(|refused| refused != key);
+            }
+        } else {
+            self.remember_refused(key);
+        }
+        admitted
+    }
+
+    fn judge(&mut self, target: &str, redirected: bool, local_root: Option<&Path>) -> bool {
         if !redirected && self.started {
             self.settled = true;
         }
@@ -657,6 +717,58 @@ fn guard_navigation_scope(
         DISPATCH_TIMEOUT,
         "the capture scope could not be enforced",
         move |browser, tx| {
+            let blocker_scope = scope.clone();
+            let environment: ICoreWebView2Environment = browser
+                .environment
+                .cast()
+                .map_err(|e| format!("Could not enforce the capture scope: {e}"))?;
+            let blocker = WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let request = unsafe { args.Request() }?;
+                let mut uri = PWSTR::null();
+                unsafe { request.Uri(&mut uri) }?;
+                let uri = take_pwstr(uri);
+                let blocked = blocker_scope
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .blocks_document(&uri);
+                if blocked {
+                    let reason = HSTRING::from("Blocked");
+                    let headers = HSTRING::from("");
+                    let mut response = std::ptr::null_mut();
+                    // No content stream: the response carries a status only.
+                    let created = unsafe {
+                        (Interface::vtable(&environment).CreateWebResourceResponse)(
+                            Interface::as_raw(&environment),
+                            std::ptr::null_mut(),
+                            403,
+                            PCWSTR(reason.as_ptr()),
+                            PCWSTR(headers.as_ptr()),
+                            &mut response,
+                        )
+                    };
+                    if created.is_ok() && !response.is_null() {
+                        let response =
+                            unsafe { ICoreWebView2WebResourceResponse::from_raw(response) };
+                        unsafe { args.SetResponse(&response) }?;
+                    }
+                }
+                Ok(())
+            }));
+            let mut blocker_token = 0i64;
+            let every_uri = HSTRING::from("*");
+            unsafe {
+                browser.webview.AddWebResourceRequestedFilter(
+                    PCWSTR(every_uri.as_ptr()),
+                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT,
+                )
+            }
+            .and_then(|_| unsafe {
+                browser
+                    .webview
+                    .add_WebResourceRequested(&blocker, &mut blocker_token)
+            })
+            .map_err(|e| format!("Could not enforce the capture scope: {e}"))?;
             let handler = NavigationStartingEventHandler::create(Box::new(move |_, args| {
                 if let Some(args) = args {
                     let mut uri = PWSTR::null();
@@ -664,12 +776,15 @@ fn guard_navigation_scope(
                     let mut flag = BOOL::from(false);
                     let redirected =
                         unsafe { args.IsRedirected(&mut flag) }.is_ok() && flag.as_bool();
-                    let allowed = target.as_deref().is_some_and(|target| {
-                        scope
-                            .lock()
-                            .unwrap_or_else(|poison| poison.into_inner())
-                            .admit(target, redirected, local_root.as_deref())
-                    });
+                    let mut guard = scope.lock().unwrap_or_else(|poison| poison.into_inner());
+                    let allowed = match target.as_deref() {
+                        Some(target) => guard.admit(target, redirected, local_root.as_deref()),
+                        None => {
+                            guard.refuse_unknown();
+                            false
+                        }
+                    };
+                    drop(guard);
                     if !allowed {
                         let _ = unsafe { args.SetCancel(true) };
                     }
@@ -1280,7 +1395,7 @@ mod tests {
     use super::{
         cancelled, cancelled_result, clamp, clear_cancel, decode_harvested_links,
         discard_capture_at, enqueue_links, finish, frontier_cap, link_in_scope, local_file_root,
-        same_origin, settle_scope, start_redirect_scope, Arc, CaptureScope, Mutex, validate_url, window_close_requested, CaptureOptions, CaptureScratch,
+        same_origin, settle_scope, start_redirect_scope, Arc, CaptureScope, Mutex, REFUSED_DOCUMENTS_CAP, validate_url, window_close_requested, CaptureOptions, CaptureScratch,
         CapturedPage, CAPTURE_LABEL, MAX_DEPTH_CEILING, MAX_PAGES_CEILING,
     };
 
@@ -1422,6 +1537,65 @@ mod tests {
         assert!(scope.admit("https://www.example.test/", false, None));
         assert!(scope.admit("https://example.test/", true, None));
         assert!(!scope.admit("https://www.www.www.example.test/", true, None));
+    }
+
+    #[test]
+    fn only_refused_top_level_targets_block_their_document_request() {
+        let mut scope = CaptureScope::new("http".into(), "example.test:80".into());
+        assert!(scope.admit("http://example.test/", false, None));
+        assert!(!scope.blocks_document("http://example.test/"));
+        assert!(!scope.blocks_document("https://cdn.other.test/frame.html"));
+        assert!(!scope.admit("https://other.test/landing#top", false, None));
+        assert!(scope.blocks_document("https://other.test/landing"));
+        assert!(!scope.blocks_document("https://other.test/elsewhere"));
+
+        // A start redirect that moves the scope admits a target an earlier
+        // hop refused, and its request goes out again.
+        let mut scope = CaptureScope::new("http".into(), "example.test:80".into());
+        assert!(scope.admit("http://example.test/", false, None));
+        assert!(!scope.admit("http://www.example.test/", false, None));
+        assert!(scope.blocks_document("http://www.example.test/"));
+        scope.settled = false;
+        assert!(scope.admit("http://www.example.test/", true, None));
+        assert!(!scope.blocks_document("http://www.example.test/"));
+    }
+
+    #[test]
+    fn refused_document_keys_are_the_browser_spelling_less_the_fragment() {
+        let mut scope = CaptureScope::new("http".into(), "example.test:80".into());
+        assert!(scope.admit("http://example.test/", false, None));
+        let target = "https://other.test/a%20b/'|^`?q='|^`#frag'|";
+        assert!(!scope.admit(target, false, None));
+        assert!(scope.blocks_document("https://other.test/a%20b/'|^`?q='|^`"));
+        assert!(!scope.blocks_document("https://other.test/a%20b/%27%7C%5E%60?q='|^`"));
+    }
+
+    #[test]
+    fn refused_documents_are_capped_oldest_first() {
+        let mut scope = CaptureScope::new("http".into(), "example.test:80".into());
+        assert!(scope.admit("http://example.test/", false, None));
+        for i in 0..=REFUSED_DOCUMENTS_CAP {
+            assert!(!scope.admit(&format!("https://other.test/{i}"), false, None));
+        }
+        assert_eq!(scope.refused_documents.len(), REFUSED_DOCUMENTS_CAP);
+        assert_eq!(scope.refused_order.len(), REFUSED_DOCUMENTS_CAP);
+        assert!(!scope.blocks_document("https://other.test/0"));
+        assert!(scope.blocks_document("https://other.test/1"));
+        assert!(scope.blocks_document(&format!("https://other.test/{REFUSED_DOCUMENTS_CAP}")));
+        // A repeat refusal does not grow the record.
+        assert!(!scope.admit("https://other.test/1", false, None));
+        assert_eq!(scope.refused_order.len(), REFUSED_DOCUMENTS_CAP);
+    }
+
+    #[test]
+    fn an_unreadable_refused_target_blocks_documents_until_an_admission() {
+        let mut scope = CaptureScope::new("http".into(), "example.test:80".into());
+        assert!(scope.admit("http://example.test/", false, None));
+        scope.refuse_unknown();
+        assert!(scope.blocks_document("https://anything.test/"));
+        assert!(scope.blocks_document("http://example.test/next"));
+        assert!(scope.admit("http://example.test/next", false, None));
+        assert!(!scope.blocks_document("https://anything.test/"));
     }
 
     #[test]

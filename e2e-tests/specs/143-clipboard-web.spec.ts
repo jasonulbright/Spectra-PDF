@@ -560,7 +560,9 @@ describe('create PDF from the clipboard and from a web page', () => {
       expect(await invokeAppCommand('file.createFromWebPage')).toBe(true);
       await $('[data-testid="web-capture-dialog"]').waitForDisplayed({ timeout: 15_000 });
 
-      const outside = createServer((_req, res) => {
+      const outsideHits: string[] = [];
+      const outside = createServer((req, res) => {
+        outsideHits.push(req.url ?? '');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end('<!doctype html><title>Outside</title><p>must not load</p>');
       });
@@ -592,6 +594,10 @@ describe('create PDF from the clipboard and from a web page', () => {
         const capturedText = (await readPdf(result!.pages[0].path)).text;
         expect(capturedText).toContain(TOKEN);
         expect(capturedText).not.toContain('must not load');
+        // Requests already accepted finish before the count is read.
+        outside.closeIdleConnections();
+        await new Promise<void>((done) => outside.close(() => done()));
+        expect(outsideHits).toEqual([]);
       } finally {
         await Promise.all([
           new Promise<void>((done) => inside.close(() => done())),
@@ -655,7 +661,9 @@ describe('create PDF from the clipboard and from a web page', () => {
       expect(await invokeAppCommand('file.createFromWebPage')).toBe(true);
       await $('[data-testid="web-capture-dialog"]').waitForDisplayed({ timeout: 15_000 });
 
-      const outside = createServer((_req, res) => {
+      const outsideHits: string[] = [];
+      const outside = createServer((req, res) => {
+        outsideHits.push(req.url ?? '');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end('<!doctype html><title>Outside</title><p>must not load</p>');
       });
@@ -677,6 +685,10 @@ describe('create PDF from the clipboard and from a web page', () => {
         const message = await $('[data-testid="web-capture-error"]').getText();
         expect(message).toContain('localhost');
         expect(message).not.toContain('status');
+        // Requests already accepted finish before the count is read.
+        outside.closeIdleConnections();
+        await new Promise<void>((done) => outside.close(() => done()));
+        expect(outsideHits).toEqual([]);
       } finally {
         entry.closeAllConnections();
         outside.closeAllConnections();
