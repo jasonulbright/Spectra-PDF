@@ -153,12 +153,12 @@ def _presentation_source(path, **keys):
 def test_merge_takes_presentation_key_from_later_source_when_first_lacks_it(tmp_path):
     a, b, out = tmp_path / 'a.pdf', tmp_path / 'b.pdf', tmp_path / 'out.pdf'
     _presentation_source(a)
-    _presentation_source(b, **{'/PageLayout': Name.TwoPageLeft, '/PageMode': Name.UseOutlines,
+    _presentation_source(b, **{'/PageLayout': Name.TwoPageLeft, '/PageMode': Name.FullScreen,
                                '/URI': Dictionary(Base=String('http://b.test/'))})
     merge([str(a), str(b)], str(out))
     with pikepdf.open(out) as pdf:
         assert pdf.Root.PageLayout == Name.TwoPageLeft
-        assert pdf.Root.PageMode == Name.UseOutlines
+        assert pdf.Root.PageMode == Name.FullScreen
         assert bytes(pdf.Root.URI.Base) == b'http://b.test/'
 
 

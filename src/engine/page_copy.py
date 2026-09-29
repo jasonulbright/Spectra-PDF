@@ -10,7 +10,9 @@ from collections import Counter
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name
-from engine.catalog_carry import carry_catalog
+from engine.catalog_carry import (
+    DocCarry, StructCarry, carry_catalog_jumps, settle_actions_sd, settle_page_mode,
+)
 from engine.optional_content import OptionalContentCarry, read_optional_content
 from engine.output_intents import (
     PAGE_LEVEL_VERSION, OutputIntentCarry, read_output_intents,
@@ -104,6 +106,14 @@ def copy_pages_with_forms(dst, src, pages=None):
     if versions is None:
         versions = VersionCarry()
         dst._spectra_versions = versions
+    struct = getattr(dst, '_spectra_struct', None)
+    if struct is None:
+        struct = StructCarry()
+        dst._spectra_struct = struct
+    document = getattr(dst, '_spectra_document', None)
+    if document is None:
+        document = DocCarry()
+        dst._spectra_document = document
     optional_source = read_optional_content(src, src_pages, content.budget)
     # Both reads precede the form helper's source mutations, and both are read
     # from the source rather than from the copied pages.
@@ -142,6 +152,7 @@ def copy_pages_with_forms(dst, src, pages=None):
         dst.pages.append(page)
     before = len(dst.acroform.fields)
     renamed = {}
+    annot_occurrences = {}
     if originals:
         copied, fields, _ = dst.acroform.transform_annotations(
             Array(list(originals.values())), from_qpdf=src, from_acroform=src.acroform)
@@ -179,6 +190,8 @@ def copy_pages_with_forms(dst, src, pages=None):
                 annot.P = page.obj
                 local[key] = annot
                 annots.append(annot)
+                if key[0] == 'object':
+                    annot_occurrences.setdefault(key[1], []).append(annot)
             # Keep popup/reply relationships inside the same page occurrence.
             for source_key, annot in zip(keys, annots):
                 for relation in ('/Popup', '/IRT', '/Parent'):
@@ -203,7 +216,19 @@ def copy_pages_with_forms(dst, src, pages=None):
     refresh_sig_flags(dst)
     carry_doc_form_extras(dst, src, renamed)
     dst.acroform.invalidate_cache()
-    added, dest_renames, dropped = carry_catalog(dst, src, src_pages, start)
+    first_map = struct.add(dst, src, src_pages, start, annot_occurrences)
+    struct.register_sources(dst, src, first_map)
+    for page in dst.pages[start:]:
+        annots = page.obj.get('/Annots')
+        for annot in annots if isinstance(annots, Array) else ():
+            if isinstance(annot, Dictionary):
+                settle_actions_sd(struct, dst, annot.get('/A'))
+                aa = annot.get('/AA')
+                for trigger in aa.keys() if isinstance(aa, Dictionary) else ():
+                    settle_actions_sd(struct, dst, aa.get(trigger))
+    added, dest_renames, dropped, jumps = carry_catalog_jumps(dst, src, src_pages, start, first_map)
+    document.add(dst, src, src_pages, start, jumps, struct, first_map)
+    settle_page_mode(dst)
     content.add(dst, optional_source)
     if optional_source is not None:
         versions.require(optional_source.minimum_version)
