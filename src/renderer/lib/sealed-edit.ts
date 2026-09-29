@@ -56,24 +56,44 @@ export function setSealedReader(next: SealedCall | null): void {
   reader = next;
 }
 
+/** A user-opened file's bytes that the engine did not decrypt. pdf-lib would
+ * read their strings as ciphertext, so a reader that meets this error takes
+ * its own fallback instead of reading the encrypted buffer. */
+export class SealedDecryptError extends Error {
+  constructor(readonly path: string, readonly capability: SealedCapability) {
+    super(`sealed_plaintext failed for ${path}`);
+    this.name = 'SealedDecryptError';
+  }
+}
+
 /** `buffer`, decrypted, when it is a user-opened file's encrypted bytes and
- * the document allows `capability`; otherwise `buffer` itself. pdf-lib reads
- * an encrypted file's strings as ciphertext and cannot load some at all, so
+ * the document allows `capability`; `buffer` itself when the file is not
+ * user-opened or the document denies `capability`. pdf-lib reads an
+ * encrypted file's strings as ciphertext and cannot load some at all, so
  * the renderer's own readers of a user-opened file's bytes (the raw-style
- * annotation read, the layer remap after a page commit) take these bytes. */
+ * annotation read, the layer remap after a page commit) take these bytes.
+ * Throws `SealedDecryptError` when a user-opened file allows `capability` but
+ * no decrypted bytes arrive (no reader registered, engine failure, malformed
+ * reply). */
 export async function readableBytes(
   file: Pick<OpenFile, 'security' | 'workingPath'>,
   buffer: Uint8Array,
   capability: SealedCapability = 'commentTier',
 ): Promise<Uint8Array> {
-  if (!isSealed(file) || !reader || deniedPermission(file.security!, capability)) return buffer;
+  if (!isSealed(file) || deniedPermission(file.security!, capability)) return buffer;
+  if (!reader) throw new SealedDecryptError(file.workingPath, capability);
   const reply = await reader('sealed_plaintext', {
     path: file.workingPath,
     capabilities: [capability],
     data: bytesToBase64(buffer),
   }).catch(() => null);
   const data = reply && typeof reply === 'object' ? (reply as Record<string, unknown>).data : undefined;
-  return typeof data === 'string' ? base64ToBytes(data) : buffer;
+  if (typeof data !== 'string') throw new SealedDecryptError(file.workingPath, capability);
+  try {
+    return base64ToBytes(data);
+  } catch {
+    throw new SealedDecryptError(file.workingPath, capability);
+  }
 }
 
 export async function sealedReseal(

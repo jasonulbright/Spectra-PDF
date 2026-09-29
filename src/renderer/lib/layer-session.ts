@@ -5,7 +5,7 @@ import type { EngineCall } from './engine-call';
 import type { ProcessingStep } from './processing-steps';
 import { EDIT_DECLINED } from './edit-text';
 import { tChrome } from '../i18n';
-import { readableBytes } from './sealed-edit';
+import { readableBytes, SealedDecryptError } from './sealed-edit';
 
 export interface Layer { index: number; name: string; visible: boolean; locked: boolean; processing_step: ProcessingStep | null }
 const invalid = () => new Error(tChrome('app.operation.unverified'));
@@ -95,7 +95,8 @@ export function createLayerSessions(readState: () => AppState) {
         const edge = file.authoredIdentity;
         if (!edge || edge.sourceBuffer !== buffer || edge.buffer !== file.buffer || edge.pages.length !== file.pageCount
             || new Set(edge.pages).size !== edge.pages.length || edge.pages.some(id => !byId.has(id))) throw changed();
-        const [before, after] = await Promise.all([buffer!, file.buffer!].map(b => readableBytes(file, new Uint8Array(b), 'pageTier')));
+        const [before, after] = await Promise.all([buffer!, file.buffer!].map(b => readableBytes(file, new Uint8Array(b), 'pageTier')))
+          .catch((e: unknown) => { throw e instanceof SealedDecryptError ? invalid() : e; });
         index = await remapLayerIndex(before, after, index, edge.pages.map((id, i) => [byId.get(id)!, i]));
         const rows = parseLayerRead(await call('list_layers', { file: s.workingPath, for_edit: true }));
         if (!at(s, file.buffer) || readState().pageDirtyPaths.includes(s.path)) throw changed();
