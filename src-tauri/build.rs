@@ -276,10 +276,10 @@ fn verify_copied_resources(rows: &[Row]) {
     let mut present = BTreeSet::new();
     collect_staged(&copied, "", &mut present);
     let expected: BTreeSet<String> = rows.iter().map(|r| r.path.clone()).collect();
-    for extra in present.difference(&expected) {
+    if let Some(extra) = present.difference(&expected).next() {
         panic!("copied engine payload carries an unmanifested file: {extra}");
     }
-    for missing in expected.difference(&present) {
+    if let Some(missing) = expected.difference(&present).next() {
         panic!("copied engine payload is missing a manifest row: {missing}");
     }
     assert_no_bytecode(&present);
@@ -329,10 +329,10 @@ fn stage_engine_payload() -> Vec<Row> {
 
     let mut staged = BTreeSet::new();
     collect_staged(&staging, "", &mut staged);
-    for extra in staged.difference(&expected) {
+    if let Some(extra) = staged.difference(&expected).next() {
         panic!("staged engine payload carries an unmanifested file: {extra}");
     }
-    for missing in expected.difference(&staged) {
+    if let Some(missing) = expected.difference(&staged).next() {
         panic!("staged engine payload is missing a manifest row: {missing}");
     }
     assert_no_bytecode(&staged);
