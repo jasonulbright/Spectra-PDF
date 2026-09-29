@@ -15,6 +15,7 @@ record. A path that is not a known document opens with the empty password,
 and an encrypted one still raises `pikepdf.PasswordError`.
 """
 
+import json
 import os
 import shutil
 import tempfile
@@ -41,6 +42,10 @@ class _Credential:
     revision: int | None
     p: int | None
     origin: str = ""
+    #: The authenticated public-key security handler of a certificate open
+    #: (ISO 32000-2 7.6.5): it holds the recipients' seed, which reseals the
+    #: plaintext working copy under the document's own recipient lists.
+    handler: object = field(default=None, repr=False, compare=False)
 
 
 _documents: dict[str, _Credential] = {}
@@ -74,7 +79,83 @@ def open_pdf(source, *args, document=None, **kwargs):
     if credential is not None and credential.opener == "user" and pdf.is_encrypted:
         pdf._spectra_preserve_encryption = True
         pdf._spectra_credential = credential
+    if _is_path(named):
+        recipient = _credential_for(named)
+        if (
+            recipient is not None
+            and recipient.opener == "recipient"
+            and not (recipient.p or 0) & _PUBKEY_ENCRYPTION_CHANGE
+        ):
+            # The plaintext of a restricted certificate-opened document: its
+            # pages may be written only inside its own private working folder.
+            folder = os.path.dirname(_key(named))
+            pdf._spectra_recipient_folder = folder
+            _hold_recipient_folder(pdf, folder)
     return pdf
+
+
+#: Folders of restricted certificate-opened documents open in this process,
+#: counted per open. qpdf copies foreign objects lazily, so a document holding
+#: pages of one can only be written while that one is still open; requests run
+#: one at a time, so every write in that window is checked against these.
+_open_recipient_folders: dict[str, int] = {}
+
+
+def _hold_recipient_folder(pdf, folder: str) -> None:
+    _open_recipient_folders[folder] = _open_recipient_folders.get(folder, 0) + 1
+    close = pdf.close
+    released = False
+
+    def release_and_close():
+        nonlocal released
+        if not released:
+            released = True
+            left = _open_recipient_folders.get(folder, 1) - 1
+            if left > 0:
+                _open_recipient_folders[folder] = left
+            else:
+                _open_recipient_folders.pop(folder, None)
+        close()
+
+    pdf.close = release_and_close
+
+
+def end_request() -> None:
+    """Forget the restricted folders held by the request that just ended. A
+    handle it leaked still refuses by its own mark; later requests are not
+    bound by it."""
+    _open_recipient_folders.clear()
+
+
+def open_recipient_folders() -> set[str]:
+    """Working folders of restricted certificate-opened documents now open."""
+    return set(_open_recipient_folders)
+
+
+def refuse_recipient_escape(target, folders) -> None:
+    """Refuse a write to `target` outside any of `folders`."""
+    if not folders or not _is_path(target):
+        return
+    parent = os.path.normcase(os.path.realpath(os.path.dirname(os.path.abspath(os.fspath(target)))))
+    if any(parent != folder for folder in folders):
+        from engine.pdf_save import _refuse_unreproducible_encryption
+
+        _refuse_unreproducible_encryption(True, False)
+
+
+def _restricted_recipient_folder(source):
+    credential = _credential_for(source)
+    if credential is None or credential.opener != "recipient":
+        return None
+    if (credential.p or 0) & _PUBKEY_ENCRYPTION_CHANGE:
+        return None
+    return os.path.dirname(_key(source))
+
+
+def is_open_document(path) -> bool:
+    """Whether `path` holds a credential: a document opened through the
+    open funnel, or a file of a certificate-opened working folder."""
+    return _credential_for(path) is not None
 
 
 def document_password(source) -> str | None:
@@ -115,6 +196,9 @@ def copy_document(source, target) -> None:
     """Copy the document at `source` to `target` byte for byte, lending the
     copy the credential of `source` until `source` is closed, as `save_pdf`
     does for a copy it writes."""
+    if _is_path(source):
+        folder = _restricted_recipient_folder(source)
+        refuse_recipient_escape(target, {folder} if folder else set())
     shutil.copyfile(source, target)
     if _is_path(source):
         _lend(_documents.get(_key(source)), target)
@@ -145,6 +229,17 @@ PERMISSIONS_HELD = (
     "This document's permissions are held by an owner password, which is "
     "needed to change them. Open it with that password first."
 )
+
+
+#: The refusal of an operation the grants of a certificate recipient's list
+#: withhold (ISO 32000-2 Table 24).
+PERMISSIONS_HELD_BY_RECIPIENTS = (
+    "This document's permissions are set by its certificate recipient lists, "
+    "and your certificate's list does not allow this."
+)
+
+#: Table 24 bit 2: change of encryption, which enables every other permission.
+_PUBKEY_ENCRYPTION_CHANGE = 1 << 1
 
 
 class GhostscriptPasswordUnsupported(ValueError):
@@ -425,7 +520,8 @@ def print_resolution(source) -> str:
     permissions, revision = held
     if not permissions.get("print"):
         return "none"
-    if not permissions.get("print_high") and (revision or 0) >= 3:
+    # A recipient record has no revision: Table 24 bit 12 always applies.
+    if not permissions.get("print_high") and (revision is None or revision >= 3):
         return "low"
     return "high"
 
@@ -444,6 +540,9 @@ def require_permission(source, name: str) -> None:
     except (pikepdf.PasswordError, pikepdf.PdfError):
         return
     if held is not None and not held[0].get(name):
+        credential = _credential_for(source)
+        if credential is not None and credential.opener == "recipient":
+            raise PermissionError(PERMISSIONS_HELD_BY_RECIPIENTS)
         raise PermissionError(PERMISSIONS_HELD)
 
 
@@ -451,9 +550,9 @@ def _opener_permissions(source):
     """(permissions, revision) held by the opener of the document at
     `source`, or None where nothing limits it: an owner-password open, an
     unencrypted document, or a path that does not exist."""
-    credential = _documents.get(_key(source)) if _is_path(source) else None
+    credential = _credential_for(source)
     if credential is not None:
-        if credential.opener != "user":
+        if credential.opener not in ("user", "recipient"):
             return None
         return credential.permissions, credential.revision
     if not _is_path(source) or not os.path.exists(source):
@@ -569,7 +668,7 @@ def document_permissions(path: str) -> dict:
     `opener` is "user", "owner", or "none" for a document that was not
     opened through `open_document`; an unknown document is read with the
     empty password."""
-    credential = _documents.get(_key(path))
+    credential = _credential_for(path)
     if credential is not None:
         return {
             "opener": credential.opener,
@@ -586,6 +685,122 @@ def document_permissions(path: str) -> dict:
             "revision": int(pdf.encryption.R) if encrypted else None,
             "p": int(pdf.encryption.P) if encrypted else None,
         }
+
+
+#: Beside a certificate-opened working copy: the recipient's grants, so an
+#: engine that restarts without the in-memory record still enforces them on
+#: every file of that working folder (the copy, its stages and snapshots).
+RECIPIENT_MARKER = "spectra-recipient.json"
+
+
+def _marker_credential(source):
+    folder = os.path.dirname(_key(source))
+    try:
+        with open(os.path.join(folder, RECIPIENT_MARKER), encoding="utf-8") as f:
+            record = json.load(f)
+        permissions = {name: record["permissions"].get(name) is True for name, _ in _PERMISSION_KEYS}
+        flags = int(record["p"])
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        # An unreadable record grants nothing.
+        permissions = {name: False for name, _ in _PERMISSION_KEYS}
+        flags = 0
+    return _Credential("recipient", None, permissions, None, flags, "")
+
+
+def _credential_for(source):
+    """The credential of `source`: its in-memory record, else the recipient
+    record of its working folder."""
+    if not _is_path(source):
+        return None
+    credential = _documents.get(_key(source))
+    if credential is not None:
+        return credential
+    return _marker_credential(source)
+
+
+def restrict_to_owner(folder: str) -> None:
+    """Give `folder` and everything in it a protected DACL granting only the
+    process user; later files inherit it. No-op off Windows."""
+    if os.name != "nt":
+        os.chmod(folder, 0o700)
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    to_descriptor = advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW
+    to_descriptor.argtypes = (wintypes.LPCWSTR, wintypes.DWORD,
+                              ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p)
+    to_descriptor.restype = wintypes.BOOL
+    get_dacl = advapi32.GetSecurityDescriptorDacl
+    get_dacl.argtypes = (ctypes.c_void_p, ctypes.POINTER(wintypes.BOOL),
+                         ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.BOOL))
+    get_dacl.restype = wintypes.BOOL
+    set_named = advapi32.SetNamedSecurityInfoW
+    set_named.argtypes = (wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD, ctypes.c_void_p,
+                          ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+    set_named.restype = wintypes.DWORD
+    kernel32.LocalFree.argtypes = (ctypes.c_void_p,)
+    kernel32.LocalFree.restype = ctypes.c_void_p
+
+    descriptor = ctypes.c_void_p()
+    if not to_descriptor(_gs_folder_sddl(_process_user_sid()), 1, ctypes.byref(descriptor), None):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        present, defaulted = wintypes.BOOL(), wintypes.BOOL()
+        dacl = ctypes.c_void_p()
+        if not get_dacl(descriptor, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        # SE_FILE_OBJECT; DACL | PROTECTED_DACL: inheritable ACEs propagate to
+        # the files already in the folder.
+        error = set_named(folder, 1, 0x4 | 0x80000000, None, None, dacl, None)
+        if error:
+            raise ctypes.WinError(error)
+    finally:
+        kernel32.LocalFree(descriptor)
+
+
+def register_recipient(path: str, permissions: dict, flags: int, handler) -> None:
+    """Record a certificate open of the working copy at `path`: the
+    recipient's Table 24 grants, and the handler that reseals it on save.
+    The grants are also written beside it (`RECIPIENT_MARKER`)."""
+    folder = os.path.dirname(_key(path))
+    with open(os.path.join(folder, RECIPIENT_MARKER), "w", encoding="utf-8") as f:
+        json.dump({"permissions": dict(permissions), "p": int(flags)}, f)
+    _documents[_key(path)] = _Credential(
+        "recipient", None, dict(permissions), None, flags, _key(path), handler
+    )
+
+
+def is_recipient_copy(path) -> bool:
+    """Whether `path` lies in the working folder of a certificate-opened
+    document."""
+    credential = _credential_for(path)
+    return credential is not None and credential.opener == "recipient"
+
+
+def require_encryption_change(source) -> None:
+    """Refuse to change or remove the encryption of a certificate-opened
+    working copy at `source` whose recipient list withholds Table 24 bit 2.
+    The working copy is plaintext, so the encryption doors cannot see the
+    protection in the file itself."""
+    credential = _credential_for(source)
+    if credential is None or credential.opener != "recipient":
+        return
+    if not (credential.p or 0) & _PUBKEY_ENCRYPTION_CHANGE:
+        raise PermissionError(PERMISSIONS_HELD_BY_RECIPIENTS)
+
+
+def recipient_handler(path):
+    """The authenticated public-key handler of a certificate-opened working
+    copy at `path`, or None."""
+    credential = _credential_for(path)
+    if credential is None or credential.opener != "recipient":
+        return None
+    return credential.handler
 
 
 def opened_with_user_password(path) -> bool:

@@ -15,6 +15,7 @@ import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
 import { focusOmniSearch, omniSearchAvailable } from './omnisearch-focus';
 import { gsBlocked } from '../lib/gs-capability';
+import { copyBlock, selectionPageIds } from '../lib/copy-permission';
 import { clearRecentStorageSafely } from '../lib/recent-files';
 import {
   toggleGrid,
@@ -598,10 +599,12 @@ const BASE_COMMANDS: Record<CommandId, Command> = {
     when: (ctx) =>
       inCanvas(ctx) &&
       typeof window !== 'undefined' &&
-      !(window.getSelection()?.isCollapsed ?? true),
-    run: () => {
+      !(window.getSelection()?.isCollapsed ?? true) &&
+      copyBlock(ctx.state, selectionPageIds(window.getSelection())) === null,
+    run: (ctx) => {
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed) return;
+      if (copyBlock(ctx.state, selectionPageIds(sel))) return;
       const text = sel.toString();
       void navigator.clipboard.writeText(text).catch(() => {
         // The selection survives the menu click; execCommand copies it even

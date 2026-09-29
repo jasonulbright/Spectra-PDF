@@ -42,6 +42,9 @@ export const DIALOG_STRINGS = {
   'dialog.certUnlock.noKey': 'No key file chosen',
   'dialog.certUnlock.keyPassword': 'Key file password',
   'dialog.certUnlock.pickFirst': 'Choose your key file (.pfx / .p12) first.',
+  'dialog.certUnlock.openedTitle': 'Opened With Certificate',
+  'dialog.certUnlock.opened':
+    '"{{name}}" was opened with the certificate of {{subject}}, issued by {{issuer}} (serial number {{serial}}). Saving keeps the encryption for all recipients.',
 
   'dialog.dropZone.hint': 'Drop PDF files here',
   // A file dropped onto a document that is drawn too small at the current

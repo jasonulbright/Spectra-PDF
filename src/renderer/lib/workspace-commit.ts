@@ -12,6 +12,7 @@ import { tChrome } from '../i18n';
 import { preserveReason, type PreserveOutcome, type PreserveRefusal } from './preserve-reason';
 import { hasPendingPageCommit, recoverPendingPageCommit, publishPageCommit, type PageCommitIo } from './page-commit-transaction';
 import { commitCapabilities, isSealed, sealedPlaintext, sealedReseal, type SealedCall, type SealedCapability } from './sealed-edit';
+import { pageExportBlock } from './document-permissions';
 
 // A page's 1-based position within its file's committed order: pages of all
 // same-path documents in workspace order — what the file looks like after
@@ -401,6 +402,16 @@ export async function commitPageEdits({
     // protect them in another file is not held.
     for (const plan of plans) {
       const keys = new Set(plan.documents.flatMap((d) => d.pages.map((p) => p.sourceKey)));
+      const escaping = [...keys].find((key) => {
+        const security = files.get(key)?.security;
+        return key !== plan.path && !!security && pageExportBlock(security)?.kind === 'recipientList';
+      });
+      if (escaping !== undefined) {
+        throw new Error(tChrome('canvas.common.fileFailure', {
+          name: baseName(escaping),
+          message: tChrome('app.permissions.recipientListNeeded'),
+        }));
+      }
       const leaving = [...keys].find((key) => key !== plan.path && isSealed(files.get(key)));
       if (leaving !== undefined || (isSealed(files.get(plan.path)) && (!sealed || !readBack))) {
         throw new Error(tChrome('canvas.common.fileFailure', {

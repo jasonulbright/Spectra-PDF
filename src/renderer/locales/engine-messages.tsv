@@ -46,6 +46,7 @@ batch_ocr.sourceDestinationSameFile	exact	batch_ocr	source and destination are t
 batch_ocr.sourceFolderFound	pattern	batch_ocr,create_pdf_folders,guided_actions,preflight_sweep	Source folder not found: {{source}}
 budget.subprocessOutputLimitCannot	exact	budget	a subprocess output limit cannot be negative
 budget.timeBudgetNeedsPositive	exact	budget	a time budget needs a positive floor
+catalog_carry.structureTreeTooDeep	exact	catalog_carry	The structure tree is too deep or too large to carry
 check.fileFound	pattern	check,document_health,rebuild,recognize,recover,repair	File not found: {{file}}
 clause_map.checkCitesClause	pattern	clause_map	No check cites a clause of {{part}}.
 color_spaces.expectedNumberGotProcedure	exact	color_spaces	expected number, got procedure
@@ -593,9 +594,13 @@ printer_marks.markWeightMustOne	pattern	printer_marks	Mark weight must be one of
 printer_marks.pageInformationNeedsEmbedded	exact	printer_marks	Page information needs an embedded font and no font directory is available.
 printer_marks.printerMark	pattern	printer_marks	{{kind}} is not a printer mark.
 pubkey_crypt.couldReadCheckFile	pattern	pubkey_crypt	Could not read {{v0}} — check the file and its password.
+pubkey_crypt.documentOpenedCertificate	exact	pubkey_crypt	this document was not opened with a certificate
+pubkey_crypt.documentSPermissionsSet	exact	credentials,pubkey_crypt	This document's permissions are set by its certificate recipient lists, and your certificate's list does not allow this.
 pubkey_crypt.keyDoesMatchAny	pattern	pubkey_crypt	The key in {{v0}} does not match any recipient of this document.
 pubkey_crypt.leastOneRecipientCertificate	exact	pubkey_crypt	At least one recipient certificate is required.
 pubkey_crypt.readableXCertificatePem	pattern	pubkey_crypt	{{v0}} is not a readable X.509 certificate (PEM or DER).
+pubkey_crypt.resealedOutputMustStage	exact	pubkey_crypt	the resealed output must be a stage, never the working copy
+pubkey_crypt.workingCopyAlreadyEncrypted	exact	pubkey_crypt	the working copy is already encrypted
 read_aloud.nothingPageStructureTree	exact	read_aloud	nothing on this page is in the structure tree
 read_aloud.pageContentOutsideStructure	exact	read_aloud	page content outside the structure tree
 read_aloud.tagged	exact	read_aloud	not tagged

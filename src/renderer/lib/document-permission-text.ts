@@ -16,6 +16,7 @@ const PERMISSION_TEXT = {
  * all show for the same block. */
 export function capabilityBlockText(block: CapabilityBlock): string {
   if (block.kind === 'ownerPassword') return tChrome('app.permissions.ownerPasswordNeeded');
+  if (block.kind === 'recipientList') return tChrome('app.permissions.recipientListNeeded');
   return tChrome('app.permissions.denied', { permission: tChrome(PERMISSION_TEXT[block.permission]) });
 }
 

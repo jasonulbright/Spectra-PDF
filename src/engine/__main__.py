@@ -31,7 +31,13 @@ from engine.prepress import convert_cmyk, convert_pdfx
 from engine.optimize import optimize
 from engine.pdfa import convert_pdfa
 from engine.encrypt import decrypt, encrypt, grant_accessibility_permission
-from engine.pubkey_crypt import decrypt_with_pfx, encrypt_with_certs
+from engine.pubkey_crypt import (
+    decrypt_with_pfx,
+    encrypt_with_certs,
+    open_pubkey_document,
+    pubkey_reattach,
+    pubkey_reseal,
+)
 from engine.extract_text import extract_text
 from engine.search_in_files import search_in_files
 from engine.search_regions import search_text_regions
@@ -257,6 +263,9 @@ def main() -> None:
     server.register("decrypt", decrypt)
     server.register("encrypt_pubkey", encrypt_with_certs)
     server.register("decrypt_pubkey", decrypt_with_pfx)
+    server.register("open_pubkey_document", open_pubkey_document)
+    server.register("pubkey_reseal", pubkey_reseal)
+    server.register("pubkey_reattach", pubkey_reattach)
     server.register("extract_text", extract_text)
     server.register("search_in_files", search_in_files)
     server.register("search_text_regions", search_text_regions)

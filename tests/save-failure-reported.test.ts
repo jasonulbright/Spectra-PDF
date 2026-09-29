@@ -16,16 +16,21 @@ function enclosingDeclaration(node: ts.Node): string | null {
 }
 
 describe('every save over a user file reports its refusal', () => {
-  it('file.saveAs is called only by saveOrReport', () => {
+  it('file.saveAs and saveWorkingCopy are reached only from saveOrReport', () => {
     const owners: (string | null)[] = [];
     const visit = (node: ts.Node) => {
-      if (ts.isCallExpression(node) && node.expression.getText(source) === 'file.saveAs') {
+      // Any reference, called or handed on: `saveWorkingCopy` receives
+      // `file.saveAs` as its writer.
+      if (ts.isPropertyAccessExpression(node) && node.getText(source) === 'file.saveAs') {
+        owners.push(enclosingDeclaration(node));
+      }
+      if (ts.isCallExpression(node) && node.expression.getText(source) === 'saveWorkingCopy') {
         owners.push(enclosingDeclaration(node));
       }
       ts.forEachChild(node, visit);
     };
     visit(source);
-    expect(owners).toEqual(['saveOrReport']);
+    expect(owners).toEqual(['saveOrReport', 'saveOrReport']);
   });
 
   it('a refused save stops the gesture that asked for it', () => {

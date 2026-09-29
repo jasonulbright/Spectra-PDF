@@ -107,8 +107,13 @@ const INTERNAL_METHODS = new Set([
   // a queue entry.
   'open_document',
   'open_document_attempt',
+  'open_pubkey_document',
+  'pubkey_reattach',
   'close_document',
   'document_permissions',
+  // Save's reseal of a certificate-opened working copy runs after Save has
+  // committed the page tier; it writes only a stage beside the copy.
+  'pubkey_reseal',
   'get_metadata',
   'get_pdf_version',
   // The Properties dialog's three read-only tabs. Same hazard as

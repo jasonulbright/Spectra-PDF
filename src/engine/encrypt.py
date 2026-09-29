@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pikepdf
-from engine.credentials import PERMISSIONS_HELD, open_pdf
+from engine.credentials import PERMISSIONS_HELD, open_pdf, require_encryption_change
 
 from .inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
@@ -92,6 +92,7 @@ def encrypt(
     if not owner_password:
         owner_password = user_password
 
+    require_encryption_change(file)
     allow = _build_permissions(permissions)
     enc_kwargs = dict(owner=owner_password, user=user_password, aes=True, R=6)
     if allow is not None:
@@ -128,6 +129,7 @@ def grant_accessibility_permission(file: str, output: str) -> dict:
     replacing that password with one nobody chose or dropping the encryption
     altogether.
     """
+    require_encryption_change(file)
     output_path = Path(output)
     with open_pdf(file) as pdf:
         if not pdf.is_encrypted:
@@ -177,6 +179,7 @@ def decrypt(file: str, output: str, password: str = "") -> dict:
         output: Output PDF path.
         password: Password to unlock the document.
     """
+    require_encryption_change(file)
     with open_pdf(file, password=password) as pdf:
         _require_owner_authority(pdf)
         report = _signature_report(pdf)

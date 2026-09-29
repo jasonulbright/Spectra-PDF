@@ -286,6 +286,9 @@ class JsonRpcServer:
             finally:
                 if has_id:
                     self.cancels.retire(req_id)
+                from engine.credentials import end_request
+
+                end_request()
             if response is None:
                 continue
             try:

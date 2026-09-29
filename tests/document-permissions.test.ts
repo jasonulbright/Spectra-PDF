@@ -8,6 +8,7 @@ import {
   PERMISSION_NAMES,
   UNRESTRICTED,
   capabilityBlock,
+  isUnrestricted,
   parseDocumentSecurity,
   type DocumentSecurity,
   type PermissionName,
@@ -22,13 +23,16 @@ import {
   discardDocumentWorkingCopy,
   openWithCredentials,
   prepareDocumentWorkingCopy,
+  saveWorkingCopy,
   type DocumentOpenIo,
+  type SaveWorkingCopyIo,
   type PrepareDocumentIo,
 } from '../src/renderer/lib/document-open';
 import { droppedCredentials, releaseDocumentCredentials } from '../src/renderer/lib/credential-release';
 import { documentPassword, rememberDocumentPassword } from '../src/renderer/lib/document-passwords';
 import { releaseStageCredential, setStageCredentialCaller, shareStageCredential } from '../src/renderer/lib/stage-credentials';
 import { opCapability } from '../src/renderer/lib/op-edit-class';
+import { copyBlock } from '../src/renderer/lib/copy-permission';
 import { tChrome } from '../src/renderer/i18n';
 
 const PATH = 'C:/docs/locked.pdf';
@@ -479,5 +483,247 @@ describe('where the typed password may live', () => {
     expect(importers).toEqual(['App.tsx', 'hooks/useDocumentHealth.ts', 'lib/credential-release.ts', 'lib/pdfDocCache.ts', 'lib/workspace.ts']);
     const store = readFileSync(join(root, 'lib/document-passwords.ts'), 'utf8');
     expect(store).not.toMatch(/localStorage|sessionStorage|indexedDB|console\.|writeBuffer|invoke\(/);
+  });
+});
+
+// ISO 32000-2 7.6.5.2 and Table 24: a certificate open applies the grants of
+// the first recipient list that matches the key, and Save writes the working
+// copy back under the original recipient lists.
+describe('a certificate-encrypted document', () => {
+  const PRINT_ONLY = {
+    print: true, print_high: false, modify: false, copy: false,
+    annotate: false, fill: false, accessibility: true, assemble: false,
+  };
+  const RECIPIENT = { subject: 'Common Name: print-only', issuer: 'Common Name: print-only', serial: '1F' };
+
+  function certIo(reply: () => Record<string, unknown>) {
+    const calls: { method: string; params: Record<string, unknown> }[] = [];
+    const announced: unknown[] = [];
+    let answers = 1;
+    const io: DocumentOpenIo = {
+      call: async (method, params) => {
+        calls.push({ method, params });
+        if (method === 'check_encrypted') return { encrypted: true, kind: 'pubkey' };
+        if (method === 'open_pubkey_document') return reply();
+        throw new Error(`unexpected ${method}`);
+      },
+      askPassword: async () => 'cancel',
+      askCertificate: async () => (answers-- > 0 ? { pfx: 'C:/keys/me.pfx', password: 'k' } : 'cancel'),
+      wrongPassword: () => 'incorrect',
+      certificateOpened: (name, recipient) => announced.push({ name, recipient }),
+    };
+    return { io, calls, announced };
+  }
+
+  it('opens with the grants of the recipient list, not as unrestricted, and says which certificate opened it', async () => {
+    const { io, calls, announced } = certIo(() => ({
+      encrypted: true, opener: 'recipient', permissions: PRINT_ONLY, recipient: RECIPIENT,
+    }));
+    const opened = await openWithCredentials('w.pdf', 'locked.pdf', io);
+    expect(calls.map((c) => c.method)).toEqual(['check_encrypted', 'open_pubkey_document']);
+    expect(calls[1].params).toEqual({ path: 'w.pdf', pfx: 'C:/keys/me.pfx', password: 'k' });
+    expect(opened?.password).toBeNull();
+    expect(opened?.security.opener).toBe('recipient');
+    expect(opened?.security.permissions).toEqual(PRINT_ONLY);
+    expect(isUnrestricted(opened!.security)).toBe(false);
+    expect(announced).toEqual([{ name: 'locked.pdf', recipient: RECIPIENT }]);
+  });
+
+  it('refuses a malformed open reply with a translated sentence', async () => {
+    const { io } = certIo(() => ({ encrypted: true }));
+    await expect(openWithCredentials('w.pdf', 'locked.pdf', io)).rejects.toThrow(tChrome('app.open.invalidReply'));
+  });
+
+  it('enforces the grants of the recipient list on commands and in the reducer', () => {
+    const state = stateOf(parseDocumentSecurity({ opener: 'recipient', permissions: PRINT_ONLY }));
+    expect(enabled(state, 'file.print')).toBe(true);
+    const next = appReducer(state, { type: 'ROTATE_PAGE_REFS', pageIds: [`${PATH}#p0`], delta: 90 });
+    expect(next.pageEditRefusalReason).toEqual({ kind: 'permission', permission: 'assemble' });
+    expect(capabilityBlock(state.files.get(PATH)!.security!, 'copy')).toEqual({ kind: 'permission', permission: 'copy' });
+  });
+
+  it('keeps the pages of a restricted recipient from moving into another file', () => {
+    const OTHER = 'C:/docs/plain.pdf';
+    const restricted = { ...PRINT_ONLY, assemble: true, modify: true };
+    const base = stateOf(parseDocumentSecurity({ opener: 'recipient', permissions: restricted }));
+    const other = makeFile(OTHER);
+    const otherDoc: OpenDocument = { ...other, id: `${OTHER}#0`, pages: pages(OTHER), pageCount: 2 };
+    const state: AppState = {
+      ...base,
+      files: new Map([...base.files, [OTHER, other]]),
+      workspace: { documents: [...base.workspace.documents, otherDoc] },
+    };
+    const out = appReducer(state, {
+      type: 'MOVE_PAGE', fromDocId: `${PATH}#0`, pageId: `${PATH}#p0`, toDocId: `${OTHER}#0`, toIndex: 0,
+    } as never);
+    expect(out.pageEditRefusalReason).toEqual({ kind: 'recipientList' });
+    expect(capabilityBlockText({ kind: 'recipientList' })).toBe(tChrome('app.permissions.recipientListNeeded'));
+  });
+
+  it('reseals a save under the recipient lists and never copies the plaintext working copy over the file', async () => {
+    const calls: { method: string; params: Record<string, unknown> }[] = [];
+    const saveAs = vi.fn(async (source: string, dest: string) => { void source; void dest; });
+    const remove = vi.fn(async (path: string) => { void path; });
+    const security = parseDocumentSecurity({ opener: 'recipient', permissions: PRINT_ONLY });
+    await saveWorkingCopy('scratch/w.pdf', security, PATH, {
+      call: async (method, params) => {
+        calls.push({ method, params });
+        return { output: params.output };
+      },
+      saveAs,
+      remove,
+      reattach: async () => false,
+    });
+    expect(calls.map((c) => c.method)).toEqual(['pubkey_reseal']);
+    const stage = calls[0].params.output as string;
+    expect(calls[0].params.path).toBe('scratch/w.pdf');
+    expect(stage).not.toBe('scratch/w.pdf');
+    expect(saveAs).toHaveBeenCalledWith(stage, PATH);
+    expect(saveAs).not.toHaveBeenCalledWith('scratch/w.pdf', PATH);
+    expect(remove).toHaveBeenCalledWith(stage);
+  });
+
+  it('writes nothing over the file when the reseal is refused', async () => {
+    const saveAs = vi.fn(async (source: string, dest: string) => { void source; void dest; });
+    const security = parseDocumentSecurity({ opener: 'recipient', permissions: PRINT_ONLY });
+    await expect(saveWorkingCopy('scratch/w.pdf', security, PATH, {
+      call: async () => { throw new Error('this document was not opened with a certificate'); },
+      saveAs,
+      remove: async () => {},
+      reattach: async () => false,
+    })).rejects.toThrow('not opened with a certificate');
+    expect(saveAs).not.toHaveBeenCalled();
+  });
+
+  function resealIo(replies: Record<string, unknown>[], extra: Partial<SaveWorkingCopyIo> = {}) {
+    const calls: Record<string, unknown>[] = [];
+    const saveAs = vi.fn(async (source: string, dest: string) => { void source; void dest; });
+    const io: SaveWorkingCopyIo = {
+      call: async (_method, params) => {
+        calls.push(params);
+        const next = replies.shift()!;
+        return next.output === 'STAGE' ? { ...next, output: params.output } : next;
+      },
+      saveAs,
+      remove: async () => {},
+      reattach: async () => false,
+      ...extra,
+    };
+    return { io, calls, saveAs };
+  }
+  const recipient = () => parseDocumentSecurity({ opener: 'recipient', permissions: PRINT_ONLY });
+
+  it('asks before breaking signatures, and writes nothing when declined', async () => {
+    const confirm = vi.fn(async () => false);
+    const { io, saveAs } = resealIo([{ output: null, signatures: 2 }], { confirmSignatureBreak: confirm });
+    expect(await saveWorkingCopy('scratch/w.pdf', recipient(), PATH, io)).toBe(false);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(saveAs).not.toHaveBeenCalled();
+  });
+
+  it('breaks signatures only after the user agrees', async () => {
+    const { io, calls, saveAs } = resealIo(
+      [{ output: null, signatures: 1 }, { output: 'STAGE' }],
+      { confirmSignatureBreak: async () => true },
+    );
+    expect(await saveWorkingCopy('scratch/w.pdf', recipient(), PATH, io)).toBe(true);
+    expect(calls.map((c) => c.break_signatures)).toEqual([false, true]);
+    expect(saveAs).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a signed save nobody asked for, such as a tab hand-off', async () => {
+    const { io, saveAs } = resealIo([{ output: null, signatures: 1 }]);
+    await expect(saveWorkingCopy('scratch/w.pdf', recipient(), PATH, io))
+      .rejects.toThrow(tChrome('app.save.signedCertificateImplicit'));
+    expect(saveAs).not.toHaveBeenCalled();
+  });
+
+  it('authenticates again after an engine restart, then saves', async () => {
+    const reattach = vi.fn(async () => true);
+    const { io, saveAs } = resealIo([{ output: null, needs_certificate: true }, { output: 'STAGE' }], { reattach });
+    expect(await saveWorkingCopy('scratch/w.pdf', recipient(), PATH, io)).toBe(true);
+    expect(reattach).toHaveBeenCalledTimes(1);
+    expect(saveAs).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes nothing when the certificate is not supplied again', async () => {
+    const { io, saveAs } = resealIo([{ output: null, needs_certificate: true }]);
+    expect(await saveWorkingCopy('scratch/w.pdf', recipient(), PATH, io)).toBe(false);
+    expect(saveAs).not.toHaveBeenCalled();
+  });
+
+  it('copies any other working copy as before', async () => {
+    const saveAs = vi.fn(async (source: string, dest: string) => { void source; void dest; });
+    const call = vi.fn(async () => ({}));
+    await saveWorkingCopy('scratch/w.pdf', allowing(['print']), PATH, {
+      call, saveAs, remove: async () => {}, reattach: async () => false,
+    });
+    expect(call).not.toHaveBeenCalled();
+    expect(saveAs).toHaveBeenCalledWith('scratch/w.pdf', PATH);
+  });
+});
+
+describe('open failure texts', () => {
+  it('are translated', async () => {
+    const failing = {
+      releaseCredentials: vi.fn(async () => { throw new Error('engine unavailable'); }),
+      removeWorkingCopy: vi.fn(async () => { throw new Error('locked'); }),
+    };
+    await expect(discardDocumentWorkingCopy(PATH, 'w.pdf', failing)).rejects.toThrow(tChrome('app.open.discardFailed'));
+    const io: PrepareDocumentIo = {
+      ...failing,
+      createWorkingCopy: vi.fn(async () => 'w.pdf'),
+      readBuffer: vi.fn(async () => new Uint8Array()),
+      rememberPassword: vi.fn(),
+      call: vi.fn(async (method: string) => {
+        if (method === 'check_encrypted') return { encrypted: true, kind: 'password' };
+        return { status: 'opened' };
+      }),
+      askPassword: vi.fn(async () => ({ password: 'x' })),
+      askCertificate: vi.fn(async (): Promise<'cancel'> => 'cancel'),
+      wrongPassword: () => 'incorrect',
+    };
+    const failure = await prepareDocumentWorkingCopy(PATH, 'locked.pdf', io).catch((e: unknown) => e);
+    expect((failure as Error).message).toBe(tChrome('app.open.cleanupFailed'));
+    expect(((failure as AggregateError).errors[0] as Error).message).toBe(tChrome('app.open.invalidReply'));
+  });
+});
+
+describe('copying a selection', () => {
+  it('is refused for a page of a document that withholds copying, whoever opened it', () => {
+    for (const opener of ['user', 'recipient'] as const) {
+      const state = stateOf(allowing(['print'], opener));
+      expect(copyBlock(state, [`${PATH}#p0`])).toEqual({ kind: 'permission', permission: 'copy' });
+      expect(copyBlock(state, [])).toEqual({ kind: 'permission', permission: 'copy' });
+    }
+  });
+
+  it('is allowed where the document grants copying', () => {
+    expect(copyBlock(stateOf(allowing(['copy'], 'recipient')), [`${PATH}#p0`])).toBeNull();
+    expect(copyBlock(stateOf(), [`${PATH}#p0`])).toBeNull();
+  });
+
+  it('gates Edit > Copy on the pages the selection covers', () => {
+    expect(readFileSync(join(__dirname, '../src/renderer/commands/registry.ts'), 'utf8'))
+      .toMatch(/'edit\.copy'[\s\S]*?copyBlock\(ctx\.state, selectionPageIds\(window\.getSelection\(\)\)\) === null[\s\S]*?if \(copyBlock\(ctx\.state, selectionPageIds\(sel\)\)\) return;/);
+  });
+});
+
+describe('a save without the renderer record', () => {
+  it('asks the engine and reseals a certificate-opened working copy', async () => {
+    const methods: string[] = [];
+    const saveAs = vi.fn(async (source: string, dest: string) => { void source; void dest; });
+    await saveWorkingCopy('scratch/w.pdf', undefined, PATH, {
+      call: async (method, params) => {
+        methods.push(method);
+        if (method === 'document_permissions') return { opener: 'recipient', permissions: { print: true } };
+        return { output: params.output };
+      },
+      saveAs,
+      remove: async () => {},
+      reattach: async () => false,
+    });
+    expect(methods).toEqual(['document_permissions', 'pubkey_reseal']);
+    expect(saveAs).not.toHaveBeenCalledWith('scratch/w.pdf', PATH);
   });
 });

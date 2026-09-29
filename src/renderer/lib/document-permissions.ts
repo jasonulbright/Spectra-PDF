@@ -1,6 +1,8 @@
 // ISO 32000-2 7.6.4.1 and Table 22: a document opened with its USER password
 // allows only what its /P bits grant; the owner password and an unencrypted
-// document allow everything. The engine decodes the bits
+// document allow everything. 7.6.5.2 and Table 24: a document opened with a
+// recipient certificate allows what the first matching recipient list grants
+// (`engine/pubkey_crypt.py` `open_pubkey_document`). The engine decodes the bits
 // (`engine/credentials.py` `document_permissions`); this module decides what
 // each capability of the app needs from them.
 //
@@ -20,7 +22,7 @@ export const PERMISSION_NAMES = [
 
 export type PermissionName = (typeof PERMISSION_NAMES)[number];
 
-export type DocumentOpener = 'user' | 'owner' | 'none';
+export type DocumentOpener = 'user' | 'owner' | 'recipient' | 'none';
 
 export interface DocumentSecurity {
   opener: DocumentOpener;
@@ -53,11 +55,13 @@ export type Capability =
   | 'formAuthoring';
 
 /** Why a capability is unavailable: a /P bit the document withholds, or an
- * edit that would carry a user-opened document's pages into another file,
- * where its protection cannot follow them. */
+ * edit that would carry a user-opened or restricted certificate-opened
+ * document's pages into another file, where its protection cannot follow
+ * them. */
 export type CapabilityBlock =
   | { kind: 'permission'; permission: PermissionName }
-  | { kind: 'ownerPassword' };
+  | { kind: 'ownerPassword' }
+  | { kind: 'recipientList' };
 
 /** The /P bit a capability lacks, or null when the bits allow it.
  *
@@ -100,7 +104,9 @@ export function capabilityBlock(security: DocumentSecurity, capability: Capabili
 export function parseDocumentSecurity(raw: unknown): DocumentSecurity {
   const reply = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const opener: DocumentOpener =
-    reply.opener === 'user' || reply.opener === 'owner' || reply.opener === 'none' ? reply.opener : 'user';
+    reply.opener === 'user' || reply.opener === 'owner' || reply.opener === 'recipient' || reply.opener === 'none'
+      ? reply.opener
+      : 'user';
   const bits = reply.permissions && typeof reply.permissions === 'object'
     ? (reply.permissions as Record<string, unknown>)
     : {};
@@ -114,4 +120,19 @@ export function parseDocumentSecurity(raw: unknown): DocumentSecurity {
 /** Whether a security record grants everything (nothing to enforce). */
 export function isUnrestricted(security: DocumentSecurity): boolean {
   return security.opener !== 'user' && PERMISSION_NAMES.every((name) => security.permissions[name]);
+}
+
+/** Whether the working copy is the plaintext of a certificate-encrypted file,
+ * which Save writes back under the file's own recipient lists. */
+export function isRecipientOpened(security: DocumentSecurity | undefined): boolean {
+  return security?.opener === 'recipient';
+}
+
+/** Why `security`'s pages may not leave the document into another file, or
+ * null. The protection of a user-opened or restricted certificate-opened
+ * document cannot follow its pages. */
+export function pageExportBlock(security: DocumentSecurity): CapabilityBlock | null {
+  if (security.opener === 'user') return { kind: 'ownerPassword' };
+  if (security.opener === 'recipient' && !isUnrestricted(security)) return { kind: 'recipientList' };
+  return null;
 }
