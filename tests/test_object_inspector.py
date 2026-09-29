@@ -873,3 +873,44 @@ class TestTheTextState:
         src = self._page(tmp_path, b"BT 3 Tr /F0 12 Tf 60 300 Td (recognized) Tj ET")
         with pikepdf.open(src) as pdf:
             assert self._objects(pdf, pdf.pages[0]) == []
+
+
+def _bbox_form_walk(tmp_path, form_content: bytes, matrix=None) -> list:
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    form = pdf.make_stream(form_content)
+    form["/Type"] = pikepdf.Name.XObject
+    form["/Subtype"] = pikepdf.Name.Form
+    form["/BBox"] = pikepdf.Array([0, 0, 100, 100])
+    if matrix is not None:
+        form["/Matrix"] = pikepdf.Array(matrix)
+    page.obj["/Resources"] = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Fm=form))
+    page.Contents = pdf.make_stream(b"/Fm Do")
+    src = tmp_path / "bbox.pdf"
+    pdf.save(src)
+    pdf.close()
+    with pikepdf.open(src) as doc:
+        walk = _Walk(doc, doc.pages[0])
+        walk.run()
+        return [o["rect"] for o in walk.objects if o["kind"] != "form"]
+
+
+class TestFormBBoxClip:
+    def test_fill_outside_the_form_bbox_is_not_reported(self, tmp_path):
+        rects = _bbox_form_walk(tmp_path, b"10 10 20 20 re f 300 300 20 20 re f")
+        assert rects == [[10.0, 10.0, 30.0, 30.0]]
+
+    def test_singular_form_matrix_draws_nothing(self, tmp_path):
+        assert _bbox_form_walk(tmp_path, b"10 10 20 20 re f", matrix=[1, 0, 2, 0, 0, 0]) == []
+
+
+class TestShadingUnderEmptyClip:
+    @pytest.mark.parametrize("case", [0, 1], ids=["disjoint", "singular"])
+    def test_shading_with_no_visible_area_is_not_reported(self, tmp_path, case):
+        from test_page_vectors import SHADING_NO_AREA_CASES, _shading_pdf
+
+        src = _shading_pdf(tmp_path / "sh.pdf", *SHADING_NO_AREA_CASES[case])
+        with pikepdf.open(src) as doc:
+            walk = _Walk(doc, doc.pages[0])
+            walk.run()
+            assert [o for o in walk.objects if o["kind"] == "shading"] == []

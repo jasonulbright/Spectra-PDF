@@ -56,7 +56,7 @@ import pikepdf
 from engine.credentials import open_pdf, require_permission
 from pikepdf import Dictionary, Name
 
-from engine.content_walk import ClipTracker, GraphicsTextState
+from engine.content_walk import ClipTracker, GraphicsTextState, form_clip
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 from engine.redact import (
@@ -361,7 +361,7 @@ def _walk_placements(
                     out,
                     True,
                     base_alpha=alpha,
-                    base_clip=clips.clip,
+                    base_clip=form_clip(xobj, state.ctm, clips.clip),
                     base_blend=blend,
                     base_mask=mask,
                 )

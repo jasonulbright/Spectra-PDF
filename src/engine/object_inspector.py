@@ -57,6 +57,8 @@ from .content_walk import (
     ClipTracker,
     DEFAULT_COLOR,
     IDENTITY,
+    clip_has_area,
+    form_clip,
     bbox_of_rect_under_matrix,
     mat_mult,
     transform_point,
@@ -659,7 +661,7 @@ class _Walk:
             resources,
             mat_mult(_as_matrix(xobj.get("/Matrix")) or IDENTITY, state.ctm),
             depth + 1,
-            clips.clip,
+            form_clip(xobj, state.ctm, clips.clip),
             unit if root_unit is None else root_unit,
             form or name,
             state,
@@ -751,6 +753,8 @@ class _Walk:
                     colour["rgb"] = None
             except (AttributeError, KeyError, TypeError, ValueError):
                 colour["unknown"] = True
+        if clips.clip is not None and not clip_has_area(clips.clip):
+            return
         rect = list(clips.clip) if clips.clip is not None else list(self.box)
         self._emit(
             "shading", rect, unit_for([idx]), colour, nested=nested, form=form,

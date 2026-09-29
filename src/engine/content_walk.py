@@ -18,6 +18,8 @@ against the refactored `_walk`: the security-critical client is the
 regression harness for the seam.
 """
 
+import math
+import sys
 from typing import Callable, NamedTuple, Optional
 
 import pikepdf
@@ -81,6 +83,41 @@ def rects_intersect(a: Rect, b: Rect) -> bool:
     as NON-overlapping (`<=`), matching redact.py's long-standing predicate so
     every clip/region test in the walkers agrees on the boundary case."""
     return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+
+# Finite so it serializes as JSON; no finite rect intersects it, and
+# intersecting it with any clip leaves it unchanged.
+EMPTY_CLIP: Rect = (sys.float_info.max, sys.float_info.max, -sys.float_info.max, -sys.float_info.max)
+
+
+def clip_has_area(clip: Rect) -> bool:
+    return clip[0] < clip[2] and clip[1] < clip[3]
+
+
+def form_clip(xobj, ctm: Matrix, clip: Optional[Rect]) -> Optional[Rect]:
+    """The device-space clip a Form XObject's content runs under: the invoking
+    `clip` narrowed by the form's /BBox mapped through /Matrix and `ctm`
+    (ISO 32000-2 §8.10.1; /BBox and /Matrix per Table 93). A rotated or skewed
+    BBox narrows by its corners' bounding box, a superset of the true
+    quadrilateral, so content reported clipped is invisible. A composed matrix
+    that overflows or is singular maps the form onto no area, so nothing it
+    draws is visible. An unreadable /Matrix or /BBox leaves `clip` unchanged."""
+    composed = mat_mult(as_matrix(xobj.get("/Matrix")) or IDENTITY, ctm)
+    if not all(math.isfinite(v) for v in composed):
+        return EMPTY_CLIP
+    a, b, c, d, _, _ = composed
+    if a * d - b * c == 0:
+        return EMPTY_CLIP
+    try:
+        bx0, by0, bx1, by1 = (float(v) for v in xobj.get("/BBox"))
+    except (TypeError, ValueError):
+        return clip
+    box = bbox_of_corners_under_matrix(composed, bx0, by0, bx1, by1)
+    if not all(math.isfinite(v) for v in box):
+        return clip
+    if clip is None:
+        return box
+    return (max(clip[0], box[0]), max(clip[1], box[1]), min(clip[2], box[2]), min(clip[3], box[3]))
 
 
 class TextStateSnapshot(NamedTuple):
