@@ -1012,6 +1012,12 @@ export const app = {
   /** Hide this window to the system tray instead of closing. */
   hideToTray: () => invoke('hide_to_tray'),
 
+  /** Bring this window forward for a prompt when it is hidden or minimized,
+   * one such window at a time. Null when the window is already on screen. */
+  promptTurnBegin: () => invoke<number | null>('prompt_turn_begin'),
+
+  promptTurnEnd: (token: number) => invoke('prompt_turn_end', { token }),
+
   /** Open an empty second workspace; resolves to its label. */
   openNewWindow: () => invoke<string>('open_new_window'),
 
