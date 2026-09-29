@@ -28,6 +28,7 @@ pub mod store_certs;
 pub mod csc_oauth;
 pub mod session;
 pub mod tabdrag;
+mod prompt_turn;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
@@ -118,10 +119,19 @@ pub fn run() {
         .manage(tabdrag::StripRegistry::new())
         .manage(session::SessionState::new())
         .manage(session::QuitAcks::new())
+        .manage(prompt_turn::PromptTurns::new())
         .manage(page_commit::PageCommitState::default())
         .manage(scanner::ScannerSessions::new())
         .manage(commands::StartupEntryNotice::new())
         .manage(commands::UnreadableRecords::new())
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                webview
+                    .app_handle()
+                    .state::<prompt_turn::PromptTurns>()
+                    .release_label(webview.label());
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -270,6 +280,8 @@ pub fn run() {
             commands::quit_cancelled,
             commands::set_tab_order,
             commands::hide_to_tray,
+            prompt_turn::prompt_turn_begin,
+            prompt_turn::prompt_turn_end,
             app_windows::open_new_window,
             app_windows::claim_document,
             app_windows::downgrade_document_to_read,
@@ -475,6 +487,7 @@ pub fn run() {
                 tauri::WindowEvent::Destroyed => {
                     session::on_window_destroyed(app, window.label());
                     health_engine::on_window_destroyed(app, window.label());
+                    app.state::<prompt_turn::PromptTurns>().forget(window.label());
                     app_windows::on_window_destroyed(app, window.label());
                 }
                 _ => {}

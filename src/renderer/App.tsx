@@ -114,6 +114,7 @@ import { pageEditDecision, type PageDelta } from './lib/page-edit-gate';
 import { opCapability, sequenceEditClass, type OpMethod } from './lib/op-edit-class';
 import type { PreserveOutcome, PreserveRefusal } from './lib/preserve-reason';
 import { finishCoordinatedExit, sealBeforeClose, shouldMinimizeToTrayOnClose } from './lib/close-sequence';
+import { withPromptTurn } from './lib/prompt-turn';
 import { setCommitGate, runCommitGate } from './lib/commit-gate';
 import { initialViewPlan, parseInitialView, planIsInert } from './lib/initial-view';
 import type { FormFieldValue } from './lib/forms';
@@ -2581,7 +2582,10 @@ function AppContent(): React.ReactElement {
       snapshots,
       (pending) => {
         const names = pending.map(({ path }) => readState().files.get(path)?.name ?? path).join(', ');
-        return showConfirm(message(names));
+        return withPromptTurn(
+          { begin: app.promptTurnBegin, end: app.promptTurnEnd },
+          () => showConfirm(message(names)),
+        );
       },
       async (pending) => {
         if (!(await commitOrAbort())) return false;

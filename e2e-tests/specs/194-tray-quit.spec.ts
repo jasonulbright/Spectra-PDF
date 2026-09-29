@@ -19,6 +19,14 @@ const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 const CONFIRM_MESSAGE = '[data-testid="confirm-message"]';
 const CONFIRM_CANCEL = '[data-testid="confirm-cancel"]';
 
+const windowVisible = async (): Promise<boolean> =>
+  browser.execute(async () => {
+    const w = window as unknown as {
+      __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
+    };
+    return (await w.__TAURI_INTERNALS__.invoke('plugin:window|is_visible', { label: 'main' })) === true;
+  });
+
 describe('tray Quit', () => {
   let dir = '';
   let pdf = '';
@@ -67,5 +75,46 @@ describe('tray Quit', () => {
       timeoutMsg: 'the page edit could not be undone after cancelling tray Quit',
     });
     expect((await getState()).activeFile?.pageCount).toBe(5);
+  });
+
+  it('brings a window hidden to the tray forward before asking about its unsaved work', async () => {
+    const hidden = resolve(dir, 'hidden.pdf');
+    copyFileSync(SAMPLE_PDF, hidden);
+    await waitForHarness();
+    await openByPaths([hidden]);
+    await setView('canvas');
+    const pages = async () => (await getWorkspacePageIds()).filter((id) => id.startsWith(hidden));
+    await browser.waitUntil(async () => (await pages()).length === 5, {
+      timeout: 30_000,
+      timeoutMsg: 'the document never indexed',
+    });
+    await selectCanvasPages([(await pages())[0]]);
+    await deleteSelectedCanvasPages();
+    await browser.waitUntil(async () => (await pages()).length === 4, {
+      timeout: 30_000,
+      timeoutMsg: 'the page delete never landed in the page tier',
+    });
+    await browser.executeAsync((done: (v: unknown) => void) => {
+      (window as any).__TAURI_INTERNALS__.invoke('hide_to_tray').then(done, done);
+    });
+    await browser.waitUntil(
+      async () => !(await windowVisible()),
+      { timeout: 10_000, timeoutMsg: 'the window never hid to the tray' },
+    );
+
+    await emitTrayAction('quit');
+    await waitForDisplayedSelector(CONFIRM_CANCEL, {
+      timeout: 15_000,
+      timeoutMsg: 'tray Quit did not ask about the hidden window\'s unsaved document',
+    });
+    await browser.waitUntil(
+      async () => windowVisible(),
+      { timeout: 10_000, timeoutMsg: 'the prompt was raised in a window still hidden' },
+    );
+    await $(CONFIRM_CANCEL).click();
+    await waitForDisplayedSelector(CONFIRM_CANCEL, { timeout: 15_000, reverse: true });
+
+    expect(await windowVisible()).toBe(true);
+    expect(await pages()).toHaveLength(4);
   });
 });
