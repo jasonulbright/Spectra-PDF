@@ -1,5 +1,6 @@
 import { OPS } from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
+import { orderedPageText, type OrientedItem } from './text-order'
 
 export interface ExtractedPage {
   text: string
@@ -31,17 +32,17 @@ export async function extractPageText(
   const page = await pdf.getPage(pageIndex + 1)
   const content = await page.getTextContent()
 
-  let text = ''
+  const items: OrientedItem[] = []
   let chars = 0
   for (const item of content.items) {
     if (!('str' in item)) continue
-    text += item.str
-    if (item.hasEOL) text += '\n'
+    items.push(item)
     for (let i = 0; i < item.str.length; i++) {
       if (isRealGlyph(item.str.charCodeAt(i))) chars++
     }
   }
 
+  const text = orderedPageText(items, page.rotate)
   const needsOcr = chars < MIN_TEXT_CHARS ? await paintsRasterImage(page) : false
   return { text, needsOcr }
 }
