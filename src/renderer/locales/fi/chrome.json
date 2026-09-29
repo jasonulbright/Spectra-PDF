@@ -2352,6 +2352,7 @@
   "engine.ink_manager.inkUsedPatternTool": "Mustetta ”{{name}}” käyttää kuvio, jota tämä työkalu ei voi kirjoittaa uudelleen.",
   "engine.ink_manager.nameLeastOneInk": "Nimeä vähintään yksi muunnettava muste.",
   "engine.ink_manager.processInksCannotAliased": "Prosessivärejä ei voi liittää aliaksena spottiväriin.",
+  "engine.inplace.fileCouldReplacedBecause": "Tiedostoa ei voitu korvata, koska toinen ohjelma käyttää sitä. Sulje se siellä ja yritä uudelleen.",
   "engine.inspect.pageOutRange": "Sivu {{page}} on alueen ulkopuolella (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "tasoindeksi {{index}} on alueen ulkopuolella (0-{{v1}})",
   "engine.links.documentDestinationNamed": "tässä asiakirjassa ei ole kohdetta nimeltä {{name}}",

@@ -2478,6 +2478,7 @@
   "engine.ink_manager.inkUsedPatternTool": "Barva „{{name}}“ je použita vzorkem, který tento nástroj nedokáže přepsat.",
   "engine.ink_manager.nameLeastOneInk": "Uveďte alespoň jednu barvu k převodu.",
   "engine.ink_manager.processInksCannotAliased": "Procesní barvy nelze propojit s přímou barvou.",
+  "engine.inplace.fileCouldReplacedBecause": "Soubor nelze nahradit, protože ho používá jiný program. Zavřete ho tam a zkuste to znovu.",
   "engine.inspect.pageOutRange": "Stránka {{page}} je mimo rozsah (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "index vrstvy {{index}} je mimo rozsah (0-{{v1}})",
   "engine.links.documentDestinationNamed": "tento dokument nemá cíl s názvem {{name}}",

@@ -33,6 +33,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pikepdf
+from engine.inplace import write_text_staged
 from engine.credentials import open_pdf
 
 from engine.batch_ocr import (
@@ -64,7 +65,7 @@ def report_path_for(dest_root: Path, rel: str) -> Path:
 
 def _write_report(path: Path, report: dict) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    write_text_staged(path, json.dumps(report, indent=2))
     return str(path)
 
 
@@ -315,5 +316,5 @@ def _write_sweep_log(started_at: datetime, finished_at: datetime, report: dict,
         f"{report['clean']} clean · {report['ok']} measured · "
         f"{report['failed']} failed · {report['total']} total"
     )
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_staged(path, "\n".join(lines) + "\n")
     return str(path)

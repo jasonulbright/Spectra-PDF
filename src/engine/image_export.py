@@ -24,12 +24,15 @@ margin the crop exists to hide, so the exported file does not depict the page
 the user was looking at when they asked for it.
 """
 
+import os
+from contextlib import ExitStack
 from pathlib import Path
 
 import pikepdf
 from engine.credentials import open_pdf, require_permission
 
 from . import budget
+from .inplace import atomic_output
 from .printer import parse_page_spec
 from .validate import validate_pdf
 
@@ -122,13 +125,13 @@ def export_images(
     # what was written (and so a partial gs failure is detectable).
     out_dir = output_path.parent
     stem = output_path.stem
-    if per_page and n_pages > 1:
+    single = not (per_page and n_pages > 1)
+    if not single:
         expected = [out_dir / f"{stem}-{i}{ext}" for i in range(1, n_pages + 1)]
         # gs template: user % escaped, then our literal %d.
         gs_out = str(out_dir / f"{stem}-".replace("%", "%%")) + "%d" + ext
     else:
         expected = [output_path]
-        gs_out = str(output_path).replace("%", "%%")
 
     cmd = [
         gs_path,
@@ -150,22 +153,36 @@ def export_images(
         cmd.append(f"-dJPEGQ={quality}")
     if spec:
         cmd.append(f"-sPageList={spec}")
-    cmd.extend([f"-sOutputFile={gs_out}", str(input_path)])
 
     # Through the gs family's own door: it validates the executable and
     # replaces cmd[0] with the probed path, and it derives the budget from the
     # input instead of the flat `_TIMEOUT` that a 1,000-page render outgrew.
     # The floor stays `_TIMEOUT`, so no export that finished before can now
     # time out.
-    result = budget.gs(
-        cmd,
-        what="Ghostscript (image export)",
-        path=input_path,
-        pages=n_pages,
-        base=float(_TIMEOUT),
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Ghostscript failed: {result.stderr.strip() or result.stdout.strip()}")
+    with ExitStack() as scope:
+        if single:
+            # The single image renders beside the output and lands whole; a
+            # render killed part-way never replaces a file already there.
+            staged = scope.enter_context(atomic_output(output_path))
+            gs_out = str(staged).replace("%", "%%")
+        cmd.extend([f"-sOutputFile={gs_out}", str(input_path)])
+        result = budget.gs(
+            cmd,
+            what="Ghostscript (image export)",
+            path=input_path,
+            pages=n_pages,
+            base=float(_TIMEOUT),
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Ghostscript failed: {result.stderr.strip() or result.stdout.strip()}")
+        # The staging file exists from its creation, so an empty one is the
+        # "reported success, wrote nothing" case.
+        if single and os.path.getsize(str(staged)) == 0:
+            missing = [str(output_path)]
+            raise RuntimeError(
+                f"Ghostscript reported success but {len(missing)} expected output "
+                f"file(s) are missing (first: {missing[0]})"
+            )
 
     missing = [str(p) for p in expected if not p.is_file()]
     if missing:

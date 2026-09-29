@@ -2415,6 +2415,7 @@
   "engine.ink_manager.inkUsedPatternTool": "Cerneala „{{name}}” este utilizată de un model pe care acest instrument nu îl poate rescrie.",
   "engine.ink_manager.nameLeastOneInk": "Numiți cel puțin o cerneală de convertit.",
   "engine.ink_manager.processInksCannotAliased": "Cernelurile de cvadricromie nu pot fi asociate unei culori spot.",
+  "engine.inplace.fileCouldReplacedBecause": "Fișierul nu a putut fi înlocuit deoarece îl folosește alt program. Închideți-l acolo și încercați din nou.",
   "engine.inspect.pageOutRange": "Pagina {{page}} este în afara intervalului (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "indexul de strat {{index}} este în afara intervalului (0-{{v1}})",
   "engine.links.documentDestinationNamed": "acest document nu are nicio destinație cu numele {{name}}",

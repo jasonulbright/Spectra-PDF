@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pikepdf
 from engine.credentials import open_pdf
+from engine.inplace import atomic_output
 
 COUNT_INTENT = "/Count"
 
@@ -134,7 +135,8 @@ def export_count_summary(file: str, output: str) -> dict:
         raise ValueError(f"Output folder does not exist: {out_path.parent}")
     # newline="" is the csv module's contract on Windows — without it every
     # record ends \r\r\n and half the spreadsheet importers show blank rows.
-    with out_path.open("w", newline="", encoding="utf-8") as handle:
+    with atomic_output(out_path) as staged, \
+            open(str(staged), "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(COLUMNS)
         for row in rows:

@@ -2415,6 +2415,7 @@
   "engine.ink_manager.inkUsedPatternTool": "הדיו \"{{name}}\" נמצא בשימוש בתבנית שכלי זה אינו יכול לשכתב.",
   "engine.ink_manager.nameLeastOneInk": "ציין דיו אחד לפחות להמרה.",
   "engine.ink_manager.processInksCannotAliased": "לא ניתן לתת לדיו התהליך כינוי של צבע ספוט.",
+  "engine.inplace.fileCouldReplacedBecause": "לא ניתן היה להחליף את הקובץ כי תוכנה אחרת משתמשת בו. סגרו אותו שם ונסו שוב.",
   "engine.inspect.pageOutRange": "עמוד {{page}} מחוץ לטווח — הטווח הוא בין 1 לבין {{v1}}",
   "engine.layers.layerIndexOutRange": "מספר השכבה {{index}} מחוץ לטווח — הטווח הוא בין 0 לבין {{v1}}",
   "engine.links.documentDestinationNamed": "במסמך זה אין יעד בשם {{name}}",

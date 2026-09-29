@@ -38,6 +38,7 @@ import pikepdf
 from engine.credentials import open_pdf, require_permission
 from pikepdf import Array, Dictionary, Name, String
 
+from .inplace import write_bytes_staged, atomic_output
 from .page_images import _save
 from .pdf_tree import name_bytes, name_label, name_object, name_text, token_text
 from .validate import validate_pdf
@@ -382,7 +383,7 @@ def emit_trapping_setup(file: str, output: str = "", assignments=None) -> dict:
         out.append(line)
 
     target = Path(output) if output else source
-    target.write_bytes(b"\n".join(out))
+    write_bytes_staged(target, b"\n".join(out))
     return {
         "output": str(target),
         "pages": len(pages),
@@ -443,11 +444,12 @@ def export_postscript(
     ]
     if pages:
         cmd.append(f"-sPageList={pages}")
-    cmd += [f"-sOutputFile={str(target).replace('%', '%%')}", str(source)]
-    result = budget.gs(cmd, what="Ghostscript (PostScript export)", path=source)
-    if result.returncode != 0 or not target.is_file():
-        detail = (result.stderr or result.stdout or "").strip()
-        raise RuntimeError(f"Ghostscript PostScript export failed: {detail}")
+    with atomic_output(target) as staged:
+        cmd += [f"-sOutputFile={str(staged).replace('%', '%%')}", str(source)]
+        result = budget.gs(cmd, what="Ghostscript (PostScript export)", path=source)
+        if result.returncode != 0 or staged.stat().st_size == 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(f"Ghostscript PostScript export failed: {detail}")
 
     carried = list_trap_presets(file)
     attached = 0

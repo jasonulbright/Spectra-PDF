@@ -48,6 +48,7 @@ import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.inplace import atomic_output
 from engine.credentials import open_pdf
 
 from . import budget
@@ -871,7 +872,8 @@ def _isolation_pdf(pdf, page, units, wanted, tile, dest: Path) -> None:
         new_page.Contents = out.make_stream(body)
         if shared is not None:
             new_page.obj["/Resources"] = shared
-    out.save(str(dest))
+    with atomic_output(Path(dest)) as staged:
+        out.save(str(staged))
     out.close()
 
 

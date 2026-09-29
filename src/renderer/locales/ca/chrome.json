@@ -2415,6 +2415,7 @@
   "engine.ink_manager.inkUsedPatternTool": "La tinta «{{name}}» l'usa un patró que aquesta eina no pot reescriure.",
   "engine.ink_manager.nameLeastOneInk": "Anomeneu almenys una tinta per convertir.",
   "engine.ink_manager.processInksCannotAliased": "Les tintes de quadricromia no es poden associar a un color directe.",
+  "engine.inplace.fileCouldReplacedBecause": "No s'ha pogut substituir el fitxer perquè un altre programa l'està fent servir. Tanqueu-lo allà i torneu-ho a provar.",
   "engine.inspect.pageOutRange": "La pàgina {{page}} és fora de l'interval (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "l'índex de capa {{index}} és fora de l'interval (0-{{v1}})",
   "engine.links.documentDestinationNamed": "aquest document no té cap destinació anomenada {{name}}",

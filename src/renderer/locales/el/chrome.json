@@ -2352,6 +2352,7 @@
   "engine.ink_manager.inkUsedPatternTool": "Το μελάνι «{{name}}» χρησιμοποιείται από μοτίβο που αυτό το εργαλείο δεν μπορεί να επανεγγράψει.",
   "engine.ink_manager.nameLeastOneInk": "Ονομάστε τουλάχιστον ένα μελάνι προς μετατροπή.",
   "engine.ink_manager.processInksCannotAliased": "Τα μελάνια τετραχρωμίας δεν μπορούν να αντιστοιχιστούν σε πλακέ χρώμα.",
+  "engine.inplace.fileCouldReplacedBecause": "Δεν ήταν δυνατή η αντικατάσταση του αρχείου επειδή το χρησιμοποιεί άλλο πρόγραμμα. Κλείστε το εκεί και δοκιμάστε ξανά.",
   "engine.inspect.pageOutRange": "Η σελίδα {{page}} είναι εκτός εύρους (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "ο δείκτης επιπέδου {{index}} είναι εκτός εύρους (0-{{v1}})",
   "engine.links.documentDestinationNamed": "αυτό το έγγραφο δεν έχει προορισμό με το όνομα {{name}}",

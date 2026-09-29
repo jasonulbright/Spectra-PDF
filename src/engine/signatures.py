@@ -80,7 +80,7 @@ from engine import eutl, msctl, os_trust, stamp_appearance, wincert
 from engine.acroform import form_field_forest
 from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
 from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification, UnjudgeableModification
-from engine.inplace import is_same_file
+from engine.inplace import is_same_file, write_bytes_staged
 from engine.signature_size import raw_signature_size
 from engine.fieldmdp import (
     ACTION_BY_NAME,
@@ -1886,8 +1886,7 @@ def generate_signer(
         serialization.BestAvailableEncryption(password.encode("utf-8")),
     )
     # Fail closed: serialize fully, then write.
-    with open(output_path, "wb") as f:
-        f.write(pfx_bytes)
+    write_bytes_staged(output_path, pfx_bytes)
 
     return {
         "output": str(output_path),

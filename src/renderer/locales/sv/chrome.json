@@ -2352,6 +2352,7 @@
   "engine.ink_manager.inkUsedPatternTool": "Färgen \"{{name}}\" används av ett mönster som det här verktyget inte kan skriva om.",
   "engine.ink_manager.nameLeastOneInk": "Namnge minst en färg att konvertera.",
   "engine.ink_manager.processInksCannotAliased": "Processfärger kan inte kopplas som alias till en dekorfärg.",
+  "engine.inplace.fileCouldReplacedBecause": "Filen kunde inte ersättas eftersom ett annat program använder den. Stäng den där och försök igen.",
   "engine.inspect.pageOutRange": "Sida {{page}} ligger utanför intervallet (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "lagerindexet {{index}} ligger utanför intervallet (0-{{v1}})",
   "engine.links.documentDestinationNamed": "det här dokumentet har ingen destination med namnet {{name}}",

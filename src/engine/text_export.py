@@ -15,6 +15,7 @@ import io
 from pathlib import Path
 
 import pikepdf
+from engine.inplace import write_text_staged
 from engine.credentials import open_pdf
 from pdfminer.layout import LAParams
 from pdfminer.pdfinterp import PDFResourceManager
@@ -126,7 +127,7 @@ def export_text(
     # UTF-8 with no BOM and no newline translation: the file is a transcription,
     # and a BOM would be read back as a character by every consumer that does
     # not strip one.
-    out_path.write_text(body, encoding="utf-8", newline="")
+    write_text_staged(out_path, body, newline="")
     return {
         "output": str(out_path),
         "format": "txt",

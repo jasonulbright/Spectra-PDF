@@ -40,7 +40,7 @@ from engine.compress import compress
 # this module is a consumer like any other.
 from engine.create_pdf import IMAGE_SUFFIXES, image_to_pdf
 from engine.enhance_scan import enhance_scan
-from engine.inplace import publish_copy
+from engine.inplace import publish_copy, write_text_staged
 from engine.form_detect import _crop_box, _display_rect_to_pdf, _page_rotate
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
@@ -1400,7 +1400,7 @@ def _write_log(
         directory = Path(log_dir)
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / batch_log_file_name(started_at)
-        path.write_text("\r\n".join(lines), encoding="utf-8")
+        write_text_staged(path, "\r\n".join(lines))
         return str(path)
     except Exception:
         return ""

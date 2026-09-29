@@ -26,7 +26,7 @@ from pikepdf import Dictionary, Name
 
 from . import budget, icc_profiles, standards_report
 from .acroform import reattach_forms_file
-from .inplace import staged_write
+from .inplace import staged_write, atomic_output
 from .pdf_save import refuse_encrypted_source
 from .pdf_tree import name_bytes, token_text
 from .trapping import DEFAULT_TRAPPED, TRAPPED_VALUES
@@ -469,7 +469,8 @@ def _restore_carve_out(output: Path, source: Path, idents: set,
             for owner in _content_owners(converted, annotations):
                 _swap_owner(converted, owner, by_ident, swapped)
             if swapped:
-                converted.save(str(output))
+                with atomic_output(Path(output)) as staged:
+                    converted.save(str(staged))
     return swapped
 
 
@@ -601,7 +602,8 @@ def _rebase_appearances(output: Path) -> None:
             stream["/Matrix"] = pikepdf.Array(list(IDENTITY))
             rebased = True
         if rebased:
-            pdf.save(str(output))
+            with atomic_output(Path(output)) as staged:
+                pdf.save(str(staged))
 
 
 def _ink_names(path: Path) -> list:

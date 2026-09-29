@@ -718,6 +718,7 @@ class TestFinishStaged:
             raise KeyboardInterrupt
 
         monkeypatch.setattr(inplace_mod.os, "replace", cancel)
+        monkeypatch.setattr(inplace_mod, "_replace_existing_windows", cancel)
         with pytest.raises(KeyboardInterrupt):
             finish_staged(staged, destination)
 

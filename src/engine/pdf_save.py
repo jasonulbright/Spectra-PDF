@@ -7,6 +7,7 @@ from xml.etree import ElementTree
 
 import pikepdf
 from engine.credentials import lend_saved_copy, open_pdf
+from engine.inplace import atomic_output
 
 _SENTINEL = object()
 
@@ -565,6 +566,12 @@ def save_pdf(
         # qpdf updates an existing Size to the written xref count, but leaves
         # it absent after recovering an input that omitted this required key.
         pdf.trailer["/Size"] = 1
-    pdf.save(target, **kwargs)
+    if isinstance(target, (str, os.PathLike)):
+        # A save killed mid-write never lands: the name keeps its previous
+        # bytes until the complete output replaces it.
+        with atomic_output(target) as staged:
+            pdf.save(staged, **kwargs)
+    else:
+        pdf.save(target, **kwargs)
     if kept_user_encryption:
         lend_saved_copy(pdf, target)

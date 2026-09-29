@@ -2289,6 +2289,7 @@
   "engine.ink_manager.inkUsedPatternTool": "油墨「{{name}}」被本工具無法重寫的圖樣所使用。",
   "engine.ink_manager.nameLeastOneInk": "請至少指定一種要轉換的油墨。",
   "engine.ink_manager.processInksCannotAliased": "原色油墨無法設為特別色的別名。",
+  "engine.inplace.fileCouldReplacedBecause": "無法取代檔案，因為另一個程式正在使用它。請在該程式中關閉檔案，然後再試一次。",
   "engine.inspect.pageOutRange": "第 {{page}} 頁超出範圍（1-{{v1}}）",
   "engine.layers.layerIndexOutRange": "圖層索引 {{index}} 超出範圍（0-{{v1}}）",
   "engine.links.documentDestinationNamed": "本文件沒有名為 {{name}} 的目的地",

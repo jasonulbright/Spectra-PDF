@@ -2352,6 +2352,7 @@
   "engine.ink_manager.inkUsedPatternTool": "\"{{name}}\" mürekkebi, bu aracın yeniden yazamadığı bir desen tarafından kullanılıyor.",
   "engine.ink_manager.nameLeastOneInk": "Dönüştürülecek en az bir mürekkep adlandırın.",
   "engine.ink_manager.processInksCannotAliased": "Proses mürekkepleri bir nokta rengine takma adla eşlenemez.",
+  "engine.inplace.fileCouldReplacedBecause": "Dosya başka bir program tarafından kullanıldığı için değiştirilemedi. Dosyayı orada kapatıp yeniden deneyin.",
   "engine.inspect.pageOutRange": "{{page}} sayfası aralık dışında (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "katman dizini {{index}} aralık dışında (0-{{v1}})",
   "engine.links.documentDestinationNamed": "bu belgede {{name}} adlı bir hedef yok",

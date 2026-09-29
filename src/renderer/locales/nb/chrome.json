@@ -2352,6 +2352,7 @@
   "engine.ink_manager.inkUsedPatternTool": "Blekket \"{{name}}\" brukes av et mønster dette verktøyet ikke kan skrive om.",
   "engine.ink_manager.nameLeastOneInk": "Navngi minst ett blekk som skal konverteres.",
   "engine.ink_manager.processInksCannotAliased": "Prosessblekk kan ikke gjøres til alias for en spotfarge.",
+  "engine.inplace.fileCouldReplacedBecause": "Filen kunne ikke erstattes fordi et annet program bruker den. Lukk den der og prøv igjen.",
   "engine.inspect.pageOutRange": "Side {{page}} ligger utenfor intervallet (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "lagindeksen {{index}} ligger utenfor intervallet (0-{{v1}})",
   "engine.links.documentDestinationNamed": "dette dokumentet har ingen destinasjon med navnet {{name}}",

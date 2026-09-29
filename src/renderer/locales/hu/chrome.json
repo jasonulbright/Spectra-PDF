@@ -2352,6 +2352,7 @@
   "engine.ink_manager.inkUsedPatternTool": "A(z) „{{name}}” festéket olyan minta használja, amelyet ez az eszköz nem tud újraírni.",
   "engine.ink_manager.nameLeastOneInk": "Nevezzen meg legalább egy átalakítandó festéket.",
   "engine.ink_manager.processInksCannotAliased": "A folyamatfestékek nem kapcsolhatók direkt színhez.",
+  "engine.inplace.fileCouldReplacedBecause": "A fájlt nem sikerült lecserélni, mert egy másik program használja. Zárja be ott, és próbálja újra.",
   "engine.inspect.pageOutRange": "A(z) {{page}}. oldal a tartományon kívül esik (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "a(z) {{index}}. rétegindex a tartományon kívül esik (0-{{v1}})",
   "engine.links.documentDestinationNamed": "ebben a dokumentumban nincs {{name}} nevű célhely",

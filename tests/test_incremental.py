@@ -1808,3 +1808,36 @@ class TestFormatVersion:
         report = transplant_incremental(original, modified, output)
         assert report == {'applied': False, 'reason': 'The PDF version cannot be determined.'}
         assert not os.path.exists(output)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DACL")
+def test_landing_equals_checked_bytes_and_keeps_dacl(tmp_dir, pki, monkeypatch):
+    import subprocess
+    from contextlib import contextmanager
+
+    signed = _signed(tmp_dir, pki)
+    orig_bytes = open(signed, "rb").read()
+    modified = _rewrite_with(signed, tmp_dir, _add_square)
+    out = os.path.join(tmp_dir, "out.pdf")
+    with open(out, "wb") as handle:
+        handle.write(b"previous")
+    grant = subprocess.run(["icacls", out, "/grant", "*S-1-5-32-545:(R)"],
+                           capture_output=True, text=True)
+    assert grant.returncode == 0, grant.stdout + grant.stderr
+
+    seen = {}
+    real = incremental.staged_write
+
+    @contextmanager
+    def spy(path):
+        with real(path) as staged:
+            yield staged
+            seen["bytes"] = open(staged, "rb").read()
+
+    monkeypatch.setattr(incremental, "staged_write", spy)
+    assert transplant_incremental(signed, modified, out)["applied"] is True
+    landed = open(out, "rb").read()
+    assert landed == seen["bytes"]
+    assert landed[: len(orig_bytes)] == orig_bytes
+    acl = subprocess.run(["icacls", out], capture_output=True, text=True).stdout
+    assert "BUILTIN" in acl and "Users:(R)" in acl, acl

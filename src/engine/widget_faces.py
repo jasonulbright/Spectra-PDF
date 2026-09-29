@@ -40,6 +40,7 @@ Boundaries, each measured:
 from pathlib import Path
 
 import pikepdf
+from engine.inplace import atomic_output
 from engine.credentials import copy_document, open_pdf
 from pikepdf import Dictionary, Name
 
@@ -349,5 +350,6 @@ def harvest_appearances(output: Path, source: Path, scratch: Path,
                 paired = True
         for index in range(len(pages) - 1, source_pages - 1, -1):
             del converted.pages[index]
-        converted.save(str(output))
+        with atomic_output(Path(output)) as staged:
+            converted.save(str(staged))
     return forms if paired else None

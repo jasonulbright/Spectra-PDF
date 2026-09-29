@@ -2604,6 +2604,7 @@
   "engine.ink_manager.inkUsedPatternTool": "الحبر «{{name}}» مستخدم في نمط لا يمكن لهذه الأداة إعادة كتابته.",
   "engine.ink_manager.nameLeastOneInk": "حدّد حبرًا واحدًا على الأقل للتحويل.",
   "engine.ink_manager.processInksCannotAliased": "لا يمكن جعل أحبار الفرز أسماء بديلة للون موضعي.",
+  "engine.inplace.fileCouldReplacedBecause": "تعذر استبدال الملف لأن برنامجًا آخر يستخدمه. أغلقه هناك ثم حاول مرة أخرى.",
   "engine.inspect.pageOutRange": "الصفحة {{page}} خارج النطاق المسموح من 1 إلى {{v1}}",
   "engine.layers.layerIndexOutRange": "فهرس الطبقة {{index}} خارج النطاق المسموح من 0 إلى {{v1}}",
   "engine.links.documentDestinationNamed": "لا يحتوي هذا المستند على وجهة باسم {{name}}",

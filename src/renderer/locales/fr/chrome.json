@@ -2415,6 +2415,7 @@
   "engine.ink_manager.inkUsedPatternTool": "L’encre « {{name}} » est utilisée par un motif que cet outil ne peut pas réécrire.",
   "engine.ink_manager.nameLeastOneInk": "Indiquez au moins une encre à convertir.",
   "engine.ink_manager.processInksCannotAliased": "Les encres de quadrichromie ne peuvent pas être fusionnées avec un ton direct.",
+  "engine.inplace.fileCouldReplacedBecause": "Impossible de remplacer le fichier, car un autre programme l’utilise. Fermez-le dans ce programme, puis réessayez.",
   "engine.inspect.pageOutRange": "Page {{page}} hors limites (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "l’indice de calque {{index}} est hors limites (0-{{v1}})",
   "engine.links.documentDestinationNamed": "ce document n’a aucune destination nommée {{name}}",

@@ -2478,6 +2478,7 @@
   "engine.ink_manager.inkUsedPatternTool": "Краска «{{name}}» используется узором, который этот инструмент не может переписать.",
   "engine.ink_manager.nameLeastOneInk": "Назовите хотя бы одну краску для преобразования.",
   "engine.ink_manager.processInksCannotAliased": "Триадные краски нельзя сопоставить с плашечным цветом.",
+  "engine.inplace.fileCouldReplacedBecause": "Не удалось заменить файл, так как он используется другой программой. Закройте его там и повторите попытку.",
   "engine.inspect.pageOutRange": "Страница {{page}} вне диапазона (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "индекс слоя {{index}} вне диапазона (0-{{v1}})",
   "engine.links.documentDestinationNamed": "в этом документе нет назначения с именем {{name}}",

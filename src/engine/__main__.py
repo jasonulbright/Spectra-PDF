@@ -130,6 +130,9 @@ from engine.doc_properties import (
 from engine.font_inventory import list_document_fonts
 from engine.reversion import get_pdf_version, set_pdf_version
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
+import tempfile
+
+from engine.inplace import reclaim_stale_stages
 from engine.credentials import (
     close_document,
     document_permissions,
@@ -244,6 +247,7 @@ def ping() -> dict:
 
 
 def main() -> None:
+    reclaim_stale_stages(tempfile.gettempdir())
     remove_stale_gs_argfiles()
     server = JsonRpcServer()
     server.register("ping", ping)

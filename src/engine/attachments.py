@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pikepdf
 from engine.credentials import open_pdf
-from engine.inplace import is_same_file, staged_write
+from engine.inplace import is_same_file, staged_write, write_bytes_staged
 from engine.pdf_save import save_pdf
 
 
@@ -84,7 +84,7 @@ def extract_attachment(file: str, name: str, output: str) -> dict:
         if name not in pdf.attachments:
             raise ValueError(f"no attachment named {name!r}")
         data = pdf.attachments[name].get_file().read_bytes()
-    Path(output).write_bytes(data)
+    write_bytes_staged(output, data)
     return {"output": str(output), "name": name, "size": len(data)}
 
 

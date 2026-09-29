@@ -2289,6 +2289,7 @@
   "engine.ink_manager.inkUsedPatternTool": "インキ「{{name}}」は、このツールが書き換えられないパターンで使われています。",
   "engine.ink_manager.nameLeastOneInk": "変換するインキを 1 つ以上指定してください。",
   "engine.ink_manager.processInksCannotAliased": "プロセスインキを特色に統合することはできません。",
+  "engine.inplace.fileCouldReplacedBecause": "別のプログラムが使用しているため、ファイルを置き換えられませんでした。そのプログラムでファイルを閉じてから、もう一度お試しください。",
   "engine.inspect.pageOutRange": "ページ {{page}} は範囲外です（1-{{v1}}）",
   "engine.layers.layerIndexOutRange": "レイヤーのインデックス {{index}} は範囲外です（0-{{v1}}）",
   "engine.links.documentDestinationNamed": "この文書には {{name}} という名前の宛先がありません",

@@ -43,7 +43,7 @@ from engine.afscript import recognize
 from engine.content_walk import IDENTITY, as_matrix, bbox_of_corners_under_matrix
 from engine.document_js import decode_js
 from engine.fieldmdp import lock_of_field_dict, locked_fields
-from engine.inplace import is_same_file, staged_write
+from engine.inplace import is_same_file, staged_write, write_bytes_staged
 from engine.pdf_metrics import (
     GLYPH_HEIGHT_EM,
     HELVETICA_DESCENT_EM,
@@ -2228,7 +2228,7 @@ def export_form_data(
         payload = formdata.write_xfdf_fields(values, name)
     else:
         payload = formdata.write_html_form_data(values)
-    output_path.write_bytes(payload)
+    write_bytes_staged(output_path, payload)
     return {"output": str(output_path), "format": fmt, "count": len(values)}
 
 

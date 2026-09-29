@@ -2332,6 +2332,7 @@
   "engine.ink_manager.inkUsedPatternTool": "Ink \"{{name}}\" is used by a pattern this tool cannot rewrite.",
   "engine.ink_manager.nameLeastOneInk": "Name at least one ink to convert.",
   "engine.ink_manager.processInksCannotAliased": "Process inks cannot be aliased to a spot colour.",
+  "engine.inplace.fileCouldReplacedBecause": "The file could not be replaced because another program is using it. Close it there and try again.",
   "engine.inspect.pageOutRange": "Page {{page}} out of range (1-{{v1}})",
   "engine.ipc.circularReferenceDetected": "Circular reference detected",
   "engine.ipc.invalidJsonConstant": "Invalid JSON constant: {{value}}",

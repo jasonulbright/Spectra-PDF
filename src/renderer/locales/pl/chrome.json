@@ -2478,6 +2478,7 @@
   "engine.ink_manager.inkUsedPatternTool": "Farba „{{name}}” jest używana przez deseń, którego to narzędzie nie potrafi przepisać.",
   "engine.ink_manager.nameLeastOneInk": "Wskaż co najmniej jedną farbę do konwersji.",
   "engine.ink_manager.processInksCannotAliased": "Farb procesowych nie można powiązać z kolorem dodatkowym.",
+  "engine.inplace.fileCouldReplacedBecause": "Nie można zastąpić pliku, ponieważ używa go inny program. Zamknij go tam i spróbuj ponownie.",
   "engine.inspect.pageOutRange": "Strona {{page}} poza zakresem (1-{{v1}})",
   "engine.layers.layerIndexOutRange": "indeks warstwy {{index}} jest poza zakresem (0-{{v1}})",
   "engine.links.documentDestinationNamed": "ten dokument nie ma miejsca docelowego o nazwie {{name}}",
