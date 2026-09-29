@@ -2224,7 +2224,8 @@ EXCLUDED_DOORS = {
     ),
     "open_pubkey_document": (
         "has no `output` at all: a certificate open always rewrites the "
-        "working copy it was given as its plaintext and records the "
+        "working copy it was given as its plaintext, keeps the encrypted "
+        "original beside it through a staged write, and records the "
         "recipient's grants. Pinned by tests/test_pubkey_crypt.py"
     ),
     "pubkey_reseal": (

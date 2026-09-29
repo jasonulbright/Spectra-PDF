@@ -2,7 +2,9 @@
 
 argv[1] is the directory that holds the `engine` package. `test_sleep` runs
 for the requested seconds unless cancelled; `test_pid` answers the process
-id. Nothing in the shipped engine registers either method."""
+id; `test_identity` writes a self-signed certificate and its PKCS#12 bundle
+(password "test-pass") into a folder. Nothing in the shipped engine
+registers any of them."""
 
 import os
 import sys
@@ -24,9 +26,50 @@ def _sleep(seconds: float) -> dict:
     return {"slept": seconds}
 
 
+def _identity(folder: str) -> dict:
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives.serialization import pkcs12
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "recipient")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=36500))
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=False, content_commitment=False,
+                key_encipherment=True, data_encipherment=True,
+                key_agreement=False, key_cert_sign=False, crl_sign=False,
+                encipher_only=False, decipher_only=False,
+            ),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    cert_path = os.path.join(folder, "recipient.cer")
+    with open(cert_path, "wb") as f:
+        f.write(cert.public_bytes(serialization.Encoding.DER))
+    pfx_path = os.path.join(folder, "recipient.pfx")
+    with open(pfx_path, "wb") as f:
+        f.write(pkcs12.serialize_key_and_certificates(
+            b"recipient", key, cert, None, serialization.BestAvailableEncryption(b"test-pass")))
+    return {"cert": cert_path, "pfx": pfx_path}
+
+
 def _run_with_test_methods(self, *args, **kwargs):
     self.register("test_sleep", _sleep)
     self.register("test_pid", os.getpid)
+    self.register("test_identity", _identity)
     return _run(self, *args, **kwargs)
 
 

@@ -20,13 +20,14 @@ const code = ts.transpileModule(`const call = ${callback.getText(source)};`, {
 }).outputText;
 
 describe('engine dispatch ownership', () => {
-  it.each(['entry', 'gate', 'lock', 'queue', 'read-lock', 'read-current', 'current'])('checks the actual dispatch boundary: %s', async boundary => {
+  it.each(['entry', 'recovery', 'gate', 'lock', 'queue', 'read-lock', 'read-current', 'current'])('checks the actual dispatch boundary: %s', async boundary => {
     let current = boundary !== 'entry';
     const raw = vi.fn(async () => ({ output: 'copy.pdf' })), release = vi.fn();
     const gate = vi.fn(async () => { if (boundary === 'gate') current = false; });
     const env = {
       isTrackableMethod: () => !boundary.startsWith('read-'), beginInteractive: () => release,
       runCommitGate: gate,
+      restoreLostCredentials: vi.fn(async () => { if (boundary === 'recovery') current = false; }),
       lockKeysFor: () => ['work.pdf'],
       withFileLock: async (_keys: string[], run: () => Promise<unknown>) => {
         if (boundary === 'lock' || boundary === 'read-lock') current = false;

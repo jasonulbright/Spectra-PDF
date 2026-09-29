@@ -462,6 +462,28 @@ def test_grants_survive_an_engine_restart(tmp_dir, sample_pdf):
         credentials.close_document(work)
 
 
+def test_a_restarted_engine_reattaches_from_the_sealed_original(tmp_dir, sample_pdf):
+    from engine import credentials
+    from engine.pubkey_crypt import RECIPIENT_SEALED, open_pubkey_document, pubkey_reattach, pubkey_reseal
+
+    doc, pfx_p, _ = _two_list_document(tmp_dir, sample_pdf)
+    folder = os.path.join(tmp_dir, "workfolder")
+    os.makedirs(folder)
+    work = _working(folder, doc)
+    open_pubkey_document(work, pfx_p, "test-pass")
+    assert classify_encryption(os.path.join(folder, RECIPIENT_SEALED)) == "pubkey"
+    os.remove(doc)
+    credentials._documents.clear()
+    try:
+        reattached = pubkey_reattach(work, "", pfx_p, "test-pass")
+        assert reattached["permissions"]["modify"] is False
+        stage = os.path.join(folder, "stage.sealed")
+        assert pubkey_reseal(work, stage)["output"] == stage
+        assert classify_encryption(stage) == "pubkey"
+    finally:
+        credentials.close_document(work)
+
+
 def test_signed_document_needs_consent_to_reseal(tmp_dir, sample_pdf, monkeypatch):
     from engine import incremental
     from engine.credentials import close_document
