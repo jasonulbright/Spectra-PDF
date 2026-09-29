@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocked = vi.hoisted(() => ({
   listen: vi.fn(), request: vi.fn(), health: vi.fn(), start: vi.fn(), cancel: vi.fn(),
@@ -16,6 +16,8 @@ let receive: (reply: Reply) => void;
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
 describe('window-owned engine response routing', () => {
+  beforeAll(async () => { await import('../src/renderer/hooks/useEngine'); }, 60_000);
+
   beforeEach(() => {
     vi.resetModules();
     vi.resetAllMocks();

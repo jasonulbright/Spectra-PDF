@@ -49,8 +49,19 @@ describe('XFA facts reach the Forms and Health surfaces', () => {
         await $('[data-testid="forms-xfa-calculations-unknown"]').waitForDisplayed();
         expect(await $('[data-testid="forms-xfa-calculations"]').isExisting()).toBe(false);
       } else if (shape === 'no-logic') {
-        expect(await $('[data-testid="forms-xfa-calculations"]').isExisting()).toBe(false);
-        expect(await $('[data-testid="forms-xfa-calculations-unknown"]').isExisting()).toBe(false);
+        // Absence is only evidence once the document reads have finished:
+        // 'no-evidence' is the verdict while either health reader is pending.
+        const verdict = $('[data-testid="doc-health-toggle"]');
+        await browser.waitUntil(async () => {
+          const value = await verdict.getAttribute('data-verdict');
+          return value !== null && value !== 'no-evidence';
+        }, { timeout: 40000, timeoutMsg: 'the document reads never settled' });
+        await $('[data-testid="forms-xfa-static"]').waitForDisplayed({ timeout: 20000 });
+        for (let sample = 0; sample < 8; sample++) {
+          expect(await $('[data-testid="forms-xfa-calculations"]').isExisting()).toBe(false);
+          expect(await $('[data-testid="forms-xfa-calculations-unknown"]').isExisting()).toBe(false);
+          await browser.pause(250);
+        }
       } else {
         await $('[data-testid="forms-xfa-calculations"]').waitForDisplayed();
         expect(await $('[data-testid="forms-xfa-calculations-unknown"]').isExisting()).toBe(false);

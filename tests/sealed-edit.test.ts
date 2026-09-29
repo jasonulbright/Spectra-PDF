@@ -25,6 +25,13 @@ import { createAppStore } from '../src/renderer/state/store';
 import { initialState } from '../src/renderer/state/reducer';
 import { setStageCredentialCaller } from '../src/renderer/lib/stage-credentials';
 import { readingWith } from './helpers/published-bytes';
+import { codeText } from './helpers/code-text';
+import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+
+const rendererCode = (relative: string) =>
+  codeText(fileURLToPath(new URL(`../src/renderer/${relative}`, import.meta.url)));
 
 const USER_OPENED = parseDocumentSecurity({
   opener: 'user',
@@ -163,9 +170,12 @@ describe('page-tier commit routing', () => {
   });
 
   it('App hands the commit the ungated engine transport', async () => {
-    const { readFileSync } = await import('node:fs');
-    const app = readFileSync(new URL('../src/renderer/App.tsx', import.meta.url), 'utf8');
-    const call = app.slice(app.indexOf('return commitPageEdits({'), app.indexOf('if (!outcome) throw'));
+    const app = rendererCode('App.tsx');
+    const start = app.indexOf('return commitPageEdits({');
+    const end = app.indexOf('if (!outcome) throw', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const call = app.slice(start, end);
     expect(call).toContain('sealed: callRaw');
     expect(app).toContain('setSealedReader(callRaw)');
   });
@@ -250,18 +260,16 @@ describe('health sweep password', () => {
   });
 
   it('the health hook reads the password for the path it sweeps', async () => {
-    const { readFileSync } = await import('node:fs');
-    const hook = readFileSync(new URL('../src/renderer/hooks/useDocumentHealth.ts', import.meta.url), 'utf8');
+    const hook = rendererCode('hooks/useDocumentHealth.ts');
     expect(hook).toContain('collectHealth(buffer, isCurrent, documentPassword(path))');
-    const engine = readFileSync(new URL('../src/renderer/hooks/useEngine.ts', import.meta.url), 'utf8');
+    const engine = rendererCode('hooks/useEngine.ts');
     expect(engine).toContain('runHealthSweep(dispatch, path, gate, password)');
   });
 });
 
 describe('removed dead code', () => {
   it('drops the unlock queue label', async () => {
-    const { readFileSync } = await import('node:fs');
-    const queue = readFileSync(new URL('../src/renderer/hooks/useOperationQueue.tsx', import.meta.url), 'utf8');
+    const queue = rendererCode('hooks/useOperationQueue.tsx');
     expect(queue).not.toMatch(/unlock: 'Unlock'|case 'unlock'/);
   });
 });
@@ -300,19 +308,79 @@ describe('signing permission gate', () => {
   });
 
   it('gates the panel sign and the canvas sign before the engine call', async () => {
-    const { readFileSync } = await import('node:fs');
-    const panel = readFileSync(new URL('../src/renderer/panels/SignaturesPanel.tsx', import.meta.url), 'utf8');
-    const doSign = panel.slice(panel.indexOf('const doSign = useCallback('));
-    expect(doSign.indexOf('signBlock(activeFile)')).toBeGreaterThan(-1);
-    expect(doSign.indexOf('signBlock(activeFile)')).toBeLessThan(doSign.indexOf("call('sign_pdf'"));
-    const canvas = readFileSync(new URL('../src/renderer/components/canvas/WorkspaceCanvasView.tsx', import.meta.url), 'utf8');
-    const gate = canvas.indexOf('signBlock(file)');
-    const dialogAt = canvas.indexOf('dialog.saveFile({ defaultPath: `${baseName}-signed.pdf` })');
-    expect(gate).toBeGreaterThan(-1);
-    expect(gate).toBeLessThan(dialogAt);
-    expect(gate).toBeLessThan(canvas.indexOf("engineCall('sign_pdf'", dialogAt));
+    const panelPath = fileURLToPath(new URL('../src/renderer/panels/SignaturesPanel.tsx', import.meta.url));
+    const canvasPath = fileURLToPath(new URL('../src/renderer/components/canvas/WorkspaceCanvasView.tsx', import.meta.url));
+    const panel = ungatedSignCalls(panelPath, 'call');
+    expect(panel.total).toBe(1);
+    expect(panel.ungated).toEqual([]);
     // Every canvas sign_pdf call, the harness field sign included, is gated.
-    const calls = canvas.split("engineCall('sign_pdf'").length - 1;
-    expect(canvas.split(/signBlock\((file|f)\)/).length - 1).toBeGreaterThanOrEqual(calls);
+    const canvas = ungatedSignCalls(canvasPath, 'engineCall');
+    expect(canvas.total).toBe(2);
+    expect(canvas.ungated).toEqual([]);
+
+    const code = codeText(canvasPath);
+    const gate = code.indexOf('signBlock(file)');
+    const dialogAt = code.indexOf('dialog.saveFile({ defaultPath: `${baseName}-signed.pdf` })');
+    expect(gate).toBeGreaterThan(-1);
+    expect(dialogAt).toBeGreaterThan(gate);
   });
 });
+
+function readsName(node: ts.Node, name: string): boolean {
+  if (ts.isIdentifier(node) && node.text === name) return true;
+  return ts.forEachChild(node, (child) => readsName(child, name) || undefined) ?? false;
+}
+
+function callsSignBlock(node: ts.Node): boolean {
+  if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'signBlock') return true;
+  return ts.forEachChild(node, (child) => callsSignBlock(child) || undefined) ?? false;
+}
+
+function exits(statement: ts.Statement): boolean {
+  if (ts.isThrowStatement(statement) || ts.isReturnStatement(statement)) return true;
+  return ts.isBlock(statement) && statement.statements.some(exits);
+}
+
+// A statement list guards its successors when an earlier `if` tests a
+// `signBlock(...)` result, directly or through a binding, and its branch exits.
+function guardedBefore(statements: readonly ts.Statement[], index: number): boolean {
+  const bound = new Set<string>();
+  for (const statement of statements.slice(0, index)) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name) && declaration.initializer && callsSignBlock(declaration.initializer)) {
+          bound.add(declaration.name.text);
+        }
+      }
+    }
+    if (ts.isIfStatement(statement) && exits(statement.thenStatement)
+      && (callsSignBlock(statement.expression) || [...bound].some((name) => readsName(statement.expression, name)))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function ungatedSignCalls(path: string, callee: string): { total: number; ungated: string[] } {
+  const file = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const ungated: string[] = [];
+  let total = 0;
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === callee
+      && node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === 'sign_pdf') {
+      total += 1;
+      let guarded = false;
+      for (let child: ts.Node = node; child.parent && !guarded; child = child.parent) {
+        const parent = child.parent;
+        if (ts.isBlock(parent) || ts.isSourceFile(parent)) {
+          guarded = guardedBefore(parent.statements, parent.statements.indexOf(child as ts.Statement));
+        }
+        if (ts.isFunctionLike(parent)) break;
+      }
+      if (!guarded) ungated.push(`${path}:${file.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return { total, ungated };
+}

@@ -51,6 +51,44 @@ describe('every save over a user file reports its refusal', () => {
     expect(uses.length).toBeGreaterThan(0);
     for (const use of uses) {
       expect(ts.isAwaitExpression(use.parent), use.getText(source)).toBe(true);
+      expect(outcomeDecides(use.parent), use.getText(source)).toBe(true);
     }
   });
 });
+
+function readsBinding(node: ts.Node, name: string): boolean {
+  if (ts.isIdentifier(node) && node.text === name) return true;
+  return ts.forEachChild(node, (child) => readsBinding(child, name) || undefined) ?? false;
+}
+
+// The awaited result must reach an `if` condition: directly (through `!`,
+// `&&`, `||`, parentheses), through a binding a later `if` in the same block
+// reads, or as an arrow's return value whose enclosing call meets the same test.
+function outcomeDecides(value: ts.Node): boolean {
+  let current = value;
+  for (;;) {
+    const parent = current.parent;
+    if (ts.isParenthesizedExpression(parent)
+      || (ts.isPrefixUnaryExpression(parent) && parent.operator === ts.SyntaxKind.ExclamationToken)
+      || (ts.isBinaryExpression(parent)
+        && (parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+          || parent.operatorToken.kind === ts.SyntaxKind.BarBarToken))
+      || ts.isAwaitExpression(parent)) {
+      current = parent;
+      continue;
+    }
+    if (ts.isIfStatement(parent)) return parent.expression === current;
+    if (ts.isArrowFunction(parent) && parent.body === current) {
+      return ts.isCallExpression(parent.parent) && outcomeDecides(parent.parent);
+    }
+    if (ts.isVariableDeclaration(parent) && parent.initializer === current && ts.isIdentifier(parent.name)) {
+      const name = parent.name.text;
+      const statement = parent.parent.parent;
+      const block = statement.parent;
+      if (!ts.isBlock(block)) return false;
+      const later = block.statements.slice(block.statements.indexOf(statement as ts.Statement) + 1);
+      return later.some((next) => ts.isIfStatement(next) && readsBinding(next.expression, name));
+    }
+    return false;
+  }
+}

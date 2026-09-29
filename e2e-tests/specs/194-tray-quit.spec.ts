@@ -3,6 +3,7 @@ import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import {
+  closeAllFiles,
   deleteSelectedCanvasPages,
   emitTrayAction,
   getState,
@@ -81,6 +82,11 @@ describe('tray Quit', () => {
     const hidden = resolve(dir, 'hidden.pdf');
     copyFileSync(SAMPLE_PDF, hidden);
     await waitForHarness();
+    await closeAllFiles();
+    await browser.waitUntil(async () => (await getState()).fileCount === 0, {
+      timeout: 15_000,
+      timeoutMsg: 'the first case\'s document stayed open',
+    });
     await openByPaths([hidden]);
     await setView('canvas');
     const pages = async () => (await getWorkspacePageIds()).filter((id) => id.startsWith(hidden));
@@ -111,6 +117,9 @@ describe('tray Quit', () => {
       async () => windowVisible(),
       { timeout: 10_000, timeoutMsg: 'the prompt was raised in a window still hidden' },
     );
+    const message = await $(CONFIRM_MESSAGE).getText();
+    expect(message).toContain('hidden.pdf');
+    expect(message).not.toContain('pending.pdf');
     await $(CONFIRM_CANCEL).click();
     await waitForDisplayedSelector(CONFIRM_CANCEL, { timeout: 15_000, reverse: true });
 

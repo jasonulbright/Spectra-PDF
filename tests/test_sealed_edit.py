@@ -211,6 +211,83 @@ def test_doors_are_registered_and_kept_out_of_the_queue():
     text = main.read_text(encoding="utf-8")
     assert 'server.register("sealed_plaintext", sealed_plaintext)' in text
     assert 'server.register("sealed_reseal", sealed_reseal)' in text
+    _assert_sealed_doors_bypass_the_queue(main.parent.parent / "renderer")
+
+
+def _strip_ts_comments(text: str) -> str:
+    """Comments removed; string, template and regex-free code kept verbatim.
+    Template `${}` nesting is tracked so a comment inside an interpolation
+    is still removed and a quote inside one does not end the template."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    stack: list[str] = []  # "`" for template text, "{" for braces
+    while i < n:
+        c = text[i]
+        if stack and stack[-1] == "`":
+            if c == "\\":
+                out.append(text[i:i + 2]); i += 2; continue
+            if c == "`":
+                stack.pop(); out.append(c); i += 1; continue
+            if text.startswith("${", i):
+                stack.append("{"); out.append("${"); i += 2; continue
+            out.append(c); i += 1; continue
+        if text.startswith("//", i):
+            end = text.find("\n", i)
+            i = n if end < 0 else end
+            continue
+        if text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+            out.append(" ")
+            continue
+        if c in "'\"":
+            j = i + 1
+            while j < n and text[j] != c and text[j] != "\n":
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1]); i = j + 1; continue
+        if c == "`":
+            stack.append("`"); out.append(c); i += 1; continue
+        if c == "{" and stack:
+            stack.append("{")
+        elif c == "}" and stack and stack[-1] == "{":
+            stack.pop()
+        out.append(c); i += 1
+    return "".join(out)
+
+
+def test_comment_stripping_keeps_string_and_template_literals():
+    source = (
+        "const a = '/* not a comment */'; // gone\n"
+        'const b = "http://x"; /* gone */ const c = `a // b ${d /* gone */} /* e */`;\n'
+    )
+    assert _strip_ts_comments(source) == (
+        "const a = '/* not a comment */'; \n"
+        'const b = "http://x";   const c = `a // b ${d  } /* e */`;\n'
+    )
+
+
+def _assert_sealed_doors_bypass_the_queue(renderer) -> None:
+    import re
+
+    engine = _strip_ts_comments((renderer / "hooks" / "useEngine.ts").read_text(encoding="utf-8"))
+    raw = re.search(r"const rawCall = useCallback\((.*?)\[dispatch\]\);", engine, flags=re.S)
+    assert raw, "rawCall definition not found"
+    assert "dispatch(method, params, options)" in raw.group(1)
+    for queued in ("track(", "runCommitGate(", "withFileLock("):
+        assert queued not in raw.group(1), queued
+    assert re.search(r"return \{[^}]*\bcallRaw: rawCall\b", engine)
+
+    app = _strip_ts_comments((renderer / "App.tsx").read_text(encoding="utf-8"))
+    for binding in (r"\bsealed:\s*([\w.]+)", r"\bcallStaged:\s*([\w.]+)", r"\bsetSealedReader\(\s*([\w.]+)\s*\)"):
+        bound = re.findall(binding, app)
+        assert bound, binding
+        assert "callRaw" in bound and set(bound) <= {"callRaw", "null"}, (binding, bound)
+
+    for path in renderer.rglob("*.ts*"):
+        if path.name == "sealed-edit.ts":
+            continue
+        source = _strip_ts_comments(path.read_text(encoding="utf-8"))
+        assert not re.search(r"""\bcall\(\s*['"]sealed_""", source), path
 
 
 def test_reseal_refuses_the_working_copy_as_its_output(sealed):

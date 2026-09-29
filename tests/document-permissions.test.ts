@@ -4,6 +4,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import ts from 'typescript';
 import {
   PERMISSION_NAMES,
   UNRESTRICTED,
@@ -477,7 +478,7 @@ describe('where the typed password may live', () => {
     };
     walk(root);
     const importers = files
-      .filter((f) => /from '[./]*(lib\/)?document-passwords'/.test(readFileSync(f, 'utf8')))
+      .filter((f) => importsPasswordStore(f))
       .map((f) => relative(root, f).replace(/\\/g, '/'))
       .sort();
     expect(importers).toEqual(['App.tsx', 'hooks/useDocumentHealth.ts', 'lib/credential-release.ts', 'lib/pdfDocCache.ts', 'lib/workspace.ts']);
@@ -704,8 +705,13 @@ describe('copying a selection', () => {
   });
 
   it('gates Edit > Copy on the pages the selection covers', () => {
-    expect(readFileSync(join(__dirname, '../src/renderer/commands/registry.ts'), 'utf8'))
-      .toMatch(/'edit\.copy'[\s\S]*?copyBlock\(ctx\.state, selectionPageIds\(window\.getSelection\(\)\)\) === null[\s\S]*?if \(copyBlock\(ctx\.state, selectionPageIds\(sel\)\)\) return;/);
+    const { when, run } = commandEntry(join(__dirname, '../src/renderer/commands/registry.ts'), 'edit.copy');
+    expect(nodesIn(when).some((node) => ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
+      && printed(node) === 'copyBlock(ctx.state, selectionPageIds(window.getSelection())) === null')).toBe(true);
+    expect(nodesIn(run).some((node) => ts.isIfStatement(node)
+      && printed(node.expression) === 'copyBlock(ctx.state, selectionPageIds(sel))'
+      && ts.isReturnStatement(node.thenStatement))).toBe(true);
   });
 });
 
@@ -727,3 +733,44 @@ describe('a save without the renderer record', () => {
     expect(saveAs).not.toHaveBeenCalledWith('scratch/w.pdf', PATH);
   });
 });
+
+const printer = ts.createPrinter({ removeComments: true });
+const printed = (node: ts.Node) =>
+  printer.printNode(ts.EmitHint.Unspecified, node, node.getSourceFile()).replace(/\s+/g, ' ');
+
+function nodesIn(root: ts.Node): ts.Node[] {
+  const all: ts.Node[] = [];
+  const visit = (node: ts.Node) => { all.push(node); ts.forEachChild(node, visit); };
+  visit(root);
+  return all;
+}
+
+function parse(path: string): ts.SourceFile {
+  const kind = path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  return ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, kind);
+}
+
+// Static imports, re-exports and dynamic import() calls all count.
+function importsPasswordStore(path: string): boolean {
+  const store = (specifier: ts.Node | undefined) =>
+    specifier !== undefined && ts.isStringLiteralLike(specifier)
+    && /(^|\/)document-passwords(\.tsx?)?$/.test(specifier.text);
+  return nodesIn(parse(path)).some((node) =>
+    ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && store(node.moduleSpecifier))
+    || (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+      && store(node.arguments[0])));
+}
+
+function commandEntry(path: string, id: string): { when: ts.Node; run: ts.Node } {
+  const entries = nodesIn(parse(path)).filter((node): node is ts.PropertyAssignment =>
+    ts.isPropertyAssignment(node) && ts.isStringLiteral(node.name) && node.name.text === id
+    && ts.isObjectLiteralExpression(node.initializer));
+  expect(entries).toHaveLength(1);
+  const member = (name: string) => {
+    const found = (entries[0].initializer as ts.ObjectLiteralExpression).properties.find((property) =>
+      property.name !== undefined && ts.isIdentifier(property.name) && property.name.text === name);
+    expect(found, name).toBeDefined();
+    return found!;
+  };
+  return { when: member('when'), run: member('run') };
+}

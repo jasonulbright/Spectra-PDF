@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { foldSentences } from '../src/renderer/lib/sentence-join';
+import { codeText } from './helpers/code-text';
 
 const fill = (pattern: string) => (first: string, second: string): string =>
   pattern.replace('{{first}}', first).replace('{{second}}', second);
@@ -29,12 +30,12 @@ describe('foldSentences', () => {
 describe('panel copy', () => {
   it('never joins two catalog strings with hard-coded sentence punctuation', () => {
     const joined = /\)\}[.!?] *\{t[A-Z][A-Za-z]*\(/;
-    const source = readFileSync(resolve(__dirname, '../src/renderer/panels/HeaderFooterPanel.tsx'), 'utf8');
+    const source = codeText(resolve(__dirname, '../src/renderer/panels/HeaderFooterPanel.tsx'));
     expect(joined.test(source)).toBe(false);
   });
 
   it('folds engine reasons through the sentence pair, never a bare space', () => {
-    const source = readFileSync(resolve(__dirname, '../src/renderer/panels/FlattenerPanel.tsx'), 'utf8');
+    const source = codeText(resolve(__dirname, '../src/renderer/panels/FlattenerPanel.tsx'));
     expect(source).not.toMatch(/\.join\(' '\)/);
     expect(source.match(/joinSentences\(/g)?.length).toBe(2);
   });
@@ -42,7 +43,7 @@ describe('panel copy', () => {
 
 describe('settings copy', () => {
   it('renders the virtual printer pending state through the catalog', () => {
-    const source = readFileSync(resolve(__dirname, '../src/renderer/panels/SettingsPanel.tsx'), 'utf8');
+    const source = codeText(resolve(__dirname, '../src/renderer/panels/SettingsPanel.tsx'));
     expect(source).not.toMatch(/>\s*Checking…\s*</);
   });
 });
