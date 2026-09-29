@@ -8,7 +8,9 @@
 // page labels, layer configuration, document language, and viewer preferences.
 // catalog-carry.test.ts pins every carried key.
 //
-// Document-owned entries carry only from the owner. Optional content is
+// Document-owned entries carry only from the owner. Articles are listed from
+// every contributing source (carryThreads): a bead on a donor page is
+// reachable only through a listed thread. Optional content is
 // composed separately from EVERY contributing source by optional-content-carry:
 // a donor's layer state determines what its copied pages actually display.
 //
@@ -521,17 +523,42 @@ function carryPageLabels(
 
 // ── /Threads (articles) ────────────────────────────────────────────────────
 
-/** A thread travels with its beads: the copied pages' /B beads already reach
- * the copied thread through /T and the /N ring, so the catalog lists exactly
- * the threads a kept bead reached, in source order. A thread with no bead on
- * a kept page has no copy and is not listed. ISO 32000-2 12.4.3. */
-function carryThreads(output: PDFDocument, source: CarriedSourcePages, objectMap: ObjectMap): void {
-  const threads = source.doc.catalog.lookup(N('Threads'));
-  if (!(threads instanceof PDFArray)) return;
-  const carried = threads.asArray().flatMap(raw => {
-    const mapped = raw instanceof PDFRef ? objectMap.get(raw.tag) : undefined;
-    return mapped ? [mapped] : [];
-  });
+/** Whether the thread's /F-/N walk returns to its first bead. */
+function ringCloses(doc: PDFDocument, thread: PDFDict): boolean {
+  const seen = new Set<string>();
+  let cursor = thread.get(N('F'));
+  const first = cursor instanceof PDFRef ? cursor.tag : undefined;
+  while (cursor instanceof PDFRef && !seen.has(cursor.tag) && seen.size < 100000) {
+    seen.add(cursor.tag);
+    const bead = doc.context.lookup(cursor);
+    if (!(bead instanceof PDFDict)) return false;
+    cursor = bead.get(N('N'));
+    if (cursor instanceof PDFRef && cursor.tag === first) return true;
+  }
+  return false;
+}
+
+/** A thread travels with its beads: the copied pages' /B beads reach the
+ * copied thread through /T and the /N ring (re-closed over kept beads before
+ * the copy), so the catalog lists every thread of EVERY contributing source
+ * whose ring closes and a kept bead reached, in source order. A thread with
+ * no bead on a kept page has no copy and is not listed. ISO 32000-2 12.4.3. */
+export function carryThreads(output: PDFDocument, sources: CarriedSourcePages[]): void {
+  const carried: PDFRef[] = [];
+  const listed = new Set<string>();
+  for (const source of sources) {
+    const threads = source.doc.catalog.lookup(N('Threads'));
+    if (!(threads instanceof PDFArray) || source.pairs.length === 0) continue;
+    const objectMap = buildInPageObjectMap(source, output);
+    for (const raw of threads.asArray()) {
+      if (!(raw instanceof PDFRef)) continue;
+      const thread = source.doc.context.lookup(raw);
+      const mapped = objectMap.get(raw.tag);
+      if (!mapped || listed.has(mapped.tag) || !(thread instanceof PDFDict) || !ringCloses(source.doc, thread)) continue;
+      listed.add(mapped.tag);
+      carried.push(mapped);
+    }
+  }
   if (carried.length > 0) output.catalog.set(N('Threads'), output.context.obj(carried));
 }
 
@@ -959,7 +986,6 @@ export function carryDocumentCatalog(output: PDFDocument, source: CarriedSourceP
   carryViewerPreferences(output, source);
   carryOutlines(output, source, copier);
   carryPageLabels(output, source);
-  carryThreads(output, source, objectMap);
   carryDocumentBehavior(output, source, objectMap, copier);
   copier.carryNamedDestinations();
 }

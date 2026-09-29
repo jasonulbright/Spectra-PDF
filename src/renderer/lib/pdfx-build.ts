@@ -1,4 +1,4 @@
-import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFNull, PDFObject, PDFPage, PDFRef, PDFStream, PDFString, degrees } from 'pdf-lib';
+import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFNull, PDFObject, PDFObjectCopier, PDFPage, PDFRef, PDFStream, PDFString, degrees } from 'pdf-lib';
 
 import { tChrome } from '../i18n';
 import { MANIFEST_NAME, PDFX_VERSION } from './pdfx-format';
@@ -6,7 +6,8 @@ import type { ExportAnnotation, ExportDocument, ExportPage, PdfxManifest } from 
 import { carryAcroForm, prepareSourceForms, sourceHasXfa } from './acroform-carry';
 import type { FormContribution } from './acroform-carry';
 import { carryEmbeddedFiles } from './embedded-files-carry';
-import { actionSettler, carryDocumentCatalog, namedDestinationResolver, settleActionEntry } from './catalog-carry';
+import type { CarrySource } from './embedded-files-carry';
+import { actionSettler, carryDocumentCatalog, carryThreads, namedDestinationResolver, settleActionEntry } from './catalog-carry';
 import { carryOptionalContent } from './optional-content-carry';
 import { carryDocumentMetadata } from './metadata-carry';
 import { copyOutputIntents } from './output-intents-carry';
@@ -1550,7 +1551,7 @@ async function assemblePages(
   }
   const sources = new Map<
     string,
-    { doc: PDFDocument; copiedByIndex: Map<number, PDFPage>; contribution: FormContribution }
+    { doc: PDFDocument; bytes: Uint8Array; copier: PDFObjectCopier; copiedByIndex: Map<number, PDFPage>; contribution: FormContribution }
   >();
   const contributions: FormContribution[] = [];
   for (const [key, g] of groups) {
@@ -1568,12 +1569,19 @@ async function assemblePages(
     }
     prepareSourceForms(doc, g.indices);
     dropJumpsToRemovedPages(doc, g.indices);
-    const copied = await output.copyPages(doc, g.indices);
+    // copyPages' own shape, with the copier kept: the catalog carries below
+    // copy through the same cache, so an object reached from a page and the
+    // catalog lands once.
+    const copier = PDFObjectCopier.for(doc.context, output.context);
+    const copied = g.indices.map(index => {
+      const node = copier.copy(doc.getPage(index).node);
+      return PDFPage.of(node, output.context.register(node), output);
+    });
     const copiedByIndex = new Map<number, PDFPage>();
     g.indices.forEach((idx, i) => copiedByIndex.set(idx, copied[i]));
     const contribution: FormContribution = { source: doc, copiedPages: [] };
     contributions.push(contribution);
-    sources.set(key, { doc, copiedByIndex, contribution });
+    sources.set(key, { doc, bytes: g.bytes, copier, copiedByIndex, contribution });
   }
   const stampImages = await embedStampImages(output, pages);
   const signatureFonts = await embedSignatureFonts(output, pages);
@@ -1655,6 +1663,20 @@ async function assemblePages(
     await carryDocumentMetadata(output, owner.doc, metadataOverrides);
     carryIntents(owner.doc, owner.doc.catalog, output.catalog);
   }
+  carryThreads(output, carriedSources);
+  // Without an owner key the owner is the source holding the owner's bytes,
+  // never a donor as well.
+  const ownKey = ownSourceKey ?? [...sources].find(([, s]) => s.bytes === ownBytes)?.[0];
+  const ownSource = ownKey !== undefined ? sources.get(ownKey) : undefined;
+  let ownCarry: CarrySource | undefined = ownSource;
+  if (!ownCarry && owner) ownCarry = { doc: owner.doc, copier: PDFObjectCopier.for(owner.doc.context, output.context) };
+  else if (!ownCarry && ownBytes) {
+    try {
+      const doc = await PDFDocument.load(ownBytes, { ignoreEncryption: true, updateMetadata: false });
+      ownCarry = { doc, copier: PDFObjectCopier.for(doc.context, output.context) };
+    } catch { ownCarry = undefined; }
+  }
+  carryEmbeddedFiles(output, ownCarry, [...sources].filter(([key]) => key !== ownKey).map(([, s]) => s));
   carryFormatDeclarations(output, formatSources);
 }
 
@@ -1752,10 +1774,6 @@ export async function buildPdf(
   // entry this builder generates, set explicitly below.
   const output = await PDFDocument.create({ updateMetadata: false });
   await assemblePages(output, pages, ownSourceKey, ownBytes, { producer: `PDFX ${PDFX_VERSION}` });
-  // Document-level catalog trees (/Names /EmbeddedFiles, /Collection) are not
-  // page subtrees — without this carry a committed page edit deleted every
-  // attachment (embedded-files-carry.ts).
-  if (ownBytes) await carryEmbeddedFiles(output, ownBytes);
   // Names the writer, so it describes this build and not the source's tool.
   // GENERATED_INFO_KEYS keeps the carry off the key; this is its only writer.
   output.setProducer(`PDFX ${PDFX_VERSION}`);
@@ -1775,10 +1793,9 @@ export async function buildPdfx(
   await assemblePages(output, nonEmpty.flatMap((doc) => doc.pages), ownSourceKey, ownBytes, {
     producer: `PDFX ${PDFX_VERSION}`, title, keywords: 'PDFX',
   });
-  // Carry BEFORE the manifest attach: pdf-lib's save-time embed appends to an
-  // existing tree, so the manifest and carried members coexist (pinned by
-  // embedded-files-carry.test.ts's pdfx leg).
-  if (ownBytes) await carryEmbeddedFiles(output, ownBytes);
+  // The embedded-files carry ran inside assemblePages, BEFORE the manifest
+  // attach: pdf-lib's save-time embed appends to an existing tree, so the
+  // manifest and carried members coexist (embedded-files-carry.test.ts).
   for (const doc of nonEmpty) {
     manifest.documents.push({ name: doc.name, pages: doc.pages.length });
   }
