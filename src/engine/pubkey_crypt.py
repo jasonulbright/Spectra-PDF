@@ -33,6 +33,7 @@ the standard encrypt exposes; assistive-technology access is never blocked.
 
 import io
 import os
+import shutil
 from pathlib import Path
 
 import pikepdf
@@ -264,6 +265,16 @@ def decrypt_with_pfx(file: str, output: str, pfx: str, password: str = "") -> di
 
 
 
+#: Beside a certificate-opened working copy: the encrypted bytes it was opened
+#: from. A replacement engine process authenticates against them again
+#: (`pubkey_reattach` with no `source`), whatever became of the user's file.
+RECIPIENT_SEALED = "spectra-recipient.sealed"
+
+
+def _sealed_original(path: str) -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(path)), RECIPIENT_SEALED)
+
+
 def open_pubkey_document(path: str, pfx: str, password: str = "") -> dict:
     """Open the certificate-encrypted working copy at `path`.
 
@@ -279,6 +290,8 @@ def open_pubkey_document(path: str, pfx: str, password: str = "") -> dict:
     # Before the plaintext exists: the folder, and every stage and snapshot
     # later written in it, is readable by the process user only.
     restrict_to_owner(os.path.dirname(os.path.abspath(path)))
+    with staged_write(Path(_sealed_original(path))) as staged:
+        shutil.copyfile(path, staged)
     register_recipient(path, permissions, flags.as_sint32() if flags is not None else -1, handler)
     writer = copy_into_new_writer(reader)
     _staged_write(writer, Path(path))
@@ -290,12 +303,15 @@ def open_pubkey_document(path: str, pfx: str, password: str = "") -> dict:
     }
 
 
-def pubkey_reattach(path: str, source: str, pfx: str, password: str = "") -> dict:
+def pubkey_reattach(path: str, source: str = "", pfx: str = "", password: str = "") -> dict:
     """Authenticate again to the certificate-encrypted `source` (the user's
     file) for the working copy at `path`, whose in-memory record an engine
-    restart lost. The grants of the new authentication replace the old."""
+    restart lost. The grants of the new authentication replace the old. An
+    empty `source` is the encrypted original kept beside the working copy."""
     if not is_recipient_copy(path):
         raise ValueError("this document was not opened with a certificate")
+    if not source:
+        source = _sealed_original(path)
     reader, result, credential = _authenticate(source, pfx, password)
     flags = result.permission_flags
     permissions = recipient_permissions(flags)

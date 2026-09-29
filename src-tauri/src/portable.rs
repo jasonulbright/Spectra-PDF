@@ -619,8 +619,10 @@ pub async fn icc_license_text(app: tauri::AppHandle) -> Result<String, String> {
 ///
 /// The engine is a long-lived subprocess that read [`ICC_ASSENT_ENV`] at spawn,
 /// so accepting mid-session has to reach it: the engine is stopped here and the
-/// next call starts a fresh one with the new value. Nothing is lost — the
-/// engine holds no state between calls.
+/// next call starts a fresh one with the new value. The engine does hold state
+/// between calls (the credentials of password- and certificate-opened
+/// documents); each replacement worker is given its window's credentials again
+/// before it serves a request (`engine::CredentialLedger`).
 #[tauri::command]
 pub async fn record_icc_assent(app: tauri::AppHandle, accepted: bool) -> Result<AssentState, String> {
     record_icc_assent_at(&exe_dir(), accepted)?;

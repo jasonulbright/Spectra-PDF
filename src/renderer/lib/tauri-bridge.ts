@@ -48,6 +48,11 @@ export const engine = {
   onWriteStopped: (callback: (count: number) => void) =>
     listen<number>('engine:writeStopped', (event) => callback(event.payload)),
 
+  /** A replaced worker refused a document's credential; the payload names
+   * its working copy. */
+  onCredentialLost: (callback: (workingPath: string) => void) =>
+    listen<{ path: string }>('engine:credential-lost', (event) => callback(event.payload.path)),
+
   /** Send a JSON-RPC request to the interactive engine. The window's worker
    * starts on its first request. */
   request: (req: object) => invoke('send_to_engine', { request: req }),

@@ -4006,6 +4006,7 @@ dependencies = [
  "windows-core 0.62.2",
  "windows-version",
  "winreg 0.56.0",
+ "zeroize",
 ]
 
 [[package]]

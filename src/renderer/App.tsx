@@ -55,6 +55,12 @@ import { discardDocumentWorkingCopy, prepareDocumentWorkingCopy, saveWorkingCopy
 import { setStageCredentialCaller } from './lib/stage-credentials';
 import { setSealedReader } from './lib/sealed-edit';
 import { rememberDocumentPassword } from './lib/document-passwords';
+import {
+  forgetLostCredential,
+  markCredentialLost,
+  setCredentialUnlocker,
+  unlockLostDocument,
+} from './lib/credential-recovery';
 import { droppedCredentials, releaseDocumentCredentials } from './lib/credential-release';
 import { capabilityBlock, type Capability, type DocumentSecurity } from './lib/document-permissions';
 import { capabilityBlockText, PermissionRefusal } from './lib/document-permission-text';
@@ -949,6 +955,7 @@ function AppContent(): React.ReactElement {
   );
 
   const releaseCredentials = useCallback((path: string, workingPath: string) => {
+    forgetLostCredential(workingPath);
     return releaseDocumentCredentials(path, workingPath, readState().files.has(path), callRaw);
   }, [callRaw, readState]);
   const credentialHolders = useRef(new Map<string, string>());
@@ -988,6 +995,31 @@ function AppContent(): React.ReactElement {
     },
     [call, releaseCredentials, showPasswordPrompt, showCertUnlockPrompt, showNotice],
   );
+
+  useEffect(() => {
+    setCredentialUnlocker(async (workingPath) => {
+      const record = [...readState().files.values()].find((f) => f.workingPath === workingPath);
+      if (!record) return true;
+      return unlockLostDocument(record, {
+        call: callRaw,
+        askPassword: showPasswordPrompt,
+        askCertificate: showCertUnlockPrompt,
+        wrongPassword: () => tChrome('app.open.incorrectPassword'),
+        rememberPassword: rememberDocumentPassword,
+      });
+    });
+    let stop: (() => void) | undefined;
+    let active = true;
+    void engine.onCredentialLost(markCredentialLost).then((unlisten) => {
+      if (active) stop = unlisten;
+      else unlisten();
+    }, () => {});
+    return () => {
+      active = false;
+      stop?.();
+      setCredentialUnlocker(null);
+    };
+  }, [callRaw, readState, showPasswordPrompt, showCertUnlockPrompt]);
 
   const stateRef = useRef(state);
   stateRef.current = state;

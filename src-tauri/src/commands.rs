@@ -1964,21 +1964,23 @@ pub async fn close_window(
     minimize_to_tray: bool,
     force: Option<bool>,
 ) -> Result<CloseOutcome, String> {
-    let others = crate::app_windows::app_window_labels(&app)
-        .into_iter()
-        .filter(|l| l != window.label())
-        .count();
+    let labels = crate::app_windows::app_window_labels(&app);
+    let others = claim_close(&CLOSING, &labels, window.label());
     if others == 0 {
         let writes = app.state::<crate::engine::EngineRouter>().writes_in_flight(None);
         match crate::engine_writes::last_close(minimize_to_tray, force.unwrap_or(false), writes) {
             crate::engine_writes::LastClose::Hide => {
+                release_close(&CLOSING, window.label());
                 let _ = window.hide();
                 return Ok(CloseOutcome::Closed);
             }
             // The engine workers end with this process. The window stays, so
             // the user sees what is running and a relaunch has a window to
             // come to.
-            crate::engine_writes::LastClose::FinishWrites => return Ok(CloseOutcome::Writing),
+            crate::engine_writes::LastClose::FinishWrites => {
+                release_close(&CLOSING, window.label());
+                return Ok(CloseOutcome::Writing);
+            }
             crate::engine_writes::LastClose::Exit => {}
         }
         // Engine outputs are written in place, so a worker killed mid-save
@@ -1991,6 +1993,7 @@ pub async fn close_window(
         // and its claims are read from managed state, and destroying it is what
         // releases them.
         if !crate::session::teardown_permitted(crate::session::capture_and_seal(&app)) {
+            release_close(&CLOSING, window.label());
             return Ok(CloseOutcome::Aborted);
         }
         // Set the quitting flag so ExitRequested handler allows exit
@@ -1999,8 +2002,43 @@ pub async fn close_window(
         app.exit(0);
         return Ok(CloseOutcome::Closed);
     }
-    let _ = window.destroy();
-    Ok(CloseOutcome::Closed)
+    destroyed(&CLOSING, window.label(), window.destroy())
+}
+
+/// The outcome of destroying `me`. A window that failed to destroy is still
+/// open and counts as a window again.
+fn destroyed<E: std::fmt::Display>(
+    closing: &std::sync::Mutex<Vec<String>>,
+    me: &str,
+    result: Result<(), E>,
+) -> Result<CloseOutcome, String> {
+    result.map(|()| CloseOutcome::Closed).map_err(|error| {
+        release_close(closing, me);
+        error.to_string()
+    })
+}
+
+/// Windows whose close has decided and not yet been undone. A window is
+/// listed until it is destroyed; it no longer counts as another window.
+static CLOSING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// The windows in `labels` other than `me` that are not closing, counted in
+/// the same step that lists `me` as closing. Without that one step, two
+/// windows closing at once each count the other, neither runs the last-window
+/// close, and the process stays alive with no window.
+fn claim_close(closing: &std::sync::Mutex<Vec<String>>, labels: &[String], me: &str) -> usize {
+    let mut closing = closing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    closing.retain(|label| labels.contains(label));
+    let others = labels.iter().filter(|l| *l != me && !closing.contains(l)).count();
+    if !closing.iter().any(|l| l == me) {
+        closing.push(me.to_string());
+    }
+    others
+}
+
+/// `me` stays open after all.
+fn release_close(closing: &std::sync::Mutex<Vec<String>>, me: &str) {
+    closing.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).retain(|l| l != me);
 }
 
 /// What a window close did.
@@ -2638,6 +2676,53 @@ pub async fn set_startup_enabled(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn of_two_windows_closing_at_once_exactly_one_is_the_last() {
+        let labels = vec!["doc-1".to_string(), "main".to_string()];
+        for _ in 0..200 {
+            let closing = std::sync::Mutex::new(Vec::new());
+            let barrier = std::sync::Barrier::new(2);
+            let lasts: usize = std::thread::scope(|scope| {
+                let handles: Vec<_> = labels
+                    .iter()
+                    .map(|me| {
+                        let (closing, barrier, labels) = (&closing, &barrier, &labels);
+                        scope.spawn(move || {
+                            barrier.wait();
+                            super::claim_close(closing, labels, me)
+                        })
+                    })
+                    .collect();
+                handles.into_iter().map(|h| usize::from(h.join().unwrap() == 0)).sum()
+            });
+            assert_eq!(lasts, 1);
+        }
+    }
+
+    #[test]
+    fn a_window_that_fails_to_destroy_counts_as_a_window_again() {
+        let closing = std::sync::Mutex::new(Vec::new());
+        let labels = vec!["doc-1".to_string(), "main".to_string()];
+        assert_eq!(super::claim_close(&closing, &labels, "main"), 1);
+        assert!(super::destroyed(&closing, "main", Err("gone")).is_err());
+        assert_eq!(super::claim_close(&closing, &labels, "doc-1"), 1);
+        assert_eq!(super::destroyed::<String>(&closing, "doc-1", Ok(())), Ok(super::CloseOutcome::Closed));
+        assert_eq!(super::claim_close(&closing, &labels, "main"), 0);
+    }
+
+    #[test]
+    fn a_close_that_is_undone_counts_as_a_window_again() {
+        let closing = std::sync::Mutex::new(Vec::new());
+        let labels = vec!["doc-1".to_string(), "main".to_string()];
+        assert_eq!(super::claim_close(&closing, &labels, "main"), 1);
+        super::release_close(&closing, "main");
+        assert_eq!(super::claim_close(&closing, &labels, "doc-1"), 1);
+        // A destroyed window leaves the list with its label.
+        let remaining = vec!["doc-1".to_string()];
+        assert_eq!(super::claim_close(&closing, &remaining, "doc-1"), 0);
+        assert!(closing.lock().unwrap().iter().all(|l| l == "doc-1"));
+    }
+
     #[test]
     fn batch_listing_skips_engine_temps() {
         let dir = tempfile::tempdir().unwrap();

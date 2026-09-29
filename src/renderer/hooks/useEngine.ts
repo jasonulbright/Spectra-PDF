@@ -7,6 +7,7 @@ import { useOperationQueue, isTrackableMethod } from './useOperationQueue';
 import { beginInteractive, submitIdle, trackInteractive } from '../lib/engine-idle-lane';
 import { isHealthMethod, runHealthSweep, type EngineHealthReply } from '../lib/doc-health-engine';
 import { withHealthInput } from '../lib/doc-health-input';
+import { restoreLostCredentials } from '../lib/credential-recovery';
 import type { PdfBuffer } from '../state/types';
 import type { EngineCallOptions } from '../lib/engine-call';
 
@@ -242,6 +243,7 @@ export function useEngine() {
 
   const call = useCallback(async (method: string, params: Record<string, unknown> = {}, options?: EngineCallOptions): Promise<EngineResult> => {
     options?.assertCurrent?.();
+    await restoreLostCredentials(params);
     if (isTrackableMethod(method)) {
       // Counted interactive from HERE, not from the dispatch below: the gate
       // and the lock run first and can take arbitrarily long, and the question
