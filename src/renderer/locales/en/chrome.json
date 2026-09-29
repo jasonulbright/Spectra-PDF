@@ -2033,6 +2033,7 @@
   "engine.batch_ocr.sourceFolderFound": "Source folder not found: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "a subprocess output limit cannot be negative",
   "engine.budget.timeBudgetNeedsPositive": "a time budget needs a positive floor",
+  "engine.catalog_carry.actionChainsTooLarge": "The action chains are too large to carry",
   "engine.catalog_carry.structureTreeTooDeep": "The structure tree is too deep or too large to carry",
   "engine.check.fileFound": "File not found: {{file}}",
   "engine.clause_map.checkCitesClause": "No check cites a clause of {{part}}.",

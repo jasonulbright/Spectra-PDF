@@ -2062,6 +2062,7 @@
   "engine.batch_ocr.sourceFolderFound": "Quellordner nicht gefunden: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Ein Ausgabelimit für einen Unterprozess darf nicht negativ sein.",
   "engine.budget.timeBudgetNeedsPositive": "ein Zeitbudget benötigt eine positive Untergrenze",
+  "engine.catalog_carry.actionChainsTooLarge": "Die Aktionsketten sind zu groß, um übernommen zu werden",
   "engine.catalog_carry.structureTreeTooDeep": "Der Strukturbaum ist zu tief oder zu groß, um übernommen zu werden",
   "engine.check.fileFound": "Datei nicht gefunden: {{file}}",
   "engine.clause_map.checkCitesClause": "Keine Prüfung verweist auf eine Klausel von {{part}}.",

@@ -2062,6 +2062,7 @@
   "engine.batch_ocr.sourceFolderFound": "Bronmap niet gevonden: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Een uitvoerlimiet voor een subprocess mag niet negatief zijn.",
   "engine.budget.timeBudgetNeedsPositive": "een tijdslimiet heeft een positieve ondergrens nodig",
+  "engine.catalog_carry.actionChainsTooLarge": "De actieketens zijn te groot om over te nemen",
   "engine.catalog_carry.structureTreeTooDeep": "De structuurboom is te diep of te groot om over te nemen",
   "engine.check.fileFound": "Bestand niet gevonden: {{file}}",
   "engine.clause_map.checkCitesClause": "Geen enkele controle verwijst naar een clausule van {{part}}.",

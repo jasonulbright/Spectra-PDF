@@ -36,9 +36,7 @@ Document-level form behavior:
   blind-carried: each entry resolves to its fully-qualified field name
   source-side, follows ``add_pages_from``'s rename report, and re-binds to
   the destination's copied field object; entries whose field did not
-  survive drop out. The document catalog's /AA (document-action scripts)
-  is document-scoped, not page-scoped — it carries whole, first source
-  with one wins (the /DA//Q first-contributor rule).
+  survive drop out. The catalog /AA is carried by ``catalog_carry``.
 - ``prune_form_to_pages`` reconciles an in-place /CO the same way after
   pruning (delete's path).
 - ``reattach_acroform`` (the 1:1 gs-regeneration path) carries /CO, the
@@ -409,7 +407,7 @@ def _apply_renames(name: str, renamed: dict) -> str:
 
 def carry_doc_form_extras(dst: pikepdf.Pdf, src: pikepdf.Pdf, renamed: dict) -> None:
     """Carry document-level form behavior after an ``add_pages_from`` copy:
-    /CO reconciled by FQ name (module docstring), catalog /AA first-wins.
+    /CO reconciled by FQ name (module docstring).
     Call per source, in input order, with that source's rename report."""
     src_acro = src.Root.get("/AcroForm")
     if src_acro is not None:
@@ -432,11 +430,6 @@ def carry_doc_form_extras(dst: pikepdf.Pdf, src: pikepdf.Pdf, renamed: dict) -> 
                         existing.extend(resolved)
                     else:
                         dst_acro["/CO"] = Array(resolved)
-    if dst.Root.get("/AA") is None:
-        src_aa = src.Root.get("/AA")
-        if src_aa is not None and isinstance(src_aa, Dictionary):
-            handle = src_aa if src_aa.is_indirect else src.make_indirect(src_aa)
-            dst.Root["/AA"] = dst.copy_foreign(handle)
 
 
 def calculation_order_names(pdf: pikepdf.Pdf) -> list:

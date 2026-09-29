@@ -2062,6 +2062,7 @@
   "engine.batch_ocr.sourceFolderFound": "A forrásmappa nem található: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Az alfolyamat kimeneti korlátja nem lehet negatív.",
   "engine.budget.timeBudgetNeedsPositive": "az időkerethez pozitív alsó határ szükséges",
+  "engine.catalog_carry.actionChainsTooLarge": "A műveletláncok túl nagyok az átvitelhez",
   "engine.catalog_carry.structureTreeTooDeep": "A szerkezeti fa túl mély vagy túl nagy az átvitelhez",
   "engine.check.fileFound": "A fájl nem található: {{file}}",
   "engine.clause_map.checkCitesClause": "Egyetlen ellenőrzés sem hivatkozik a(z) {{part}} egyik pontjára sem.",

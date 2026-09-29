@@ -2125,6 +2125,7 @@
   "engine.batch_ocr.sourceFolderFound": "Carpeta de origen no encontrada: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "El límite de salida de un subproceso no puede ser negativo.",
   "engine.budget.timeBudgetNeedsPositive": "un presupuesto de tiempo necesita un mínimo positivo",
+  "engine.catalog_carry.actionChainsTooLarge": "Las cadenas de acciones son demasiado grandes para trasladarlas",
   "engine.catalog_carry.structureTreeTooDeep": "El árbol de estructura es demasiado profundo o demasiado grande para trasladarlo",
   "engine.check.fileFound": "Archivo no encontrado: {{file}}",
   "engine.clause_map.checkCitesClause": "Ninguna comprobación cita una cláusula de {{part}}.",

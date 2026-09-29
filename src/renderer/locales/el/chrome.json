@@ -2062,6 +2062,7 @@
   "engine.batch_ocr.sourceFolderFound": "Ο φάκελος προέλευσης δεν βρέθηκε: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Το όριο εξόδου μιας υποδιεργασίας δεν μπορεί να είναι αρνητικό.",
   "engine.budget.timeBudgetNeedsPositive": "ένας χρονικός προϋπολογισμός χρειάζεται θετικό κατώφλι",
+  "engine.catalog_carry.actionChainsTooLarge": "Οι αλυσίδες ενεργειών είναι πολύ μεγάλες για να μεταφερθούν",
   "engine.catalog_carry.structureTreeTooDeep": "Το δέντρο δομής είναι πολύ βαθύ ή πολύ μεγάλο για να μεταφερθεί",
   "engine.check.fileFound": "Το αρχείο δεν βρέθηκε: {{file}}",
   "engine.clause_map.checkCitesClause": "Κανένας έλεγχος δεν παραπέμπει σε ρήτρα του {{part}}.",

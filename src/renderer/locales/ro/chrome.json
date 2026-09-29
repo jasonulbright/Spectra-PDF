@@ -2125,6 +2125,7 @@
   "engine.batch_ocr.sourceFolderFound": "Folderul sursă nu a fost găsit: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Limita de ieșire a unui subprocess nu poate fi negativă.",
   "engine.budget.timeBudgetNeedsPositive": "un buget de timp are nevoie de un prag pozitiv",
+  "engine.catalog_carry.actionChainsTooLarge": "Lanțurile de acțiuni sunt prea mari pentru a fi transferate",
   "engine.catalog_carry.structureTreeTooDeep": "Arborele de structură este prea adânc sau prea mare pentru a fi preluat",
   "engine.check.fileFound": "Fișierul nu a fost găsit: {{file}}",
   "engine.clause_map.checkCitesClause": "Nicio verificare nu citează o clauză din {{part}}.",

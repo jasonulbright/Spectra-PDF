@@ -2062,6 +2062,7 @@
   "engine.batch_ocr.sourceFolderFound": "Kaynak klasör bulunamadı: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Bir alt sürecin çıktı sınırı negatif olamaz.",
   "engine.budget.timeBudgetNeedsPositive": "bir zaman bütçesi pozitif bir alt sınır gerektirir",
+  "engine.catalog_carry.actionChainsTooLarge": "Eylem zincirleri aktarılamayacak kadar büyük",
   "engine.catalog_carry.structureTreeTooDeep": "Yapı ağacı aktarılamayacak kadar derin veya büyük",
   "engine.check.fileFound": "Dosya bulunamadı: {{file}}",
   "engine.clause_map.checkCitesClause": "Hiçbir denetim {{part}} bölümünün bir maddesine atıfta bulunmuyor.",

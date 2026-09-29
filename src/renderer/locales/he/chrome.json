@@ -2125,6 +2125,7 @@
   "engine.batch_ocr.sourceFolderFound": "תיקיית המקור לא נמצאה: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "מגבלת הפלט של תהליך משנה לא יכולה להיות שלילית.",
   "engine.budget.timeBudgetNeedsPositive": "מכסת זמן זקוקה לערך רצפה חיובי",
+  "engine.catalog_carry.actionChainsTooLarge": "שרשראות הפעולות גדולות מדי להעברה",
   "engine.catalog_carry.structureTreeTooDeep": "עץ המבנה עמוק מדי או גדול מדי להעברה",
   "engine.check.fileFound": "הקובץ לא נמצא: {{file}}",
   "engine.clause_map.checkCitesClause": "אף בדיקה אינה מפנה לסעיף של {{part}}.",

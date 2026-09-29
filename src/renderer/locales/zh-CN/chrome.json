@@ -1999,6 +1999,7 @@
   "engine.batch_ocr.sourceFolderFound": "找不到源文件夹：{{source}}",
   "engine.budget.subprocessOutputLimitCannot": "子进程的输出上限不能为负数。",
   "engine.budget.timeBudgetNeedsPositive": "时间预算需要一个正的下限",
+  "engine.catalog_carry.actionChainsTooLarge": "操作链过大，无法沿用",
   "engine.catalog_carry.structureTreeTooDeep": "结构树过深或过大，无法转移",
   "engine.check.fileFound": "找不到文件：{{file}}",
   "engine.clause_map.checkCitesClause": "没有任何检查引用 {{part}} 的条款。",

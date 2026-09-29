@@ -1999,6 +1999,7 @@
   "engine.batch_ocr.sourceFolderFound": "找不到來源資料夾：{{source}}",
   "engine.budget.subprocessOutputLimitCannot": "子程序的輸出上限不可為負數。",
   "engine.budget.timeBudgetNeedsPositive": "時間預算需要一個正數下限",
+  "engine.catalog_carry.actionChainsTooLarge": "動作鏈過大，無法沿用",
   "engine.catalog_carry.structureTreeTooDeep": "結構樹過深或過大，無法轉移",
   "engine.check.fileFound": "找不到檔案：{{file}}",
   "engine.clause_map.checkCitesClause": "沒有任何檢查引用 {{part}} 的條款。",

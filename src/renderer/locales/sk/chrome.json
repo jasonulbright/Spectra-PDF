@@ -2188,6 +2188,7 @@
   "engine.batch_ocr.sourceFolderFound": "Zdrojový priečinok sa nenašiel: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Limit výstupu podprocesu nesmie byť záporný.",
   "engine.budget.timeBudgetNeedsPositive": "časový limit potrebuje kladnú medzu",
+  "engine.catalog_carry.actionChainsTooLarge": "Reťazce akcií sú príliš veľké na prenesenie",
   "engine.catalog_carry.structureTreeTooDeep": "Strom štruktúry je príliš hlboký alebo príliš veľký na prenesenie",
   "engine.check.fileFound": "Súbor sa nenašiel: {{file}}",
   "engine.clause_map.checkCitesClause": "Žiadna kontrola neodkazuje na ustanovenie {{part}}.",

@@ -1999,6 +1999,7 @@
   "engine.batch_ocr.sourceFolderFound": "元フォルダーが見つかりません：{{source}}",
   "engine.budget.subprocessOutputLimitCannot": "サブプロセスの出力上限に負の値は指定できません。",
   "engine.budget.timeBudgetNeedsPositive": "時間の上限には正の下限値が必要です",
+  "engine.catalog_carry.actionChainsTooLarge": "アクションチェーンが大きすぎるため引き継げません",
   "engine.catalog_carry.structureTreeTooDeep": "構造ツリーが深すぎるか大きすぎるため、引き継げません",
   "engine.check.fileFound": "ファイルが見つかりません：{{file}}",
   "engine.clause_map.checkCitesClause": "{{part}} の条項を引用するチェックはありません。",

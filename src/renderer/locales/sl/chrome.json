@@ -2188,6 +2188,7 @@
   "engine.batch_ocr.sourceFolderFound": "Izvorne mape ni mogoče najti: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Omejitev izhoda podprocesa ne sme biti negativna.",
   "engine.budget.timeBudgetNeedsPositive": "časovni proračun potrebuje pozitivno spodnjo mejo",
+  "engine.catalog_carry.actionChainsTooLarge": "Verige dejanj so prevelike za prenos",
   "engine.catalog_carry.structureTreeTooDeep": "Drevo strukture je pregloboko ali preveliko za prenos",
   "engine.check.fileFound": "Datoteke ni mogoče najti: {{file}}",
   "engine.clause_map.checkCitesClause": "Nobeno preverjanje se ne sklicuje na določbo {{part}}.",

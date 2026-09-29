@@ -2062,6 +2062,7 @@
   "engine.batch_ocr.sourceFolderFound": "Kildemappen blev ikke fundet: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "En outputgrænse for en underproces må ikke være negativ.",
   "engine.budget.timeBudgetNeedsPositive": "et tidsbudget kræver en positiv nedre grænse",
+  "engine.catalog_carry.actionChainsTooLarge": "Handlingskæderne er for store til at blive overført",
   "engine.catalog_carry.structureTreeTooDeep": "Strukturtræet er for dybt eller for stort til at blive overført",
   "engine.check.fileFound": "Filen blev ikke fundet: {{file}}",
   "engine.clause_map.checkCitesClause": "Ingen kontrol henviser til en klausul i {{part}}.",

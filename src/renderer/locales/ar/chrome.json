@@ -2314,6 +2314,7 @@
   "engine.batch_ocr.sourceFolderFound": "تعذّر العثور على المجلد المصدر: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "لا يمكن أن يكون حد إخراج العملية الفرعية سالبًا.",
   "engine.budget.timeBudgetNeedsPositive": "تحتاج ميزانية الوقت إلى حد أدنى موجب",
+  "engine.catalog_carry.actionChainsTooLarge": "سلاسل الإجراءات كبيرة جدًا بحيث لا يمكن نقلها",
   "engine.catalog_carry.structureTreeTooDeep": "شجرة البنية عميقة جدًا أو كبيرة جدًا بحيث لا يمكن نقلها",
   "engine.check.fileFound": "تعذّر العثور على الملف: {{file}}",
   "engine.clause_map.checkCitesClause": "لا يستشهد أي فحص ببند من {{part}}.",

@@ -2,8 +2,8 @@
 
 ``carry_catalog_jumps`` handles presentation keys, named destinations and
 jumps on the copied pages; ``StructCarry`` the structure tree; ``DocCarry``
-outlines, page labels, embedded files, /Lang, /ViewerPreferences and
-metadata.
+outlines, page labels, embedded files, articles, document JavaScript, /AA,
+/OpenAction, /Lang, /ViewerPreferences and metadata.
 
 Called once per ``copy_pages_with_forms`` contribution, after the pages are
 appended. Presentation keys follow first-definer order (see
@@ -33,6 +33,7 @@ from lxml import etree
 from pikepdf import Array, Dictionary, Name, Stream, String
 
 _MAX_DEPTH = 64
+_MAX_ACTION_STEPS = 100_000
 _PRESENTATION = ('/PageLayout', '/PageMode')
 
 
@@ -216,6 +217,10 @@ class _Jumps:
     """Re-points or classifies destination values on the copied pages."""
 
     def __init__(self, dst: pikepdf.Pdf, carried: dict, resolve, src_keys: set):
+        self.dst = dst
+        self.memo: dict = {}
+        self.active: set = set()
+        self.steps = 0
         self.pages = {page.obj.objgen for page in dst.pages}
         self.carried = carried
         self.resolve = resolve
@@ -250,9 +255,31 @@ class _Jumps:
         """The action with dangling GoTo actions removed from its chain, or
         None when nothing survives. Only a GoTo whose own destination targets
         an uncopied page is removed; its surviving /Next successors take its
-        place in execution order. Every other action type is kept."""
+        place in execution order. Every other action type is kept.
+
+        Each indirect action settles once per contribution and every referrer
+        shares that result; an action reached again through its own /Next is
+        left as it is, so a cyclic or diamond-shaped /Next graph settles in
+        one visit per action."""
         if depth > _MAX_DEPTH or not isinstance(action, Dictionary):
             return action
+        key = action.objgen if action.is_indirect else None
+        if key is not None:
+            if key in self.memo:
+                return self.memo[key]
+            if key in self.active:
+                return action
+            self.active.add(key)
+        self.steps += 1
+        if self.steps > _MAX_ACTION_STEPS:
+            raise ValueError('The action chains are too large to carry')
+        result = self._settle(action, depth)
+        if key is not None:
+            self.active.discard(key)
+            self.memo[key] = result
+        return result
+
+    def _settle(self, action, depth):
         nxt = action.get('/Next')
         chain = list(nxt) if isinstance(nxt, Array) else [nxt] if nxt is not None else []
         settled = [self.settle(sub, depth + 1) for sub in chain]
@@ -268,9 +295,12 @@ class _Jumps:
             if not survivors:
                 return None
             head, rest = survivors[0], survivors[1:]
-            if rest:
+            if rest and isinstance(head, Dictionary):
+                # The head may also be reached directly from another chain,
+                # which must not gain these successors.
                 own = head.get('/Next')
                 own = list(own) if isinstance(own, Array) else [own] if own is not None else []
+                head = self.dst.make_indirect(Dictionary(head))
                 head.Next = Array(own + rest)
             return head
         if chain and any(a is None or a is not b for a, b in zip(settled, chain)):
@@ -1057,6 +1087,11 @@ class DocCarry:
     are the union of the contributions' arrays. /Collection (12.3.5) is
     first-definer, with its initial document (/D) re-pointed through the rename.
 
+    Articles (12.4.3): see ``_carry_threads``.
+
+    Document behaviour (/Names /JavaScript, /AA, /OpenAction): see
+    ``_carry_behavior``.
+
     /Lang (14.9.2) and /ViewerPreferences (12.2) are first-definer, except
     /PrintPageRange, which is rebuilt over the whole output (see
     ``_carry_print_range``).
@@ -1082,6 +1117,8 @@ class DocCarry:
         _carry_outlines(dst, src, jumps, struct, first_map)
         self._carry_labels(dst, src, src_pages, start)
         _carry_embedded(dst, src)
+        _carry_threads(dst, src, src_pages, start)
+        _carry_behavior(dst, src, jumps, struct)
         _carry_lang(dst, src)
         _carry_viewer_preferences(dst, src)
         self._carry_print_range(dst, src, src_pages, start)
@@ -1358,6 +1395,190 @@ def _carry_embedded(dst, src):
             else:
                 copied.D = String(final)
         dst.Root.Collection = copied if copied.is_indirect else dst.make_indirect(copied)
+
+
+# -- articles -------------------------------------------------------------------
+_MAX_BEADS = 100_000
+
+
+def _carry_threads(dst, src, src_pages, start):
+    """Articles (ISO 32000-2 12.4.3, Tables 159-160). Each source /Threads
+    entry whose closed /N ring has a bead on a copied page becomes a new
+    destination thread listed after the existing ones: the copied beads, in
+    ring order, form a new closed /N-/V ring, the first carries /T, and each
+    /P is the bead's copied page. Beads on uncopied pages leave the ring. A
+    thread with no copied bead, or whose ring does not close, is not listed.
+    A page copied more than once contributes its beads at its first copy."""
+    threads = src.Root.get('/Threads')
+    if not isinstance(threads, Array):
+        return
+    beads = {}
+    first = set()
+    for offset, page in enumerate(src_pages):
+        if page.obj.objgen in first:
+            continue
+        first.add(page.obj.objgen)
+        copy = dst.pages[start + offset].obj
+        src_b, dst_b = page.obj.get('/B'), copy.get('/B')
+        if not isinstance(src_b, Array) or not isinstance(dst_b, Array) or len(src_b) != len(dst_b):
+            continue
+        for old, new in zip(src_b, dst_b):
+            if isinstance(old, Dictionary) and old.is_indirect and isinstance(new, Dictionary) and new.is_indirect:
+                beads.setdefault(old.objgen, (new, copy))
+    out = list(dst.Root.Threads) if isinstance(dst.Root.get('/Threads'), Array) else []
+    for thread in threads:
+        if not isinstance(thread, Dictionary):
+            continue
+        ring, seen, cursor, closed = [], set(), thread.get('/F'), False
+        while isinstance(cursor, Dictionary) and cursor.is_indirect and cursor.objgen not in seen:
+            if len(seen) >= _MAX_BEADS:
+                break
+            seen.add(cursor.objgen)
+            ring.append(cursor)
+            cursor = cursor.get('/N')
+            closed = isinstance(cursor, Dictionary) and cursor.objgen == ring[0].objgen
+        kept = [beads[b.objgen] for b in ring if b.objgen in beads]
+        if not closed or not kept:
+            continue
+        new = dst.make_indirect(Dictionary({k: copy_value(dst, v) for k, v in thread.items() if k != '/F'}))
+        new.Type = Name.Thread
+        new.F = kept[0][0]
+        for i, (bead, page) in enumerate(kept):
+            bead.N = kept[(i + 1) % len(kept)][0]
+            bead.V = kept[i - 1][0]
+            bead.P = page
+            if i == 0 or '/T' in bead:
+                bead.T = new
+        out.append(new)
+    if out:
+        dst.Root.Threads = Array(out)
+
+
+# -- document behaviour ---------------------------------------------------------
+def _copy_action(dst, value, fresh: dict, depth: int = 0):
+    """Copy a source value, giving every indirect action a new object per
+    contribution. The foreign copy map returns one object per source object
+    for the life of dst, so an action a previous contribution of the same
+    open already settled would come back with that contribution's pruning."""
+    if depth > _MAX_DEPTH:
+        return copy_value(dst, value)
+    if isinstance(value, Dictionary) and value.is_indirect and '/S' in value:
+        if value.objgen in fresh:
+            return fresh[value.objgen]
+        new = dst.make_indirect(Dictionary())
+        fresh[value.objgen] = new
+        for key, item in value.items():
+            new[key] = _copy_action(dst, item, fresh, depth + 1)
+        return new
+    if isinstance(value, Dictionary) and not value.is_indirect:
+        return Dictionary({k: _copy_action(dst, v, fresh, depth + 1) for k, v in value.items()})
+    if isinstance(value, Array) and not value.is_indirect:
+        return Array([_copy_action(dst, v, fresh, depth + 1) for v in value])
+    return copy_value(dst, value)
+
+
+def _chain_members(action) -> set:
+    """objgen of every indirect action reachable through /Next."""
+    out: set = set()
+    stack = [action]
+    while stack and len(out) < _MAX_ACTION_STEPS:
+        item = stack.pop()
+        if not isinstance(item, Dictionary):
+            continue
+        if item.is_indirect:
+            if item.objgen in out:
+                continue
+            out.add(item.objgen)
+        stack.extend(_kids(item.get('/Next')))
+    return out
+
+
+def _carry_behavior(dst, src, jumps, struct):
+    """Document JavaScript (7.9.6 /Names /JavaScript), document events (/AA,
+    12.6.3 Table 200) and the opening action (/OpenAction, 7.7.2 Table 29).
+
+    Every action chain loses only its GoTo actions whose destination targets
+    an uncopied page (``_Jumps.settle``); a script entry, trigger or opening
+    action is omitted only when nothing in its chain survives. A named or
+    explicit /OpenAction destination is re-pointed to the copied page, or
+    omitted when its page was not copied.
+
+    Across contributions: script names merge into one name tree, a name
+    already present suffixed as ``name.1``, ``name.2``, ... so every script
+    still runs at open. A document event already defined runs the earlier
+    contribution's chain first, then this contribution's, through /Next
+    (12.6.2). /OpenAction is first-definer: one document opens once.
+    """
+    memo: dict = {}
+    fresh: dict = {}
+
+    def settle(value):
+        copied = _copy_action(dst, value, fresh)
+        shared = copied.objgen if getattr(copied, 'is_indirect', False) else None
+        if shared is not None and shared in memo:
+            return memo[shared]
+        settle_actions_sd(struct, dst, copied)
+        result = jumps.settle(copied)
+        if shared is not None:
+            memo[shared] = result
+        return result
+
+    names = src.Root.get('/Names')
+    tree = names.get('/JavaScript') if isinstance(names, Dictionary) else None
+    if isinstance(tree, Dictionary):
+        entries: list = []
+        _tree_entries(tree, entries, set())
+        kept = [(key, action) for key, action in ((k, settle(v)) for k, v in entries) if action is not None]
+        if kept:
+            out_names = dst.Root.get('/Names')
+            if not isinstance(out_names, Dictionary):
+                out_names = dst.make_indirect(Dictionary())
+                dst.Root.Names = out_names
+            existing: list = []
+            _tree_entries(out_names.get('/JavaScript'), existing, set())
+            merged = dict(existing)
+            for key, action in kept:
+                merged[_unique(merged.keys(), key, _suffixed)] = action
+            flat = Array()
+            for key in sorted(merged):
+                flat.append(String(key))
+                flat.append(merged[key])
+            out_names.JavaScript = dst.make_indirect(Dictionary(Names=flat))
+
+    aa = src.Root.get('/AA')
+    if isinstance(aa, Dictionary):
+        out = dst.Root.get('/AA')
+        out = Dictionary(out) if isinstance(out, Dictionary) else Dictionary()
+        for trigger in list(aa.keys()):
+            action = settle(aa.get(trigger))
+            if not isinstance(action, Dictionary):
+                continue
+            prior = out.get(trigger)
+            if action.is_indirect and action.objgen in _chain_members(prior):
+                continue
+            if isinstance(prior, Dictionary):
+                head = Dictionary(prior)
+                own = prior.get('/Next')
+                own = list(own) if isinstance(own, Array) else [own] if own is not None else []
+                head.Next = Array(own + [action])
+                out[trigger] = head
+            else:
+                out[trigger] = action
+        if len(out.keys()) > 0:
+            dst.Root.AA = out
+
+    opening = src.Root.get('/OpenAction')
+    if opening is None or '/OpenAction' in dst.Root:
+        return
+    if isinstance(opening, Dictionary):
+        action = settle(opening)
+        if action is not None:
+            dst.Root.OpenAction = action
+        return
+    dest = copy_value(dst, opening)
+    keep, replacement = jumps.fix(dest)
+    if keep and isinstance(dest, (Array, String, Name)):
+        dst.Root.OpenAction = dest if replacement is None else replacement
 
 
 # -- language and viewer preferences -----------------------------------------

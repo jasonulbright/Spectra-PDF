@@ -2188,6 +2188,7 @@
   "engine.batch_ocr.sourceFolderFound": "Zdrojová složka nenalezena: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Limit výstupu podprocesu nesmí být záporný.",
   "engine.budget.timeBudgetNeedsPositive": "časový limit potřebuje kladnou mez",
+  "engine.catalog_carry.actionChainsTooLarge": "Řetězce akcí jsou příliš velké na přenesení",
   "engine.catalog_carry.structureTreeTooDeep": "Strom struktury je příliš hluboký nebo příliš velký na přenesení",
   "engine.check.fileFound": "Soubor nenalezen: {{file}}",
   "engine.clause_map.checkCitesClause": "Žádná kontrola neodkazuje na ustanovení {{part}}.",

@@ -2062,6 +2062,7 @@
   "engine.batch_ocr.sourceFolderFound": "Lähdekansiota ei löytynyt: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Aliprosessin tulostusraja ei voi olla negatiivinen.",
   "engine.budget.timeBudgetNeedsPositive": "aikabudjetti tarvitsee positiivisen alarajan",
+  "engine.catalog_carry.actionChainsTooLarge": "Toimintoketjut ovat liian suuria siirrettäviksi",
   "engine.catalog_carry.structureTreeTooDeep": "Rakennepuu on liian syvä tai liian suuri siirrettäväksi",
   "engine.check.fileFound": "Tiedostoa ei löytynyt: {{file}}",
   "engine.clause_map.checkCitesClause": "Mikään tarkistus ei viittaa {{part}}-osan kohtaan.",
