@@ -1224,6 +1224,7 @@
   "dialog.webCapture.capture": "Captura",
   "dialog.webCapture.capturing": "Capturant…",
   "dialog.webCapture.cancelled": "Captura cancel·lada — la finestra de captura s’ha tancat. No s’ha afegit res.",
+  "dialog.webCapture.redirectRefused": "L'adreça ha redirigit a {{host}}, un lloc diferent. No s'ha capturat res. Per capturar aquest lloc, introduïu-ne l'adreça.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} caràcter",
   "dialog.createPdf.clipboardTextChars_many": "{{count}} caràcters",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} caràcters",

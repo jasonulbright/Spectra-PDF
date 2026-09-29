@@ -1224,6 +1224,7 @@
   "dialog.webCapture.capture": "לכידה",
   "dialog.webCapture.capturing": "לוכד…",
   "dialog.webCapture.cancelled": "הלכידה בוטלה — חלון הלכידה נסגר. שום דבר לא נוסף.",
+  "dialog.webCapture.redirectRefused": "הכתובת הפנתה אל {{host}}, אתר אחר. דבר לא נלכד. כדי ללכוד את האתר הזה, הזינו את הכתובת שלו.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} תו",
   "dialog.createPdf.clipboardTextChars_two": "{{count}} תווים",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} תווים",

@@ -1248,6 +1248,7 @@
   "dialog.webCapture.capture": "Захватить",
   "dialog.webCapture.capturing": "Захват…",
   "dialog.webCapture.cancelled": "Захват отменён — окно захвата было закрыто. Ничего не добавлено.",
+  "dialog.webCapture.redirectRefused": "Адрес перенаправил на {{host}} — другой сайт. Ничего не захвачено. Чтобы захватить этот сайт, введите его адрес.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} символ",
   "dialog.createPdf.clipboardTextChars_few": "{{count}} символа",
   "dialog.createPdf.clipboardTextChars_many": "{{count}} символов",

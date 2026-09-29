@@ -54,6 +54,8 @@ impl ProcessJob {
 
         command.creation_flags(creation_flags | CREATE_SUSPENDED);
         let mut child = command.spawn()?;
+        #[cfg(test)]
+        tests::run_after_create_hook(child.id());
         let job = match Self::attach(child.id()) {
             Ok(job) => job,
             Err(error) => {
@@ -132,8 +134,60 @@ impl Drop for ProcessJob {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
     use std::io::{BufRead, Write};
     use std::process::{Command, Stdio};
+
+    thread_local! {
+        static AFTER_CREATE: RefCell<Option<Box<dyn Fn(u32)>>> = const { RefCell::new(None) };
+    }
+
+    /// Runs between process creation and job assignment in `ProcessJob::spawn`.
+    pub(super) fn run_after_create_hook(pid: u32) {
+        AFTER_CREATE.with(|hook| {
+            if let Some(hook) = hook.borrow().as_ref() {
+                hook(pid);
+            }
+        });
+    }
+
+    /// The suspend count of the process's first listed thread, read by
+    /// suspending and immediately resuming it.
+    fn first_thread_suspend_count(pid: u32) -> Option<u32> {
+        use windows::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD,
+            THREADENTRY32,
+        };
+        use windows::Win32::System::Threading::{
+            OpenThread, ResumeThread, SuspendThread, THREAD_SUSPEND_RESUME,
+        };
+        unsafe {
+            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0).ok()?;
+            let mut entry = THREADENTRY32 {
+                dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+                ..Default::default()
+            };
+            let mut more = Thread32First(snapshot, &mut entry).is_ok();
+            let mut count = None;
+            while more {
+                if entry.th32OwnerProcessID == pid {
+                    if let Ok(thread) = OpenThread(THREAD_SUSPEND_RESUME, false, entry.th32ThreadID)
+                    {
+                        let previous = SuspendThread(thread);
+                        if previous != u32::MAX {
+                            ResumeThread(thread);
+                            count = Some(previous);
+                        }
+                        let _ = CloseHandle(thread);
+                    }
+                    break;
+                }
+                more = Thread32Next(snapshot, &mut entry).is_ok();
+            }
+            let _ = CloseHandle(snapshot);
+            count
+        }
+    }
 
     #[test]
     #[ignore]
@@ -213,7 +267,32 @@ mod tests {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        let (mut owner, job) = ProcessJob::spawn(command, 0).unwrap();
+        // Holds job assignment until the child is proven unable to run, or
+        // until it has already started its descendant. A spawn that lets the
+        // child run before assignment therefore always assigns too late,
+        // whatever the scheduler does.
+        let hook_started = started.clone();
+        AFTER_CREATE.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |pid| {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+                loop {
+                    if first_thread_suspend_count(pid).is_some_and(|count| count > 0) {
+                        return;
+                    }
+                    if hook_started.exists() {
+                        return;
+                    }
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "the child neither stayed suspended nor started its descendant"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }));
+        });
+        let spawned = ProcessJob::spawn(command, 0);
+        AFTER_CREATE.with(|hook| hook.borrow_mut().take());
+        let (mut owner, job) = spawned.unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !started.exists() && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(5));

@@ -545,6 +545,8 @@ export const DIALOG_STRINGS = {
   'dialog.webCapture.capturing': 'Capturing…',
   'dialog.webCapture.cancelled':
     'Capture cancelled — the capture window was closed. Nothing was added.',
+  'dialog.webCapture.redirectRefused':
+    'The address redirected to {{host}}, a different site. Nothing was captured. To capture that site, enter its address.',
   'dialog.webCapture.truncated_one':
     'Reached the page limit after {{count}} page — there were more links to follow.',
   'dialog.webCapture.truncated_other':

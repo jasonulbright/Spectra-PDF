@@ -93,6 +93,12 @@ export function WebCaptureDialog({
           setNotice(tChrome('dialog.webCapture.cancelled'));
           return null;
         }
+        if (result.refusedRedirect !== null) {
+          setError(
+            tChrome('dialog.webCapture.redirectRefused', { host: result.refusedRedirect }),
+          );
+          return null;
+        }
         onCaptured(result);
         return result;
       } catch (err) {

@@ -1176,6 +1176,7 @@
   "dialog.webCapture.capture": "抓取",
   "dialog.webCapture.capturing": "正在抓取…",
   "dialog.webCapture.cancelled": "抓取已取消 — 抓取窗口被关闭。未添加任何内容。",
+  "dialog.webCapture.redirectRefused": "该地址重定向到了另一个网站 {{host}}。未捕获任何内容。要捕获该网站，请输入其地址。",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} 个字符",
   "dialog.createPdf.clipboardHtmlChars_other": "带格式文本 {{count}} 个字符",
   "dialog.createPdf.clipboardHtmlFrom_other": "{{count}} 个字符,复制自 {{source}}",

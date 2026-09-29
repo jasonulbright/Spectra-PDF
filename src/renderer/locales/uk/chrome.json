@@ -1248,6 +1248,7 @@
   "dialog.webCapture.capture": "Захопити",
   "dialog.webCapture.capturing": "Захоплення…",
   "dialog.webCapture.cancelled": "Захоплення скасовано — вікно захоплення було закрито. Нічого не додано.",
+  "dialog.webCapture.redirectRefused": "Адреса перенаправила на {{host}} — інший сайт. Нічого не захоплено. Щоб захопити цей сайт, введіть його адресу.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} символ",
   "dialog.createPdf.clipboardTextChars_few": "{{count}} символи",
   "dialog.createPdf.clipboardTextChars_many": "{{count}} символів",

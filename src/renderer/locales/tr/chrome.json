@@ -1200,6 +1200,7 @@
   "dialog.webCapture.capture": "Yakala",
   "dialog.webCapture.capturing": "Yakalanıyor…",
   "dialog.webCapture.cancelled": "Yakalama iptal edildi — yakalama penceresi kapatıldı. Hiçbir şey eklenmedi.",
+  "dialog.webCapture.redirectRefused": "Adres, farklı bir site olan {{host}} adresine yönlendirdi. Hiçbir şey yakalanmadı. O siteyi yakalamak için adresini girin.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} karakter",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} karakter",
   "dialog.createPdf.clipboardHtmlChars_one": "{{count}} karakter biçimli metin",

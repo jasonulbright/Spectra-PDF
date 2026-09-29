@@ -1200,6 +1200,7 @@
   "dialog.webCapture.capture": "Vastleggen",
   "dialog.webCapture.capturing": "Bezig met vastleggen…",
   "dialog.webCapture.cancelled": "Vastleggen geannuleerd — het vastlegvenster is gesloten. Er is niets toegevoegd.",
+  "dialog.webCapture.redirectRefused": "Het adres verwees door naar {{host}}, een andere site. Er is niets vastgelegd. Voer het adres van die site in om deze vast te leggen.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} teken",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} tekens",
   "dialog.createPdf.clipboardHtmlChars_one": "{{count}} teken opgemaakte tekst",

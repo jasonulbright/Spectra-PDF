@@ -1224,6 +1224,7 @@
   "dialog.webCapture.capture": "Acquisisci",
   "dialog.webCapture.capturing": "Acquisizione…",
   "dialog.webCapture.cancelled": "Acquisizione annullata — la finestra di acquisizione è stata chiusa. Non è stato aggiunto nulla.",
+  "dialog.webCapture.redirectRefused": "L'indirizzo ha reindirizzato a {{host}}, un sito diverso. Non è stato acquisito nulla. Per acquisire quel sito, immetti il suo indirizzo.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} carattere",
   "dialog.createPdf.clipboardTextChars_many": "{{count}} caratteri",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} caratteri",

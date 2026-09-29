@@ -1248,6 +1248,7 @@
   "dialog.webCapture.capture": "Zachytit",
   "dialog.webCapture.capturing": "Zachycuji…",
   "dialog.webCapture.cancelled": "Zachycení zrušeno — okno zachycení bylo zavřeno. Nic nebylo přidáno.",
+  "dialog.webCapture.redirectRefused": "Adresa přesměrovala na {{host}}, což je jiný web. Nic nebylo zachyceno. Chcete-li zachytit tento web, zadejte jeho adresu.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} znak",
   "dialog.createPdf.clipboardTextChars_few": "{{count}} znaky",
   "dialog.createPdf.clipboardTextChars_many": "{{count}} znaku",

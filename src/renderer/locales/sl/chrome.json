@@ -1248,6 +1248,7 @@
   "dialog.webCapture.capture": "Zajemi",
   "dialog.webCapture.capturing": "Zajemanje…",
   "dialog.webCapture.cancelled": "Zajem preklican — okno zajema je bilo zaprto. Nič ni bilo dodano.",
+  "dialog.webCapture.redirectRefused": "Naslov je preusmeril na {{host}}, drugo spletno mesto. Nič ni bilo zajeto. Če želite zajeti to spletno mesto, vnesite njegov naslov.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} znak",
   "dialog.createPdf.clipboardTextChars_two": "{{count}} znaka",
   "dialog.createPdf.clipboardTextChars_few": "{{count}} znake",
