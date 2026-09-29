@@ -6,6 +6,7 @@ import { ZOOM_SETTLE_MS } from '../../canvas/reading-page';
 import { tChrome } from '../../i18n';
 import { recognizeRaster, type RawEngineCall } from '../../lib/ocr-recognize';
 import { textLayerScaleVars } from '../../lib/text-layer-scale';
+import { applyReadingOrder } from '../../lib/text-layer-order';
 import {
   peekSelectionCache,
   rasterScaleFor,
@@ -129,7 +130,7 @@ export function PageTextLayer({
   const [gestured, setGestured] = useState(false);
   useEffect(() => setGestured(false), [pdf, pageNumber]);
 
-  // Rebuilding is EXPENSIVE - a worker round-trip (`streamTextContent`) plus a
+  // Rebuilding is EXPENSIVE - a worker round-trip (`getTextContent`) plus a
   // full span rebuild, per mounted page. Zoom changes arrive as a burst (OS key
   // repeat on a held Ctrl+=), so settle first, exactly as the raster's own
   // `zoomVersion` does and for the same reason. Seeded with the initial size so
@@ -178,14 +179,24 @@ export function PageTextLayer({
         for (const [name, value] of Object.entries(textLayerScaleVars(viewport))) {
           container.style.setProperty(name, value);
         }
+        const content = await page.getTextContent();
+        if (cancelled) return;
         container.replaceChildren();
         layer = new TextLayer({
-          textContentSource: page.streamTextContent(),
+          textContentSource: content,
           container,
           viewport,
         });
         await layer.render();
         if (cancelled) return;
+        // Selection and copy follow DOM order; this puts rotated and
+        // mixed-orientation text in the order search reads it.
+        const items = content.items.flatMap((it) => ('str' in it ? [it] : []));
+        applyReadingOrder(container, layer.textDivs, items, page.rotate, () => {
+          const br = document.createElement('br');
+          br.setAttribute('role', 'presentation');
+          return br;
+        });
         setNative({
           version: ++nativeVersionRef.current,
           hasText: (container.textContent ?? '').trim().length > 0,

@@ -143,3 +143,24 @@ export function orderedPageText(items: readonly OrientedItem[], pageRotate = 0):
   }
   return text;
 }
+
+export type ReadingStep = { kind: 'item'; index: number } | { kind: 'break' };
+
+/** The text layer's node sequence in reading order: each item, a break after
+ * an item that ends a line, and a break between orientations — the same
+ * boundaries `orderedPageText` writes as newlines. Null when the reading order
+ * is content-stream order, so an upright page keeps its layer untouched. */
+export function readingSequence(items: readonly OrientedItem[], pageRotate = 0): ReadingStep[] | null {
+  const groups = orientationOrder(items, pageRotate);
+  if (groups.length <= 1) return null;
+  const steps: ReadingStep[] = [];
+  for (const group of groups) {
+    const last = steps[steps.length - 1];
+    if (last && last.kind !== 'break') steps.push({ kind: 'break' });
+    for (const index of group) {
+      steps.push({ kind: 'item', index });
+      if (items[index].hasEOL) steps.push({ kind: 'break' });
+    }
+  }
+  return steps;
+}
