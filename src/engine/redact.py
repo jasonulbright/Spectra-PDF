@@ -1811,14 +1811,14 @@ def redact(
     }
     pages_redacted = 0
     with open_pdf(file) as pdf:
+        for page_no in by_page:
+            if not (1 <= page_no <= len(pdf.pages)):
+                raise ValueError(f"page {page_no} is out of range (1-{len(pdf.pages)})")
         run = _Run(pdf, gs_path)
-        total = len(pdf.pages)
-        marked = [pdf.pages[number - 1] for number in by_page if 1 <= number <= total]
+        marked = [pdf.pages[number - 1] for number in by_page]
         if marked:
             run.fonts = redact_fonts.baseline(pdf, marked)
         for page_num, specs in by_page.items():
-            if not (1 <= page_num <= total):
-                continue
             page_stats = _redact_page(pdf, pdf.pages[page_num - 1], specs, font_dir, run)
             for key in stats:
                 stats[key] += page_stats[key]

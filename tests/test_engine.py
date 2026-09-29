@@ -533,15 +533,14 @@ class TestRedact:
         assert "SECRET DATA" not in text
         assert "KEEP ME" in text
 
-    def test_redact_out_of_range_page_is_ignored(self, tmp_dir):
+    def test_redact_out_of_range_page_is_refused(self, tmp_dir):
         src = os.path.join(tmp_dir, "redact_in4.pdf")
         out = os.path.join(tmp_dir, "redact_out4.pdf")
         _make_redact_fixture(src)
 
-        result = redact(file=src, output=out, regions=[{"page": 99, "rect": [0, 0, 10, 10]}])
-        assert result["pages_redacted"] == 0
-        text = extract_text(out)["text"]
-        assert "SECRET DATA" in text
+        with pytest.raises(ValueError, match=r"page 99 is out of range"):
+            redact(file=src, output=out, regions=[{"page": 99, "rect": [0, 0, 10, 10]}])
+        assert not os.path.exists(out)
 
     def test_redact_finds_images_via_inherited_resources(self, tmp_dir):
         # Regression: a page whose /Resources lives on an ancestor /Pages

@@ -400,37 +400,97 @@ def _own_pruned_copy(resources, instructions):
     return own
 
 
+# ISO 32000-2 resource holders besides the page tree: form XObjects (8.10.2,
+# Table 93), tiling patterns (8.7.3.1), Type 3 fonts (9.6.4, Table 110),
+# annotation appearances (7.8.3), named pages in the Templates name tree
+# (7.7.4 Table 32, 12.7.7) under /Resources; the interactive form dictionary's
+# default resources under /DR (12.7.3, Table 224). Holders are often direct
+# objects (an /AcroForm inlined in the catalog), so the walk descends into
+# every direct child of every indirect object. 12.7.7 requires a template to
+# be typed /Template, but files in circulation type it /Page; page-tree
+# membership is therefore decided by object identity, never by /Type.
+_RESOURCE_KEYS = ("/Resources", "/DR")
+
+
+def _page_tree_ids(pdf) -> set:
+    ids: set = set()
+    for page in pdf.pages:
+        node = page.obj
+        depth = 0
+        while node is not None and depth < 64:
+            key = _key(node)
+            if key is None or key in ids:
+                break
+            ids.add(key)
+            node = node.get("/Parent")
+            depth += 1
+    return ids
+
+
+def _resource_holders(pdf, originals: set):
+    found = []
+    stack = [obj for obj in pdf.objects
+             if isinstance(obj, (pikepdf.Dictionary, pikepdf.Stream, pikepdf.Array))]
+    stack.append(pdf.trailer)
+    while stack:
+        obj = stack.pop()
+        if isinstance(obj, (pikepdf.Dictionary, pikepdf.Stream)):
+            for key in list(obj.keys()):
+                try:
+                    value = obj.get(key)
+                except Exception:
+                    continue
+                if key in _RESOURCE_KEYS and _mentions(value, originals):
+                    found.append((obj, key))
+                if isinstance(value, (pikepdf.Dictionary, pikepdf.Array)) and _key(value) is None:
+                    stack.append(value)
+        elif isinstance(obj, pikepdf.Array):
+            for item in obj:
+                if isinstance(item, (pikepdf.Dictionary, pikepdf.Array)) and _key(item) is None:
+                    stack.append(item)
+    return found
+
+
+def _drawn_by(obj, key):
+    """The instructions a holder's own content runs, or None when it has no
+    readable content of its own."""
+    if key != "/Resources":
+        return None
+    try:
+        if isinstance(obj, pikepdf.Stream):
+            return list(pikepdf.parse_content_stream(obj))
+        if obj.get("/Subtype") == Name("/Type3"):
+            instructions = []
+            for glyph in (obj.get("/CharProcs") or pikepdf.Dictionary()).values():
+                instructions.extend(pikepdf.parse_content_stream(glyph))
+            return instructions
+        contents = obj.get("/Contents")
+        if contents is None:
+            return None
+        parts = contents if isinstance(contents, pikepdf.Array) else [contents]
+        instructions = []
+        for part in parts:
+            instructions.extend(pikepdf.parse_content_stream(part))
+        return instructions
+    except Exception:
+        return None
+
+
 def _clean_content_owners(pdf, originals: set) -> None:
-    """The same for every other owner of a resource dictionary: a form, a
-    tiling pattern, a Type 3 font. A form that shares the page's dictionary is
-    the common shape — it lists the page's pictures and draws one of them."""
-    owners = []
-    for obj in pdf.objects:
-        if not isinstance(obj, (pikepdf.Dictionary, pikepdf.Stream)):
+    """The same for every other holder of a resource dictionary. A holder with
+    content of its own (a stream, a Type 3 font, a named page) keeps what that
+    content draws; every other holder (the form's default resources, content
+    that cannot be read) loses the originals outright, because a listing alone
+    keeps the unredacted object in the saved file."""
+    page_tree = _page_tree_ids(pdf)
+    for obj, key in _resource_holders(pdf, originals):
+        if key == "/Resources" and _key(obj) in page_tree:
             continue
-        try:
-            resources = obj.get("/Resources")
-        except Exception:
-            continue
-        if not _mentions(resources, originals) or obj.get("/Type") == Name("/Page"):
-            continue
-        owners.append(obj)
-    for obj in owners:
-        try:
-            if isinstance(obj, pikepdf.Stream):
-                instructions = list(pikepdf.parse_content_stream(obj))
-            elif obj.get("/Subtype") == Name("/Type3"):
-                instructions = []
-                for glyph in (obj.get("/CharProcs") or pikepdf.Dictionary()).values():
-                    instructions.extend(pikepdf.parse_content_stream(glyph))
-            else:
-                continue
-        except Exception:
-            # Content that cannot be read cannot show what it draws; the
-            # originals leave its list rather than stay on its word.
-            obj["/Resources"] = _without_originals(obj["/Resources"], originals)
-            continue
-        obj["/Resources"] = _own_pruned_copy(obj["/Resources"], instructions)
+        instructions = _drawn_by(obj, key)
+        if instructions is None:
+            obj[key] = _without_originals(obj[key], originals)
+        else:
+            obj[key] = _own_pruned_copy(obj[key], instructions)
 
 
 def _without_originals(resources, originals: set):
