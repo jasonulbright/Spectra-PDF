@@ -212,6 +212,109 @@ class TestSharedResources:
             assert bytes(drawn.read_bytes()) == SECRET
 
 
+class TestNonPageResourceHolders:
+    """A resource dictionary outside the page tree — the interactive form's
+    /DR, a named page in the Templates name tree — lists the original as well.
+    Nothing draws it there, yet the listing alone keeps it in the saved file."""
+
+    def _page(self, doc, draw: bytes, resources):
+        page = doc.add_blank_page(page_size=(100, 100))
+        page.obj["/Resources"] = resources
+        page.Contents = doc.make_stream(draw)
+        return page
+
+    def test_an_image_listed_in_the_form_default_resources_goes(self, tmp_dir):
+        doc = pikepdf.new()
+        image = _image(doc)
+        self._page(doc, b"q 80 0 0 80 10 10 cm /Im0 Do Q", Dictionary(XObject=Dictionary(Im0=image)))
+        doc.Root["/AcroForm"] = Dictionary(Fields=Array(), DR=Dictionary(XObject=Dictionary(Im0=image)))
+
+        _src, out, result = _run(tmp_dir, doc, [0, 0, 100, 100])
+
+        assert result["images_removed"] == 1
+        assert not _anywhere(out, zlib.compress(SECRET))
+
+    def test_a_form_listed_in_the_form_default_resources_loses_the_original(self, tmp_dir):
+        doc = pikepdf.new()
+        image = _image(doc)
+        form = _form(doc, b"q 80 0 0 80 10 10 cm /Im0 Do Q", Dictionary(XObject=Dictionary(Im0=image)))
+        self._page(doc, b"/Fm0 Do", Dictionary(XObject=Dictionary(Fm0=form)))
+        acroform = doc.make_indirect(Dictionary(Fields=Array(), DR=Dictionary(XObject=Dictionary(Fm0=form, Im0=image))))
+        doc.Root["/AcroForm"] = acroform
+
+        _src, out, _result = _run(tmp_dir, doc, [0, 0, 100, 100])
+
+        assert not _anywhere(out, zlib.compress(SECRET))
+
+    def test_a_named_page_template_stops_listing_the_original(self, tmp_dir):
+        doc = pikepdf.new()
+        image = _image(doc)
+        self._page(doc, b"q 80 0 0 80 10 10 cm /Im0 Do Q", Dictionary(XObject=Dictionary(Im0=image)))
+        template = doc.make_indirect(Dictionary(
+            Type=Name("/Template"),
+            MediaBox=Array([0, 0, 100, 100]),
+            Resources=Dictionary(XObject=Dictionary(Im0=image)),
+            Contents=doc.make_stream(b""),
+        ))
+        doc.Root["/Names"] = Dictionary(Templates=Dictionary(Names=Array([String("t"), template])))
+
+        _src, out, _result = _run(tmp_dir, doc, [0, 0, 100, 100])
+
+        assert not _anywhere(out, zlib.compress(SECRET))
+
+
+    @pytest.mark.parametrize("kind", ["/Template", "/Page"])
+    def test_a_named_page_that_does_not_draw_the_original_stops_listing_it(self, tmp_dir, kind):
+        doc = pikepdf.new()
+        image = _image(doc)
+        other = _image(doc, TestSharedResources.OTHER)
+        self._page(doc, b"q 80 0 0 80 10 10 cm /Im0 Do Q", Dictionary(XObject=Dictionary(Im0=image)))
+        template = doc.make_indirect(Dictionary(
+            Type=Name(kind),
+            MediaBox=Array([0, 0, 100, 100]),
+            Resources=Dictionary(XObject=Dictionary(Im0=image, Im1=other)),
+            Contents=doc.make_stream(b"q 80 0 0 80 10 10 cm /Im1 Do Q"),
+        ))
+        doc.Root["/Names"] = Dictionary(Templates=Dictionary(Names=Array([String("t"), template])))
+
+        _src, out, _result = _run(tmp_dir, doc, [0, 0, 100, 100])
+
+        assert not _anywhere(out, zlib.compress(SECRET))
+        assert _anywhere(out, zlib.compress(TestSharedResources.OTHER)), "the template keeps what it draws"
+
+    def test_a_named_page_that_draws_the_original_keeps_it(self, tmp_dir):
+        doc = pikepdf.new()
+        image = _image(doc)
+        self._page(doc, b"q 80 0 0 80 10 10 cm /Im0 Do Q", Dictionary(XObject=Dictionary(Im0=image)))
+        template = doc.make_indirect(Dictionary(
+            Type=Name("/Template"),
+            MediaBox=Array([0, 0, 100, 100]),
+            Resources=Dictionary(XObject=Dictionary(Im0=image)),
+            Contents=doc.make_stream(b"q 80 0 0 80 10 10 cm /Im0 Do Q"),
+        ))
+        doc.Root["/Names"] = Dictionary(Templates=Dictionary(Names=Array([String("t"), template])))
+
+        _src, out, _result = _run(tmp_dir, doc, [0, 0, 100, 100])
+
+        with pikepdf.open(out) as pdf:
+            kept = pdf.Root.Names.Templates.Names[1].Resources.XObject[Name("/Im0")]
+            assert bytes(kept.read_bytes()) == SECRET
+
+
+class TestPageRange:
+    def test_a_region_on_a_page_the_file_does_not_have_is_refused(self, tmp_dir):
+        doc = pikepdf.new()
+        doc.add_blank_page(page_size=(100, 100))
+        src = _save(doc, os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+
+        with pytest.raises(ValueError, match=r"page 2 is out of range \(1-1\)"):
+            redact(file=src, output=out, regions=[
+                {"page": 1, "rect": [0, 0, 10, 10]}, {"page": 2, "rect": [0, 0, 10, 10]},
+            ])
+        assert not os.path.exists(out)
+
+
 class TestFormCopyKeys:
     @pytest.mark.parametrize("key", ["/Metadata", "/PieceInfo", "/LastModified", "/AF", "/OPI", "/Ref", "/PtData", "/Private"])
     def test_a_form_copy_carries_nothing_that_describes_the_original(self, tmp_dir, key):
