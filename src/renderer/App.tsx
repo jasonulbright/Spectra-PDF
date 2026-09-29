@@ -4,7 +4,7 @@ import { restoreHistory } from './lib/disk-history';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
 import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/workspace-publication';
 import { withFileLock } from './lib/engine-lock';
-import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter } from './lib/tauri-bridge';
+import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter, engine } from './lib/tauri-bridge';
 import type { PhysicalScreenPoint, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
 import { HandOffGate, flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
 import {
@@ -49,6 +49,7 @@ import { createUnlockPrompts, type UnlockPrompt } from './lib/unlock-prompts';
 import { reportLaunch } from './lib/launch-notices';
 import { PasswordDialog } from './components/PasswordDialog';
 import { copyBlock, selectionPageIds } from './lib/copy-permission';
+import { closeThroughWrites, waitForWrites, withdrawRequest, type CloseOutcome, type GatedClose, type WriteWait } from './lib/close-writes';
 import { discardDocumentWorkingCopy, prepareDocumentWorkingCopy, saveWorkingCopy } from './lib/document-open';
 import { setStageCredentialCaller } from './lib/stage-credentials';
 import { setSealedReader } from './lib/sealed-edit';
@@ -488,8 +489,25 @@ function AppContent(): React.ReactElement {
   // another program holds, a read-only file, a full disk) leaves the file as
   // it was and the document unsaved; the gestures that start one run from
   // fire-and-forget command handlers, so the refusal is shown here or nowhere.
+  const reportSaveFailure = useCallback(
+    (dest: string, e: unknown): Promise<void> => showNotice(
+      tChrome('app.save.failedTitle'),
+      tChrome('app.save.failed', {
+        name: dest.split(/[\\/]/).pop() ?? dest,
+        reason: e instanceof Error ? e.message : String(e),
+      }),
+    ),
+    [showNotice],
+  );
+  // `deferReport` receives a failed write instead of the notice, for a caller
+  // that must release what it holds before the notice is shown.
   const saveOrReport = useCallback(
-    async (workingPath: string, dest: string, asked = true): Promise<boolean> => {
+    async (
+      workingPath: string,
+      dest: string,
+      asked = true,
+      deferReport?: (error: unknown) => void,
+    ): Promise<boolean> => {
       try {
         const record = [...readState().files.values()].find((f) => f.workingPath === workingPath);
         const name = dest.split(/[\\/]/).pop() ?? dest;
@@ -525,20 +543,34 @@ function AppContent(): React.ReactElement {
           },
         });
       } catch (e: unknown) {
-        await showNotice(
-          tChrome('app.save.failedTitle'),
-          tChrome('app.save.failed', {
-            name: dest.split(/[\\/]/).pop() ?? dest,
-            reason: e instanceof Error ? e.message : String(e),
-          }),
-        );
+        if (deferReport) deferReport(e);
+        else await reportSaveFailure(dest, e);
         return false;
       }
     },
-    [showNotice, showProceedConfirm, showCertUnlockPrompt, readState, call],
+    [reportSaveFailure, showProceedConfirm, showCertUnlockPrompt, readState, call],
   );
   const saveOrReportRef = useRef(saveOrReport);
   saveOrReportRef.current = saveOrReport;
+  const reportSaveFailureRef = useRef(reportSaveFailure);
+  reportSaveFailureRef.current = reportSaveFailure;
+
+  // A closed window's engine worker is killed when its write outlives the
+  // drain deadline; the windows still open are the only place to say so.
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let active = true;
+    void engine.onWriteStopped(() => {
+      void showNotice(tChrome('app.engine.writeStoppedTitle'), tChrome('app.engine.writeStopped'));
+    }).then((unlisten) => {
+      if (active) stop = unlisten;
+      else unlisten();
+    }, () => {});
+    return () => {
+      active = false;
+      stop?.();
+    };
+  }, [showNotice]);
 
   // A launch that corrected a "Start with Windows" entry, or found a record it
   // could not read, did so before any window existed; it reports here.
@@ -659,6 +691,38 @@ function AppContent(): React.ReactElement {
   const handleConfirmResult = useCallback((result: ConfirmResult) => {
     if (confirmState) confirmQueue.answer(confirmState.id)?.resolve(result);
   }, [confirmState, confirmQueue]);
+
+  // Writes still running hold the last window: it says so, closes by itself
+  // when they finish, and closes at once only if the user quits anyway.
+  const waitOnWrites = useCallback(
+    (): Promise<WriteWait> => {
+      let finishingId = 0;
+      return waitForWrites({
+      ask: () => new Promise<boolean>((resolve) => {
+        requestConfirm({
+          message: tChrome('app.exit.finishing'),
+          kind: 'proceed',
+          title: tChrome('app.exit.finishingTitle'),
+          affirmLabel: tChrome('app.exit.quitAnyway'),
+          resolve: (r) => resolve(r === 'save'),
+        });
+        // This request's own id: a later request queued behind it must not be
+        // the one a finished wait withdraws.
+        finishingId = lastConfirmId.current;
+      }),
+      withdraw: () => { withdrawRequest(confirmQueue, finishingId); },
+      listen: (onCount) => engine.onWritesInFlight(onCount),
+      current: () => engine.writesInFlight(),
+      });
+    },
+    [requestConfirm, confirmQueue],
+  );
+
+  const closeGated = useCallback(
+    (close: (force: boolean) => Promise<CloseOutcome>): Promise<GatedClose> =>
+      closeThroughWrites(close, waitOnWrites),
+    [waitOnWrites],
+  );
 
   // Fetch app version on mount
   useEffect(() => {
@@ -2833,7 +2897,7 @@ function AppContent(): React.ReactElement {
         alreadyAnswered,
       ),
       (sessionId) => app.quitCancelled(sessionId),
-      () => app.confirmClose(),
+      () => closeGated((force) => app.confirmClose(force)),
     );
     if (result === 'cancelled') return;
     // A missing peer receipt, malformed quit result, or failed session
@@ -2841,7 +2905,7 @@ function AppContent(): React.ReactElement {
     if (result === 'aborted') {
       await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
     }
-  }, [readState, confirmCurrentDirtyFiles, showNotice]);
+  }, [readState, confirmCurrentDirtyFiles, showNotice, closeGated]);
 
   // Hand a document to another window. A hand-off MOVES: the document leaves
   // this workspace, so two live copies of one file never exist and every
@@ -2908,9 +2972,15 @@ function AppContent(): React.ReactElement {
           let moved: TabDragResult;
           try {
             if (plan.saveFirst) {
-              if (!(await saveOrReportRef.current(handed.workingPath, handed.path, false))) {
+              // A failed write gives the document back BEFORE it is reported:
+              // the notice waits on the user, and the reservation must not.
+              const failures: unknown[] = [];
+              if (!(await saveOrReportRef.current(
+                handed.workingPath, handed.path, false, (error) => failures.push(error),
+              ))) {
                 handOffsInFlight.current.delete(path);
                 await tabDrag.release(held.token).catch(() => {});
+                if (failures.length > 0) void reportSaveFailureRef.current(handed.path, failures[0]);
                 return false;
               }
               dispatch({ type: 'MARK_SAVED', path });
@@ -3198,12 +3268,36 @@ function AppContent(): React.ReactElement {
   // this session away with nothing left standing to capture it from. Silence
   // there reads as a dead close button.
   const closeOrReport = useCallback(
-    async (minimizeToTray: boolean): Promise<void> => {
-      if (await app.closeWindow(minimizeToTray)) return;
-      await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
+    async (minimizeToTray: boolean): Promise<GatedClose> => {
+      const closed = await closeGated((force) => app.closeWindow(minimizeToTray, force));
+      if (closed === 'aborted') {
+        await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
+      }
+      return closed;
     },
-    [showNotice],
+    [showNotice, closeGated],
   );
+
+  // A window's engine worker starts on its first request and imports the
+  // whole engine before it answers; every surface's first call waits on that.
+  const [engineStarting, setEngineStarting] = useState(false);
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let active = true;
+    void engine.onStarting(setEngineStarting).then((unlisten) => {
+      if (active) stop = unlisten;
+      else unlisten();
+    }, () => {});
+    return () => {
+      active = false;
+      stop?.();
+    };
+  }, []);
+
+  // The reason Windows shows while a logoff or shutdown waits on a write.
+  useEffect(() => {
+    void engine.setShutdownBlockReason(tChrome('app.exit.shutdownReason')).catch(() => {});
+  }, []);
 
   // The quit's PREPARE round: finish publishing this window's tab order and
   // say so, before the record is captured.
@@ -3261,7 +3355,7 @@ function AppContent(): React.ReactElement {
         await app.quitCancelled(sessionId);
         return;
       }
-      await closeOrReport(minimizeToTray);
+      if ((await closeOrReport(minimizeToTray)) === 'stayed') await app.quitCancelled(sessionId);
     });
     return () => { unlisten.then((fn) => fn()); };
   }, [confirmCurrentDirtyFiles, closeOrReport]);
@@ -3879,6 +3973,15 @@ function AppContent(): React.ReactElement {
           />
         );
       })()}
+      {engineStarting && (
+        <div
+          role="status"
+          data-testid="engine-starting"
+          className="fixed bottom-3 end-3 z-50 rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-200 shadow"
+        >
+          {tChrome('chrome.status.engineStarting')}
+        </div>
+      )}
       {showAbout && <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />}
       {showIccLicense && <IccLicenseDialog onClose={() => setShowIccLicense(false)} />}
       {showGsMissing && <GsMissingDialog onClose={() => setShowGsMissing(false)} />}

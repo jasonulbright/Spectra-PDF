@@ -112,9 +112,9 @@ describe('App routes every confirm request through the queue', () => {
     );
   });
 
-  it('each of the four request helpers queues its request', () => {
+  it('each of the five request helpers queues its request', () => {
     const helpers = app.match(/requestConfirm\(\{/g) ?? [];
-    expect(helpers.length).toBe(4);
+    expect(helpers.length).toBe(5);
   });
 
   it('an answer closes the request on screen, by id, and settles that request', () => {

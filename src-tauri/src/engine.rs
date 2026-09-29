@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
@@ -10,37 +11,177 @@ use tokio::sync::Mutex;
 /// Maximum content bytes in one JSON-RPC frame in either direction, excluding
 /// its newline delimiter. All three engine transports use the same wire limit.
 pub(crate) const MAX_ENGINE_RPC_LINE_BYTES: usize = 256 * 1024 * 1024;
-
-/// Manages the Python JSON-RPC engine sidecar process.
+/// The interactive Python engine: one sidecar process PER WINDOW.
+///
+/// A worker answers one request at a time, so a long call (an in-place batch
+/// OCR, an MRC compression, a large redaction) delays only the requests of the
+/// window that owns the worker. A window's engine traffic reaches no other
+/// process.
+///
+/// Every piece of engine-side state that outlives a request is created by the
+/// window that uses it and is keyed by that window's own working-copy paths:
+/// the credential registry (`open_document`, `share_document`,
+/// `open_pubkey_document`), sealed readers and recipient handlers, and the
+/// restricted-folder marks that `credentials.end_request` clears after each
+/// request. Documents are owned by exactly one window, and a tab hand-off
+/// re-opens the document into a new working copy in the receiving window, so
+/// no request ever needs state that lives in another window's worker. Inside
+/// one worker, requests stay strictly serial, which is the invariant those
+/// modules are written against.
 pub struct EngineState {
-    pub child: Arc<Mutex<Option<EngineChild>>>,
+    workers: std::sync::Mutex<Workers>,
+    next_generation: AtomicU64,
+    launcher: Launcher,
+}
+
+#[derive(Default)]
+struct Workers {
+    live: HashMap<String, Arc<EngineWorker>>,
+    /// Labels whose window was destroyed. A late send from a destroyed window
+    /// must not spawn a worker that nothing would ever retire.
+    retired: std::collections::HashSet<String>,
+    /// Workers of destroyed windows still finishing a write.
+    draining: Vec<Arc<EngineWorker>>,
+}
+
+/// How a worker process is launched.
+enum Launcher {
+    /// The bundled interpreter and engine under the resource directory.
+    Resources,
+    /// An explicit program and argument list.
+    Command { program: String, args: Vec<String> },
+}
+
+/// One window's engine slot. The slot survives its process: a worker that
+/// exits is respawned into the same slot by the next send.
+pub struct EngineWorker {
+    pub child: Mutex<Option<EngineChild>>,
+    generation: AtomicU64,
     retiring: AtomicBool,
+    closed: AtomicBool,
+}
+
+impl EngineWorker {
+    fn new() -> Self {
+        Self {
+            child: Mutex::new(None),
+            generation: AtomicU64::new(0),
+            retiring: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
+        }
+    }
+
+    /// True once the owning window has been destroyed.
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
 }
 
 pub struct EngineChild {
     pub child: CommandChild,
+    generation: u64,
     _job: crate::process_job::ProcessJob,
+}
+
+impl EngineChild {
+    /// The number that ties this process to the routes it was sent.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
 }
 
 impl EngineState {
     pub fn new() -> Self {
+        Self::with_launcher(Launcher::Resources)
+    }
+
+    /// Workers are launched as `program args…` instead of the bundled
+    /// interpreter and engine.
+    pub fn with_command(program: impl Into<String>, args: Vec<String>) -> Self {
+        Self::with_launcher(Launcher::Command { program: program.into(), args })
+    }
+
+    fn with_launcher(launcher: Launcher) -> Self {
         Self {
-            child: Arc::new(Mutex::new(None)),
-            retiring: AtomicBool::new(false),
+            workers: std::sync::Mutex::new(Workers::default()),
+            next_generation: AtomicU64::new(1),
+            launcher,
         }
+    }
+
+    fn lock_workers(&self) -> std::sync::MutexGuard<'_, Workers> {
+        self.workers.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// The slot of `label`'s worker, created on first use. Refused for a
+    /// window that has been destroyed.
+    pub fn worker(&self, label: &str) -> Result<Arc<EngineWorker>, String> {
+        let mut workers = self.lock_workers();
+        if workers.retired.contains(label) {
+            return Err(WINDOW_CLOSED.to_string());
+        }
+        Ok(workers
+            .live
+            .entry(label.to_string())
+            .or_insert_with(|| Arc::new(EngineWorker::new()))
+            .clone())
+    }
+
+    /// The slot of `label`'s worker when one exists.
+    pub fn existing_worker(&self, label: &str) -> Option<Arc<EngineWorker>> {
+        self.lock_workers().live.get(label).cloned()
+    }
+
+    /// Every worker with a process, including destroyed windows' workers
+    /// that are still finishing a write.
+    fn all_workers(&self) -> Vec<Arc<EngineWorker>> {
+        let workers = self.lock_workers();
+        workers.live.values().chain(workers.draining.iter()).cloned().collect()
+    }
+
+    fn set_draining(&self, worker: &Arc<EngineWorker>, draining: bool) {
+        let mut workers = self.lock_workers();
+        workers.draining.retain(|held| !Arc::ptr_eq(held, worker));
+        if draining {
+            workers.draining.push(worker.clone());
+        }
+    }
+
+    /// Remove `label`'s slot for good and return it.
+    fn retire(&self, label: &str) -> Option<Arc<EngineWorker>> {
+        let mut workers = self.lock_workers();
+        workers.retired.insert(label.to_string());
+        let worker = workers.live.remove(label);
+        if let Some(worker) = &worker {
+            worker.closed.store(true, Ordering::SeqCst);
+        }
+        worker
+    }
+
+}
+
+impl Default for EngineState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
+/// The line `engine/__main__.py` writes to stderr once every handler is
+/// registered.
+const ENGINE_READY_LINE: &str = "engine: ready";
+
+const WINDOW_CLOSED: &str = "This window has closed; its document engine is stopped.";
+
 /// Which window each in-flight engine request belongs to.
 ///
-/// One sidecar serves every window, and a renderer correlates a response by
-/// its id alone against a map that is module-scoped — so every renderer starts
-/// numbering at 1 and one window's response satisfies another window's pending
-/// entry for the same number. The request id is rewritten to a process-global
-/// number on the way out and restored on the way back, which makes the
-/// correlation unforgeable rather than conventional: a renderer that does not
-/// namespace its ids is not a participant that got it wrong, it simply cannot
-/// see another window's traffic.
+/// A renderer correlates a response by its id alone against a map that is
+/// module-scoped — so every renderer starts numbering at 1 and one window's
+/// response would satisfy another window's pending entry for the same number.
+/// The request id is rewritten to a process-global number on the way out and
+/// restored on the way back, which makes the correlation unforgeable rather
+/// than conventional. Each route also records the worker generation it was
+/// written to, and a response is only accepted from that generation: one
+/// worker can neither answer nor, by exiting, fail another worker's requests.
 pub struct EngineRouter {
     next_outer: AtomicU64,
     by_outer: std::sync::Mutex<HashMap<u64, Route>>,
@@ -49,6 +190,7 @@ pub struct EngineRouter {
 struct Route {
     label: String,
     inner: serde_json::Value,
+    worker: u64,
     leases: Vec<Arc<crate::folder_claims::FolderLease>>,
     _workers: Vec<crate::folder_claims::WorkerLease>,
     _output_reservation: Option<crate::app_windows::EngineOutputReservation>,
@@ -62,20 +204,23 @@ impl EngineRouter {
         }
     }
 
-    fn register(&self, label: &str, inner: serde_json::Value,
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Route>> {
+        self.by_outer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn register(&self, label: &str, inner: serde_json::Value, worker: u64,
         leases: Vec<Arc<crate::folder_claims::FolderLease>>,
         workers: Vec<crate::folder_claims::WorkerLease>,
         output_reservation: Option<crate::app_windows::EngineOutputReservation>) -> u64 {
         let outer = self.next_outer.fetch_add(1, Ordering::SeqCst);
-        let mut map = self
-            .by_outer
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        map.insert(
+        self.lock().insert(
             outer,
             Route {
                 label: label.to_string(),
                 inner,
+                worker,
                 leases,
                 _workers: workers,
                 _output_reservation: output_reservation,
@@ -85,11 +230,19 @@ impl EngineRouter {
     }
 
     fn take(&self, outer: u64) -> Option<Route> {
-        self.by_outer
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.lock()
             .remove(&outer)
             .filter(|route| !route.label.is_empty())
+    }
+
+    /// Retire a routing only when worker generation `worker` owns it. A line
+    /// from any other process leaves the route in place.
+    fn take_from(&self, outer: u64, worker: u64) -> Option<Route> {
+        let mut map = self.lock();
+        if map.get(&outer).is_none_or(|route| route.worker != worker) {
+            return None;
+        }
+        map.remove(&outer).filter(|route| !route.label.is_empty())
     }
 
     /// Retire one routing, answering who asked and under which id.
@@ -100,22 +253,54 @@ impl EngineRouter {
     /// Retire EVERY routing. For a sidecar that has been killed: nothing is
     /// coming back, so each caller is owed an answer from whoever killed it.
     pub fn take_all(&self) -> Vec<(u64, String, serde_json::Value)> {
-        let mut map = self
-            .by_outer
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        map.drain().filter(|(_, route)| !route.label.is_empty())
+        self.lock()
+            .drain()
+            .filter(|(_, route)| !route.label.is_empty())
             .map(|(outer, route)| (outer, route.label, route.inner))
             .collect()
+    }
+
+    /// Retire every routing written to worker generation `worker`, which has
+    /// stopped. Other workers' routes are untouched.
+    pub fn take_worker(&self, worker: u64) -> Vec<(u64, String, serde_json::Value)> {
+        let mut map = self.lock();
+        let ids: Vec<u64> = map
+            .iter()
+            .filter_map(|(outer, route)| (route.worker == worker).then_some(*outer))
+            .collect();
+        ids.into_iter()
+            .filter_map(|outer| map.remove(&outer).map(|route| (outer, route)))
+            .filter(|(_, route)| !route.label.is_empty())
+            .map(|(outer, route)| (outer, route.label, route.inner))
+            .collect()
+    }
+
+    /// Whether any routing, addressed or retained, is still owed by worker
+    /// generation `worker`.
+    pub fn has_worker(&self, worker: u64) -> bool {
+        self.lock().values().any(|route| route.worker == worker)
+    }
+
+    /// The routed requests of worker generation `worker` that hold write
+    /// protection.
+    fn write_routes(&self, worker: u64) -> Vec<u64> {
+        self.lock()
+            .iter()
+            .filter(|(_, route)| route.worker == worker)
+            .filter(|(_, route)| !route.leases.is_empty() || route._output_reservation.is_some())
+            .map(|(outer, _)| *outer)
+            .collect()
+    }
+
+    /// Whether routing `outer` is still held.
+    pub fn contains(&self, outer: u64) -> bool {
+        self.lock().contains_key(&outer)
     }
 
     /// Retire every request belonging to one window and return the process ids
     /// whose companion state must be retired with them.
     pub fn take_label(&self, label: &str) -> Vec<u64> {
-        let mut map = self
-            .by_outer
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut map = self.lock();
         let ids: Vec<u64> = map
             .iter()
             .filter_map(|(outer, route)| (route.label == label).then_some(*outer))
@@ -145,32 +330,42 @@ impl EngineRouter {
     /// window that issued a request can address it: another window's inner
     /// ids resolve to nothing, and a retired route resolves to nothing.
     pub fn outer_for(&self, label: &str, inner: &serde_json::Value) -> Option<u64> {
+        self.route_for(label, inner).map(|(outer, _)| outer)
+    }
+
+    /// `outer_for` with the worker generation the request was written to.
+    fn route_for(&self, label: &str, inner: &serde_json::Value) -> Option<(u64, u64)> {
         if label.is_empty() || inner.is_null() {
             return None;
         }
-        self.by_outer
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.lock()
             .iter()
             .filter(|(_, route)| route.label == label && route.inner == *inner)
-            .map(|(outer, _)| *outer)
+            .map(|(outer, route)| (*outer, route.worker))
             .max()
     }
 
     /// How many requests each window has in flight.
     pub fn outstanding(&self) -> HashMap<String, usize> {
         let mut counts: HashMap<String, usize> = HashMap::new();
-        let map = self
-            .by_outer
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        for route in map.values() {
+        for route in self.lock().values() {
             if route.label.is_empty() {
                 continue;
             }
             *counts.entry(route.label.clone()).or_insert(0) += 1;
         }
         counts
+    }
+
+    /// How many routed requests hold write protection (an output reservation
+    /// or a folder lease), on worker generation `worker` or on any worker.
+    /// Retained routes of destroyed windows count.
+    pub fn writes_in_flight(&self, worker: Option<u64>) -> usize {
+        self.lock()
+            .values()
+            .filter(|route| worker.is_none_or(|worker| route.worker == worker))
+            .filter(|route| !route.leases.is_empty() || route._output_reservation.is_some())
+            .count()
     }
 }
 
@@ -180,64 +375,25 @@ impl Default for EngineRouter {
     }
 }
 
-/// Tell each window how much engine work the OTHER windows have in flight.
-///
-/// The sidecar is strictly serial, so a long run started in one window stalls
-/// every other window's next operation. Each window's own queue can only show
-/// its own work, so without this the wait renders as a hang. The count is a
-/// number, never the other window's document.
-pub fn publish_activity(app: &AppHandle) {
-    let labels = crate::app_windows::app_window_labels(app);
-    if labels.len() < 2 {
-        // One window can only ever be waiting on itself, and its own operation
-        // queue already says so.
-        for label in &labels {
-            let _ = app.emit_to(label.as_str(), "engine:otherWindows", 0usize);
-        }
-        return;
-    }
-    let counts = app.state::<EngineRouter>().outstanding();
-    for label in labels {
-        let _ = app.emit_to(
-            label.as_str(),
-            "engine:otherWindows",
-            other_window_work_count(&counts, &label),
-        );
-    }
-}
-
-/// The number of outstanding engine requests owned by windows other than
-/// `label`. Used both for activity events and the initial renderer snapshot:
-/// a window opened during another window's request missed the earlier event.
-fn other_window_work_count(counts: &HashMap<String, usize>, label: &str) -> usize {
-    let total: usize = counts.values().sum();
-    total - counts.get(label).copied().unwrap_or(0)
-}
-
-/// Current cross-window activity for a renderer that subscribed after work
-/// had already started. The event stream carries later changes; this snapshot
-/// fills the initial state.
-#[tauri::command]
-pub fn other_window_work(app: AppHandle, window: tauri::WebviewWindow) -> usize {
-    let counts = app.state::<EngineRouter>().outstanding();
-    other_window_work_count(&counts, window.label())
-}
 
 /// Rewrite an outbound request's id to a process-global number and remember
-/// who asked. Returns the outer id when one was allocated.
-pub(crate) fn route_request(
-    app: &AppHandle,
+/// who asked and which worker generation it is written to. Returns the outer
+/// id when one was allocated.
+pub(crate) fn route_request<R: Runtime>(
+    app: &AppHandle<R>,
     label: &str,
     request: &mut serde_json::Value,
-    pid: u32,
+    child: &EngineChild,
     output_reservation: Option<crate::app_windows::EngineOutputReservation>,
 ) -> Result<Option<u64>, String> {
+    let pid = child.child.pid();
     let leases = app.state::<crate::app_windows::ClaimState>().folder_leases(label);
     let workers = leases.iter().map(|lease| lease.retain_in_worker(pid)).collect::<Result<Vec<_>, _>>()?;
     Ok(route_with_leases(
         &app.state::<EngineRouter>(),
         label,
         request,
+        child.generation,
         leases,
         workers,
         output_reservation,
@@ -253,10 +409,11 @@ pub fn route_with(
     label: &str,
     request: &mut serde_json::Value,
 ) -> Option<u64> {
-    route_with_leases(router, label, request, Vec::new(), Vec::new(), None)
+    route_with_leases(router, label, request, 0, Vec::new(), Vec::new(), None)
 }
 
 fn route_with_leases(router: &EngineRouter, label: &str, request: &mut serde_json::Value,
+    worker: u64,
     leases: Vec<Arc<crate::folder_claims::FolderLease>>,
     workers: Vec<crate::folder_claims::WorkerLease>,
     output_reservation: Option<crate::app_windows::EngineOutputReservation>) -> Option<u64> {
@@ -265,7 +422,7 @@ fn route_with_leases(router: &EngineRouter, label: &str, request: &mut serde_jso
     if inner.is_null() {
         return None;
     }
-    let outer = router.register(label, inner, leases, workers, output_reservation);
+    let outer = router.register(label, inner, worker, leases, workers, output_reservation);
     obj.insert("id".to_string(), serde_json::Value::from(outer));
     Some(outer)
 }
@@ -293,12 +450,24 @@ pub async fn cancel_engine_request(
     window: tauri::WebviewWindow,
     id: serde_json::Value,
 ) -> Result<bool, String> {
-    let Some(outer) = app.state::<EngineRouter>().outer_for(window.label(), &id) else {
+    cancel_request(&app, window.label(), &id).await
+}
+
+/// `cancel_engine_request` for window `label`. The cancel is written only to
+/// the worker process the request was written to.
+pub async fn cancel_request<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    id: &serde_json::Value,
+) -> Result<bool, String> {
+    let Some((outer, generation)) = app.state::<EngineRouter>().route_for(label, id) else {
         return Ok(false);
     };
-    let state = app.state::<EngineState>();
-    let mut guard = state.child.lock().await;
-    let Some(child) = guard.as_mut() else {
+    let Some(worker) = app.state::<EngineState>().existing_worker(label) else {
+        return Ok(false);
+    };
+    let mut guard = worker.child.lock().await;
+    let Some(child) = guard.as_mut().filter(|child| child.generation == generation) else {
         return Ok(false);
     };
     child
@@ -308,32 +477,84 @@ pub async fn cancel_engine_request(
     Ok(true)
 }
 
-/// Undo a routing when the request never reached the sidecar.
-pub fn unroute_request(app: &AppHandle, outer: u64) {
-    if app.state::<EngineRouter>().take(outer).is_some() {
-        // The request may have been visible to a renderer's initial snapshot
-        // even though serialization or the pipe write then failed before the
-        // normal dispatch event was published.
-        publish_activity(app);
+/// Write one request to `label`'s worker, starting the worker first when it
+/// is not running. The id is rewritten before the write so the response can be
+/// addressed back to the window that asked; a write that never lands releases
+/// the routing so the table cannot grow entries no response will ever retire.
+pub async fn write_request<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    request: serde_json::Value,
+) -> Result<(), String> {
+    write_reserved_request(app, label, request, None).await
+}
+
+/// `write_request` for a request whose output path is already claimed; the
+/// reservation is held by the route until the response retires it.
+pub(crate) async fn write_reserved_request<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    mut request: serde_json::Value,
+    output_reservation: Option<crate::app_windows::EngineOutputReservation>,
+) -> Result<(), String> {
+    let worker = app.state::<EngineState>().worker(label)?;
+    let mut guard = lock_started(&worker.child, || start_worker(app, label, &worker)).await?;
+    if worker.is_closed() {
+        return Err(WINDOW_CLOSED.to_string());
     }
+    let Some(child) = guard.as_mut() else {
+        return Err("Engine not running".to_string());
+    };
+    let outer = route_request(app, label, &mut request, child, output_reservation)?;
+    let unroute = |app: &AppHandle<R>| {
+        if let Some(outer) = outer {
+            unroute_request(app, outer);
+        }
+    };
+    let msg = match serde_json::to_string(&request) {
+        Ok(msg) => msg,
+        Err(e) => {
+            unroute(app);
+            return Err(format!("Serialize error: {}", e));
+        }
+    };
+    if msg.len() > MAX_ENGINE_RPC_LINE_BYTES {
+        unroute(app);
+        return Err(format!(
+            "Engine request exceeds the {} MiB limit.",
+            MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
+        ));
+    }
+    if let Err(e) = child.child.write((msg + "\n").as_bytes()) {
+        unroute(app);
+        return Err(format!("Failed to write to engine: {}", e));
+    }
+    drop(guard);
+    Ok(())
+}
+
+/// Undo a routing when the request never reached the sidecar.
+pub fn unroute_request<R: Runtime>(app: &AppHandle<R>, outer: u64) {
+    app.state::<EngineRouter>().take(outer);
 }
 
 /// Restore a response's original id and deliver it to the window that asked.
-fn route_response(app: &AppHandle, mut json: serde_json::Value) {
+/// Only a route written to worker generation `generation` can be answered by
+/// that worker's output.
+fn route_response<R: Runtime>(app: &AppHandle<R>, label: &str, generation: u64, mut json: serde_json::Value) {
     let Some(outer) = json.get("id").and_then(|v| v.as_u64()) else {
-        // Nothing correlates an id-less line to one window, and the engine only
-        // emits them as process-wide notices.
-        let _ = app.emit("engine:response", json);
+        // An id-less line correlates to no request; the worker serves one
+        // window, so it goes to that window only.
+        let _ = app.emit_to(label, "engine:response", json);
         return;
     };
-    let Some(route) = app.state::<EngineRouter>().take(outer) else {
+    let Some(route) = app.state::<EngineRouter>().take_from(outer, generation) else {
         return;
     };
     if let Some(obj) = json.as_object_mut() {
         obj.insert("id".to_string(), route.inner);
     }
     let _ = app.emit_to(route.label.as_str(), "engine:response", json);
-    publish_activity(app);
 }
 
 /// Resolves the path to the Python engine startup script.
@@ -528,27 +749,40 @@ pub fn python_args(script: &str) -> Vec<String> {
     vec!["-s".to_string(), script.to_string()]
 }
 
-/// Starts the Python engine sidecar and wires stdout to the webview.
-/// Idempotent — if the engine is already running, returns immediately.
-pub async fn start(app: &AppHandle) -> Result<(), String> {
+/// Starts `label`'s engine worker and wires its stdout to that window.
+/// Idempotent — if the worker is already running, returns immediately.
+pub async fn start<R: Runtime>(app: &AppHandle<R>, label: &str) -> Result<(), String> {
+    let worker = app.state::<EngineState>().worker(label)?;
+    start_worker(app, label, &worker).await
+}
+
+async fn start_worker<R: Runtime>(app: &AppHandle<R>, label: &str, worker: &Arc<EngineWorker>) -> Result<(), String> {
     let state = app.state::<EngineState>();
 
     // Hold the startup lock until the child and its lifetime guard are ready.
-    let mut guard = state.child.lock().await;
-    if state.retiring.load(Ordering::SeqCst) {
+    let mut guard = worker.child.lock().await;
+    if worker.is_closed() {
+        return Err(WINDOW_CLOSED.to_string());
+    }
+    if worker.retiring.load(Ordering::SeqCst) {
         return Err("The document engine is stopping after an oversized response.".to_string());
     }
     if guard.is_some() {
         return Ok(());
     }
 
-    let python_path = get_python_path(app);
-    let script_path = get_engine_script_path(app);
+    let (program, args) = match &state.launcher {
+        Launcher::Resources => (
+            get_python_path(app),
+            python_args(&get_engine_script_path(app)),
+        ),
+        Launcher::Command { program, args } => (program.clone(), args.clone()),
+    };
 
     let shell = app.shell();
     let (mut rx, child) = shell
-        .command(&python_path)
-        .args(python_args(&script_path))
+        .command(&program)
+        .args(args)
         .envs(python_env().into_iter().collect::<HashMap<String, String>>())
         // The plugin's default line reader buffers until newline with no cap.
         // Read raw chunks so this process can bound each JSON-RPC frame.
@@ -563,12 +797,19 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
             return Err(format!("The engine process could not be contained: {error}"));
         }
     };
-    let pid = child.pid();
-    *guard = Some(EngineChild { child, _job: job });
+    let generation = state.next_generation.fetch_add(1, Ordering::SeqCst);
+    worker.generation.store(generation, Ordering::SeqCst);
+    *guard = Some(EngineChild { child, generation, _job: job });
+    drop(guard);
 
-    // Forward stdout lines to the webview as engine:response events
+    // Starting a worker imports the whole engine before the first request is
+    // read; the window says so until the worker reports ready.
+    let _ = app.emit_to(label, "engine:starting", true);
     let app_handle = app.clone();
+    let worker = worker.clone();
+    let label = label.to_string();
     tauri::async_runtime::spawn(async move {
+        let mut starting = true;
         let mut stdout_line = Vec::new();
         let mut oversized_stdout = false;
         let mut claimed_oversize = false;
@@ -587,29 +828,28 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
                     for line in chunk.completed {
                         if !line.iter().all(u8::is_ascii_whitespace) {
                             if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&line) {
-                                route_response(&app_handle, json);
+                                route_response(&app_handle, &label, generation, json);
                             }
                         }
                     }
                     if chunk.oversized {
                         eprintln!(
-                            "[engine] response line exceeded the {} MiB limit; stopping the engine",
+                            "[engine {label}] response line exceeded the {} MiB limit; stopping the engine",
                             MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
                         );
                         oversized_stdout = true;
-                        let state = app_handle.state::<EngineState>();
-                        let mut guard = state.child.lock().await;
+                        let mut guard = worker.child.lock().await;
                         if guard
                             .as_ref()
-                            .is_some_and(|current| current.child.pid() == pid)
+                            .is_some_and(|current| current.generation == generation)
                         {
-                            state.retiring.store(true, Ordering::SeqCst);
+                            worker.retiring.store(true, Ordering::SeqCst);
                             let current = guard.take().expect("matched engine child");
-                            let EngineChild { child, _job } = current;
+                            let EngineChild { child, _job, .. } = current;
                             retiring_job = Some(_job);
                             claimed_oversize = true;
                             if let Err(error) = child.kill() {
-                                eprintln!("[engine] failed to stop oversized worker: {error}");
+                                eprintln!("[engine {label}] failed to stop oversized worker: {error}");
                                 // Closing the kill-on-close job is the
                                 // fallback if the direct process kill fails.
                                 drop(retiring_job.take());
@@ -620,16 +860,23 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
                 tauri_plugin_shell::process::CommandEvent::Stderr(bytes) => {
                     let msg = String::from_utf8_lossy(&bytes);
                     let trimmed = msg.trim();
+                    if starting && trimmed.contains(ENGINE_READY_LINE) {
+                        starting = false;
+                        let _ = app_handle.emit_to(label.as_str(), "engine:starting", false);
+                    }
                     if !trimmed.is_empty() {
-                        eprintln!("[engine] {}", trimmed);
+                        eprintln!("[engine {label}] {}", trimmed);
                     }
                 }
                 tauri_plugin_shell::process::CommandEvent::Terminated(status) => {
-                    eprintln!("[engine] exited with {:?}", status);
+                    eprintln!("[engine {label}] exited with {:?}", status);
                     break;
                 }
                 _ => {}
             }
+        }
+        if starting {
+            let _ = app_handle.emit_to(label.as_str(), "engine:starting", false);
         }
         if claimed_oversize {
             // The Terminated event has arrived (or the stream closed), so no
@@ -638,28 +885,168 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
             drop(retiring_job.take());
             let stopped = stopped_responses_with_message(
                 &app_handle.state::<EngineRouter>(),
+                generation,
                 "The engine response exceeded the 256 MiB limit. The operation was stopped.",
             );
             deliver_stopped(&app_handle, stopped);
-            app_handle
-                .state::<EngineState>()
-                .retiring
-                .store(false, Ordering::SeqCst);
+            worker.retiring.store(false, Ordering::SeqCst);
             return;
         }
-        // A closed event stream also means the worker cannot answer. Ignore a
-        // previous worker's late termination after an intentional restart.
-        let state = app_handle.state::<EngineState>();
-        let mut guard = state.child.lock().await;
-        if guard.as_ref().is_some_and(|current| current.child.pid() == pid) {
+        // A closed event stream also means the worker cannot answer. The slot
+        // is cleared only when it still holds THIS generation; a later worker
+        // spawned after an intentional restart is left alone.
+        let mut guard = worker.child.lock().await;
+        if guard.as_ref().is_some_and(|current| current.generation == generation) {
             guard.take(); // closes the job, including any surviving descendants
-            let stopped = stopped_responses(&app_handle.state::<EngineRouter>());
-            drop(guard);
-            deliver_stopped(&app_handle, stopped);
         }
+        drop(guard);
+        // Routes are keyed by generation, so this drains exactly the requests
+        // this process was sent and never answered. A restart that already
+        // drained them leaves nothing here.
+        let stopped = stopped_responses(&app_handle.state::<EngineRouter>(), generation);
+        deliver_stopped(&app_handle, stopped);
     });
 
     Ok(())
+}
+
+/// How long a worker may keep running to finish a write in flight after its
+/// window closed, before an assent restart, or before the app exits. A worker
+/// still writing at the deadline is killed.
+pub const ENGINE_DRAIN_DEADLINE: Duration = Duration::from_secs(600);
+
+/// Override of `ENGINE_DRAIN_DEADLINE` in whole milliseconds, read on every
+/// drain. A malformed or absent value is the compiled-in default.
+pub const ENGINE_DRAIN_ENV: &str = "SPECTRAPDF_ENGINE_DRAIN_MS";
+
+const DRAIN_POLL: Duration = Duration::from_millis(50);
+
+/// The drain deadline as configured now.
+pub fn engine_drain_deadline() -> Duration {
+    std::env::var(ENGINE_DRAIN_ENV)
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map_or(ENGINE_DRAIN_DEADLINE, Duration::from_millis)
+}
+
+/// Poll `done` until it holds or `deadline` passes. True when it held.
+async fn wait_until(deadline: Instant, done: impl Fn() -> bool) -> bool {
+    loop {
+        if done() {
+            return true;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        tokio::time::sleep(DRAIN_POLL.min(deadline - now)).await;
+    }
+}
+
+/// Wait, bounded by `within`, until no worker holds a write in flight.
+/// True when every write finished.
+pub async fn wait_for_writes<R: Runtime>(app: &AppHandle<R>, within: Duration) -> bool {
+    let router = app.state::<EngineRouter>();
+    wait_until(Instant::now() + within, || router.writes_in_flight(None) == 0).await
+}
+
+/// Tell every open window that a closed window's write was stopped before it
+/// finished. The count is the number of writes that were cut.
+fn notify_writes_stopped<R: Runtime>(app: &AppHandle<R>, cut: usize) {
+    let labels: Vec<String> = app
+        .webview_windows()
+        .into_keys()
+        .filter(|label| crate::app_windows::is_app_window(label))
+        .collect();
+    for label in labels {
+        let _ = app.emit_to(label.as_str(), "engine:writeStopped", cut);
+    }
+}
+
+/// After the drain deadline, how long a cancelled write is given to reach its
+/// next safe point before its worker is killed.
+const CANCEL_GRACE: Duration = Duration::from_secs(30);
+
+/// Ask every write of worker generation `generation` to stop at its next safe
+/// point. Nothing is written when the slot holds another generation.
+async fn cancel_generation_writes<R: Runtime>(app: &AppHandle<R>, worker: &EngineWorker, generation: u64) {
+    let mut guard = worker.child.lock().await;
+    let Some(child) = guard.as_mut().filter(|child| child.generation == generation) else {
+        return;
+    };
+    for outer in app.state::<EngineRouter>().write_routes(generation) {
+        let _ = child.child.write(cancel_frame(outer).as_bytes());
+    }
+}
+
+/// Ask every write in flight, in every worker, to stop at its next safe point,
+/// then wait up to `within` for them to end. For a session that is ending.
+pub async fn cancel_writes<R: Runtime>(app: &AppHandle<R>, within: Duration) {
+    for worker in app.state::<EngineState>().all_workers() {
+        let generation = worker.generation.load(Ordering::SeqCst);
+        cancel_generation_writes(app, &worker, generation).await;
+    }
+    let router = app.state::<EngineRouter>();
+    wait_until(Instant::now() + within, || router.writes_in_flight(None) == 0).await;
+}
+
+/// Stop the worker of a destroyed window.
+///
+/// The window's own routes are dropped; routes that hold write protection (an
+/// output reservation, a folder lease) are kept, unaddressed, until the worker
+/// answers them. A worker that owes nothing is killed at once. A worker that
+/// still owes such a route has every other request of that window cancelled
+/// and keeps running until those writes finish. At the drain deadline its
+/// writes are cancelled so they stop at a safe point; a worker still running
+/// `CANCEL_GRACE` later is killed. Either way its routes and leases are
+/// released, and the open windows are told when a write was cut.
+pub fn retire_window<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    let first = app.state::<EngineRouter>().take_label(label);
+    let Some(worker) = app.state::<EngineState>().retire(label) else {
+        return;
+    };
+    let app = app.clone();
+    let label = label.to_string();
+    tauri::async_runtime::spawn(async move {
+        let mut guard = worker.child.lock().await;
+        // A send holds the slot lock from its closed check through its write,
+        // so every route this window will ever register exists by now.
+        let router = app.state::<EngineRouter>();
+        let late = router.take_label(&label);
+        let Some(generation) = guard.as_ref().map(EngineChild::generation) else {
+            return;
+        };
+        if router.writes_in_flight(Some(generation)) == 0 {
+            drop(guard);
+            stop_generation(&app, &worker, generation).await;
+            return;
+        }
+        if let Some(child) = guard.as_mut() {
+            for outer in first.into_iter().chain(late) {
+                if !router.contains(outer) {
+                    let _ = child.child.write(cancel_frame(outer).as_bytes());
+                }
+            }
+        }
+        drop(guard);
+        let state = app.state::<EngineState>();
+        state.set_draining(&worker, true);
+        let deadline = Instant::now() + engine_drain_deadline();
+        let mut cut = 0;
+        if !wait_until(deadline, || !router.has_worker(generation)).await {
+            // Every write still running here is stopped before it finishes,
+            // whether the cancel or the kill ends it.
+            cut = router.writes_in_flight(Some(generation));
+            eprintln!("[engine {label}] drain deadline passed; cancelling its writes");
+            cancel_generation_writes(&app, &worker, generation).await;
+            wait_until(Instant::now() + CANCEL_GRACE, || !router.has_worker(generation)).await;
+        }
+        stop_generation(&app, &worker, generation).await;
+        state.set_draining(&worker, false);
+        if cut > 0 {
+            notify_writes_stopped(&app, cut);
+        }
+    });
 }
 
 /// Add raw sidecar bytes to a partial frame, returning completed frames and
@@ -745,10 +1132,11 @@ pub(crate) fn read_bounded_line<R: std::io::BufRead>(
 
 fn stopped_responses_with_message(
     router: &EngineRouter,
+    generation: u64,
     message: &str,
 ) -> Vec<(String, serde_json::Value)> {
     router
-        .take_all()
+        .take_worker(generation)
         .into_iter()
         .map(|(_, label, inner)| {
             (
@@ -761,17 +1149,43 @@ fn stopped_responses_with_message(
         .collect()
 }
 
-/// Drops the running engine so the next call spawns one carrying the current
-/// colour-profile assent.
+/// Drops every running worker so the next call in each window spawns one
+/// carrying the current colour-profile assent.
 ///
 /// The assent rides an environment variable, which a live subprocess read once
 /// at spawn — so a mid-session acceptance reaches the engine only through a new
-/// process. Safe at any moment the user can click the dialog's button: the
-/// engine holds nothing across calls, and `start` is idempotent, so the next
-/// operation brings one back.
-pub async fn restart_for_assent(app: &AppHandle) {
-    let state = app.state::<EngineState>();
-    let mut guard = state.child.lock().await;
+/// process. An idle worker is stopped before this returns. A worker with a
+/// write in flight is stopped in the background once that write finishes, or
+/// at the drain deadline, so the caller never waits on it; its pending
+/// requests are answered with the stopped error. `start` is idempotent, so the
+/// next operation brings one back.
+pub async fn restart_for_assent<R: Runtime>(app: &AppHandle<R>) {
+    let deadline = Instant::now() + engine_drain_deadline();
+    for worker in app.state::<EngineState>().all_workers() {
+        let generation = worker.child.lock().await.as_ref().map(EngineChild::generation);
+        let Some(generation) = generation else {
+            continue;
+        };
+        if app.state::<EngineRouter>().writes_in_flight(Some(generation)) == 0 {
+            stop_generation(app, &worker, generation).await;
+            continue;
+        }
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let router = app.state::<EngineRouter>();
+            wait_until(deadline, || router.writes_in_flight(Some(generation)) == 0).await;
+            stop_generation(&app, &worker, generation).await;
+        });
+    }
+}
+
+/// Stop `worker` when it still runs generation `generation`, answering its
+/// pending requests with the stopped error.
+async fn stop_generation<R: Runtime>(app: &AppHandle<R>, worker: &EngineWorker, generation: u64) {
+    let mut guard = worker.child.lock().await;
+    if guard.as_ref().is_none_or(|child| child.generation != generation) {
+        return;
+    }
     let stopped = stop_and_drain(&mut guard, &app.state::<EngineRouter>(), |child| {
         let _ = child.child.kill();
     });
@@ -779,31 +1193,49 @@ pub async fn restart_for_assent(app: &AppHandle) {
     deliver_stopped(app, stopped);
 }
 
-/// Empties the slot and retires every routed request in one step under the
-/// slot lock. The killed child's monitor then finds the slot empty or holding
-/// another pid and skips its own drain, and `take_all` removes each route as it
-/// returns it, so a request is failed exactly once whichever path runs.
-fn stop_and_drain<T>(slot: &mut Option<T>, router: &EngineRouter, kill: impl FnOnce(T)) -> Vec<(String, serde_json::Value)> {
-    if let Some(child) = slot.take() {
-        kill(child);
-    }
-    stopped_responses(router)
+/// Empties the slot and retires every request routed to the worker it held,
+/// in one step under the slot lock. The killed child's monitor then finds the
+/// slot empty or holding another generation and its own drain finds nothing,
+/// because `take_worker` removes each route as it returns it: a request is
+/// failed exactly once whichever path runs.
+fn stop_and_drain<T: Generational>(
+    slot: &mut Option<T>,
+    router: &EngineRouter,
+    kill: impl FnOnce(T),
+) -> Vec<(String, serde_json::Value)> {
+    let Some(child) = slot.take() else {
+        return Vec::new();
+    };
+    let generation = child.generation();
+    kill(child);
+    stopped_responses(router, generation)
 }
 
-/// The "engine stopped" error for every request still routed, keyed by the
-/// window that asked. Dropping the routes also releases their leases.
-fn stopped_responses(router: &EngineRouter) -> Vec<(String, serde_json::Value)> {
+trait Generational {
+    fn generation(&self) -> u64;
+}
+
+impl Generational for EngineChild {
+    fn generation(&self) -> u64 {
+        self.generation
+    }
+}
+
+/// The "engine stopped" error for every request still routed to worker
+/// generation `generation`, keyed by the window that asked. Dropping the
+/// routes also releases their leases.
+fn stopped_responses(router: &EngineRouter, generation: u64) -> Vec<(String, serde_json::Value)> {
     stopped_responses_with_message(
         router,
+        generation,
         "The document engine stopped before completing the operation.",
     )
 }
 
-fn deliver_stopped(app: &AppHandle, stopped: Vec<(String, serde_json::Value)>) {
+fn deliver_stopped<R: Runtime>(app: &AppHandle<R>, stopped: Vec<(String, serde_json::Value)>) {
     for (label, payload) in stopped {
         let _ = app.emit_to(label.as_str(), "engine:response", payload);
     }
-    publish_activity(app);
 }
 
 /// Locks the engine slot, starting an engine first when the slot is empty.
@@ -848,23 +1280,14 @@ mod start_tests {
     }
 
     #[test]
-    fn initial_window_activity_excludes_only_the_calling_window() {
-        let counts = HashMap::from([("main".into(), 2), ("doc-1".into(), 3)]);
-        assert_eq!(other_window_work_count(&counts, "main"), 3);
-        assert_eq!(other_window_work_count(&counts, "doc-1"), 2);
-        assert_eq!(other_window_work_count(&counts, "doc-2"), 5);
-        assert_eq!(other_window_work_count(&HashMap::new(), "main"), 0);
-    }
-
-    #[test]
-    fn activity_snapshot_drops_a_route_that_never_reached_the_engine() {
+    fn a_route_that_never_reached_the_engine_is_dropped() {
         let router = EngineRouter::new();
         let mut request = serde_json::json!({"id": 7});
         let outer = route_with(&router, "main", &mut request).unwrap();
-        assert_eq!(other_window_work_count(&router.outstanding(), "doc-1"), 1);
+        assert_eq!(router.outstanding().get("main"), Some(&1));
 
         assert!(router.take(outer).is_some());
-        assert_eq!(other_window_work_count(&router.outstanding(), "doc-1"), 0);
+        assert!(router.outstanding().is_empty());
     }
 
     #[test]
@@ -985,11 +1408,22 @@ mod start_tests {
         assert_eq!(starts.load(Ordering::SeqCst), 1);
     }
 
+    impl Generational for u32 {
+        fn generation(&self) -> u64 {
+            u64::from(*self)
+        }
+    }
+
+    fn routed(router: &EngineRouter, label: &str, inner: u64, worker: u64) -> u64 {
+        let mut request = serde_json::json!({"id": inner});
+        route_with_leases(router, label, &mut request, worker, Vec::new(), Vec::new(), None).unwrap()
+    }
+
     #[test]
     fn an_assent_restart_fails_each_pending_request_exactly_once() {
         let router = EngineRouter::new();
-        let mut request = serde_json::json!({"id": 41});
-        route_with(&router, "main", &mut request).unwrap();
+        routed(&router, "main", 41, 7);
+        let other = routed(&router, "doc-1", 41, 8);
         let mut slot = Some(7u32);
         let mut killed = Vec::new();
         let stopped = stop_and_drain(&mut slot, &router, |pid| killed.push(pid));
@@ -999,9 +1433,112 @@ mod start_tests {
         assert_eq!(stopped[0].0, "main");
         assert_eq!(stopped[0].1["id"], 41);
         assert!(stopped[0].1["error"]["message"].as_str().unwrap().contains("stopped"));
-        assert!(router.outstanding().is_empty());
         // The killed child's monitor drains after the restart; nothing is left.
-        assert!(stopped_responses(&router).is_empty());
+        assert!(stopped_responses(&router, 7).is_empty());
+        // Another window's worker keeps its request.
+        assert!(router.contains(other));
+        assert_eq!(router.outstanding().get("doc-1"), Some(&1));
+    }
+
+    #[test]
+    fn a_response_is_accepted_only_from_the_worker_the_request_was_written_to() {
+        let router = EngineRouter::new();
+        let a = routed(&router, "main", 1, 10);
+        let b = routed(&router, "doc-1", 1, 11);
+        // Worker 11 echoing worker 10's outer id retires nothing.
+        assert!(router.take_from(a, 11).is_none());
+        assert!(router.contains(a));
+        let route = router.take_from(a, 10).expect("worker 10 answers its own request");
+        assert_eq!(route.label, "main");
+        assert_eq!(route.inner, serde_json::json!(1));
+        assert!(router.take_from(a, 10).is_none());
+        assert_eq!(router.take_from(b, 11).map(|route| route.label), Some("doc-1".to_string()));
+    }
+
+    #[test]
+    fn one_workers_exit_fails_only_its_own_requests() {
+        let router = EngineRouter::new();
+        routed(&router, "main", 1, 10);
+        routed(&router, "main", 2, 10);
+        let survivor = routed(&router, "doc-1", 1, 11);
+        let stopped = stopped_responses(&router, 10);
+        let mut ids: Vec<_> = stopped
+            .iter()
+            .map(|(label, payload)| (label.clone(), payload["id"].as_u64().unwrap()))
+            .collect();
+        ids.sort();
+        assert_eq!(ids, vec![("main".to_string(), 1), ("main".to_string(), 2)]);
+        assert!(!router.has_worker(10));
+        assert!(router.has_worker(11));
+        assert!(router.contains(survivor));
+    }
+
+    #[test]
+    fn a_cancel_names_the_worker_that_holds_the_request() {
+        let router = EngineRouter::new();
+        let mine = routed(&router, "main", 5, 10);
+        let theirs = routed(&router, "doc-1", 5, 11);
+        assert_eq!(router.route_for("main", &serde_json::json!(5)), Some((mine, 10)));
+        assert_eq!(router.route_for("doc-1", &serde_json::json!(5)), Some((theirs, 11)));
+        assert_eq!(router.route_for("doc-2", &serde_json::json!(5)), None);
+    }
+
+    #[test]
+    fn a_retained_write_keeps_its_worker_owed_after_the_window_is_dropped() {
+        let scratch = tempfile::tempdir().unwrap();
+        let state = crate::app_windows::ClaimState::with_registry(scratch.path().join("claims"));
+        let output = scratch.path().join("out.pdf").to_string_lossy().into_owned();
+        let reservation = state.claim_engine_output(&output, "doc-1").unwrap();
+        let router = EngineRouter::new();
+        let mut write = serde_json::json!({"id": 1});
+        let kept = route_with_leases(
+            &router, "doc-1", &mut write, 12, Vec::new(), Vec::new(), Some(reservation),
+        )
+        .unwrap();
+        let read = routed(&router, "doc-1", 2, 12);
+        let dropped = router.take_label("doc-1");
+        assert_eq!(dropped.len(), 2);
+        assert!(router.contains(kept));
+        assert!(!router.contains(read));
+        assert!(router.has_worker(12));
+        assert_eq!(router.writes_in_flight(Some(12)), 1);
+        assert_eq!(router.writes_in_flight(Some(13)), 0);
+        assert_eq!(router.writes_in_flight(None), 1);
+        // The retained route is unaddressed: its answer reaches no window.
+        assert!(router.take_from(kept, 12).is_none());
+        assert!(!router.has_worker(12));
+        assert_eq!(router.writes_in_flight(None), 0);
+    }
+
+    #[tokio::test]
+    async fn a_drain_wait_ends_when_the_condition_holds_or_at_its_deadline() {
+        let start = Instant::now();
+        assert!(wait_until(start + Duration::from_secs(5), || true).await);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        let flag = Arc::new(AtomicBool::new(false));
+        let setter = flag.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            setter.store(true, Ordering::SeqCst);
+        });
+        assert!(wait_until(Instant::now() + Duration::from_secs(5), || flag.load(Ordering::SeqCst)).await);
+        let start = Instant::now();
+        assert!(!wait_until(start + Duration::from_millis(200), || false).await);
+        assert!(start.elapsed() >= Duration::from_millis(200));
+    }
+
+    #[test]
+    fn a_destroyed_window_cannot_respawn_its_worker() {
+        let state = EngineState::new();
+        let first = state.worker("doc-1").unwrap();
+        assert!(Arc::ptr_eq(&first, &state.worker("doc-1").unwrap()));
+        assert!(!Arc::ptr_eq(&first, &state.worker("doc-2").unwrap()));
+        let retired = state.retire("doc-1").expect("slot existed");
+        assert!(retired.is_closed());
+        assert!(state.worker("doc-1").is_err());
+        assert!(state.existing_worker("doc-1").is_none());
+        assert!(state.retire("doc-3").is_none());
+        assert!(state.worker("doc-3").is_err());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1057,6 +1594,7 @@ mod lease_tests {
             &router,
             "doc-1",
             &mut request,
+            0,
             leases,
             Vec::new(),
             Some(reservation),
@@ -1091,6 +1629,7 @@ mod lease_tests {
             &router,
             "doc-1",
             &mut request,
+            0,
             Vec::new(),
             Vec::new(),
             Some(reservation),
@@ -1126,6 +1665,7 @@ mod lease_tests {
                 &router,
                 "doc-1",
                 &mut request,
+                0,
                 vec![lease.clone()],
                 Vec::new(),
                 None,

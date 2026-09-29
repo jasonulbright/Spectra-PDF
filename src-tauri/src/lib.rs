@@ -15,6 +15,7 @@ mod staging;
 mod watchers;
 mod web_capture;
 pub mod engine;
+pub mod engine_writes;
 pub mod health_engine;
 pub mod net;
 pub mod gs;
@@ -108,6 +109,7 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .manage(engine::EngineState::new())
         .manage(engine::EngineRouter::new())
+        .manage(engine_writes::ShutdownReason::new())
         .manage(health_engine::HealthEngineState::new())
         .manage(health_engine::HealthRouter::new())
         .manage(app_windows::BackdropState::new())
@@ -260,11 +262,11 @@ pub fn run() {
             scheduler::delete_scheduled_run,
             scheduler::run_scheduled_now,
             scheduler::set_scheduled_run_enabled,
-            commands::start_engine,
             commands::send_to_engine,
             commands::send_to_health_engine,
-            engine::other_window_work,
             engine::cancel_engine_request,
+            engine_writes::engine_writes_in_flight,
+            engine_writes::set_shutdown_block_reason,
             commands::check_auto_update_disabled,
             commands::check_field_scripts_disabled,
             commands::get_startup_enabled,
@@ -320,6 +322,7 @@ pub fn run() {
             // Off the main thread: the tree can hold thousands of folders,
             // and nothing here waits on the pass.
             std::thread::spawn(scratch::reclaim_at_startup);
+            engine_writes::spawn_watcher(&app.handle().clone());
 
             // The battery's fallback spec launches with
             // SPECTRAPDF_E2E_FORCE_OPAQUE=1 so the opaque presentation runs
@@ -535,6 +538,24 @@ mod tests {
             .expect("the window events");
         let setup = &source[start..start + length];
         assert!(setup.contains("std::thread::spawn(scratch::reclaim_at_startup);"));
+    }
+
+    /// The engine workers die with this process, so the last window is the
+    /// gate: it asks about writes in flight before the session is captured
+    /// and before anything is destroyed. The exit itself waits for nothing.
+    #[test]
+    fn the_last_close_asks_about_engine_writes_before_it_tears_anything_down() {
+        let source = include_str!("commands.rs");
+        let start = source.find("pub async fn close_window(").expect("close_window");
+        let body = &source[start..];
+        let gate = body.find("engine_writes::last_close(").expect("the last close consults the writes");
+        let capture = body.find("capture_and_seal(").expect("the last close captures the session");
+        let exit = body.find("app.exit(0)").expect("the last close exits");
+        assert!(gate < capture && capture < exit);
+        let lib = include_str!("lib.rs");
+        let exit_branch = &lib[lib.find("if let RunEvent::Exit = &event {").expect("the exit branch")..];
+        assert!(!exit_branch[..exit_branch.find("scan_host::shutdown()").unwrap()].contains("wait_for_writes"));
+        assert!(lib.contains("engine_writes::spawn_watcher(&app.handle().clone());"));
     }
 
     #[test]

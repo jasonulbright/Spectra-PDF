@@ -31,6 +31,7 @@ short-circuits that pass whenever the edits already sufficed.
 from __future__ import annotations
 from engine.credentials import open_pdf
 
+import os
 import re
 import shutil
 import unicodedata
@@ -891,6 +892,33 @@ def check_spelling(
     }
 
 
+#: A virus scanner or the search indexer can hold a just-written file open
+#: for a moment, and Windows refuses to rename a directory while it does.
+_RENAME_ATTEMPTS = 20
+_RENAME_PAUSE_SECONDS = 0.1
+
+
+def _rename_into_place(pending: Path, dest: Path, name: str) -> None:
+    """Rename `pending` onto `dest`, retrying a transient sharing refusal."""
+    import time
+
+    for attempt in range(_RENAME_ATTEMPTS):
+        try:
+            os.rename(pending, dest)
+            return
+        except OSError as exc:
+            if dest.exists():
+                raise ValueError(f"A {name} dictionary has already been added.") from exc
+            if not isinstance(exc, PermissionError):
+                reason = exc.strerror
+                raise ValueError(f"The dictionary could not be added: {reason}") from exc
+            if attempt == _RENAME_ATTEMPTS - 1:
+                raise ValueError(
+                    "The dictionary could not be added because another program is using its files. Try again."
+                ) from exc
+            time.sleep(_RENAME_PAUSE_SECONDS)
+
+
 def add_user_dictionary(
     aff: str,
     dic: str,
@@ -938,8 +966,25 @@ def add_user_dictionary(
     except Exception as exc:
         shutil.rmtree(staging, ignore_errors=True)
         raise ValueError(f"That dictionary could not be read: {exc}") from exc
-    dest.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(aff_path, dest / f"{name}.aff")
-    shutil.copyfile(dic_path, dest / f"{name}.dic")
-    shutil.rmtree(staging, ignore_errors=True)
+    # Each window's engine is its own process, and a sibling may list or load
+    # the user directory at any moment. The pair is written complete into a
+    # directory whose name is no tag (`_tags_in` requires `<dir>/<dir>.aff`),
+    # then renamed onto its tag in one step: a reader sees no directory or a
+    # whole pair, never one file or a partial one. The rename also decides a
+    # race between two processes adding the same tag — it refuses an existing
+    # target, so exactly one addition lands.
+    root = Path(user_dictionary_dir)
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        pending = Path(tempfile.mkdtemp(prefix=f".adding-{name}-", dir=root))
+    except OSError:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    try:
+        shutil.copyfile(staging / f"{name}.aff", pending / f"{name}.aff")
+        shutil.copyfile(staging / f"{name}.dic", pending / f"{name}.dic")
+        _rename_into_place(pending, dest, name)
+    finally:
+        shutil.rmtree(pending, ignore_errors=True)
+        shutil.rmtree(staging, ignore_errors=True)
     return {"tag": name, "bcp47": name.replace("_", "-"), "origin": "user"}

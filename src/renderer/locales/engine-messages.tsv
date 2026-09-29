@@ -728,6 +728,8 @@ soft_proof.profileDescribesDevicePrinting	pattern	soft_proof	that profile descri
 spelling.dictionaryAffFileDic	exact	spelling	A dictionary is an .aff file and a .dic file.
 spelling.dictionaryAlreadyBeenAdded	pattern	spelling	A {{name}} dictionary has already been added.
 spelling.dictionaryAlreadyShipsApp	pattern	spelling	A {{name}} dictionary already ships with the app.
+spelling.dictionaryCouldAdded	pattern	spelling	The dictionary could not be added: {{reason}}
+spelling.dictionaryCouldAddedBecause	exact	spelling	The dictionary could not be added because another program is using its files. Try again.
 spelling.dictionaryCouldRead	pattern	spelling	That dictionary could not be read: {{exc}}
 spelling.dictionaryCouldRead2	pattern	spelling	The {{language}} dictionary could not be read: {{exc}}
 spelling.documentNothingSpellCheck	exact	spelling	This document has nothing to spell-check.

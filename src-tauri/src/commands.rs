@@ -1,4 +1,4 @@
-use crate::engine::{self, EngineState};
+use crate::engine;
 use std::fs;
 use std::path::Path;
 use tauri::{AppHandle, Emitter, Manager};
@@ -1856,11 +1856,6 @@ pub(crate) fn canonical_path_or_parent(p: &str) -> String {
     }
 }
 
-#[tauri::command]
-pub async fn start_engine(app: AppHandle) -> Result<(), String> {
-    engine::start(&app).await
-}
-
 /// Hand a JSON-RPC request to the sidecar on behalf of the calling window.
 ///
 /// The id is rewritten before the write so the response can be addressed back
@@ -1873,83 +1868,44 @@ pub async fn send_to_engine(
     request: serde_json::Value,
 ) -> Result<(), String> {
     let mut request = request;
-    let state = app.state::<EngineState>();
-    let mut guard = engine::lock_started(&state.child, || engine::start(&app)).await?;
-    if let Some(ref mut child) = *guard {
-        let label = window.label().to_string();
-        require_source_tree_authority(&app, &label, &mut request)?;
-        let output_reservation = if let Some(target) = engine_output_path(&request)? {
-            let claim_app = app.clone();
-            let claim_label = label.clone();
-            Some(
-                tauri::async_runtime::spawn_blocking(move || {
-                    let claims = claim_app.state::<crate::app_windows::ClaimState>();
-                    match target {
-                        EngineOutputTarget::File(path) => claims.claim_engine_output(
-                            &canonical_path(&path), &claim_label,
-                        ),
-                        EngineOutputTarget::Folder(path) => claims.claim_engine_output_folder(
-                            &canonical_path(&path), &claim_label,
-                        ),
-                        EngineOutputTarget::SplitFolder { folder, outputs } => {
-                            let folder = canonical_path(&folder);
-                            let outputs = outputs.into_iter()
-                                .map(|path| canonical_path(&path))
-                                .collect::<Vec<_>>();
-                            claims.claim_engine_output_split(&folder, &outputs, &claim_label)
-                        }
+    let label = window.label().to_string();
+    require_source_tree_authority(&app, &label, &mut request)?;
+    let output_reservation = if let Some(target) = engine_output_path(&request)? {
+        let claim_app = app.clone();
+        let claim_label = label.clone();
+        Some(
+            tauri::async_runtime::spawn_blocking(move || {
+                let claims = claim_app.state::<crate::app_windows::ClaimState>();
+                match target {
+                    EngineOutputTarget::File(path) => claims.claim_engine_output(
+                        &canonical_path(&path), &claim_label,
+                    ),
+                    EngineOutputTarget::Folder(path) => claims.claim_engine_output_folder(
+                        &canonical_path(&path), &claim_label,
+                    ),
+                    EngineOutputTarget::SplitFolder { folder, outputs } => {
+                        let folder = canonical_path(&folder);
+                        let outputs = outputs.into_iter()
+                            .map(|path| canonical_path(&path))
+                            .collect::<Vec<_>>();
+                        claims.claim_engine_output_split(&folder, &outputs, &claim_label)
                     }
-                })
-                .await
-                .map_err(|error| error.to_string())??,
-            )
-        } else {
-            None
-        };
-        if output_reservation.is_some()
-            && request
-                .get("id")
-                .is_none_or(serde_json::Value::is_null)
-        {
-            return Err("An output request must have a response id.".to_string());
-        }
-        let outer = match engine::route_request(
-            &app,
-            &label,
-            &mut request,
-            child.child.pid(),
-            output_reservation,
-        ) {
-            Ok(outer) => outer,
-            Err(error) => return Err(error),
-        };
-        let unroute = |app: &AppHandle| {
-            if let Some(outer) = outer { engine::unroute_request(app, outer); }
-        };
-        let msg = match serde_json::to_string(&request) {
-            Ok(msg) => msg,
-            Err(e) => {
-                unroute(&app);
-                return Err(format!("Serialize error: {}", e));
-            }
-        };
-        if msg.len() > engine::MAX_ENGINE_RPC_LINE_BYTES {
-            unroute(&app);
-            return Err(format!(
-                "Engine request exceeds the {} MiB limit.",
-                engine::MAX_ENGINE_RPC_LINE_BYTES / (1024 * 1024)
-            ));
-        }
-        if let Err(e) = child.child.write((msg + "\n").as_bytes()) {
-            unroute(&app);
-            return Err(format!("Failed to write to engine: {}", e));
-        }
-        drop(guard);
-        engine::publish_activity(&app);
-        Ok(())
+                }
+            })
+            .await
+            .map_err(|error| error.to_string())??,
+        )
     } else {
-        Err("Engine not running".to_string())
+        None
+    };
+    if output_reservation.is_some()
+        && request
+            .get("id")
+            .is_none_or(serde_json::Value::is_null)
+    {
+        return Err("An output request must have a response id.".to_string());
     }
+    engine::write_reserved_request(&app, &label, request, output_reservation).await
 }
 
 /// Hand a JSON-RPC request to the HEALTH worker on behalf of the calling
@@ -1979,7 +1935,7 @@ pub async fn send_to_health_engine(
 /// knows its own state and nothing about the other window's unsaved work, and
 /// destroying a fixed label would discard whichever window did not ask.
 ///
-/// Returns whether the window actually closed. The last window's destruction is
+/// Returns what the close did. The last window's destruction is
 /// the app's exit, so it is gated on its own session snapshot reaching disk: a
 /// capture that failed leaves the previous run's record on the file and the seal
 /// already lifted, and destroying the window then would exit having thrown this
@@ -1989,36 +1945,66 @@ pub async fn close_window(
     app: AppHandle,
     window: tauri::WebviewWindow,
     minimize_to_tray: bool,
-) -> Result<bool, String> {
+    force: Option<bool>,
+) -> Result<CloseOutcome, String> {
     let others = crate::app_windows::app_window_labels(&app)
         .into_iter()
         .filter(|l| l != window.label())
         .count();
-    if others == 0 && minimize_to_tray {
-        let _ = window.hide();
-        return Ok(true);
-    }
     if others == 0 {
+        let writes = app.state::<crate::engine::EngineRouter>().writes_in_flight(None);
+        match crate::engine_writes::last_close(minimize_to_tray, force.unwrap_or(false), writes) {
+            crate::engine_writes::LastClose::Hide => {
+                let _ = window.hide();
+                return Ok(CloseOutcome::Closed);
+            }
+            // The engine workers end with this process. The window stays, so
+            // the user sees what is running and a relaunch has a window to
+            // come to.
+            crate::engine_writes::LastClose::FinishWrites => return Ok(CloseOutcome::Writing),
+            crate::engine_writes::LastClose::Exit => {}
+        }
+        // Engine outputs are written in place, so a worker killed mid-save
+        // leaves a torn file. A forced close first asks each write to stop at
+        // its next safe point.
+        if writes > 0 {
+            crate::engine::cancel_writes(&app, crate::engine_writes::SESSION_END_GRACE).await;
+        }
         // The session is captured while this window still stands: its geometry
         // and its claims are read from managed state, and destroying it is what
         // releases them.
         if !crate::session::teardown_permitted(crate::session::capture_and_seal(&app)) {
-            return Ok(false);
+            return Ok(CloseOutcome::Aborted);
         }
         // Set the quitting flag so ExitRequested handler allows exit
         crate::QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = window.destroy();
         app.exit(0);
-        return Ok(true);
+        return Ok(CloseOutcome::Closed);
     }
     let _ = window.destroy();
-    crate::engine::publish_activity(&app);
-    Ok(true)
+    Ok(CloseOutcome::Closed)
+}
+
+/// What a window close did.
+#[derive(serde::Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CloseOutcome {
+    Closed,
+    /// The session record did not reach disk; nothing was closed.
+    Aborted,
+    /// Engine writes are running and this is the last window; nothing was
+    /// closed. Closing again with `force` stops them.
+    Writing,
 }
 
 #[tauri::command]
-pub async fn confirm_close(app: AppHandle, window: tauri::WebviewWindow) -> Result<bool, String> {
-    close_window(app, window, false).await
+pub async fn confirm_close(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    force: Option<bool>,
+) -> Result<CloseOutcome, String> {
+    close_window(app, window, false, force).await
 }
 
 /// Ask every OTHER workspace window to run its own close flow. Each answers by

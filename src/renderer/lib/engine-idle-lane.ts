@@ -31,8 +31,7 @@ let tail: Promise<unknown> = Promise.resolve();
 // Outstanding INTERACTIVE requests. The lane publishes this count and no
 // longer gates on it: since health moved to its own worker there is nothing
 // here for a user operation to be held behind. It is the renderer-side answer
-// to "is the user waiting on the engine right now", the local counterpart of
-// the cross-window count `engine.rs` `publish_activity` emits.
+// to "is the user waiting on the engine right now".
 let interactive = 0;
 
 /**

@@ -12,7 +12,11 @@ child = subprocess.Popen(
     text=True,
 )
 descendants = json.loads(child.stdout.readline())
-Path(sys.argv[1]).write_text(json.dumps([os.getpid(), *descendants]))
+# A reader polls for the receipt; it appears whole or not at all.
+receipt = Path(sys.argv[1])
+pending = receipt.with_name(receipt.name + ".pending")
+pending.write_text(json.dumps([os.getpid(), *descendants]))
+os.replace(pending, receipt)
 print(json.dumps(sys.argv[3:]), flush=True)
 if sys.argv[2] == "exit":
     sys.exit(3)

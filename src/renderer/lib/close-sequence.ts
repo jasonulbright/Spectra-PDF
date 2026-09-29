@@ -22,6 +22,8 @@
 // DOM-free and dependency-injected: the ordering is the invariant, and an
 // invariant living inside a listener callback is an invariant with no test.
 
+import type { GatedClose } from './close-writes';
+
 export interface CloseSequenceDeps {
   /** Finish publishing this window's tab order; false when it did not land. */
   flush: () => Promise<boolean>;
@@ -46,7 +48,7 @@ export async function finishCoordinatedExit(
   request: () => Promise<CoordinatedQuitResult>,
   confirmDirty: () => Promise<boolean>,
   cancelQuit: (sessionId: number) => Promise<unknown>,
-  close: () => Promise<boolean>,
+  close: () => Promise<GatedClose>,
 ): Promise<CoordinatedExitResult> {
   const result = await request();
   if (!result.proceed || result.sessionId === null) return 'aborted';
@@ -54,7 +56,12 @@ export async function finishCoordinatedExit(
     await cancelQuit(result.sessionId);
     return 'cancelled';
   }
-  return (await close()) ? 'closed' : 'aborted';
+  const closed = await close();
+  if (closed === 'stayed') {
+    await cancelQuit(result.sessionId);
+    return 'cancelled';
+  }
+  return closed;
 }
 
 /**

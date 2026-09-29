@@ -109,6 +109,10 @@ describe('tray Quit', () => {
     expect(calleePath(reconfirm.expression)).toBe('confirmCurrentDirtyFiles');
     expect(reconfirm.arguments.map(print)[2]).toBe('alreadyAnswered');
     expect(print(stepCall(2))).toBe('app.quitCancelled(sessionId)');
-    expect(calleePath(stepCall(3).expression)).toBe('app.confirmClose');
+    // The close runs through the write gate, which keeps the last window
+    // while engine writes are running.
+    const close = stepCall(3);
+    expect(calleePath(close.expression)).toBe('closeGated');
+    expect(print(close.arguments[0])).toBe('(force) => app.confirmClose(force)');
   });
 });

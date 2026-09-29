@@ -363,6 +363,16 @@ export const WORKBENCH_STRINGS = {
   'app.save.failedTitle': 'Could Not Save',
   'app.save.failed':
     '"{{name}}" was not saved and is unchanged on disk. {{reason}}',
+  // A closed window's engine worker ran past the drain deadline while writing.
+  'app.engine.writeStoppedTitle': 'Operation Stopped',
+  'app.engine.writeStopped':
+    'An operation from a closed window was stopped before it finished writing its output. The output may be incomplete.',
+  // The last window stays while engine writes run; the reason is shown by
+  // Windows when a logoff or shutdown waits on one.
+  'app.exit.finishingTitle': 'Finishing Writes',
+  'app.exit.finishing': 'An operation is still writing a file. The app closes when it finishes. Quit anyway to stop it now; the file it is writing may be incomplete.',
+  'app.exit.quitAnyway': 'Quit Anyway',
+  'app.exit.shutdownReason': 'Spectra PDF is still writing a file.',
   'app.commit.recoveryRequired': 'The page commit needs recovery. Original working copies are retained. Retry before continuing.',
   'app.commit.dismiss': 'Dismiss',
   'app.history.changed': 'The document or history changed. Try again.',

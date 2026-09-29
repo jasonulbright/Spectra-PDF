@@ -550,7 +550,7 @@ LIVE_CLI_STEP = "Live CLI tests against the provisioned runtime"
 #: -- run as one command. `test_every_guarded_rust_test_runs_in_the_provisioned_step`
 #: derives the same list from the test sources, so a guarded test that no gate
 #: runs cannot land.
-LIVE_CLI_TESTS = ("cli_bytecode", "cli_run_action", "health_worker")
+LIVE_CLI_TESTS = ("cli_bytecode", "cli_run_action", "engine_workers", "health_worker")
 LIVE_CLI_COMMAND = "cargo test " + " ".join(f"--test {name}" for name in LIVE_CLI_TESTS)
 
 

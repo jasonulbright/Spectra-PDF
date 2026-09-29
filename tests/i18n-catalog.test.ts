@@ -290,6 +290,24 @@ describe('i18n catalogs', () => {
     expect(actual, 'stale en catalog — run npm run i18n:en and commit the diff').toEqual(expected);
   });
 
+  // JSON.parse keeps the LAST of two equal keys, so a duplicate passes every
+  // parsed check while one of its two texts is dead. Only the raw text shows it.
+  it('no shipped catalog repeats a key', () => {
+    const keyLine = /^\s*"((?:[^"\\]|\\.)*)"\s*:/;
+    for (const locale of SHIPPED_LOCALES) {
+      const p = resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`);
+      const seen = new Set<string>();
+      const repeated: string[] = [];
+      for (const line of readFileSync(p, 'utf8').split('\n')) {
+        const match = keyLine.exec(line);
+        if (!match) continue;
+        if (seen.has(match[1])) repeated.push(match[1]);
+        seen.add(match[1]);
+      }
+      expect(repeated, `locale ${locale} repeats keys`).toEqual([]);
+    }
+  });
+
   it("every shipped locale has EXACTLY en's key set, expanded to its plural forms", () => {
     const enKeys = Object.keys(JSON.parse(readFileSync(EN_PATH, 'utf8')));
     const suffixed = (s: string): string[] =>

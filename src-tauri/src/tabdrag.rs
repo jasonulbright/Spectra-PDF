@@ -834,7 +834,6 @@ fn show_torn_off(app: &AppHandle, reservation: &Reservation) {
         crate::session::on_window_geometry_changed(app, &reservation.target);
     }
     app_windows::show_when_ready(app, &reservation.target, true);
-    crate::engine::publish_activity(app);
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────

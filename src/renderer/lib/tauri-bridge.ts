@@ -6,6 +6,7 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { withFileLock } from './engine-lock';
 import { withFileSave } from './file-save-barrier';
 import { listen } from '@tauri-apps/api/event';
+import type { CloseOutcome } from './close-writes';
 import type {
   ScanEvent,
   ScanResult,
@@ -28,10 +29,27 @@ import { runCommitGate } from './commit-gate';
 // ── Engine (Python sidecar) ───────────────────────────────────────────────
 
 export const engine = {
-  /** Start the Python engine sidecar process. */
-  start: () => invoke('start_engine'),
+  /** This window's engine worker started (true) or finished starting. */
+  onStarting: (callback: (starting: boolean) => void) =>
+    listen<boolean>('engine:starting', (event) => callback(event.payload)),
 
-  /** Send a JSON-RPC request to the interactive engine. */
+  /** How many engine writes are running now, in every window. */
+  writesInFlight: () => invoke<number>('engine_writes_in_flight'),
+
+  /** Every change in the count of engine writes running. */
+  onWritesInFlight: (callback: (count: number) => void) =>
+    listen<number>('engine:writesInFlight', (event) => callback(event.payload)),
+
+  /** The reason Windows shows while a logoff or shutdown waits on a write. */
+  setShutdownBlockReason: (text: string) => invoke('set_shutdown_block_reason', { text }),
+
+  /** A closed window's write was stopped at the drain deadline; the
+   * payload is how many writes were cut. */
+  onWriteStopped: (callback: (count: number) => void) =>
+    listen<number>('engine:writeStopped', (event) => callback(event.payload)),
+
+  /** Send a JSON-RPC request to the interactive engine. The window's worker
+   * starts on its first request. */
   request: (req: object) => invoke('send_to_engine', { request: req }),
 
   /** Send a JSON-RPC request to the HEALTH worker — a second sidecar with a
@@ -52,16 +70,6 @@ export const engine = {
   onResponse: (callback: (response: unknown) => void) => {
     return listen<unknown>('engine:response', (event) => callback(event.payload));
   },
-
-  /** How many engine requests the OTHER windows have in flight. One sidecar
-   * serves them all, strictly serially, so this window's next operation waits
-   * behind them. */
-  onOtherWindows: (callback: (count: number) => void) => {
-    return listen<number>('engine:otherWindows', (event) => callback(event.payload));
-  },
-
-  /** Current other-window activity for a renderer that subscribed mid-run. */
-  otherWindowWorkSnapshot: () => invoke<number>('other_window_work'),
 };
 
 // ── Window ownership ──────────────────────────────────────────────────────
@@ -977,16 +985,19 @@ export const app = {
   /** Close THIS window, quitting only when it was the last one. The count is
    * taken in Rust: a renderer knows nothing about another window's unsaved
    * work, and destroying a fixed label discards whichever window did not ask. */
-  confirmClose: () => invoke<boolean>('confirm_close'),
+  confirmClose: (force = false) => invoke<CloseOutcome>('confirm_close', { force }),
 
   /** The window × : close, or hide to tray when this is the only window left.
    * Tray residency is an app-level state, so a second window's × closes that
    * window rather than hiding the app.
    *
-   * False means the window is still standing: the last window out captures the
-   * session, and a capture that did not reach disk calls the teardown off
-   * rather than exiting with an older run's record on the file. */
-  closeWindow: (minimizeToTray: boolean) => invoke<boolean>('close_window', { minimizeToTray }),
+   * `aborted` means the window is still standing: the last window out
+   * captures the session, and a capture that did not reach disk calls the
+   * teardown off rather than exiting with an older run's record on the file.
+   * `writing` means engine writes are running and this is the last window;
+   * `force` closes it anyway and stops them. */
+  closeWindow: (minimizeToTray: boolean, force = false) =>
+    invoke<CloseOutcome>('close_window', { minimizeToTray, force }),
 
   /** Ask every other window to run its own close flow. Each answers by closing
    * itself and the last one out exits, so a window that cancels keeps the app.
