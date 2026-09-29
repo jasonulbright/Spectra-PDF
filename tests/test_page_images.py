@@ -2284,3 +2284,31 @@ class TestVectorPlacement:
         delete_page_images(p1, out, 1, [0, 3])
         after = list_page_images(out, 1)["images"]
         assert [i["kind"] for i in after] == ["xobject", "xobject"]
+
+
+def _bbox_form_image_pdf(path, place: bytes, matrix=None):
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    form = pdf.make_stream(b"q 20 0 0 20 " + place + b" cm /Im0 Do Q")
+    form["/Type"] = Name.XObject
+    form["/Subtype"] = Name.Form
+    form["/BBox"] = pikepdf.Array([0, 0, 100, 100])
+    if matrix is not None:
+        form["/Matrix"] = pikepdf.Array(matrix)
+    form["/Resources"] = Dictionary(XObject=Dictionary(Im0=_rgb_image(pdf, 255, 0, 0)))
+    page.obj["/Resources"] = Dictionary(XObject=Dictionary(Fm=form))
+    page.Contents = pdf.make_stream(b"/Fm Do")
+    pdf.save(path)
+    pdf.close()
+    return path
+
+
+class TestFormBBoxClip:
+    @pytest.mark.parametrize("place, clipped", [(b"10 10", False), (b"300 300", True)])
+    def test_image_outside_the_form_bbox_is_clipped(self, tmp_dir, place, clipped):
+        src = _bbox_form_image_pdf(os.path.join(tmp_dir, "i.pdf"), place)
+        assert [i["clipped"] for i in list_page_images(src, 1)["images"]] == [clipped]
+
+    def test_singular_form_matrix_draws_nothing(self, tmp_dir):
+        src = _bbox_form_image_pdf(os.path.join(tmp_dir, "i.pdf"), b"10 10", matrix=[0, 0, 0, 0, 0, 0])
+        assert [i["clipped"] for i in list_page_images(src, 1)["images"]] == [True]

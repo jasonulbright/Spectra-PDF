@@ -44,7 +44,7 @@ from engine.credentials import open_pdf
 
 from engine import color_spaces
 from engine.bezier import cubic_bbox_points, flatten_cubic
-from engine.content_walk import ClipTracker, DEFAULT_COLOR, GraphicsTextState, mat_mult, transform_point
+from engine.content_walk import ClipTracker, DEFAULT_COLOR, GraphicsTextState, clip_has_area, form_clip, mat_mult, transform_point
 from engine.page_images import (
     _do_instruction,
     _finalize_page_rewrite,
@@ -527,7 +527,7 @@ def _walk_vectors(
                     base_fill=state.fill_color,
                     base_stroke=state.stroke_color,
                     out=out,
-                    base_clip=clips.clip,
+                    base_clip=form_clip(xobj, state.ctm, clips.clip),
                     geometry=geometry,
                 )
         if operator == "sh":
@@ -550,7 +550,8 @@ def _walk_vectors(
             )
             if frame is not None:
                 frame["saw_sh"] = True
-            rect = list(clips.clip) if clips.clip is not None else None
+            empty = clips.clip is not None and not clip_has_area(clips.clip)
+            rect = list(clips.clip) if clips.clip is not None and not empty else None
             out.append(
                 {
                     "index": len(out),
@@ -573,7 +574,7 @@ def _walk_vectors(
                     "_edit_depth": depth,
                     "_sh_frame": {"open": frame["idx"]} if recognized else None,
                     "_sh_name": key_text(operands[0]) if operands else None,
-                    "clipped": clips.clips_away(tuple(rect)) if rect else False,
+                    "clipped": empty or (clips.clips_away(tuple(rect)) if rect else False),
                 }
             )
             path_start, start_ctm, construct_idxs, has_clip = None, None, [], False

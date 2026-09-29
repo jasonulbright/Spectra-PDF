@@ -1261,3 +1261,116 @@ class TestMissingWidth:
         assert cap.decoded_width(b"AB") == pytest.approx(600)
         assert cap.measures(b"AB")
         assert not font_capability(self._font(pdf)).measures(b"AB")
+
+
+def _form_page(pdf, page_content: bytes, form_content: bytes, bbox, matrix=None, inner=None):
+    form = pdf.make_stream(form_content)
+    form["/Type"] = Name.XObject
+    form["/Subtype"] = Name.Form
+    form["/BBox"] = Array(bbox)
+    if matrix is not None:
+        form["/Matrix"] = Array(matrix)
+    xobjects = {}
+    if inner is not None:
+        xobjects["Inner"] = inner
+    form["/Resources"] = Dictionary(Font=Dictionary(F1=_helv(pdf)), XObject=Dictionary(**xobjects))
+    page = _page(pdf, page_content, {"/F1": _helv(pdf)})
+    page.obj["/Resources"]["/XObject"] = Dictionary(Fm=form)
+    return page
+
+
+class TestFormBBoxClip:
+    def _runs(self, tmp_dir, build) -> list:
+        src = os.path.join(tmp_dir, "form-bbox.pdf")
+        pdf = pikepdf.new()
+        build(pdf)
+        pdf.save(src)
+        pdf.close()
+        return list_text_runs(src, 1)["runs"]
+
+    def test_text_outside_bbox_is_clipped(self, tmp_dir):
+        runs = self._runs(tmp_dir, lambda pdf: _form_page(
+            pdf, b"/Fm Do",
+            b"BT /F1 12 Tf 10 10 Td (In) Tj 300 300 Td (Out) Tj ET",
+            [0, 0, 100, 100],
+        ))
+        assert [r["text"] for r in runs] == ["In", "Out"]
+        assert [r["clipped"] for r in runs] == [False, True]
+        assert [r["index"] for r in runs] == [0, 1]
+
+    def test_bbox_follows_matrix_and_ctm(self, tmp_dir):
+        # Form space (0,0,100,100) lands at device (200,200,300,300) after
+        # /Matrix translate 100 and cm translate 100.
+        runs = self._runs(tmp_dir, lambda pdf: _form_page(
+            pdf, b"q 1 0 0 1 100 100 cm /Fm Do Q",
+            b"BT /F1 12 Tf 10 10 Td (In) Tj -60 0 Td (Out) Tj ET",
+            [0, 0, 100, 100], matrix=[1, 0, 0, 1, 100, 100],
+        ))
+        assert [r["clipped"] for r in runs] == [False, True]
+
+    def test_rotated_bbox_clips_by_quadrilateral_bounds(self, tmp_dir):
+        # 90-degree /Matrix: BBox (0,0,100,100) maps to device (-100,0,0,100),
+        # shifted by cm to (400,300,500,400).
+        runs = self._runs(tmp_dir, lambda pdf: _form_page(
+            pdf, b"q 1 0 0 1 500 300 cm /Fm Do Q",
+            b"BT /F1 12 Tf 10 10 Td (In) Tj 200 0 Td (Out) Tj ET",
+            [0, 0, 100, 100], matrix=[0, 1, -1, 0, 0, 0],
+        ))
+        assert [r["clipped"] for r in runs] == [False, True]
+
+    def test_partially_clipped_run_stays_listed(self, tmp_dir):
+        runs = self._runs(tmp_dir, lambda pdf: _form_page(
+            pdf, b"/Fm Do",
+            b"BT /F1 12 Tf 90 10 Td (Straddle) Tj ET",
+            [0, 0, 100, 100],
+        ))
+        assert [r["clipped"] for r in runs] == [False]
+
+    def test_nested_form_bbox_intersects(self, tmp_dir):
+        def build(pdf):
+            inner = pdf.make_stream(b"BT /F1 12 Tf 10 10 Td (Both) Tj 70 0 Td (OuterOnly) Tj ET")
+            inner["/Type"] = Name.XObject
+            inner["/Subtype"] = Name.Form
+            inner["/BBox"] = Array([0, 0, 50, 50])
+            inner["/Resources"] = Dictionary(Font=Dictionary(F1=_helv(pdf)))
+            _form_page(pdf, b"/Fm Do", b"/Inner Do", [0, 0, 200, 200], inner=inner)
+
+        runs = self._runs(tmp_dir, build)
+        assert [r["text"] for r in runs] == ["Both", "OuterOnly"]
+        assert [r["clipped"] for r in runs] == [False, True]
+
+    # The CTM reaches 1e300 through finite steps; /Matrix 1e10 overflows it.
+    _HUGE_CTM = (
+        "q " + "1000000000000000000000000000000.0 0 0 1000000000000000000000000000000.0 0 0 cm " * 10
+        + "/Fm Do Q"
+    ).encode()
+
+    @pytest.mark.parametrize(
+        "page, matrix",
+        [
+            (b"/Fm Do", [0, 0, 0, 0, 0, 0]),
+            (b"/Fm Do", [1, 0, 2, 0, 0, 0]),
+            (b"q 0 0 0 0 0 0 cm /Fm Do Q", [1, 0, 0, 1, 0, 0]),
+            (_HUGE_CTM, [10000000000, 0, 0, 10000000000, 0, 0]),
+        ],
+        ids=["zero", "singular", "singular-ctm", "overflow"],
+    )
+    def test_degenerate_matrix_draws_nothing(self, tmp_dir, page, matrix):
+        runs = self._runs(tmp_dir, lambda pdf: _form_page(
+            pdf, page,
+            b"BT /F1 12 Tf 10 10 Td (Gone) Tj ET",
+            [0, 0, 100, 100], matrix=matrix,
+        ))
+        assert [r["text"] for r in runs] == ["Gone"]
+        assert [r["clipped"] for r in runs] == [True]
+
+    def test_text_inside_bbox_unchanged(self, tmp_dir):
+        runs = self._runs(tmp_dir, lambda pdf: _form_page(
+            pdf, b"/Fm Do",
+            b"BT /F1 12 Tf 10 10 Td (Hello) Tj ET",
+            [0, 0, 612, 792],
+        ))
+        (run,) = runs
+        assert run["clipped"] is False
+        assert run["editable"] is True
+        assert run["rect"][0] == pytest.approx(10, abs=0.01)

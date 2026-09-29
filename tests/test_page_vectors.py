@@ -909,3 +909,71 @@ class TestShadingObjects:
         with pytest.raises(ValueError, match="no stroke or fill"):
             restyle_page_vector(src, out, 1, 0, fill=[1, 0, 0])
         assert not os.path.exists(out)
+
+
+def _bbox_form_pdf(path, form_content: bytes, matrix=None):
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    form = pdf.make_stream(form_content)
+    form["/Type"] = pikepdf.Name.XObject
+    form["/Subtype"] = pikepdf.Name.Form
+    form["/BBox"] = pikepdf.Array([0, 0, 100, 100])
+    if matrix is not None:
+        form["/Matrix"] = pikepdf.Array(matrix)
+    page.obj["/Resources"] = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Fm=form))
+    page.Contents = pdf.make_stream(b"/Fm Do")
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
+class TestFormBBoxClip:
+    def test_fill_outside_the_form_bbox_is_clipped(self, tmp_path):
+        src = _bbox_form_pdf(tmp_path / "v.pdf", b"10 10 20 20 re f 300 300 20 20 re f")
+        assert [v["clipped"] for v in list_page_vectors(src, 1)["vectors"]] == [False, True]
+
+    @pytest.mark.parametrize("matrix", [[0, 0, 0, 0, 0, 0], [1, 0, 2, 0, 0, 0]])
+    def test_singular_form_matrix_draws_nothing(self, tmp_path, matrix):
+        src = _bbox_form_pdf(tmp_path / "v.pdf", b"10 10 20 20 re f", matrix=matrix)
+        assert [v["clipped"] for v in list_page_vectors(src, 1)["vectors"]] == [True]
+
+
+def _shading_pdf(path, content: bytes, form_content: bytes | None = None, matrix=None):
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    shading = pikepdf.Dictionary(
+        ShadingType=2, ColorSpace=pikepdf.Name.DeviceGray, Coords=[0, 0, 100, 0],
+        Function=pikepdf.Dictionary(FunctionType=2, Domain=[0, 1], C0=[0], C1=[1], N=1),
+    )
+    resources = pikepdf.Dictionary(Shading=pikepdf.Dictionary(Sh0=shading))
+    if form_content is not None:
+        form = pdf.make_stream(form_content)
+        form["/Type"] = pikepdf.Name.XObject
+        form["/Subtype"] = pikepdf.Name.Form
+        form["/BBox"] = pikepdf.Array([0, 0, 100, 100])
+        form["/Matrix"] = pikepdf.Array(matrix)
+        form["/Resources"] = pikepdf.Dictionary(Shading=pikepdf.Dictionary(Sh0=shading))
+        resources["/XObject"] = pikepdf.Dictionary(Fm=form)
+    page.obj["/Resources"] = resources
+    page.Contents = pdf.make_stream(content)
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
+# Two disjoint clips intersect to an inverted box; a singular form matrix
+# gives the empty clip. Neither may leak an inverted rect.
+SHADING_NO_AREA_CASES = [
+    (b"q 0 0 10 10 re W n 100 100 10 10 re W n /Sh0 sh Q", None, None),
+    (b"/Fm Do", b"/Sh0 sh", [1, 0, 2, 0, 0, 0]),
+]
+
+
+class TestShadingUnderEmptyClip:
+    @pytest.mark.parametrize("content, form_content, matrix", SHADING_NO_AREA_CASES, ids=["disjoint", "singular"])
+    def test_shading_with_no_visible_area(self, tmp_path, content, form_content, matrix):
+        src = _shading_pdf(tmp_path / "sh.pdf", content, form_content, matrix)
+        (shading,) = [v for v in list_page_vectors(src, 1)["vectors"] if v["kind"] == "shading"]
+        assert shading["clipped"] is True
+        x0, y0, x1, y1 = shading["rect"]
+        assert x0 <= x1 and y0 <= y1
