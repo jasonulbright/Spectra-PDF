@@ -230,6 +230,109 @@ def _gs_process_is_running(pid: int) -> bool:
         return True
 
 
+def _process_user_sid() -> str:
+    """String SID of the user the process token belongs to.
+
+    The folder names this SID as owner and sole ACE rather than OWNER RIGHTS:
+    an elevated token's default owner is the Administrators group, and a folder
+    owned by that group is unreadable to the same user's later non-elevated
+    run, so the startup reclaim could never remove it."""
+    import ctypes
+    from ctypes import wintypes
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.LocalFree.argtypes = (ctypes.c_void_p,)
+    kernel32.LocalFree.restype = ctypes.c_void_p
+    advapi32.OpenProcessToken.argtypes = (wintypes.HANDLE, wintypes.DWORD,
+                                          ctypes.POINTER(wintypes.HANDLE))
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+    advapi32.GetTokenInformation.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                             wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
+    advapi32.GetTokenInformation.restype = wintypes.BOOL
+    advapi32.ConvertSidToStringSidW.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p))
+    advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
+
+    token = wintypes.HANDLE()
+    if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), 0x0008,  # TOKEN_QUERY
+                                     ctypes.byref(token)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        needed = wintypes.DWORD()
+        advapi32.GetTokenInformation(token, 1, None, 0, ctypes.byref(needed))  # TokenUser
+        buffer = ctypes.create_string_buffer(needed.value)
+        if not advapi32.GetTokenInformation(token, 1, buffer, needed, ctypes.byref(needed)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        sid = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0]
+        text = ctypes.c_void_p()
+        if not advapi32.ConvertSidToStringSidW(sid, ctypes.byref(text)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            return ctypes.wstring_at(text.value)
+        finally:
+            kernel32.LocalFree(text)
+    finally:
+        kernel32.CloseHandle(token)
+
+
+def _gs_folder_sddl(sid: str) -> str:
+    """Owner `sid` and a protected DACL with one ACE, full control for `sid`:
+    nothing is inherited from the temporary directory, and SYSTEM,
+    Administrators and every other account get no access."""
+    return f"O:{sid}D:P(A;OICI;FA;;;{sid})"
+
+
+def _make_gs_folder() -> str:
+    """Create an empty folder for one argument file, readable by its owner only.
+
+    On Windows the DACL is applied by `CreateDirectoryW` at creation, so no
+    moment exists in which the folder carries the temporary directory's
+    inherited ACL; `tempfile.mkdtemp` applies an owner-only DACL only from
+    Python 3.13. Elsewhere `mkdtemp` creates it with mode 0o700."""
+    if os.name != "nt":
+        return tempfile.mkdtemp(prefix=_GS_FOLDER_PREFIX)
+    import ctypes
+    import secrets
+    from ctypes import wintypes
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    to_descriptor = advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW
+    to_descriptor.argtypes = (wintypes.LPCWSTR, wintypes.DWORD,
+                              ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p)
+    to_descriptor.restype = wintypes.BOOL
+    create_directory = kernel32.CreateDirectoryW
+    create_directory.argtypes = (wintypes.LPCWSTR, ctypes.c_void_p)
+    create_directory.restype = wintypes.BOOL
+    local_free = kernel32.LocalFree
+    local_free.argtypes = (ctypes.c_void_p,)
+    local_free.restype = ctypes.c_void_p
+
+    class SecurityAttributes(ctypes.Structure):
+        _fields_ = [("nLength", wintypes.DWORD),
+                    ("lpSecurityDescriptor", ctypes.c_void_p),
+                    ("bInheritHandle", wintypes.BOOL)]
+
+    descriptor = ctypes.c_void_p()
+    if not to_descriptor(_gs_folder_sddl(_process_user_sid()), 1, ctypes.byref(descriptor), None):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        attributes = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
+        root = tempfile.gettempdir()
+        for _ in range(100):
+            folder = os.path.join(root, _GS_FOLDER_PREFIX + secrets.token_hex(8))
+            if create_directory(folder, ctypes.byref(attributes)):
+                return folder
+            error = ctypes.get_last_error()
+            if error != 183:  # ERROR_ALREADY_EXISTS
+                raise ctypes.WinError(error)
+        raise FileExistsError("no unused name for a Ghostscript argument folder")
+    finally:
+        local_free(descriptor)
+
+
 def remove_stale_gs_argfiles() -> int:
     """Remove argument-file folders a killed engine left in the temporary
     directory, each holding a stored password. Returns the count removed."""
@@ -283,22 +386,24 @@ def gs_password_argv(cmd: list[str], *sources):
 
     Ghostscript reads an encrypted PDF only with `-sPDFPassword=`, and a
     command-line argument is visible to every process on the machine. The
-    password goes into an `@file` argument inside a directory that
-    `tempfile.mkdtemp` creates readable by its owner only, removed when the
-    block ends. Without the password Ghostscript exits 0 having rendered
+    password goes into an `@file` argument inside a folder that
+    `_make_gs_folder` creates readable by its owner only, removed when the
+    block ends on every exit path. Ghostscript 10 reads no argument file from
+    standard input (`@-` is refused), so a file is the only channel that keeps
+    the password out of the process command line. Without the password Ghostscript exits 0 having rendered
     nothing, so the omission never surfaces as its own error."""
     password = next((pw for pw in map(document_password, sources) if pw), None)
     if not password:
         yield list(cmd)
         return
     line = gs_password_line(password)
-    folder = tempfile.mkdtemp(prefix=_GS_FOLDER_PREFIX)
+    folder = _make_gs_folder()
     try:
         owner_path = os.path.join(folder, _GS_OWNER_FILE)
         with open(owner_path, "x", encoding="ascii") as owner_file:
             owner_file.write(str(os.getpid()))
         argfile = os.path.join(folder, "args")
-        with open(argfile, "w", encoding="utf-8", newline="\n") as handle:
+        with open(argfile, "x", encoding="utf-8", newline="\n") as handle:
             handle.write(line + "\n")
         yield [cmd[0], "@" + argfile, *cmd[1:]]
     finally:

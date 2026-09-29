@@ -785,3 +785,81 @@ def test_gs_owner_process_liveness_tracks_a_real_child():
         child.terminate()
         child.wait(timeout=10)
     assert not credentials._gs_process_is_running(child.pid)
+
+
+def _dacl(path: str) -> str:
+    import subprocess
+
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+         "(Get-Acl -LiteralPath $env:SPECTRA_ACL_PATH).Sddl"],
+        capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL,
+        env={**os.environ, "SPECTRA_ACL_PATH": path},
+    )
+    sddl = result.stdout.strip()
+    return sddl[sddl.index("D:"):].split("S:")[0]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DACL")
+def test_the_gs_argfile_is_readable_by_its_owner_only(user_opened, monkeypatch, tmp_dir):
+    import re
+    import tempfile
+
+    from engine.credentials import gs_password_argv
+
+    # A permissive parent proves the folder inherits nothing from it.
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_dir)
+    with gs_password_argv(["gs", user_opened], user_opened) as argv:
+        argfile = argv[1][1:]
+        folder = os.path.dirname(argfile)
+        assert os.path.dirname(folder) == tmp_dir
+        folder_dacl, file_dacl = _dacl(folder), _dacl(argfile)
+    sid = credentials._process_user_sid()
+    assert sid.startswith("S-1-5-")
+    assert folder_dacl.startswith("D:P"), folder_dacl
+    for dacl in (folder_dacl, file_dacl):
+        aces = re.findall(r"\(([^)]*)\)", dacl)
+        assert aces, dacl
+        assert all(ace.split(";")[5] == sid and ace.split(";")[0] == "A" for ace in aces), dacl
+
+
+def test_engine_start_removes_a_folder_left_by_the_same_users_prior_run(monkeypatch, tmp_dir):
+    import tempfile
+    import time
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_dir)
+    folder = credentials._make_gs_folder()
+    with open(os.path.join(folder, ".owner-pid"), "x", encoding="ascii") as handle:
+        handle.write("4242")
+    with open(os.path.join(folder, "args"), "x", encoding="utf-8") as handle:
+        handle.write('"-sPDFPassword=secret"\n')
+    old = time.time() - 3600
+    os.utime(folder, (old, old))
+    monkeypatch.setattr(credentials, "_gs_process_is_running", lambda _pid: False)
+
+    assert credentials.remove_stale_gs_argfiles() == 1
+    assert not os.path.exists(folder)
+
+
+def test_the_gs_argfile_is_removed_when_the_run_raises(user_opened):
+    from engine.credentials import gs_password_argv
+
+    with pytest.raises(RuntimeError, match="gs failed"):
+        with gs_password_argv(["gs", user_opened], user_opened) as argv:
+            folder = os.path.dirname(argv[1][1:])
+            assert os.path.isfile(argv[1][1:])
+            raise RuntimeError("gs failed")
+    assert not os.path.exists(folder)
+
+
+def test_the_gs_argv_carries_the_argfile_and_never_the_password(user_opened):
+    from engine.credentials import gs_password_argv
+
+    cmd = ["gs", "-dSAFER", user_opened]
+    with gs_password_argv(cmd, user_opened) as argv:
+        assert argv[0] == "gs" and argv[2:] == cmd[1:] and argv[1].startswith("@")
+        assert not any(USER in arg for arg in argv)
+        with open(argv[1][1:], encoding="utf-8") as handle:
+            assert USER in handle.read()
+        folder = os.path.dirname(argv[1][1:])
+    assert not os.path.exists(folder)
