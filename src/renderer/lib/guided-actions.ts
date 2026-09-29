@@ -430,6 +430,18 @@ export const STEP_CATALOG: readonly StepDef[] = [
         ],
         defaultValue: 'skip',
       },
+      {
+        // An unattended run has nobody to ask, so it reports the redacted
+        // text it finds outside page content unless this says to remove it.
+        key: 'residue',
+        label: 'Redacted text outside the pages',
+        kind: 'select',
+        options: [
+          { value: 'report', label: 'Report it in the result' },
+          { value: 'remove', label: 'Replace it in text and values; remove matching scripts whole; keep field names' },
+        ],
+        defaultValue: 'report',
+      },
     ],
     mapParams: (params) => {
       const list = (value: string | number | undefined): string[] =>
@@ -445,6 +457,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
         expand: String(params.expand ?? 'match'),
         marks_only: String(params.mode ?? 'apply') === 'marks',
         allow_signed: String(params.signed ?? 'skip') === 'include',
+        ...(String(params.residue ?? 'report') === 'remove' ? { remove_residue: 'all' } : {}),
         ...(overlay ? { properties: { overlay_text: overlay } } : {}),
       };
     },

@@ -449,7 +449,7 @@ describe('the App', () => {
   const app = source('src/renderer/App.tsx');
 
   it('answers whether apply and save wrote new bytes', () => {
-    expect(app).toContain('writeRedactionMarks(path, marks, seen, \'redact\', readState, performOperation, redactionGeometry, gsPathIfAvailable)');
+    expect(app).toContain('writeRedactionMarks(path, marks, seen, \'redact\', readState, performOperation, redactionGeometry, gsPathIfAvailable,\n        offerRedactionResidue)');
     expect(app).toContain("writeRedactionMarks(path, marks, seen, 'save_redaction_marks', readState, performOperation, redactionGeometry, gsPathIfAvailable)");
   });
 });

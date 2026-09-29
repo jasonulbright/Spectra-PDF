@@ -68,7 +68,10 @@ def _is_ocrd(path: Path) -> bool:
 
 
 def _litter(root: Path) -> list[str]:
-    return sorted(p.name for p in root.rglob("*") if p.name.endswith(".tmp"))
+    return sorted(
+        p.name for p in root.rglob("*")
+        if p.name.endswith(".tmp") or p.name.startswith(".spectra-stage-")
+    )
 
 
 def test_in_place_stop_between_files_keeps_finished_files_and_leaves_the_rest(tmp_path, monkeypatch):

@@ -532,6 +532,18 @@ export const CANVAS_STRINGS = {
   'canvas.redact.failed': 'Redaction failed — {{reasons}}. Those marks are still pending.',
   'canvas.redact.failedSingle': 'Redaction failed — {{reasons}}. The marks are still pending.',
   'canvas.redact.saveMarksFailed': 'Saving marks failed — {{reasons}}.',
+  'canvas.redact.residue.title': 'Redacted text appears elsewhere',
+  'canvas.redact.residue.message':
+    'The text you redacted still appears outside the pages: {{places}}. Remove it from these places?',
+  'canvas.redact.residue.remove': 'Remove',
+  'canvas.redact.residue.item': '{{kind}} ({{count}})',
+  'canvas.redact.residue.thread': 'Article threads',
+  'canvas.redact.residue.fieldNote': 'Field names are not changed. Field values are replaced.',
+  'canvas.redact.residue.scriptNote': 'Scripts are never edited. A script that contains the text is removed whole.',
+  'canvas.redact.residue.destNote':
+    'Named destinations get new names. Links in this file follow them; links from other files to the old names stop working.',
+  'canvas.redact.residue.truncated': 'The list is too long to show in full. Every occurrence is removed.',
+  'canvas.redact.residue.pageLabel': 'Page labels',
   // The stored /Redact set could not be read back in full. Both of these
   // exist so a PARTIAL seed can never look like a complete one — the engine
   // refuses when a mark will not resolve, and the seed itself counts marks

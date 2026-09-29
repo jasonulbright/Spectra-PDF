@@ -62,6 +62,7 @@ from engine import portfolio as portfolio_mod
 from engine import printer_marks as printer_marks_mod
 from engine import pubkey_crypt as pubkey_crypt_mod
 from engine import redact as redact_mod
+from engine import redact_document as redact_document_mod
 from engine import redact_marks as redact_marks_mod
 from engine import reversion as reversion_mod
 from engine import rotate as rotate_mod
@@ -209,6 +210,19 @@ def _with_text(path: Path) -> Path:
     pdf.save(str(path))
     pdf.close()
     return path
+
+
+def _with_titled_text(path: Path) -> Path:
+    _with_text(path)
+    with pikepdf.open(str(path), allow_overwriting_input=True) as pdf:
+        pdf.docinfo[Name.Title] = String("CONFIDENTIAL")
+        pdf.save(str(path))
+    return path
+
+
+def _info_title(path: str) -> object:
+    with pikepdf.open(path) as pdf:
+        return str(pdf.docinfo.get(Name.Title, ""))
 
 
 def _with_comment(path: Path) -> Path:
@@ -1483,6 +1497,15 @@ CASES = (
         lambda src, out: redact_mod.redact(src, out, REDACT_REGION),
         _text_of,
         doors=("redact",),
+    ),
+    Case(
+        "redaction_residue",
+        redact_document_mod,
+        _with_titled_text,
+        lambda src, out: redact_document_mod.remove_redaction_residue(
+            src, out, ["CONFIDENTIAL"]),
+        _info_title,
+        doors=("remove_redaction_residue",),
     ),
     Case(
         # Searching produces the regions; the WRITE is the redact door it

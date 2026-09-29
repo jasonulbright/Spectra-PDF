@@ -43,7 +43,7 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
                   : 'dialog.confirm.titleUnsaved',
             )}
           </Dialog.Title>
-          <Dialog.Description className="text-sm text-neutral-400 mb-5" data-testid="confirm-message">
+          <Dialog.Description className="text-sm text-neutral-400 mb-5 whitespace-pre-line" data-testid="confirm-message">
             {message}
           </Dialog.Description>
           {kind === 'notice' ? (

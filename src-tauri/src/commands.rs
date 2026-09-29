@@ -635,6 +635,22 @@ pub async fn list_pdfs_recursive(root: String) -> Result<PdfListing, String> {
     .map_err(|e| format!("Folder walk failed: {}", e))?
 }
 
+/// Whether a file name is an engine temp (`engine/inplace.py`
+/// `is_spectra_temp_name`), never a user document. A stage a killed engine
+/// left behind ends in `.pdf`; listed as a source it is processed, copied or
+/// moved like one.
+pub fn is_spectra_temp_name(name: &str) -> bool {
+    if name.starts_with(".spectra-stage-") {
+        return true;
+    }
+    let Some(stem) = name.strip_prefix('.').and_then(|n| n.strip_suffix(".tmp")) else {
+        return false;
+    };
+    [".inplace", ".enhanced", ".repaired", ".image"]
+        .iter()
+        .any(|kind| stem.len() > kind.len() && stem.ends_with(kind))
+}
+
 fn walk_pdfs(
     root: &Path,
     dir: &Path,
@@ -688,6 +704,7 @@ fn walk_pdfs(
         } else if path
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+            && !is_spectra_temp_name(&entry.file_name().to_string_lossy())
         {
             let rel = path
                 .strip_prefix(root)
@@ -2621,6 +2638,22 @@ pub async fn set_startup_enabled(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn batch_listing_skips_engine_temps() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("scan.pdf"), b"x").unwrap();
+        std::fs::write(dir.path().join(".spectra-stage-999999-inplace_ab12.pdf"), b"x").unwrap();
+        std::fs::write(dir.path().join(".scan.pdf.inplace.tmp"), b"x").unwrap();
+        let mut listing = super::PdfListing { files: Vec::new(), skipped_dirs: Vec::new() };
+        let mut visited = std::collections::HashSet::new();
+        super::walk_pdfs(dir.path(), dir.path(), &mut listing, &mut visited, 0);
+        let rels: Vec<_> = listing.files.iter().map(|f| f.rel.clone()).collect();
+        assert_eq!(rels, vec!["scan.pdf".to_string()]);
+        assert!(super::is_spectra_temp_name(".x.pdf.enhanced.tmp"));
+        assert!(!super::is_spectra_temp_name(".tmp"));
+        assert!(!super::is_spectra_temp_name("report.pdf"));
+    }
+
     use super::{
         append_line_at, classify_recent_paths, copy_file_creating_dirs_at, engine_output_path,
         is_batch_log_name,

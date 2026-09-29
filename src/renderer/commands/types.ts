@@ -153,6 +153,10 @@ export interface AppCommandHandlers {
    * document is warned about first, with the signature count the report
    * measured. Returns false when the warning was declined and the document was
    * left alone. */
+  /** Ask whether to remove the redacted text from the places outside page
+   * content a `redact` result lists. False when the result lists none or the
+   * user declined. */
+  askRedactionResidue(result: unknown): Promise<boolean>;
   sanitizeDocument(
     path: string,
     request: import('../lib/sanitize-report').SanitizeRequest,

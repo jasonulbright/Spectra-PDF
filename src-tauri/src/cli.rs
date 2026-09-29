@@ -808,6 +808,15 @@ pub struct DeleteArgs {
 
 #[derive(Args)]
 pub struct RedactArgs {
+    /// Also remove the redacted text from places outside page content:
+    /// `all`, or a comma list of outline, thread, dest_name, page_label,
+    /// metadata, annotation, field, embedded_file, javascript. Text is
+    /// replaced; field names are kept; a matching script is removed whole; a
+    /// renamed destination is retargeted inside the file, and links from
+    /// other files to its old name stop working (`renamed_destinations`).
+    /// Without it the result only reports those places (`residue`)
+    #[arg(long, value_name = "KINDS")]
+    pub remove_residue: Option<String>,
     /// Input PDF file
     pub input: PathBuf,
     /// Output PDF file
@@ -874,6 +883,15 @@ pub struct SearchRegionsArgs {
 
 #[derive(Args)]
 pub struct SearchRedactArgs {
+    /// Also remove the redacted text from places outside page content:
+    /// `all`, or a comma list of outline, thread, dest_name, page_label,
+    /// metadata, annotation, field, embedded_file, javascript. Text is
+    /// replaced; field names are kept; a matching script is removed whole; a
+    /// renamed destination is retargeted inside the file, and links from
+    /// other files to its old name stop working (`renamed_destinations`).
+    /// Without it the result only reports those places (`residue`)
+    #[arg(long, value_name = "KINDS")]
+    pub remove_residue: Option<String>,
     /// Input PDF file
     pub input: PathBuf,
     /// Output PDF file
@@ -3236,6 +3254,7 @@ fn redact_params(args: &RedactArgs, gs_path: String) -> Result<Value, String> {
         // the reader nothing.
         "font_dir": resolve_fonts().to_string_lossy().to_string(),
         "gs_path": gs_path,
+        "remove_residue": args.remove_residue.clone().unwrap_or_default(),
     }))
 }
 
@@ -3272,6 +3291,7 @@ fn search_redact_params(args: &SearchRedactArgs, gs_path: String) -> Result<Valu
         "properties": properties,
         "font_dir": resolve_fonts().to_string_lossy().to_string(),
         "gs_path": gs_path,
+        "remove_residue": args.remove_residue.clone().unwrap_or_default(),
     }))
 }
 
@@ -7588,6 +7608,29 @@ mod tests {
         let listed: Vec<String> = POSTSCRIPT_SUFFIXES.iter().map(|s| format!("\".{s}\"")).collect();
         let line = format!("POSTSCRIPT_SUFFIXES = ({})", listed.join(", "));
         assert!(source.contains(&line), "{} no longer says {line}", path.display());
+    }
+
+    #[test]
+    fn residue_removal_is_report_only_unless_the_flag_names_kinds() {
+        let plain = match command(&["redact", "in.pdf", "-o", "out.pdf", "-p", "1", "--rect", "0,0,8,8"]) {
+            CliCommand::Redact(args) => args,
+            _ => panic!("not the redact arm"),
+        };
+        assert_eq!(redact_params(&plain, String::new()).unwrap()["remove_residue"], "");
+        let flagged = match command(&[
+            "redact", "in.pdf", "-o", "out.pdf", "-p", "1", "--rect", "0,0,8,8", "--remove-residue", "all",
+        ]) {
+            CliCommand::Redact(args) => args,
+            _ => panic!("not the redact arm"),
+        };
+        assert_eq!(redact_params(&flagged, String::new()).unwrap()["remove_residue"], "all");
+        let search = match command(&[
+            "search-redact", "in.pdf", "-o", "out.pdf", "-q", "S", "--remove-residue", "outline,info",
+        ]) {
+            CliCommand::SearchRedact(args) => args,
+            _ => panic!("not the search-redact arm"),
+        };
+        assert_eq!(search_redact_params(&search, String::new()).unwrap()["remove_residue"], "outline,info");
     }
 
     #[test]

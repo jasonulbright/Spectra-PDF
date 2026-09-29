@@ -23,7 +23,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from engine.inplace import write_text_staged
+from engine.inplace import is_spectra_temp_name, write_text_staged
 from engine.batch_ocr import _format_duration, _format_timestamp, _pad, dest_conflicts_with_source
 from engine.create_pdf import IMAGE_SUFFIXES, accepted_suffixes, create_pdf
 
@@ -106,7 +106,9 @@ def list_source_folders(
         except OSError as exc:
             skipped_dirs.append(str(exc))
             return
-        members = [n for n in names if n.lower().endswith(wanted)]
+        members = [
+            n for n in names if n.lower().endswith(wanted) and not is_spectra_temp_name(n)
+        ]
         if not members:
             return
         members.sort(key=natural_key)

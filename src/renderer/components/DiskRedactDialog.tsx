@@ -39,6 +39,7 @@ import {
   type SignedNote,
 } from '../lib/disk-redact';
 import { createDiskRedactIo } from '../lib/disk-redact-io';
+import { getCommandContext } from '../commands/context';
 import { claimOutputRoots, writtenRoots } from '../lib/output-root-claim';
 import { diskRedactLogFileName, formatDiskRedactLog } from '../lib/disk-redact-log';
 
@@ -200,7 +201,8 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
   );
 
   const makeIo = useCallback(
-    async () => createDiskRedactIo(callRaw, await app.getEditFontPath()),
+    async () => createDiskRedactIo(callRaw, await app.getEditFontPath(),
+      async (result) => (await getCommandContext()?.app?.askRedactionResidue(result)) ?? false),
     [callRaw],
   );
 

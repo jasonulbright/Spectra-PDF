@@ -35,6 +35,7 @@ import engine.preflight_sweep as preflight_sweep_mod
 from engine.batch_ocr import batch_ocr
 from engine.extract_text import extract_text
 from engine.guided_actions import run_action
+from engine.inplace import is_spectra_temp_name, is_stage_path
 from engine.preflight_sweep import run_preflight_sweep
 
 import preflight_builders as builders
@@ -45,14 +46,12 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 RESOURCES = FIXTURES.parent.parent / "resources"
 TESSERACT = RESOURCES / "tesseract" / "tesseract.exe"
 
-#: What every one of these walks stages its working copy as.
-STAGING_SUFFIX = ".inplace.tmp"
 
 
 def _staged(root: Path) -> list:
     """Every staging file anywhere under the tree — the litter a walk that
     died mid-file leaves unless the run removes it."""
-    return sorted(str(p.relative_to(root)) for p in root.rglob("*" + STAGING_SUFFIX))
+    return sorted(str(p.relative_to(root)) for p in root.rglob("*") if is_spectra_temp_name(p.name))
 
 
 def _hardlink(source: Path, alias: Path) -> Path:
@@ -152,7 +151,7 @@ class TestRunActionInPlace:
         real = guided_actions_mod._readable_output
 
         def die_for_one(path, *args, **kwargs):
-            if Path(path).name.startswith("." + target.name):
+            if Path(path).parent == target.parent and is_stage_path(path):
                 targets.append(str(path))
                 raise OSError("the volume went away mid-write")
             return real(path, *args, **kwargs)
@@ -247,7 +246,7 @@ class TestPreflightSweepInPlace:
         real = preflight_sweep_mod._readable_output
 
         def die_for_one(path, *args, **kwargs):
-            if Path(path).name.startswith("." + target.name):
+            if Path(path).parent == target.parent and is_stage_path(path):
                 targets.append(str(path))
                 raise OSError("the volume went away mid-write")
             return real(path, *args, **kwargs)
@@ -325,7 +324,7 @@ class TestBatchOcrInPlace:
         real = batch_ocr_mod._verify_output
 
         def die_for_one(path, *args, **kwargs):
-            if Path(path).name.startswith("." + target.name):
+            if Path(path).parent == target.parent and is_stage_path(path):
                 targets.append(str(path))
                 raise OSError("the volume went away mid-write")
             return real(path, *args, **kwargs)

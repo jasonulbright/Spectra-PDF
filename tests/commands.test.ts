@@ -95,6 +95,7 @@ const noopHandlers = (): AppCommandHandlers => ({
   minimizeToTray: vi.fn(async () => {}),
   newWindow: vi.fn(async () => {}),
   moveToNewWindow: vi.fn(async () => {}),
+  askRedactionResidue: vi.fn(async () => false),
   sanitizeDocument: vi.fn(async () => true),
   setFieldLock: vi.fn(async () => true),
   setFieldActions: vi.fn(async () => true),
