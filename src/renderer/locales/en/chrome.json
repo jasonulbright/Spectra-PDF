@@ -1973,6 +1973,7 @@
   "dialog.webCapture.maxPages": "Page limit",
   "dialog.webCapture.paper": "Paper",
   "dialog.webCapture.posture": "The capture window is a browser. It loads what the address serves, including scripts, fonts and third-party requests, exactly as any browser would — and you watch it do so. Capture runs only when you start it, never in the background, and closing the window stops it. A capture of more than one page follows links on the same site only.",
+  "dialog.webCapture.redirectRefused": "The address redirected to {{host}}, a different site. Nothing was captured. To capture that site, enter its address.",
   "dialog.webCapture.title": "Create PDF from Web Page",
   "dialog.webCapture.truncated_one": "Reached the page limit after {{count}} page — there were more links to follow.",
   "dialog.webCapture.truncated_other": "Reached the page limit after {{count}} pages — there were more links to follow.",

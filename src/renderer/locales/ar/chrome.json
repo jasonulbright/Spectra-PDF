@@ -1296,6 +1296,7 @@
   "dialog.webCapture.capture": "التقاط",
   "dialog.webCapture.capturing": "جارٍ الالتقاط…",
   "dialog.webCapture.cancelled": "أُلغي الالتقاط — أُغلقت نافذة الالتقاط. لم يُضَف أي شيء.",
+  "dialog.webCapture.redirectRefused": "أعاد العنوان التوجيه إلى {{host}}، وهو موقع مختلف. لم يُلتقط أي شيء. لالتقاط ذلك الموقع، أدخل عنوانه.",
   "dialog.createPdf.clipboardTextChars_zero": "{{count}} أحرف",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} حرف",
   "dialog.createPdf.clipboardTextChars_two": "{{count}} حرفان",

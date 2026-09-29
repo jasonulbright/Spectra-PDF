@@ -1200,6 +1200,7 @@
   "dialog.webCapture.capture": "Rögzítés",
   "dialog.webCapture.capturing": "Rögzítés…",
   "dialog.webCapture.cancelled": "A rögzítés megszakadt — a rögzítőablak bezárult. Semmi nem lett hozzáadva.",
+  "dialog.webCapture.redirectRefused": "A cím átirányított ide: {{host}}, ami egy másik webhely. Semmi sem lett rögzítve. A webhely rögzítéséhez adja meg annak címét.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} karakter",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} karakter",
   "dialog.createPdf.clipboardHtmlChars_one": "{{count}} karakter formázott szöveg",

@@ -1200,6 +1200,7 @@
   "dialog.webCapture.capture": "Hämta",
   "dialog.webCapture.capturing": "Hämtar…",
   "dialog.webCapture.cancelled": "Hämtningen avbröts — hämtfönstret stängdes. Ingenting lades till.",
+  "dialog.webCapture.redirectRefused": "Adressen omdirigerade till {{host}}, en annan webbplats. Inget fångades. Ange webbplatsens adress för att fånga den.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} tecken",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} tecken",
   "dialog.createPdf.clipboardHtmlChars_one": "{{count}} tecken formaterad text",

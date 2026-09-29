@@ -17,6 +17,9 @@
 //!   * a web crawl follows only links whose HOST AND SCHEME match the start;
 //!     redirects and later top-level navigation obey the same boundary, and a
 //!     local-file crawl stays under the selected page's canonical parent;
+//!   * the one exception is the start page's own first load: a redirect that
+//!     only upgrades http to https or adds or removes a leading `www.` moves
+//!     the scope to its target, and the scope is fixed from then on;
 //!   * one window, navigated in turn — never a fan-out of hidden webviews;
 //!   * one capture at a time, and the window is destroyed on every exit path;
 //!   * closing the window cancels the run, and a cancelled run SAYS so rather
@@ -31,7 +34,7 @@ use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -204,6 +207,87 @@ pub struct CaptureResult {
     pub cancelled: bool,
     /// Per-URL failures. A capture that lost a page SAYS which one.
     pub failures: Vec<String>,
+    /// The host a start-page redirect tried to reach outside the capture's
+    /// scope. Structured so the caller names the refusal in the user's
+    /// language instead of showing the browser's cancellation status.
+    pub refused_redirect: Option<String>,
+}
+
+/// The origin a capture may navigate within.
+///
+/// `settled` is false only while the start page's first load is in flight;
+/// only then may a redirect move the scope (see `start_redirect_scope`).
+struct CaptureScope {
+    start_scheme: String,
+    start_host: String,
+    scheme: String,
+    host: String,
+    started: bool,
+    settled: bool,
+    load_observed: bool,
+    refused_host: Option<String>,
+}
+
+impl CaptureScope {
+    fn new(scheme: String, host: String) -> Self {
+        Self {
+            start_scheme: scheme.clone(),
+            start_host: host.clone(),
+            scheme,
+            host,
+            started: false,
+            settled: false,
+            load_observed: false,
+            refused_host: None,
+        }
+    }
+
+    /// Decide one top-level navigation. Redirects are judged against the
+    /// ORIGINAL start, so a chain cannot walk the host one step at a time.
+    /// A refusal before the crawl has seen the first load end records the
+    /// target host, whether a redirect or a script caused it.
+    fn admit(&mut self, target: &str, redirected: bool, local_root: Option<&Path>) -> bool {
+        if !redirected && self.started {
+            self.settled = true;
+        }
+        if link_in_scope(target, &self.scheme, &self.host, local_root) {
+            self.started = true;
+            return true;
+        }
+        if self.started && !self.settled && redirected {
+            if let Some((scheme, host)) =
+                start_redirect_scope(&self.start_scheme, &self.start_host, target)
+                    .filter(|(scheme, _)| self.scheme != "https" || scheme == "https")
+            {
+                self.scheme = scheme;
+                self.host = host;
+                return true;
+            }
+        }
+        if self.started && !self.load_observed {
+            self.refused_host = Some(
+                url::Url::parse(target)
+                    .ok()
+                    .and_then(|url| url.host_str().map(str::to_string))
+                    .unwrap_or_else(|| target.to_string()),
+            );
+        }
+        false
+    }
+}
+
+type SharedScope = Arc<Mutex<CaptureScope>>;
+
+fn scope_snapshot(scope: &SharedScope) -> (String, String) {
+    let scope = scope.lock().unwrap_or_else(|poison| poison.into_inner());
+    (scope.scheme.clone(), scope.host.clone())
+}
+
+fn settle_scope(scope: &SharedScope) -> Option<String> {
+    let mut scope = scope.lock().unwrap_or_else(|poison| poison.into_inner());
+    scope.settled = true;
+    scope.load_observed = true;
+    scope.refused_host.clone()
 }
 
 #[derive(Deserialize)]
@@ -256,6 +340,31 @@ pub fn validate_url(raw: &str) -> Result<(String, String, String), String> {
         format!("{}:{port}", host.to_ascii_lowercase())
     };
     Ok((candidate, scheme, host))
+}
+
+/// The scope a redirect of the start page's first load moves the capture to,
+/// or `None` when the redirect leaves the site.
+///
+/// Admitted: the same host upgraded from http to https (default port to
+/// default port only), and the same scheme and port with a leading `www.`
+/// added or removed; both together are also admitted. Every other change of
+/// scheme, host or port is a different site. A registrable-domain comparison
+/// would need the public suffix list; without it `a.example` and `b.example`
+/// cannot be told apart from `a.co.uk` and `b.co.uk`.
+pub fn start_redirect_scope(scheme: &str, host: &str, target: &str) -> Option<(String, String)> {
+    let (_, next_scheme, next_host) = validate_url(target).ok()?;
+    let (name, port) = host.rsplit_once(':')?;
+    let (next_name, next_port) = next_host.rsplit_once(':')?;
+    let transport = if next_scheme == scheme {
+        next_port == port
+    } else {
+        scheme == "http" && next_scheme == "https" && port == "80" && next_port == "443"
+    };
+    let www = |bare: &str, prefixed: &str| {
+        !bare.is_empty() && prefixed.strip_prefix("www.") == Some(bare)
+    };
+    let same_site = next_name == name || www(name, next_name) || www(next_name, name);
+    (scheme != "file" && transport && same_site).then_some((next_scheme, next_host))
 }
 
 /// Is `candidate` in the same origin as the capture's start?
@@ -540,8 +649,7 @@ where
 /// so the event registration has exactly the capture's lifetime.
 fn guard_navigation_scope(
     window: &WebviewWindow,
-    scheme: String,
-    host: String,
+    scope: SharedScope,
     local_root: Option<PathBuf>,
 ) -> Result<(), StepError> {
     run_step(
@@ -552,12 +660,16 @@ fn guard_navigation_scope(
             let handler = NavigationStartingEventHandler::create(Box::new(move |_, args| {
                 if let Some(args) = args {
                     let mut uri = PWSTR::null();
-                    let allowed = unsafe { args.Uri(&mut uri) }
-                        .ok()
-                        .map(|_| take_pwstr(uri))
-                        .is_some_and(|uri| {
-                            link_in_scope(&uri, &scheme, &host, local_root.as_deref())
-                        });
+                    let target = unsafe { args.Uri(&mut uri) }.ok().map(|_| take_pwstr(uri));
+                    let mut flag = BOOL::from(false);
+                    let redirected =
+                        unsafe { args.IsRedirected(&mut flag) }.is_ok() && flag.as_bool();
+                    let allowed = target.as_deref().is_some_and(|target| {
+                        scope
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner())
+                            .admit(target, redirected, local_root.as_deref())
+                    });
                     if !allowed {
                         let _ = unsafe { args.SetCancel(true) };
                     }
@@ -927,7 +1039,8 @@ async fn run_capture(
     let hwnd = window.hwnd().map(|h| h.0 as usize).unwrap_or(0);
     let _ = window.with_webview(move |_| watch_close(hwnd));
 
-    match guard_navigation_scope(&window, scheme.clone(), host.clone(), local_root.clone()) {
+    let scope: SharedScope = Arc::new(Mutex::new(CaptureScope::new(scheme, host)));
+    match guard_navigation_scope(&window, scope.clone(), local_root.clone()) {
         Ok(()) => {}
         Err(StepError::Cancelled) => return Ok(cancelled_result(capture_id)),
         Err(StepError::Failed(error)) => return Err(error),
@@ -958,8 +1071,7 @@ async fn run_capture(
             &worker,
             &opts,
             &start,
-            &scheme,
-            &host,
+            &scope,
             local_root.as_deref(),
             depth,
             budget,
@@ -978,6 +1090,9 @@ async fn run_capture(
     // A cancelled run reports itself rather than refusing: the refusal below
     // names a capture that was tried and produced nothing, which is a
     // different thing from one that was stopped.
+    if result.pages.is_empty() && result.refused_redirect.is_some() {
+        return Ok(result);
+    }
     if result.pages.is_empty() && !result.cancelled {
         let detail = result
             .failures
@@ -1015,6 +1130,7 @@ fn finish(
         pages,
         visited,
         failures,
+        refused_redirect: None,
     }
 }
 
@@ -1024,8 +1140,7 @@ fn crawl(
     window: &WebviewWindow,
     options: &CaptureOptions,
     start: &str,
-    scheme: &str,
-    host: &str,
+    scope: &SharedScope,
     local_root: Option<&Path>,
     depth: u32,
     budget: u32,
@@ -1040,6 +1155,7 @@ fn crawl(
     let mut cursor = 0usize;
     let mut stopped = false;
     let mut link_limit_reported = false;
+    let mut refused_redirect = None;
 
     while cursor < frontier.len() {
         if pages.len() as u32 >= budget {
@@ -1053,10 +1169,16 @@ fn crawl(
         cursor += 1;
         visited += 1;
 
-        match navigate(window, &url) {
+        let navigated = navigate(window, &url);
+        let refused = if visited == 1 { settle_scope(scope) } else { None };
+        match navigated {
             Ok(()) => {}
             Err(StepError::Cancelled) => {
                 stopped = true;
+                break;
+            }
+            Err(StepError::Failed(_)) if refused.is_some() => {
+                refused_redirect = refused;
                 break;
             }
             Err(StepError::Failed(err)) => {
@@ -1064,6 +1186,7 @@ fn crawl(
                 continue;
             }
         }
+        let (scheme, host) = scope_snapshot(scope);
         if !settle_pause() {
             stopped = true;
             break;
@@ -1074,8 +1197,8 @@ fn crawl(
             window,
             &path,
             options,
-            scheme.to_string(),
-            host.to_string(),
+            scheme.clone(),
+            host.clone(),
             local_root.map(Path::to_path_buf),
         ) {
             Ok(final_url) => final_url,
@@ -1111,8 +1234,8 @@ fn crawl(
                     }
                     if enqueue_links(
                         harvested.links,
-                        scheme,
-                        host,
+                        &scheme,
+                        &host,
                         local_root,
                         level + 1,
                         budget,
@@ -1139,7 +1262,7 @@ fn crawl(
         abandon_navigation(window);
     }
 
-    finish(
+    let mut result = finish(
         capture_id,
         stopped,
         cursor,
@@ -1147,7 +1270,9 @@ fn crawl(
         pages,
         visited,
         failures,
-    )
+    );
+    result.refused_redirect = refused_redirect;
+    result
 }
 
 #[cfg(test)]
@@ -1155,7 +1280,7 @@ mod tests {
     use super::{
         cancelled, cancelled_result, clamp, clear_cancel, decode_harvested_links,
         discard_capture_at, enqueue_links, finish, frontier_cap, link_in_scope, local_file_root,
-        same_origin, validate_url, window_close_requested, CaptureOptions, CaptureScratch,
+        same_origin, settle_scope, start_redirect_scope, Arc, CaptureScope, Mutex, validate_url, window_close_requested, CaptureOptions, CaptureScratch,
         CapturedPage, CAPTURE_LABEL, MAX_DEPTH_CEILING, MAX_PAGES_CEILING,
     };
 
@@ -1217,8 +1342,8 @@ mod tests {
             "https",
             "example.test:443"
         ));
-        // The scope remains the start's exact origin: apex-to-www and HTTP
-        // to HTTPS redirects are out of scope under the capture contract.
+        // Links and later navigations stay in the exact origin; only the
+        // start page's first load may move it (`start_redirect_scope`).
         assert!(!same_origin(
             "https://www.example.test/next",
             "https",
@@ -1229,6 +1354,114 @@ mod tests {
             "http",
             "example.test:80"
         ));
+    }
+
+    fn moved(scheme: &str, host: &str, target: &str) -> Option<(String, String)> {
+        start_redirect_scope(scheme, host, target)
+    }
+
+    fn scope(scheme: &str, host: &str) -> Option<(String, String)> {
+        Some((scheme.to_string(), host.to_string()))
+    }
+
+    #[test]
+    fn a_start_redirect_may_upgrade_to_https_on_the_same_host() {
+        assert_eq!(
+            moved("http", "example.test:80", "https://example.test/"),
+            scope("https", "example.test:443")
+        );
+        assert_eq!(
+            moved("http", "example.test:80", "https://example.test:443/a"),
+            scope("https", "example.test:443")
+        );
+        // A non-default port on either side is a different service.
+        assert_eq!(moved("http", "example.test:8080", "https://example.test/"), None);
+        assert_eq!(moved("http", "example.test:80", "https://example.test:8443/"), None);
+        // Never a downgrade.
+        assert_eq!(moved("https", "example.test:443", "http://example.test/"), None);
+    }
+
+    #[test]
+    fn a_start_redirect_may_add_or_remove_a_leading_www() {
+        assert_eq!(
+            moved("https", "example.test:443", "https://www.example.test/"),
+            scope("https", "www.example.test:443")
+        );
+        assert_eq!(
+            moved("https", "www.example.test:443", "https://EXAMPLE.test/"),
+            scope("https", "example.test:443")
+        );
+        assert_eq!(
+            moved("http", "localhost:8123", "http://www.localhost:8123/start"),
+            scope("http", "www.localhost:8123")
+        );
+        assert_eq!(
+            moved("http", "example.test:80", "https://www.example.test/"),
+            scope("https", "www.example.test:443")
+        );
+        assert_eq!(
+            moved("https", "xn--bcher-kva.example:443", "https://www.bücher.example/"),
+            scope("https", "www.xn--bcher-kva.example:443")
+        );
+        // The port is part of the site.
+        assert_eq!(moved("http", "localhost:8123", "http://www.localhost:8124/"), None);
+    }
+
+    #[test]
+    fn a_redirect_chain_is_judged_against_the_original_start() {
+        let mut scope = CaptureScope::new("http".into(), "example.test:80".into());
+        assert!(scope.admit("http://example.test/", false, None));
+        assert!(scope.admit("https://example.test/", true, None));
+        assert!(scope.admit("https://www.example.test/", true, None));
+        assert!(!scope.admit("https://www.www.example.test/", true, None));
+        assert_eq!(scope.refused_host.as_deref(), Some("www.www.example.test"));
+        assert!(scope.admit("https://example.test/back", true, None));
+        assert!(!scope.admit("http://example.test/", true, None));
+
+        let mut scope = CaptureScope::new("https".into(), "www.example.test:443".into());
+        assert!(scope.admit("https://www.example.test/", false, None));
+        assert!(scope.admit("https://example.test/", true, None));
+        assert!(!scope.admit("https://www.www.www.example.test/", true, None));
+    }
+
+    #[test]
+    fn a_script_navigation_off_site_during_the_first_load_names_its_host() {
+        let scope = Arc::new(Mutex::new(CaptureScope::new(
+            "https".into(),
+            "example.test:443".into(),
+        )));
+        {
+            let mut guard = scope.lock().unwrap();
+            assert!(guard.admit("https://example.test/", false, None));
+            assert!(!guard.admit("https://evil.test/landing", false, None));
+            // A script navigation is never a redirect, so it cannot move the scope.
+            assert!(!guard.admit("https://www.example.test/", true, None));
+        }
+        assert_eq!(settle_scope(&scope).as_deref(), Some("www.example.test"));
+        let mut guard = scope.lock().unwrap();
+        guard.refused_host = None;
+        assert!(!guard.admit("https://later.test/", false, None));
+        assert_eq!(guard.refused_host, None, "only the first load is reported");
+    }
+
+    #[test]
+    fn a_start_redirect_to_another_site_is_refused() {
+        for target in [
+            "https://evil.test/",
+            "https://example.test.evil.test/",
+            "https://wwwexample.test/",
+            "https://www.www.example.test/",
+            "https://shop.example.test/",
+            "https://www.evil.test/",
+            "http://127.0.0.1/",
+            "file:///C:/Windows/win.ini",
+            "javascript:alert(1)",
+        ] {
+            assert_eq!(moved("https", "example.test:443", target), None, "{target}");
+        }
+        // A bare `www` is not the apex of anything.
+        assert_eq!(moved("https", "www:443", "https://www./"), None);
+        assert_eq!(moved("file", "", "file:///C:/other.html"), None);
     }
 
     #[test]

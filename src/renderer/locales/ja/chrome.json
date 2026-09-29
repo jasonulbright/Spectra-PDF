@@ -1176,6 +1176,7 @@
   "dialog.webCapture.capture": "取り込む",
   "dialog.webCapture.capturing": "取り込み中…",
   "dialog.webCapture.cancelled": "取り込みを中止しました — 取り込みウィンドウが閉じられました。何も追加されていません。",
+  "dialog.webCapture.redirectRefused": "アドレスは別のサイト {{host}} にリダイレクトされました。何も取り込まれていません。そのサイトを取り込むには、そのアドレスを入力してください。",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} 文字",
   "dialog.createPdf.clipboardHtmlChars_other": "書式付きテキスト {{count}} 文字",
   "dialog.createPdf.clipboardHtmlFrom_other": "{{count}} 文字 ({{source}} からコピー)",

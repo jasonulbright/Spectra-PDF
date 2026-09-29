@@ -1200,6 +1200,7 @@
   "dialog.webCapture.capture": "Hent",
   "dialog.webCapture.capturing": "Henter…",
   "dialog.webCapture.cancelled": "Hentning annulleret — hentevinduet blev lukket. Der blev ikke tilføjet noget.",
+  "dialog.webCapture.redirectRefused": "Adressen omdirigerede til {{host}}, et andet websted. Intet blev indfanget. Angiv adressen på webstedet for at indfange det.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} tegn",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} tegn",
   "dialog.createPdf.clipboardHtmlChars_one": "{{count}} tegn formateret tekst",

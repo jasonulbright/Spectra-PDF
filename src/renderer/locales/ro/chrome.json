@@ -1224,6 +1224,7 @@
   "dialog.webCapture.capture": "Capturează",
   "dialog.webCapture.capturing": "Se capturează…",
   "dialog.webCapture.cancelled": "Captură anulată — fereastra de captură a fost închisă. Nu s-a adăugat nimic.",
+  "dialog.webCapture.redirectRefused": "Adresa a redirecționat către {{host}}, un site diferit. Nu s-a capturat nimic. Pentru a captura acel site, introduceți adresa lui.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} caracter",
   "dialog.createPdf.clipboardTextChars_few": "{{count}} caractere",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} de caractere",

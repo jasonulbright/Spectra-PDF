@@ -1200,6 +1200,7 @@
   "dialog.webCapture.capture": "Kaappaa",
   "dialog.webCapture.capturing": "Kaapataan…",
   "dialog.webCapture.cancelled": "Kaappaus peruttiin — kaappausikkuna suljettiin. Mitään ei lisätty.",
+  "dialog.webCapture.redirectRefused": "Osoite ohjasi sivustolle {{host}}, joka on eri sivusto. Mitään ei kaapattu. Jos haluat kaapata sivuston, anna sen osoite.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} merkki",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} merkkiä",
   "dialog.createPdf.clipboardHtmlChars_one": "{{count}} merkki muotoiltua tekstiä",

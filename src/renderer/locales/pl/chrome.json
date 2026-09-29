@@ -1248,6 +1248,7 @@
   "dialog.webCapture.capture": "Przechwyć",
   "dialog.webCapture.capturing": "Przechwytywanie…",
   "dialog.webCapture.cancelled": "Przechwytywanie anulowane — okno przechwytywania zostało zamknięte. Nic nie zostało dodane.",
+  "dialog.webCapture.redirectRefused": "Adres przekierował do {{host}}, innej witryny. Niczego nie przechwycono. Aby przechwycić tę witrynę, wprowadź jej adres.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} znak",
   "dialog.createPdf.clipboardTextChars_few": "{{count}} znaki",
   "dialog.createPdf.clipboardTextChars_many": "{{count}} znaków",

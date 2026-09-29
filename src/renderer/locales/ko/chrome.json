@@ -1176,6 +1176,7 @@
   "dialog.webCapture.capture": "가져오기",
   "dialog.webCapture.capturing": "가져오는 중…",
   "dialog.webCapture.cancelled": "가져오기가 취소되었습니다 — 가져오기 창이 닫혔습니다. 아무것도 추가되지 않았습니다.",
+  "dialog.webCapture.redirectRefused": "주소가 다른 사이트인 {{host}}(으)로 리디렉션되었습니다. 아무것도 캡처되지 않았습니다. 해당 사이트를 캡처하려면 그 주소를 입력하세요.",
   "dialog.createPdf.clipboardTextChars_other": "{{count}}자",
   "dialog.createPdf.clipboardHtmlChars_other": "서식 있는 텍스트 {{count}}자",
   "dialog.createPdf.clipboardHtmlFrom_other": "{{count}}자, {{source}}에서 복사",

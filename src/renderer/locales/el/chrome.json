@@ -1200,6 +1200,7 @@
   "dialog.webCapture.capture": "Λήψη",
   "dialog.webCapture.capturing": "Γίνεται λήψη…",
   "dialog.webCapture.cancelled": "Η λήψη ακυρώθηκε — το παράθυρο λήψης έκλεισε. Δεν προστέθηκε τίποτα.",
+  "dialog.webCapture.redirectRefused": "Η διεύθυνση ανακατεύθυνε στο {{host}}, έναν διαφορετικό ιστότοπο. Δεν καταγράφηκε τίποτα. Για να καταγράψετε αυτόν τον ιστότοπο, εισαγάγετε τη διεύθυνσή του.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} χαρακτήρας",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} χαρακτήρες",
   "dialog.createPdf.clipboardHtmlChars_one": "{{count}} χαρακτήρας μορφοποιημένου κειμένου",

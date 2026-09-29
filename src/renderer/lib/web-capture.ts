@@ -74,6 +74,8 @@ export interface CaptureResult {
    */
   cancelled: boolean;
   failures: string[];
+  /** The host a start-page redirect tried to leave the site for; nothing was captured. */
+  refusedRedirect: string | null;
 }
 
 export interface CaptureFailureNotice {

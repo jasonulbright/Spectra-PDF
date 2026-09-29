@@ -1200,6 +1200,7 @@
   "dialog.webCapture.capture": "Erfassen",
   "dialog.webCapture.capturing": "Wird erfasst…",
   "dialog.webCapture.cancelled": "Erfassung abgebrochen — das Erfassungsfenster wurde geschlossen. Es wurde nichts hinzugefügt.",
+  "dialog.webCapture.redirectRefused": "Die Adresse wurde zu {{host}} umgeleitet, einer anderen Website. Es wurde nichts erfasst. Geben Sie die Adresse dieser Website ein, um sie zu erfassen.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} Zeichen",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} Zeichen",
   "dialog.createPdf.clipboardHtmlChars_one": "{{count}} Zeichen formatierter Text",

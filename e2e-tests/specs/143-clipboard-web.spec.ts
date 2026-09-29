@@ -545,6 +545,14 @@ describe('create PDF from the clipboard and from a web page', () => {
     // limit on the suite while Mocha is defining the test.
     this.timeout(180_000);
 
+    // Mocha runs this suite after every case above it, and the last of those
+    // leaves the web capture dialog open over Create PDF.
+    beforeEach(async () => {
+      if (await $('[data-testid="web-capture-close"]').isExisting()) {
+        await $('[data-testid="web-capture-close"]').click();
+      }
+    });
+
     it('blocks out-of-scope redirects and records the final in-scope page URL', async () => {
       if (await $('[data-testid="create-pdf-close"]').isExisting()) {
         await $('[data-testid="create-pdf-close"]').click();
@@ -589,6 +597,96 @@ describe('create PDF from the clipboard and from a web page', () => {
           new Promise<void>((done) => inside.close(() => done())),
           new Promise<void>((done) => outside.close(() => done())),
         ]);
+        if (await $('[data-testid="create-pdf-close"]').isExisting()) {
+          await $('[data-testid="create-pdf-close"]').click();
+        }
+      }
+    });
+
+    it('follows a start redirect from the apex host to www and keeps that scope', async () => {
+      if (await $('[data-testid="create-pdf-close"]').isExisting()) {
+        await $('[data-testid="create-pdf-close"]').click();
+      }
+      expect(await invokeAppCommand('file.createFromWebPage')).toBe(true);
+      await $('[data-testid="web-capture-dialog"]').waitForDisplayed({ timeout: 15_000 });
+
+      // One listener answers both names: `*.localhost` resolves to loopback in
+      // the browser, so the host changes while the port stays the same.
+      let port = 0;
+      const site = createServer((req, res) => {
+        const path = (req.url ?? '/').split('?')[0];
+        if (!(req.headers.host ?? '').toLowerCase().startsWith('www.')) {
+          res.writeHead(301, { Location: `http://www.localhost:${port}/start` });
+          res.end();
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(
+          path === '/start'
+            ? `<!doctype html><html><head><title>Www page</title></head><body><h1>${TOKEN}</h1><a href="/leaf">leaf</a></body></html>`
+            : '<!doctype html><html><head><title>Www leaf</title></head><body>leaf</body></html>',
+        );
+      });
+      port = await listenLocal(site);
+
+      try {
+        await browser.setTimeout({ script: 180_000 });
+        const result = await webCaptureRun({ url: `http://localhost:${port}/`, depth: 1, maxPages: 2 });
+        expect(result).not.toBeNull();
+        expect(result!.pages.map((page) => page.url)).toEqual([
+          `http://www.localhost:${port}/start`,
+          `http://www.localhost:${port}/leaf`,
+        ]);
+        expect((await readPdf(result!.pages[0].path)).text).toContain(TOKEN);
+      } finally {
+        // The browser keeps idle connections open, and `close` waits for them.
+        site.closeAllConnections();
+        await new Promise<void>((done) => site.close(() => done()));
+        if (await $('[data-testid="create-pdf-close"]').isExisting()) {
+          await $('[data-testid="create-pdf-close"]').click();
+        }
+      }
+    });
+
+    it('refuses a start redirect to another site and names that host', async () => {
+      if (await $('[data-testid="create-pdf-close"]').isExisting()) {
+        await $('[data-testid="create-pdf-close"]').click();
+      }
+      expect(await invokeAppCommand('file.createFromWebPage')).toBe(true);
+      await $('[data-testid="web-capture-dialog"]').waitForDisplayed({ timeout: 15_000 });
+
+      const outside = createServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<!doctype html><title>Outside</title><p>must not load</p>');
+      });
+      const outsidePort = await listenLocal(outside);
+      const entry = createServer((_req, res) => {
+        res.writeHead(302, { Location: `http://localhost:${outsidePort}/landing` });
+        res.end();
+      });
+      const entryPort = await listenLocal(entry);
+
+      try {
+        await browser.setTimeout({ script: 180_000 });
+        const result = await webCaptureRun({
+          url: `http://127.0.0.1:${entryPort}/`,
+          depth: 0,
+          maxPages: 1,
+        });
+        expect(result).toBeNull();
+        const message = await $('[data-testid="web-capture-error"]').getText();
+        expect(message).toContain('localhost');
+        expect(message).not.toContain('status');
+      } finally {
+        entry.closeAllConnections();
+        outside.closeAllConnections();
+        await Promise.all([
+          new Promise<void>((done) => entry.close(() => done())),
+          new Promise<void>((done) => outside.close(() => done())),
+        ]);
+        if (await $('[data-testid="web-capture-close"]').isExisting()) {
+          await $('[data-testid="web-capture-close"]').click();
+        }
         if (await $('[data-testid="create-pdf-close"]').isExisting()) {
           await $('[data-testid="create-pdf-close"]').click();
         }

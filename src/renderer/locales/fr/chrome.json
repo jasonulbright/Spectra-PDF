@@ -1224,6 +1224,7 @@
   "dialog.webCapture.capture": "Capturer",
   "dialog.webCapture.capturing": "Capture en cours…",
   "dialog.webCapture.cancelled": "Capture annulée — la fenêtre de capture a été fermée. Rien n’a été ajouté.",
+  "dialog.webCapture.redirectRefused": "L'adresse a redirigé vers {{host}}, un site différent. Rien n'a été capturé. Pour capturer ce site, saisissez son adresse.",
   "dialog.createPdf.clipboardTextChars_one": "{{count}} caractère",
   "dialog.createPdf.clipboardTextChars_many": "{{count}} caractères",
   "dialog.createPdf.clipboardTextChars_other": "{{count}} caractères",
