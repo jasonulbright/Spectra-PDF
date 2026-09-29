@@ -2125,6 +2125,7 @@
   "engine.batch_ocr.sourceFolderFound": "No s'ha trobat la carpeta d'origen: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "El límit de sortida d’un subprocés no pot ser negatiu.",
   "engine.budget.timeBudgetNeedsPositive": "un pressupost de temps necessita un llindar positiu",
+  "engine.catalog_carry.actionChainsTooLarge": "Les cadenes d'accions són massa grans per traslladar-les",
   "engine.catalog_carry.structureTreeTooDeep": "L'arbre d'estructura és massa profund o massa gran per traslladar-lo",
   "engine.check.fileFound": "No s'ha trobat el fitxer: {{file}}",
   "engine.clause_map.checkCitesClause": "Cap comprovació no cita una clàusula de {{part}}.",

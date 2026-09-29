@@ -2125,6 +2125,7 @@
   "engine.batch_ocr.sourceFolderFound": "Cartella di origine non trovata: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Il limite di output di un sottoprocesso non può essere negativo.",
   "engine.budget.timeBudgetNeedsPositive": "un budget di tempo richiede un limite inferiore positivo",
+  "engine.catalog_carry.actionChainsTooLarge": "Le catene di azioni sono troppo grandi per essere trasferite",
   "engine.catalog_carry.structureTreeTooDeep": "L'albero di struttura è troppo profondo o troppo grande per essere trasferito",
   "engine.check.fileFound": "File non trovato: {{file}}",
   "engine.clause_map.checkCitesClause": "Nessun controllo cita una clausola di {{part}}.",

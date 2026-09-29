@@ -2125,6 +2125,7 @@
   "engine.batch_ocr.sourceFolderFound": "Pasta de origem não encontrada: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "O limite de saída de um subprocesso não pode ser negativo.",
   "engine.budget.timeBudgetNeedsPositive": "um orçamento de tempo precisa de um piso positivo",
+  "engine.catalog_carry.actionChainsTooLarge": "As cadeias de ações são grandes demais para serem transferidas",
   "engine.catalog_carry.structureTreeTooDeep": "A árvore de estrutura é profunda ou grande demais para ser transferida",
   "engine.check.fileFound": "Arquivo não encontrado: {{file}}",
   "engine.clause_map.checkCitesClause": "Nenhuma verificação cita uma cláusula de {{part}}.",

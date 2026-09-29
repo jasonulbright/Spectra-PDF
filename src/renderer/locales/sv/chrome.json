@@ -2062,6 +2062,7 @@
   "engine.batch_ocr.sourceFolderFound": "Källmappen hittades inte: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "En utmatningsgräns för en underprocess får inte vara negativ.",
   "engine.budget.timeBudgetNeedsPositive": "en tidsbudget kräver en positiv nedre gräns",
+  "engine.catalog_carry.actionChainsTooLarge": "Åtgärdskedjorna är för stora för att föras över",
   "engine.catalog_carry.structureTreeTooDeep": "Strukturträdet är för djupt eller för stort för att föras över",
   "engine.check.fileFound": "Filen hittades inte: {{file}}",
   "engine.clause_map.checkCitesClause": "Ingen kontroll hänvisar till en klausul i {{part}}.",

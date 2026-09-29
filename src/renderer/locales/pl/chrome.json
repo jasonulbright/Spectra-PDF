@@ -2188,6 +2188,7 @@
   "engine.batch_ocr.sourceFolderFound": "Nie znaleziono folderu źródłowego: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Limit wyjścia podprocesu nie może być ujemny.",
   "engine.budget.timeBudgetNeedsPositive": "limit czasu wymaga dodatniego progu",
+  "engine.catalog_carry.actionChainsTooLarge": "Łańcuchy akcji są zbyt duże, aby je przenieść",
   "engine.catalog_carry.structureTreeTooDeep": "Drzewo struktury jest zbyt głębokie lub zbyt duże, aby je przenieść",
   "engine.check.fileFound": "Nie znaleziono pliku: {{file}}",
   "engine.clause_map.checkCitesClause": "Żadna kontrola nie powołuje się na klauzulę {{part}}.",

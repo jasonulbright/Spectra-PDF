@@ -2125,6 +2125,7 @@
   "engine.batch_ocr.sourceFolderFound": "Dossier source introuvable : {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "La limite de sortie d’un sous-processus ne peut pas être négative.",
   "engine.budget.timeBudgetNeedsPositive": "un budget de temps exige une borne inférieure positive",
+  "engine.catalog_carry.actionChainsTooLarge": "Les chaînes d'actions sont trop volumineuses pour être reprises",
   "engine.catalog_carry.structureTreeTooDeep": "L'arborescence de structure est trop profonde ou trop volumineuse pour être reprise",
   "engine.check.fileFound": "Fichier introuvable : {{file}}",
   "engine.clause_map.checkCitesClause": "Aucun contrôle ne cite une clause de {{part}}.",

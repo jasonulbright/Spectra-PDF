@@ -1999,6 +1999,7 @@
   "engine.batch_ocr.sourceFolderFound": "원본 폴더를 찾을 수 없습니다: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "하위 프로세스 출력 한도는 음수일 수 없습니다.",
   "engine.budget.timeBudgetNeedsPositive": "시간 예산에는 양수 하한이 필요합니다",
+  "engine.catalog_carry.actionChainsTooLarge": "작업 체인이 너무 커서 옮길 수 없습니다",
   "engine.catalog_carry.structureTreeTooDeep": "구조 트리가 너무 깊거나 너무 커서 옮길 수 없습니다",
   "engine.check.fileFound": "파일을 찾을 수 없습니다: {{file}}",
   "engine.clause_map.checkCitesClause": "{{part}}의 조항을 인용하는 검사가 없습니다.",

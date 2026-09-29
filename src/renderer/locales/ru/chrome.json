@@ -2188,6 +2188,7 @@
   "engine.batch_ocr.sourceFolderFound": "Исходная папка не найдена: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Лимит вывода подпроцесса не может быть отрицательным.",
   "engine.budget.timeBudgetNeedsPositive": "лимиту времени нужен положительный порог",
+  "engine.catalog_carry.actionChainsTooLarge": "Цепочки действий слишком велики для переноса",
   "engine.catalog_carry.structureTreeTooDeep": "Дерево структуры слишком глубокое или слишком большое для переноса",
   "engine.check.fileFound": "Файл не найден: {{file}}",
   "engine.clause_map.checkCitesClause": "Ни одна проверка не ссылается на пункт {{part}}.",

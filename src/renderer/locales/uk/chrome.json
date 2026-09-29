@@ -2188,6 +2188,7 @@
   "engine.batch_ocr.sourceFolderFound": "Вихідну папку не знайдено: {{source}}",
   "engine.budget.subprocessOutputLimitCannot": "Ліміт виводу підпроцесу не може бути від’ємним.",
   "engine.budget.timeBudgetNeedsPositive": "ліміту часу потрібен додатний поріг",
+  "engine.catalog_carry.actionChainsTooLarge": "Ланцюжки дій завеликі для перенесення",
   "engine.catalog_carry.structureTreeTooDeep": "Дерево структури завелике або заглибоке для перенесення",
   "engine.check.fileFound": "Файл не знайдено: {{file}}",
   "engine.clause_map.checkCitesClause": "Жодна перевірка не посилається на пункт {{part}}.",
