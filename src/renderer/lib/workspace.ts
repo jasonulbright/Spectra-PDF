@@ -5,7 +5,7 @@ import { documentPassword } from './document-passwords';
 import { readManifest, partitionPages, stripExtension } from './pdfx-format';
 import { importPageAnnotations } from './annotation-import';
 import { readRawAnnotationStyles } from './annotation-raw-style';
-import { readableBytes } from './sealed-edit';
+import { readableBytes, SealedDecryptError } from './sealed-edit';
 import {
   adoptAuthoredIdentity,
   nextGeneration,
@@ -79,14 +79,26 @@ function toUint8(buffer: PdfBuffer): Uint8Array {
   return buffer instanceof Uint8Array ? buffer : buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : Uint8Array.from(buffer);
 }
 
+async function rawStylesOf(file: OpenFile, buffer: PdfBuffer) {
+  let bytes: Uint8Array;
+  try {
+    bytes = await readableBytes(file, toUint8(buffer));
+  } catch (e) {
+    if (e instanceof SealedDecryptError) return null;
+    throw e;
+  }
+  return readRawAnnotationStyles(bytes);
+}
+
 async function indexDocument(file: OpenFile, buffer: PdfBuffer, doc: PDFDocumentProxy): Promise<OpenDocument[]> {
   const manifest = await readManifest(doc);
   const partitions = partitionPages(manifest, doc.numPages, stripExtension(file.name));
   // The raw-style sidecar: pdf-lib reads the /Annots entries pdf.js
   // hides (/IC /CA /BE /CL /RD /LE), so shape/callout imports are faithful.
   // null (unparseable) degrades those imports to untouched. A user-opened
-  // file's text entries are read from its decrypted bytes.
-  const rawStyles = await readRawAnnotationStyles(await readableBytes(file, toUint8(buffer)));
+  // file's text entries are read from its decrypted bytes; a failed decrypt
+  // takes the same null, since ciphertext strings would import as garbage.
+  const rawStyles = await rawStylesOf(file, buffer);
   const dims: { width: number; height: number }[] = [];
   const annotations: PageAnnotation[][] = [];
   for (let i = 1; i <= doc.numPages; i++) {
