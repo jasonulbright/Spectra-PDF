@@ -22,13 +22,16 @@ export function groupRedactionMarks(state: AppState, marks: readonly RedactionMa
 }
 
 /** Marks name physical pages; engine regions name positions in committed
- * bytes. Convert only after the commit, while the operation owns its source. */
+ * bytes. Convert only after the commit, while the operation owns its source.
+ * `offerResidue` receives an applied redaction's result, so the flow can offer
+ * to remove the redacted text from places outside page content. */
 export async function writeRedactionMarks(
   path: string, marks: readonly RedactionMark[], seen: AppState,
   method: 'redact' | 'save_redaction_marks', getState: () => AppState,
   perform: PerformOperation,
   geometry: (page: PageRef, state: AppState) => Promise<PageGeometry>,
   gsPath: () => Promise<string>,
+  offerResidue?: (path: string, result: unknown) => Promise<void>,
 ): Promise<boolean> {
   const current = getState();
   const source = current.files.get(path);
@@ -52,5 +55,7 @@ export async function writeRedactionMarks(
       return { regions: payload.files[0]?.regions ?? [] };
     },
   });
-  return wroteBytes(result);
+  const wrote = wroteBytes(result);
+  if (wrote && method === 'redact' && offerResidue) await offerResidue(path, result);
+  return wrote;
 }

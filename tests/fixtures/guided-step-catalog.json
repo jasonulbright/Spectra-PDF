@@ -233,6 +233,7 @@
         "properties",
         "query",
         "regex",
+        "remove_residue",
         "terms",
         "whole_word"
       ],

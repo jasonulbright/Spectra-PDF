@@ -84,6 +84,7 @@ from .mrc import (
 )
 from .page_images import _walk_placements, replace_placement_with_layers
 from .redact import IDENTITY, _lookup_xobject, _resolve_resources
+from .ipc import raise_if_cancelled
 from .validate import validate_pdf
 from .pdf_tree import token_text
 
@@ -844,6 +845,7 @@ def enhance_scan(
             )
 
         for candidate in candidates:
+            raise_if_cancelled()
             page = pdf.pages[candidate.page_number - 1]
             try:
                 measured = _measure(pdf, file, page, candidate, opts, gs_path, tesseract_path)

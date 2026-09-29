@@ -121,6 +121,39 @@ describe('redaction strips content through the real engine round trip', () => {
     expect(texts[1]).toContain('PAGE TWO SURVIVES');
   });
 
+  it('offers to remove the redacted text from the metadata, and removes it on yes', async () => {
+    await closeAllFiles();
+    const residue = resolve(tmp, 'residue.pdf');
+    const output = resolve(tmp, 'residue-redacted.pdf');
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    doc.addPage([612, 792]).drawText('SECRET TOP LINE', { x: 50, y: 700, size: 24, font });
+    doc.setTitle('Report on SECRET TOP LINE');
+    doc.setSubject('SECRET TOP LINE');
+    writeFileSync(residue, await doc.save());
+    await openByPaths([residue]);
+    await setView('canvas');
+    await addRedactionMark({ x: 0, y: 0, w: 1, h: 0.25 });
+    await browser.execute(() => {
+      (window as any).__residueApply = (window as any).__SPECTRA_TEST__.applyRedactions();
+    });
+    const affirm = await $('[data-testid="confirm-affirm"]');
+    await affirm.waitForDisplayed({ timeout: 30_000 });
+    expect(await $('[data-testid="confirm-message"]').getText()).toContain('(2)');
+    await affirm.click();
+    await browser.executeAsync(function (done) {
+      (window as any).__residueApply.then(() => done(null), (err: unknown) => done(String(err)));
+    });
+    await browser.waitUntil(async () => {
+      await saveActiveAs(output);
+      const saved = await PDFDocument.load(readFileSync(output), { updateMetadata: false });
+      return !(saved.getTitle() ?? '').includes('SECRET') && !(saved.getSubject() ?? '').includes('SECRET');
+    }, { timeout: 30_000, timeoutMsg: 'the metadata still carries the redacted text' });
+    const saved = await PDFDocument.load(readFileSync(output), { updateMetadata: false });
+    expect(saved.getTitle()).toBe('Report on ***');
+    expect((await pageTexts(output))[0]).not.toContain('SECRET TOP LINE');
+  });
+
   for (const rotate of [false, true]) {
     it(`removes only marked scan pixels${rotate ? ' after a pending page rotation' : ''}`, async () => {
       await closeAllFiles();

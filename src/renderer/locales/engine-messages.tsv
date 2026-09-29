@@ -629,6 +629,8 @@ redact.overlayTextNeedsEmbedded	exact	redact	this overlay text needs an embedded
 redact.pageContainsMalformedDrawing	exact	redact	The page contains a malformed drawing path. Redaction was not applied.
 redact.redactionCannotRemoveText	exact	redact	Redaction cannot remove text that defines a clipping path because doing so could change visible page content.
 redact_document.documentStructureTooComplex	exact	redact_document	The document structure is too complex to redact safely.
+redact_document.termsMustListStrings	exact	redact_document	terms must be a list of strings
+redact_document.unknownResidueKind	pattern	redact_document	unknown residue kind: {{v0}}
 redact_marks.redactionMarkSDocument	pattern	redact_marks	{{count}} redaction mark(s) in this document cannot be read (page(s) {{location}}). A mark whose annotation or /Rect will not resolve is neither shown nor applied, so redacting now would leave marked content in place. Repair the document first.
 repair.pdfEncryptedDecryptBefore	exact	repair	PDF is encrypted -- decrypt before repairing
 repair.pdfTooDamagedTier	pattern	repair	PDF is too damaged for Tier 1 repair: {{e2}}. Try 'rebuild' (Tier 2) or 'recover' (Tier 3).

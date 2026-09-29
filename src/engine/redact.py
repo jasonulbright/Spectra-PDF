@@ -1762,7 +1762,8 @@ def _redact_page(
 
 
 def redact(
-    file: str, output: str, regions: list[dict], font_dir: str = "", gs_path: str = ""
+    file: str, output: str, regions: list[dict], font_dir: str = "", gs_path: str = "",
+    remove_residue=None,
 ) -> dict:
     """Strip content under one or more rectangular regions and black them out.
 
@@ -1791,6 +1792,12 @@ def redact(
     but a lossy JPEG 2000 codestream ties every pixel to the mark. An image
     whose encoding cannot be rewritten safely raises instead (see
     `image_redact`), before anything is written, so the input keeps its bytes.
+
+    `removed_text` is the text the marks took off the pages, and `residue`
+    lists every place outside page content that still spells it
+    (`redact_document`); `remove_redaction_residue` removes them on request.
+    `remove_residue` ("all" or a list of kinds) removes them in the same
+    write; left empty, the run only reports them.
     """
     input_path = Path(file)
     output_path = Path(output)
@@ -1815,6 +1822,7 @@ def redact(
             if not (1 <= page_no <= len(pdf.pages)):
                 raise ValueError(f"page {page_no} is out of range (1-{len(pdf.pages)})")
         run = _Run(pdf, gs_path)
+        terms = redact_document.removed_terms(pdf, by_page)
         marked = [pdf.pages[number - 1] for number in by_page]
         if marked:
             run.fonts = redact_fonts.baseline(pdf, marked)
@@ -1825,6 +1833,10 @@ def redact(
             pages_redacted += 1
         if pages_redacted:
             redact_document.finish(pdf, run)
+        kinds = redact_document.residue_kinds(remove_residue)
+        removal = (redact_document.scrub_residue(pdf, terms, kinds, font_dir) if kinds
+                   else {"residue_removed": 0, "renamed_destinations": 0})
+        residue = redact_document.find_residue(pdf, terms)
 
         if same_file:
             with staged_write(output_path) as staged:
@@ -1843,4 +1855,7 @@ def redact(
         "images_widened": len(run.context.widened),
         "images_removed_for_compression": len(run.context.removed_for_codec),
         "paths_redacted": run.paths_redacted,
+        "removed_text": terms,
+        **removal,
+        **residue,
     }

@@ -33,7 +33,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pikepdf
-from engine.inplace import write_text_staged
+from engine.inplace import reclaim_stale_stages, scratch_path, write_text_staged
 from engine.credentials import open_pdf
 
 from engine.batch_ocr import (
@@ -172,11 +172,14 @@ def run_preflight_sweep(
     started_at = datetime.now()
     entries, skipped_dirs = _list_sources(source_path, False)
     results: list[dict] = []
+    reclaimed: set[Path] = set()
     for index, (abs_path, rel) in enumerate(entries):
         if progress:
             print(f"[{index + 1}/{len(entries)}] {rel}", flush=True)
-        out_path = (abs_path.parent / f".{abs_path.name}.inplace.tmp") if in_place \
-            else dest_path / rel
+        if in_place and abs_path.parent not in reclaimed:
+            reclaimed.add(abs_path.parent)
+            reclaim_stale_stages(abs_path.parent)
+        out_path = scratch_path(abs_path.parent, "inplace") if in_place else dest_path / rel
         report_path = report_path_for(
             source_path if in_place else dest_path,
             rel,

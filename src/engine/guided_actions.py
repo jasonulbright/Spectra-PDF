@@ -35,7 +35,7 @@ import os
 import shutil
 
 import pikepdf
-from engine.inplace import write_text_staged
+from engine.inplace import reclaim_stale_stages, scratch_path, write_text_staged
 from engine.credentials import open_pdf
 
 from engine import gs_capability
@@ -249,6 +249,7 @@ _STEPS: dict[str, _Step] = {
                 "marks_only",
                 "allow_signed",
                 "properties",
+                "remove_residue",
             }
         ),
         frozenset({"font_dir", "gs_path"}),
@@ -885,13 +886,17 @@ def run_action(
     # An export-only action never stages: reading each source directly is the
     # difference between one pass and a full copy of every file in the tree.
     stages = bool(transform_steps)
+    reclaimed: set[Path] = set()
     for index, (abs_path, rel) in enumerate(entries):
         if progress:
             print(f"[{index + 1}/{len(entries)}] {rel}", flush=True)
         # In place: stage beside the original, verify, then swap atomically —
         # a failed step or a bad write can never leave a broken original.
         if in_place:
-            out_path = abs_path.parent / f".{abs_path.name}.inplace.tmp"
+            if abs_path.parent not in reclaimed:
+                reclaimed.add(abs_path.parent)
+                reclaim_stale_stages(abs_path.parent)
+            out_path = scratch_path(abs_path.parent, "inplace")
         elif creates and not rel.lower().endswith(".pdf"):
             # The mirrored name GAINS `.pdf` rather than replacing the
             # extension — `invoice.docx` and `invoice.pdf` in one folder must

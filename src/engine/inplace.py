@@ -76,6 +76,25 @@ def reclaim_stale_stages(folder) -> int:
     return removed
 
 
+#: Scratch names written beside user files before stage-named temps existed.
+_LEGACY_TEMP_NAME = re.compile(r"^\..+\.(inplace|enhanced|repaired|image)\.tmp$")
+
+
+def is_spectra_temp_name(name: str) -> bool:
+    """Whether a file name is a Spectra temp, never a user document. Folder
+    walkers skip these: a stage left by a killed engine ends in ``.pdf`` and
+    would otherwise be processed, copied or moved as a source."""
+    return name.startswith(STAGE_PREFIX) or _LEGACY_TEMP_NAME.match(name) is not None
+
+
+def scratch_path(folder, tag: str) -> Path:
+    """An unused stage-pattern name in ``folder``, not created. The pid in the
+    name lets :func:`reclaim_stale_stages` remove it after a kill."""
+    import secrets
+
+    return Path(folder) / f"{STAGE_PREFIX}{os.getpid()}-{tag}_{secrets.token_hex(6)}.pdf"
+
+
 def staging_target(output: Path) -> Path:
     """A fresh, closed temp file beside ``output``."""
     output = Path(output)

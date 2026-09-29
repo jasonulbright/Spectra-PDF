@@ -67,6 +67,7 @@ from . import budget
 from . import gs_capability
 from . import mrc_verify
 from .inplace import is_same_file, staged_write
+from .ipc import raise_if_cancelled
 from .mrc_codecs import (
     CCITT_G4,
     JBIG2_GENERIC,
@@ -1076,6 +1077,7 @@ def mrc_compress(
             )
 
         for candidate in candidates:
+            raise_if_cancelled()
             page = pdf.pages[candidate.page_number - 1]
             source = _lift_image(pdf, page, candidate)
             if source is None:
@@ -1111,6 +1113,7 @@ def mrc_compress(
         reverted = 0
         lowest: float | None = None
         for (candidate, mask, stats, page_bg_div), stream in zip(prepared, streams):
+            raise_if_cancelled()
             page = pdf.pages[candidate.page_number - 1]
             try:
                 # Rule 4 — in the PRODUCTION path, not only in the tests.

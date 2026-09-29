@@ -157,6 +157,7 @@ from engine.derived_nav import outline_from_structure, preview_structure_outline
 from engine.read_aloud import read_aloud_page
 from engine.document_js import list_document_js, set_document_js
 from engine.redact import redact
+from engine.redact_document import remove_redaction_residue
 from engine.search_redact import search_and_redact
 from engine.sanitize import audit_hidden_information, sanitize_pdf
 from engine.space_audit import audit_space_usage
@@ -389,6 +390,7 @@ def main() -> None:
     server.register("list_document_js", list_document_js)
     server.register("set_document_js", set_document_js)
     server.register("redact", redact)
+    server.register("remove_redaction_residue", remove_redaction_residue)
     server.register("search_and_redact", search_and_redact)
     server.register("audit_hidden_information", audit_hidden_information)
     server.register("sanitize_pdf", sanitize_pdf)

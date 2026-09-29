@@ -40,7 +40,13 @@ from engine.compress import compress
 # this module is a consumer like any other.
 from engine.create_pdf import IMAGE_SUFFIXES, image_to_pdf
 from engine.enhance_scan import enhance_scan
-from engine.inplace import publish_copy, write_text_staged
+from engine.inplace import (
+    is_spectra_temp_name,
+    publish_copy,
+    reclaim_stale_stages,
+    scratch_path,
+    write_text_staged,
+)
 from engine.form_detect import _crop_box, _display_rect_to_pdf, _page_rotate
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
@@ -96,6 +102,8 @@ def _mrc_step(
             gs_path=gs_path,
             tesseract_path=tesseract_path,
         )
+    except RequestCancelled:
+        raise
     except Exception as exc:  # noqa: BLE001 - per-file isolation, as above
         return False, f"MRC compression did not apply: {exc}"
     finally:
@@ -136,6 +144,8 @@ def _enhance_step(
             gs_path=gs_path,
             tesseract_path=tesseract_path,
         )
+    except RequestCancelled:
+        raise
     except Exception as exc:  # noqa: BLE001 - per-file isolation, as above
         return False, f"Scan enhancement did not apply: {exc}"
     if not report["written"]:
@@ -258,7 +268,7 @@ def _list_sources(
     for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: skipped.append(str(e))):
         dirnames.sort()
         for name in sorted(filenames):
-            if name.lower().endswith(wanted):
+            if name.lower().endswith(wanted) and not is_spectra_temp_name(name):
                 abs_path = Path(dirpath) / name
                 files.append((abs_path, str(abs_path.relative_to(root))))
     return files, skipped
@@ -354,7 +364,7 @@ def _repair_only_entry(
     A damaged file's repaired bytes land through a staged write: `publish_copy`
     in the mirror, verify-then-`os.replace` in place.
     """
-    scratch = out_path.parent / f".{out_path.stem}.repaired.tmp"
+    scratch = scratch_path(out_path.parent, "repaired")
     result: dict
     try:
         scratch.parent.mkdir(parents=True, exist_ok=True)
@@ -679,6 +689,7 @@ def batch_ocr(
     stopped = False
     # A stopped mirror run removes the empty folders its staging created.
     dirs_before = set() if in_place else _dirs_under(dest_path)
+    reclaimed: set[Path] = set()
 
     for index, (abs_path, rel) in enumerate(entries):
         if cancelled():
@@ -693,8 +704,14 @@ def batch_ocr(
         # collide, and the original name stays legible in the output.
         out_rel = rel + ".pdf" if _is_image(abs_path) else rel
         out_path = (
-            abs_path.parent / f".{abs_path.name}.inplace.tmp" if in_place else dest_path / out_rel
+            scratch_path(abs_path.parent, "inplace") if in_place else dest_path / out_rel
         )
+        # A killed earlier run left its temps beside the originals (in place)
+        # or beside the outputs (mirror); each folder is swept once per run.
+        for folder in (abs_path.parent, out_path.parent):
+            if folder not in reclaimed:
+                reclaimed.add(folder)
+                reclaim_stale_stages(folder)
         if repair_only:
             try:
                 results.append(
@@ -736,7 +753,7 @@ def batch_ocr(
                 # An image becomes a PDF FIRST — one page per FRAME, so a
                 # multi-page fax TIFF OCRs whole — and everything after this
                 # line is the shipped PDF path with no branch.
-                wrapped = out_path.parent / f".{out_path.stem}.image.tmp"
+                wrapped = scratch_path(out_path.parent, "image")
                 try:
                     image_to_pdf(abs_path, wrapped)
                     source_for_open = wrapped
@@ -749,7 +766,7 @@ def batch_ocr(
                 # BEFORE the page is opened for recognition, because that is
                 # the whole order (`_enhance_step`), and into a staging copy,
                 # because a batch source is never modified.
-                enhanced = out_path.parent / f".{out_path.stem}.enhanced.tmp"
+                enhanced = scratch_path(out_path.parent, "enhanced")
                 try:
                     enhanced.parent.mkdir(parents=True, exist_ok=True)
                     _copy_file(source_for_open, enhanced)
@@ -757,6 +774,8 @@ def batch_ocr(
                         enhanced, gs_path, tesseract_path, enhance_orientation
                     )
                     source_for_open = enhanced
+                except RequestCancelled:
+                    raise
                 except Exception as exc:  # noqa: BLE001 - never fails the file
                     if enhanced is not None:
                         enhanced.unlink(missing_ok=True)
@@ -780,7 +799,7 @@ def batch_ocr(
                 # A password failure is not a repair candidate: a structural
                 # rewrite cannot supply a password.
                 if repair_damaged and classification != "password-protected":
-                    scratch = out_path.parent / f".{out_path.stem}.repaired.tmp"
+                    scratch = scratch_path(out_path.parent, "repaired")
                     try:
                         scratch.parent.mkdir(parents=True, exist_ok=True)
                         repair(str(abs_path), str(scratch))
@@ -944,8 +963,9 @@ def batch_ocr(
                             f"{prior}; move failed: {exc}" if prior else str(exc)
                         )
         except RequestCancelled:
-            # Raised only before anything is written for this file: the
-            # original and its outputs are as they were, so it is not listed.
+            # The original is untouched. A mirror output already written for
+            # this file is a complete, valid PDF (every write is staged), so
+            # it stays; the file is not listed.
             stopped = True
             result = None
         except Exception as exc:  # noqa: BLE001 - per-file isolation is the point

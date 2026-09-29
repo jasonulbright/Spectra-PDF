@@ -45,6 +45,8 @@ export const OP_EDIT_CLASS = {
   // band; SAVING marks writes /Redact annotations and removes nothing yet.
   redact: 'structural',
   save_redaction_marks: 'annotate',
+  // Rewrites bookmark titles, names, metadata and field values.
+  remove_redaction_residue: 'structural',
 
   // ── Forms: values and widgets ─────────────────────────────────────────
   reset_form_fields: 'form-fill',

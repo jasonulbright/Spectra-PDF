@@ -5,6 +5,7 @@ import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-
 import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/workspace-publication';
 import { withFileLock } from './lib/engine-lock';
 import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter, engine } from './lib/tauri-bridge';
+import { residueMessage, residueOf, residueRequest } from './lib/redaction-residue';
 import type { PhysicalScreenPoint, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
 import { HandOffGate, flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
 import {
@@ -1835,10 +1836,33 @@ function AppContent(): React.ReactElement {
     return { box: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, bakedRotate: source.rotate };
   }, []);
 
+  // The redacted text can still be spelled outside page content: bookmark
+  // titles, names, metadata, field values. The question lists every place and
+  // removes nothing until it is answered.
+  const askRedactionResidue = useCallback(async (result: unknown): Promise<boolean> => {
+    const residue = residueOf(result);
+    if (!residue) return false;
+    return showActionConfirm(
+      tChrome('canvas.redact.residue.title'),
+      residueMessage(residue),
+      tChrome('canvas.redact.residue.remove'),
+    );
+  }, [showActionConfirm]);
+
+  const offerRedactionResidue = useCallback(async (path: string, result: unknown) => {
+    const residue = residueOf(result);
+    if (!residue || !(await askRedactionResidue(result))) return;
+    await performOperation(path, 'remove_redaction_residue', {
+      ...residueRequest(residue),
+      font_dir: await app.getEditFontPath(),
+    }, { intent: gestureIntent(path) });
+  }, [askRedactionResidue, performOperation, gestureIntent]);
+
   const handleRedactFile = useCallback(
     (path: string, marks: readonly RedactionMark[], seen: AppState): Promise<boolean> =>
-      writeRedactionMarks(path, marks, seen, 'redact', readState, performOperation, redactionGeometry, gsPathIfAvailable),
-    [readState, performOperation, redactionGeometry],
+      writeRedactionMarks(path, marks, seen, 'redact', readState, performOperation, redactionGeometry, gsPathIfAvailable,
+        offerRedactionResidue),
+    [readState, performOperation, redactionGeometry, offerRedactionResidue],
   );
 
   const handleSaveRedactionMarks = useCallback(
@@ -3167,6 +3191,7 @@ function AppContent(): React.ReactElement {
     minimizeToTray: async () => { await app.hideToTray(); },
     newWindow: async () => { await app.openNewWindow(); },
     moveToNewWindow: handleMoveToNewWindow,
+    askRedactionResidue,
     sanitizeDocument: handleSanitizeDocument,
     setFieldLock: handleSetFieldLock,
     setFieldActions: handleSetFieldActions,
@@ -3226,6 +3251,7 @@ function AppContent(): React.ReactElement {
       minimizeToTray: () => h.current.minimizeToTray(),
       newWindow: () => h.current.newWindow(),
       moveToNewWindow: () => h.current.moveToNewWindow(),
+      askRedactionResidue: (result) => h.current.askRedactionResidue(result),
       sanitizeDocument: (path, request) => h.current.sanitizeDocument(path, request),
       setFieldLock: (path, field, lock) => h.current.setFieldLock(path, field, lock),
       setFieldActions: (path, field, actions, data) =>

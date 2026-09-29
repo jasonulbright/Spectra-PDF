@@ -13,10 +13,14 @@ import { loadRedactionProperties, propertiesPayload } from './redaction-properti
 import type { DiskRedactIo, RedactRegion } from './disk-redact';
 import type { SearchRequest } from './search-redact';
 import { parseSignaturePolicy } from './signatures';
+import { residueOf, residueRequest } from './redaction-residue';
 
 export function createDiskRedactIo(
   callRaw: (method: string, params: Record<string, unknown>) => Promise<unknown>,
   fontDir: string,
+  /** Asked once per written file whose result lists redacted text outside
+   * page content; true removes it from the output. */
+  askResidue: (result: unknown) => Promise<boolean> = async () => false,
 ): DiskRedactIo {
   return {
     async search(abs, request: SearchRequest) {
@@ -48,13 +52,19 @@ export function createDiskRedactIo(
       // question marks over a redaction code. Ghostscript decodes a JBIG2
       // scan the mark covers only part of; without one, that file refuses by
       // name and the rest of the run goes on.
-      await callRaw('redact', {
+      const result = await callRaw('redact', {
         file: abs,
         output,
         regions: payload,
         font_dir: fontDir,
         gs_path: await gsPathIfAvailable(),
       });
+      const residue = residueOf(result);
+      if (residue && await askResidue(result)) {
+        await callRaw('remove_redaction_residue', {
+          file: output, output, ...residueRequest(residue), font_dir: fontDir,
+        });
+      }
     },
     copyFile: (src, dest) => batch.copyFile(src, dest),
     ensureParentDirs: (path) => batch.ensureParentDirs(path),

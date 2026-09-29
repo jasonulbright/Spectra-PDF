@@ -271,7 +271,10 @@ fn scan_pdfs(dir: &Path) -> HashMap<String, PdfStamp> {
             .extension()
             .map(|e| e.eq_ignore_ascii_case("pdf"))
             .unwrap_or(false);
-        if !is_pdf || !path.is_file() {
+        if !is_pdf
+            || !path.is_file()
+            || crate::commands::is_spectra_temp_name(&entry.file_name().to_string_lossy())
+        {
             continue;
         }
         let Ok(meta) = entry.metadata() else { continue };
@@ -976,6 +979,7 @@ mod tests {
         std::fs::write(tmp.join("a.pdf"), b"12345").unwrap();
         std::fs::write(tmp.join("b.PDF"), b"123").unwrap();
         std::fs::write(tmp.join("notes.txt"), b"x").unwrap();
+        std::fs::write(tmp.join(".spectra-stage-999999-inplace_ab12.pdf"), b"x").unwrap();
         let scan = scan_pdfs(&tmp);
         assert_eq!(scan.len(), 2);
         assert_eq!(scan.get("a.pdf").map(|stamp| stamp.size), Some(5));
