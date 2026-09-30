@@ -3981,6 +3981,7 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "dunce",
+ "libc",
  "reqwest",
  "same-file",
  "serde",

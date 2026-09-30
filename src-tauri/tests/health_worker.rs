@@ -33,6 +33,7 @@
 //! writes into it.
 
 use std::path::Path;
+#[cfg(windows)]
 use std::process::Command;
 use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
@@ -50,6 +51,16 @@ const WINDOW: &str = "main";
 /// test rather than travel silently.
 const DEADLINE_REFUSAL: &str = "health inspection exceeded its deadline";
 
+#[cfg(unix)]
+fn junction(link: &Path, target: &Path) {
+    if link.exists() {
+        return;
+    }
+    std::os::unix::fs::symlink(target, link)
+        .unwrap_or_else(|e| panic!("symlink {} -> {}: {e}", link.display(), target.display()));
+}
+
+#[cfg(windows)]
 fn junction(link: &Path, target: &Path) {
     if link.exists() {
         return;
@@ -68,7 +79,34 @@ fn junction(link: &Path, target: &Path) {
     );
 }
 
+/// Where the mock app resolves its resources. Windows keeps them beside the
+/// executable; Linux looks in `<exe dir>/../lib/<product>` outside a Cargo
+/// output directory, and `deps` is not one.
+fn resource_dir(here_dir: &Path) -> std::path::PathBuf {
+    if cfg!(windows) {
+        return here_dir.to_path_buf();
+    }
+    let product = mock_context::<tauri::test::MockRuntime, _>(noop_assets()).package_info().name.clone();
+    let dir = here_dir.join("..").join("lib").join(product);
+    std::fs::create_dir_all(&dir).expect("create the resource folder");
+    dir
+}
+
+/// Whether a pid is still a running process. A zombie has exited.
+#[cfg(unix)]
+fn alive(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .map(|stat| {
+            stat.rsplit(')')
+                .next()
+                .and_then(|rest| rest.split_whitespace().next())
+                .is_some_and(|state| state != "Z")
+        })
+        .unwrap_or(false)
+}
+
 /// Whether a pid is still a running process.
+#[cfg(windows)]
 fn alive(pid: u32) -> bool {
     let out = Command::new("tasklist")
         .args(["/FI", &format!("PID eq {pid}"), "/NH"])
@@ -135,8 +173,9 @@ fn an_overdue_request_is_refused_the_worker_dies_and_the_next_request_respawns_i
 
     // Where the app under test will look: beside the RUNNING binary, which is
     // the test binary, not the product one.
-    junction(&here_dir.join("python"), &exe_dir.join("python"));
-    junction(&here_dir.join("engine"), &engine);
+    let resources = resource_dir(&here_dir);
+    junction(&resources.join("python"), &exe_dir.join("python"));
+    junction(&resources.join("engine"), &engine);
 
     // A watcher that ticks once a second cannot observe anything a test is
     // willing to wait for; the deadline itself stays at the shipped default
@@ -328,8 +367,9 @@ fn a_pre_kill_token_stepped_against_the_respawned_worker_reports_the_run_lost() 
         return;
     }
 
-    junction(&here_dir.join("python"), &exe_dir.join("python"));
-    junction(&here_dir.join("engine"), &engine);
+    let resources = resource_dir(&here_dir);
+    junction(&resources.join("python"), &exe_dir.join("python"));
+    junction(&resources.join("engine"), &engine);
 
     std::env::set_var(health_engine::HEALTH_WATCH_ENV, "25");
     std::env::remove_var(health_engine::HEALTH_DEADLINE_ENV);

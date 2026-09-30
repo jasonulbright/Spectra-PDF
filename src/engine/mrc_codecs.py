@@ -193,7 +193,7 @@ def jbig2_candidates(engine_dir: Path) -> tuple[Path, ...]:
     running the dev tree, because `resolve_jbig2` reads its own `__file__`.
     """
     return platform_support.vendored_candidates(
-        engine_dir, "jbig2enc", platform_support.program_name("jbig2")
+        engine_dir, "jbig2enc", *platform_support.program_relative("jbig2")
     )
 
 

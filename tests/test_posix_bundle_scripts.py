@@ -71,3 +71,147 @@ def test_every_posix_script_parses(script):
         ["sh", "-n", str(SCRIPTS / script)], capture_output=True, text=True, timeout=60
     )
     assert run.returncode == 0, run.stderr
+
+
+#: The scripts that fetch a fork's pinned Linux artifact, the manifest that
+#: inventories the unpacked tree, the awk row selector the script's notice gate
+#: uses (as a Python predicate over the row), and the file/notice/sha columns.
+ARTIFACT_SCRIPTS = {
+    "bundle-tesseract.sh": ("tesseract-licenses.tsv", lambda c: c[0].startswith(("bin/", "lib/")), 0, 3, None),
+    "bundle-jbig2enc.sh": ("jbig2enc-licenses.tsv", lambda c: c[0].startswith(("bin/", "lib/")), 0, 4, None),
+    "bundle-voikko.sh": ("voikko.tsv", lambda c: len(c) >= 8 and c[7] == "linux", 0, 5, 3),
+}
+ARTIFACT_PIN = re.compile(
+    r'^(?:NATIVE|ARTIFACT)_URL="(https://github\.com/jasonulbright/[^"]+\.tar\.zst)"\n'
+    r'(?:NATIVE|ARTIFACT)_SHA256="([^"]*)"\n'
+    r'(?:NATIVE|ARTIFACT)_SIZE="([^"]*)"$',
+    re.MULTILINE,
+)
+
+
+def _artifact_pin(script: str) -> tuple[str, str, str]:
+    match = ARTIFACT_PIN.search((SCRIPTS / script).read_text(encoding="utf-8"))
+    assert match, f"{script} carries no URL/SHA256/SIZE pin block"
+    return match.groups()
+
+
+def _manifest_rows(name: str) -> list[list[str]]:
+    rows, header = [], False
+    for line in (SCRIPTS / name).read_text(encoding="utf-8").splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        if not header:
+            header = line.startswith("file\t")
+            continue
+        rows.append(line.split("\t"))
+    return rows
+
+
+@pytest.mark.parametrize("script", sorted(ARTIFACT_SCRIPTS))
+def test_each_artifact_script_pins_url_hash_and_size(script):
+    url, sha, size = _artifact_pin(script)
+    assert re.fullmatch(r"[0-9a-f]{64}", sha), sha
+    assert re.fullmatch(r"[1-9][0-9]*", size), size
+    assert "/releases/download/spectra-" in url, url
+
+
+def test_the_artifact_pins_are_distinct():
+    pins = [_artifact_pin(s)[1] for s in ARTIFACT_SCRIPTS]
+    assert len(set(pins)) == len(pins)
+
+
+@pytest.mark.parametrize("script", sorted(ARTIFACT_SCRIPTS))
+def test_each_artifact_script_runs_the_notice_gate_on_its_manifest(script):
+    manifest = ARTIFACT_SCRIPTS[script][0]
+    text = (SCRIPTS / script).read_text(encoding="utf-8")
+    assert f'scripts/{manifest}"' in text
+    assert re.search(r"^notice_gate ", text, re.MULTILINE), script
+    assert re.search(r"^install_artifact ", text, re.MULTILINE), script
+
+
+@pytest.mark.parametrize("script", sorted(ARTIFACT_SCRIPTS))
+def test_the_linux_rows_resolve_inside_the_artifact_layout(script):
+    manifest, select, file_col, notice_col, sha_col = ARTIFACT_SCRIPTS[script]
+    rows = [r for r in _manifest_rows(manifest) if select(r)]
+    assert rows, f"{manifest} has no Linux rows"
+    shipped = {r[file_col] for r in rows}
+    for row in rows:
+        file = row[file_col]
+        assert file.split("/", 1)[0] in ("bin", "lib", "licenses"), file
+        for notice in row[notice_col].split(","):
+            assert re.fullmatch(r"[A-Za-z0-9.+_-]+", notice), (file, notice)
+        if sha_col is not None:
+            assert re.fullmatch(r"[0-9a-f]{64}", row[sha_col]), file
+    assert any(f.startswith(("bin/", "lib/")) for f in shipped)
+
+
+@pytest.mark.parametrize("script", sorted(ARTIFACT_SCRIPTS))
+def test_a_provisioned_tree_holds_every_row_and_notice(script):
+    manifest, select, file_col, notice_col, sha_col = ARTIFACT_SCRIPTS[script]
+    component = re.search(r'="\$LINUX_RESOURCES/([a-z0-9]+)"', (SCRIPTS / script).read_text(encoding="utf-8"))[1]
+    tree = SCRIPTS.parent / "resources" / "linux-x86_64" / component
+    if not (tree / ".artifact-sha256").is_file():
+        pytest.skip(f"{component} artifact not provisioned")
+    for row in (r for r in _manifest_rows(manifest) if select(r)):
+        assert (tree / row[file_col]).is_file(), row[file_col]
+        for notice in row[notice_col].split(","):
+            assert (tree / "licenses" / notice).is_file(), (row[file_col], notice)
+
+
+def test_the_jbig2_row_requires_the_patents_note():
+    rows = {r[0]: r for r in _manifest_rows("jbig2enc-licenses.tsv")}
+    assert "PATENTS-jbig2enc.txt" in rows["bin/jbig2"][4].split(",")
+
+
+def test_every_linux_tree_carries_the_gcc_runtime_notice():
+    for script, (manifest, select, file_col, notice_col, _sha) in ARTIFACT_SCRIPTS.items():
+        rows = [r for r in _manifest_rows(manifest) if select(r)]
+        runtime = [r for r in rows if r[file_col] in ("lib/libstdc++.so.6", "lib/libgcc_s.so.1")]
+        assert len(runtime) == 2, script
+        assert all(r[notice_col] == "LICENSE-gcc-runtime.txt" for r in runtime), script
+
+
+def test_the_voikko_linux_row_carries_the_windows_licence_reading():
+    rows = _manifest_rows("voikko.tsv")
+    windows = next(r for r in rows if r[0] == "libvoikko-1.dll")
+    linux = next(r for r in rows if r[0] == "lib/libvoikko.so.1")
+    assert linux[4] == windows[4]
+    assert "LICENSE-utfcpp.txt" in linux[5].split(",")
+
+
+def test_the_windows_gates_skip_the_linux_rows():
+    # Each PowerShell gate filters the shared manifest to its own rows; a Linux
+    # row that reached it would name a file no Windows tree holds.
+    assert r"'\.(exe|dll)$'" in (SCRIPTS / "bundle-jbig2enc.ps1").read_text(encoding="utf-8")
+    assert "platform -ne 'linux'" in (SCRIPTS / "bundle-voikko.ps1").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("script", sorted(ARTIFACT_SCRIPTS))
+def test_each_artifact_script_names_the_tree_the_engine_reads(script, monkeypatch):
+    from engine import platform_support
+
+    monkeypatch.setattr(platform_support, "IS_WINDOWS", False)
+    component = {"bundle-tesseract.sh": "tesseract", "bundle-jbig2enc.sh": "jbig2enc", "bundle-voikko.sh": "voikko"}[script]
+    text = (SCRIPTS / script).read_text(encoding="utf-8")
+    assert f'="$LINUX_RESOURCES/{component}"' in text
+    relative = {
+        "tesseract": platform_support.program_relative("tesseract"),
+        "jbig2enc": platform_support.program_relative("jbig2"),
+        "voikko": platform_support.library_relative("libvoikko-1.dll", "libvoikko.so.1"),
+    }[component]
+    rows = [r for r in _manifest_rows(ARTIFACT_SCRIPTS[script][0]) if ARTIFACT_SCRIPTS[script][1](r)]
+    assert "/".join(relative) in {r[0] for r in rows}
+
+
+def test_the_engine_refusals_name_scripts_that_exist(monkeypatch):
+    from engine import platform_support
+
+    engine = SCRIPTS.parent / "src" / "engine"
+    stems = set()
+    for source in engine.glob("*.py"):
+        stems |= set(re.findall(r'bundle_script\("([^"]+)"\)', source.read_text(encoding="utf-8")))
+    assert {"bundle-tesseract", "bundle-jbig2enc"} <= stems
+    for windows in (False, True):
+        monkeypatch.setattr(platform_support, "IS_WINDOWS", windows)
+        for stem in stems:
+            assert (SCRIPTS.parent / platform_support.bundle_script(stem)).is_file(), (windows, stem)

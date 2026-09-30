@@ -654,7 +654,8 @@ fn read_store(_machine_store: bool) -> Result<Vec<StoreCertificate>, StoreReadEr
     Err(StoreReadError {
         reason: "unsupported",
         code: None,
-        message: "The Windows certificate store is not available on this system.".to_string(),
+        message: crate::platform::Unsupported::new(crate::platform::feature::STORE_CERTIFICATES)
+            .to_string(),
     })
 }
 

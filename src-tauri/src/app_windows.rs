@@ -1713,20 +1713,24 @@ pub fn build_app_window(
     e2e: bool,
 ) -> tauri::Result<tauri::WebviewWindow> {
     let force_opaque = e2e && std::env::var("SPECTRAPDF_E2E_FORCE_OPAQUE").is_ok();
-    let wants_backdrop = crate::wants_backdrop(
-        windows_version::OsVersion::current().build,
-        crate::is_remote_session(),
-        crate::transparency_effects_enabled(),
-    ) && !force_opaque;
-    let window = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::default())
+    let wants_backdrop = crate::platform_wants_backdrop() && !force_opaque;
+    let builder = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::default())
         .title("Spectra PDF")
         .inner_size(1200.0, 800.0)
         .min_inner_size(800.0, 600.0)
         .center()
         .visible(false)
-        .transparent(wants_backdrop)
-        .build()?;
-    let backdrop = if wants_backdrop && window_vibrancy::apply_mica(&window, None).is_ok() {
+        .transparent(wants_backdrop);
+    // Every window shares one data directory: the per-window localStorage
+    // keys only stay apart, and `spectra-recent` only stays shared, inside a
+    // single storage.
+    #[cfg(target_os = "linux")]
+    let builder = match crate::portable::webview_data_in_force() {
+        Some(dir) => builder.data_directory(dir),
+        None => builder,
+    };
+    let window = builder.build()?;
+    let backdrop = if wants_backdrop && apply_backdrop(&window) {
         "mica"
     } else {
         // A transparent window whose HTML paints opaque renders identically to
@@ -1737,6 +1741,16 @@ pub fn build_app_window(
     app.state::<BackdropState>().record(label, backdrop);
     crate::session::on_window_created(app, &window);
     Ok(window)
+}
+
+#[cfg(windows)]
+fn apply_backdrop(window: &tauri::WebviewWindow) -> bool {
+    window_vibrancy::apply_mica(window, None).is_ok()
+}
+
+#[cfg(not(windows))]
+fn apply_backdrop(_window: &tauri::WebviewWindow) -> bool {
+    false
 }
 
 // ── Lifecycle hooks ───────────────────────────────────────────────────────
@@ -1975,6 +1989,7 @@ pub async fn take_pending_opens(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::native_path as native;
 
     fn test_claim_state() -> ClaimState {
         let mut state = ClaimState::new();
@@ -2079,27 +2094,27 @@ mod tests {
         // the temp path on the download, read back by the window it moves to.
         let claims = ClaimState::new();
         let origins = WebOrigins::new();
-        let path = "C:\\Temp\\net\\a.pdf";
+        let path = native("C:\\Temp\\net\\a.pdf");
         assert!(claims.claim_document(path, "main", ClaimMode::Write).granted);
         claims.set_web_origin(&origins, path, "main", "https://example.com/a.pdf");
         let found = origins.lookup(&[
-            "C:\\Temp\\net\\a.pdf".to_string(),
-            "C:\\Temp\\net\\b.pdf".to_string(),
+            native("C:\\Temp\\net\\a.pdf").to_string(),
+            native("C:\\Temp\\net\\b.pdf").to_string(),
         ]);
         assert_eq!(
-            found.get("C:\\Temp\\net\\a.pdf").map(String::as_str),
+            found.get(native("C:\\Temp\\net\\a.pdf")).map(String::as_str),
             Some("https://example.com/a.pdf"),
         );
         // A path with no recorded origin is simply absent — never a temp path
         // masquerading as web-origined.
-        assert!(!found.contains_key("C:\\Temp\\net\\b.pdf"));
+        assert!(!found.contains_key(native("C:\\Temp\\net\\b.pdf")));
     }
 
     #[test]
     fn web_origin_registration_requires_a_live_write_claim() {
         let claims = ClaimState::new();
         let origins = WebOrigins::new();
-        let path = "C:\\Temp\\net\\a.pdf";
+        let path = native("C:\\Temp\\net\\a.pdf");
 
         claims.set_web_origin(&origins, path, "main", "https://example.com/a.pdf");
         assert!(origins.lookup(&[path.to_string()]).is_empty());
@@ -2116,7 +2131,7 @@ mod tests {
     fn web_origin_survives_handover_and_is_removed_after_the_last_claim() {
         let claims = ClaimState::new();
         let origins = WebOrigins::new();
-        let path = "C:\\Temp\\net\\a.pdf";
+        let path = native("C:\\Temp\\net\\a.pdf");
         assert!(claims.claim_document(path, "main", ClaimMode::Write).granted);
         claims.set_web_origin(&origins, path, "main", "https://example.com/a.pdf");
 
@@ -2131,7 +2146,7 @@ mod tests {
         claims.forget_web_origin_if_unclaimed(&origins, path);
         assert!(origins.lookup(&[path.to_string()]).is_empty());
 
-        let second = "C:\\Temp\\net\\b.pdf";
+        let second = native("C:\\Temp\\net\\b.pdf");
         assert!(claims.claim_document(second, "main", ClaimMode::Write).granted);
         claims.set_web_origin(&origins, second, "main", "https://example.com/b.pdf");
         claims.release_label("main");
@@ -2151,27 +2166,27 @@ mod tests {
     #[test]
     fn a_write_claim_is_exclusive_and_names_its_holder() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+        assert!(state.claim(native("C:\\a.pdf"), "main", ClaimMode::Write).granted);
 
-        let refused = state.claim("C:\\a.pdf", "doc-1", ClaimMode::Write);
+        let refused = state.claim(native("C:\\a.pdf"), "doc-1", ClaimMode::Write);
         assert!(!refused.granted);
         assert_eq!(refused.owner, "main");
 
         // A read of a path held for writing is refused too: the reader's
         // pending pages address positions the writer is about to change.
-        let refused_read = state.claim("C:\\a.pdf", "doc-1", ClaimMode::Read);
+        let refused_read = state.claim(native("C:\\a.pdf"), "doc-1", ClaimMode::Read);
         assert!(!refused_read.granted);
         assert_eq!(refused_read.owner, "main");
 
         // Re-claiming from the holder is the same claim, not a conflict.
-        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
-        assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("main"));
+        assert!(state.claim(native("C:\\a.pdf"), "main", ClaimMode::Write).granted);
+        assert_eq!(state.owner(native("C:\\a.pdf")).as_deref(), Some("main"));
     }
 
     #[test]
     fn the_document_owner_can_reclaim_its_path_for_tab_reactivation() {
         let state = test_claim_state();
-        let path = r"C:\same.pdf";
+        let path = native(r"C:\same.pdf");
         assert!(state
             .claim_document(path, "main", ClaimMode::Write)
             .granted);
@@ -2208,37 +2223,37 @@ mod tests {
     #[test]
     fn the_exclusive_owner_reclaiming_is_granted_and_stacks_no_second_holder() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\a.pdf", "doc-1", ClaimMode::Write).granted);
+        assert!(state.claim(native("C:\\a.pdf"), "doc-1", ClaimMode::Write).granted);
 
-        let again = state.claim("C:\\a.pdf", "doc-1", ClaimMode::Write);
+        let again = state.claim(native("C:\\a.pdf"), "doc-1", ClaimMode::Write);
         assert!(again.granted);
         assert!(again.owner.is_empty());
-        assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("doc-1"));
+        assert_eq!(state.owner(native("C:\\a.pdf")).as_deref(), Some("doc-1"));
 
         // A re-claim updates the holder in place rather than pushing a second
         // one: a stacked holder would survive its window's single release and
         // wedge the path for the rest of the session.
-        state.release("C:\\a.pdf", "doc-1");
-        assert_eq!(state.owner("C:\\a.pdf"), None);
-        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+        state.release(native("C:\\a.pdf"), "doc-1");
+        assert_eq!(state.owner(native("C:\\a.pdf")), None);
+        assert!(state.claim(native("C:\\a.pdf"), "main", ClaimMode::Write).granted);
     }
 
     #[test]
     fn a_transfer_swaps_the_owner_without_the_path_ever_being_free() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+        assert!(state.claim(native("C:\\a.pdf"), "main", ClaimMode::Write).granted);
 
-        let moved = state.transfer("C:\\a.pdf", "main", "doc-1");
+        let moved = state.transfer(native("C:\\a.pdf"), "main", "doc-1");
         assert!(moved.granted);
         assert!(moved.owner.is_empty());
-        assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("doc-1"));
+        assert_eq!(state.owner(native("C:\\a.pdf")).as_deref(), Some("doc-1"));
 
         // Exclusivity moved with it: neither a third window nor the window that
         // just gave it up can take the path back.
-        let third = state.claim("C:\\a.pdf", "doc-2", ClaimMode::Write);
+        let third = state.claim(native("C:\\a.pdf"), "doc-2", ClaimMode::Write);
         assert!(!third.granted);
         assert_eq!(third.owner, "doc-1");
-        let back = state.claim("C:\\a.pdf", "main", ClaimMode::Write);
+        let back = state.claim(native("C:\\a.pdf"), "main", ClaimMode::Write);
         assert!(!back.granted);
         assert_eq!(back.owner, "doc-1");
     }
@@ -2246,22 +2261,22 @@ mod tests {
     #[test]
     fn a_transfer_from_a_window_that_does_not_own_the_path_is_refused() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+        assert!(state.claim(native("C:\\a.pdf"), "main", ClaimMode::Write).granted);
 
-        let refused = state.transfer("C:\\a.pdf", "doc-1", "doc-2");
+        let refused = state.transfer(native("C:\\a.pdf"), "doc-1", "doc-2");
         assert!(!refused.granted);
         assert_eq!(refused.owner, "main");
-        assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("main"));
+        assert_eq!(state.owner(native("C:\\a.pdf")).as_deref(), Some("main"));
 
         // A path nobody holds has nothing to hand over, and a refusal must not
         // leave a holder behind for a path that was never claimed.
-        let unowned = state.transfer("C:\\ghost.pdf", "main", "doc-1");
+        let unowned = state.transfer(native("C:\\ghost.pdf"), "main", "doc-1");
         assert!(!unowned.granted);
         assert!(unowned.owner.is_empty());
-        assert_eq!(state.owner("C:\\ghost.pdf"), None);
+        assert_eq!(state.owner(native("C:\\ghost.pdf")), None);
         assert!(
             state
-                .claim("C:\\ghost.pdf", "doc-2", ClaimMode::Write)
+                .claim(native("C:\\ghost.pdf"), "doc-2", ClaimMode::Write)
                 .granted
         );
     }
@@ -2269,20 +2284,20 @@ mod tests {
     #[test]
     fn a_transfer_is_refused_while_a_second_window_holds_the_path() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Read).granted);
-        assert!(state.claim("C:\\src.pdf", "doc-1", ClaimMode::Read).granted);
+        assert!(state.claim(native("C:\\src.pdf"), "main", ClaimMode::Read).granted);
+        assert!(state.claim(native("C:\\src.pdf"), "doc-1", ClaimMode::Read).granted);
 
         // Two readers means neither is the exclusive owner: the other window's
         // pending pages address positions in this file.
-        let refused = state.transfer("C:\\src.pdf", "main", "doc-2");
+        let refused = state.transfer(native("C:\\src.pdf"), "main", "doc-2");
         assert!(!refused.granted);
         assert_eq!(refused.owner, "doc-1");
-        assert_eq!(state.owner("C:\\src.pdf").as_deref(), Some("main"));
+        assert_eq!(state.owner(native("C:\\src.pdf")).as_deref(), Some("main"));
 
         // A sole reader is still not an exclusive owner — a read claim never
         // conferred the right to hand the file to somebody else.
-        state.release("C:\\src.pdf", "doc-1");
-        let sole_reader = state.transfer("C:\\src.pdf", "main", "doc-2");
+        state.release(native("C:\\src.pdf"), "doc-1");
+        let sole_reader = state.transfer(native("C:\\src.pdf"), "main", "doc-2");
         assert!(!sole_reader.granted);
         assert_eq!(sole_reader.owner, "main");
     }
@@ -2290,36 +2305,36 @@ mod tests {
     #[test]
     fn releasing_after_a_transfer_leaves_no_residue_in_either_window() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\a.pdf", "doc-3", ClaimMode::Write).granted);
-        assert!(state.transfer("C:\\a.pdf", "doc-3", "doc-4").granted);
+        assert!(state.claim(native("C:\\a.pdf"), "doc-3", ClaimMode::Write).granted);
+        assert!(state.transfer(native("C:\\a.pdf"), "doc-3", "doc-4").granted);
 
         // The new owner's SINGLE release frees the path completely: a swap that
         // left the source stacked behind the new holder would keep the path
         // owned here, and wedge it for the rest of the session.
-        state.release("C:\\a.pdf", "doc-4");
-        assert_eq!(state.owner("C:\\a.pdf"), None);
-        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+        state.release(native("C:\\a.pdf"), "doc-4");
+        assert_eq!(state.owner(native("C:\\a.pdf")), None);
+        assert!(state.claim(native("C:\\a.pdf"), "main", ClaimMode::Write).granted);
 
         // The source closes its tab without releasing; a stray release from it
         // must not strip the claim off the window that now holds the path.
-        assert!(state.claim("C:\\b.pdf", "doc-3", ClaimMode::Write).granted);
-        assert!(state.transfer("C:\\b.pdf", "doc-3", "doc-4").granted);
-        state.release("C:\\b.pdf", "doc-3");
-        assert_eq!(state.owner("C:\\b.pdf").as_deref(), Some("doc-4"));
+        assert!(state.claim(native("C:\\b.pdf"), "doc-3", ClaimMode::Write).granted);
+        assert!(state.transfer(native("C:\\b.pdf"), "doc-3", "doc-4").granted);
+        state.release(native("C:\\b.pdf"), "doc-3");
+        assert_eq!(state.owner(native("C:\\b.pdf")).as_deref(), Some("doc-4"));
     }
 
     #[test]
     fn destroying_the_window_a_path_was_transferred_to_frees_it() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
-        assert!(state.transfer("C:\\a.pdf", "main", "doc-1").granted);
+        assert!(state.claim(native("C:\\a.pdf"), "main", ClaimMode::Write).granted);
+        assert!(state.transfer(native("C:\\a.pdf"), "main", "doc-1").granted);
 
         // Release is driven by the window's own destruction, so the transferred
         // path follows the label it moved to, not the one it came from.
         state.release_label("main");
-        assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("doc-1"));
+        assert_eq!(state.owner(native("C:\\a.pdf")).as_deref(), Some("doc-1"));
         state.release_label("doc-1");
-        assert_eq!(state.owner("C:\\a.pdf"), None);
+        assert_eq!(state.owner(native("C:\\a.pdf")), None);
     }
 
     #[test]
@@ -2407,76 +2422,76 @@ mod tests {
     #[test]
     fn an_output_path_names_its_holder_unless_it_is_the_document_itself() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
-        assert!(state.claim("C:\\b.pdf", "doc-1", ClaimMode::Write).granted);
-        assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Read).granted);
+        assert!(state.claim(native("C:\\a.pdf"), "main", ClaimMode::Write).granted);
+        assert!(state.claim(native("C:\\b.pdf"), "doc-1", ClaimMode::Write).granted);
+        assert!(state.claim(native("C:\\src.pdf"), "main", ClaimMode::Read).granted);
 
         assert_eq!(
-            state.open_holder("C:\\a.pdf", None),
+            state.open_holder(native("C:\\a.pdf"), None),
             Some("main".to_string())
         );
         assert_eq!(
-            state.open_holder("C:\\b.pdf", Some("C:\\a.pdf")),
+            state.open_holder(native("C:\\b.pdf"), Some(native("C:\\a.pdf"))),
             Some("doc-1".to_string())
         );
         // Save As of a document onto its own file.
-        assert_eq!(state.open_holder("C:\\a.pdf", Some("C:\\a.pdf")), None);
-        assert_eq!(state.open_holder("C:\\new.pdf", None), None);
-        assert_eq!(state.open_holder("C:\\src.pdf", None), None);
+        assert_eq!(state.open_holder(native("C:\\a.pdf"), Some(native("C:\\a.pdf"))), None);
+        assert_eq!(state.open_holder(native("C:\\new.pdf"), None), None);
+        assert_eq!(state.open_holder(native("C:\\src.pdf"), None), None);
 
-        state.release("C:\\a.pdf", "main");
-        assert_eq!(state.open_holder("C:\\a.pdf", None), None);
+        state.release(native("C:\\a.pdf"), "main");
+        assert_eq!(state.open_holder(native("C:\\a.pdf"), None), None);
     }
 
     #[test]
     fn the_documents_a_window_has_open_are_its_write_claims_only() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\b.pdf", "main", ClaimMode::Write).granted);
-        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
-        assert!(state.claim("C:\\z.pdf", "doc-1", ClaimMode::Write).granted);
+        assert!(state.claim(native("C:\\b.pdf"), "main", ClaimMode::Write).granted);
+        assert!(state.claim(native("C:\\a.pdf"), "main", ClaimMode::Write).granted);
+        assert!(state.claim(native("C:\\z.pdf"), "doc-1", ClaimMode::Write).granted);
         // An import source: read by main, never open in it.
-        assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Read).granted);
+        assert!(state.claim(native("C:\\src.pdf"), "main", ClaimMode::Read).granted);
 
         assert_eq!(
             state.write_claims("main"),
-            vec!["C:\\a.pdf".to_string(), "C:\\b.pdf".to_string()]
+            vec![native("C:\\a.pdf").to_string(), native("C:\\b.pdf").to_string()]
         );
-        assert_eq!(state.write_claims("doc-1"), vec!["C:\\z.pdf".to_string()]);
+        assert_eq!(state.write_claims("doc-1"), vec![native("C:\\z.pdf").to_string()]);
         assert!(state.write_claims("doc-9").is_empty());
 
         // A transferred document is listed by whoever holds it now, and by
         // nobody else — a session that recorded it twice would open two copies.
-        assert!(state.transfer("C:\\a.pdf", "main", "doc-1").granted);
-        assert_eq!(state.write_claims("main"), vec!["C:\\b.pdf".to_string()]);
+        assert!(state.transfer(native("C:\\a.pdf"), "main", "doc-1").granted);
+        assert_eq!(state.write_claims("main"), vec![native("C:\\b.pdf").to_string()]);
         assert_eq!(
             state.write_claims("doc-1"),
-            vec!["C:\\a.pdf".to_string(), "C:\\z.pdf".to_string()]
+            vec![native("C:\\a.pdf").to_string(), native("C:\\z.pdf").to_string()]
         );
     }
 
     #[test]
     fn read_claims_coexist_and_still_block_a_write() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Read).granted);
-        assert!(state.claim("C:\\src.pdf", "doc-1", ClaimMode::Read).granted);
+        assert!(state.claim(native("C:\\src.pdf"), "main", ClaimMode::Read).granted);
+        assert!(state.claim(native("C:\\src.pdf"), "doc-1", ClaimMode::Read).granted);
 
-        let refused = state.claim("C:\\src.pdf", "doc-2", ClaimMode::Write);
+        let refused = state.claim(native("C:\\src.pdf"), "doc-2", ClaimMode::Write);
         assert!(!refused.granted);
 
         // A reader upgrading to a write is refused while another reader holds
         // the path — the upgrade is not privileged by already being a holder.
-        let upgrade = state.claim("C:\\src.pdf", "main", ClaimMode::Write);
+        let upgrade = state.claim(native("C:\\src.pdf"), "main", ClaimMode::Write);
         assert!(!upgrade.granted);
         assert_eq!(upgrade.owner, "doc-1");
 
-        state.release("C:\\src.pdf", "doc-1");
-        assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Write).granted);
+        state.release(native("C:\\src.pdf"), "doc-1");
+        assert!(state.claim(native("C:\\src.pdf"), "main", ClaimMode::Write).granted);
     }
 
     #[test]
     fn a_document_retained_only_as_an_import_source_downgrades_to_read() {
         let state = test_claim_state();
-        let path = r"C:\imports\source.pdf";
+        let path = native(r"C:\imports\source.pdf");
         assert!(state
             .claim_document(path, "main", ClaimMode::Write)
             .granted);
@@ -2502,50 +2517,50 @@ mod tests {
         let state = test_claim_state();
         assert!(
             state
-                .claim("C:\\docs\\a.pdf", "main", ClaimMode::Write)
+                .claim(native("C:\\docs\\a.pdf"), "main", ClaimMode::Write)
                 .granted
         );
         assert!(
             state
-                .claim("C:\\src\\import.pdf", "main", ClaimMode::Read)
+                .claim(native("C:\\src\\import.pdf"), "main", ClaimMode::Read)
                 .granted
         );
 
-        let refused = run(&state, "doc-1", &["C:\\out", "C:\\docs"]);
+        let refused = run(&state, "doc-1", &[native("C:\\out"), native("C:\\docs")]);
         assert!(!refused.granted);
-        assert_eq!(refused.document, "C:\\docs\\a.pdf");
-        assert_eq!(refused.folder, "C:\\docs");
+        assert_eq!(refused.document, native("C:\\docs\\a.pdf"));
+        assert_eq!(refused.folder, native("C:\\docs"));
         assert_eq!(refused.owner, "main");
         assert!(!refused.same_window);
-        assert!(!run(&state, "main", &["C:\\"]).granted);
+        assert!(!run(&state, "main", &[native("C:\\")]).granted);
         assert!(
-            run(&state, "main", &["C:\\src"]).granted,
+            run(&state, "main", &[native("C:\\src")]).granted,
             "an import source is not open"
         );
         assert!(
-            run(&state, "main", &["C:\\docs2"]).granted,
+            run(&state, "main", &[native("C:\\docs2")]).granted,
             "a sibling folder is not inside"
         );
 
-        let token = run(&state, "doc-1", &["C:\\batch"]).token.unwrap();
-        let blocked = state.claim("C:\\batch\\sub\\b.pdf", "main", ClaimMode::Write);
+        let token = run(&state, "doc-1", &[native("C:\\batch")]).token.unwrap();
+        let blocked = state.claim(native("C:\\batch\\sub\\b.pdf"), "main", ClaimMode::Write);
         assert!(!blocked.granted);
         assert_eq!(blocked.owner, "doc-1");
-        assert_eq!(blocked.folder, "C:\\batch");
+        assert_eq!(blocked.folder, native("C:\\batch"));
         assert!(
             state
-                .claim("C:\\batch\\c.pdf", "main", ClaimMode::Read)
+                .claim(native("C:\\batch\\c.pdf"), "main", ClaimMode::Read)
                 .granted
         );
         assert!(
             state
-                .claim("C:\\batchx\\d.pdf", "main", ClaimMode::Write)
+                .claim(native("C:\\batchx\\d.pdf"), "main", ClaimMode::Write)
                 .granted
         );
         assert!(state.release_run(token, "doc-1"));
         assert!(
             state
-                .claim("C:\\batch\\sub\\b.pdf", "main", ClaimMode::Write)
+                .claim(native("C:\\batch\\sub\\b.pdf"), "main", ClaimMode::Write)
                 .granted
         );
     }
@@ -2553,7 +2568,7 @@ mod tests {
     #[test]
     fn an_engine_output_reservation_blocks_a_later_document_open() {
         let state = test_claim_state();
-        let path = r"C:\export\result.pdf";
+        let path = native(r"C:\export\result.pdf");
         let reservation = state.claim_engine_output(path, "main").unwrap();
 
         let blocked = state.claim_document(path, "doc-1", ClaimMode::Write);
@@ -2581,6 +2596,7 @@ mod tests {
         assert!(!state.holds_folder_run("batch", &std::env::temp_dir().to_string_lossy()));
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_private_scratch_output_is_not_blocked_by_a_temp_ancestor_run() {
         let state = test_claim_state();
@@ -2610,6 +2626,7 @@ mod tests {
         drop(reservation);
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_private_scratch_output_ignores_another_process_ancestor_lease() {
         let state = test_claim_state();
@@ -2662,23 +2679,23 @@ mod tests {
     #[test]
     fn engine_outputs_inside_the_windows_folder_run_reuse_its_claim() {
         let state = test_claim_state();
-        let token = run(&state, "main", &[r"C:\batch"]).token.unwrap();
+        let token = run(&state, "main", &[native(r"C:\batch")]).token.unwrap();
 
         let reservation = state
-            .claim_engine_output(r"C:\batch\result.pdf", "main")
+            .claim_engine_output(native(r"C:\batch\result.pdf"), "main")
             .unwrap();
         assert_eq!(state.folder_leases("main").len(), 1);
         assert!(!state
-            .claim_document(r"C:\batch\result.pdf", "doc-1", ClaimMode::Write)
+            .claim_document(native(r"C:\batch\result.pdf"), "doc-1", ClaimMode::Write)
             .granted);
 
         assert!(state.release_run(token, "main"));
         assert!(!state
-            .claim_document(r"C:\batch\result.pdf", "doc-1", ClaimMode::Write)
+            .claim_document(native(r"C:\batch\result.pdf"), "doc-1", ClaimMode::Write)
             .granted);
         drop(reservation);
         assert!(state
-            .claim_document(r"C:\batch\result.pdf", "doc-1", ClaimMode::Write)
+            .claim_document(native(r"C:\batch\result.pdf"), "doc-1", ClaimMode::Write)
             .granted);
     }
 
@@ -2686,13 +2703,13 @@ mod tests {
     fn an_engine_output_that_is_already_open_is_refused_before_writing() {
         let state = test_claim_state();
         assert!(state
-            .claim_document(r"C:\export\result.pdf", "doc-1", ClaimMode::Write)
+            .claim_document(native(r"C:\export\result.pdf"), "doc-1", ClaimMode::Write)
             .granted);
 
         let refusal = state
-            .claim_engine_output(r"C:\export\result.pdf", "main")
+            .claim_engine_output(native(r"C:\export\result.pdf"), "main")
             .unwrap_err();
-        assert!(refusal.contains(r"C:\export\result.pdf"));
+        assert!(refusal.contains(native(r"C:\export\result.pdf")));
         assert!(refusal.contains("doc-1"));
     }
 
@@ -2849,9 +2866,9 @@ mod tests {
     fn a_second_request_cannot_reserve_the_same_engine_output() {
         let state = test_claim_state();
         let first = state
-            .claim_engine_output(r"C:\export\result.pdf", "main")
+            .claim_engine_output(native(r"C:\export\result.pdf"), "main")
             .unwrap();
-        let second = state.claim_engine_output(r"C:\export\result.pdf", "main");
+        let second = state.claim_engine_output(native(r"C:\export\result.pdf"), "main");
         assert!(second.unwrap_err().contains("another operation is writing it"));
         drop(first);
     }
@@ -2921,7 +2938,7 @@ mod tests {
         use std::panic::{catch_unwind, AssertUnwindSafe};
 
         let state = test_claim_state();
-        let path = r"C:\poisoned\document.pdf";
+        let path = native(r"C:\poisoned\document.pdf");
         assert!(state.claim_document(path, "doc-1", ClaimMode::Write).granted);
         let _ = catch_unwind(AssertUnwindSafe(|| {
             let _map = state.by_path.lock().unwrap();
@@ -2967,19 +2984,19 @@ mod tests {
     #[test]
     fn destroying_a_window_drops_everything_it_held() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\a.pdf", "doc-1", ClaimMode::Write).granted);
-        assert!(run(&state, "doc-1", &["C:\\out"]).granted);
-        assert!(run(&state, "doc-1", &["C:\\out2"]).granted);
-        assert!(run(&state, "main", &["C:\\kept"]).granted);
+        assert!(state.claim(native("C:\\a.pdf"), "doc-1", ClaimMode::Write).granted);
+        assert!(run(&state, "doc-1", &[native("C:\\out")]).granted);
+        assert!(run(&state, "doc-1", &[native("C:\\out2")]).granted);
+        assert!(run(&state, "main", &[native("C:\\kept")]).granted);
 
         state.release_label("doc-1");
 
-        assert_eq!(state.owner("C:\\a.pdf"), None);
-        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
-        assert!(run(&state, "main", &["C:\\out"]).granted);
-        assert!(run(&state, "main", &["C:\\out2"]).granted);
+        assert_eq!(state.owner(native("C:\\a.pdf")), None);
+        assert!(state.claim(native("C:\\a.pdf"), "main", ClaimMode::Write).granted);
+        assert!(run(&state, "main", &[native("C:\\out")]).granted);
+        assert!(run(&state, "main", &[native("C:\\out2")]).granted);
         // Another window's run is not the destroyed window's to drop.
-        let kept = run(&state, "doc-2", &["C:\\kept"]);
+        let kept = run(&state, "doc-2", &[native("C:\\kept")]);
         assert!(!kept.granted);
         assert_eq!(kept.owner, "main");
     }
@@ -2987,39 +3004,39 @@ mod tests {
     #[test]
     fn a_second_run_of_one_window_on_the_same_folder_is_refused() {
         let state = test_claim_state();
-        assert!(run(&state, "main", &["C:\\out"]).granted);
+        assert!(run(&state, "main", &[native("C:\\out")]).granted);
 
         // The first run is still writing: its dialog was closed while it stopped.
-        let second = run(&state, "main", &["C:\\out"]);
+        let second = run(&state, "main", &[native("C:\\out")]);
         assert!(!second.granted);
         assert_eq!(second.owner, "main");
         assert!(second.same_window);
-        assert_eq!(second.folder, "C:\\out");
+        assert_eq!(second.folder, native("C:\\out"));
         assert_eq!(second.token, None);
     }
 
     #[test]
     fn a_second_run_of_one_window_on_a_nested_folder_is_refused_both_ways() {
         let outer_first = test_claim_state();
-        assert!(run(&outer_first, "main", &["C:\\out"]).granted);
-        let inner = run(&outer_first, "main", &["C:\\out\\sub"]);
+        assert!(run(&outer_first, "main", &[native("C:\\out")]).granted);
+        let inner = run(&outer_first, "main", &[native("C:\\out\\sub")]);
         assert!(!inner.granted);
         assert!(inner.same_window);
-        assert_eq!(inner.folder, "C:\\out\\sub");
+        assert_eq!(inner.folder, native("C:\\out\\sub"));
 
         let inner_first = test_claim_state();
-        assert!(run(&inner_first, "main", &["C:\\out\\sub"]).granted);
-        let outer = run(&inner_first, "main", &["C:\\out"]);
+        assert!(run(&inner_first, "main", &[native("C:\\out\\sub")]).granted);
+        let outer = run(&inner_first, "main", &[native("C:\\out")]);
         assert!(!outer.granted);
         assert!(outer.same_window);
-        assert_eq!(outer.folder, "C:\\out");
+        assert_eq!(outer.folder, native("C:\\out"));
     }
 
     #[test]
     fn a_refusal_says_whether_the_run_in_the_way_is_this_windows_own() {
         let state = test_claim_state();
-        assert!(run(&state, "doc-1", &["C:\\out"]).granted);
-        let refused = run(&state, "main", &["C:\\out"]);
+        assert!(run(&state, "doc-1", &[native("C:\\out")]).granted);
+        let refused = run(&state, "main", &[native("C:\\out")]);
         assert!(!refused.granted);
         assert_eq!(refused.owner, "doc-1");
         assert!(!refused.same_window);
@@ -3028,36 +3045,36 @@ mod tests {
     #[test]
     fn releasing_one_run_leaves_the_other_runs_folders_claimed() {
         let state = test_claim_state();
-        let first = run(&state, "main", &["C:\\out\\a"]).token.unwrap();
-        let second = run(&state, "main", &["C:\\out\\b"]).token.unwrap();
+        let first = run(&state, "main", &[native("C:\\out\\a")]).token.unwrap();
+        let second = run(&state, "main", &[native("C:\\out\\b")]).token.unwrap();
         assert_ne!(first, second);
 
         assert!(state.release_run(first, "main"));
 
         // The second run still writes C:\out\b: no run of any window may write
         // over it, its own window's included.
-        let over = run(&state, "doc-1", &["C:\\out"]);
+        let over = run(&state, "doc-1", &[native("C:\\out")]);
         assert!(!over.granted);
         assert_eq!(over.owner, "main");
-        assert!(!run(&state, "main", &["C:\\out\\b"]).granted);
+        assert!(!run(&state, "main", &[native("C:\\out\\b")]).granted);
         // The first run's folder is free again.
-        let reuse = run(&state, "doc-1", &["C:\\out\\a"]);
+        let reuse = run(&state, "doc-1", &[native("C:\\out\\a")]);
         assert!(reuse.granted);
 
         assert!(state.release_run(second, "main"));
         assert!(state.release_run(reuse.token.unwrap(), "doc-1"));
-        assert!(run(&state, "doc-2", &["C:\\out"]).granted);
+        assert!(run(&state, "doc-2", &[native("C:\\out")]).granted);
     }
 
     #[test]
     fn a_release_frees_only_a_run_of_the_window_that_sends_it() {
         let state = test_claim_state();
-        let token = run(&state, "main", &["C:\\out"]).token.unwrap();
+        let token = run(&state, "main", &[native("C:\\out")]).token.unwrap();
 
         // Tokens are sequential; a window that sends another window's token
         // releases nothing.
         assert!(!state.release_run(token, "doc-1"));
-        assert!(!run(&state, "doc-1", &["C:\\out"]).granted);
+        assert!(!run(&state, "doc-1", &[native("C:\\out")]).granted);
 
         assert!(state.release_run(token, "main"));
         // A token is spent once.
@@ -3068,28 +3085,28 @@ mod tests {
     #[test]
     fn a_token_is_never_issued_twice() {
         let state = test_claim_state();
-        let first = run(&state, "main", &["C:\\out"]).token.unwrap();
+        let first = run(&state, "main", &[native("C:\\out")]).token.unwrap();
         assert!(state.release_run(first, "main"));
-        let second = run(&state, "main", &["C:\\out"]).token.unwrap();
+        let second = run(&state, "main", &[native("C:\\out")]).token.unwrap();
         assert_ne!(first, second);
 
         // A late release of the first run does not free the second.
         assert!(!state.release_run(first, "main"));
-        assert!(!run(&state, "doc-1", &["C:\\out"]).granted);
+        assert!(!run(&state, "doc-1", &[native("C:\\out")]).granted);
     }
 
     #[test]
     fn a_run_claims_all_its_folders_or_none() {
         let state = test_claim_state();
-        assert!(run(&state, "doc-1", &["C:\\moved"]).granted);
+        assert!(run(&state, "doc-1", &[native("C:\\moved")]).granted);
 
-        let refused = run(&state, "main", &["C:\\out", "C:\\moved\\x"]);
+        let refused = run(&state, "main", &[native("C:\\out"), native("C:\\moved\\x")]);
         assert!(!refused.granted);
         assert_eq!(refused.owner, "doc-1");
-        assert_eq!(refused.folder, "C:\\moved\\x");
+        assert_eq!(refused.folder, native("C:\\moved\\x"));
 
         // Nothing of the refused run stayed behind.
-        assert!(run(&state, "doc-2", &["C:\\out"]).granted);
+        assert!(run(&state, "doc-2", &[native("C:\\out")]).granted);
     }
 
     #[test]
@@ -3097,11 +3114,11 @@ mod tests {
         // An in-place run writes its source tree and files its originals into
         // a folder inside it.
         let state = test_claim_state();
-        let in_place = run(&state, "main", &["C:\\docs", "C:\\docs\\done"]);
+        let in_place = run(&state, "main", &[native("C:\\docs"), native("C:\\docs\\done")]);
         assert!(in_place.granted);
-        assert!(!run(&state, "doc-1", &["C:\\docs\\done"]).granted);
+        assert!(!run(&state, "doc-1", &[native("C:\\docs\\done")]).granted);
         assert!(state.release_run(in_place.token.unwrap(), "main"));
-        assert!(run(&state, "doc-1", &["C:\\docs\\done"]).granted);
+        assert!(run(&state, "doc-1", &[native("C:\\docs\\done")]).granted);
     }
 
     #[test]
@@ -3146,7 +3163,7 @@ mod tests {
     #[test]
     fn a_run_claim_crosses_the_wire_in_the_shape_the_renderer_reads() {
         let state = test_claim_state();
-        let granted = run(&state, "main", &["C:\\out"]);
+        let granted = run(&state, "main", &[native("C:\\out")]);
         assert_eq!(
             serde_json::to_value(&granted).unwrap(),
             serde_json::json!({
@@ -3158,81 +3175,81 @@ mod tests {
                 "token": granted.token.unwrap(),
             })
         );
-        let refused = run(&state, "doc-1", &["C:\\out\\sub"]);
+        let refused = run(&state, "doc-1", &[native("C:\\out\\sub")]);
         assert_eq!(
             serde_json::to_value(&refused).unwrap(),
             serde_json::json!({
                 "granted": false,
                 "owner": "main",
                 "sameWindow": false,
-                "folder": "C:\\out\\sub",
+                "folder": native("C:\\out\\sub"),
                 "document": "",
                 "token": null,
             })
         );
         assert!(
             state
-                .claim("C:\\docs\\a.pdf", "doc-1", ClaimMode::Write)
+                .claim(native("C:\\docs\\a.pdf"), "doc-1", ClaimMode::Write)
                 .granted
         );
-        let open = run(&state, "doc-1", &["C:\\docs"]);
+        let open = run(&state, "doc-1", &[native("C:\\docs")]);
         assert_eq!(
             serde_json::to_value(&open).unwrap(),
             serde_json::json!({
                 "granted": false,
                 "owner": "doc-1",
                 "sameWindow": true,
-                "folder": "C:\\docs",
-                "document": "C:\\docs\\a.pdf",
+                "folder": native("C:\\docs"),
+                "document": native("C:\\docs\\a.pdf"),
                 "token": null,
             })
         );
         assert_eq!(
-            serde_json::to_value(state.claim("C:\\out\\b.pdf", "doc-1", ClaimMode::Write)).unwrap(),
-            serde_json::json!({ "granted": false, "owner": "main", "folder": "C:\\out" })
+            serde_json::to_value(state.claim(native("C:\\out\\b.pdf"), "doc-1", ClaimMode::Write)).unwrap(),
+            serde_json::json!({ "granted": false, "owner": "main", "folder": native("C:\\out") })
         );
     }
 
     #[test]
     fn releasing_a_path_this_window_never_held_is_a_no_op() {
         let state = test_claim_state();
-        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
-        state.release("C:\\a.pdf", "doc-1");
-        assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("main"));
-        state.release("C:\\never-claimed.pdf", "doc-1");
-        assert_eq!(state.owner("C:\\never-claimed.pdf"), None);
+        assert!(state.claim(native("C:\\a.pdf"), "main", ClaimMode::Write).granted);
+        state.release(native("C:\\a.pdf"), "doc-1");
+        assert_eq!(state.owner(native("C:\\a.pdf")).as_deref(), Some("main"));
+        state.release(native("C:\\never-claimed.pdf"), "doc-1");
+        assert_eq!(state.owner(native("C:\\never-claimed.pdf")), None);
     }
 
     #[test]
     fn output_roots_conflict_by_containment_not_by_prefix() {
-        assert!(roots_conflict("C:\\out", "C:\\out"));
-        assert!(roots_conflict("C:\\out", "C:\\out\\sub"));
-        assert!(roots_conflict("C:\\out\\sub", "C:\\out"));
-        assert!(roots_conflict("C:\\out\\", "C:\\out"));
+        assert!(roots_conflict(native("C:\\out"), native("C:\\out")));
+        assert!(roots_conflict(native("C:\\out"), native("C:\\out\\sub")));
+        assert!(roots_conflict(native("C:\\out\\sub"), native("C:\\out")));
+        assert!(roots_conflict(native("C:\\out\\"), native("C:\\out")));
         #[cfg(windows)]
         {
-            assert!(roots_conflict("C:\\OUT", "c:/out/sub"));
-            assert!(roots_conflict(r"C:\out", r"C:\other\..\out\sub"));
-            assert!(root_contains(r"C:\OUT", r"c:/other/../out/sub/result.pdf"));
+            assert!(roots_conflict(native("C:\\OUT"), native("c:/out/sub")));
+            assert!(roots_conflict(native(r"C:\out"), native(r"C:\other\..\out\sub")));
+            assert!(root_contains(native(r"C:\OUT"), native(r"c:/other/../out/sub/result.pdf")));
         }
-        assert!(!root_contains(r"C:\out", r"C:\out2\result.pdf"));
-        assert!(!roots_conflict("C:\\out", "C:\\out2"));
-        assert!(!roots_conflict("C:\\out", "C:\\other"));
+        assert!(!root_contains(native(r"C:\out"), native(r"C:\out2\result.pdf")));
+        assert!(!roots_conflict(native("C:\\out"), native("C:\\out2")));
+        assert!(!roots_conflict(native("C:\\out"), native("C:\\other")));
 
         let state = test_claim_state();
-        assert!(run(&state, "main", &["C:\\out"]).granted);
-        let refused = run(&state, "doc-1", &["C:\\out\\sub"]);
+        assert!(run(&state, "main", &[native("C:\\out")]).granted);
+        let refused = run(&state, "doc-1", &[native("C:\\out\\sub")]);
         assert!(!refused.granted);
         assert_eq!(refused.owner, "main");
         #[cfg(windows)]
         {
-            let case_alias = run(&state, "doc-2", &["c:/OUT/sub"]);
+            let case_alias = run(&state, "doc-2", &[native("c:/OUT/sub")]);
             assert!(!case_alias.granted);
             assert_eq!(case_alias.owner, "main");
         }
-        assert!(run(&state, "doc-1", &["C:\\out2"]).granted);
-        assert!(!run(&state, "main", &["C:\\out2\\x"]).granted);
-        assert!(run(&state, "main", &["C:\\other"]).granted);
+        assert!(run(&state, "doc-1", &[native("C:\\out2")]).granted);
+        assert!(!run(&state, "main", &[native("C:\\out2\\x")]).granted);
+        assert!(run(&state, "main", &[native("C:\\other")]).granted);
     }
 
     #[cfg(not(windows))]
@@ -3256,13 +3273,13 @@ mod tests {
         assert!(queue_open(
             &registry,
             "doc-1",
-            vec!["C:\\a.pdf".into()],
+            vec![native("C:\\a.pdf").into()],
             false
         ));
         assert!(queue_open(
             &registry,
             "doc-1",
-            vec!["C:\\b.pdf".into()],
+            vec![native("C:\\b.pdf").into()],
             true
         ));
         let drained = registry.take_pending("doc-1");
@@ -3287,7 +3304,7 @@ mod tests {
         assert!(queue_handover(
             &registry,
             "doc-1",
-            vec!["C:\\a.pdf".into()],
+            vec![native("C:\\a.pdf").into()],
             Some(2),
             handover(1),
         ));
@@ -3295,7 +3312,7 @@ mod tests {
         assert!(queue_open(
             &registry,
             "doc-1",
-            vec!["C:\\b.pdf".into()],
+            vec![native("C:\\b.pdf").into()],
             false
         ));
         let drained = registry.take_pending("doc-1");
@@ -3309,14 +3326,14 @@ mod tests {
         assert!(queue_handover(
             &registry,
             "doc-1",
-            vec!["C:\\a.pdf".into()],
+            vec![native("C:\\a.pdf").into()],
             None,
             handover(7)
         ));
         assert!(queue_open(
             &registry,
             "doc-1",
-            vec!["C:\\b.pdf".into()],
+            vec![native("C:\\b.pdf").into()],
             false
         ));
 
@@ -3325,7 +3342,7 @@ mod tests {
         assert!(registry.revoke_pending("doc-1", 7));
         let left = registry.take_pending("doc-1");
         assert_eq!(left.len(), 1);
-        assert_eq!(left[0].files, vec!["C:\\b.pdf".to_string()]);
+        assert_eq!(left[0].files, vec![native("C:\\b.pdf").to_string()]);
 
         // A token that is no longer queued reports the removal it did not make,
         // so a cancel racing a drain cannot undo a delivery that happened.
@@ -3339,7 +3356,7 @@ mod tests {
         assert!(queue_handover(
             &registry,
             "doc-1",
-            vec!["C:\\a.pdf".into()],
+            vec![native("C:\\a.pdf").into()],
             None,
             handover(3)
         ));
@@ -3347,7 +3364,7 @@ mod tests {
         assert_eq!(drained[0].handover, Some(handover(3)));
 
         let plain = PendingOpen {
-            files: vec!["C:\\a.pdf".into()],
+            files: vec![native("C:\\a.pdf").into()],
             merge: false,
             index: None,
             handover: None,
@@ -3366,13 +3383,13 @@ mod tests {
         assert!(queue_open(
             &registry,
             "doc-1",
-            vec!["C:\\b.pdf".into()],
+            vec![native("C:\\b.pdf").into()],
             false
         ));
         assert!(queue_handover(
             &registry,
             "doc-1",
-            vec!["C:\\a.pdf".into()],
+            vec![native("C:\\a.pdf").into()],
             None,
             handover(4)
         ));
@@ -3381,14 +3398,14 @@ mod tests {
         // entry is the destruction rollback's only record of the move.
         let drained = registry.take_deliverable("doc-1");
         assert_eq!(drained.len(), 1);
-        assert_eq!(drained[0].files, vec!["C:\\b.pdf".to_string()]);
+        assert_eq!(drained[0].files, vec![native("C:\\b.pdf").to_string()]);
         // Draining again takes nothing and still leaves it.
         assert!(registry.take_deliverable("doc-1").is_empty());
 
         assert!(registry.release_pending("doc-1", 4));
         let committed = registry.take_deliverable("doc-1");
         assert_eq!(committed.len(), 1);
-        assert_eq!(committed[0].files, vec!["C:\\a.pdf".to_string()]);
+        assert_eq!(committed[0].files, vec![native("C:\\a.pdf").to_string()]);
         assert_eq!(
             registry.finish_handover_open("doc-1", 4).unwrap().handover,
             Some(handover(4))
@@ -3402,14 +3419,14 @@ mod tests {
         assert!(queue_handover(
             &registry,
             "doc-1",
-            vec!["C:\\a.pdf".into()],
+            vec![native("C:\\a.pdf").into()],
             None,
             handover(4)
         ));
         assert!(queue_handover(
             &registry,
             "doc-1",
-            vec!["C:\\b.pdf".into()],
+            vec![native("C:\\b.pdf").into()],
             None,
             handover(5)
         ));
@@ -3422,14 +3439,14 @@ mod tests {
         // handover that the renderer has not acknowledged yet.
         let left = registry.take_pending("doc-1");
         assert_eq!(left.len(), 2);
-        assert!(left.iter().any(|open| open.files == vec!["C:\\a.pdf"]));
-        assert!(left.iter().any(|open| open.files == vec!["C:\\b.pdf"]));
+        assert!(left.iter().any(|open| open.files == vec![native("C:\\a.pdf")]));
+        assert!(left.iter().any(|open| open.files == vec![native("C:\\b.pdf")]));
     }
 
     #[test]
     fn a_queued_position_survives_the_wire_and_an_older_record_has_none() {
         let queued = PendingOpen {
-            files: vec!["C:\\a.pdf".into()],
+            files: vec![native("C:\\a.pdf").into()],
             merge: false,
             index: Some(0),
             handover: None,
@@ -3466,25 +3483,25 @@ mod tests {
         // A hung renderer never sends a release; destruction is the only one.
         assert!(
             state
-                .claim("C:\\hung.pdf", "doc-1", ClaimMode::Write)
+                .claim(native("C:\\hung.pdf"), "doc-1", ClaimMode::Write)
                 .granted
         );
         assert!(
             state
-                .claim("C:\\shared.pdf", "doc-1", ClaimMode::Read)
+                .claim(native("C:\\shared.pdf"), "doc-1", ClaimMode::Read)
                 .granted
         );
         assert!(
             state
-                .claim("C:\\shared.pdf", "main", ClaimMode::Read)
+                .claim(native("C:\\shared.pdf"), "main", ClaimMode::Read)
                 .granted
         );
         assert!(
             state
-                .claim("C:\\mine.pdf", "main", ClaimMode::Write)
+                .claim(native("C:\\mine.pdf"), "main", ClaimMode::Write)
                 .granted
         );
-        let folder = run(&state, "doc-1", &["C:\\batch"]).token.unwrap();
+        let folder = run(&state, "doc-1", &[native("C:\\batch")]).token.unwrap();
 
         state.release_label("doc-1");
 
@@ -3492,23 +3509,23 @@ mod tests {
         assert!(!state.release_run(folder, "doc-1"));
         assert!(
             state
-                .claim("C:\\hung.pdf", "doc-2", ClaimMode::Write)
+                .claim(native("C:\\hung.pdf"), "doc-2", ClaimMode::Write)
                 .granted
         );
-        assert!(run(&state, "doc-2", &["C:\\batch"]).granted);
-        assert_eq!(state.owner("C:\\shared.pdf").as_deref(), Some("main"));
+        assert!(run(&state, "doc-2", &[native("C:\\batch")]).granted);
+        assert_eq!(state.owner(native("C:\\shared.pdf")).as_deref(), Some("main"));
         assert!(
             !state
-                .claim("C:\\shared.pdf", "doc-2", ClaimMode::Write)
+                .claim(native("C:\\shared.pdf"), "doc-2", ClaimMode::Write)
                 .granted
         );
-        assert_eq!(state.write_claims("main"), vec!["C:\\mine.pdf".to_string()]);
+        assert_eq!(state.write_claims("main"), vec![native("C:\\mine.pdf").to_string()]);
     }
 
     #[test]
     fn a_folder_and_a_document_in_it_claimed_in_opposite_orders_go_to_one_window() {
-        const FOLDER: &str = "C:\\race";
-        const DOC: &str = "C:\\race\\a.pdf";
+        let folder_root = native("C:\\race");
+        let doc_path = native("C:\\race\\a.pdf");
         for _ in 0..200 {
             let state = test_claim_state();
             let barrier = std::sync::Barrier::new(2);
@@ -3516,14 +3533,14 @@ mod tests {
             let (a, b) = std::thread::scope(|scope| {
                 let a = scope.spawn(|| {
                     barrier.wait();
-                    let folder = run(&state, "main", &[FOLDER]).granted;
-                    let doc = state.claim(DOC, "main", ClaimMode::Write).granted;
+                    let folder = run(&state, "main", &[folder_root]).granted;
+                    let doc = state.claim(doc_path, "main", ClaimMode::Write).granted;
                     (folder, doc)
                 });
                 let b = scope.spawn(|| {
                     barrier.wait();
-                    let doc = state.claim(DOC, "doc-1", ClaimMode::Write).granted;
-                    let folder = run(&state, "doc-1", &[FOLDER]).granted;
+                    let doc = state.claim(doc_path, "doc-1", ClaimMode::Write).granted;
+                    let folder = run(&state, "doc-1", &[folder_root]).granted;
                     (folder, doc)
                 });
                 let watchdog = scope.spawn(move || {
@@ -3540,10 +3557,10 @@ mod tests {
             assert_eq!(granted, 1, "main {a:?}, doc-1 {b:?}");
             assert!(a.0 ^ b.1, "main {a:?}, doc-1 {b:?}");
             // Read claims still coexist with whichever side won.
-            assert!(state.claim(DOC, "doc-2", ClaimMode::Read).granted || b.1);
+            assert!(state.claim(doc_path, "doc-2", ClaimMode::Read).granted || b.1);
             assert!(
                 state
-                    .claim("C:\\race\\b.pdf", "doc-2", ClaimMode::Read)
+                    .claim(native("C:\\race\\b.pdf"), "doc-2", ClaimMode::Read)
                     .granted
             );
         }

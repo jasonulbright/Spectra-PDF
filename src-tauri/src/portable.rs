@@ -20,6 +20,16 @@
 //! which `nsis-hooks.nsh` refuses to install without. So an installed run
 //! carries its acceptance and never asks again; a portable run has no record
 //! until the first-run dialog writes one.
+//!
+//! On Linux the same record decides the same way: a distribution package lays
+//! `install-record.json` beside the executable, and anything without it is
+//! portable. An AppImage mounts read-only, so nothing can be written beside
+//! the executable; `$APPIMAGE` names the image file instead, and a portable
+//! AppImage keeps its root in the `<image>.config` or `<image>.home` folder
+//! beside that file, the directories the AppImage runtime itself treats as
+//! the portable home. An AppImage with neither folder has no portable root
+//! and uses the per-user XDG directories, exactly as the read-only-media
+//! fallback does on Windows.
 
 use std::path::{Path, PathBuf};
 use tauri::Manager;
@@ -37,8 +47,17 @@ pub const PORTABLE_DATA_DIR: &str = "data";
 /// The assent record a portable run writes, under [`PORTABLE_DATA_DIR`].
 pub const ICC_ASSENT_FILE: &str = "icc-assent.json";
 
-/// The WebView2 user data folder under [`PORTABLE_DATA_DIR`].
+/// The webview's user data folder under the portable root.
+#[cfg(not(target_os = "linux"))]
 pub const WEBVIEW_DATA_DIR: &str = "webview2";
+#[cfg(target_os = "linux")]
+pub const WEBVIEW_DATA_DIR: &str = "webview";
+
+/// The bundle identifier: the folder name every per-user root is keyed by.
+pub const APP_IDENTIFIER: &str = "com.spectrapdf.app";
+
+/// Set by the AppImage runtime to the image file's absolute path.
+pub const APPIMAGE_ENV: &str = "APPIMAGE";
 
 /// The engine subprocess reads its assent state from this variable. See
 /// [`assent_env_value`] for why the engine is told rather than asked to look.
@@ -51,6 +70,7 @@ pub const ICC_ASSENT_ENV: &str = "SPECTRAPDF_ICC_ASSENT";
 pub const WEBVIEW_USER_DATA_ENV: &str = "WEBVIEW2_USER_DATA_FOLDER";
 
 /// The EdgeUpdate client id of the WebView2 Evergreen Runtime.
+#[cfg_attr(not(windows), allow(dead_code))]
 const WEBVIEW2_CLIENT: &str =
     r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
 
@@ -138,6 +158,96 @@ pub fn is_portable() -> bool {
     container() == Container::Portable
 }
 
+// ── the portable root ──────────────────────────────────────────────────────
+
+/// The portable container's writable root, or None when it has none.
+///
+/// Pure over the image path so both layouts are pinnable. Without an image the
+/// root is `<exe dir>/data`, as in the Windows zip. With one, the root is the
+/// first of `<image>.config` and `<image>.home` that exists as a folder; the
+/// user creates one of them to make an AppImage portable.
+pub fn portable_root_for(dir: &Path, appimage: Option<&Path>) -> Option<PathBuf> {
+    let Some(image) = appimage else {
+        return Some(dir.join(PORTABLE_DATA_DIR));
+    };
+    [".config", ".home"].into_iter().find_map(|suffix| {
+        let mut beside = image.as_os_str().to_os_string();
+        beside.push(suffix);
+        let beside = PathBuf::from(beside);
+        beside.is_dir().then(|| beside.join(APP_IDENTIFIER))
+    })
+}
+
+/// The running AppImage file, when this process runs from one.
+pub fn appimage() -> Option<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var_os(APPIMAGE_ENV)
+            .map(PathBuf::from)
+            .filter(|image| image.is_absolute() && image.is_file())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+pub fn portable_root(dir: &Path) -> Option<PathBuf> {
+    portable_root_for(dir, appimage().as_deref())
+}
+
+// ── the XDG base directories ───────────────────────────────────────────────
+
+/// One XDG base directory: the variable's value when it is an absolute path,
+/// else `$HOME/<fallback>`. The specification says a relative value is
+/// invalid and must be ignored.
+pub fn xdg_base_from(
+    value: Option<std::ffi::OsString>,
+    home: Option<PathBuf>,
+    fallback: &str,
+) -> Option<PathBuf> {
+    value
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .or_else(|| home.filter(|home| home.is_absolute()).map(|home| home.join(fallback)))
+}
+
+fn xdg_base(variable: &str, fallback: &str) -> Option<PathBuf> {
+    xdg_base_from(
+        std::env::var_os(variable),
+        std::env::var_os("HOME").map(PathBuf::from),
+        fallback,
+    )
+}
+
+/// `$XDG_CONFIG_HOME`, default `~/.config`.
+pub fn xdg_config_home() -> Option<PathBuf> {
+    xdg_base("XDG_CONFIG_HOME", ".config")
+}
+
+/// `$XDG_DATA_HOME`, default `~/.local/share`.
+pub fn xdg_data_home() -> Option<PathBuf> {
+    xdg_base("XDG_DATA_HOME", ".local/share")
+}
+
+/// `$XDG_STATE_HOME`, default `~/.local/state`.
+pub fn xdg_state_home() -> Option<PathBuf> {
+    xdg_base("XDG_STATE_HOME", ".local/state")
+}
+
+/// Where a portable copy with no portable root records its assent: the
+/// per-user configuration folder. Only a Linux AppImage without a portable
+/// folder reaches this; a Windows portable copy always has its root.
+fn assent_record_dir(dir: &Path) -> Option<PathBuf> {
+    portable_root(dir).or_else(|| {
+        if cfg!(target_os = "linux") {
+            xdg_config_home().map(|config| config.join(APP_IDENTIFIER))
+        } else {
+            None
+        }
+    })
+}
+
 // ── the assent record ──────────────────────────────────────────────────────
 
 /// The one field both records carry. Spelled the same in the installer's JSON
@@ -190,7 +300,10 @@ pub fn icc_assent_at(dir: &Path) -> IccAssent {
             None => IccAssent::Unrecorded,
         };
     }
-    match read_accepted_flag(&dir.join(PORTABLE_DATA_DIR).join(ICC_ASSENT_FILE)) {
+    let Some(root) = assent_record_dir(dir) else {
+        return IccAssent::Unrecorded;
+    };
+    match read_accepted_flag(&root.join(ICC_ASSENT_FILE)) {
         Some(true) => IccAssent::Accepted,
         Some(false) => IccAssent::Declined,
         None => IccAssent::Unrecorded,
@@ -214,7 +327,8 @@ pub fn record_icc_assent_at(dir: &Path, accepted: bool) -> Result<(), String> {
                 .to_string(),
         );
     }
-    let root = dir.join(PORTABLE_DATA_DIR);
+    let root = assent_record_dir(dir)
+        .ok_or_else(|| "Cannot resolve the configuration folder.".to_string())?;
     std::fs::create_dir_all(&root)
         .map_err(|e| format!("Cannot create {}: {}", root.display(), e))?;
     let body = format!("{{\n  \"{ACCEPTED_KEY}\": {accepted}\n}}\n");
@@ -258,7 +372,7 @@ pub fn assent_env_value(assent: IccAssent) -> &'static str {
 pub fn webview_user_data_at(dir: &Path, container: Container) -> Option<PathBuf> {
     match container {
         Container::Installed => None,
-        Container::Portable => Some(dir.join(PORTABLE_DATA_DIR).join(WEBVIEW_DATA_DIR)),
+        Container::Portable => portable_root(dir).map(|root| root.join(WEBVIEW_DATA_DIR)),
     }
 }
 
@@ -318,7 +432,10 @@ pub fn apply_webview_user_data() -> Option<PathBuf> {
     ) {
         WebViewUserDataDecision::UseDefault => None,
         WebViewUserDataDecision::SetPortable(wanted) => {
+            #[cfg(not(target_os = "linux"))]
             std::env::set_var(WEBVIEW_USER_DATA_ENV, &wanted);
+            #[cfg(target_os = "linux")]
+            let _ = WEBVIEW_DATA_IN_FORCE.set(wanted.clone());
             Some(wanted)
         }
         WebViewUserDataDecision::PortableFallback => {
@@ -326,6 +443,18 @@ pub fn apply_webview_user_data() -> Option<PathBuf> {
             None
         }
     }
+}
+
+/// WebKitGTK takes its data directory per window, not from the environment.
+/// Startup records the decision here and every window builder applies it.
+#[cfg(target_os = "linux")]
+static WEBVIEW_DATA_IN_FORCE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The portable webview data directory, or None for the per-user default
+/// (`$XDG_DATA_HOME/com.spectrapdf.app`).
+#[cfg(target_os = "linux")]
+pub fn webview_data_in_force() -> Option<PathBuf> {
+    WEBVIEW_DATA_IN_FORCE.get().cloned()
 }
 
 /// Create `dir` if needed and prove it can accept a new file.
@@ -373,7 +502,7 @@ pub fn resolve_data_root(
 pub fn preferred_data_root(dir: &Path, container: Container) -> Option<PathBuf> {
     match container {
         Container::Installed => None,
-        Container::Portable => Some(dir.join(PORTABLE_DATA_DIR)),
+        Container::Portable => portable_root(dir),
     }
 }
 
@@ -851,5 +980,46 @@ mod tests {
         assert!(!webview2_version_is_installed("0.0.0.0"));
         assert!(!webview2_version_is_installed(""));
         assert!(!webview2_version_is_installed("   "));
+    }
+
+    #[test]
+    fn an_appimage_is_portable_only_with_a_folder_beside_the_image() {
+        let dir = scratch("appimage");
+        let image = dir.join("Spectra_PDF.AppImage");
+        std::fs::write(&image, b"").unwrap();
+        let payload = dir.join("mount");
+        assert_eq!(
+            portable_root_for(&payload, None),
+            Some(payload.join(PORTABLE_DATA_DIR))
+        );
+        assert_eq!(portable_root_for(&payload, Some(&image)), None);
+        let home = dir.join("Spectra_PDF.AppImage.home");
+        std::fs::create_dir_all(&home).unwrap();
+        assert_eq!(
+            portable_root_for(&payload, Some(&image)),
+            Some(home.join(APP_IDENTIFIER))
+        );
+        let config = dir.join("Spectra_PDF.AppImage.config");
+        std::fs::create_dir_all(&config).unwrap();
+        assert_eq!(
+            portable_root_for(&payload, Some(&image)),
+            Some(config.join(APP_IDENTIFIER))
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn xdg_directories_ignore_relative_values_and_default_under_home() {
+        let home = std::env::temp_dir().join("home");
+        let set = std::env::temp_dir().join("state");
+        assert_eq!(
+            xdg_base_from(Some(set.clone().into_os_string()), Some(home.clone()), ".local/state"),
+            Some(set)
+        );
+        assert_eq!(
+            xdg_base_from(Some("relative".into()), Some(home.clone()), ".local/state"),
+            Some(home.join(".local/state"))
+        );
+        assert_eq!(xdg_base_from(None, None, ".config"), None);
     }
 }

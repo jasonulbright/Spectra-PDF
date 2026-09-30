@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TESSERACT = vendored_tools.TESSERACT
 GS = gs_axis.GS_PATH
 SCANNED = ROOT / "e2e-tests" / "fixtures" / "scanned.pdf"
-TESSDATA = TESSERACT.parent / "tessdata"
+TESSDATA = vendored_tools.TESSDATA
 CJK_FONT = ROOT / "resources" / "fonts" / "NotoSansCJKsc-Regular.otf"
 LANGUAGES_TS = ROOT / "src" / "renderer" / "ocr" / "languages.ts"
 
@@ -284,7 +284,7 @@ class TestAgainstTheVendoredStack:
         # Guards the failure that cost real time: tessdata/configs/tsv is a
         # CONFIG file, not a model. Without it tesseract exits 0 and prints
         # plain text, so recognition silently yields zero boxes.
-        assert (TESSERACT.parent / "tessdata" / "configs" / "tsv").is_file()
+        assert (TESSDATA / "configs" / "tsv").is_file()
 
     def test_refuses_a_page_past_the_end(self):
         with pytest.raises(RuntimeError):

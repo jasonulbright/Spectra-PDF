@@ -223,7 +223,7 @@ class TestJbig2:
         # is the one that matters in production and cannot be exercised by
         # running the dev tree, so the candidate list is tested directly.
         root = Path(tmp_dir)
-        program = vendored_tools.JBIG2.name
+        program = vendored_tools.JBIG2.relative_to(vendored_tools.NATIVE / "jbig2enc")
         shipped = jbig2_candidates(root / "resources" / "engine")
         assert shipped[0] == root / "resources" / "jbig2enc" / program
         dev = jbig2_candidates(root / "src" / "engine")
@@ -236,7 +236,7 @@ class TestJbig2:
         found = resolve_jbig2()
         if not found:
             pytest.skip("jbig2enc not vendored")
-        assert Path(found).parent.name == "jbig2enc"
+        assert Path(found) == vendored_tools.JBIG2
 
     def test_missing_encoder_refuses_by_name(self):
         from engine.mrc_codecs import _require_jbig2

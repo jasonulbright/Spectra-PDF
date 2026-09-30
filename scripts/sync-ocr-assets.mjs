@@ -27,13 +27,14 @@ if (OCR_LANGS.length === 0) {
 const root = fileURLToPath(new URL('../', import.meta.url))
 const nm = join(root, 'node_modules')
 // The native tree differs per platform: resources/tesseract/ with
-// tesseract.exe on Windows, resources/linux-x86_64/tesseract/ with `tesseract`
-// elsewhere. SPECTRA_OCR_TARGET=linux-x86_64 stages the Linux tree from any host.
+// tesseract.exe on Windows, resources/linux-x86_64/tesseract/ elsewhere. SPECTRA_OCR_TARGET=linux-x86_64 stages the Linux tree from any host.
 const linux = (process.env.SPECTRA_OCR_TARGET || (process.platform === 'win32' ? 'windows' : 'linux-x86_64')) === 'linux-x86_64'
 const tessDir = linux ? join(root, 'resources', 'linux-x86_64', 'tesseract') : join(root, 'resources', 'tesseract')
-const program = linux ? 'tesseract' : 'tesseract.exe'
-const fix = linux ? 'provision the pinned Linux OCR artifact' : 'run scripts/bundle-tesseract.ps1'
-const dest = join(tessDir, 'tessdata')
+// The Linux tree is the pinned artifact as published: bin/tesseract and
+// share/tessdata (src/engine/platform_support.py tessdata_dir).
+const program = linux ? join('bin', 'tesseract') : 'tesseract.exe'
+const fix = linux ? 'run scripts/bundle-tesseract.sh' : 'run scripts/bundle-tesseract.ps1'
+const dest = linux ? join(tessDir, 'share', 'tessdata') : join(tessDir, 'tessdata')
 
 // Staging models into a tree with no program would produce a silently useless
 // resource folder, so say so plainly instead.

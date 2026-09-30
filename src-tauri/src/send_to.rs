@@ -25,6 +25,7 @@ fn send_dir() -> PathBuf {
 /// Whether `path` sits directly in the staging folder `dir`, by physical
 /// identity of its parent. MAPI attaches whatever path it is handed, so an
 /// unconfined path would put any local file into a compose window.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn is_staged_copy(path: &Path, dir: &Path) -> bool {
     path.parent()
         .is_some_and(|parent| same_file::is_same_file(parent, dir).unwrap_or(false))
@@ -151,6 +152,7 @@ pub async fn stage_send_copy(path: String, display_name: String) -> Result<Strin
 
 /// The default desktop mail client's registered name, if any. HKCU overrides
 /// HKLM (per-user default beats machine default), both read-only.
+#[cfg(windows)]
 fn default_mail_client() -> Option<String> {
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
     for root in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
@@ -165,12 +167,17 @@ fn default_mail_client() -> Option<String> {
     None
 }
 
+#[cfg(windows)]
 const SUCCESS_SUCCESS: u32 = 0;
+#[cfg(windows)]
 const MAPI_E_USER_ABORT: u32 = 1;
+#[cfg(windows)]
 const MAPI_LOGON_UI: u32 = 0x1;
+#[cfg(windows)]
 const MAPI_DIALOG: u32 = 0x8;
 
 /// The failures worth naming (full table is MAPI.h; the rest report the code).
+#[cfg(windows)]
 fn mapi_error_name(code: u32) -> String {
     match code {
         2 => "the mail app reported a general failure".to_string(),
@@ -184,6 +191,7 @@ fn mapi_error_name(code: u32) -> String {
     }
 }
 
+#[cfg(windows)]
 #[repr(C)]
 struct MapiFileDescW {
     ul_reserved: u32,
@@ -194,6 +202,7 @@ struct MapiFileDescW {
     lp_file_type: *mut core::ffi::c_void,
 }
 
+#[cfg(windows)]
 #[repr(C)]
 struct MapiMessageW {
     ul_reserved: u32,
@@ -210,8 +219,10 @@ struct MapiMessageW {
     lp_files: *mut MapiFileDescW,
 }
 
+#[cfg(windows)]
 type MapiSendMailWFn = unsafe extern "system" fn(usize, usize, *const MapiMessageW, u32, u32) -> u32;
 
+#[cfg(windows)]
 fn utf16z(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
@@ -220,6 +231,7 @@ fn utf16z(s: &str) -> Vec<u16> {
 /// opens its compose window and the user takes it from there. Runs on a
 /// dedicated thread (MAPI providers dislike foreign COM apartments) and
 /// BLOCKS until the compose window closes on most clients.
+#[cfg(windows)]
 fn run_mapi(hwnd: usize, staged_path: &str) -> Result<u32, String> {
     use windows::core::{s, w};
     use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
@@ -277,6 +289,14 @@ fn run_mapi(hwnd: usize, staged_path: &str) -> Result<u32, String> {
 /// worker thread is left to park until the client returns. The user closing
 /// the compose window without sending (MAPI_E_USER_ABORT) is likewise not an
 /// error — attaching and then deciding not to send is a valid choice.
+#[cfg(not(windows))]
+#[tauri::command]
+pub async fn send_by_email(window: tauri::WebviewWindow, staged_path: String) -> Result<(), String> {
+    let _ = (window, staged_path);
+    Err(crate::platform::Unsupported::new(crate::platform::feature::SEND_BY_EMAIL).into())
+}
+
+#[cfg(windows)]
 #[tauri::command]
 pub async fn send_by_email(window: tauri::WebviewWindow, staged_path: String) -> Result<(), String> {
     if default_mail_client().is_none() {
@@ -389,6 +409,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(windows)]
     #[test]
     fn mapi_failures_are_named() {
         assert!(mapi_error_name(3).contains("log on"));

@@ -216,13 +216,13 @@ def _installed_lang(lang: str, tessdata: Path) -> str:
 
 
 def _tessdata_for(exe: Path) -> Path:
-    """tessdata sits beside the executable in the vendored tree.
+    """The vendored tree's tessdata (`platform_support.tessdata_dir`).
 
     Passing it explicitly means recognition does not depend on TESSDATA_PREFIX
     being set in whatever environment the run happens in -- which for a
     SCHEDULED run under a service account is an environment nobody configured.
     """
-    tessdata = exe.parent / "tessdata"
+    tessdata = platform_support.tessdata_dir(exe)
     if not tessdata.is_dir():
         script = platform_support.bundle_script("bundle-tesseract")
         raise RuntimeError(f"No tessdata beside {exe}; run {script}.")

@@ -627,6 +627,26 @@ fn schtasks() -> Command {
 ///
 /// Runs on its own thread so COM initialisation cannot collide with the async
 /// runtime's thread reuse, and the apartment is torn down deterministically.
+/// Scheduled actions need a task backend; without one every command refuses
+/// by name before touching the task store.
+fn scheduled_actions_available() -> Result<(), String> {
+    if crate::commands::PlatformCapabilities::current().scheduled_actions {
+        Ok(())
+    } else {
+        Err(crate::platform::Unsupported::new(crate::platform::feature::SCHEDULED_ACTIONS).into())
+    }
+}
+
+#[cfg(not(windows))]
+fn register_task_com(
+    _task_path: String,
+    _xml: String,
+    _account: String,
+    _password: Option<String>,
+) -> Result<(), String> {
+    Err(crate::platform::Unsupported::new(crate::platform::feature::SCHEDULED_ACTIONS).into())
+}
+
 #[cfg(windows)]
 fn register_task_com(
     task_path: String,
@@ -1118,6 +1138,7 @@ pub async fn create_scheduled_run(
     password: Option<String>,
     action_json: Option<String>,
 ) -> Result<String, String> {
+    scheduled_actions_available()?;
     validate_profile(&profile)?;
     let exe = std::env::current_exe()
         .map_err(|e| format!("Cannot resolve this application's path: {e}"))?
@@ -1867,6 +1888,7 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 /// cannot return anything we did not put there.
 #[tauri::command]
 pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
+    scheduled_actions_available()?;
     if let Ok(dir) = actions_dir() {
         reclaim_legacy_action_stages(&dir, SystemTime::now());
         reclaim_orphaned_actions(&dir);
@@ -1960,6 +1982,7 @@ pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
 /// our own folder — this is the destructive call, so it gets the narrow gate.
 #[tauri::command]
 pub async fn delete_scheduled_run(name: String) -> Result<(), String> {
+    scheduled_actions_available()?;
     if !valid_task_name(&name) {
         return Err(format!("Not a schedule this app created: {name}"));
     }
@@ -1981,6 +2004,7 @@ pub async fn delete_scheduled_run(name: String) -> Result<(), String> {
 /// the wrong thing.
 #[tauri::command]
 pub async fn run_scheduled_now(name: String) -> Result<(), String> {
+    scheduled_actions_available()?;
     if !valid_task_name(&name) {
         return Err(format!("Not a schedule this app created: {name}"));
     }
@@ -1992,6 +2016,7 @@ pub async fn run_scheduled_now(name: String) -> Result<(), String> {
 /// otherwise has to open Task Scheduler for.
 #[tauri::command]
 pub async fn set_scheduled_run_enabled(name: String, enabled: bool) -> Result<(), String> {
+    scheduled_actions_available()?;
     if !valid_task_name(&name) {
         return Err(format!("Not a schedule this app created: {name}"));
     }
@@ -2113,6 +2138,7 @@ mod tests {
     /// builds where the undocumented behavior is absent, it pins the ensure
     /// step itself. Uses its own probe folder so the app's real folder —
     /// which may hold a user's schedules — is never touched or deleted.
+    #[cfg(windows)]
     #[test]
     #[ignore]
     fn com_registration_creates_the_missing_folder() {
@@ -2144,6 +2170,7 @@ mod tests {
     }
 
     /// Test-only cleanup: schtasks can delete tasks but not FOLDERS.
+    #[cfg(windows)]
     fn delete_task_folder(folder: &str) {
         use windows::core::BSTR;
         use windows::Win32::System::Com::{
@@ -2522,6 +2549,7 @@ mod tests {
     /// Uses Task Scheduler itself to produce the XML that the product reads.
     /// This is ignored in the normal suite because it registers and removes a
     /// uniquely named task in an isolated probe folder.
+    #[cfg(windows)]
     #[test]
     #[ignore]
     fn schtasks_readback_with_omitted_defaults_remains_editable() {
@@ -3193,6 +3221,7 @@ mod tests {
     /// The Task Scheduler reads, against the real store: what a registration
     /// names reads back through the definition, and absence is not an error.
     /// Uses a probe folder of its own, deleted at the end.
+    #[cfg(windows)]
     #[test]
     #[ignore]
     fn com_definitions_read_back_the_action_a_registration_names() {
@@ -3232,6 +3261,7 @@ mod tests {
     /// The whole replace against the real store, in a probe folder: after two
     /// registrations the task names the second file, which holds the second
     /// action, and the first file is gone.
+    #[cfg(windows)]
     #[test]
     #[ignore]
     fn com_a_replaced_schedule_names_its_own_complete_action() {

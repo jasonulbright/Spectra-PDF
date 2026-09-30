@@ -10,6 +10,7 @@ fn main() {
     // a console, raise a dialog, or reach the parser, and its stdio carries a
     // protocol that any other output would corrupt.
     let argv: Vec<String> = std::env::args().collect();
+    #[cfg(windows)]
     if spectrapdf_lib::scan_host::host_arg_present(&argv) {
         std::process::exit(spectrapdf_lib::scan_host::serve());
     }
@@ -25,6 +26,11 @@ fn main() {
     // --help and --version output is visible when invoked from a terminal.
     // (windows_subsystem = "windows" starts with no console attached.)
     attach_parent_console();
+
+    if let Some(refusal) = spectrapdf_lib::cli::launch_refusal(&argv) {
+        eprintln!("error: {refusal}");
+        std::process::exit(2);
+    }
 
     // Document arguments reach the GUI without passing through the parser,
     // which has no positional to hold them and would exit 2 with no console to

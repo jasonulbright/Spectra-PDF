@@ -17,13 +17,17 @@ WINDOWS = os.name == "nt"
 NATIVE = ROOT / "resources" if WINDOWS else ROOT / "resources" / "linux-x86_64"
 EXE = ".exe" if WINDOWS else ""
 
-TESSERACT = NATIVE / "tesseract" / f"tesseract{EXE}"
-JBIG2 = NATIVE / "jbig2enc" / f"jbig2{EXE}"
+#: A Linux tree is the pinned artifact as published: programs in `bin/`,
+#: libraries in `lib/`, Tesseract's models in `share/tessdata/`.
+BIN = "" if WINDOWS else "bin"
+TESSERACT = NATIVE / "tesseract" / BIN / f"tesseract{EXE}"
+TESSDATA = TESSERACT.parent / "tessdata" if WINDOWS else NATIVE / "tesseract" / "share" / "tessdata"
+JBIG2 = NATIVE / "jbig2enc" / BIN / f"jbig2{EXE}"
 SOFFICE = NATIVE / "libreoffice" / "program" / f"soffice{EXE}"
 #: The Finnish analyser's native library. The Windows DLL sits beside the
 #: dictionary data; the Linux library has its own platform tree.
 VOIKKO_LIBRARY = (
     ROOT / "resources" / "dictionaries" / "fi" / "libvoikko-1.dll"
     if WINDOWS
-    else NATIVE / "voikko" / "libvoikko.so.1"
+    else NATIVE / "voikko" / "lib" / "libvoikko.so.1"
 )

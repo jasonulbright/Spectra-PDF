@@ -2,18 +2,60 @@
 //! The registry mutex serializes multi-root claims; each lease's open handle
 //! outlives that mutex and is released by the OS even after a process crash.
 
+#[cfg(any(windows, target_os = "linux"))]
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io;
+#[cfg(any(windows, target_os = "linux"))]
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
+#[cfg(any(windows, target_os = "linux"))]
 use std::time::{Duration, Instant};
 
+#[cfg(any(windows, target_os = "linux"))]
 use serde::{Deserialize, Serialize};
 
+#[cfg(windows)]
 #[derive(Debug)]
 pub struct FolderLease {
     _handle: File,
 }
 
+#[cfg(windows)]
+fn lease_handle(file: File) -> File {
+    file
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+pub struct FolderLease {
+    _handle: std::sync::Arc<LockedRecord>,
+}
+
+/// The record's open file description, unlocked explicitly when the last
+/// in-process holder goes. A child forked concurrently holds a copy of every
+/// descriptor until its `exec`; without the explicit unlock that copy would
+/// keep a released lease locked for that interval. A crash runs no `Drop`, so
+/// the worker's in-flight copy still holds the lock then.
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct LockedRecord(File);
+
+#[cfg(target_os = "linux")]
+impl Drop for LockedRecord {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        unsafe {
+            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn lease_handle(file: File) -> std::sync::Arc<LockedRecord> {
+    std::sync::Arc::new(LockedRecord(file))
+}
+
+#[cfg(windows)]
 /// The worker holds the same OS lease while it can still write. A parent's
 /// crash may close its own lease before the job has terminated its children.
 pub struct WorkerLease {
@@ -21,6 +63,7 @@ pub struct WorkerLease {
     handle: usize,
 }
 
+#[cfg(windows)]
 impl FolderLease {
     pub fn retain_in_worker(&self, pid: u32) -> Result<WorkerLease, String> {
         use std::os::windows::io::AsRawHandle;
@@ -54,6 +97,7 @@ impl FolderLease {
     }
 }
 
+#[cfg(windows)]
 impl Drop for WorkerLease {
     fn drop(&mut self) {
         use windows::Win32::Foundation::{
@@ -84,6 +128,7 @@ impl Drop for WorkerLease {
 }
 
 #[derive(Debug)]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 pub enum ClaimError {
     Busy(String),
     Unavailable(String),
@@ -95,14 +140,18 @@ impl From<io::Error> for ClaimError {
     }
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 #[derive(Serialize, Deserialize)]
 struct Record {
     roots: Vec<String>,
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 const MAX_LIVE_RECORDS: usize = 4096;
+#[cfg(any(windows, target_os = "linux"))]
 const MAX_REGISTRY_ENTRIES: usize = MAX_LIVE_RECORDS + 1; // plus registry.lock
 
+#[cfg(windows)]
 pub fn registry_path() -> Result<PathBuf, ClaimError> {
     // Task Scheduler can run under another account. ProgramData supplies one
     // machine-wide location; its default inherited Users permissions allow
@@ -115,6 +164,7 @@ pub fn registry_path() -> Result<PathBuf, ClaimError> {
         .join("folder-claims"))
 }
 
+#[cfg(windows)]
 fn exclusive(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     // Only READ access is needed to acquire an exclusive OS sharing lease.
@@ -122,6 +172,7 @@ fn exclusive(path: &Path) -> io::Result<File> {
     OpenOptions::new().read(true).share_mode(0).open(path)
 }
 
+#[cfg(windows)]
 fn live_record(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     // Readers may inspect the record; nobody may replace, delete or write it
@@ -138,10 +189,12 @@ fn live_record(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
+#[cfg(windows)]
 fn sharing_error(error: &io::Error) -> bool {
     matches!(error.raw_os_error(), Some(32 | 33))
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 fn registry_lock(path: &Path) -> Result<File, ClaimError> {
     match OpenOptions::new().write(true).create_new(true).open(path) {
         Ok(file) => drop(file),
@@ -161,6 +214,7 @@ fn registry_lock(path: &Path) -> Result<File, ClaimError> {
 }
 
 /// Resolve an existing ancestor too: destinations need not exist yet.
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 pub fn normalized_root(path: &str) -> Result<PathBuf, ClaimError> {
     let raw = Path::new(path);
     if !raw.is_absolute() {
@@ -189,12 +243,14 @@ pub fn normalized_root(path: &str) -> Result<PathBuf, ClaimError> {
     )))
 }
 
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 fn prefix(a: &str, b: &str) -> bool {
     a == b
         || b.strip_prefix(a)
             .is_some_and(|rest| rest.starts_with(['\\', '/']))
 }
 
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 pub fn roots_conflict(a: &Path, b: &Path) -> bool {
     let fold = |p: &Path| {
         p.to_string_lossy()
@@ -223,10 +279,105 @@ pub fn roots_conflict(a: &Path, b: &Path) -> bool {
     false
 }
 
+
+/// A lease the worker holds through its lease channel
+/// (`process_job::LEASE_FD_ENV`). A parent's crash closes this process's
+/// copies; the worker's in-flight copy keeps the same open file description,
+/// and therefore its `flock`, until the worker exits.
+#[cfg(target_os = "linux")]
+pub struct WorkerLease {
+    carrier: std::sync::Arc<crate::process_job::LeaseCarrier>,
+    id: u64,
+    _record: std::sync::Arc<LockedRecord>,
+}
+
+#[cfg(target_os = "linux")]
+impl FolderLease {
+    pub fn retain_in_worker(&self, pid: u32) -> Result<WorkerLease, String> {
+        use std::os::fd::AsFd;
+        let carrier = crate::process_job::lease_carrier(pid)
+            .ok_or_else(|| "The worker process has no folder lease channel.".to_string())?;
+        let id = carrier
+            .hold(self._handle.0.as_fd())
+            .map_err(|error| format!("The folder lease could not be shared with the worker: {error}"))?;
+        Ok(WorkerLease {
+            carrier,
+            id,
+            _record: self._handle.clone(),
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for WorkerLease {
+    fn drop(&mut self) {
+        self.carrier.release(self.id);
+    }
+}
+
+/// Per user: no scheduled run under another account exists here. The runtime
+/// directory is the per-login tmpfs the XDG base directory specification
+/// defines for exactly this kind of lock file; the state directory is its
+/// persistent stand-in when a session has none.
+#[cfg(target_os = "linux")]
+pub fn registry_path() -> Result<PathBuf, ClaimError> {
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .or_else(crate::portable::xdg_state_home)
+        .ok_or_else(|| {
+            ClaimError::Unavailable("The per-user state folder is unavailable.".into())
+        })?;
+    Ok(base.join("spectrapdf").join("folder-claims"))
+}
+
+#[cfg(target_os = "linux")]
+fn try_flock(file: &File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+/// The lock lives on the open file description, so every descriptor that
+/// shares it (a `dup`, an in-flight `SCM_RIGHTS` copy) holds it, and it is
+/// released only when the last of them closes.
+#[cfg(target_os = "linux")]
+fn exclusive(path: &Path) -> io::Result<File> {
+    let file = File::open(path)?;
+    try_flock(&file)?;
+    Ok(file)
+}
+
+/// Linux has no delete-on-close: a finished run's record stays until the next
+/// claim finds its lock free and removes it under the registry mutex.
+/// Read-only mode stops another account, not this user, from rewriting it.
+#[cfg(target_os = "linux")]
+fn live_record(path: &Path) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .mode(0o444)
+        .open(path)?;
+    try_flock(&file)?;
+    Ok(file)
+}
+
+#[cfg(target_os = "linux")]
+fn sharing_error(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::WouldBlock
+}
+
+#[cfg(any(windows, target_os = "linux"))]
 pub fn claim(roots: &[String]) -> Result<FolderLease, ClaimError> {
     claim_in(&registry_path()?, roots)
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 pub fn claim_in(registry: &Path, roots: &[String]) -> Result<FolderLease, ClaimError> {
     if roots.len() > 64 {
         return Err(ClaimError::Unavailable(
@@ -311,10 +462,50 @@ pub fn claim_in(registry: &Path, roots: &[String]) -> Result<FolderLease, ClaimE
     let mut file = live_record(&registry.join(format!("{id}.json")))?;
     file.write_all(&bytes)?;
     file.sync_all()?;
-    Ok(FolderLease { _handle: file })
+    Ok(FolderLease {
+        _handle: lease_handle(file),
+    })
 }
 
-#[cfg(test)]
+/// No lease backend exists here yet: nothing can hold a lease, so every claim
+/// refuses by name and a folder tool never runs unprotected.
+#[cfg(not(any(windows, target_os = "linux")))]
+mod unsupported {
+    use std::path::Path;
+
+    use super::ClaimError;
+    use crate::platform::{feature, Unsupported};
+
+    /// Uninhabited: no lease can be taken.
+    #[derive(Debug)]
+    pub enum FolderLease {}
+
+    /// Uninhabited: no lease can be retained.
+    pub enum WorkerLease {}
+
+    impl FolderLease {
+        pub fn retain_in_worker(&self, _pid: u32) -> Result<WorkerLease, String> {
+            match *self {}
+        }
+    }
+
+    fn refusal() -> ClaimError {
+        ClaimError::Unavailable(Unsupported::new(feature::FOLDER_LEASES).to_string())
+    }
+
+    pub fn claim(_roots: &[String]) -> Result<FolderLease, ClaimError> {
+        Err(refusal())
+    }
+
+    pub fn claim_in(_registry: &Path, _roots: &[String]) -> Result<FolderLease, ClaimError> {
+        Err(refusal())
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub use unsupported::{claim, claim_in, FolderLease, WorkerLease};
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests {
     use super::*;
 
@@ -355,6 +546,7 @@ mod tests {
         assert!(!roots_conflict(&a, &scratch.path().join("outside")));
     }
 
+    #[cfg(windows)]
     #[test]
     fn live_records_are_readable_but_cannot_be_changed_or_removed() {
         let scratch = tempfile::tempdir().unwrap();
@@ -424,12 +616,12 @@ mod tests {
     #[test]
     fn another_process_blocks_a_claim_and_crash_releases_it() {
         use std::io::BufRead;
-        use std::os::windows::process::CommandExt;
         use std::process::{Command, Stdio};
         let scratch = tempfile::tempdir().unwrap();
         let root = scratch.path().join("out").to_string_lossy().into_owned();
         let registry = scratch.path().join("claims");
-        let mut child = Command::new(std::env::current_exe().unwrap())
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
             .args([
                 "--exact",
                 "folder_claims::tests::child_holds_folder",
@@ -438,11 +630,14 @@ mod tests {
             ])
             .env("SPECTRA_TEST_CLAIM_REGISTRY", &registry)
             .env("SPECTRA_TEST_CLAIM_ROOT", &root)
-            .creation_flags(0x0800_0000)
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
+            .stdout(Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
+        }
+        let mut child = command.spawn().unwrap();
         let mut reader = std::io::BufReader::new(child.stdout.take().unwrap());
         let mut ready = false;
         for line in reader.by_ref().lines() {
@@ -457,5 +652,114 @@ mod tests {
         child.wait().unwrap();
         assert!(matches!(blocked, Err(ClaimError::Busy(_))));
         assert!(claim_in(&registry, &[root]).is_ok());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_finished_runs_record_is_removed_by_the_next_claim() {
+        let scratch = tempfile::tempdir().unwrap();
+        let registry = scratch.path().join("claims");
+        let root = scratch.path().join("out").to_string_lossy().into_owned();
+        let records = |registry: &Path| {
+            std::fs::read_dir(registry)
+                .unwrap()
+                .filter(|entry| {
+                    entry.as_ref().unwrap().path().extension().is_some_and(|ext| ext == "json")
+                })
+                .count()
+        };
+        drop(claim_in(&registry, std::slice::from_ref(&root)).unwrap());
+        assert_eq!(records(&registry), 1);
+        let held = claim_in(&registry, std::slice::from_ref(&root)).unwrap();
+        assert_eq!(records(&registry), 1);
+        drop(held);
+    }
+
+    // Invoked by a second test process: it claims a folder, retains the lease
+    // in a bound worker, and is then killed.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore]
+    fn child_retains_folder_in_a_worker() {
+        let Some(registry) = std::env::var_os("SPECTRA_TEST_CLAIM_REGISTRY") else {
+            return;
+        };
+        let root = std::env::var("SPECTRA_TEST_CLAIM_ROOT").unwrap();
+        let lease = claim_in(Path::new(&registry), &[root]).unwrap();
+        let mut command = std::process::Command::new("sleep");
+        command.arg("60");
+        let (worker, job) = crate::process_job::spawn_bound(
+            command,
+            crate::process_job::Binding { lease_channel: true, memory_limit: None },
+        )
+        .unwrap();
+        let retained = lease.retain_in_worker(worker.id()).unwrap();
+        println!("worker={}", worker.id());
+        std::io::stdout().flush().unwrap();
+        std::mem::forget((lease, retained, job));
+        std::thread::sleep(Duration::from_secs(60));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_crashed_runs_lease_is_held_until_its_worker_is_gone() {
+        use std::io::BufRead;
+        use std::process::{Command, Stdio};
+        let scratch = tempfile::tempdir().unwrap();
+        let root = scratch.path().join("out").to_string_lossy().into_owned();
+        let registry = scratch.path().join("claims");
+        let mut parent = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "folder_claims::tests::child_retains_folder_in_a_worker",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("SPECTRA_TEST_CLAIM_REGISTRY", &registry)
+            .env("SPECTRA_TEST_CLAIM_ROOT", &root)
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let reader = std::io::BufReader::new(parent.stdout.take().unwrap());
+        let mut worker = None;
+        for line in reader.lines() {
+            if let Some(pid) = line.unwrap().strip_prefix("worker=") {
+                worker = Some(pid.trim().parse::<u32>().unwrap());
+                break;
+            }
+        }
+        let worker = worker.expect("the worker was spawned");
+        assert!(matches!(
+            claim_in(&registry, std::slice::from_ref(&root)),
+            Err(ClaimError::Busy(_))
+        ));
+        parent.kill().unwrap();
+        parent.wait().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let claimed = claim_in(&registry, std::slice::from_ref(&root));
+            match claimed {
+                Ok(_) => {
+                    assert!(!worker_running(worker), "claimed while the worker still ran");
+                    break;
+                }
+                Err(ClaimError::Busy(_)) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(other) => panic!("the lease was never released: {other:?}"),
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn worker_running(pid: u32) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .map(|stat| {
+                stat.rsplit(')')
+                    .next()
+                    .and_then(|rest| rest.split_whitespace().next())
+                    .is_some_and(|state| state != "Z")
+            })
+            .unwrap_or(false)
     }
 }
