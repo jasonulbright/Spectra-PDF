@@ -108,10 +108,13 @@ jobs:
           python-version-file: .python-version
 
       - name: Install pip-audit
-        run: pip install pip-audit
+        run: "pip install --require-hashes --only-binary :all: -r scripts/pip-audit-requirements.txt"
 
       - name: pip audit (bundled engine runtime)
         run: pip-audit -r scripts/python-requirements.txt --no-deps
+
+      - name: pip audit (Linux engine runtime)
+        run: pip-audit -r scripts/python-requirements-linux.txt --no-deps --disable-pip
 
       # The wheels committed under vendor/wheels/ are installed from this
       # repository rather than resolved from the lockfile, so the step above

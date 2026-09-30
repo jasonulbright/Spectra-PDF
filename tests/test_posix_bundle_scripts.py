@@ -215,3 +215,35 @@ def test_the_engine_refusals_name_scripts_that_exist(monkeypatch):
         monkeypatch.setattr(platform_support, "IS_WINDOWS", windows)
         for stem in stems:
             assert (SCRIPTS.parent / platform_support.bundle_script(stem)).is_file(), (windows, stem)
+
+
+def _merge_patch(base, patch):
+    if not isinstance(patch, dict):
+        return patch
+    out = dict(base) if isinstance(base, dict) else {}
+    for key, value in patch.items():
+        if value is None:
+            out.pop(key, None)
+        else:
+            out[key] = _merge_patch(out.get(key), value)
+    return out
+
+
+def test_each_platform_bundle_ships_only_its_own_native_trees():
+    import json
+
+    tauri = SCRIPTS.parent / "src-tauri"
+    base = json.loads((tauri / "tauri.conf.json").read_text(encoding="utf-8"))
+    linux = _merge_patch(base, json.loads((tauri / "tauri.linux.conf.json").read_text(encoding="utf-8")))
+    portable = {"../resources/fonts", "../resources/dictionaries", "../resources/icc"}
+
+    windows_trees = {k for k in base["bundle"]["resources"] if k.startswith("../resources/")}
+    assert not {k for k in windows_trees if k.startswith("../resources/linux-x86_64")}
+    windows_native = windows_trees - portable
+    assert {"../resources/python", "../resources/tesseract", "../resources/jbig2enc"} <= windows_native
+
+    linux_trees = {k for k in linux["bundle"]["resources"] if k.startswith("../resources/")}
+    assert not linux_trees & windows_native
+    assert linux_trees - portable == {k for k in linux_trees if k.startswith("../resources/linux-x86_64/")}
+    targets = linux["bundle"]["resources"]
+    assert targets["../resources/linux-x86_64/python"] == "python"

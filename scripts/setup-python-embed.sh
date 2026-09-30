@@ -170,5 +170,15 @@ rm -f "$DEST"/bin/pip "$DEST"/bin/pip3 "$DEST"/bin/pip3.*
 # program that uses it. Nothing in the engine opens a dbm database, so the
 # extension does not ship; `dbm` falls back to its SQLite backend.
 rm -f "$DEST"/lib/python3.*/lib-dynload/_dbm.*
+# The archive's terminfo database carries symlinks whose targets it does not
+# include; the bundler refuses a resource tree with a dangling link.
+dangling="$(find "$DEST" -type l ! -exec test -e {} \; -print)"
+if [ -n "$dangling" ]; then
+  printf '%s\n' "$dangling" | while IFS= read -r link; do rm -f "$link"; done
+  echo "Removed $(printf '%s\n' "$dangling" | wc -l | tr -d ' ') dangling symlink(s)"
+fi
+left="$(find "$DEST" -type l ! -exec test -e {} \; -print)"
+[ -z "$left" ] || die "dangling symlinks remain under $DEST:
+$left"
 
 echo "Done. Linux Python runtime: $(tree_size "$DEST") at $DEST"

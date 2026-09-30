@@ -19,7 +19,7 @@ install_artifact "$ARTIFACT_URL" "$ARTIFACT_SHA256" "$ARTIFACT_SIZE" \
   "jbig2enc-0.32-linux-x86_64.tar.zst" "$DEST"
 rm -rf "$DEST.old"
 
-notice_gate "$MANIFEST" "$DEST" '$1 ~ /^(bin|lib)\//' 1 5 0
+notice_gate "$MANIFEST" "$DEST" '$1 ~ /^(bin|lib)\//' 1 5 0 4
 
 "$DEST/bin/jbig2" --version >/dev/null 2>&1 || die "$DEST/bin/jbig2 does not run on this host"
 echo "Done. jbig2enc 0.32 at $DEST ($(tree_size "$DEST"))"

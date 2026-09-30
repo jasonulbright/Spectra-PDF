@@ -101,5 +101,5 @@ rm -rf "$work"
 
 install_artifact "$NATIVE_URL" "$NATIVE_SHA256" "$NATIVE_SIZE"   "libvoikko-4.3.3-linux-x86_64.tar.zst" "$NATIVE_DEST"
 rm -rf "$NATIVE_DEST.old"
-notice_gate "$MANIFEST" "$NATIVE_DEST" '$8 == "linux"' 1 6 4
+notice_gate "$MANIFEST" "$NATIVE_DEST" '$8 == "linux"' 1 6 4 5
 echo "Done. libvoikko 4.3.3 at $NATIVE_DEST ($(tree_size "$NATIVE_DEST"))"
