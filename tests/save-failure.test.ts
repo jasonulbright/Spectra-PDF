@@ -25,8 +25,10 @@ describe('saveFailureNotice', () => {
 describe('writeFailureText', () => {
   it('localizes the unsafe-replacement refusal and passes others through', () => {
     const text = writeFailureText('C:/docs/report 1.pdf', new Error(unsafe));
-    expect(text).toContain('"report 1.pdf" was not saved and is unchanged on disk.');
-    expect(text).toContain('Choose another folder or use Save As.');
+    expect(text).toBe(
+      '"report 1.pdf" was not written. This folder does not allow the existing file to be replaced safely. Choose another folder.',
+    );
+    expect(text).not.toContain('Save As');
     expect(text).not.toContain('Choose a folder where new files can be created');
     expect(writeFailureText('C:/docs/a.html', new Error('disk full'))).toBe('disk full');
   });

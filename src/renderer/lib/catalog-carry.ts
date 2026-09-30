@@ -39,6 +39,7 @@ import {
   PDFPage,
   PDFRef,
   PDFRawStream,
+  PDFStream,
   PDFString,
 } from 'pdf-lib';
 import { tChrome } from '../i18n';
@@ -57,39 +58,46 @@ const N = PDFName.of.bind(PDFName);
  * graphs pair node-for-node. */
 export type ObjectMap = Map<string, PDFRef>;
 
+const IN_PAGE_OBJECT_LIMIT = 1_000_000;
+
+/** Walks the two graphs together from one root pair. Each source reference is
+ * visited once and only references can close a cycle, so the walk ends without
+ * a depth cap; a graph larger than the visit budget refuses the operation. */
 function mapParallel(
-  srcCtxObj: PDFObject | undefined,
-  outCtxObj: PDFObject | undefined,
+  srcRoot: PDFObject | undefined,
+  outRoot: PDFObject | undefined,
   src: PDFDocument,
   out: PDFDocument,
   map: ObjectMap,
   seen: Set<string>,
-  depth: number,
+  budget: { visits: number },
 ): void {
-  if (depth > 6) return;
-  let srcObj = srcCtxObj;
-  let outObj = outCtxObj;
-  if (srcObj instanceof PDFRef) {
-    if (!(outObj instanceof PDFRef)) return;
-    if (seen.has(srcObj.tag)) return;
-    seen.add(srcObj.tag);
-    map.set(srcObj.tag, outObj);
-    srcObj = src.context.lookup(srcObj);
-    outObj = out.context.lookup(outObj);
-  }
-  if (srcObj instanceof PDFDict && outObj instanceof PDFDict) {
-    for (const [key, value] of srcObj.entries()) {
-      // /Parent and /P climb OUT of the page subtree; following them would
-      // walk the whole document.
-      if (key === N('Parent') || key === N('P')) continue;
-      mapParallel(value, outObj.get(key), src, out, map, seen, depth + 1);
+  const stack: [PDFObject | undefined, PDFObject | undefined][] = [[srcRoot, outRoot]];
+  while (stack.length > 0) {
+    if (--budget.visits < 0) throw new Error(tChrome('app.operation.unverified'));
+    let [srcObj, outObj] = stack.pop() as [PDFObject | undefined, PDFObject | undefined];
+    if (srcObj instanceof PDFRef) {
+      if (!(outObj instanceof PDFRef)) continue;
+      if (seen.has(srcObj.tag)) continue;
+      seen.add(srcObj.tag);
+      map.set(srcObj.tag, outObj);
+      srcObj = src.context.lookup(srcObj);
+      outObj = out.context.lookup(outObj);
     }
-    return;
-  }
-  if (srcObj instanceof PDFArray && outObj instanceof PDFArray) {
-    const n = Math.min(srcObj.size(), outObj.size());
-    for (let i = 0; i < n; i++) {
-      mapParallel(srcObj.get(i), outObj.get(i), src, out, map, seen, depth + 1);
+    if (srcObj instanceof PDFStream && outObj instanceof PDFStream) {
+      srcObj = srcObj.dict;
+      outObj = outObj.dict;
+    }
+    if (srcObj instanceof PDFDict && outObj instanceof PDFDict) {
+      for (const [key, value] of srcObj.entries()) {
+        // /Parent and /P climb OUT of the page subtree; following them would
+        // walk the whole document.
+        if (key === N('Parent') || key === N('P')) continue;
+        stack.push([value, outObj.get(key)]);
+      }
+    } else if (srcObj instanceof PDFArray && outObj instanceof PDFArray) {
+      const n = Math.min(srcObj.size(), outObj.size());
+      for (let i = 0; i < n; i++) stack.push([srcObj.get(i), outObj.get(i)]);
     }
   }
 }
@@ -103,6 +111,7 @@ export function buildInPageObjectMap(
 ): ObjectMap {
   const map: ObjectMap = new Map();
   const seen = new Set<string>();
+  const budget = { visits: IN_PAGE_OBJECT_LIMIT };
   for (const { srcIndex, outPage } of source.pairs) {
     const srcPage = source.doc.getPage(srcIndex);
     for (const key of ['Resources', 'Annots', 'B'] as const) {
@@ -113,7 +122,7 @@ export function buildInPageObjectMap(
         output,
         map,
         seen,
-        0,
+        budget,
       );
     }
   }

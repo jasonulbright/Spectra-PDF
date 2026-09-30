@@ -23,9 +23,9 @@ from typing import Any, Callable, Iterator, TextIO
 
 _LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 MAX_JSONRPC_LINE_BYTES = 256 * 1024 * 1024
-#: Bounds on requests read but not yet served. At a bound the reader stops
-#: reading, so the host's pipe write blocks instead of the worker's memory
-#: growing; a cancel queued behind that point is read once a request retires.
+#: Bounds on requests read but not yet served. The reader never stops reading,
+#: so a cancel is always applied on arrival; a request that arrives while the
+#: inbox is at a bound is refused on its id instead of being queued.
 MAX_QUEUED_REQUESTS = 256
 MAX_QUEUED_BYTES = 2 * MAX_JSONRPC_LINE_BYTES
 
@@ -217,10 +217,21 @@ def _valid_request_id(req_id: Any) -> bool:
     )
 
 
+QUEUE_FULL_CODE = -32001
+QUEUE_FULL_MESSAGE = "The engine has too many queued requests. Try again when current work finishes."
+
+
+def _refused(message: str, req_id: Any, code: int) -> dict[str, Any]:
+    """A user-facing refusal answered on `req_id`; the message is swept into
+    the engine refusal table like a raised one."""
+    return {"jsonrpc": "2.0", "error": {"code": code, "message": message}, "id": req_id}
+
+
 class _Inbox:
     """FIFO between the reader thread and the main thread, bounded by item
     count and by the wire size of the queued lines. An item is always admitted
-    into an empty inbox, so one line at the size limit still proceeds."""
+    into an empty inbox, so one line at the size limit still proceeds.
+    `offer` never blocks, so the reader keeps draining input at a bound."""
 
     def __init__(self, max_items: int, max_bytes: int) -> None:
         self._items: deque[tuple[str, Any, int]] = deque()
@@ -229,15 +240,23 @@ class _Inbox:
         self._max_bytes = max_bytes
         self._changed = threading.Condition()
 
-    def put(self, kind: str, value: Any, size: int = 0) -> None:
+    def offer(self, kind: str, value: Any, size: int = 0) -> bool:
+        """Queue the item when it fits; False leaves the inbox unchanged."""
         with self._changed:
-            while self._items and (
+            if self._items and (
                 len(self._items) >= self._max_items
                 or self._bytes + size > self._max_bytes
             ):
-                self._changed.wait()
+                return False
             self._items.append((kind, value, size))
             self._bytes += size
+            self._changed.notify_all()
+            return True
+
+    def close(self, failure: BaseException | None) -> None:
+        """Queue end of input past the bounds: it holds no request bytes."""
+        with self._changed:
+            self._items.append(("eof", failure, 0))
             self._changed.notify_all()
 
     def get(self) -> tuple[str, Any]:
@@ -256,11 +275,14 @@ class JsonRpcServer:
     def __init__(self) -> None:
         self._methods: dict[str, Callable[..., Any]] = {}
         self.cancels = CancelRegistry()
+        # The reader thread answers refused lines while the main thread writes
+        # responses; one frame per write keeps lines whole on the wire.
+        self._output_lock = threading.Lock()
 
     def register(self, name: str, handler: Callable[..., Any]) -> None:
         self._methods[name] = handler
 
-    def _read(self, input_stream: TextIO, inbox: _Inbox) -> None:
+    def _read(self, input_stream: TextIO, output_stream: TextIO, inbox: _Inbox) -> None:
         """Reader thread. A cancel is applied here, while the main thread may
         be inside the handler it cancels; every other line is queued in
         arrival order. The last item is always ("eof", exception-or-None), so
@@ -276,7 +298,8 @@ class JsonRpcServer:
                 try:
                     request = json.loads(line, parse_constant=_reject_json_constant)
                 except (ValueError, RecursionError):
-                    inbox.put("parse-error", None)
+                    if not inbox.offer("parse-error", None):
+                        self._write_error(output_stream, None, -32700, "Parse error")
                     continue
                 if (
                     isinstance(request, dict)
@@ -287,18 +310,25 @@ class JsonRpcServer:
                     if isinstance(params, dict):
                         self.cancels.request(params.get("id"))
                     continue
-                if isinstance(request, dict) and "id" in request:
+                has_id = isinstance(request, dict) and "id" in request
+                if has_id:
                     self.cancels.admit(request.get("id"))
-                inbox.put("request", request, size)
+                if inbox.offer("request", request, size):
+                    continue
+                if has_id:
+                    self.cancels.retire(request.get("id"))
+                    req_id = request.get("id")
+                    reply_id = _representable_id(req_id) if _valid_request_id(req_id) else None
+                    self._write(output_stream, _refused(QUEUE_FULL_MESSAGE, reply_id, QUEUE_FULL_CODE))
         except BaseException as exc:  # noqa: BLE001 - re-raised on the main thread
             failure = exc
         finally:
-            inbox.put("eof", failure)
+            inbox.close(failure)
 
     def run(self, input_stream: TextIO, output_stream: TextIO) -> None:
         inbox = _Inbox(MAX_QUEUED_REQUESTS, MAX_QUEUED_BYTES)
         threading.Thread(
-            target=self._read, args=(input_stream, inbox), name="jsonrpc-reader", daemon=True
+            target=self._read, args=(input_stream, output_stream, inbox), name="jsonrpc-reader", daemon=True
         ).start()
         while True:
             kind, request = inbox.get()
@@ -365,8 +395,9 @@ class JsonRpcServer:
                     },
                     "id": _representable_id(response.get("id")),
                 })
-            output_stream.write(encoded + "\n")
-            output_stream.flush()
+            with self._output_lock:
+                output_stream.write(encoded + "\n")
+                output_stream.flush()
 
     def _handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
         has_id = "id" in request
@@ -417,14 +448,17 @@ class JsonRpcServer:
                 "id": response_id,
             }
 
-    @staticmethod
     def _write_error(
+        self,
         stream: TextIO, req_id: Any, code: int, message: str
     ) -> None:
-        response = {
+        self._write(stream, {
             "jsonrpc": "2.0",
             "error": {"code": code, "message": message},
             "id": req_id,
-        }
-        stream.write(json.dumps(response) + "\n")
-        stream.flush()
+        })
+
+    def _write(self, stream: TextIO, response: dict[str, Any]) -> None:
+        with self._output_lock:
+            stream.write(json.dumps(response) + "\n")
+            stream.flush()

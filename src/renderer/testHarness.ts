@@ -1502,6 +1502,8 @@ export function registerDocumentJsHandler(handler: DocumentJsHandler | null): vo
 }
 
 export interface TestHarness {
+  /** Every content-security-policy refusal this document has raised. */
+  cspViolations: () => string[];
   /** Open one or more PDFs by absolute path, bypassing the OS dialog. */
   openByPaths: (paths: string[]) => Promise<void>;
   /** Save the active working copy to a known destination, no dialog. */
@@ -2431,6 +2433,41 @@ declare global {
   }
 }
 
+// Refusals raised before this module evaluates (the HTML shell, the entry
+// chunk's own stylesheet) reach only the buffered ReportingObserver; later
+// ones reach both, so entries are keyed to count each refusal once.
+const cspViolationLog = new Map<string, string>();
+
+function recordCspViolation(directive: string, blocked: string, source: string, line: number): void {
+  const key = `${directive}|${blocked}|${source}|${line}`;
+  if (!cspViolationLog.has(key)) {
+    cspViolationLog.set(key, `${directive} refused ${blocked || '(inline)'} at ${source || '(document)'}:${line}`);
+  }
+}
+
+if (TEST_HARNESS_ENABLED && typeof document !== 'undefined') {
+  document.addEventListener('securitypolicyviolation', (event) => {
+    recordCspViolation(event.effectiveDirective, event.blockedURI, event.sourceFile, event.lineNumber);
+  });
+  const Observer = (globalThis as { ReportingObserver?: new (
+    callback: (reports: { type: string; body: Record<string, unknown> | null }[]) => void,
+    options: { types: string[]; buffered: boolean },
+  ) => { observe: () => void } }).ReportingObserver;
+  if (Observer) {
+    new Observer((reports) => {
+      for (const report of reports) {
+        const body = report.body ?? {};
+        recordCspViolation(
+          String(body.effectiveDirective ?? ''),
+          String(body.blockedURL ?? ''),
+          String(body.sourceFile ?? ''),
+          Number(body.lineNumber ?? 0),
+        );
+      }
+    }, { types: ['csp-violation'], buffered: true }).observe();
+  }
+}
+
 /** Marker a refused image transform carries, so a caller can tell "the page id
  * retired under me, re-resolve and re-issue" from a genuine failure. */
 const TRANSFORM_REFUSED = 'editImageTransform refused';
@@ -2546,6 +2583,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
   };
 
   const harness: TestHarness = {
+    cspViolations: () => [...cspViolationLog.values()],
     openByPaths: async (paths) => {
       try {
         await waitForEngine();

@@ -21,6 +21,6 @@ export function saveFailureNotice(dest: string, error: unknown): SaveFailureNoti
 export function writeFailureText(dest: string, error: unknown): string {
   const notice = saveFailureNotice(dest, error);
   return notice.key === 'app.save.replaceUnsafe'
-    ? tChrome(notice.key, notice.params)
+    ? tChrome('app.export.replaceUnsafe', notice.params)
     : notice.params.reason;
 }

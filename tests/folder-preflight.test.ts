@@ -209,6 +209,25 @@ describe('the report artifacts', () => {
     expect(result.errors).toEqual([{ rel: 'a.pdf', reason: 'unreadable' }]);
   });
 
+  it('records an unsafe-replacement refusal in the localized export text', async () => {
+    const io: FolderPreflightIo = {
+      run: async () => report(),
+      readReport: async () => REPORT,
+      writeReport: async (path) => {
+        if (path.endsWith('.html')) {
+          throw new Error(`Failed to save: The folder does not allow ${path} to be replaced safely. Choose a folder where new files can be created.`);
+        }
+        return path;
+      },
+    };
+    const result = await emitLocalizedReports(report(), io, new Date());
+    expect(result.errors.length).toBeGreaterThan(0);
+    for (const e of result.errors) {
+      expect(e.reason).toContain('was not written. This folder does not allow the existing file to be replaced safely.');
+      expect(e.reason).not.toContain('Choose a folder where new files can be created');
+    }
+  });
+
   it('emits nothing for a row that produced no report', async () => {
     const io: FolderPreflightIo = {
       run: async () => report(),

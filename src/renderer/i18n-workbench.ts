@@ -366,6 +366,9 @@ export const WORKBENCH_STRINGS = {
   // The folder refuses a new file beside the document or its replacement.
   'app.save.replaceUnsafe':
     '"{{name}}" was not saved and is unchanged on disk. This folder does not allow the file to be replaced safely. Choose another folder or use Save As.',
+  // An export refused because its folder cannot replace the existing file safely.
+  'app.export.replaceUnsafe':
+    '"{{name}}" was not written. This folder does not allow the existing file to be replaced safely. Choose another folder.',
   // A closed window's engine worker ran past the drain deadline while writing.
   'app.engine.writeStoppedTitle': 'Operation Stopped',
   'app.engine.writeStopped':

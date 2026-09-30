@@ -188,14 +188,62 @@ def _pulled_while_busy(monkeypatch, *, items: int, max_bytes: int, total: int) -
     return seen, [json.loads(line) for line in out.getvalue().splitlines()]
 
 
-def test_a_busy_handler_stops_the_reader_at_the_queued_request_bound(monkeypatch):
+def _split(replies: list) -> tuple[list, list]:
+    from engine import ipc
+
+    refused = [r["id"] for r in replies if r.get("error", {}).get("code") == ipc.QUEUE_FULL_CODE]
+    served = [r["id"] for r in replies if "result" in r]
+    return served, refused
+
+
+def test_a_busy_handler_refuses_requests_past_the_queued_request_bound(monkeypatch):
     seen, replies = _pulled_while_busy(monkeypatch, items=4, max_bytes=1 << 30, total=200)
-    # The running request, four queued, and one line held waiting for room.
-    assert seen <= 6
-    assert [r["id"] for r in replies] == list(range(200))
+    # The reader drains all input. At most the running request and four queued
+    # run; the reader may fill the inbox before the first request is taken.
+    assert seen == 200
+    served, refused = _split(replies)
+    assert 4 <= len(served) <= 5 and served == list(range(len(served)))
+    assert refused == list(range(len(served), 200))
 
 
-def test_a_busy_handler_stops_the_reader_at_the_queued_byte_bound(monkeypatch):
+def test_a_busy_handler_refuses_requests_past_the_queued_byte_bound(monkeypatch):
     seen, replies = _pulled_while_busy(monkeypatch, items=10_000, max_bytes=200, total=200)
-    assert seen <= 6
-    assert [r["id"] for r in replies] == list(range(200))
+    assert seen == 200
+    served, refused = _split(replies)
+    assert len(served) <= 5 and served == list(range(len(served)))
+    assert sorted(served + refused) == list(range(200))
+
+
+def test_a_cancel_behind_a_full_inbox_reaches_the_running_request(monkeypatch):
+    import threading
+
+    from engine import ipc
+
+    monkeypatch.setattr(ipc, "MAX_QUEUED_REQUESTS", 2)
+    started = threading.Event()
+    observed = []
+
+    def block():
+        started.set()
+        for _ in range(500):
+            if ipc.cancelled():
+                observed.append("cancelled")
+                return "stopped"
+            threading.Event().wait(0.01)
+        return "ran out"
+
+    def lines():
+        yield '{"jsonrpc":"2.0","id":0,"method":"block","params":{}}\n'
+        started.wait(5)
+        for index in range(1, 10):
+            yield f'{{"jsonrpc":"2.0","id":{index},"method":"echo","params":{{}}}}\n'
+        yield '{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":0}}\n'
+
+    server = JsonRpcServer()
+    server.register("block", block)
+    server.register("echo", lambda **kw: kw)
+    out = io.StringIO()
+    server.run(lines(), out)
+    replies = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert observed == ["cancelled"]
+    assert sorted(r["id"] for r in replies) == list(range(10))

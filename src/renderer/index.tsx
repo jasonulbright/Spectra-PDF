@@ -1,3 +1,4 @@
+import { adoptStyleNonce } from './lib/style-nonce';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
@@ -49,6 +50,7 @@ window.addEventListener('unhandledrejection', (event) => {
   console.error('Unhandled promise rejection:', event.reason);
 });
 
+adoptStyleNonce();
 stampInitialTheme();
 initBackdrop().finally(() => {
   const root = createRoot(document.getElementById('root')!);
