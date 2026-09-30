@@ -1,6 +1,6 @@
 #!/bin/sh
 # Supplemental release metadata checks. Run once with local candidate validation.
-# Functional suites already run in that validation; security audits run in CI.
+# Functional suites already run in that validation.
 # Do not rerun this script at each commit, push, and tag boundary.
 R="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$R/ci-parity.results.local.txt"
@@ -63,6 +63,19 @@ fi
 #     change that did not regenerate it. ---
 gate engine-manifest "$R/.venv/Scripts/python.exe" scripts/gen-engine-payload-manifest.py --check
 gate engine-payload "$R/.venv/Scripts/python.exe" scripts/check-engine-payload.py
+
+# --- CI audit job: pip-audit over both engine locks, from the hash-pinned tool
+#     lock. The tool venv is rebuilt whenever that lock changes. ---
+AUDIT_VENV="$R/.pip-audit.local"
+AUDIT_PY="$AUDIT_VENV/Scripts/python.exe"
+AUDIT_LOCK_SHA="$(sha256sum "$R/scripts/pip-audit-requirements.txt" | cut -d' ' -f1)"
+if [ ! -x "$AUDIT_PY" ] || [ "$(cat "$AUDIT_VENV/.lock-sha256" 2>/dev/null)" != "$AUDIT_LOCK_SHA" ]; then
+  rm -rf "$AUDIT_VENV"
+  gate pip-audit-install sh -c '"$1" -m venv "$2" && "$2/Scripts/python.exe" -m pip install --require-hashes --only-binary :all: -r scripts/pip-audit-requirements.txt && printf "%s\n" "$3" > "$2/.lock-sha256"' \
+    sh "$R/.venv/Scripts/python.exe" "$AUDIT_VENV" "$AUDIT_LOCK_SHA"
+fi
+gate pip-audit-windows "$AUDIT_PY" -m pip_audit -r scripts/python-requirements.txt --no-deps
+gate pip-audit-linux "$AUDIT_PY" -m pip_audit -r scripts/python-requirements-linux.txt --no-deps --disable-pip
 
 # Inspect the production renderer already built by candidate validation.
 gate release-bundle "$R/.venv/Scripts/python.exe" scripts/check-release-bundle.py

@@ -114,23 +114,26 @@ install_artifact() {
   ARTIFACT_CHANGED=1
 }
 
-# notice_gate TSV DEST SELECT FILE_COL NOTICE_COL SHA_COL
+# notice_gate TSV DEST SELECT FILE_COL NOTICE_COL SHA_COL LICENCE_COL
 # SELECT is an awk condition on a manifest row ($1..$n). Refuses when a
 # selected row's file or any of its comma-separated notices (under
 # DEST/licenses/) is missing, when a pinned sha256 differs, and when a file
 # under DEST/bin or DEST/lib has no selected row. SHA_COL 0 means no column.
+# Each selected row's licence must equal the licence of the DEST/NOTICES.tsv
+# row whose notices list the row's first notice; an artifact licence written
+# `X (elected from E)` matches a manifest licence E.
 notice_gate() {
-  tsv="$1"; dest="$2"; select="$3"; fcol="$4"; ncol="$5"; scol="$6"
+  tsv="$1"; dest="$2"; select="$3"; fcol="$4"; ncol="$5"; scol="$6"; lcol="$7"
   [ -f "$tsv" ] || die "notice manifest missing: $tsv"
   rows="$(awk -F '\t' "
     /^#/ || NF == 0 { next }
     !hdr { hdr = (\$1 == \"file\"); next }
-    $select { print \$$fcol \"\t\" \$$ncol \"\t\" ($scol ? \$$scol : \"-\") }
+    $select { print \$$fcol \"\t\" \$$ncol \"\t\" ($scol ? \$$scol : \"-\") \"\t\" \$$lcol }
   " "$tsv")"
   [ -n "$rows" ] || die "$tsv has no rows for $dest"
   problems=""
   tab="$(printf '\t')"
-  while IFS="$tab" read -r file notices sha; do
+  while IFS="$tab" read -r file notices sha _licence; do
     if [ ! -f "$dest/$file" ]; then
       problems="$problems
   $file: has a row in $(basename "$tsv") but is not in the tree"
@@ -153,5 +156,31 @@ ROWS
     printf '%s\n' "$rows" | cut -f1 | grep -qxF "$f" || problems="$problems
   $f: shipped but has NO ROW in $(basename "$tsv")"
   done
+  if [ -f "$dest/NOTICES.tsv" ]; then
+    problems="$problems$(printf '%s\n' "$rows" | awk -F '\t' -v manifest="$(basename "$tsv")" '
+      NR == FNR {
+        if (FNR == 1) { for (i = 1; i <= NF; i++) col[$i] = i; next }
+        n = split($col["notices"], list, ",")
+        for (i = 1; i <= n; i++) lic[list[i]] = $col["license"]
+        next
+      }
+      {
+        split($2, mine, ",")
+        if (!(mine[1] in lic)) {
+          printf "\n  %s: no NOTICES.tsv row lists notice %s", $1, mine[1]
+          next
+        }
+        theirs = lic[mine[1]]
+        suffix = " (elected from " $4 ")"
+        elected = length(theirs) > length(suffix) &&
+          substr(theirs, length(theirs) - length(suffix) + 1) == suffix
+        if (theirs != $4 && !elected)
+          printf "\n  %s: %s says \"%s\" but NOTICES.tsv says \"%s\"", $1, manifest, $4, theirs
+      }
+    ' "$dest/NOTICES.tsv" -)"
+  else
+    problems="$problems
+  NOTICES.tsv: the artifact carries no notice inventory"
+  fi
   [ -z "$problems" ] || die "notice gate FAILED -- refusing to ship $dest:$problems"
 }

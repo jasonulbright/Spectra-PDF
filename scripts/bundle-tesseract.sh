@@ -51,7 +51,7 @@ done
 [ "$(sha256_of "$TESSDATA/osd.traineddata")" = "$OSD_SHA256" ] \
   || die "share/tessdata/osd.traineddata differs from its pin; delete it and run again"
 
-notice_gate "$MANIFEST" "$DEST" '$1 ~ /^(bin|lib)\//' 1 4 0
+notice_gate "$MANIFEST" "$DEST" '$1 ~ /^(bin|lib)\//' 1 4 0 3
 
 "$DEST/bin/tesseract" --version >/dev/null 2>&1 || die "$DEST/bin/tesseract does not run on this host"
 echo "Done. Tesseract 5.4.0 at $DEST ($(tree_size "$DEST"))"
