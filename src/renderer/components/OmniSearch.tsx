@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppState } from '../state/AppStateProvider';
 import { useSearchContext } from '../search/SearchProvider';
-import { TOOL_DEFS, type ToolId } from '../commands/tools';
+import { type ToolId } from '../commands/tools';
+import { availableToolDefs } from '../commands/platform';
 import { rankToolMatches, type FrecencyStore } from '../search/omnisearch-rank';
 import { noteToolPick, readFrecency } from '../search/omnisearch-frecency';
 import { markSnippet } from '../search/search-core';
@@ -105,7 +106,7 @@ export function OmniSearch(): React.JSX.Element {
     () =>
       rankToolMatches(
         debounced,
-        TOOL_DEFS.map((t) => ({
+        availableToolDefs().map((t) => ({
           id: t.id,
           title: tToolTitle(t.id, t.title, language),
           description: tToolDescription(t.id, t.description, language),

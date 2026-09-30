@@ -239,6 +239,7 @@ pub fn run() {
             commands::open_releases_page,
             commands::get_system_accent_color,
             commands::get_window_backdrop,
+            commands::platform_capabilities,
             app_windows::renderer_ready,
             app_windows::settle_window_compose,
             commands::append_operation_log,

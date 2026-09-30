@@ -6,6 +6,7 @@
 import { useEffect } from 'react';
 import { KEY_BINDINGS, type KeyBinding } from './standard-keys';
 import { COMMANDS, type CommandId } from './registry';
+import { commandAvailable } from './platform';
 import {
   appModalCount,
   closeTopAppModal,
@@ -104,6 +105,7 @@ export function formatKey(key: string): string {
 export function shortcutForCommand(command: CommandId): string | null {
   // Pref-gated bindings never display — a menu must not advertise a key
   // that may be dead (the single-key accelerators default OFF).
+  if (!commandAvailable(command)) return null;
   const b = KEY_BINDINGS.find((x) => x.command === command && !x.requiresPref);
   if (!b) return null;
   const parts: string[] = [];
@@ -291,6 +293,12 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
     // Ctrl+Z/A stay native editing (not in the suppress list), while a
     // browser accelerator like Ctrl+= must not zoom the webview just
     // because a find input has focus.
+    suppressBrowserDefault(e);
+    return;
+  }
+  if (!commandAvailable(binding.command)) {
+    // The command is absent on this platform, but the key must not fall
+    // through to the webview's own accelerator (Ctrl+P prints the page).
     suppressBrowserDefault(e);
     return;
   }

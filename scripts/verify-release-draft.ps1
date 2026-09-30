@@ -99,7 +99,6 @@ param(
     [Parameter(Mandatory = $true)][string]$Tag,
     [string]$Bundle = "src-tauri/target/release/bundle/nsis",
     [string]$Portable = "src-tauri/target/release/bundle/portable",
-    [string]$Sources = "release-sources",
     [string]$Downloads = "",
     [string]$Offline = "",
     [string]$CargoPackage = "src-tauri",
@@ -183,10 +182,8 @@ if ($installer.Count -ne 1) { throw "expected one installer, found $($installer.
 $signature = Get-Item -LiteralPath (Join-Path $Bundle "$($installer[0].Name).sig")
 $portableZip = @(Get-ChildItem -LiteralPath $Portable -Filter "*-portable.zip" -File)
 if ($portableZip.Count -ne 1) { throw "expected one portable zip, found $($portableZip.Count)" }
-$sourceFiles = @(Get-ChildItem -LiteralPath $Sources -File)
-if (-not $sourceFiles) { throw "no corresponding-source archives in $Sources" }
 $sums = Get-Item -LiteralPath (Join-Path $Bundle "SHA256SUMS.txt")
-$local = @($installer) + @($signature) + @($portableZip) + @($sourceFiles) + @($sums)
+$local = @($installer) + @($signature) + @($portableZip) + @($sums)
 
 # Local file -> the name GitHub serves it under. Every later lookup of a
 # downloaded asset goes through this map, and it is one-to-one: two local
@@ -259,7 +256,7 @@ if ($ExpectSigned) {
 # are compared as written: an uppercase digest is not this workflow's output.
 # The names are GitHub's, not the build directory's: `sha256sum -c` is run
 # against downloaded files, and no mapping is applied at that point.
-$checksummed = Sort-Ordinal @(@($installer) + @($portableZip) + @($sourceFiles) | ForEach-Object { Get-GitHubAssetName $_.Name })
+$checksummed = Sort-Ordinal @(@($installer) + @($portableZip) | ForEach-Object { Get-GitHubAssetName $_.Name })
 $named = @()
 foreach ($line in Get-Content -LiteralPath (Get-Downloaded "SHA256SUMS.txt").path) {
     if (-not $line.Trim()) { continue }

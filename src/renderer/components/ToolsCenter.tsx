@@ -1,5 +1,6 @@
 import React from 'react';
-import { TOOL_DEFS, type ToolId } from '../commands/tools';
+import { type ToolId } from '../commands/tools';
+import { availableToolDefs } from '../commands/platform';
 import { isCommandEnabled } from '../commands/context';
 import { ToolIcon } from './tool-icons';
 import { useTranslation } from 'react-i18next';
@@ -31,7 +32,7 @@ export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.J
       {!embedded && <h2 className="tools-center-heading">{tChrome('tools.heading')}</h2>}
       {!embedded && <p className="tools-center-sub">{tChrome('tools.sub')}</p>}
       <div className="tools-grid">
-        {TOOL_DEFS.map((tool) => {
+        {availableToolDefs().map((tool) => {
           // Grey what can't run, exactly as the menu bar does for the same
           // command. `invokeCommand` silently no-ops on a failed `when`, so an
           // ungated tile is a dead click that looks identical to a live one —

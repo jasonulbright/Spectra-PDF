@@ -3,6 +3,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { initBackdrop } from './lib/backdrop';
+import { loadPlatformCapabilities } from './lib/platform-capabilities';
 import { watchWindowCompose } from './lib/compose-settle';
 import { signalFirstPaint } from './lib/first-paint';
 import { stampInitialTheme } from './lib/theme-boot';
@@ -52,7 +53,10 @@ window.addEventListener('unhandledrejection', (event) => {
 
 adoptStyleNonce();
 stampInitialTheme();
-initBackdrop().finally(() => {
+// The capability report is read before the first render: menus and commands
+// resolve their platform-bound entries against it, and an entry must never
+// appear and then vanish.
+void Promise.all([initBackdrop(), loadPlatformCapabilities()]).finally(() => {
   const root = createRoot(document.getElementById('root')!);
   root.render(
     <>

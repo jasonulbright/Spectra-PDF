@@ -1194,21 +1194,18 @@ def _draft_fixture(root: Path) -> tuple[list[str], Path]:
     """
     bundle = root / "nsis"
     portable = root / "portable"
-    sources = root / "sources"
     downloaded = root / "downloaded"
-    for d in (bundle, portable, sources, downloaded):
+    for d in (bundle, portable, downloaded):
         d.mkdir()
     installer = "Spectra PDF_1.2.3_x64-setup.exe"
     files = {
         bundle / installer: b"MZ" + bytes(range(256)) * 4,
         bundle / f"{installer}.sig": b"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZw==\n",
         portable / "Spectra PDF_1.2.3_x64-portable.zip": b"PK" + bytes(range(256)),
-        sources / "libheif-1.0.tar.gz": b"\x1f\x8b" + b"src" * 50,
     }
     for path, data in files.items():
         path.write_bytes(data)
-    checksummed = [bundle / installer, portable / "Spectra PDF_1.2.3_x64-portable.zip",
-                   sources / "libheif-1.0.tar.gz"]
+    checksummed = [bundle / installer, portable / "Spectra PDF_1.2.3_x64-portable.zip"]
     sums = "".join(
         f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {_github_asset_name(p.name)}\n"
         for p in checksummed
@@ -1239,7 +1236,7 @@ def _draft_fixture(root: Path) -> tuple[list[str], Path]:
     args = [
         "pwsh", "-NoProfile", "-File", str(ROOT / DRAFT_VERIFIER),
         "-Repo", "o/r", "-Tag", "v1.2.3", "-Bundle", str(bundle), "-Portable", str(portable),
-        "-Sources", str(sources), "-Offline", str(downloaded),
+        "-Offline", str(downloaded),
         "-CargoPackage", str(ROOT / "src-tauri"),
     ]
     return args, downloaded
@@ -1364,7 +1361,7 @@ def test_the_draft_verifier_accepts_a_faithful_upload(tmp_path: Path) -> None:
     args, _downloaded = _draft_fixture(tmp_path)
     run = _run_verifier(args)
     assert run.returncode == 0, run.stdout + run.stderr
-    assert "verified from downloaded bytes: 6 assets hashed" in run.stdout
+    assert "verified from downloaded bytes: 5 assets hashed" in run.stdout
 
 
 def test_the_draft_verifier_refuses_a_same_length_wrong_installer(tmp_path: Path) -> None:
@@ -1859,7 +1856,7 @@ def test_the_draft_verifier_ignores_an_accepting_test_the_verified_package_carri
     _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="2026-09-02T15:00:00.000Z"))
     run = subprocess.run(args, capture_output=True, text=True, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
-    assert "verified from downloaded bytes: 6 assets hashed" in run.stdout
+    assert "verified from downloaded bytes: 5 assets hashed" in run.stdout
     # A fresh name each run: the two staged targets never coincide.
     second = re.search(rf"as .*({VERIFIER_TEST_PREFIX}[0-9a-f]{{16}}_updater_manifest)\.rs", run.stdout)
     assert second and second.group(1) != Path(staged.group(1)).stem
@@ -1972,7 +1969,7 @@ def test_the_draft_verifier_tolerates_an_explicit_target_outside_the_reserved_pr
     )
     run = subprocess.run(args, capture_output=True, text=True, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
-    assert "verified from downloaded bytes: 6 assets hashed" in run.stdout
+    assert "verified from downloaded bytes: 5 assets hashed" in run.stdout
     assert _staged_leftovers(package) == []
 
 
@@ -2026,7 +2023,7 @@ def test_the_draft_verifier_proves_exactly_one_verifier_test_ran(verifier_revisi
     args, downloaded, _source, env = verifier_revision
     run = subprocess.run(args, capture_output=True, text=True, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
-    assert "verified from downloaded bytes: 6 assets hashed" in run.stdout
+    assert "verified from downloaded bytes: 5 assets hashed" in run.stdout
     assert f"verifier test '{VERIFIER_FUNCTION}' executed: {VERIFIER_TALLY}" in run.stdout
     assert f"test {VERIFIER_FUNCTION} ... ok" in run.stdout
     assert [line for line in _harness_lines(run) if line.startswith("running ")] == ["running 1 test"]
@@ -3099,7 +3096,6 @@ RETRY_ROUTED_PS = (
     "setup-python-embed.ps1",
     "pip-bootstrap.ps1",
     "setup-test-softhsm.ps1",
-    "stage-corresponding-source.ps1",
     "install-signing-tools.ps1",
     "verify-release-draft.ps1",
     "install-ghostscript-test-tool.ps1",

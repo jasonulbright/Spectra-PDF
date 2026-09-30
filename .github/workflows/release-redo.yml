@@ -217,10 +217,6 @@ jobs:
         run: node scripts/sync-ocr-assets.mjs
         shell: pwsh
 
-      - name: Stage corresponding source archives
-        run: powershell -ExecutionPolicy Bypass -File scripts/stage-corresponding-source.ps1 -OutputDirectory release-sources
-        shell: pwsh
-
       # The release body and the updater manifest's `notes` are one string,
       # taken from the changelog section for this version. The extractor
       # refuses a missing or empty section, a `Remaining` heading, and the
@@ -365,26 +361,6 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "failed to upload $($file.Name)" }
           }
 
-      - name: Upload corresponding source archives to the draft
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
-        run: |
-          $files = @(Get-ChildItem release-sources -File -ErrorAction Stop)
-          if (-not $files) { throw "no corresponding-source archives were staged" }
-          $repo = "${{ github.repository }}"
-          $assets = @(gh api "repos/$repo/releases/$env:RELEASE_ID/assets?per_page=100" | ConvertFrom-Json)
-          foreach ($file in $files) {
-            foreach ($stale in @($assets | Where-Object name -ceq $file.Name)) {
-              gh api --method DELETE "repos/$repo/releases/assets/$($stale.id)"
-              if ($LASTEXITCODE -ne 0) { throw "failed to replace $($file.Name)" }
-            }
-            $name = [uri]::EscapeDataString($file.Name)
-            gh api --method POST -H "Content-Type: application/octet-stream" "https://uploads.github.com/repos/$repo/releases/$env:RELEASE_ID/assets?name=$name" --input $file.FullName > $null
-            if ($LASTEXITCODE -ne 0) { throw "failed to upload $($file.Name)" }
-          }
-
       - name: Upload SHA-256 checksums to the draft
         shell: pwsh
         env:
@@ -394,11 +370,9 @@ jobs:
           $bundle = "src-tauri/target/release/bundle/nsis"
           $installers = @(Get-ChildItem $bundle -Filter "*-setup.exe" -ErrorAction Stop)
           if (-not $installers) { throw "no installer found in $bundle to checksum" }
-          $sources = @(Get-ChildItem release-sources -File -ErrorAction Stop)
-          if (-not $sources) { throw "no corresponding-source archives found to checksum" }
           $portable = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -ErrorAction Stop)
           if ($portable.Count -ne 1) { throw "expected one portable zip to checksum, found $($portable.Count)" }
-          $files = @($installers) + @($portable) + @($sources)
+          $files = @($installers) + @($portable)
           # The name column is the name GitHub serves the asset under, not the
           # build directory's: this file is verified with `sha256sum -c` beside
           # downloaded files, and GitHub rewrites a space in an uploaded asset

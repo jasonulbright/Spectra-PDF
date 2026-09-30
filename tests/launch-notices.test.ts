@@ -188,7 +188,7 @@ describe('App reports the launch once, from mount', () => {
     const effect = app.slice(app.indexOf('void reportLaunch({'));
     const save = effect.slice(0, effect.indexOf('showNotice,'));
     expect(save).toContain('const settings = getSettings();');
-    expect(save).toContain('app.setStartMinimized(settings.startMinimized)');
+    expect(save).toContain("app.setStartMinimized(settings.startMinimized && platformCapability('trayResidency'))");
     expect(save).toContain('app.setRestoreWindowsOnLaunch(settings.restoreWindowsOnLaunch)');
   });
 });

@@ -18,6 +18,7 @@ import {
   type SignerSourceMode,
   type StoreReadFailure,
 } from '../lib/signer-sources';
+import { platformCapability } from '../lib/platform-capabilities';
 import {
   CSC_GRANTS,
   DEFAULT_SCOPE,
@@ -186,6 +187,7 @@ export function SignerSourceFields({
   const [storeBusy, setStoreBusy] = useState(false);
   const [storeFailure, setStoreFailure] = useState<StoreReadFailure | null>(null);
 
+  const storeOffered = platformCapability('storeCertificates');
   const inStoreMode = value.mode === 'store';
   const storeThumbprint = value.mode === 'store' ? value.thumbprint : null;
   /** The user has operated the source chooser. A late store answer never
@@ -221,8 +223,8 @@ export function SignerSourceFields({
   // Opening the form READS the store: installed certificates are the primary
   // source, so they are on offer before the user asks for them.
   useEffect(() => {
-    void loadStoreCerts();
-  }, [loadStoreCerts]);
+    if (storeOffered) void loadStoreCerts();
+  }, [loadStoreCerts, storeOffered]);
 
   /** The selection, but only while the store still enumerates it. The
    * caller's state outlives one opening of the form, so a thumbprint chosen
@@ -249,7 +251,7 @@ export function SignerSourceFields({
   // Once per mount: the incoming source is read, not depended on. See
   // `sourceOnOpen` for why an unconfigured source returns to the store.
   useEffect(() => {
-    const next = sourceOnOpen(value);
+    const next = sourceOnOpen(value, storeOffered);
     if (next !== value.mode) onChange(emptySourceFor(next));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -434,7 +436,7 @@ export function SignerSourceFields({
     <fieldset className="min-w-0">
       <legend className="text-xs text-neutral-400 mb-1.5">{tChrome('dialog.signer.label')}</legend>
       <div ref={rootRef} className="flex flex-col gap-2">
-        {sourceRow(PRIMARY_SIGNER_SOURCE, {
+        {storeOffered && sourceRow(PRIMARY_SIGNER_SOURCE, {
           hint: tChrome('dialog.signer.modeStoreHint'),
           describedBy: verdictId,
           after: (
@@ -462,13 +464,13 @@ export function SignerSourceFields({
             </div>
           ),
         })}
-        {availability === 'loading' && inStoreMode ? (
+        {storeOffered && availability === 'loading' && inStoreMode ? (
           <p data-testid={`${idPrefix}-store-loading`} className="text-[11px] text-neutral-500">
             {tChrome('dialog.signer.storeLoading')}
           </p>
         ) : null}
 
-        {value.mode === 'store' ? (
+        {storeOffered && value.mode === 'store' ? (
           <>
             {/* Stacked rather than inline: the select carries a subject, an
                 issuer and a date, and an inline label leaves it too narrow to
@@ -537,9 +539,11 @@ export function SignerSourceFields({
           </>
         ) : null}
 
-        <span className="text-xs text-neutral-400 mt-1">
-          {tChrome('dialog.signer.sourceAdvanced')}
-        </span>
+        {storeOffered && (
+          <span className="text-xs text-neutral-400 mt-1">
+            {tChrome('dialog.signer.sourceAdvanced')}
+          </span>
+        )}
         {ADVANCED_SIGNER_SOURCES.map((m) =>
           sourceRow(m, {
             describedBy:

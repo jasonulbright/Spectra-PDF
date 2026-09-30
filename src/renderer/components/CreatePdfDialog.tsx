@@ -48,6 +48,7 @@ import {
   type CaptureResult,
 } from '../lib/web-capture';
 import { WebCaptureDialog } from './WebCaptureDialog';
+import { platformCapability } from '../lib/platform-capabilities';
 
 // File ▸ Create PDF: ONE door for images, Office /
 // text / web documents, PostScript and a blank page. A MENU dialog, not a
@@ -471,6 +472,7 @@ export function CreatePdfDialog({
           >
             {tChrome('dialog.createPdf.addFiles')}
           </button>
+          {platformCapability('clipboardRead') && (
           <button
             type="button"
             data-testid="create-pdf-add-clipboard"
@@ -480,6 +482,8 @@ export function CreatePdfDialog({
           >
             {tChrome('dialog.createPdf.addClipboard')}
           </button>
+          )}
+          {platformCapability('webCapture') && (
           <button
             type="button"
             data-testid="create-pdf-add-web"
@@ -489,6 +493,7 @@ export function CreatePdfDialog({
           >
             {tChrome('dialog.createPdf.addWebPage')}
           </button>
+          )}
           <button
             type="button"
             data-testid="create-pdf-add-blank"

@@ -948,6 +948,8 @@ export const app = {
   getSystemAccentColor: () => invoke<string | null>('get_system_accent_color'),
   /** Which backdrop the window was created with: "mica" or "none". */
   getWindowBackdrop: () => invoke<string>('get_window_backdrop'),
+  /** One boolean per platform-bound feature; see `lib/platform-capabilities`. */
+  platformCapabilities: () => invoke<unknown>('platform_capabilities'),
   /** This window's renderer has painted its first laid-out frame. The window
    *  is created hidden and becomes visible on this signal. */
   rendererReady: () => invoke('renderer_ready'),

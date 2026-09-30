@@ -5,6 +5,7 @@ import { gsBlocked, gsStateKey, refreshGsCapability } from '../lib/gs-capability
 import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { deriveAccentVars, type ThemeName } from '../lib/accent';
+import { platformCapability } from '../lib/platform-capabilities';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
 import { clampSnapshotDpi, MAX_SNAPSHOT_DPI, MIN_SNAPSHOT_DPI } from '../lib/snapshot-image';
@@ -108,6 +109,7 @@ function stampTheme(effective: ThemeName, generation: number): void {
  * ever needs clearing.
  */
 function applyAccentColor(generation: number): void {
+  if (!platformCapability('accentColor')) return;
   app.getSystemAccentColor().then((hex) => {
     if (generation !== themeGeneration) return; // a newer theme owns the shell
     if (!hex) return; // keep the last good palette rather than a partial one
@@ -634,7 +636,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           {tChrome('panel.settings.batchLogSharedHint')}
         </p>
       </div>
-      <VirtualPrinterBlock />
+      {platformCapability('virtualPrinter') && <VirtualPrinterBlock />}
       </>
       )}
 
@@ -693,6 +695,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
 
       {category === 'tray' && (
       <>
+      {platformCapability('trayResidency') && (
       <label className="flex items-center gap-2 cursor-pointer">
         <input
           type="checkbox"
@@ -714,7 +717,9 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         <span className="text-sm text-neutral-400">{tChrome('panel.settings.minimizeToTray')}</span>
       </label>
 
-      {settings.minimizeToTray && (
+      )}
+
+      {platformCapability('trayResidency') && settings.minimizeToTray && (
         <label className="flex items-center gap-2 cursor-pointer ms-4">
           <input
             type="checkbox"
