@@ -386,7 +386,7 @@ def whiten(samples: np.ndarray, paper: np.ndarray, strength: float) -> np.ndarra
 # Orientation
 # --------------------------------------------------------------------------
 def _tessdata_for(exe: Path) -> Path:
-    tessdata = exe.parent / "tessdata"
+    tessdata = platform_support.tessdata_dir(exe)
     if not tessdata.is_dir():
         script = platform_support.bundle_script("bundle-tesseract")
         raise RuntimeError(f"No tessdata beside {exe}; run {script}.")

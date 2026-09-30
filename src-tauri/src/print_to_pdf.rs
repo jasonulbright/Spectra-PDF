@@ -162,6 +162,7 @@ impl StagedPostscript {
     }
 
     /// Keep a test reservation on disk after closing its writer.
+    #[cfg_attr(not(windows), allow(dead_code))]
     fn retain_path(mut self) -> PathBuf {
         self.file.take();
         self.cleanup = false;
@@ -468,6 +469,7 @@ fn run_powershell(args: &[&str]) -> Result<String, String> {
     }
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn powershell_executable_under(system_dir: &Path) -> PathBuf {
     system_dir
         .join("WindowsPowerShell")
@@ -475,6 +477,7 @@ fn powershell_executable_under(system_dir: &Path) -> PathBuf {
         .join("powershell.exe")
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn powershell_modules_directory(executable: &Path) -> Result<PathBuf, String> {
     executable
         .parent()
@@ -669,8 +672,19 @@ fn uninstall_printer_script() -> String {
     )
 }
 
+/// The virtual printer needs a print-queue backend; without one every command
+/// refuses by name before running anything.
+fn virtual_printer_available() -> Result<(), String> {
+    if crate::commands::PlatformCapabilities::current().virtual_printer {
+        Ok(())
+    } else {
+        Err(crate::platform::Unsupported::new(crate::platform::feature::VIRTUAL_PRINTER).into())
+    }
+}
+
 #[tauri::command]
 pub async fn virtual_printer_status(app: AppHandle) -> Result<VirtualPrinterStatus, String> {
+    virtual_printer_available()?;
     let installed = run_powershell(&[&printer_status_script()])
         .map(|out| out.trim().eq_ignore_ascii_case("yes"))
         .unwrap_or(false);
@@ -687,12 +701,14 @@ pub async fn virtual_printer_status(app: AppHandle) -> Result<VirtualPrinterStat
 
 #[tauri::command]
 pub async fn install_virtual_printer() -> Result<(), String> {
+    virtual_printer_available()?;
     let script = install_printer_script();
     run_elevated_script(&script)
 }
 
 #[tauri::command]
 pub async fn uninstall_virtual_printer() -> Result<(), String> {
+    virtual_printer_available()?;
     let script = uninstall_printer_script();
     run_elevated_script(&script)
 }
@@ -897,6 +913,7 @@ try {
         assert!(!command.contains(".ps1"));
     }
 
+    #[cfg(windows)]
     #[test]
     fn printer_powershell_path_is_rooted_in_the_windows_system_directory() {
         let executable =

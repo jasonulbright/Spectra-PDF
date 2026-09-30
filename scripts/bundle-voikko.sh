@@ -7,14 +7,15 @@
 # and are never pruned, so a checkout shared with a Windows host keeps its
 # DLL rows.
 #
-# The `linux` rows (libvoikko.so.1 and the C++ runtime it loads) are a
-# prebuilt artifact provisioned into resources/linux-x86_64/voikko/; this
-# script does not build them.
+# The native half writes the `linux` rows: the pinned libvoikko 4.3.3 artifact
+# published by the fork's release, unpacked as published into
+# resources/linux-x86_64/voikko/ (lib/libvoikko.so.1 and the GCC runtime it
+# loads, licenses/, NOTICES.tsv, SHA256SUMS.txt).
 #
 #   sh scripts/bundle-voikko.sh
 
 . "$(dirname "$0")/posix-common.sh"
-require_tool curl sha256sum dpkg-deb
+require_tool curl sha256sum dpkg-deb tar awk
 # The MSYS2 package is zstd-compressed; the Linux runtime (Python 3.14,
 # scripts/setup-python-embed.sh) reads it without a zstd tool.
 PY="$LINUX_RESOURCES/python/bin/python3"
@@ -24,8 +25,12 @@ DICT_URL="https://deb.debian.org/debian/pool/main/v/voikko-fi/voikko-fi_2.5-2_am
 DICT_SHA256="e85564a1be3bf8c45d6d63b0928699ef3283f5299be8ee2d6662e6a59e816bdd"
 ENGINE_URL="https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libvoikko-4.3.3-3-any.pkg.tar.zst"
 ENGINE_SHA256="46e048d8579271704969b0dfe688e9cd40e904adc0936addeee2c39f0a34e107"
+NATIVE_URL="https://github.com/jasonulbright/corevoikko/releases/download/spectra-4.3.3-1/libvoikko-4.3.3-linux-x86_64.tar.zst"
+NATIVE_SHA256="b8d88a9da5929987f2f2918d7008a731d711dbe964d43ce2a2c48f06c1827876"
+NATIVE_SIZE="1960336"
 MANIFEST="$REPO_ROOT/scripts/voikko.tsv"
 DEST="$RESOURCES_ROOT/dictionaries/fi"
+NATIVE_DEST="$LINUX_RESOURCES/voikko"
 
 work="$LINUX_RESOURCES/.voikko-work"
 rm -rf "$work"
@@ -93,3 +98,8 @@ for file, pin in rows:
 print(f"Done. Finnish dictionary data: {len(rows)} rows verified, {written} written in {dest}")
 EOF
 rm -rf "$work"
+
+install_artifact "$NATIVE_URL" "$NATIVE_SHA256" "$NATIVE_SIZE"   "libvoikko-4.3.3-linux-x86_64.tar.zst" "$NATIVE_DEST"
+rm -rf "$NATIVE_DEST.old"
+notice_gate "$MANIFEST" "$NATIVE_DEST" '$8 == "linux"' 1 6 4
+echo "Done. libvoikko 4.3.3 at $NATIVE_DEST ($(tree_size "$NATIVE_DEST"))"

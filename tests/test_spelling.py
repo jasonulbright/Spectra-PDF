@@ -1137,13 +1137,18 @@ class TestVoikkoManifest:
             # A `runtime` row's bytes are whatever bundle-tesseract.ps1
             # vendored, so it pins a notice rather than a hash.
             assert sha == "-" or len(sha) == 64, file
-            assert notice in notices, file
+            for leaf in notice.split(","):
+                assert leaf in notices, file
 
     def test_every_shipped_binary_has_a_row(self):
         if not _provisioned(VOIKKO_TAG):
             pytest.skip("Finnish dictionary not provisioned")
         listed = {file for (file, *_), _root in self.platform_rows()}
-        root = os.path.dirname(str(vendored_tools.VOIKKO_LIBRARY))
+        root = (
+            os.path.dirname(str(vendored_tools.VOIKKO_LIBRARY))
+            if os.name == "nt"
+            else str(vendored_tools.NATIVE / "voikko")
+        )
         for dirpath, _dirs, files in os.walk(root):
             for name in files:
                 if not name.lower().endswith((".dll", ".so")) and ".so." not in name:
@@ -1164,7 +1169,8 @@ class TestVoikkoManifest:
 
     def test_the_runtime_rows_name_binaries_the_ocr_manifest_already_covers(self):
         # The three mingw DLLs libvoikko links already ship beside the OCR
-        # runtime with rows there; they are copied rather than re-fetched, and
+        # runtime with rows there (the Linux artifact carries its own GCC
+        # runtime and notice); they are copied rather than re-fetched, and
         # inventoried once. A copy with no row on either side is the failure.
         ocr = os.path.join(
             os.path.dirname(self.MANIFEST), "tesseract-licenses.tsv"
@@ -1175,7 +1181,9 @@ class TestVoikkoManifest:
                 for line in f
                 if not line.startswith("#") and "\t" in line
             }
-        runtime = [file for file, _c, role, *_ in self.rows() if role == "runtime"]
+        runtime = [
+            cells[0] for cells in self.rows() if cells[2] == "runtime" and cells[7] == "windows"
+        ]
         assert runtime
         for file in runtime:
             assert file in covered, file

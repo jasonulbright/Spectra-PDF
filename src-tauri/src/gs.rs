@@ -228,12 +228,12 @@ fn output_within_using(
 ) -> std::io::Result<std::process::Output> {
     use std::io::Read;
     use std::process::Stdio;
+    let mut cmd = cmd;
     #[cfg(unix)]
     if contain_process_tree {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    let mut cmd = cmd;
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

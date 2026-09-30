@@ -65,3 +65,93 @@ require_tool() {
     command -v "$tool" >/dev/null 2>&1 || die "$tool is required on PATH"
   done
 }
+
+# unpack_tar_zst ARCHIVE DIR. The Linux Python runtime reads zstd itself, so a
+# host without the zstd tool still unpacks once setup-python-embed.sh has run.
+unpack_tar_zst() {
+  mkdir -p "$2"
+  if command -v zstd >/dev/null 2>&1; then
+    zstd -dc "$1" | tar -x -C "$2"
+    return 0
+  fi
+  py="$LINUX_RESOURCES/python/bin/python3"
+  [ -x "$py" ] || die "unpacking $1 needs zstd on PATH or scripts/setup-python-embed.sh run first"
+  "$py" - "$1" "$2" <<'PYEOF'
+import sys, tarfile
+import compression.zstd as zstd
+with zstd.open(sys.argv[1], "rb") as raw, tarfile.open(fileobj=raw, mode="r|") as tar:
+    tar.extractall(sys.argv[2], filter="data")
+PYEOF
+}
+
+# install_artifact URL SHA256 SIZE NAME DEST
+# Fetches a pinned release tarball, refuses a size or hash mismatch, unpacks it
+# into DEST.stage, verifies SHA256SUMS.txt inside it, and swaps it into DEST.
+# The previous tree is left at DEST.old for the caller to harvest and remove.
+# A DEST whose marker names this pin and whose sums still hold is kept as is;
+# ARTIFACT_CHANGED says which branch ran.
+install_artifact() {
+  url="$1"; want="$2"; size="$3"; name="$4"; dest="$5"
+  ARTIFACT_CHANGED=0
+  if [ -f "$dest/.artifact-sha256" ] && [ "$(cat "$dest/.artifact-sha256")" = "$want" ] \
+     && (cd "$dest" && sha256sum -c --quiet --strict SHA256SUMS.txt) >/dev/null 2>&1; then
+    return 0
+  fi
+  archive="$(fetch_verified "$url" "$want" "$name")"
+  got_size="$(wc -c < "$archive" | tr -d ' ')"
+  [ "$got_size" = "$size" ] || die "$name is $got_size bytes; the pin is $size"
+  rm -rf "$dest.stage" "$dest.old"
+  unpack_tar_zst "$archive" "$dest.stage"
+  [ -f "$dest.stage/SHA256SUMS.txt" ] || die "$name has no SHA256SUMS.txt"
+  (cd "$dest.stage" && sha256sum -c --quiet --strict SHA256SUMS.txt) >&2 \
+    || die "$name does not match its own SHA256SUMS.txt"
+  extra="$(cd "$dest.stage" && find . -type f ! -name SHA256SUMS.txt | sed 's|^\./||' | sort \
+    | awk 'NR == FNR { sub(/^[0-9a-f]+  (\.\/)?/, ""); listed[$0] = 1; next } !($0 in listed)' SHA256SUMS.txt -)"
+  [ -z "$extra" ] || die "$name carries files SHA256SUMS.txt does not list: $extra"
+  if [ -d "$dest" ]; then mv "$dest" "$dest.old"; fi
+  mv "$dest.stage" "$dest"
+  printf '%s\n' "$want" > "$dest/.artifact-sha256"
+  ARTIFACT_CHANGED=1
+}
+
+# notice_gate TSV DEST SELECT FILE_COL NOTICE_COL SHA_COL
+# SELECT is an awk condition on a manifest row ($1..$n). Refuses when a
+# selected row's file or any of its comma-separated notices (under
+# DEST/licenses/) is missing, when a pinned sha256 differs, and when a file
+# under DEST/bin or DEST/lib has no selected row. SHA_COL 0 means no column.
+notice_gate() {
+  tsv="$1"; dest="$2"; select="$3"; fcol="$4"; ncol="$5"; scol="$6"
+  [ -f "$tsv" ] || die "notice manifest missing: $tsv"
+  rows="$(awk -F '\t' "
+    /^#/ || NF == 0 { next }
+    !hdr { hdr = (\$1 == \"file\"); next }
+    $select { print \$$fcol \"\t\" \$$ncol \"\t\" ($scol ? \$$scol : \"-\") }
+  " "$tsv")"
+  [ -n "$rows" ] || die "$tsv has no rows for $dest"
+  problems=""
+  tab="$(printf '\t')"
+  while IFS="$tab" read -r file notices sha; do
+    if [ ! -f "$dest/$file" ]; then
+      problems="$problems
+  $file: has a row in $(basename "$tsv") but is not in the tree"
+      continue
+    fi
+    old_ifs="$IFS"; IFS=','
+    for n in $notices; do
+      [ -f "$dest/licenses/$n" ] || problems="$problems
+  $file: the row names notice '$n' but licenses/$n is not present"
+    done
+    IFS="$old_ifs"
+    if [ "$sha" != "-" ] && [ "$(sha256_of "$dest/$file")" != "$sha" ]; then
+      problems="$problems
+  $file: sha256 differs from the pin in $(basename "$tsv")"
+    fi
+  done <<ROWS
+$rows
+ROWS
+  for f in $(cd "$dest" && find bin lib -type f 2>/dev/null | sort); do
+    printf '%s\n' "$rows" | cut -f1 | grep -qxF "$f" || problems="$problems
+  $f: shipped but has NO ROW in $(basename "$tsv")"
+  done
+  [ -z "$problems" ] || die "notice gate FAILED -- refusing to ship $dest:$problems"
+}

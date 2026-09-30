@@ -275,7 +275,7 @@ def _ocr_words(pdf_path: str, gs_path: str, dpi: int = 300) -> list[str]:
         result = subprocess.run(
             [
                 str(TESSERACT), str(png), "stdout", "-l", "eng",
-                "--tessdata-dir", str(TESSERACT.parent / "tessdata"),
+                "--tessdata-dir", str(vendored_tools.TESSDATA),
             ],
             capture_output=True,
             text=True,

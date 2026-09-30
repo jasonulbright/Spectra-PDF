@@ -3,6 +3,11 @@ use windows::Win32::Foundation::{CloseHandle, HANDLE};
 
 pub struct ProcessJob(usize);
 
+/// Bind a running process to this one's lifetime.
+pub fn contain(pid: u32) -> Result<Option<ProcessJob>, String> {
+    ProcessJob::attach(pid).map(Some)
+}
+
 impl ProcessJob {
     /// Attach to an already running process. Descendants created before this
     /// call are not captured; use `spawn` when the child can create them early.

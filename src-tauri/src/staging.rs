@@ -395,6 +395,7 @@ pub(crate) fn replace_denied(_target: &Path) -> bool {
 }
 
 /// Whether `record` exists and this process may not replace it by a rename.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn replace_refused(record: &Path) -> bool {
     record.is_file() && replace_denied(record)
 }
@@ -426,6 +427,7 @@ pub(crate) fn replace_unsafe(record: &Path) -> io::Error {
 /// (see [`replace_denied`], asked before any stage exists). Either refusal is
 /// returned as [`replace_unsafe`]: the only other way to land the bytes is a
 /// write into the live file, which a process death leaves torn.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn export_record(record: &Path, bytes: &[u8]) -> io::Result<()> {
     if replace_refused(record) {
         return Err(replace_unsafe(record));
@@ -447,6 +449,7 @@ pub(crate) fn export_record(record: &Path, bytes: &[u8]) -> io::Result<()> {
 
 /// Replace `record` with a copy of `source` like [`copy_record`], refusing
 /// as [`export_record`] does. Returns the byte count.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn export_copy(source: &Path, record: &Path) -> io::Result<u64> {
     if replace_refused(record) {
         return Err(replace_unsafe(record));
@@ -471,6 +474,7 @@ pub(crate) fn export_copy(source: &Path, record: &Path) -> io::Result<u64> {
 /// landing it only if `record` is still absent. A name selected after an
 /// existence check must use this form: `export_copy` intentionally replaces
 /// existing files and would otherwise lose a concurrent writer's data.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn export_copy_new(source: &Path, record: &Path) -> io::Result<u64> {
     let mut copied = 0;
     create_record(record, |staged| {

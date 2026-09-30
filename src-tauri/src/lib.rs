@@ -1,27 +1,57 @@
 pub mod cli;
+#[cfg(windows)]
+mod clipboard_read;
+#[cfg(not(windows))]
+#[path = "clipboard_read_unsupported.rs"]
 mod clipboard_read;
 mod commands;
 pub mod create_pdf_sources;
 mod print_to_pdf;
 mod scheduler;
 mod send_to;
+#[cfg(windows)]
+mod snapshot;
+#[cfg(not(windows))]
+#[path = "snapshot_unsupported.rs"]
 mod snapshot;
 mod page_commit;
 mod file_publication;
 mod folder_claims;
+#[cfg(windows)]
+mod process_job;
+#[cfg(target_os = "linux")]
+#[path = "process_job_linux.rs"]
+mod process_job;
+#[cfg(not(any(windows, target_os = "linux")))]
+#[path = "process_job_unsupported.rs"]
 mod process_job;
 mod scratch;
 mod staging;
 mod watchers;
+#[cfg(windows)]
+mod web_capture;
+#[cfg(not(windows))]
+#[path = "web_capture_unsupported.rs"]
 mod web_capture;
 pub mod engine;
 pub mod engine_writes;
 pub mod health_engine;
 pub mod net;
 pub mod gs;
+#[cfg(windows)]
 mod printers;
+#[cfg(not(windows))]
+#[path = "printers_unsupported.rs"]
+mod printers;
+pub mod platform;
+#[cfg(windows)]
 pub mod scan_host;
+#[cfg(windows)]
 pub mod scanner;
+#[cfg(not(windows))]
+#[path = "scanner_unsupported.rs"]
+pub mod scanner;
+#[cfg(windows)]
 pub mod scantest;
 pub mod app_windows;
 pub mod portable;
@@ -30,6 +60,16 @@ pub mod csc_oauth;
 pub mod session;
 pub mod tabdrag;
 mod prompt_turn;
+
+/// A Windows path literal as this platform spells an absolute path: identity
+/// on Windows; elsewhere the drive is dropped and separators become `/`.
+#[cfg(test)]
+pub(crate) fn native_path(path: &'static str) -> &'static str {
+    if cfg!(windows) {
+        return path;
+    }
+    Box::leak(path[2..].replace('\\', "/").into_boxed_str())
+}
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
@@ -45,12 +85,14 @@ pub static QUITTING: AtomicBool = AtomicBool::new(false);
 /// documented backdrop API from 22523 and a fallback attribute below it).
 /// Windows 10 has no equivalent worth shipping — its acrylic path lags
 /// window drags — so unsupported builds keep an ordinary opaque window.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn backdrop_supported(build: u32) -> bool {
     build >= 22000
 }
 
 /// Is "Transparency effects" on? (Settings ▸ Personalization ▸ Colours.)
 /// Absent value means the Windows default, which is ON.
+#[cfg(windows)]
 pub(crate) fn transparency_effects_enabled() -> bool {
     winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
         .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
@@ -59,6 +101,7 @@ pub(crate) fn transparency_effects_enabled() -> bool {
         .unwrap_or(true)
 }
 
+#[cfg(windows)]
 pub(crate) fn is_remote_session() -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTESESSION};
     unsafe { GetSystemMetrics(SM_REMOTESESSION) != 0 }
@@ -74,8 +117,25 @@ pub(crate) fn is_remote_session() -> bool {
 /// the opaque fallback is the correct presentation there.
 ///
 /// Pure so it can be pinned; the three environment reads stay outside it.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn wants_backdrop(build: u32, remote: bool, transparency_on: bool) -> bool {
     backdrop_supported(build) && !remote && transparency_on
+}
+
+/// The live environment's answer to `wants_backdrop`.
+#[cfg(windows)]
+pub(crate) fn platform_wants_backdrop() -> bool {
+    wants_backdrop(
+        windows_version::OsVersion::current().build,
+        is_remote_session(),
+        transparency_effects_enabled(),
+    )
+}
+
+/// No backdrop composes here; the opaque shell is the designed presentation.
+#[cfg(not(windows))]
+pub(crate) fn platform_wants_backdrop() -> bool {
+    false
 }
 
 /// When true, the binary is running under end-to-end test control:
@@ -340,8 +400,10 @@ pub fn run() {
             let startup = commands::load_startup_config(app.handle());
             // Under end-to-end control the window is force-shown below, so the
             // preference must not decide anything about visibility here.
-            let start_minimized =
-                !e2e && (args.iter().any(|a| a == "--minimized") || startup.start_minimized);
+            let tray = commands::PlatformCapabilities::current().tray_residency;
+            let start_minimized = !e2e
+                && tray
+                && (args.iter().any(|a| a == "--minimized") || startup.start_minimized);
 
             // The main window's geometry comes back on every launch — it
             // belongs to the window, not to the session — while the documents
@@ -362,7 +424,9 @@ pub fn run() {
             // The virtual printer's loopback listener — also part of the
             // product under test (e2e streams a job straight at the port).
             app.manage(print_to_pdf::PrinterState::new());
-            print_to_pdf::start_listener(app.handle());
+            if commands::PlatformCapabilities::current().virtual_printer {
+                print_to_pdf::start_listener(app.handle());
+            }
 
             if e2e {
                 // E2E: skip tray + force-show window; every launch must be
@@ -370,48 +434,50 @@ pub fn run() {
                 app_windows::show_when_ready(app.handle(), app_windows::MAIN_LABEL, true);
                 return Ok(());
             }
-            // Build system tray
-            let show = MenuItem::with_id(app, "show", "Show Spectra PDF", true, None::<&str>)?;
-            let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
-            let merge = MenuItem::with_id(app, "merge", "Quick Merge", true, None::<&str>)?;
-            let separator2 = tauri::menu::PredefinedMenuItem::separator(app)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &separator, &merge, &separator2, &quit])?;
+            if tray {
+                // Build system tray
+                let show = MenuItem::with_id(app, "show", "Show Spectra PDF", true, None::<&str>)?;
+                let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
+                let merge = MenuItem::with_id(app, "merge", "Quick Merge", true, None::<&str>)?;
+                let separator2 = tauri::menu::PredefinedMenuItem::separator(app)?;
+                let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show, &separator, &merge, &separator2, &quit])?;
 
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().cloned().unwrap())
-                .menu(&menu)
-                .tooltip("Spectra PDF")
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    // Every workspace window comes back: the tray hides them
-                    // all, so restoring only one strands the rest.
-                    "show" => app_windows::show_all_app_windows(app),
-                    "merge" => {
-                        let target = app_windows::route_target(app);
-                        app_windows::focus_label(app, &target);
-                        let _ = app.emit_to(target.as_str(), "app:trayAction", "merge");
-                    }
-                    "quit" => {
-                        // Explicit Quit must use the renderer's shared close
-                        // flow so dirty documents can be saved or kept open,
-                        // and every workspace window can acknowledge the
-                        // request before the session is sealed.
-                        let target = app_windows::route_target(app);
-                        app_windows::focus_label(app, &target);
-                        let _ = app.emit_to(target.as_str(), "app:trayAction", "quit");
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::DoubleClick {
-                        button: MouseButton::Left,
-                        ..
-                    } = event
-                    {
-                        app_windows::show_all_app_windows(tray.app_handle());
-                    }
-                })
-                .build(app)?;
+                TrayIconBuilder::new()
+                    .icon(app.default_window_icon().cloned().unwrap())
+                    .menu(&menu)
+                    .tooltip("Spectra PDF")
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        // Every workspace window comes back: the tray hides them
+                        // all, so restoring only one strands the rest.
+                        "show" => app_windows::show_all_app_windows(app),
+                        "merge" => {
+                            let target = app_windows::route_target(app);
+                            app_windows::focus_label(app, &target);
+                            let _ = app.emit_to(target.as_str(), "app:trayAction", "merge");
+                        }
+                        "quit" => {
+                            // Explicit Quit must use the renderer's shared close
+                            // flow so dirty documents can be saved or kept open,
+                            // and every workspace window can acknowledge the
+                            // request before the session is sealed.
+                            let target = app_windows::route_target(app);
+                            app_windows::focus_label(app, &target);
+                            let _ = app.emit_to(target.as_str(), "app:trayAction", "quit");
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::DoubleClick {
+                            button: MouseButton::Left,
+                            ..
+                        } = event
+                        {
+                            app_windows::show_all_app_windows(tray.app_handle());
+                        }
+                    })
+                    .build(app)?;
+            }
 
             // The window is built hidden and shown on the renderer's first
             // painted frame — unless --minimized or the startup preference
@@ -503,7 +569,10 @@ pub fn run() {
         .expect("error building tauri application")
         .run(move |_app, event| {
             if let RunEvent::ExitRequested { api, .. } = &event {
-                if !e2e && !QUITTING.load(Ordering::SeqCst) {
+                if !e2e
+                    && commands::PlatformCapabilities::current().tray_residency
+                    && !QUITTING.load(Ordering::SeqCst)
+                {
                     // Keep the app running when the window is hidden to tray
                     api.prevent_exit();
                 }
@@ -518,6 +587,7 @@ pub fn run() {
                 });
                 // The scanner host holds device locks, so it is ended here
                 // rather than left to the job object that backstops a crash.
+                #[cfg(windows)]
                 scan_host::shutdown();
             }
         });
@@ -564,7 +634,7 @@ mod tests {
         let source = include_str!("lib.rs");
         let start = source.find("\"quit\" => {").expect("the tray quit branch");
         let length = source[start..]
-            .find("\n                    _ => {}")
+            .find("\n                        _ => {}")
             .expect("the end of the tray event match");
         let branch = &source[start..start + length];
         assert!(branch.contains("app:trayAction"));
@@ -641,10 +711,17 @@ mod tests {
         let canonical = crate::commands::canonical_path(&file.to_string_lossy());
         assert!(!canonical.starts_with(r"\\?\"), "{canonical}");
 
-        let lower = file.to_string_lossy().to_lowercase();
-        let slashy = file.to_string_lossy().replace('\\', "/");
-        assert_eq!(crate::commands::canonical_path(&lower), canonical);
-        assert_eq!(crate::commands::canonical_path(&slashy), canonical);
+        // Case and separator are spellings only on Windows; elsewhere they
+        // name other files.
+        #[cfg(windows)]
+        {
+            let lower = file.to_string_lossy().to_lowercase();
+            let slashy = file.to_string_lossy().replace('\\', "/");
+            assert_eq!(crate::commands::canonical_path(&lower), canonical);
+            assert_eq!(crate::commands::canonical_path(&slashy), canonical);
+        }
+        #[cfg(not(windows))]
+        assert_eq!(canonical, file.to_string_lossy());
 
         // A path that doesn't exist passes through untouched — Save As
         // targets are usually new files.

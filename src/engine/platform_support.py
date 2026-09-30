@@ -35,6 +35,28 @@ def shared_library_name(windows_name: str, posix_name: str) -> str:
     return windows_name if IS_WINDOWS else posix_name
 
 
+def program_relative(stem: str) -> tuple[str, ...]:
+    """A vendored program's path relative to its component tree.
+
+    A Linux tree is the pinned artifact unpacked as published: programs in
+    `bin/` load their libraries from `lib/` through RUNPATH `$ORIGIN/../lib`,
+    so flattening the tree would break the load.
+    """
+    return (program_name(stem),) if IS_WINDOWS else ("bin", stem)
+
+
+def library_relative(windows_name: str, posix_name: str) -> tuple[str, ...]:
+    """A vendored shared library's path relative to its component tree."""
+    return (windows_name,) if IS_WINDOWS else ("lib", posix_name)
+
+
+def tessdata_dir(tesseract: Path) -> Path:
+    """The language-model directory of a vendored Tesseract program."""
+    if IS_WINDOWS:
+        return tesseract.parent / "tessdata"
+    return tesseract.parent.parent / "share" / "tessdata"
+
+
 def vendored_candidates(engine_dir: Path, component: str, *relative: str) -> tuple[Path, ...]:
     """Where a vendored tree's file sits relative to the engine package.
 

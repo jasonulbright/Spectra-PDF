@@ -188,7 +188,7 @@ def _voikko_library(tree: Path) -> Path:
     """The vendored libvoikko for this platform.
 
     Windows ships the DLL beside the dictionary. A Linux dev tree keeps the
-    native library in its own platform tree (resources/linux-x86_64/voikko), because the
+    native library in its own platform tree (resources/linux-x86_64/voikko/lib), because the
     dictionary tree is shared with a Windows checkout; the shipped layout may
     place it beside the dictionary, which is looked at first.
     """
@@ -196,7 +196,8 @@ def _voikko_library(tree: Path) -> Path:
     beside = tree / name
     if beside.is_file() or platform_support.IS_WINDOWS:
         return beside
-    for candidate in platform_support.vendored_candidates(Path(__file__).resolve().parent, "voikko", name):
+    relative = platform_support.library_relative("libvoikko-1.dll", "libvoikko.so.1")
+    for candidate in platform_support.vendored_candidates(Path(__file__).resolve().parent, "voikko", *relative):
         if candidate.is_file():
             return candidate
     return beside

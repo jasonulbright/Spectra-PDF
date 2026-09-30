@@ -619,11 +619,8 @@ the license above are offered by us alone and not by Adobe.
 ## Linux x86-64 runtime
 
 The Linux runtime trees live in `resources/linux-x86_64/`. Every download is
-verified against a pinned SHA-256 before use. The OCR, JBIG2 and Finnish
-native programs below are built from pinned release sources in their own build
-repositories, so the source archive named in each row is the corresponding
-source of the shipped object code. Every shipped program and library resolves
-to a row in the manifest named in its section.
+verified against a pinned SHA-256 before use. Every shipped program and library
+resolves to a row in the manifest named in its section.
 
 ### Python runtime
 
@@ -644,26 +641,34 @@ to a row in the manifest named in its section.
 
 ### OCR (`scripts/tesseract-licenses.tsv`)
 
-| File | Component | License | Source archive |
-|---|---|---|---|
-| `tesseract`, `libtesseract.so.5.4.0` | Tesseract 5.4.0 | Apache-2.0 | <https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.4.0.tar.gz> |
-| `libleptonica.so.6` | Leptonica 1.84.1 | BSD-2-Clause | <https://github.com/DanBloomberg/leptonica/releases/download/1.84.1/leptonica-1.84.1.tar.gz> |
-| `libtiff.so.6` | libtiff 4.6.0, built without JBIG | libtiff | <https://download.osgeo.org/libtiff/tiff-4.6.0.tar.gz> |
-| `libpng16.so.16` | libpng 1.6.43 | libpng-2.0 | <https://download.sourceforge.net/libpng/libpng-1.6.43.tar.xz> |
-| `libjpeg.so.8` | libjpeg-turbo 3.0.3 | IJG AND BSD-3-Clause AND Zlib | <https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.0.3/libjpeg-turbo-3.0.3.tar.gz> |
-| `libz.so.1` | zlib 1.3.1 | Zlib | <https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz> |
-| `libstdc++.so.6`, `libgcc_s.so.1` | GCC 13.3.0 runtime | GPL-3.0-or-later WITH GCC-exception-3.1 | <https://gcc.gnu.org/> |
+`tesseract/` is the release artifact `spectra-5.4.0-1` of the fork, unpacked
+as published. Notices ship in `tesseract/licenses/`.
 
-The notices ship in `tesseract/licenses/`, copied from the verified source
-archives. The orientation model `osd.traineddata` is the tessdata_fast 4.1.0
-file (Apache-2.0).
+| Component | Version | License | Fork | Upstream |
+|---|---|---|---|---|
+| Tesseract (`bin/tesseract`, `lib/libtesseract.so.5.4.0`) | 5.4.0 | Apache-2.0 | <https://github.com/jasonulbright/tesseract> | <https://github.com/tesseract-ocr/tesseract> |
+| Leptonica (`lib/libleptonica.so.6`) | 1.84.1 | BSD-2-Clause | <https://github.com/jasonulbright/tesseract> | <https://github.com/DanBloomberg/leptonica> |
+| libtiff, built without JBIG (`lib/libtiff.so.6`) | 4.6.0 | libtiff | <https://github.com/jasonulbright/tesseract> | <https://gitlab.com/libtiff/libtiff> |
+| libpng (`lib/libpng16.so.16`) | 1.6.43 | libpng-2.0 | <https://github.com/jasonulbright/tesseract> | <https://github.com/pnggroup/libpng> |
+| libjpeg-turbo (`lib/libjpeg.so.8`) | 3.0.3 | IJG AND BSD-3-Clause AND Zlib | <https://github.com/jasonulbright/tesseract> | <https://github.com/libjpeg-turbo/libjpeg-turbo> |
+| zlib (`lib/libz.so.1`) | 1.3.1 | Zlib | <https://github.com/jasonulbright/tesseract> | <https://github.com/madler/zlib> |
+| GCC runtime (`lib/libstdc++.so.6`, `lib/libgcc_s.so.1`) | 8.5.0 | GPL-3.0-or-later WITH GCC-exception-3.1 | <https://github.com/jasonulbright/tesseract> | <https://gcc.gnu.org/> |
+| Orientation and English models (`share/tessdata/osd.traineddata`, `eng.traineddata`) | tessdata_fast 4.1.0 | Apache-2.0 | none | <https://github.com/tesseract-ocr/tessdata_fast> |
 
 ### JBIG2 encoder (`scripts/jbig2enc-licenses.tsv`)
 
-`jbig2` is jbig2enc 0.32 (Apache-2.0), built from
-<https://github.com/agl/jbig2enc/archive/refs/tags/0.32.tar.gz>. It loads the
-same Leptonica, libtiff, libpng, libjpeg-turbo, zlib and GCC runtime builds as
-the OCR tree, shipped beside it with the same notices.
+`jbig2enc/` is the release artifact `spectra-0.32-1` of the fork, unpacked as
+published. Notices, and the upstream PATENTS note, ship in `jbig2enc/licenses/`.
+
+| Component | Version | License | Fork | Upstream |
+|---|---|---|---|---|
+| jbig2enc (`bin/jbig2`) | 0.32 | Apache-2.0 | <https://github.com/jasonulbright/jbig2enc> | <https://github.com/agl/jbig2enc> |
+| Leptonica (`lib/libleptonica.so.6`) | 1.84.1 | BSD-2-Clause | <https://github.com/jasonulbright/jbig2enc> | <https://github.com/DanBloomberg/leptonica> |
+| libtiff, built without JBIG (`lib/libtiff.so.6`) | 4.6.0 | libtiff | <https://github.com/jasonulbright/jbig2enc> | <https://gitlab.com/libtiff/libtiff> |
+| libpng (`lib/libpng16.so.16`) | 1.6.43 | libpng-2.0 | <https://github.com/jasonulbright/jbig2enc> | <https://github.com/pnggroup/libpng> |
+| libjpeg-turbo (`lib/libjpeg.so.8`) | 3.0.3 | IJG AND BSD-3-Clause AND Zlib | <https://github.com/jasonulbright/jbig2enc> | <https://github.com/libjpeg-turbo/libjpeg-turbo> |
+| zlib (`lib/libz.so.1`) | 1.3.1 | Zlib | <https://github.com/jasonulbright/jbig2enc> | <https://github.com/madler/zlib> |
+| GCC runtime (`lib/libstdc++.so.6`, `lib/libgcc_s.so.1`) | 8.5.0 | GPL-3.0-or-later WITH GCC-exception-3.1 | <https://github.com/jasonulbright/jbig2enc> | <https://gcc.gnu.org/> |
 
 ### LibreOffice (`scripts/bundle-libreoffice.sh`, `scripts/libreoffice-notices.tsv`)
 
@@ -683,12 +688,16 @@ Their copyright files ship in `libreoffice/licenses/`.
 
 ### Finnish spelling (`scripts/voikko.tsv`)
 
-`voikko/libvoikko.so.1` is libvoikko 4.3.3 (MPL-1.1 OR GPL-2.0-or-later OR
-LGPL-2.1-or-later), built from
-<https://www.puimula.org/voikko-sources/libvoikko/libvoikko-4.3.3.tar.gz>, the
-upstream release the Windows build is made from. It loads the GCC runtime
-shipped beside it. The transducer data, binding and notices are the
-platform-neutral files listed under **Finnish — libvoikko and voikko-fi**.
+`voikko/` is the release artifact `spectra-4.3.3-1` of the fork, unpacked as
+published. Notices ship in `voikko/licenses/`. The transducer data, binding and
+notices are the platform-neutral files listed under **Finnish — libvoikko and
+voikko-fi**.
+
+| Component | Version | License | Fork | Upstream |
+|---|---|---|---|---|
+| libvoikko (`lib/libvoikko.so.1`) | 4.3.3 | MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later (MPL-1.1 used) | <https://github.com/jasonulbright/corevoikko> | <https://github.com/voikko/corevoikko> |
+| utfcpp (compiled into libvoikko) | as bundled in libvoikko 4.3.3 | BSL-1.0 | <https://github.com/jasonulbright/corevoikko> | <https://github.com/nemtrif/utfcpp> |
+| GCC runtime (`lib/libstdc++.so.6`, `lib/libgcc_s.so.1`) | 8.5.0 | GPL-3.0-or-later WITH GCC-exception-3.1 | <https://github.com/jasonulbright/corevoikko> | <https://gcc.gnu.org/> |
 
 ## Frontend / runtime libraries
 

@@ -4,7 +4,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
+#[cfg(target_os = "linux")]
+use crate::process_job::WorkerChild as CommandChild;
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_shell::process::CommandChild;
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_shell::ShellExt;
 use tokio::sync::Mutex;
 
@@ -88,7 +92,7 @@ impl EngineWorker {
 pub struct EngineChild {
     pub child: CommandChild,
     generation: u64,
-    _job: crate::process_job::ProcessJob,
+    _job: Option<crate::process_job::ProcessJob>,
 }
 
 impl EngineChild {
@@ -1035,23 +1039,40 @@ async fn start_worker<R: Runtime>(app: &AppHandle<R>, label: &str, worker: &Arc<
         Launcher::Command { program, args } => (program.clone(), args.clone()),
     };
 
-    let shell = app.shell();
-    let (mut rx, child) = shell
-        .command(&program)
-        .args(args)
-        .envs(python_env().into_iter().collect::<HashMap<String, String>>())
-        // The plugin's default line reader buffers until newline with no cap.
-        // Read raw chunks so this process can bound each JSON-RPC frame.
-        .set_raw_out(true)
-        .spawn()
+    #[cfg(not(target_os = "linux"))]
+    let (mut rx, child, job) = {
+        let (rx, child) = app
+            .shell()
+            .command(&program)
+            .args(args)
+            .envs(python_env().into_iter().collect::<HashMap<String, String>>())
+            // The plugin's default line reader buffers until newline with no
+            // cap. Read raw chunks so this process can bound each JSON-RPC
+            // frame.
+            .set_raw_out(true)
+            .spawn()
+            .map_err(|e| format!("Failed to start engine: {}", e))?;
+        let job = match crate::process_job::contain(child.pid()) {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = child.kill();
+                return Err(format!("The engine process could not be contained: {error}"));
+            }
+        };
+        (rx, child, job)
+    };
+    // Bound and leased at spawn: the lease channel exists only as an
+    // inherited descriptor, and the lifetime binding only from `pre_exec`.
+    #[cfg(target_os = "linux")]
+    let (mut rx, child, job) = {
+        let (rx, child) = crate::process_job::spawn_worker(
+            &program,
+            &args,
+            python_env(),
+            crate::process_job::Binding { lease_channel: true, memory_limit: None },
+        )
         .map_err(|e| format!("Failed to start engine: {}", e))?;
-
-    let job = match crate::process_job::ProcessJob::attach(child.pid()) {
-        Ok(job) => job,
-        Err(error) => {
-            let _ = child.kill();
-            return Err(format!("The engine process could not be contained: {error}"));
-        }
+        (rx, child, None)
     };
     let generation = state.next_generation.fetch_add(1, Ordering::SeqCst);
     worker.generation.store(generation, Ordering::SeqCst);
@@ -1999,7 +2020,7 @@ mod lease_tests {
 
         let state = crate::app_windows::ClaimState::new();
         let router = EngineRouter::new();
-        let path = r"C:\export\result.pdf";
+        let path = crate::native_path(r"C:\export\result.pdf");
         let reservation = state.claim_engine_output(path, "doc-1").unwrap();
 
         let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -2035,6 +2056,7 @@ mod lease_tests {
             .granted);
     }
 
+    #[cfg(windows)]
     #[test]
     fn closing_a_window_keeps_its_folders_until_work_finishes() {
         for terminate in [false, true] {

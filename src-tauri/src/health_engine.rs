@@ -33,7 +33,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
+#[cfg(target_os = "linux")]
+use crate::process_job::WorkerChild as CommandChild;
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_shell::process::CommandChild;
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_shell::ShellExt;
 use tokio::sync::{Mutex, Notify};
 
@@ -254,7 +258,7 @@ fn confine_worker(pid: u32) -> Result<usize, String> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn confine_worker(_pid: u32) -> Result<usize, String> {
     Err("health worker memory confinement is unavailable on this platform".to_string())
 }
@@ -479,8 +483,9 @@ async fn start_locked<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
 
     let python_path = crate::engine::get_python_path(app);
     let script_path = crate::engine::get_engine_script_path(app);
-    let shell = app.shell();
-    let (mut rx, child) = shell
+    #[cfg(not(target_os = "linux"))]
+    let (mut rx, child) = app
+        .shell()
         .command(&python_path)
         .args(crate::engine::python_args(&script_path))
         .envs(
@@ -493,6 +498,18 @@ async fn start_locked<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
         .set_raw_out(true)
         .spawn()
         .map_err(|e| format!("Failed to start health worker: {}", e))?;
+    // The memory ceiling is set before exec, so no allocation precedes it.
+    #[cfg(target_os = "linux")]
+    let (mut rx, child) = crate::process_job::spawn_worker(
+        &python_path,
+        &crate::engine::python_args(&script_path),
+        crate::engine::python_env(),
+        crate::process_job::Binding {
+            lease_channel: false,
+            memory_limit: Some(HEALTH_MEMORY_LIMIT as u64),
+        },
+    )
+    .map_err(|e| format!("Failed to start health worker: {}", e))?;
 
     let generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
     let pid = child.pid();
@@ -583,15 +600,18 @@ async fn start_locked<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
     // Wire termination before confinement. If assigning the kernel job fails,
     // the same generation-aware kill barrier used at run time can then prove
     // this process is gone before a retry is permitted to spawn another one.
-    let job = match confine_worker(pid) {
-        Ok(job) => job,
-        Err(error) => {
-            let _ = kill_locked(app).await;
-            return Err(format!("Failed to confine health worker memory: {error}"));
+    #[cfg(not(target_os = "linux"))]
+    {
+        let job = match confine_worker(pid) {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = kill_locked(app).await;
+                return Err(format!("Failed to confine health worker memory: {error}"));
+            }
+        };
+        if let Ok(mut jobs) = state.jobs.lock() {
+            jobs.insert(generation, job);
         }
-    };
-    if let Ok(mut jobs) = state.jobs.lock() {
-        jobs.insert(generation, job);
     }
 
     let watched = app.clone();

@@ -799,11 +799,15 @@ mod tests {
         std::fs::create_dir_all(&src).unwrap();
         let s = src.to_string_lossy().to_string();
 
-        let ok = folder(&s, &format!("{}\\out", tmp.display()), &format!("{}\\done", tmp.display()));
+        let ok = folder(
+            &s,
+            &tmp.join("out").to_string_lossy(),
+            &tmp.join("done").to_string_lossy(),
+        );
         assert!(validate_folder(&ok).is_ok());
 
         let mut inside_src = ok.clone();
-        inside_src.dest = format!("{s}\\out");
+        inside_src.dest = src.join("out").to_string_lossy().into_owned();
         assert!(validate_folder(&inside_src).unwrap_err().contains("outside the watched"));
 
         let mut no_done = ok.clone();
@@ -815,7 +819,7 @@ mod tests {
         assert!(validate_folder(&stepless).unwrap_err().contains("no steps"));
 
         let mut missing = ok;
-        missing.source = format!("{s}\\nope");
+        missing.source = src.join("nope").to_string_lossy().into_owned();
         assert!(validate_folder(&missing).unwrap_err().contains("not found"));
     }
 

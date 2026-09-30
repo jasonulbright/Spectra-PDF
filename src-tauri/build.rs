@@ -355,6 +355,9 @@ fn manifest_test_binaries() {
     // The very resource object `tauri_build::build` links into the product
     // executable, so the two carry ONE manifest rather than two that can
     // disagree.
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
     let resource = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR")).join("resource.lib");
     if resource.is_file() {
         println!("cargo:rustc-link-arg-tests={}", resource.display());

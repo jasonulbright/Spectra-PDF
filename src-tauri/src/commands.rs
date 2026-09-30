@@ -1368,6 +1368,7 @@ pub async fn open_releases_page(app: AppHandle) -> Result<(), String> {
 /// output always carries a space in its filename.
 ///
 /// Windows filenames cannot contain `"`, so the path itself needs no escaping.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn select_argument(canonical: &str) -> String {
     format!("/select,\"{canonical}\"")
 }
@@ -1392,21 +1393,40 @@ pub async fn reveal_in_file_manager(path: String) -> Result<(), String> {
     if !p.is_file() {
         return Err(format!("not a file: {canonical}"));
     }
-    let mut cmd = std::process::Command::new("explorer.exe");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.raw_arg(select_argument(&canonical));
-    }
-    #[cfg(not(windows))]
-    {
-        cmd.arg(format!("/select,{canonical}"));
-    }
-    cmd.spawn()
+    reveal_command(p)?
+        .spawn()
         // explorer.exe exits non-zero even when it succeeds, so the spawn is
         // the only thing worth checking; the process is not awaited.
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+#[cfg(windows)]
+fn reveal_command(path: &std::path::Path) -> Result<std::process::Command, String> {
+    use std::os::windows::process::CommandExt;
+    let mut cmd = std::process::Command::new("explorer.exe");
+    cmd.raw_arg(select_argument(&path.to_string_lossy()));
+    Ok(cmd)
+}
+
+/// The freedesktop file-manager interface's `ShowItems`, which opens the
+/// containing folder with the item selected. The item travels as one `file:`
+/// URI argument, never through a shell.
+#[cfg(not(windows))]
+fn reveal_command(path: &std::path::Path) -> Result<std::process::Command, String> {
+    let uri = url::Url::from_file_path(path)
+        .map_err(|()| format!("not an absolute path: {}", path.display()))?;
+    let mut cmd = std::process::Command::new("dbus-send");
+    cmd.args([
+        "--session",
+        "--dest=org.freedesktop.FileManager1",
+        "--type=method_call",
+        "/org/freedesktop/FileManager1",
+        "org.freedesktop.FileManager1.ShowItems",
+    ])
+    .arg(format!("array:string:{uri}"))
+    .arg("string:");
+    Ok(cmd)
 }
 
 /// Opens one of the SHIPPED third-party license notice files with the OS
@@ -1465,9 +1485,21 @@ pub async fn printer_capabilities(
 /// machines.
 #[tauri::command]
 pub async fn get_system_accent_color() -> Result<Option<String>, String> {
-    Ok(accent_from_uisettings().or_else(accent_from_registry))
+    Ok(system_accent_color())
 }
 
+#[cfg(windows)]
+fn system_accent_color() -> Option<String> {
+    accent_from_uisettings().or_else(accent_from_registry)
+}
+
+/// No accent source is read here yet; the renderer keeps its designed default.
+#[cfg(not(windows))]
+fn system_accent_color() -> Option<String> {
+    None
+}
+
+#[cfg(windows)]
 fn accent_from_uisettings() -> Option<String> {
     use windows::UI::ViewManagement::{UIColorType, UISettings};
     let ui = UISettings::new().ok()?;
@@ -1475,6 +1507,7 @@ fn accent_from_uisettings() -> Option<String> {
     Some(format!("#{:02X}{:02X}{:02X}", c.R, c.G, c.B))
 }
 
+#[cfg(windows)]
 fn accent_from_registry() -> Option<String> {
     use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
     use winreg::RegKey;
@@ -1527,6 +1560,7 @@ pub struct PlatformCapabilities {
     pub tray_residency: bool,
     pub backdrop: bool,
     pub console_attach: bool,
+    pub start_with_system: bool,
 }
 
 impl PlatformCapabilities {
@@ -1547,6 +1581,7 @@ impl PlatformCapabilities {
             tray_residency: true,
             backdrop: true,
             console_attach: true,
+            start_with_system: true,
         }
     }
 
@@ -1567,6 +1602,7 @@ impl PlatformCapabilities {
             tray_residency: false,
             backdrop: false,
             console_attach: false,
+            start_with_system: false,
         }
     }
 }
@@ -2038,7 +2074,8 @@ pub async fn close_window(
     let others = claim_close(&CLOSING, &labels, window.label());
     if others == 0 {
         let writes = app.state::<crate::engine::EngineRouter>().writes_in_flight(None);
-        match crate::engine_writes::last_close(minimize_to_tray, force.unwrap_or(false), writes) {
+        let hide = minimize_to_tray && PlatformCapabilities::current().tray_residency;
+        match crate::engine_writes::last_close(hide, force.unwrap_or(false), writes) {
             crate::engine_writes::LastClose::Hide => {
                 release_close(&CLOSING, window.label());
                 let _ = window.hide();
@@ -2281,6 +2318,9 @@ pub async fn set_tab_order(
 
 #[tauri::command]
 pub async fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
+    if !PlatformCapabilities::current().tray_residency {
+        return Err(crate::platform::Unsupported::new(crate::platform::feature::TRAY_RESIDENCY).into());
+    }
     let _ = window.hide();
     Ok(())
 }
@@ -2514,17 +2554,30 @@ pub async fn take_unreadable_records(
 
 #[tauri::command]
 pub async fn check_auto_update_disabled() -> Result<bool, String> {
+    Ok(machine_policy_set("DisableAutoUpdate"))
+}
+
+/// Whether an administrator set a machine policy flag to 1.
+#[cfg(windows)]
+fn machine_policy_set(name: &str) -> bool {
     use winreg::enums::HKEY_LOCAL_MACHINE;
     use winreg::RegKey;
 
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     match hklm.open_subkey("SOFTWARE\\Spectra PDF") {
         Ok(key) => {
-            let value: Result<u32, _> = key.get_value("DisableAutoUpdate");
-            Ok(value.unwrap_or(0) == 1)
+            let value: Result<u32, _> = key.get_value(name);
+            value.unwrap_or(0) == 1
         }
-        Err(_) => Ok(false),
+        Err(_) => false,
     }
+}
+
+/// No machine policy store is read here yet, so no administrator can have set
+/// a flag: every policy reads as unset.
+#[cfg(not(windows))]
+fn machine_policy_set(_name: &str) -> bool {
+    false
 }
 
 /// Whether this machine forbids running field scripts, whatever the user's
@@ -2533,22 +2586,14 @@ pub async fn check_auto_update_disabled() -> Result<bool, String> {
 /// — it can turn scripting off, never on.
 #[tauri::command]
 pub async fn check_field_scripts_disabled() -> Result<bool, String> {
-    use winreg::enums::HKEY_LOCAL_MACHINE;
-    use winreg::RegKey;
-
-    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    match hklm.open_subkey("SOFTWARE\\Spectra PDF") {
-        Ok(key) => {
-            let value: Result<u32, _> = key.get_value("DisableFieldScripts");
-            Ok(value.unwrap_or(0) == 1)
-        }
-        Err(_) => Ok(false),
-    }
+    Ok(machine_policy_set("DisableFieldScripts"))
 }
 
 // ── Startup (Start with Windows) ─────────────────────────────────────────
 
+#[cfg_attr(not(windows), allow(dead_code))]
 const STARTUP_REG_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+#[cfg_attr(not(windows), allow(dead_code))]
 const STARTUP_REG_VALUE: &str = "SpectraPDF";
 
 /// What a launch must do to the Run value it found there.
@@ -2556,6 +2601,7 @@ const STARTUP_REG_VALUE: &str = "SpectraPDF";
 /// `Absent` covers both "startup is not enabled" and "the value is gone":
 /// neither is this code's business to create, because only the user's own
 /// preference turns the entry on.
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RunKeyAction {
     Absent,
@@ -2569,6 +2615,7 @@ pub(crate) enum RunKeyAction {
 /// ` --minimized`, so the quoted head is the path. An unquoted value (written
 /// by an older build or by hand) is taken up to the first ` --`, which is the
 /// only separator this app's own flags use.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn run_value_exe(value: &str) -> &str {
     let trimmed = value.trim();
     if let Some(rest) = trimmed.strip_prefix('"') {
@@ -2598,6 +2645,7 @@ fn run_value_exe(value: &str) -> &str {
 /// happens to start first must not seize the other's startup entry.
 /// `recorded_exists` is the caller's answer to that question so the decision
 /// stays testable without a filesystem.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn run_key_action(
     existing: Option<&str>,
     exe: &Path,
@@ -2694,6 +2742,16 @@ pub async fn startup_entry_notice(
 /// Returns (enabled, minimized) — minimized is true if the --minimized flag is present.
 #[tauri::command]
 pub async fn get_startup_enabled() -> Result<(bool, bool), String> {
+    startup_entry()
+}
+
+#[cfg(not(windows))]
+fn startup_entry() -> Result<(bool, bool), String> {
+    Ok((false, false))
+}
+
+#[cfg(windows)]
+fn startup_entry() -> Result<(bool, bool), String> {
     use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
     use winreg::RegKey;
 
@@ -2718,6 +2776,16 @@ pub async fn set_startup_enabled(
     enabled: bool,
     start_minimized: bool,
 ) -> Result<(), String> {
+    write_startup_entry(enabled, start_minimized)
+}
+
+#[cfg(not(windows))]
+fn write_startup_entry(_enabled: bool, _start_minimized: bool) -> Result<(), String> {
+    Err(crate::platform::Unsupported::new(crate::platform::feature::START_WITH_SYSTEM).into())
+}
+
+#[cfg(windows)]
+fn write_startup_entry(enabled: bool, start_minimized: bool) -> Result<(), String> {
     use winreg::enums::{HKEY_CURRENT_USER, KEY_WRITE};
     use winreg::RegKey;
 
@@ -2755,6 +2823,7 @@ mod tests {
             "systemPrinting", "virtualPrinter", "scanning", "scheduledActions",
             "storeCertificates", "sendByEmail", "webCapture", "clipboardRead", "snapshot",
             "accentColor", "enterprisePolicy", "trayResidency", "backdrop", "consoleAttach",
+            "startWithSystem",
         ];
         let mut got = keys.clone();
         expected.sort_unstable();
@@ -2831,12 +2900,15 @@ mod tests {
         append_line_at, classify_recent_paths, copy_file_creating_dirs_at, engine_output_path,
         is_batch_log_name,
         is_managed_member_path, load_startup_config_at, move_file_creating_dirs_at,
-        reclaim_batch_log_stages, run_key_action, save_as, select_argument, working_copy_in,
-        write_action_file, write_batch_log_at, write_profile_file, write_report_file,
+        run_key_action, select_argument, working_copy_in,
+        write_action_file, write_profile_file, write_report_file,
         write_startup_flag_at, EngineOutputTarget, LaunchRecord, PathStatus, RunKeyAction,
         QuitRequestResult, StartupConfig,
         UnreadableRecord, UnreadableRecords, CLASSIFY_MAX_BATCH,
     };
+    #[cfg(windows)]
+    use super::{reclaim_batch_log_stages, save_as, write_batch_log_at};
+    use crate::native_path as native;
     use std::path::Path;
 
     /// A scratch directory of this test's own, so concurrent tests cannot see
@@ -2869,14 +2941,17 @@ mod tests {
         let existing = base.join("Done Folder");
         std::fs::create_dir_all(&existing).unwrap();
         let canonical_base = super::canonical_path(&base.to_string_lossy());
-        let upper = existing.to_string_lossy().to_uppercase();
+        // Windows resolves another case spelling to the same folder; a
+        // case-sensitive file system names a different one.
+        let spell = |path: String| if cfg!(windows) { path.to_uppercase() } else { path };
+        let upper = spell(existing.to_string_lossy().into_owned());
         assert_eq!(
             super::canonical_path_or_parent(&upper),
             super::canonical_path(&existing.to_string_lossy()),
         );
-        let missing = base.join("DONE FOLDER").join("not yet").to_string_lossy().to_uppercase();
+        let missing = spell(existing.join("not yet").to_string_lossy().into_owned());
         let expected = std::path::Path::new(&super::canonical_path(&existing.to_string_lossy()))
-            .join("NOT YET")
+            .join(spell("not yet".to_string()))
             .to_string_lossy()
             .into_owned();
         assert_eq!(super::canonical_path_or_parent(&missing), expected);
@@ -2885,32 +2960,32 @@ mod tests {
     }
     #[test]
     fn only_absolute_engine_output_paths_are_reserved() {
-        let request = serde_json::json!({"id": 1, "params": {"output": r"C:\out\result.pdf"}});
+        let request = serde_json::json!({"id": 1, "params": {"output": native(r"C:\out\result.pdf")}});
         assert_eq!(
             engine_output_path(&request).unwrap(),
-            Some(EngineOutputTarget::File(r"C:\out\result.pdf".to_string()))
+            Some(EngineOutputTarget::File(native(r"C:\out\result.pdf").to_string()))
         );
 
         let folder_split = serde_json::json!({
             "id": 2,
             "method": "split",
             "params": {
-                "file": r"C:\in.pdf", "mode": "every_n", "output_dir": r"C:\out",
-                "output_paths": [r"C:\out\in_1-2.pdf"]
+                "file": native(r"C:\in.pdf"), "mode": "every_n", "output_dir": native(r"C:\out"),
+                "output_paths": [native(r"C:\out\in_1-2.pdf")]
             }
         });
         assert_eq!(
             engine_output_path(&folder_split).unwrap(),
             Some(EngineOutputTarget::SplitFolder {
-                folder: r"C:\out".to_string(),
-                outputs: vec![r"C:\out\in_1-2.pdf".to_string()],
+                folder: native(r"C:\out").to_string(),
+                outputs: vec![native(r"C:\out\in_1-2.pdf").to_string()],
             })
         );
 
         let unplanned_split = serde_json::json!({
             "id": 3,
             "method": "split",
-            "params": {"mode": "every_n", "output_dir": r"C:\out"}
+            "params": {"mode": "every_n", "output_dir": native(r"C:\out")}
         });
         assert!(engine_output_path(&unplanned_split).unwrap_err().contains("planned output paths"));
 
@@ -2918,7 +2993,7 @@ mod tests {
             "id": 4,
             "method": "split",
             "params": {
-                "mode": "every_n", "output_dir": r"C:\out",
+                "mode": "every_n", "output_dir": native(r"C:\out"),
                 "output_paths": ["out.pdf"]
             }
         });
@@ -2928,7 +3003,7 @@ mod tests {
         assert!(engine_output_path(&relative).unwrap_err().contains("absolute"));
         let relative_folder = serde_json::json!({"id": 6, "params": {"output_dir": "out"}});
         assert!(engine_output_path(&relative_folder).unwrap_err().contains("absolute"));
-        let absent = serde_json::json!({"id": 7, "params": {"file": r"C:\in.pdf"}});
+        let absent = serde_json::json!({"id": 7, "params": {"file": native(r"C:\in.pdf")}});
         assert_eq!(engine_output_path(&absent).unwrap(), None);
     }
 
@@ -3193,18 +3268,18 @@ mod tests {
 
     #[test]
     fn member_open_scope_is_the_managed_dir_only() {
-        let base = Path::new(r"C:\Users\u\AppData\Roaming\app\portfolio-members");
+        let base = Path::new(native(r"C:\Users\u\AppData\Roaming\app\portfolio-members"));
         assert!(is_managed_member_path(
             base,
-            Path::new(r"C:\Users\u\AppData\Roaming\app\portfolio-members\doc-abc\notes.txt")
+            Path::new(native(r"C:\Users\u\AppData\Roaming\app\portfolio-members\doc-abc\notes.txt"))
         ));
         // The base itself, siblings, and traversal escapes are all refused.
         assert!(!is_managed_member_path(base, base));
         assert!(!is_managed_member_path(
             base,
-            Path::new(r"C:\Users\u\AppData\Roaming\app\other\notes.txt")
+            Path::new(native(r"C:\Users\u\AppData\Roaming\app\other\notes.txt"))
         ));
-        assert!(!is_managed_member_path(base, Path::new(r"C:\Windows\System32\cmd.exe")));
+        assert!(!is_managed_member_path(base, Path::new(native(r"C:\Windows\System32\cmd.exe"))));
     }
 
     fn listing(dir: &Path) -> std::collections::BTreeSet<String> {

@@ -55,6 +55,7 @@ fn bytecode_under(dir: &Path, hits: &mut Vec<PathBuf>) {
     }
 }
 
+#[cfg(windows)]
 fn junction(link: &Path, target: &Path) {
     let status = Command::new("cmd")
         .args(["/C", "mklink", "/J"])
@@ -63,6 +64,21 @@ fn junction(link: &Path, target: &Path) {
         .status()
         .expect("spawn cmd for mklink");
     assert!(status.success(), "mklink /J {} -> {}", link.display(), target.display());
+}
+
+#[cfg(unix)]
+fn junction(link: &Path, target: &Path) {
+    std::os::unix::fs::symlink(target, link)
+        .unwrap_or_else(|e| panic!("symlink {} -> {}: {e}", link.display(), target.display()));
+}
+
+/// Removes the link itself, never what it points at.
+fn remove_junction(link: &Path) -> std::io::Result<()> {
+    if cfg!(windows) {
+        fs::remove_dir(link)
+    } else {
+        fs::remove_file(link)
+    }
 }
 
 #[test]
@@ -116,7 +132,7 @@ fn check_writes_no_bytecode_into_the_engine_payload() {
     bytecode_under(&scratch.join("engine"), &mut after);
 
     // The junction is removed as a directory entry, never followed.
-    fs::remove_dir(scratch.join("python")).expect("remove python junction");
+    remove_junction(&scratch.join("python")).expect("remove python junction");
     fs::remove_dir_all(&scratch).expect("remove scratch");
 
     assert!(

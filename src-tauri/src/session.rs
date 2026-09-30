@@ -70,6 +70,7 @@ impl Rect {
 
     /// Widened to i64 before any addition: a saved rectangle is arbitrary
     /// persisted data, and `x + width` on two i32 extremes wraps.
+    #[cfg_attr(not(windows), allow(dead_code))]
     fn intersection_area(&self, other: &Rect) -> i64 {
         let left = (self.x as i64).max(other.x as i64);
         let right = (self.x as i64 + self.width as i64).min(other.x as i64 + other.width as i64);
@@ -458,6 +459,7 @@ impl SessionState {
     /// Returns whether the file was sealed. A quit prompted several windows
     /// and any number of them can cancel, so every cancel calls this and only
     /// the first one finds a seal to lift.
+    #[cfg_attr(not(windows), allow(dead_code))]
     fn unseal_and_write(&self, sink: impl FnMut() -> std::io::Result<()>) -> WriteOutcome {
         self.unseal_and_write_for(None, sink)
     }

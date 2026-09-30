@@ -52,25 +52,6 @@ tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zeroize = "1.8"
-winreg = "0.56"
-window-vibrancy = "0.8"
-windows-version = "0.1"
-windows = { version = "0.62", features = ["UI_ViewManagement", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Variant", "Win32_System_TaskScheduler", "Win32_Devices_ImageAcquisition", "Win32_UI_Shell", "Win32_Security_Cryptography", "Win32_System_Time", "Win32_System_SystemInformation", "Win32_System_Shutdown"] }
-# Named directly, at the version `windows` itself uses: `#[implement]` expands
-# to `windows_core::` paths, and without a direct dependency that name resolves
-# to the older windows-core another crate in the graph pulls in, so the
-# generated COM vtable fails to typecheck against the interface it implements.
-windows-core = "0.62"
-# WebView2's own COM bindings, already in the tree because tauri-runtime-wry
-# uses them -- promoted to a direct dependency so the web capture can reach
-# ICoreWebView2_7::PrintToPdf, which is Chromium's own print pipeline.
-webview2-com = "0.38"
-# Those bindings are generated against windows-core 0.61, and an interface
-# cast only typechecks against the `Interface` trait from the SAME
-# windows-core the interface was generated with -- so 0.61 is named alongside
-# the 0.62 the rest of the crate uses. Neither version is a browser-runtime
-# pin: they track the crates, not the installed WebView2.
-windows-core-webview2 = { package = "windows-core", version = "0.61" }
 tokio = { version = "1", features = ["sync", "io-util", "fs", "net", "time"] }
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
@@ -102,6 +83,32 @@ tokio-util = { version = "0.7", features = ["io"] }
 # Already in the graph under reqwest; named directly because net.rs resolves a
 # `Location` with `Url::join` rather than by hand.
 url = "2"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+window-vibrancy = "0.8"
+windows-version = "0.1"
+windows = { version = "0.62", features = ["UI_ViewManagement", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Variant", "Win32_System_TaskScheduler", "Win32_Devices_ImageAcquisition", "Win32_UI_Shell", "Win32_Security_Cryptography", "Win32_System_Time", "Win32_System_SystemInformation", "Win32_System_Shutdown"] }
+# Named directly, at the version `windows` itself uses: `#[implement]` expands
+# to `windows_core::` paths, and without a direct dependency that name resolves
+# to the older windows-core another crate in the graph pulls in, so the
+# generated COM vtable fails to typecheck against the interface it implements.
+windows-core = "0.62"
+# WebView2's own COM bindings, already in the tree because tauri-runtime-wry
+# uses them -- promoted to a direct dependency so the web capture can reach
+# ICoreWebView2_7::PrintToPdf, which is Chromium's own print pipeline.
+webview2-com = "0.38"
+# Those bindings are generated against windows-core 0.61, and an interface
+# cast only typechecks against the `Interface` trait from the SAME
+# windows-core the interface was generated with -- so 0.61 is named alongside
+# the 0.62 the rest of the crate uses. Neither version is a browser-runtime
+# pin: they track the crates, not the installed WebView2.
+windows-core-webview2 = { package = "windows-core", version = "0.61" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# prctl, flock, socketpair and SCM_RIGHTS for child-process lifetime and
+# folder-claim leases.
+libc = "0.2"
 
 [dev-dependencies]
 # `#[tokio::test]` for the network client's tests, which drive an in-process

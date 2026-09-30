@@ -39,6 +39,7 @@ pub(crate) fn net_dir() -> PathBuf {
 }
 
 /// Where clipboard payloads stay until their Create PDF dialog releases them.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn clipboard_dir() -> PathBuf {
     root().join(CLIPBOARD)
 }
@@ -116,6 +117,7 @@ pub(crate) fn net_file_owner(name: &str) -> Option<u32> {
 }
 
 /// A clipboard scratch file's canonical name, owned by one process.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn clipboard_file_name(
     stamp: u128,
     n: u32,
@@ -858,13 +860,29 @@ mod tests {
         std::fs::remove_dir(&link).unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_under_a_working_folder_name_is_left_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("keep.pdf"), b"%PDF").unwrap();
+        let link = root.path().join(format!("{}.{DEAD}", uuid()));
+        std::os::unix::fs::symlink(target.path(), &link).unwrap();
+        assert_eq!(
+            reclaim_tree(root.path(), OWN, |_| false, || true, SystemTime::now()),
+            Reclaimed::default()
+        );
+        assert!(link.exists());
+        assert!(target.path().join("keep.pdf").exists());
+    }
+
     #[test]
     fn a_tree_deeper_than_a_working_folder_can_be_is_kept() {
         let root = tempfile::tempdir().unwrap();
         let shallow = working_folder(root.path(), DEAD);
         let deep = working_folder(root.path(), DEAD);
-        std::fs::create_dir_all(shallow.join(["d"; MAX_DEPTH].join("\\"))).unwrap();
-        std::fs::create_dir_all(deep.join(["d"; MAX_DEPTH + 1].join("\\"))).unwrap();
+        std::fs::create_dir_all(shallow.join(["d"; MAX_DEPTH].iter().collect::<PathBuf>())).unwrap();
+        std::fs::create_dir_all(deep.join(["d"; MAX_DEPTH + 1].iter().collect::<PathBuf>())).unwrap();
 
         let done = reclaim_tree(root.path(), OWN, |_| false, || false, SystemTime::now());
 

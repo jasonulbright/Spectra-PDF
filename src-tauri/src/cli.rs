@@ -3322,27 +3322,43 @@ impl CliEngine {
             return Err(format!("Engine script not found at {}", script.display()));
         }
 
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-        let mut child = Command::new(&python)
+        let mut command = Command::new(&python);
+        command
             .args(crate::engine::python_args(&script.to_string_lossy()))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .envs(crate::engine::python_env())
-            .env(ENGINE_SURFACE.0, ENGINE_SURFACE.1)
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
+            .env(ENGINE_SURFACE.0, ENGINE_SURFACE.1);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+        #[cfg(not(target_os = "linux"))]
+        let (mut child, job) = {
+            let mut child = command
+                .spawn()
+                .map_err(|e| format!("Failed to start engine: {}", e))?;
+            let job = match crate::process_job::contain(child.id()) {
+                Ok(job) => job,
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("The engine process could not be contained: {error}"));
+                }
+            };
+            (child, job)
+        };
+        #[cfg(target_os = "linux")]
+        let (mut child, job) = {
+            let (child, job) = crate::process_job::spawn_bound(
+                command,
+                crate::process_job::Binding { lease_channel: true, memory_limit: None },
+            )
             .map_err(|e| format!("Failed to start engine: {}", e))?;
-
-        let job = match crate::process_job::ProcessJob::attach(child.id()) {
-            Ok(job) => job,
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("The engine process could not be contained: {error}"));
-            }
+            (child, Some(job))
         };
         let stdout = child.stdout.take().expect("stdout not captured");
         let reader = BufReader::new(stdout);
@@ -3364,7 +3380,7 @@ impl CliEngine {
         Ok(Self {
             child,
             reader,
-            _job: Some(job),
+            _job: job,
             failed: false,
         })
     }
@@ -3440,6 +3456,7 @@ impl CliEngine {
 
     /// A second write end of the engine's stdin, for a writer that runs while
     /// `call` holds `self` blocked on the response.
+    #[cfg(windows)]
     fn stdin_writer(&self) -> Option<std::fs::File> {
         use std::os::windows::io::AsHandle;
         let stdin = self.child.stdin.as_ref()?;
@@ -3472,6 +3489,7 @@ fn request_line(method: &str, params: Value) -> Result<String, String> {
 /// itself. A second Ctrl+C falls through to the default handler, which ends
 /// this process; the job object then ends the engine, and an in-place
 /// original is still either untouched or fully replaced.
+#[cfg(windows)]
 mod batch_interrupt {
     use std::io::Write;
     use std::sync::Mutex;
@@ -3620,6 +3638,21 @@ mod batch_interrupt {
     }
 }
 
+/// Off Windows, Ctrl+C keeps the default handler and ends the run: the
+/// cancel-at-a-safe-point route arrives with the process-model backend.
+#[cfg(not(windows))]
+mod batch_interrupt {
+    pub(super) struct Armed;
+
+    impl Armed {
+        pub(super) fn request_sent(&self) {}
+    }
+
+    pub(super) fn arm(_engine: &super::CliEngine) -> Option<Armed> {
+        None
+    }
+}
+
 #[cfg(test)]
 mod request_line_tests {
     use super::*;
@@ -3642,6 +3675,7 @@ mod request_line_tests {
 /// A typo has to refuse rather than silently run nothing: a tester who asked
 /// for row "4" and got an empty run would report that the feeder row does not
 /// work.
+#[cfg(windows)]
 fn parse_scan_test_rows(rows: Option<&str>) -> Result<Vec<String>, String> {
     let Some(rows) = rows else {
         return Ok(Vec::new());
@@ -3663,6 +3697,7 @@ fn parse_scan_test_rows(rows: Option<&str>) -> Result<Vec<String>, String> {
 }
 
 /// The guided checklist arm. Returns the process exit code.
+#[cfg(windows)]
 fn run_scan_test(args: &ScanTestArgs) -> i32 {
     if args.list {
         println!("{}", crate::scantest::list_rows());
@@ -3719,6 +3754,7 @@ fn run_scan_test(args: &ScanTestArgs) -> i32 {
 /// attached it is the one, and with none or several the run refuses by name.
 /// Guessing which of two machines has paper in its feeder is not a decision
 /// software gets to make.
+#[cfg(windows)]
 fn resolve_scan_device(requested: Option<&str>) -> Result<String, String> {
     if let Some(id) = requested {
         return Ok(id.to_string());
@@ -3732,6 +3768,7 @@ fn resolve_scan_device(requested: Option<&str>) -> Result<String, String> {
 /// Split from `resolve_scan_device` so the decision is testable: the live
 /// enumeration answers differently on a box with a scanner attached than on
 /// one without, and every branch here has to hold on both.
+#[cfg(windows)]
 fn choose_scan_device(scanners: &[crate::scanner::ScannerDevice]) -> Result<String, String> {
     match scanners.len() {
         0 => Err("No scanners found.".to_string()),
@@ -3754,6 +3791,7 @@ fn choose_scan_device(scanners: &[crate::scanner::ScannerDevice]) -> Result<Stri
 /// The source rows come from the capability report, the same list the dialog
 /// picks from — a second derivation here would be a run whose CLI and whose
 /// dialog disagree about which side of a sheet "duplex" means.
+#[cfg(windows)]
 fn scan_settings(
     capabilities: &crate::scanner::ScannerCapabilities,
     args: &ScanArgs,
@@ -3950,6 +3988,7 @@ fn collect_batch_inputs(
 /// Sheet size in points for the print layout modes: an explicit "WxH"
 /// override wins; otherwise the chosen (or default) paper's size from the
 /// printer's own capability report.
+#[cfg(windows)]
 fn resolve_sheet(
     printer: &str,
     paper: Option<u16>,
@@ -3976,6 +4015,48 @@ fn resolve_sheet(
     Err("Could not resolve the paper size for this layout; pass --sheet WxH (points)".into())
 }
 
+/// The platform feature a command needs and the running platform lacks.
+///
+/// Checked before the engine starts, so a command whose subsystem has no
+/// backend here refuses by name instead of failing inside it.
+pub fn platform_refusal(
+    command: &CliCommand,
+    capabilities: &crate::commands::PlatformCapabilities,
+) -> Option<crate::platform::Unsupported> {
+    use crate::platform::{feature, Unsupported};
+    let missing = match command {
+        CliCommand::Print(_) | CliCommand::Printers(_) if !capabilities.system_printing => {
+            feature::SYSTEM_PRINTING
+        }
+        CliCommand::Scanners(_) | CliCommand::Scan(_) | CliCommand::ScanTest(_)
+            if !capabilities.scanning =>
+        {
+            feature::SCANNING
+        }
+        CliCommand::Sign(args)
+            if !capabilities.store_certificates
+                && (args.store_cert.is_some() || args.store_machine || args.list_store_certs) =>
+        {
+            feature::STORE_CERTIFICATES
+        }
+        _ => return None,
+    };
+    Some(Unsupported::new(missing))
+}
+
+/// `--minimized` asks for a tray-resident start, which needs the tray.
+pub fn launch_refusal(argv: &[String]) -> Option<crate::platform::Unsupported> {
+    launch_refusal_for(argv, &crate::commands::PlatformCapabilities::current())
+}
+
+fn launch_refusal_for(
+    argv: &[String],
+    capabilities: &crate::commands::PlatformCapabilities,
+) -> Option<crate::platform::Unsupported> {
+    (!capabilities.tray_residency && argv.iter().skip(1).any(|a| a == "--minimized"))
+        .then(|| crate::platform::Unsupported::new(crate::platform::feature::START_MINIMIZED))
+}
+
 // ── Main CLI entry point ────────────────────────────────────────────────────
 
 /// Run the CLI. Returns the exit code.
@@ -3985,8 +4066,16 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
     // one arm gets left reading the wrong source.
     let _ = EXPLICIT_GS.set(gs_path);
 
+    if let Some(refusal) =
+        platform_refusal(&command, &crate::commands::PlatformCapabilities::current())
+    {
+        eprintln!("error: {refusal}");
+        return 2;
+    }
+
     // Printer enumeration/capabilities are pure winspool — no Python engine
     // to spawn.
+    #[cfg(windows)]
     if let CliCommand::Printers(args) = &command {
         let result = match &args.capabilities {
             Some(name) => crate::printers::capabilities(name)
@@ -4013,6 +4102,7 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
 
     // Scanner enumeration/capabilities are pure WIA — no Python engine to
     // spawn, and the session store closes its devices when it drops here.
+    #[cfg(windows)]
     if let CliCommand::Scanners(args) = &command {
         let result = match &args.capabilities {
             Some(device_id) => crate::scanner::ScannerSessions::new()
@@ -4036,6 +4126,7 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
     // The checklist runner is pure WIA plus its own evidence reader: it
     // judges the staged pages, never an assembled PDF, so it needs no engine
     // and a tester needs nothing provisioned to run it.
+    #[cfg(windows)]
     if let CliCommand::ScanTest(args) = &command {
         return run_scan_test(args);
     }
@@ -4186,6 +4277,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             engine.call("compress", params)
         }
 
+        #[cfg(not(windows))]
+        CliCommand::Print(_) => unreachable!("print refuses before engine start"),
+        #[cfg(windows)]
         CliCommand::Print(args) => {
             let mut params = json!({
                 "file": abs(&args.input).to_string_lossy(),
@@ -4409,6 +4503,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             )
         }
 
+        #[cfg(not(windows))]
+        CliCommand::Scan(_) => unreachable!("scan refuses before engine start"),
+        #[cfg(windows)]
         CliCommand::Scan(args) => {
             let sessions = crate::scanner::ScannerSessions::new();
             let device = resolve_scan_device(args.device.as_deref())?;
@@ -6594,6 +6691,79 @@ mod tests {
         );
     }
 
+    fn capabilities(present: bool) -> crate::commands::PlatformCapabilities {
+        crate::commands::PlatformCapabilities {
+            system_printing: present,
+            virtual_printer: present,
+            scanning: present,
+            scheduled_actions: present,
+            store_certificates: present,
+            send_by_email: present,
+            web_capture: present,
+            clipboard_read: present,
+            snapshot: present,
+            accent_color: present,
+            enterprise_policy: present,
+            tray_residency: present,
+            backdrop: present,
+            console_attach: present,
+            start_with_system: present,
+        }
+    }
+
+    fn refusal(args: &[&str], present: bool) -> Option<String> {
+        let command = parse(args).command.expect("a subcommand");
+        platform_refusal(&command, &capabilities(present)).map(|r| r.to_string())
+    }
+
+    #[test]
+    fn a_command_without_its_platform_feature_refuses_by_name() {
+        let printing = Some("System printing is not available on this platform".to_string());
+        let scanning = Some("Scanning is not available on this platform".to_string());
+        let store = Some("Certificate-store signing is not available on this platform".to_string());
+        assert_eq!(refusal(&["spectrapdf", "printers"], false), printing);
+        assert_eq!(refusal(&["spectrapdf", "print", "a.pdf", "--printer", "P"], false), printing);
+        assert_eq!(refusal(&["spectrapdf", "scanners"], false), scanning);
+        assert_eq!(refusal(&["spectrapdf", "scan", "-o", "s.pdf"], false), scanning);
+        assert_eq!(refusal(&["spectrapdf", "scan-test", "--list"], false), scanning);
+        assert_eq!(refusal(&["spectrapdf", "sign", "--list-store-certs"], false), store);
+        assert_eq!(
+            refusal(&["spectrapdf", "sign", "a.pdf", "-o", "b.pdf", "--store-cert", "AABB"], false),
+            store
+        );
+        assert_eq!(
+            refusal(
+                &["spectrapdf", "sign", "a.pdf", "-o", "b.pdf", "--store-cert", "AABB", "--store-machine"],
+                false
+            ),
+            store
+        );
+    }
+
+    #[test]
+    fn a_command_with_its_platform_feature_or_needing_none_runs() {
+        assert_eq!(refusal(&["spectrapdf", "printers"], true), None);
+        assert_eq!(refusal(&["spectrapdf", "scan-test", "--list"], true), None);
+        assert_eq!(refusal(&["spectrapdf", "sign", "--list-store-certs"], true), None);
+        assert_eq!(
+            refusal(&["spectrapdf", "sign", "a.pdf", "-o", "b.pdf", "--pfx", "k.pfx"], false),
+            None
+        );
+        assert_eq!(refusal(&["spectrapdf", "merge", "a.pdf", "b.pdf", "-o", "m.pdf"], false), None);
+    }
+
+    #[test]
+    fn a_minimized_launch_needs_the_tray() {
+        let argv = |args: &[&str]| args.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        let minimized = argv(&["spectrapdf", "--minimized"]);
+        assert_eq!(
+            launch_refusal_for(&minimized, &capabilities(false)).map(|r| r.to_string()),
+            Some("Starting minimized to the tray is not available on this platform".to_string())
+        );
+        assert_eq!(launch_refusal_for(&minimized, &capabilities(true)), None);
+        assert_eq!(launch_refusal_for(&argv(&["spectrapdf", "a.pdf"]), &capabilities(false)), None);
+    }
+
     #[test]
     fn flag_only_and_bare_launches_parse() {
         assert_eq!(classify(&["spectrapdf.exe"]), LaunchMode::Parse);
@@ -6609,6 +6779,7 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     fn scan_capabilities() -> crate::scanner::ScannerCapabilities {
         use crate::scanner::*;
         let feeder = ScanSourceReport {
@@ -6693,6 +6864,7 @@ mod tests {
         assert_eq!(bare.paper, "auto");
     }
 
+    #[cfg(windows)]
     #[test]
     fn scan_settings_come_from_the_reported_source_rows() {
         let caps = scan_capabilities();
@@ -6706,6 +6878,7 @@ mod tests {
         assert_eq!(settings.document_handling, Some(1));
     }
 
+    #[cfg(windows)]
     #[test]
     fn scan_refuses_a_source_or_a_colour_the_device_does_not_offer() {
         let caps = scan_capabilities();
@@ -6725,6 +6898,7 @@ mod tests {
         assert!(scan_settings(&caps, &scan_args(&["--paper", "foolscap"])).is_err());
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_page_count_is_dropped_on_a_source_that_cannot_feed_sheets() {
         use crate::scanner::{ScanSourceOption, SourceOptionId};
@@ -6739,6 +6913,7 @@ mod tests {
         assert_eq!(settings.pages, None);
     }
 
+    #[cfg(windows)]
     #[test]
     fn the_checklist_row_selection_refuses_a_row_that_does_not_exist() {
         assert_eq!(parse_scan_test_rows(None), Ok(Vec::new()));
@@ -6786,6 +6961,7 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_headless_run_refuses_to_pick_between_scanners() {
         use crate::scanner::ScannerDevice;
