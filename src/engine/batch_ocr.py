@@ -41,6 +41,7 @@ from engine.compress import compress
 from engine.create_pdf import IMAGE_SUFFIXES, image_to_pdf
 from engine.enhance_scan import enhance_scan
 from engine.inplace import (
+    finish_staged,
     is_spectra_temp_name,
     publish_copy,
     reclaim_stale_stages,
@@ -362,7 +363,7 @@ def _repair_only_entry(
     strip signatures and renumber objects, which is a change, not a repair --
     so the mirror receives a byte copy and in-place leaves the original alone.
     A damaged file's repaired bytes land through a staged write: `publish_copy`
-    in the mirror, verify-then-`os.replace` in place.
+    in the mirror, verify-then-`finish_staged` in place.
     """
     scratch = scratch_path(out_path.parent, "repaired")
     result: dict
@@ -399,7 +400,7 @@ def _repair_only_entry(
                 if report.get("signatures_removed"):
                     result["signaturesRemoved"] = int(report["signatures_removed"])
                 if in_place:
-                    os.replace(scratch, abs_path)
+                    finish_staged(scratch, abs_path)
                     result["inPlace"] = True
                 else:
                     _copy_file(scratch, out_path)
@@ -551,28 +552,29 @@ def ocr_file(
     })
 
 
-def _dirs_under(root: Path) -> set[str]:
-    """Every folder at or under `root` that exists now, not following links."""
-    found: set[str] = set()
-    if not root.is_dir():
-        return found
-    for top, dirs, _files in os.walk(root):
-        found.add(_norm_path(top))
-        found.update(_norm_path(os.path.join(top, d)) for d in dirs)
-    return found
+def _make_owned_dirs(folder: Path, owned: list[str]) -> None:
+    """Create `folder` and its missing ancestors, recording in `owned` each
+    folder this call created. A folder another process creates first raises
+    `FileExistsError` here and is never recorded."""
+    missing: list[Path] = []
+    current = folder
+    while not current.exists() and current.parent != current:
+        missing.append(current)
+        current = current.parent
+    for path in reversed(missing):
+        try:
+            os.mkdir(path)
+        except FileExistsError:
+            continue
+        except OSError:
+            return
+        owned.append(str(path))
 
 
-def _remove_new_empty_dirs(root: Path, before: set[str]) -> None:
-    """Remove empty folders at or under `root` that did not exist in `before`,
-    deepest first. `os.rmdir` refuses a folder with anything in it."""
-    if not root.is_dir():
-        return
-    created = sorted(
-        (d for d in _dirs_under(root) if d not in before),
-        key=lambda d: d.count(os.sep),
-        reverse=True,
-    )
-    for folder in created:
+def _remove_owned_empty_dirs(owned: list[str]) -> None:
+    """Remove the folders in `owned` that are empty, deepest first. `os.rmdir`
+    refuses a folder with anything in it."""
+    for folder in sorted(owned, key=lambda d: d.count(os.sep), reverse=True):
         try:
             os.rmdir(folder)
         except OSError:
@@ -687,8 +689,9 @@ def batch_ocr(
     entries, skipped_dirs = _list_sources(source_path, bool(include_images))
     results: list[dict] = []
     stopped = False
-    # A stopped mirror run removes the empty folders its staging created.
-    dirs_before = set() if in_place else _dirs_under(dest_path)
+    # Mirror folders this run created; the ones still empty at the end are
+    # removed, and no folder another process made is ever in the list.
+    owned_dirs: list[str] = []
     reclaimed: set[Path] = set()
 
     for index, (abs_path, rel) in enumerate(entries):
@@ -706,6 +709,8 @@ def batch_ocr(
         out_path = (
             scratch_path(abs_path.parent, "inplace") if in_place else dest_path / out_rel
         )
+        if not in_place:
+            _make_owned_dirs(out_path.parent, owned_dirs)
         # A killed earlier run left its temps beside the originals (in place)
         # or beside the outputs (mirror); each folder is swept once per run.
         for folder in (abs_path.parent, out_path.parent):
@@ -925,7 +930,7 @@ def batch_ocr(
                             ),
                         }
                 # In place: the verified staging REPLACES the original
-                # atomically (same directory, os.replace). A skipped result
+                # atomically (same directory, finish_staged). A skipped result
                 # leaves the original untouched; the finally unlinks staging.
                 if in_place and (
                     result["status"] == "ocr"
@@ -933,7 +938,7 @@ def batch_ocr(
                     or result.get("enhanceApplied")
                 ):
                     try:
-                        os.replace(out_path, abs_path)
+                        finish_staged(out_path, abs_path)
                         result["inPlace"] = True
                     except OSError as exc:
                         result = {
@@ -993,13 +998,18 @@ def batch_ocr(
         if stopped:
             break
 
-    if stopped and not in_place:
-        _remove_new_empty_dirs(dest_path, dirs_before)
+    # A Stop that lands during the last file finds no next iteration to see it.
+    if not stopped and cancelled():
+        stopped = True
+    _remove_owned_empty_dirs(owned_dirs)
     report = {"cancelled": stopped, "results": results, "skippedDirs": skipped_dirs, "inPlace": in_place}
     if remove_empty_folders and not stopped:
         protected = [str(dest_path)] if not in_place else []
         protected += [str(Path(r).resolve()) for r in (moved_root, error_root) if r]
-        report["emptyFolders"] = remove_empty_folders_in(str(source_path), protected)
+        cleanup = remove_empty_folders_in(str(source_path), protected)
+        if cleanup.get("stopped"):
+            report["cancelled"] = True
+        report["emptyFolders"] = cleanup
     log_path = _write_log(
         started_at,
         datetime.now(),
@@ -1188,7 +1198,9 @@ def _remove_planned(cand: dict) -> dict | None:
 
 
 def remove_empty_folders_in(root: str, protected: list[str] | None = None) -> dict:
-    """Plan, then delete. Returns {"removed": [...], "skipped": [{"path", "reason"}]}.
+    """Plan, then delete. Returns {"removed": [...], "skipped": [{"path", "reason"}]},
+    plus `"stopped": True` when a cancel ended the deletion early; `removed`
+    then lists exactly what was deleted before the stop.
 
     `protected` names folders that are never removed even when empty (the
     run's destination and filing roots)."""
@@ -1202,6 +1214,8 @@ def remove_empty_folders_in(root: str, protected: list[str] | None = None) -> di
     # child's entry already explains why.
     blocked: set[str] = set()
     for cand in plan["candidates"]:
+        if cancelled():
+            return {"removed": removed, "skipped": skipped, "stopped": True}
         path = cand["path"]
         if _norm_path(path) in blocked:
             blocked.add(_norm_path(os.path.dirname(path)))

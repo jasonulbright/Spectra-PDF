@@ -158,3 +158,23 @@ def test_moved_original_is_the_healed_file_when_replace_is_on(tmp_path):
               replace_repaired_originals=True, moved_root=str(moved))
     with pikepdf.open(moved / "sub" / "bad.pdf") as healed:
         assert not healed.get_warnings()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows file metadata")
+def test_in_place_repair_keeps_the_originals_dacl_entry_and_stream(tmp_path):
+    import subprocess
+
+    src = _tree(tmp_path)
+    bad = src / "sub" / "bad.pdf"
+    grant = subprocess.run(["icacls", str(bad), "/grant", "*S-1-5-32-545:(R)"],
+                           capture_output=True, text=True)
+    assert grant.returncode == 0, grant.stdout + grant.stderr
+    with open(str(bad) + ":note", "wb") as stream:
+        stream.write(b"stream kept")
+    report = batch_ocr(str(src), in_place=True, repair_only=True)
+    by_rel = {r["rel"]: r for r in report["results"]}
+    assert by_rel[os.path.join("sub", "bad.pdf")]["status"] == "repaired"
+    acl = subprocess.run(["icacls", str(bad)], capture_output=True, text=True).stdout
+    assert r"BUILTIN\Users:(R)" in acl, acl
+    with open(str(bad) + ":note", "rb") as stream:
+        assert stream.read() == b"stream kept"

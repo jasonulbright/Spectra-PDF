@@ -174,11 +174,148 @@ def _replace_existing_windows(staged: Path, output: Path) -> None:
         os.replace(str(staged), str(output))
         return
     if error in _REPLACE_UNSUPPORTED:
-        # A filesystem or share without ReplaceFile support still lands the
-        # complete file; only the target's own metadata is not carried.
+        _carry_target_metadata(output, staged)
         _rename_over(staged, output)
         return
     raise ctypes.WinError(error)
+
+
+_DACL_SECURITY_INFORMATION = 0x4
+_PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
+_UNPROTECTED_DACL_SECURITY_INFORMATION = 0x20000000
+_SE_DACL_PROTECTED = 0x1000
+_ERROR_HANDLE_EOF = 38
+_ERROR_INSUFFICIENT_BUFFER = 122
+#: Attributes a rename would not carry and SetFileAttributesW can set.
+_CARRIED_ATTRIBUTES = 0x2 | 0x4 | 0x20 | 0x100 | 0x1000 | 0x2000
+_FILE_WRITE_ATTRIBUTES = 0x100
+_OPEN_EXISTING = 3
+_INVALID_HANDLE = -1
+
+
+def _carry_target_metadata(output: Path, staged: Path) -> None:
+    """Give ``staged`` what ``ReplaceFileW`` would have kept from ``output``:
+    its DACL, alternate data streams, creation time and owner-set attributes.
+    Any part that cannot be read or written raises before the rename, so the
+    target keeps its bytes and its metadata rather than landing without them."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+
+    def fail() -> None:
+        raise ctypes.WinError(ctypes.get_last_error())
+
+    get_security = advapi32.GetFileSecurityW
+    get_security.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p,
+                             wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
+    get_security.restype = wintypes.BOOL
+    needed = wintypes.DWORD(0)
+    if not get_security(str(output), _DACL_SECURITY_INFORMATION, None, 0,
+                        ctypes.byref(needed)):
+        if ctypes.get_last_error() != _ERROR_INSUFFICIENT_BUFFER:
+            fail()
+    descriptor = ctypes.create_string_buffer(needed.value)
+    if not get_security(str(output), _DACL_SECURITY_INFORMATION, descriptor,
+                        needed, ctypes.byref(needed)):
+        fail()
+    get_control = advapi32.GetSecurityDescriptorControl
+    get_control.argtypes = (ctypes.c_void_p, ctypes.POINTER(wintypes.WORD),
+                            ctypes.POINTER(wintypes.DWORD))
+    get_control.restype = wintypes.BOOL
+    control, revision = wintypes.WORD(0), wintypes.DWORD(0)
+    if not get_control(descriptor, ctypes.byref(control), ctypes.byref(revision)):
+        fail()
+    information = _DACL_SECURITY_INFORMATION | (
+        _PROTECTED_DACL_SECURITY_INFORMATION if control.value & _SE_DACL_PROTECTED
+        else _UNPROTECTED_DACL_SECURITY_INFORMATION
+    )
+    set_security = advapi32.SetFileSecurityW
+    set_security.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p)
+    set_security.restype = wintypes.BOOL
+
+    for name in _alternate_streams(kernel32, output):
+        with open(f"{output}{name}", "rb") as source, open(f"{staged}{name}", "wb") as sink:
+            shutil.copyfileobj(source, sink)
+            sink.flush()
+            os.fsync(sink.fileno())
+
+    class _AttributeData(ctypes.Structure):
+        _fields_ = [("attributes", wintypes.DWORD), ("created", wintypes.FILETIME),
+                    ("accessed", wintypes.FILETIME), ("written", wintypes.FILETIME),
+                    ("size_high", wintypes.DWORD), ("size_low", wintypes.DWORD)]
+
+    get_attributes = kernel32.GetFileAttributesExW
+    get_attributes.argtypes = (wintypes.LPCWSTR, ctypes.c_int, ctypes.c_void_p)
+    get_attributes.restype = wintypes.BOOL
+    data = _AttributeData()
+    if not get_attributes(str(output), 0, ctypes.byref(data)):
+        fail()
+    create = kernel32.CreateFileW
+    create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    create.restype = wintypes.HANDLE
+    handle = create(str(staged), _FILE_WRITE_ATTRIBUTES, 0x7, None, _OPEN_EXISTING, 0, None)
+    if handle is None or handle == ctypes.c_void_p(_INVALID_HANDLE).value:
+        fail()
+    try:
+        set_time = kernel32.SetFileTime
+        set_time.argtypes = (wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+        set_time.restype = wintypes.BOOL
+        if not set_time(handle, ctypes.byref(data.created), None, None):
+            fail()
+    finally:
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel32.CloseHandle(handle)
+    carried = data.attributes & _CARRIED_ATTRIBUTES
+    if carried:
+        set_attributes = kernel32.SetFileAttributesW
+        set_attributes.argtypes = (wintypes.LPCWSTR, wintypes.DWORD)
+        set_attributes.restype = wintypes.BOOL
+        if not set_attributes(str(staged), carried):
+            fail()
+    # Last: a restrictive DACL can deny this process the writes above.
+    if not set_security(str(staged), information, descriptor):
+        fail()
+
+
+def _alternate_streams(kernel32, path: Path) -> list:
+    """The ``:name:$DATA`` suffixes of ``path``'s named data streams. A volume
+    that keeps no streams reports none."""
+    import ctypes
+    from ctypes import wintypes
+
+    class _StreamData(ctypes.Structure):
+        _fields_ = [("size", ctypes.c_longlong), ("name", ctypes.c_wchar * (260 + 36))]
+
+    first = kernel32.FindFirstStreamW
+    first.argtypes = (wintypes.LPCWSTR, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
+    first.restype = wintypes.HANDLE
+    following = kernel32.FindNextStreamW
+    following.argtypes = (wintypes.HANDLE, ctypes.c_void_p)
+    following.restype = wintypes.BOOL
+    close = kernel32.FindClose
+    close.argtypes = (wintypes.HANDLE,)
+    found = _StreamData()
+    handle = first(str(path), 0, ctypes.byref(found), 0)
+    if handle is None or handle == ctypes.c_void_p(_INVALID_HANDLE).value:
+        error = ctypes.get_last_error()
+        if error in (_ERROR_HANDLE_EOF, *_REPLACE_UNSUPPORTED):
+            return []
+        raise ctypes.WinError(error)
+    names = []
+    try:
+        while True:
+            if found.name != "::$DATA":
+                names.append(found.name)
+            if not following(handle, ctypes.byref(found)):
+                error = ctypes.get_last_error()
+                if error == _ERROR_HANDLE_EOF:
+                    return names
+                raise ctypes.WinError(error)
+    finally:
+        close(handle)
 
 
 def _rename_over(staged: Path, output: Path) -> None:

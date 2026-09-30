@@ -291,3 +291,59 @@ def test_repair_only_stops_before_writing_a_repaired_file(tmp_path, monkeypatch)
     for name, data in before.items():
         assert (src / name).read_bytes() == data
     assert _litter(src) == []
+
+
+def test_a_stop_during_the_last_file_is_a_stop_and_removes_no_empty_folders(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    _tree(src, ("a.pdf",))
+    (src / "empty").mkdir()
+    fakes = _Fakes(monkeypatch, stop_after_writes=1)
+    report = fakes.run(source=str(src), in_place=True, remove_empty_folders=True)
+
+    assert report["cancelled"] is True
+    assert "emptyFolders" not in report
+    assert (src / "empty").is_dir()
+
+
+def test_a_stop_during_empty_folder_removal_ends_it_and_reports_what_went(tmp_path, monkeypatch):
+    root = tmp_path / "in"
+    for name in ("a", "b", "c"):
+        (root / name).mkdir(parents=True)
+    flag = [False]
+    real = batch_mod._remove_planned
+
+    def remove_then_stop(cand):
+        entry = real(cand)
+        flag[0] = True
+        return entry
+
+    monkeypatch.setattr(batch_mod, "_remove_planned", remove_then_stop)
+    with serving(lambda: flag[0]):
+        report = batch_mod.remove_empty_folders_in(str(root))
+
+    assert report["stopped"] is True
+    assert len(report["removed"]) == 1
+    assert sorted(p.name for p in root.iterdir()) == sorted(
+        {"a", "b", "c"} - {Path(report["removed"][0]).name}
+    )
+
+
+def test_a_stopped_mirror_run_keeps_an_empty_folder_another_process_made(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    (src / "sub").mkdir(parents=True)
+    _pdf(src / "sub" / "a.pdf")
+    dest = tmp_path / "out"
+    fakes = _Fakes(monkeypatch, stop_at=1)
+    real_recognize = fakes.recognize
+
+    def recognize_while_another_writer_works(*args, **kw):
+        (dest / "theirs" / "deeper").mkdir(parents=True)
+        return real_recognize(*args, **kw)
+
+    monkeypatch.setattr(batch_mod, "recognize", recognize_while_another_writer_works)
+    report = fakes.run(source=str(src), dest=str(dest))
+
+    assert report["cancelled"] is True
+    assert sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*")) == [
+        "theirs", "theirs/deeper",
+    ]

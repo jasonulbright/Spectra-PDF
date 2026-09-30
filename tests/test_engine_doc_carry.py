@@ -435,3 +435,67 @@ def test_page_copied_twice_tags_each_link_occurrence(tmp_path, monkeypatch):
         tree = dict(zip(*[iter(pdf.Root.StructTreeRoot.ParentTree.Nums)] * 2))
         assert tree[first.StructParent].K.Obj.objgen == first.objgen
         assert tree[last.StructParent].K.Obj.objgen == last.objgen
+
+
+# -- traversal completeness ------------------------------------------------------
+def _deep_names(pdf, leaves, depth):
+    """A name tree whose leaves sit `depth` /Kids levels below the root."""
+    node = pdf.make_indirect(Dictionary(Names=Array([x for k, v in leaves for x in (String(k), v)])))
+    for _ in range(depth):
+        node = pdf.make_indirect(Dictionary(Kids=Array([node])))
+    return node
+
+
+def test_deep_trees_and_outlines_carry_every_entry(tmp_path):
+    src, out = tmp_path / 'src.pdf', tmp_path / 'out.pdf'
+    pdf = pikepdf.Pdf.new()
+    for _ in range(2):
+        pdf.add_blank_page(page_size=(200, 200))
+    spec = Dictionary(Type=Name.Filespec, F=String('a.txt'),
+                      EF=Dictionary(F=pdf.make_stream(b'x', Type=Name.EmbeddedFile)))
+    pdf.Root.Names = Dictionary(
+        EmbeddedFiles=_deep_names(pdf, [('deep.txt', spec)], 100),
+        Dests=_deep_names(pdf, [('far', Array([pdf.pages[1].obj, Name.Fit]))], 100))
+    labels = pdf.make_indirect(Dictionary(Nums=Array([0, Dictionary(S=Name.r)])))
+    for _ in range(100):
+        labels = pdf.make_indirect(Dictionary(Kids=Array([labels])))
+    pdf.Root.PageLabels = labels
+    # An outline 200 levels deep.
+    root = pdf.make_indirect(Dictionary(Type=Name.Outlines))
+    parent = root
+    for level in range(200):
+        item = pdf.make_indirect(Dictionary(Title=String(f'L{level}'), Parent=parent,
+                                            Dest=Array([pdf.pages[0].obj, Name.Fit])))
+        parent.First = parent.Last = item
+        parent.Count = 1
+        parent = item
+    pdf.Root.Outlines = root
+    pdf.save(src)
+    merge([str(src)], str(out))
+    with pikepdf.open(out) as pdf:
+        names, item = [], pdf.Root.Outlines.get('/First')
+        while isinstance(item, Dictionary):
+            names.append(str(item.Title))
+            item = item.get('/First')
+        assert len(names) == 200 and names[-1] == 'L199'
+        from engine.catalog_carry import _tree_entries
+        files, dests = [], []
+        _tree_entries(pdf.Root.Names.EmbeddedFiles, files, set())
+        _tree_entries(pdf.Root.Names.Dests, dests, set())
+        assert [k for k, _ in files] == [b'deep.txt']
+        assert [k for k, _ in dests] == [b'far']
+        assert pdf.Root.PageLabels.Nums[1].S == Name.r
+
+
+def test_open_action_structure_destination_is_carried(tmp_path):
+    src, out = tmp_path / 'src.pdf', tmp_path / 'out.pdf'
+    _tagged(src, 'A')
+    with pikepdf.open(src, allow_overwriting_input=True) as pdf:
+        elem = pdf.Root.StructTreeRoot.K.K[1]
+        pdf.Root.OpenAction = pdf.make_indirect(Dictionary(
+            S=Name.GoTo, D=Array([pdf.pages[1].obj, Name.Fit]), SD=Array([elem, Name.Fit])))
+        pdf.save(src)
+    merge([str(src)], str(out))
+    with pikepdf.open(out) as pdf:
+        target = pdf.Root.StructTreeRoot.K[0].K[1]
+        assert pdf.Root.OpenAction.SD[0].objgen == target.objgen and bytes(target.ID) == b'p1'

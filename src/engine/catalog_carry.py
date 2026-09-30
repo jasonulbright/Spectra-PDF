@@ -55,23 +55,27 @@ def _carry_presentation(dst: pikepdf.Pdf, src: pikepdf.Pdf) -> None:
         dst.Root.URI = Dictionary(Base=String(bytes(base)))
 
 
-def _tree_entries(node, out: list, seen: set, depth: int = 0) -> None:
-    if depth > _MAX_DEPTH or not isinstance(node, Dictionary):
-        return
-    if node.is_indirect:
-        if node.objgen in seen:
-            return
-        seen.add(node.objgen)
-    names = node.get('/Names')
-    if isinstance(names, Array):
-        for i in range(0, len(names) - 1, 2):
-            key = names[i]
-            if isinstance(key, String):
-                out.append((bytes(key), names[i + 1]))
-    kids = node.get('/Kids')
-    if isinstance(kids, Array):
-        for kid in kids:
-            _tree_entries(kid, out, seen, depth + 1)
+def _tree_entries(node, out: list, seen: set) -> None:
+    """Every leaf entry of a name tree, in tree order, at any depth: the carry
+    writes the tree from this list, so an entry missing here is lost."""
+    stack = [node]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, Dictionary):
+            continue
+        if node.is_indirect:
+            if node.objgen in seen:
+                continue
+            seen.add(node.objgen)
+        names = node.get('/Names')
+        if isinstance(names, Array):
+            for i in range(0, len(names) - 1, 2):
+                key = names[i]
+                if isinstance(key, String):
+                    out.append((bytes(key), names[i + 1]))
+        kids = node.get('/Kids')
+        if isinstance(kids, Array):
+            stack.extend(reversed(list(kids)))
 
 
 def _string_entries(pdf: pikepdf.Pdf) -> list:
@@ -988,23 +992,39 @@ class StructCarry:
 
 
 def _sd_targets(src) -> set:
-    """Structure elements that /SD entries of the source's actions name."""
+    """Structure elements that /SD entries of the source's actions name: page
+    annotations, outline items, and every catalog action root the carry
+    copies (/OpenAction, /AA triggers, /Names /JavaScript entries)."""
     out = set()
     seen = set()
 
-    def action(value, depth):
-        if depth > 64 or not isinstance(value, Dictionary):
-            return
-        if value.is_indirect:
-            if value.objgen in seen:
-                return
-            seen.add(value.objgen)
-        sd = value.get('/SD')
-        if isinstance(sd, Array) and len(sd) > 0 and isinstance(sd[0], Dictionary) and sd[0].is_indirect:
-            out.add(sd[0].objgen)
-        for nxt in _kids(value.get('/Next')):
-            action(nxt, depth + 1)
+    def action(value, _depth=0):
+        stack = [value]
+        while stack:
+            value = stack.pop()
+            if not isinstance(value, Dictionary):
+                continue
+            if value.is_indirect:
+                if value.objgen in seen:
+                    continue
+                seen.add(value.objgen)
+            sd = value.get('/SD')
+            if isinstance(sd, Array) and len(sd) > 0 and isinstance(sd[0], Dictionary) and sd[0].is_indirect:
+                out.add(sd[0].objgen)
+            stack.extend(_kids(value.get('/Next')))
 
+    action(src.Root.get('/OpenAction'))
+    catalog_aa = src.Root.get('/AA')
+    if isinstance(catalog_aa, Dictionary):
+        for key in catalog_aa.keys():
+            action(catalog_aa.get(key))
+    names = src.Root.get('/Names')
+    scripts = names.get('/JavaScript') if isinstance(names, Dictionary) else None
+    if isinstance(scripts, Dictionary):
+        entries: list = []
+        _tree_entries(scripts, entries, set())
+        for _key, value in entries:
+            action(value)
     for page in src.pages:
         annots = page.obj.get('/Annots')
         if not isinstance(annots, Array):
@@ -1017,49 +1037,43 @@ def _sd_targets(src) -> set:
             if isinstance(aa, Dictionary):
                 for key in aa.keys():
                     action(aa.get(key), 0)
-    budget = [100000]
     outline = src.Root.get('/Outlines')
-
-    def items(node, depth):
-        if depth > 128 or not isinstance(node, Dictionary):
-            return
-        cursor = node.get('/First')
-        while isinstance(cursor, Dictionary) and budget[0] > 0:
-            budget[0] -= 1
+    stack = [outline.get('/First')] if isinstance(outline, Dictionary) else []
+    while stack:
+        cursor = stack.pop()
+        while isinstance(cursor, Dictionary):
             if cursor.objgen in seen:
-                return
+                break
             seen.add(cursor.objgen)
             action(cursor.get('/A'), 0)
-            items(cursor, depth + 1)
+            stack.append(cursor.get('/First'))
             cursor = cursor.get('/Next')
-
-    items(outline, 0)
     return out
 
 
-def settle_actions_sd(carry: StructCarry, dst, action, depth: int = 0, seen=None):
+def settle_actions_sd(carry: StructCarry, dst, action, seen=None):
     """Re-point or remove /SD in an action chain already in dst."""
     if seen is None:
         seen = set()
-    if depth > 64 or not isinstance(action, Dictionary):
-        return
-    if action.is_indirect:
-        if action.objgen in seen:
-            return
-        seen.add(action.objgen)
-    if '/SD' in action:
-        settled = carry.settle_sd(dst, action.SD)
-        if settled is None:
-            del action['/SD']
-        else:
-            action.SD = settled
-    for nxt in _kids(action.get('/Next')):
-        settle_actions_sd(carry, dst, nxt, depth + 1, seen)
+    stack = [action]
+    while stack:
+        action = stack.pop()
+        if not isinstance(action, Dictionary):
+            continue
+        if action.is_indirect:
+            if action.objgen in seen:
+                continue
+            seen.add(action.objgen)
+        if '/SD' in action:
+            settled = carry.settle_sd(dst, action.SD)
+            if settled is None:
+                del action['/SD']
+            else:
+                action.SD = settled
+        stack.extend(_kids(action.get('/Next')))
 
 
 # -- document-level entries ----------------------------------------------
-_OUTLINE_MAX_DEPTH = 128
-_MAX_ITEMS = 100_000
 _CLAIM_NS = ('http://www.aiim.org/pdfa/ns/id/', 'http://www.aiim.org/pdfua/ns/id/')
 
 
@@ -1214,22 +1228,26 @@ def _carry_outlines(dst, src, jumps, struct, first_map):
     if not isinstance(root, Dictionary) or not isinstance(root.get('/First'), Dictionary):
         return
     seen: set = set()
-    budget = [_MAX_ITEMS]
 
-    def parse(parent, depth):
-        items = []
-        cursor = parent.get('/First')
-        while isinstance(cursor, Dictionary) and depth <= _OUTLINE_MAX_DEPTH and budget[0] > 0:
-            budget[0] -= 1
-            if cursor.objgen in seen:
-                break
-            seen.add(cursor.objgen)
-            count = cursor.get('/Count')
-            items.append((cursor, parse(cursor, depth + 1), not (isinstance(count, int) and count < 0)))
-            cursor = cursor.get('/Next')
-        return items
+    def parse(root):
+        """(item, children, open) per item at every depth, cycle-safe."""
+        top: list = []
+        stack = [(root, top)]
+        while stack:
+            parent, items = stack.pop()
+            cursor = parent.get('/First')
+            while isinstance(cursor, Dictionary):
+                if cursor.objgen in seen:
+                    break
+                seen.add(cursor.objgen)
+                count = cursor.get('/Count')
+                children: list = []
+                items.append((cursor, children, not (isinstance(count, int) and count < 0)))
+                stack.append((cursor, children))
+                cursor = cursor.get('/Next')
+        return top
 
-    tree = parse(root, 0)
+    tree = parse(root)
     if not tree:
         return
     out_root = dst.Root.get('/Outlines')
@@ -1273,26 +1291,41 @@ def _carry_outlines(dst, src, jumps, struct, first_map):
         new.Parent = parent
         return new
 
-    def wire(parent, nodes):
-        """Append nodes under parent; returns the visible-descendant count."""
-        built = []
-        for item, children, is_open in nodes:
-            new = build(item, children, parent)
-            visible = wire(new, children)
-            if children:
-                new.Count = visible if is_open else -visible
-            built.append((new, is_open, visible))
-        last = parent.get('/Last') if built else None
-        for new, _, _ in built:
-            if isinstance(last, Dictionary):
-                last.Next = new
-                new.Prev = last
-            else:
-                parent.First = new
-            last = new
-        if built:
-            parent.Last = last
-        return sum(1 + (visible if is_open else 0) for _, is_open, visible in built)
+    def wire(root_parent, root_nodes):
+        """Append nodes under parent at every depth; returns the root level's
+        visible-descendant count. Children are wired before their parent's
+        /Count is set, in post-order, without recursion."""
+        visible_of: dict = {}
+        order: list = []
+        stack = [(root_parent, root_nodes, None)]
+        while stack:
+            parent, nodes, owner = stack.pop()
+            built = []
+            for item, children, is_open in nodes:
+                new = build(item, children, parent)
+                built.append((new, children, is_open))
+            last = parent.get('/Last') if built else None
+            for new, _, _ in built:
+                if isinstance(last, Dictionary):
+                    last.Next = new
+                    new.Prev = last
+                else:
+                    parent.First = new
+                last = new
+            if built:
+                parent.Last = last
+            order.append((owner, built))
+            for new, children, _ in built:
+                stack.append((new, children, new.objgen))
+        for owner, built in reversed(order):
+            total = 0
+            for new, children, is_open in built:
+                visible = visible_of.get(new.objgen, 0)
+                if children:
+                    new.Count = visible if is_open else -visible
+                total += 1 + (visible if is_open else 0)
+            visible_of[owner] = total
+        return visible_of[None]
 
     added = wire(out_root, tree)
     prior = out_root.get('/Count')
@@ -1307,13 +1340,14 @@ def _expand_labels(src):
         return None
     entries = []
     seen: set = set()
-
-    def walk(node, depth):
-        if depth > 64 or not isinstance(node, Dictionary):
-            return
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, Dictionary):
+            continue
         if node.is_indirect:
             if node.objgen in seen:
-                return
+                continue
             seen.add(node.objgen)
         nums = node.get('/Nums')
         if isinstance(nums, Array):
@@ -1329,10 +1363,7 @@ def _expand_labels(src):
                                     st if isinstance(st, int) and not isinstance(st, bool) and st >= 1 else 1))
         kids = node.get('/Kids')
         if isinstance(kids, Array):
-            for kid in kids:
-                walk(kid, depth + 1)
-
-    walk(root, 0)
+            stack.extend(reversed(list(kids)))
     if not entries:
         return None
     entries.sort(key=lambda e: e[0])
@@ -1398,7 +1429,6 @@ def _carry_embedded(dst, src):
 
 
 # -- articles -------------------------------------------------------------------
-_MAX_BEADS = 100_000
 
 
 def _carry_threads(dst, src, src_pages, start):
@@ -1431,8 +1461,6 @@ def _carry_threads(dst, src, src_pages, start):
             continue
         ring, seen, cursor, closed = [], set(), thread.get('/F'), False
         while isinstance(cursor, Dictionary) and cursor.is_indirect and cursor.objgen not in seen:
-            if len(seen) >= _MAX_BEADS:
-                break
             seen.add(cursor.objgen)
             ring.append(cursor)
             cursor = cursor.get('/N')
@@ -1468,7 +1496,10 @@ def _copy_action(dst, value, fresh: dict, depth: int = 0):
         new = dst.make_indirect(Dictionary())
         fresh[value.objgen] = new
         for key, item in value.items():
-            new[key] = _copy_action(dst, item, fresh, depth + 1)
+            # /SD names a structure element, which also carries /S: it goes
+            # through the foreign copy map, where the structure carry finds it.
+            new[key] = (copy_value(dst, item) if key == '/SD'
+                        else _copy_action(dst, item, fresh, depth + 1))
         return new
     if isinstance(value, Dictionary) and not value.is_indirect:
         return Dictionary({k: _copy_action(dst, v, fresh, depth + 1) for k, v in value.items()})

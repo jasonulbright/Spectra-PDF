@@ -1,12 +1,11 @@
 """PDF inspection — page count, dimensions, info, encryption check."""
 
 import math
-import os
-import tempfile
 from pathlib import Path
 
 import pikepdf
 from engine.credentials import open_pdf
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 
 
@@ -29,18 +28,10 @@ def check_encrypted(file: str) -> dict:
 def _decrypt_in_place(file: str, password: str) -> None:
     """Rewrite `file` without its protection. The caller has established the
     owner authority."""
-    file_path = Path(file)
-    fd, tmp_path = tempfile.mkstemp(suffix=".pdf", dir=file_path.parent)
-    os.close(fd)
-    try:
+    with staged_write(Path(file)) as staged:
         with open_pdf(file, password=password) as pdf:
             # Removing the protection IS the operation.
-            save_pdf(pdf, tmp_path, drop_encryption=True)
-        os.replace(tmp_path, file)
-    except Exception:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
+            save_pdf(pdf, str(staged), drop_encryption=True)
 
 
 def unlock(file: str, password: str) -> dict:

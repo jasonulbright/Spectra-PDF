@@ -605,12 +605,15 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
       });
       // After every file, and never after a stop: a stopped run leaves the
       // tree mid-way, and removing folders then would act on a partial state.
-      if (removeEmptyFolders && !rep.cancelled) {
+      if (removeEmptyFolders && !rep.cancelled && !cancelledRef.current) {
+        const cleanupAbort = new AbortController();
+        inPlaceAbortRef.current = cleanupAbort;
         try {
           rep.emptyFolders = (await callRaw('remove_empty_folders', {
             root: source,
             protected: [dest, movedRoot ?? '', errorRoot ?? ''],
-          })) as unknown as EmptyFolderReport;
+          }, { signal: cleanupAbort.signal })) as unknown as EmptyFolderReport;
+          if (rep.emptyFolders.stopped) rep.cancelled = true;
         } catch (e: unknown) {
           const message = e instanceof Error ? e.message : String(e);
           const refusal = emptyFolderRefusal(message);
@@ -622,6 +625,8 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                 : { path: source, reason: message },
             ],
           };
+        } finally {
+          if (inPlaceAbortRef.current === cleanupAbort) inPlaceAbortRef.current = null;
         }
       }
       setReport(rep);

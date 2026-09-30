@@ -35,7 +35,7 @@ import os
 import shutil
 
 import pikepdf
-from engine.inplace import reclaim_stale_stages, scratch_path, write_text_staged
+from engine.inplace import finish_staged, reclaim_stale_stages, scratch_path, write_text_staged
 from engine.credentials import open_pdf
 
 from engine import gs_capability
@@ -941,7 +941,7 @@ def run_action(
                         "the processed copy could not be read back -- the original "
                         "was left untouched"
                     )
-                os.replace(out_path, abs_path)
+                finish_staged(out_path, abs_path)
             row: dict = {"rel": rel, "status": "ok", "steps_applied": applied}
             # The move gate reads the PROCESSED copy, so it is answered before a
             # terminal export consumes and removes it.

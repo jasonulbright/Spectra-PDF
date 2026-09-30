@@ -33,7 +33,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pikepdf
-from engine.inplace import reclaim_stale_stages, scratch_path, write_text_staged
+from engine.inplace import finish_staged, reclaim_stale_stages, scratch_path, write_text_staged
 from engine.credentials import open_pdf
 
 from engine.batch_ocr import (
@@ -209,7 +209,7 @@ def run_preflight_sweep(
                         "the processed copy could not be read back -- the original "
                         "was left untouched"
                     )
-                os.replace(out_path, abs_path)
+                finish_staged(out_path, abs_path)
             row["applied"] = [entry["fixup"] for entry in outcome["applied"]]
             # A fixup that landed on part of what it was asked for is named
             # here as well as in `applied`: the id alone would read as a

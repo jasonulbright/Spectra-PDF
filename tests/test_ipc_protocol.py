@@ -147,3 +147,55 @@ def test_numeric_id_is_preserved_in_result_serialization_error():
     replies = _serve(['{"jsonrpc":"2.0","id":4.5,"method":"raw"}'])
     assert replies[0]["error"]["code"] == -32603
     assert replies[0]["id"] == 4.5
+
+
+def _pulled_while_busy(monkeypatch, *, items: int, max_bytes: int, total: int) -> tuple[int, list]:
+    """Serve `total` requests behind one handler that blocks until released;
+    return how many input lines the reader pulled while it blocked, and the
+    replies once released."""
+    import threading
+    import time
+
+    from engine import ipc
+
+    monkeypatch.setattr(ipc, "MAX_QUEUED_REQUESTS", items)
+    monkeypatch.setattr(ipc, "MAX_QUEUED_BYTES", max_bytes)
+    release = threading.Event()
+    pulled = 0
+
+    def lines():
+        nonlocal pulled
+        for index in range(total):
+            pulled += 1
+            method = "block" if index == 0 else "echo"
+            yield f'{{"jsonrpc":"2.0","id":{index},"method":"{method}","params":{{}}}}\n'
+
+    server = JsonRpcServer()
+    server.register("block", lambda: release.wait(10) and "done")
+    server.register("echo", lambda **kw: kw)
+    out = io.StringIO()
+    runner = threading.Thread(target=server.run, args=(lines(), out))
+    runner.start()
+    deadline = time.monotonic() + 5
+    last = -1
+    while time.monotonic() < deadline and last != pulled:
+        last = pulled
+        time.sleep(0.2)
+    seen = pulled
+    release.set()
+    runner.join(10)
+    assert not runner.is_alive()
+    return seen, [json.loads(line) for line in out.getvalue().splitlines()]
+
+
+def test_a_busy_handler_stops_the_reader_at_the_queued_request_bound(monkeypatch):
+    seen, replies = _pulled_while_busy(monkeypatch, items=4, max_bytes=1 << 30, total=200)
+    # The running request, four queued, and one line held waiting for room.
+    assert seen <= 6
+    assert [r["id"] for r in replies] == list(range(200))
+
+
+def test_a_busy_handler_stops_the_reader_at_the_queued_byte_bound(monkeypatch):
+    seen, replies = _pulled_while_busy(monkeypatch, items=10_000, max_bytes=200, total=200)
+    assert seen <= 6
+    assert [r["id"] for r in replies] == list(range(200))

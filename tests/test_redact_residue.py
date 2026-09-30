@@ -450,9 +450,11 @@ def test_a_removed_action_hands_its_slot_to_its_successors(tmp_dir):
     assert "***" not in _strings(clean)
 
 
-def test_xmp_dates_and_identifiers_are_never_scrubbed(tmp_dir):
-    """A date value is skipped whatever its property name, and so is an
-    identifier, even when a term would match inside it."""
+def test_a_redacted_date_is_removed_from_xmp_and_other_values_stay(tmp_dir):
+    """A date the marks removed is residue in any property: a free-text
+    property is scrubbed, a typed date property is removed whole (a scrubbed
+    value would not parse as a date). A timestamp or an identifier that only
+    contains the date's digits is not the term and stays."""
     def build(pdf):
         with pdf.open_metadata(set_pikepdf_as_editor=False, update_docinfo=False) as meta:
             meta["dc:title"] = SECRET
@@ -462,6 +464,7 @@ def test_xmp_dates_and_identifiers_are_never_scrubbed(tmp_dir):
             ' xmlns:x1="urn:example:x1" xmlns:stEvt="http://ns.adobe.com/xap/1.0/sType/ResourceEvent#"'
             ' xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/">'
             '<photoshop:DateCreated>2024-01-01</photoshop:DateCreated>'
+            '<x1:birth>2024-01-01</x1:birth>'
             '<x1:recorded>2024-01-01T10:00:00Z</x1:recorded>'
             '<xmpMM:History><rdf:Seq><rdf:li rdf:parseType="Resource">'
             '<stEvt:when>2024-01-01T10:00:00Z</stEvt:when>'
@@ -479,15 +482,36 @@ def test_xmp_dates_and_identifiers_are_never_scrubbed(tmp_dir):
     out = os.path.join(tmp_dir, "dates_out.pdf")
     result = redact(src, out, [{"page": 1, "rect": [90, 690, 600, 730]}])
     assert "2024-01-01" in result["removed_text"]
+    found = {e["where"] for e in result["residue"] if e["kind"] == "metadata"}
+    assert {"DateCreated", "birth"} <= found
     clean = os.path.join(tmp_dir, "dates_clean.pdf")
     remove_redaction_residue(out, clean, result["removed_text"], ["metadata"])
     with pikepdf.open(clean) as pdf:
         xmp = pdf.Root.Metadata.read_bytes().decode("utf-8")
-    assert "<photoshop:DateCreated>2024-01-01</photoshop:DateCreated>" in xmp
+    assert "DateCreated" not in xmp
+    assert "<x1:birth>***</x1:birth>" in xmp
     assert "<x1:recorded>2024-01-01T10:00:00Z</x1:recorded>" in xmp
     assert "<stEvt:when>2024-01-01T10:00:00Z</stEvt:when>" in xmp
     assert "uuid:2024-6789" in xmp
     assert SECRET not in xmp
+
+
+def test_a_redacted_date_is_removed_from_an_info_date(tmp_dir):
+    def build(pdf):
+        pdf.docinfo[Name.CreationDate] = String("2024-01-01")
+
+    pdf = _doc("SSN 123-45-6789 2024-01-01")
+    build(pdf)
+    src = os.path.join(tmp_dir, "idate.pdf")
+    pdf.save(src)
+    pdf.close()
+    out = os.path.join(tmp_dir, "idate_out.pdf")
+    result = redact(src, out, [{"page": 1, "rect": [90, 690, 600, 730]}])
+    assert result["residue_counts"].get("metadata") == 1
+    clean = os.path.join(tmp_dir, "idate_clean.pdf")
+    remove_redaction_residue(out, clean, result["removed_text"], ["metadata"])
+    with pikepdf.open(clean) as pdf:
+        assert "/CreationDate" not in pdf.docinfo
 
 
 def _cjk_doc(pdf_text_bytes: bytes):
@@ -546,3 +570,96 @@ def test_counts_are_occurrences_and_field_names_are_report_only(tmp_dir):
     assert result["residue_counts"]["outline"] == 2
     assert result["residue_report_only"] == {"field_name": 1}
     assert "field_name" not in result["residue_counts"]
+
+
+# ── completeness ──────────────────────────────────────────────────────────
+
+
+def test_every_term_is_collected_past_a_thousand(tmp_dir):
+    from engine import redact_document
+
+    words = [f"W{n:04d}" for n in range(1100)]
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    font = pdf.make_indirect(Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica))
+    pdf.pages[0].obj.Resources = Dictionary(Font=Dictionary(F1=font))
+    lines = []
+    for row in range(55):
+        chunk = " ".join(words[row * 20:(row + 1) * 20])
+        lines.append(f"BT /F1 4 Tf 10 {780 - row * 12} Td ({chunk}) Tj ET")
+    pdf.pages[0].obj.Contents = pdf.make_stream(" ".join(lines).encode("latin-1"))
+    terms = redact_document.removed_terms(pdf, {1: [{"rect": [0, 0, 612, 792]}]})
+    folded = {t.casefold() for t in terms}
+    assert all(w.casefold() in folded for w in words)
+    pdf.docinfo[Name.Subject] = String(words[-1])
+    residue = redact_document.find_residue(pdf, terms)
+    assert residue["residue_counts"].get("metadata") == 1
+
+
+def _name_tree_of(pdf, count: int):
+    """An /EmbeddedFiles-shaped name tree of `count` leaves, 100 per kid."""
+    kids = Array()
+    for start in range(0, count, 100):
+        names = Array()
+        for n in range(start, min(start + 100, count)):
+            names.append(String(f"k{n:06d}"))
+            names.append(Dictionary(Type=Name.Filespec, F=String(f"f{n}.txt")))
+        kids.append(pdf.make_indirect(Dictionary(Names=names)))
+    return Dictionary(Kids=kids)
+
+
+def test_renaming_a_tree_key_keeps_every_other_entry(monkeypatch):
+    from engine import redact_document
+
+    pdf = pikepdf.new()
+    pdf.add_blank_page()
+    tree = _name_tree_of(pdf, 1200)
+    tree.Kids[0].Names[0] = String(SECRET)
+    pdf.Root.Names = Dictionary(EmbeddedFiles=tree)
+    # A tree deeper than any fixed depth bound still carries every entry.
+    deep = pdf.Root.Names.EmbeddedFiles
+    for _ in range(80):
+        deep = Dictionary(Kids=Array([pdf.make_indirect(deep)]))
+    pdf.Root.Names.EmbeddedFiles = deep
+    redact_document.scrub_residue(pdf, [SECRET], ["embedded_file"])
+    entries = redact_document._tree_entries(pdf.Root.Names.EmbeddedFiles)
+    assert len(entries) == 1200
+    assert SECRET not in {key for key, _k, _v in entries}
+
+
+def test_outlines_and_actions_are_scanned_at_any_size():
+    from engine import redact_document
+
+    pdf = pikepdf.new()
+    pdf.add_blank_page()
+    with pdf.open_outline() as ol:
+        for n in range(300):
+            ol.root.append(pikepdf.OutlineItem(f"item {n}", 0))
+        ol.root.append(pikepdf.OutlineItem(SECRET, 0))
+    result = redact_document.find_residue(pdf, [SECRET])
+    assert result["residue_counts"] == {"outline": 1}
+    assert result["residue_unread"] == []
+
+
+def test_an_unreadable_place_marks_the_scan_incomplete(monkeypatch):
+    from engine import redact_document
+
+    monkeypatch.setattr(redact_document, "MAX_METADATA_BYTES", 16)
+    pdf = pikepdf.new()
+    pdf.add_blank_page()
+    with pdf.open_metadata(set_pikepdf_as_editor=False, update_docinfo=False) as meta:
+        meta["dc:description"] = SECRET
+    result = redact_document.find_residue(pdf, [SECRET])
+    assert result["residue_unread"] == ["metadata: XMP"]
+
+
+@pytest.mark.parametrize("stored, term", [
+    ("José García", "José García"),
+    ("José García", "José García"),
+])
+def test_canonically_equivalent_text_matches_both_ways(stored, term):
+    from engine.redact_document import REPLACEMENT, Matcher
+
+    matcher = Matcher([term])
+    assert matcher.hits(f"Name: {stored}.")
+    assert matcher.scrub(f"Name: {stored}.") == f"Name: {REPLACEMENT}."

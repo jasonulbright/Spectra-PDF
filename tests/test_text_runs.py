@@ -106,6 +106,26 @@ class TestListTextRuns:
         assert [run["clipped"] for run in runs] == [False, True]
         assert [run["index"] for run in runs] == [0, 1]
 
+    def test_rotated_form_bbox_clips_by_its_parallelogram(self, tmp_dir):
+        # A 45-degree form: its BBox maps to a diamond. A run inside the
+        # diamond's bounding box but outside the diamond is clipped away.
+        src = os.path.join(tmp_dir, "rotform.pdf")
+        pdf = pikepdf.new()
+        font = _helv(pdf)
+        k = 0.7071067811865476
+        form = pdf.make_stream(
+            b"BT /F1 2 Tf 49.5 -35.4 Td (x) Tj ET BT /F1 2 Tf 50 50 Td (y) Tj ET",
+            Type=Name.XObject, Subtype=Name.Form, BBox=Array([0, 0, 100, 100]),
+            Matrix=Array([k, k, -k, k, 0, 0]),
+            Resources=Dictionary(Font=Dictionary(F1=font)),
+        )
+        page = _page(pdf, b"q 1 0 0 1 300 300 cm /Fm Do Q", {"/F1": font})
+        page.obj.Resources.XObject = Dictionary(Fm=form)
+        pdf.save(src)
+        pdf.close()
+        runs = list_text_runs(src, 1)["runs"]
+        assert {run["text"]: run["clipped"] for run in runs} == {"x": True, "y": False}
+
     def test_no_clip_runs_never_clipped(self, tmp_dir):
         src = os.path.join(tmp_dir, "t.pdf")
         pdf = pikepdf.new()

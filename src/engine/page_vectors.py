@@ -44,7 +44,7 @@ from engine.credentials import open_pdf
 
 from engine import color_spaces
 from engine.bezier import cubic_bbox_points, flatten_cubic
-from engine.content_walk import ClipTracker, DEFAULT_COLOR, GraphicsTextState, clip_has_area, form_clip, mat_mult, transform_point
+from engine.content_walk import ClipTracker, DEFAULT_COLOR, GraphicsTextState, clip_has_area, mat_mult, transform_point
 from engine.page_images import (
     _do_instruction,
     _finalize_page_rewrite,
@@ -527,7 +527,7 @@ def _walk_vectors(
                     base_fill=state.fill_color,
                     base_stroke=state.stroke_color,
                     out=out,
-                    base_clip=form_clip(xobj, state.ctm, clips.clip),
+                    base_clip=clips.for_form(xobj, state.ctm),
                     geometry=geometry,
                 )
         if operator == "sh":
