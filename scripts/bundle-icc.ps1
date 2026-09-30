@@ -32,6 +32,14 @@
 # Layout written:
 #   resources/icc/<upstream base name>.icc
 #   resources/icc/Adobe-Color-Profile-License.txt
+#   resources/icc/srgb/sRGB2014.icc          (PDF/A output intent)
+#   resources/icc/srgb/ICC-Profile-Terms.txt
+#
+# The sRGB profile is an ICC registry profile under the ICC's own profile
+# terms, not under the bundling agreement above. It sits in a subdirectory so
+# the description-keyed listing of the bundled set never reads it. Its pinned
+# row below is verified by sha256 and size, on the way out of vendor/icc and
+# again on disk.
 #
 # Run before packaging:
 #   powershell -ExecutionPolicy Bypass -File scripts\bundle-icc.ps1
@@ -55,6 +63,15 @@ $ErrorActionPreference = "Stop"
 # The shipped end-user licence file name. The engine never reads it; the
 # notice gate below refuses to write the tree without it.
 $LicenseName = "Adobe-Color-Profile-License.txt"
+
+$Srgb = [pscustomobject]@{
+    description = "sRGB2014"
+    file        = "sRGB2014.icc"
+    url         = "https://registry.color.org/rgb-registry/profiles/sRGB2014.icc"
+    sha256      = "384b832de3412066743b52a75ee906b6fb9fb8d9e09e936fc2c43223815c6e0a"
+    size        = 3024
+    terms       = "ICC-Profile-Terms.txt"
+}
 
 # ---------------------------------------------------------------------------
 # Manifest reader. Comment and header lines are preserved verbatim on a
@@ -182,6 +199,25 @@ foreach ($r in $rows) {
 }
 
 Copy-Item $LicenseText (Join-Path $staging $LicenseName) -Force
+
+$srgbSource = Join-Path $SourceDir $Srgb.file
+$srgbTerms = Join-Path $SourceDir $Srgb.terms
+if (-not (Test-Path $srgbTerms)) { throw "the ICC profile terms text is missing: $srgbTerms" }
+if (-not ((Get-Content $Notices -Raw).Contains($Srgb.description))) {
+    throw "$($Srgb.description): ships with no row in THIRD-PARTY-LICENSES.md"
+}
+if (-not (Test-Path $srgbSource)) { throw "committed profile missing: $srgbSource (pinned from $($Srgb.url))" }
+$srgbDir = Join-Path $staging "srgb"
+New-Item -ItemType Directory -Force -Path $srgbDir | Out-Null
+foreach ($path in @($srgbSource, (Join-Path $srgbDir $Srgb.file))) {
+    if ($path -ne $srgbSource) { Copy-Item $srgbSource $path -Force }
+    $item = Get-Item $path
+    $sha = (Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant()
+    if ($sha -ne $Srgb.sha256 -or $item.Length -ne $Srgb.size) {
+        throw "$path : sha256 $sha / $($item.Length) bytes does not match the pinned $($Srgb.sha256) / $($Srgb.size)"
+    }
+}
+Copy-Item $srgbTerms (Join-Path $srgbDir $Srgb.terms) -Force
 
 # Re-verify on disk. The copy is what ships, and "unmodified" is a
 # condition of the licence rather than an implementation detail.

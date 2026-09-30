@@ -2643,6 +2643,7 @@
   "engine.pdf_save.documentSEncryptionCannot4": "Šifriranja tega dokumenta pri tem opravilu ni mogoče ohraniti: svoje metapodatke šifrira z algoritmom, ki ga s to nastavitvijo ni mogoče zapisati nazaj, prepisana kopija pa bi razkrila metapodatke, ki jih dokument ohranja šifrirane. Če želite nezaščiteno kopijo, dokument najprej dešifrirajte.",
   "engine.pdf_save.documentSEncryptionCannot5": "Šifriranja tega dokumenta pri tem opravilu ni mogoče ohraniti: svoje tokove, nize in vdelane datoteke varuje z različnimi algoritmi, prepisana kopija pa lahko za vse tri nosi le en algoritem. Če želite nezaščiteno kopijo, dokument najprej dešifrirajte.",
   "engine.pdf_save.documentSEncryptionCannot6": "Šifriranja tega dokumenta pri tem opravilu ni mogoče ohraniti: različica šifriranja, algoritem in dolžina ključa so kombinacija, ki je ni mogoče zapisati nazaj natanko, prepisana kopija pa bi spremenila moč njegove zaščite. Če želite nezaščiteno kopijo, dokument najprej dešifrirajte.",
+  "engine.pdfa.bundledSrgbColourProfile": "Priloženi barvni profil sRGB manjka ({{candidate}}), zato ni mogoče zapisati izhodnega namena PDF/A.",
   "engine.pdfa.ghostscriptPdfConversionDid": "Pretvorba Ghostscript v PDF/A ni ustvarila {{requested}}: izhod navaja {{declared}}.",
   "engine.pdfa.ghostscriptPdfConversionFailed": "Pretvorba v PDF/A z Ghostscript ni uspela: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Izhod nima izhodnega namena PDF/A, zato {{requested}} ni bil ustvarjen.",

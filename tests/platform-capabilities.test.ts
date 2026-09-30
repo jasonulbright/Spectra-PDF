@@ -7,7 +7,13 @@ import { availableCommandIds, COMMAND_IDS, type CommandId } from '../src/rendere
 import { TOOL_DEFS } from '../src/renderer/commands/tools';
 import { KEY_BINDINGS } from '../src/renderer/commands/standard-keys';
 import { shortcutForCommand } from '../src/renderer/commands/keymap';
-import { availableToolDefs, commandAvailable } from '../src/renderer/commands/platform';
+import {
+  PREFERENCE_CONTROLS,
+  availablePreferenceControls,
+  availableToolDefs,
+  commandAvailable,
+  type PreferenceControl,
+} from '../src/renderer/commands/platform';
 import {
   ALL_PLATFORM_CAPABILITIES,
   loadPlatformCapabilities,
@@ -616,7 +622,7 @@ describe('capability module', () => {
   it('defaults to every flag true', () => {
     expect(platformCapabilities()).toEqual(ALL_PLATFORM_CAPABILITIES);
     for (const f of PLATFORM_FEATURES) expect(platformCapability(f)).toBe(true);
-    expect(PLATFORM_FEATURES).toHaveLength(14);
+    expect(PLATFORM_FEATURES).toHaveLength(15);
   });
 
   it('parses only an exact true as available', () => {
@@ -674,6 +680,25 @@ const EXPECTED_DROPS: Record<PlatformFeature, CommandId[]> = {
   trayResidency: ['window.minimizeToTray'],
   backdrop: [],
   consoleAttach: [],
+  startWithSystem: [],
+};
+
+const EXPECTED_PREFERENCE_DROPS: Record<PlatformFeature, PreferenceControl[]> = {
+  systemPrinting: [],
+  virtualPrinter: [],
+  scanning: [],
+  scheduledActions: [],
+  storeCertificates: [],
+  sendByEmail: [],
+  webCapture: [],
+  clipboardRead: [],
+  snapshot: [],
+  accentColor: [],
+  enterprisePolicy: [],
+  trayResidency: ['minimizeToTray', 'startMinimized'],
+  backdrop: [],
+  consoleAttach: [],
+  startWithSystem: ['startWithSystem'],
 };
 
 function allMenuIds(): CommandId[] {
@@ -714,6 +739,18 @@ describe.each(PLATFORM_FEATURES)('flag %s false', (feature) => {
       expect(commandAvailable(b.command)).toBe(!drops.has(b.command));
       if (drops.has(b.command)) expect(shortcutForCommand(b.command)).toBeNull();
     }
+  });
+});
+
+describe('preferences controls', () => {
+  it('shows every control with every flag true', () => {
+    expect(availablePreferenceControls()).toEqual(['minimizeToTray', 'startMinimized', 'startWithSystem']);
+  });
+
+  it.each(PLATFORM_FEATURES)('flag %s false drops exactly its controls', (feature) => {
+    setPlatformCapabilities({ [feature]: false });
+    const drops = new Set(EXPECTED_PREFERENCE_DROPS[feature]);
+    expect(availablePreferenceControls()).toEqual(PREFERENCE_CONTROLS.filter((c) => !drops.has(c)));
   });
 });
 

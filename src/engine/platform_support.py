@@ -69,3 +69,94 @@ def vendored_candidates(engine_dir: Path, component: str, *relative: str) -> tup
     if DEV_PLATFORM_DIR:
         dev = dev / DEV_PLATFORM_DIR
     return (shipped.joinpath(*relative), (dev / component).joinpath(*relative))
+
+
+#: The host passes the decimal number of an inherited lease-channel socket in
+#: this variable (see `adopt_lease_channel`).
+LEASE_FD_ENV = "SPECTRAPDF_LEASE_FD"
+
+_lease_fd: int | None = None
+
+
+def adopt_lease_channel() -> int | None:
+    """Take ownership of the host's folder-lease channel, if one was passed.
+
+    The socket's single queued message holds the lock-file descriptions of
+    every folder lease the host shares with this process; each lease stays
+    held while this process keeps the socket open. The socket is therefore
+    never read, written, or closed. It is marked close-on-exec so no child
+    carries a lease past this process's death, and the variable is removed so
+    no child reads a descriptor number that is not its own.
+    """
+    global _lease_fd
+    raw = os.environ.pop(LEASE_FD_ENV, None)
+    if _lease_fd is not None or raw is None or IS_WINDOWS:
+        return _lease_fd
+    try:
+        fd = int(raw)
+        os.fstat(fd)
+    except (ValueError, OSError):
+        return None
+    os.set_inheritable(fd, False)
+    _lease_fd = fd
+    return fd
+
+
+def lease_channel() -> int | None:
+    """The descriptor adopted by `adopt_lease_channel`, if any."""
+    return _lease_fd
+
+
+if sys.platform.startswith("linux"):
+    import ctypes
+    import signal
+
+    _PR_SET_PDEATHSIG = 1
+    # Resolved before any fork: the child between fork and exec may run only
+    # the already-bound C call, never an import or a symbol lookup.
+    _prctl = ctypes.CDLL(None, use_errno=True).prctl
+    _prctl.argtypes = (ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong)
+    _prctl.restype = ctypes.c_int
+
+    def _die_with(parent: int):
+        def arm() -> None:
+            if _prctl(_PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0) != 0:
+                os._exit(127)
+            # The parent can die between fork and prctl; the signal is then
+            # never sent and the child is already reparented.
+            if os.getppid() != parent:
+                os.kill(os.getpid(), signal.SIGKILL)
+
+        return arm
+
+    def _spawn_options() -> dict:
+        return {"preexec_fn": _die_with(os.getpid())}
+
+else:
+
+    def _spawn_options() -> dict:
+        return {}
+
+
+def spawn_options() -> dict:
+    """Keyword arguments every engine child process is started with.
+
+    On Linux the child receives SIGKILL when the thread that spawned it dies,
+    so a spawn must come from a thread that outlives the child (the request
+    loop's main thread).
+    """
+    return _spawn_options()
+
+
+def popen(args, **kwargs):
+    """`subprocess.Popen` with `spawn_options`. Every engine spawn uses this or `run`."""
+    import subprocess
+
+    return subprocess.Popen(args, **kwargs, **spawn_options())
+
+
+def run(args, **kwargs):
+    """`subprocess.run` with `spawn_options`."""
+    import subprocess
+
+    return subprocess.run(args, **kwargs, **spawn_options())

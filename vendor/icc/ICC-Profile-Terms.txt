@@ -1,0 +1,13 @@
+sRGB2014.icc
+Copyright International Color Consortium, 2015 (the profile's own cprt tag)
+
+Source: https://registry.color.org/rgb-registry/profiles/sRGB2014.icc
+Licence: the general licensing terms for ICC profiles,
+https://registry.color.org/profile-library/#license
+
+This profile is made available by the International Color Consortium, and may
+be copied, distributed, embedded, made, used, and sold without restriction.
+Altered versions must have the original identification and copyright
+information removed and must not be presented as the original profile.
+
+Spectra PDF ships this profile unmodified.

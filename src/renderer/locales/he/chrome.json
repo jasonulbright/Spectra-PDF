@@ -2580,6 +2580,7 @@
   "engine.pdf_save.documentSEncryptionCannot4": "לא ניתן לשמר את ההצפנה של מסמך זה בפעולה זו: הוא מצפין את המטא-נתונים שלו באלגוריתם שאינו ניתן לכתיבה חוזרת בהגדרה זו, ועותק שייכתב מחדש יחשוף מטא-נתונים שהמסמך שומר מוצפנים. הסירו את ההצפנה מהמסמך תחילה אם ברצונכם עותק לא מוגן.",
   "engine.pdf_save.documentSEncryptionCannot5": "לא ניתן לשמר את ההצפנה של מסמך זה בפעולה זו: הוא מגן על הזרמים, המחרוזות והקבצים המוטמעים שלו באלגוריתמים שונים, ועותק שייכתב מחדש יכול לשאת אלגוריתם אחד בלבד לשלושתם. הסירו את ההצפנה מהמסמך תחילה אם ברצונכם עותק לא מוגן.",
   "engine.pdf_save.documentSEncryptionCannot6": "לא ניתן לשמר את ההצפנה של מסמך זה בפעולה זו: גרסת ההצפנה, האלגוריתם ואורך המפתח שלו הם צירוף שאינו ניתן לכתיבה חוזרת במדויק, ועותק שייכתב מחדש ישנה את חוזק ההגנה שלו. הסירו את ההצפנה מהמסמך תחילה אם ברצונכם עותק לא מוגן.",
+  "engine.pdfa.bundledSrgbColourProfile": "פרופיל הצבע sRGB המצורף חסר ({{candidate}}), ולכן לא ניתן לכתוב כוונת פלט PDF/A.",
   "engine.pdfa.ghostscriptPdfConversionDid": "המרת PDF/A של Ghostscript לא הפיקה {{requested}}: הפלט מצהיר על {{declared}}.",
   "engine.pdfa.ghostscriptPdfConversionFailed": "המרת PDF/A באמצעות Ghostscript נכשלה: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "הפלט אינו נושא כוונת פלט PDF/A, ולכן {{requested}} לא הופק.",

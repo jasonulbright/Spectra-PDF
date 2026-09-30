@@ -21,7 +21,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import gs_capability
+from . import gs_capability, platform_support
 from .credentials import gs_password_argv
 
 
@@ -261,7 +261,7 @@ def run(cmd: list[str], *, what: str, budget: float, size_bytes: int = 0, pages:
         # The child must not run even briefly outside its per-run job: it
         # could otherwise spawn a grandchild before job assignment.
         launch_options["creationflags"] = 0x00000004  # CREATE_SUSPENDED
-    process = subprocess.Popen(
+    process = platform_support.popen(
         cmd,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,

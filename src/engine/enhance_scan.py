@@ -423,7 +423,7 @@ def detect_orientation(
         image.save(png, dpi=(max(dpi, 1), max(dpi, 1)))
         env = dict(os.environ)
         env["TESSDATA_PREFIX"] = str(tessdata)
-        proc = subprocess.run(
+        proc = platform_support.run(
             [str(exe), str(png), "stdout", "--psm", "0", "--tessdata-dir", str(tessdata)],
             capture_output=True,
             text=True,

@@ -53,7 +53,7 @@ from pathlib import Path
 import pikepdf
 from engine.credentials import PERMISSIONS_HELD, gs_password_argv, open_pdf, print_resolution
 
-from . import gs_capability
+from . import gs_capability, platform_support
 from .print_layout import (
     NUP_ORDERS,
     apply_subset,
@@ -307,7 +307,7 @@ def _run_jobs(args: list[str], jobs: int) -> None:
         try:
             # build_gs_args puts the input document last.
             with gs_password_argv(args, args[-1]) as argv:
-                result = subprocess.run(
+                result = platform_support.run(
                     argv,
                     capture_output=True,
                     text=True,

@@ -97,6 +97,8 @@ export interface StepDef {
   engineMethod?: string;
   /** The step's engine call takes font_dir (Unicode text faces). */
   needsFontDir?: boolean;
+  /** The step's engine call takes icc_dir (the PDF/A output-intent profile). */
+  needsIccDir?: boolean;
   /** The step's engine call takes tesseract_path (OCR). */
   needsTesseract?: boolean;
   /** The step's engine call takes soffice_path (the bridged export targets). */
@@ -207,6 +209,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
   {
     op: 'convert_pdfa',
     title: 'Convert to PDF/A',
+    needsIccDir: true,
     params: [
       {
         key: 'level',

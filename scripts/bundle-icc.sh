@@ -94,6 +94,35 @@ for r in rows:
         sys.exit(f"{r['member']}: sha256 {got} does not match the pinned {r['sha256']}")
     shutil.copyfile(src(r["member"]), staging / src(r["member"]).name)
 shutil.copyfile(license_text, staging / license_name)
+
+# The PDF/A sRGB profile: an ICC registry profile under the ICC's own terms,
+# kept in a subdirectory the description-keyed listing never reads.
+SRGB = {
+    "description": "sRGB2014",
+    "file": "sRGB2014.icc",
+    "url": "https://registry.color.org/rgb-registry/profiles/sRGB2014.icc",
+    "sha256": "384b832de3412066743b52a75ee906b6fb9fb8d9e09e936fc2c43223815c6e0a",
+    "size": 3024,
+    "terms": "ICC-Profile-Terms.txt",
+}
+srgb_source = source / SRGB["file"]
+srgb_terms = source / SRGB["terms"]
+if not srgb_terms.is_file():
+    sys.exit(f"the ICC profile terms text is missing: {srgb_terms}")
+if SRGB["description"] not in body:
+    sys.exit(f"{SRGB['description']}: ships with no row in THIRD-PARTY-LICENSES.md")
+if not srgb_source.is_file():
+    sys.exit(f"committed profile missing: {srgb_source} (pinned from {SRGB['url']})")
+srgb_dir = staging / "srgb"
+srgb_dir.mkdir()
+shutil.copyfile(srgb_source, srgb_dir / SRGB["file"])
+for path in (srgb_source, srgb_dir / SRGB["file"]):
+    data = path.read_bytes()
+    got = hashlib.sha256(data).hexdigest()
+    if got != SRGB["sha256"] or len(data) != SRGB["size"]:
+        sys.exit(f"{path}: sha256 {got} / {len(data)} bytes does not match the pinned "
+                 f"{SRGB['sha256']} / {SRGB['size']}")
+shutil.copyfile(srgb_terms, srgb_dir / SRGB["terms"])
 for r in rows:
     if sha(staging / src(r["member"]).name) != r["sha256"]:
         sys.exit(f"{src(r['member']).name}: written bytes do not match the pinned {r['sha256']}")

@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pikepdf
 from engine.credentials import gs_password_argv, open_pdf
-from engine import gs_capability
+from engine import gs_capability, platform_support
 from engine.pdf_save import save_pdf
 
 # Render stages inherit printer.py's posture: bounded, stdin-isolated.
@@ -536,7 +536,7 @@ def _run_render(args: list[str], what: str) -> None:
     try:
         # The input document is the last argument of every render stage.
         with gs_password_argv(args, args[-1]) as argv:
-            result = subprocess.run(
+            result = platform_support.run(
                 argv,
                 capture_output=True,
                 text=True,

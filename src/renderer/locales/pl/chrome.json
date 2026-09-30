@@ -2643,6 +2643,7 @@
   "engine.pdf_save.documentSEncryptionCannot4": "Szyfrowania tego dokumentu nie da się zachować w tej operacji: szyfruje swoje metadane algorytmem, którego przy tym ustawieniu nie da się zapisać z powrotem, a kopia napisana na nowo ujawniłaby metadane, które ten dokument trzyma zaszyfrowane. Jeśli chcesz niezabezpieczoną kopię, najpierw odszyfruj dokument.",
   "engine.pdf_save.documentSEncryptionCannot5": "Szyfrowania tego dokumentu nie da się zachować w tej operacji: chroni swoje strumienie, ciągi znaków i pliki osadzone różnymi algorytmami, a kopia napisana na nowo może nieść tylko jeden algorytm dla wszystkich trzech. Jeśli chcesz niezabezpieczoną kopię, najpierw odszyfruj dokument.",
   "engine.pdf_save.documentSEncryptionCannot6": "Szyfrowania tego dokumentu nie da się zachować w tej operacji: jego wersja szyfrowania, algorytm i długość klucza tworzą kombinację, której nie da się zapisać z powrotem dokładnie, a kopia napisana na nowo zmieniłaby siłę jego ochrony. Jeśli chcesz niezabezpieczoną kopię, najpierw odszyfruj dokument.",
+  "engine.pdfa.bundledSrgbColourProfile": "Brak dołączonego profilu kolorów sRGB ({{candidate}}), więc nie można zapisać intencji wyjściowej PDF/A.",
   "engine.pdfa.ghostscriptPdfConversionDid": "Konwersja Ghostscript do PDF/A nie dała {{requested}}: wynik deklaruje {{declared}}.",
   "engine.pdfa.ghostscriptPdfConversionFailed": "Konwersja na PDF/A przez Ghostscript nie powiodła się: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Wynik nie zawiera intencji wyjściowej PDF/A, więc {{requested}} nie powstał.",
