@@ -3,6 +3,7 @@
 import os
 import re
 import shutil
+import sys
 
 import pikepdf
 import pytest
@@ -3683,9 +3684,14 @@ class TestPrintPdf:
             raise AssertionError("gs must not spawn for an unknown printer")
 
         monkeypatch.setattr(printer_mod.subprocess, "run", fail_run)
-        with pytest.raises(ValueError, match="Unknown printer"):
-            print_pdf(file=sample_pdf, printer="OPS Test No Such Printer 9c41")
+        if sys.platform == "win32":
+            with pytest.raises(ValueError, match="Unknown printer"):
+                print_pdf(file=sample_pdf, printer="OPS Test No Such Printer 9c41")
+        else:
+            with pytest.raises(RuntimeError, match="Printing to a system printer is not available"):
+                print_pdf(file=sample_pdf, printer="OPS Test No Such Printer 9c41")
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="winspool is a Windows interface")
     def test_printer_exists_asks_real_winspool(self):
         from engine.printer import printer_exists
 

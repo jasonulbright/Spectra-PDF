@@ -26,15 +26,20 @@ if (OCR_LANGS.length === 0) {
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const nm = join(root, 'node_modules')
-const tessDir = join(root, 'resources', 'tesseract')
+// The native tree differs per platform: resources/tesseract/ with
+// tesseract.exe on Windows, resources/linux-x86_64/tesseract/ with `tesseract`
+// elsewhere. SPECTRA_OCR_TARGET=linux-x86_64 stages the Linux tree from any host.
+const linux = (process.env.SPECTRA_OCR_TARGET || (process.platform === 'win32' ? 'windows' : 'linux-x86_64')) === 'linux-x86_64'
+const tessDir = linux ? join(root, 'resources', 'linux-x86_64', 'tesseract') : join(root, 'resources', 'tesseract')
+const program = linux ? 'tesseract' : 'tesseract.exe'
+const fix = linux ? 'provision the pinned Linux OCR artifact' : 'run scripts/bundle-tesseract.ps1'
 const dest = join(tessDir, 'tessdata')
 
-// The binary is vendored by scripts/bundle-tesseract.ps1. Staging models into a
-// tree with no tesseract.exe would produce a silently useless resource folder,
-// so say so plainly instead.
-if (!existsSync(join(tessDir, 'tesseract.exe'))) {
+// Staging models into a tree with no program would produce a silently useless
+// resource folder, so say so plainly instead.
+if (!existsSync(join(tessDir, program))) {
   console.warn(
-    '[sync-ocr-assets] resources/tesseract has no tesseract.exe yet — run scripts/bundle-tesseract.ps1 first. Skipping the native half.',
+    `[sync-ocr-assets] ${tessDir} has no ${program} yet — ${fix} first. Skipping the native half.`,
   )
   process.exit(0)
 }
@@ -80,7 +85,7 @@ if (missing.length > 0) {
 // installer. It is not an offered language, so its absence is not a build
 // failure — but note it, because page-orientation handling degrades without it.
 if (!existsSync(join(dest, 'osd.traineddata'))) {
-  console.warn('[sync-ocr-assets] osd.traineddata absent — re-run scripts/bundle-tesseract.ps1.')
+  console.warn(`[sync-ocr-assets] osd.traineddata absent — ${fix} again.`)
 }
 
 // Guard the thing that actually breaks recognition output (see the vendoring
@@ -88,12 +93,12 @@ if (!existsSync(join(dest, 'osd.traineddata'))) {
 // plain text and the engine parses no boxes.
 if (!existsSync(join(dest, 'configs', 'tsv'))) {
   console.error(
-    '[sync-ocr-assets] tessdata/configs/tsv is missing — word-box output would silently not work. Re-run scripts/bundle-tesseract.ps1.',
+    `[sync-ocr-assets] tessdata/configs/tsv is missing — word-box output would silently not work; ${fix} again.`,
   )
   process.exit(1)
 }
 
 const mb = (bytes / 1024 / 1024).toFixed(1)
 console.log(
-  `[sync-ocr-assets] Staged ${OCR_LANGS.length} language models -> resources/tesseract/tessdata (${mb} MB).`,
+  `[sync-ocr-assets] Staged ${OCR_LANGS.length} language models -> ${dest} (${mb} MB).`,
 )

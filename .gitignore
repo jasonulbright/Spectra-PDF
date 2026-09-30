@@ -144,6 +144,8 @@ userinput.md
 # LibreOffice runtime for Office export (assembled by scripts/bundle-libreoffice.ps1;
 # large, gitignored like resources/python & resources/ghostscript).
 resources/libreoffice/
+# Linux x86-64 runtime trees and their download cache (scripts/*.sh).
+resources/linux-x86_64/
 tests/softhsm2/
 
 # instruction file for a different tool; not part of this repo

@@ -1235,6 +1235,7 @@ def _draft_fixture(root: Path) -> tuple[list[str], Path]:
     }
     _write_manifest(downloaded, manifest, assets)
     _write_release(downloaded, {"draft": True, "tag_name": "v1.2.3", "body": RELEASE_BODY})
+    _require_shell("pwsh")
     args = [
         "pwsh", "-NoProfile", "-File", str(ROOT / DRAFT_VERIFIER),
         "-Repo", "o/r", "-Tag", "v1.2.3", "-Bundle", str(bundle), "-Portable", str(portable),
@@ -1291,6 +1292,14 @@ def _verifier_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     return {**os.environ, **COLOURING_ENV, **(extra or {})}
 
 
+
+def _require_shell(name: str) -> None:
+    """Skip a test that drives a release script when its shell is absent: the
+    release tooling is PowerShell and runs on the Windows runner."""
+    if shutil.which(name) is None:
+        pytest.skip(f"{name} is not installed")
+
+
 def _run_verifier(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(args, capture_output=True, text=True, env=_verifier_env())
 
@@ -1342,6 +1351,7 @@ def test_the_draft_verifiers_cargo_parse_ignores_terminal_styling() -> None:
             '"[$($running.Count)] $($running -join \'|\')"',
         ]
     )
+    _require_shell("pwsh")
     run = subprocess.run(
         ["pwsh", "-NoProfile", "-Command", script], capture_output=True, text=True
     )
@@ -1621,6 +1631,7 @@ def test_the_python_model_matches_the_shipped_asset_name_rule() -> None:
     script = "\n".join(
         ['. "' + rule + '"'] + [f'Get-GitHubAssetName "{n}"' for n in names]
     )
+    _require_shell("pwsh")
     run = subprocess.run(
         ["pwsh", "-NoProfile", "-Command", script], capture_output=True, text=True
     )
@@ -2606,6 +2617,7 @@ def test_the_sign_script_does_nothing_outside_ci(tmp_path: Path) -> None:
     env = dict(os.environ)
     env.pop("GITHUB_ACTIONS", None)
     env.pop("SPECTRAPDF_SIGN", None)
+    _require_shell("powershell")
     run = subprocess.run(
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
          "-File", str(ROOT / SIGN_SCRIPT), str(target)],
@@ -2652,6 +2664,7 @@ def test_the_sign_script_refuses_a_signing_run_with_no_coordinates(tmp_path: Pat
     for name in ("SPECTRAPDF_SIGN_ENDPOINT", "SPECTRAPDF_SIGN_ACCOUNT",
                  "SPECTRAPDF_SIGN_PROFILE"):
         env.pop(name, None)
+    _require_shell("powershell")
     run = subprocess.run(
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
          "-File", str(ROOT / SIGN_SCRIPT), str(target)],
@@ -2714,6 +2727,7 @@ def test_the_signed_set_is_exactly_three_artifacts() -> None:
         "  if ($line) { Write-Output ('{0} {1}' -f (Test-SignedArtifact $line), $line) }\n"
         "}\n"
     )
+    _require_shell("powershell")
     run = subprocess.run(
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
         input="\n".join(paths), capture_output=True, text=True, cwd=ROOT,
@@ -2816,6 +2830,7 @@ def test_a_signing_client_that_misses_the_pin_is_refused_before_extraction(
         " catch { 'REFUSED: ' + $_.Exception.Message }\n",
         encoding="utf-8",
     )
+    _require_shell("powershell")
     run = subprocess.run(
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
         capture_output=True, text=True, timeout=120,
@@ -3442,6 +3457,7 @@ def test_a_pip_wheel_that_misses_the_pin_is_refused_before_install(tmp_path: Pat
         " catch { 'REFUSED: ' + $_.Exception.Message }\n",
         encoding="utf-8",
     )
+    _require_shell("powershell")
     run = subprocess.run(
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
         capture_output=True, text=True, timeout=120,
@@ -3475,6 +3491,7 @@ def test_pip_bootstrap_archive_is_private_to_the_run_and_always_removed(tmp_path
         " catch { 'REFUSED: ' + $_.Exception.Message }\n",
         encoding="utf-8",
     )
+    _require_shell("powershell")
     run = subprocess.run(
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
         capture_output=True, text=True, timeout=120,

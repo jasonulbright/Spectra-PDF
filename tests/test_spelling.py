@@ -40,6 +40,7 @@ from engine.spelling import (
 )
 
 from spelling_words import WORDS
+import vendored_tools
 
 DICT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resources", "dictionaries"
@@ -50,7 +51,6 @@ DICT_DIR = os.path.join(
 #: its provisioning question is a different set of files.
 VOIKKO_TAG = "fi"
 VOIKKO_FILES = (
-    "libvoikko-1.dll",
     "libvoikko.py",
     os.path.join("5", "mor-standard", "index.txt"),
     os.path.join("5", "mor-standard", "mor.vfst"),
@@ -63,7 +63,9 @@ def _provisioned(tag: str) -> bool:
     `isdir` guard is satisfied by that stub — which is exactly the state
     neither a provisioned box nor a bare checkout ever reaches."""
     if tag == VOIKKO_TAG:
-        return all(os.path.isfile(os.path.join(DICT_DIR, tag, name)) for name in VOIKKO_FILES)
+        return vendored_tools.VOIKKO_LIBRARY.is_file() and all(
+            os.path.isfile(os.path.join(DICT_DIR, tag, name)) for name in VOIKKO_FILES
+        )
     base = os.path.join(DICT_DIR, tag, tag)
     return os.path.isfile(base + ".aff") and os.path.isfile(base + ".dic")
 
@@ -1115,9 +1117,20 @@ class TestVoikkoManifest:
                 out.append(line.rstrip("\n").split("\t"))
         return out
 
+    def platform_rows(self):
+        """The rows this platform ships, and the tree each is relative to."""
+        own = "windows" if os.name == "nt" else "linux"
+        native = str(vendored_tools.NATIVE / "voikko")
+        for cells in self.rows():
+            if cells[7] == "all":
+                yield cells, os.path.join(DICT_DIR, VOIKKO_TAG)
+            elif cells[7] == own:
+                yield cells, os.path.join(DICT_DIR, VOIKKO_TAG) if own == "windows" else native
+
     def test_every_row_carries_a_licence_a_notice_and_a_source(self):
         notices = {os.path.basename(f) for f, _c, role, *_ in self.rows() if role == "notice"}
-        for file, component, role, sha, spdx, notice, source in self.rows():
+        for file, component, role, sha, spdx, notice, source, platform in self.rows():
+            assert platform in ("all", "windows", "linux"), file
             assert component, file
             assert spdx, file
             assert source, file
@@ -1129,11 +1142,11 @@ class TestVoikkoManifest:
     def test_every_shipped_binary_has_a_row(self):
         if not _provisioned(VOIKKO_TAG):
             pytest.skip("Finnish dictionary not provisioned")
-        listed = {file for file, *_ in self.rows()}
-        root = os.path.join(DICT_DIR, VOIKKO_TAG)
+        listed = {file for (file, *_), _root in self.platform_rows()}
+        root = os.path.dirname(str(vendored_tools.VOIKKO_LIBRARY))
         for dirpath, _dirs, files in os.walk(root):
             for name in files:
-                if not name.lower().endswith(".dll"):
+                if not name.lower().endswith((".dll", ".so")) and ".so." not in name:
                     continue
                 shipped = os.path.relpath(os.path.join(dirpath, name), root).replace(os.sep, "/")
                 assert shipped in listed, shipped
@@ -1141,8 +1154,8 @@ class TestVoikkoManifest:
     def test_the_provisioned_tree_ships_every_file_the_manifest_names(self):
         if not _provisioned(VOIKKO_TAG):
             pytest.skip("Finnish dictionary not provisioned")
-        for file, _component, _role, sha, *_ in self.rows():
-            path = os.path.join(DICT_DIR, VOIKKO_TAG, file.replace("/", os.sep))
+        for (file, _component, _role, sha, *_), root in self.platform_rows():
+            path = os.path.join(root, file.replace("/", os.sep))
             assert os.path.isfile(path), path
             if sha == "-":
                 continue

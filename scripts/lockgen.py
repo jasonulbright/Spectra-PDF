@@ -2,13 +2,16 @@
 lockfile. Invoked by scripts/lock-python-deps.ps1 — not run directly in normal
 workflows.
 
-Usage: python lockgen.py <pip-report.json> <out-requirements.txt>
+Usage: python lockgen.py <pip-report.json> <out-requirements.txt> [platform-label [regenerate-script [install-script]]]
 """
 
 import json
 import sys
 
 report_path, out_path = sys.argv[1], sys.argv[2]
+platform = sys.argv[3] if len(sys.argv) > 3 else "Windows x86_64"
+regenerate = sys.argv[4] if len(sys.argv) > 4 else "scripts/lock-python-deps.ps1"
+installer = sys.argv[5] if len(sys.argv) > 5 else "setup-python-embed.ps1"
 report = json.load(open(report_path, encoding="utf-8"))
 
 entries = []
@@ -25,11 +28,11 @@ entries.sort(key=lambda t: t[0].lower())
 
 header = (
     "# Hash-pinned lockfile for the bundled Python engine runtime.\n"
-    "# GENERATED — do not edit by hand. Regenerate with scripts/lock-python-deps.ps1\n"
+    f"# GENERATED — do not edit by hand. Regenerate with {regenerate}\n"
     "# after changing scripts/python-requirements.in. Installed by\n"
-    "# setup-python-embed.ps1 via `pip install --require-hashes -r`, so every\n"
+    f"# {installer} via `pip install --require-hashes -r`, so every\n"
     "# transitive dependency (cryptography, lxml, …) is version- and hash-locked,\n"
-    "# not floated at build time. Resolved for CPython 3.14 / Windows x86_64.\n"
+    f"# not floated at build time. Resolved for CPython 3.14 / {platform}.\n"
     "#\n"
 )
 lines = [f"{n}=={v} --hash=sha256:{s}" for n, v, s in entries]

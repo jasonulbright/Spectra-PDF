@@ -243,3 +243,29 @@ def test_damaged_backup_never_causes_deletion_of_the_only_surviving_output(sourc
         assert len(pdf.pages) == 1
     backups = list(source.parent.glob('*.backup'))
     assert len(backups) == 1 and backups[0].read_bytes() == b'externally damaged backup'
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='the hard-link claim is the POSIX publication path')
+@pytest.mark.parametrize('external', [False, True])
+def test_a_filesystem_without_hard_links_still_publishes_without_clobbering(
+    source, monkeypatch, external
+):
+    import errno
+
+    selected = source.parent / 'result.pdf'
+
+    def no_links(src, dst):
+        if external:
+            Path(dst).write_bytes(b'new external file')
+        raise OSError(errno.EPERM, 'Operation not permitted', str(dst))
+
+    monkeypatch.setattr(writer.os, 'link', no_links)
+    if external:
+        with pytest.raises((OSError, RuntimeError)):
+            writer.split(str(source), ranges='1', output=str(selected))
+        assert selected.read_bytes() == b'new external file'
+        return
+    writer.split(str(source), ranges='1', output=str(selected))
+    with pikepdf.open(selected) as pdf:
+        assert len(pdf.pages) == 1
+    assert list(source.parent.glob('.spectra-split-*')) == []

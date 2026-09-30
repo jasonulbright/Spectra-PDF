@@ -178,9 +178,13 @@ def printer_exists(name: str) -> bool:
     invisible window that hangs the job until the timeout (observed live:
     exactly 600s, caught by the e2e). The name must be proven real
     before gs ever spawns.
+
+    Off Windows there is no mswinpr2 device and no spooler to ask, so a
+    print job refuses here by name rather than reaching a Ghostscript
+    device that does not exist.
     """
-    if sys.platform != "win32":  # engine ships Windows-only; keep tests portable
-        return True
+    if sys.platform != "win32":
+        raise RuntimeError("Printing to a system printer is not available on this platform.")
     import ctypes
     from ctypes import wintypes
 

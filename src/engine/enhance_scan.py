@@ -63,6 +63,7 @@ from pathlib import Path
 
 import numpy as np
 import pikepdf
+from engine import platform_support
 from engine.credentials import open_pdf
 from PIL import Image
 from pikepdf import Name
@@ -387,7 +388,8 @@ def whiten(samples: np.ndarray, paper: np.ndarray, strength: float) -> np.ndarra
 def _tessdata_for(exe: Path) -> Path:
     tessdata = exe.parent / "tessdata"
     if not tessdata.is_dir():
-        raise RuntimeError(f"No tessdata beside {exe}; run scripts/bundle-tesseract.ps1.")
+        script = platform_support.bundle_script("bundle-tesseract")
+        raise RuntimeError(f"No tessdata beside {exe}; run {script}.")
     return tessdata
 
 
@@ -406,10 +408,12 @@ def detect_orientation(
     """
     exe = Path(tesseract_path) if tesseract_path else Path()
     if not exe.is_file():
+        program = platform_support.program_name("tesseract")
+        script = platform_support.bundle_script("bundle-tesseract")
         raise RuntimeError(
-            "The OCR engine is not available: no tesseract.exe at "
+            f"The OCR engine is not available: no {program} at "
             f"{tesseract_path or '(no path given)'}. Turn off orientation detection or "
-            "run scripts/bundle-tesseract.ps1."
+            f"run {script}."
         )
     tessdata = _tessdata_for(exe)
     with tempfile.TemporaryDirectory(prefix="spectrapdf_osd_") as work:

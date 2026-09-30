@@ -54,10 +54,11 @@ from engine.mrc import segment
 from engine.recognize import recognize
 
 import gs_axis
+import vendored_tools
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 RESOURCES = Path(__file__).resolve().parent.parent / "resources"
-TESSERACT = RESOURCES / "tesseract" / "tesseract.exe"
+TESSERACT = vendored_tools.TESSERACT
 
 #: `make_enhance_scans.py` builds `scan-skew.pdf` at exactly this angle.
 SKEW_DEGREES = 2.75

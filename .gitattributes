@@ -68,3 +68,9 @@ tests/fixtures/xmp-extension-schemas/*.xml -text
 # the payload byte-identical to the committed blob on every platform.
 
 src/engine/** -text
+
+# A POSIX shell reads a carriage return as part of the command, so a shell
+# script checked out with CRLF endings fails to parse under sh (a Windows
+# checkout run from WSL, or a Linux build host sharing the tree).
+
+*.sh text eol=lf

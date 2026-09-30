@@ -53,6 +53,7 @@ from engine.mrc_codecs import (
     symbol_mode_suits,
     verify_mask_stream,
 )
+import vendored_tools
 
 # Tall enough that Pillow's ~205-row default strip height would produce
 # SEVERAL strips — a short fixture would pass the single-strip pin by accident.
@@ -222,10 +223,12 @@ class TestJbig2:
         # is the one that matters in production and cannot be exercised by
         # running the dev tree, so the candidate list is tested directly.
         root = Path(tmp_dir)
+        program = vendored_tools.JBIG2.name
         shipped = jbig2_candidates(root / "resources" / "engine")
-        assert shipped[0] == root / "resources" / "jbig2enc" / "jbig2.exe"
+        assert shipped[0] == root / "resources" / "jbig2enc" / program
         dev = jbig2_candidates(root / "src" / "engine")
-        assert dev[1] == root / "resources" / "jbig2enc" / "jbig2.exe"
+        dev_tree = root / vendored_tools.NATIVE.relative_to(vendored_tools.ROOT)
+        assert dev[1] == dev_tree / "jbig2enc" / program
 
     def test_the_bundled_encoder_is_the_one_found(self):
         # Whichever layout this checkout is, the resolved path must be inside

@@ -40,6 +40,8 @@ _EXTENSIONS = (".ttf", ".otf", ".ttc", ".otc")
 
 
 def _font_dirs() -> list[str]:
+    if os.name != "nt":
+        return _xdg_font_dirs()
     dirs: list[str] = []
     windir = os.environ.get("WINDIR") or os.environ.get("SystemRoot")
     if windir:
@@ -50,6 +52,31 @@ def _font_dirs() -> list[str]:
         # needed, and invisible to anything that only looks at WINDIR.
         dirs.append(os.path.join(local, "Microsoft", "Windows", "Fonts"))
     return [d for d in dirs if os.path.isdir(d)]
+
+
+def _xdg_font_dirs() -> list[str]:
+    """The per-user and system font roots of the XDG base-directory layout,
+    per-user first. fontconfig's default configuration reads these same
+    roots; `~/.fonts` is its legacy per-user location."""
+    home = os.path.expanduser("~")
+    data_home = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
+    data_dirs = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
+    dirs = [os.path.join(data_home, "fonts"), os.path.join(home, ".fonts")]
+    dirs += [os.path.join(d, "fonts") for d in data_dirs.split(":") if d]
+    return [d for d in dirs if os.path.isdir(d)]
+
+
+def _font_files(directory: str) -> list[str]:
+    """Font file paths under `directory`, in a stable order. The Windows font
+    folders are flat; the XDG roots nest one directory per package or
+    foundry, so they are walked."""
+    if os.name == "nt":
+        return [os.path.join(directory, entry) for entry in sorted(os.listdir(directory))]
+    found: list[str] = []
+    for root, subdirs, files in os.walk(directory):
+        subdirs.sort()
+        found += [os.path.join(root, name) for name in sorted(files)]
+    return found
 
 
 def embedding_refusal(fs_type: int) -> str | None:
@@ -156,13 +183,13 @@ def _scan() -> tuple:
     seen: set[str] = set()
     for directory in _font_dirs():
         try:
-            entries = sorted(os.listdir(directory))
+            paths = _font_files(directory)
         except OSError:
             continue
-        for entry in entries:
+        for path in paths:
+            entry = os.path.basename(path)
             if not entry.lower().endswith(_EXTENSIONS):
                 continue
-            path = os.path.join(directory, entry)
             key = os.path.normcase(os.path.abspath(path))
             if key in seen:
                 continue
@@ -221,6 +248,27 @@ def installed_families() -> set[str]:
     the converter of dropping a font it actually used.
     """
     return {face["family"] for face in _scan() if face.get("family")}
+
+
+def families_in(directory: str) -> set[str]:
+    """Every family name of the font files under `directory`, restricted ones
+    included. For a private font directory a program registers for itself,
+    which no system scan sees."""
+    families: set[str] = set()
+    try:
+        paths = _font_files(directory)
+    except OSError:
+        return families
+    for path in paths:
+        lower = path.lower()
+        if not lower.endswith(_EXTENSIONS):
+            continue
+        count = _collection_count(path) if lower.endswith((".ttc", ".otc")) else 1
+        for i in range(count):
+            face = read_face(path, i)
+            if face is not None and face.get("family"):
+                families.add(face["family"])
+    return families
 
 
 def resolve_face(path: str, index: int = 0) -> str:

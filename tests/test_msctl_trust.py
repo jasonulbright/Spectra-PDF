@@ -366,6 +366,7 @@ class TestSourcePrecedence:
             os_trust, "_enumerate",
             lambda store: [(der, "x509_asn", True)] if store == "ROOT" else [],
         )
+        monkeypatch.setattr(os_trust, "available", lambda: True)
         _fake_bundle(monkeypatch, tmp_path, signers=[_pem_of(pki["other_pem"])])
         out = _signed(os.path.join(str(tmp_path), "doc.pdf"), pki)
         result = verify_signatures(out, system_trust=True, msctl_trust=True)

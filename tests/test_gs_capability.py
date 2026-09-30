@@ -36,13 +36,23 @@ def clean_capability_cache(monkeypatch):
 
 
 def stub_gs(directory, version_line, *, renders=False):
-    """A fake `gs` that answers --version and (optionally) nothing else."""
-    stub = os.path.join(directory, "gswin64c.cmd")
-    body = f"@if \"%1\"==\"--version\" echo {version_line}\r\n"
-    if not renders:
-        body += "@if not \"%1\"==\"--version\" exit /b 1\r\n"
+    """A fake `gs` that answers --version and (optionally) nothing else.
+
+    A batch file on Windows, an executable shell script elsewhere: each is what
+    that platform's process launcher runs by path."""
+    if sys.platform == "win32":
+        stub = os.path.join(directory, "gswin64c.cmd")
+        body = f"@if \"%1\"==\"--version\" echo {version_line}\r\n"
+        if not renders:
+            body += "@if not \"%1\"==\"--version\" exit /b 1\r\n"
+    else:
+        stub = os.path.join(directory, "gs")
+        body = f'#!/bin/sh\nif [ "$1" = "--version" ]; then echo {version_line}; exit 0; fi\n'
+        body += "exit 0\n" if renders else "exit 1\n"
     with open(stub, "w", encoding="ascii", newline="") as handle:
         handle.write(body)
+    if sys.platform != "win32":
+        os.chmod(stub, 0o755)
     return stub
 
 
@@ -467,6 +477,10 @@ def test_printing_refuses_before_the_first_job_spawns(tmp_pdf, tmp_path):
     # once, not once per copy.
     from engine.printer import print_pdf
 
+    if sys.platform != "win32":
+        with pytest.raises(RuntimeError, match="Printing to a system printer is not available"):
+            print_pdf(tmp_pdf, "Microsoft Print to PDF", gs_path=_absent(tmp_path), copies=3)
+        return
     with pytest.raises(gc.GsUnavailable) as caught:
         print_pdf(tmp_pdf, "Microsoft Print to PDF", gs_path=_absent(tmp_path), copies=3)
     assert caught.value.reason == gc.NOT_EXECUTABLE

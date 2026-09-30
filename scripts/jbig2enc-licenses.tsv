@@ -14,6 +14,11 @@
 # here, or when a row's version disagrees with it. `jbig2.exe --version`
 # prints the same set at run time and is the cross-check.
 #
+# The Linux tree (resources/linux-x86_64/jbig2enc/) is a program plus shared
+# libraries, built from pinned release sources in its own build repository and
+# pinned here by hash, so its rows are per FILE, spelled by SONAME.
+# bundle-jbig2enc.ps1 reads only rows whose file ends in .exe or .dll.
+#
 # COLUMNS: file <TAB> component <TAB> version <TAB> spdx <TAB> notice <TAB> source
 #   file      exact filename as shipped in resources/jbig2enc/
 #   component upstream project, spelled as `depmf.json` spells it
@@ -48,3 +53,11 @@ jbig2.exe	libwebp	1.6.0	BSD-3-Clause	LICENSE-libwebp.txt	https://raw.githubuserc
 jbig2.exe	openjp2	2.5.4	BSD-2-Clause	LICENSE-openjpeg.txt	https://raw.githubusercontent.com/uclouvain/openjpeg/v2.5.4/LICENSE
 jbig2.exe	tiff	4.7.1	libtiff AND BSD-4.3TAHOE	LICENSE-libtiff.txt	https://gitlab.com/libtiff/libtiff/-/raw/v4.7.1/LICENSE.md
 jbig2.exe	zlib-ng	2.3.3	Zlib	LICENSE-zlib-ng.txt	https://raw.githubusercontent.com/zlib-ng/zlib-ng/2.3.3/LICENSE.md
+jbig2	jbig2enc	0.32	Apache-2.0	LICENSE-jbig2enc.txt	https://github.com/agl/jbig2enc/archive/refs/tags/0.32.tar.gz (COPYING)
+libgcc_s.so.1	GCC runtime library	13.3.0	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html
+libjpeg.so.8	libjpeg-turbo	3.0.3	IJG AND BSD-3-Clause AND Zlib	LICENSE-libjpeg-turbo.txt	https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.0.3/libjpeg-turbo-3.0.3.tar.gz (LICENSE.md, README.ijg)
+libleptonica.so.6	leptonica	1.84.1	BSD-2-Clause	LICENSE-leptonica.txt	https://github.com/DanBloomberg/leptonica/releases/download/1.84.1/leptonica-1.84.1.tar.gz (leptonica-license.txt)
+libpng16.so.16	libpng	1.6.43	libpng-2.0	LICENSE-libpng.txt	https://download.sourceforge.net/libpng/libpng-1.6.43.tar.xz (LICENSE)
+libstdc++.so.6	GCC runtime library	13.3.0	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html
+libtiff.so.6	tiff	4.6.0	libtiff	LICENSE-libtiff.txt	https://download.osgeo.org/libtiff/tiff-4.6.0.tar.gz (LICENSE.md)
+libz.so.1	zlib	1.3.1	Zlib	LICENSE-zlib.txt	https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz (LICENSE)

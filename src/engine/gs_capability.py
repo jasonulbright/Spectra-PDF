@@ -62,8 +62,9 @@ VERSION_BELOW_MINIMUM = "version-below-minimum"
 #: the GUI or the CLI, arrives as the `path` argument of `resolve` instead.
 PATH_ENV_VAR = "SPECTRAPDF_GS_PATH"
 
-#: Console executable names, most specific first.
-_CANDIDATE_NAMES = ("gswin64c", "gswin32c", "gs")
+#: Console executable names, most specific first. The Windows console builds
+#: are named for their word size; every other platform installs `gs`.
+_CANDIDATE_NAMES = ("gswin64c", "gswin32c", "gs") if os.name == "nt" else ("gs",)
 
 #: Which surface this engine process serves, so a refusal names that
 #: surface's fix. The command line sets it to `CLI_SURFACE` on the engine it
@@ -278,7 +279,7 @@ def _probe_with_budget(path: str | Path, budget: float) -> GsCapability:
 
 
 def _looks_like_a_path(text: str) -> bool:
-    return bool(text) and (os.sep in text or (os.altsep or "") in text)
+    return bool(text) and (os.sep in text or bool(os.altsep and os.altsep in text))
 
 
 def discover() -> list[str]:

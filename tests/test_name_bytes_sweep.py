@@ -2746,7 +2746,9 @@ class TestMoreReadersPastNamesThatAreNotUtf8:
     """Each reader below spelled a subtype, an encoding or a keyword with
     `str()`, and a name or keyword that is not UTF-8 failed the whole call."""
 
-    def test_a_scan_behind_a_damaged_keyword_is_a_scan_and_one_beside_an_odd_xobject_is_not(self, tmp_dir):
+    def test_a_scan_behind_a_damaged_keyword_is_a_scan_and_one_beside_an_odd_xobject_is_not(
+        self, tmp_dir, gs_path
+    ):
         import zlib
 
         from engine.mrc import mrc_compress
@@ -2765,12 +2767,12 @@ class TestMoreReadersPastNamesThatAreNotUtf8:
             _stream(b"\xfc\xfd q 612 0 0 792 0 0 cm /Im#E9 Do Q"),
             _stream(b"q 612 0 0 792 0 0 cm /Im#E9 Do Q q /Xg Do Q"),
         ])
-        result = mrc_compress(src, os.path.join(tmp_dir, "o.pdf"))
+        result = mrc_compress(src, os.path.join(tmp_dir, "o.pdf"), gs_path=gs_path)
         reasons = {p["page"]: p.get("reason") for p in result["pages"]}
         assert reasons[2] == "this page draws more than a scanned image"
         assert reasons[1] != "this page draws more than a scanned image"
 
-    def test_a_scan_whose_image_space_family_is_such_a_name_is_passed_over(self, tmp_dir):
+    def test_a_scan_whose_image_space_family_is_such_a_name_is_passed_over(self, tmp_dir, gs_path):
         import zlib
 
         from engine.mrc import mrc_compress
@@ -2785,7 +2787,7 @@ class TestMoreReadersPastNamesThatAreNotUtf8:
             _stream(pixels, b"/Type /XObject /Subtype /Image /Width 64 /Height 64 /ColorSpace [/Ind#FCexed "
                     b"/DeviceRGB 0 <FF0000>] /BitsPerComponent 8 /Filter /FlateDecode"),
         ])
-        result = mrc_compress(src, os.path.join(tmp_dir, "o.pdf"))
+        result = mrc_compress(src, os.path.join(tmp_dir, "o.pdf"), gs_path=gs_path)
         [page] = result["pages"]
         assert page.get("reason") != "the page image uses an indexed colour space"
 

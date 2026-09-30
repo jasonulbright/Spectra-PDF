@@ -8,6 +8,7 @@ AcroForm carry therefore cannot be forgotten by a mode: there is no other
 way to produce an output.
 """
 
+import errno
 import io
 import hashlib
 import os
@@ -312,6 +313,9 @@ def _assert_destination(path: Path, stamp) -> None:
         raise ValueError(f"Split destination changed before publication: {path}")
 
 
+_NO_HARD_LINKS = frozenset({errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP})
+
+
 def _install_new(staged: Path, path: Path) -> None:
     """Publish to an absent name, refusing a file created after our last check."""
     if os.name == 'nt':
@@ -320,7 +324,16 @@ def _install_new(staged: Path, path: Path) -> None:
     else:
         # POSIX rename would clobber. Both paths are on the same filesystem;
         # link atomically claims an absent name, with the stage cleaned later.
-        os.link(staged, path)
+        try:
+            os.link(staged, path)
+        except OSError as exc:
+            if exc.errno not in _NO_HARD_LINKS:
+                raise
+            # A filesystem without hard links (FAT, exFAT, some network
+            # shares): an exclusive create claims the absent name, and the
+            # rename lands the staged file on that claim.
+            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666))
+            os.replace(staged, path)
 
 
 def _publish_parts(file: str, planned: list[tuple[Path, list[int], bytes | None]],

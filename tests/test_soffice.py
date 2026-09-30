@@ -42,9 +42,10 @@ from engine.soffice import (
     to_pdf,
     validate_source,
 )
+import vendored_tools
 
 REPO = Path(__file__).resolve().parent.parent
-SOFFICE = REPO / "resources" / "libreoffice" / "program" / "soffice.exe"
+SOFFICE = vendored_tools.SOFFICE
 SOURCES = Path(__file__).resolve().parent / "fixtures" / "sources"
 TOKEN = "ZQXJ-2026"
 
