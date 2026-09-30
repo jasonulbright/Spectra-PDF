@@ -6,6 +6,7 @@
 //! backend is never returned.
 
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Unsupported {
@@ -31,6 +32,56 @@ impl From<Unsupported> for String {
         value.to_string()
     }
 }
+
+/// A vendored program's path relative to its component tree. A Linux tree is
+/// the pinned artifact unpacked as published: programs in `bin/` load their
+/// libraries from `lib/` through RUNPATH `$ORIGIN/../lib`, so the tree is
+/// never flattened.
+pub fn program_relative(stem: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(format!("{stem}.exe"))
+    } else {
+        Path::new("bin").join(stem)
+    }
+}
+
+/// The engine interpreter relative to the resource root.
+pub fn python_relative() -> PathBuf {
+    if cfg!(windows) {
+        Path::new("python").join("python.exe")
+    } else {
+        Path::new("python").join("bin").join("python3")
+    }
+}
+
+/// LibreOffice's `soffice` relative to the resource root.
+pub fn soffice_relative() -> PathBuf {
+    let name = if cfg!(windows) { "soffice.exe" } else { "soffice" };
+    Path::new("libreoffice").join("program").join(name)
+}
+
+/// The resource root for a process with no Tauri runtime (the CLI), resolved
+/// the way `PathResolver::resource_dir` resolves it for the window.
+///
+/// Windows and a cargo output directory keep resources beside the executable.
+/// An installed Linux build keeps them in `<exe>/../lib/<product>`, and an
+/// AppImage in `$APPDIR/usr/lib/<product>`.
+pub fn resource_root_for(exe_dir: &Path) -> PathBuf {
+    if cfg!(windows) || exe_dir.join("engine").is_dir() {
+        return exe_dir.to_path_buf();
+    }
+    if let Ok(installed) = exe_dir.join("..").join("lib").join(PRODUCT_NAME).canonicalize() {
+        return installed;
+    }
+    if let Some(appdir) = std::env::var_os("APPDIR") {
+        return PathBuf::from(appdir).join("usr").join("lib").join(PRODUCT_NAME);
+    }
+    exe_dir.to_path_buf()
+}
+
+/// `productName` in `tauri.conf.json`; Tauri names the Linux resource
+/// directory after it.
+const PRODUCT_NAME: &str = "Spectra PDF";
 
 /// Feature names, shared by the command layer and the CLI so one feature has
 /// one spelling.
@@ -62,5 +113,24 @@ mod tests {
         assert_eq!(refusal.to_string(), "Scanning is not available on this platform");
         let as_string: String = refusal.into();
         assert!(as_string.starts_with("Scanning "));
+    }
+
+    #[test]
+    fn a_directory_holding_the_engine_is_its_own_resource_root() {
+        let dir = std::env::temp_dir().join(format!("spectra-root-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("engine")).unwrap();
+        assert_eq!(resource_root_for(&dir), dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn programs_keep_the_published_tree_layout() {
+        if cfg!(windows) {
+            assert_eq!(program_relative("tesseract"), PathBuf::from("tesseract.exe"));
+            assert_eq!(python_relative(), Path::new("python").join("python.exe"));
+        } else {
+            assert_eq!(program_relative("tesseract"), Path::new("bin").join("tesseract"));
+            assert_eq!(python_relative(), Path::new("python").join("bin").join("python3"));
+        }
     }
 }

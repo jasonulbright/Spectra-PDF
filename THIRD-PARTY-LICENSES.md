@@ -658,7 +658,7 @@ resolves to a row in the manifest named in its section.
 
 ### OCR (`scripts/tesseract-licenses.tsv`)
 
-`tesseract/` is the release artifact `spectra-5.4.0-1` of the fork, unpacked
+`tesseract/` is the release artifact `spectra-5.4.0-3` of the fork, unpacked
 as published. Notices ship in `tesseract/licenses/`.
 
 | Component | Version | License | Fork | Upstream |
@@ -674,7 +674,7 @@ as published. Notices ship in `tesseract/licenses/`.
 
 ### JBIG2 encoder (`scripts/jbig2enc-licenses.tsv`)
 
-`jbig2enc/` is the release artifact `spectra-0.32-1` of the fork, unpacked as
+`jbig2enc/` is the release artifact `spectra-0.32-2` of the fork, unpacked as
 published. Notices, and the upstream PATENTS note, ship in `jbig2enc/licenses/`.
 
 | Component | Version | License | Fork | Upstream |
@@ -705,7 +705,7 @@ Their copyright files ship in `libreoffice/licenses/`.
 
 ### Finnish spelling (`scripts/voikko.tsv`)
 
-`voikko/` is the release artifact `spectra-4.3.3-1` of the fork, unpacked as
+`voikko/` is the release artifact `spectra-4.3.3-2` of the fork, unpacked as
 published. Notices ship in `voikko/licenses/`. The transducer data, binding and
 notices are the platform-neutral files listed under **Finnish — libvoikko and
 voikko-fi**.

@@ -39,6 +39,7 @@ import {
   CLIPBOARD_KIND_LABEL_KEYS,
   clipboardRow,
   clipboardSummary,
+  isClipboardFiles,
   type ClipboardKind,
   type ClipboardSourceResult,
 } from '../lib/clipboard-source';
@@ -195,7 +196,14 @@ export function CreatePdfDialog({
     setNotice(null);
     setResult(null);
     try {
-      const clip = await app.readClipboardSource();
+      const read = await app.readClipboardSource();
+      if (isClipboardFiles(read)) {
+        if (clipboardDialogMounted.current) {
+          setRows((prev) => addPaths(prev, orderSelection(read.files)));
+        }
+        return null;
+      }
+      const clip = read;
       if (!clipboardDialogMounted.current) {
         void app.discardClipboardSource(clip.path).catch(() => {});
         return null;

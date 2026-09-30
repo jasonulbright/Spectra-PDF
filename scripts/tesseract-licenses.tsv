@@ -97,12 +97,12 @@ libwinpthread-1.dll	mingw-w64 (winpthreads)	MIT AND Zope-2.1	LICENSE-mingw-w64.t
 libzstd.dll	Zstandard	BSD-3-Clause OR GPL-2.0-only	LICENSE-zstd.txt	https://github.com/facebook/zstd	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-zstd
 tesseract.exe	Tesseract OCR	Apache-2.0	LICENSE-Tesseract.txt	https://github.com/tesseract-ocr/tesseract	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-tesseract-ocr
 zlib1.dll	zlib	Zlib	LICENSE-zlib.txt	https://github.com/madler/zlib	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-zlib
-bin/tesseract	Tesseract OCR	Apache-2.0	LICENSE-tesseract.txt,AUTHORS-tesseract.txt	https://github.com/tesseract-ocr/tesseract	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-1
-lib/libgcc_s.so.1	GCC runtime library	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-1
-lib/libjpeg.so.8	libjpeg-turbo	IJG AND BSD-3-Clause AND Zlib	LICENSE-libjpeg-turbo.txt	https://github.com/libjpeg-turbo/libjpeg-turbo	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-1
-lib/libleptonica.so.6	Leptonica	BSD-2-Clause	LICENSE-leptonica.txt	https://github.com/DanBloomberg/leptonica	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-1
-lib/libpng16.so.16	libpng	libpng-2.0	LICENSE-libpng.txt	https://github.com/pnggroup/libpng	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-1
-lib/libstdc++.so.6	GCC runtime library	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-1
-lib/libtesseract.so.5.4.0	Tesseract OCR	Apache-2.0	LICENSE-tesseract.txt,AUTHORS-tesseract.txt	https://github.com/tesseract-ocr/tesseract	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-1
-lib/libtiff.so.6	libtiff (built without JBIG)	libtiff	LICENSE-libtiff.txt	https://gitlab.com/libtiff/libtiff	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-1
-lib/libz.so.1	zlib	Zlib	LICENSE-zlib.txt	https://github.com/madler/zlib	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-1
+bin/tesseract	Tesseract OCR	Apache-2.0	LICENSE-tesseract.txt,AUTHORS-tesseract.txt	https://github.com/tesseract-ocr/tesseract	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-3
+lib/libgcc_s.so.1	GCC runtime library	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-3
+lib/libjpeg.so.8	libjpeg-turbo	IJG AND BSD-3-Clause AND Zlib	LICENSE-libjpeg-turbo.txt	https://github.com/libjpeg-turbo/libjpeg-turbo	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-3
+lib/libleptonica.so.6	Leptonica	BSD-2-Clause	LICENSE-leptonica.txt	https://github.com/DanBloomberg/leptonica	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-3
+lib/libpng16.so.16	libpng	libpng-2.0	LICENSE-libpng.txt	https://github.com/pnggroup/libpng	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-3
+lib/libstdc++.so.6	GCC runtime library	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-3
+lib/libtesseract.so.5.4.0	Tesseract OCR	Apache-2.0	LICENSE-tesseract.txt,AUTHORS-tesseract.txt	https://github.com/tesseract-ocr/tesseract	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-3
+lib/libtiff.so.6	libtiff (built without JBIG)	libtiff	LICENSE-libtiff.txt	https://gitlab.com/libtiff/libtiff	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-3
+lib/libz.so.1	zlib	Zlib	LICENSE-zlib.txt	https://github.com/madler/zlib	https://github.com/jasonulbright/tesseract/releases/tag/spectra-5.4.0-3

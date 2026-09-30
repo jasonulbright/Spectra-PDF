@@ -2701,15 +2701,12 @@ pub enum BatchOperation {
 // ── Path resolution (exe-relative, no Tauri runtime) ────────────────────────
 
 fn exe_dir() -> PathBuf {
-    std::env::current_exe()
-        .expect("cannot resolve exe path")
-        .parent()
-        .expect("exe has no parent dir")
-        .to_path_buf()
+    let exe = std::env::current_exe().expect("cannot resolve exe path");
+    crate::platform::resource_root_for(exe.parent().expect("exe has no parent dir"))
 }
 
 fn resolve_python() -> PathBuf {
-    exe_dir().join("python").join("python.exe")
+    exe_dir().join(crate::platform::python_relative())
 }
 
 fn resolve_engine_script() -> PathBuf {
@@ -2756,7 +2753,9 @@ fn optional_gs_path(explicit: Option<&str>) -> String {
 /// account work -- a WASM recognizer would need a WebView, and a service
 /// account has no interactive desktop to host one in.
 fn resolve_tesseract() -> PathBuf {
-    exe_dir().join("tesseract").join("tesseract.exe")
+    exe_dir()
+        .join("tesseract")
+        .join(crate::platform::program_relative("tesseract"))
 }
 
 /// The vendored fallback-fonts DIRECTORY (mirrors `engine::get_edit_font_path`
@@ -2833,7 +2832,7 @@ fn parse_page_numbers(pages: &str) -> Result<Vec<i64>, String> {
 /// an installed LibreOffice. Returns "" when none is found; the engine then
 /// refuses the export with a clear message rather than crashing.
 fn resolve_soffice() -> String {
-    let bundled = exe_dir().join("libreoffice").join("program").join("soffice.exe");
+    let bundled = exe_dir().join(crate::platform::soffice_relative());
     if bundled.is_file() {
         return bundled.to_string_lossy().to_string();
     }

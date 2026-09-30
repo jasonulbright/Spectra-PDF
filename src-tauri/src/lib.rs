@@ -1,9 +1,14 @@
 pub mod cli;
 #[cfg(windows)]
 mod clipboard_read;
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+#[path = "clipboard_read_linux.rs"]
+mod clipboard_read;
+#[cfg(not(any(windows, target_os = "linux")))]
 #[path = "clipboard_read_unsupported.rs"]
 mod clipboard_read;
+#[cfg(any(windows, target_os = "linux"))]
+mod clipboard_scratch;
 mod commands;
 pub mod create_pdf_sources;
 mod print_to_pdf;
@@ -11,9 +16,14 @@ mod scheduler;
 mod send_to;
 #[cfg(windows)]
 mod snapshot;
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+#[path = "snapshot_linux.rs"]
+mod snapshot;
+#[cfg(not(any(windows, target_os = "linux")))]
 #[path = "snapshot_unsupported.rs"]
 mod snapshot;
+#[cfg(any(windows, target_os = "linux"))]
+mod snapshot_save;
 mod page_commit;
 mod file_publication;
 mod folder_claims;
@@ -28,9 +38,9 @@ mod process_job;
 mod scratch;
 mod staging;
 mod watchers;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 mod web_capture;
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 #[path = "web_capture_unsupported.rs"]
 mod web_capture;
 pub mod engine;

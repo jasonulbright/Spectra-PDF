@@ -31,6 +31,21 @@ export interface ClipboardSourceResult {
   source_url?: string | null;
 }
 
+/** Copied FILES (`text/uri-list`): the clipboard names files that exist, so
+ * they join the list exactly as picked files do and no scratch copy exists. */
+export interface ClipboardFilesResult {
+  path: string;
+  kind: 'files';
+  format: string;
+  files: string[];
+}
+
+export type ClipboardReadResult = ClipboardSourceResult | ClipboardFilesResult;
+
+export function isClipboardFiles(result: ClipboardReadResult): result is ClipboardFilesResult {
+  return result.kind === 'files';
+}
+
 /** Every clipboard kind, for the totality pin. */
 export const CLIPBOARD_KINDS = ['image', 'html', 'text'] as const;
 export type ClipboardKind = (typeof CLIPBOARD_KINDS)[number];

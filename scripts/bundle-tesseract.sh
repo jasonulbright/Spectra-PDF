@@ -12,9 +12,9 @@
 . "$(dirname "$0")/posix-common.sh"
 require_tool curl sha256sum tar awk
 
-ARTIFACT_URL="https://github.com/jasonulbright/tesseract/releases/download/spectra-5.4.0-1/tesseract-5.4.0-linux-x86_64.tar.zst"
-ARTIFACT_SHA256="80db796532c663bac1d7e8b5541409187ae4ff45eff9170db2c20c823df391c0"
-ARTIFACT_SIZE="3849085"
+ARTIFACT_URL="https://github.com/jasonulbright/tesseract/releases/download/spectra-5.4.0-3/tesseract-5.4.0-linux-x86_64.tar.zst"
+ARTIFACT_SHA256="9c74148edb6abb4734351bfb23aab0d088b15abc23eba4a90addad3434a8c420"
+ARTIFACT_SIZE="3850001"
 OSD_URL="https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/osd.traineddata"
 OSD_SHA256="9cf5d576fcc47564f11265841e5ca839001e7e6f38ff7f7aacf46d15a96b00ff"
 ENG_URL="https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/eng.traineddata"

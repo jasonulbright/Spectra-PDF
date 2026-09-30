@@ -109,6 +109,12 @@ windows-core-webview2 = { package = "windows-core", version = "0.61" }
 # prctl, flock, socketpair and SCM_RIGHTS for child-process lifetime and
 # folder-claim leases.
 libc = "0.2"
+# The toolkit and webview wry already links: the clipboard source, the
+# snapshot clipboard write, and web capture's print-to-file. Versions track
+# the ones wry resolves, so no second copy enters the graph.
+gtk = "0.18"
+webkit2gtk = { version = "2.0", features = ["v2_40"] }
+java_script_core = { package = "javascriptcore-rs", version = "1.1" }
 
 [dev-dependencies]
 # `#[tokio::test]` for the network client's tests, which drive an in-process
