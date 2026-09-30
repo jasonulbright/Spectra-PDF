@@ -65,7 +65,7 @@ describe('tray Quit', () => {
     expect(uses).toHaveLength(1);
     expect(uses[0].arguments.map(print)).toEqual([
       'sessionId',
-      'getSettings().minimizeToTray === true',
+      "getSettings().minimizeToTray === true && platformCapability('trayResidency')",
     ]);
   });
 

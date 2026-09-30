@@ -1,10 +1,6 @@
-# Source archives that accompany every release which ships the matching object
-# code or copyleft data.
-#
-# Remote archives are downloaded by scripts/stage-corresponding-source.ps1 and
-# accepted only at the SHA-256 recorded here. Repository paths are copied from
-# the reviewed vendored artifact. The release workflow uploads every row and
-# includes it in SHA256SUMS.txt.
+# Lineage record: the exact upstream source archive, by version and SHA-256,
+# for each shipped copyleft object code or data component. Repository paths
+# name the reviewed vendored artifact.
 #
 # Digest provenance per row: libreoffice from the .sha256 sidecar on
 # download.documentfoundation.org; poppler and poppler-data from the

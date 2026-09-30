@@ -1506,6 +1506,76 @@ pub async fn get_window_backdrop(
     Ok(state.get(window.label()).to_string())
 }
 
+// ── Platform capabilities ────────────────────────────────────────────────
+
+/// One flag per platform-bound feature. The renderer reads this once at boot;
+/// a feature whose flag is false has no UI entry at all.
+#[derive(serde::Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformCapabilities {
+    pub system_printing: bool,
+    pub virtual_printer: bool,
+    pub scanning: bool,
+    pub scheduled_actions: bool,
+    pub store_certificates: bool,
+    pub send_by_email: bool,
+    pub web_capture: bool,
+    pub clipboard_read: bool,
+    pub snapshot: bool,
+    pub accent_color: bool,
+    pub enterprise_policy: bool,
+    pub tray_residency: bool,
+    pub backdrop: bool,
+    pub console_attach: bool,
+}
+
+impl PlatformCapabilities {
+    #[cfg(windows)]
+    pub const fn current() -> Self {
+        Self {
+            system_printing: true,
+            virtual_printer: true,
+            scanning: true,
+            scheduled_actions: true,
+            store_certificates: true,
+            send_by_email: true,
+            web_capture: true,
+            clipboard_read: true,
+            snapshot: true,
+            accent_color: true,
+            enterprise_policy: true,
+            tray_residency: true,
+            backdrop: true,
+            console_attach: true,
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub const fn current() -> Self {
+        Self {
+            system_printing: false,
+            virtual_printer: false,
+            scanning: false,
+            scheduled_actions: false,
+            store_certificates: false,
+            send_by_email: false,
+            web_capture: false,
+            clipboard_read: false,
+            snapshot: false,
+            accent_color: false,
+            enterprise_policy: false,
+            tray_residency: false,
+            backdrop: false,
+            console_attach: false,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn platform_capabilities() -> PlatformCapabilities {
+    PlatformCapabilities::current()
+}
+
 // ── Operation log ────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -2676,6 +2746,24 @@ pub async fn set_startup_enabled(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn platform_capabilities_serialize_every_flag_in_camel_case() {
+        let value = serde_json::to_value(super::platform_capabilities()).unwrap();
+        let map = value.as_object().unwrap();
+        let keys: Vec<&str> = map.keys().map(String::as_str).collect();
+        let mut expected = vec![
+            "systemPrinting", "virtualPrinter", "scanning", "scheduledActions",
+            "storeCertificates", "sendByEmail", "webCapture", "clipboardRead", "snapshot",
+            "accentColor", "enterprisePolicy", "trayResidency", "backdrop", "consoleAttach",
+        ];
+        let mut got = keys.clone();
+        expected.sort_unstable();
+        got.sort_unstable();
+        assert_eq!(got, expected);
+        #[cfg(windows)]
+        assert!(map.values().all(|v| v == &serde_json::Value::Bool(true)));
+    }
+
     #[test]
     fn of_two_windows_closing_at_once_exactly_one_is_the_last() {
         let labels = vec!["doc-1".to_string(), "main".to_string()];

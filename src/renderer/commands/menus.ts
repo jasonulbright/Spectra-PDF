@@ -11,6 +11,7 @@ import type { CommandContext } from './types';
 import type { CommandId } from './registry';
 import { NAV_PANEL_IDS } from './navpanels';
 import { TOOL_DEFS } from './tools';
+import { commandAvailable } from './platform';
 
 // A leaf the renderer can draw without further resolution. `command` items are
 // resolved against COMMANDS (title, enablement, shortcut) by the renderer;
@@ -346,4 +347,45 @@ export function menuCommandIds(nodes: MenuNode[] = MENUS.flatMap((m) => m.items)
     else if (n.kind === 'submenu') out.push(...menuCommandIds(n.items));
   }
   return out;
+}
+
+/** A node list with this platform's absent commands removed. A submenu left
+ * with no command is removed with them, and separators the removal strands at
+ * an edge or beside another separator go too. A list that loses nothing is
+ * returned as the same array. */
+export function filterMenuNodes(nodes: MenuNode[]): MenuNode[] {
+  let changed = false;
+  const kept: MenuNode[] = [];
+  for (const n of nodes) {
+    if (n.kind === 'command' && !commandAvailable(n.command)) {
+      changed = true;
+      continue;
+    }
+    if (n.kind === 'submenu') {
+      const items = filterMenuNodes(n.items);
+      if (items !== n.items) {
+        changed = true;
+        if (items.every((i) => i.kind === 'separator')) continue;
+        kept.push({ ...n, items });
+        continue;
+      }
+    }
+    kept.push(n);
+  }
+  if (!changed) return nodes;
+  const out: MenuNode[] = [];
+  for (const n of kept) {
+    if (n.kind === 'separator' && (out.length === 0 || out[out.length - 1].kind === 'separator')) continue;
+    out.push(n);
+  }
+  if (out.length > 0 && out[out.length - 1].kind === 'separator') out.pop();
+  return out;
+}
+
+/** The menu bar this platform shows. */
+export function availableMenus(menus: MenuDef[] = MENUS): MenuDef[] {
+  return menus.map((m) => {
+    const items = filterMenuNodes(m.items);
+    return items === m.items ? m : { ...m, items };
+  });
 }

@@ -104,7 +104,8 @@ export function sourceIsUnconfigured(source: SignerSource): boolean {
  * A source with a file, a label or a credential in it is the user's and is
  * kept.
  */
-export function sourceOnOpen(source: SignerSource): SignerSourceMode {
+export function sourceOnOpen(source: SignerSource, storeOffered = true): SignerSourceMode {
+  if (!storeOffered) return source.mode === 'store' ? ADVANCED_SIGNER_SOURCES[0] : source.mode;
   return sourceIsUnconfigured(source) ? PRIMARY_SIGNER_SOURCE : source.mode;
 }
 

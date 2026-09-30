@@ -4,6 +4,7 @@
 // services while mounted. invokeCommand() is the ONE entry point every
 // caller shares — keymap, UI buttons, menus, and the e2e harness.
 import { COMMANDS, commandBlock, type CommandId } from './registry';
+import { commandAvailable } from './platform';
 import { capabilityBlockText } from '../lib/document-permission-text';
 import { drainPendingFind } from './find-intent';
 import type { AppCommandHandlers, CanvasServices, CommandContext } from './types';
@@ -69,7 +70,7 @@ export function getCommandContext(): CommandContext | null {
 
 export function isCommandEnabled(id: CommandId): boolean {
   const ctx = getCommandContext();
-  if (!ctx) return false;
+  if (!ctx || !commandAvailable(id)) return false;
   const cmd = COMMANDS[id];
   return cmd.when ? cmd.when(ctx) : true;
 }
@@ -90,7 +91,7 @@ export function commandBlockText(id: CommandId): string | null {
  */
 export function invokeCommand(id: CommandId): boolean {
   const ctx = getCommandContext();
-  if (!ctx) return false;
+  if (!ctx || !commandAvailable(id)) return false;
   const cmd = COMMANDS[id];
   if (cmd.when && !cmd.when(ctx)) return false;
   void cmd.run(ctx);

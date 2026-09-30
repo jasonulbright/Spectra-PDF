@@ -156,6 +156,7 @@ import {
   takeGsLaunchPrompt,
 } from './lib/gs-capability';
 import { GsMissingDialog } from './components/GsMissingDialog';
+import { platformCapability } from './lib/platform-capabilities';
 import { isPrimaryWindow } from './lib/window-label';
 import { MenuBar } from './components/MenuBar';
 import { MainToolbar } from './components/MainToolbar';
@@ -585,7 +586,7 @@ function AppContent(): React.ReactElement {
       takeUnreadableRecords: () => app.takeUnreadableRecords(),
       saveStartupFlags: () => {
         const settings = getSettings();
-        app.setStartMinimized(settings.startMinimized).catch(() => {});
+        app.setStartMinimized(settings.startMinimized && platformCapability('trayResidency')).catch(() => {});
         app.setRestoreWindowsOnLaunch(settings.restoreWindowsOnLaunch).catch(() => {});
       },
       showNotice,
@@ -3409,7 +3410,7 @@ function AppContent(): React.ReactElement {
       await handOffGate.current.settled();
       const minimizeToTray = shouldMinimizeToTrayOnClose(
         sessionId,
-        getSettings().minimizeToTray === true,
+        getSettings().minimizeToTray === true && platformCapability('trayResidency'),
       );
       // Rust decides between hiding and closing, because only it knows whether
       // this is the last workspace window: tray residency is an app-level

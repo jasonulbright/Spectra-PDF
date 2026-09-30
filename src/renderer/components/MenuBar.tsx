@@ -1,7 +1,7 @@
 import React from 'react';
 import * as Menubar from '@radix-ui/react-menubar';
 import { useAppState } from '../state/AppStateProvider';
-import { MENUS, type MenuNode } from '../commands/menus';
+import { availableMenus, type MenuNode } from '../commands/menus';
 import { COMMANDS, type CommandId } from '../commands/registry';
 import { shortcutForCommand } from '../commands/keymap';
 import { commandBlockText, getCommandContext, invokeCommand, isCommandEnabled } from '../commands/context';
@@ -118,7 +118,7 @@ export function MenuBar(): React.ReactElement {
       onValueChange={bumpOnOpen}
       className="app-shell-bar app-menubar flex items-center gap-0.5 px-1.5 h-8 border-b border-neutral-800 shrink-0 text-[13px]"
     >
-      {MENUS.map((menu) => (
+      {availableMenus().map((menu) => (
         <Menubar.Menu key={menu.id}>
           <Menubar.Trigger
             data-testid={`menu-${menu.id}`}

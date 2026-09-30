@@ -7,6 +7,7 @@ import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { invokeCommand } from '../commands/context';
+import { commandAvailable } from '../commands/platform';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
@@ -211,6 +212,7 @@ export function ScanEnhancePanel(): React.ReactElement {
           name is only true where scanning starts here. The pages land in THIS
           document at the insertion anchor; with nothing to append to the
           dialog opens for a new document instead. */}
+      {commandAvailable('document.insertFromScanner') && (
       <div className="flex flex-col gap-1 border-b border-neutral-800 pb-3">
         <p className="text-xs text-neutral-500">{tChrome('dialog.scan.panelBlurb')}</p>
         <button
@@ -222,6 +224,7 @@ export function ScanEnhancePanel(): React.ReactElement {
           {tChrome('dialog.scan.panelStart')}
         </button>
       </div>
+      )}
 
       <label className="flex items-center gap-2 text-xs text-neutral-500">
         {tChrome('panel.scanEnhance.scopeLabel')}

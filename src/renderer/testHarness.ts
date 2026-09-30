@@ -13,6 +13,12 @@ import { app, dialog, file, engine, pinStoreCertificates, scanner as scannerBrid
 import { emit } from '@tauri-apps/api/event';
 import { runCommitGate } from './lib/commit-gate';
 import { windowLabel } from './lib/window-label';
+import {
+  platformCapabilities,
+  setPlatformCapabilities,
+  type PlatformCapabilities,
+  type PlatformFeature,
+} from './lib/platform-capabilities';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
 import {
   invokeCommand as invokeRegisteredCommand,
@@ -1513,6 +1519,12 @@ export interface TestHarness {
    * MAPI launch half is deliberately not bridged — it opens a real compose
    * window on boxes with a mail client. */
   sendToEmailStage: () => Promise<string>;
+  /** Override platform capability flags; unnamed flags keep their value.
+   * Surfaces read the flags on render, so the change shows on the next one.
+   * Returns the full record in force afterwards. */
+  setPlatformCapabilities: (overrides: Partial<Record<PlatformFeature, boolean>>) => PlatformCapabilities;
+  /** The platform capability record in force. */
+  platformCapabilities: () => PlatformCapabilities;
   /** Export the active document to `destPath` in `format` via the engine
    *  (bypasses the native save dialog). Returns the engine result. */
   exportActiveAs: (destPath: string, format: string, options?: Record<string, unknown>) => Promise<unknown>;
@@ -2613,6 +2625,11 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw err;
       }
     },
+    setPlatformCapabilities: (overrides) => {
+      setPlatformCapabilities(overrides);
+      return platformCapabilities();
+    },
+    platformCapabilities: () => platformCapabilities(),
     sendToEmailStage: async () => {
       const snap = deps.getStateSnapshot();
       if (!snap.activeFile) {

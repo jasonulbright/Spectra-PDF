@@ -1,4 +1,4 @@
-"""The source archives that accompany the shipped copyleft object code and data."""
+"""The lineage record of the shipped copyleft object code and data."""
 
 import hashlib
 import os
@@ -7,7 +7,10 @@ import re
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANIFEST = os.path.join(REPO, "scripts", "corresponding-source.tsv")
-WORKFLOW = os.path.join(REPO, ".github", "workflows", "release.yml")
+WORKFLOWS = [
+    os.path.join(REPO, ".github", "workflows", name)
+    for name in ("release.yml", "release-redo.yml")
+]
 NOTICE = os.path.join(REPO, "THIRD-PARTY-LICENSES.md")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -78,41 +81,19 @@ class TestManifest:
 
 
 class TestReleaseContract:
-    def test_the_release_stages_uploads_and_checksums_the_archives(self):
-        text = open(WORKFLOW, encoding="utf-8").read()
-        assert "scripts/stage-corresponding-source.ps1" in text
-
-        stage = text.index("- name: Stage corresponding source archives")
-        upload = text.index("- name: Upload corresponding source archives to the draft")
-        checksum = text.index("- name: Upload SHA-256 checksums to the draft")
-        publish = text.index("- name: Publish the release")
-        # Staged, then uploaded to the draft, then checksummed -- all before the
-        # single step that makes the release public.
-        assert stage < upload < checksum < publish
-
-        step = text[upload:checksum]
-        # Addressed by release id, never by tag: a draft has no tag ref, so a
-        # tag-addressed upload can resolve to a different, already-public release.
-        assert "RELEASE_ID: ${{ steps.draft.outputs.releaseId }}" in step
-        assert "$files = @(Get-ChildItem release-sources -File -ErrorAction Stop)" in step
-        assert (
-            'gh api --method POST -H "Content-Type: application/octet-stream" '
-            '"https://uploads.github.com/repos/$repo/releases/$env:RELEASE_ID'
-            '/assets?name=$name" --input $file.FullName' in step
-        )
-        assert "gh release upload" not in step
-        assert "github.ref_name" not in step
-
-        sums = text[checksum:publish]
-        assert "$sources = @(Get-ChildItem release-sources" in sums
-        assert "$files = @($installers) + @($portable) + @($sources)" in sums
-        assert "SHA256SUMS.txt" in sums
+    def test_the_release_publishes_no_source_archives(self):
+        for path in WORKFLOWS:
+            text = open(path, encoding="utf-8").read()
+            assert "release-sources" not in text, path
+            assert "corresponding source archives" not in text, path
+            assert "$files = @($installers) + @($portable)\n" in text, path
 
     def test_the_public_notice_states_the_as_built_mechanism(self):
         text = open(NOTICE, encoding="utf-8").read()
         assert "scripts/corresponding-source.tsv" in text
-        assert "scripts/stage-corresponding-source.ps1" in text
-        assert "release assets" in text
+        assert "stage-corresponding-source" not in text
+        assert "attached to every release" not in text
+        assert "attached to the release" not in text
         assert "For every GPL-2.0 or LGPL-2.1 component" in text
         assert "for at least three years" in text
         assert "preferred form for modifying these dictionaries" in text

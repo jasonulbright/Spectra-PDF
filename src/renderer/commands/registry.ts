@@ -15,6 +15,8 @@ import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
 import { focusOmniSearch, omniSearchAvailable } from './omnisearch-focus';
 import { gsBlocked } from '../lib/gs-capability';
+import { platformCapability } from '../lib/platform-capabilities';
+import { commandAvailable } from './platform';
 import { copyBlock, selectionPageIds } from '../lib/copy-permission';
 import { clearRecentStorageSafely } from '../lib/recent-files';
 import {
@@ -287,6 +289,11 @@ export const COMMAND_IDS = [
 ] as const;
 
 export type CommandId = (typeof COMMAND_IDS)[number];
+
+/** The commands this platform offers, in registry order. */
+export function availableCommandIds(): CommandId[] {
+  return COMMAND_IDS.filter(commandAvailable);
+}
 
 // Every id must live under a menu-bar namespace.
 COMMAND_IDS satisfies readonly CommandNamespace[];
@@ -1168,7 +1175,7 @@ const BASE_COMMANDS: Record<CommandId, Command> = {
             dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
             dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
             dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
-          } else if (tool.id === 'ocr' && ctx.app) {
+          } else if (tool.id === 'ocr' && ctx.app && platformCapability('scanning')) {
             // Scan & OCR with nothing open is somebody about to scan
             // something, and its panes all need a document. The file picker
             // every other docless tool runs would be the wrong question; the
