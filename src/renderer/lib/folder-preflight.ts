@@ -22,6 +22,7 @@ import {
   formatPreflightText,
   type PreflightReport,
 } from './preflight-report';
+import { writeFailureText } from './save-failure';
 
 /** What a sweep may do. `check` writes nothing to any source; `fix` repairs a
  * mirrored copy and re-checks it. */
@@ -348,18 +349,18 @@ export async function emitLocalizedReports(
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     onProgress?.({ fileIndex: i, fileCount: rows.length, rel: row.rel });
+    let target = row.report as string;
     try {
-      const parsed = await io.readReport(row.report as string);
+      const parsed = await io.readReport(target);
       const emitted = { documentName: row.rel, runAt, report: parsed };
       const sidecars = reportSidecars(row.report as string);
-      await io.writeReport(sidecars.text, formatPreflightText(emitted));
-      await io.writeReport(sidecars.html, formatPreflightHtml(emitted));
+      target = sidecars.text;
+      await io.writeReport(target, formatPreflightText(emitted));
+      target = sidecars.html;
+      await io.writeReport(target, formatPreflightHtml(emitted));
       out.written += 1;
     } catch (err) {
-      out.errors.push({
-        rel: row.rel,
-        reason: err instanceof Error ? err.message : String(err),
-      });
+      out.errors.push({ rel: row.rel, reason: writeFailureText(target, err) });
     }
   }
   return out;

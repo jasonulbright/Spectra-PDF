@@ -224,3 +224,14 @@ def test_listing_reasons_are_swept():
         "unreadable ToUnicode map",
     ):
         assert message in reasons
+
+
+def test_refusal_replies_are_swept():
+    """A refusal the IPC reader answers on a request id is never raised; its
+    `_refused` factory call carries it into the table."""
+    from engine.ipc import QUEUE_FULL_MESSAGE
+
+    assert any(
+        r.template == QUEUE_FULL_MESSAGE and r.module == "ipc" and r.exc == REASON_SOURCE
+        for r in sweep()
+    )

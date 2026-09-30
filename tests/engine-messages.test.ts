@@ -139,6 +139,17 @@ describe('localizing at the boundary', () => {
     expect(localizeEngineMessage(raw)).toBe(raw);
   });
 
+  it('renders the queue-full refusal answered on a request id', async () => {
+    const raw = 'The engine has too many queued requests. Try again when current work finishes.';
+    expect(matchEngineMessage(raw)?.row.key).toBe('ipc.tooManyQueued');
+    await i18next.changeLanguage('es');
+    expect(localizeEngineMessage(raw)).toBe(
+      'El motor tiene demasiadas solicitudes en cola. Vuelva a intentarlo cuando termine el trabajo actual.',
+    );
+    await i18next.changeLanguage('en');
+    expect(localizeEngineMessage(raw)).toBe(raw);
+  });
+
   it('carries a pattern row captured value into the translation', async () => {
     const raw = 'File not found: C:\\docs\\report.pdf';
     await i18next.changeLanguage('es');

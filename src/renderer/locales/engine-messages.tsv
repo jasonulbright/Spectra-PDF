@@ -344,6 +344,7 @@ inplace.fileCouldReplacedBecause	exact	inplace	The file could not be replaced be
 inplace.fileMoreThanOne	exact	inplace	This file has more than one name on disk (hard links). Saving over it would leave the other names with the old content. Save it as a new file.
 inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 ipc.circularReferenceDetected	exact	ipc	Circular reference detected
+ipc.tooManyQueued	exact	ipc	The engine has too many queued requests. Try again when current work finishes.
 ipc.invalidJsonConstant	pattern	ipc	Invalid JSON constant: {{value}}
 layers.layerConfigurationCannotRead	exact	layers	Layer configuration cannot be read completely.
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})

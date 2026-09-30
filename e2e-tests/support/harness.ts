@@ -3777,3 +3777,22 @@ export async function iccAssentSnapshot(): Promise<IccAssentAnswer> {
     return (window as any).__SPECTRA_TEST__.iccAssentSnapshot();
   }) as Promise<IccAssentAnswer>;
 }
+
+/**
+ * Content-security-policy refusals the current document has raised. Returns
+ * null when the harness is absent (a session that already closed its window).
+ */
+export async function cspViolations(): Promise<string[] | null> {
+  return await browser.execute(function () {
+    const h = (window as any).__SPECTRA_TEST__;
+    return h && typeof h.cspViolations === 'function' ? (h.cspViolations() as string[]) : null;
+  });
+}
+
+export async function expectNoCspViolations(): Promise<void> {
+  const refused = await cspViolations();
+  if (refused === null) throw new Error('cspViolations: test harness missing');
+  if (refused.length > 0) {
+    throw new Error(`Content security policy refused ${refused.length} load(s):\n${refused.join('\n')}`);
+  }
+}

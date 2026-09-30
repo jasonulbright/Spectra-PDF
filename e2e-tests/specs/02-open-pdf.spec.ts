@@ -7,6 +7,7 @@ import {
   openByPaths,
   getState,
   closeAllFiles,
+  expectNoCspViolations,
 } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
@@ -73,5 +74,17 @@ describe('open valid PDF', () => {
     // One tab, not two stacked on the same file.
     await expect($('[data-testid="tab-doc-0"]')).toBeDisplayed();
     await expect($('[data-testid="tab-doc-1"]')).not.toBeExisting();
+  });
+
+  it('renders a page with no content-security-policy refusal', async () => {
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(function () {
+          return ((window as any).__SPECTRA_TEST__.getRenderTimings() as { kind: string }[])
+            .filter((t) => t.kind === 'base').length;
+        })) >= 1,
+      { timeout: 30_000, timeoutMsg: 'no base raster completed' },
+    );
+    await expectNoCspViolations();
   });
 });

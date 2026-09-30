@@ -754,3 +754,27 @@ describe('catalog carry — presentation entries and named destinations', () => 
     expect(namedTarget(out, 'chap3')).toBe(out.getPage(0).ref.tag);
   });
 });
+
+describe('in-page object map', () => {
+  it('maps an optional-content group nested below the former depth cap', async () => {
+    const { buildInPageObjectMap } = await import('../src/renderer/lib/catalog-carry');
+    const src = await PDFDocument.create();
+    const page = src.addPage();
+    const ctx = src.context;
+    const ocg = ctx.register(ctx.obj({ Type: 'OCG', Name: PDFString.of('Deep') }));
+    let resources = ctx.obj({ Properties: { MC0: ocg } });
+    for (let i = 0; i < 12; i++) {
+      const form = ctx.register(ctx.flateStream('', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 1, 1], Resources: resources }));
+      resources = ctx.obj({ XObject: { Fm: form } });
+    }
+    page.node.set(PDFName.of('Resources'), resources);
+    const out = await PDFDocument.create();
+    const [copied] = await out.copyPages(src, [0]);
+    out.addPage(copied);
+    const map = buildInPageObjectMap({ doc: src, pairs: [{ srcIndex: 0, outPage: copied }] }, out);
+    const mapped = map.get(ocg.tag);
+    expect(mapped).toBeDefined();
+    const target = out.context.lookup(mapped as PDFRef, PDFDict);
+    expect((target.get(PDFName.of('Name')) as PDFString).decodeText()).toBe('Deep');
+  });
+});

@@ -49,6 +49,7 @@ const RUN_LOG_DIR = resolve(__dirname, 'logs');
 const RUN_LOG = resolve(RUN_LOG_DIR, 'last-run.log');
 
 let tauriDriver: ReturnType<typeof launchOwnedProcess> | null = null;
+const reportedCspRows = new Set<string>();
 
 // The driver-level WARN/ERROR rows are emitted inside the worker processes and
 // reach the launcher only as forwarded output, so no launcher-side logger hook
@@ -220,6 +221,26 @@ export const config: WebdriverIO.Config = {
           'src-tauri/src/net.rs is compiled out and every network spec request to ' +
           '127.0.0.1 is refused as a private destination.',
       );
+    }
+  },
+  // Every refusal the webview's content security policy raised during a test
+  // becomes an ERROR row in the run log, so the inventory lists it as
+  // UNEXPLAINED against the spec that triggered it. The log is cumulative per
+  // document, so each row is printed once.
+  afterTest: async () => {
+    let refused: string[] | null = null;
+    try {
+      refused = await browser.execute(function () {
+        const h = (window as any).__SPECTRA_TEST__;
+        return h && typeof h.cspViolations === 'function' ? (h.cspViolations() as string[]) : null;
+      });
+    } catch {
+      return;
+    }
+    for (const row of refused ?? []) {
+      if (reportedCspRows.has(row)) continue;
+      reportedCspRows.add(row);
+      process.stderr.write(`${new Date().toISOString()} ERROR csp: ${row}\n`);
     }
   },
   afterSession: async () => {
