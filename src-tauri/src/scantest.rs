@@ -3457,10 +3457,10 @@ mod tests {
     }
 
     /// A rerun into a folder that lets the tester change the earlier report
-    /// and scans but not create a file replaces them in place.
+    /// and scans but not create a file refuses them and leaves them whole.
     #[cfg(windows)]
     #[test]
-    fn a_rerun_replaces_the_report_where_the_folder_refuses_new_files() {
+    fn a_rerun_refuses_the_report_untouched_where_the_folder_refuses_new_files() {
         let out = tempfile::tempdir().expect("a temp dir");
         let scans = out.path().join("scan-test-scans").join("row-1");
         std::fs::create_dir_all(&scans).expect("the scans folder");
@@ -3475,16 +3475,18 @@ mod tests {
                 "attached_scans": [scan.to_string_lossy()]
             }]
         });
-        std::fs::write(&json, serde_json::to_vec(&earlier_report).expect("old report"))
-            .expect("old report file");
+        let earlier_json = serde_json::to_vec(&earlier_report).expect("old report");
+        std::fs::write(&json, &earlier_json).expect("old report file");
         std::fs::write(&text, b"an earlier report").expect("old text report");
         std::fs::write(&scan, b"an earlier attached scan").expect("old scan");
+        let identity = crate::staging::file_id;
+        let ids = (identity(&json), identity(&text), identity(&scan));
         let elsewhere = tempfile::tempdir().expect("a temp dir");
         let page = elsewhere.path().join("page-0000.bmp");
         std::fs::write(&page, b"BM this run's page").expect("a page");
         let report = empty_report();
 
-        let saved = {
+        let (saved, written) = {
             let _out = crate::staging::Denied::create(out.path(), &[&json, &text]);
             let _scans = crate::staging::Denied::create(&scans, &[&scan]);
             let saved = attach(
@@ -3494,16 +3496,29 @@ mod tests {
                 &[],
                 &ScriptedConsole::eof(),
             );
-            write_report(&report, out.path()).expect("the report");
-            saved
+            (saved, write_report(&report, out.path()))
         };
 
-        assert_eq!(saved, vec![scan.to_string_lossy().to_string()]);
-        assert_eq!(std::fs::read(&scan).expect("the scan"), b"BM this run's page");
-        assert_eq!(std::fs::read_to_string(&text).expect("text"), report.to_text());
-        let parsed: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&json).expect("json")).expect("parses");
-        assert_eq!(parsed["device_name"], "Test Scanner");
+        assert!(saved.is_empty());
+        let refused = written.expect_err("the report is refused");
+        assert!(refused.contains("replaced safely"), "{refused}");
+        assert_eq!(std::fs::read(&scan).expect("the scan"), b"an earlier attached scan");
+        assert_eq!(std::fs::read(&json).expect("json"), earlier_json);
+        assert_eq!(std::fs::read(&text).expect("text"), b"an earlier report");
+        assert_eq!((identity(&json), identity(&text), identity(&scan)), ids);
+        let names = |dir: &Path| -> Vec<String> {
+            let mut names: Vec<String> = std::fs::read_dir(dir)
+                .expect("a listing")
+                .map(|e| e.expect("an entry").file_name().to_string_lossy().to_string())
+                .collect();
+            names.sort();
+            names
+        };
+        assert_eq!(names(&scans), vec!["page-0000.bmp"]);
+        assert_eq!(
+            names(out.path()),
+            vec!["scan-test-report.json", "scan-test-report.txt", "scan-test-scans"]
+        );
     }
 
     /// Row 3 acquires twice and rows 3, 4, 5, 16 and 17 ask the tester to

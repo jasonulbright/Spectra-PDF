@@ -141,6 +141,78 @@ FunctionEnd
   ${EndIf}
 !macroend
 
+; ── Installed Ghostscript detection ─────────────────────────────────────
+; The same floor as the app's discovery (src-tauri/src/gs.rs MINIMUM_VERSION):
+; 10.0 or newer. The installer never runs Ghostscript to learn its version;
+; it reads version-named registry subkeys and the version resource of a
+; gswin64c.exe or gswin32c.exe on PATH. A version subkey counts only while its
+; GS_DLL file exists, because an uninstall can leave the key behind.
+; NSIS converts "10.07.1" to 10 on IntOp, which is the major version.
+!macro SPECTRA_GS_SCAN_KEY ROOT SUBKEY
+  ${If} $R0 != 1
+    StrCpy $R1 0
+    ${Do}
+      ClearErrors
+      EnumRegKey $R2 ${ROOT} "${SUBKEY}" $R1
+      ${IfThen} ${Errors} ${|} ${ExitDo} ${|}
+      ${IfThen} $R2 == "" ${|} ${ExitDo} ${|}
+      IntOp $R3 $R2 + 0
+      ${If} $R3 >= 10
+        ReadRegStr $R3 ${ROOT} "${SUBKEY}\$R2" "GS_DLL"
+        ${If} $R3 != ""
+        ${AndIf} ${FileExists} "$R3"
+          StrCpy $R0 1
+          ${ExitDo}
+        ${EndIf}
+      ${EndIf}
+      IntOp $R1 $R1 + 1
+    ${Loop}
+  ${EndIf}
+!macroend
+
+!macro SPECTRA_GS_SCAN_PATH EXE
+  ${If} $R0 != 1
+    ClearErrors
+    SearchPath $R2 "${EXE}"
+    ${IfNot} ${Errors}
+      ClearErrors
+      GetDLLVersion "$R2" $R3 $R1
+      ${IfNot} ${Errors}
+        IntOp $R3 $R3 >> 16
+        IntOp $R3 $R3 & 0xFFFF
+        ${If} $R3 >= 10
+          StrCpy $R0 1
+        ${EndIf}
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+; Pushes 1 when Ghostscript 10.0 or newer is installed, else 0.
+Function SpectraGhostscriptInstalled
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  StrCpy $R0 0
+  !insertmacro SPECTRA_GS_SCAN_KEY HKLM64 "SOFTWARE\GPL Ghostscript"
+  !insertmacro SPECTRA_GS_SCAN_KEY HKLM32 "SOFTWARE\GPL Ghostscript"
+  !insertmacro SPECTRA_GS_SCAN_KEY HKLM64 "SOFTWARE\Artifex\GPL Ghostscript"
+  !insertmacro SPECTRA_GS_SCAN_KEY HKLM32 "SOFTWARE\Artifex\GPL Ghostscript"
+  !insertmacro SPECTRA_GS_SCAN_KEY HKCU64 "SOFTWARE\GPL Ghostscript"
+  !insertmacro SPECTRA_GS_SCAN_KEY HKCU32 "SOFTWARE\GPL Ghostscript"
+  !insertmacro SPECTRA_GS_SCAN_KEY HKCU64 "SOFTWARE\Artifex\GPL Ghostscript"
+  !insertmacro SPECTRA_GS_SCAN_KEY HKCU32 "SOFTWARE\Artifex\GPL Ghostscript"
+  !insertmacro SPECTRA_GS_SCAN_PATH "gswin64c.exe"
+  !insertmacro SPECTRA_GS_SCAN_PATH "gswin32c.exe"
+  StrCpy $R1 $R0
+  Pop $R3
+  Pop $R2
+  Exch $R1
+  Exch
+  Pop $R0
+FunctionEnd
+
 !macro NSIS_HOOK_POSTINSTALL
   !insertmacro SPECTRA_DROP_LEGACY_INSTALL_DIR
 
@@ -178,10 +250,14 @@ FunctionEnd
 
   ; Ghostscript is a separately licensed, user-installed prerequisite. Normal
   ; interactive installs may offer its official download page, where the user
-  ; chooses a licence and runs Artifex's own installer. /S and /P remain fully
-  ; unattended and never download, launch, or install Ghostscript.
+  ; chooses a licence and runs Artifex's own installer, unless Ghostscript 10.0
+  ; or newer is already installed. /S and /P remain fully unattended and never
+  ; download, launch, or install Ghostscript.
   ${IfNot} ${Silent}
-    ${If} $PassiveMode != 1
+  ${AndIf} $PassiveMode != 1
+    Call SpectraGhostscriptInstalled
+    Pop $R9
+    ${If} $R9 != 1
       MessageBox MB_YESNO|MB_ICONINFORMATION \
         "Ghostscript 10.0 or newer is optional and is not included with Spectra PDF.$\r$\n\
         $\r$\n\

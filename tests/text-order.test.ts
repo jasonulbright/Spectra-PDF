@@ -61,6 +61,13 @@ describe('orientation reading order', () => {
     expect(orderedPageText(items)).toBe(contentStreamText(items));
   });
 
+  it('counts a multi-scalar glyph by its scalars, as the engine does', () => {
+    const own = [body[0], at('abc', 45, 10, 10), body[1]];
+    expect(orientationOrder(own)).toEqual([[0, 2], [1]]);
+    const astral = [body[0], at('\u{1D49C}\u{1D49C}', 45, 10, 10), body[1]];
+    expect(orientationOrder(astral)).toEqual([[0, 1, 2]]);
+  });
+
   it('orders mixed body and two sidebars by char count then angle', () => {
     const items = [at('LEFT', 90, 10, 400, true), at('RIGHT', 270, 590, 400, true), ...body];
     expect(orderedPageText(items)).toBe('Body line one of the page\nBody line two continues here\nRIGHT\nLEFT\n');

@@ -9,9 +9,9 @@ not have:
   * `finish_staged` swapped with `shutil.move`, which on Windows degrades to a
     COPY when the destination exists. For an output that names its own input
     that copy runs INTO the document, so a death part-way through leaves the
-    user's file truncated. The hard-link alias below is what reads the
-    difference: after a directory-entry swap the second name still holds the
-    bytes it held, after a copy it holds whatever the copy wrote.
+    user's file truncated. The file identity below is what reads the
+    difference: a directory-entry swap gives the name a new file object, a
+    copy writes into the object the name already had.
   * Nothing owned the span between the staging and the swap, so a producer
     that died left the temp file sitting beside the document.
 
@@ -48,6 +48,7 @@ from engine import metadata as metadata_mod
 from engine import optimize as optimize_mod
 from engine import sanitize as sanitize_mod
 from engine import threads as threads_mod
+from engine.inplace import HARD_LINKED
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -422,6 +423,12 @@ def _besides(directory: Path, *expected: str) -> list:
     return sorted(p.name for p in directory.iterdir() if p.name not in expected)
 
 
+def _identity(path: Path) -> tuple:
+    """Volume and file index: a swap changes it, a write into the file does not."""
+    info = os.stat(str(path))
+    return info.st_dev, info.st_ino
+
+
 def _hardlink(source: Path, alias: Path) -> Path:
     """A second name for one physical file, or a skip where the filesystem
     has no such thing."""
@@ -489,17 +496,17 @@ class TestWritingBackOverTheInput:
 
         A swap that COPIES opens them: for an in-place write the destination
         IS the document, so the copy fills it in chunks and a death inside
-        that fill leaves a truncated file. A second name for the same file is
-        how the difference is read without racing anything.
+        that fill leaves a truncated file. The file identity is how the
+        difference is read without racing anything.
         """
         source = case.build(tmp_path / "source.pdf")
         before = source.read_bytes()
-        alias = _hardlink(source, tmp_path / "alias.pdf")
+        identity = _identity(source)
 
         case.run(str(source), str(source))
 
         assert source.read_bytes() != before
-        assert alias.read_bytes() == before
+        assert _identity(source) != identity
 
     def test_a_write_cancelled_mid_flight_leaves_nothing_staged(
         self, case, tmp_path, monkeypatch,
@@ -536,22 +543,22 @@ class TestOnePhysicalFileUnderTwoNames:
     `set_document_language` raised `Cannot overwrite input file`.
     """
 
-    def test_an_output_hardlinked_to_the_input_routes_through_staging(
+    def test_an_output_hardlinked_to_the_input_is_refused_untouched(
         self, case, tmp_path,
     ):
+        """A direct write through the link would change both names and a swap
+        would split them. The refusal comes from the staging, so an op that
+        took the direct-write branch writes instead of raising."""
         source = case.build(tmp_path / "source.pdf")
         before_bytes = source.read_bytes()
-        before = case.effect(str(source))
         alias = _hardlink(source, tmp_path / "alias.pdf")
 
-        case.run(str(source), str(alias))
+        with pytest.raises(PermissionError) as refused:
+            case.run(str(source), str(alias))
 
-        # The op landed at the name it was given.
-        assert case.effect(str(alias)) != before
-        # The staged file replaced that NAME. The other name still reading as
-        # it did is what says the write did not go through the link and into
-        # the bytes the op held open.
+        assert str(refused.value) == HARD_LINKED
         assert source.read_bytes() == before_bytes
+        assert alias.read_bytes() == before_bytes
         assert _besides(tmp_path, "source.pdf", "alias.pdf") == []
 
 
@@ -605,29 +612,29 @@ class TestTheProducerShapedStaging:
     ):
         source = _text_and_figure(tmp_path / "source.pdf")
         before = source.read_bytes()
-        alias = _hardlink(source, tmp_path / "alias.pdf")
+        identity = _identity(source)
 
         grayscale_mod.grayscale(str(source), str(source), gs_path=gs_path)
 
         assert source.read_bytes() != before
-        assert alias.read_bytes() == before
+        assert _identity(source) != identity
 
-    def test_an_output_hardlinked_to_the_input_routes_through_staging(
+    def test_an_output_hardlinked_to_the_input_is_refused_untouched(
         self, tmp_path, gs_path,
     ):
-        """The conditional staging branches on the same-file test, so an
-        output that is the input under another name must reach the staged
-        branch — Ghostscript reads its input for the whole run, and a direct
-        write through the link truncates what it is still reading."""
+        """Ghostscript reads its input for the whole run, and a direct write
+        through the link truncates what it is still reading; the staged
+        branch refuses the linked target before Ghostscript starts."""
         source = _text_and_figure(tmp_path / "source.pdf")
         before_bytes = source.read_bytes()
-        before = _gray(str(source))
         alias = _hardlink(source, tmp_path / "alias.pdf")
 
-        grayscale_mod.grayscale(str(source), str(alias), gs_path=gs_path)
+        with pytest.raises(PermissionError) as refused:
+            grayscale_mod.grayscale(str(source), str(alias), gs_path=gs_path)
 
-        assert _gray(str(alias)) != before
+        assert str(refused.value) == HARD_LINKED
         assert source.read_bytes() == before_bytes
+        assert alias.read_bytes() == before_bytes
         assert _besides(tmp_path, "source.pdf", "alias.pdf") == []
 
     def test_a_refused_run_leaves_the_input_whole_and_nothing_staged(
@@ -666,24 +673,39 @@ class TestFinishStaged:
         assert destination.read_bytes() == b"new"
         assert not staged.exists()
 
-    def test_a_hard_link_to_the_destination_keeps_the_bytes_it_had(self, tmp_path):
-        """A copy would write through the link; a directory-entry swap cannot."""
+    def test_a_hard_linked_destination_is_refused_with_every_name_intact(self, tmp_path):
+        """A swap would leave the other name on the old bytes and a copy would
+        write through it; neither happens."""
         from engine.inplace import finish_staged
 
         destination = tmp_path / "destination.bin"
         destination.write_bytes(b"old")
-        alias = tmp_path / "alias.bin"
-        try:
-            os.link(str(destination), str(alias))
-        except (AttributeError, NotImplementedError, OSError) as exc:
-            pytest.skip(f"this filesystem does not make hard links: {exc}")
+        alias = _hardlink(destination, tmp_path / "alias.bin")
         staged = tmp_path / "staged.bin"
         staged.write_bytes(b"new")
 
-        finish_staged(staged, destination)
+        with pytest.raises(PermissionError) as refused:
+            finish_staged(staged, destination)
 
-        assert destination.read_bytes() == b"new"
+        assert str(refused.value) == HARD_LINKED
+        assert destination.read_bytes() == b"old"
         assert alias.read_bytes() == b"old"
+        assert not staged.exists()
+
+    def test_a_hard_linked_destination_is_refused_before_staging(self, tmp_path):
+        from engine.inplace import staged_write
+
+        destination = tmp_path / "destination.bin"
+        destination.write_bytes(b"old")
+        _hardlink(destination, tmp_path / "alias.bin")
+        entered = []
+
+        with pytest.raises(PermissionError):
+            with staged_write(destination) as staged:
+                entered.append(staged)
+
+        assert entered == []
+        assert _besides(tmp_path, "destination.bin", "alias.bin") == []
 
     def test_a_swap_that_fails_leaves_nothing_staged(self, tmp_path):
         from engine.inplace import finish_staged

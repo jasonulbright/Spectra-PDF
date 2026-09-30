@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { AppStateProvider, useAppState, useAppDispatch, useReadAppState, useSubscribeAppState } from './state/AppStateProvider';
 import { restoreHistory } from './lib/disk-history';
+import { saveFailureNotice } from './lib/save-failure';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
 import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/workspace-publication';
 import { withFileLock } from './lib/engine-lock';
 import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter, engine } from './lib/tauri-bridge';
-import { residueMessage, residueOf, residueRequest } from './lib/redaction-residue';
+import { residueMessage, residueOf, residueRemovable, residueRequest } from './lib/redaction-residue';
 import type { PhysicalScreenPoint, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
 import { HandOffGate, flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
 import {
@@ -148,7 +149,7 @@ import { FlattenerPanel } from './panels/FlattenerPanel';
 import { TrapPresetsPanel } from './panels/TrapPresetsPanel';
 import { SettingsPanel, getSettings, type PrefCategory } from './panels/SettingsPanel';
 import {
-  ensureGsCapability,
+  recoverGsCapability,
   gsPathIfAvailable,
   registerGsSetupOpener,
   requireGsPath,
@@ -200,7 +201,7 @@ import {
   sweepDeadRecents,
 } from './lib/recent-files';
 import { claimPaths, createClaimHolds, departedImportSources, downgradeImportSourceClaims, releasePaths, retainedImportSources, soleOwner, type ClaimRefusal } from './lib/window-claims';
-import { confirmDirtySnapshots, dirtyPromptSnapshots, sameDirtyPromptSnapshot, saveKeepingLaterEdits, type DirtyPromptSnapshot } from './lib/dirty-prompt';
+import { confirmDirtySnapshots, dirtyPromptSnapshots, sameDirtyPromptSnapshot, saveListedFiles, type DirtyPromptSnapshot } from './lib/dirty-prompt';
 import { createOpenFlights, createPathOperationLock, openPathOnce } from './lib/open-flights';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
@@ -342,7 +343,7 @@ function AppContent(): React.ReactElement {
   const [showGsMissing, setShowGsMissing] = useState(false);
   useEffect(() => {
     if (!isPrimaryWindow()) return;
-    void ensureGsCapability().then((capability) => {
+    void recoverGsCapability().then((capability) => {
       if (takeGsLaunchPrompt(capability)) setShowGsMissing(true);
     });
   }, []);
@@ -497,13 +498,10 @@ function AppContent(): React.ReactElement {
   // it was and the document unsaved; the gestures that start one run from
   // fire-and-forget command handlers, so the refusal is shown here or nowhere.
   const reportSaveFailure = useCallback(
-    (dest: string, e: unknown): Promise<void> => showNotice(
-      tChrome('app.save.failedTitle'),
-      tChrome('app.save.failed', {
-        name: dest.split(/[\\/]/).pop() ?? dest,
-        reason: e instanceof Error ? e.message : String(e),
-      }),
-    ),
+    (dest: string, e: unknown): Promise<void> => {
+      const notice = saveFailureNotice(dest, e);
+      return showNotice(tChrome('app.save.failedTitle'), tChrome(notice.key, notice.params));
+    },
     [showNotice],
   );
   // `deferReport` receives a failed write instead of the notice, for a caller
@@ -1870,20 +1868,25 @@ function AppContent(): React.ReactElement {
 
   // The redacted text can still be spelled outside page content: bookmark
   // titles, names, metadata, field values. The question lists every place and
-  // removes nothing until it is answered.
+  // removes nothing until it is answered. A scan that could not read every
+  // place says so, with or without places to remove.
   const askRedactionResidue = useCallback(async (result: unknown): Promise<boolean> => {
     const residue = residueOf(result);
     if (!residue) return false;
+    if (!residueRemovable(residue)) {
+      await showNotice(tChrome('canvas.redact.residue.unreadTitle'), residueMessage(residue));
+      return false;
+    }
     return showActionConfirm(
       tChrome('canvas.redact.residue.title'),
       residueMessage(residue),
       tChrome('canvas.redact.residue.remove'),
     );
-  }, [showActionConfirm]);
+  }, [showActionConfirm, showNotice]);
 
   const offerRedactionResidue = useCallback(async (path: string, result: unknown) => {
     const residue = residueOf(result);
-    if (!residue || !(await askRedactionResidue(result))) return;
+    if (!residue || !(await askRedactionResidue(result)) || !residueRemovable(residue)) return;
     await performOperation(path, 'remove_redaction_residue', {
       ...residueRequest(residue),
       font_dir: await app.getEditFontPath(),
@@ -2781,30 +2784,33 @@ function AppContent(): React.ReactElement {
     dispatch({ type: 'MARK_SAVED', path: activeFile.path });
   }, [activeFile, dispatch, commitOrAbort, saveOrReport]);
 
-  // Saves every listed file that holds unsaved changes, in place. A document
-  // whose Save routes to Save As (downloaded from an address) is saved only
-  // when it is the active one, through the same Save As dialog.
+  // Saves every listed file that holds unsaved changes. A document whose Save
+  // routes to Save As (downloaded from an address) gets its own Save As
+  // dialog, active or not.
   const handleSaveFiles = useCallback(async (paths: readonly string[]) => {
     const pending = unsavedAmong(readState(), paths);
     if (pending.length === 0) return;
     if (!(await commitOrAbort())) return;
-    for (const path of pending) {
-      const f = readState().files.get(path);
-      if (!f) continue;
-      if (saveRouteFor(f) === 'saveAs') {
-        if (showableDoc(readState()) === path) await handleSaveAsRef.current();
-        continue;
-      }
-      const saved = await saveKeepingLaterEdits(readState, path, async () => await saveOrReport(f.workingPath, path));
-      if (!saved.written) return;
-      if (saved.markSaved) dispatch({ type: 'MARK_SAVED', path });
-    }
+    await saveListedFiles(readState, pending, {
+      route: (path) => {
+        const f = readState().files.get(path);
+        return f ? saveRouteFor(f) : null;
+      },
+      write: async (path) => {
+        const f = readState().files.get(path);
+        return !!f && await saveOrReport(f.workingPath, path);
+      },
+      saveAs: (path) => saveFileAsRef.current(path),
+      markSaved: (path) => dispatch({ type: 'MARK_SAVED', path }),
+    });
   }, [readState, commitOrAbort, saveOrReport, dispatch]);
 
-  const handleSaveAs = useCallback(async () => {
-    if (!activeFile) return;
-    const dest = await dialog.saveFile({ defaultPath: activeFile.name, ownPath: activeFile.path });
-    if (!dest) return;
+  // Save As for the open file at `path`; false when cancelled or refused.
+  const saveFileAs = useCallback(async (path: string): Promise<boolean> => {
+    const file = readState().files.get(path);
+    if (!file) return false;
+    const dest = await dialog.saveFile({ defaultPath: file.name, ownPath: file.path });
+    if (!dest) return false;
     // The destination is a bare byte copy over whatever is there. Writing over
     // a file another window has open replaces the bytes under a live document
     // that has no idea, so the destination is claimed like any other path and
@@ -2817,18 +2823,25 @@ function AppContent(): React.ReactElement {
       const claim = await claimPaths([dest], 'write');
       if (claim.refused.length > 0) {
         await reportClaimRefusal(claim.refused, 'window');
-        return;
+        return false;
       }
       granted = claim.granted;
-      if (!(await commitOrAbort())) return;
-      if (!(await saveOrReport(activeFile.workingPath, dest))) return;
-      dispatch({ type: 'MARK_SAVED', path: activeFile.path });
+      if (!(await commitOrAbort())) return false;
+      if (!(await saveOrReport(file.workingPath, dest))) return false;
+      dispatch({ type: 'MARK_SAVED', path: file.path });
+      return true;
     } finally {
       claimHolds.current.drop([dest]);
       // A document of this window open at `dest` keeps the claim.
       if (granted.length > 0) void releasePaths(granted, pathInUse);
     }
-  }, [activeFile, dispatch, commitOrAbort, reportClaimRefusal, pathInUse, saveOrReport]);
+  }, [readState, dispatch, commitOrAbort, reportClaimRefusal, pathInUse, saveOrReport]);
+  const saveFileAsRef = useRef(saveFileAs);
+  saveFileAsRef.current = saveFileAs;
+
+  const handleSaveAs = useCallback(async () => {
+    if (activeFile) await saveFileAs(activeFile.path);
+  }, [activeFile, saveFileAs]);
 
   // Save routes INTO Save As for a downloaded document, and Save As is
   // declared after it. One implementation either way — a second copy of the
@@ -3920,10 +3933,6 @@ function AppContent(): React.ReactElement {
       {/* Operation queue */}
       <OperationQueue items={queue} onClear={clearQueue} />
 
-      {/* Settings modal — accessible from Edit ▸ Preferences / Help ▸ Licenses */}
-      {showSettings !== null && (
-        <PreferencesModal category={showSettings} onClose={() => setShowSettings(null)} />
-      )}
       {showProperties && <PropertiesDialog onClose={() => setShowProperties(false)} />}
       {showPrint && <PrintDialog onClose={() => setShowPrint(false)} />}
       {showBatchOcr && <BatchOcrDialog onClose={() => setShowBatchOcr(false)} />}
@@ -4045,6 +4054,13 @@ function AppContent(): React.ReactElement {
       {showGsMissing && <GsMissingDialog onClose={() => setShowGsMissing(false)} />}
       {showCustomizeToolbar && (
         <CustomizeToolbarDialog onClose={() => setShowCustomizeToolbar(false)} />
+      )}
+      {/* Preferences follows every dialog that can open it ("Set up
+          Ghostscript" from Print, the launch offer): equal z-index modals
+          stack in document order, so an earlier slot opens behind its
+          opener. Confirm and unlock prompts stay above it. */}
+      {showSettings !== null && (
+        <PreferencesModal category={showSettings} onClose={() => setShowSettings(null)} />
       )}
       <ConfirmDialog
         // A queued request replaces the one on screen without the dialog

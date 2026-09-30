@@ -25,6 +25,7 @@ from engine.credentials import open_pdf
 from engine.acroform import refuse_if_xfa
 from engine.page_copy import copy_pages_with_forms
 from engine.fs_names import safe_file_name, unique_name
+from engine.inplace import refuse_hard_linked
 from engine.pdf_save import refuse_user_opened_source, save_pdf
 
 MODES = ("ranges", "every_n", "size", "bookmarks")
@@ -348,6 +349,9 @@ def _publish_parts(file: str, planned: list[tuple[Path, list[int], bytes | None]
         if stamp is not None:
             existing.add(stamp[:2])
         stamps.append(stamp)
+    for path, stamp in zip((p for p, _, _ in planned), stamps):
+        if stamp is not None:
+            refuse_hard_linked(path)
     records = []
 
     def cleanup(committed: bool) -> list[str]:

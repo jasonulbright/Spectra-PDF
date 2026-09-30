@@ -156,7 +156,7 @@ import { normalizeQuery, highlightWords } from '../../search/normalize';
 import type { SearchOptions } from '../../search/normalize';
 import { FindBar } from './FindBar';
 import { DocumentView } from './DocumentView';
-import { buildOcrApplyPayload } from '../../lib/ocr-apply';
+import { applyOcrPayloads, buildOcrApplyPayload } from '../../lib/ocr-apply';
 import type { OcrApplyPage } from '../../lib/ocr-apply';
 import type { OcrWord } from '../../ocr/types';
 import { fetchEditPlacements } from '../../lib/edit-images';
@@ -272,6 +272,7 @@ import { PropertiesBar } from './PropertiesBar';
 import { CanvasStatusBar } from './CanvasStatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber, currentLanguage, type UiKey } from '../../i18n';
+import { writeFailureText } from '../../lib/save-failure';
 import { pointerScope } from '../../lib/pointer-scope';
 import { watchDevicePixelRatio } from '../../lib/device-pixel-ratio';
 
@@ -2054,12 +2055,13 @@ export function WorkspaceCanvasView({
   const onSaveSnapshot = useCallback(() => {
     if (!snapshotPlacement) return;
     void (async () => {
+      let dest: string | null = null;
       try {
-        const dest = await dialog.saveImageFile('snapshot.png');
+        dest = await dialog.saveImageFile('snapshot.png');
         if (!dest) return;
         await writeSnapshotTo(dest);
       } catch (e: unknown) {
-        setSnapshotError(e instanceof Error ? e.message : String(e));
+        setSnapshotError(writeFailureText(dest ?? '', e));
       }
     })();
   }, [snapshotPlacement, writeSnapshotTo]);
@@ -3707,20 +3709,12 @@ export function WorkspaceCanvasView({
           return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
         },
       );
-      const failures: string[] = [];
-      for (const payload of payloads) {
-        try {
-          await onApplyOcrLayer(payload.path, payload.pages);
-        } catch (err) {
-          const name = payload.path.split(/[\\/]/).pop() || payload.path;
-          failures.push(
-            tChrome('canvas.common.fileFailure', {
-              name,
-              message: err instanceof Error ? err.message : String(err),
-            }),
-          );
-        }
-      }
+      const { applied, failed } = await applyOcrPayloads(payloads, onApplyOcrLayer);
+      const failures = failed.map(({ path, error }) => tChrome('canvas.common.fileFailure', {
+        name: path.split(/[\\/]/).pop() || path,
+        message: error instanceof Error ? error.message : String(error),
+      }));
+      setOcrAppliedPaths(applied);
       // A source dropped between the ready-snapshot and its turn (page
       // closed/moved, or its OCR invalidated mid-run) must be surfaced, not
       // silently skipped — the user thinks every scanned page was persisted.
@@ -3732,8 +3726,6 @@ export function WorkspaceCanvasView({
       }
       if (failures.length > 0) {
         setOcrApplyError(tChrome('canvas.ocr.applyFailed', { reasons: failures.join('; ') }));
-      } else {
-        setOcrAppliedPaths(payloads.map((payload) => payload.path));
       }
       return failures;
     } catch (err) {

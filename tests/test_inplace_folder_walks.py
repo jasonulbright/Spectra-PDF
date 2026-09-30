@@ -167,18 +167,19 @@ class TestRunActionInPlace:
         assert other.read_bytes() != other_before
         assert _staged(tree) == []
 
-    def test_an_original_under_two_names_keeps_the_bytes_it_had(self, tree):
-        """The staged copy replaces the NAME. A swap that copied would fill
-        the original in chunks, and the second name would read whatever the
-        copy wrote."""
+    def test_an_original_under_two_names_is_refused_and_both_keep_their_bytes(self, tree):
+        """A swap would leave the second name on the old bytes and a copy
+        would write through it, so that one file is refused."""
         target = tree / "a.pdf"
         before = target.read_bytes()
         alias = _hardlink(target, tree.parent / "alias.pdf")
 
-        run_action(source=str(tree), dest="", steps=self.STEPS, in_place=True)
+        report = run_action(source=str(tree), dest="", steps=self.STEPS, in_place=True)
 
-        assert target.read_bytes() != before
+        assert report["failed"] == 1
+        assert target.read_bytes() == before
         assert alias.read_bytes() == before
+        assert _staged(tree) == []
 
 
 # ── run_preflight_sweep ────────────────────────────────────────────────────
@@ -262,7 +263,7 @@ class TestPreflightSweepInPlace:
         assert other.read_bytes() != other_before
         assert _staged(tree) == []
 
-    def test_an_original_under_two_names_keeps_the_bytes_it_had(self, tree):
+    def test_an_original_under_two_names_is_refused_and_both_keep_their_bytes(self, tree):
         target = tree / "failing.pdf"
         before = target.read_bytes()
         alias = _hardlink(target, tree.parent / "alias.pdf")
@@ -270,8 +271,9 @@ class TestPreflightSweepInPlace:
         run_preflight_sweep(str(tree), "", profile=_profile(), mode="fix",
                             in_place=True, write_log=False)
 
-        assert target.read_bytes() != before
+        assert target.read_bytes() == before
         assert alias.read_bytes() == before
+        assert _staged(tree) == []
 
 
 # ── batch_ocr ──────────────────────────────────────────────────────────────
@@ -340,7 +342,7 @@ class TestBatchOcrInPlace:
         assert other.read_bytes() != other_before
         assert _staged(tree) == []
 
-    def test_an_original_under_two_names_keeps_the_bytes_it_had(self, tree):
+    def test_an_original_under_two_names_is_refused_and_both_keep_their_bytes(self, tree):
         target = tree / "a.pdf"
         before = target.read_bytes()
         alias = _hardlink(target, tree.parent / "alias.pdf")
@@ -348,5 +350,6 @@ class TestBatchOcrInPlace:
         batch_ocr(source=str(tree), gs_path=str(GS),
                   tesseract_path=str(TESSERACT), in_place=True)
 
-        assert target.read_bytes() != before
+        assert target.read_bytes() == before
         assert alias.read_bytes() == before
+        assert _staged(tree) == []

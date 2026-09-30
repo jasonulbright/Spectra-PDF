@@ -77,9 +77,13 @@ describe.skipIf(process.platform !== 'win32')('Windows E2E process ownership', (
     supervisor.stdin.write(JSON.stringify({ executable: python, args: ['-B', fixture, receipt, 'wait'], ready: 'READY' }) + '\n');
     await until(() => readReceipt(receipt) !== null || supervisor.exitCode !== null);
     expect(error).toBe('');
-    const pids = readReceipt(receipt) ?? [];
+    expect(supervisor.exitCode).toBeNull();
+    const pids = readReceipt(receipt);
+    expect(pids).not.toBeNull();
+    expect(pids!.length).toBe(3);
+    expect(pids!.every(alive)).toBe(true);
     if (mode === 'eof') supervisor.stdin.end(); else supervisor.kill();
-    await until(() => pids.every(pid => !alive(pid)));
+    await until(() => pids!.every(pid => !alive(pid)));
   }, 40_000);
 
   it('round-trips command arguments without a shell and refuses a missing executable', async () => {

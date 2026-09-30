@@ -133,27 +133,27 @@ class TestApplyOcrLayer:
         assert 238 <= first.y0 <= 245 and first.y1 <= 265
         assert last.x1 <= 142
 
-    def test_hardlink_alias_output_takes_the_safe_branch(self, tmp_dir):
-        """output that IS the input under another name (hardlink — the
-        unresolvable-alias stand-in for UNC-vs-mapped-letter spellings) must
-        take the temp+rename branch, never a direct save into the file
-        pikepdf has open. os.path.samefile (volume serial + file index)
-        catches what resolve()-string equality cannot (batch-mirror review;
-        subst aliases were verified live to resolve, hardlinks never do)."""
+    def test_hardlink_alias_output_is_refused_untouched(self, tmp_dir):
+        """output that IS the input under another name (hardlink) must never
+        be saved directly into the file pikepdf has open, and a swap would
+        split the two names. The staged branch refuses the linked target
+        before any stage exists; a direct-write branch would write instead
+        of raising."""
+        from engine.inplace import HARD_LINKED
+
         src = os.path.join(tmp_dir, "scan.pdf")
         alias = os.path.join(tmp_dir, "alias.pdf")
         _scanlike_pdf(src)
         os.link(src, alias)  # NTFS hardlink, no admin needed
         assert os.path.samefile(src, alias)
+        before = open(src, "rb").read()
 
-        r = apply_ocr_layer(src, alias, [{"page": 1, "words": WORDS}])
-        assert r["pages_applied"] == 1
-        # The alias path now holds the searchable rewrite (rename broke the
-        # link — expected); the ORIGINAL inode was never written into: the
-        # source spelling still opens clean. No corruption on either path.
-        assert "INVOICE" in extract_text(alias)["text"]
-        with pikepdf.open(src) as pdf:  # would raise if the write had raced
-            assert len(pdf.pages) == 1
+        with pytest.raises(PermissionError) as refused:
+            apply_ocr_layer(src, alias, [{"page": 1, "words": WORDS}])
+        assert str(refused.value) == HARD_LINKED
+        assert open(src, "rb").read() == before
+        assert open(alias, "rb").read() == before
+        assert sorted(os.listdir(tmp_dir)) == ["alias.pdf", "scan.pdf"]
 
     def test_readonly_existing_output_is_overwritten(self, tmp_dir):
         """Re-running the mirror over an existing read-only output must

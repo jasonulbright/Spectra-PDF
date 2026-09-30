@@ -78,8 +78,20 @@ function outcomeDecides(value: ts.Node): boolean {
       continue;
     }
     if (ts.isIfStatement(parent)) return parent.expression === current;
+    if (ts.isReturnStatement(parent) && ts.isBlock(parent.parent)
+      && ts.isArrowFunction(parent.parent.parent) && parent.parent.parent.body === parent.parent) {
+      current = parent.parent;
+      continue;
+    }
     if (ts.isArrowFunction(parent) && parent.body === current) {
-      return ts.isCallExpression(parent.parent) && outcomeDecides(parent.parent);
+      if (ts.isCallExpression(parent.parent)) return outcomeDecides(parent.parent);
+      // A `write` callback handed to saveListedFiles: the helper stops the run
+      // on a false outcome (tests/dirty-prompt.test.ts covers the refusal).
+      return ts.isPropertyAssignment(parent.parent)
+        && parent.parent.name.getText() === 'write'
+        && ts.isObjectLiteralExpression(parent.parent.parent)
+        && ts.isCallExpression(parent.parent.parent.parent)
+        && parent.parent.parent.parent.expression.getText() === 'saveListedFiles';
     }
     if (ts.isVariableDeclaration(parent) && parent.initializer === current && ts.isIdentifier(parent.name)) {
       const name = parent.name.text;

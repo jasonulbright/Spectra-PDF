@@ -24,6 +24,7 @@ import pikepdf
 import pytest
 
 import engine.incremental as incremental
+import engine.inplace as inplace
 from engine.incremental import (
     DELTA_CLASSES,
     _ceiling_refusal,
@@ -1718,6 +1719,7 @@ class TestHardLinkAliases:
             incremental, "is_same_file",
             lambda a, b: os.path.abspath(a) == os.path.abspath(b),
         )
+        monkeypatch.setattr(inplace, "refuse_hard_linked", lambda _output: None)
         signed = _signed(tmp_dir, pki)
         modified = _rewrite_with(signed, tmp_dir, _add_square)
         alias = os.path.join(tmp_dir, "alias-out.pdf")
@@ -1747,6 +1749,7 @@ class TestHardLinkAliases:
             signatures, "is_same_file",
             lambda a, b: os.path.abspath(a) == os.path.abspath(b),
         )
+        monkeypatch.setattr(inplace, "refuse_hard_linked", lambda _output: None)
         src = os.path.join(tmp_dir, "plain.pdf")
         _base_pdf(src)
         alias = os.path.join(tmp_dir, "plain-alias.pdf")

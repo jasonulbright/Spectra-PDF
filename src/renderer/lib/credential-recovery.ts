@@ -110,14 +110,21 @@ export async function unlockLostDocument(doc: LostDocument, io: UnlockIo): Promi
       const answer = await io.askCertificate(doc.name, error, pfx);
       if (answer === 'cancel') return false;
       pfx = answer.pfx;
-      try {
-        await io.call('pubkey_reattach', {
-          path: doc.workingPath, source: doc.path, pfx: answer.pfx, password: answer.password,
-        });
-        return true;
-      } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+      // An empty source is the encrypted original sealed beside the working
+      // copy: it outlives a user file that was moved, deleted or replaced.
+      // The user file is the fallback only for a sealed copy that is gone.
+      let first: string | undefined;
+      for (const source of ['', doc.path]) {
+        try {
+          await io.call('pubkey_reattach', {
+            path: doc.workingPath, source, pfx: answer.pfx, password: answer.password,
+          });
+          return true;
+        } catch (e) {
+          first ??= e instanceof Error ? e.message : String(e);
+        }
       }
+      error = first;
     }
   }
   for (;;) {

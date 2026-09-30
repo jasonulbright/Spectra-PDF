@@ -47,6 +47,7 @@ from engine import form_prepare as form_prepare_mod
 from engine import forms as forms_mod
 from engine import headers as headers_mod
 from engine import inplace as inplace_mod
+from engine.inplace import HARD_LINKED
 from engine import incremental as incremental_mod
 from engine import ink_manager as ink_manager_mod
 from engine import layers as layers_mod
@@ -1980,6 +1981,12 @@ def _besides(directory: Path, *expected: str) -> list:
     return sorted(p.name for p in directory.iterdir() if p.name not in expected)
 
 
+def _identity(path: Path) -> tuple:
+    """Volume and file index: a swap changes it, a write into the file does not."""
+    info = os.stat(str(path))
+    return info.st_dev, info.st_ino
+
+
 def _hardlink(source: Path, alias: Path) -> Path:
     """A second name for one physical file, or a skip where the filesystem
     has no such thing."""
@@ -2081,19 +2088,18 @@ class TestWritingBackOverTheInput:
 
         A swap that COPIES opens them: for an in-place write the destination
         IS the document, so the copy fills it in chunks and a death inside
-        that fill leaves a truncated file. A second name for the same file is
-        how the difference is read without racing anything — after a swap it
-        still holds the bytes it held, and after a copy it holds whatever the
-        copy wrote.
+        that fill leaves a truncated file. The file identity is how the
+        difference is read without racing anything: a swap gives the name a
+        new file object, a copy writes into the one it had.
         """
         source = case.build(tmp_path / "source.pdf")
         before = source.read_bytes()
-        alias = _hardlink(source, tmp_path / "alias.pdf")
+        identity = _identity(source)
 
         case.run(str(source), str(source))
 
         assert source.read_bytes() != before
-        assert alias.read_bytes() == before
+        assert _identity(source) != identity
 
     def test_a_write_cancelled_mid_flight_leaves_nothing_staged(
         self, case, tmp_path, monkeypatch,
@@ -2137,22 +2143,22 @@ class TestOnePhysicalFileUnderTwoNames:
     regression in all of them at once.
     """
 
-    def test_an_output_hardlinked_to_the_input_routes_through_staging(
+    def test_an_output_hardlinked_to_the_input_is_refused_untouched(
         self, case, tmp_path,
     ):
+        """A direct write through the link would change both names and a swap
+        would split them. The refusal comes from the staging, so an op that
+        took the direct-write branch writes instead of raising."""
         source = case.build(tmp_path / "source.pdf")
         before_bytes = source.read_bytes()
-        before = case.effect(str(source))
         alias = _hardlink(source, tmp_path / "alias.pdf")
 
-        case.run(str(source), str(alias))
+        with pytest.raises(PermissionError) as refused:
+            case.run(str(source), str(alias))
 
-        # The op landed at the name it was given.
-        assert case.effect(str(alias)) != before
-        # The staged file replaced the NAME. The other name still reading as
-        # it did is what says the write did not go through the link into the
-        # bytes pikepdf held open.
+        assert str(refused.value) == HARD_LINKED
         assert source.read_bytes() == before_bytes
+        assert alias.read_bytes() == before_bytes
         assert _besides(tmp_path, "source.pdf", "alias.pdf", *case.leaves) == []
 
 

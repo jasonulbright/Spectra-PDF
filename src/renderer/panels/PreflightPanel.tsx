@@ -14,6 +14,7 @@ import { gsPathIfAvailable } from '../lib/gs-capability';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { tChrome, tChromeCount } from '../i18n';
+import { writeFailureText } from '../lib/save-failure';
 import { TEST_HARNESS_ENABLED, registerPreflight } from '../testHarness';
 import type { PlaceableFinding } from '../lib/a11y-findings';
 import {
@@ -663,7 +664,7 @@ export function PreflightPanel(): React.ReactElement {
     } catch (e: unknown) {
       setStatus(
         tChrome('panel.common.error', {
-          message: e instanceof Error ? e.message : String(e),
+          message: writeFailureText(target, e),
         }),
       );
     } finally {
@@ -805,7 +806,7 @@ export function PreflightPanel(): React.ReactElement {
     } catch (e: unknown) {
       setStatus(
         tChrome('panel.common.error', {
-          message: e instanceof Error ? e.message : String(e),
+          message: writeFailureText(target, e),
         }),
       );
     }

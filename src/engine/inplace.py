@@ -135,6 +135,23 @@ FILE_IN_USE = (
     "Close it there and try again."
 )
 
+HARD_LINKED = (
+    "This file has more than one name on disk (hard links). Saving over it "
+    "would leave the other names with the old content. Save it as a new file."
+)
+
+
+def refuse_hard_linked(output) -> None:
+    """A directory-entry swap gives the written name a new file object and
+    leaves every other hard-link name on the old bytes, so a target with more
+    than one link is refused before anything is staged or replaced."""
+    try:
+        info = os.stat(str(output))
+    except FileNotFoundError:
+        return
+    if info.st_nlink > 1:
+        raise PermissionError(HARD_LINKED)
+
 
 
 def _refuse_read_only(output: Path) -> None:
@@ -335,8 +352,8 @@ def finish_staged(staged: Path, output: Path) -> None:
     copying INTO that destination — which for an output that names its own
     input means the document is overwritten byte by byte, and a copy that dies
     part-way leaves the input truncated. ``os.replace`` swaps a directory
-    entry, so a death leaves the input whole and a hard link to the input keeps
-    reading the bytes it had.
+    entry, so a death leaves the input whole. A target with other hard-link
+    names is refused: the swap would leave those names on the old bytes.
 
     The destination cannot be replaced while a handle holds it open, so a
     caller whose output is its own still-open input closes that handle before
@@ -350,6 +367,7 @@ def finish_staged(staged: Path, output: Path) -> None:
     """
     output = landing_path(output)
     try:
+        refuse_hard_linked(output)
         _flush_to_disk(staged)
         _refuse_read_only(output)
         if os.name == "nt" and os.path.isfile(str(output)):
@@ -364,8 +382,7 @@ def landing_path(output) -> Path:
     """The file a write to ``output`` replaces.
 
     A symbolic link lands on the file it points to, so the link stays a link.
-    A hard link is a second name for the old file object: the swap gives the
-    written name a new object and the other names keep the old bytes.
+    A hard-linked target is refused by :func:`refuse_hard_linked`.
     """
     output = Path(output)
     if os.path.islink(str(output)):
@@ -395,6 +412,7 @@ def staged_write(output: Path) -> Iterator[Path]:
     the interrupt it was written to survive.
     """
     output = landing_path(output)
+    refuse_hard_linked(output)
     staged = staging_target(output)
     landed = False
     try:

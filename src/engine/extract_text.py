@@ -163,6 +163,21 @@ def _circular_mean(angles: list[float]) -> float:
     return round(math.degrees(math.atan2(y, x)) % 360.0, 6)
 
 
+def _scalars(char: LTChar) -> int:
+    """Unicode scalars a character contributes to its orientation's count:
+    one drawn glyph whose /ToUnicode entry maps to several scalars counts each
+    of them, the unit the renderer's reading order counts in. A glyph with no
+    Unicode mapping counts one."""
+    text = char.get_text()
+    if text.startswith("(cid:") and text.endswith(")"):
+        return 1
+    return len(text)
+
+
+def _weight(chars: list[LTChar]) -> int:
+    return sum(_scalars(char) for char in chars)
+
+
 def _partition(chars: list[LTChar]) -> dict[tuple[float, bool], list[LTChar]]:
     """The characters grouped by reading orientation.
 
@@ -192,7 +207,7 @@ def _partition(chars: list[LTChar]) -> dict[tuple[float, bool], list[LTChar]]:
             chains[0] = chains.pop() + chains[0]
         for chain in chains:
             members = [char for _angle, char in chain]
-            if len(members) < MIN_ORIENTED_CHARS:
+            if _weight(members) < MIN_ORIENTED_CHARS:
                 strays.extend(members)
                 continue
             key = (_circular_mean([angle for angle, _char in chain]), reflected)
@@ -272,7 +287,7 @@ class _OrientedAnalysis:
         others = [obj for obj in self if not isinstance(obj, LTChar)]
         for obj in others:
             obj.analyze(laparams)
-        order = sorted(parts, key=lambda key: (-len(parts[key]), key[0], key[1]))
+        order = sorted(parts, key=lambda key: (-_weight(parts[key]), key[0], key[1]))
         laid_out = []
         for key in order:
             chars = parts[key]

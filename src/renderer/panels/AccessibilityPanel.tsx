@@ -13,6 +13,7 @@ import { parkStructSelection } from '../lib/a11y-jump';
 import { mergeUntouched } from '../lib/late-read';
 import { TEST_HARNESS_ENABLED, registerAccessibility } from '../testHarness';
 import { LOCALE_NATIVE_NAMES, SHIPPED_LOCALES, tChrome } from '../i18n';
+import { writeFailureText } from '../lib/save-failure';
 import {
   CONTENT_ROLES,
   artifactCalls,
@@ -515,7 +516,7 @@ export function AccessibilityPanel(): React.ReactElement {
       setStatus(tChrome('panel.a11y.exported', { path: await writeReport(target, report) }));
     } catch (e: unknown) {
       setStatus(
-        tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
+        tChrome('panel.common.error', { message: writeFailureText(target, e) }),
       );
     } finally {
       setBusy(false);

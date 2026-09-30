@@ -544,6 +544,10 @@ export const CANVAS_STRINGS = {
     'Named destinations get new names. Links in this file follow them; links from other files to the old names stop working.',
   'canvas.redact.residue.truncated': 'The list is too long to show in full. Every occurrence is removed.',
   'canvas.redact.residue.pageLabel': 'Page labels',
+  'canvas.redact.residue.unreadTitle': 'Redaction check is incomplete',
+  'canvas.redact.residue.unread':
+    'The check could not read these places: {{places}}. The redacted text can still appear there.',
+  'canvas.redact.residue.unreadOther': 'Other places',
   // The stored /Redact set could not be read back in full. Both of these
   // exist so a PARTIAL seed can never look like a complete one — the engine
   // refuses when a mark will not resolve, and the seed itself counts marks

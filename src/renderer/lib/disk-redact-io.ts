@@ -13,7 +13,7 @@ import { loadRedactionProperties, propertiesPayload } from './redaction-properti
 import type { DiskRedactIo, RedactRegion } from './disk-redact';
 import type { SearchRequest } from './search-redact';
 import { parseSignaturePolicy } from './signatures';
-import { residueOf, residueRequest } from './redaction-residue';
+import { residueOf, residueRemovable, residueRequest } from './redaction-residue';
 
 export function createDiskRedactIo(
   callRaw: (method: string, params: Record<string, unknown>) => Promise<unknown>,
@@ -60,7 +60,7 @@ export function createDiskRedactIo(
         gs_path: await gsPathIfAvailable(),
       });
       const residue = residueOf(result);
-      if (residue && await askResidue(result)) {
+      if (residue && await askResidue(result) && residueRemovable(residue)) {
         await callRaw('remove_redaction_residue', {
           file: output, output, ...residueRequest(residue), font_dir: fontDir,
         });
