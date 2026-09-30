@@ -14,7 +14,7 @@ import type {
   ScannerCapabilities,
   ScannerList,
 } from './scan';
-import type { ClipboardSourceResult } from './clipboard-source';
+import type { ClipboardReadResult } from './clipboard-source';
 import type { RecentPathStatus } from './recent-files';
 import type { CaptureRequest, CaptureResult } from './web-capture';
 import {
@@ -844,7 +844,7 @@ export const app = {
   /** Whatever is on the clipboard, written to a scratch file Create PDF
    * already accepts. The BYTES never cross this boundary — a pasted
    * screenshot is megabytes and the engine needs a file anyway. */
-  readClipboardSource: () => invoke<ClipboardSourceResult>('read_clipboard_source'),
+  readClipboardSource: () => invoke<ClipboardReadResult>('read_clipboard_source'),
   /** Remove a clipboard scratch copy after its Create PDF row is discarded. */
   discardClipboardSource: (path: string) => invoke<void>('discard_clipboard_source', { path }),
   /** Capture a web page in a VISIBLE browser window, through WebView2's own

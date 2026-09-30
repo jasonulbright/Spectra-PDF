@@ -1585,7 +1585,28 @@ impl PlatformCapabilities {
         }
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    pub const fn current() -> Self {
+        Self {
+            system_printing: false,
+            virtual_printer: false,
+            scanning: false,
+            scheduled_actions: false,
+            store_certificates: false,
+            send_by_email: false,
+            web_capture: false,
+            clipboard_read: true,
+            snapshot: true,
+            accent_color: false,
+            enterprise_policy: false,
+            tray_residency: false,
+            backdrop: false,
+            console_attach: false,
+            start_with_system: false,
+        }
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
     pub const fn current() -> Self {
         Self {
             system_printing: false,

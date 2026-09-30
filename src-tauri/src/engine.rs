@@ -837,8 +837,7 @@ pub fn get_python_path<R: Runtime>(app: &AppHandle<R>) -> String {
         .resource_dir()
         .expect("failed to resolve resource dir");
     resource_dir
-        .join("python")
-        .join("python.exe")
+        .join(crate::platform::python_relative())
         .to_string_lossy()
         .to_string()
 }
@@ -855,7 +854,9 @@ pub fn get_tesseract_path(app: &AppHandle) -> String {
         .path()
         .resource_dir()
         .expect("failed to resolve resource dir");
-    let exe = resource_dir.join("tesseract").join("tesseract.exe");
+    let exe = resource_dir
+        .join("tesseract")
+        .join(crate::platform::program_relative("tesseract"));
     // `dunce::simplified` STRIPS the `\?\` verbatim prefix that
     // `resource_dir()` carries on Windows, and that is load-bearing rather
     // than cosmetic: Tesseract derives its tessdata directory from the
@@ -956,10 +957,7 @@ pub fn get_icc_path(app: &AppHandle) -> String {
 /// then refuses the export with a clear message rather than crashing.
 pub fn get_soffice_path(app: &AppHandle) -> String {
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled = resource_dir
-            .join("libreoffice")
-            .join("program")
-            .join("soffice.exe");
+        let bundled = resource_dir.join(crate::platform::soffice_relative());
         if bundled.is_file() {
             return bundled.to_string_lossy().to_string();
         }
@@ -1003,10 +1001,13 @@ pub fn python_env() -> Vec<(String, String)> {
 /// `import site`, which adds the user's `%APPDATA%\Python\Python3xx\site-packages`
 /// and runs its `usercustomize` and `.pth` lines inside the engine; a `.pth`
 /// line can also put a directory ahead of the shipped packages. `-s` removes
-/// the user site. `-I` is not used: it also implies `-E`, which drops the
-/// `PYTHONUTF8` that `python_env` sets.
+/// the user site. `-P` keeps the script's own directory off `sys.path`: a
+/// runtime without a `._pth` file (Linux) otherwise puts `engine/` first,
+/// and `engine/inspect.py` shadows the standard library's `inspect`, so
+/// the interpreter fails during startup. `-I` is not used: it also implies
+/// `-E`, which drops the `PYTHONUTF8` that `python_env` sets.
 pub fn python_args(script: &str) -> Vec<String> {
-    vec!["-s".to_string(), script.to_string()]
+    vec!["-s".to_string(), "-P".to_string(), script.to_string()]
 }
 
 /// Starts `label`'s engine worker and wires its stdout to that window.
@@ -1677,7 +1678,7 @@ mod start_tests {
     #[test]
     fn the_engine_child_never_loads_the_user_site() {
         let script = r"C:\resources\engine\__startup__.py";
-        assert_eq!(python_args(script), vec!["-s", script]);
+        assert_eq!(python_args(script), vec!["-s", "-P", script]);
         let env = python_env();
         assert!(env.iter().any(|(k, v)| k == "PYTHONNOUSERSITE" && v == "1"));
         assert!(env.iter().any(|(k, v)| k == "PYTHONUTF8" && v == "1"));

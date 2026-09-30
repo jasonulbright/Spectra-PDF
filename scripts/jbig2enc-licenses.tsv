@@ -16,7 +16,7 @@
 #
 # The Linux tree (resources/linux-x86_64/jbig2enc/) is the pinned artifact
 # that bundle-jbig2enc.sh unpacks as published (fork release
-# https://github.com/jasonulbright/jbig2enc/releases/tag/spectra-0.32-1): a program plus shared
+# https://github.com/jasonulbright/jbig2enc/releases/tag/spectra-0.32-2): a program plus shared
 # libraries, so its rows are per FILE, keyed by the path inside that tree
 # (bin/, lib/). Their notice column lists one or more files (comma-separated)
 # under the tree's licenses/; the artifact ships the PATENTS note there, and the

@@ -499,11 +499,18 @@ async fn start_locked<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
         .spawn()
         .map_err(|e| format!("Failed to start health worker: {}", e))?;
     // The memory ceiling is set before exec, so no allocation precedes it.
+    // `RLIMIT_DATA` counts every private mapping, and OpenBLAS maps a buffer
+    // per worker thread when numpy loads: with one thread per core the
+    // import alone exceeds the ceiling and the worker dies before its first
+    // answer. One BLAS thread keeps the import inside it.
     #[cfg(target_os = "linux")]
     let (mut rx, child) = crate::process_job::spawn_worker(
         &python_path,
         &crate::engine::python_args(&script_path),
-        crate::engine::python_env(),
+        crate::engine::python_env()
+            .into_iter()
+            .chain([("OPENBLAS_NUM_THREADS".to_string(), "1".to_string())])
+            .collect(),
         crate::process_job::Binding {
             lease_channel: false,
             memory_limit: Some(HEALTH_MEMORY_LIMIT as u64),

@@ -1,0 +1,15 @@
+{
+  "bundle": {
+    "resources": {
+      "../resources/python": null,
+      "../resources/libreoffice": null,
+      "../resources/tesseract": null,
+      "../resources/jbig2enc": null,
+      "../resources/linux-x86_64/python": "python",
+      "../resources/linux-x86_64/libreoffice": "libreoffice",
+      "../resources/linux-x86_64/tesseract": "tesseract",
+      "../resources/linux-x86_64/jbig2enc": "jbig2enc",
+      "../resources/linux-x86_64/voikko": "voikko"
+    }
+  }
+}

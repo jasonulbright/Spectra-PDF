@@ -9,9 +9,9 @@
 . "$(dirname "$0")/posix-common.sh"
 require_tool curl sha256sum tar awk
 
-ARTIFACT_URL="https://github.com/jasonulbright/jbig2enc/releases/download/spectra-0.32-1/jbig2enc-0.32-linux-x86_64.tar.zst"
-ARTIFACT_SHA256="32884f339314d7afda2c5996e82b584fd69016d2c48ebc32ff32bcf6e28d41c6"
-ARTIFACT_SIZE="2196625"
+ARTIFACT_URL="https://github.com/jasonulbright/jbig2enc/releases/download/spectra-0.32-2/jbig2enc-0.32-linux-x86_64.tar.zst"
+ARTIFACT_SHA256="db4695b90b507867818259d6b7b3b95ebbeb0a567bb899687ac339aa456440ef"
+ARTIFACT_SIZE="2196628"
 MANIFEST="$REPO_ROOT/scripts/jbig2enc-licenses.tsv"
 DEST="$LINUX_RESOURCES/jbig2enc"
 

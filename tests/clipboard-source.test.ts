@@ -21,10 +21,11 @@ import {
 import { ACCEPTED_SUFFIXES, classify } from '../src/renderer/lib/create-pdf';
 import { DIALOG_STRINGS } from '../src/renderer/i18n-dialogs';
 
-const RUST = readFileSync(
-  resolve(__dirname, '../src-tauri/src/clipboard_read.rs'),
-  'utf8',
-);
+// Every platform reader writes scratch files; each one must agree.
+const READERS = ['clipboard_read.rs', 'clipboard_read_linux.rs'].map((file) => ({
+  file,
+  source: readFileSync(resolve(__dirname, '../src-tauri/src', file), 'utf8'),
+}));
 
 function result(over: Partial<ClipboardSourceResult>): ClipboardSourceResult {
   return {
@@ -54,17 +55,28 @@ describe('clipboard sources', () => {
     // `write_scratch("dib", …)` / the `match extension` arms — the literals
     // that decide what lands on disk.
     const written = new Set(
-      [...RUST.matchAll(/write_scratch\("([a-z0-9]+)"/g)].map((m) => `.${m[1]}`),
+      READERS.flatMap(({ source }) =>
+        [...source.matchAll(/write_scratch\("([a-z0-9]+)"/g)].map((m) => `.${m[1]}`),
+      ),
     );
     const declared = new Set(Object.values(CLIPBOARD_EXTENSIONS).flat());
     expect([...written].sort()).toEqual([...declared].sort());
+    for (const { file, source } of READERS) {
+      for (const [, ext] of source.matchAll(/write_scratch\("([a-z0-9]+)"/g)) {
+        expect(declared.has(`.${ext}`), `${file} writes .${ext}`).toBe(true);
+      }
+    }
   });
 
   it('the kinds the Rust side reports are exactly the kinds this module knows', () => {
-    const reported = new Set(
-      [...RUST.matchAll(/kind:\s*"([a-z]+)"\.to_string\(\)/g)].map((m) => m[1]),
-    );
-    expect([...reported].sort()).toEqual([...CLIPBOARD_KINDS].sort());
+    for (const { file, source } of READERS) {
+      const reported = new Set(
+        [...source.matchAll(/kind:\s*"([a-z]+)"\.to_string\(\)/g)].map((m) => m[1]),
+      );
+      // Copied files are not a scratch kind: they join the list as picked files.
+      reported.delete('files');
+      expect([...reported].sort(), file).toEqual([...CLIPBOARD_KINDS].sort());
+    }
   });
 
   it('a clipboard row is an ordinary source row with an honest kind badge', () => {
