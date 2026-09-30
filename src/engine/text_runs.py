@@ -51,7 +51,7 @@ import pikepdf
 from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
-from engine.content_walk import ClipTracker, GraphicsTextState, form_clip
+from engine.content_walk import ClipTracker, GraphicsTextState
 from engine.page_images import (
     _finalize_page_rewrite,
     _fresh_name,
@@ -556,7 +556,7 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     parent_state=state,
                     detail=detail,
                     stream_path=child_path,
-                    base_clip=form_clip(xobj, state.ctm, clips.clip),
+                    base_clip=clips.for_form(xobj, state.ctm),
                     breaks=breaks,
                 )
     return out

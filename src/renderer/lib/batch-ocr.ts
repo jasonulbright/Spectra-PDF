@@ -87,6 +87,8 @@ export interface EmptyFolderReport {
   /** `reason` is the English log text; `refusal` is set when the whole
    * removal was refused, for the on-screen message. */
   skipped: { path: string; reason: string; refusal?: EmptyFolderRefusal }[];
+  /** A Stop ended the deletion early; `removed` is what went before it. */
+  stopped?: boolean;
 }
 
 export type EmptyFolderRefusal =
@@ -622,6 +624,8 @@ export async function runBatchOcr(
     if (broke) break;
     if (result) results.push(result);
   }
+  // A Stop that lands during the last file finds no next iteration to see it.
+  if (!cancelled && isCancelled()) cancelled = true;
 
   return { cancelled, results, skippedDirs };
 }

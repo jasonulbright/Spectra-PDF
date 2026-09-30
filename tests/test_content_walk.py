@@ -10,6 +10,7 @@ from engine.content_walk import (
     GraphicsTextState,
     rects_intersect,
 )
+import pikepdf
 
 
 def _fed(ops):
@@ -184,3 +185,40 @@ class TestRectsIntersect:
 
     def test_edge_touch_is_not_intersection(self):
         assert rects_intersect((0, 0, 10, 10), (10, 0, 20, 10)) is False
+
+
+class TestFormRegion:
+    K = 0.7071067811865476
+
+    def _form(self, bbox=(0, 0, 100, 100), matrix=None):
+        self.pdf = pikepdf.new()
+        extra = {"Matrix": pikepdf.Array(matrix)} if matrix else {}
+        return self.pdf.make_stream(b"", BBox=pikepdf.Array(bbox), **extra)
+
+    def test_rotated_bbox_clips_by_parallelogram_not_its_bounding_box(self):
+        k = self.K
+        form = self._form(matrix=[k, k, -k, k, 0, 0])
+        inner = ClipTracker(ClipTracker().for_form(form, IDENTITY))
+        # The diamond spans x -70.7..70.7, y 0..141.4; (58..62, 8..12) is in
+        # that bounding box but outside the diamond.
+        assert inner.clips_away((58, 8, 62, 12)) is True
+        assert inner.clips_away((-2, 68, 2, 72)) is False
+
+    def test_disjoint_form_bbox_clips_everything_away(self):
+        outer = ClipTracker((0, 0, 50, 50))
+        inner = ClipTracker(outer.for_form(self._form(bbox=(100, 100, 200, 200)), IDENTITY))
+        # A box spanning both the parent clip and the form's BBox still sees
+        # no visible area.
+        assert inner.clips_away((-1000, -1000, 1000, 1000)) is True
+
+    def test_empty_nested_clip_clips_a_straddling_box_away(self):
+        c = _clip_fed([
+            ("re", [0, 0, 50, 50]), ("W", []), ("n", []),
+            ("re", [100, 100, 50, 50]), ("W", []), ("n", []),
+        ])
+        assert c.clips_away((-1000, -1000, 1000, 1000)) is True
+
+    def test_axis_aligned_form_keeps_an_exact_rect(self):
+        form = self._form(matrix=[2, 0, 0, 2, 10, 20])
+        inner = ClipTracker(ClipTracker((0, 0, 100, 100)).for_form(form, IDENTITY))
+        assert inner.clip == (10.0, 20.0, 100.0, 100.0)

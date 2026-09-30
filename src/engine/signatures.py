@@ -80,7 +80,7 @@ from engine import eutl, msctl, os_trust, stamp_appearance, wincert
 from engine.acroform import form_field_forest
 from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
 from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification, UnjudgeableModification
-from engine.inplace import is_same_file, write_bytes_staged
+from engine.inplace import finish_staged, is_same_file, write_bytes_staged
 from engine.signature_size import raw_signature_size
 from engine.fieldmdp import (
     ACTION_BY_NAME,
@@ -1762,7 +1762,7 @@ def sign_pdf(
             # the same discipline as the valid/intact fields beside it.
             written_certification = certification_of_file(tmp_name)
             written_dss = _dss_counts(tmp_name) if embed_revocation else None
-        os.replace(tmp_name, output_path)
+        finish_staged(Path(tmp_name), Path(output_path))
     except BaseException:
         try:
             os.unlink(tmp_name)

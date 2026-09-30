@@ -13,16 +13,21 @@ with in the file.
 
 import json
 import math
-import queue
 import re
 import sys
 import threading
+from collections import deque
 from contextlib import contextmanager, redirect_stdout
 from contextvars import ContextVar
 from typing import Any, Callable, Iterator, TextIO
 
 _LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 MAX_JSONRPC_LINE_BYTES = 256 * 1024 * 1024
+#: Bounds on requests read but not yet served. At a bound the reader stops
+#: reading, so the host's pipe write blocks instead of the worker's memory
+#: growing; a cancel queued behind that point is read once a request retires.
+MAX_QUEUED_REQUESTS = 256
+MAX_QUEUED_BYTES = 2 * MAX_JSONRPC_LINE_BYTES
 
 
 def _escaped(text: str) -> str:
@@ -212,6 +217,39 @@ def _valid_request_id(req_id: Any) -> bool:
     )
 
 
+class _Inbox:
+    """FIFO between the reader thread and the main thread, bounded by item
+    count and by the wire size of the queued lines. An item is always admitted
+    into an empty inbox, so one line at the size limit still proceeds."""
+
+    def __init__(self, max_items: int, max_bytes: int) -> None:
+        self._items: deque[tuple[str, Any, int]] = deque()
+        self._bytes = 0
+        self._max_items = max_items
+        self._max_bytes = max_bytes
+        self._changed = threading.Condition()
+
+    def put(self, kind: str, value: Any, size: int = 0) -> None:
+        with self._changed:
+            while self._items and (
+                len(self._items) >= self._max_items
+                or self._bytes + size > self._max_bytes
+            ):
+                self._changed.wait()
+            self._items.append((kind, value, size))
+            self._bytes += size
+            self._changed.notify_all()
+
+    def get(self) -> tuple[str, Any]:
+        with self._changed:
+            while not self._items:
+                self._changed.wait()
+            kind, value, size = self._items.popleft()
+            self._bytes -= size
+            self._changed.notify_all()
+            return kind, value
+
+
 class JsonRpcServer:
     """Minimal JSON-RPC 2.0 server over stdin/stdout."""
 
@@ -222,7 +260,7 @@ class JsonRpcServer:
     def register(self, name: str, handler: Callable[..., Any]) -> None:
         self._methods[name] = handler
 
-    def _read(self, input_stream: TextIO, inbox: "queue.Queue[tuple[str, Any]]") -> None:
+    def _read(self, input_stream: TextIO, inbox: _Inbox) -> None:
         """Reader thread. A cancel is applied here, while the main thread may
         be inside the handler it cancels; every other line is queued in
         arrival order. The last item is always ("eof", exception-or-None), so
@@ -231,13 +269,14 @@ class JsonRpcServer:
         failure: BaseException | None = None
         try:
             for line in input_stream:
+                size = len(line)
                 line = line.strip()
                 if not line:
                     continue
                 try:
                     request = json.loads(line, parse_constant=_reject_json_constant)
                 except (ValueError, RecursionError):
-                    inbox.put(("parse-error", None))
+                    inbox.put("parse-error", None)
                     continue
                 if (
                     isinstance(request, dict)
@@ -250,14 +289,14 @@ class JsonRpcServer:
                     continue
                 if isinstance(request, dict) and "id" in request:
                     self.cancels.admit(request.get("id"))
-                inbox.put(("request", request))
+                inbox.put("request", request, size)
         except BaseException as exc:  # noqa: BLE001 - re-raised on the main thread
             failure = exc
         finally:
-            inbox.put(("eof", failure))
+            inbox.put("eof", failure)
 
     def run(self, input_stream: TextIO, output_stream: TextIO) -> None:
-        inbox: "queue.Queue[tuple[str, Any]]" = queue.Queue()
+        inbox = _Inbox(MAX_QUEUED_REQUESTS, MAX_QUEUED_BYTES)
         threading.Thread(
             target=self._read, args=(input_stream, inbox), name="jsonrpc-reader", daemon=True
         ).start()

@@ -94,30 +94,155 @@ def clip_has_area(clip: Rect) -> bool:
     return clip[0] < clip[2] and clip[1] < clip[3]
 
 
-def form_clip(xobj, ctm: Matrix, clip: Optional[Rect]) -> Optional[Rect]:
+Point = tuple[float, float]
+
+
+class ClipRegion(NamedTuple):
+    """A device-space clip region: convex, so the intersection of two stays
+    convex. `poly` is None when the region is exactly the axis-aligned
+    `rect`; otherwise it lists the region's vertices and `rect` is their
+    bounding box. An empty region has `rect` without area (or `poly` with
+    fewer than three vertices): it clips everything away."""
+
+    rect: Rect
+    poly: Optional[tuple[Point, ...]] = None
+
+    @property
+    def empty(self) -> bool:
+        return not clip_has_area(self.rect) or (self.poly is not None and len(self.poly) < 3)
+
+
+EMPTY_REGION = ClipRegion(EMPTY_CLIP, ())
+
+
+def _cross(o: Point, a: Point, b: Point) -> float:
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+
+def _hull(points) -> list:
+    """Convex hull, counter-clockwise, collinear vertices dropped."""
+    pts = sorted(set(points))
+    if len(pts) < 3:
+        return []
+    lower: list = []
+    for p in pts:
+        while len(lower) >= 2 and _cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper: list = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and _cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    hull = lower[:-1] + upper[:-1]
+    return hull if len(hull) >= 3 else []
+
+
+def _rect_poly(rect: Rect) -> list:
+    x0, y0, x1, y1 = rect
+    return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+
+
+def _bbox(points) -> Rect:
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _region_of_points(points) -> ClipRegion:
+    """The convex hull of `points` as a region. The hull contains every path
+    (and every Bezier curve) built on those points, so it is never smaller
+    than the true clip."""
+    hull = _hull(points)
+    if not hull:
+        return EMPTY_REGION
+    box = _bbox(hull)
+    if len(hull) == 4 and all(x in (box[0], box[2]) and y in (box[1], box[3]) for x, y in hull):
+        return ClipRegion(box)
+    return ClipRegion(box, tuple(hull))
+
+
+def _convex_intersection(subject: list, clipper: list) -> list:
+    """Sutherland-Hodgman: `subject` clipped by the convex CCW `clipper`."""
+    out = list(subject)
+    for i in range(len(clipper)):
+        if not out:
+            break
+        a, b = clipper[i], clipper[(i + 1) % len(clipper)]
+        points, out = out, []
+        for j in range(len(points)):
+            cur, prev = points[j], points[j - 1]
+            cur_in = _cross(a, b, cur) >= 0
+            prev_in = _cross(a, b, prev) >= 0
+            if cur_in != prev_in:
+                dx, dy = cur[0] - prev[0], cur[1] - prev[1]
+                ex, ey = b[0] - a[0], b[1] - a[1]
+                denom = ex * dy - ey * dx
+                if denom != 0:
+                    t = (ex * (a[1] - prev[1]) - ey * (a[0] - prev[0])) / denom
+                    out.append((prev[0] + t * dx, prev[1] + t * dy))
+            if cur_in:
+                out.append(cur)
+    return out
+
+
+def intersect_regions(region: Optional[ClipRegion], other: ClipRegion) -> ClipRegion:
+    """`region` narrowed by `other` (None = unbounded)."""
+    if region is None:
+        return other
+    if region.empty or other.empty:
+        return EMPTY_REGION
+    if region.poly is None and other.poly is None:
+        a, b = region.rect, other.rect
+        return ClipRegion((max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])))
+    subject = list(region.poly) if region.poly is not None else _rect_poly(region.rect)
+    clipper = list(other.poly) if other.poly is not None else _rect_poly(other.rect)
+    return _region_of_points(_convex_intersection(subject, clipper))
+
+
+def _separated(poly, bbox: Rect) -> bool:
+    """Separating-axis test of a convex polygon against an axis-aligned box.
+    Touching projections count as separated, as in `rects_intersect`."""
+    box = _rect_poly(bbox)
+    axes = [(1.0, 0.0), (0.0, 1.0)]
+    for i in range(len(poly)):
+        a, b = poly[i], poly[(i + 1) % len(poly)]
+        axes.append((a[1] - b[1], b[0] - a[0]))
+    for ax, ay in axes:
+        pa = [ax * x + ay * y for x, y in poly]
+        pb = [ax * x + ay * y for x, y in box]
+        if max(pa) <= min(pb) or max(pb) <= min(pa):
+            return True
+    return False
+
+
+def form_region(xobj, ctm: Matrix, region: Optional[ClipRegion]) -> Optional[ClipRegion]:
     """The device-space clip a Form XObject's content runs under: the invoking
-    `clip` narrowed by the form's /BBox mapped through /Matrix and `ctm`
+    `region` narrowed by the form's /BBox mapped through /Matrix and `ctm`
     (ISO 32000-2 §8.10.1; /BBox and /Matrix per Table 93). A rotated or skewed
-    BBox narrows by its corners' bounding box, a superset of the true
-    quadrilateral, so content reported clipped is invisible. A composed matrix
-    that overflows or is singular maps the form onto no area, so nothing it
-    draws is visible. An unreadable /Matrix or /BBox leaves `clip` unchanged."""
+    BBox maps to a parallelogram and narrows by that parallelogram, not its
+    bounding box. A composed matrix that overflows or is singular maps the
+    form onto no area, so nothing it draws is visible. An unreadable /Matrix
+    or /BBox leaves `region` unchanged."""
     composed = mat_mult(as_matrix(xobj.get("/Matrix")) or IDENTITY, ctm)
     if not all(math.isfinite(v) for v in composed):
-        return EMPTY_CLIP
+        return EMPTY_REGION
     a, b, c, d, _, _ = composed
     if a * d - b * c == 0:
-        return EMPTY_CLIP
+        return EMPTY_REGION
     try:
         bx0, by0, bx1, by1 = (float(v) for v in xobj.get("/BBox"))
     except (TypeError, ValueError):
-        return clip
-    box = bbox_of_corners_under_matrix(composed, bx0, by0, bx1, by1)
-    if not all(math.isfinite(v) for v in box):
-        return clip
-    if clip is None:
-        return box
-    return (max(clip[0], box[0]), max(clip[1], box[1]), min(clip[2], box[2]), min(clip[3], box[3]))
+        return region
+    corners = [transform_point(composed, x, y) for x, y in
+               ((bx0, by0), (bx1, by0), (bx1, by1), (bx0, by1))]
+    if not all(math.isfinite(v) for p in corners for v in p):
+        return region
+    if (b == 0 and c == 0) or (a == 0 and d == 0):
+        box = ClipRegion(_bbox(corners))
+    else:
+        box = _region_of_points(corners)
+    return intersect_regions(region, box)
 
 
 class TextStateSnapshot(NamedTuple):
@@ -429,24 +554,26 @@ class ClipTracker:
     sits. Before this, clipped-invisible text/images/vectors still listed as
     editable everywhere the shared walk is used.
 
-    The clip is approximated by the clip PATH'S BOUNDING BOX, which is always a
-    SUPERSET of the true clip region (the path itself ⊆ its bbox). So
-    `clips_away(bbox)` returning True — the content's bbox is fully outside the
-    clip bbox — means the content is DEFINITELY invisible; a False can still be
-    clipped by the true (non-rectangular) path, so callers err toward KEEPING
-    content, the safe direction for a listing and for redaction alike.
+    Each clip path is approximated by the CONVEX HULL of its points, which is
+    always a SUPERSET of the true clip region (a path and its Bezier curves lie
+    inside the hull of their points), and nested clips intersect as convex
+    polygons. So `clips_away(bbox)` returning True — the content's bbox does
+    not overlap the region — means the content is DEFINITELY invisible; a
+    False can still be clipped by a non-convex path, so callers err toward
+    KEEPING content, the safe direction for a listing and for redaction alike.
+    A region without area clips everything away.
 
     `feed(operator, operands, ctm)` mirrors redact's original inline tracker:
     q pushes / Q pops the clip (it is graphics state), W|W* arm a pending clip,
     the path-construction ops accumulate device-space points under `ctm`, and a
-    path-ending op intersects the accumulated path's bbox into the clip. `ctm`
+    path-ending op intersects the accumulated path's hull into the clip. `ctm`
     is the CTM in effect at THIS operator — path-point ops never change the CTM,
     so passing the current `GraphicsTextState.ctm` (fed BEFORE its own `feed`)
     is correct. The clip is stored in DEVICE space, so q/Q save/restore need no
     re-transformation (the clip on the physical page does not move when the CTM
     is popped).
 
-    `base_clip` seeds the clip a nested Form XObject INHERITS from its invoking
+    `base_clip` (a `ClipRegion`, or a Rect) seeds the clip a nested Form XObject INHERITS from its invoking
     `Do` (a form runs in the caller's graphics state, ISO 32000 §8.10.2). The
     listers pass the parent's device-space clip so a form drawn wholly outside
     it flags its content clipped; redaction keeps the default None (unbounded)
@@ -457,11 +584,23 @@ class ClipTracker:
     _PATH_PT_OPS = ("m", "l", "c", "v", "y", "re", "h")
     _PATH_END_OPS = ("n", "f", "F", "f*", "S", "s", "B", "B*", "b", "b*")
 
-    def __init__(self, base_clip: Optional[Rect] = None):
-        self.clip: Optional[Rect] = base_clip  # None = unbounded (no clip set)
+    def __init__(self, base_clip=None):
+        # None = unbounded (no clip set); a bare Rect seeds an exact rectangle.
+        if base_clip is not None and not isinstance(base_clip, ClipRegion):
+            base_clip = ClipRegion(tuple(base_clip))
+        self.region: Optional[ClipRegion] = base_clip
         self._stack: list = []
         self._pending = False  # a W/W* seen, awaiting the path-ending op
         self._pts: list = []  # path construction points, device space
+
+    @property
+    def clip(self) -> Optional[Rect]:
+        """The region's bounding box; without area when the region is empty."""
+        return None if self.region is None else self.region.rect
+
+    def for_form(self, xobj, ctm: Matrix) -> Optional[ClipRegion]:
+        """The region a Form XObject invoked here runs under."""
+        return form_region(xobj, ctm, self.region)
 
     @staticmethod
     def _pts_under_ctm(op: str, operands: list, ctm: Matrix) -> list:
@@ -480,28 +619,17 @@ class ClipTracker:
 
     def feed(self, operator: str, operands: list, ctm: Matrix) -> None:
         if operator == "q":
-            self._stack.append(self.clip)
+            self._stack.append(self.region)
         elif operator == "Q":
-            self.clip = self._stack.pop() if self._stack else None
+            self.region = self._stack.pop() if self._stack else None
         elif operator in self._PATH_PT_OPS:
             self._pts.extend(self._pts_under_ctm(operator, operands, ctm))
         elif operator in ("W", "W*"):
             self._pending = True
         elif operator in self._PATH_END_OPS:
-            if self._pending and self._pts:
-                xs = [p[0] for p in self._pts]
-                ys = [p[1] for p in self._pts]
-                path_box = (min(xs), min(ys), max(xs), max(ys))
-                self.clip = (
-                    path_box
-                    if self.clip is None
-                    else (
-                        max(self.clip[0], path_box[0]),
-                        max(self.clip[1], path_box[1]),
-                        min(self.clip[2], path_box[2]),
-                        min(self.clip[3], path_box[3]),
-                    )
-                )
+            if self._pending and self._pts and all(
+                    math.isfinite(v) for p in self._pts for v in p):
+                self.region = intersect_regions(self.region, _region_of_points(self._pts))
             self._pending = False
             self._pts = []
 
@@ -510,6 +638,10 @@ class ClipTracker:
         DEFINITELY invisible. An unbounded clip (None) never clips anything
         away. Uses the shared `rects_intersect` predicate so the boundary case
         agrees with every other clip/region test."""
-        if self.clip is None:
+        if self.region is None:
             return False
-        return not rects_intersect(bbox, self.clip)
+        if self.region.empty:
+            return True
+        if self.region.poly is None:
+            return not rects_intersect(bbox, self.region.rect)
+        return _separated(self.region.poly, bbox)

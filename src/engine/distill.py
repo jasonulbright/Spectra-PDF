@@ -29,6 +29,7 @@ from engine.credentials import open_pdf
 
 from engine import budget
 from engine.acroform import adopt_orphan_widget_fields
+from engine.inplace import finish_staged
 from engine.pdf_save import save_pdf
 
 # Reuses compress.py's preset vocabulary; 'default' emits no
@@ -222,7 +223,7 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "") 
         # The replace happens after the reading handle closes — Windows
         # refuses to replace a file the process still holds open.
         if adopted_tmp is not None:
-            os.replace(adopted_tmp, output_path)
+            finish_staged(Path(adopted_tmp), Path(output_path))
             adopted_tmp = None
     except RuntimeError:
         raise

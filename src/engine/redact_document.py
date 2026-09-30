@@ -755,12 +755,8 @@ MIN_WORD_ALNUM = 4
 # Characters of an unspaced script (Han, kana, Thai) carry a word each far
 # more often; one character alone matches everywhere, two is the floor.
 MIN_UNSPACED_CHARS = 2
-MAX_TERMS = 1000
 MAX_REPORT = 500
 MAX_TREE_DEPTH = 64
-MAX_TREE_ENTRIES = 100_000
-MAX_OUTLINE_ITEMS = 100_000
-MAX_WALK_OBJECTS = 1_000_000
 MAX_TEXT_STREAM_BYTES = 8 * 1024 * 1024
 # ASCII, so every standard font can draw it in a regenerated field appearance.
 REPLACEMENT = "***"
@@ -771,21 +767,22 @@ _STRING_KEYS_ANNOT = ("/Contents", "/T", "/Subj", "/RC", "/TU")
 # reset lists and parent-qualified names find it: reported, never rewritten.
 _FIELD_NAME_KEYS = ("/T", "/TM")
 _STRING_KEYS_FIELD = ("/TU", "/V", "/DV")
-# Info keys that hold dates or names, not text a person wrote.
-_INFO_SKIP = frozenset({"/CreationDate", "/ModDate", "/Trapped"})
-# XMP properties that hold identifiers or format facts, by lower-cased local
-# name; a name ending in "id" (stEvt:instanceID, xmpMM:DocumentID) is one too.
-_XMP_SKIP = frozenset({"about", "format", "renditionclass", "part", "conformance",
-                       "pdfversion"})
-# An XMP Date (ISO 8601 profile, XMP Part 1 8.2.1.2) as a whole value.
-_XMP_DATE = re.compile(
-    r"\s*\d{4}(-\d{2}(-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?)?)?\s*")
+# Info keys whose value has a fixed syntax (a date string, §7.9.4): a
+# matching value is removed whole, since a scrubbed one is no longer a date.
+_INFO_TYPED = frozenset({"/CreationDate", "/ModDate"})
+# XMP properties whose value has a fixed syntax (a date, an identifier, a
+# format fact), by lower-cased local name; a name starting or ending in
+# "date" or ending in "id" (xmp:CreateDate, photoshop:DateCreated,
+# stEvt:instanceID) is one too. A matching one is removed
+# whole, since a scrubbed value would no longer parse as its type.
+_XMP_TYPED = frozenset({"about", "format", "renditionclass", "part", "conformance",
+                        "pdfversion", "when"})
 
 
-def _xmp_skipped(name: str, value: str) -> bool:
+def _xmp_typed(name: str) -> bool:
     lname = name.lower()
-    return (lname.endswith("date") or lname.endswith("id") or lname in _XMP_SKIP
-            or lname == "when" or bool(_XMP_DATE.fullmatch(value)))
+    return (lname.startswith("date") or lname.endswith("date") or lname.endswith("id")
+            or lname in _XMP_TYPED)
 _STRING_KEYS_FILESPEC = ("/F", "/UF", "/Desc")
 
 
@@ -859,13 +856,12 @@ def removed_terms(pdf, by_page: dict) -> list[str]:
                 start = None
             gap = True
 
-        def add(term: str) -> bool:
+        def add(term: str) -> None:
             term = normalize_index_text(term)
             folded = term.casefold()
             if folded not in seen:
                 seen.add(folded)
                 terms.append(term)
-            return len(terms) >= MAX_TERMS
 
         phrase: list = []
         for unit in units + [("", False, False, True)]:
@@ -876,12 +872,11 @@ def removed_terms(pdf, by_page: dict) -> list[str]:
                 joined = "".join((" " if i and u[3] else "") + u[0] for i, u in enumerate(phrase))
                 words = _phrase_words(phrase)
                 if any(_word_is_term(w) for w in words):
-                    if add(joined):
-                        return terms
+                    add(joined)
                 if len(words) > 1:
                     for word in words:
-                        if _word_is_term(word) and add(_word_core(word)):
-                            return terms
+                        if _word_is_term(word):
+                            add(_word_core(word))
                 phrase = []
     return terms
 
@@ -949,23 +944,44 @@ class Matcher:
     def __bool__(self) -> bool:
         return self.pattern is not None
 
+    @staticmethod
+    def _clusters(text: str) -> list[list[int]]:
+        """[start, end) source ranges that normalize as one unit: a base and
+        every following character that composes with it. Normalizing one code
+        point at a time leaves a decomposed base + combining mark unequal to
+        the composed term."""
+        clusters: list[list[int]] = []
+        last = ""
+        for index, ch in enumerate(text):
+            if ch == "\u00ad":
+                continue
+            joins = bool(clusters) and bool(last) and (
+                unicodedata.combining(ch) != 0
+                or len(unicodedata.normalize("NFC", last + ch))
+                < len(unicodedata.normalize("NFC", last)) + len(unicodedata.normalize("NFC", ch)))
+            if joins:
+                clusters[-1][1] = index + 1
+            else:
+                clusters.append([index, index + 1])
+            last = ch
+        return clusters
+
     def _normalized(self, text: str):
         chars: list[str] = []
-        origin: list[int] = []
+        origin: list[tuple[int, int]] = []
         in_space = True
-        for index, ch in enumerate(text):
-            if ch == "­":
-                continue
-            for expanded in unicodedata.normalize("NFKC", ch):
-                if expanded.isspace() or expanded in ("​", "﻿"):
+        for start, end in self._clusters(text):
+            piece = text[start:end].replace("\u00ad", "")
+            for expanded in unicodedata.normalize("NFKC", piece):
+                if expanded.isspace() or expanded in ("\u200b", "\ufeff"):
                     if not in_space:
                         chars.append(" ")
-                        origin.append(index)
+                        origin.append((start, end))
                         in_space = True
                     continue
                 in_space = False
                 chars.append(expanded)
-                origin.append(index)
+                origin.append((start, end))
         return "".join(chars), origin
 
     def spans(self, text: str) -> list[tuple[int, int]]:
@@ -976,7 +992,7 @@ class Matcher:
         for match in self.pattern.finditer(norm):
             if match.end() <= match.start():
                 continue
-            out.append((origin[match.start()], origin[match.end() - 1] + 1))
+            out.append((origin[match.start()][0], origin[match.end() - 1][1]))
         return out
 
     def hits(self, text: str) -> bool:
@@ -1057,10 +1073,16 @@ class _Pass:
         self.renamed_destinations = 0
         self.changed = 0
         self.truncated = False
+        # Places whose content could not be read (over a size bound, or not
+        # parseable): the scan did not cover them.
+        self.unread: list[str] = []
         self.fields_changed: list = []
 
     def wants(self, kind: str) -> bool:
         return not self.fix or kind in self.kinds
+
+    def unreadable(self, kind: str, where: str) -> None:
+        self.unread.append(f"{kind}: {where}")
 
     def note(self, kind: str, where: str, text: str) -> None:
         occurrences = max(len(self.matcher.spans(text)), 1)
@@ -1079,6 +1101,7 @@ class _Pass:
         if isinstance(value, pikepdf.Stream):
             decoded = _stream_text(value)
             if decoded is None:
+                self.unreadable(kind, where)
                 return False
             text, encoding = decoded
             if not self.matcher.hits(text):
@@ -1102,13 +1125,15 @@ class _Pass:
 
 
 def _tree_entries(root) -> list[tuple[str, object, object]]:
-    """(decoded key, key object, value) of every leaf entry, cycle-safe."""
+    """(decoded key, key object, value) of every leaf entry, cycle-safe.
+    Complete at any size or depth: a rename rewrites the tree from this list,
+    so an entry missing here is an entry deleted from the file."""
     out: list = []
     seen: set = set()
-    stack = [(root, 0)]
+    stack = [root]
     while stack:
-        node, depth = stack.pop()
-        if not isinstance(node, pikepdf.Dictionary) or depth > MAX_TREE_DEPTH:
+        node = stack.pop()
+        if not isinstance(node, pikepdf.Dictionary):
             continue
         try:
             if node.is_indirect:
@@ -1123,12 +1148,9 @@ def _tree_entries(root) -> list[tuple[str, object, object]]:
                 text = _as_text(names[i])
                 if text is not None:
                     out.append((text, names[i], names[i + 1]))
-                if len(out) >= MAX_TREE_ENTRIES:
-                    return out
         kids = node.get("/Kids")
         if isinstance(kids, pikepdf.Array):
-            for kid in reversed(list(kids)):
-                stack.append((kid, depth + 1))
+            stack.extend(reversed(list(kids)))
     return out
 
 
@@ -1193,10 +1215,9 @@ def _outlines(pass_: _Pass, pdf) -> None:
         return
     seen: set = set()
     stack = [(root.get("/First"), "")]
-    count = 0
-    while stack and count < MAX_OUTLINE_ITEMS:
+    while stack:
         item, path = stack.pop()
-        while isinstance(item, pikepdf.Dictionary) and count < MAX_OUTLINE_ITEMS:
+        while isinstance(item, pikepdf.Dictionary):
             try:
                 key = tuple(item.objgen) if item.is_indirect else id(item)
             except Exception:
@@ -1204,7 +1225,6 @@ def _outlines(pass_: _Pass, pdf) -> None:
             if key in seen:
                 break
             seen.add(key)
-            count += 1
             title = _as_text(item.get("/Title")) or ""
             where = f"{path} > {title}" if path else title
             pass_.string_key("outline", where, item, "/Title")
@@ -1229,10 +1249,10 @@ def _threads(pass_: _Pass, pdf) -> None:
 def _page_labels(pass_: _Pass, pdf) -> None:
     root = pdf.Root.get("/PageLabels")
     seen: set = set()
-    stack = [(root, 0)]
+    stack = [root]
     while stack:
-        node, depth = stack.pop()
-        if not isinstance(node, pikepdf.Dictionary) or depth > MAX_TREE_DEPTH:
+        node = stack.pop()
+        if not isinstance(node, pikepdf.Dictionary):
             continue
         try:
             if node.is_indirect:
@@ -1253,8 +1273,7 @@ def _page_labels(pass_: _Pass, pdf) -> None:
                     pass_.string_key("page_label", str(start), label, "/P")
         kids = node.get("/Kids")
         if isinstance(kids, pikepdf.Array):
-            for kid in kids:
-                stack.append((kid, depth + 1))
+            stack.extend(kids)
 
 
 def _info(pass_: _Pass, pdf) -> None:
@@ -1262,8 +1281,16 @@ def _info(pass_: _Pass, pdf) -> None:
     if not isinstance(info, pikepdf.Dictionary):
         return
     for key in list(info.keys()):
-        if key not in _INFO_SKIP:
+        if key not in _INFO_TYPED:
             pass_.string_key("metadata", key[1:], info, key)
+            continue
+        value = info.get(key)
+        text = _as_text(value) if isinstance(value, pikepdf.String) else None
+        if text is not None and pass_.matcher.hits(text):
+            pass_.note("metadata", key[1:], text)
+            if pass_.fix and "metadata" in pass_.kinds:
+                del info[key]
+                pass_.changed += 1
 
 
 def _xmp_parse(body: bytes):
@@ -1292,33 +1319,47 @@ def _xmp(pass_: _Pass, pdf) -> None:
     try:
         body, too_large = bounded_read(metadata, MAX_METADATA_BYTES)
         if body is None or too_large:
+            pass_.unreadable("metadata", "XMP")
             return
         tree = _xmp_parse(bytes(body))
     except Exception:
+        pass_.unreadable("metadata", "XMP")
         return
+    fix = pass_.fix and "metadata" in pass_.kinds
     changed = False
+    dropped: list = []
     for node in tree.getroot().iter():
         if not isinstance(node.tag, str):
             continue
+        prop = node
         where = _local(node.tag)
         parent = node.getparent()
         while where in ("li", "Alt", "Seq", "Bag") and parent is not None:
+            prop = parent
             where = _local(parent.tag)
             parent = parent.getparent()
-        if node.text and not _xmp_skipped(where, node.text) and pass_.matcher.hits(node.text):
+        if node.text and pass_.matcher.hits(node.text):
             pass_.note("metadata", where, node.text)
-            if pass_.fix and "metadata" in pass_.kinds:
-                node.text = pass_.matcher.scrub(node.text)
+            if fix:
+                if _xmp_typed(where) and prop.getparent() is not None:
+                    dropped.append(prop)
+                else:
+                    node.text = pass_.matcher.scrub(node.text)
                 changed = True
         for attr, value in list(node.attrib.items()):
             name = _local(attr)
-            if _xmp_skipped(name, value):
-                continue
             if pass_.matcher.hits(value):
                 pass_.note("metadata", name, value)
-                if pass_.fix and "metadata" in pass_.kinds:
-                    node.attrib[attr] = pass_.matcher.scrub(value)
+                if fix:
+                    if _xmp_typed(name):
+                        del node.attrib[attr]
+                    else:
+                        node.attrib[attr] = pass_.matcher.scrub(value)
                     changed = True
+    for prop in dropped:
+        holder = prop.getparent()
+        if holder is not None:
+            holder.remove(prop)
     if changed:
         metadata.write(etree.tostring(tree, encoding="utf-8", xml_declaration=True))
         pass_.changed += 1
@@ -1358,7 +1399,7 @@ def _fields(pass_: _Pass, pdf) -> None:
     stack = [(field, "", 0) for field in reversed(list(acro.get("/Fields") or []))]
     while stack:
         field, parent, depth = stack.pop()
-        if not isinstance(field, pikepdf.Dictionary) or depth > MAX_TREE_DEPTH:
+        if not isinstance(field, pikepdf.Dictionary):
             continue
         try:
             key = tuple(field.objgen) if field.is_indirect else id(field)
@@ -1479,6 +1520,8 @@ def _script_hits(pass_: _Pass, action) -> str | None:
         return None
     if isinstance(code, pikepdf.Stream):
         decoded = _stream_text(code)
+        if decoded is None:
+            pass_.unreadable("javascript", "action")
         text = decoded[0] if decoded else None
     else:
         text = _as_text(code) if isinstance(code, pikepdf.String) else None
@@ -1513,6 +1556,7 @@ def _kept_chain(pass_: _Pass, item, fix: bool, depth: int = 0, seen=None) -> lis
     /Next successors take its place, so the actions after it still run."""
     seen = set() if seen is None else seen
     if depth > MAX_TREE_DEPTH:
+        pass_.unreadable("javascript", "action")
         return [item] if isinstance(item, pikepdf.Dictionary) else list(item or [])
     items = [item] if isinstance(item, pikepdf.Dictionary) else (
         list(item) if isinstance(item, pikepdf.Array) else [])
@@ -1613,14 +1657,10 @@ def _entries(holder) -> list:
 def _walk_dicts(pdf):
     """Every dictionary in the file, direct or indirect, each once."""
     seen: set = set()
-    count = 0
     for obj in pdf.objects:
         stack = [obj]
         while stack:
             item = stack.pop()
-            count += 1
-            if count > MAX_WALK_OBJECTS:
-                return
             if not isinstance(item, (pikepdf.Dictionary, pikepdf.Stream, pikepdf.Array)):
                 continue
             # Direct objects form a tree, so only an indirect one can be met
@@ -1699,17 +1739,20 @@ def residue_kinds(value) -> list:
 def find_residue(pdf, terms) -> dict:
     """Every place outside page content that still spells a term.
     `residue` is capped at `MAX_REPORT` rows; `residue_counts` counts every
-    occurrence per kind, so a caller removes by kind, never by row."""
+    occurrence per kind, so a caller removes by kind, never by row.
+    `residue_unread` names each place the scan could not read (over a size
+    bound, or unparseable); a non-empty list means the scan is incomplete."""
     matcher = Matcher(terms)
     if not matcher:
         return {"residue": [], "residue_truncated": False, "residue_counts": {},
-                "residue_report_only": {}}
+                "residue_report_only": {}, "residue_unread": []}
     pass_ = _Pass(matcher)
     _run(pass_, pdf)
     counts = {k: n for k, n in pass_.counts.items() if k not in REPORT_ONLY_KINDS}
     report_only = {k: n for k, n in pass_.counts.items() if k in REPORT_ONLY_KINDS}
     return {"residue": pass_.found, "residue_truncated": pass_.truncated,
-            "residue_counts": counts, "residue_report_only": report_only}
+            "residue_counts": counts, "residue_report_only": report_only,
+            "residue_unread": sorted(set(pass_.unread))}
 
 
 def scrub_residue(pdf, terms, kinds=None, font_dir: str = "") -> dict:

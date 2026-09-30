@@ -339,17 +339,26 @@ def test_stage_name_carries_owner_pid(tmp_path):
 
 
 def _fail_replace_file(monkeypatch, error: int) -> None:
+    """ReplaceFileW fails with ``error``; every other export is the real one."""
     import ctypes
 
+    real_dll = ctypes.WinDLL
+
+    class ReplaceFileW:
+        argtypes = restype = None
+
+        def __new__(cls, *args):
+            ctypes.set_last_error(error)
+            return 0
+
     class Kernel:
-        class ReplaceFileW:
-            argtypes = restype = None
+        def __init__(self, real):
+            self._real = real
 
-            def __new__(cls, *args):
-                return 0
+        def __getattr__(self, name):
+            return ReplaceFileW if name == "ReplaceFileW" else getattr(self._real, name)
 
-    monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **k: Kernel)
-    monkeypatch.setattr(ctypes, "get_last_error", lambda: error)
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **k: Kernel(real_dll(*a, **k)))
 
 
 @windows_only
@@ -360,6 +369,53 @@ def test_unsupported_replace_falls_back_to_rename(tmp_path, monkeypatch, error):
     inplace.write_bytes_staged(target, b"new")
     monkeypatch.undo()
     assert target.read_bytes() == b"new"
+    assert _leftovers(tmp_path, {"doc.pdf"}) == []
+
+
+@windows_only
+@pytest.mark.parametrize("error", [1, 50, 87, 1175])
+def test_unsupported_replace_keeps_dacl_entry_attributes_stream_and_creation_time(
+    tmp_path, monkeypatch, error
+):
+    target = _existing(tmp_path)
+    grant = subprocess.run(["icacls", str(target), "/grant", "*S-1-5-32-545:(R)"],
+                           capture_output=True, text=True)
+    assert grant.returncode == 0, grant.stdout + grant.stderr
+    Path(str(target) + ":note").write_bytes(b"stream kept")
+    _set_attributes(target, FILE_ATTRIBUTE_HIDDEN)
+    created = os.stat(target).st_birthtime_ns
+    _fail_replace_file(monkeypatch, error)
+    inplace.write_bytes_staged(target, b"new")
+    monkeypatch.undo()
+    assert target.read_bytes() == b"new"
+    acl = subprocess.run(["icacls", str(target)], capture_output=True, text=True).stdout
+    assert r"BUILTIN\Users:(R)" in acl, acl
+    assert os.stat(target).st_file_attributes & FILE_ATTRIBUTE_HIDDEN
+    assert Path(str(target) + ":note").read_bytes() == b"stream kept"
+    assert os.stat(target).st_birthtime_ns == created
+    assert _leftovers(tmp_path, {"doc.pdf"}) == []
+
+
+@windows_only
+def test_unsupported_replace_that_cannot_carry_metadata_leaves_the_target(
+    tmp_path, monkeypatch
+):
+    target = _existing(tmp_path)
+    Path(str(target) + ":note").write_bytes(b"stream kept")
+    _fail_replace_file(monkeypatch, 50)
+    real_open = open
+
+    def refuse_streams(path, mode="r", *a, **k):
+        if str(path).startswith(str(tmp_path / ".spectra-stage-")) and ":" in Path(str(path)).name:
+            raise PermissionError(13, "stream refused", str(path))
+        return real_open(path, mode, *a, **k)
+
+    monkeypatch.setattr("builtins.open", refuse_streams)
+    with pytest.raises(PermissionError):
+        inplace.write_bytes_staged(target, b"new")
+    monkeypatch.undo()
+    assert target.read_bytes() == OLD
+    assert Path(str(target) + ":note").read_bytes() == b"stream kept"
     assert _leftovers(tmp_path, {"doc.pdf"}) == []
 
 
