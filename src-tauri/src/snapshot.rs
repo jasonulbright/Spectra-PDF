@@ -274,8 +274,7 @@ pub fn save_snapshot_png(request: Request<'_>) -> Result<String, String> {
 /// The body must carry the PNG signature and the path must name a `.png`.
 /// The file is published as an export (see
 /// [`crate::file_publication::export_bytes`]): an existing file the save
-/// dialog offered to overwrite stays whole until the new one lands, except in
-/// a folder that refuses the stage a new file.
+/// dialog offered to overwrite stays whole until the new one lands.
 fn write_png(body: &[u8], path: impl FnOnce() -> Result<String, String>) -> Result<String, String> {
     if body.len() < PNG_SIGNATURE.len() || body[..PNG_SIGNATURE.len()] != PNG_SIGNATURE {
         return Err("snapshot body is not a PNG".to_string());
@@ -423,21 +422,25 @@ mod tests {
     }
 
     /// A folder that lets the user change the chosen picture but not create a
-    /// file beside it: the snapshot is written into the picture in place.
+    /// file beside it: the snapshot refuses and leaves the picture whole.
     #[cfg(windows)]
     #[test]
-    fn a_snapshot_is_rewritten_where_the_folder_refuses_a_new_file() {
+    fn a_snapshot_refuses_untouched_where_the_folder_refuses_a_new_file() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("shot.png");
-        std::fs::write(&target, png(b"the previous shot, longer than the new one")).unwrap();
+        let earlier = png(b"the previous shot, longer than the new one");
+        std::fs::write(&target, &earlier).unwrap();
+        let id = crate::staging::file_id(&target);
         let path = target.to_string_lossy().to_string();
 
         {
             let _denied = crate::staging::Denied::create(dir.path(), &[&target]);
-            assert_eq!(write_png(&png(b"a new shot"), || Ok(path.clone())).unwrap(), path);
+            let refused = write_png(&png(b"a new shot"), || Ok(path.clone())).unwrap_err();
+            assert!(refused.contains("replaced safely"), "{refused}");
         }
 
-        assert_eq!(std::fs::read(&target).unwrap(), png(b"a new shot"));
+        assert_eq!(std::fs::read(&target).unwrap(), earlier);
+        assert_eq!(crate::staging::file_id(&target), id);
         let beside: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name())

@@ -363,6 +363,9 @@ export const WORKBENCH_STRINGS = {
   'app.save.failedTitle': 'Could Not Save',
   'app.save.failed':
     '"{{name}}" was not saved and is unchanged on disk. {{reason}}',
+  // The folder refuses a new file beside the document or its replacement.
+  'app.save.replaceUnsafe':
+    '"{{name}}" was not saved and is unchanged on disk. This folder does not allow the file to be replaced safely. Choose another folder or use Save As.',
   // A closed window's engine worker ran past the drain deadline while writing.
   'app.engine.writeStoppedTitle': 'Operation Stopped',
   'app.engine.writeStopped':

@@ -55,7 +55,9 @@ def test_unprovable_downgrade_never_publishes(tmp_path, destination):
         os.link(source, output)
     previous = output.read_bytes() if output.exists() else None
     files = set(tmp_path.iterdir())
-    with pytest.raises(ValueError, match='cannot be lowered'):
+    # A hard-linked output is refused before the downgrade is evaluated.
+    refusal = (PermissionError, 'hard links') if destination == 'hardlink' else (ValueError, 'cannot be lowered')
+    with pytest.raises(refusal[0], match=refusal[1]):
         reversion.set_pdf_version(str(source), str(output), '1.7')
     assert source.read_bytes() == before
     assert (output.read_bytes() if output.exists() else None) == previous

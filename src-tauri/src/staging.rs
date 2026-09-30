@@ -406,75 +406,29 @@ pub(crate) fn refused_for_create(refused: &io::Error, dir: &Path) -> bool {
     refused.kind() == io::ErrorKind::PermissionDenied && create_denied(dir)
 }
 
-/// A file that [`overwrite_in_place`] can rewrite from its first byte.
-trait InPlace: Write + io::Seek {
-    fn set_len(&mut self, len: u64) -> io::Result<()>;
-    fn sync_all(&mut self) -> io::Result<()>;
-}
-
-impl InPlace for File {
-    fn set_len(&mut self, len: u64) -> io::Result<()> {
-        File::set_len(self, len)
-    }
-    fn sync_all(&mut self) -> io::Result<()> {
-        File::sync_all(self)
-    }
-}
-
-fn write_whole(file: &mut impl InPlace, bytes: &[u8]) -> io::Result<()> {
-    file.seek(io::SeekFrom::Start(0))?;
-    file.write_all(bytes)?;
-    file.set_len(bytes.len() as u64)?;
-    file.sync_all()
-}
-
-/// Rewrite `file` to exactly `bytes`. On failure `previous` is written back
-/// and the original error is returned. An in-place rewrite is not atomic:
-/// when the restore fails too, the error keeps the original kind and names
-/// both failures, and the record may hold the new prefix over the previous
-/// tail. A crash mid-write leaves the same state.
-fn overwrite_in_place(file: &mut impl InPlace, previous: &[u8], bytes: &[u8]) -> io::Result<()> {
-    let failed = match write_whole(file, bytes) {
-        Ok(()) => return Ok(()),
-        Err(failed) => failed,
-    };
-    match write_whole(file, previous) {
-        Ok(()) => Err(failed),
-        Err(restore) => Err(io::Error::new(
-            failed.kind(),
-            format!("in-place write failed ({failed}); restoring the previous bytes failed ({restore}); the file may be torn"),
-        )),
-    }
-}
-
-/// Write `bytes` over the existing `record` in place, under the record's
-/// lock, restoring the previous bytes when the write fails. A record that
-/// does not open for both reading and writing leaves `refusal` standing.
-fn rewrite_existing(record: &Path, refusal: io::Error, bytes: &[u8]) -> io::Result<()> {
-    use std::io::Read;
-    let lock = record_lock(record);
-    let _serialized = lock.lock().unwrap_or_else(|e| e.into_inner());
-    let Ok(mut file) = std::fs::OpenOptions::new().read(true).write(true).open(record) else {
-        return Err(refusal);
-    };
-    let mut previous = Vec::new();
-    file.read_to_end(&mut previous)?;
-    overwrite_in_place(&mut file, &previous, bytes)
+/// The refusal for an export whose folder allows no crash-safe replacement:
+/// a write into the live file would leave it torn if the process died part-way.
+pub(crate) fn replace_unsafe(record: &Path) -> io::Error {
+    let name = record.file_name().unwrap_or(record.as_os_str()).to_string_lossy();
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!(
+            "The folder does not allow {name} to be replaced safely. Choose a folder where new files can be created."
+        ),
+    )
 }
 
 /// Replace `record` with `bytes` like [`write_record`], for a file written to
 /// a folder the user chose.
 ///
 /// A folder can let a user change a file and still refuse to create one
-/// beside it, or refuse to replace it by a rename. When `record` exists and
-/// opens for writing, and its folder refuses the stage for the first reason
-/// (see [`refused_for_create`]) or its replacement for the second (see
-/// [`replace_denied`], asked before any stage exists), the bytes are written
-/// into it in place.
+/// beside it (see [`refused_for_create`]), or refuse to replace it by a rename
+/// (see [`replace_denied`], asked before any stage exists). Either refusal is
+/// returned as [`replace_unsafe`]: the only other way to land the bytes is a
+/// write into the live file, which a process death leaves torn.
 pub(crate) fn export_record(record: &Path, bytes: &[u8]) -> io::Result<()> {
     if replace_refused(record) {
-        let refusal = io::Error::from(io::ErrorKind::PermissionDenied);
-        return rewrite_existing(record, refusal, bytes);
+        return Err(replace_unsafe(record));
     }
     let mut create_refused = false;
     let staged = replace_record(record, |staged| {
@@ -486,19 +440,16 @@ pub(crate) fn export_record(record: &Path, bytes: &[u8]) -> io::Result<()> {
         Ok(file)
     });
     match staged {
-        Err(refusal) if create_refused => {
-            rewrite_existing(record, refusal, bytes)
-        }
+        Err(_) if create_refused => Err(replace_unsafe(record)),
         landed => landed,
     }
 }
 
-/// Replace `record` with a copy of `source` like [`copy_record`], with the
-/// in-place write [`export_record`] falls back to. Returns the byte count.
+/// Replace `record` with a copy of `source` like [`copy_record`], refusing
+/// as [`export_record`] does. Returns the byte count.
 pub(crate) fn export_copy(source: &Path, record: &Path) -> io::Result<u64> {
     if replace_refused(record) {
-        let refusal = io::Error::from(io::ErrorKind::PermissionDenied);
-        return copy_in_place(source, record, refusal);
+        return Err(replace_unsafe(record));
     }
     let mut copied = 0;
     let mut create_refused = false;
@@ -511,7 +462,7 @@ pub(crate) fn export_copy(source: &Path, record: &Path) -> io::Result<u64> {
     });
     match staged {
         Ok(()) => Ok(copied),
-        Err(refusal) if create_refused => copy_in_place(source, record, refusal),
+        Err(_) if create_refused => Err(replace_unsafe(record)),
         Err(refusal) => Err(refusal),
     }
 }
@@ -528,14 +479,6 @@ pub(crate) fn export_copy_new(source: &Path, record: &Path) -> io::Result<u64> {
         Ok(held)
     })?;
     Ok(copied)
-}
-
-/// Copy `source` into the existing `record` through [`rewrite_existing`].
-/// `source` is read whole before `record` is touched. Returns the byte count.
-fn copy_in_place(source: &Path, record: &Path, refusal: io::Error) -> io::Result<u64> {
-    let bytes = std::fs::read(source)?;
-    rewrite_existing(record, refusal, &bytes)?;
-    Ok(bytes.len() as u64)
 }
 
 /// A record's bytes, or `None` when no record exists. Every other failure is
@@ -1347,7 +1290,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn an_export_is_rewritten_in_place_where_the_folder_refuses_a_new_file() {
+    fn an_export_is_refused_untouched_where_the_folder_refuses_a_new_file() {
         let dir = tempfile::tempdir().unwrap();
         let report = dir.path().join("scan-test-report.json");
         let scan = dir.path().join("page-0000.bmp");
@@ -1356,153 +1299,30 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
         let page = elsewhere.path().join("page-0000.bmp");
         std::fs::write(&page, b"BM this run").unwrap();
+        let (report_file, scan_file) = (file_id(&report), file_id(&scan));
 
         {
             let _denied = Denied::create(dir.path(), &[&report, &scan]);
-            export_record(&report, b"this report").unwrap();
-            assert_eq!(export_copy(&page, &scan).unwrap(), 11);
+            let refused = export_record(&report, b"this report").unwrap_err();
+            assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied);
+            assert!(refused.to_string().contains("scan-test-report.json"));
+            assert!(refused.to_string().contains("replaced safely"));
+            let refused = export_copy(&page, &scan).unwrap_err();
+            assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied);
+            assert!(refused.to_string().contains("replaced safely"));
             let new = dir.path().join("new-report.json");
             let refused = export_record(&new, b"needs a new file").unwrap_err();
             assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied);
-            assert!(write_record(&report, b"not an export").is_err());
         }
 
-        assert_eq!(std::fs::read(&report).unwrap(), b"this report");
-        assert_eq!(std::fs::read(&scan).unwrap(), b"BM this run");
+        assert_eq!(std::fs::read(&report).unwrap(), b"an earlier and longer report");
+        assert_eq!(std::fs::read(&scan).unwrap(), b"BM an earlier and longer page");
+        assert_eq!(file_id(&report), report_file);
+        assert_eq!(file_id(&scan), scan_file);
         assert_eq!(
             names(dir.path()),
             ["page-0000.bmp", "scan-test-report.json"].map(String::from).into()
         );
-    }
-
-    #[test]
-    fn an_unreadable_source_leaves_the_in_place_record_untouched() {
-        let dir = tempfile::tempdir().unwrap();
-        let record = dir.path().join("page-0000.bmp");
-        std::fs::write(&record, b"BM the earlier page").unwrap();
-        let missing = dir.path().join("absent.bmp");
-        let refusal = io::Error::from(io::ErrorKind::PermissionDenied);
-        assert!(copy_in_place(&missing, &record, refusal).is_err());
-        assert_eq!(std::fs::read(&record).unwrap(), b"BM the earlier page");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn a_record_that_does_not_open_for_reading_is_refused_and_untouched() {
-        let dir = tempfile::tempdir().unwrap();
-        let record = dir.path().join("page-0000.bmp");
-        std::fs::write(&record, b"BM the earlier page").unwrap();
-        {
-            let _denied = Denied::only(&record, "(RD)");
-            let refusal = io::Error::from(io::ErrorKind::PermissionDenied);
-            let err = rewrite_existing(&record, refusal, b"BM new").unwrap_err();
-            assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
-        }
-        assert_eq!(std::fs::read(&record).unwrap(), b"BM the earlier page");
-    }
-
-    #[derive(Clone, Copy, PartialEq)]
-    enum Step {
-        Write,
-        SetLen,
-        Sync,
-    }
-
-    /// An in-memory file whose `step` fails its first `fails` attempts; a
-    /// failed write first lands 3 bytes.
-    struct Failing {
-        data: io::Cursor<Vec<u8>>,
-        step: Option<Step>,
-        fails: u32,
-    }
-
-    impl Failing {
-        fn trip(&mut self, step: Step) -> io::Result<()> {
-            if self.step == Some(step) && self.fails > 0 {
-                self.fails -= 1;
-                return Err(io::Error::from(io::ErrorKind::StorageFull));
-            }
-            Ok(())
-        }
-    }
-
-    impl Write for Failing {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            if self.step == Some(Step::Write) && self.fails > 0 {
-                self.data.write_all(&buf[..buf.len().min(3)])?;
-            }
-            self.trip(Step::Write)?;
-            self.data.write(buf)
-        }
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl io::Seek for Failing {
-        fn seek(&mut self, to: io::SeekFrom) -> io::Result<u64> {
-            self.data.seek(to)
-        }
-    }
-
-    impl InPlace for Failing {
-        fn set_len(&mut self, len: u64) -> io::Result<()> {
-            self.trip(Step::SetLen)?;
-            self.data.get_mut().resize(len as usize, 0);
-            Ok(())
-        }
-        fn sync_all(&mut self) -> io::Result<()> {
-            self.trip(Step::Sync)
-        }
-    }
-
-    fn failing(old: &[u8], step: Option<Step>, fails: u32) -> Failing {
-        Failing { data: io::Cursor::new(old.to_vec()), step, fails }
-    }
-
-    const SHORTER_AND_LONGER: [&[u8]; 2] =
-        [b"short", b"a replacement that is longer than the earlier one"];
-
-    #[test]
-    fn a_failed_in_place_write_restores_the_previous_bytes() {
-        let old = b"the earlier and longer record";
-        for step in [Step::Write, Step::SetLen, Step::Sync] {
-            for new in SHORTER_AND_LONGER {
-                let mut file = failing(old, Some(step), 1);
-                let err = overwrite_in_place(&mut file, old, new).unwrap_err();
-                assert_eq!(err.kind(), io::ErrorKind::StorageFull);
-                assert_eq!(file.data.get_ref(), old);
-            }
-        }
-    }
-
-    #[test]
-    fn a_failed_restore_reports_both_failures_with_the_original_kind() {
-        let old = b"the earlier and longer record";
-        for step in [Step::Write, Step::SetLen, Step::Sync] {
-            let mut file = failing(old, Some(step), 2);
-            let err = overwrite_in_place(&mut file, old, b"short").unwrap_err();
-            assert_eq!(err.kind(), io::ErrorKind::StorageFull);
-            assert!(err.to_string().contains("restoring the previous bytes failed"));
-        }
-    }
-
-    #[test]
-    fn an_in_place_write_leaves_exactly_the_new_bytes() {
-        let old = b"the earlier record";
-        for new in SHORTER_AND_LONGER {
-            let mut file = failing(old, None, 0);
-            overwrite_in_place(&mut file, old, new).unwrap();
-            assert_eq!(file.data.get_ref(), new);
-        }
-        let dir = tempfile::tempdir().unwrap();
-        let record = dir.path().join("page-0000.bmp");
-        for new in [&b"BM"[..], b"BM a page longer than any before it"] {
-            std::fs::write(&record, b"BM the earlier page").unwrap();
-            let refusal = io::Error::from(io::ErrorKind::PermissionDenied);
-            rewrite_existing(&record, refusal, new).unwrap();
-            assert_eq!(std::fs::read(&record).unwrap(), new);
-        }
     }
 
     /// An unrelated path matching the stage format does not block an export
@@ -1546,7 +1366,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn an_export_is_rewritten_in_place_where_the_folder_refuses_its_replacement() {
+    fn an_export_is_refused_untouched_where_the_folder_refuses_its_replacement() {
         let dir = tempfile::tempdir().unwrap();
         let report = dir.path().join("scan-test-report.json");
         let scan = dir.path().join("page-0000.bmp");
@@ -1560,15 +1380,18 @@ mod tests {
         {
             let _report = Denied::replace(dir.path(), &report);
             let _scan = Denied::only(&scan, "(DE)");
-            export_record(&report, b"this report").unwrap();
-            assert_eq!(export_copy(&page, &scan).unwrap(), 11);
+            let refused = export_record(&report, b"this report").unwrap_err();
+            assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied);
+            assert!(refused.to_string().contains("replaced safely"));
             assert!(write_record(&report, b"not an export").is_err());
         }
 
-        assert_eq!(std::fs::read(&report).unwrap(), b"this report");
+        assert_eq!(std::fs::read(&report).unwrap(), b"an earlier and longer report");
+        assert_eq!(file_id(&report), report_file);
+        // The scan's own access list alone still lets the folder replace it.
+        assert_eq!(export_copy(&page, &scan).unwrap(), 11);
         assert_eq!(std::fs::read(&scan).unwrap(), b"BM this run");
-        assert_eq!(file_id(&report), report_file, "the report was not written in place");
-        assert_eq!(file_id(&scan), scan_file, "the scan was not written in place");
+        assert_ne!(file_id(&scan), scan_file, "written in place, not through the stage");
         assert_eq!(
             names(dir.path()),
             ["page-0000.bmp", "scan-test-report.json"].map(String::from).into()

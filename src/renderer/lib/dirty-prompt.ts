@@ -76,3 +76,38 @@ export async function saveKeepingLaterEdits(
   const after = dirtyPromptSnapshots(readState(), [path])[0];
   return { written: true, markSaved: !!before && !!after && sameDirtyPromptSnapshot(before, after) };
 }
+
+export interface SaveFilesIo {
+  /** How `path` saves, or null when it is no longer open. */
+  route: (path: string) => 'save' | 'saveAs' | null;
+  /** Write `path` in place; false when the write was refused. */
+  write: (path: string) => Promise<boolean>;
+  /** Save `path` through the Save As dialog; false when cancelled or refused. */
+  saveAs: (path: string) => Promise<boolean>;
+  markSaved: (path: string) => void;
+}
+
+/**
+ * Save each of `paths` in order. A document whose Save routes to Save As is
+ * asked for through its own dialog whether or not it is the active one. The
+ * run stops at the first refused write or cancelled dialog, and every file
+ * not yet saved stays unsaved. True when every file was saved.
+ */
+export async function saveListedFiles(
+  readState: () => AppState,
+  paths: readonly string[],
+  io: SaveFilesIo,
+): Promise<boolean> {
+  for (const path of paths) {
+    const route = io.route(path);
+    if (route === null) continue;
+    if (route === 'saveAs') {
+      if (!(await io.saveAs(path))) return false;
+      continue;
+    }
+    const saved = await saveKeepingLaterEdits(readState, path, () => io.write(path));
+    if (!saved.written) return false;
+    if (saved.markSaved) io.markSaved(path);
+  }
+  return true;
+}

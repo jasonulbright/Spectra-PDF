@@ -49,8 +49,35 @@ def test_only_the_visible_installer_offers_ghostscript_download() -> None:
     prompt = postinstall.index("Open the official Ghostscript download page now?")
 
     assert postinstall.index("${IfNot} ${Silent}") < prompt
-    assert postinstall.index("${If} $PassiveMode != 1") < prompt
+    assert postinstall.index("${AndIf} $PassiveMode != 1") < prompt
     assert 'ExecShell "open" "https://ghostscript.com/releases/gsdnld.html"' in postinstall
+
+
+def test_ghostscript_offer_is_skipped_when_an_install_is_found() -> None:
+    hooks = (ROOT / "src-tauri" / "nsis-hooks.nsh").read_text()
+    postinstall = hooks.split("!macro NSIS_HOOK_POSTINSTALL", 1)[1].split(
+        "!macroend", 1
+    )[0]
+    prompt = postinstall.index("Open the official Ghostscript download page now?")
+    check = postinstall.index("Call SpectraGhostscriptInstalled")
+    assert postinstall.index("${IfNot} ${Silent}") < check < prompt
+    assert postinstall.index("${If} $R9 != 1", check) < prompt
+
+    detect = hooks.split("Function SpectraGhostscriptInstalled", 1)[1].split(
+        "FunctionEnd", 1
+    )[0]
+    for root in ("HKLM64", "HKLM32", "HKCU64", "HKCU32"):
+        for key in (r"SOFTWARE\GPL Ghostscript", r"SOFTWARE\Artifex\GPL Ghostscript"):
+            assert f'SPECTRA_GS_SCAN_KEY {root} "{key}"' in detect
+    assert 'SPECTRA_GS_SCAN_PATH "gswin64c.exe"' in detect
+    assert "ExecWait" not in hooks and "nsExec" not in hooks
+
+
+def test_installer_ghostscript_floor_matches_discovery() -> None:
+    hooks = (ROOT / "src-tauri" / "nsis-hooks.nsh").read_text()
+    gs = (ROOT / "src-tauri" / "src" / "gs.rs").read_text()
+    assert "pub const MINIMUM_VERSION: (u32, u32) = (10, 0);" in gs
+    assert hooks.count("${If} $R3 >= 10") == 2
 
 
 def test_shipped_notice_keeps_ghostscript_separate() -> None:

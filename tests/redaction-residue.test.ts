@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { residueGroups, residueMessage, residueOf, residueRequest } from '../src/renderer/lib/redaction-residue';
+import { residueGroups, residueMessage, residueOf, residueRemovable, residueRequest } from '../src/renderer/lib/redaction-residue';
 import { writeRedactionMarks } from '../src/renderer/lib/redaction-write';
 import { initialState } from '../src/renderer/state/reducer';
 import type { AppState, OpenDocument, OpenFile } from '../src/renderer/state/types';
@@ -70,6 +70,32 @@ describe('redaction residue', () => {
     expect(residueMessage(withNames, 'en')).toContain('Field names are not changed.');
   });
 
+  it('reports a scan that could not read every place, even with nothing found', () => {
+    const partial = residueOf({ ...RESULT, residue: [], residue_counts: {}, residue_unread: ['metadata: XMP', 'javascript: action'] })!;
+    expect(partial).not.toBeNull();
+    expect(partial.incomplete).toBe(true);
+    expect(residueRemovable(partial)).toBe(false);
+    const message = residueMessage(partial, 'en');
+    expect(message).toContain('The check could not read these places');
+    expect(message).toContain('Document and page metadata');
+    expect(message).not.toContain('Remove it from these places?');
+
+    const unknown = residueOf({ ...RESULT, residue: [], residue_counts: {}, residue_unread: ['somewhere: else'] })!;
+    expect(residueMessage(unknown, 'en')).toContain('Other places');
+
+    const clean = residueOf({ ...RESULT, residue: [], residue_counts: {}, residue_unread: [] });
+    expect(clean).toBeNull();
+  });
+
+  it('adds the incomplete-scan note to a removal question', () => {
+    const mixed = residueOf({ ...RESULT, residue_unread: ['metadata: XMP'] })!;
+    expect(residueRemovable(mixed)).toBe(true);
+    const message = residueMessage(mixed, 'en');
+    expect(message).toContain('Remove it from these places?');
+    expect(message).toContain('The check could not read these places');
+    expect(residueMessage(residueOf(RESULT)!, 'en')).not.toContain('could not read');
+  });
+
   it('takes the signed-document decision like every other rewrite', async () => {
     const { opEditClass } = await import('../src/renderer/lib/op-edit-class');
     expect(opEditClass('remove_redaction_residue')).toBe('structural');
@@ -132,6 +158,20 @@ describe('disk redaction offers the same removal', () => {
     calls.length = 0;
     await createDiskRedactIo(callRaw, 'fonts', async () => false).write('in.pdf', 'out.pdf', [{ page: 1, rect: [0, 0, 1, 1] }], false);
     expect(calls.map(c => c[0])).toEqual(['redact']);
+  });
+
+  it('tells the user about an incomplete scan and removes nothing', async () => {
+    const { createDiskRedactIo } = await import('../src/renderer/lib/disk-redact-io');
+    const calls: string[] = [];
+    const partial = { ...RESULT, residue: [], residue_counts: {}, residue_unread: ['metadata: XMP'] };
+    const callRaw = async (method: string) => {
+      calls.push(method);
+      return method === 'redact' ? partial : {};
+    };
+    const ask = vi.fn(async () => true);
+    await createDiskRedactIo(callRaw, 'fonts', ask).write('in.pdf', 'out.pdf', [{ page: 1, rect: [0, 0, 1, 1] }], false);
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(['redact']);
   });
 });
 

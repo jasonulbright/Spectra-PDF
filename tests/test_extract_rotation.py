@@ -159,3 +159,51 @@ def test_stray_off_axis_glyph_reads_with_upright_text(tmp_path, monkeypatch):
     path = _pdf(tmp_path / "stray.pdf", content)
     assert _lines(pdfminer_text(path))[0] == "Upright words"
     assert passes == []
+
+
+def _to_unicode_pdf(path, content: str, mapped: str) -> str:
+    """One Helvetica page whose /ToUnicode maps code 0x78 to `mapped`."""
+    target = "".join(f"{ord(ch):04X}" for ch in mapped)
+    cmap = (
+        "/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n"
+        "/CMapName /Multi def 1 begincodespacerange <00> <FF> endcodespacerange\n"
+        f"1 beginbfchar <78> <{target}> endbfchar\n"
+        "endcmap CMapName currentdict /CMap defineresource pop end end\n"
+    )
+    pdf = pikepdf.new()
+    font = pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name.Font,
+            Subtype=pikepdf.Name.Type1,
+            BaseFont=pikepdf.Name.Helvetica,
+            ToUnicode=pdf.make_stream(cmap.encode("ascii")),
+        )
+    )
+    page = pdf.add_blank_page(page_size=(612, 792))
+    page.obj.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=font))
+    page.obj.Contents = pdf.make_stream(content.encode("latin-1"))
+    pdf.save(str(path))
+    return str(path)
+
+
+@pytest.mark.parametrize(("mapped", "own_pass"), [("abc", True), ("ab", False)])
+def test_multi_scalar_glyph_counts_its_scalars(tmp_path, monkeypatch, mapped, own_pass):
+    from pdfminer.layout import LTLayoutContainer
+
+    from engine import extract_text as module
+
+    passes = []
+    original = LTLayoutContainer.analyze
+
+    def counted(self, laparams):
+        if isinstance(self, module._Frame):
+            passes.append(self)
+        return original(self, laparams)
+
+    monkeypatch.setattr(LTLayoutContainer, "analyze", counted)
+    content = "BT /F1 12 Tf 72 700 Td (Hello Hello) Tj ET\n" + _line("x", 45, 300, 400)
+    path = _to_unicode_pdf(tmp_path / "multi.pdf", content, mapped)
+    lines = _lines(pdfminer_text(path))
+    assert lines[0] == "Hello Hello"
+    assert mapped in "".join(lines[1:])
+    assert (len(passes) == 2) is own_pass

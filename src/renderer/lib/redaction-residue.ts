@@ -39,13 +39,21 @@ export interface Residue {
   /** Places the engine reports and never changes (field names). */
   readonly reportOnly: number;
   readonly truncated: boolean;
+  /** The scan could not read every place, so finding nothing does not mean
+   * nothing is there. */
+  readonly incomplete: boolean;
+  /** The kinds of the places the scan could not read. */
+  readonly unread: readonly ResidueKind[];
+  /** An unread place of a kind this list does not name. */
+  readonly unreadOther: boolean;
 }
 
 const KIND_SET: ReadonlySet<string> = new Set(RESIDUE_KINDS);
 
 /** The residue a `redact` result reports, or null when there is none to
- * offer. A malformed result is treated as none: the redaction itself
- * succeeded, and a question built on unreadable data would name nothing. */
+ * offer and the scan read every place. A malformed result is treated as
+ * none: the redaction itself succeeded, and a question built on unreadable
+ * data would name nothing. */
 export function residueOf(result: unknown): Residue | null {
   if (result === null || typeof result !== 'object') return null;
   const fields = result as Record<string, unknown>;
@@ -81,10 +89,19 @@ export function residueOf(result: unknown): Residue | null {
       if (Number.isFinite(count) && count > 0) reportOnly += count;
     }
   }
+  // Each unread place is named `kind: where` by the engine.
+  const unreadRaw = Array.isArray(fields.residue_unread)
+    ? fields.residue_unread.filter((u): u is string => typeof u === 'string')
+    : [];
+  const unreadKinds = unreadRaw.map((u) => u.split(':')[0].trim());
+  const unread = RESIDUE_KINDS.filter((kind) => unreadKinds.includes(kind));
+  const unreadOther = unreadKinds.some((kind) => !KIND_SET.has(kind));
+  const incomplete = unreadRaw.length > 0;
   // Only removable places are offered: a question whose answer cannot
-  // clear what it lists would report a removal that did not happen.
-  if (!terms.length || !counts.size) return null;
-  return { terms, entries, counts, reportOnly, truncated: fields.residue_truncated === true };
+  // clear what it lists would report a removal that did not happen. A scan
+  // that could not read every place is still reported, never read as clean.
+  if (!terms.length || (!counts.size && !incomplete)) return null;
+  return { terms, entries, counts, reportOnly, truncated: fields.residue_truncated === true, incomplete, unread, unreadOther };
 }
 
 /** The label each kind is listed under. */
@@ -106,11 +123,25 @@ export function residueGroups(residue: Residue): { label: Parameters<typeof tChr
     .map((kind) => ({ label: KIND_LABELS[kind], count: residue.counts.get(kind)! }));
 }
 
+/** Whether the residue offers places to remove, rather than only reporting
+ * an incomplete scan. */
+export function residueRemovable(residue: Residue): boolean {
+  return residue.counts.size > 0;
+}
+
+function unreadNote(residue: Residue, lng?: string): string {
+  const labels = residue.unread.map((kind) => tChrome(KIND_LABELS[kind], undefined, lng));
+  if (residue.unreadOther || labels.length === 0) labels.push(tChrome('canvas.redact.residue.unreadOther', undefined, lng));
+  const places = new Intl.ListFormat(formattingLocale(lng), { style: 'long', type: 'conjunction' }).format(labels);
+  return tChrome('canvas.redact.residue.unread', { places }, lng);
+}
+
 /** The question's body: every place with its count, in the language's own
  * list pattern, then what removal does that the user cannot see: field
  * names stay, scripts go whole, renamed destinations stop answering links
  * from outside the file, and a capped list still removes every occurrence. */
 export function residueMessage(residue: Residue, lng?: string): string {
+  if (!residueRemovable(residue)) return unreadNote(residue, lng);
   const items = residueGroups(residue).map(({ label, count }) =>
     tChrome('canvas.redact.residue.item', { kind: tChrome(label, undefined, lng), count }, lng));
   const places = new Intl.ListFormat(formattingLocale(lng), { style: 'long', type: 'conjunction' }).format(items);
@@ -119,6 +150,7 @@ export function residueMessage(residue: Residue, lng?: string): string {
   if (residue.counts.has('javascript')) parts.push(tChrome('canvas.redact.residue.scriptNote', undefined, lng));
   if (residue.counts.has('dest_name')) parts.push(tChrome('canvas.redact.residue.destNote', undefined, lng));
   if (residue.truncated) parts.push(tChrome('canvas.redact.residue.truncated', undefined, lng));
+  if (residue.incomplete) parts.push(unreadNote(residue, lng));
   return parts.join('\n\n');
 }
 

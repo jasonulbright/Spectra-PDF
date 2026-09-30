@@ -85,14 +85,30 @@ describe('credential recovery after a worker replacement', () => {
     expect(unlock.remembered).toEqual(['u']);
   });
 
-  it('reattaches a certificate document against the user file', async () => {
-    const doc = { path: 'C:\\users\\doc.pdf', name: 'doc.pdf', workingPath: W, security: { ...UNRESTRICTED, opener: 'recipient' as const } };
-    const unlock = io([new Error('no match'), { opener: 'recipient' }], [
-      { pfx: 'a.pfx', password: 'p' },
-      { pfx: 'b.pfx', password: 'p' },
+  const recipientDoc = { path: 'C:\\users\\doc.pdf', name: 'doc.pdf', workingPath: W, security: { ...UNRESTRICTED, opener: 'recipient' as const } };
+
+  it('reattaches a certificate document against the sealed original', async () => {
+    const unlock = io([{ opener: 'recipient' }], [{ pfx: 'a.pfx', password: 'p' }]);
+    expect(await unlockLostDocument(recipientDoc, unlock)).toBe(true);
+    expect(unlock.calls).toEqual([['pubkey_reattach', { path: W, source: '', pfx: 'a.pfx', password: 'p' }]]);
+    expect(await unlockLostDocument(recipientDoc, io([], ['cancel']))).toBe(false);
+  });
+
+  it('asks again with the sealed-copy refusal when both sources refuse, and uses the user file only after it', async () => {
+    const errors: (string | undefined)[] = [];
+    const unlock = io(
+      [new Error('no match'), new Error('user file gone'), new Error('sealed gone'), { opener: 'recipient' }],
+      [{ pfx: 'a.pfx', password: 'p' }, { pfx: 'b.pfx', password: 'p' }],
+    );
+    const ask = unlock.askCertificate;
+    unlock.askCertificate = async (name, error, pfx) => {
+      errors.push(error);
+      return ask(name, error, pfx);
+    };
+    expect(await unlockLostDocument(recipientDoc, unlock)).toBe(true);
+    expect(unlock.calls.map(([, p]) => [p.source, p.pfx])).toEqual([
+      ['', 'a.pfx'], [recipientDoc.path, 'a.pfx'], ['', 'b.pfx'], [recipientDoc.path, 'b.pfx'],
     ]);
-    expect(await unlockLostDocument(doc, unlock)).toBe(true);
-    expect(unlock.calls[1]).toEqual(['pubkey_reattach', { path: W, source: doc.path, pfx: 'b.pfx', password: 'p' }]);
-    expect(await unlockLostDocument(doc, io([], ['cancel']))).toBe(false);
+    expect(errors).toEqual([undefined, 'no match']);
   });
 });

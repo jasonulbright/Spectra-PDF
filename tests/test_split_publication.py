@@ -85,6 +85,21 @@ def test_targets_cannot_alias_one_another(source):
     assert first.read_bytes() == b'existing destination'
 
 
+def test_a_hard_linked_destination_is_refused_before_publication(source):
+    from engine.inplace import HARD_LINKED
+
+    existing = source.parent / 'split_1.pdf'
+    existing.write_bytes(b'existing destination')
+    other = source.parent / 'elsewhere.pdf'
+    os.link(existing, other)
+    with pytest.raises(PermissionError) as refused:
+        writer.split(str(source), ranges='1', output=str(existing))
+    assert str(refused.value) == HARD_LINKED
+    assert existing.read_bytes() == b'existing destination'
+    assert other.read_bytes() == b'existing destination'
+    assert sorted(p.name for p in source.parent.iterdir()) == ['elsewhere.pdf', 'source.pdf', 'split_1.pdf']
+
+
 @pytest.mark.parametrize('failure', ['render', 'publish', 'published-then-raised', 'backup-then-raised', 'restore', 'restored-then-raised'])
 def test_publication_rollback_and_retained_recovery(source, monkeypatch, failure):
     directory = source.parent / 'out'

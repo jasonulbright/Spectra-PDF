@@ -34,8 +34,10 @@ function mod360(x: number): number {
   return r < 0 ? r + 360 : r + 0;
 }
 
-/** Characters an item contributes to its orientation's count. The engine
- * counts every drawn glyph, spaces included. pdf.js keeps drawn spaces inside
+/** Characters an item contributes to its orientation's count, in Unicode
+ * scalars: the engine counts each drawn glyph by the scalars its /ToUnicode
+ * entry maps to, spaces included, so one glyph mapped to several scalars
+ * counts each on both paths. pdf.js keeps drawn spaces inside
  * a run's string but emits the spaces it infers from glyph gaps as items of
  * their own, which draw nothing; a whitespace-only item counts zero. */
 function charCount(str: string): number {

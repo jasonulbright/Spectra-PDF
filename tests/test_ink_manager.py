@@ -454,7 +454,7 @@ class TestWritingBackOverTheInput:
         assert source.read_bytes() == before
         assert self._besides(tmp_path, "source.pdf") == []
 
-    def test_an_output_hardlinked_to_the_input_is_recognised_as_the_input(
+    def test_an_output_hardlinked_to_the_input_is_refused_untouched(
         self, tmp_path,
     ):
         source = tmp_path / "source.pdf"
@@ -465,13 +465,13 @@ class TestWritingBackOverTheInput:
         except (AttributeError, NotImplementedError, OSError) as exc:
             pytest.skip(f"this filesystem does not make hard links: {exc}")
 
-        spot_to_process(str(source), str(alias), ["Warm Red"])
-        assert "Warm Red" not in _colorant_names(str(alias))
-        # Two names for one file resolve differently and ARE one file, so only
-        # the identity test reaches the staged branch. The other name still
-        # reading as it did is what says the staged file replaced the NAME
-        # rather than being written into the file pikepdf held open.
-        assert "Warm Red" in _colorant_names(str(source))
+        before = source.read_bytes()
+        # A direct write through the link would change both names and never
+        # raise; only the staged branch refuses a linked target.
+        with pytest.raises(PermissionError, match="hard links"):
+            spot_to_process(str(source), str(alias), ["Warm Red"])
+        assert source.read_bytes() == before
+        assert alias.read_bytes() == before
 
 
 class TestInkSettings:

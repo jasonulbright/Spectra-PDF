@@ -40,6 +40,7 @@ import {
   type GuidedStepOp,
   type PlanRequest,
 } from '../lib/guided-actions';
+import { writeFailureText } from '../lib/save-failure';
 import { useTranslation } from 'react-i18next';
 import {
   tChrome,
@@ -398,7 +399,7 @@ export function GuidedActionsPanel(): React.ReactElement {
       await executeExport(action, path);
       setListError(null);
     } catch (e: unknown) {
-      setListError(e instanceof Error ? e.message : String(e));
+      setListError(writeFailureText(path, e));
     }
   };
   const importAction = async (): Promise<void> => {

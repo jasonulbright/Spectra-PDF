@@ -341,6 +341,7 @@ ink_manager.inkUsedPatternTool	pattern	ink_manager	Ink "{{name}}" is used by a p
 ink_manager.nameLeastOneInk	exact	ink_manager	Name at least one ink to convert.
 ink_manager.processInksCannotAliased	exact	ink_manager	Process inks cannot be aliased to a spot colour.
 inplace.fileCouldReplacedBecause	exact	inplace	The file could not be replaced because another program is using it. Close it there and try again.
+inplace.fileMoreThanOne	exact	inplace	This file has more than one name on disk (hard links). Saving over it would leave the other names with the old content. Save it as a new file.
 inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 ipc.circularReferenceDetected	exact	ipc	Circular reference detected
 ipc.invalidJsonConstant	pattern	ipc	Invalid JSON constant: {{value}}

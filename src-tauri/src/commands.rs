@@ -3521,11 +3521,10 @@ mod tests {
     }
 
     /// A folder that lets the user change an existing file but not create one:
-    /// each export is rewritten in place, and a Save of a document refuses and
-    /// leaves the document whole.
+    /// each export and a Save of a document refuse and leave the file whole.
     #[cfg(windows)]
     #[tokio::test]
-    async fn exports_are_rewritten_where_the_folder_refuses_a_new_file() {
+    async fn exports_refuse_untouched_where_the_folder_refuses_a_new_file() {
         let root = scratch("export-create-denied");
         let dir = root.join("shared");
         std::fs::create_dir_all(&dir).unwrap();
@@ -3533,29 +3532,38 @@ mod tests {
         let profile = dir.join("profile.json");
         let action = dir.join("action.json");
         let document = dir.join("document.pdf");
+        let earlier = b"the previous export, longer than the new one";
         for path in [&report, &profile, &action] {
-            std::fs::write(path, b"the previous export, longer than the new one").unwrap();
+            std::fs::write(path, earlier).unwrap();
         }
         std::fs::write(&document, b"%PDF-1.7 the saved document").unwrap();
         let working = root.join("working.pdf");
         std::fs::write(&working, b"%PDF-1.7 edited").unwrap();
         let path = |p: &Path| p.to_string_lossy().to_string();
+        let identity = crate::staging::file_id;
+        let ids = [&report, &profile, &action, &document].map(|p| identity(p));
 
         {
             let _denied = crate::staging::Denied::create(
                 &dir,
                 &[&report, &profile, &action, &document],
             );
-            write_report_file(path(&report), "<p>report</p>".into()).await.unwrap();
-            write_profile_file(path(&profile), "{\"profile\":1}".into()).await.unwrap();
-            write_action_file(path(&action), "{\"steps\":[]}".into()).await.unwrap();
-            assert!(save_as(path(&working), path(&document)).await.is_err());
+            let refusals = [
+                write_report_file(path(&report), "<p>report</p>".into()).await.unwrap_err(),
+                write_profile_file(path(&profile), "{\"profile\":1}".into()).await.unwrap_err(),
+                write_action_file(path(&action), "{\"steps\":[]}".into()).await.unwrap_err(),
+                save_as(path(&working), path(&document)).await.unwrap_err(),
+            ];
+            for refused in refusals {
+                assert!(refused.contains("replaced safely"), "{refused}");
+            }
         }
 
-        assert_eq!(std::fs::read(&report).unwrap(), b"<p>report</p>");
-        assert_eq!(std::fs::read(&profile).unwrap(), b"{\"profile\":1}");
-        assert_eq!(std::fs::read(&action).unwrap(), b"{\"steps\":[]}");
+        for path in [&report, &profile, &action] {
+            assert_eq!(std::fs::read(path).unwrap(), earlier);
+        }
         assert_eq!(std::fs::read(&document).unwrap(), b"%PDF-1.7 the saved document");
+        assert_eq!([&report, &profile, &action, &document].map(|p| identity(p)), ids);
         assert_eq!(
             listing(&dir),
             ["action.json", "document.pdf", "profile.json", "report.html"]

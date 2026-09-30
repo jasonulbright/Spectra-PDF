@@ -29,6 +29,7 @@ import {
   refreshGsCapability,
   registerGsSetupOpener,
   gsNeedsLaunchPrompt,
+  recoverGsCapability,
   requireGsPath,
   resetGsCapability,
   suppressGsLaunchPrompt,
@@ -334,5 +335,59 @@ describe('the launch offer', () => {
     resetGsCapability();
     expect(gsNeedsLaunchPrompt(capability)).toBe(false);
     expect(takeGsLaunchPrompt(capability)).toBe(false);
+  });
+});
+
+describe('launch recovery of a stale configured path', () => {
+  const stale = 'C:\\old\\gs\\bin\\gswin64c.exe';
+  const configure = (gsPath: string) =>
+    store.set('spectra-settings', JSON.stringify({ gsPath }));
+  const storedPath = () => JSON.parse(store.get('spectra-settings') ?? '{}').gsPath;
+  const missing = { available: false, path: stale, version: '', reason: GS_NOT_EXECUTABLE, detail: '' };
+
+  it('adopts a discovered install when the saved executable is gone', async () => {
+    configure(stale);
+    probe.mockResolvedValue(missing);
+    reprobe.mockResolvedValue(ready);
+    const answer = await recoverGsCapability();
+    expect(probe).toHaveBeenCalledWith(stale);
+    expect(reprobe).toHaveBeenCalledWith(undefined);
+    expect(answer.available).toBe(true);
+    expect(gsCapability().path).toBe(ready.path);
+    expect(storedPath()).toBe('');
+    expect(takeGsLaunchPrompt(answer)).toBe(false);
+  });
+
+  it('falls into the launch offer when discovery finds nothing', async () => {
+    configure(stale);
+    probe.mockResolvedValue(missing);
+    reprobe.mockResolvedValue(absent);
+    const answer = await recoverGsCapability();
+    expect(storedPath()).toBe('');
+    expect(gsBlocked(answer)).toBe(true);
+    expect(takeGsLaunchPrompt(answer)).toBe(true);
+  });
+
+  it('keeps a saved path that still works', async () => {
+    configure(ready.path);
+    probe.mockResolvedValue(ready);
+    const answer = await recoverGsCapability();
+    expect(answer.available).toBe(true);
+    expect(reprobe).not.toHaveBeenCalled();
+    expect(storedPath()).toBe(ready.path);
+  });
+
+  it('keeps a saved path that exists but refuses for another reason', async () => {
+    configure(stale);
+    probe.mockResolvedValue({ ...missing, reason: GS_VERSION_BELOW_MINIMUM });
+    await recoverGsCapability();
+    expect(reprobe).not.toHaveBeenCalled();
+    expect(storedPath()).toBe(stale);
+  });
+
+  it('does nothing when no path is configured', async () => {
+    probe.mockResolvedValue(absent);
+    await recoverGsCapability();
+    expect(reprobe).not.toHaveBeenCalled();
   });
 });

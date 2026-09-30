@@ -309,3 +309,18 @@ describe('the distribution never claims to carry Ghostscript', () => {
     expect(spec).not.toMatch(/resources.{0,20}ghostscript/i);
   });
 });
+
+describe('Preferences opens above the dialogs that open it', () => {
+  it('renders after Print and the launch offer, before the confirm prompt', () => {
+    const app = readFileSync(resolve(process.cwd(), 'src/renderer/App.tsx'), 'utf8');
+    const at = (needle: string) => {
+      const index = app.indexOf(needle);
+      expect(index, needle).toBeGreaterThan(-1);
+      return index;
+    };
+    const prefs = at('<PreferencesModal category=');
+    expect(prefs).toBeGreaterThan(at('<PrintDialog onClose='));
+    expect(prefs).toBeGreaterThan(at('<GsMissingDialog onClose='));
+    expect(prefs).toBeLessThan(at('<ConfirmDialog'));
+  });
+});

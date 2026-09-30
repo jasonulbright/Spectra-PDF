@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { confirmDirtySnapshots, dirtyPromptSnapshots, sameDirtyPromptSnapshot, saveKeepingLaterEdits, unconfirmedDirtySnapshots } from '../src/renderer/lib/dirty-prompt';
+import { confirmDirtySnapshots, dirtyPromptSnapshots, sameDirtyPromptSnapshot, saveKeepingLaterEdits, saveListedFiles, unconfirmedDirtySnapshots } from '../src/renderer/lib/dirty-prompt';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
 import type { AppState, OpenDocument, OpenFile, PageRef, PdfBuffer } from '../src/renderer/state/types';
 
@@ -143,5 +143,38 @@ describe('saving in place keeps edits made during the write', () => {
   it('marks nothing when the write is refused', async () => {
     const state = dirtyState(1);
     expect(await saveKeepingLaterEdits(() => state, 'a.pdf', async () => false)).toEqual({ written: false, markSaved: false });
+  });
+});
+
+describe('saving a list of files', () => {
+  const fixed: AppState = {
+    ...initialState,
+    files: new Map(['a.pdf', 'web.pdf', 'b.pdf'].map((p) => [p, { ...file(p, new Uint8Array([1]) as unknown as PdfBuffer), dirty: true, editRevision: 1 }])),
+  };
+  const state = (): AppState => fixed;
+
+  function recorder(saveAsAnswer: boolean) {
+    const log: string[] = [];
+    return {
+      log,
+      io: {
+        route: (path: string) => (path === 'gone.pdf' ? null : path === 'web.pdf' ? 'saveAs' as const : 'save' as const),
+        write: async (path: string) => { log.push(`write ${path}`); return true; },
+        saveAs: async (path: string) => { log.push(`saveAs ${path}`); return saveAsAnswer; },
+        markSaved: (path: string) => { log.push(`saved ${path}`); },
+      },
+    };
+  }
+
+  it('asks Save As for a downloaded document that is not the active one', async () => {
+    const { log, io } = recorder(true);
+    expect(await saveListedFiles(state, ['a.pdf', 'gone.pdf', 'web.pdf', 'b.pdf'], io)).toBe(true);
+    expect(log).toEqual(['write a.pdf', 'saved a.pdf', 'saveAs web.pdf', 'write b.pdf', 'saved b.pdf']);
+  });
+
+  it('stops at a cancelled Save As and leaves the rest unsaved', async () => {
+    const { log, io } = recorder(false);
+    expect(await saveListedFiles(state, ['a.pdf', 'web.pdf', 'b.pdf'], io)).toBe(false);
+    expect(log).toEqual(['write a.pdf', 'saved a.pdf', 'saveAs web.pdf']);
   });
 });

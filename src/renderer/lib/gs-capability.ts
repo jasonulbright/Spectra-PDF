@@ -243,6 +243,31 @@ export function gsStateKey(capability: GsCapability = current): string | null {
   }
 }
 
+// ── Launch recovery ─────────────────────────────────────────────────────
+
+/**
+ * The launch answer, after a stale configured path is recovered.
+ *
+ * An upgrade or uninstall removes the executable a saved path names, and the
+ * saved path then refuses every Ghostscript surface by that path's name while
+ * a working install may sit elsewhere on the machine. A configured path whose
+ * probe reports `not-executable` is therefore replaced by what Preferences ▸
+ * Engine "Use Ghostscript from this PC" stores — the empty path, which
+ * resolves by discovery — and discovery is probed at once. A configured path
+ * that probes usable, or that exists but refuses for another reason, is kept.
+ * When discovery finds nothing, the stored path is empty, so the launch offer
+ * applies exactly as it does to a copy that never had a path.
+ */
+export async function recoverGsCapability(): Promise<GsCapability> {
+  const capability = await ensureGsCapability();
+  if (pinned || capability.pending || capability.available) return capability;
+  if (capability.reason !== GS_NOT_EXECUTABLE) return capability;
+  const stale = configuredPath();
+  if (stale === undefined || stale !== capability.path.trim()) return capability;
+  saveSettings({ ...loadSettings(), gsPath: '' });
+  return refreshGsCapability(undefined);
+}
+
 // ── The launch offer ────────────────────────────────────────────────────
 //
 // A copy with no Ghostscript anywhere gates ten features, and nothing said

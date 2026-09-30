@@ -93,3 +93,23 @@ export async function buildOcrApplyPayload(
   }
   return { files, skippedSources };
 }
+
+/** Apply each file's payload independently. `applied` lists every file whose
+ * layer landed, even when another file's apply failed: those files were
+ * modified and still need their Save and Copy follow-ups. */
+export async function applyOcrPayloads(
+  payloads: readonly OcrApplyFilePayload[],
+  apply: (path: string, pages: OcrApplyPage[]) => Promise<void>,
+): Promise<{ applied: string[]; failed: { path: string; error: unknown }[] }> {
+  const applied: string[] = [];
+  const failed: { path: string; error: unknown }[] = [];
+  for (const payload of payloads) {
+    try {
+      await apply(payload.path, payload.pages);
+      applied.push(payload.path);
+    } catch (error) {
+      failed.push({ path: payload.path, error });
+    }
+  }
+  return { applied, failed };
+}
