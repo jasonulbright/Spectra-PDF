@@ -2454,6 +2454,7 @@
   "engine.pdf_save.documentSEncryptionCannot4": "この操作では文書の暗号化を保持できません。メタデータをその設定のままでは書き戻せない暗号方式で暗号化しており、書き換えた複製ではこの文書が暗号化して保持しているメタデータが露出します。保護されていない複製が必要な場合は、先に文書の暗号化を解除してください。",
   "engine.pdf_save.documentSEncryptionCannot5": "この操作では文書の暗号化を保持できません。ストリーム、文字列、埋め込みファイルをそれぞれ異なる暗号方式で保護しており、書き換えた複製では三者に対して一つの暗号方式しか持てません。保護されていない複製が必要な場合は、先に文書の暗号化を解除してください。",
   "engine.pdf_save.documentSEncryptionCannot6": "この操作では文書の暗号化を保持できません。暗号化のバージョン、暗号方式、鍵長の組み合わせをそのまま書き戻すことができず、書き換えた複製では保護の強度が変わります。保護されていない複製が必要な場合は、先に文書の暗号化を解除してください。",
+  "engine.pdfa.bundledSrgbColourProfile": "同梱の sRGB カラープロファイルがありません ({{candidate}})。PDF/A の出力インテントを書き込めません。",
   "engine.pdfa.ghostscriptPdfConversionDid": "Ghostscript の PDF/A 変換は {{requested}} を生成しませんでした。出力は {{declared}} と宣言しています。",
   "engine.pdfa.ghostscriptPdfConversionFailed": "Ghostscript による PDF/A 変換に失敗しました：{{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "出力に PDF/A 出力インテントがないため、{{requested}} は生成されませんでした。",

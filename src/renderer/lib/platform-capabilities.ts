@@ -20,6 +20,7 @@ export const PLATFORM_FEATURES = [
   'trayResidency',
   'backdrop',
   'consoleAttach',
+  'startWithSystem',
 ] as const;
 
 export type PlatformFeature = (typeof PLATFORM_FEATURES)[number];

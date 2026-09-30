@@ -4,7 +4,7 @@ import tempfile
 from engine.credentials import open_pdf
 from pathlib import Path
 
-from . import budget, gs_capability, standards_report
+from . import budget, gs_capability, icc_profiles, standards_report
 from .inplace import is_same_file, staged_write_if
 from .pdf_save import refuse_encrypted_source
 from .validate import validate_pdf
@@ -15,6 +15,7 @@ def convert_pdfa(
     output: str,
     level: str = "2b",
     gs_path: str = "",
+    icc_dir: str = "",
 ) -> dict:
     """Convert a PDF to PDF/A format using Ghostscript.
 
@@ -73,8 +74,8 @@ def convert_pdfa(
     source_facts = standards_report.census(input_path)
 
     capability = gs_capability.require(gs_path)
+    profile = _rgb_profile(icc_dir)
     with staged_write_if(same_file, output_path) as gs_target,             tempfile.TemporaryDirectory(prefix="spectra-pdfa-") as scratch:
-        profile = _rgb_profile(Path(capability.path))
         definition = Path(scratch) / "pdfa_def.ps"
         definition.write_text(_output_intent_ps(profile), encoding="ascii")
         cmd = [
@@ -153,18 +154,20 @@ def _discard(produced: Path) -> None:
         pass
 
 
-# The ICC version PDF/A-1 admits is ICC.1:1998-09 (version 2); the profile the
-# user's Ghostscript ships as its own RGB default is version 2, and ROM-built
-# Windows binaries carry it under %rom% when the on-disk tree is absent.
-_ROM_RGB_PROFILE = "%rom%iccprofiles/default_rgb.icc"
+# The ICC version PDF/A-1 admits is ICC.1:1998-09 (version 2). The bundled
+# ICC registry sRGB profile is version 2; it is the one profile embedded on
+# every platform, so the output intent never depends on the user's Ghostscript.
+_SRGB_PROFILE = ("srgb", "sRGB2014.icc")
 
 
-def _rgb_profile(executable: Path) -> str:
-    for root in (executable.parent.parent, executable.parent):
-        candidate = root / "iccprofiles" / "default_rgb.icc"
-        if candidate.is_file():
-            return str(candidate)
-    return _ROM_RGB_PROFILE
+def _rgb_profile(icc_dir: str = "") -> str:
+    candidate = icc_profiles.profile_dir(icc_dir).joinpath(*_SRGB_PROFILE)
+    if not candidate.is_file():
+        raise RuntimeError(
+            f"The bundled sRGB colour profile is missing ({candidate}), so no "
+            "PDF/A output intent can be written."
+        )
+    return str(candidate)
 
 
 def _ps_path(path: str) -> str:

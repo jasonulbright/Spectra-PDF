@@ -2517,6 +2517,7 @@
   "engine.pdf_save.documentSEncryptionCannot4": "Dokumentets kryptering kan inte behållas i den här åtgärden: det krypterar sina metadata med en algoritm som inte kan skrivas tillbaka med den inställningen, och en omskriven kopia skulle blotta metadata som dokumentet håller krypterade. Dekryptera dokumentet först om du vill ha en oskyddad kopia.",
   "engine.pdf_save.documentSEncryptionCannot5": "Dokumentets kryptering kan inte behållas i den här åtgärden: det skyddar sina strömmar, strängar och inbäddade filer med olika algoritmer, och en omskriven kopia kan bara bära en algoritm för alla tre. Dekryptera dokumentet först om du vill ha en oskyddad kopia.",
   "engine.pdf_save.documentSEncryptionCannot6": "Dokumentets kryptering kan inte behållas i den här åtgärden: dess krypteringsversion, algoritm och nyckellängd är en kombination som inte kan skrivas tillbaka exakt, och en omskriven kopia skulle ändra styrkan i dess skydd. Dekryptera dokumentet först om du vill ha en oskyddad kopia.",
+  "engine.pdfa.bundledSrgbColourProfile": "Den medföljande sRGB-färgprofilen saknas ({{candidate}}), så ingen PDF/A-utdataavsikt kan skrivas.",
   "engine.pdfa.ghostscriptPdfConversionDid": "Ghostscripts PDF/A-konvertering gav inte {{requested}}: utdata anger {{declared}}.",
   "engine.pdfa.ghostscriptPdfConversionFailed": "Ghostscripts PDF/A-konvertering misslyckades: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Utdata saknar PDF/A-utdataavsikt, så {{requested}} skapades inte.",

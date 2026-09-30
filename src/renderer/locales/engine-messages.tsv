@@ -500,6 +500,7 @@ pdf_save.documentSEncryptionCannot5	exact	pdf_save	This document's encryption ca
 pdf_save.documentSEncryptionCannot6	exact	pdf_save	This document's encryption cannot be kept through this operation: its encryption version, cipher and key length are a combination that cannot be written back exactly, and a rewritten copy would change the strength of its protection. Decrypt the document first if you want an unprotected copy.
 pdf_version.pdfVersionCannotDetermined	exact	pdf_version	The PDF version cannot be determined.
 pdf_version.versionDeclarationsCannotPreserved	exact	pdf_version	The version declarations cannot be preserved completely.
+pdfa.bundledSrgbColourProfile	pattern	pdfa	The bundled sRGB colour profile is missing ({{candidate}}), so no PDF/A output intent can be written.
 pdfa.ghostscriptPdfConversionDid	pattern	pdfa	Ghostscript PDF/A conversion did not produce {{requested}}: the output declares {{declared}}.
 pdfa.ghostscriptPdfConversionFailed	pattern	pdfa	Ghostscript PDF/A conversion failed: {{v0}}
 pdfa.outputCarriesPdfOutput	pattern	pdfa	The output carries no PDF/A output intent, so {{requested}} was not produced.

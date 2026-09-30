@@ -20,6 +20,7 @@ import sys
 sys.stdin.reconfigure(encoding="utf-8")
 sys.stdout.reconfigure(encoding="utf-8")
 
+from engine import platform_support
 from engine.ipc import JsonRpcServer
 from engine.merge import merge
 from engine.split import plan_split, split
@@ -248,6 +249,7 @@ def ping() -> dict:
 
 
 def main() -> None:
+    platform_support.adopt_lease_channel()
     reclaim_stale_stages(tempfile.gettempdir())
     remove_stale_gs_argfiles()
     server = JsonRpcServer()

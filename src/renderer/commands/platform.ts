@@ -25,6 +25,26 @@ export const TOOL_PLATFORM: Readonly<Partial<Record<ToolId, PlatformFeature>>> =
   snapshot: 'snapshot',
 };
 
+/** Preferences controls bound to a platform feature, in panel order. A control
+ * absent from this map is always shown. */
+export const PREFERENCE_CONTROLS = ['minimizeToTray', 'startMinimized', 'startWithSystem'] as const;
+
+export type PreferenceControl = (typeof PREFERENCE_CONTROLS)[number];
+
+export const PREFERENCE_PLATFORM: Readonly<Record<PreferenceControl, PlatformFeature>> = {
+  minimizeToTray: 'trayResidency',
+  startMinimized: 'trayResidency',
+  startWithSystem: 'startWithSystem',
+};
+
+export function preferenceAvailable(control: PreferenceControl): boolean {
+  return platformCapability(PREFERENCE_PLATFORM[control]);
+}
+
+export function availablePreferenceControls(): PreferenceControl[] {
+  return PREFERENCE_CONTROLS.filter(preferenceAvailable);
+}
+
 export function commandFeature(id: CommandId): PlatformFeature | null {
   const direct = COMMAND_PLATFORM[id];
   if (direct) return direct;

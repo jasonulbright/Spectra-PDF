@@ -31,6 +31,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from engine import platform_support
+
 #: The oldest Ghostscript this engine will drive, as (major, minor).
 #:
 #: The FUNCTIONAL floor is 9.50: `prepress` passes `--permit-file-read=` and
@@ -171,7 +173,7 @@ def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
     if os.name == "nt":
         # A probe must never flash a console window in the GUI process.
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
-    return subprocess.run(
+    return platform_support.run(
         cmd,
         capture_output=True,
         text=True,

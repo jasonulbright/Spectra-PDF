@@ -2643,6 +2643,7 @@
   "engine.pdf_save.documentSEncryptionCannot4": "Šifrovanie tohto dokumentu nemožno pri tejto operácii zachovať: svoje metaúdaje šifruje algoritmom, ktorý s týmto nastavením nemožno zapísať späť, a prepísaná kópia by odhalila metaúdaje, ktoré dokument uchováva zašifrované. Ak chcete nechránenú kópiu, dokument najprv dešifrujte.",
   "engine.pdf_save.documentSEncryptionCannot5": "Šifrovanie tohto dokumentu nemožno pri tejto operácii zachovať: svoje dátové prúdy, reťazce a vložené súbory chráni rôznymi algoritmami a prepísaná kópia môže pre všetky tri niesť len jeden algoritmus. Ak chcete nechránenú kópiu, dokument najprv dešifrujte.",
   "engine.pdf_save.documentSEncryptionCannot6": "Šifrovanie tohto dokumentu nemožno pri tejto operácii zachovať: verzia šifrovania, algoritmus a dĺžka kľúča tvoria kombináciu, ktorú nemožno zapísať späť presne, a prepísaná kópia by zmenila silu jeho ochrany. Ak chcete nechránenú kópiu, dokument najprv dešifrujte.",
+  "engine.pdfa.bundledSrgbColourProfile": "Pribalený farebný profil sRGB chýba ({{candidate}}), takže nemožno zapísať výstupný zámer PDF/A.",
   "engine.pdfa.ghostscriptPdfConversionDid": "Prevod Ghostscriptu do PDF/A nevytvoril {{requested}}: výstup deklaruje {{declared}}.",
   "engine.pdfa.ghostscriptPdfConversionFailed": "Prevod do PDF/A Ghostscriptom zlyhal: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Výstup nenesie žiadny výstupný zámer PDF/A, takže {{requested}} nevznikol.",

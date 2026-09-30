@@ -201,6 +201,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             const gsPath = gsPaths[i];
             if (gsPath !== undefined) extras.gs_path = gsPath;
             if (def.needsFontDir) extras.font_dir = await app.getEditFontPath();
+            if (def.needsIccDir) extras.icc_dir = await app.getIccPath();
             if (def.needsTesseract) extras.tesseract_path = await app.getTesseractPath();
             if (def.needsSoffice) extras.soffice_path = await app.getSofficePath();
             if (def.terminalOutput) {

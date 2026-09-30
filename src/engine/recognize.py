@@ -277,7 +277,7 @@ def _run_tesseract(png: Path | bytes, lang: str, exe: Path, tessdata: Path) -> t
     env["TESSDATA_PREFIX"] = str(tessdata)
     # Binary stdin for the bytes arm, so `text=True` cannot mangle the PNG on
     # the way in; stdout is decoded either way.
-    proc = subprocess.run(
+    proc = platform_support.run(
         cmd,
         input=bytes(png) if from_bytes else None,
         capture_output=True,

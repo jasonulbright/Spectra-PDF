@@ -2517,6 +2517,7 @@
   "engine.pdf_save.documentSEncryptionCannot4": "Tämän asiakirjan salausta ei voi säilyttää tässä toiminnossa: se salaa metatietonsa algoritmilla, jota ei voi kirjoittaa takaisin tällä asetuksella, ja uudelleen kirjoitettu kopio paljastaisi metatietoja, jotka asiakirja pitää salattuina. Pura asiakirjan salaus ensin, jos haluat suojaamattoman kopion.",
   "engine.pdf_save.documentSEncryptionCannot5": "Tämän asiakirjan salausta ei voi säilyttää tässä toiminnossa: se suojaa virtansa, merkkijononsa ja upotetut tiedostonsa eri algoritmeilla, ja uudelleen kirjoitettu kopio voi kantaa vain yhtä algoritmia kaikille kolmelle. Pura asiakirjan salaus ensin, jos haluat suojaamattoman kopion.",
   "engine.pdf_save.documentSEncryptionCannot6": "Tämän asiakirjan salausta ei voi säilyttää tässä toiminnossa: sen salausversio, algoritmi ja avaimen pituus ovat yhdistelmä, jota ei voi kirjoittaa takaisin täsmälleen, ja uudelleen kirjoitettu kopio muuttaisi sen suojauksen vahvuutta. Pura asiakirjan salaus ensin, jos haluat suojaamattoman kopion.",
+  "engine.pdfa.bundledSrgbColourProfile": "Mukana toimitettu sRGB-väriprofiili puuttuu ({{candidate}}), joten PDF/A-tulostetarkoitusta ei voi kirjoittaa.",
   "engine.pdfa.ghostscriptPdfConversionDid": "Ghostscriptin PDF/A-muunnos ei tuottanut muotoa {{requested}}: tuloste ilmoittaa {{declared}}.",
   "engine.pdfa.ghostscriptPdfConversionFailed": "Ghostscriptin PDF/A-muunnos epäonnistui: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Tulosteessa ei ole PDF/A-tulostetarkoitusta, joten muotoa {{requested}} ei tuotettu.",

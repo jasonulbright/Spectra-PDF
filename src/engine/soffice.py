@@ -21,7 +21,7 @@ from xml.etree import ElementTree as ET
 import pikepdf
 from engine.credentials import open_pdf
 
-from engine import budget
+from engine import budget, platform_support
 from engine.inplace import publish_copy
 from engine.pdf_fonts import name_str
 from engine.system_fonts import families_in, installed_families
@@ -92,7 +92,7 @@ def _kill_tree(pid: int) -> None:
             pass
         return
     try:
-        subprocess.run(
+        platform_support.run(
             ["taskkill", "/F", "/T", "/PID", str(pid)],
             capture_output=True,
             stdin=subprocess.DEVNULL,
@@ -152,7 +152,7 @@ def run_convert(
         # crafted document) would orphan soffice.bin holding the profile dir
         # open, so the finally's rmtree silently fails and both leak. Track the
         # pid and kill the whole TREE on timeout (taskkill /T).
-        proc = subprocess.Popen(
+        proc = platform_support.popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

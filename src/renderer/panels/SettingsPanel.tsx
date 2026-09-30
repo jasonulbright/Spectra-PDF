@@ -6,6 +6,7 @@ import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { deriveAccentVars, type ThemeName } from '../lib/accent';
 import { platformCapability } from '../lib/platform-capabilities';
+import { preferenceAvailable } from '../commands/platform';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
 import { clampSnapshotDpi, MAX_SNAPSHOT_DPI, MIN_SNAPSHOT_DPI } from '../lib/snapshot-image';
@@ -383,7 +384,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
   const forcedColors = useForcedColors();
 
   useEffect(() => {
-    // Load startup state from registry (Start with Windows toggle)
+    if (!preferenceAvailable('startWithSystem')) return;
     app.getStartupEnabled().then(([enabled]) => {
       setStartWithWindows(enabled);
     }).catch(() => {});
@@ -695,7 +696,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
 
       {category === 'tray' && (
       <>
-      {platformCapability('trayResidency') && (
+      {preferenceAvailable('minimizeToTray') && (
       <label className="flex items-center gap-2 cursor-pointer">
         <input
           type="checkbox"
@@ -719,7 +720,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
 
       )}
 
-      {platformCapability('trayResidency') && settings.minimizeToTray && (
+      {preferenceAvailable('startMinimized') && settings.minimizeToTray && (
         <label className="flex items-center gap-2 cursor-pointer ms-4">
           <input
             type="checkbox"
@@ -740,6 +741,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         </label>
       )}
 
+      {preferenceAvailable('startWithSystem') && (
       <label className="flex items-center gap-2 cursor-pointer">
         <input
           type="checkbox"
@@ -754,6 +756,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         />
         <span className="text-sm text-neutral-400">{tChrome('panel.settings.startWithWindows')}</span>
       </label>
+      )}
 
       <div data-testid="restore-windows-pref">
         <label className="flex items-center gap-2 cursor-pointer">

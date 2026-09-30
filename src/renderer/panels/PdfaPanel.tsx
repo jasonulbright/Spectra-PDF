@@ -10,6 +10,7 @@ import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 import { suffixedOutputName } from '../lib/output-names';
+import { app } from '../lib/tauri-bridge';
 import type { StandardsReport } from '../lib/standards-report';
 
 export function PdfaPanel(): React.ReactElement {
@@ -31,7 +32,7 @@ export function PdfaPanel(): React.ReactElement {
     // The previous run's report describes a file this run is replacing.
     setReport(null);
     try {
-      const r = await call('convert_pdfa', { file: activeFile.workingPath, output, level, gs_path: await requireGsPath() });
+      const r = await call('convert_pdfa', { file: activeFile.workingPath, output, level, gs_path: await requireGsPath(), icc_dir: await app.getIccPath() });
       // The file's own claim, read back out of its metadata — not the level
       // that was asked for. The engine refuses when the two disagree, so they
       // agree here; stating the read-back one keeps the sentence true to what

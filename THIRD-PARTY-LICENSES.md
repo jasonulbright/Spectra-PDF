@@ -616,6 +616,23 @@ Adobe in the United States and/or other countries. Spectra PDF is not
 affiliated with Adobe; any terms of Spectra PDF's own license that differ from
 the license above are offered by us alone and not by Adobe.
 
+### sRGB output-intent profile
+
+One further profile, `sRGB2014` (ICC version 2), ships in the `icc/srgb`
+resource folder. It is the `/DestOutputProfile` of every PDF/A output intent.
+
+- **Source:** International Color Consortium,
+  <https://registry.color.org/rgb-registry/profiles/sRGB2014.icc>
+  (sha256 `384b832de3412066743b52a75ee906b6fb9fb8d9e09e936fc2c43223815c6e0a`,
+  3024 bytes), pinned in `scripts/bundle-icc.ps1` and `scripts/bundle-icc.sh`.
+- **Copyright:** International Color Consortium, 2015 (the profile's `cprt`
+  tag). The profile ships **unmodified**.
+- **License:** the ICC's general licensing terms for ICC profiles,
+  <https://registry.color.org/profile-library/#license>, which permit copying
+  and distribution without restriction.
+- **License text shipped at:** `resources/icc/srgb/ICC-Profile-Terms.txt`
+  (committed copy: `vendor/icc/ICC-Profile-Terms.txt`)
+
 ## Linux x86-64 runtime
 
 The Linux runtime trees live in `resources/linux-x86_64/`. Every download is
