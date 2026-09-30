@@ -624,6 +624,80 @@ Adobe in the United States and/or other countries. Spectra PDF is not
 affiliated with Adobe; any terms of Spectra PDF's own license that differ from
 the license above are offered by us alone and not by Adobe.
 
+## Linux x86-64 runtime
+
+The Linux runtime trees live in `resources/linux-x86_64/`. Every download is
+verified against a pinned SHA-256 before use. The OCR, JBIG2 and Finnish
+native programs below are built from pinned release sources in their own build
+repositories, so the source archive named in each row is the corresponding
+source of the shipped object code. Every shipped program and library resolves
+to a row in the manifest named in its section.
+
+### Python runtime
+
+- CPython 3.14.7 from python-build-standalone release 20260924
+  (`scripts/setup-python-embed.sh`). The build links OpenSSL, SQLite, libffi,
+  XZ, bzip2, zlib, expat, mpdecimal, libedit, ncurses, libuuid, Tcl/Tk, libX11,
+  libXau and libxcb. Their licence texts, and `PYTHON.json` naming each linked
+  library, ship at `python/licenses/`, taken from the full archive of the same
+  build. The `_dbm` extension, which links Berkeley DB, is removed and does not
+  ship.
+- Packages: the versions of `scripts/python-requirements.txt`, resolved to
+  manylinux wheels in `scripts/python-requirements-linux.txt`, plus the
+  manylinux pi-heif wheel in `scripts/vendored-wheels.tsv`. Each package's
+  licence texts ship in its `*.dist-info` directory, as on Windows.
+- The numpy manylinux wheel carries `libgfortran` (GPL-3.0-or-later WITH
+  GCC-exception-3.1) and `libquadmath` (LGPL-2.1-or-later) in `numpy.libs/`.
+  Source: <https://gcc.gnu.org/>.
+
+### OCR (`scripts/tesseract-licenses.tsv`)
+
+| File | Component | License | Source archive |
+|---|---|---|---|
+| `tesseract`, `libtesseract.so.5.4.0` | Tesseract 5.4.0 | Apache-2.0 | <https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.4.0.tar.gz> |
+| `libleptonica.so.6` | Leptonica 1.84.1 | BSD-2-Clause | <https://github.com/DanBloomberg/leptonica/releases/download/1.84.1/leptonica-1.84.1.tar.gz> |
+| `libtiff.so.6` | libtiff 4.6.0, built without JBIG | libtiff | <https://download.osgeo.org/libtiff/tiff-4.6.0.tar.gz> |
+| `libpng16.so.16` | libpng 1.6.43 | libpng-2.0 | <https://download.sourceforge.net/libpng/libpng-1.6.43.tar.xz> |
+| `libjpeg.so.8` | libjpeg-turbo 3.0.3 | IJG AND BSD-3-Clause AND Zlib | <https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.0.3/libjpeg-turbo-3.0.3.tar.gz> |
+| `libz.so.1` | zlib 1.3.1 | Zlib | <https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz> |
+| `libstdc++.so.6`, `libgcc_s.so.1` | GCC 13.3.0 runtime | GPL-3.0-or-later WITH GCC-exception-3.1 | <https://gcc.gnu.org/> |
+
+The notices ship in `tesseract/licenses/`, copied from the verified source
+archives. The orientation model `osd.traineddata` is the tessdata_fast 4.1.0
+file (Apache-2.0).
+
+### JBIG2 encoder (`scripts/jbig2enc-licenses.tsv`)
+
+`jbig2` is jbig2enc 0.32 (Apache-2.0), built from
+<https://github.com/agl/jbig2enc/archive/refs/tags/0.32.tar.gz>. It loads the
+same Leptonica, libtiff, libpng, libjpeg-turbo, zlib and GCC runtime builds as
+the OCR tree, shipped beside it with the same notices.
+
+### LibreOffice (`scripts/bundle-libreoffice.sh`, `scripts/libreoffice-notices.tsv`)
+
+The official LibreOffice 26.2.5 Linux x86-64 packages, unpacked unmodified. The
+PDF-import helper `program/xpdfimport` statically links poppler
+(GPL-2.0-or-later) and reads the same poppler-data tables as on Windows; the
+corresponding source is the one listed under **LibreOffice** above. The tree
+also carries these libraries, which the official build takes from the host:
+
+| Files in `program/` | Component | License | Source |
+|---|---|---|---|
+| `libnss3.so`, `libnssutil3.so`, `libsmime3.so`, `libssl3.so`, `libsoftokn3.so`, `libfreeblpriv3.so`, `libnssdbm3.so` | Mozilla NSS 3.98 (Ubuntu 3.98-1ubuntu0.2) | MPL-2.0 | <https://launchpad.net/ubuntu/+source/nss/2:3.98-1ubuntu0.2> |
+| `libnspr4.so`, `libplc4.so`, `libplds4.so` | Mozilla NSPR 4.35 (Ubuntu 4.35-1.1build1) | MPL-2.0 | <https://launchpad.net/ubuntu/+source/nspr/2:4.35-1.1build1> |
+| `libsqlite3.so.0` | SQLite 3.45.1 (Ubuntu 3.45.1-1ubuntu2.8) | blessing (public domain) | <https://launchpad.net/ubuntu/+source/sqlite3/3.45.1-1ubuntu2.8> |
+
+Their copyright files ship in `libreoffice/licenses/`.
+
+### Finnish spelling (`scripts/voikko.tsv`)
+
+`voikko/libvoikko.so.1` is libvoikko 4.3.3 (MPL-1.1 OR GPL-2.0-or-later OR
+LGPL-2.1-or-later), built from
+<https://www.puimula.org/voikko-sources/libvoikko/libvoikko-4.3.3.tar.gz>, the
+upstream release the Windows build is made from. It loads the GCC runtime
+shipped beside it. The transducer data, binding and notices are the
+platform-neutral files listed under **Finnish — libvoikko and voikko-fi**.
+
 ## Frontend / runtime libraries
 
 Bundled into the WebView2 renderer (see `package.json` for exact versions):

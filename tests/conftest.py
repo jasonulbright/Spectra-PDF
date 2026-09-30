@@ -15,6 +15,7 @@ sys.path.insert(0, SRC_DIR)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from gs_axis import GS_PATH, PRESENT_AXIS_SKIP, force_absent  # noqa: E402
+import vendored_tools  # noqa: E402
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -151,13 +152,12 @@ def icc_dir():
 
 
 def _resolve_soffice():
-    """Bundled LibreOffice first (resources/libreoffice), else a system install."""
-    bundled = os.path.join(
-        os.path.dirname(__file__), "..", "resources", "libreoffice",
-        "program", "soffice.exe",
-    )
+    """Bundled LibreOffice first, else a system install."""
+    bundled = str(vendored_tools.SOFFICE)
     if os.path.isfile(bundled):
         return bundled
+    if os.name != "nt":
+        return None
     for base in (
         os.environ.get("ProgramFiles", r"C:\Program Files"),
         os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),

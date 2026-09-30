@@ -25,11 +25,21 @@ import pytest
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANIFEST = os.path.join(REPO, "scripts", "libreoffice-notices.tsv")
 BUNDLER = os.path.join(REPO, "scripts", "bundle-libreoffice.ps1")
-TREE = os.path.join(REPO, "resources", "libreoffice")
+LINUX_BUNDLER = os.path.join(REPO, "scripts", "bundle-libreoffice.sh")
+WINDOWS = os.name == "nt"
+PLATFORM = "windows" if WINDOWS else "linux"
+TREE = (
+    os.path.join(REPO, "resources", "libreoffice")
+    if WINDOWS
+    else os.path.join(REPO, "resources", "linux-x86_64", "libreoffice")
+)
+XPDFIMPORT = "xpdfimport.exe" if WINDOWS else "xpdfimport"
 
 # Skip on the FILE, never the directory: the release workflow stubs `resources/`
 # with empty directories, so `isdir` is true where the binary is absent.
-_provisioned = os.path.isfile(os.path.join(TREE, "program", "soffice.exe"))
+_provisioned = os.path.isfile(
+    os.path.join(TREE, "program", "soffice.exe" if WINDOWS else "soffice")
+)
 needs_tree = pytest.mark.skipif(
     not _provisioned, reason="vendored LibreOffice not provisioned"
 )
@@ -53,6 +63,11 @@ def rows():
     return out
 
 
+def platform_rows():
+    """The rows this platform's gate checks: its own plus the `all` rows."""
+    return [cells[:7] for cells in rows() if cells[7] in ("all", PLATFORM)]
+
+
 def _notice_names():
     return {os.path.basename(f) for f, _c, role, *_ in rows() if role == "notice"}
 
@@ -60,7 +75,8 @@ def _notice_names():
 class TestManifest:
     def test_every_row_is_complete(self):
         notices = _notice_names()
-        for file, component, role, sha, spdx, notice, source in rows():
+        for file, component, role, sha, spdx, notice, source, platform in rows():
+            assert platform in ("all", "windows", "linux"), file
             assert file, component
             assert component, file
             assert role in ("binary", "data", "notice"), file
@@ -74,6 +90,7 @@ class TestManifest:
     def test_the_gpl_components_are_named_by_their_class(self):
         by_file = {file: (spdx, role) for file, _c, role, _s, spdx, *_ in rows()}
         assert by_file["program/xpdfimport.exe"] == ("GPL-2.0-or-later", "binary")
+        assert by_file["program/xpdfimport"] == ("GPL-2.0-or-later", "binary")
         for table in ("cidToUnicode", "nameToUnicode", "unicodeMap"):
             spdx, role = by_file[f"share/xpdfimport/poppler_data/{table}"]
             assert spdx == "GPL-2.0-or-later", table
@@ -105,7 +122,7 @@ class TestManifest:
 @needs_tree
 class TestProvisionedTree:
     def test_every_manifest_row_is_present_at_its_pin(self):
-        for file, _component, _role, sha, *_ in rows():
+        for file, _component, _role, sha, *_ in platform_rows():
             path = os.path.join(TREE, file.replace("/", os.sep))
             assert os.path.exists(path), path
             if sha == "-":
@@ -150,9 +167,12 @@ class TestProvisionedTree:
 # PowerShell 7 first: some environments put a reduced `powershell` on PATH that
 # lacks Get-FileHash, which the bundler has always used.
 _PWSH = shutil.which("pwsh") or shutil.which("powershell")
+_SH = shutil.which("sh")
 
 
-@pytest.mark.skipif(_PWSH is None, reason="PowerShell not available")
+@pytest.mark.skipif(
+    (_PWSH if WINDOWS else _SH) is None, reason="the platform's bundler shell is not available"
+)
 class TestBundlerGate:
     """The refusal control: the gate must fail a tree that lost the GPL parts.
 
@@ -160,11 +180,16 @@ class TestBundlerGate:
     """
 
     def _gate(self, tree):
-        return subprocess.run(
+        command = (
             [
                 _PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass",
                 "-File", BUNDLER, "-GateOnly", "-DestDir", str(tree),
-            ],
+            ]
+            if WINDOWS
+            else [_SH, LINUX_BUNDLER, "--gate-only", str(tree)]
+        )
+        return subprocess.run(
+            command,
             capture_output=True,
             text=True,
             stdin=subprocess.DEVNULL,
@@ -173,7 +198,7 @@ class TestBundlerGate:
 
     def _skeleton(self, tmp_dir):
         """Only the files the manifest names — enough to exercise the gate."""
-        for file, _component, _role, sha, *_ in rows():
+        for file, _component, _role, sha, *_ in platform_rows():
             src = os.path.join(TREE, file.replace("/", os.sep))
             dst = os.path.join(tmp_dir, file.replace("/", os.sep))
             os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -191,10 +216,10 @@ class TestBundlerGate:
     @needs_tree
     def test_it_refuses_a_tree_with_the_pdf_import_helper_removed(self, tmp_dir):
         tree = self._skeleton(tmp_dir)
-        os.remove(os.path.join(tree, "program", "xpdfimport.exe"))
+        os.remove(os.path.join(tree, "program", XPDFIMPORT))
         done = self._gate(tree)
         assert done.returncode != 0
-        assert "xpdfimport.exe" in done.stdout + done.stderr
+        assert XPDFIMPORT in done.stdout + done.stderr
 
     @needs_tree
     def test_it_refuses_a_tree_with_the_gpl_encoding_tables_removed(self, tmp_dir):
@@ -207,7 +232,7 @@ class TestBundlerGate:
     @needs_tree
     def test_it_refuses_a_tree_whose_helper_does_not_match_the_pin(self, tmp_dir):
         tree = self._skeleton(tmp_dir)
-        target = os.path.join(tree, "program", "xpdfimport.exe")
+        target = os.path.join(tree, "program", XPDFIMPORT)
         with open(target, "ab") as fh:
             fh.write(b"\0")
         done = self._gate(tree)

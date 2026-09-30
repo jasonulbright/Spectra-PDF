@@ -83,10 +83,11 @@ from engine import trapping as trapping_mod
 from engine import watermark as watermark_mod
 from engine import xfdf as xfdf_mod
 from engine.extract_text import extract_text
+import vendored_tools
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 RESOURCES = FIXTURES.parent.parent / "resources"
-TESSERACT = RESOURCES / "tesseract" / "tesseract.exe"
+TESSERACT = vendored_tools.TESSERACT
 
 
 # ── the documents ──────────────────────────────────────────────────────────

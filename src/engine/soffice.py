@@ -24,7 +24,7 @@ from engine.credentials import open_pdf
 from engine import budget
 from engine.inplace import publish_copy
 from engine.pdf_fonts import name_str
-from engine.system_fonts import installed_families
+from engine.system_fonts import families_in, installed_families
 
 # Allow for LibreOffice's cold profile build and a bridged second launch.
 _BASE_SECONDS = 240.0
@@ -77,10 +77,20 @@ def seed_profile(profile: Path) -> Path:
 
 
 def _kill_tree(pid: int) -> None:
-    """Kill a process and its children. soffice.exe launches soffice.bin as a
-    child, so a bare kill of the tracked pid leaves the worker running and its
-    profile dir locked — taskkill /T terminates the whole tree (Windows-only,
-    which this app is). Best-effort: a race where it already exited is fine."""
+    """Kill a process and its children. The soffice launcher starts soffice.bin
+    as a child, so a bare kill of the tracked pid leaves the worker running and
+    its profile dir locked. Windows: taskkill /T terminates the whole tree.
+    POSIX: the launcher leads its own session (`start_new_session`), so the
+    process group is the tree. Best-effort: a race where it already exited is
+    fine."""
+    if os.name == "posix":
+        import signal
+
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        return
     try:
         subprocess.run(
             ["taskkill", "/F", "/T", "/PID", str(pid)],
@@ -150,6 +160,7 @@ def run_convert(
             # subprocess that reads the RPC pipe consumes the next request.
             stdin=subprocess.DEVNULL,
             text=True,
+            start_new_session=(os.name == "posix"),
         )
         try:
             stdout, stderr = proc.communicate(timeout=allowed)
@@ -606,26 +617,56 @@ def declared_faces(path: str | Path) -> set[str]:
     return {n for n in (_unescape(name) for name in names) if n}
 
 
-def substituted_faces(source: str | Path, produced_pdf: str | Path) -> list[str]:
+# Faces designed to the same advance widths as the face they stand in for, so a
+# substitution between them does not reflow a line. The Liberation family is
+# published as metric-compatible with these three.
+_METRIC_EQUIVALENT = {
+    "arial": "liberationsans",
+    "timesnewroman": "liberationserif",
+    "couriernew": "liberationmono",
+}
+
+
+def _private_font_dir(soffice_path: str | Path | None) -> Path | None:
+    """The font directory a LibreOffice tree registers for itself
+    (`share/fonts/truetype` beside `program/`), where bundle-libreoffice
+    stages the app fonts."""
+    if not soffice_path:
+        return None
+    return Path(soffice_path).resolve().parent.parent / "share" / "fonts" / "truetype"
+
+
+def substituted_faces(
+    source: str | Path, produced_pdf: str | Path, soffice_path: str | Path | None = None
+) -> list[str]:
     """Faces the source asked for that the converter did not have.
 
     A contract that reflows because Calibri became DejaVu is a common
-    Office-conversion failure, so substitutions are reported. Two independent
-    acquittals are used because each one can only remove
-    an accusation and never add one: the face is in the produced PDF (so it was
-    found, whatever else is true), or it is installed on this machine (so
-    LibreOffice had it available, whether or not this document drew with it).
+    Office-conversion failure, so substitutions are reported. Three independent
+    acquittals are used because each one can only remove an accusation and never
+    add one: the face is in the produced PDF (so it was found, whatever else is
+    true); it is installed on this machine or in the converter's own font
+    directory (so LibreOffice had it available, whether or not this document
+    drew with it); or the PDF draws with a face metric-compatible with it (so
+    no line reflowed).
     """
     declared = declared_faces(source)
     if not declared:
         return []
     present = embedded_faces(produced_pdf)
-    installed = {_normalise_face(family) for family in installed_families()}
+    families = set(installed_families())
+    private = _private_font_dir(soffice_path)
+    if private is not None and private.is_dir():
+        families |= families_in(str(private))
+    installed = {_normalise_face(family) for family in families}
     missing = []
     for name in sorted(declared):
         key = _normalise_face(name)
-        if key and key not in present and key not in installed:
-            missing.append(name)
+        if not key or key in present or key in installed:
+            continue
+        if _METRIC_EQUIVALENT.get(key) in present:
+            continue
+        missing.append(name)
     return missing
 
 
@@ -660,7 +701,7 @@ def to_pdf(source: str | Path, output: str | Path, soffice_path: str) -> dict:
             raise RuntimeError(
                 "LibreOffice reported success but the PDF it wrote has no pages"
             )
-        fonts = substituted_faces(src, produced)
+        fonts = substituted_faces(src, produced, soffice_path)
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         if out_path.exists():

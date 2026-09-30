@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +37,7 @@ def _mtimes() -> dict[str, int]:
     }
 
 
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="the Rust toolchain is not installed")
 def test_payload_build_stabilizes_and_still_repairs_drift():
     # Historical-package verifier fixtures share this target directory. With
     # uncommitted build.rs edits, their newer compiled build-script can mask

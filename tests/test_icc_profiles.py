@@ -117,18 +117,26 @@ class TestTheNoticeGate:
     check runs before anything is extracted rather than being left to review.
     """
 
-    SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "bundle-icc.ps1"
+    WINDOWS = os.name == "nt"
+    SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / (
+        "bundle-icc.ps1" if WINDOWS else "bundle-icc.sh"
+    )
 
     def _run(self, manifest, notices=None):
-        args = [
-            "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", str(self.SCRIPT), "-Manifest", str(manifest),
-            # A destination nothing reads: the gate must fail before the
-            # script would ever write there.
-            "-DestDir", str(Path(manifest).parent / "out"),
-        ]
-        if notices is not None:
-            args += ["-Notices", str(notices)]
+        # A destination nothing reads: the gate must fail before the script
+        # would ever write there.
+        out = str(Path(manifest).parent / "out")
+        if self.WINDOWS:
+            args = [
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", str(self.SCRIPT), "-Manifest", str(manifest), "-DestDir", out,
+            ]
+            if notices is not None:
+                args += ["-Notices", str(notices)]
+        else:
+            args = ["sh", str(self.SCRIPT), "--manifest", str(manifest), "--dest-dir", out]
+            if notices is not None:
+                args += ["--notices", str(notices)]
         return subprocess.run(args, capture_output=True, text=True, timeout=300,
                               stdin=subprocess.DEVNULL)
 

@@ -63,7 +63,9 @@ foreach ($r in $rows) {
     if ($sha -ne $r.sha256) { throw "$($r.file): sha256 $sha does not match the pinned $($r.sha256)" }
 }
 
-$wheels = @($rows | Where-Object { $_.role -eq 'wheel' } | ForEach-Object { Join-Path $VendorDir $_.file })
+# One manifest carries every platform's wheel; only the rows this interpreter
+# can install are installed (a manylinux wheel is refused by pip on Windows).
+$wheels = @($rows | Where-Object { $_.role -eq 'wheel' -and $_.file -match '(win_amd64|-none-any)\.whl$' } | ForEach-Object { Join-Path $VendorDir $_.file })
 Write-Host "Installing $($wheels.Count) vendored wheel(s) into $Python..."
 & $Python -m pip install --no-index --no-deps --force-reinstall @wheels --no-warn-script-location
 if ($LASTEXITCODE -ne 0) { throw "vendored wheel install failed" }

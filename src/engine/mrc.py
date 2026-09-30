@@ -64,6 +64,7 @@ from PIL import Image
 from pikepdf import Dictionary, Name
 
 from . import budget
+from . import platform_support
 from . import gs_capability
 from . import mrc_verify
 from .inplace import is_same_file, staged_write
@@ -1040,10 +1041,11 @@ def mrc_compress(
         # Asked for and not available REFUSES. Running the compression with
         # the check quietly skipped would hand back exactly the output the
         # switch exists to prevent, under a setting that says otherwise.
+        script = platform_support.bundle_script("bundle-tesseract")
         raise RuntimeError(
             f"The OCR engine is not available at {tesseract_path or '(no path given)'}, so "
             "the text of an MRC page cannot be verified. Turn off text verification or "
-            "run scripts/bundle-tesseract.ps1."
+            f"run {script}."
         )
 
     info = validate_pdf(file)

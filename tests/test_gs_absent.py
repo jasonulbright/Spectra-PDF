@@ -334,6 +334,16 @@ ROSTER: dict[str, Callable[[Bench], object]] = {
 # ── The derivation ────────────────────────────────────────────────────────
 
 
+#: The printer door drives Ghostscript's Windows print device; elsewhere it
+#: refuses by platform before Ghostscript is consulted (tests/test_engine.py).
+DOORS = [
+    pytest.param(door, marks=pytest.mark.skipif(
+        sys.platform != "win32", reason="the print device is a Windows interface"))
+    if door == "printer" else door
+    for door in sorted(ROSTER)
+]
+
+
 def test_the_roster_covers_every_gs_door():
     """The roster IS the sweep's answer, not a list somebody remembered.
 
@@ -364,7 +374,7 @@ def test_the_derivation_finds_a_new_door(tmp_path, monkeypatch):
 # ── The absent-state answer, per door ─────────────────────────────────────
 
 
-@pytest.mark.parametrize("door", sorted(ROSTER))
+@pytest.mark.parametrize("door", DOORS)
 def test_every_gs_door_refuses_by_name(door, bench, gs_absent):
     """Refuses, with the reason attached — never a spawn failure."""
     with pytest.raises(gc.GsUnavailable) as caught:
@@ -377,7 +387,7 @@ def test_every_gs_door_refuses_by_name(door, bench, gs_absent):
     assert "ghostscript.com" in str(caught.value)
 
 
-@pytest.mark.parametrize("door", sorted(ROSTER))
+@pytest.mark.parametrize("door", DOORS)
 def test_no_gs_door_leaves_a_partial_output(door, bench, gs_absent):
     """Nothing in the output directory after the refusal.
 
@@ -390,7 +400,7 @@ def test_no_gs_door_leaves_a_partial_output(door, bench, gs_absent):
     assert sorted(p.name for p in bench.out.iterdir()) == []
 
 
-@pytest.mark.parametrize("door", sorted(ROSTER))
+@pytest.mark.parametrize("door", DOORS)
 def test_no_gs_door_reports_success(door, bench, gs_absent):
     """A returned report is a silent success — the roster's whole point.
 

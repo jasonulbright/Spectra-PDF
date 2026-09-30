@@ -61,6 +61,9 @@ def _fake_store(monkeypatch, root_entries, ca_entries=()):
         return []
 
     monkeypatch.setattr(os_trust, "_enumerate", fake)
+    # A fabricated store is a present store on every host, including one
+    # whose platform exposes none.
+    monkeypatch.setattr(os_trust, "available", lambda: True)
     return asked
 
 

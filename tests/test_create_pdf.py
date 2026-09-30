@@ -33,6 +33,7 @@ from engine.create_pdf import (
 from engine.extract_text import extract_text
 
 import gs_axis
+import vendored_tools
 
 
 def field_names(path):
@@ -447,7 +448,7 @@ PS_BODY = (
 )
 
 REPO = Path(__file__).resolve().parent.parent
-SOFFICE = REPO / "resources" / "libreoffice" / "program" / "soffice.exe"
+SOFFICE = vendored_tools.SOFFICE
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 SOURCES = FIXTURES / "sources"
 

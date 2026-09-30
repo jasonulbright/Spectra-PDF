@@ -84,6 +84,9 @@ function Read-NoticeManifest([string]$path) {
         $c = $line -split "`t"
         if (-not $seenHeader) { $seenHeader = $true; continue }
         if ($c.Count -lt 7) { throw "notice manifest row has $($c.Count) columns: $line" }
+        $platform = if ($c.Count -ge 8 -and $c[7].Trim()) { $c[7].Trim() } else { "all" }
+        if ($platform -notin @("all", "windows", "linux")) { throw "notice manifest row names platform '$platform': $line" }
+        if ($platform -eq "linux") { continue }
         $rows += [pscustomobject]@{
             file = $c[0].Trim(); component = $c[1].Trim(); role = $c[2].Trim()
             sha256 = $c[3].Trim(); spdx = $c[4].Trim(); notice = $c[5].Trim()

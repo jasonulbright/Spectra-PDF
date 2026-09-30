@@ -13,6 +13,7 @@ import ctypes
 import hashlib
 import json
 import os
+import shutil
 import stat
 import struct
 import subprocess
@@ -212,6 +213,8 @@ def _zip64_central(path: Path, index: int, declared_size: int = 24) -> None:
 
 @pytest.fixture(params=SHELLS)
 def shell(request):
+    if shutil.which(request.param) is None:
+        pytest.skip(f"{request.param} is not installed")
     return request.param
 
 

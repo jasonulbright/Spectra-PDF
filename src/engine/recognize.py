@@ -34,7 +34,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from . import budget
+from . import budget, platform_support
 
 # Matches the renderer's old rasterizer (ocr-client.ts): 300 dpi is the density
 # tesseract's models are trained around -- materially lower loses small type,
@@ -66,9 +66,11 @@ _LANG_RE = re.compile(rf"^{_LANG_STEM}(?:\+{_LANG_STEM})*$", re.IGNORECASE)
 def _tesseract_exe(tesseract_path: str) -> Path:
     exe = Path(tesseract_path) if tesseract_path else Path()
     if not exe.is_file():
+        program = platform_support.program_name("tesseract")
+        script = platform_support.bundle_script("bundle-tesseract")
         raise RuntimeError(
-            "The OCR engine is not available: no tesseract.exe at "
-            f"{tesseract_path or '(no path given)'}. Run scripts/bundle-tesseract.ps1."
+            f"The OCR engine is not available: no {program} at "
+            f"{tesseract_path or '(no path given)'}. Run {script}."
         )
     return exe
 
@@ -222,7 +224,8 @@ def _tessdata_for(exe: Path) -> Path:
     """
     tessdata = exe.parent / "tessdata"
     if not tessdata.is_dir():
-        raise RuntimeError(f"No tessdata beside {exe}; run scripts/bundle-tesseract.ps1.")
+        script = platform_support.bundle_script("bundle-tesseract")
+        raise RuntimeError(f"No tessdata beside {exe}; run {script}.")
     return tessdata
 
 
@@ -289,9 +292,10 @@ def _run_tesseract(png: Path | bytes, lang: str, exe: Path, tessdata: Path) -> t
     # "this page has no text" -- the exact silent degradation this program
     # refuses. Fail loudly instead.
     if "Can't open tsv" in (proc.stderr or ""):
+        script = platform_support.bundle_script("bundle-tesseract")
         raise RuntimeError(
             "OCR produced no word boxes: tessdata/configs/tsv is missing from the "
-            "vendored Tesseract. Re-run scripts/bundle-tesseract.ps1."
+            f"vendored Tesseract. Re-run {script}."
         )
     return _parse_tsv(proc.stdout or "", width, height)
 
@@ -378,7 +382,7 @@ def recognize(
             (e.g. ``eng+fra``). NOT auto-detection -- each model is loaded and
             run, which is slower and slightly less accurate on a page that is
             only one of them.
-        tesseract_path: Path to the vendored tesseract.exe.
+        tesseract_path: Path to the vendored Tesseract program.
         gs_path: Path to the Ghostscript to drive ("" resolves one).
 
     Returns:

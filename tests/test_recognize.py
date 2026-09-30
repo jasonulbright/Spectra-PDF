@@ -23,9 +23,10 @@ from engine.recognize import (
 )
 
 import gs_axis
+import vendored_tools
 
 ROOT = Path(__file__).resolve().parents[1]
-TESSERACT = ROOT / "resources" / "tesseract" / "tesseract.exe"
+TESSERACT = vendored_tools.TESSERACT
 GS = gs_axis.GS_PATH
 SCANNED = ROOT / "e2e-tests" / "fixtures" / "scanned.pdf"
 TESSDATA = TESSERACT.parent / "tessdata"

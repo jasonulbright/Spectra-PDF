@@ -46,7 +46,9 @@ function Read-Manifest {
         Select-Object -Skip 1 |
         ForEach-Object {
             $c = $_ -split "`t"
-            if ($c.Count -ge 6 -and $c[1]) {
+            # Rows for the Linux tree (bundle-jbig2enc.sh) name files with no
+            # Windows extension; this gate reads the Windows set only.
+            if ($c.Count -ge 6 -and $c[1] -and $c[0].Trim() -match '\.(exe|dll)$') {
                 $rows[$c[1].Trim()] = @{ file = $c[0].Trim(); version = $c[2].Trim(); notice = $c[4].Trim() }
             }
         }

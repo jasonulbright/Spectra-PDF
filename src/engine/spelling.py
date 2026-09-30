@@ -39,7 +39,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Iterator
 
-from engine import text_match
+from engine import platform_support, text_match
 
 # ═══════════════════════════ the spylls adapter ═══════════════════════════
 
@@ -184,14 +184,33 @@ def _without_ignored(dictionary: Any, word: str) -> str:
 # which is a different engine behind the same two methods.
 
 
+def _voikko_library(tree: Path) -> Path:
+    """The vendored libvoikko for this platform.
+
+    Windows ships the DLL beside the dictionary. A Linux dev tree keeps the
+    native library in its own platform tree (resources/linux-x86_64/voikko), because the
+    dictionary tree is shared with a Windows checkout; the shipped layout may
+    place it beside the dictionary, which is looked at first.
+    """
+    name = platform_support.shared_library_name("libvoikko-1.dll", "libvoikko.so.1")
+    beside = tree / name
+    if beside.is_file() or platform_support.IS_WINDOWS:
+        return beside
+    for candidate in platform_support.vendored_candidates(Path(__file__).resolve().parent, "voikko", name):
+        if candidate.is_file():
+            return candidate
+    return beside
+
+
 def _open_voikko(tree: Path) -> Any:
     """A libvoikko handle bound to OUR vendored library and OUR tree.
 
     Both bindings are load-bearing. The vendored `libvoikko.py`'s own loader
-    falls back to `CDLL("libvoikko-1.dll")` — a bare name resolved against the
-    system search path — whenever the copy beside it fails to open. Opening the
-    vendored DLL by absolute path FIRST makes that fallback unreachable: once
-    the module is loaded under that path the loader returns it again, and a
+    falls back to `CDLL("libvoikko-1.dll")` (`libvoikko.so.1` off Windows) — a
+    bare name resolved against the system search path — whenever the copy
+    beside it fails to open. Opening the vendored library by absolute path
+    FIRST makes that fallback unreachable: once the module is loaded under that
+    path (or, off Windows, under its soname) the loader returns it again, and a
     failure surfaces here as a refusal instead of a silent handover to whatever
     libvoikko the machine happens to carry. The module is likewise loaded from
     its own file rather than through `sys.path`.
@@ -201,7 +220,7 @@ def _open_voikko(tree: Path) -> Any:
     import sys
 
     module_path = tree / "libvoikko.py"
-    dll_path = tree / "libvoikko-1.dll"
+    dll_path = _voikko_library(tree)
     for path in (module_path, dll_path):
         if not path.is_file():
             raise ValueError(f"The Finnish spelling engine is incomplete: {path.name} is missing.")

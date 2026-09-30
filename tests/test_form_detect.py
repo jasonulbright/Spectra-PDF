@@ -19,13 +19,14 @@ from engine.form_detect import detect_form_fields
 from engine.form_detect_vocab import is_date_label, is_signature_label
 
 import gs_axis
+import vendored_tools
 
 
 K = 0.5523  # the circle-from-Béziers control-point ratio
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 GS_EXE = gs_axis.GS_PATH
-TESSERACT_EXE = _ROOT / "resources" / "tesseract" / "tesseract.exe"
+TESSERACT_EXE = vendored_tools.TESSERACT
 
 
 def _simple_font(doc):

@@ -77,7 +77,7 @@ import numpy as np
 from PIL import Image
 from PIL.TiffImagePlugin import ROWSPERSTRIP
 
-from . import budget
+from . import budget, platform_support
 from engine.pdf_save import save_pdf
 
 # The mask codecs, in the order the presets prefer them.
@@ -192,11 +192,8 @@ def jbig2_candidates(engine_dir: Path) -> tuple[Path, ...]:
     one is the layout that matters in production and cannot be exercised by
     running the dev tree, because `resolve_jbig2` reads its own `__file__`.
     """
-    return (
-        # Shipped: <resources>/engine/ beside <resources>/jbig2enc/.
-        engine_dir.parent / "jbig2enc" / "jbig2.exe",
-        # Dev tree: src/engine/ with <repo>/resources/jbig2enc/.
-        engine_dir.parent.parent / "resources" / "jbig2enc" / "jbig2.exe",
+    return platform_support.vendored_candidates(
+        engine_dir, "jbig2enc", platform_support.program_name("jbig2")
     )
 
 
@@ -230,9 +227,11 @@ def jbig2_available(jbig2_path: str = "") -> bool:
 def _require_jbig2(jbig2_path: str) -> str:
     exe = resolve_jbig2(jbig2_path)
     if not exe:
+        program = platform_support.program_name("jbig2")
+        script = platform_support.bundle_script("bundle-jbig2enc")
         raise RuntimeError(
-            "The JBIG2 encoder is not available: no jbig2.exe at "
-            f"{jbig2_path or '(no path given)'}. Run scripts/bundle-jbig2enc.ps1."
+            f"The JBIG2 encoder is not available: no {program} at "
+            f"{jbig2_path or '(no path given)'}. Run {script}."
         )
     return exe
 

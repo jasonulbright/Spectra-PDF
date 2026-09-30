@@ -171,6 +171,7 @@ class TestApplyOcrLayer:
         assert r["pages_applied"] == 1
         assert "INVOICE" in extract_text(out)["text"]
 
+    @pytest.mark.skipif(os.name != "nt", reason="the \\\\?\\ verbatim prefix is a Windows path form")
     def test_verbatim_prefixed_long_path_output(self, tmp_dir):
         r"""A \\?\-prefixed, >260-char output path — what dunce emits when a
         resolved path exceeds legacy limits — must reach pikepdf intact (the

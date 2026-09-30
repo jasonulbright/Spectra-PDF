@@ -64,11 +64,10 @@ from engine.mrc_codecs import CCITT_G4, JBIG2_GENERIC, JBIG2_SYMBOL
 from engine.pdfa import convert_pdfa
 
 import numpy as np
+import vendored_tools
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
-TESSERACT = (
-    Path(__file__).resolve().parent.parent / "resources" / "tesseract" / "tesseract.exe"
-)
+TESSERACT = vendored_tools.TESSERACT
 
 SCANS = ("scan-text", "scan-photo", "scan-form")
 

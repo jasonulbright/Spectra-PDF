@@ -221,7 +221,7 @@ class TestRootRefusal:
 class _Tagged:
     def __init__(self, real, tag):
         self._real = real
-        self.st_file_attributes = real.st_file_attributes | 0x400
+        self.st_file_attributes = getattr(real, "st_file_attributes", 0) | 0x400
         self.st_reparse_tag = tag
 
     def __getattr__(self, name):

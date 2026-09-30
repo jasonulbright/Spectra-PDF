@@ -568,6 +568,9 @@ class TestTheDestinationIsClosedBeforeTheSwap:
     used to degrade into tolerated an open destination by writing through it.
     """
 
+    @pytest.mark.skipif(
+        os.name != "nt", reason="POSIX rename replaces an open file; the refusal is a Windows sharing rule"
+    )
     def test_replacing_a_destination_that_is_still_open_is_refused(self, tmp_path):
         source = _plain(tmp_path / "source.pdf")
         staged = tmp_path / "staged.pdf"
@@ -707,7 +710,8 @@ class TestFinishStaged:
         assert entered == []
         assert _besides(tmp_path, "destination.bin", "alias.bin") == []
 
-    def test_a_swap_that_fails_leaves_nothing_staged(self, tmp_path):
+    def test_a_swap_that_fails_leaves_nothing_staged(self, tmp_path, monkeypatch):
+        from engine import inplace
         from engine.inplace import finish_staged
 
         destination = tmp_path / "held-open.bin"
@@ -715,6 +719,13 @@ class TestFinishStaged:
         staged = tmp_path / "staged.bin"
         staged.write_bytes(b"new")
 
+        if os.name != "nt":
+            # POSIX rename succeeds over an open file, so the failure is
+            # injected at the swap itself.
+            def refused(src, dst):
+                raise PermissionError(13, "Permission denied", dst)
+
+            monkeypatch.setattr(inplace.os, "replace", refused)
         with open(destination, "rb") as held:
             held.read()
             with pytest.raises(OSError):

@@ -80,6 +80,7 @@ function Read-Manifest {
             spdx      = $c[4].Trim()
             notice    = $c[5].Trim()
             source    = $c[6].Trim()
+            platform  = if ($c.Count -ge 8 -and $c[7].Trim()) { $c[7].Trim() } else { "all" }
         }
     }
     if (-not $seenHeader) { throw "manifest $Path has no header row" }
@@ -87,7 +88,9 @@ function Read-Manifest {
 }
 
 $man = Read-Manifest $Manifest
-$rows = $man.rows
+# Rows for the Linux tree (bundle-voikko.sh) are carried through a
+# -WriteManifest rewrite untouched and are not part of this gate.
+$rows = @($man.rows | Where-Object { $_.platform -ne 'linux' })
 
 # ---------------------------------------------------------------------------
 # The notice gate, half one: the manifest is self-consistent. Checked BEFORE
@@ -225,13 +228,13 @@ if ($WriteManifest) {
     $byFile = @{}
     foreach ($k in $plan.Keys) { $byFile[$k] = $plan[$k] }
     $out = @($man.header)
-    foreach ($r in $rows) {
+    foreach ($r in $man.rows) {
         $sha = $r.sha256
-        if ($r.role -ne 'runtime' -and $r.notice -ne 'LICENSE-gcc-runtime.txt' -and $r.notice -ne 'LICENSE-mingw-w64.txt') {
+        if ($r.platform -ne 'linux' -and $r.role -ne 'runtime' -and $r.notice -ne 'LICENSE-gcc-runtime.txt' -and $r.notice -ne 'LICENSE-mingw-w64.txt') {
             if (-not $byFile.ContainsKey($r.file)) { throw "$($r.file): the manifest names a file this run does not produce" }
             $sha = (Get-FileHash -Algorithm SHA256 $byFile[$r.file]).Hash.ToLowerInvariant()
         }
-        $out += ($r.file, $r.component, $r.role, $sha, $r.spdx, $r.notice, $r.source) -join "`t"
+        $out += ($r.file, $r.component, $r.role, $sha, $r.spdx, $r.notice, $r.source, $r.platform) -join "`t"
     }
     [System.IO.File]::WriteAllText($Manifest, ($out -join "`n") + "`n", [System.Text.UTF8Encoding]::new($false))
     Write-Host "Wrote $($rows.Count) rows into $Manifest. Review the diff and commit."

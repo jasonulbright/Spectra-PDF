@@ -41,10 +41,11 @@ from engine.preflight_sweep import run_preflight_sweep
 import preflight_builders as builders
 
 import gs_axis
+import vendored_tools
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 RESOURCES = FIXTURES.parent.parent / "resources"
-TESSERACT = RESOURCES / "tesseract" / "tesseract.exe"
+TESSERACT = vendored_tools.TESSERACT
 
 
 

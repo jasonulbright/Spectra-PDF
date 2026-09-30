@@ -196,7 +196,7 @@ enhance_scan.enhancementAskedTurnDeskew	exact	enhance_scan	no enhancement was as
 enhance_scan.jpegQualityMustGot	pattern	enhance_scan	the JPEG quality must be 1-100, got {{quality}}
 enhance_scan.maximumSkewMustDegrees	pattern	enhance_scan	the maximum skew must be 0.1-{{MAX_SKEW_LIMIT}} degrees, got {{max_skew}}
 enhance_scan.minimumSkewMustDegrees	pattern	enhance_scan	the minimum skew must be 0-{{max_skew}} degrees, got {{min_skew}}
-enhance_scan.ocrEngineAvailableTesseract	pattern	enhance_scan	The OCR engine is not available: no tesseract.exe at {{v0}}. Turn off orientation detection or run scripts/bundle-tesseract.ps1.
+enhance_scan.ocrEngineAvailableTesseract	pattern	enhance_scan	The OCR engine is not available: no {{program}} at {{v1}}. Turn off orientation detection or run {{script}}.
 enhance_scan.orientationConfidenceFloorCannot	pattern	enhance_scan	the orientation confidence floor cannot be negative, got {{confidence}}
 enhance_scan.pageSelected	exact	enhance_scan	no page was selected
 enhance_scan.selectedPageDocumentScanned	exact	enhance_scan	no selected page in this document is a scanned image — scan enhancement has nothing to work on
@@ -344,8 +344,8 @@ inplace.fileCouldReplacedBecause	exact	inplace	The file could not be replaced be
 inplace.fileMoreThanOne	exact	inplace	This file has more than one name on disk (hard links). Saving over it would leave the other names with the old content. Save it as a new file.
 inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 ipc.circularReferenceDetected	exact	ipc	Circular reference detected
-ipc.tooManyQueued	exact	ipc	The engine has too many queued requests. Try again when current work finishes.
 ipc.invalidJsonConstant	pattern	ipc	Invalid JSON constant: {{value}}
+ipc.tooManyQueued	exact	ipc	The engine has too many queued requests. Try again when current work finishes.
 layers.layerConfigurationCannotRead	exact	layers	Layer configuration cannot be read completely.
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 layers.layerLockedDefaultConfiguration	exact	layers	Layer is locked in the default configuration.
@@ -378,14 +378,14 @@ mrc.firstDifference	pattern	mrc	{{reason}} (first difference — {{divergence}})
 mrc.ghostscriptCouldRenderPage	pattern	mrc	Ghostscript could not render the page image: {{detail}}
 mrc.mrcBackgroundDivisorMust	pattern	mrc	the MRC background divisor must be 1-12, got {{bg_divisor}}
 mrc.mrcForegroundDivisorMust	pattern	mrc	the MRC foreground divisor must be 1-12, got {{fg_divisor}}
-mrc.ocrEngineAvailableText	pattern	mrc	The OCR engine is not available at {{v0}}, so the text of an MRC page cannot be verified. Turn off text verification or run scripts/bundle-tesseract.ps1.
+mrc.ocrEngineAvailableText	pattern	mrc	The OCR engine is not available at {{v0}}, so the text of an MRC page cannot be verified. Turn off text verification or run {{script}}.
 mrc.pageDocumentScannedImage	exact	mrc	no page in this document is a scanned image — MRC compression has nothing to separate
 mrc.pdfJbigFilterMask	pattern	mrc	PDF/A-1 has no JBIG2 filter, so the mask codec {{mask_codec}} and the PDF/A-safe option cannot both apply — choose one.
 mrc.textVerificationFailedSource	pattern	mrc	text verification failed: {{similarity}} of the source page's words survived, below this preset's {{verify_threshold}} floor
 mrc.unknownMrcMaskCodec	pattern	mrc	unknown MRC mask codec: {{name}} (expected one of {{v1}})
 mrc.unknownMrcPresetExpected	pattern	mrc	unknown MRC preset: {{preset}} (expected one of {{v1}})
 mrc_codecs.ccittGMaskMust	pattern	mrc_codecs	a CCITT G4 mask must encode as ONE strip; libtiff wrote {{v0}} — the concatenated stream would decode progressively wrong.
-mrc_codecs.jbigEncoderAvailableJbig	pattern	mrc_codecs	The JBIG2 encoder is not available: no jbig2.exe at {{v0}}. Run scripts/bundle-jbig2enc.ps1.
+mrc_codecs.jbigEncoderAvailableJbig	pattern	mrc_codecs	The JBIG2 encoder is not available: no {{program}} at {{v1}}. Run {{script}}.
 mrc_codecs.jbigEncoderProducedOutput	pattern	mrc_codecs	The JBIG2 encoder produced no output for page {{v0}}.
 mrc_codecs.jbigEncoderProducedSymbol	exact	mrc_codecs	The JBIG2 encoder produced no symbol dictionary — the shared /JBIG2Globals stream every page refers to is missing.
 mrc_codecs.jbigSymbolThresholdMust	pattern	mrc_codecs	the JBIG2 symbol threshold must be {{MIN_SYMBOL_THRESHOLD}}-{{MAX_SYMBOL_THRESHOLD}}, got {{symbol_threshold}}
@@ -587,6 +587,7 @@ printer.previewNeedsPaperSize	exact	printer	Preview needs the paper size (sheet_
 printer.previewPageCapMust	pattern	printer	Preview page cap must be 1-{{PREVIEW_MAX_PAGES}}, got {{max_pages}}
 printer.printJobTimedOut	pattern	printer	Print job timed out after {{JOB_TIMEOUT_S}}s — the printer driver did not respond
 printer.printerSpecified	exact	printer	No printer specified
+printer.printingSystemPrinterAvailable	exact	printer	Printing to a system printer is not available on this platform.
 printer.unknownExpectedOne	pattern	printer	Unknown {{name}} {{value}} (expected one of {{v2}})
 printer.unknownPaperId	pattern	printer	Unknown paper id {{paper}}
 printer.unknownPrinter	pattern	printer	Unknown printer: '{{printer}}'
@@ -612,16 +613,16 @@ rebuild.ghostscriptRebuildFailed	pattern	rebuild	Ghostscript rebuild failed: {{s
 rebuild.rebuildKeptDocumentS	pattern	rebuild	The rebuild kept {{page_count}} of the document's {{source_pages}} pages, so it was not saved. Use Repair (Tier 1) or Recover (Tier 3) instead.
 recognize.couldRenderPageOcr	pattern	recognize	Could not render page {{page}} for OCR: {{detail}}
 recognize.invalidRecognitionLanguage	pattern	recognize	Invalid recognition language: {{lang}}
-recognize.ocrEngineAvailableTesseract	pattern	recognize	The OCR engine is not available: no tesseract.exe at {{v0}}. Run scripts/bundle-tesseract.ps1.
+recognize.ocrEngineAvailableTesseract	pattern	recognize	The OCR engine is not available: no {{program}} at {{v1}}. Run {{script}}.
 recognize.ocrFailedPage	pattern	recognize	OCR failed on page {{page}}: {{detail}}
 recognize.ocrFailedPageImage	pattern	recognize	OCR failed on the page image: {{detail}}
-recognize.ocrProducedWordBoxes	exact	recognize	OCR produced no word boxes: tessdata/configs/tsv is missing from the vendored Tesseract. Re-run scripts/bundle-tesseract.ps1.
+recognize.ocrProducedWordBoxes	pattern	recognize	OCR produced no word boxes: tessdata/configs/tsv is missing from the vendored Tesseract. Re-run {{script}}.
 recognize.ocrRasteriserDidProduce	exact	recognize	OCR rasteriser did not produce a PNG
 recognize.ocrRasteriserProducedZero	exact	recognize	OCR rasteriser produced a zero-sized page image
 recognize.pageMustBased	exact	recognize	page must be 1-based
 recognize.recognitionInputReadableImage	exact	recognize	Recognition input is not a readable image
 recognize.recognitionLanguageInstalled	pattern	recognize	Recognition language is not installed: {{code}}
-recognize.tessdataBesideRunScripts	pattern	enhance_scan,recognize	No tessdata beside {{exe}}; run scripts/bundle-tesseract.ps1.
+recognize.tessdataBesideRunScripts	pattern	enhance_scan,recognize	No tessdata beside {{exe}}; run {{script}}.
 recover.cannotOpenFileRecovery	pattern	recover	Cannot open file for recovery: {{e}}. File may be completely unreadable.
 recover.pagesCouldRecoveredFile	exact	recover	No pages could be recovered. File is completely unreadable.
 recover.pdfEncryptedDecryptBefore	exact	recover	PDF is encrypted -- decrypt before recovery

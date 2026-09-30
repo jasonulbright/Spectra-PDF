@@ -40,9 +40,10 @@ import pytest
 from engine.create_pdf import create_pdf, image_to_pdf
 from engine.extract_text import extract_text
 from engine.soffice import to_pdf
+import vendored_tools
 
 REPO = Path(__file__).resolve().parent.parent
-SOFFICE = REPO / "resources" / "libreoffice" / "program" / "soffice.exe"
+SOFFICE = vendored_tools.SOFFICE
 TOKEN = "CLIP-9713"
 
 needs_soffice = pytest.mark.skipif(
@@ -167,7 +168,9 @@ class TestClipboardText:
         out = self._convert(tmp_dir, self.BODY.encode("utf-8-sig"))
         with pikepdf.open(str(out)) as pdf:
             box = [round(float(v)) for v in pdf.pages[0]["/MediaBox"]]
-        assert box == [0, 0, 612, 792]
+        # The converter takes the paper from the host's locale: US Letter on the
+        # Windows runner, A4 under a Linux locale that does not name Letter.
+        assert box in ([0, 0, 612, 792], [0, 0, 595, 842])
 
     def test_clipboard_text_reaches_the_create_pdf_door(self, tmp_dir):
         src = Path(tmp_dir) / "note.txt"

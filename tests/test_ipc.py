@@ -19,9 +19,10 @@ def _request(request_id: int, method: str, params: str = "{}") -> str:
 def test_a_deep_request_is_reported_without_ending_the_server():
     server = JsonRpcServer()
     server.register("ping", lambda: "alive")
-    # The shipped CPython decoder tolerates over 10,000 levels before its
-    # C-stack guard fires; this depth reliably exercises that guard.
-    depth = 20000
+    # The decoder's C-stack guard fires at a depth set by the thread's stack
+    # size: past 10,000 levels on Windows, past 20,000 on Linux. This depth
+    # exercises that guard on both.
+    depth = 1_000_000
     deep_params = '{"x":' * depth + "0" + "}" * depth
     output = StringIO()
 

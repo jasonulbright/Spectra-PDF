@@ -22,10 +22,11 @@ from engine.image_export import export_images
 from engine.text_authoring import add_text_box
 
 import gs_axis
+import vendored_tools
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GS = gs_axis.GS_PATH
-TESS = os.path.join(ROOT, "resources", "tesseract", "tesseract.exe")
+TESS = str(vendored_tools.TESSERACT)
 FONTS = os.path.join(ROOT, "resources", "fonts")
 PHRASE = "SCANNED IMAGE PAGE"
 

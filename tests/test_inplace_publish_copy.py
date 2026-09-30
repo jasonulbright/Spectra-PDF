@@ -9,7 +9,7 @@ directory-entry swap gives the name a new file object.
 """
 
 import os
-import shutil
+import sys
 from pathlib import Path
 
 import pikepdf
@@ -91,7 +91,8 @@ def test_office_import_replaces_an_existing_output_by_swap(tmp_path, monkeypatch
         return produced
 
     monkeypatch.setattr(soffice, "run_convert", convert)
-    result = soffice.to_pdf(source, out, shutil.which("cmd") or os.environ["COMSPEC"])
+    # Any existing program stands in for soffice: run_convert is replaced.
+    result = soffice.to_pdf(source, out, sys.executable)
     assert result["pages"] == 2
     with pikepdf.open(out) as pdf:
         assert len(pdf.pages) == 2
