@@ -30,9 +30,7 @@ param(
 )
 
 # Pinned installer checksum -- update deliberately alongside $TessVersion.
-# Verified against the served 50,175,248-byte installer.
-# The mirrored bytes were fetched from the upstream origin
-# https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-$TessVersion.exe
+# Both vendor sources below serve the same 50,175,248-byte installer.
 $ExpectedSha256 = "C885FFF6998E0608BA4BB8AB51436E1C6775C2BAFC2559A19B423E18678B60C9"
 
 # The checked-in JBIG-free libtiff, and the hash it must have. Update both
@@ -41,13 +39,13 @@ $LibTiffSrc = Join-Path $PSScriptRoot "tesseract-libtiff\libtiff-6.dll"
 . (Join-Path $PSScriptRoot "download-retry.ps1")
 $ExpectedLibTiffSha256 = "AA79B1C2EC7FD815325C94A5E97BC904A962D9A40E55C74EB06A804AD7D756D8"
 
-# Ordered installer sources, tried in turn. The project-hosted mirror carries the
-# same bytes as the upstream build and is the only source: the upstream host is
-# geo-blocked for GitHub-hosted runners, so it cannot serve a workflow. The list
-# shape stays so a second mirror can be added. Whichever source answers, the
-# SHA-256 pin above decides the bytes.
+# Ordered installer sources, tried in turn; UB Mannheim publishes both. The
+# vendor's GitHub release is first because digi.bib.uni-mannheim.de does not
+# answer GitHub-hosted runners. Whichever source answers, the SHA-256 pin above
+# decides the bytes.
 $InstallerSources = @(
-    "https://github.com/jasonulbright/Spectra-PDF/releases/download/vendor-cache/tesseract-ocr-w64-setup-$TessVersion.exe"
+    "https://github.com/UB-Mannheim/tesseract/releases/download/v$TessVersion/tesseract-ocr-w64-setup-$TessVersion.exe",
+    "https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-$TessVersion.exe"
 )
 
 Write-Host "Vendoring Tesseract $TessVersion (UB Mannheim build, Apache-2.0)..."

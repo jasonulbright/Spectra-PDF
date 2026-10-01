@@ -13,25 +13,24 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "bundle-tesseract.ps1"
 TEXT = SCRIPT.read_text(encoding="utf-8")
 
-MIRROR = "https://github.com/jasonulbright/Spectra-PDF/releases/download/vendor-cache/tesseract-ocr-w64-setup-$TessVersion.exe"
-UPSTREAM_HOST = "digi.bib.uni-mannheim.de"
+VENDOR_SOURCES = [
+    "https://github.com/UB-Mannheim/tesseract/releases/download/v$TessVersion/tesseract-ocr-w64-setup-$TessVersion.exe",
+    "https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-$TessVersion.exe",
+]
 
 
-def test_the_mirror_is_the_only_download_source() -> None:
-    # The upstream host is geo-blocked for GitHub-hosted runners, so it is not a
-    # source. Its URL survives only as the provenance of the pinned bytes, in a
-    # comment; any other occurrence would be a live source again.
-    sources = TEXT.index("$InstallerSources = @(")
-    body = TEXT[sources : TEXT.index(")", sources)]
-    assert MIRROR in body
-    assert UPSTREAM_HOST not in body
+def test_sources_are_the_vendor_urls_in_order() -> None:
+    # digi.bib.uni-mannheim.de does not answer GitHub-hosted runners, so the
+    # vendor's GitHub release must stay first or every workflow run fails.
+    start = TEXT.index("$InstallerSources = @(")
+    body = TEXT[start : TEXT.index("\n)", start)]
+    urls = [line.strip().rstrip(",").strip('"') for line in body.splitlines()[1:] if line.strip()]
+    assert urls == VENDOR_SOURCES
 
-    mentions = [
-        line
-        for line in TEXT.splitlines()
-        if UPSTREAM_HOST in line
-    ]
-    assert mentions and all(line.lstrip().startswith("#") for line in mentions)
+
+def test_no_project_hosted_copy_is_a_source() -> None:
+    assert "jasonulbright/Spectra-PDF/releases" not in TEXT
+    assert "vendor-cache" not in TEXT
 
 
 def test_checksum_gate_follows_the_download_loop() -> None:
