@@ -70,6 +70,11 @@ describe('buildPrintParams', () => {
     expect(p.image_dpi).toBe(150);
   });
 
+  it('hands a media keyword paper back unchanged', () => {
+    const p = buildPrintParams(opts({ paper: 'iso_a4_210x297mm' }));
+    expect(p.paper).toBe('iso_a4_210x297mm');
+  });
+
   it('scale mode carries the percent and the sheet', () => {
     const p = buildPrintParams(opts({
       fit: 'scale', scalePercent: 55, sheetWidth: 612, sheetHeight: 792,

@@ -158,6 +158,9 @@ pub struct CaptureResult {
     /// scope. Structured so the caller names the refusal in the user's
     /// language instead of showing the browser's cancellation status.
     pub refused_redirect: Option<String>,
+    /// The pages lack the header and footer the request asked for, because
+    /// the browser's print pipeline draws none; the caller stamps them.
+    pub stamp_headers_footers: bool,
 }
 
 /// The origin a capture may navigate within.
@@ -502,6 +505,29 @@ fn decode_harvested_links(raw: &str) -> Result<HarvestedLinks, String> {
     decode_link_list(&encoded)
 }
 
+/// On Linux the capture folders are private to this user, so another account
+/// cannot read or replace a page between its print and the assembly.
+#[cfg(target_os = "linux")]
+fn prepare_capture_root(root: &Path) -> std::io::Result<()> {
+    crate::private_temp_linux::ensure_private_under(&std::env::temp_dir(), root)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn prepare_capture_root(root: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(root)
+}
+
+#[cfg(target_os = "linux")]
+fn create_capture_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new().mode(0o700).create(dir)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn create_capture_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir(dir)
+}
+
 fn capture_root() -> PathBuf {
     std::env::temp_dir().join("spectrapdf").join("web-capture")
 }
@@ -521,11 +547,11 @@ impl CaptureScratch {
     }
 
     fn new_at(root: &Path, pid: u32) -> Result<Self, String> {
-        std::fs::create_dir_all(root)
+        prepare_capture_root(root)
             .map_err(|e| format!("Cannot create the capture scratch folder: {e}"))?;
         let id = uuid::Uuid::new_v4();
         let dir = root.join(format!("{id}.{pid}"));
-        std::fs::create_dir(&dir)
+        create_capture_dir(&dir)
             .map_err(|e| format!("Cannot create the capture's private folder: {e}"))?;
         Ok(Self {
             id,
@@ -776,6 +802,7 @@ async fn run_capture(
     .map_err(|e| format!("The capture did not run: {e}"))?;
 
     let mut result = outcome?;
+    result.stamp_headers_footers = options.headers_footers && !backend::DRAWS_HEADERS_FOOTERS;
     if result.cancelled {
         result.pages.clear();
         return Ok(result);
@@ -824,6 +851,7 @@ fn finish(
         visited,
         failures,
         refused_redirect: None,
+        stamp_headers_footers: false,
     }
 }
 
@@ -1515,6 +1543,22 @@ mod tests {
         );
         assert!(!complete.truncated);
         assert!(!complete.cancelled);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn capture_folders_are_private_to_this_user() {
+        use std::os::unix::fs::MetadataExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("spectrapdf").join("web-capture");
+        let scratch = CaptureScratch::new_at(&root, 4200).unwrap();
+        for dir in [root.parent().unwrap(), root.as_path(), scratch.dir.as_path()] {
+            assert_eq!(std::fs::metadata(dir).unwrap().mode() & 0o777, 0o700, "{}", dir.display());
+        }
+        let elsewhere = tempfile::tempdir().unwrap();
+        let planted = temp.path().join("planted");
+        std::os::unix::fs::symlink(elsewhere.path(), &planted).unwrap();
+        assert!(CaptureScratch::new_at(&planted.join("web-capture"), 4200).is_err());
     }
 
     #[test]

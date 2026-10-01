@@ -16,6 +16,16 @@ pub mod shell_menu;
 mod print_to_pdf;
 mod scheduler;
 mod send_to;
+#[cfg(target_os = "linux")]
+mod autostart_linux;
+#[cfg(target_os = "linux")]
+mod pkcs11_modules;
+#[cfg(target_os = "linux")]
+mod policy_linux;
+#[cfg(target_os = "linux")]
+pub mod private_temp_linux;
+#[cfg(target_os = "linux")]
+mod tray_linux;
 #[cfg(windows)]
 mod snapshot;
 #[cfg(target_os = "linux")]
@@ -52,15 +62,25 @@ pub mod net;
 pub mod gs;
 #[cfg(windows)]
 mod printers;
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+mod cups_linux;
+#[cfg(target_os = "linux")]
+#[path = "printers_linux.rs"]
+mod printers;
+#[cfg(not(any(windows, target_os = "linux")))]
 #[path = "printers_unsupported.rs"]
 mod printers;
 pub mod platform;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 pub mod scan_host;
+#[cfg(any(windows, target_os = "linux"))]
+pub mod scan_model;
 #[cfg(windows)]
 pub mod scanner;
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+#[path = "scanner_sane.rs"]
+pub mod scanner;
+#[cfg(not(any(windows, target_os = "linux")))]
 #[path = "scanner_unsupported.rs"]
 pub mod scanner;
 #[cfg(windows)]
@@ -167,6 +187,52 @@ fn route_shell_handoff(app: &tauri::AppHandle, handoff: String) {
 /// environment variable.
 pub(crate) fn is_e2e_mode() -> bool {
     std::env::var("SPECTRAPDF_E2E").is_ok()
+}
+
+/// The tray icon and its menu. Built only where tray residency is offered.
+fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Show Spectra PDF", true, None::<&str>)?;
+    let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
+    let merge = MenuItem::with_id(app, "merge", "Quick Merge", true, None::<&str>)?;
+    let separator2 = tauri::menu::PredefinedMenuItem::separator(app)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &separator, &merge, &separator2, &quit])?;
+
+    TrayIconBuilder::new()
+        .icon(app.default_window_icon().cloned().unwrap())
+        .menu(&menu)
+        .tooltip("Spectra PDF")
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            // Every workspace window comes back: the tray hides them
+            // all, so restoring only one strands the rest.
+            "show" => app_windows::show_all_app_windows(app),
+            "merge" => {
+                let target = app_windows::route_target(app);
+                app_windows::focus_label(app, &target);
+                let _ = app.emit_to(target.as_str(), "app:trayAction", "merge");
+            }
+            "quit" => {
+                // Explicit Quit must use the renderer's shared close
+                // flow so dirty documents can be saved or kept open,
+                // and every workspace window can acknowledge the
+                // request before the session is sealed.
+                let target = app_windows::route_target(app);
+                app_windows::focus_label(app, &target);
+                let _ = app.emit_to(target.as_str(), "app:trayAction", "quit");
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } = event
+            {
+                app_windows::show_all_app_windows(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -277,6 +343,7 @@ pub fn run() {
             commands::pick_pem_file,
             commands::pick_icc_file,
             commands::pick_pkcs11_module,
+            commands::list_pkcs11_modules,
             store_certs::list_store_certificates,
             csc_oauth::csc_authorize,
             commands::pick_any_file,
@@ -443,8 +510,12 @@ pub fn run() {
             // Under end-to-end control the window is force-shown below, so the
             // preference must not decide anything about visibility here.
             let tray = commands::PlatformCapabilities::current().tray_residency;
+            #[cfg(target_os = "linux")]
+            let tray_pending = !e2e && tray_linux::pending();
+            #[cfg(not(target_os = "linux"))]
+            let tray_pending = false;
             let start_minimized = !e2e
-                && tray
+                && (tray || tray_pending)
                 && (args.iter().any(|a| a == "--minimized") || startup.start_minimized);
 
             // The main window's geometry comes back on every launch — it
@@ -477,48 +548,30 @@ pub fn run() {
                 return Ok(());
             }
             if tray {
-                // Build system tray
-                let show = MenuItem::with_id(app, "show", "Show Spectra PDF", true, None::<&str>)?;
-                let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
-                let merge = MenuItem::with_id(app, "merge", "Quick Merge", true, None::<&str>)?;
-                let separator2 = tauri::menu::PredefinedMenuItem::separator(app)?;
-                let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-                let menu = Menu::with_items(app, &[&show, &separator, &merge, &separator2, &quit])?;
-
-                TrayIconBuilder::new()
-                    .icon(app.default_window_icon().cloned().unwrap())
-                    .menu(&menu)
-                    .tooltip("Spectra PDF")
-                    .on_menu_event(|app, event| match event.id.as_ref() {
-                        // Every workspace window comes back: the tray hides them
-                        // all, so restoring only one strands the rest.
-                        "show" => app_windows::show_all_app_windows(app),
-                        "merge" => {
-                            let target = app_windows::route_target(app);
-                            app_windows::focus_label(app, &target);
-                            let _ = app.emit_to(target.as_str(), "app:trayAction", "merge");
+                build_tray(app.handle())?;
+            }
+            // A minimized launch on a desktop whose tray host has not
+            // registered yet stays hidden while the host is awaited off the
+            // main thread; it gets its tray, or its window, once that settles.
+            #[cfg(target_os = "linux")]
+            if tray_pending {
+                let handle = app.handle().clone();
+                tray_linux::when_decided(move |present| {
+                    let app = handle.clone();
+                    let _ = handle.run_on_main_thread(move || {
+                        if !present || build_tray(&app).is_err() {
+                            app_windows::show_when_ready(&app, app_windows::MAIN_LABEL, true);
+                            return;
                         }
-                        "quit" => {
-                            // Explicit Quit must use the renderer's shared close
-                            // flow so dirty documents can be saved or kept open,
-                            // and every workspace window can acknowledge the
-                            // request before the session is sealed.
-                            let target = app_windows::route_target(app);
-                            app_windows::focus_label(app, &target);
-                            let _ = app.emit_to(target.as_str(), "app:trayAction", "quit");
-                        }
-                        _ => {}
-                    })
-                    .on_tray_icon_event(|tray, event| {
-                        if let TrayIconEvent::DoubleClick {
-                            button: MouseButton::Left,
-                            ..
-                        } = event
-                        {
-                            app_windows::show_all_app_windows(tray.app_handle());
-                        }
-                    })
-                    .build(app)?;
+                        // The renderer read the report while the decision
+                        // waited and holds `trayResidency` false.
+                        let _ = app.emit_to(
+                            app_windows::MAIN_LABEL,
+                            "app:platformCapabilitiesChanged",
+                            (),
+                        );
+                    });
+                });
             }
 
             // The window is built hidden and shown on the renderer's first
@@ -632,7 +685,7 @@ pub fn run() {
                 });
                 // The scanner host holds device locks, so it is ended here
                 // rather than left to the job object that backstops a crash.
-                #[cfg(windows)]
+                #[cfg(any(windows, target_os = "linux"))]
                 scan_host::shutdown();
             }
         });
@@ -679,7 +732,7 @@ mod tests {
         let source = include_str!("lib.rs");
         let start = source.find("\"quit\" => {").expect("the tray quit branch");
         let length = source[start..]
-            .find("\n                        _ => {}")
+            .find("_ => {}")
             .expect("the end of the tray event match");
         let branch = &source[start..start + length];
         assert!(branch.contains("app:trayAction"));

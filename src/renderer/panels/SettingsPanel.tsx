@@ -15,7 +15,7 @@ import { gsBlocked, gsStateKey, refreshGsCapability } from '../lib/gs-capability
 import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { deriveAccentVars, type ThemeName } from '../lib/accent';
-import { platformCapability } from '../lib/platform-capabilities';
+import { hostOs, platformCapability } from '../lib/platform-capabilities';
 import { preferenceAvailable } from '../commands/platform';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
@@ -765,7 +765,9 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           }}
           className="rounded bg-neutral-800 border-neutral-700"
         />
-        <span className="text-sm text-neutral-400">{tChrome('panel.settings.startWithWindows')}</span>
+        <span className="text-sm text-neutral-400">
+          {tChrome(hostOs() === 'linux' ? 'panel.settings.startAtSignIn' : 'panel.settings.startWithWindows')}
+        </span>
       </label>
       )}
 
@@ -961,6 +963,10 @@ function VirtualPrinterBlock(): React.JSX.Element {
   // print dialog that accepts jobs and produces nothing — a failure OUTSIDE
   // this app, where no notice of ours can reach it.
   const gs = useGsCapability();
+  // The Linux printer is a CUPS queue that hands the job over as PDF, so it
+  // needs no distiller and Ghostscript is not a prerequisite there.
+  const linux = hostOs() === 'linux';
+  const needsGs = !linux;
   const [vpStatus, setVpStatus] = useState<VirtualPrinterStatus | null>(null);
   const [vpBusy, setVpBusy] = useState(false);
   const [vpError, setVpError] = useState<string | null>(null);
@@ -993,9 +999,9 @@ function VirtualPrinterBlock(): React.JSX.Element {
     <div data-testid="virtual-printer-pref">
       <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.printTo')}</label>
       <p className="text-xs text-neutral-500 mb-2">
-        {tChrome('panel.settings.printerBlurb')}
+        {tChrome(linux ? 'panel.settings.printerBlurbLinux' : 'panel.settings.printerBlurb')}
       </p>
-      <GsRequiredNotice capability={gs} testId="virtual-printer-gs" />
+      {needsGs && <GsRequiredNotice capability={gs} testId="virtual-printer-gs" />}
       {vpStatus === null ? (
         <p className="text-sm text-neutral-500">{tChrome('panel.settings.gsChecking')}</p>
       ) : (
@@ -1004,6 +1010,12 @@ function VirtualPrinterBlock(): React.JSX.Element {
             {vpStatus.installed
               ? tChrome('panel.settings.printerInstalled')
               : tChrome('panel.settings.printerNotInstalled')}
+            {linux && vpStatus.printerName !== '' && (
+              <>
+                {' · '}
+                <span className="font-mono" data-testid="virtual-printer-queue">{vpStatus.printerName}</span>
+              </>
+            )}
             {' · '}
             {vpStatus.listener === 'listening'
               ? tChrome('panel.settings.printerReady')
@@ -1029,7 +1041,7 @@ function VirtualPrinterBlock(): React.JSX.Element {
               <button
                 type="button"
                 data-testid="virtual-printer-install"
-                disabled={vpBusy || gsBlocked(gs)}
+                disabled={vpBusy || (needsGs && gsBlocked(gs))}
                 onClick={() => void run(() => virtualPrinter.install())}
                 className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
               >
@@ -1037,7 +1049,7 @@ function VirtualPrinterBlock(): React.JSX.Element {
               </button>
             )}
             <span className="text-xs text-neutral-500">
-              {tChrome('panel.settings.uacNote')}
+              {tChrome(linux ? 'panel.settings.adminNoteLinux' : 'panel.settings.uacNote')}
             </span>
           </div>
           {vpError && (

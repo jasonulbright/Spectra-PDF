@@ -8,6 +8,7 @@
 
 import type { UnreadableRecord } from './tauri-bridge';
 import { tChrome } from '../i18n';
+import { hostOs } from './platform-capabilities';
 
 export interface LaunchNotice {
   title: string;
@@ -56,9 +57,10 @@ export async function reportLaunch(deps: LaunchReportDeps): Promise<void> {
   const notices: LaunchNotice[] = [];
   const detail = await deps.startupEntryNotice().catch(() => '');
   if (detail) {
+    const signIn = hostOs() === 'linux';
     notices.push({
-      title: tChrome('app.startupEntry.staleTitle'),
-      message: tChrome('app.startupEntry.stale', { detail }),
+      title: tChrome(signIn ? 'app.startupEntry.staleTitleSignIn' : 'app.startupEntry.staleTitle'),
+      message: tChrome(signIn ? 'app.startupEntry.staleSignIn' : 'app.startupEntry.stale', { detail }),
     });
   }
   const repair = (await deps.explorerMenuRepairNotice?.().catch(() => '')) ?? '';

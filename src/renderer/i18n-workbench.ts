@@ -427,6 +427,9 @@ export const WORKBENCH_STRINGS = {
   'app.startupEntry.staleTitle': 'Start with Windows needs attention',
   'app.startupEntry.stale':
     'This copy has moved since "Start with Windows" was switched on, and the entry could not be updated, so the application will not start with Windows. Switch the setting off and on again in Preferences. ({{detail}})',
+  'app.startupEntry.staleTitleSignIn': 'Starting at sign-in needs attention',
+  'app.startupEntry.staleSignIn':
+    'This copy has moved since "Start when you sign in" was switched on, and the entry could not be updated, so the application will not start when you sign in. Switch the setting off and on again in Preferences. ({{detail}})',
 
   // A record the launch reads before any window exists, and could not read.
   // The unread file is moved aside when it can be; the path is where it went.

@@ -136,6 +136,14 @@ csc_signer.signingServiceNeedsOauth	exact	csc_signer	A signing service needs the
 csc_signer.signingServiceNeedsWeb	exact	csc_signer	A signing service needs its web address.
 csc_signer.signingServiceSignsThrough	exact	csc_signer	This signing service signs in through a browser, which a command-line or scheduled run cannot do. Register the provider for the client-credentials grant to sign without a person present.
 csc_signer.unknownSigningServiceAuthorization	pattern	csc_signer	Unknown signing-service authorization ({{grant}}).
+cups_print.installedCupsLibraryToo	pattern	cups_print	The installed CUPS library ({{LIBRARY}}) has no {{name}}; it is too old for printing.
+cups_print.printSystemCouldReached	pattern	cups_print	The print system could not be reached: {{detail}}
+cups_print.printSystemStoppedAccepting	pattern	cups_print	The print system stopped accepting the document: {{detail}}
+cups_print.printerDidAcceptJob	pattern	cups_print	The printer '{{printer}}' did not accept the job: {{detail}}
+cups_print.printerDidReportCapabilities	pattern	cups_print	The printer '{{printer}}' did not report its capabilities: {{detail}}
+cups_print.printerRefusedDocument	pattern	cups_print	The printer '{{printer}}' refused the document: {{detail}}
+cups_print.printerRefusedJob	pattern	cups_print	The printer '{{printer}}' refused the job: {{detail}}
+cups_print.systemPrintingNeedsCups	pattern	cups_print	System printing needs CUPS ({{LIBRARY}}), which is not installed on this system.
 derived_nav.documentTaggedHeadingsBuild	exact	derived_nav	This document is not tagged, so it has no headings to build bookmarks from. Tag it first — automatically, or in the Tags panel.
 derived_nav.headingDepthMustNumber	pattern	derived_nav	heading depth must be a number from 1 to {{MAX_LEVEL}}
 derived_nav.headingsFoundStructureTree	exact	derived_nav	No headings found in the structure tree — nothing to build bookmarks from.
@@ -590,8 +598,8 @@ printer.printJobTimedOut	pattern	printer	Print job timed out after {{JOB_TIMEOUT
 printer.printerSpecified	exact	printer	No printer specified
 printer.printingSystemPrinterAvailable	exact	printer	Printing to a system printer is not available on this platform.
 printer.unknownExpectedOne	pattern	printer	Unknown {{name}} {{value}} (expected one of {{v2}})
-printer.unknownPaperId	pattern	printer	Unknown paper id {{paper}}
-printer.unknownPrinter	pattern	printer	Unknown printer: '{{printer}}'
+printer.unknownPaperId	pattern	cups_print,printer	Unknown paper id {{paper}}
+printer.unknownPrinter	pattern	cups_print,printer	Unknown printer: '{{printer}}'
 printer_marks.addingPrinterMarksWould	pattern	printer_marks	Adding printer marks would make page {{index}} larger than the 14400-point page limit.
 printer_marks.colourBarCannotFit	pattern	printer_marks	The colour bar cannot fit its {{needed}} patches along the top edge of page {{page_number}}.
 printer_marks.markOffsetMustZero	exact	printer_marks	Mark offset must be zero or more and mark length must be positive.

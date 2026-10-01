@@ -192,6 +192,7 @@ export type ScanEvent =
  * has no row for renders as its own name, and nothing else would notice.
  */
 export const SCAN_REFUSAL_KEYS: readonly string[] = [
+  'scan.accessDenied',
   'scan.busy',
   'scan.cancelledAtDevice',
   'scan.coverOpen',
@@ -208,6 +209,7 @@ export const SCAN_REFUSAL_KEYS: readonly string[] = [
   'scan.paperJam',
   'scan.paperProblem',
   'scan.pageUnreadable',
+  'scan.saneMissing',
   'scan.scratchFull',
   'scan.settingRejected',
 ];

@@ -29,6 +29,11 @@ export type BookletBinding = 'left' | 'right';
 
 export const IMAGE_DPI_CHOICES = [150, 300, 600] as const;
 
+/** A paper as the printer reports it: a DMPAPER number on Windows, the
+ *  destination's media keyword (`iso_a4_210x297mm`) on Linux. Opaque to the
+ *  dialog, which only hands it back. */
+export type PaperId = number | string;
+
 export interface PrintOptions {
   file: string;
   printer: string;
@@ -41,8 +46,8 @@ export interface PrintOptions {
   fit: FitMode;
   scalePercent: number;
   duplex: DuplexMode;
-  /** DMPAPER id, null = printer default. */
-  paper: number | null;
+  /** The printer's own paper id, null = printer default. */
+  paper: PaperId | null;
   orientation: OrientationMode;
   color: ColorMode;
   annots: AnnotsMode;

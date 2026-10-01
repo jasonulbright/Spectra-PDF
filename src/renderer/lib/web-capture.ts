@@ -76,6 +76,71 @@ export interface CaptureResult {
   failures: string[];
   /** The host a start-page redirect tried to leave the site for; nothing was captured. */
   refusedRedirect: string | null;
+  /** The request asked for headers and footers and the browser drew none:
+   * the caller stamps them onto each page (`captureHeaderFooterPlacements`). */
+  stampHeadersFooters: boolean;
+}
+
+/** One stamp position as the engine's `add_header_footer` takes it. */
+export interface HeaderFooterPlacement {
+  position: 'tl' | 'tc' | 'bl' | 'br';
+  text: string;
+}
+
+export const CAPTURE_HEADER_FOOTER_FONT_SIZE = 8;
+const TITLE_LIMIT = 60;
+const ADDRESS_LIMIT = 90;
+
+/** Text the stamp draws as given: no pictographs or joiners (no bundled face
+ * draws them), no bidi controls, no engine page token, one line, bounded. */
+function stampText(text: string, limit: number): string {
+  const cleaned = text
+    .replace(/\p{Extended_Pictographic}|\u200d|\ufe0e|\ufe0f/gu, '')
+    .replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\{(page|pages|bates)\}/g, '($1)')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const chars = Array.from(cleaned);
+  return chars.length > limit ? `${chars.slice(0, limit - 3).join('')}...` : cleaned;
+}
+
+/**
+ * The header and footer a browser's own print pipeline draws on a captured
+ * page: the print date and the page title at the top, the page address and
+ * "page/pages" at the bottom. `printedAt` is formatted by the caller.
+ */
+export function captureHeaderFooterPlacements(
+  page: CapturedPage,
+  printedAt: string,
+): HeaderFooterPlacement[] {
+  const placements: HeaderFooterPlacement[] = [
+    { position: 'tl', text: stampText(printedAt, TITLE_LIMIT) },
+    { position: 'tc', text: stampText(page.title, TITLE_LIMIT) },
+    { position: 'bl', text: stampText(page.url, ADDRESS_LIMIT) },
+    { position: 'br', text: '{page}/{pages}' },
+  ];
+  return placements.filter((p) => p.text !== '');
+}
+
+/** Where the stamp sits, in points from the page edge: inside the capture's
+ * margin band, never closer to the edge than a printer can reach. */
+export function captureHeaderFooterInset(marginIn: number): number {
+  const margin = Number.isFinite(marginIn) && marginIn > 0 ? marginIn * 72 : 0;
+  return Math.min(36, Math.max(6, margin / 2 - CAPTURE_HEADER_FOOTER_FONT_SIZE / 2));
+}
+
+/** The print date as digits in the UI locale's order, so the stamp needs no
+ * face beyond Latin-1 and carries no right-to-left run (the Arabic comma
+ * becomes a comma). */
+export function capturePrintDate(locale: string, at: Date): string {
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    hourCycle: 'h23',
+    numberingSystem: 'latn',
+  })
+    .format(at)
+    .replace(/\u060c/g, ',');
 }
 
 export interface CaptureFailureNotice {

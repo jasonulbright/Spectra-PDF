@@ -19,6 +19,7 @@ import {
   storeAvailability,
   storeSelectionAfterRead,
   classifyStoreFailure,
+  tokenCertificateOptions,
   type SignerSource,
   type StoreAvailability,
 } from '../src/renderer/lib/signer-sources';
@@ -327,5 +328,35 @@ describe('the remembered certificate', () => {
   it('never falls back to the first row', () => {
     expect(rememberedCertificate(options, null)).toBeNull();
     expect(rememberedCertificate(options, '')).toBeNull();
+  });
+});
+
+describe('the certificates a PKCS#11 listing offers', () => {
+  it('lists every labelled certificate on every labelled token, once, in order', () => {
+    const listing = {
+      tokens: [
+        {
+          label: 'PIV Card ',
+          login_required: true,
+          certificates: [
+            { label: 'Signing', subject: 'CN=Ada', issuer: 'CN=CA', not_after: '2030-01-01' },
+            { label: '', subject: 'CN=nameless', issuer: '', not_after: '' },
+            { label: 'Signing', subject: 'CN=Ada again', issuer: '', not_after: '' },
+          ],
+        },
+        { label: '', login_required: false, certificates: [{ label: 'X', subject: '', issuer: '', not_after: '' }] },
+        { label: 'SoftHSM', login_required: false, certificates: [{ label: 'Test', subject: 'CN=T', issuer: '', not_after: '' }] },
+      ],
+    };
+    expect(tokenCertificateOptions(listing)).toEqual([
+      { token: 'PIV Card', label: 'Signing', subject: 'CN=Ada' },
+      { token: 'SoftHSM', label: 'Test', subject: 'CN=T' },
+    ]);
+  });
+
+  it('reads a malformed answer as no certificates', () => {
+    expect(tokenCertificateOptions(null)).toEqual([]);
+    expect(tokenCertificateOptions({ tokens: 'x' })).toEqual([]);
+    expect(tokenCertificateOptions({ tokens: [{ label: 'T', certificates: null }] })).toEqual([]);
   });
 });

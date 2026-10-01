@@ -230,7 +230,12 @@ from engine.spelling import (
 from engine.printer import print_pdf, print_preview, print_preview_cleanup
 from engine.incremental import signature_policy, transplant_incremental
 from engine.redact_marks import list_redact_annotations, save_redaction_marks
-from engine.signatures import verify_signatures, sign_pdf, generate_signer
+from engine.signatures import (
+    generate_signer,
+    list_pkcs11_certificates,
+    sign_pdf,
+    verify_signatures,
+)
 from engine.csc_signer import list_csc_credentials
 from engine.stamp_appearance import preview_appearance
 from engine.struct_fix import set_table_headers
@@ -466,6 +471,7 @@ def main() -> None:
     server.register("verify_signatures", verify_signatures)
     server.register("sign_pdf", sign_pdf)
     server.register("generate_signer", generate_signer)
+    server.register("list_pkcs11_certificates", list_pkcs11_certificates)
     server.register("list_csc_credentials", list_csc_credentials)
     server.register("preview_stamp_appearance", preview_appearance)
     server.register("transplant_incremental", transplant_incremental)

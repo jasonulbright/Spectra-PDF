@@ -260,6 +260,8 @@ impl Drop for StartingHost {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
+            #[cfg(target_os = "linux")]
+            close_job(child.id() as usize);
         }
         close_job(std::mem::take(&mut self.job));
     }
@@ -381,11 +383,12 @@ fn spawn_host() -> Result<Host, ScanRefusal> {
 fn spawn_host_with(
     confine_child: impl FnOnce(u32) -> Result<usize, ScanRefusal>,
 ) -> Result<Host, ScanRefusal> {
-    let child = host_command()?
+    let mut command = host_command()?;
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+        .stderr(Stdio::null());
+    let child = spawn_child(command)
         .map_err(|_| host_refusal("The scanner service could not be started."))?;
     let mut starting = StartingHost::new(child);
     let job = confine_child(starting.child_mut().id())?;
@@ -540,9 +543,48 @@ fn confine(pid: u32) -> Result<usize, ScanRefusal> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn confine(_pid: u32) -> Result<usize, ScanRefusal> {
     Ok(0)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn spawn_child(mut command: Command) -> io::Result<Child> {
+    command.spawn()
+}
+
+/// Linux: the child is forked by the process-lifetime spawner thread with
+/// `PR_SET_PDEATHSIG`, so it cannot outlive this process, and its lifetime
+/// binding is held under its pid until the host is retired.
+#[cfg(target_os = "linux")]
+fn spawn_child(command: Command) -> io::Result<Child> {
+    let (child, job) = crate::process_job::spawn_bound(command, Default::default())?;
+    linux_jobs()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(child.id() as usize, job);
+    Ok(child)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_jobs() -> &'static Mutex<HashMap<usize, crate::process_job::ProcessJob>> {
+    static JOBS: OnceLock<Mutex<HashMap<usize, crate::process_job::ProcessJob>>> = OnceLock::new();
+    JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The child's binding, keyed by its pid. A child spawned outside
+/// `spawn_child` has none, which is the containment failure.
+#[cfg(target_os = "linux")]
+fn confine(pid: u32) -> Result<usize, ScanRefusal> {
+    let bound = linux_jobs()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .contains_key(&(pid as usize));
+    if bound {
+        Ok(pid as usize)
+    } else {
+        Err(host_refusal("The scanner service could not be contained."))
+    }
 }
 
 #[cfg(windows)]
@@ -556,8 +598,21 @@ fn close_job(job: usize) {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn close_job(_job: usize) {}
+
+/// Dropping the binding kills what remains of the child's process group.
+#[cfg(target_os = "linux")]
+fn close_job(job: usize) {
+    if job == 0 {
+        return;
+    }
+    let released = linux_jobs()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&job);
+    drop(released);
+}
 
 /// What a request is waiting for, and for how long.
 #[derive(Debug, Clone, Copy)]
@@ -964,11 +1019,11 @@ fn handle(
         }
     }
     let outcome: Result<Value, ScanRefusal> = match op {
-        "enumerate" => crate::scanner::wia_enumerate_announced(announce)
+        "enumerate" => crate::scanner::host_enumerate_announced(announce)
             .and_then(|devices| encode(&devices)),
         "selectDialog" => {
             let parent = message.get("parent").and_then(Value::as_u64).unwrap_or(0) as usize;
-            crate::scanner::wia_select_device_dialog_announced(parent, announce)
+            crate::scanner::host_select_device_dialog_announced(parent, announce)
                 .and_then(|chosen| encode(&chosen))
         }
         "open" => sessions.open(&device).map(|()| Value::Null),
@@ -1063,6 +1118,18 @@ mod tests {
         }
     }
 
+    /// The answer crossed the boundary: the devices, or on a Linux system
+    /// without SANE its named refusal, which the child also produces.
+    fn crossed(result: Result<Vec<ScannerDevice>, ScanRefusal>, what: &str) -> Vec<ScannerDevice> {
+        match result {
+            Ok(devices) => devices,
+            Err(refusal) if cfg!(target_os = "linux") && refusal.key == "scan.saneMissing" => {
+                Vec::new()
+            }
+            Err(refusal) => panic!("{what}: {refusal}"),
+        }
+    }
+
     #[test]
     fn a_startup_abort_kills_its_child() {
         let scratch = tempfile::tempdir().unwrap();
@@ -1112,7 +1179,7 @@ mod tests {
     /// process boundary, which is what the in-process path could not bound.
     #[test]
     fn enumeration_is_answered_across_a_real_child_process() {
-        let devices = enumerate().expect("enumeration crosses the host and answers");
+        let devices = crossed(enumerate(), "enumeration crosses the host and answers");
         for device in &devices {
             assert!(!device.id.is_empty(), "an enumerated device carries an id");
         }
@@ -1128,7 +1195,7 @@ mod tests {
     #[test]
     fn a_teardown_that_never_finishes_is_refused_and_the_child_is_replaced() {
         let _serialised = one_at_a_time();
-        enumerate().expect("a child is live");
+        crossed(enumerate(), "a child is live");
         let wedged_generation = hosts()
             .lock()
             .expect("the slot is usable")
@@ -1165,7 +1232,7 @@ mod tests {
             "a stalled child is terminated and forgotten"
         );
         // And the scanner still works: the stall cost one request.
-        enumerate().expect("a replacement child answers");
+        crossed(enumerate(), "a replacement child answers");
     }
 
     /// The recovery the fix exists for: a child that dies takes its generation
@@ -1175,7 +1242,7 @@ mod tests {
     #[test]
     fn a_dead_child_is_replaced_and_the_next_request_is_answered() {
         let _serialised = one_at_a_time();
-        enumerate().expect("the first child answers");
+        crossed(enumerate(), "the first child answers");
         let first = {
             let slot = hosts().lock().expect("the slot is usable");
             let host = slot.as_ref().expect("a child is live");
@@ -1184,7 +1251,7 @@ mod tests {
         };
         // The dead child is still the one in the slot: the next request must
         // notice for itself rather than wait out its deadline.
-        let devices = enumerate().expect("a replacement child answers");
+        let devices = crossed(enumerate(), "a replacement child answers");
         let second = {
             let slot = hosts().lock().expect("the slot is usable");
             slot.as_ref().expect("a child is live").generation

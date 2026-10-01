@@ -4,13 +4,18 @@ import { useAppModal } from '../hooks/useAppModal';
 import { useOperationQueue } from '../hooks/useOperationQueue';
 import { app } from '../lib/tauri-bridge';
 import { TEST_HARNESS_ENABLED, registerWebCapture } from '../testHarness';
-import { tChrome, tChromeCount, type UiKey } from '../i18n';
+import { formattingLocale, tChrome, tChromeCount, type UiKey } from '../i18n';
+import { useEngine } from '../hooks/useEngine';
 import {
   CAPTURE_DEPTHS,
   CAPTURE_PAPER_IDS,
   DEPTH_LABEL_KEYS,
+  CAPTURE_HEADER_FOOTER_FONT_SIZE,
   MAX_PAGES_CEILING,
   buildRequest,
+  captureHeaderFooterInset,
+  captureHeaderFooterPlacements,
+  capturePrintDate,
   paperInches,
   previewHost,
   type CaptureDepth,
@@ -22,9 +27,10 @@ import {
 //
 // The capture runs in a VISIBLE browser window that Rust creates and destroys.
 // Nothing is fetched that the user does not both start and watch, the engine
-// is not involved, and the posture line below is shown rather than assumed —
-// a capability that reaches the network states what it does at the point the
-// user decides to use it.
+// fetches nothing (it only stamps headers and footers onto captured pages
+// where the browser cannot draw them), and the posture line below is shown
+// rather than assumed — a capability that reaches the network states what it
+// does at the point the user decides to use it.
 //
 // The result is handed UP as source rows: a captured site lands in the Create
 // PDF list, so it combines with local files, reorders, and gets its bookmarks
@@ -40,6 +46,7 @@ export function WebCaptureDialog({
 }): React.JSX.Element {
   useTranslation();
   const { track } = useOperationQueue();
+  const { callRaw } = useEngine();
   const [url, setUrl] = useState('');
   const [depth, setDepth] = useState<CaptureDepth>(0);
   const [maxPages, setMaxPages] = useState('10');
@@ -57,6 +64,32 @@ export function WebCaptureDialog({
   const capturingRef = useRef(false);
 
   const host = useMemo(() => previewHost(url), [url]);
+
+  /** Stamp each captured page in place, as the browser's print pipeline does
+   * where it can. The pages are this capture's own scratch files, never a
+   * workspace document. Returns the first failure's message, or null. */
+  const stampHeadersFooters = useCallback(
+    async (result: CaptureResult, marginIn: number): Promise<string | null> => {
+      const printedAt = capturePrintDate(formattingLocale(), new Date());
+      const fontDir = await app.getEditFontPath();
+      for (const page of result.pages) {
+        try {
+          await callRaw('add_header_footer', {
+            file: page.path,
+            output: page.path,
+            placements: captureHeaderFooterPlacements(page, printedAt),
+            font_size: CAPTURE_HEADER_FOOTER_FONT_SIZE,
+            margin: captureHeaderFooterInset(marginIn),
+            font_dir: fontDir,
+          });
+        } catch (err) {
+          return err instanceof Error ? err.message : String(err);
+        }
+      }
+      return null;
+    },
+    [callRaw],
+  );
 
   const request = useCallback(() => {
     const [width, height] = paperInches(paper);
@@ -99,6 +132,14 @@ export function WebCaptureDialog({
           );
           return null;
         }
+        if (result.stampHeadersFooters && result.pages.length > 0) {
+          const stamped = await stampHeadersFooters(result, built.marginIn);
+          if (stamped !== null) {
+            void app.discardWebCapture(result.captureId).catch(() => {});
+            setError(tChrome('dialog.webCapture.headerFooterFailed', { message: stamped }));
+            return null;
+          }
+        }
         onCaptured(result);
         return result;
       } catch (err) {
@@ -109,7 +150,7 @@ export function WebCaptureDialog({
         setBusy(false);
       }
     },
-    [track, onCaptured],
+    [track, onCaptured, stampHeadersFooters],
   );
 
   const capture = useCallback(() => {

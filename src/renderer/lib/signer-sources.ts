@@ -304,3 +304,49 @@ export function storeSelectionAfterRead(state: {
   }
   return selection.thumbprint !== null ? { thumbprint: null, machineStore: false } : null;
 }
+
+/** The engine's `list_pkcs11_certificates` answer: each token in a module
+ * and the certificates it shows without a PIN. */
+export interface Pkcs11Listing {
+  tokens: {
+    label: string;
+    login_required: boolean;
+    certificates: { label: string; subject: string; issuer: string; not_after: string }[];
+  }[];
+}
+
+/** One certificate on a token, as the token source's picker offers it. */
+export interface TokenCertificateOption {
+  token: string;
+  label: string;
+  subject: string;
+}
+
+/**
+ * Every certificate a listing offers, in token order. A certificate is found
+ * by its token label and its own label, so a row missing either cannot be
+ * signed with and is not offered, and a repeated pair is offered once.
+ */
+export function tokenCertificateOptions(listing: unknown): TokenCertificateOption[] {
+  const tokens = (listing as Partial<Pkcs11Listing> | null)?.tokens;
+  if (!Array.isArray(tokens)) return [];
+  const seen = new Set<string>();
+  const options: TokenCertificateOption[] = [];
+  for (const token of tokens) {
+    const tokenLabel = typeof token?.label === 'string' ? token.label.trim() : '';
+    if (!tokenLabel || !Array.isArray(token.certificates)) continue;
+    for (const cert of token.certificates) {
+      const label = typeof cert?.label === 'string' ? cert.label.trim() : '';
+      if (!label) continue;
+      const key = JSON.stringify([tokenLabel, label]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      options.push({
+        token: tokenLabel,
+        label,
+        subject: typeof cert.subject === 'string' ? cert.subject : '',
+      });
+    }
+  }
+  return options;
+}

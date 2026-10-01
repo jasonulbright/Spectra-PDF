@@ -1,4 +1,5 @@
 [
+  "scan.accessDenied",
   "scan.busy",
   "scan.cancelledAtDevice",
   "scan.coverOpen",
@@ -12,9 +13,10 @@
   "scan.feederEmpty",
   "scan.needsAttention",
   "scan.notResponding",
+  "scan.pageUnreadable",
   "scan.paperJam",
   "scan.paperProblem",
-  "scan.pageUnreadable",
+  "scan.saneMissing",
   "scan.scratchFull",
   "scan.settingRejected"
 ]

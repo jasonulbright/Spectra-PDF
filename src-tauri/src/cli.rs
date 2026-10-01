@@ -426,11 +426,18 @@ pub struct ScanTestArgs {
     pub attach_scans: bool,
 }
 
+/// A paper as `printers --capabilities` reports it: a DMPAPER number on
+/// Windows, the destination's media keyword on Linux.
+#[cfg(windows)]
+pub type PaperId = u16;
+#[cfg(not(windows))]
+pub type PaperId = String;
+
 #[derive(Args)]
 pub struct PrintArgs {
     /// Input PDF file
     pub input: PathBuf,
-    /// Exact Windows printer name (see the `printers` subcommand)
+    /// Exact printer name (see the `printers` subcommand)
     #[arg(short, long)]
     pub printer: String,
     /// Page range like "1-3,5" (default: all pages)
@@ -458,9 +465,9 @@ pub struct PrintArgs {
     /// Two-sided printing: printer | simplex | long | short
     #[arg(long, default_value = "printer")]
     pub duplex: String,
-    /// Paper by DMPAPER id (see `printers --capabilities`)
+    /// Paper by the id `printers --capabilities` reports
     #[arg(long)]
-    pub paper: Option<u16>,
+    pub paper: Option<PaperId>,
     /// Page orientation: auto | portrait | landscape
     #[arg(long, default_value = "auto")]
     pub orientation: String,
@@ -3769,7 +3776,7 @@ fn run_scan_test(args: &ScanTestArgs) -> i32 {
 /// attached it is the one, and with none or several the run refuses by name.
 /// Guessing which of two machines has paper in its feeder is not a decision
 /// software gets to make.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn resolve_scan_device(requested: Option<&str>) -> Result<String, String> {
     if let Some(id) = requested {
         return Ok(id.to_string());
@@ -3783,7 +3790,7 @@ fn resolve_scan_device(requested: Option<&str>) -> Result<String, String> {
 /// Split from `resolve_scan_device` so the decision is testable: the live
 /// enumeration answers differently on a box with a scanner attached than on
 /// one without, and every branch here has to hold on both.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn choose_scan_device(scanners: &[crate::scanner::ScannerDevice]) -> Result<String, String> {
     match scanners.len() {
         0 => Err("No scanners found.".to_string()),
@@ -3806,7 +3813,7 @@ fn choose_scan_device(scanners: &[crate::scanner::ScannerDevice]) -> Result<Stri
 /// The source rows come from the capability report, the same list the dialog
 /// picks from — a second derivation here would be a run whose CLI and whose
 /// dialog disagree about which side of a sheet "duplex" means.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn scan_settings(
     capabilities: &crate::scanner::ScannerCapabilities,
     args: &ScanArgs,
@@ -4003,10 +4010,10 @@ fn collect_batch_inputs(
 /// Sheet size in points for the print layout modes: an explicit "WxH"
 /// override wins; otherwise the chosen (or default) paper's size from the
 /// printer's own capability report.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn resolve_sheet(
     printer: &str,
-    paper: Option<u16>,
+    paper: Option<&PaperId>,
     sheet: Option<&str>,
 ) -> Result<(f64, f64), String> {
     if let Some(spec) = sheet {
@@ -4018,9 +4025,9 @@ fn resolve_sheet(
         return Ok((w, h));
     }
     let caps = crate::printers::capabilities(printer)?;
-    let id = paper.or(caps.default_paper);
+    let id = paper.or(caps.default_paper.as_ref());
     if let Some(id) = id {
-        if let Some(p) = caps.papers.iter().find(|p| p.id == id) {
+        if let Some(p) = caps.papers.iter().find(|p| &p.id == id) {
             return Ok((p.width_pt, p.height_pt));
         }
     }
@@ -4060,6 +4067,12 @@ pub fn platform_refusal(
     Some(Unsupported::new(missing))
 }
 
+/// On Linux the tray is a property of the desktop session, not of the build:
+/// a `--minimized` launch on a desktop that shows no tray starts with its
+/// window shown, which is also what an autostart entry needs when the session
+/// has not brought up its tray host yet.
+const MINIMIZED_NEEDS_A_TRAY_BUILD: bool = cfg!(not(target_os = "linux"));
+
 /// `--minimized` asks for a tray-resident start, which needs the tray, and
 /// `--shell-action` comes only from the File Explorer command handler.
 pub fn launch_refusal(argv: &[String]) -> Option<crate::platform::Unsupported> {
@@ -4072,7 +4085,10 @@ fn launch_refusal_for(
 ) -> Option<crate::platform::Unsupported> {
     use crate::platform::{feature, Unsupported};
     let args = || argv.iter().skip(1);
-    if !capabilities.tray_residency && args().any(|a| a == "--minimized") {
+    if MINIMIZED_NEEDS_A_TRAY_BUILD
+        && !capabilities.tray_residency
+        && args().any(|a| a == "--minimized")
+    {
         return Some(Unsupported::new(feature::START_MINIMIZED));
     }
     let shell_action =
@@ -4103,9 +4119,9 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
         return crate::shell_menu::run_cli(args.action);
     }
 
-    // Printer enumeration/capabilities are pure winspool — no Python engine
-    // to spawn.
-    #[cfg(windows)]
+    // Printer enumeration/capabilities are pure winspool or CUPS — no Python
+    // engine to spawn.
+    #[cfg(any(windows, target_os = "linux"))]
     if let CliCommand::Printers(args) = &command {
         let result = match &args.capabilities {
             Some(name) => crate::printers::capabilities(name)
@@ -4130,9 +4146,10 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
         };
     }
 
-    // Scanner enumeration/capabilities are pure WIA — no Python engine to
-    // spawn, and the session store closes its devices when it drops here.
-    #[cfg(windows)]
+    // Scanner enumeration/capabilities are pure WIA or SANE — no Python
+    // engine to spawn, and the session store closes its devices when it
+    // drops here.
+    #[cfg(any(windows, target_os = "linux"))]
     if let CliCommand::Scanners(args) = &command {
         let result = match &args.capabilities {
             Some(device_id) => crate::scanner::ScannerSessions::new()
@@ -4159,6 +4176,13 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
     #[cfg(windows)]
     if let CliCommand::ScanTest(args) = &command {
         return run_scan_test(args);
+    }
+    #[cfg(not(windows))]
+    if let CliCommand::ScanTest(_) = &command {
+        let refusal =
+            crate::platform::Unsupported::new(crate::platform::feature::SCANNER_CHECKLIST);
+        eprintln!("error: {refusal}");
+        return 2;
     }
 
     let mut engine = match CliEngine::start() {
@@ -4307,9 +4331,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             engine.call("compress", params)
         }
 
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "linux")))]
         CliCommand::Print(_) => unreachable!("print refuses before engine start"),
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         CliCommand::Print(args) => {
             let mut params = json!({
                 "file": abs(&args.input).to_string_lossy(),
@@ -4329,7 +4353,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "image_dpi": args.image_dpi,
                 "layout": args.layout,
             });
-            if let Some(paper) = args.paper {
+            if let Some(paper) = &args.paper {
                 params["paper"] = json!(paper);
             }
             if args.fit == "scale" {
@@ -4359,7 +4383,8 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             // same way the dialog does (chosen paper -> capabilities ->
             // default paper), with --sheet as the explicit override.
             if args.layout != "single" || args.fit == "scale" {
-                let (w, h) = resolve_sheet(&args.printer, args.paper, args.sheet.as_deref())?;
+                let (w, h) =
+                    resolve_sheet(&args.printer, args.paper.as_ref(), args.sheet.as_deref())?;
                 params["sheet_width"] = json!(w);
                 params["sheet_height"] = json!(h);
             }
@@ -4534,9 +4559,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             )
         }
 
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "linux")))]
         CliCommand::Scan(_) => unreachable!("scan refuses before engine start"),
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         CliCommand::Scan(args) => {
             let sessions = crate::scanner::ScannerSessions::new();
             let device = resolve_scan_device(args.device.as_deref())?;
@@ -6741,6 +6766,7 @@ mod tests {
             start_with_system: present,
             hidden_animation_frames: present,
             explorer_menu: present,
+            os: "windows",
         }
     }
 
@@ -6789,10 +6815,15 @@ mod tests {
     fn a_minimized_launch_needs_the_tray() {
         let argv = |args: &[&str]| args.iter().map(|a| a.to_string()).collect::<Vec<_>>();
         let minimized = argv(&["spectrapdf", "--minimized"]);
-        assert_eq!(
-            launch_refusal_for(&minimized, &capabilities(false)).map(|r| r.to_string()),
-            Some("Starting minimized to the tray is not available on this platform".to_string())
-        );
+        let refused = launch_refusal_for(&minimized, &capabilities(false)).map(|r| r.to_string());
+        if cfg!(target_os = "linux") {
+            assert_eq!(refused, None);
+        } else {
+            assert_eq!(
+                refused,
+                Some("Starting minimized to the tray is not available on this platform".to_string())
+            );
+        }
         assert_eq!(launch_refusal_for(&minimized, &capabilities(true)), None);
         assert_eq!(launch_refusal_for(&argv(&["spectrapdf", "a.pdf"]), &capabilities(false)), None);
     }

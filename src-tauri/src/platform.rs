@@ -89,6 +89,7 @@ pub mod feature {
     pub const SYSTEM_PRINTING: &str = "System printing";
     pub const VIRTUAL_PRINTER: &str = "The virtual printer";
     pub const SCANNING: &str = "Scanning";
+    pub const SCANNER_CHECKLIST: &str = "The scanner checklist";
     pub const SCHEDULED_ACTIONS: &str = "Scheduled actions";
     pub const STORE_CERTIFICATES: &str = "Certificate-store signing";
     pub const SEND_BY_EMAIL: &str = "Send by email";

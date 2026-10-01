@@ -175,6 +175,8 @@ export const REFUSAL_STRINGS = {
   // so these resolve from the catalog and nothing matches a message. The key
   // set is pinned across the two languages by
   // `tests/fixtures/scan-refusal-keys.json`, which both suites read.
+  'refusal.scan.accessDenied':
+    'This account is not allowed to use the scanner. Ask an administrator to grant scanner access.',
   'refusal.scan.busy': 'A scan is already running on this scanner.',
   'refusal.scan.cancelledAtDevice': 'The scan was cancelled at the scanner.',
   'refusal.scan.coverOpen': 'Close the scanner cover.',
@@ -195,6 +197,7 @@ export const REFUSAL_STRINGS = {
   'refusal.scan.paperJam': 'Clear the paper jam, then scan again.',
   'refusal.scan.paperProblem': 'Check the paper in the feeder.',
   'refusal.scan.pageUnreadable': 'The scanned page could not be read: {{folder}}.',
+  'refusal.scan.saneMissing': 'Scanning needs SANE (libsane.so.1), which is not installed on this system.',
   'refusal.scan.scratchFull':
     'Too many scans are still open. Close some, or remove the folders in {{folder}}, then try again.',
   'refusal.scan.settingRejected': 'The scanner rejected one of the requested settings.',

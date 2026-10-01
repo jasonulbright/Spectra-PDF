@@ -299,6 +299,12 @@ export function setHeldOutputReporter(
   heldOutputReporter = report;
 }
 
+/** A PKCS#11 module the system registered: its registration name and library. */
+export interface Pkcs11Module {
+  name: string;
+  path: string;
+}
+
 /** One row of the Windows certificate store's signing-capable certificates. */
 export interface StoreCertificate {
   thumbprint: string;
@@ -397,6 +403,9 @@ export const dialog = {
   pickPemFile: () => invoke<string | null>('pick_pem_file'),
   pickIccFile: () => invoke<string | null>('pick_icc_file'),
   pickPkcs11Module: () => invoke<string | null>('pick_pkcs11_module'),
+  /** The PKCS#11 modules the system registered (p11-kit on Linux); empty
+   * where no such registry exists. */
+  listPkcs11Modules: () => invoke<Pkcs11Module[]>('list_pkcs11_modules'),
   /**
    * Certificates in the Windows certificate store that can sign a document.
    *
@@ -823,7 +832,8 @@ export interface PrinterList {
 }
 
 export interface PaperOption {
-  id: number;
+  /** DMPAPER number on Windows, CUPS media keyword on Linux. */
+  id: number | string;
   name: string;
   width_pt: number;
   height_pt: number;
@@ -831,7 +841,7 @@ export interface PaperOption {
 
 export interface PrinterCapabilities {
   papers: PaperOption[];
-  default_paper: number | null;
+  default_paper: number | string | null;
   duplex: boolean;
   color: boolean;
   collate: boolean;
@@ -1132,6 +1142,12 @@ export const app = {
   /** Listen for tray actions (Quick Merge). */
   onTrayAction: (callback: (action: string) => void) => {
     return listen<string>('app:trayAction', (event) => callback(event.payload));
+  },
+
+  /** A session-dependent capability settled after boot (a minimized launch
+   * whose tray host registered late); the report is read again. */
+  onPlatformCapabilitiesChanged: (callback: () => void) => {
+    return listen('app:platformCapabilitiesChanged', () => callback());
   },
 };
 
