@@ -1,5 +1,7 @@
 ; Spectra PDF NSIS custom hooks for Tauri bundler
-; - Explorer context menu entries for PDF files
+; - Explorer context menu entries for PDF files, and the File Explorer commands
+;   (Convert to PDF, Combine into one PDF) registered through spectrapdf.exe
+; - Machine policy values survive an upgrade
 ; - Silent install: disable auto-update (enterprise MECM/Intune deployments)
 ; - Unattended install: require explicit acceptance of the Adobe profile EULA
 ; - /? switch dialog
@@ -47,6 +49,88 @@
 
 !define MUI_CUSTOMFUNCTION_GUIINIT SpectraPdfGuiInit
 
+; ── Machine policy ──────────────────────────────────────────────────────
+; The application is 64-bit and reads HKLM\SOFTWARE\Spectra PDF through the
+; 64-bit registry view. This installer is a 32-bit process, whose HKLM\SOFTWARE
+; writes land in WOW6432Node unless the view is set, so every policy read and
+; write here runs under SetRegView 64.
+;
+; An interactive upgrade runs the previous uninstaller without /UPDATE, and an
+; uninstaller deletes the policy key. The values are read before that
+; uninstaller runs and written back after the install when they are gone.
+!define SPECTRA_POLICY_KEY "SOFTWARE\Spectra PDF"
+Var SpectraPolicyAutoUpdate
+Var SpectraPolicyFieldScripts
+Var SpectraPolicyExplorerMenu
+
+!macro SPECTRA_CAPTURE_POLICY NAME VAR
+  ClearErrors
+  ReadRegDWORD ${VAR} HKLM "${SPECTRA_POLICY_KEY}" "${NAME}"
+  ${If} ${Errors}
+    StrCpy ${VAR} ""
+  ${EndIf}
+!macroend
+
+!macro SPECTRA_RESTORE_POLICY NAME VAR
+  ${If} ${VAR} != ""
+    ClearErrors
+    ReadRegDWORD $R9 HKLM "${SPECTRA_POLICY_KEY}" "${NAME}"
+    ${If} ${Errors}
+      WriteRegDWORD HKLM "${SPECTRA_POLICY_KEY}" "${NAME}" ${VAR}
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+; ── Running application ─────────────────────────────────────────────────
+; The template's own running-app check comes after the hooks, and a cancel
+; there would leave the File Explorer commands removed or their handler moved
+; aside under an application that stays installed. This check runs first, with
+; the template's messages and plugin, so a cancel aborts before anything is
+; changed, and the template's check then finds nothing running. ID keeps the
+; labels unique per insertion; EXE is the process image name.
+!macro SPECTRA_REQUIRE_APP_CLOSED ID EXE
+  nsis_tauri_utils::FindProcess "${EXE}"
+  Pop $R0
+  ${If} $R0 = 0
+    nsis_tauri_utils::StrReplace "$(appRunning)" "{{product_name}}" "Spectra PDF"
+    Pop $R1
+    nsis_tauri_utils::StrReplace "$(appRunningOkKill)" "{{product_name}}" "Spectra PDF"
+    Pop $R2
+    nsis_tauri_utils::StrReplace "$(failedToKillApp)" "{{product_name}}" "Spectra PDF"
+    Pop $R3
+    IfSilent spectra_kill_${ID} 0
+    ${IfThen} $PassiveMode != 1 ${|} MessageBox MB_OKCANCEL $R2 IDOK spectra_kill_${ID} IDCANCEL spectra_cancel_${ID} ${|}
+    spectra_kill_${ID}:
+      nsis_tauri_utils::KillProcess "${EXE}"
+      Pop $R0
+      Sleep 500
+      ${If} $R0 = 0
+      ${OrIf} $R0 = 2
+        Goto spectra_closed_${ID}
+      ${EndIf}
+      Abort $R3
+    spectra_cancel_${ID}:
+      Abort $R1
+  ${EndIf}
+  spectra_closed_${ID}:
+!macroend
+
+; ── File Explorer command handler ───────────────────────────────────────
+; Explorer (classic verbs) or dllhost.exe (the app package) can hold the
+; handler DLL loaded. A loaded image can be renamed but not replaced, so the
+; old file moves aside under a unique name and is deleted now or, while still
+; loaded, at the next restart.
+!macro SPECTRA_RETIRE_SHELL_DLL ARCH
+  ${If} ${FileExists} "$INSTDIR\shell\${ARCH}\spectrapdf_shell.dll"
+    System::Call 'ole32::CoCreateGuid(g .R7)'
+    ClearErrors
+    Rename "$INSTDIR\shell\${ARCH}\spectrapdf_shell.dll" "$INSTDIR\shell\${ARCH}\spectrapdf_shell.$R7.old"
+    ${IfNot} ${Errors}
+      Delete /REBOOTOK "$INSTDIR\shell\${ARCH}\spectrapdf_shell.$R7.old"
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 Function SpectraPdfGuiInit
   ${GetParameters} $0
   ${GetOptions} $0 "/?" $1
@@ -86,6 +170,13 @@ Function SpectraPdfGuiInit
   ; Runs after .onInit set the shell context and before the reinstall page
   ; reads the install-directory key.
   !insertmacro SPECTRA_ADOPT_LEGACY_INSTALL_DIR
+
+  ; Before the reinstall page can run the previous uninstaller.
+  SetRegView 64
+  !insertmacro SPECTRA_CAPTURE_POLICY "DisableAutoUpdate" $SpectraPolicyAutoUpdate
+  !insertmacro SPECTRA_CAPTURE_POLICY "DisableFieldScripts" $SpectraPolicyFieldScripts
+  !insertmacro SPECTRA_CAPTURE_POLICY "DisableExplorerMenu" $SpectraPolicyExplorerMenu
+  SetRegView default
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
@@ -116,6 +207,10 @@ FunctionEnd
       Quit
     ${EndIf}
   ${EndIf}
+
+  !insertmacro SPECTRA_REQUIRE_APP_CLOSED "install" "spectrapdf.exe"
+  !insertmacro SPECTRA_RETIRE_SHELL_DLL "x64"
+  !insertmacro SPECTRA_RETIRE_SHELL_DLL "arm64"
 !macroend
 
 ; The install record is written whole under a staging name, flushed, and
@@ -236,14 +331,36 @@ FunctionEnd
   WriteRegStr HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Open" "Icon" "$INSTDIR\spectrapdf.exe,0"
   WriteRegStr HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Open\command" "" '"$INSTDIR\spectrapdf.exe" "%1"'
 
-  ; Context menu: "Merge with Spectra PDF"
-  WriteRegStr HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Merge" "" "Merge with Spectra PDF"
-  WriteRegStr HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Merge" "Icon" "$INSTDIR\spectrapdf.exe,0"
-  WriteRegStr HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Merge\command" "" '"$INSTDIR\spectrapdf.exe" "--merge" "%1"'
+  ; The per-file "Merge with Spectra PDF" verb of earlier versions started one
+  ; process per selected file. Combine into one PDF replaces it.
+  DeleteRegKey HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Merge"
 
+  ; The File Explorer commands for every user (elevated: the app package is
+  ; staged and provisioned, or the classic verbs are written to HKLM), then
+  ; for the installing user at once; provisioning reaches every other user at
+  ; their next sign-in. A failure is reported and never fails the install.
+  ClearErrors
+  ExecWait '"$INSTDIR\spectrapdf.exe" shell-menu install-machine' $R9
+  ${If} ${Errors}
+    DetailPrint "File Explorer commands: spectrapdf.exe could not be started."
+  ${ElseIf} $R9 == 3
+    DetailPrint "File Explorer commands: the app package was refused; classic menu entries were registered."
+  ${ElseIf} $R9 != 0
+    DetailPrint "File Explorer commands: registration failed (exit $R9)."
+  ${EndIf}
+  ${IfNot} ${Silent}
+    nsis_tauri_utils::RunAsUser "$INSTDIR\spectrapdf.exe" "shell-menu register-user"
+  ${EndIf}
+
+  SetRegView 64
   ; Silent install (MECM/Intune/PDQ): disable auto-update so IT controls the update cycle
-  IfSilent 0 +2
-    WriteRegDWORD HKLM "SOFTWARE\Spectra PDF" "DisableAutoUpdate" 1
+  ${If} ${Silent}
+    WriteRegDWORD HKLM "${SPECTRA_POLICY_KEY}" "DisableAutoUpdate" 1
+  ${EndIf}
+  !insertmacro SPECTRA_RESTORE_POLICY "DisableAutoUpdate" $SpectraPolicyAutoUpdate
+  !insertmacro SPECTRA_RESTORE_POLICY "DisableFieldScripts" $SpectraPolicyFieldScripts
+  !insertmacro SPECTRA_RESTORE_POLICY "DisableExplorerMenu" $SpectraPolicyExplorerMenu
+  SetRegView default
 
   ; Refresh shell icon cache
   System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, p 0, p 0)'
@@ -274,12 +391,28 @@ FunctionEnd
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+  !insertmacro SPECTRA_REQUIRE_APP_CLOSED "uninstall" "spectrapdf.exe"
+
   ; Remove context menu entries
   DeleteRegKey HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Open"
   DeleteRegKey HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Merge"
 
-  ; Remove app registry key (includes DisableAutoUpdate)
-  DeleteRegKey HKLM "SOFTWARE\Spectra PDF"
+  ; /UPDATE: the next version installs over this one and keeps the File
+  ; Explorer commands and the machine policy. A real uninstall removes the
+  ; commands for every user, moves the handler DLLs aside so the plain
+  ; resource deletion that follows cannot leave a loaded one behind, and
+  ; removes the policy key from both registry views (older silent installs
+  ; wrote it to WOW6432Node).
+  ${If} $UpdateMode <> 1
+    ExecWait '"$INSTDIR\spectrapdf.exe" shell-menu uninstall-machine' $R9
+    !insertmacro SPECTRA_RETIRE_SHELL_DLL "x64"
+    !insertmacro SPECTRA_RETIRE_SHELL_DLL "arm64"
+    SetRegView 64
+    DeleteRegKey HKLM "${SPECTRA_POLICY_KEY}"
+    SetRegView 32
+    DeleteRegKey HKLM "${SPECTRA_POLICY_KEY}"
+    SetRegView default
+  ${EndIf}
 
   ; The install record. Removed with the rest of the payload so a leftover
   ; file cannot make a later portable copy in the same folder believe it was

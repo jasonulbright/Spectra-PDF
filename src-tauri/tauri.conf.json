@@ -7,6 +7,7 @@
     "frontendDist": "../dist/renderer",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "npm run build:renderer",
+    "beforeBundleCommand": "npm run build:shell-menu",
     "beforeDevCommand": "npm run dev:renderer"
   },
   "app": {
@@ -50,6 +51,7 @@
       "../resources/jbig2enc": "jbig2enc",
       "../resources/dictionaries": "dictionaries",
       "../resources/icc": "icc",
+      "../resources/shell": "shell",
       "engine-payload": "engine",
       "../THIRD-PARTY-LICENSES.md": "THIRD-PARTY-LICENSES.md",
       "THIRD-PARTY-LICENSES-RUST.html": "THIRD-PARTY-LICENSES-RUST.html"

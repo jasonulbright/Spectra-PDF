@@ -44,6 +44,29 @@ function Get-SignToolPath {
     throw "signtool.exe (x64) was not found. Searched: $($roots -join '; ')"
 }
 
+# MakeAppx packs the File Explorer command packages. Same discovery as
+# signtool: the newest Windows SDK build directory, x64 host tools.
+function Get-MakeAppxPath {
+    if ($env:SPECTRAPDF_MAKEAPPX) {
+        if (-not (Test-Path -LiteralPath $env:SPECTRAPDF_MAKEAPPX)) {
+            throw "SPECTRAPDF_MAKEAPPX is set to '$env:SPECTRAPDF_MAKEAPPX', which does not exist"
+        }
+        return (Resolve-Path -LiteralPath $env:SPECTRAPDF_MAKEAPPX).Path
+    }
+    $roots = @(
+        "${env:ProgramFiles(x86)}\Windows Kits\10\bin",
+        "${env:ProgramFiles}\Windows Kits\10\bin"
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    foreach ($root in $roots) {
+        $hits = @(Get-ChildItem -LiteralPath $root -Recurse -Filter "makeappx.exe" -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like "*\x64\*" })
+        if ($hits.Count -gt 0) { return (Get-NewestByVersionThenTime $hits)[0].FullName }
+    }
+    $onPath = Get-Command makeappx.exe -ErrorAction SilentlyContinue
+    if ($onPath) { return $onPath.Source }
+    throw "makeappx.exe (x64) was not found; install the Windows SDK. Searched: $($roots -join '; ')"
+}
+
 # The client tools MSI writes its payload under a location that is not
 # derivable from the package id, so the uninstall entry's InstallLocation is the
 # only authoritative source; the fixed roots below are a fallback for payloads
@@ -141,8 +164,10 @@ function Assert-AuthenticodeSigned {
 
 # The signed set. The bundler runs the sign command for every binary it
 # produces or stages -- NSIS plugin DLLs and every unsigned exe/dll among the
-# vendored resources included -- and only three of those are ours to sign: the
-# app executable, the installer, and the uninstaller. Signing a third party's
+# vendored resources included -- and only these are ours to sign: the app
+# executable, the installer, the uninstaller, and the File Explorer command
+# handler and its packages, which scripts/build-shell-menu.ps1 signs at their
+# build paths before copying them under `resources`. Signing a third party's
 # binary re-attributes it; signing an NSIS plugin changes bytes the toolchain
 # ships.
 #
@@ -180,6 +205,12 @@ function Test-SignedArtifact {
     }
     # The uninstaller makensis hands to `!uninstfinalize`.
     if ($leaf -imatch '^ns[0-9A-Za-z]{1,10}\.tmp$') { return $true }
+    # The File Explorer command handler, as cargo built it for one target.
+    if ($leaf -ieq "spectrapdf_shell.dll" -and $parent -ieq "release") { return $true }
+    # Its sparse packages, where build-shell-menu.ps1 packs them.
+    if ($leaf -imatch '^SpectraPDF\.ExplorerCommands_(x64|arm64)\.msix$' -and $parent -ieq "shell-menu-stage") {
+        return $true
+    }
 
     return $false
 }

@@ -292,6 +292,66 @@ export function toEngineSources(rows: readonly SourceRow[]): Record<string, unkn
   });
 }
 
+/** One PDF for the whole list, or one PDF beside each source. */
+export type OutputMode = 'single' | 'perFile';
+
+/**
+ * Can this list be converted one PDF per source? Every row must be a file the
+ * user picked: a blank page has no source to sit beside, and a clipboard or
+ * web-capture row's path is a scratch file nobody chose a folder for.
+ */
+export function perFileEligible(rows: readonly SourceRow[]): boolean {
+  return rows.length >= 2 && rows.every((r) => r.kind !== 'blank' && !!r.path && !r.origin);
+}
+
+/** The mode a run actually uses: per file only while the list allows it. */
+export function effectiveOutputMode(mode: OutputMode, rows: readonly SourceRow[]): OutputMode {
+  return mode === 'perFile' && perFileEligible(rows) ? 'perFile' : 'single';
+}
+
+export interface PerFileTarget {
+  row: SourceRow;
+  /** `<source folder>\<stem>.pdf`; the run asks for a free name from here. */
+  desired: string;
+}
+
+/** The wanted output of every row in per-file mode, in list order. */
+export function perFileTargets(rows: readonly SourceRow[]): PerFileTarget[] {
+  return rows
+    .filter((row): row is SourceRow & { path: string } => !!row.path)
+    .map((row) => {
+      const ext = extensionOf(row.path);
+      const stem = ext ? row.path.slice(0, -ext.length) : row.path;
+      return { row, desired: `${stem}.pdf` };
+    });
+}
+
+export interface OutputReservation {
+  out: string;
+  release: () => Promise<void>;
+}
+
+/**
+ * Pick a name nothing occupies and hold it for the write. The name is claimed
+ * first and checked again under the claim: a name that another writer filled
+ * between the first check and the claim is released and the next free name is
+ * tried, so an existing file is never written over. A refused claim (another
+ * run holds that name) rejects with the claim's own message.
+ */
+export async function reserveFreeOutput(
+  desired: string,
+  freeName: (path: string) => Promise<string>,
+  claim: (path: string) => Promise<{ granted: boolean; message: string; release: () => Promise<void> }>,
+): Promise<OutputReservation> {
+  for (;;) {
+    const out = await freeName(desired);
+    const held = await claim(out);
+    if (!held.granted) throw new Error(held.message);
+    if ((await freeName(out)) === out) return { out, release: held.release };
+    await held.release();
+  }
+}
+
 /**
  * The default output name for a list.
  *

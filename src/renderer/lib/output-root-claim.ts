@@ -61,25 +61,49 @@ export function writtenRoots(run: RunFolders): string[] {
  * entries are skipped; a run with nothing to claim is granted at once.
  */
 export async function claimOutputRoots(roots: readonly string[]): Promise<OutputRootClaim> {
+  return claimWritten(roots, (outcome) =>
+    outcome.document
+      ? tChrome('app.window.folderHasOpenDocument', {
+        name: baseName(outcome.document),
+        folder: outcome.folder,
+      })
+      : tChrome(
+        outcome.sameWindow ? 'app.window.folderBusyHere' : 'app.window.folderBusy',
+        { folder: outcome.folder },
+      ));
+}
+
+/**
+ * Claim one output FILE for the write that creates it, the way Create PDF and
+ * Combine reserve their outputs: an open document elsewhere in its folder is
+ * no conflict, the file itself open, or a run writing it or its folder, is.
+ * The refusal names the file.
+ */
+export async function claimOutputFile(path: string): Promise<OutputRootClaim> {
+  return claimWritten([path], (outcome) => {
+    const name = baseName(path);
+    if (outcome.document) {
+      return tChrome(outcome.sameWindow ? 'app.window.outputOpenHere' : 'app.window.outputOpenElsewhere', { name });
+    }
+    return tChrome(outcome.sameWindow ? 'app.window.outputBusyHere' : 'app.window.outputBusy', { name });
+  });
+}
+
+const baseName = (path: string): string => path.split(/[\\/]/).pop() || path;
+
+type Refusal = Awaited<ReturnType<typeof claims.claimOutputRoots>>;
+
+async function claimWritten(
+  roots: readonly string[],
+  refusal: (outcome: Refusal) => string,
+): Promise<OutputRootClaim> {
   const wanted = roots.filter((root) => root !== '');
   if (wanted.length === 0) {
     return { granted: true, message: '', release: async () => {} };
   }
   const outcome = await inClaimOrder(CLAIM_QUEUE, () => claims.claimOutputRoots(wanted));
   if (!outcome.granted) {
-    return {
-      granted: false,
-      message: outcome.document
-        ? tChrome('app.window.folderHasOpenDocument', {
-          name: outcome.document.split(/[\\/]/).pop() ?? outcome.document,
-          folder: outcome.folder,
-        })
-        : tChrome(
-          outcome.sameWindow ? 'app.window.folderBusyHere' : 'app.window.folderBusy',
-          { folder: outcome.folder },
-        ),
-      release: async () => {},
-    };
+    return { granted: false, message: refusal(outcome), release: async () => {} };
   }
   const token = outcome.token;
   let held = true;

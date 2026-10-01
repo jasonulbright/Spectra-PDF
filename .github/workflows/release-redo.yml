@@ -153,6 +153,10 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          # Windows on ARM runs the x64 app, but its Explorer loads only an
+          # ARM64 File Explorer command handler.
+          targets: aarch64-pc-windows-msvc
 
       - name: Cache Cargo
         uses: actions/cache@v6
@@ -215,6 +219,14 @@ jobs:
         # Must run AFTER the Tesseract vendoring step, which supplies
         # tessdata/configs (TSV output) and osd.
         run: node scripts/sync-ocr-assets.mjs
+        shell: pwsh
+
+      # The tag's own handler build, for a tag that carries one (see
+      # release.yml). The tag's `beforeBundleCommand` signs, packs and stages
+      # it inside the build step.
+      - name: Stage the File Explorer command handler
+        if: hashFiles('scripts/build-shell-menu.ps1') != ''
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-shell-menu.ps1 -CompileOnly
         shell: pwsh
 
       # The release body and the updater manifest's `notes` are one string,

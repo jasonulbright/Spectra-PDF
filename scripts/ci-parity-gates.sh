@@ -56,6 +56,16 @@ if command -v powershell >/dev/null 2>&1; then
   gate portable-checkmap powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -CheckMap
 fi
 
+# --- Release job: the File Explorer command handler builds, and both package
+#     manifests render with the committed publisher and pass MakeAppx's schema
+#     validation. The release job runs the same script (-CompileOnly before
+#     the signing window, the full build inside `tauri build`). The ARM64
+#     compile runs here only where that Rust target is installed; the log says
+#     when it did not. (PowerShell-only.) ---
+if command -v powershell >/dev/null 2>&1; then
+  gate shell-menu powershell -ExecutionPolicy Bypass -File scripts/build-shell-menu.ps1 -Check
+fi
+
 # --- CI gate: the engine payload is exactly the manifested tree. A `resources`
 #     directory entry is copied whole, so a checkout's ignored __pycache__ or
 #     untracked scratch rides into the installer and the portable zip. The

@@ -66,6 +66,9 @@ resources/dictionaries/
 # tree is a build output). The profiles themselves, their end-user licence text
 # and the pinned manifest with every profile's sha256 live in git.
 resources/icc/
+# The File Explorer command handler and its packages (built and signed by
+# scripts/build-shell-menu.ps1 from the crate under src-tauri/shell-menu).
+resources/shell/
 # The bundler package the committed profiles were extracted from. It is
 # redistributable only under an agreement carrying an indemnity, so it is
 # never committed; the standalone-distribution grant is what the committed

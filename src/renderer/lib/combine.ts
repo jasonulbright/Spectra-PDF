@@ -12,7 +12,17 @@
 // There is no DOM test environment here, so a
 // rule living inside the component is a rule with no test.
 
-import type { SourceKind, SourceRow } from './create-pdf';
+import { addPaths, orderSelection, type SourceKind, type SourceRow } from './create-pdf';
+
+/**
+ * Add a picked, dropped or File Explorer batch to the list in folder name
+ * order. Every one of those sources delivers the focused item first, so the
+ * delivery order carries no user intent (`orderSelection`); the user sets
+ * the final order with the row controls before anything is written.
+ */
+export function seedRows(rows: readonly SourceRow[], paths: readonly string[]): SourceRow[] {
+  return addPaths(rows, orderSelection(paths));
+}
 
 /** Where the assembled pages go. */
 export const COMBINE_TARGETS = ['new', 'append'] as const;

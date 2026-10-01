@@ -1,7 +1,8 @@
 // What a launch has to report once a window exists.
 //
-// Both reports are decided before any window is built: the "Start with
-// Windows" correction, and the records the launch could not read. Rust keeps
+// Every report is decided before any window is built: the "Start with
+// Windows" correction, the File Explorer commands' repair, and the records the
+// launch could not read. Rust keeps
 // each until the first window asks, and asking clears it, so one launch
 // reports once.
 
@@ -34,6 +35,8 @@ export function unreadableRecordNotice(record: UnreadableRecord): LaunchNotice {
 
 export interface LaunchReportDeps {
   startupEntryNotice: () => Promise<string>;
+  /** The File Explorer commands' launch repair failure, or "". */
+  explorerMenuRepairNotice?: () => Promise<string>;
   takeUnreadableRecords: () => Promise<UnreadableRecord[]>;
   /** Write the startup flags back from this window's preferences. */
   saveStartupFlags: () => void;
@@ -56,6 +59,13 @@ export async function reportLaunch(deps: LaunchReportDeps): Promise<void> {
     notices.push({
       title: tChrome('app.startupEntry.staleTitle'),
       message: tChrome('app.startupEntry.stale', { detail }),
+    });
+  }
+  const repair = (await deps.explorerMenuRepairNotice?.().catch(() => '')) ?? '';
+  if (repair) {
+    notices.push({
+      title: tChrome('launch.explorerMenuRepair.title'),
+      message: tChrome('launch.explorerMenuRepair.failed', { reason: repair }),
     });
   }
   const records = await deps.takeUnreadableRecords().catch((): UnreadableRecord[] => []);

@@ -11,6 +11,8 @@ mod clipboard_read;
 mod clipboard_scratch;
 mod commands;
 pub mod create_pdf_sources;
+pub mod shell_action;
+pub mod shell_menu;
 mod print_to_pdf;
 mod scheduler;
 mod send_to;
@@ -148,6 +150,17 @@ pub(crate) fn platform_wants_backdrop() -> bool {
     false
 }
 
+/// Read a File Explorer verb's handoff on a worker thread (it touches the
+/// file system once per listed path) and queue the result for one window. A
+/// handoff that cannot be read reaches that window as a named refusal.
+fn route_shell_handoff(app: &tauri::AppHandle, handoff: String) {
+    let app = app.clone();
+    std::thread::spawn(move || match shell_action::read_handoff(&handoff) {
+        Ok(create) => app_windows::route_shell_action(&app, create),
+        Err(error) => app_windows::route_shell_refusal(&app, error.to_string()),
+    });
+}
+
 /// When true, the binary is running under end-to-end test control:
 /// single-instance hijacking and tray-persistence are disabled so each WDIO
 /// session gets a clean launch and exit. Enabled via the SPECTRAPDF_E2E
@@ -174,6 +187,11 @@ pub fn run() {
     // process later builds.
     portable::apply_webview_user_data();
 
+    let launch_args: Vec<String> = std::env::args().collect();
+    if shell_action::arg_value(&launch_args).is_some() {
+        shell_action::record_launch_identity();
+    }
+
     let e2e = is_e2e_mode();
 
     let mut builder = tauri::Builder::default()
@@ -195,6 +213,7 @@ pub fn run() {
         .manage(page_commit::PageCommitState::default())
         .manage(scanner::ScannerSessions::new())
         .manage(commands::StartupEntryNotice::new())
+        .manage(shell_menu::RepairNotice::new())
         .manage(commands::UnreadableRecords::new())
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Started {
@@ -233,6 +252,10 @@ pub fn run() {
                     .map(|a| commands::canonical_path(a))
                     .collect();
                 let merge = argv.iter().any(|a| a == "--merge");
+                if let Some(handoff) = shell_action::arg_value(&argv) {
+                    route_shell_handoff(app, handoff);
+                    return;
+                }
                 // One target window, chosen by ownership then focus: broadcast
                 // here mints an independent working copy of the same file per
                 // window, and the loser's whole edit session vanishes on
@@ -340,6 +363,12 @@ pub fn run() {
             engine_writes::set_shutdown_block_reason,
             commands::check_auto_update_disabled,
             commands::check_field_scripts_disabled,
+            commands::check_explorer_menu_disabled,
+            commands::free_output_path,
+            shell_menu::get_shell_menu_status,
+            shell_menu::set_shell_menu_enabled,
+            shell_menu::set_shell_menu_language,
+            shell_menu::shell_menu_repair_notice,
             commands::get_startup_enabled,
             commands::set_startup_enabled,
             commands::startup_entry_notice,
@@ -405,6 +434,9 @@ pub fn run() {
             // user moved — a portable one especially — has a Run entry
             // pointing at nothing until this corrects it.
             commands::refresh_startup_entry_at_launch(&app.handle().clone());
+            if commands::PlatformCapabilities::current().explorer_menu && !e2e {
+                shell_menu::repair_at_launch(&app.handle().clone());
+            }
 
             let args: Vec<String> = std::env::args().collect();
             let startup = commands::load_startup_config(app.handle());
@@ -510,6 +542,9 @@ pub fn run() {
                 // payload waits in the registry rather than riding an event a
                 // renderer that has not mounted yet cannot receive.
                 app_windows::route_open(&app.handle().clone(), files, merge);
+            }
+            if let Some(handoff) = shell_action::arg_value(&args) {
+                route_shell_handoff(app.handle(), handoff);
             }
 
             Ok(())

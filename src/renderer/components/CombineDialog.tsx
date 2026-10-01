@@ -35,9 +35,12 @@ import {
   setRowContributed,
   setRowError,
   setRowPageCount,
+  seedRows,
   setRowRange,
   supportsPageRange,
 } from '../lib/combine';
+import { claimOutputFile } from '../lib/output-root-claim';
+import { useRowDrag, rowDragClass } from './useRowDrag';
 
 // Document ▸ Combine Files.
 //
@@ -81,6 +84,7 @@ export function CombineDialog({
   workingDirFor,
   onAppend,
   initialPaths,
+  initialTarget,
 }: {
   onClose: () => void;
   /** Open a newly created PDF through the normal open funnel. Rejection is
@@ -99,21 +103,28 @@ export function CombineDialog({
   /** Sources the dialog opens pre-populated with — a drop on the window
    * while Combine is open lands here (drop-to-combine). */
   initialPaths?: readonly string[];
+  /** The target a seed asks for; null leaves the current target. */
+  initialTarget?: CombineTarget | null;
 }): React.JSX.Element {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { callRaw } = useEngine();
   const { track } = useOperationQueue();
-  const [rows, setRows] = useState<SourceRow[]>(() => addPaths([], initialPaths ?? []));
+  const [rows, setRows] = useState<SourceRow[]>(() => seedRows([], initialPaths ?? []));
   const [target, setTarget] = useState<CombineTarget>(
-    destinations.length > 0 ? 'append' : 'new',
+    initialTarget ?? (destinations.length > 0 ? 'append' : 'new'),
   );
   const [destinationId, setDestinationId] = useState<string>(destinations[0]?.docId ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CombineResult | null>(null);
   const [appended, setAppended] = useState<{ pages: number; name: string } | null>(null);
-  const dragFrom = useRef<number | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const reorder = useCallback(
+    (from: number, to: number) => setRows((prev) => reorderRows(prev, from, to)),
+    [],
+  );
+  const { drag, startRowDrag } = useRowDrag(listRef, '[data-testid="combine-row"]', reorder);
   // Ref, not state: the reentrancy window opens BEFORE any state update lands
   // (the whole native save-dialog round trip), so a second click reads a stale
   // busy=false closure and BOTH runs proceed — the convertingRef discipline,
@@ -128,8 +139,12 @@ export function CombineDialog({
   useEffect(() => {
     const seeded = JSON.parse(seedKey) as string[];
     if (seeded.length === 0) return;
-    setRows((prev) => addPaths(prev, seeded));
+    setRows((prev) => seedRows(prev, seeded));
   }, [seedKey]);
+  // A File Explorer seed names its target; a drop or a menu open does not.
+  useEffect(() => {
+    if (initialTarget) setTarget(initialTarget);
+  }, [seedKey, initialTarget]);
 
   const destination = useMemo(
     () => destinations.find((d) => d.docId === destinationId) ?? null,
@@ -182,7 +197,7 @@ export function CombineDialog({
   const addSources = useCallback(async () => {
     const picked = await dialog.pickCreatePdfSources();
     if (picked.length > 0) {
-      setRows((prev) => addPaths(prev, picked));
+      setRows((prev) => seedRows(prev, picked));
       setError(null);
       setResult(null);
       setAppended(null);
@@ -211,21 +226,27 @@ export function CombineDialog({
 
   const combineIntoNew = useCallback(
     async (sourceRows: readonly SourceRow[], out: string): Promise<CombineResult | null> => {
-      const tools = await toolPaths();
-      // `skip`, not `refuse`: Combine reports per-row state and lets the user
-      // decide, and a skipped row is NEVER silent — it comes back carrying its
-      // own error, which `applyReport` puts on the row.
-      const r = (await track('create_pdf', { file: out }, () =>
-        callRaw('create_pdf', {
-          sources: toEngineSources(sourceRows),
-          output: out,
-          on_unsupported: 'skip',
-          ...tools,
-        }),
-      )) as unknown as CombineResult;
-      setRows((prev) => applyReport(prev, r.sources ?? []));
-      setResult(r);
-      return r;
+      const claim = await claimOutputFile(out);
+      if (!claim.granted) throw new Error(claim.message);
+      try {
+        const tools = await toolPaths();
+        // `skip`, not `refuse`: Combine reports per-row state and lets the user
+        // decide, and a skipped row is NEVER silent — it comes back carrying its
+        // own error, which `applyReport` puts on the row.
+        const r = (await track('create_pdf', { file: out }, () =>
+          callRaw('create_pdf', {
+            sources: toEngineSources(sourceRows),
+            output: out,
+            on_unsupported: 'skip',
+            ...tools,
+          }),
+        )) as unknown as CombineResult;
+        setRows((prev) => applyReport(prev, r.sources ?? []));
+        setResult(r);
+        return r;
+      } finally {
+        await claim.release();
+      }
     },
     [callRaw, track, toolPaths],
   );
@@ -413,6 +434,7 @@ export function CombineDialog({
         ) : (
           <ul
             className="flex flex-col border border-neutral-800 rounded divide-y divide-neutral-800 max-h-64 overflow-y-auto"
+            ref={listRef}
             data-testid="combine-list"
             aria-label={tChrome('dialog.combine.listLabel')}
           >
@@ -425,26 +447,26 @@ export function CombineDialog({
                   data-testid="combine-row"
                   data-kind={row.kind || 'unsupported'}
                   data-state={row.kind === '' ? 'unsupported' : row.error ? 'error' : 'ready'}
-                  draggable={!busy}
-                  onDragStart={() => {
-                    dragFrom.current = index;
-                  }}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const from = dragFrom.current;
-                    dragFrom.current = null;
-                    if (from !== null) setRows((prev) => reorderRows(prev, from, index));
-                  }}
-                  className="flex flex-col gap-0.5 px-2 py-1.5 text-xs"
+                  data-dragging={drag?.from === index ? 'yes' : undefined}
+                  className={'flex flex-col gap-0.5 px-2 py-1.5 text-xs ' + rowDragClass(drag, index)}
                 >
                   <div className="flex items-center gap-2">
+                    <span
+                      data-testid="combine-row-grip"
+                      aria-hidden="true"
+                      title={tChrome('dialog.createPdf.dragHandle')}
+                      className={`shrink-0 px-0.5 text-neutral-500 select-none touch-none ${busy ? '' : 'cursor-grab hover:text-neutral-300'}`}
+                      onPointerDown={busy ? undefined : (e) => startRowDrag(e, index)}
+                    >
+                      ⋮⋮
+                    </span>
                     <span className="shrink-0 px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 text-[10px] uppercase tracking-wide">
                       {row.kind
                         ? tChrome(KIND_LABEL_KEYS[row.kind] as UiKey)
                         : tChrome('dialog.createPdf.kindUnsupported')}
                     </span>
                     <span
+                      data-testid="combine-row-name"
                       className={`flex-1 truncate ${row.kind ? 'text-neutral-300' : 'text-red-400'}`}
                       title={row.path ?? ''}
                     >

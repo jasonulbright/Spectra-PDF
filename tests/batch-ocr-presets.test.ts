@@ -12,6 +12,7 @@ import {
   loadBatchOcrPresets,
   normalizeBatchOcrSettings,
   presetNameProblem,
+  presetNoteKey,
   presetScheduleFields,
   removePreset,
   renamePreset,
@@ -347,5 +348,12 @@ describe('repair-only mode', () => {
       replaceRepairedOriginals: true,
     });
     expect(ocr.replaceRepairedOriginals).toBe(false);
+  });
+});
+
+describe('presetNoteKey', () => {
+  it('names the scheduling surface only when scheduled actions exist', () => {
+    expect(presetNoteKey(true)).toBe('dialog.batch.presetNote');
+    expect(presetNoteKey(false)).toBe('dialog.batch.presetNoteUnscheduled');
   });
 });

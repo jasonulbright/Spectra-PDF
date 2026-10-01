@@ -343,6 +343,11 @@ export const WORKBENCH_STRINGS = {
     '"{{name}}" is open in this window. Close it, or choose another name.',
   'app.window.outputOpenElsewhere':
     '"{{name}}" is open in another window. Close it there, or choose another name.',
+  // An output file a run of another window, or of this one, is writing now.
+  'app.window.outputBusy':
+    'Another run is writing "{{name}}". Wait until it stops, or choose another name.',
+  'app.window.outputBusyHere':
+    'A run in this window is still writing "{{name}}". Wait until it stops, or choose another name.',
   // A folder run and an open document inside its folders exclude each other:
   // the run would replace bytes the document's next save writes back.
   'app.window.folderHasOpenDocument':

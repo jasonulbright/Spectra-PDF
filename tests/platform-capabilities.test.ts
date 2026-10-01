@@ -622,7 +622,7 @@ describe('capability module', () => {
   it('defaults to every flag true', () => {
     expect(platformCapabilities()).toEqual(ALL_PLATFORM_CAPABILITIES);
     for (const f of PLATFORM_FEATURES) expect(platformCapability(f)).toBe(true);
-    expect(PLATFORM_FEATURES).toHaveLength(16);
+    expect(PLATFORM_FEATURES).toHaveLength(17);
   });
 
   it('parses only an exact true as available', () => {
@@ -682,6 +682,7 @@ const EXPECTED_DROPS: Record<PlatformFeature, CommandId[]> = {
   consoleAttach: [],
   startWithSystem: [],
   hiddenAnimationFrames: [],
+  explorerMenu: [],
 };
 
 const EXPECTED_PREFERENCE_DROPS: Record<PlatformFeature, PreferenceControl[]> = {
@@ -701,6 +702,7 @@ const EXPECTED_PREFERENCE_DROPS: Record<PlatformFeature, PreferenceControl[]> = 
   consoleAttach: [],
   startWithSystem: ['startWithSystem'],
   hiddenAnimationFrames: [],
+  explorerMenu: ['explorerMenu'],
 };
 
 function allMenuIds(): CommandId[] {
@@ -746,7 +748,7 @@ describe.each(PLATFORM_FEATURES)('flag %s false', (feature) => {
 
 describe('preferences controls', () => {
   it('shows every control with every flag true', () => {
-    expect(availablePreferenceControls()).toEqual(['minimizeToTray', 'startMinimized', 'startWithSystem']);
+    expect(availablePreferenceControls()).toEqual(['minimizeToTray', 'startMinimized', 'startWithSystem', 'explorerMenu']);
   });
 
   it.each(PLATFORM_FEATURES)('flag %s false drops exactly its controls', (feature) => {

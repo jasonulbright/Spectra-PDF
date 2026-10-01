@@ -1,8 +1,10 @@
 # Authenticode sign one file. Invoked by the bundler for every binary it
 # produces or stages (`bundle.windows.signCommand` in
-# src-tauri/tauri.conf.json), which is a wider set than the three artifacts
-# this project signs: the app executable, the installer, and the uninstaller.
-# Test-SignedArtifact holds that set, so the app executable is signed before
+# src-tauri/tauri.conf.json), which is a wider set than the artifacts this
+# project signs: the app executable, the installer, the uninstaller, and the
+# File Explorer command handler and packages (scripts/build-shell-menu.ps1
+# invokes this script for those). Test-SignedArtifact holds that set, so the
+# app executable is signed before
 # NSIS packs it and the installer after -- the portable zip copies the same
 # already-signed executable the installer stages -- while NSIS plugins and
 # vendored third-party binaries pass through untouched.
@@ -68,7 +70,7 @@ try {
     . (Join-Path $PSScriptRoot "windows-signing.ps1")
 
     if (-not (Test-SignedArtifact $Path)) {
-        Write-SignLog "sign-windows: not signing '$Path' (outside the signed set: app executable, installer, uninstaller)"
+        Write-SignLog "sign-windows: not signing '$Path' (outside the signed set: app executable, installer, uninstaller, File Explorer command handler and packages)"
         exit 0
     }
 

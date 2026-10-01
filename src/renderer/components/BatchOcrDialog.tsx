@@ -38,6 +38,7 @@ import {
   removePreset,
   duplicatePreset,
   PRESET_MAX,
+  presetNoteKey,
   renamePreset,
   saveBatchOcrPresets,
   upsertPreset,
@@ -49,6 +50,7 @@ import { TEST_HARNESS_ENABLED, registerBatchOcr } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber, tOcrLanguage } from '../i18n';
 import { ChromeIcon } from './chrome-icons';
+import { platformCapability } from '../lib/platform-capabilities';
 
 // Tools ▸ Batch OCR Folder…:
 // mirror a folder tree into searchable PDFs. Needs NO open document — the
@@ -851,7 +853,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               </p>
             ) : (
               <p className="text-xs text-neutral-500">
-                {tChrome('dialog.batch.presetNote', {
+                {tChrome(presetNoteKey(platformCapability('scheduledActions')), {
                   schedule: tChrome('dialog.schedule.title'),
                 })}
               </p>

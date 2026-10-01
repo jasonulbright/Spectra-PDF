@@ -1303,6 +1303,15 @@ pub struct PendingOpen {
     /// and signals; nothing else may.
     #[serde(default, skip_serializing)]
     pub reserved: bool,
+    /// A File Explorer verb's selection. `files` is empty on such an entry:
+    /// the sources are read by Create PDF or Combine, never opened as
+    /// documents, so no claim is taken for them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub create: Option<crate::shell_action::ShellCreate>,
+    /// A File Explorer verb whose handoff could not be read: the reason, shown
+    /// to the user by the receiving window. `files` is empty on such an entry.
+    #[serde(default, rename = "shellRefused", skip_serializing_if = "Option::is_none")]
+    pub shell_refused: Option<String>,
 }
 
 pub struct WindowRegistry {
@@ -1619,6 +1628,41 @@ pub fn route_open(app: &AppHandle, files: Vec<String>, merge: bool) {
     focus_label(app, &groups[0].0);
 }
 
+/// Hand a File Explorer verb's selection to the routing target and raise it.
+pub fn route_shell_action(app: &AppHandle, create: crate::shell_action::ShellCreate) {
+    route_shell_entry(app, Some(create), None);
+}
+
+/// Tell the routing target that a File Explorer verb's handoff was refused,
+/// and raise it.
+pub fn route_shell_refusal(app: &AppHandle, reason: String) {
+    route_shell_entry(app, None, Some(reason));
+}
+
+fn route_shell_entry(
+    app: &AppHandle,
+    create: Option<crate::shell_action::ShellCreate>,
+    shell_refused: Option<String>,
+) {
+    let target = route_target(app);
+    let queued = app.state::<WindowRegistry>().push_pending(
+        &target,
+        PendingOpen {
+            files: Vec::new(),
+            merge: false,
+            index: None,
+            handover: None,
+            reserved: false,
+            create,
+            shell_refused,
+        },
+    );
+    if queued {
+        signal_open(app, &target);
+    }
+    focus_label(app, &target);
+}
+
 /// Queue an open for a label, without signalling.
 ///
 /// Split from the signal so a handover can queue under the lock that guards it
@@ -1633,6 +1677,8 @@ pub fn queue_open(registry: &WindowRegistry, label: &str, files: Vec<String>, me
             index: None,
             handover: None,
             reserved: false,
+            create: None,
+            shell_refused: None,
         },
     )
 }
@@ -1664,6 +1710,8 @@ pub fn queue_handover(
             index,
             handover: Some(handover),
             reserved: true,
+            create: None,
+            shell_refused: None,
         },
     )
 }
@@ -3369,6 +3417,8 @@ mod tests {
             index: None,
             handover: None,
             reserved: false,
+            create: None,
+            shell_refused: None,
         };
         let json = serde_json::to_string(&plain).unwrap();
         assert!(!json.contains("handover"), "{json}");
@@ -3451,6 +3501,8 @@ mod tests {
             index: Some(0),
             handover: None,
             reserved: false,
+            create: None,
+            shell_refused: None,
         };
         let json = serde_json::to_string(&queued).unwrap();
         assert_eq!(
@@ -3464,6 +3516,53 @@ mod tests {
         let lean: PendingOpen =
             serde_json::from_str(r#"{"files":["C:\\a.pdf"],"merge":false}"#).unwrap();
         assert_eq!(lean.index, None);
+        assert_eq!(lean.create, None);
+        assert!(!json.contains("create"), "{json}");
+    }
+
+    #[test]
+    fn a_shell_verb_entry_carries_its_selection_and_no_files() {
+        let create = crate::shell_action::ShellCreate {
+            action: crate::shell_action::ShellVerb::Combine,
+            paths: vec![native("C:\\b.pdf").into(), native("C:\\a.png").into()],
+            skipped: 1,
+        };
+        let registry = WindowRegistry::new();
+        assert!(registry.push_pending(
+            "main",
+            PendingOpen {
+                files: Vec::new(),
+                merge: false,
+                index: None,
+                handover: None,
+                reserved: false,
+                create: Some(create.clone()),
+                shell_refused: None,
+            },
+        ));
+        let drained = registry.take_deliverable("main");
+        assert_eq!(drained.len(), 1);
+        let json = serde_json::to_value(&drained[0]).unwrap();
+        assert_eq!(json["files"], serde_json::json!([]));
+        assert_eq!(json["create"]["action"], "combine");
+        assert_eq!(json["create"]["skipped"], 1);
+        let back: PendingOpen = serde_json::from_value(json).unwrap();
+        assert_eq!(back.create, Some(create));
+        assert!(!serde_json::to_string(&back).unwrap().contains("shellRefused"));
+        assert!(registry.take_pending("main").is_empty());
+
+        let refused = PendingOpen {
+            files: Vec::new(),
+            merge: false,
+            index: None,
+            handover: None,
+            reserved: false,
+            create: None,
+            shell_refused: Some("the shell handoff is malformed".into()),
+        };
+        let json = serde_json::to_value(&refused).unwrap();
+        assert_eq!(json["shellRefused"], "the shell handoff is malformed");
+        assert!(json.get("create").is_none());
     }
 
     #[test]

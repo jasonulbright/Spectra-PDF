@@ -27,7 +27,7 @@ export const TOOL_PLATFORM: Readonly<Partial<Record<ToolId, PlatformFeature>>> =
 
 /** Preferences controls bound to a platform feature, in panel order. A control
  * absent from this map is always shown. */
-export const PREFERENCE_CONTROLS = ['minimizeToTray', 'startMinimized', 'startWithSystem'] as const;
+export const PREFERENCE_CONTROLS = ['minimizeToTray', 'startMinimized', 'startWithSystem', 'explorerMenu'] as const;
 
 export type PreferenceControl = (typeof PREFERENCE_CONTROLS)[number];
 
@@ -35,6 +35,7 @@ export const PREFERENCE_PLATFORM: Readonly<Record<PreferenceControl, PlatformFea
   minimizeToTray: 'trayResidency',
   startMinimized: 'trayResidency',
   startWithSystem: 'startWithSystem',
+  explorerMenu: 'explorerMenu',
 };
 
 export function preferenceAvailable(control: PreferenceControl): boolean {

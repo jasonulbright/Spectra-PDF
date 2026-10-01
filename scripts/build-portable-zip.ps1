@@ -76,6 +76,7 @@ $runtimes = @{
     "fonts"        = "Liberation"
     "dictionaries" = "Hunspell"
     "icc"          = "Adobe"
+    "shell"        = ""
 }
 
 # ---------------------------------------------------------------------------
@@ -283,6 +284,22 @@ try {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "installer extraction produced no $name" }
         if ($ExpectSigned) {
             Assert-AuthenticodeSigned -Path $path -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
+        }
+    }
+
+    # The File Explorer command handler ships as two DLLs and two packages. A
+    # manifest that carries the shell directory carries all four, each signed;
+    # a tag built before the handler existed carries none.
+    if (@($entries | Where-Object { $_.name -like 'shell/*' }).Count -gt 0) {
+        foreach ($shellName in @(
+            'shell/x64/spectrapdf_shell.dll', 'shell/arm64/spectrapdf_shell.dll',
+            'shell/SpectraPDF.ExplorerCommands_x64.msix', 'shell/SpectraPDF.ExplorerCommands_arm64.msix'
+        )) {
+            $hit = @($entries | Where-Object { $_.name -ceq $shellName })
+            if ($hit.Count -ne 1) { throw "the installer manifest carries a shell directory without $shellName" }
+            if ($ExpectSigned) {
+                Assert-AuthenticodeSigned -Path $hit[0].source -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
+            }
         }
     }
 
