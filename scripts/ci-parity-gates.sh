@@ -23,6 +23,12 @@ gate rust-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py ru
 gate python-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py python
 gate node-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py node
 
+# --- CI audit job: npm audit and cargo audit, same flags and directories.
+#     cargo audit reads its ignore list from src-tauri/.cargo/audit.toml, so it
+#     runs from src-tauri. ---
+gate npm-audit npm audit --production --audit-level=high
+gate cargo-audit sh -c 'cd src-tauri && cargo audit'
+
 # --- Release job: version consistency (tag == package.json == tauri.conf == Cargo.toml) ---
 # Not tag-aware here (no tag yet at push time); instead assert the four surfaces AGREE.
 gate version-consistency "$R/.venv/Scripts/python.exe" - <<'PY'
@@ -86,6 +92,29 @@ if [ ! -x "$AUDIT_PY" ] || [ "$(cat "$AUDIT_VENV/.lock-sha256" 2>/dev/null)" != 
 fi
 gate pip-audit-windows "$AUDIT_PY" -m pip_audit -r scripts/python-requirements.txt --no-deps
 gate pip-audit-linux "$AUDIT_PY" -m pip_audit -r scripts/python-requirements-linux.txt --no-deps --disable-pip
+
+# --- CI audit job: the wheels committed under vendor/wheels/ install from the
+#     repository, so the lock audits above cannot see them. Same selection as
+#     CI: rows after the header whose role is `wheel`, audited as name==version. ---
+gate pip-audit-vendored "$AUDIT_PY" - <<'PY'
+import pathlib, subprocess, sys
+req, seen = [], False
+for line in pathlib.Path("scripts/vendored-wheels.tsv").read_text(encoding="utf-8").splitlines():
+    if not seen:
+        seen = line.startswith("package\t")
+        continue
+    if not line.strip():
+        continue
+    c = line.split("\t")
+    if c[2].strip() == "wheel":
+        req.append(f"{c[0].strip()}=={c[1].strip()}")
+if not seen:
+    print("vendored-wheels.tsv has no header row"); sys.exit(1)
+out = pathlib.Path("vendored-audit-requirements.local.txt")
+out.write_text("\n".join(req) + "\n", encoding="utf-8")
+print("auditing", req)
+sys.exit(subprocess.run([sys.executable, "-m", "pip_audit", "-r", str(out), "--no-deps"]).returncode)
+PY
 
 # Inspect the production renderer already built by candidate validation.
 gate release-bundle "$R/.venv/Scripts/python.exe" scripts/check-release-bundle.py
