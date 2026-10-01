@@ -19,6 +19,13 @@ function contentStreamText(items: readonly OrientedItem[]): string {
   return text;
 }
 
+const column = (str: string, x: number, y: number, hasEOL = false): OrientedItem => ({
+  str,
+  dir: 'ttb',
+  hasEOL,
+  transform: [20, 0, 0, 20, x, y],
+});
+
 const body = [at('Body line one of the page', 0, 72, 700, true), at('Body line two continues here', 0, 72, 686, true)];
 
 describe('orientation reading order', () => {
@@ -44,9 +51,12 @@ describe('orientation reading order', () => {
   });
 
   it('chains an arc label into one part after the body', () => {
-    const arc = ['A', 'R', 'C', 'L', 'B'].map((ch, i) => at(ch, 30 + i * 5, 300 + i * 8, 300));
+    // The glyphs advance along the chain's mean direction, 40 degrees.
+    const arc = ['A', 'R', 'C', 'L', 'B'].map((ch, i) =>
+      at(ch, 30 + i * 5, 300 + i * 8 * Math.cos(rad(40)), 300 + i * 8 * Math.sin(rad(40))),
+    );
     const items = [...arc.slice(0, 2), body[0], ...arc.slice(2), body[1]];
-    const expected = 'Body line one of the page\nBody line two continues here\nARCLB';
+    const expected = 'Body line one of the page\nBody line two continues here\nARCLB\n';
     expect(orderedPageText(items)).toBe(expected);
     expect(contentStreamText(items)).not.toBe(expected);
   });
@@ -122,6 +132,18 @@ describe('review fixes', () => {
     expect(orientationOrder([...body, at('a b', 45)])).toEqual([[0, 1], [2]]);
     // "ab" plus an inferred gap space is two glyphs: under three, read upright.
     expect(orientationOrder([...body, at('a', 45), at(' ', 45), at('b', 45)])).toEqual([[0, 1, 2, 3, 4]]);
+  });
+
+  it('reads columns of a vertical font drawn left first from right to left', () => {
+    const items = [column('上下', 300, 700, true), column('左右', 330, 700)];
+    expect(orderedPageText(items)).toBe('左右\n上下\n');
+  });
+
+  it('reads an inferred space with the column before it', () => {
+    const space: OrientedItem = { str: ' ', dir: 'ltr', transform: [20, 0, 0, 20, 330, 660] };
+    const items = [...body, column('上下', 330, 700), space, column('左右', 330, 640)];
+    expect(orientationOrder(items)).toEqual([[0, 1], [2, 3, 4]]);
+    expect(orderedPageText(items)).toBe('Body line one of the page\nBody line two continues here\n上下 左右\n');
   });
 
   it('orders RTL body before a rotated sidebar and keeps RTL strings as drawn', () => {

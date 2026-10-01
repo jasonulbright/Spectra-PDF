@@ -33,7 +33,9 @@ A run no paragraph admits — text set at an angle, a column whose glyphs climb
 — is a block of its own, placed in layout order by its top edge: the
 paragraph lister leaving it on the run-box surface says it cannot be
 reflowed, not that it is not on the page. A run whose box has no area paints
-nothing and is not read.
+nothing and is not read. On a page whose text is not all upright in its own
+user space, the layout order is `reading_order`'s: per orientation as the
+reader sees the page, top to bottom in each orientation's own frame.
 """
 
 from __future__ import annotations
@@ -42,6 +44,16 @@ import pikepdf
 from engine.credentials import open_pdf
 
 from engine.content_walk import GraphicsTextState
+from engine.reading_order import (
+    UPRIGHT,
+    line_tolerance,
+    order_lines,
+    orientation,
+    page_rotation,
+    partition,
+    to_frame,
+    user_frame,
+)
 from engine.redact import IDENTITY, _resolve_resources, _span_bbox
 from engine.struct_tree import _is_elem, _kids, _page_map, _page_no
 from engine.text_metrics import _FontCache, measurable, show_items_from_segments
@@ -320,6 +332,59 @@ def _with_leftover_runs(paragraphs, local: list, detail: list, fonts: _FontCache
     return out
 
 
+def _in_reading_order(blocks: list, detail: list, rotate: int) -> list:
+    """`blocks` in the reading order `reading_order` gives, when the page's
+    text is not all upright in its own user space.
+
+    A block reads in the orientation that carries most of its characters,
+    weighed over its spans by `reading_order.partition`'s rule: a column
+    that opens with tate-chu-yoko digits reads as a column. Blocks partition
+    by orientation as the reader sees the page; each part orders its blocks
+    as lines of its own frame, by the frame's top edge of each block's box
+    and then its leading edge. An all-upright page keeps the lister's
+    order."""
+
+    def run_key(index: int) -> tuple[float, bool]:
+        det = detail[index]
+        a, b, c, d, _e, _f = det["combined"]
+        cap = det.get("cap")
+        return orientation(a, b, c, d, bool(cap is not None and cap.writes_vertical), rotate)
+
+    leads: list[tuple[tuple[float, bool], int | None]] = []
+    for _run_indexes, _text, _box, spans in blocks:
+        weighed = [(int(span["run"]), int(span["e"]) - int(span["s"])) for span in spans]
+        if not weighed:
+            leads.append((UPRIGHT, None))
+            continue
+        key, members = partition(weighed, lambda entry: run_key(entry[0]), lambda entry: entry[1], min_chars=0)[0]
+        leads.append((key, members[0][0]))
+    entries = list(range(len(blocks)))
+
+    def key_of(n: int) -> tuple[float, bool]:
+        return leads[n][0]
+
+    def weight_of(n: int) -> int:
+        return len(blocks[n][1])
+
+    parts = partition(entries, key_of, weight_of)
+    if [user_frame(key, rotate) for key, _members in parts] == [UPRIGHT]:
+        return blocks
+
+    def place(n: int, frame) -> tuple[float, float, float]:
+        x0, _y0, _x1, y1 = to_frame(blocks[n][2], frame)
+        lead = leads[n][1]
+        if lead is None:
+            return x0, y1, line_tolerance(0.0, 0.0, 0.0)
+        _a, _b, c, d, _e, _f = detail[lead]["combined"]
+        return x0, y1, line_tolerance(float(detail[lead]["style"]["size"]), c, d)
+
+    ordered = []
+    for _key, lines in order_lines(entries, key_of, weight_of, place, rotate):
+        for line in lines:
+            ordered.extend(blocks[n] for n, _along, _across in line)
+    return ordered
+
+
 def read_aloud_page(file: str, page: int) -> dict:
     """One page's reading blocks.
 
@@ -402,7 +467,11 @@ def read_aloud_page(file: str, page: int) -> dict:
             else:
                 order = "structure"
 
-        blocks_in_layout = _with_leftover_runs(paragraphs, local, local_detail, fonts, run_rect)
+        blocks_in_layout = _in_reading_order(
+            _with_leftover_runs(paragraphs, local, local_detail, fonts, run_rect),
+            local_detail,
+            page_rotation(p),
+        )
         entries = []
         for run_indexes, text, box, spans in blocks_in_layout:
             first = run_indexes[0] if run_indexes else 0

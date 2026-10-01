@@ -1,0 +1,228 @@
+{
+  "note": [
+    "The reading orders the engine (src/engine/reading_order.py and the readers",
+    "built on it) and the renderer (src/renderer/search/text-order.ts over pdf.js",
+    "text content) must agree on. Read by tests/test_reading_order.py and",
+    "tests/reading-order-corpus.test.ts, case for case.",
+    "",
+    "`rotations`: a page /Rotate value and the clockwise rotation it reads as.",
+    "`orientations`: a text matrix's linear part, the font's writing mode and the",
+    "page rotation; `angle` is the display direction the pen advances in, degrees",
+    "counter-clockwise, and `reflected` whether glyph space is mirrored.",
+    "`partitions`: [text, angle, reflected?] items, each weighing its character",
+    "count, and the parts they group into, in reading order.",
+    "`pages`: one 612 x 792 page with /Rotate `rotate`. A `text` item is a",
+    "Helvetica show at 12 pt under text matrix `tm`; a `cids` item is a column",
+    "of `vertical_font` codes at 20 pt from `at` (Identity-V, one em down per",
+    "code). `lines` is the page's text in reading order. `readers` names every",
+    "reader held to exactly those lines: layout (pdfminer), search (the run",
+    "walk), segments (form detection), aloud (read-aloud blocks), renderer",
+    "(pdf.js items through text-order.ts). The renderer keeps content-stream",
+    "order for text upright in user space, so a case that draws such text out of",
+    "order does not name it."
+  ],
+  "vertical_font": {"1": "上", "2": "下", "3": "左", "4": "右", "5": "見", "6": "出"},
+  "rotations": [
+    [0, 0], [90, 90], [180, 180], [270, 270], [360, 0], [-90, 270], [450, 90],
+    [-450, 270], [45, 0], [135, 0], [225, 0], [315, 0], [90.5, 0]
+  ],
+  "orientations": [
+    {"matrix": [0, 1, -1, 0], "vertical": false, "rotate": 0, "angle": 90, "reflected": false},
+    {"matrix": [1, 0, 0, 1], "vertical": true, "rotate": 0, "angle": 270, "reflected": false},
+    {"matrix": [0, -1, 1, 0], "vertical": true, "rotate": 0, "angle": 180, "reflected": false},
+    {"matrix": [1, 0, 0, 1], "vertical": false, "rotate": 90, "angle": 270, "reflected": false},
+    {"matrix": [1, 0, 0, 1], "vertical": true, "rotate": 270, "angle": 0, "reflected": false},
+    {"matrix": [1, 0, 0, -1], "vertical": false, "rotate": 0, "angle": 0, "reflected": true},
+    {"matrix": [0, 0, 0, 0], "vertical": false, "rotate": 90, "angle": 270, "reflected": false}
+  ],
+  "partitions": [
+    {
+      "items": [["ab", 90], ["abcd", 0], ["cd", 180], ["ef", 90]],
+      "parts": [[0, false, ["abcd"]], [90, false, ["ab", "ef"]], [180, false, ["cd"]]]
+    },
+    {
+      "items": [["body", 0], ["x", 45]],
+      "parts": [[0, false, ["body", "x"]]]
+    },
+    {
+      "items": [["one", 1.5], ["two", -2.5], ["three", 0.2]],
+      "parts": [[0, false, ["one", "two", "three"]]]
+    },
+    {
+      "items": [["abcd", 0, true], ["efgh", 0]],
+      "parts": [[0, false, ["efgh"]], [0, true, ["abcd"]]]
+    },
+    {
+      "items": [["bodytext", 0], ["W", 349], ["W", 352.5], ["W", 356.5], ["W", 3.5], ["W", 7]],
+      "parts": [[0, false, ["bodytext"]], [357.697973, false, ["W", "W", "W", "W", "W"]]]
+    }
+  ],
+  "pages": [
+    {
+      "name": "vertical columns read top to bottom, right to left",
+      "rotate": 0,
+      "draw": [{"cids": [1, 2], "at": [300, 700]}, {"cids": [3, 4], "at": [330, 700]}],
+      "lines": ["左右", "上下"],
+      "readers": ["layout", "search", "segments", "renderer"]
+    },
+    {
+      "name": "vertical columns on a page rotated 90",
+      "rotate": 90,
+      "draw": [{"cids": [1, 2], "at": [300, 700]}, {"cids": [3, 4], "at": [330, 700]}],
+      "lines": ["左右", "上下"],
+      "readers": ["layout", "search", "segments", "renderer"]
+    },
+    {
+      "name": "stacked vertical blocks read block by block",
+      "rotate": 0,
+      "draw": [
+        {"cids": [5, 6], "at": [300, 600]},
+        {"cids": [1, 2], "at": [330, 600]},
+        {"cids": [3, 4], "at": [300, 700]},
+        {"cids": [1, 2], "at": [330, 700]}
+      ],
+      "lines": ["上下", "左右", "上下", "見出"],
+      "readers": ["layout"]
+    },
+    {
+      "name": "a horizontal head beside vertical columns reads whole and first",
+      "rotate": 0,
+      "draw": [
+        {"text": "Running head", "tm": [1, 0, 0, 1, 72, 760]},
+        {"cids": [1, 2], "at": [300, 700]},
+        {"cids": [3, 4], "at": [330, 700]}
+      ],
+      "lines": ["Running head", "左右", "上下"],
+      "readers": ["layout", "search", "segments", "renderer"]
+    },
+    {
+      "name": "lines turned 90 degrees read in their own order",
+      "rotate": 0,
+      "draw": [
+        {"text": "Third line here", "tm": [0, 1, -1, 0, 346, 396]},
+        {"text": "Second line here", "tm": [0, 1, -1, 0, 326, 396]},
+        {"text": "First line here", "tm": [0, 1, -1, 0, 306, 396]}
+      ],
+      "lines": ["First line here", "Second line here", "Third line here"],
+      "readers": ["layout", "search", "segments", "aloud", "renderer"]
+    },
+    {
+      "name": "lines turned 180 degrees read in their own order",
+      "rotate": 0,
+      "draw": [
+        {"text": "Third line here", "tm": [-1, 0, 0, -1, 306, 436]},
+        {"text": "Second line here", "tm": [-1, 0, 0, -1, 306, 416]},
+        {"text": "First line here", "tm": [-1, 0, 0, -1, 306, 396]}
+      ],
+      "lines": ["First line here", "Second line here", "Third line here"],
+      "readers": ["layout", "search", "segments", "aloud", "renderer"]
+    },
+    {
+      "name": "lines turned 270 degrees read in their own order",
+      "rotate": 0,
+      "draw": [
+        {"text": "Third line here", "tm": [0, -1, 1, 0, 266, 396]},
+        {"text": "Second line here", "tm": [0, -1, 1, 0, 286, 396]},
+        {"text": "First line here", "tm": [0, -1, 1, 0, 306, 396]}
+      ],
+      "lines": ["First line here", "Second line here", "Third line here"],
+      "readers": ["layout", "search", "segments", "aloud", "renderer"]
+    },
+    {
+      "name": "upright lines on a page rotated 90 read top down",
+      "rotate": 90,
+      "draw": [
+        {"text": "Second line", "tm": [1, 0, 0, 1, 72, 680]},
+        {"text": "First line", "tm": [1, 0, 0, 1, 72, 700]}
+      ],
+      "lines": ["First line", "Second line"],
+      "readers": ["layout", "search", "segments", "aloud"]
+    },
+    {
+      "name": "upright lines on a page rotated 180 read top down",
+      "rotate": 180,
+      "draw": [
+        {"text": "Second line", "tm": [1, 0, 0, 1, 72, 680]},
+        {"text": "First line", "tm": [1, 0, 0, 1, 72, 700]}
+      ],
+      "lines": ["First line", "Second line"],
+      "readers": ["layout", "search", "segments", "aloud"]
+    },
+    {
+      "name": "upright lines on a page rotated 270 read top down",
+      "rotate": 270,
+      "draw": [
+        {"text": "Second line", "tm": [1, 0, 0, 1, 72, 680]},
+        {"text": "First line", "tm": [1, 0, 0, 1, 72, 700]}
+      ],
+      "lines": ["First line", "Second line"],
+      "readers": ["layout", "search", "segments", "aloud"]
+    },
+    {
+      "name": "a side label reads after the body",
+      "rotate": 0,
+      "draw": [
+        {"text": "Side label text", "tm": [0, -1, 1, 0, 560, 700]},
+        {"text": "Body line one", "tm": [1, 0, 0, 1, 100, 600]},
+        {"text": "Body line two", "tm": [1, 0, 0, 1, 100, 580]},
+        {"text": "Body line three", "tm": [1, 0, 0, 1, 100, 560]}
+      ],
+      "lines": ["Body line one", "Body line two", "Body line three", "Side label text"],
+      "readers": ["layout", "search", "segments", "aloud", "renderer"]
+    },
+    {
+      "name": "a side label reads after the body on a page rotated 90",
+      "rotate": 90,
+      "draw": [
+        {"text": "Side label text", "tm": [0, -1, 1, 0, 560, 700]},
+        {"text": "Body line one", "tm": [1, 0, 0, 1, 100, 600]},
+        {"text": "Body line two", "tm": [1, 0, 0, 1, 100, 580]},
+        {"text": "Body line three", "tm": [1, 0, 0, 1, 100, 560]}
+      ],
+      "lines": ["Body line one", "Body line two", "Body line three", "Side label text"],
+      "readers": ["layout", "search", "segments", "aloud", "renderer"]
+    },
+    {
+      "name": "a heavier turned part reads before a short upright head",
+      "rotate": 0,
+      "draw": [
+        {"text": "Head", "tm": [1, 0, 0, 1, 72, 760]},
+        {"text": "Third line here", "tm": [0, 1, -1, 0, 346, 396]},
+        {"text": "Second line here", "tm": [0, 1, -1, 0, 326, 396]},
+        {"text": "First line here", "tm": [0, 1, -1, 0, 306, 396]}
+      ],
+      "lines": ["First line here", "Second line here", "Third line here", "Head"],
+      "readers": ["layout", "search", "segments", "aloud", "renderer"]
+    },
+    {
+      "name": "equal parts read in ascending display angle",
+      "rotate": 0,
+      "draw": [
+        {"text": "UPRT", "tm": [1, 0, 0, 1, 72, 700]},
+        {"text": "SIDE", "tm": [0, 1, -1, 0, 300, 300]}
+      ],
+      "lines": ["UPRT", "SIDE"],
+      "readers": ["layout", "search", "segments", "aloud", "renderer"]
+    },
+    {
+      "name": "equal parts read in ascending display angle on a page rotated 90",
+      "rotate": 90,
+      "draw": [
+        {"text": "UPRT", "tm": [1, 0, 0, 1, 72, 700]},
+        {"text": "SIDE", "tm": [0, 1, -1, 0, 300, 300]}
+      ],
+      "lines": ["SIDE", "UPRT"],
+      "readers": ["layout", "search", "segments", "aloud", "renderer"]
+    },
+    {
+      "name": "a rotation that is not a multiple of 90 reads as none",
+      "rotate": 135,
+      "draw": [
+        {"text": "UPRT", "tm": [1, 0, 0, 1, 72, 700]},
+        {"text": "SIDE", "tm": [0, 1, -1, 0, 300, 300]}
+      ],
+      "lines": ["UPRT", "SIDE"],
+      "readers": ["layout", "search", "segments", "aloud", "renderer"]
+    }
+  ]
+}
