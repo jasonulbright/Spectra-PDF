@@ -787,15 +787,30 @@ def _python_releases(*names: str, pre: tuple = (), unpublished: tuple = ()) -> o
     return _toolchains().Fetched(rows)
 
 
+def _setup_python_manifest(*versions: str, unstable: tuple = (), linux_only: tuple = ()) -> object:
+    rows = [
+        {
+            "version": version,
+            "stable": version not in unstable,
+            "files": [{"platform": "linux", "arch": "x64"}]
+            + ([] if version in linux_only else [{"platform": "win32", "arch": "x64"}]),
+        }
+        for version in versions
+    ]
+    return _toolchains().Fetched(rows)
+
+
 PYTHON_314 = ("Python 3.14.5rc1", "Python 3.14.5", "Python 3.14.6", "Python 3.14.7")
+SETUP_PYTHON_314 = ("3.15.0-rc.2", "3.14.7", "3.14.6", "3.14.5", "3.14.5-rc.1")
 
 
-def _python(pin="3.14.7", venv="3.14.7\n", releases=None, venv_status=0):
+def _python(pin="3.14.7", venv="3.14.7\n", releases=None, venv_status=0, manifest=None):
     module = _toolchains()
     return module.python_verdict(
         module.Fetched(pin) if pin is not None else module.Fetched(error=".python-version: missing"),
         _answer(venv, venv_status),
         releases if releases is not None else _python_releases(*PYTHON_314, pre=("Python 3.14.5rc1",)),
+        manifest if manifest is not None else _setup_python_manifest(*SETUP_PYTHON_314),
     )
 
 
@@ -809,6 +824,33 @@ def test_the_python_check_passes_the_newest_pin_in_the_venv() -> None:
     )
     passed, lines = _python(releases=newer_elsewhere)
     assert passed, lines
+    assert not any(line.startswith("NOTE:") for line in lines), lines
+
+
+def test_the_python_check_holds_a_release_setup_python_does_not_offer_yet() -> None:
+    ahead = _python_releases(*PYTHON_314, "Python 3.14.8", pre=("Python 3.14.5rc1",))
+    for manifest in (
+        _setup_python_manifest(*SETUP_PYTHON_314),
+        _setup_python_manifest("3.14.8", *SETUP_PYTHON_314, unstable=("3.14.8",)),
+        _setup_python_manifest("3.14.8", *SETUP_PYTHON_314, linux_only=("3.14.8",)),
+    ):
+        passed, lines = _python(releases=ahead, manifest=manifest)
+        assert passed, lines
+        assert lines[-1] == ("NOTE: python 3.14.8 released; pinned 3.14.7 until "
+                             "actions/setup-python offers it")
+
+
+@pytest.mark.parametrize("pin,offered,expected", [
+    ("3.14.7", ("3.14.8", *SETUP_PYTHON_314), "3.14.8"),
+    ("3.14.8", SETUP_PYTHON_314, "3.14.7"),
+])
+def test_the_python_check_requires_the_newest_release_both_offer(pin, offered, expected) -> None:
+    releases = _python_releases(*PYTHON_314, "Python 3.14.8", pre=("Python 3.14.5rc1",))
+    passed, lines = _python(pin=pin, venv=f"{pin}\n", releases=releases,
+                            manifest=_setup_python_manifest(*offered))
+    assert not passed
+    assert f"Expected version: {expected}" in lines
+    assert f"python-{expected}-embed-amd64.zip" in lines[-1]
 
 
 def test_the_python_check_refuses_a_pin_behind_python_org() -> None:
@@ -827,7 +869,9 @@ def test_the_python_check_refuses_a_venv_off_the_pin() -> None:
     assert "-m venv --clear .venv" in lines[-1]
 
 
-@pytest.mark.parametrize("case", ["no pin", "inexact pin", "no releases", "no venv"])
+@pytest.mark.parametrize(
+    "case", ["no pin", "inexact pin", "no releases", "no manifest", "no venv"]
+)
 def test_the_python_check_fails_closed(case: str) -> None:
     module = _toolchains()
     kwargs, cause = {
@@ -835,6 +879,9 @@ def test_the_python_check_fails_closed(case: str) -> None:
         "inexact pin": ({"pin": "3.14"}, "not major.minor.patch"),
         "no releases": (
             {"releases": module.Fetched(error="python.org: timed out")}, "python.org: timed out"
+        ),
+        "no manifest": (
+            {"manifest": module.Fetched(error="manifest: timed out")}, "manifest: timed out"
         ),
         "no venv": ({"venv_status": 1}, "did not report its version"),
     }[case]
@@ -932,6 +979,7 @@ def test_each_check_asks_the_sources_ci_reads(monkeypatch) -> None:
     assert venv and Path(venv[0][0]).parent.parent == module.ROOT / ".venv"
     assert fetched == [
         "https://www.python.org/api/v2/downloads/release/?is_published=true",
+        "https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json",
         "https://nodejs.org/dist/index.json",
     ]
     assert module.PYTHON_PIN == ROOT / ".python-version"
