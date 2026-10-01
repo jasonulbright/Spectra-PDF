@@ -17,16 +17,19 @@
 
 import { resolve } from 'node:path';
 
-/** The debug binary the WDIO config launches. */
-const APP_BINARY = resolve(
-  __dirname,
-  '..',
-  '..',
-  'src-tauri',
-  'target',
-  'debug',
-  'spectrapdf.exe',
-);
+const REPO_ROOT = resolve(__dirname, '..', '..');
+
+/** The debug binary the WDIO config for this platform launches. */
+export const APP_BINARY =
+  process.platform === 'win32'
+    ? resolve(REPO_ROOT, 'src-tauri', 'target', 'debug', 'spectrapdf.exe')
+    : resolve(process.env.CARGO_TARGET_DIR ?? resolve(REPO_ROOT, 'src-tauri', 'target'), 'debug', 'spectrapdf');
+
+/** The repository's development virtual environment interpreter. */
+export const VENV_PYTHON =
+  process.platform === 'win32'
+    ? resolve(REPO_ROOT, '.venv', 'Scripts', 'python.exe')
+    : resolve(REPO_ROOT, '.venv', 'bin', 'python');
 
 /** `portable::data_root` for that binary: `<exe dir>\data`. */
 export const APP_DATA_ROOT = resolve(APP_BINARY, '..', 'data');

@@ -29,8 +29,9 @@ import {
   closeAllFiles,
 } from '../support/harness.js';
 import type { CommentSummaryReport } from '../support/harness.js';
+import { APP_BINARY } from '../support/app-data.js';
 
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_EXE = APP_BINARY;
 
 // Drawn into the source pages, so it can only reach the summary through the
 // page image — which is what tells the two composition modes apart in the

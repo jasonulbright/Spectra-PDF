@@ -3,27 +3,49 @@
  * `wdio.conf.ts`, driven by tauri-driver in front of WebKitWebDriver.
  *
  * WebKitWebDriver ships with the host's WebKitGTK (Debian/Ubuntu package
- * `webkit2gtk-driver`) and always matches the installed webview, so nothing
- * is resolved or downloaded here: the run refuses when the driver is absent.
+ * `webkit2gtk-driver`) and always matches the installed webview. Nothing is
+ * pinned or downloaded: every run resolves the driver again from PATH and the
+ * distribution's package directories, and hands tauri-driver that path.
  *
  * Prereqs (one-time per machine):
  *   cargo install tauri-driver --locked
  *   the distribution's WebKitWebDriver package
+ *   the distribution's Ghostscript package (a user-supplied prerequisite the
+ *   suite needs present, as on Windows)
  *
  * Build the app harness with (from the repo root):
  *   VITE_E2E=1 npx tauri build --debug --no-bundle --features e2e-net-private
  *
- * Then: npx wdio run e2e-tests/wdio.linux.conf.ts --spec <spec>
+ * CARGO_TARGET_DIR, when set, must end in a directory named `target`. A
+ * binary outside `target/<profile>` resolves its resources to
+ * `/usr/lib/<product>` and the engine cannot start.
+ *
+ * Then, from the e2e-tests directory (where wdio is installed):
+ *   npx wdio run wdio.linux.conf.ts --spec specs/<spec>
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { accessSync, constants, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
+import { basename, dirname, resolve } from 'node:path';
 import { config as windowsConfig } from './wdio.conf';
 
 const REPO_ROOT = resolve(__dirname, '..');
 const TARGET_DIR = process.env.CARGO_TARGET_DIR ?? resolve(REPO_ROOT, 'src-tauri', 'target');
 const APP_BINARY = resolve(TARGET_DIR, 'debug', 'spectrapdf');
 const TAURI_DRIVER_PORT = 4444;
+const PORTABLE_DATA = resolve(dirname(APP_BINARY), 'data');
+// Fits a single 1080p monitor at its origin, whatever the desktop layout.
+const WINDOW_RECT = { x: 0, y: 0, width: 1600, height: 1000 } as const;
+
+// Package layouts that install WebKitWebDriver outside PATH, newest API first.
+const DRIVER_DIRS = [
+  '/usr/libexec/webkit2gtk-4.1',
+  '/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1',
+  '/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1',
+  '/usr/lib64/webkit2gtk-4.1',
+  '/usr/libexec/webkit2gtk-4.0',
+  '/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0',
+];
 
 let tauriDriver: ChildProcess | null = null;
 
@@ -31,6 +53,38 @@ function which(program: string): string | null {
   const found = spawnSync('sh', ['-c', `command -v ${program}`], { encoding: 'utf8' });
   const path = found.stdout.trim();
   return found.status === 0 && path ? path : null;
+}
+
+function executable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveNativeDriver(): string {
+  const candidates = [which('WebKitWebDriver'), ...DRIVER_DIRS.map((d) => resolve(d, 'WebKitWebDriver'))];
+  for (const candidate of candidates) {
+    if (candidate && executable(candidate)) return candidate;
+  }
+  throw new Error(
+    'No WebKitWebDriver found on PATH or in the WebKitGTK package directories. ' +
+      'Install the distribution package that ships it (Debian/Ubuntu: webkit2gtk-driver).',
+  );
+}
+
+async function requireFreeDriverPort(): Promise<void> {
+  await new Promise<void>((resolvePort, reject) => {
+    const server = createServer();
+    server.once('error', () =>
+      reject(new Error(`E2E port ${TAURI_DRIVER_PORT} is already in use; no existing process was stopped`)),
+    );
+    server.listen({ host: '127.0.0.1', port: TAURI_DRIVER_PORT, exclusive: true }, () =>
+      server.close((error) => (error ? reject(error) : resolvePort())),
+    );
+  });
 }
 
 /** The driver runs in its own process group so a stop also ends the
@@ -48,6 +102,27 @@ async function stopDriver(): Promise<void> {
   await exited;
 }
 
+/** `pkill -f` reads its pattern as an extended regular expression; a path
+ * holding a metacharacter would otherwise match other processes or none. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** An app instance left by an aborted session holds the single-window claims
+ * and the engine; only processes running this exact binary are stopped. */
+function reapOrphanedApps(): void {
+  spawnSync('pkill', ['-KILL', '-f', `^${escapeRegExp(APP_BINARY)}( |$)`]);
+}
+
+/** The harness exists before the window is shown, and pointer actions against
+ * a hidden window fail as out of bounds. */
+async function waitForVisibleWindow(timeoutMs = 15_000): Promise<void> {
+  await browser.waitUntil(
+    async () => Boolean(await browser.execute(() => document.visibilityState === 'visible')),
+    { timeout: timeoutMs, timeoutMsg: 'The app window never became visible' },
+  );
+}
+
 export const config: WebdriverIO.Config = {
   ...windowsConfig,
   capabilities: [
@@ -61,27 +136,47 @@ export const config: WebdriverIO.Config = {
     if (!existsSync(APP_BINARY)) {
       throw new Error(`App binary not found at ${APP_BINARY}. Build the e2e harness first.`);
     }
-    if (!which('WebKitWebDriver')) {
-      throw new Error('WebKitWebDriver is not on PATH. Install the webkit2gtk-driver package.');
+    const profileDir = dirname(APP_BINARY);
+    if (basename(dirname(profileDir)) !== 'target' || !existsSync(resolve(profileDir, '.cargo-lock'))) {
+      throw new Error(
+        `${APP_BINARY} is not inside a cargo output directory named "target"; its resources ` +
+          'would resolve to /usr/lib and the engine could not start. Build with a CARGO_TARGET_DIR ending in /target.',
+      );
     }
+    resolveNativeDriver();
     if (!which('tauri-driver')) {
       throw new Error('tauri-driver is not on PATH. Run `cargo install tauri-driver --locked`.');
     }
+    if (!which('gs')) {
+      throw new Error(
+        'Ghostscript (gs) is not on PATH. The suite needs the user-supplied prerequisite present; ' +
+          'install the distribution package.',
+      );
+    }
     // The same answered colour-profile baseline the Windows run seeds.
-    const portableData = resolve(APP_BINARY, '..', 'data');
+    const portableData = PORTABLE_DATA;
     mkdirSync(portableData, { recursive: true });
     writeFileSync(
       resolve(portableData, 'icc-assent.json'),
       '{\n  "adobeIccEulaAccepted": true\n}\n',
     );
   },
-  beforeSession: async () => {
+  beforeSession: async (_config, _caps, specs: string[]) => {
     await stopDriver();
-    const child = spawn('tauri-driver', ['--port', String(TAURI_DRIVER_PORT)], {
-      stdio: ['ignore', 'inherit', 'inherit'],
-      env: { ...process.env, SPECTRAPDF_E2E: '1' },
-      detached: true,
-    });
+    reapOrphanedApps();
+    await requireFreeDriverPort();
+    // A restored rectangle from an earlier session can span every monitor:
+    // each session starts from the default placement instead.
+    rmSync(resolve(PORTABLE_DATA, 'session.json'), { force: true });
+    const env: NodeJS.ProcessEnv = { ...process.env, SPECTRAPDF_E2E: '1' };
+    if (specs?.some((s) => s.includes('backdrop-fallback'))) {
+      env.SPECTRAPDF_E2E_FORCE_OPAQUE = '1';
+    }
+    const child = spawn(
+      'tauri-driver',
+      ['--port', String(TAURI_DRIVER_PORT), '--native-driver', resolveNativeDriver()],
+      { stdio: ['ignore', 'inherit', 'inherit'], env, detached: true },
+    );
     tauriDriver = child;
     await Promise.race([
       new Promise<void>((done) => setTimeout(done, 1500)),
@@ -90,10 +185,36 @@ export const config: WebdriverIO.Config = {
       ),
     ]);
   },
+  before: async (...args: unknown[]) => {
+    // WebKitWebDriver's Get Element Text answers "" for rendered text under
+    // this webview. The rendered text of a laid-out element is its
+    // innerText; an element with no layout box keeps the driver's answer.
+    browser.overwriteCommand(
+      'getText',
+      async function (this: WebdriverIO.Element, original: () => Promise<string>) {
+        const driverText = await original();
+        if (driverText !== '') return driverText;
+        return browser.execute(
+          (el: HTMLElement) => (el.getClientRects().length > 0 ? el.innerText.trim() : ''),
+          this as unknown as HTMLElement,
+        );
+      },
+      true,
+    );
+    await browser.setWindowRect(WINDOW_RECT.x, WINDOW_RECT.y, WINDOW_RECT.width, WINDOW_RECT.height);
+    const inherited = windowsConfig.before as ((...a: unknown[]) => Promise<void>) | undefined;
+    await inherited?.(...args);
+    await waitForVisibleWindow();
+  },
+  onReload: async () => {
+    await waitForVisibleWindow();
+  },
   afterSession: async () => {
     await stopDriver();
+    reapOrphanedApps();
   },
   onComplete: async () => {
     await stopDriver();
+    reapOrphanedApps();
   },
 };

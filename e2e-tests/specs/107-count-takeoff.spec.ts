@@ -18,6 +18,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { PDFDocument } from 'pdf-lib';
+import { APP_BINARY } from '../support/app-data.js';
 import {
   waitForHarness,
   openByPaths,
@@ -33,7 +34,7 @@ import {
   takeoffSetGroups,
 } from '../support/harness.js';
 
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_EXE = APP_BINARY;
 
 const CTRL = String.fromCharCode(0xe009); // W3C Control key
 

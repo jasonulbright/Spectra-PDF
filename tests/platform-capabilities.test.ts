@@ -622,7 +622,7 @@ describe('capability module', () => {
   it('defaults to every flag true', () => {
     expect(platformCapabilities()).toEqual(ALL_PLATFORM_CAPABILITIES);
     for (const f of PLATFORM_FEATURES) expect(platformCapability(f)).toBe(true);
-    expect(PLATFORM_FEATURES).toHaveLength(15);
+    expect(PLATFORM_FEATURES).toHaveLength(16);
   });
 
   it('parses only an exact true as available', () => {
@@ -681,6 +681,7 @@ const EXPECTED_DROPS: Record<PlatformFeature, CommandId[]> = {
   backdrop: [],
   consoleAttach: [],
   startWithSystem: [],
+  hiddenAnimationFrames: [],
 };
 
 const EXPECTED_PREFERENCE_DROPS: Record<PlatformFeature, PreferenceControl[]> = {
@@ -699,6 +700,7 @@ const EXPECTED_PREFERENCE_DROPS: Record<PlatformFeature, PreferenceControl[]> = 
   backdrop: [],
   consoleAttach: [],
   startWithSystem: ['startWithSystem'],
+  hiddenAnimationFrames: [],
 };
 
 function allMenuIds(): CommandId[] {

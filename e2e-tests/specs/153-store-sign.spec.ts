@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect } from '@wdio/globals';
+import { APP_BINARY, VENV_PYTHON } from '../support/app-data.js';
 import {
   answerNextSaveDialog,
   boxFit,
@@ -28,6 +29,7 @@ import {
   waitForHarness,
   type ControlVisibility,
   type RowMetrics,
+  requirePlatformFeatures,
 } from '../support/harness.js';
 
 // Signing with a certificate in the Windows store, through CNG, with the
@@ -47,9 +49,8 @@ import {
 // in the platform" can be a finding rather than a claim.
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_EXE = APP_BINARY;
 const REPO_ROOT = resolve(__dirname, '..', '..');
-const VENV_PYTHON = resolve(REPO_ROOT, '.venv', 'Scripts', 'python.exe');
 const CERTUTIL = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'certutil.exe');
 
 const SOURCE_STORE = '[data-testid="sign-source-input-store"]';
@@ -371,6 +372,10 @@ async function focusedSourceTestId(): Promise<string> {
 }
 
 describe('signing with a Windows certificate store certificate', function () {
+  before(async function () {
+    await requirePlatformFeatures(this, 'storeCertificates');
+  });
+
   before(async function () {
     SCRATCH = mkdtempSync(join(tmpdir(), 'spectra-e2e-store-'));
     const pfx = join(SCRATCH, 'store-test.pfx');

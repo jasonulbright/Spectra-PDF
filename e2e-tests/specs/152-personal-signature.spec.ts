@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { expect } from '@wdio/globals';
 import { PDFDocument, PDFName, PDFDict, PDFStream } from 'pdf-lib';
+import { APP_BINARY } from '../support/app-data.js';
 import {
   answerImagePicker,
   getFirstAnnotation,
@@ -33,7 +34,7 @@ import {
 // injected stroke set would prove the store and skip the door.
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_EXE = APP_BINARY;
 const TEST_PFX = resolve(__dirname, '..', 'fixtures', 'test-signer.pfx');
 const TEST_PFX_PASSWORD = 'testpw';
 

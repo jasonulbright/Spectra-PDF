@@ -9,6 +9,7 @@ import {
   scheduleCreate,
   scheduleList,
   scheduleRemove,
+  requirePlatformFeatures,
 } from '../support/harness.js';
 
 // Scheduled batch runs. This spec asserts the lifecycle through the app —
@@ -52,6 +53,10 @@ function forceDelete(name: string): void {
 }
 
 describe('scheduled batch runs', () => {
+  before(async function () {
+    await requirePlatformFeatures(this, 'scheduledActions');
+  });
+
   let tmp: string;
   let src: string;
   let dest: string;

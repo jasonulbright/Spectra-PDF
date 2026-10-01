@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
 import { PDFDocument, PDFName, StandardFonts } from 'pdf-lib';
+import { APP_BINARY } from '../support/app-data.js';
 import {
   waitForHarness,
   invokeAppCommand,
@@ -42,7 +43,7 @@ import {
   folderPreflightSnapshot,
 } from '../support/harness.js';
 
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_EXE = APP_BINARY;
 
 /** A document with an embedded file and no trim box — two findings a profile
  * can carry doors for, authored here so the spec owns what it asserts on. */

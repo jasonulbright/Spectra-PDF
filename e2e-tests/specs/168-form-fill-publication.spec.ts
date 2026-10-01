@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { PDFDocument } from 'pdf-lib';
 import { expect } from '@wdio/globals';
+import { APP_BINARY } from '../support/app-data.js';
 import { waitForHarness, openByPaths, closeAllFiles, getState, setView, getWorkspacePageIds,
   setCanvasFormValue, pendingFormValueCount, applyCanvasFormValues, invokeAppCommand,
   signActiveFileInPlace, verifyActiveSignatures, setActiveOp } from '../support/harness.js';
@@ -79,7 +80,7 @@ describe('form fill publication', () => {
     const verified = await verifyActiveSignatures();
     expect(verified.signatures.every(s => s.policy_ok)).toBe(true);
     expect(verified.signatures.length).toBeGreaterThan(0);
-    const text = execFileSync(resolve(__dirname, '../../src-tauri/target/debug/spectrapdf.exe'),
+    const text = execFileSync(APP_BINARY,
       ['verify-signatures', working], { encoding: 'utf8' });
     const report = JSON.parse(text.slice(text.indexOf('{')));
     expect(report.signatures.every((s: { intact: boolean; valid: boolean }) => s.intact && s.valid)).toBe(true);

@@ -15,6 +15,7 @@
   },
   "include": [
     "wdio.conf.ts",
+    "wdio.linux.conf.ts",
     "log-registry.ts",
     "scan-run-log.ts",
     "specs/**/*.ts",

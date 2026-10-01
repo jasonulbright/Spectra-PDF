@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { expect } from '@wdio/globals';
-import { waitForHarness, invokeAppCommand, getState, saveActiveAs } from '../support/harness.js';
+import { waitForHarness, invokeAppCommand, getState, saveActiveAs, requirePlatformFeatures } from '../support/harness.js';
+import { APP_BINARY } from '../support/app-data.js';
 
 // The virtual printer: the loopback RAW listener + Ghostscript distill
 // + the open funnel, driven exactly the way the Windows spooler drives it —
@@ -12,7 +13,7 @@ import { waitForHarness, invokeAppCommand, getState, saveActiveAs } from '../sup
 // for this path (that half is admin-gated UI, asserted as affordance only),
 // so the whole conversion chain is exercised for real.
 
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_EXE = APP_BINARY;
 
 let TMP = '';
 let listenerReady = false;
@@ -23,6 +24,10 @@ function cliText(path: string): string {
 }
 
 describe('virtual printer', () => {
+  before(async function () {
+    await requirePlatformFeatures(this, 'virtualPrinter');
+  });
+
   before(async () => {
     TMP = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-vprint-'));
     await waitForHarness();

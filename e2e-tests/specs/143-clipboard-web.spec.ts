@@ -40,6 +40,7 @@ import {
   getState,
   invokeAppCommand,
   closeAllFiles,
+  requirePlatformFeatures,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -309,6 +310,14 @@ async function makePdfFixture(path: string): Promise<void> {
   writeFileSync(path, await doc.save());
 }
 
+/** Text and HTML are seeded through PowerShell against the Windows clipboard;
+ * no other host has a seeder here. */
+function requireClipboardSeeder(context: Mocha.Context): void {
+  if (process.platform === 'win32') return;
+  console.log('SKIP: no external clipboard seeder on this host');
+  context.skip();
+}
+
 describe('create PDF from the clipboard and from a web page', () => {
   let tmp: string;
   let listener: Server | null = null;
@@ -343,7 +352,8 @@ describe('create PDF from the clipboard and from a web page', () => {
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('an image on the clipboard becomes a PDF page', async () => {
+  it('an image on the clipboard becomes a PDF page', async function () {
+    await requirePlatformFeatures(this, 'snapshot', 'clipboardRead');
     // Seeded by the product's OWN write path: the snapshot tool publishes
     // CF_DIB + PNG, and Create PDF reads that back.
     const source = resolve(tmp, 'src.pdf');
@@ -397,7 +407,7 @@ describe('create PDF from the clipboard and from a web page', () => {
     expect(clip).not.toBeNull();
     expect(clip!.kind).toBe('image');
     // The write side publishes both formats; the read side prefers PNG.
-    expect(['PNG', 'CF_DIB']).toContain(clip!.format);
+    expect(process.platform === 'win32' ? ['PNG', 'CF_DIB'] : ['image/png']).toContain(clip!.format);
     expect(existsSync(clip!.path)).toBe(true);
 
     // The row is on the list, badged by the ENGINE's own classification.
@@ -420,7 +430,9 @@ describe('create PDF from the clipboard and from a web page', () => {
     await $('[data-testid="create-pdf-close"]').click();
   });
 
-  it('text on the clipboard becomes a PDF page', async () => {
+  it('text on the clipboard becomes a PDF page', async function () {
+    await requirePlatformFeatures(this, 'clipboardRead');
+    requireClipboardSeeder(this);
     seedClipboardText(`${TOKEN}\r\nsecond line of the pasted note\r\n`);
     expect(await invokeAppCommand('file.createPdf')).toBe(true);
     await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ timeout: 15_000 });
@@ -441,7 +453,9 @@ describe('create PDF from the clipboard and from a web page', () => {
     await $('[data-testid="create-pdf-close"]').click();
   });
 
-  it('an HTML fragment referencing a remote image does NOT fetch it', async () => {
+  it('an HTML fragment referencing a remote image does NOT fetch it', async function () {
+    await requirePlatformFeatures(this, 'clipboardRead');
+    requireClipboardSeeder(this);
     hits = [];
     seedClipboardHtml(
       `<p><b>${TOKEN}</b></p>` +
@@ -466,7 +480,9 @@ describe('create PDF from the clipboard and from a web page', () => {
     await $('[data-testid="create-pdf-close"]').click();
   });
 
-  it('an empty clipboard refuses by name instead of adding a blank row', async () => {
+  it('an empty clipboard refuses by name instead of adding a blank row', async function () {
+    await requirePlatformFeatures(this, 'clipboardRead');
+    requireClipboardSeeder(this);
     emptyClipboard();
     expect(await invokeAppCommand('file.createPdf')).toBe(true);
     await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ timeout: 15_000 });
@@ -477,7 +493,8 @@ describe('create PDF from the clipboard and from a web page', () => {
     await $('[data-testid="create-pdf-close"]').click();
   });
 
-  it('the web capture dialog states the host it will contact', async () => {
+  it('the web capture dialog states the host it will contact', async function () {
+    await requirePlatformFeatures(this, 'webCapture');
     expect(await invokeAppCommand('file.createFromWebPage')).toBe(true);
     await $('[data-testid="web-capture-dialog"]').waitForDisplayed({ timeout: 15_000 });
     // The posture is on the page, not in a doc nobody reads.
@@ -490,7 +507,8 @@ describe('create PDF from the clipboard and from a web page', () => {
     expect(await $('[data-testid="web-capture-run"]').isEnabled()).toBe(true);
   });
 
-  it('a scheme the gate refuses never opens a window', async () => {
+  it('a scheme the gate refuses never opens a window', async function () {
+    await requirePlatformFeatures(this, 'webCapture');
     // The dialog from the previous case is still up.
     const result = await webCaptureRun({ url: 'javascript:alert(1)' });
     expect(result).toBeNull();
@@ -499,7 +517,8 @@ describe('create PDF from the clipboard and from a web page', () => {
     expect(await error.getText()).toContain('javascript');
   });
 
-  it('captures a real page through the browser and bookmarks it', async () => {
+  it('captures a real page through the browser and bookmarks it', async function () {
+    await requirePlatformFeatures(this, 'webCapture');
     // A file:// fixture: the whole WebView2 PrintToPdf route runs for real,
     // on this machine, without leaving it.
     const page = resolve(tmp, 'capture.html');
@@ -544,6 +563,10 @@ describe('create PDF from the clipboard and from a web page', () => {
     // WDIO snapshots a test's timeout before entering its callback, so set the
     // limit on the suite while Mocha is defining the test.
     this.timeout(180_000);
+
+    before(async function () {
+      await requirePlatformFeatures(this, 'webCapture');
+    });
 
     // Mocha runs this suite after every case above it, and the last of those
     // leaves the web capture dialog open over Create PDF.
@@ -706,7 +729,8 @@ describe('create PDF from the clipboard and from a web page', () => {
     });
   });
 
-  it('closing the capture window cancels the crawl and takes the window with it', async () => {
+  it('closing the capture window cancels the crawl and takes the window with it', async function () {
+    await requirePlatformFeatures(this, 'webCapture');
     // The previous case handed its capture up, which closes this dialog.
     if (await $('[data-testid="create-pdf-close"]').isExisting()) {
       await $('[data-testid="create-pdf-close"]').click();
@@ -780,7 +804,8 @@ describe('create PDF from the clipboard and from a web page', () => {
     }
   });
 
-  it('a capture in one window does not withhold the other window\'s engine replies', async () => {
+  it('a capture in one window does not withhold the other window\'s engine replies', async function () {
+    await requirePlatformFeatures(this, 'webCapture');
     // The capture borrows the window's own thread for each browser call and
     // waits for it elsewhere. Held for a whole crawl instead, that thread
     // stops delivering events app-wide — and engine replies are delivered as

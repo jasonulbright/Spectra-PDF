@@ -21,6 +21,7 @@ export const PLATFORM_FEATURES = [
   'backdrop',
   'consoleAttach',
   'startWithSystem',
+  'hiddenAnimationFrames',
 ] as const;
 
 export type PlatformFeature = (typeof PLATFORM_FEATURES)[number];

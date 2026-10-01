@@ -6707,6 +6707,7 @@ mod tests {
             backdrop: present,
             console_attach: present,
             start_with_system: present,
+            hidden_animation_frames: present,
         }
     }
 

@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect } from '@wdio/globals';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { APP_BINARY } from '../support/app-data.js';
 import {
   waitForHarness,
   openByPaths,
@@ -43,7 +44,7 @@ import {
   waitForDisplayedSelector,
 } from '../support/harness.js';
 
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_EXE = APP_BINARY;
 const SIGNED_PDF = resolve(__dirname, '..', 'fixtures', 'signed.pdf');
 const TEST_PFX = resolve(__dirname, '..', 'fixtures', 'test-signer.pfx');
 const TEST_PFX_PASSWORD = 'testpw';
