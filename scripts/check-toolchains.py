@@ -13,7 +13,10 @@ rust    CI: `dtolnay/rust-toolchain@stable`. The toolchain active for
         update for it.
 python  CI and the shipped runtime (scripts/setup-python-embed.ps1) read
         `.python-version`. The .venv interpreter is that pin, and the pin is
-        the newest final release of its minor that python.org lists.
+        the newest final release of its minor that python.org lists AND
+        actions/setup-python offers for win32 x64 (the audit job's runner):
+        a pin setup-python cannot install fails every CI run. A python.org
+        release the manifest does not carry yet passes with a note.
 node    CI reads the major from `.node-version`, with `check-latest`. Local
         Node is the newest release of that major in nodejs.org/dist/index.json,
         and local npm is the npm that release bundles.
@@ -43,6 +46,9 @@ CRATE = ROOT / "src-tauri"
 PYTHON_PIN = ROOT / ".python-version"
 NODE_PIN = ROOT / ".node-version"
 PYTHON_RELEASES = "https://www.python.org/api/v2/downloads/release/?is_published=true"
+SETUP_PYTHON_MANIFEST = (
+    "https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json"
+)
 NODE_RELEASES = "https://nodejs.org/dist/index.json"
 
 #: `rustup check` exits with this when at least one channel has an update.
@@ -186,9 +192,9 @@ def check_rust() -> tuple:
 # ── Python ───────────────────────────────────────────────────────────────────
 
 
-def newest_python(releases: object, major: int, minor: int) -> str:
-    """The newest final `major.minor.N` in python.org's release list, or ""."""
-    found = []
+def python_finals(releases: object, major: int, minor: int) -> set:
+    """The final `major.minor.N` versions in python.org's release list."""
+    found = set()
     for release in releases if isinstance(releases, list) else []:
         if not isinstance(release, dict):
             continue
@@ -199,11 +205,36 @@ def newest_python(releases: object, major: int, minor: int) -> str:
             continue
         numbers = tuple(int(part) for part in name.groups())
         if numbers[:2] == (major, minor):
-            found.append(numbers)
-    return ".".join(str(part) for part in max(found)) if found else ""
+            found.add(numbers)
+    return found
 
 
-def python_verdict(pin: Fetched, venv: Answer, releases: Fetched) -> tuple:
+def setup_python_offers(manifest: object, major: int, minor: int) -> set:
+    """The stable `major.minor.N` versions actions/setup-python installs on win32 x64."""
+    found = set()
+    for entry in manifest if isinstance(manifest, list) else []:
+        if not isinstance(entry, dict) or entry.get("stable") is not True:
+            continue
+        version = EXACT.match(str(entry.get("version", "")))
+        if not version:
+            continue
+        files = entry.get("files")
+        if not any(
+            isinstance(row, dict) and row.get("platform") == "win32" and row.get("arch") == "x64"
+            for row in files if isinstance(files, list)
+        ):
+            continue
+        numbers = tuple(int(part) for part in version.groups())
+        if numbers[:2] == (major, minor):
+            found.add(numbers)
+    return found
+
+
+def _dotted(numbers: tuple) -> str:
+    return ".".join(str(part) for part in numbers)
+
+
+def python_verdict(pin: Fetched, venv: Answer, releases: Fetched, manifest: Fetched) -> tuple:
     exact = EXACT.match(str(pin.value or ""))
     local = venv.stdout.strip() if venv.status == 0 and EXACT.match(venv.stdout.strip()) else ""
     if exact is None:
@@ -214,24 +245,45 @@ def python_verdict(pin: Fetched, venv: Answer, releases: Fetched) -> tuple:
             "unknown",
             "write the exact version CI and the shipped runtime use into .python-version",
         )
-    newest = newest_python(releases.value, int(exact[1]), int(exact[2]))
+    minor = f"{exact[1]}.{exact[2]}"
+    finals = python_finals(releases.value, int(exact[1]), int(exact[2]))
+    released = _dotted(max(finals)) if finals else ""
+    offered = setup_python_offers(manifest.value, int(exact[1]), int(exact[2]))
     problems = []
-    if not newest:
+    if not released:
         problems.append(
-            f"python.org lists no final {exact[1]}.{exact[2]} release"
+            f"python.org lists no final {minor} release"
             f" ({releases.error or 'none in its release list'})."
+        )
+    if not offered:
+        problems.append(
+            f"actions/setup-python offers no stable {minor} release for win32 x64"
+            f" ({manifest.error or 'none in its manifest'})."
         )
     if not local:
         problems.append(f"the .venv interpreter did not report its version ({_shown(venv)}).")
     if problems:
-        return False, _refusal(problems, local or "unknown", newest or "unknown", "rerun once "
-                               "python.org and .venv answer; nothing is compared without them")
+        return False, _refusal(problems, local or "unknown", released or "unknown", "rerun once "
+                               "python.org, the setup-python manifest and .venv answer; "
+                               "nothing is compared without them")
+
+    both = finals & offered
+    newest = _dotted(max(both)) if both else ""
+    if not newest:
+        return False, _refusal(
+            [f"no {minor} release is both final on python.org and offered by "
+             "actions/setup-python."],
+            local, "unknown", "rerun once python.org and the setup-python manifest share a "
+            f"{minor} release",
+        )
+    pending = [f"NOTE: python {released} released; pinned {newest} until "
+               "actions/setup-python offers it"] if released != newest else []
 
     pin_text = exact[0]
     if pin_text != newest:
         return False, _refusal(
-            [f".python-version pins {pin_text}; python.org's newest {exact[1]}.{exact[2]} "
-             f"release is {newest}."],
+            [f".python-version pins {pin_text}; the newest {minor} release python.org and "
+             f"actions/setup-python both offer is {newest}."],
             local,
             newest,
             f"set .python-version to {newest} and $ExpectedSha256 in "
@@ -247,7 +299,8 @@ def python_verdict(pin: Fetched, venv: Answer, releases: Fetched) -> tuple:
             "--clear .venv, then install scripts/python-requirements.txt, the vendored wheels "
             "and pytest into it as CI does",
         )
-    return True, [f"OK: .venv runs Python {local}, the pin and python.org's newest release"]
+    return True, [f"OK: .venv runs Python {local}, the pin and the newest release python.org "
+                  "and actions/setup-python both offer", *pending]
 
 
 def _venv_python() -> Path:
@@ -261,6 +314,7 @@ def check_python() -> tuple:
         run(str(_venv_python()), "-B", "-c",
             "import sys; print('%d.%d.%d' % sys.version_info[:3])"),
         fetch_json(PYTHON_RELEASES),
+        fetch_json(SETUP_PYTHON_MANIFEST),
     )
 
 
