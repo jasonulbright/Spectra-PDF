@@ -48,6 +48,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface, type Interface } from 'node:readline';
 import { expect } from '@wdio/globals';
 import { PDFDocument } from 'pdf-lib';
+import { VENV_PYTHON } from '../support/app-data.js';
 import {
   waitForHarness,
   openByPaths,
@@ -63,7 +64,6 @@ import {
 
 const REPO_ROOT = resolve(__dirname, '..', '..');
 const RUNNER = resolve(__dirname, '..', 'support', 'csc-mock-server.py');
-const VENV_PYTHON = resolve(REPO_ROOT, '.venv', 'Scripts', 'python.exe');
 
 /** What the provider has been asked to do — read from the server, never from
  * the application's account of what it sent. */

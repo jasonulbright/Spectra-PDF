@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { expect } from '@wdio/globals';
 import { PDFDocument, PDFDict, PDFName, PDFStream, PDFRawStream } from 'pdf-lib';
 import { crc32, deflateSync, inflateSync } from 'node:zlib';
+import { APP_BINARY } from '../support/app-data.js';
 import {
   answerImagePicker,
   answerNextSaveDialog,
@@ -35,7 +36,7 @@ import {
 // coincidence.
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_EXE = APP_BINARY;
 const TEST_PFX = resolve(__dirname, '..', 'fixtures', 'test-signer.pfx');
 const TEST_PFX_PASSWORD = 'testpw';
 

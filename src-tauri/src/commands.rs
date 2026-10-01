@@ -1561,6 +1561,7 @@ pub struct PlatformCapabilities {
     pub backdrop: bool,
     pub console_attach: bool,
     pub start_with_system: bool,
+    pub hidden_animation_frames: bool,
 }
 
 impl PlatformCapabilities {
@@ -1582,6 +1583,7 @@ impl PlatformCapabilities {
             backdrop: true,
             console_attach: true,
             start_with_system: true,
+            hidden_animation_frames: true,
         }
     }
 
@@ -1603,6 +1605,7 @@ impl PlatformCapabilities {
             backdrop: false,
             console_attach: false,
             start_with_system: false,
+            hidden_animation_frames: false,
         }
     }
 
@@ -1624,6 +1627,7 @@ impl PlatformCapabilities {
             backdrop: false,
             console_attach: false,
             start_with_system: false,
+            hidden_animation_frames: true,
         }
     }
 }
@@ -2844,7 +2848,7 @@ mod tests {
             "systemPrinting", "virtualPrinter", "scanning", "scheduledActions",
             "storeCertificates", "sendByEmail", "webCapture", "clipboardRead", "snapshot",
             "accentColor", "enterprisePolicy", "trayResidency", "backdrop", "consoleAttach",
-            "startWithSystem",
+            "startWithSystem", "hiddenAnimationFrames",
         ];
         let mut got = keys.clone();
         expected.sort_unstable();

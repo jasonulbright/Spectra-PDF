@@ -23,6 +23,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
+import { VENV_PYTHON } from '../support/app-data.js';
 import {
   closeAllFiles,
   createPlacedField,
@@ -38,7 +39,6 @@ import {
 } from '../support/harness.js';
 
 const REPO_ROOT = resolve(__dirname, '..', '..');
-const VENV_PYTHON = resolve(REPO_ROOT, '.venv', 'Scripts', 'python.exe');
 const ORACLE = resolve(__dirname, '..', 'support', 'xfa-packets.py');
 const STATIC_PDF = resolve(__dirname, '..', 'fixtures', 'xfa-static.pdf');
 const DYNAMIC_PDF = resolve(__dirname, '..', 'fixtures', 'xfa-dynamic.pdf');

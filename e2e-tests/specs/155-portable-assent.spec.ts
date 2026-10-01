@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect } from '@wdio/globals';
+import { APP_BINARY } from '../support/app-data.js';
 import {
   answerIccPicker,
   getState,
@@ -40,7 +41,7 @@ import {
 // recording or the dependent surfaces is stubbed.
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_EXE = APP_BINARY;
 const EXE_DIR = resolve(APP_EXE, '..');
 const PORTABLE_DATA = join(EXE_DIR, 'data');
 const ASSENT_RECORD = join(PORTABLE_DATA, 'icc-assent.json');

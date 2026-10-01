@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
 import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFRef, PDFString, decodePDFRawStream } from 'pdf-lib';
+import { APP_BINARY } from '../support/app-data.js';
 import {
   waitForHarness,
   openByPaths,
@@ -34,7 +35,7 @@ import {
 // through the REAL CLI arms and read back through them — no mocks anywhere.
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_EXE = APP_BINARY;
 
 async function taggedSource(role: 'P' | 'H1', sameNamespace: boolean): Promise<Uint8Array> {
   const pdf = await PDFDocument.create({ updateMetadata: false }), ctx = pdf.context, N = PDFName.of;

@@ -18,6 +18,7 @@ import {
   scanSaveAs,
   scanSetSource,
   scanSnapshot,
+  requirePlatformFeatures,
 } from '../support/harness.js';
 
 // File ▸ Create PDF from Scanner…, and the same dialog appending into an open
@@ -149,6 +150,10 @@ const FEEDER_DUPLEX = {
 };
 
 describe('scan', () => {
+  before(async function () {
+    await requirePlatformFeatures(this, 'scanning');
+  });
+
   let tmp: string;
   let pages: string[];
 

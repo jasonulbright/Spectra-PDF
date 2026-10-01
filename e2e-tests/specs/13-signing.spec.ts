@@ -8,6 +8,7 @@ import { PDFDocument } from 'pdf-lib';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — no type declarations for the deep legacy import
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { APP_BINARY } from '../support/app-data.js';
 import {
   waitForHarness,
   openByPaths,
@@ -167,7 +168,7 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     // ETSI.CAdES.detached, and `trusted` flips true ONLY with the signer's
     // own cert supplied as a user trust anchor (self-signed → its own root).
     const { execFileSync } = await import('node:child_process');
-    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+    const binary = APP_BINARY;
     const bare = JSON.parse(
       execFileSync(binary, ['verify-signatures', padesOut], { encoding: 'utf-8' }),
     ) as { signatures: { pades: boolean; subfilter: string; trusted: boolean }[] };
@@ -192,7 +193,7 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     // no store on any host can anchor it. The purpose-filtered store read
     // itself is proven in the engine suite against an injected store.
     const { execFileSync } = await import('node:child_process');
-    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+    const binary = APP_BINARY;
     const off = JSON.parse(
       execFileSync(binary, ['verify-signatures', output], { encoding: 'utf-8' }),
     ) as { system_trust: { requested: boolean; available: boolean } };
@@ -245,7 +246,7 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     // trust outcome — the self-signed test signer chains to nothing in any
     // trusted list. Anchoring against the bundle is proven in the engine suite.
     const { execFileSync } = await import('node:child_process');
-    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+    const binary = APP_BINARY;
     const off = JSON.parse(
       execFileSync(binary, ['verify-signatures', output], { encoding: 'utf-8' }),
     ) as { eutl_trust: { requested: boolean; available: boolean } };
@@ -310,7 +311,7 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     // a trust outcome — the self-signed test signer chains to nothing in any
     // root program. Anchoring against the bundle is proven in the engine suite.
     const { execFileSync } = await import('node:child_process');
-    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+    const binary = APP_BINARY;
     const off = JSON.parse(
       execFileSync(binary, ['verify-signatures', output], { encoding: 'utf-8' }),
     ) as { msctl_trust: { requested: boolean; available: boolean } };

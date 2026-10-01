@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { APP_BINARY } from '../support/app-data.js';
 import {
   waitForHarness,
   openByPaths,
@@ -16,7 +17,7 @@ import {
   closeAllFiles,
 } from '../support/harness.js';
 
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_EXE = APP_BINARY;
 const FIXTURE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
 describe('XFDF interchange via the CLI', () => {

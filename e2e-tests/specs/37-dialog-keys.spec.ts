@@ -6,6 +6,7 @@ import {
   closeAllFiles,
   getState,
   getWorkspacePageIds,
+  platformFeature,
 } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
@@ -33,13 +34,15 @@ describe('dialog keyboard model', () => {
     await $('[data-testid="properties-dialog"]').waitForDisplayed({
       reverse: true, timeoutMsg: 'Escape did not close Properties',
     });
-    // Print (Ctrl+P)
-    await browser.keys(['Control', 'p']);
-    await $('[data-testid="print-dialog"]').waitForDisplayed();
-    await browser.keys(['Escape']);
-    await $('[data-testid="print-dialog"]').waitForDisplayed({
-      reverse: true, timeoutMsg: 'Escape did not close Print',
-    });
+    // Print (Ctrl+P), where the platform has a print backend
+    if (await platformFeature('systemPrinting')) {
+      await browser.keys(['Control', 'p']);
+      await $('[data-testid="print-dialog"]').waitForDisplayed();
+      await browser.keys(['Escape']);
+      await $('[data-testid="print-dialog"]').waitForDisplayed({
+        reverse: true, timeoutMsg: 'Escape did not close Print',
+      });
+    }
     // Preferences (Ctrl+K)
     await browser.keys(['Control', 'k']);
     await $('[data-testid="prefs-close"]').waitForDisplayed();
@@ -71,18 +74,21 @@ describe('dialog keyboard model', () => {
   });
 
   it('Tab is TRAPPED inside an open dialog', async () => {
-    await browser.keys(['Control', 'p']);
-    await $('[data-testid="print-dialog"]').waitForDisplayed();
+    const [chord, dialog] = (await platformFeature('systemPrinting'))
+      ? ['p', '[data-testid="print-dialog"]']
+      : ['d', '[data-testid="properties-dialog"]'];
+    await browser.keys(['Control', chord]);
+    await $(dialog).waitForDisplayed();
     for (let i = 0; i < 12; i++) {
       await browser.keys(['Tab']);
-      const inside = (await browser.execute(() => {
-        const dlg = document.querySelector('[data-testid="print-dialog"]');
+      const inside = (await browser.execute((selector: string) => {
+        const dlg = document.querySelector(selector);
         return dlg ? dlg.contains(document.activeElement) : false;
-      })) as boolean;
+      }, dialog)) as boolean;
       expect(inside).toBe(true);
     }
     await browser.keys(['Escape']);
-    await $('[data-testid="print-dialog"]').waitForDisplayed({ reverse: true });
+    await $(dialog).waitForDisplayed({ reverse: true });
   });
 
   it('reload keys never reach the webview — the app state SURVIVES F5 and Ctrl+R', async () => {

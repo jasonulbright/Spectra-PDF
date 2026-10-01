@@ -769,9 +769,34 @@ impl Default for SessionState {
 
 // ── Reading the live windows ──────────────────────────────────────────────
 
+#[cfg(not(target_os = "linux"))]
+fn read_inner_size(window: &WebviewWindow) -> Option<PhysicalSize<u32>> {
+    window.inner_size().ok()
+}
+
+/// The size `set_size` accepts, read back in the same terms.
+///
+/// On GTK the runtime's `inner_size` is the configure-event size, which
+/// includes the client-side decoration (header bar and shadow margins), while
+/// `set_size` resizes the window without them. Recording the first and
+/// restoring through the second grows the window by the decoration on every
+/// launch. `gtk_window_get_size` reports exactly what `gtk_window_resize`
+/// takes. GTK answers only on its own thread; elsewhere the runtime's figure
+/// stands until the next geometry change on that thread replaces it.
+#[cfg(target_os = "linux")]
+fn read_inner_size(window: &WebviewWindow) -> Option<PhysicalSize<u32>> {
+    use gtk::prelude::GtkWindowExt;
+    if !gtk::is_initialized_main_thread() {
+        return window.inner_size().ok();
+    }
+    let (width, height) = window.gtk_window().ok()?.size();
+    let scale = window.scale_factor().ok()?;
+    Some(tauri::LogicalSize::new(f64::from(width), f64::from(height)).to_physical(scale))
+}
+
 fn read_placement(window: &WebviewWindow) -> Option<Placement> {
     let position = window.outer_position().ok()?;
-    let size = window.inner_size().ok()?;
+    let size = read_inner_size(window)?;
     Some(Placement {
         rect: Rect {
             x: position.x,

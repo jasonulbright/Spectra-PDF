@@ -35,6 +35,34 @@ export async function waitForHarness(timeoutMs = 15_000): Promise<void> {
   );
 }
 
+export async function platformFeature(feature: string): Promise<boolean> {
+  return browser.execute(
+    (f: string) => (window as any).__SPECTRA_TEST__.platformCapabilities()[f] === true,
+    feature,
+  );
+}
+
+/**
+ * Skips the calling suite when the running build reports any of `features`
+ * absent in its platform capability report. The report is the app's own
+ * answer, so a platform that gains a backend runs the suite with no spec edit.
+ * Call from a mocha `before(function () { ... })` hook: an arrow function has
+ * no mocha context to skip.
+ */
+export async function requirePlatformFeatures(
+  context: Mocha.Context,
+  ...features: string[]
+): Promise<void> {
+  await waitForHarness();
+  const report = await browser.execute(
+    () => (window as any).__SPECTRA_TEST__.platformCapabilities() as Record<string, boolean>,
+  );
+  const absent = features.filter((feature) => report[feature] !== true);
+  if (absent.length === 0) return;
+  console.log(`SKIP: platform capability report lacks ${absent.join(', ')}`);
+  context.skip();
+}
+
 export async function openByPaths(paths: string[]): Promise<void> {
   const result = await browser.executeAsync<string | null, [string[]]>(
     function (p, done) {

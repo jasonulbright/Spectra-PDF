@@ -14,6 +14,7 @@ import {
   setView,
   waitForDisplayedSelector,
   waitForHarness,
+  requirePlatformFeatures,
 } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
@@ -29,6 +30,10 @@ const windowVisible = async (): Promise<boolean> =>
   });
 
 describe('tray Quit', () => {
+  before(async function () {
+    await requirePlatformFeatures(this, 'trayResidency');
+  });
+
   let dir = '';
   let pdf = '';
 

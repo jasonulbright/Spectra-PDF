@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFil
 import { basename, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
+import { APP_BINARY } from '../support/app-data.js';
 import {
   waitForHarness,
   openByPaths,
@@ -19,7 +20,7 @@ import {
 // with an action-JSON file — verified here too.
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_EXE = APP_BINARY;
 
 let SCRATCH = '';
 let SRC = '';

@@ -19,6 +19,7 @@ import {
   scheduleRemove,
   setReactInputValue,
   setReactSelectValue,
+  requirePlatformFeatures,
 } from '../support/harness.js';
 
 // Schedule a saved action (run_action was built engine-side FOR this).
@@ -63,6 +64,10 @@ function forceDelete(name: string): void {
 }
 
 describe('scheduled guided actions', () => {
+  before(async function () {
+    await requirePlatformFeatures(this, 'scheduledActions');
+  });
+
   let tmp: string;
   let src: string;
   let dest: string;

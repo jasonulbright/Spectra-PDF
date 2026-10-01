@@ -1,16 +1,18 @@
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { expect } from '@wdio/globals';
+import { APP_BINARY } from '../support/app-data.js';
 import {
   waitForHarness,
   openByPaths,
   closeAllFiles,
   setReactInputValue,
   waitForDisplayedSelector,
+  requirePlatformFeatures,
 } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
-const BINARY = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const BINARY = APP_BINARY;
 
 // File ▸ Print… (Ctrl+P) — printer picker, range, copies,
 // fit/actual — plus the CLI arm. Nothing here SPOOLS a job (the only printers
@@ -28,6 +30,10 @@ async function printerOptions(): Promise<string[]> {
 }
 
 describe('print', () => {
+  before(async function () {
+    await requirePlatformFeatures(this, 'systemPrinting');
+  });
+
   it('Ctrl+P is inert with no document to print', async () => {
     await waitForHarness();
     await closeAllFiles();

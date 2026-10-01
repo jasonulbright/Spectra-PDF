@@ -8,6 +8,7 @@ import { PDFDocument } from 'pdf-lib';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — no type declarations for the deep legacy import
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { APP_BINARY } from '../support/app-data.js';
 import {
   waitForHarness,
   openByPaths,
@@ -139,7 +140,7 @@ describe('forms panel fills AcroForm fields and bakes them into the saved file',
     // GUI fill asserted above.
     const { execFileSync } = await import('node:child_process');
     const cliOut = resolve(tmp, 'filled-cli.pdf');
-    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+    const binary = APP_BINARY;
     execFileSync(binary, [
       'forms', source,
       '-o', cliOut,
@@ -174,7 +175,7 @@ describe('forms panel fills AcroForm fields and bakes them into the saved file',
     writeFileSync(other, await doc.save());
 
     const mergedOut = resolve(tmp, 'merged.pdf');
-    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+    const binary = APP_BINARY;
     execFileSync(binary, ['merge', dest, other, '-o', mergedOut]);
 
     const p1 = await fieldValues(mergedOut, 1);
