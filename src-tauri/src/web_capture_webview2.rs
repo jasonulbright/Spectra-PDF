@@ -37,6 +37,9 @@ use super::{
     PRINT_TIMEOUT, SCRIPT_TIMEOUT,
 };
 
+/// `PrintToPdf` draws the header and footer itself.
+pub(super) const DRAWS_HEADERS_FOOTERS: bool = true;
+
 /// Make the capture window's close cancel the capture. The subclass goes on
 /// from the window's own thread, and ahead of every step: both are messages
 /// to that thread, delivered in the order sent.

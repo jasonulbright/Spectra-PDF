@@ -3670,6 +3670,7 @@ class TestPrintPdf:
     def test_refuses_range_beyond_document(self, sample_pdf, monkeypatch):
         import engine.printer as printer_mod
         monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        monkeypatch.setattr(printer_mod, "_SPOOL_THROUGH_CUPS", False)
         with pytest.raises(ValueError, match="beyond the document"):
             print_pdf(file=sample_pdf, printer="P", pages="6")
 
@@ -3688,7 +3689,11 @@ class TestPrintPdf:
             with pytest.raises(ValueError, match="Unknown printer"):
                 print_pdf(file=sample_pdf, printer="OPS Test No Such Printer 9c41")
         else:
-            with pytest.raises(RuntimeError, match="Printing to a system printer is not available"):
+            # CUPS answers: an unknown queue, or a named refusal when the
+            # library or the scheduler is absent.
+            with pytest.raises(
+                (ValueError, RuntimeError), match="Unknown printer|CUPS|print system"
+            ):
                 print_pdf(file=sample_pdf, printer="OPS Test No Such Printer 9c41")
 
     @pytest.mark.skipif(sys.platform != "win32", reason="winspool is a Windows interface")
@@ -3717,6 +3722,7 @@ class TestPrintPdf:
         import engine.printer as printer_mod
         monkeypatch.setattr(printer_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        monkeypatch.setattr(printer_mod, "_SPOOL_THROUGH_CUPS", False)
         # The job spawn is stubbed below the capability check, which probes
         # for real; "GS" is forced usable so the argv keeps the path the
         # caller named.
@@ -3765,6 +3771,7 @@ class TestPrintPdf:
         import engine.printer as printer_mod
         monkeypatch.setattr(printer_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        monkeypatch.setattr(printer_mod, "_SPOOL_THROUGH_CUPS", False)
         gs_axis.force_available(monkeypatch, "GS")
         with pytest.raises(RuntimeError, match="failed to open printer"):
             print_pdf(file=sample_pdf, printer="No Such Printer")
@@ -3782,6 +3789,7 @@ class TestPrintPdf:
         import engine.printer as printer_mod
         monkeypatch.setattr(printer_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        monkeypatch.setattr(printer_mod, "_SPOOL_THROUGH_CUPS", False)
         gs_axis.force_available(monkeypatch, "GS")
         with pytest.raises(RuntimeError, match="printer offline"):
             print_pdf(file=sample_pdf, printer="P")
@@ -3795,6 +3803,7 @@ class TestPrintPdf:
 
         monkeypatch.setattr(printer_mod.subprocess, "run", timeout_run)
         monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        monkeypatch.setattr(printer_mod, "_SPOOL_THROUGH_CUPS", False)
         gs_axis.force_available(monkeypatch, "GS")
         with pytest.raises(RuntimeError, match="timed out.*driver did not respond"):
             print_pdf(file=sample_pdf, printer="P")
@@ -4288,6 +4297,7 @@ class TestPrintPipeline:
 
         monkeypatch.setattr(printer_mod, "_run_jobs", fake_jobs)
         monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        monkeypatch.setattr(printer_mod, "_SPOOL_THROUGH_CUPS", False)
         return captured
 
     def _sized(self, tmp_dir, widths, name="in.pdf"):

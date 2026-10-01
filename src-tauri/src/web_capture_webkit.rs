@@ -38,8 +38,9 @@ use super::{
 /// The GTK print backend that writes a file instead of spooling to a printer.
 const PRINT_TO_FILE: &str = "Print to File";
 
-const HEADERS_FOOTERS_UNAVAILABLE: &str =
-    "Page headers and footers are not available for web capture on this platform";
+/// GTK's print operation has no header or footer of its own, so a capture that
+/// asks for them is stamped after printing (see `CaptureResult`).
+pub(super) const DRAWS_HEADERS_FOOTERS: bool = false;
 
 thread_local! {
     /// The navigation a `navigate` step is waiting for. One capture runs at a
@@ -258,9 +259,6 @@ pub(super) fn print_page(
     host: String,
     local_root: Option<PathBuf>,
 ) -> Result<String, StepError> {
-    if options.headers_footers {
-        return Err(StepError::Failed(HEADERS_FOOTERS_UNAVAILABLE.to_string()));
-    }
     let output = glib::filename_to_uri(path, None)
         .map_err(|e| StepError::Failed(format!("The capture file name is not usable: {e}")))?
         .to_string();

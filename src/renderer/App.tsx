@@ -156,7 +156,11 @@ import {
   takeGsLaunchPrompt,
 } from './lib/gs-capability';
 import { GsMissingDialog } from './components/GsMissingDialog';
-import { platformCapability } from './lib/platform-capabilities';
+import {
+  loadPlatformCapabilities,
+  onPlatformCapabilitiesChange,
+  platformCapability,
+} from './lib/platform-capabilities';
 import { isPrimaryWindow } from './lib/window-label';
 import { MenuBar } from './components/MenuBar';
 import { MainToolbar } from './components/MainToolbar';
@@ -3497,6 +3501,22 @@ function AppContent(): React.ReactElement {
     });
     return () => { unlisten.then((fn) => fn()); };
   }, [focusBoardOrHome, handleExit]);
+
+  // The tray of a minimized launch can settle after the boot read of the
+  // capability report. Rust says so to this window; the report is read again
+  // and the shell re-renders, so the minimize-to-tray controls appear in this
+  // session rather than the next.
+  const [, setCapabilitiesRead] = useState(0);
+  useEffect(() => {
+    const unsubscribe = onPlatformCapabilitiesChange(() => setCapabilitiesRead((n) => n + 1));
+    const unlisten = app.onPlatformCapabilitiesChanged(() => {
+      void loadPlatformCapabilities();
+    });
+    return () => {
+      unsubscribe();
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   // A File Explorer verb opens Create PDF or Combine with its selection
   // listed; nothing is written until the user runs the dialog, and every

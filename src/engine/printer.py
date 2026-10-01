@@ -1,4 +1,5 @@
-"""Print a PDF to a Windows printer via Ghostscript's mswinpr2 device.
+"""Print a PDF to a system printer: Windows through Ghostscript's mswinpr2
+device, Linux through the system's CUPS (`cups_print`).
 
 Same arm's-length-subprocess posture as compress/grayscale/PDF-A (the AGPL
 boundary is the process boundary). mswinpr2 renders through the installed
@@ -40,6 +41,12 @@ devices with the same switch lists (TestPrintFitSemantics and friends).
 All print renders pass -dUseCropBox: the CropBox is what the viewer shows,
 and printing the MediaBox of a cropped document would silently print
 content the user cannot see.
+
+On Linux every page-level stage above is unchanged; only the final spool
+differs. The prepared (or original) PDF is submitted to CUPS as one job per
+collated copy, with the driver options as IPP job-template attributes, and
+the paper id is the destination's own media keyword rather than a DMPAPER
+number (see `cups_print`).
 """
 
 import re
@@ -127,6 +134,11 @@ MIN_SHEET_PT, MAX_SHEET_PT = 72.0, 14400.0
 # Preview scratch dirs: distinctive prefix so cleanup can never be
 # talked into removing anything else, plus an age-based sweep for dirs a
 # crash orphaned.
+#: The final spool goes to CUPS instead of a Ghostscript printer device.
+#: `cups_print` is imported only on that path, so a Windows engine never
+#: loads the libcups bindings.
+_SPOOL_THROUGH_CUPS = not platform_support.IS_WINDOWS
+
 PREVIEW_PREFIX = "spectrapdf-print-preview-"
 PREVIEW_MAX_PAGES = 32
 _PREVIEW_STALE_S = 3600
@@ -179,10 +191,14 @@ def printer_exists(name: str) -> bool:
     exactly 600s, caught by the e2e). The name must be proven real
     before gs ever spawns.
 
-    Off Windows there is no mswinpr2 device and no spooler to ask, so a
-    print job refuses here by name rather than reaching a Ghostscript
-    device that does not exist.
+    On Linux the question goes to CUPS, which knows every queue and saved
+    instance; a system without CUPS, or whose scheduler is unreachable,
+    refuses by name.
     """
+    if _SPOOL_THROUGH_CUPS:
+        from . import cups_print
+
+        return cups_print.destination_exists(name)
     if sys.platform != "win32":
         raise RuntimeError("Printing to a system printer is not available on this platform.")
     import ctypes
@@ -409,7 +425,11 @@ def print_pdf(
     _require_bool("reverse", reverse)
     _require_bool("as_image", as_image)
     if paper is not None:
-        if isinstance(paper, bool) or not isinstance(paper, int) or not 1 <= paper <= 32767:
+        if _SPOOL_THROUGH_CUPS:
+            from . import cups_print
+
+            cups_print.validate_media(paper)
+        elif isinstance(paper, bool) or not isinstance(paper, int) or not 1 <= paper <= 32767:
             raise ValueError(f"Unknown paper id {paper!r}")
     if as_image:
         if isinstance(image_dpi, bool) or not isinstance(image_dpi, int):
@@ -495,12 +515,23 @@ def print_pdf(
         if rotate_prepass:
             plain = False
 
-    us_ps = build_setpagedevice_ps(
+    us_ps = None if _SPOOL_THROUGH_CUPS else build_setpagedevice_ps(
         paper,
         _ORIENT_VALUES.get(resolved_orient),
         _COLOR_VALUES.get(color),
         doc_name,
     )
+
+    def _spool(job_file: str, job_pages: str, job_fit: str, jobs: int) -> None:
+        if _SPOOL_THROUGH_CUPS:
+            from . import cups_print
+
+            cups_print.print_file(
+                job_file, printer, job_pages, job_fit, duplex, paper,
+                resolved_orient, color, doc_name, jobs,
+            )
+        else:
+            _run_jobs(build_gs_args(job_file, printer, job_pages, job_fit, gs_path, duplex, us_ps), jobs)
 
     stages: list[str] = []
     sheets_out: int | None = None
@@ -556,9 +587,8 @@ def print_pdf(
         # An odd or even subset is not in the user's range; the job's page
         # list names the pages that remain after it.
         job_pages = page_list if subset == "all" else ",".join(str(p + 1) for p in order)
-        args = build_gs_args(file, printer, job_pages, fit, gs_path, duplex, us_ps)
         jobs = copies
-        _run_jobs(args, jobs)
+        _spool(file, job_pages, fit, jobs)
     else:
         with tempfile.TemporaryDirectory(prefix="spectra-print-") as td:
             tdp = Path(td)
@@ -685,9 +715,8 @@ def print_pdf(
                 current = dup
                 stages.append("uncollated-copies")
 
-            args = build_gs_args(current, printer, "", final_fit, gs_path, duplex, us_ps)
             jobs = 1 if uncollated_dup else copies
-            _run_jobs(args, jobs)
+            _spool(current, "", final_fit, jobs)
 
     result = {
         "printer": printer,

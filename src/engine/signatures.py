@@ -1388,6 +1388,72 @@ def _signer_source(
     )
 
 
+def _token_certificate(der: bytes, label: str) -> dict | None:
+    """One certificate object as the signer's token list shows it, or None
+    when its value is not an X.509 certificate."""
+    from asn1crypto import x509 as asn1_x509
+
+    try:
+        cert = asn1_x509.Certificate.load(der)
+        subject = cert.subject.human_friendly
+        issuer = cert.issuer.human_friendly
+        not_after = cert.not_valid_after.isoformat()
+    except Exception:
+        return None
+    return {"label": label, "subject": subject, "issuer": issuer, "not_after": not_after}
+
+
+def list_pkcs11_certificates(module: str) -> dict:
+    """The certificates each token in a PKCS#11 module shows WITHOUT a login.
+
+    Read-only: every session is opened without a PIN, so a token that keeps
+    its certificates private lists none (``login_required`` says so) and its
+    labels are typed by hand. A certificate's label is the one the signer
+    finds it by; the key is looked up under the same label unless the user
+    names another. Nothing is cached: the module is asked on every call, so a
+    token inserted since the last call appears.
+    """
+    if not module or not Path(module).is_file():
+        raise ValueError("PKCS#11 module not found at the given path.")
+    import pkcs11
+    from pkcs11 import Attribute, ObjectClass, TokenFlag
+
+    try:
+        lib = pkcs11.lib(module)
+        slots = lib.get_slots(token_present=True)
+    except Exception as exc:
+        msg = f"Could not open the PKCS#11 token: {exc}"
+        raise ValueError(msg) from exc
+    tokens = []
+    for slot in slots:
+        try:
+            token = slot.get_token()
+        except Exception:
+            continue
+        entry = {
+            "label": str(token.label).strip(),
+            "manufacturer": str(getattr(token, "manufacturer_id", "") or "").strip(),
+            "model": str(getattr(token, "model", "") or "").strip(),
+            "login_required": bool(token.flags & TokenFlag.LOGIN_REQUIRED),
+            "certificates": [],
+        }
+        try:
+            with token.open() as session:
+                for obj in session.get_objects({Attribute.CLASS: ObjectClass.CERTIFICATE}):
+                    try:
+                        label = str(obj[Attribute.LABEL]).strip()
+                        der = bytes(obj[Attribute.VALUE])
+                    except Exception:
+                        continue
+                    row = _token_certificate(der, label) if label else None
+                    if row is not None:
+                        entry["certificates"].append(row)
+        except Exception:
+            pass
+        tokens.append(entry)
+    return {"tokens": tokens}
+
+
 def _csc_source(
     url: str | None,
     credential_id: str | None,

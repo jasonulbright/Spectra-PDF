@@ -19,6 +19,12 @@
 //! while the app is closed sits in the Windows queue erroring-retrying until
 //! the app (and so the listener) is back; the Settings block says exactly
 //! that.
+//!
+//! On Linux the queue is a CUPS IPP Everywhere queue and the receiver is an
+//! IPP printer on loopback (`print_to_pdf_linux.rs`); it reuses the job naming
+//! and staging rules below, and the PostScript receiver is not compiled in.
+
+#![cfg_attr(target_os = "linux", allow(dead_code))]
 
 use std::io::Write;
 use std::net::TcpListener;
@@ -29,6 +35,10 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use tauri::{AppHandle, Manager};
+
+#[cfg(target_os = "linux")]
+#[path = "print_to_pdf_linux.rs"]
+mod linux;
 
 pub const PRINTER_NAME: &str = "Spectra PDF";
 pub const PORT_NAME: &str = "SpectraPDF_9100";
@@ -76,8 +86,16 @@ impl PrinterState {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 fn printed_dir() -> PathBuf {
     std::env::temp_dir().join("spectrapdf").join("printed")
+}
+
+/// The per-user cache folder, never the shared `/tmp`: another account could
+/// create `/tmp/spectrapdf` first and read or replace what lands in it.
+#[cfg(target_os = "linux")]
+fn printed_dir() -> PathBuf {
+    linux::printed_dir()
 }
 
 /// How every name a job writes into the printed folder begins.
@@ -316,6 +334,7 @@ fn handle_job(app: &AppHandle, stem: &str, staged: StagedPostscript) {
 
 /// Start the loopback listener — the app-setup hook. Never panics: a taken
 /// port becomes a named status the Settings block shows.
+#[cfg(not(target_os = "linux"))]
 pub fn start_listener(app: &AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
@@ -682,6 +701,34 @@ fn virtual_printer_available() -> Result<(), String> {
     }
 }
 
+/// Start the loopback IPP printer — the app-setup hook.
+#[cfg(target_os = "linux")]
+pub fn start_listener(app: &AppHandle) {
+    linux::start_listener(app);
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn virtual_printer_status(app: AppHandle) -> Result<VirtualPrinterStatus, String> {
+    virtual_printer_available()?;
+    linux::status(&app)
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn install_virtual_printer(app: AppHandle) -> Result<(), String> {
+    virtual_printer_available()?;
+    linux::install(&app)
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn uninstall_virtual_printer() -> Result<(), String> {
+    virtual_printer_available()?;
+    linux::uninstall()
+}
+
+#[cfg(not(target_os = "linux"))]
 #[tauri::command]
 pub async fn virtual_printer_status(app: AppHandle) -> Result<VirtualPrinterStatus, String> {
     virtual_printer_available()?;
@@ -699,6 +746,7 @@ pub async fn virtual_printer_status(app: AppHandle) -> Result<VirtualPrinterStat
     })
 }
 
+#[cfg(not(target_os = "linux"))]
 #[tauri::command]
 pub async fn install_virtual_printer() -> Result<(), String> {
     virtual_printer_available()?;
@@ -706,6 +754,7 @@ pub async fn install_virtual_printer() -> Result<(), String> {
     run_elevated_script(&script)
 }
 
+#[cfg(not(target_os = "linux"))]
 #[tauri::command]
 pub async fn uninstall_virtual_printer() -> Result<(), String> {
     virtual_printer_available()?;

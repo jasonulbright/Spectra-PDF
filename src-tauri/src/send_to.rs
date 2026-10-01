@@ -22,10 +22,23 @@ fn send_dir() -> PathBuf {
     std::env::temp_dir().join("spectrapdf").join("send-to")
 }
 
+/// The staging folder is private to this user on Linux: a folder another
+/// account created first would let it read or swap the attachment before the
+/// mail client opens it.
+#[cfg(target_os = "linux")]
+fn prepare_send_dir(dir: &Path) -> std::io::Result<()> {
+    crate::private_temp_linux::ensure_private_under(&std::env::temp_dir(), dir)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn prepare_send_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)
+}
+
 /// Whether `path` sits directly in the staging folder `dir`, by physical
 /// identity of its parent. MAPI attaches whatever path it is handed, so an
 /// unconfined path would put any local file into a compose window.
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 fn is_staged_copy(path: &Path, dir: &Path) -> bool {
     path.parent()
         .is_some_and(|parent| same_file::is_same_file(parent, dir).unwrap_or(false))
@@ -139,7 +152,7 @@ fn sweep_old(dir: &Path) {
 #[tauri::command]
 pub async fn stage_send_copy(path: String, display_name: String) -> Result<String, String> {
     let dir = send_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Could not prepare the staging folder: {e}"))?;
+    prepare_send_dir(&dir).map_err(|e| format!("Could not prepare the staging folder: {e}"))?;
     sweep_old(&dir);
     let dest = reserve_free(&dir, &safe_file_name(&display_name))
         .map_err(|e| format!("Could not stage the attachment copy: {e}"))?;
@@ -289,11 +302,30 @@ fn run_mapi(hwnd: usize, staged_path: &str) -> Result<u32, String> {
 /// worker thread is left to park until the client returns. The user closing
 /// the compose window without sending (MAPI_E_USER_ABORT) is likewise not an
 /// error — attaching and then deciding not to send is a valid choice.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 #[tauri::command]
 pub async fn send_by_email(window: tauri::WebviewWindow, staged_path: String) -> Result<(), String> {
     let _ = (window, staged_path);
     Err(crate::platform::Unsupported::new(crate::platform::feature::SEND_BY_EMAIL).into())
+}
+
+#[cfg(target_os = "linux")]
+#[path = "send_to_linux.rs"]
+mod linux;
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn send_by_email(window: tauri::WebviewWindow, staged_path: String) -> Result<(), String> {
+    let _ = window;
+    if !is_staged_copy(Path::new(&staged_path), &send_dir()) {
+        return Err(format!("Not a staged attachment copy: {staged_path}"));
+    }
+    if !Path::new(&staged_path).is_file() {
+        return Err(format!("The staged attachment is missing: {staged_path}"));
+    }
+    tauri::async_runtime::spawn_blocking(move || linux::send(Path::new(&staged_path)))
+        .await
+        .map_err(|e| format!("Could not hand the file to the email app: {e}"))?
 }
 
 #[cfg(windows)]
@@ -407,6 +439,24 @@ mod tests {
         assert!(!is_staged_copy(&theirs, &dir));
         assert!(!is_staged_copy(&dir.join("inner").join("doc.pdf"), &dir));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_staging_folder_is_private_and_a_planted_link_is_refused() {
+        use std::os::unix::fs::MetadataExt;
+        let base = tempfile::tempdir().unwrap();
+        let dir = base.path().join("spectrapdf").join("send-to");
+        prepare_send_dir(&dir).unwrap();
+        assert_eq!(std::fs::metadata(&dir).unwrap().mode() & 0o777, 0o700);
+        assert_eq!(std::fs::metadata(dir.parent().unwrap()).unwrap().mode() & 0o777, 0o700);
+
+        let theirs = tempfile::tempdir().unwrap();
+        let planted = tempfile::tempdir().unwrap();
+        let root = planted.path().join("spectrapdf");
+        std::os::unix::fs::symlink(theirs.path(), &root).unwrap();
+        assert!(prepare_send_dir(&root.join("send-to")).is_err());
+        assert!(!theirs.path().join("send-to").exists());
     }
 
     #[cfg(windows)]

@@ -19,10 +19,11 @@ import { normalizeMrcPreset } from '../lib/mrc-presets';
 import { TEST_HARNESS_ENABLED, registerScheduledRuns } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tOcrLanguage, tStepTitle } from '../i18n';
+import { hostOs } from '../lib/platform-capabilities';
 
 // Tools ▸ Scheduled Batch Runs owns the complete lifecycle: create, list, run
-// now, enable, disable, and delete. Windows Task Scheduler performs
-// the timing, which is why a run fires with the app CLOSED; an in-app timer
+// now, enable, disable, and delete. Windows Task Scheduler (a systemd user
+// timer on Linux) performs the timing, which is why a run fires with the app CLOSED; an in-app timer
 // would silently not run on any morning nobody opened the app.
 //
 // The list is read back from the registered tasks themselves — there is no
@@ -71,6 +72,9 @@ const EMPTY: ScheduleProfile = {
 export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): React.JSX.Element {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
+  // A systemd user timer runs as the user who created it; there is no other
+  // account to name, so the account fields are absent.
+  const runsAsYouOnly = hostOs() === 'linux';
   const [runs, setRuns] = useState<ScheduledRun[] | null>(null);
   const [editing, setEditing] = useState<ScheduleProfile | null>(null);
   const [password, setPassword] = useState('');
@@ -192,7 +196,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
       {editing === null ? (
         <div className="flex flex-col gap-3" data-testid="schedule-list-view">
           <p className="text-xs text-neutral-500">
-            {tChrome('dialog.schedule.blurb')}
+            {tChrome(runsAsYouOnly ? 'dialog.schedule.blurbSystemd' : 'dialog.schedule.blurb')}
           </p>
 
           {runs === null ? (
@@ -680,12 +684,15 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
             )}
           </div>
 
+          {!(runsAsYouOnly && (editing.runType === 'action' || editing.inPlace)) && (
           <details className="rounded border border-neutral-800 bg-neutral-950/40">
             <summary className="px-3 py-2 text-sm text-neutral-300 cursor-pointer select-none">
               {tChrome(
-                editing.runType === 'action'
-                  ? 'dialog.schedule.accountSection'
-                  : 'dialog.schedule.filingSection',
+                runsAsYouOnly
+                  ? 'dialog.schedule.filingOnlySection'
+                  : editing.runType === 'action'
+                    ? 'dialog.schedule.accountSection'
+                    : 'dialog.schedule.filingSection',
               )}
             </summary>
             <div className="px-3 pb-3 pt-1 flex flex-col gap-3">
@@ -722,6 +729,8 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                 </>
               )}
 
+              {!runsAsYouOnly && (
+              <>
               <Field label={tChrome('dialog.schedule.accountLabel')}>
                 <input
                   data-testid="schedule-account"
@@ -767,8 +776,11 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                   </p>
                 </>
               )}
+              </>
+              )}
             </div>
           </details>
+          )}
 
           {error && (
             <p className="text-sm text-red-400" data-testid="schedule-form-error">

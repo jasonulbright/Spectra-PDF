@@ -16,6 +16,10 @@ import {
 } from '../src/renderer/commands/platform';
 import {
   ALL_PLATFORM_CAPABILITIES,
+  hostOs,
+  onPlatformCapabilitiesChange,
+  parseHostOs,
+  setHostOs,
   loadPlatformCapabilities,
   parsePlatformCapabilities,
   PLATFORM_FEATURES,
@@ -796,5 +800,53 @@ describe('certificate store source', () => {
     expect(sourceOnOpen(emptySourceFor('store'), false)).toBe('pfx');
     expect(sourceOnOpen({ mode: 'store', thumbprint: 'AB', machineStore: false }, false)).toBe('pfx');
     expect(sourceOnOpen({ mode: 'pem', keyPath: 'k', certPath: null }, false)).toBe('pem');
+  });
+});
+
+describe('the host operating system', () => {
+  it('is read from the report, and anything unrecognized is other', async () => {
+    expect(parseHostOs({ os: 'linux' })).toBe('linux');
+    expect(parseHostOs({ os: 'windows' })).toBe('windows');
+    expect(parseHostOs({ os: 'Linux' })).toBe('other');
+    expect(parseHostOs(null)).toBe('other');
+    await loadPlatformCapabilities(async () => ({ ...ALL_PLATFORM_CAPABILITIES, os: 'linux' }));
+    expect(hostOs()).toBe('linux');
+    expect(platformCapabilities()).toEqual(ALL_PLATFORM_CAPABILITIES);
+  });
+
+  it('defaults to windows and resets with the flags', () => {
+    expect(hostOs()).toBe('windows');
+    setHostOs('linux');
+    expect(hostOs()).toBe('linux');
+    resetPlatformCapabilities();
+    expect(hostOs()).toBe('windows');
+  });
+
+  it('is never a feature flag', () => {
+    expect((PLATFORM_FEATURES as readonly string[]).includes('os')).toBe(false);
+    expect(Object.keys(parsePlatformCapabilities({ os: 'linux' }))).not.toContain('os');
+  });
+});
+
+describe('a capability that settles after boot', () => {
+  it('re-reads the report and tells every subscriber, until it unsubscribes', async () => {
+    const seen: boolean[] = [];
+    const unsubscribe = onPlatformCapabilitiesChange(() => seen.push(platformCapability('trayResidency')));
+    await loadPlatformCapabilities(async () => ({ ...ALL_PLATFORM_CAPABILITIES, trayResidency: false }));
+    await loadPlatformCapabilities(async () => ({ ...ALL_PLATFORM_CAPABILITIES, trayResidency: true }));
+    expect(seen).toEqual([false, true]);
+    unsubscribe();
+    await loadPlatformCapabilities(async () => ALL_PLATFORM_CAPABILITIES);
+    expect(seen).toEqual([false, true]);
+  });
+
+  it('a failed re-read keeps the record and tells no one', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const listener = vi.fn();
+    const unsubscribe = onPlatformCapabilitiesChange(listener);
+    await loadPlatformCapabilities(() => Promise.reject(new Error('bridge')));
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+    error.mockRestore();
   });
 });

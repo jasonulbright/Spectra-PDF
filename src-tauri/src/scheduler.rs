@@ -17,11 +17,16 @@
 //! enumeration and deletion address a folder we created rather than pattern-
 //! matching across the machine — the same discipline as the batch-log sweep and
 //! `delete_batch_scratch`. This code never touches a task outside that folder.
+//!
+//! On Linux the systemd backend in `scheduler_systemd.rs` replaces the Task
+//! Scheduler half of this module; that half stays compiled for its tests.
+#![cfg_attr(target_os = "linux", allow(dead_code))]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 
+#[cfg(not(target_os = "linux"))]
 use tauri::AppHandle;
 
 /// The one Task Scheduler folder this app writes to. Everything below is
@@ -569,7 +574,13 @@ fn owned_by_this_account(path: &Path) -> bool {
     unsafe { EqualSid(file_owner, owner.Owner) }.is_ok()
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn owned_by_this_account(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.uid() == unsafe { libc::geteuid() })
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn owned_by_this_account(_path: &Path) -> bool {
     false
 }
@@ -590,6 +601,7 @@ fn valid_task_name(name: &str) -> bool {
 }
 
 fn schtasks() -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut cmd = Command::new("schtasks.exe");
     // Never pop a console window on a GUI-initiated call.
     #[cfg(windows)]
@@ -633,6 +645,9 @@ fn scheduled_actions_available() -> Result<(), String> {
     if crate::commands::PlatformCapabilities::current().scheduled_actions {
         Ok(())
     } else {
+        #[cfg(target_os = "linux")]
+        return Err(systemd::NO_USER_MANAGER.to_string());
+        #[cfg(not(target_os = "linux"))]
         Err(crate::platform::Unsupported::new(crate::platform::feature::SCHEDULED_ACTIONS).into())
     }
 }
@@ -1131,6 +1146,7 @@ fn quote_windows_arg(value: &str) -> String {
 /// keeps the action file the registered task names. See
 /// [`register_with_action`] for how the action file follows the
 /// registration.
+#[cfg(not(target_os = "linux"))]
 #[tauri::command]
 pub async fn create_scheduled_run(
     app: AppHandle,
@@ -1886,6 +1902,7 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 
 /// Every run this app created. Scoped to our folder — a `/Query` on the folder
 /// cannot return anything we did not put there.
+#[cfg(not(target_os = "linux"))]
 #[tauri::command]
 pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
     scheduled_actions_available()?;
@@ -1980,6 +1997,7 @@ pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
 
 /// Delete a scheduled run. Refuses any name that could address a task outside
 /// our own folder — this is the destructive call, so it gets the narrow gate.
+#[cfg(not(target_os = "linux"))]
 #[tauri::command]
 pub async fn delete_scheduled_run(name: String) -> Result<(), String> {
     scheduled_actions_available()?;
@@ -2002,6 +2020,7 @@ pub async fn delete_scheduled_run(name: String) -> Result<(), String> {
 /// Run a scheduled batch immediately, through Task Scheduler, so it runs under
 /// exactly the identity it will use on its own — testing it any other way tests
 /// the wrong thing.
+#[cfg(not(target_os = "linux"))]
 #[tauri::command]
 pub async fn run_scheduled_now(name: String) -> Result<(), String> {
     scheduled_actions_available()?;
@@ -2014,6 +2033,7 @@ pub async fn run_scheduled_now(name: String) -> Result<(), String> {
 
 /// Enable or disable without deleting — the "pause this for now" the user
 /// otherwise has to open Task Scheduler for.
+#[cfg(not(target_os = "linux"))]
 #[tauri::command]
 pub async fn set_scheduled_run_enabled(name: String, enabled: bool) -> Result<(), String> {
     scheduled_actions_available()?;
@@ -2027,6 +2047,62 @@ pub async fn set_scheduled_run_enabled(name: String, enabled: bool) -> Result<()
         if enabled { "/ENABLE" } else { "/DISABLE" },
     ]))?;
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[path = "scheduler_systemd.rs"]
+mod systemd;
+
+#[cfg(target_os = "linux")]
+pub(crate) use systemd::user_manager_present;
+
+/// The Linux commands run on the blocking pool: each one waits on systemctl.
+#[cfg(target_os = "linux")]
+async fn on_blocking_pool<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|e| format!("The schedule request did not finish: {e}"))?
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn create_scheduled_run(
+    profile: ScheduleProfile,
+    password: Option<String>,
+    action_json: Option<String>,
+) -> Result<String, String> {
+    scheduled_actions_available()?;
+    on_blocking_pool(move || systemd::create(profile, password, action_json)).await
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
+    scheduled_actions_available()?;
+    on_blocking_pool(systemd::list).await
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn delete_scheduled_run(name: String) -> Result<(), String> {
+    scheduled_actions_available()?;
+    on_blocking_pool(move || systemd::delete(&name)).await
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn run_scheduled_now(name: String) -> Result<(), String> {
+    scheduled_actions_available()?;
+    on_blocking_pool(move || systemd::run_now(&name)).await
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn set_scheduled_run_enabled(name: String, enabled: bool) -> Result<(), String> {
+    scheduled_actions_available()?;
+    on_blocking_pool(move || systemd::set_enabled(&name, enabled)).await
 }
 
 #[cfg(test)]

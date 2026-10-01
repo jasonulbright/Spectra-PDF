@@ -18,6 +18,9 @@ import {
   MAX_PAGES_CEILING,
   buildRequest,
   captureFailureNotice,
+  captureHeaderFooterInset,
+  captureHeaderFooterPlacements,
+  capturePrintDate,
   outlineFromRows,
   paperInches,
   previewHost,
@@ -164,5 +167,56 @@ describe('web capture', () => {
 
   it('a list with no captured page has no outline to write', () => {
     expect(outlineFromRows([{}, { origin: 'clipboard' }], [2, 1])).toEqual([]);
+  });
+});
+
+describe('headers and footers stamped after a capture', () => {
+  const page = { url: 'https://example.com/a', title: 'Example page', path: '/tmp/1.pdf' };
+
+  it('place the date and title at the top and the address and page count at the bottom', () => {
+    expect(captureHeaderFooterPlacements(page, '10/1/26, 15:30')).toEqual([
+      { position: 'tl', text: '10/1/26, 15:30' },
+      { position: 'tc', text: 'Example page' },
+      { position: 'bl', text: 'https://example.com/a' },
+      { position: 'br', text: '{page}/{pages}' },
+    ]);
+  });
+
+  it('drop what no bundled face draws, keep engine tokens literal, and bound the length', () => {
+    const placements = captureHeaderFooterPlacements(
+      { ...page, title: 'Rocket \u{1F680}\uFE0F launch {page}\u200F', url: `https://e.com/${'x'.repeat(200)}` },
+      '',
+    );
+    expect(placements.map((p) => p.position)).toEqual(['tc', 'bl', 'br']);
+    expect(placements[0].text).toBe('Rocket launch (page)');
+    expect(placements[1].text.length).toBe(90);
+    expect(placements[1].text.endsWith('...')).toBe(true);
+    expect(captureHeaderFooterPlacements({ ...page, title: '' }, 'd').map((p) => p.position)).toEqual([
+      'tl', 'bl', 'br',
+    ]);
+  });
+
+  it('sit inside the margin band and never at the very edge', () => {
+    expect(captureHeaderFooterInset(0.4)).toBeCloseTo(10.4);
+    expect(captureHeaderFooterInset(0)).toBe(6);
+    expect(captureHeaderFooterInset(Number.NaN)).toBe(6);
+    expect(captureHeaderFooterInset(3)).toBe(36);
+  });
+
+  it('print the date in Latin digits and a 24-hour clock whatever the UI language', () => {
+    const at = new Date(2026, 9, 1, 15, 30);
+    for (const locale of ['en-US', 'ar', 'he', 'ja', 'zh-CN', 'ko', 'el', 'ru']) {
+      const stamped = captureHeaderFooterPlacements(page, capturePrintDate(locale, at))[0].text;
+      expect(stamped).toMatch(/15/);
+      expect(stamped).not.toMatch(/[؀-ۿ֐-׿]/);
+    }
+  });
+
+  it('are requested by Rust only where the browser draws none', () => {
+    expect(RUST).toContain('pub stamp_headers_footers: bool');
+    const webkit = readFileSync(resolve(__dirname, '../src-tauri/src/web_capture_webkit.rs'), 'utf8');
+    const webview2 = readFileSync(resolve(__dirname, '../src-tauri/src/web_capture_webview2.rs'), 'utf8');
+    expect(webkit).toContain('pub(super) const DRAWS_HEADERS_FOOTERS: bool = false;');
+    expect(webview2).toContain('pub(super) const DRAWS_HEADERS_FOOTERS: bool = true;');
   });
 });

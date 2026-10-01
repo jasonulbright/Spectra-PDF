@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useEngine } from '../hooks/useEngine';
 import { useTranslation } from 'react-i18next';
-import { dialog, type StoreCertificate } from '../lib/tauri-bridge';
+import { dialog, type Pkcs11Module, type StoreCertificate } from '../lib/tauri-bridge';
 import { tChrome, tDate, type UiKey } from '../i18n';
 import {
   ADVANCED_SIGNER_SOURCES,
@@ -14,11 +14,14 @@ import {
   storeAvailability,
   storeSelectionAfterRead,
   classifyStoreFailure,
+  tokenCertificateOptions,
+  type Pkcs11Listing,
+  type TokenCertificateOption,
   type SignerSource,
   type SignerSourceMode,
   type StoreReadFailure,
 } from '../lib/signer-sources';
-import { platformCapability } from '../lib/platform-capabilities';
+import { hostOs, platformCapability } from '../lib/platform-capabilities';
 import {
   CSC_GRANTS,
   DEFAULT_SCOPE,
@@ -175,7 +178,7 @@ export function SignerSourceFields({
 }): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { call } = useEngine();
+  const { call, callRaw } = useEngine();
   const [showGenerate, setShowGenerate] = useState(false);
   const [genName, setGenName] = useState('');
   const [genOrg, setGenOrg] = useState('');
@@ -300,6 +303,49 @@ export function SignerSourceFields({
     const p = await dialog.pickPkcs11Module();
     if (p && value.mode === 'pkcs11') onChange({ ...value, modulePath: p });
   }, [onChange, value]);
+
+  // The modules the system registered, read once per opened form. Where no
+  // registry exists the list is empty and the module is picked as a file.
+  const [modules, setModules] = useState<Pkcs11Module[]>([]);
+  useEffect(() => {
+    let live = true;
+    dialog.listPkcs11Modules().then(
+      (rows) => { if (live) setModules(rows); },
+      () => { if (live) setModules([]); },
+    );
+    return () => { live = false; };
+  }, []);
+
+  // What the chosen module's tokens show without a PIN, read on request.
+  const [tokenCerts, setTokenCerts] = useState<TokenCertificateOption[] | null>(null);
+  const [tokenBusy, setTokenBusy] = useState(false);
+  const [tokenMessage, setTokenMessage] = useState<string | null>(null);
+  const modulePath = value.mode === 'pkcs11' ? value.modulePath : null;
+  useEffect(() => {
+    setTokenCerts(null);
+    setTokenMessage(null);
+  }, [modulePath]);
+
+  const findTokenCertificates = useCallback(async () => {
+    if (!modulePath) return;
+    setTokenBusy(true);
+    setTokenMessage(null);
+    try {
+      const listing = (await callRaw('list_pkcs11_certificates', {
+        module: modulePath,
+      })) as unknown as Pkcs11Listing;
+      const options = tokenCertificateOptions(listing);
+      setTokenCerts(options);
+      if (options.length === 0) setTokenMessage(tChrome('dialog.signer.noTokenCerts'));
+    } catch (e: unknown) {
+      setTokenCerts(null);
+      setTokenMessage(
+        tChrome('dialog.signer.tokenReadFailed', { message: e instanceof Error ? e.message : String(e) }),
+      );
+    } finally {
+      setTokenBusy(false);
+    }
+  }, [callRaw, modulePath]);
 
   const pickKey = useCallback(async () => {
     const p = await dialog.pickPemFile();
@@ -586,12 +632,30 @@ export function SignerSourceFields({
           <>
             <div className="flex items-center gap-2">
               <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.module')}</span>
-              <span
-                className="flex-1 min-w-0 text-xs text-neutral-300 truncate"
-                title={value.modulePath ?? undefined}
-              >
-                {fileName(value.modulePath)}
-              </span>
+              {modules.length > 0 ? (
+                <select
+                  data-testid={`${idPrefix}-module-select`}
+                  aria-label={tChrome('dialog.signer.module')}
+                  value={value.modulePath ?? ''}
+                  onChange={(e) => onChange({ ...value, modulePath: e.target.value || null })}
+                  className="flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">{tChrome('dialog.signer.moduleInstalled')}</option>
+                  {modules.map((m) => (
+                    <option key={m.path} value={m.path}>{m.name}</option>
+                  ))}
+                  {value.modulePath && !modules.some((m) => m.path === value.modulePath) && (
+                    <option value={value.modulePath}>{fileName(value.modulePath)}</option>
+                  )}
+                </select>
+              ) : (
+                <span
+                  className="flex-1 min-w-0 text-xs text-neutral-300 truncate"
+                  title={value.modulePath ?? undefined}
+                >
+                  {fileName(value.modulePath)}
+                </span>
+              )}
               <button
                 data-testid={`${idPrefix}-pick-module`}
                 onClick={() => void pickModule()}
@@ -600,6 +664,42 @@ export function SignerSourceFields({
                 {tChrome('dialog.signer.choose')}
               </button>
             </div>
+            <div className="flex items-center gap-2 ml-[5.5rem]">
+              <button
+                data-testid={`${idPrefix}-find-token-certs`}
+                disabled={!value.modulePath || tokenBusy}
+                onClick={() => void findTokenCertificates()}
+                className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium shrink-0"
+              >
+                {tokenBusy ? tChrome('dialog.signer.findingCerts') : tChrome('dialog.signer.findCerts')}
+              </button>
+              {tokenCerts !== null && tokenCerts.length > 0 && (
+                <select
+                  data-testid={`${idPrefix}-token-cert-select`}
+                  aria-label={tChrome('dialog.signer.tokenCertPick')}
+                  value={
+                    tokenCerts.findIndex((c) => c.token === value.tokenLabel && c.label === value.certLabel)
+                  }
+                  onChange={(e) => {
+                    const chosen = tokenCerts[Number(e.target.value)];
+                    if (chosen) onChange({ ...value, tokenLabel: chosen.token, certLabel: chosen.label, keyLabel: '' });
+                  }}
+                  className="flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
+                >
+                  <option value={-1}>{tChrome('dialog.signer.tokenCertPick')}</option>
+                  {tokenCerts.map((c, i) => (
+                    <option key={`${c.token}\u0000${c.label}`} value={i}>
+                      {tChrome('dialog.signer.tokenCertOption', { token: c.token, label: c.label, subject: c.subject })}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {tokenMessage !== null && (
+              <p data-testid={`${idPrefix}-token-message`} className="text-[11px] text-neutral-400 -mt-1 ml-[5.5rem]">
+                {tokenMessage}
+              </p>
+            )}
             <div className="flex items-center gap-2">
               <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.token')}</span>
               <input
@@ -631,7 +731,7 @@ export function SignerSourceFields({
               />
             </div>
             <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
-              {tChrome('dialog.signer.tokenNote')}
+              {tChrome(hostOs() === 'linux' ? 'dialog.signer.tokenNoteLinux' : 'dialog.signer.tokenNote')}
             </p>
           </>
         ) : value.mode === 'pem' ? (

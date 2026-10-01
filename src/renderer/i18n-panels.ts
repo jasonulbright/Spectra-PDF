@@ -2637,6 +2637,7 @@ export const PANEL_STRINGS = {
   'panel.settings.minimizeToTray': 'Minimize to system tray on close',
   'panel.settings.startMinimized': 'Start minimized to tray',
   'panel.settings.startWithWindows': 'Start with Windows',
+  'panel.settings.startAtSignIn': 'Start when you sign in',
   'panel.settings.explorerMenu': 'Show Spectra PDF commands in the File Explorer context menu',
   'panel.settings.explorerMenu.hint':
     'Adds Convert to PDF and Combine into one PDF when you right-click files.',
@@ -2676,6 +2677,8 @@ export const PANEL_STRINGS = {
   'panel.settings.printTo': 'Print to Spectra PDF',
   'panel.settings.printerBlurb':
     'Installs a printer named “Spectra PDF” in every application’s print dialog. Printing to it opens the pages here as a new PDF. Conversion happens on this PC with the bundled tools; jobs are received only while this app is running (minimized to the tray counts) — a job printed while it is closed waits in the Windows print queue.',
+  'panel.settings.printerBlurbLinux':
+    'Adds a printer named “Spectra PDF” to every application’s print dialog. Printing to it opens the pages here as a new PDF. Jobs are received only while this app is running; a job printed while it is closed waits in the system print queue.',
   'panel.settings.printerInstalled': 'Printer installed',
   'panel.settings.printerNotInstalled': 'Printer not installed',
   'panel.settings.printerReady': 'ready to receive jobs',
@@ -2684,6 +2687,8 @@ export const PANEL_STRINGS = {
   'panel.settings.removePrinter': 'Remove printer…',
   'panel.settings.installPrinter': 'Install printer…',
   'panel.settings.uacNote': 'Windows asks for administrator approval — printers are system devices.',
+  'panel.settings.adminNoteLinux':
+    'Adding or removing the printer changes the system print queues; your system may ask for an administrator password.',
 
   'panel.ga.open': 'Open a PDF to run an action on it',
   'panel.ga.pickSource': 'Folder of PDFs to process',

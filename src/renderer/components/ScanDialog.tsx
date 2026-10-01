@@ -4,6 +4,7 @@ import { useAppModal } from '../hooks/useAppModal';
 import { useEngine } from '../hooks/useEngine';
 import { useOperationQueue } from '../hooks/useOperationQueue';
 import { app, batch, dialog, scanner } from '../lib/tauri-bridge';
+import { hostOs } from '../lib/platform-capabilities';
 import { tChrome, type UiKey } from '../i18n';
 import { formatBytes } from '../lib/format-bytes';
 import { loadDocument } from '../lib/pdfRenderer';
@@ -473,6 +474,8 @@ export function ScanDialog({
     return built;
   }, [pages, onAppend, appendDir, assemble, discardScratches, onClose]);
 
+  // SANE has no system device picker; the device list is the only door.
+  const systemPicker = hostOs() !== 'linux';
   const chooseDifferent = useCallback(async () => {
     try {
       const chosen = await scanner.scannerSelectDialog();
@@ -989,15 +992,17 @@ export function ScanDialog({
               {tChrome('dialog.scan.refresh')}
             </button>
           )}
-          <button
-            type="button"
-            data-testid="scan-choose-device"
-            className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
-            disabled={busy}
-            onClick={() => void chooseDifferent()}
-          >
-            {tChrome('dialog.scan.chooseDifferent')}
-          </button>
+          {systemPicker && (
+            <button
+              type="button"
+              data-testid="scan-choose-device"
+              className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
+              disabled={busy}
+              onClick={() => void chooseDifferent()}
+            >
+              {tChrome('dialog.scan.chooseDifferent')}
+            </button>
+          )}
           {phase === 'scanning' ? (
             <button
               type="button"

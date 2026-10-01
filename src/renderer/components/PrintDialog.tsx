@@ -663,7 +663,9 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
               value={opts.paper ?? ''}
               disabled={!caps || caps.papers.length === 0}
               onChange={(e) =>
-                set('paper', e.target.value === '' ? null : Number(e.target.value))}
+                set('paper', e.target.value === ''
+                  ? null
+                  : caps?.papers.find((p) => String(p.id) === e.target.value)?.id ?? null)}
             >
               <option value="">{tChrome('dialog.print.printerDefault')}</option>
               {(caps?.papers ?? []).map((p) => (

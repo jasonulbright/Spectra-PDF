@@ -396,6 +396,18 @@ export const DIALOG_STRINGS = {
   'dialog.signer.keyPlaceholder': 'Blank = same as certificate label',
   'dialog.signer.tokenNote':
     "The password field is the token PIN. The module is your device vendor's PKCS#11 .dll.",
+  // The token list is read without a PIN, so a token that keeps its
+  // certificates private lists none and its labels are typed by hand.
+  'dialog.signer.tokenNoteLinux':
+    'The password field is the token PIN. The module is the PKCS#11 library (.so) for your device, usually installed with its driver.',
+  'dialog.signer.moduleInstalled': 'Choose an installed module',
+  'dialog.signer.findCerts': 'Find certificates',
+  'dialog.signer.findingCerts': 'Reading the token…',
+  'dialog.signer.tokenCertPick': 'Choose a certificate on the token',
+  'dialog.signer.tokenCertOption': '{{token}}: {{label}} — {{subject}}',
+  'dialog.signer.noTokenCerts':
+    'No certificate could be read from this module without the PIN. Type the token and certificate labels instead.',
+  'dialog.signer.tokenReadFailed': 'The module could not be read: {{message}}',
   'dialog.signer.keyFile': 'Key file',
   'dialog.signer.certificate': 'Certificate',
   'dialog.signer.pemNote': 'The certificate file may be a fullchain (signer first).',
@@ -537,6 +549,7 @@ export const DIALOG_STRINGS = {
   'dialog.webCapture.paper': 'Paper',
   'dialog.webCapture.margin': 'Margin (in)',
   'dialog.webCapture.headersFooters': 'Print page headers and footers',
+  'dialog.webCapture.headerFooterFailed': 'The page headers and footers could not be added: {{message}}',
   'dialog.webCapture.backgrounds': 'Print background graphics',
   'dialog.webCapture.willContact_one':
     'Will open a browser window and load up to {{count}} page from {{host}}.',
@@ -756,6 +769,8 @@ export const DIALOG_STRINGS = {
   'dialog.schedule.title': 'Scheduled Batch Runs',
   'dialog.schedule.blurb':
     'Scheduled runs happen through Windows Task Scheduler, so they run even when Spectra PDF is closed. Everything here is managed from this window — you never need to open Task Scheduler.',
+  'dialog.schedule.blurbSystemd':
+    'Scheduled runs happen through systemd user timers, so they run even when Spectra PDF is closed. A run missed because the computer was off or you were signed out starts as soon as your session is back. Everything here is managed from this window.',
   'dialog.schedule.empty': 'No scheduled runs yet.',
   'dialog.schedule.timing': 'Next: {{next}} · Last: {{last}}',
   'dialog.schedule.timingResult': 'Next: {{next}} · Last: {{last}} ({{result}})',
@@ -806,6 +821,7 @@ export const DIALOG_STRINGS = {
   // language (the Settings-panel precedent for dropping inline emphasis spans).
   'dialog.schedule.accountSection': 'Account — optional',
   'dialog.schedule.filingSection': 'Filing and account — optional',
+  'dialog.schedule.filingOnlySection': 'Filing — optional',
   'dialog.schedule.movedLabel': 'Move processed originals to',
   'dialog.schedule.errorsLabel': 'Move failed originals to',
   'dialog.schedule.pickErrors': 'Choose where failed originals go',

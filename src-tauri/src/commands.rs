@@ -524,7 +524,8 @@ pub async fn pick_pem_file(
 }
 
 /// Pick a PKCS#11 provider module — the token-signing source. The
-/// vendor's cryptoki DLL is the one artifact every token ships.
+/// vendor's cryptoki library (a DLL, or a shared object on Linux) is the one
+/// artifact every token ships.
 #[tauri::command]
 pub async fn pick_pkcs11_module(
     app: AppHandle,
@@ -534,7 +535,7 @@ pub async fn pick_pkcs11_module(
         .dialog()
         .file()
         .set_parent(&window)
-        .add_filter("PKCS#11 module", &["dll"])
+        .add_filter("PKCS#11 module", &[PKCS11_MODULE_EXTENSION])
         .add_filter("All files", &["*"])
         .blocking_pick_file();
     match result {
@@ -544,6 +545,31 @@ pub async fn pick_pkcs11_module(
         },
         None => Ok(None),
     }
+}
+
+#[cfg(windows)]
+const PKCS11_MODULE_EXTENSION: &str = "dll";
+#[cfg(not(windows))]
+const PKCS11_MODULE_EXTENSION: &str = "so";
+
+/// The PKCS#11 modules the system registered for every application, for the
+/// token source's module list. Windows has no such registry; the module file
+/// is picked there.
+#[tauri::command]
+pub async fn list_pkcs11_modules() -> Result<Vec<Pkcs11ModuleRow>, String> {
+    #[cfg(target_os = "linux")]
+    return Ok(crate::pkcs11_modules::registered()
+        .into_iter()
+        .map(|m| Pkcs11ModuleRow { name: m.name, path: m.path })
+        .collect());
+    #[cfg(not(target_os = "linux"))]
+    Ok(Vec::new())
+}
+
+#[derive(serde::Serialize)]
+pub struct Pkcs11ModuleRow {
+    pub name: String,
+    pub path: String,
 }
 
 /// Pick an ICC colour profile — the prepress destination-profile picker
@@ -1563,6 +1589,9 @@ pub struct PlatformCapabilities {
     pub start_with_system: bool,
     pub hidden_animation_frames: bool,
     pub explorer_menu: bool,
+    /// `windows`, `linux` or `other`: the platform's own name for wording that
+    /// names an operating-system mechanism. Never a feature switch.
+    pub os: &'static str,
 }
 
 impl PlatformCapabilities {
@@ -1586,29 +1615,36 @@ impl PlatformCapabilities {
             start_with_system: true,
             hidden_animation_frames: true,
             explorer_menu: true,
+            os: "windows",
         }
     }
 
+    /// Scheduling and the tray depend on the session, not the build: a
+    /// systemd user manager, and a desktop that shows a tray at all. Printing
+    /// and scanning are offered on every Linux system: CUPS and SANE are the
+    /// system's own libraries, opened at first use, and a missing one refuses
+    /// by name at that use rather than leaving the feature without an entry.
     #[cfg(target_os = "linux")]
-    pub const fn current() -> Self {
+    pub fn current() -> Self {
         Self {
-            system_printing: false,
-            virtual_printer: false,
-            scanning: false,
-            scheduled_actions: false,
+            system_printing: true,
+            virtual_printer: true,
+            scanning: true,
+            scheduled_actions: crate::scheduler::user_manager_present(),
             store_certificates: false,
-            send_by_email: false,
-            web_capture: false,
+            send_by_email: true,
+            web_capture: true,
             clipboard_read: true,
             snapshot: true,
             accent_color: false,
-            enterprise_policy: false,
-            tray_residency: false,
+            enterprise_policy: true,
+            tray_residency: crate::tray_linux::residency_at_launch(),
             backdrop: false,
             console_attach: false,
-            start_with_system: false,
+            start_with_system: true,
             hidden_animation_frames: false,
             explorer_menu: false,
+            os: "linux",
         }
     }
 
@@ -1632,6 +1668,7 @@ impl PlatformCapabilities {
             start_with_system: false,
             hidden_animation_frames: true,
             explorer_menu: false,
+            os: "other",
         }
     }
 }
@@ -2103,7 +2140,7 @@ pub async fn close_window(
     let others = claim_close(&CLOSING, &labels, window.label());
     if others == 0 {
         let writes = app.state::<crate::engine::EngineRouter>().writes_in_flight(None);
-        let hide = minimize_to_tray && PlatformCapabilities::current().tray_residency;
+        let hide = minimize_to_tray && tray_shows_now();
         match crate::engine_writes::last_close(hide, force.unwrap_or(false), writes) {
             crate::engine_writes::LastClose::Hide => {
                 release_close(&CLOSING, window.label());
@@ -2347,11 +2384,23 @@ pub async fn set_tab_order(
 
 #[tauri::command]
 pub async fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
-    if !PlatformCapabilities::current().tray_residency {
+    if !tray_shows_now() {
         return Err(crate::platform::Unsupported::new(crate::platform::feature::TRAY_RESIDENCY).into());
     }
     let _ = window.hide();
     Ok(())
+}
+
+/// Whether hiding a window to the tray leaves a way back to it. The icon is
+/// built at launch only when tray residency was offered then, and on Linux the
+/// host that shows it can leave the session later (a panel extension switched
+/// off), so it is asked again at every hide.
+fn tray_shows_now() -> bool {
+    let offered = PlatformCapabilities::current().tray_residency;
+    #[cfg(target_os = "linux")]
+    return offered && crate::tray_linux::host_present();
+    #[cfg(not(target_os = "linux"))]
+    offered
 }
 
 // ── Startup config (Rust-readable settings for pre-window decisions) ─────
@@ -2602,9 +2651,15 @@ pub(crate) fn machine_policy_set(name: &str) -> bool {
     }
 }
 
-/// No machine policy store is read here yet, so no administrator can have set
-/// a flag: every policy reads as unset.
-#[cfg(not(windows))]
+/// Whether an administrator set a machine policy in the policy file.
+#[cfg(target_os = "linux")]
+pub(crate) fn machine_policy_set(name: &str) -> bool {
+    crate::policy_linux::machine_policy_set(name)
+}
+
+/// No machine policy store is read here, so no administrator can have set a
+/// flag: every policy reads as unset.
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn machine_policy_set(_name: &str) -> bool {
     false
 }
@@ -2735,7 +2790,12 @@ fn refresh_startup_entry() -> Result<(), String> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn refresh_startup_entry() -> Result<(), String> {
+    crate::autostart_linux::refresh()
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn refresh_startup_entry() -> Result<(), String> {
     Ok(())
 }
@@ -2788,7 +2848,12 @@ pub async fn get_startup_enabled() -> Result<(bool, bool), String> {
     startup_entry()
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn startup_entry() -> Result<(bool, bool), String> {
+    crate::autostart_linux::state()
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn startup_entry() -> Result<(bool, bool), String> {
     Ok((false, false))
 }
@@ -2822,7 +2887,12 @@ pub async fn set_startup_enabled(
     write_startup_entry(enabled, start_minimized)
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn write_startup_entry(enabled: bool, start_minimized: bool) -> Result<(), String> {
+    crate::autostart_linux::write(enabled, start_minimized)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn write_startup_entry(_enabled: bool, _start_minimized: bool) -> Result<(), String> {
     Err(crate::platform::Unsupported::new(crate::platform::feature::START_WITH_SYSTEM).into())
 }
@@ -2881,14 +2951,31 @@ mod tests {
             "systemPrinting", "virtualPrinter", "scanning", "scheduledActions",
             "storeCertificates", "sendByEmail", "webCapture", "clipboardRead", "snapshot",
             "accentColor", "enterprisePolicy", "trayResidency", "backdrop", "consoleAttach",
-            "startWithSystem", "hiddenAnimationFrames", "explorerMenu",
+            "startWithSystem", "hiddenAnimationFrames", "explorerMenu", "os",
         ];
         let mut got = keys.clone();
         expected.sort_unstable();
         got.sort_unstable();
         assert_eq!(got, expected);
+        let flags = map.iter().filter(|(key, _)| key.as_str() != "os");
         #[cfg(windows)]
-        assert!(map.values().all(|v| v == &serde_json::Value::Bool(true)));
+        assert!(flags.clone().all(|(_, v)| v == &serde_json::Value::Bool(true)));
+        assert!(flags.into_iter().all(|(_, v)| v.is_boolean()));
+        #[cfg(windows)]
+        assert_eq!(map["os"], "windows");
+        #[cfg(target_os = "linux")]
+        assert_eq!(map["os"], "linux");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_reports_the_features_its_backends_provide() {
+        let caps = super::PlatformCapabilities::current();
+        assert!(caps.system_printing && caps.virtual_printer && caps.scanning);
+        assert!(caps.send_by_email && caps.web_capture && caps.enterprise_policy);
+        assert!(caps.start_with_system && caps.clipboard_read && caps.snapshot);
+        assert!(!caps.store_certificates && !caps.explorer_menu && !caps.backdrop);
+        assert_eq!(caps.scheduled_actions, crate::scheduler::user_manager_present());
     }
 
     #[test]

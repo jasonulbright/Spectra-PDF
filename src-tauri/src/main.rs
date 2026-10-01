@@ -6,11 +6,16 @@ use clap::Parser;
 use spectrapdf_lib::cli::{classify_launch, Cli, LaunchMode};
 
 fn main() {
+    // Before any thread exists: every later temp path, the webview's file
+    // scope and every child process resolve against TMPDIR.
+    #[cfg(target_os = "linux")]
+    spectrapdf_lib::private_temp_linux::adopt();
+
     // The scanner host is dispatched before anything else: it must not attach
     // a console, raise a dialog, or reach the parser, and its stdio carries a
     // protocol that any other output would corrupt.
     let argv: Vec<String> = std::env::args().collect();
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     if spectrapdf_lib::scan_host::host_arg_present(&argv) {
         std::process::exit(spectrapdf_lib::scan_host::serve());
     }

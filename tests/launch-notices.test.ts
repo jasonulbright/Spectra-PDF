@@ -215,3 +215,21 @@ describe('the File Explorer commands repair', () => {
     expect(quiet).not.toHaveBeenCalled();
   });
 });
+
+describe('the startup entry notice on Linux', () => {
+  it('names the sign-in entry rather than Windows', async () => {
+    const { setHostOs, resetPlatformCapabilities } = await import('../src/renderer/lib/platform-capabilities');
+    setHostOs('linux');
+    try {
+      const { deps, shown, dismiss } = launch('Permission denied', []);
+      const done = reportLaunch(deps);
+      await flush();
+      expect(shown).toEqual([tChrome('app.startupEntry.staleTitleSignIn')]);
+      expect(tChrome('app.startupEntry.staleSignIn', { detail: 'x' })).not.toContain('Windows');
+      await dismiss();
+      await done;
+    } finally {
+      resetPlatformCapabilities();
+    }
+  });
+});
