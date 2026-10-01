@@ -5,7 +5,8 @@ name: Release
 # uploaded assets; the last step of the job undrafts. A failed gate leaves a
 # draft nobody can download. The updater manifest (latest.json) is generated
 # and signed automatically by tauri-action because the updater is configured
-# with a pubkey and bundle.createUpdaterArtifacts is enabled.
+# with a pubkey and bundle.createUpdaterArtifacts is enabled; a release that
+# ships Linux packages adds the linux-x86_64 entry after it.
 on:
   push:
     tags:
@@ -33,8 +34,31 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+    outputs:
+      linux: ${{ steps.platforms.outputs.linux }}
     steps:
       - uses: actions/checkout@v7
+
+      # YYYY.MDD.N: valid date, no leading zero, every field below 65536, and
+      # the release number one above the newest date tag on the remote (the
+      # tag being built excluded, so a re-cut unpublished tag passes). The
+      # local CI-parity version gate applies the same rule before the push.
+      - name: Tag is the next YYYY.MDD.N release
+        shell: bash
+        run: |
+          git ls-remote --tags --refs origin 'v*' > "$RUNNER_TEMP/remote-tags.txt"
+          python scripts/release_version.py tag "$TAG" --existing-file "$RUNNER_TEMP/remote-tags.txt"
+        env:
+          TAG: ${{ github.ref_name }}
+
+      # The platform set is read from the tag's own tree: a release builds
+      # Linux only when .github/release-platforms.txt lists it, and the redo
+      # of that tag reads the same file. A tree without the file is
+      # Windows-only.
+      - name: Release platforms from the tag's tree
+        id: platforms
+        shell: bash
+        run: python scripts/release_platforms.py --github-output
 
       - name: Tag matches every version surface
         shell: pwsh
@@ -51,9 +75,133 @@ jobs:
           if ($cargo -cne $tag) { $bad += "Cargo.toml ($cargo)" }
           if ($bad) { throw "Tag $tag disagrees with: $($bad -join ', ')" }
 
+  # The Linux packages: AppImage (+ .zsync), .deb and signed .rpm, built in an
+  # Ubuntu 22.04 container so every shipped ELF file needs glibc 2.35 at most.
+  # Runs before the Windows job, so a Linux failure costs no Windows minutes
+  # and leaves no draft. Skipped unless the tag's tree lists linux in
+  # .github/release-platforms.txt.
+  linux:
+    name: Build (Linux)
+    needs: verify
+    if: needs.verify.outputs.linux == 'true'
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      # No version pins: the container's own WebKitGTK and GTK development
+      # packages are the floor the packages are built against.
+      - name: Install the build packages
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates curl build-essential pkg-config file xz-utils zstd dpkg-dev python3 rpm tzdata libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          check-latest: true
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: Linux-cargo-release-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      # The pinned archives the provisioning scripts fetch. Every file is
+      # re-verified by SHA-256 on use, so a cache hit changes no input.
+      - name: Cache the pinned Linux downloads
+        uses: actions/cache@v6
+        with:
+          path: resources/linux-x86_64/.downloads
+          key: Linux-downloads-${{ hashFiles('scripts/*.sh', 'scripts/*.tsv', '.python-version', 'scripts/python-requirements-linux.txt') }}
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      # Provisions every vendored tree, builds the .deb and .rpm, assembles
+      # the AppImage, signs the AppImage for the updater manifest and the .rpm
+      # with the package key, and runs the built CLI from the .deb payload and
+      # the AppImage. --release refuses without either key.
+      - name: Build, sign and smoke the Linux packages
+        run: sh scripts/linux-release-build.sh --release
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          TAURI_SIGNING_RPM_KEY: ${{ secrets.TAURI_SIGNING_RPM_KEY }}
+          TAURI_SIGNING_RPM_KEY_PASSPHRASE: ""
+
+      # The declared dependencies resolve on the oldest supported release.
+      - name: Install the .deb on Ubuntu 22.04
+        run: sh scripts/linux-install-smoke.sh src-tauri/target/release/bundle/linux --deb
+
+      # The .sig is the linux-x86_64 signature in latest.json, never an asset.
+      - name: Keep the Linux packages for the Windows job
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-packages
+          path: |
+            src-tauri/target/release/bundle/linux/spectrapdf_*_amd64.AppImage
+            src-tauri/target/release/bundle/linux/spectrapdf_*_amd64.AppImage.zsync
+            src-tauri/target/release/bundle/linux/spectrapdf_*_amd64.AppImage.sig
+            src-tauri/target/release/bundle/linux/spectrapdf_*_amd64.deb
+            src-tauri/target/release/bundle/linux/spectrapdf-*-1.x86_64.rpm
+          if-no-files-found: error
+          retention-days: 1
+
+  # Clean installs on the current Fedora and Ubuntu releases, one runner, two
+  # containers with floating tags. Fedora checks the .rpm signature against
+  # keys/spectrapdf-rpm-signing.pub.asc: Ubuntu 22.04's rpm reports valid
+  # signatures of this kind as invalid, so the build job cannot.
+  linux-smoke:
+    name: Install check (Linux)
+    needs: [verify, linux]
+    if: needs.verify.outputs.linux == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /keys/spectrapdf-rpm-signing.pub.asc
+            /scripts/linux-install-smoke.sh
+            /scripts/verify-rpm-signature.sh
+            /tests/fixtures/sample.pdf
+
+      - name: Download the Linux packages
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-packages
+          path: linux-packages
+
+      - name: Fedora 44 installs the .rpm and runs the AppImage
+        run: docker run --rm -v "$PWD:/w" -w /w fedora:44 sh scripts/linux-install-smoke.sh linux-packages --rpm --appimage
+
+      - name: Ubuntu 26.04 refuses the AppImage without WebKitGTK, then installs the .deb
+        run: docker run --rm -v "$PWD:/w" -w /w ubuntu:26.04 sh scripts/linux-install-smoke.sh linux-packages --expect-missing-webkit --deb --appimage
+
   release:
     name: Build & publish (Windows)
-    needs: verify
+    needs: [verify, linux, linux-smoke]
+    # Runs after the Linux jobs pass, or when they were skipped because the
+    # tag's tree builds Windows only. A Linux failure skips this job.
+    if: >-
+      !cancelled() && needs.verify.result == 'success' &&
+      (needs.verify.outputs.linux != 'true' || needs.linux-smoke.result == 'success')
     runs-on: windows-latest
     # Gates the OIDC federated credential: the app registration trusts this
     # repository only through this environment.
@@ -401,6 +549,50 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "failed to upload $($file.Name)" }
           }
 
+      - name: Download the Linux packages
+        if: needs.verify.outputs.linux == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-packages
+          path: src-tauri/target/release/bundle/linux
+
+      # The AppImage, its .zsync, the .deb and the .rpm, under the names the
+      # build gave them: the AppImage's embedded update information matches
+      # the .zsync by name, and the .zsync names the AppImage. The AppImage
+      # .sig is not an asset; it is the linux-x86_64 signature below.
+      - name: Upload the Linux packages to the draft
+        if: needs.verify.outputs.linux == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
+        run: |
+          . ./scripts/linux-release-assets.ps1
+          $files = Get-LinuxReleaseAssets -Directory "src-tauri/target/release/bundle/linux" -Version ("${{ github.ref_name }}" -creplace '^v','')
+          $repo = "${{ github.repository }}"
+          $assets = @(gh api "repos/$repo/releases/$env:RELEASE_ID/assets?per_page=100" | ConvertFrom-Json)
+          foreach ($file in $files.Uploaded) {
+            foreach ($stale in @($assets | Where-Object name -ceq $file.Name)) {
+              gh api --method DELETE "repos/$repo/releases/assets/$($stale.id)"
+              if ($LASTEXITCODE -ne 0) { throw "failed to replace $($file.Name)" }
+            }
+            $name = [uri]::EscapeDataString($file.Name)
+            gh api --method POST -H "Content-Type: application/octet-stream" "https://uploads.github.com/repos/$repo/releases/$env:RELEASE_ID/assets?name=$name" --input $file.FullName > $null
+            if ($LASTEXITCODE -ne 0) { throw "failed to upload $($file.Name)" }
+          }
+
+      # The updater reads `linux-x86_64` on every Linux install (the AppImage,
+      # .deb and .rpm all fall back to it). tauri-action wrote the Windows
+      # entries; this adds the Linux one -- the AppImage's asset url and its
+      # .sig -- and replaces the draft's latest.json.
+      - name: Upload latest.json with the Linux updater entry
+        if: needs.verify.outputs.linux == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
+        run: pwsh -NoProfile -File scripts/add-linux-updater-entry.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ github.ref_name }}" -LinuxDir src-tauri/target/release/bundle/linux
+
       # The portable zip carries no Authenticode signature, so the published
       # checksum is how a user confirms a downloaded file is the file this workflow built.
       - name: Upload SHA-256 checksums to the draft
@@ -408,6 +600,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
+          LINUX_DIR: ${{ needs.verify.outputs.linux == 'true' && 'src-tauri/target/release/bundle/linux' || '' }}
         run: |
           $bundle = "src-tauri/target/release/bundle/nsis"
           $installers = @(Get-ChildItem $bundle -Filter "*-setup.exe" -ErrorAction Stop)
@@ -415,6 +608,10 @@ jobs:
           $portable = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -ErrorAction Stop)
           if ($portable.Count -ne 1) { throw "expected one portable zip to checksum, found $($portable.Count)" }
           $files = @($installers) + @($portable)
+          if ($env:LINUX_DIR) {
+            . ./scripts/linux-release-assets.ps1
+            $files += @((Get-LinuxReleaseAssets -Directory $env:LINUX_DIR -Version ("${{ github.ref_name }}" -creplace '^v','')).Checksummed)
+          }
           # The name column is the name GitHub serves the asset under, not the
           # build directory's: this file is verified with `sha256sum -c` beside
           # downloaded files, and GitHub rewrites a space in an uploaded asset
@@ -448,7 +645,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
-        run: pwsh -NoProfile -File scripts/verify-release-draft.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ github.ref_name }}" -ExpectSigned
+        run: pwsh -NoProfile -File scripts/verify-release-draft.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ github.ref_name }}" -ExpectSigned ${{ needs.verify.outputs.linux == 'true' && '-LinuxDir src-tauri/target/release/bundle/linux' || '' }}
 
       # The ONLY step that makes anything public. Must stay last.
       - name: Publish the release

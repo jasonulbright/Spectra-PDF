@@ -11,9 +11,11 @@
 //!
 //! With `SPECTRAPDF_UPDATER_MANIFEST` set (the release verifier's mode), the
 //! named manifest is verified against the expectations in the sibling
-//! variables; unset, that test returns and only the fixture tests run.
+//! variables; unset, that test returns and only the fixture tests run. A
+//! platform named `linux-*` takes its url and signature from the `_LINUX_`
+//! variables (the AppImage), every other platform from the installer's.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -26,13 +28,22 @@ const NOTES_FILE_ENV: &str = "SPECTRAPDF_UPDATER_NOTES_FILE";
 const PLATFORMS_ENV: &str = "SPECTRAPDF_UPDATER_PLATFORMS";
 const URL_ENV: &str = "SPECTRAPDF_UPDATER_URL";
 const SIGNATURE_FILE_ENV: &str = "SPECTRAPDF_UPDATER_SIGNATURE_FILE";
+const LINUX_URL_ENV: &str = "SPECTRAPDF_UPDATER_LINUX_URL";
+const LINUX_SIGNATURE_FILE_ENV: &str = "SPECTRAPDF_UPDATER_LINUX_SIGNATURE_FILE";
+
+/// What one platform entry must carry: the asset url, its signature, and the
+/// artifact's name for the refusal message.
+#[derive(Clone)]
+struct Target {
+    url: String,
+    signature: String,
+    artifact: &'static str,
+}
 
 struct Expected {
     version: String,
     notes: String,
-    platforms: BTreeSet<String>,
-    url: String,
-    signature: String,
+    platforms: BTreeMap<String, Target>,
 }
 
 fn verify(manifest: &str, expected: &Expected) -> Result<(), String> {
@@ -69,23 +80,26 @@ fn verify(manifest: &str, expected: &Expected) -> Result<(), String> {
         }
     };
     let present: BTreeSet<String> = platforms.keys().cloned().collect();
-    if present != expected.platforms {
+    let wanted: BTreeSet<String> = expected.platforms.keys().cloned().collect();
+    if present != wanted {
         return Err(format!(
             "latest.json platforms [{}] != [{}]",
             join(&present),
-            join(&expected.platforms)
+            join(&wanted)
         ));
     }
     for (name, platform) in platforms {
-        if platform.url.as_str() != expected.url {
+        let target = &expected.platforms[name];
+        if platform.url.as_str() != target.url {
             return Err(format!(
                 "latest.json url mismatch (platform {name}): '{}' != '{}'",
-                platform.url, expected.url
+                platform.url, target.url
             ));
         }
-        if platform.signature.trim() != expected.signature {
+        if platform.signature.trim() != target.signature {
             return Err(format!(
-                "latest.json signature is not the installer's .sig (platform {name})"
+                "latest.json signature is not the {}'s .sig (platform {name})",
+                target.artifact
             ));
         }
     }
@@ -110,12 +124,28 @@ fn verifies_the_manifest_named_by_the_environment() {
         eprintln!("skipped: {MANIFEST_ENV} is not set");
         return;
     };
+    let installer = Target {
+        url: env(URL_ENV),
+        signature: read(Path::new(&env(SIGNATURE_FILE_ENV))).trim().to_string(),
+        artifact: "installer",
+    };
+    let mut platforms = BTreeMap::new();
+    for name in env(PLATFORMS_ENV).split(',') {
+        let target = if name.starts_with("linux-") {
+            Target {
+                url: env(LINUX_URL_ENV),
+                signature: read(Path::new(&env(LINUX_SIGNATURE_FILE_ENV))).trim().to_string(),
+                artifact: "AppImage",
+            }
+        } else {
+            installer.clone()
+        };
+        platforms.insert(name.to_string(), target);
+    }
     let expected = Expected {
         version: env(VERSION_ENV),
         notes: read(Path::new(&env(NOTES_FILE_ENV))),
-        platforms: env(PLATFORMS_ENV).split(',').map(str::to_string).collect(),
-        url: env(URL_ENV),
-        signature: read(Path::new(&env(SIGNATURE_FILE_ENV))).trim().to_string(),
+        platforms,
     };
     let manifest = PathBuf::from(manifest);
     if let Err(message) = verify(&read(&manifest), &expected) {
@@ -132,18 +162,54 @@ fn fixture_dir() -> PathBuf {
 
 fn fixture() -> (String, Expected) {
     let dir = fixture_dir();
+    let installer = Target {
+        url: "https://api.github.com/repos/jasonulbright/Spectra-PDF/releases/assets/538527808"
+            .to_string(),
+        signature: read(&dir.join("installer.sig")).trim().to_string(),
+        artifact: "installer",
+    };
     let expected = Expected {
         version: "1.1.20".to_string(),
         notes: read(&dir.join("notes.txt")),
         platforms: ["windows-x86_64-nsis", "windows-x86_64"]
             .iter()
-            .map(|s| s.to_string())
+            .map(|s| (s.to_string(), installer.clone()))
             .collect(),
-        url: "https://api.github.com/repos/jasonulbright/Spectra-PDF/releases/assets/538527808"
-            .to_string(),
-        signature: read(&dir.join("installer.sig")).trim().to_string(),
     };
     (read(&dir.join("latest.json")), expected)
+}
+
+const APPIMAGE_URL: &str =
+    "https://api.github.com/repos/jasonulbright/Spectra-PDF/releases/assets/538527999";
+const APPIMAGE_SIGNATURE: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IGFwcGltYWdl";
+
+/// The fixture with the `linux-x86_64` entry a Linux release adds: the
+/// AppImage's asset url and its own signature.
+fn linux_fixture() -> (String, Expected) {
+    let (manifest, mut expected) = fixture();
+    let manifest = mutated(&manifest, |m| {
+        m["platforms"].as_object_mut().unwrap().insert(
+            "linux-x86_64".to_string(),
+            serde_json::json!({ "url": APPIMAGE_URL, "signature": APPIMAGE_SIGNATURE }),
+        );
+    });
+    expected.platforms.insert(
+        "linux-x86_64".to_string(),
+        Target {
+            url: APPIMAGE_URL.to_string(),
+            signature: APPIMAGE_SIGNATURE.to_string(),
+            artifact: "AppImage",
+        },
+    );
+    (manifest, expected)
+}
+
+/// The release an installed copy reads from the fixture carrying `version`.
+fn release_at(manifest: &str, version: &str) -> RemoteRelease {
+    let text = mutated(manifest, |m| {
+        m.insert("version".to_string(), Value::from(version));
+    });
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("version {version:?} must parse: {e}"))
 }
 
 fn mutated(manifest: &str, mutate: impl FnOnce(&mut serde_json::Map<String, Value>)) -> String {
@@ -346,4 +412,83 @@ fn refuses_a_foreign_signature() {
         refusal(&wrong, &expected),
         "latest.json signature is not the installer's .sig (platform windows-x86_64)"
     );
+}
+
+#[test]
+fn accepts_the_linux_entry_beside_the_windows_entries() {
+    let (manifest, expected) = linux_fixture();
+    verify(&manifest, &expected).unwrap();
+}
+
+#[test]
+fn refuses_a_missing_linux_entry() {
+    let (_, expected) = linux_fixture();
+    let (manifest, _) = fixture();
+    assert_eq!(
+        refusal(&manifest, &expected),
+        "latest.json platforms [windows-x86_64, windows-x86_64-nsis] \
+         != [linux-x86_64, windows-x86_64, windows-x86_64-nsis]"
+    );
+}
+
+#[test]
+fn refuses_a_linux_entry_naming_the_installer() {
+    let (manifest, expected) = linux_fixture();
+    let wrong = mutated(&manifest, |m| {
+        let installer = m["platforms"]["windows-x86_64"]["url"].clone();
+        m["platforms"]["linux-x86_64"]["url"] = installer;
+    });
+    let message = refusal(&wrong, &expected);
+    assert!(message.contains("url mismatch (platform linux-x86_64)"), "{message}");
+}
+
+#[test]
+fn refuses_a_linux_entry_carrying_the_installer_signature() {
+    let (manifest, expected) = linux_fixture();
+    let wrong = mutated(&manifest, |m| {
+        let installer = m["platforms"]["windows-x86_64"]["signature"].clone();
+        m["platforms"]["linux-x86_64"]["signature"] = installer;
+    });
+    assert_eq!(
+        refusal(&wrong, &expected),
+        "latest.json signature is not the AppImage's .sig (platform linux-x86_64)"
+    );
+}
+
+#[test]
+fn orders_date_versions_after_the_legacy_versions() {
+    // An installed copy offers the update when the manifest's version is
+    // greater than its own, in the plugin's semver order.
+    let (manifest, _) = fixture();
+    let sequence = [
+        "1.1.20",
+        "1.2.8",
+        "2026.930.150",
+        "2026.1004.151",
+        "2026.1004.152",
+        "2026.1231.160",
+        "2027.101.161",
+        "2027.1231.65535",
+    ];
+    for pair in sequence.windows(2) {
+        let (older, newer) = (release_at(&manifest, pair[0]), release_at(&manifest, pair[1]));
+        assert!(newer.version > older.version, "{} must order after {}", pair[1], pair[0]);
+        assert_eq!(newer.version.to_string(), pair[1]);
+    }
+}
+
+#[test]
+fn refuses_a_version_with_a_leading_zero() {
+    let (manifest, expected) = fixture();
+    for version in ["2026.0930.150", "2026.930.0150", "02026.930.150"] {
+        let wrong = mutated(&manifest, |m| {
+            m.insert("version".to_string(), Value::from(version));
+        });
+        let message =
+            verify(&wrong, &expected).expect_err(&format!("version {version:?} must be refused"));
+        assert!(
+            message.contains("the updater's deserializer refuses latest.json"),
+            "{version}: {message}"
+        );
+    }
 }

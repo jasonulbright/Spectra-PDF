@@ -87,6 +87,13 @@
 # manifest's asset url go through the same mapping, because the public verifies
 # the downloaded file under the name GitHub gave it.
 #
+# -LinuxDir <dir> adds the Linux release (scripts/linux-release-assets.ps1):
+# the AppImage, its .zsync, the .deb and the .rpm are uploaded assets, the
+# AppImage, .deb and .rpm are checksummed, and latest.json carries
+# `linux-x86_64` with the AppImage's asset url and the built AppImage .sig.
+# The .sig itself is never an asset. Without -LinuxDir the Windows-only set is
+# the whole contract, which is what a tag built without Linux is held to.
+#
 # -Offline <dir> skips the API and reads <dir>/release.json, <dir>/assets.json
 # and the "downloaded" asset files from <dir>; the comparison is otherwise the
 # same, which is what tests/test_ci_capability_setup.py drives. -Repo is still
@@ -102,6 +109,7 @@ param(
     [string]$Downloads = "",
     [string]$Offline = "",
     [string]$CargoPackage = "src-tauri",
+    [string]$LinuxDir = "",
     [switch]$ExpectSigned,
     [string]$SignerCommonName = "Jason Ulbright"
 )
@@ -112,6 +120,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "github-asset-name.ps1")
 . (Join-Path $PSScriptRoot "download-retry.ps1")
 . (Join-Path $PSScriptRoot "windows-signing.ps1")
+. (Join-Path $PSScriptRoot "linux-release-assets.ps1")
 
 function Get-Sha256([string]$path) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
@@ -144,7 +153,14 @@ function Sort-Ordinal([string[]]$items) {
         [System.StringComparer]::Ordinal))
 }
 
-if ($Tag -cnotmatch '^v[0-9]') { throw "-Tag must be a lowercase 'v' tag, got '$Tag'" }
+# A release tag is `v` plus three numeric fields without leading zeros, each
+# below 65536: a YYYY.MDD.N version or a 1.x.y version of the history. The
+# release run's verify job holds a new tag to the full date and sequence rule
+# (scripts/release_version.py); a redo may rebuild either form.
+if ($Tag -cnotmatch '^v(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})$' -or
+    @($Matches[1], $Matches[2], $Matches[3] | Where-Object { [int]$_ -ge 65536 }).Count -ne 0) {
+    throw "-Tag must be a lowercase 'v' release tag (three fields, no leading zero, each below 65536), got '$Tag'"
+}
 $version = $Tag.Substring(1)
 # The manifest url is rebuilt from the repository, never pattern-matched.
 if ($Repo -cnotmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "-Repo must be <owner>/<name>, got '$Repo'" }
@@ -155,6 +171,11 @@ if ($Repo -cnotmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "-Repo must be
 # the updater resolves the target-specific entry before the fallback; a
 # manifest that validates only the fallback validates the entry nobody reads.
 $expectedPlatforms = @("windows-x86_64-nsis", "windows-x86_64")
+$linux = $null
+if ($LinuxDir) {
+    $linux = Get-LinuxReleaseAssets -Directory $LinuxDir -Version $version
+    $expectedPlatforms += "linux-x86_64"
+}
 
 if ($Offline) {
     $Downloads = $Offline
@@ -184,6 +205,7 @@ $portableZip = @(Get-ChildItem -LiteralPath $Portable -Filter "*-portable.zip" -
 if ($portableZip.Count -ne 1) { throw "expected one portable zip, found $($portableZip.Count)" }
 $sums = Get-Item -LiteralPath (Join-Path $Bundle "SHA256SUMS.txt")
 $local = @($installer) + @($signature) + @($portableZip) + @($sums)
+if ($linux) { $local += $linux.Uploaded }
 
 # Local file -> the name GitHub serves it under. Every later lookup of a
 # downloaded asset goes through this map, and it is one-to-one: two local
@@ -256,7 +278,9 @@ if ($ExpectSigned) {
 # are compared as written: an uppercase digest is not this workflow's output.
 # The names are GitHub's, not the build directory's: `sha256sum -c` is run
 # against downloaded files, and no mapping is applied at that point.
-$checksummed = Sort-Ordinal @(@($installer) + @($portableZip) | ForEach-Object { Get-GitHubAssetName $_.Name })
+$checksummedFiles = @($installer) + @($portableZip)
+if ($linux) { $checksummedFiles += $linux.Checksummed }
+$checksummed = Sort-Ordinal @($checksummedFiles | ForEach-Object { Get-GitHubAssetName $_.Name })
 $named = @()
 foreach ($line in Get-Content -LiteralPath (Get-Downloaded "SHA256SUMS.txt").path) {
     if (-not $line.Trim()) { continue }
@@ -280,6 +304,19 @@ $localSig = (Get-Content -LiteralPath $signature.FullName -Raw).Trim()
 if ($uploadedSig -cne $localSig) { throw "uploaded $($assetNameOf[$signature.Name]) is not the built signature" }
 $installerId = (Get-Downloaded $assetNameOf[$installer[0].Name]).id
 $installerUrl = "https://api.github.com/repos/$Repo/releases/assets/$installerId"
+# Each platform entry's expected url and signature. The Windows entries name
+# the installer and carry the uploaded installer .sig; the Linux entry names
+# the AppImage and carries the built AppImage .sig, which is not an asset.
+$entryOf = New-OrdinalMap
+foreach ($name in @("windows-x86_64-nsis", "windows-x86_64")) {
+    $entryOf[$name] = @{ url = $installerUrl; signature = $uploadedSig; artifact = "uploaded installer" }
+}
+if ($linux) {
+    $appImageId = (Get-Downloaded $assetNameOf[$linux.AppImage.Name]).id
+    $appImageUrl = "https://api.github.com/repos/$Repo/releases/assets/$appImageId"
+    $appImageSig = (Get-Content -LiteralPath $linux.Sig.FullName -Raw).Trim()
+    $entryOf["linux-x86_64"] = @{ url = $appImageUrl; signature = $appImageSig; artifact = "built AppImage" }
+}
 # Platform entries are re-keyed into an ordinal map: `$manifest.platforms.$name`
 # resolves a property case-insensitively, which would let `Windows-x86_64-NSIS`
 # stand in for the key the updater actually looks up.
@@ -295,11 +332,12 @@ Assert-SameOrdinalSet $wanted $present {
 }
 foreach ($name in $expectedPlatforms) {
     $platform = $platforms[$name]
-    if (-not $platform.signature -or ([string]$platform.signature).Trim() -cne $uploadedSig) {
-        throw "latest.json signature is not the uploaded installer's .sig (platform $name)"
+    $want = $entryOf[$name]
+    if (-not $platform.signature -or ([string]$platform.signature).Trim() -cne $want.signature) {
+        throw "latest.json signature is not the $($want.artifact)'s .sig (platform $name)"
     }
-    if ([string]$platform.url -cne $installerUrl) {
-        throw "latest.json url mismatch (platform $name): '$($platform.url)' != '$installerUrl'"
+    if ([string]$platform.url -cne $want.url) {
+        throw "latest.json url mismatch (platform $name): '$($platform.url)' != '$($want.url)'"
     }
 }
 
@@ -477,6 +515,13 @@ try {
     $env:SPECTRAPDF_UPDATER_PLATFORMS = $expectedPlatforms -join ","
     $env:SPECTRAPDF_UPDATER_URL = $installerUrl
     $env:SPECTRAPDF_UPDATER_SIGNATURE_FILE = (Resolve-Path -LiteralPath (Get-Downloaded $assetNameOf[$signature.Name]).path).Path
+    if ($linux) {
+        $env:SPECTRAPDF_UPDATER_LINUX_URL = $appImageUrl
+        $env:SPECTRAPDF_UPDATER_LINUX_SIGNATURE_FILE = $linux.Sig.FullName
+    } else {
+        Remove-Item Env:SPECTRAPDF_UPDATER_LINUX_URL -ErrorAction SilentlyContinue
+        Remove-Item Env:SPECTRAPDF_UPDATER_LINUX_SIGNATURE_FILE -ErrorAction SilentlyContinue
+    }
     # A test-name argument is a substring FILTER to the harness, and a filter
     # that selects nothing is a passing run (`running 0 tests`, exit 0). A
     # staged file that executed is therefore not yet a manifest that was

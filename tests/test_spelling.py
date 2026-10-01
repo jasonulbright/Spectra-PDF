@@ -42,9 +42,7 @@ from engine.spelling import (
 from spelling_words import WORDS
 import vendored_tools
 
-DICT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resources", "dictionaries"
-)
+DICT_DIR = str(vendored_tools.DICTIONARIES)
 
 
 #: The Finnish tag ships a morphological analyser instead of a word list, so

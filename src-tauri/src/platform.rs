@@ -79,8 +79,12 @@ pub fn resource_root_for(exe_dir: &Path) -> PathBuf {
     exe_dir.to_path_buf()
 }
 
-/// `productName` in `tauri.conf.json`; Tauri names the Linux resource
-/// directory after it.
+/// `productName` of the platform's Tauri config; Tauri names the Linux
+/// resource directory after it. `tauri.linux.conf.json` overrides the shared
+/// value so the directory and the package name carry no space.
+#[cfg(target_os = "linux")]
+const PRODUCT_NAME: &str = "spectrapdf";
+#[cfg(not(target_os = "linux"))]
 const PRODUCT_NAME: &str = "Spectra PDF";
 
 /// Feature names, shared by the command layer and the CLI so one feature has
@@ -123,6 +127,21 @@ mod tests {
         std::fs::create_dir_all(dir.join("engine")).unwrap();
         assert_eq!(resource_root_for(&dir), dir);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_resource_directory_name_is_the_platform_product_name() {
+        let shared: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let linux: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.linux.conf.json")).unwrap();
+        let expected = if cfg!(target_os = "linux") {
+            &linux["productName"]
+        } else {
+            &shared["productName"]
+        };
+        assert_eq!(expected.as_str(), Some(PRODUCT_NAME));
+        assert!(linux.get("version").is_none());
     }
 
     #[test]

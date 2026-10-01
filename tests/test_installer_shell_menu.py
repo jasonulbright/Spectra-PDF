@@ -298,7 +298,8 @@ def test_the_release_jobs_compile_both_handlers_before_the_signing_window() -> N
         stage = text.index("- name: Stage the File Explorer command handler")
         assert stage < text.index("- name: Azure login (federated, no secret)"), workflow
         assert "scripts/build-shell-menu.ps1 -CompileOnly" in text[stage:], workflow
-        rust = text.index("uses: dtolnay/rust-toolchain@stable")
+        # The Windows job's toolchain: the Linux build job precedes it.
+        rust = text.index("uses: dtolnay/rust-toolchain@stable", text.index("\n  release:\n"))
         assert "targets: aarch64-pc-windows-msvc" in text[rust : rust + 300], workflow
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "mkdir -p resources/shell" in ci

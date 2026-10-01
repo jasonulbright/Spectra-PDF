@@ -46,18 +46,18 @@ share/xpdfimport/poppler_data/cidToUnicode	poppler-data CID-to-Unicode tables	da
 share/xpdfimport/poppler_data/nameToUnicode	poppler-data glyph-name tables	data	-	GPL-2.0-or-later	COPYING.gpl2	https://poppler.freedesktop.org/	all
 share/xpdfimport/poppler_data/unicodeMap	poppler-data Unicode output maps	data	-	GPL-2.0-or-later	COPYING.gpl2	https://poppler.freedesktop.org/	all
 share/xpdfimport/poppler_data/cMap	poppler-data predefined CMaps	data	-	LicenseRef-Adobe-CMap	COPYING.adobe	https://poppler.freedesktop.org/	all
-licenses/copyright-nss	Mozilla NSS copyright and licence (Ubuntu libnss3 package)	notice	-	-	-	https://launchpad.net/ubuntu/+source/nss/2:3.98-1ubuntu0.2	linux
-licenses/copyright-nspr	Mozilla NSPR copyright and licence (Ubuntu libnspr4 package)	notice	-	-	-	https://launchpad.net/ubuntu/+source/nspr/2:4.35-1.1build1	linux
+licenses/copyright-nss	Mozilla NSS copyright and licence (Ubuntu libnss3 package)	notice	-	-	-	https://launchpad.net/ubuntu/+source/nss/2:3.98-0ubuntu0.22.04.4	linux
+licenses/copyright-nspr	Mozilla NSPR copyright and licence (Ubuntu libnspr4 package)	notice	-	-	-	https://launchpad.net/ubuntu/+source/nspr/2:4.35-0ubuntu0.22.04.1	linux
 program/xpdfimport	poppler, statically linked into LibreOffice's PDF import helper	binary	fe73e7375e346189b08199ff83b4e99a88105d074d2ef1ace4fb1bcba64b2b9e	GPL-2.0-or-later	LICENSE	https://www.libreoffice.org/about-us/source-code/	linux
-program/libnss3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-1ubuntu0.2	linux
-program/libnssutil3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-1ubuntu0.2	linux
-program/libsmime3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-1ubuntu0.2	linux
-program/libssl3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-1ubuntu0.2	linux
-program/libsoftokn3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-1ubuntu0.2	linux
-program/libfreeblpriv3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-1ubuntu0.2	linux
-program/libnssdbm3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-1ubuntu0.2	linux
-program/libnspr4.so	Mozilla NSPR	binary	-	MPL-2.0	copyright-nspr	https://launchpad.net/ubuntu/+source/nspr/2:4.35-1.1build1	linux
-program/libplc4.so	Mozilla NSPR	binary	-	MPL-2.0	copyright-nspr	https://launchpad.net/ubuntu/+source/nspr/2:4.35-1.1build1	linux
-program/libplds4.so	Mozilla NSPR	binary	-	MPL-2.0	copyright-nspr	https://launchpad.net/ubuntu/+source/nspr/2:4.35-1.1build1	linux
-licenses/copyright-sqlite	SQLite copyright statement (Ubuntu libsqlite3-0 package)	notice	-	-	-	https://launchpad.net/ubuntu/+source/sqlite3/3.45.1-1ubuntu2.8	linux
-program/libsqlite3.so.0	SQLite	binary	-	blessing	copyright-sqlite	https://launchpad.net/ubuntu/+source/sqlite3/3.45.1-1ubuntu2.8	linux
+program/libnss3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-0ubuntu0.22.04.4	linux
+program/libnssutil3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-0ubuntu0.22.04.4	linux
+program/libsmime3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-0ubuntu0.22.04.4	linux
+program/libssl3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-0ubuntu0.22.04.4	linux
+program/libsoftokn3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-0ubuntu0.22.04.4	linux
+program/libfreeblpriv3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-0ubuntu0.22.04.4	linux
+program/libnssdbm3.so	Mozilla NSS	binary	-	MPL-2.0	copyright-nss	https://launchpad.net/ubuntu/+source/nss/2:3.98-0ubuntu0.22.04.4	linux
+program/libnspr4.so	Mozilla NSPR	binary	-	MPL-2.0	copyright-nspr	https://launchpad.net/ubuntu/+source/nspr/2:4.35-0ubuntu0.22.04.1	linux
+program/libplc4.so	Mozilla NSPR	binary	-	MPL-2.0	copyright-nspr	https://launchpad.net/ubuntu/+source/nspr/2:4.35-0ubuntu0.22.04.1	linux
+program/libplds4.so	Mozilla NSPR	binary	-	MPL-2.0	copyright-nspr	https://launchpad.net/ubuntu/+source/nspr/2:4.35-0ubuntu0.22.04.1	linux
+licenses/copyright-sqlite	SQLite copyright statement (Ubuntu libsqlite3-0 package)	notice	-	-	-	https://launchpad.net/ubuntu/+source/sqlite3/3.37.2-2ubuntu0.8	linux
+program/libsqlite3.so.0	SQLite	binary	-	blessing	copyright-sqlite	https://launchpad.net/ubuntu/+source/sqlite3/3.37.2-2ubuntu0.8	linux

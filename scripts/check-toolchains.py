@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Refuses a local gate run on a toolchain other than the one CI installs.
 
-Usage: check-toolchains.py rust|python|node
+Usage: check-toolchains.py rust|python|python-linux|node
 
 A gate that passes here is evidence about CI only when it ran on the toolchain
 CI installs on every run. Each check reads what CI reads, compares it with
@@ -17,6 +17,13 @@ python  CI and the shipped runtime (scripts/setup-python-embed.ps1) read
         actions/setup-python offers for win32 x64 (the audit job's runner):
         a pin setup-python cannot install fails every CI run. A python.org
         release the manifest does not carry yet passes with a note.
+python-linux
+        The Linux runtime (scripts/setup-python-embed.sh) comes from
+        python-build-standalone, which publishes a CPython patch after
+        python.org. Its pin is the same minor as `.python-version` at the same
+        or a lower patch, and it is the newest CPython of that minor, at or
+        below `.python-version`, in the newest python-build-standalone
+        release. A newer matching build fails the check until the pin moves.
 node    CI reads the major from `.node-version`, with `check-latest`. Local
         Node is the newest release of that major in nodejs.org/dist/index.json,
         and local npm is the npm that release bundles.
@@ -50,6 +57,12 @@ SETUP_PYTHON_MANIFEST = (
     "https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json"
 )
 NODE_RELEASES = "https://nodejs.org/dist/index.json"
+LINUX_EMBED = ROOT / "scripts" / "setup-python-embed.sh"
+PBS_LATEST = "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
+PBS_ASSET = re.compile(
+    r"^cpython-(\d+)\.(\d+)\.(\d+)\+(\d+)-x86_64-unknown-linux-gnu-install_only_stripped\.tar\.gz$"
+)
+LINUX_PIN = re.compile(r'^PBS_(RELEASE|PINNED_VERSION)="([^"]*)"$', re.M)
 
 #: `rustup check` exits with this when at least one channel has an update.
 UPDATES_AVAILABLE = 100
@@ -318,6 +331,102 @@ def check_python() -> tuple:
     )
 
 
+# ── Linux Python runtime ─────────────────────────────────────────────────────
+
+
+def read_linux_pin(path: Path) -> Fetched:
+    """`{"release": ..., "version": ...}` from setup-python-embed.sh."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return Fetched(error=f"{path.name}: {exc}")
+    found = dict(LINUX_PIN.findall(text))
+    if set(found) != {"RELEASE", "PINNED_VERSION"}:
+        return Fetched(error=f"{path.name} names no PBS_RELEASE and PBS_PINNED_VERSION pair")
+    return Fetched({"release": found["RELEASE"], "version": found["PINNED_VERSION"]})
+
+
+def pbs_builds(release: object) -> dict:
+    """`{(major, minor, patch): sha256 or ""}` of one release's Linux x86-64 builds."""
+    found = {}
+    assets = release.get("assets") if isinstance(release, dict) else None
+    for asset in assets if isinstance(assets, list) else []:
+        if not isinstance(asset, dict):
+            continue
+        name = PBS_ASSET.match(str(asset.get("name", "")))
+        if not name or name[4] != str(release.get("tag_name", "")):
+            continue
+        digest = str(asset.get("digest") or "")
+        found[tuple(int(part) for part in name.groups()[:3])] = (
+            digest[len("sha256:"):] if digest.startswith("sha256:") else ""
+        )
+    return found
+
+
+def python_linux_verdict(pin: Fetched, linux: Fetched, latest: Fetched) -> tuple:
+    exact = EXACT.match(str(pin.value or ""))
+    linux_pin = linux.value if isinstance(linux.value, dict) else {}
+    pinned = EXACT.match(str(linux_pin.get("version", "")))
+    shown = linux_pin.get("version") or "unknown"
+    problems = []
+    if exact is None:
+        problems.append(f"the Python pin cannot be read: "
+                        f"{pin.error or f'.python-version holds {pin.value!r}'}.")
+    if pinned is None:
+        problems.append(f"the Linux runtime pin cannot be read: "
+                        f"{linux.error or f'PBS_PINNED_VERSION is {shown!r}'}.")
+    tag = str(latest.value.get("tag_name", "")) if isinstance(latest.value, dict) else ""
+    if not tag:
+        problems.append(f"python-build-standalone's newest release cannot be read "
+                        f"({latest.error or 'it names no tag'}).")
+    if problems:
+        return False, _refusal(problems, shown, "unknown", "rerun once .python-version, "
+                               "scripts/setup-python-embed.sh and the python-build-standalone "
+                               "release list answer; nothing is compared without them")
+
+    target = tuple(int(part) for part in exact.groups())
+    local = tuple(int(part) for part in pinned.groups())
+    minor = f"{target[0]}.{target[1]}"
+    if local[:2] != target[:2] or local[2] > target[2]:
+        return False, _refusal(
+            [f"the Linux runtime pins {_dotted(local)}; it must be Python {minor} at "
+             f"{exact[0]} or a lower patch."],
+            _dotted(local), f"{minor}.x <= {exact[0]}",
+            "set PBS_RELEASE, PBS_PINNED_VERSION and both SHA-256 values in "
+            "scripts/setup-python-embed.sh to a python-build-standalone build of "
+            f"Python {minor}",
+        )
+    builds = {v: sha for v, sha in pbs_builds(latest.value).items()
+              if v[:2] == target[:2] and v[2] <= target[2]}
+    if not builds:
+        return False, _refusal(
+            [f"python-build-standalone {tag} carries no Linux x86-64 build of Python "
+             f"{minor} at or below {exact[0]}."],
+            _dotted(local), "unknown",
+            "rerun once python-build-standalone publishes a matching build",
+        )
+    newest = max(builds)
+    if local != newest:
+        digest = f" (install_only_stripped SHA-256 {builds[newest]})" if builds[newest] else ""
+        return False, _refusal(
+            [f"the Linux runtime pins {_dotted(local)}; python-build-standalone {tag} "
+             f"carries {_dotted(newest)}{digest}."],
+            _dotted(local), _dotted(newest),
+            f"set PBS_RELEASE to {tag}, PBS_PINNED_VERSION to {_dotted(newest)} and both "
+            "SHA-256 values (install_only_stripped and pgo+lto-full) in "
+            "scripts/setup-python-embed.sh, then run it",
+        )
+    lag = ([f"NOTE: the Linux runtime trails .python-version ({exact[0]}) until "
+            f"python-build-standalone publishes it"] if local != target else [])
+    return True, [f"OK: the Linux runtime pins Python {_dotted(local)}, the newest {minor} "
+                  f"build at or below {exact[0]} in python-build-standalone {tag}", *lag]
+
+
+def check_python_linux() -> tuple:
+    return python_linux_verdict(read_pin(PYTHON_PIN), read_linux_pin(LINUX_EMBED),
+                                fetch_json(PBS_LATEST))
+
+
 # ── Node and npm ─────────────────────────────────────────────────────────────
 
 
@@ -398,7 +507,12 @@ def check_node() -> tuple:
     )
 
 
-CHECKS = {"rust": check_rust, "python": check_python, "node": check_node}
+CHECKS = {
+    "rust": check_rust,
+    "python": check_python,
+    "python-linux": check_python_linux,
+    "node": check_node,
+}
 
 
 def main(argv: list) -> int:

@@ -697,9 +697,9 @@ also carries these libraries, which the official build takes from the host:
 
 | Files in `program/` | Component | License | Source |
 |---|---|---|---|
-| `libnss3.so`, `libnssutil3.so`, `libsmime3.so`, `libssl3.so`, `libsoftokn3.so`, `libfreeblpriv3.so`, `libnssdbm3.so` | Mozilla NSS 3.98 (Ubuntu 3.98-1ubuntu0.2) | MPL-2.0 | <https://launchpad.net/ubuntu/+source/nss/2:3.98-1ubuntu0.2> |
-| `libnspr4.so`, `libplc4.so`, `libplds4.so` | Mozilla NSPR 4.35 (Ubuntu 4.35-1.1build1) | MPL-2.0 | <https://launchpad.net/ubuntu/+source/nspr/2:4.35-1.1build1> |
-| `libsqlite3.so.0` | SQLite 3.45.1 (Ubuntu 3.45.1-1ubuntu2.8) | blessing (public domain) | <https://launchpad.net/ubuntu/+source/sqlite3/3.45.1-1ubuntu2.8> |
+| `libnss3.so`, `libnssutil3.so`, `libsmime3.so`, `libssl3.so`, `libsoftokn3.so`, `libfreeblpriv3.so`, `libnssdbm3.so` | Mozilla NSS 3.98 (Ubuntu 22.04, 3.98-0ubuntu0.22.04.4) | MPL-2.0 | <https://launchpad.net/ubuntu/+source/nss/2:3.98-0ubuntu0.22.04.4> |
+| `libnspr4.so`, `libplc4.so`, `libplds4.so` | Mozilla NSPR 4.35 (Ubuntu 22.04, 4.35-0ubuntu0.22.04.1) | MPL-2.0 | <https://launchpad.net/ubuntu/+source/nspr/2:4.35-0ubuntu0.22.04.1> |
+| `libsqlite3.so.0` | SQLite 3.37.2 (Ubuntu 22.04, 3.37.2-2ubuntu0.8) | blessing (public domain) | <https://launchpad.net/ubuntu/+source/sqlite3/3.37.2-2ubuntu0.8> |
 
 Their copyright files ship in `libreoffice/licenses/`.
 
@@ -708,13 +708,38 @@ Their copyright files ship in `libreoffice/licenses/`.
 `voikko/` is the release artifact `spectra-4.3.3-2` of the fork, unpacked as
 published. Notices ship in `voikko/licenses/`. The transducer data, binding and
 notices are the platform-neutral files listed under **Finnish — libvoikko and
-voikko-fi**.
+voikko-fi**; on Linux they ship in `dictionaries/fi/`, which holds no Windows
+library.
 
 | Component | Version | License | Fork | Upstream |
 |---|---|---|---|---|
 | libvoikko (`lib/libvoikko.so.1`) | 4.3.3 | MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later (MPL-1.1 used) | <https://github.com/jasonulbright/corevoikko> | <https://github.com/voikko/corevoikko> |
 | utfcpp (compiled into libvoikko) | as bundled in libvoikko 4.3.3 | BSL-1.0 | <https://github.com/jasonulbright/corevoikko> | <https://github.com/nemtrif/utfcpp> |
 | GCC runtime (`lib/libstdc++.so.6`, `lib/libgcc_s.so.1`) | 8.5.0 | GPL-3.0-or-later WITH GCC-exception-3.1 | <https://github.com/jasonulbright/corevoikko> | <https://gcc.gnu.org/> |
+
+### AppImage runtime
+
+The first part of the AppImage file is the AppImage type-2 runtime, release
+`20251108`, used unmodified (<https://github.com/AppImage/type2-runtime>,
+SHA-256 `2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d`).
+It is a static executable. Its own code is MIT; it statically links the
+libraries below. The `.deb` and `.rpm` do not contain it. The licence texts
+ship inside the AppImage in `usr/share/doc/spectrapdf/appimage-runtime/`.
+
+| Component | Version | License | Source |
+|---|---|---|---|
+| type2-runtime | 20251108 | MIT | <https://github.com/AppImage/type2-runtime/tree/20251108> |
+| libfuse (library part, with the runtime's `mount.c` patch) | 3.15.0 | LGPL-2.1-only | <https://github.com/libfuse/libfuse/releases/tag/fuse-3.15.0> |
+| squashfuse | 0.5.2 | BSD-2-Clause | <https://github.com/vasi/squashfuse/tree/0.5.2> |
+| zstd | Alpine 3.21 package | BSD-3-Clause (elected from BSD-3-Clause OR GPL-2.0-only) | <https://github.com/facebook/zstd> |
+| zlib | Alpine 3.21 package | Zlib | <https://zlib.net/> |
+| musl libc | Alpine 3.21 package | MIT | <https://musl.libc.org/> |
+| mimalloc | Alpine 3.21 package | MIT | <https://github.com/microsoft/mimalloc> |
+
+libfuse is the one weak-copyleft part. LGPL-2.1 section 6 permits a static
+link when the combined work's terms allow modification and the user can
+relink it against a changed library. The runtime's own source is MIT and
+public at the pinned tag, with its build scripts, so both conditions hold.
 
 ## Frontend / runtime libraries
 

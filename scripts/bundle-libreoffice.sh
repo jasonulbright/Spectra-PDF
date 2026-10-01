@@ -28,17 +28,38 @@ STAMP="$LINUX_RESOURCES/.stamps/libreoffice"
 
 # The official build links Mozilla NSS and NSPR from the host; they are not a
 # desktop baseline, so the tree carries them beside its own libraries. Ubuntu
-# 24.04 packages, pinned to the SHA-256 in the archive's signed index.
-NSS_DEB="libnss3_3.98-1ubuntu0.2_amd64.deb"
-NSS_SHA256="4254f11d782dfb970e78113519a59d440112ed43c4b56f709da0aef81da8651a"
-NSS_URL="http://archive.ubuntu.com/ubuntu/pool/main/n/nss/$NSS_DEB"
-NSPR_DEB="libnspr4_4.35-1.1build1_amd64.deb"
-NSPR_SHA256="e579e72d091f6c7a13f5a756c31065b15aae5b81840d61b069355aa2283c07b4"
-NSPR_URL="http://archive.ubuntu.com/ubuntu/pool/main/n/nspr/$NSPR_DEB"
+# 22.04 (jammy-security) packages, pinned to the SHA-256 in the archive's
+# signed index: the Linux build base is Ubuntu 22.04, and a library built on a
+# newer release raises the glibc floor of the whole package above 2.35. The
+# archive pool drops a build once a newer security build supersedes it, so
+# each package also names the Launchpad librarian copy of the same file.
+UBUNTU_POOL="http://archive.ubuntu.com/ubuntu/pool/main"
+SECURITY_POOL="http://security.ubuntu.com/ubuntu/pool/main"
+LAUNCHPAD_FILES="https://launchpad.net/ubuntu/+archive/primary/+files"
+NSS_DEB="libnss3_3.98-0ubuntu0.22.04.4_amd64.deb"
+NSS_SHA256="caf60f375adbbdafef74930c5dd91411de0ac5c9499bf699185110dc77d82611"
+NSS_URLS="$UBUNTU_POOL/n/nss/$NSS_DEB $SECURITY_POOL/n/nss/$NSS_DEB $LAUNCHPAD_FILES/$NSS_DEB"
+NSPR_DEB="libnspr4_4.35-0ubuntu0.22.04.1_amd64.deb"
+NSPR_SHA256="b3c96e4a61675c87f8d9655109346748847d859abc95f20493159d06b5aa30ef"
+NSPR_URLS="$UBUNTU_POOL/n/nspr/$NSPR_DEB $SECURITY_POOL/n/nspr/$NSPR_DEB $LAUNCHPAD_FILES/$NSPR_DEB"
 # NSS's softoken keeps its key database in SQLite.
-SQLITE_DEB="libsqlite3-0_3.45.1-1ubuntu2.8_amd64.deb"
-SQLITE_SHA256="b1190bb72359f5fcc47406aa46065eaf4f1ca208085c51224a52b04bedc0b4bb"
-SQLITE_URL="http://archive.ubuntu.com/ubuntu/pool/main/s/sqlite3/$SQLITE_DEB"
+SQLITE_DEB="libsqlite3-0_3.37.2-2ubuntu0.8_amd64.deb"
+SQLITE_SHA256="6e22b1e8d375fed6a1d52cad5887e762b6cdeaba137595e726c95486968dfab5"
+SQLITE_URLS="$UBUNTU_POOL/s/sqlite3/$SQLITE_DEB $SECURITY_POOL/s/sqlite3/$SQLITE_DEB $LAUNCHPAD_FILES/$SQLITE_DEB"
+
+# fetch_first NAME SHA256 URL... -> the cached path from the first source that
+# serves the pinned bytes.
+fetch_first() {
+  name="$1"; want="$2"; shift 2
+  for url in "$@"; do
+    if got="$( (fetch_verified "$url" "$want" "$name") )"; then
+      echo "$got"
+      return 0
+    fi
+    echo "  exhausted $url; trying the next source..." >&2
+  done
+  die "$name download failed on every source"
+}
 
 # Libraries a desktop session provides and the tree takes from the host.
 HOST_SONAMES="libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 ld-linux-x86-64.so.2
@@ -106,7 +127,7 @@ assert_notices() {
           else if (!(notice[i] in notices))
             print "  " file[i] ": names notice \x27" notice[i] "\x27, which no notice row ships"
         }
-        if (sha[i] != "-" && sha[i] !~ /^[0-9a-f]{64}$/)
+        if (sha[i] != "-" && (length(sha[i]) != 64 || sha[i] ~ /[^0-9a-f]/))
           print "  " file[i] ": sha256 is neither \x27-\x27 nor 64 hex characters"
         print "CHECK\t" file[i] "\t" sha[i]
       }
@@ -184,9 +205,9 @@ root=""
 for d in "$work"/root/opt/libreoffice*; do [ -x "$d/program/soffice" ] && root="$d"; done
 [ -n "$root" ] || die "program/soffice not found in the unpacked packages"
 
-nss="$(fetch_verified "$NSS_URL" "$NSS_SHA256" "$NSS_DEB")"
-nspr="$(fetch_verified "$NSPR_URL" "$NSPR_SHA256" "$NSPR_DEB")"
-sqlite="$(fetch_verified "$SQLITE_URL" "$SQLITE_SHA256" "$SQLITE_DEB")"
+nss="$(fetch_first "$NSS_DEB" "$NSS_SHA256" $NSS_URLS)"
+nspr="$(fetch_first "$NSPR_DEB" "$NSPR_SHA256" $NSPR_URLS)"
+sqlite="$(fetch_first "$SQLITE_DEB" "$SQLITE_SHA256" $SQLITE_URLS)"
 mkdir -p "$work/nss"
 dpkg-deb -x "$nss" "$work/nss"
 dpkg-deb -x "$nspr" "$work/nss"
