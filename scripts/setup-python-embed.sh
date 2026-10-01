@@ -17,13 +17,18 @@ case "$PYTHON_VERSION" in
 esac
 
 # The release tag and SHA-256 are one pair with the version pin: a pin changed
-# without both refuses at the download.
+# without both refuses at the download. python-build-standalone publishes a
+# CPython patch after python.org does, so the Linux runtime may trail
+# .python-version by patch releases of the SAME minor. The `python-linux` arm
+# of scripts/check-toolchains.py fails once a newer build of that minor exists.
 PBS_RELEASE="20260924"
 PBS_PINNED_VERSION="3.14.7"
 PBS_SHA256="bd0d0568ccded07bbf1c87727230dc5dd0187e706a87da23c4de78388a229b78"
-[ "$PYTHON_VERSION" = "$PBS_PINNED_VERSION" ] ||
-  die "setup-python-embed.sh pins $PBS_PINNED_VERSION but .python-version is $PYTHON_VERSION"
-PBS_NAME="cpython-$PYTHON_VERSION+$PBS_RELEASE-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+pin_minor="${PBS_PINNED_VERSION%.*}"
+pin_patch="${PBS_PINNED_VERSION##*.}"
+[ "${PYTHON_VERSION%.*}" = "$pin_minor" ] && [ "$pin_patch" -le "${PYTHON_VERSION##*.}" ] ||
+  die "setup-python-embed.sh pins $PBS_PINNED_VERSION; .python-version is $PYTHON_VERSION. The Linux runtime must be the same minor at the same or a lower patch."
+PBS_NAME="cpython-$PBS_PINNED_VERSION+$PBS_RELEASE-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
 PBS_URL="https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_RELEASE/$(printf %s "$PBS_NAME" | sed 's/+/%2B/')"
 
 PIP_VERSION="26.2.1"
@@ -40,8 +45,8 @@ installed_version() {
   "$PY" -B -S -c "import sys; print('%d.%d.%d' % sys.version_info[:3])" 2>/dev/null || true
 }
 
-echo "Setting up Python $PYTHON_VERSION (python-build-standalone $PBS_RELEASE)..."
-if [ "$(installed_version)" != "$PYTHON_VERSION" ]; then
+echo "Setting up Python $PBS_PINNED_VERSION (python-build-standalone $PBS_RELEASE; .python-version is $PYTHON_VERSION)..."
+if [ "$(installed_version)" != "$PBS_PINNED_VERSION" ]; then
   archive="$(fetch_verified "$PBS_URL" "$PBS_SHA256" "$PBS_NAME")"
   rm -rf "$DEST" "$DEST.tmp"
   mkdir -p "$DEST.tmp"
@@ -59,7 +64,7 @@ fi
 # links (OpenSSL, SQLite, libffi, Tcl/Tk, ...). The full archive of the same
 # build does: its licenses/ directory and PYTHON.json (which names each
 # linked library and its licence) ship in the runtime as licenses/.
-PBS_FULL_NAME="cpython-$PYTHON_VERSION+$PBS_RELEASE-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst"
+PBS_FULL_NAME="cpython-$PBS_PINNED_VERSION+$PBS_RELEASE-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst"
 PBS_FULL_SHA256="4a4d145c228b59c4e5e615177ea25f07b5c8d08c152f8251e7236f5d15bb6636"
 PBS_FULL_URL="https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_RELEASE/$(printf %s "$PBS_FULL_NAME" | sed 's/+/%2B/g')"
 if [ ! -f "$DEST/licenses/PYTHON.json" ]; then

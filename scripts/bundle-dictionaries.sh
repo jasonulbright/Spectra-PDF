@@ -1,14 +1,17 @@
 #!/bin/sh
-# Vendors the Hunspell spelling dictionaries into resources/dictionaries/.
-# POSIX counterpart of bundle-dictionaries.ps1: the same pinned upstream commit,
-# the same manifest (scripts/dictionaries.tsv) and the same notice gate. Every
-# file is fetched once into the download cache and verified by SHA-256 before
-# it is written. A tree that already carries every row at its pin is left as is.
+# Vendors the Hunspell spelling dictionaries into
+# resources/linux-x86_64/dictionaries/. POSIX counterpart of
+# bundle-dictionaries.ps1: the same pinned upstream commit, the same manifest
+# (scripts/dictionaries.tsv) and the same notice gate. Every file is fetched
+# once into the download cache and verified by SHA-256 before it is written. A
+# tree that already carries every row at its pin is left as is.
 #
 #   sh scripts/bundle-dictionaries.sh
 #
-# The Finnish analyser (resources/dictionaries/fi/) is written by
-# bundle-voikko.sh and is kept here.
+# The Linux bundle maps this tree, not resources/dictionaries/: the Windows
+# script writes the Finnish analyser's DLLs into the shared tree, and a Linux
+# package built from a shared checkout would ship them. The Finnish analyser
+# (dictionaries/fi/ here) is written by bundle-voikko.sh and is kept.
 
 . "$(dirname "$0")/posix-common.sh"
 require_tool curl python3
@@ -16,7 +19,7 @@ require_tool curl python3
 COMMIT="f2ff99058268502bdcf4cad25c1ca2935ad8aa7d"
 BASE="https://raw.githubusercontent.com/LibreOffice/dictionaries/$COMMIT"
 MANIFEST="$REPO_ROOT/scripts/dictionaries.tsv"
-DEST="$RESOURCES_ROOT/dictionaries"
+DEST="$LINUX_RESOURCES/dictionaries"
 
 python3 - "$MANIFEST" "$DEST" "$FETCH_CACHE/dictionaries-$COMMIT" "$BASE" <<'EOF'
 import hashlib, os, pathlib, shutil, sys, time, urllib.request

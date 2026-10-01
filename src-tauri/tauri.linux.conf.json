@@ -1,19 +1,53 @@
 {
+  "productName": "spectrapdf",
   "build": {
     "beforeBundleCommand": null
   },
   "bundle": {
+    "targets": ["deb", "rpm"],
+    "createUpdaterArtifacts": false,
+    "shortDescription": "Open-source PDF workbench",
+    "longDescription": "Open-source PDF workbench: view, edit, annotate, fill, sign, convert, compare, redact and OCR PDF documents offline.",
+    "license": "MIT",
+    "icon": [
+      "icons/32x32.png",
+      "icons/64x64.png",
+      "icons/128x128.png",
+      "icons/icon.png"
+    ],
     "resources": {
       "../resources/shell": null,
       "../resources/python": null,
       "../resources/libreoffice": null,
       "../resources/tesseract": null,
       "../resources/jbig2enc": null,
+      "../resources/dictionaries": null,
       "../resources/linux-x86_64/python": "python",
       "../resources/linux-x86_64/libreoffice": "libreoffice",
       "../resources/linux-x86_64/tesseract": "tesseract",
       "../resources/linux-x86_64/jbig2enc": "jbig2enc",
-      "../resources/linux-x86_64/voikko": "voikko"
+      "../resources/linux-x86_64/voikko": "voikko",
+      "../resources/linux-x86_64/dictionaries": "dictionaries"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["tzdata"],
+        "section": "text",
+        "desktopTemplate": "linux/spectrapdf.desktop",
+        "files": {
+          "/usr/share/metainfo/com.spectrapdf.app.metainfo.xml": "linux/com.spectrapdf.app.metainfo.xml",
+          "/usr/share/doc/spectrapdf/copyright": "../LICENSE"
+        }
+      },
+      "rpm": {
+        "depends": ["tzdata"],
+        "release": "1",
+        "desktopTemplate": "linux/spectrapdf.desktop",
+        "files": {
+          "/usr/share/metainfo/com.spectrapdf.app.metainfo.xml": "linux/com.spectrapdf.app.metainfo.xml",
+          "/usr/share/licenses/spectrapdf/LICENSE": "../LICENSE"
+        }
+      }
     }
   }
 }

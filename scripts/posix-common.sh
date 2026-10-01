@@ -2,8 +2,9 @@
 #
 # Layout: native Linux trees land in resources/linux-x86_64/<component>/ so a
 # checkout shared with a Windows host never has its Windows trees replaced.
-# Portable data trees (fonts, dictionaries, ICC) use the same paths as the
-# Windows scripts. Downloads are cached in resources/linux-x86_64/.downloads/
+# Portable data trees (fonts, ICC) use the same paths as the Windows scripts.
+# The spelling dictionaries land in resources/linux-x86_64/dictionaries/: the
+# Windows tree carries the Finnish analyser's DLLs. Downloads are cached in resources/linux-x86_64/.downloads/
 # and re-verified by SHA-256 on every run, so a second run is offline.
 # SPECTRA_RESOURCES and SPECTRA_FETCH_CACHE move the resource root and the
 # cache, for provisioning into a scratch tree.

@@ -11,9 +11,22 @@ text-mode stdout would emit CRLF into one side of that comparison.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import re
 import sys
 from pathlib import Path
+
+
+def _release_version():
+    """The sibling version module, by path: this script runs from `scripts/`
+    and from a redo's `verifier/scripts/`, and tests load it by file path, so
+    the module is never importable as a package."""
+    path = Path(__file__).resolve().with_name("release_version.py")
+    spec = importlib.util.spec_from_file_location("release_version", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 FOOTER = "Full changelog: CHANGELOG.md"
 
@@ -42,9 +55,12 @@ RELEASED_LINE = re.compile(r"^\*Released .*\*$")
 def extract(changelog: str, version: str) -> str:
     """The notes for `version`, footer appended.
 
-    Raises ValueError when the section is missing, empty, carries a banned
-    term, or carries a `### Remaining` heading (private-repo only).
+    Raises ValueError when `version` is not a release version, or the section
+    is missing, empty, carries a banned term, or carries a `### Remaining`
+    heading (private-repo only).
     """
+    if not _release_version().is_release_version(version):
+        raise ValueError(f"'{version}' is neither a YYYY.MDD.N nor a 1.x.y release version")
     lines = changelog.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     heading = f"## {version}"
     try:
@@ -83,7 +99,7 @@ def extract(changelog: str, version: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("version", help="version without a leading `v`, e.g. 1.2.0")
+    parser.add_argument("version", help="version without a leading `v`, e.g. 2026.1004.151")
     parser.add_argument(
         "--changelog",
         default=str(Path(__file__).resolve().parents[1] / "CHANGELOG.md"),

@@ -24,6 +24,9 @@ TESSERACT = NATIVE / "tesseract" / BIN / f"tesseract{EXE}"
 TESSDATA = TESSERACT.parent / "tessdata" if WINDOWS else NATIVE / "tesseract" / "share" / "tessdata"
 JBIG2 = NATIVE / "jbig2enc" / BIN / f"jbig2{EXE}"
 SOFFICE = NATIVE / "libreoffice" / "program" / f"soffice{EXE}"
+#: The bundled spelling dictionaries. The Linux tree is its own copy so a
+#: checkout shared with a Windows host never ships the Windows analyser DLLs.
+DICTIONARIES = ROOT / "resources" / "dictionaries" if WINDOWS else NATIVE / "dictionaries"
 #: The Finnish analyser's native library. The Windows DLL sits beside the
 #: dictionary data; the Linux library has its own platform tree.
 VOIKKO_LIBRARY = (

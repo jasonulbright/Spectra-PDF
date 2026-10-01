@@ -74,3 +74,10 @@ src/engine/** -text
 # checkout run from WSL, or a Linux build host sharing the tree).
 
 *.sh text eol=lf
+
+# The Linux packaging inputs are read on a Linux host from the same checkout:
+# AppRun is a POSIX shell script without the .sh suffix, and the desktop entry
+# and AppStream files are copied into the packages byte for byte.
+
+src-tauri/linux/** text eol=lf
+keys/*.asc text eol=lf

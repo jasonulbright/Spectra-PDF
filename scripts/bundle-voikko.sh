@@ -1,11 +1,11 @@
 #!/bin/sh
 # Vendors the platform-neutral half of the Finnish spelling engine into
-# resources/dictionaries/fi/: the rows of scripts/voikko.tsv whose platform is
-# `all` (the voikko-fi transducer, the libvoikko.py binding and the notices).
-# POSIX counterpart of the data half of bundle-voikko.ps1, from the same pinned
-# official packages. Files are rewritten only when missing or off their pin
-# and are never pruned, so a checkout shared with a Windows host keeps its
-# DLL rows.
+# resources/linux-x86_64/dictionaries/fi/: the rows of scripts/voikko.tsv whose
+# platform is `all` (the voikko-fi transducer, the libvoikko.py binding and the
+# notices). POSIX counterpart of the data half of bundle-voikko.ps1, from the
+# same pinned official packages. Files are rewritten only when missing or off
+# their pin; a file no `all` row names is removed, so the Linux tree never
+# carries a Windows DLL row.
 #
 # The native half writes the `linux` rows: the pinned libvoikko 4.3.3 artifact
 # published by the fork's release, unpacked as published into
@@ -29,7 +29,7 @@ NATIVE_URL="https://github.com/jasonulbright/corevoikko/releases/download/spectr
 NATIVE_SHA256="d48b0633fe14cec57dadfc8ff9b4c3e3a0e03259ccacba6d344111153bf55388"
 NATIVE_SIZE="1960318"
 MANIFEST="$REPO_ROOT/scripts/voikko.tsv"
-DEST="$RESOURCES_ROOT/dictionaries/fi"
+DEST="$LINUX_RESOURCES/dictionaries/fi"
 NATIVE_DEST="$LINUX_RESOURCES/voikko"
 
 work="$LINUX_RESOURCES/.voikko-work"
@@ -95,7 +95,17 @@ for file, pin in rows:
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(src, target)
     written += 1
-print(f"Done. Finnish dictionary data: {len(rows)} rows verified, {written} written in {dest}")
+named = {pathlib.PurePosixPath(file) for file, _pin in rows}
+pruned = 0
+for path in sorted(dest.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+    if path.is_file() or path.is_symlink():
+        if pathlib.PurePosixPath(path.relative_to(dest).as_posix()) not in named:
+            path.unlink()
+            pruned += 1
+    elif path.is_dir() and not any(path.iterdir()):
+        path.rmdir()
+print(f"Done. Finnish dictionary data: {len(rows)} rows verified, {written} written, "
+      f"{pruned} removed in {dest}")
 EOF
 rm -rf "$work"
 

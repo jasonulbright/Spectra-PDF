@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Spectra PDF
+GenericName=PDF Editor
+Comment=View, edit, annotate, sign and convert PDF documents
+Exec=spectrapdf %F
+Icon=spectrapdf
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/pdf;
+Keywords=PDF;Document;Edit;Annotate;Sign;OCR;
+StartupNotify=true
+StartupWMClass=spectrapdf

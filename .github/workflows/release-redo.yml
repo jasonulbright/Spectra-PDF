@@ -5,12 +5,14 @@ name: Release (redo)
 # could never reach the point of producing installers.
 #
 # THE INVARIANT: the product bytes come from the TAG. This workflow checks the
-# tag out in full and overlays exactly ONE file from main --
-# scripts/bundle-libreoffice.ps1 -- which downloads a vendor archive whose
-# SHA-256 is pinned inside it. Nothing that ends up in an installer is taken
-# from main; the overlay can only change WHICH HOST is asked for bytes that are
-# checksum-verified either way. Do not widen the overlay: any other file from
-# main would publish, under the tag's version, code the tag does not contain.
+# tag out in full and each build job overlays exactly ONE file from main: its
+# platform's LibreOffice download script (scripts/bundle-libreoffice.ps1 for
+# Windows, scripts/bundle-libreoffice.sh for Linux), which downloads vendor
+# archives whose SHA-256 values are pinned inside it. Nothing that ends up in a
+# package is taken from main; the overlay can only change WHICH HOST is asked
+# for bytes that are checksum-verified either way. Do not widen the overlay:
+# any other file from main would publish, under the tag's version, code the
+# tag does not contain.
 #
 # VERIFIER TOOLING is the second, separate source: the gates that READ the
 # build (the engine payload check, the renderer harness scan, the draft
@@ -33,15 +35,22 @@ name: Release (redo)
 # tests/test_ci_capability_setup.py runs the selection against the last
 # released tags and the legacy verifier against their real trees.
 #
-# The build/sign/publish steps below are a copy of release.yml's `release` job.
-# They are kept in step with it by hand; a change to that job that matters to a
-# republish belongs here too.
+# Two platform regimes, also chosen from the TAG's tree: a tag whose
+# .github/release-platforms.txt lists linux rebuilds the Linux packages first
+# (the `linux` and `linux-smoke` jobs, copies of release.yml's) and the draft
+# verifier holds the draft to the Linux assets; any other tag is Windows-only
+# and both Linux jobs are skipped. A redo therefore rebuilds exactly the
+# platform set the tag was released with.
+#
+# The build/sign/publish steps below are copies of release.yml's `linux`,
+# `linux-smoke` and `release` jobs. They are kept in step with them by hand; a
+# change to those jobs that matters to a republish belongs here too.
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to rebuild and publish (e.g. v1.1.15)"
+        description: "Existing tag to rebuild and publish (e.g. v2026.1004.151)"
         required: true
         type: string
 
@@ -56,8 +65,167 @@ env:
   SPECTRAPDF_SIGN_SUBJECT_CN: Jason Ulbright
 
 jobs:
+  regime:
+    name: Select the platform regime from the tag's tree
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      linux: ${{ steps.platforms.outputs.linux }}
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+
+      - name: Check out the verifier tooling from the workflow's revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: verifier
+          sparse-checkout: |
+            scripts
+
+      # A YYYY.MDD.N tag or a 1.x.y tag of the history.
+      - name: Tag input is a release version
+        run: python3 verifier/scripts/release_version.py release-tag "$TAG"
+        env:
+          TAG: ${{ inputs.tag }}
+
+      - name: Release platforms from the tag's tree
+        id: platforms
+        run: python3 verifier/scripts/release_platforms.py --rev HEAD --github-output
+
+  linux:
+    name: Rebuild from tag (Linux)
+    needs: regime
+    if: needs.regime.outputs.linux == 'true'
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - name: Install the build packages
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates curl build-essential pkg-config file xz-utils zstd dpkg-dev python3 rpm tzdata libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Check out the tag in full
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+
+      # The Linux job's one permitted deviation from the tag (see the header).
+      - name: Overlay the vendor download tooling from main
+        run: |
+          git fetch origin main --depth=1
+          git checkout origin/main -- scripts/bundle-libreoffice.sh
+          git --no-pager diff --stat HEAD -- scripts/bundle-libreoffice.sh
+
+      - name: Check out the verifier tooling from the workflow's revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: verifier
+          sparse-checkout: |
+            scripts
+            src-tauri/tests
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: verifier/.node-version
+          check-latest: true
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: Linux-cargo-release-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Cache the pinned Linux downloads
+        uses: actions/cache@v6
+        with:
+          path: resources/linux-x86_64/.downloads
+          key: Linux-downloads-${{ hashFiles('scripts/*.sh', 'scripts/*.tsv', '.python-version', 'scripts/python-requirements-linux.txt') }}
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build, sign and smoke the Linux packages
+        run: sh scripts/linux-release-build.sh --release
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          TAURI_SIGNING_RPM_KEY: ${{ secrets.TAURI_SIGNING_RPM_KEY }}
+          TAURI_SIGNING_RPM_KEY_PASSPHRASE: ""
+
+      - name: Install the .deb on Ubuntu 22.04
+        run: sh verifier/scripts/linux-install-smoke.sh src-tauri/target/release/bundle/linux --deb
+
+      - name: Keep the Linux packages for the Windows job
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-packages
+          path: |
+            src-tauri/target/release/bundle/linux/spectrapdf_*_amd64.AppImage
+            src-tauri/target/release/bundle/linux/spectrapdf_*_amd64.AppImage.zsync
+            src-tauri/target/release/bundle/linux/spectrapdf_*_amd64.AppImage.sig
+            src-tauri/target/release/bundle/linux/spectrapdf_*_amd64.deb
+            src-tauri/target/release/bundle/linux/spectrapdf-*-1.x86_64.rpm
+          if-no-files-found: error
+          retention-days: 1
+
+  # Verifier tooling only: the install checks and the signature check run from
+  # the workflow's revision against the packages the tag built.
+  linux-smoke:
+    name: Install check (Linux)
+    needs: [regime, linux]
+    if: needs.regime.outputs.linux == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /keys/spectrapdf-rpm-signing.pub.asc
+            /scripts/linux-install-smoke.sh
+            /scripts/verify-rpm-signature.sh
+            /tests/fixtures/sample.pdf
+
+      - name: Download the Linux packages
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-packages
+          path: linux-packages
+
+      - name: Fedora 44 installs the .rpm and runs the AppImage
+        run: docker run --rm -v "$PWD:/w" -w /w fedora:44 sh scripts/linux-install-smoke.sh linux-packages --rpm --appimage
+
+      - name: Ubuntu 26.04 refuses the AppImage without WebKitGTK, then installs the .deb
+        run: docker run --rm -v "$PWD:/w" -w /w ubuntu:26.04 sh scripts/linux-install-smoke.sh linux-packages --expect-missing-webkit --deb --appimage
+
   release:
     name: Rebuild & publish from tag (Windows)
+    needs: [regime, linux, linux-smoke]
+    if: >-
+      !cancelled() && needs.regime.result == 'success' &&
+      (needs.regime.outputs.linux != 'true' || needs.linux-smoke.result == 'success')
     runs-on: windows-latest
     # Gates the OIDC federated credential: the app registration trusts this
     # repository only through this environment.
@@ -373,11 +541,48 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "failed to upload $($file.Name)" }
           }
 
+      - name: Download the Linux packages
+        if: needs.regime.outputs.linux == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-packages
+          path: src-tauri/target/release/bundle/linux
+
+      - name: Upload the Linux packages to the draft
+        if: needs.regime.outputs.linux == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
+        run: |
+          . ./verifier/scripts/linux-release-assets.ps1
+          $files = Get-LinuxReleaseAssets -Directory "src-tauri/target/release/bundle/linux" -Version ("${{ inputs.tag }}" -creplace '^v','')
+          $repo = "${{ github.repository }}"
+          $assets = @(gh api "repos/$repo/releases/$env:RELEASE_ID/assets?per_page=100" | ConvertFrom-Json)
+          foreach ($file in $files.Uploaded) {
+            foreach ($stale in @($assets | Where-Object name -ceq $file.Name)) {
+              gh api --method DELETE "repos/$repo/releases/assets/$($stale.id)"
+              if ($LASTEXITCODE -ne 0) { throw "failed to replace $($file.Name)" }
+            }
+            $name = [uri]::EscapeDataString($file.Name)
+            gh api --method POST -H "Content-Type: application/octet-stream" "https://uploads.github.com/repos/$repo/releases/$env:RELEASE_ID/assets?name=$name" --input $file.FullName > $null
+            if ($LASTEXITCODE -ne 0) { throw "failed to upload $($file.Name)" }
+          }
+
+      - name: Upload latest.json with the Linux updater entry
+        if: needs.regime.outputs.linux == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
+        run: pwsh -NoProfile -File verifier/scripts/add-linux-updater-entry.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ inputs.tag }}" -LinuxDir src-tauri/target/release/bundle/linux
+
       - name: Upload SHA-256 checksums to the draft
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
+          LINUX_DIR: ${{ needs.regime.outputs.linux == 'true' && 'src-tauri/target/release/bundle/linux' || '' }}
         run: |
           $bundle = "src-tauri/target/release/bundle/nsis"
           $installers = @(Get-ChildItem $bundle -Filter "*-setup.exe" -ErrorAction Stop)
@@ -385,6 +590,10 @@ jobs:
           $portable = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -ErrorAction Stop)
           if ($portable.Count -ne 1) { throw "expected one portable zip to checksum, found $($portable.Count)" }
           $files = @($installers) + @($portable)
+          if ($env:LINUX_DIR) {
+            . ./verifier/scripts/linux-release-assets.ps1
+            $files += @((Get-LinuxReleaseAssets -Directory $env:LINUX_DIR -Version ("${{ inputs.tag }}" -creplace '^v','')).Checksummed)
+          }
           # The name column is the name GitHub serves the asset under, not the
           # build directory's: this file is verified with `sha256sum -c` beside
           # downloaded files, and GitHub rewrites a space in an uploaded asset
@@ -415,7 +624,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
-        run: pwsh -NoProfile -File verifier/scripts/verify-release-draft.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ inputs.tag }}" ${{ steps.signing-regime.outputs.signed == 'true' && '-ExpectSigned' || '' }}
+        run: pwsh -NoProfile -File verifier/scripts/verify-release-draft.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ inputs.tag }}" ${{ steps.signing-regime.outputs.signed == 'true' && '-ExpectSigned' || '' }} ${{ needs.regime.outputs.linux == 'true' && '-LinuxDir src-tauri/target/release/bundle/linux' || '' }}
 
       # The ONLY step that makes anything public. Must stay last.
       - name: Publish the release

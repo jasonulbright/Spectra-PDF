@@ -185,7 +185,15 @@ def test_the_redo_publisher_takes_product_bytes_from_the_tag() -> None:
         for line in text.splitlines()
         if "git checkout origin/main --" in line
     ]
-    assert overlays == ["git checkout origin/main -- scripts/bundle-libreoffice.ps1"]
+    # One overlay per build job, each its own platform's download script.
+    assert overlays == [
+        "git checkout origin/main -- scripts/bundle-libreoffice.sh",
+        "git checkout origin/main -- scripts/bundle-libreoffice.ps1",
+    ]
+    for job, script in (("linux", "bundle-libreoffice.sh"), ("release", "bundle-libreoffice.ps1")):
+        job_text = "\n".join(t for _n, t in _job_steps("release-redo.yml", job))
+        assert job_text.count("git checkout origin/main --") == 1, job
+        assert f"git checkout origin/main -- scripts/{script}" in job_text, job
     assert "permissions:\n  contents: write" in text
     # The publish steps address the dispatched tag, never a ref the run is on.
     assert "github.ref_name" not in text
@@ -359,7 +367,8 @@ def test_the_draft_verifier_hashes_the_bytes_github_holds() -> None:
     assert download < hashed
     assert "uploaded bytes differ from the built file" in text[hashed:]
     assert "SHA256SUMS.txt is wrong for" in text[hashed:]
-    assert "latest.json signature is not the uploaded installer's .sig" in text[hashed:]
+    assert "latest.json signature is not the $($want.artifact)'s .sig" in text[hashed:]
+    assert 'artifact = "uploaded installer"' in text[hashed:]
     # Never a PowerShell redirection of a native command: it re-encodes bytes.
     assert re.search(r"gh api[^\n]*>\s*\$", text) is None
 
@@ -1236,34 +1245,46 @@ def _github_asset_name(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", ".", name).strip(".")
 
 
-def _draft_fixture(root: Path) -> tuple[list[str], Path]:
+def _draft_fixture(
+    root: Path, version: str = "1.2.3", linux: bool = False
+) -> tuple[list[str], Path]:
     """A built release beside the 'downloaded' draft GitHub would serve.
 
     The build's installer and portable names carry a space; GitHub serves them
     dotted, so the draft's assets, the checksum file and the downloaded files
-    all use the dotted names, as the real drafts do.
+    all use the dotted names, as the real drafts do. With `linux`, the build
+    also holds the five Linux files, the draft the four Linux uploads, and the
+    manifest the `linux-x86_64` entry the release workflow's own script adds;
+    the verifier is then run with -LinuxDir.
     """
     bundle = root / "nsis"
     portable = root / "portable"
     downloaded = root / "downloaded"
-    for d in (bundle, portable, downloaded):
+    linux_dir = root / "linux"
+    for d in (bundle, portable, downloaded) + ((linux_dir,) if linux else ()):
         d.mkdir()
-    installer = "Spectra PDF_1.2.3_x64-setup.exe"
+    installer = f"Spectra PDF_{version}_x64-setup.exe"
+    portable_zip = f"Spectra PDF_{version}_x64-portable.zip"
     files = {
         bundle / installer: b"MZ" + bytes(range(256)) * 4,
         bundle / f"{installer}.sig": b"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZw==\n",
-        portable / "Spectra PDF_1.2.3_x64-portable.zip": b"PK" + bytes(range(256)),
+        portable / portable_zip: b"PK" + bytes(range(256)),
     }
     for path, data in files.items():
         path.write_bytes(data)
-    checksummed = [bundle / installer, portable / "Spectra PDF_1.2.3_x64-portable.zip"]
+    checksummed = [bundle / installer, portable / portable_zip]
+    uploaded_linux: list[Path] = []
+    if linux:
+        built = _linux_build(linux_dir, version)
+        uploaded_linux = [built["appimage"], built["zsync"], built["deb"], built["rpm"]]
+        checksummed += [built["appimage"], built["deb"], built["rpm"]]
     sums = "".join(
         f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {_github_asset_name(p.name)}\n"
         for p in checksummed
     )
     (bundle / "SHA256SUMS.txt").write_bytes(sums.encode("ascii"))
     assets = []
-    for i, path in enumerate(list(files) + [bundle / "SHA256SUMS.txt"], start=100):
+    for i, path in enumerate(list(files) + [bundle / "SHA256SUMS.txt"] + uploaded_linux, start=100):
         asset_name = _github_asset_name(path.name)
         shutil.copyfile(path, downloaded / asset_name)
         assets.append({"name": asset_name, "id": i, "size": path.stat().st_size})
@@ -1276,21 +1297,64 @@ def _draft_fixture(root: Path) -> tuple[list[str], Path]:
     # The complete manifest Tauri publishes: `notes` is the release body and
     # `pub_date` is the draft's timestamp; both are shown by the update notice.
     manifest = {
-        "version": "1.2.3",
+        "version": version,
         "notes": RELEASE_BODY,
         "pub_date": "2026-09-02T15:00:00.000Z",
         "platforms": {"windows-x86_64": dict(entry), "windows-x86_64-nsis": dict(entry)},
     }
     _write_manifest(downloaded, manifest, assets)
-    _write_release(downloaded, {"draft": True, "tag_name": "v1.2.3", "body": RELEASE_BODY})
+    _write_release(downloaded, {"draft": True, "tag_name": f"v{version}", "body": RELEASE_BODY})
     _require_shell("pwsh")
     args = [
         "pwsh", "-NoProfile", "-File", str(ROOT / DRAFT_VERIFIER),
-        "-Repo", "o/r", "-Tag", "v1.2.3", "-Bundle", str(bundle), "-Portable", str(portable),
+        "-Repo", "o/r", "-Tag", f"v{version}", "-Bundle", str(bundle), "-Portable", str(portable),
         "-Offline", str(downloaded),
         "-CargoPackage", str(ROOT / "src-tauri"),
     ]
+    if linux:
+        added = _add_linux_entry(downloaded, linux_dir, version)
+        assert added.returncode == 0, added.stdout + added.stderr
+        args += ["-LinuxDir", str(linux_dir)]
     return args, downloaded
+
+
+ADD_LINUX_ENTRY = "scripts/add-linux-updater-entry.ps1"
+LINUX_ASSETS = "scripts/linux-release-assets.ps1"
+APPIMAGE_SIGNATURE = "dW50cnVzdGVkIGNvbW1lbnQ6IGFwcGltYWdl"
+
+
+def _linux_build(directory: Path, version: str) -> dict[str, Path]:
+    """The five files scripts/linux-release-build.sh writes, by their names."""
+    names = {
+        "appimage": f"spectrapdf_{version}_amd64.AppImage",
+        "zsync": f"spectrapdf_{version}_amd64.AppImage.zsync",
+        "sig": f"spectrapdf_{version}_amd64.AppImage.sig",
+        "deb": f"spectrapdf_{version}_amd64.deb",
+        "rpm": f"spectrapdf-{version}-1.x86_64.rpm",
+    }
+    data = {
+        "appimage": b"\x7fELF" + bytes(range(256)) * 3,
+        "zsync": b"zsync: 0.6.2\nFilename: " + names["appimage"].encode() + b"\n",
+        "sig": APPIMAGE_SIGNATURE.encode() + b"\n",
+        "deb": b"!<arch>\n" + bytes(range(128)),
+        "rpm": b"\xed\xab\xee\xdb" + bytes(range(200)),
+    }
+    paths = {}
+    for key, name in names.items():
+        paths[key] = directory / name
+        paths[key].write_bytes(data[key])
+    return paths
+
+
+def _add_linux_entry(downloaded: Path, linux_dir: Path, version: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [
+            "pwsh", "-NoProfile", "-File", str(ROOT / ADD_LINUX_ENTRY),
+            "-Repo", "o/r", "-Tag", f"v{version}", "-LinuxDir", str(linux_dir),
+            "-Offline", str(downloaded),
+        ],
+        capture_output=True, text=True,
+    )
 
 
 RELEASE_BODY = (
@@ -1575,7 +1639,7 @@ def test_the_draft_verifier_refuses_a_tag_differing_only_by_case(tmp_path: Path)
     args[args.index("-Tag") + 1] = "V1.2.3"
     run = _run_verifier(args)
     assert run.returncode != 0
-    assert "-Tag must be a lowercase 'v' tag" in run.stdout + run.stderr
+    assert "-Tag must be a lowercase 'v' release tag" in run.stdout + run.stderr
     _write_release(_downloaded, {"draft": True, "tag_name": "V1.2.3", "body": RELEASE_BODY})
     args[args.index("-Tag") + 1] = "v1.2.3"
     run = _run_verifier(args)
@@ -2045,6 +2109,7 @@ def verifier_revision(tmp_path: Path):
         # the sibling travels with it wherever the script is placed.
         shutil.copyfile(ROOT / ASSET_NAME_RULE, worktree / ASSET_NAME_RULE)
         shutil.copyfile(ROOT / SIGNING_HELPERS, worktree / SIGNING_HELPERS)
+        shutil.copyfile(ROOT / LINUX_ASSETS, worktree / LINUX_ASSETS)
         args, downloaded = _draft_fixture(tmp_path)
         args[args.index("-File") + 1] = str(worktree / DRAFT_VERIFIER)
         env = {**os.environ, "CARGO_TARGET_DIR": str(ROOT / "src-tauri" / "target")}
@@ -3162,6 +3227,7 @@ RETRY_ROUTED_PS = (
     "setup-test-softhsm.ps1",
     "install-signing-tools.ps1",
     "verify-release-draft.ps1",
+    "add-linux-updater-entry.ps1",
     "install-ghostscript-test-tool.ps1",
 )
 RETRY_ROUTED_PY = (
@@ -3448,8 +3514,22 @@ def test_fresh_scheduler_and_security_audits_remain_hosted() -> None:
 
 def test_local_supplement_does_not_repeat_the_functional_battery() -> None:
     script = (ROOT / "scripts/ci-parity-gates.sh").read_text(encoding="utf-8")
-    for command in ("cargo test", "pytest", "npm test", "vite build", "npm run typecheck", "cargo audit", "npm audit"):
+    for command in ("cargo test", "pytest", "npm test", "vite build", "npm run typecheck"):
         assert command not in script
+
+
+def test_local_supplement_mirrors_the_hosted_dependency_audits() -> None:
+    """The dependency audits are not part of the functional battery: an
+    advisory against a pinned dependency is caught before the push, with the
+    flags and directories the hosted audit job uses."""
+    script = (ROOT / "scripts/ci-parity-gates.sh").read_text(encoding="utf-8")
+    audit = "\n".join(text for _, text in _job_steps("ci.yml", "audit"))
+    for hosted, local in (
+        ("npm audit --production --audit-level=high", "gate npm-audit npm audit --production --audit-level=high"),
+        ("cd src-tauri && cargo audit", "gate cargo-audit sh -c 'cd src-tauri && cargo audit'"),
+    ):
+        assert hosted in audit
+        assert local in script
 
 
 def test_release_smokes_its_vendored_engine_before_publication() -> None:
@@ -3570,3 +3650,531 @@ def test_libreoffice_ships_only_the_pinned_msi_and_checks_the_extraction() -> No
     assert roots.lstrip("$roots = ").startswith("if ($UseLocalInstall)"), roots
     for path in (ROOT / ".github" / "workflows").glob("*.yml"):
         assert "UseLocalInstall" not in path.read_text(encoding="utf-8"), path.name
+
+
+
+# ---------------------------------------------------------------------------
+# Release version format YYYY.MDD.N and the Linux release
+# ---------------------------------------------------------------------------
+
+RELEASE_VERSION = "scripts/release_version.py"
+RELEASE_PLATFORMS = "scripts/release_platforms.py"
+PLATFORMS_FILE = ".github/release-platforms.txt"
+CI_PARITY = "scripts/ci-parity-gates.sh"
+CI_PARITY_LINUX = "scripts/ci-parity-linux.sh"
+LINUX_SMOKE = "scripts/linux-install-smoke.sh"
+LINUX_BUNDLE_DIR = "src-tauri/target/release/bundle/linux"
+
+
+def _script_module(relative: str, name: str):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, ROOT / relative)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def _versions():
+    return _script_module(RELEASE_VERSION, "release_version")
+
+
+@pytest.mark.parametrize(
+    "version",
+    ("2026.930.150", "2026.1004.151", "2027.101.152", "2028.229.153", "2026.1231.65535"),
+)
+def test_a_date_version_is_accepted(version: str) -> None:
+    assert _versions().parse_date_version(version).text == version
+
+
+@pytest.mark.parametrize(
+    "version,reason",
+    (
+        ("2026.0930.150", "leading zero"),
+        ("2026.930.0150", "leading zero"),
+        ("2026.930.65536", "not below 65536"),
+        ("2026.1301.150", "month 13"),
+        ("2026.931.150", "day 31 does not exist"),
+        ("2026.229.150", "day 29 does not exist"),
+        ("2026.1000.150", "day 0 does not exist"),
+        ("2025.1231.150", "predates the format"),
+        ("2026.930.149", "below the first date release"),
+        ("2026.93.150", "is not YYYY.MDD.N"),
+        ("2026.12310.150", "is not YYYY.MDD.N"),
+        ("1.2.8", "is not YYYY.MDD.N"),
+        ("v2026.930.150", "is not YYYY.MDD.N"),
+    ),
+)
+def test_a_malformed_date_version_is_refused(version: str, reason: str) -> None:
+    with pytest.raises(ValueError) as excinfo:
+        _versions().parse_date_version(version)
+    assert reason in str(excinfo.value)
+
+
+def test_date_versions_order_after_the_legacy_versions() -> None:
+    """The updater compares semver fields numerically: every date version is
+    newer than every 1.x.y version, and a later release than an earlier one.
+    The Rust twin of this test parses with the updater's own deserializer."""
+    module = _versions()
+    released = ["1.1.20", "1.2.8", "2026.930.150", "2026.1004.151", "2026.1004.152",
+                "2026.1231.160", "2027.101.161"]
+    shuffled = [released[i] for i in (4, 0, 6, 2, 5, 1, 3)]
+    assert sorted(shuffled, key=module.order_key) == released
+    # A string sort would put 2026.930 after 2026.1004.
+    assert sorted(released[2:4]) != released[2:4]
+
+
+RELEASE_DAY = __import__("datetime").date(2026, 10, 4)
+
+
+def test_the_next_release_number_never_skips_or_repeats() -> None:
+    module = _versions()
+    legacy = ["v1.2.7", "v1.2.8", "vendor-cache"]
+    assert module.check_next("2026.1004.150", legacy, RELEASE_DAY).number == 150
+    with pytest.raises(ValueError, match="release number is 150, not 151"):
+        module.check_next("2026.1004.151", legacy, RELEASE_DAY)
+    tags = legacy + ["v2026.1004.150"]
+    assert module.check_next("2026.1004.151", tags).number == 151
+    assert module.check_next("2026.1011.151", tags).number == 151
+    for skipped in ("2026.1011.152", "2026.1011.150"):
+        with pytest.raises(ValueError, match="never skip or repeat"):
+            module.check_next(skipped, tags)
+    with pytest.raises(ValueError, match="earlier than v2026.1004.150"):
+        module.check_next("2026.1003.151", tags)
+    # A re-cut of an unpublished tag is checked against the tags before it.
+    assert module.check_tag("v2026.1004.150", tags, RELEASE_DAY).number == 150
+
+
+@pytest.mark.parametrize(
+    "version,message",
+    (
+        ("2026.929.150", "before the format ruling (2026-09-30)"),
+        ("2026.1006.150", "later than 2026-10-05"),
+        ("2027.1004.150", "later than 2026-10-05"),
+    ),
+)
+def test_the_first_date_release_refuses_a_mistyped_date(version: str, message: str) -> None:
+    module = _versions()
+    legacy = ["v1.2.8"]
+    for accepted in ("2026.930.150", "2026.1004.150", "2026.1005.150"):
+        assert module.check_next(accepted, legacy, RELEASE_DAY).number == 150
+    with pytest.raises(ValueError, match=re.escape(message)):
+        module.check_next(version, legacy, RELEASE_DAY)
+    with pytest.raises(ValueError, match=re.escape(message)):
+        module.check_tag("v" + version, legacy, RELEASE_DAY)
+
+
+def test_the_surfaces_rule_allows_an_unbumped_tree_and_refuses_a_new_legacy_version() -> None:
+    module = _versions()
+    tags = ["v1.2.7", "v1.2.8"]
+    assert "already tagged" in module.check_surfaces("1.2.8", tags)
+    with pytest.raises(ValueError, match="takes YYYY.MDD.N, not a 1.x.y version"):
+        module.check_surfaces("1.2.9", tags)
+    assert "next release" in module.check_surfaces("2026.1004.150", tags, RELEASE_DAY)
+
+
+def test_the_tag_rule_reads_ls_remote_output(tmp_path: Path) -> None:
+    listing = tmp_path / "tags.txt"
+    listing.write_text(
+        "0123\trefs/tags/v1.2.8\n4567\trefs/tags/v2026.1004.150\n89ab\trefs/tags/vendor-cache\n",
+        encoding="utf-8",
+    )
+    script = str(ROOT / RELEASE_VERSION)
+    good = subprocess.run([sys.executable, script, "tag", "v2026.1011.151", "--existing-file", str(listing)],
+                          capture_output=True, text=True)
+    assert good.returncode == 0, good.stderr
+    bad = subprocess.run([sys.executable, script, "tag", "v2026.1011.152", "--existing-file", str(listing)],
+                         capture_output=True, text=True)
+    assert bad.returncode == 1 and "the release number is 151, not 152" in bad.stderr
+    legacy = subprocess.run([sys.executable, script, "release-tag", "v1.1.15"], capture_output=True, text=True)
+    assert legacy.returncode == 0, legacy.stderr
+    padded = subprocess.run([sys.executable, script, "release-tag", "v2026.0930.150"], capture_output=True, text=True)
+    assert padded.returncode == 1
+
+
+CHANGELOG_DATE_TOP = (
+    "# Changelog\n\n## 2026.1011.151\n\n*Released 2026-10-11*\n\nVarious bug fixes.\n\n"
+    "## 2026.1004.150\n\n*Released 2026-10-04*\n\nVarious bug fixes.\n\n"
+    "## 1.2.8\n\n*Released 2026-09-29*\n\nVarious bug fixes.\n\n"
+    "## 1.0.0 — A new name: Spectra PDF\n\nold\n\n## 2.8.5 — Older history\n\nold\n"
+)
+
+
+def test_the_changelog_contract_accepts_the_real_changelog_and_date_headings() -> None:
+    module = _versions()
+    real = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    version = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["version"]
+    assert module.check_changelog(real, version) == len(re.findall(r"^## ", real, re.M))
+    assert module.check_changelog(CHANGELOG_DATE_TOP, "2026.1011.151") == 5
+
+
+@pytest.mark.parametrize(
+    "mutate,message",
+    (
+        (lambda t: t.replace("## 2026.1004.150", "## 2026.1004.152"), "is not below '## 2026.1011.151'"),
+        (lambda t: t.replace("*Released 2026-10-04*", "*Released 2026-10-03*"), "is not the date of 2026.1004.150"),
+        (lambda t: t + "\n## 2026.930.149\n\nlate\n", "below the first date release"),
+        (lambda t: t + "\n## 2026.1018.152\n\nlate\n", "sits below a 1.x.y heading"),
+        (lambda t: t.replace("## 2026.1004.150", "## 2026.1004.150 — Title"), "is not a version heading"),
+        (lambda t: t.replace("## 1.2.8", "## Unreleased"), "is not a version heading"),
+        (lambda t: t.replace("## 2026.1011.151", "## 2026.1011.0151"), "leading zero"),
+    ),
+)
+def test_the_changelog_contract_refuses(mutate, message: str) -> None:
+    text = mutate(CHANGELOG_DATE_TOP)
+    version = "2026.1011.151" if "## 2026.1011.151\n" in text else "2026.1004.150"
+    with pytest.raises(ValueError) as excinfo:
+        _versions().check_changelog(text, version)
+    assert message in str(excinfo.value)
+
+
+def test_the_extractor_refuses_a_version_that_is_not_a_release_version() -> None:
+    extract = _release_notes_module().extract
+    text = "# Changelog\n\n## 2026.0930.150\n\n*Released 2026-09-30*\n\nnotes\n"
+    with pytest.raises(ValueError, match="neither a YYYY.MDD.N nor a 1.x.y"):
+        extract(text, "2026.0930.150")
+    good = text.replace("2026.0930.150", "2026.930.150")
+    assert extract(good, "2026.930.150") == "notes\n\n" + CHANGELOG_FOOTER
+
+
+def test_the_release_run_holds_the_tag_to_the_version_rule() -> None:
+    steps = dict(_job_steps("release.yml", "verify"))
+    step = steps["Tag is the next YYYY.MDD.N release"]
+    assert "git ls-remote --tags --refs origin 'v*' > \"$RUNNER_TEMP/remote-tags.txt\"" in step
+    assert 'python scripts/release_version.py tag "$TAG" --existing-file "$RUNNER_TEMP/remote-tags.txt"' in step
+    assert "TAG: ${{ github.ref_name }}" in step
+    names = [n for n, _ in _job_steps("release.yml", "verify")]
+    assert names.index("Tag is the next YYYY.MDD.N release") < names.index("Tag matches every version surface")
+
+
+def test_the_version_rule_is_mirrored_locally() -> None:
+    script = (ROOT / CI_PARITY).read_text(encoding="utf-8")
+    consistency = script[script.index("gate version-consistency"):script.index("gate changelog")]
+    assert "release_version.check_surfaces(pkg, tags)" in consistency
+    assert '["git", "tag", "--list", "v*"]' in consistency
+    changelog = script[script.index("gate changelog"):]
+    assert "release_version.check_changelog(" in changelog[:changelog.index("\nPY\n")]
+
+
+def test_the_redo_accepts_every_released_tag_form() -> None:
+    steps = dict(_job_steps("release-redo.yml", "regime"))
+    assert 'python3 verifier/scripts/release_version.py release-tag "$TAG"' in steps["Tag input is a release version"]
+    module = _versions()
+    tags = [t for t in _git("tag", "--list", "v*").split() if re.fullmatch(r"v\d+\.\d+\.\d+", t)]
+    assert tags
+    for tag in tags:
+        assert module.check_release_tag(tag) == tag[1:]
+
+
+def test_the_platform_switch_is_well_formed() -> None:
+    module = _script_module(RELEASE_PLATFORMS, "release_platforms")
+    assert module.PLATFORMS_FILE == PLATFORMS_FILE
+    assert "windows" in module.read(ROOT)
+    for text in ("windows\nlinux\n", "windows\r\nlinux\r\n", "linux\nwindows\n"):
+        assert module.parse(text) == {"windows", "linux"}
+    for text, message in (
+        ("linux\n", "'windows' is not listed"),
+        ("windows\nmacos\n", "unknown platform 'macos'"),
+        ("windows\nwindows\n", "listed twice"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            module.parse(text)
+
+
+def test_a_tree_without_the_platform_switch_is_windows_only(tmp_path: Path) -> None:
+    module = _script_module(RELEASE_PLATFORMS, "release_platforms")
+    assert module.read(tmp_path) == {"windows"}
+    # The released tags predate the switch, so a redo of any of them is
+    # Windows-only.
+    newest = [t for t in _git("tag", "--sort=-v:refname").split() if re.fullmatch(r"v\d+\.\d+\.\d+", t)][0]
+    if not _tag_has(newest, PLATFORMS_FILE):
+        assert module.read(ROOT, rev=newest) == {"windows"}
+
+
+def test_the_platform_switch_reads_a_revision_and_fails_on_a_git_error(tmp_path: Path) -> None:
+    """Only a file absent from an existing commit means Windows-only; a
+    revision git cannot resolve exits 1 by name instead of defaulting."""
+    module = _script_module(RELEASE_PLATFORMS, "release_platforms")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    identity = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+    _git("init", "-q", cwd=repo)
+    (repo / "README").write_text("x\n", encoding="utf-8")
+    _git("add", "README", cwd=repo)
+    _git(*identity, "commit", "-q", "-m", "a", cwd=repo)
+    (repo / ".github").mkdir()
+    (repo / PLATFORMS_FILE).write_text("windows\nlinux\n", encoding="utf-8")
+    _git("add", PLATFORMS_FILE, cwd=repo)
+    _git(*identity, "commit", "-q", "-m", "b", cwd=repo)
+    assert module.read(repo, rev="HEAD~1") == {"windows"}
+    assert module.read(repo, rev="HEAD") == {"windows", "linux"}
+    with pytest.raises(ValueError, match="git cannot resolve the revision 'v9.9.9'"):
+        module.read(repo, rev="v9.9.9")
+    run = subprocess.run(
+        [sys.executable, str(ROOT / RELEASE_PLATFORMS), "--rev", "v9.9.9"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert run.returncode == 1 and "git cannot resolve the revision 'v9.9.9'" in run.stderr
+    assert run.stdout == ""
+
+
+@pytest.mark.parametrize("workflow,switch", (("release.yml", "verify"), ("release-redo.yml", "regime")))
+def test_the_linux_jobs_run_only_when_the_tag_lists_linux(workflow: str, switch: str) -> None:
+    flag = f"needs.{switch}.outputs.linux == 'true'"
+    header = _job_header(workflow, switch)
+    assert "linux: ${{ steps.platforms.outputs.linux }}" in header
+    platforms = dict(_job_steps(workflow, switch))["Release platforms from the tag's tree"]
+    assert "release_platforms.py" in platforms and "--github-output" in platforms
+    for job in ("linux", "linux-smoke"):
+        assert f"if: {flag}" in _job_header(workflow, job), (workflow, job)
+    windows = _job_header(workflow, "release")
+    assert f"needs: [{switch}, linux, linux-smoke]" in windows
+    assert "!cancelled()" in windows
+    assert f"needs.{switch}.result == 'success'" in windows
+    assert f"(needs.{switch}.outputs.linux != 'true' || needs.linux-smoke.result == 'success')" in windows
+    # Every Linux step of the Windows job is behind the same switch.
+    for name, text in _job_steps(workflow, "release"):
+        if "Linux" in name:
+            assert f"if: {flag}" in text, (workflow, name)
+    verify = dict(_job_steps(workflow, "release"))[RELEASE_VERIFY_DRAFT_STEP]
+    assert f"${{{{ {flag} && '-LinuxDir {LINUX_BUNDLE_DIR}' || '' }}}}" in verify
+
+
+@pytest.mark.parametrize("workflow", ("release.yml", "release-redo.yml"))
+def test_the_linux_build_job_is_the_floor_container_with_both_keys(workflow: str) -> None:
+    header = _job_header(workflow, "linux")
+    assert "runs-on: ubuntu-24.04" in header
+    assert "container: ubuntu:22.04" in header
+    assert "timeout-minutes:" in header
+    steps = dict(_job_steps(workflow, "linux"))
+    build = steps["Build, sign and smoke the Linux packages"]
+    assert "run: sh scripts/linux-release-build.sh --release" in build
+    assert "TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" in build
+    assert "TAURI_SIGNING_RPM_KEY: ${{ secrets.TAURI_SIGNING_RPM_KEY }}" in build
+    assert 'TAURI_SIGNING_RPM_KEY_PASSPHRASE: ""' in build
+    keep = steps["Keep the Linux packages for the Windows job"]
+    assert "retention-days: 1" in keep and "if-no-files-found: error" in keep
+    install = steps["Install the build packages"]
+    assert "libwebkit2gtk-4.1-dev" in install and "rpm" in install and "tzdata" in install
+    assert "=" not in install.split("apt-get install", 1)[1].split("\n", 1)[0], "no version pins"
+
+
+@pytest.mark.parametrize("workflow", ("release.yml", "release-redo.yml"))
+def test_the_install_checks_cover_fedora_and_ubuntu(workflow: str) -> None:
+    steps = _job_steps(workflow, "linux-smoke")
+    runs = [t for _n, t in steps if "docker run" in t]
+    assert len(runs) == 2
+    fedora, ubuntu = runs
+    assert f"fedora:44 sh {LINUX_SMOKE} linux-packages --rpm --appimage" in fedora
+    assert f"ubuntu:26.04 sh {LINUX_SMOKE} linux-packages --expect-missing-webkit --deb --appimage" in ubuntu
+    checkout = steps[0][1]
+    assert "sparse-checkout-cone-mode: false" in checkout
+    for path in ("/keys/spectrapdf-rpm-signing.pub.asc", f"/{LINUX_SMOKE}",
+                 "/scripts/verify-rpm-signature.sh", "/tests/fixtures/sample.pdf"):
+        assert path in checkout, path
+    smoke = (ROOT / LINUX_SMOKE).read_text(encoding="utf-8")
+    rpm = smoke[smoke.index("    --rpm)"):]
+    assert rpm.index("sh scripts/verify-rpm-signature.sh") < rpm.index("dnf -y install")
+
+
+def test_the_linux_jobs_precede_any_windows_minutes() -> None:
+    assert _workflow_jobs("release.yml") == ["verify", "linux", "linux-smoke", "release"]
+    assert _workflow_jobs("release-redo.yml") == ["regime", "linux", "linux-smoke", "release"]
+
+
+def _linux_assets(directory: Path, version: str) -> subprocess.CompletedProcess:
+    script = "\n".join([
+        f". '{ROOT / LINUX_ASSETS}'",
+        f"$a = Get-LinuxReleaseAssets -Directory '{directory}' -Version '{version}'",
+        "'uploaded=' + (($a.Uploaded | ForEach-Object Name) -join ',')",
+        "'checksummed=' + (($a.Checksummed | ForEach-Object Name) -join ',')",
+    ])
+    return subprocess.run(["pwsh", "-NoProfile", "-Command", script], capture_output=True, text=True)
+
+
+def test_the_linux_release_uploads_four_files_and_never_the_sig(tmp_path: Path) -> None:
+    _require_shell("pwsh")
+    version = "2026.1004.151"
+    _linux_build(tmp_path, version)
+    run = _linux_assets(tmp_path, version)
+    assert run.returncode == 0, run.stdout + run.stderr
+    lines = run.stdout.splitlines()
+    assert (f"uploaded=spectrapdf_{version}_amd64.AppImage,spectrapdf_{version}_amd64.AppImage.zsync,"
+            f"spectrapdf_{version}_amd64.deb,spectrapdf-{version}-1.x86_64.rpm") in lines
+    assert (f"checksummed=spectrapdf_{version}_amd64.AppImage,spectrapdf_{version}_amd64.deb,"
+            f"spectrapdf-{version}-1.x86_64.rpm") in lines
+
+
+@pytest.mark.parametrize("change", ("missing", "extra", "other-version"))
+def test_the_linux_release_refuses_a_directory_that_is_not_this_build(tmp_path: Path, change: str) -> None:
+    _require_shell("pwsh")
+    version = "2026.1004.151"
+    built = _linux_build(tmp_path, version)
+    if change == "missing":
+        built["zsync"].unlink()
+    elif change == "extra":
+        (tmp_path / f"spectrapdf_{version}_amd64.AppImage.sig.bak").write_bytes(b"x")
+    else:
+        built["rpm"].rename(tmp_path / "spectrapdf-2026.1004.150-1.x86_64.rpm")
+    run = _linux_assets(tmp_path, version)
+    assert run.returncode != 0
+    assert _verifier_says(run, f"Linux assets in {tmp_path}")
+
+
+def test_the_linux_entry_keeps_every_other_manifest_value(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path, version="2026.1004.151", linux=True)
+    manifest = json.loads((downloaded / "latest.json").read_text(encoding="utf-8"))
+    assert manifest["pub_date"] == "2026-09-02T15:00:00.000Z"
+    assert manifest["notes"] == RELEASE_BODY
+    assert manifest["version"] == "2026.1004.151"
+    assert manifest["platforms"]["linux-x86_64"] == {
+        "signature": APPIMAGE_SIGNATURE,
+        "url": "https://api.github.com/repos/o/r/releases/assets/104",
+    }
+    assert sorted(manifest["platforms"]) == ["linux-x86_64", "windows-x86_64", "windows-x86_64-nsis"]
+    raw = (downloaded / "latest.json").read_bytes()
+    assert b"\r" not in raw and not raw.startswith(b"\xef\xbb\xbf")
+    sizes = {a["name"]: a["size"] for a in json.loads((downloaded / "assets.json").read_text(encoding="utf-8"))}
+    assert sizes["latest.json"] == len(raw)
+    # A re-run replaces the entry instead of adding a second one.
+    again = _add_linux_entry(downloaded, tmp_path / "linux", "2026.1004.151")
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert json.loads((downloaded / "latest.json").read_text(encoding="utf-8")) == manifest
+
+
+def test_the_draft_verifier_accepts_a_faithful_linux_release(tmp_path: Path) -> None:
+    args, _downloaded = _draft_fixture(tmp_path, version="2026.1004.151", linux=True)
+    run = _run_verifier(args)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "verified from downloaded bytes: 9 assets hashed, latest.json at 2026.1004.151" in run.stdout
+
+
+def test_the_draft_verifier_refuses_a_linux_release_without_its_updater_entry(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path, version="2026.1004.151", linux=True)
+    _mutate_manifest(downloaded, lambda p: p.pop("linux-x86_64"))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(
+        run, "latest.json platforms [windows-x86_64, windows-x86_64-nsis] != "
+        "[linux-x86_64, windows-x86_64, windows-x86_64-nsis]")
+
+
+def test_the_draft_verifier_refuses_an_uploaded_appimage_signature(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path, version="2026.1004.151", linux=True)
+    name = "spectrapdf_2026.1004.151_amd64.AppImage.sig"
+    shutil.copyfile(tmp_path / "linux" / name, downloaded / name)
+    assets = json.loads((downloaded / "assets.json").read_text(encoding="utf-8"))
+    assets.append({"name": name, "id": 300, "size": (downloaded / name).stat().st_size})
+    (downloaded / "assets.json").write_text(json.dumps(assets))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(run, "draft assets differ from the built set")
+
+
+def test_the_draft_verifier_refuses_a_linux_entry_naming_the_installer(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path, version="2026.1004.151", linux=True)
+    _mutate_manifest(downloaded, lambda p: p["linux-x86_64"].update(url=p["windows-x86_64"]["url"]))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(
+        run, "url mismatch (platform linux-x86_64): 'https://api.github.com/repos/o/r/releases/assets/100'")
+
+
+def test_the_draft_verifier_refuses_a_linux_entry_with_the_installer_signature(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path, version="2026.1004.151", linux=True)
+    _mutate_manifest(downloaded, lambda p: p["linux-x86_64"].update(signature=p["windows-x86_64"]["signature"]))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(run, "latest.json signature is not the built AppImage's .sig (platform linux-x86_64)")
+
+
+def test_the_draft_verifier_refuses_a_stale_linux_checksum(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path, version="2026.1004.151", linux=True)
+    deb = "spectrapdf_2026.1004.151_amd64.deb"
+    sums = downloaded / "SHA256SUMS.txt"
+    lines = sums.read_text(encoding="utf-8").splitlines()
+    index = next(i for i, line in enumerate(lines) if line.endswith("  " + deb))
+    digest = lines[index].split("  ", 1)[0]
+    lines[index] = ("0" if digest[0] != "0" else "1") + digest[1:] + "  " + deb
+    body = ("\n".join(lines) + "\n").encode("ascii")
+    sums.write_bytes(body)
+    (tmp_path / "nsis" / "SHA256SUMS.txt").write_bytes(body)
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(run, f"SHA256SUMS.txt is wrong for {deb}")
+
+
+def test_the_draft_verifier_refuses_a_linux_release_whose_checksums_omit_a_package(tmp_path: Path) -> None:
+    args, downloaded = _draft_fixture(tmp_path, version="2026.1004.151", linux=True)
+    rpm = "spectrapdf-2026.1004.151-1.x86_64.rpm"
+    sums = downloaded / "SHA256SUMS.txt"
+    lines = [line for line in sums.read_text(encoding="utf-8").splitlines() if not line.endswith(rpm)]
+    body = ("\n".join(lines) + "\n").encode("ascii")
+    sums.write_bytes(body)
+    (tmp_path / "nsis" / "SHA256SUMS.txt").write_bytes(body)
+    assets = json.loads((downloaded / "assets.json").read_text(encoding="utf-8"))
+    for asset in assets:
+        if asset["name"] == "SHA256SUMS.txt":
+            asset["size"] = len(body)
+    (downloaded / "assets.json").write_text(json.dumps(assets))
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(run, "SHA256SUMS.txt covers")
+
+
+@pytest.mark.parametrize("tag", ("v2026.0930.150", "v2026.930.65536", "v2026.930", "v2026.930.150-rc1"))
+def test_the_draft_verifier_refuses_a_tag_that_is_not_a_release_version(tmp_path: Path, tag: str) -> None:
+    args, _downloaded = _draft_fixture(tmp_path)
+    args[args.index("-Tag") + 1] = tag
+    run = _run_verifier(args)
+    assert run.returncode != 0
+    assert _verifier_says(run, "-Tag must be a lowercase 'v' release tag")
+
+
+def test_the_checksum_step_adds_the_linux_packages_only_when_linux_ships() -> None:
+    for workflow in ("release.yml", "release-redo.yml"):
+        switch = "verify" if workflow == "release.yml" else "regime"
+        step = dict(_job_steps(workflow, "release"))["Upload SHA-256 checksums to the draft"]
+        assert (f"LINUX_DIR: ${{{{ needs.{switch}.outputs.linux == 'true' && "
+                f"'{LINUX_BUNDLE_DIR}' || '' }}}}") in step, workflow
+        assert "if ($env:LINUX_DIR) {" in step
+        assert ").Checksummed)" in step
+
+
+def test_the_linux_parity_gates_follow_the_switch_and_fail_without_wsl() -> None:
+    script = (ROOT / CI_PARITY).read_text(encoding="utf-8")
+    block = script[script.index('LINUX_RELEASE="$('):script.index("esac", script.index('LINUX_RELEASE="$('))]
+    assert "scripts/release_platforms.py" in block
+    enabled = block[block.index("linux=true)"):block.index("linux=false)")]
+    assert "gate python-linux-toolchain" in enabled and "check-toolchains.py python-linux" in enabled
+    assert "gate linux sh scripts/ci-parity-linux.sh" in enabled
+    assert "wsl.exe -e sh -lc" in enabled and "sh scripts/ci-parity-linux.sh" in enabled
+    # The System32 stub exists without a distribution; the gate asks for one.
+    assert enabled.index("wsl.exe -l -q") < enabled.index("wsl.exe -e sh -lc")
+    assert "exit 1" in enabled[enabled.index("else"):], "a host without WSL must fail the gate"
+    linux = (ROOT / CI_PARITY_LINUX).read_text(encoding="utf-8")
+    for step in (
+        "sh scripts/build-appimage.sh --prepare",
+        "sh scripts/build-appimage.sh --check",
+        "sh scripts/bundle-libreoffice.sh",
+        "sh scripts/bundle-tesseract.sh",
+        "sh scripts/bundle-jbig2enc.sh",
+        "sh scripts/bundle-dictionaries.sh",
+        "sh scripts/bundle-voikko.sh",
+        "cargo check --all-targets",
+    ):
+        assert f"step {step}" in linux, step
+    assert 'FLOOR="2.35"' in linux
+
+
+def test_the_readme_claims_no_linux_package_before_the_switch_lists_linux() -> None:
+    """The README is a public surface: it names the Linux packages in the
+    commit that turns the Linux release on, never before."""
+    module = _script_module(RELEASE_PLATFORMS, "release_platforms")
+    if "linux" in module.read(ROOT):
+        return
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    for claim in ("AppImage", ".deb", ".rpm", "rpm --import", "platform-Windows%20%7C%20Linux",
+                  "/etc/spectrapdf/policies.json"):
+        assert claim not in readme, claim

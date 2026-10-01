@@ -23,6 +23,35 @@ gate rust-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py ru
 gate python-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py python
 gate node-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py node
 
+# --- Release job (Linux): runs when .github/release-platforms.txt lists linux,
+#     the same switch the release workflows read from the tag's tree. The
+#     Linux Python runtime may trail .python-version by patches of the same
+#     minor until python-build-standalone publishes the matching patch.
+#     scripts/ci-parity-linux.sh mirrors the Linux build job's compile, notice
+#     gates and glibc floor; on Windows it runs in WSL, and a host without WSL
+#     fails the gate. ---
+LINUX_RELEASE="$(cd "$R" && "$R/.venv/Scripts/python.exe" scripts/release_platforms.py)"
+case "$LINUX_RELEASE" in
+  linux=true)
+    gate python-linux-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py python-linux
+    if [ "$(uname -s)" = "Linux" ]; then
+      gate linux sh scripts/ci-parity-linux.sh
+    elif command -v wsl.exe >/dev/null 2>&1 &&
+         [ -n "$(wsl.exe -l -q 2>/dev/null | tr -d '\000\r[:space:]')" ]; then
+      gate linux env MSYS_NO_PATHCONV=1 wsl.exe -e sh -lc 'cd "$(wslpath -u "$1")" && sh scripts/ci-parity-linux.sh' sh "$(cygpath -w "$R")"
+    else
+      # wsl.exe exists in System32 even with no distribution installed.
+      gate linux sh -c 'echo "no WSL distribution found (wsl.exe -l -q lists none): the Linux gates run in WSL on a Windows host"; exit 1'
+    fi
+    ;;
+  linux=false)
+    echo "linux SKIPPED (.github/release-platforms.txt lists windows only)" >> "$OUT"
+    ;;
+  *)
+    gate release-platforms "$R/.venv/Scripts/python.exe" scripts/release_platforms.py
+    ;;
+esac
+
 # --- CI audit job: npm audit and cargo audit, same flags and directories.
 #     cargo audit reads its ignore list from src-tauri/.cargo/audit.toml, so it
 #     runs from src-tauri. ---
@@ -30,9 +59,14 @@ gate npm-audit npm audit --production --audit-level=high
 gate cargo-audit sh -c 'cd src-tauri && cargo audit'
 
 # --- Release job: version consistency (tag == package.json == tauri.conf == Cargo.toml) ---
-# Not tag-aware here (no tag yet at push time); instead assert the four surfaces AGREE.
+# Not tag-aware here (no tag yet at push time); instead assert the four surfaces
+# AGREE, and that the version is either already tagged (tree not bumped since
+# that release) or the next YYYY.MDD.N release after the local tags -- the
+# release run's verify job applies the same rule to the pushed tag.
 gate version-consistency "$R/.venv/Scripts/python.exe" - <<'PY'
-import json, re, sys, pathlib
+import json, re, subprocess, sys, pathlib
+sys.path.insert(0, "scripts")
+import release_version
 root = pathlib.Path(".")
 pkg   = json.loads((root/"package.json").read_text())["version"]
 conf  = json.loads((root/"src-tauri/tauri.conf.json").read_text())["version"]
@@ -41,19 +75,25 @@ lock  = json.loads((root/"package-lock.json").read_text())["version"]
 vals = {"package.json": pkg, "tauri.conf.json": conf, "Cargo.toml": cargo, "package-lock.json": lock}
 if len(set(vals.values())) != 1:
     print("VERSION SURFACES DISAGREE:", vals); sys.exit(1)
+tags = subprocess.run(["git", "tag", "--list", "v*"], capture_output=True, text=True, check=True).stdout.split()
+try:
+    print(release_version.check_surfaces(pkg, tags))
+except ValueError as exc:
+    print(f"VERSION: {exc}"); sys.exit(1)
 print("all four surfaces at", pkg)
 PY
 
 # --- Release check: changelog has an entry for the current version + headings intact ---
 gate changelog "$R/.venv/Scripts/python.exe" - <<'PY'
-import json, re, pathlib
-root = pathlib.Path(".")
-ver = json.loads((root/"package.json").read_text())["version"]
-cl = (root/"CHANGELOG.md").read_text(encoding="utf-8")
-if f"## {ver}" not in cl:
-    print(f"CHANGELOG.md has no '## {ver}' section"); raise SystemExit(1)
-heads = re.findall(r'^## ', cl, re.M)
-print(f"changelog OK: '## {ver}' present, {len(heads)} version headings")
+import json, pathlib, sys
+sys.path.insert(0, "scripts")
+import release_version
+ver = json.loads(pathlib.Path("package.json").read_text())["version"]
+try:
+    count = release_version.check_changelog(pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8"), ver)
+except ValueError as exc:
+    print(exc); sys.exit(1)
+print(f"changelog OK: '## {ver}' present, {count} version headings")
 PY
 
 # --- CI gate: portable payload notice map covers every declared resource ---
