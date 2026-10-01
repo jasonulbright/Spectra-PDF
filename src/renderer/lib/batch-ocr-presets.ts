@@ -346,3 +346,10 @@ export function presetScheduleFields(settings: BatchOcrSettings): {
     repairOnly: s.repairOnly,
   };
 }
+
+/** The preset note names the scheduling surface only where it exists. */
+export function presetNoteKey(
+  scheduledActions: boolean,
+): 'dialog.batch.presetNote' | 'dialog.batch.presetNoteUnscheduled' {
+  return scheduledActions ? 'dialog.batch.presetNote' : 'dialog.batch.presetNoteUnscheduled';
+}

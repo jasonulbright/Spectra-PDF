@@ -50,6 +50,7 @@ jobs:
           mkdir -p resources/jbig2enc
           mkdir -p resources/dictionaries
           mkdir -p resources/icc
+          mkdir -p resources/shell
         shell: bash
 
       - name: Create renderer placeholder for native test compilation

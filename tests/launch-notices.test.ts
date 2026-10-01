@@ -192,3 +192,26 @@ describe('App reports the launch once, from mount', () => {
     expect(save).toContain('app.setRestoreWindowsOnLaunch(settings.restoreWindowsOnLaunch)');
   });
 });
+
+describe('the File Explorer commands repair', () => {
+  it('reports a failed repair with its reason, and nothing when the read fails', async () => {
+    const failed = launch('', []);
+    const shown = vi.fn(async () => {});
+    await reportLaunch({
+      ...failed.deps,
+      showNotice: shown,
+      explorerMenuRepairNotice: async () => 'Access is denied.',
+    });
+    expect(shown).toHaveBeenCalledWith(
+      tChrome('launch.explorerMenuRepair.title'),
+      tChrome('launch.explorerMenuRepair.failed', { reason: 'Access is denied.' }),
+    );
+    const quiet = vi.fn(async () => {});
+    await reportLaunch({
+      ...failed.deps,
+      showNotice: quiet,
+      explorerMenuRepairNotice: () => Promise.reject(new Error('Command shell_menu_repair_notice not found')),
+    });
+    expect(quiet).not.toHaveBeenCalled();
+  });
+});

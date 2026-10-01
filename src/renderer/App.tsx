@@ -5,9 +5,9 @@ import { saveFailureNotice } from './lib/save-failure';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
 import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/workspace-publication';
 import { withFileLock } from './lib/engine-lock';
-import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter, engine } from './lib/tauri-bridge';
+import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter, engine, shellMenu } from './lib/tauri-bridge';
 import { residueMessage, residueOf, residueRemovable, residueRequest } from './lib/redaction-residue';
-import type { PhysicalScreenPoint, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
+import type { PhysicalScreenPoint, ShellCreate, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
 import { HandOffGate, flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
 import {
   decodeToRawSource,
@@ -182,8 +182,9 @@ import { CreatePdfDialog } from './components/CreatePdfDialog';
 import { CombineDialog } from './components/CombineDialog';
 import { OpenFromWebDialog, type OpenFromWebResult } from './components/OpenFromWebDialog';
 import { saveRouteFor, type OpenDownloadResult } from './lib/web-open';
-import { classify as classifySource } from './lib/create-pdf';
-import type { CombineDestination } from './lib/combine';
+import { classify as classifySource, type OutputMode } from './lib/create-pdf';
+import type { CombineDestination, CombineTarget } from './lib/combine';
+import { contractFailureMessage, shellRefusedNotice, shellSeed, shellSkippedNotice } from './lib/shell-action';
 import { ExportImagesDialog } from './components/ExportImagesDialog';
 import { ExportDocumentDialog, type DocumentExportFormat } from './components/ExportDocumentDialog';
 import { buildBlankPagePdf } from './lib/blank-page';
@@ -219,7 +220,7 @@ import { useKeymapDispatcher } from './commands/keymap';
 import { useAppModal } from './hooks/useAppModal';
 import type { AppCommandHandlers } from './commands/types';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount, tNumber } from './i18n';
+import i18next, { SHIPPED_LOCALES, tChrome, tChromeCount, tNumber } from './i18n';
 import {
   summarizeOpenOutcomes,
   translateOpenFailure,
@@ -389,11 +390,14 @@ function AppContent(): React.ReactElement {
   // Sources a drop pre-populates Create PDF with. Cleared on close so
   // the next menu-opened dialog starts empty rather than replaying a drop.
   const [createPdfSeed, setCreatePdfSeed] = useState<string[]>([]);
+  // The output mode a File Explorer seed asks for; null for every other open.
+  const [createPdfOutputMode, setCreatePdfOutputMode] = useState<OutputMode | null>(null);
   // Combine Files is a dialog now, not a bare picker: it has to
   // show per-row conversion state, page ranges and a target, none of which a
   // native file picker can carry.
   const [showCombine, setShowCombine] = useState(false);
   const [combineSeed, setCombineSeed] = useState<string[]>([]);
+  const [combineTarget, setCombineTarget] = useState<CombineTarget | null>(null);
   // Read by the drop handler, which must not re-bind on every open/close.
   const showCombineRef = useRef(false);
   showCombineRef.current = showCombine;
@@ -583,6 +587,8 @@ function AppContent(): React.ReactElement {
   useEffect(() => {
     void reportLaunch({
       startupEntryNotice: () => app.startupEntryNotice(),
+      explorerMenuRepairNotice: () =>
+        platformCapability('explorerMenu') ? shellMenu.repairNotice() : Promise.resolve(''),
       takeUnreadableRecords: () => app.takeUnreadableRecords(),
       saveStartupFlags: () => {
         const settings = getSettings();
@@ -591,6 +597,28 @@ function AppContent(): React.ReactElement {
       },
       showNotice,
     });
+  }, [showNotice]);
+
+  // The File Explorer verb labels follow the app's UI language, so the shell
+  // handler is told the language at launch and on every switch. A pseudo-locale
+  // is not a catalog the handler carries and is not sent.
+  useEffect(() => {
+    if (!platformCapability('explorerMenu')) return;
+    let reported = false;
+    const sync = (lng: string) => {
+      if (!SHIPPED_LOCALES.includes(lng)) return;
+      shellMenu.setLanguage(lng).catch((err: unknown) => {
+        if (reported) return;
+        reported = true;
+        void showNotice(
+          tChrome('launch.explorerMenuRepair.title'),
+          contractFailureMessage(err, 'set_shell_menu_language'),
+        );
+      });
+    };
+    sync(i18next.language);
+    i18next.on('languageChanged', sync);
+    return () => { i18next.off('languageChanged', sync); };
   }, [showNotice]);
 
   /** A refusal that has somewhere to send the user: the affirmative button
@@ -1574,6 +1602,7 @@ function AppContent(): React.ReactElement {
       const importable = paths.filter((p) => !convertible.includes(p));
       if (convertible.length > 0) {
         setCreatePdfSeed(convertible);
+        setCreatePdfOutputMode(null);
         setShowCreatePdf(true);
       }
       if (importable.length > 0) await importFilesIntoDoc(importable, docId, index);
@@ -1607,7 +1636,10 @@ function AppContent(): React.ReactElement {
       // does not re-bind every time the dialog opens or closes.
       if (showCombineRef.current) {
         const accepted = paths.filter((p) => classifySource(p) !== '');
-        if (accepted.length > 0) setCombineSeed(accepted);
+        if (accepted.length > 0) {
+          setCombineSeed(accepted);
+          setCombineTarget(null);
+        }
         return;
       }
       // A drop carrying files the open funnel cannot take (a .docx, a
@@ -1618,6 +1650,7 @@ function AppContent(): React.ReactElement {
       const pdfs = paths.filter((p) => classifySource(p) === 'pdf');
       if (convertible.length > 0) {
         setCreatePdfSeed(convertible);
+        setCreatePdfOutputMode(null);
         setShowCreatePdf(true);
       }
       if (pdfs.length > 0) {
@@ -1711,6 +1744,7 @@ function AppContent(): React.ReactElement {
   // tab's own Combine action dead on a cold start.
   const combineFiles = useCallback(async () => {
     setCombineSeed([]);
+    setCombineTarget(null);
     setShowCombine(true);
   }, []);
 
@@ -3203,11 +3237,13 @@ function AppContent(): React.ReactElement {
     openWatchedFolders: () => setShowWatchers(true),
     openCreatePdf: () => {
       setCreatePdfSeed([]);
+      setCreatePdfOutputMode(null);
       setCreatePdfAutoStart(null);
       setShowCreatePdf(true);
     },
     openCreatePdfFrom: (source) => {
       setCreatePdfSeed([]);
+      setCreatePdfOutputMode(null);
       setCreatePdfAutoStart(source);
       setShowCreatePdf(true);
     },
@@ -3462,6 +3498,28 @@ function AppContent(): React.ReactElement {
     return () => { unlisten.then((fn) => fn()); };
   }, [focusBoardOrHome, handleExit]);
 
+  // A File Explorer verb opens Create PDF or Combine with its selection
+  // listed; nothing is written until the user runs the dialog, and every
+  // output it opens goes through openByPaths. A dialog already open merges
+  // the selection into its list.
+  const applyShellCreate = useCallback((create: ShellCreate) => {
+    const seed = shellSeed(create);
+    if (seed.paths.length > 0) {
+      if (seed.dialog === 'combine') {
+        setCombineSeed(seed.paths);
+        setCombineTarget(seed.target);
+        setShowCombine(true);
+      } else {
+        setCreatePdfSeed(seed.paths);
+        setCreatePdfOutputMode(seed.outputMode);
+        setCreatePdfAutoStart(null);
+        setShowCreatePdf(true);
+      }
+    }
+    const notice = shellSkippedNotice(create);
+    if (notice) void showNotice(notice.title, notice.message);
+  }, [showNotice]);
+
   // Handle files opened via file association, context menu, or second instance.
   // openByPaths focuses the opened doc's tab (strips + merge-up ARE the merge
   // flow, 2o — a shell "merge" open lands there like any multi-open).
@@ -3491,6 +3549,15 @@ function AppContent(): React.ReactElement {
           await completeHandover(false);
           continue;
         }
+        if (pending.shellRefused !== undefined) {
+          const notice = shellRefusedNotice(pending.shellRefused);
+          void showNotice(notice.title, notice.message);
+          if (pending.files.length === 0) continue;
+        }
+        if (pending.create) {
+          applyShellCreate(pending.create);
+          if (pending.files.length === 0) continue;
+        }
         try {
           // A dropped tab carries the gap its caret marked in the receiving
           // window; every other queued open carries none and appends.
@@ -3515,7 +3582,7 @@ function AppContent(): React.ReactElement {
     void drain();
     const unlisten = app.onOpenFile(() => { void drain(); });
     return () => { cancelled = true; unlisten.then((fn) => fn()); };
-  }, [openByPaths]);
+  }, [openByPaths, applyShellCreate, showNotice]);
 
   // A document coming back from a handover the receiving window died holding.
   // Ownership is already back here; what is left is where it should appear.
@@ -3984,24 +4051,29 @@ function AppContent(): React.ReactElement {
       {showCreatePdf && (
         <CreatePdfDialog
           initialPaths={createPdfSeed}
+          initialOutputMode={createPdfOutputMode}
           autoStart={createPdfAutoStart}
           onClose={() => {
             setShowCreatePdf(false);
             setCreatePdfSeed([]);
+            setCreatePdfOutputMode(null);
             setCreatePdfAutoStart(null);
           }}
           onOpenResult={openCreatedPdf}
+          onOpenAll={async (paths) => { await openByPaths(paths); }}
         />
       )}
       {showCombine && (
         <CombineDialog
           initialPaths={combineSeed}
+          initialTarget={combineTarget}
           destinations={combineDestinations}
           workingDirFor={combineWorkingDirFor}
           onAppend={appendCombined}
           onClose={() => {
             setShowCombine(false);
             setCombineSeed([]);
+            setCombineTarget(null);
           }}
           onOpenResult={async (path) => { await openByPaths([path]); }}
         />

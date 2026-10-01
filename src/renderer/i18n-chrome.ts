@@ -143,6 +143,27 @@ export const CHROME_STRINGS = {
   'imageres.unmeasured': 'Not measurable: {{unmeasured}}',
   'imageres.scanned': 'Scanned document — {{scanned}} of {{pages}} pages classify as scans.',
   'imageres.scanPages': '{{scanned}} of {{pages}} pages classify as scans.',
+
+  // File Explorer context-menu commands. The shell handler DLL compiles the
+  // two verb labels from every catalog at build time and substitutes
+  // `{{app}}` with the product name; a locale missing either key fails that
+  // build.
+  'shell.verb.convert': 'Convert to PDF with {{app}}',
+  'shell.verb.combine': 'Combine into one PDF with {{app}}',
+  'shell.skippedTitle': 'Not every selected item was added',
+  'shell.skipped_one':
+    '{{count}} selected item was not added: it is not a file on this PC, or {{app}} cannot convert it.',
+  'shell.skipped_other':
+    '{{count}} selected items were not added: they are not files on this PC, or {{app}} cannot convert them.',
+  // A command the renderer calls is absent from this build of the backend.
+  'shell.commandMissing':
+    'This copy of Spectra PDF cannot do this because a part of it is missing: {{command}}',
+  // A File Explorer verb's handoff file that could not be read; the reason is
+  // the backend's own text.
+  'shell.refusedTitle': 'The selection could not be opened',
+  'shell.refused': 'The files selected in File Explorer could not be passed to Spectra PDF: {{reason}}',
+  'launch.explorerMenuRepair.title': 'File Explorer commands need attention',
+  'launch.explorerMenuRepair.failed': 'The File Explorer commands could not be updated: {{reason}}',
 } as const;
 
 export type ChromeKey = keyof typeof CHROME_STRINGS;

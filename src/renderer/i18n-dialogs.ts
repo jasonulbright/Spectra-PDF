@@ -589,6 +589,21 @@ export const DIALOG_STRINGS = {
     'The download was cancelled and nothing was opened. A transfer already under way finishes into a temporary file that is discarded.',
   'dialog.createPdf.converting': 'Converting…',
   'dialog.createPdf.convert': 'Convert…',
+  // One PDF per source, each saved beside its source with no save dialog.
+  'dialog.createPdf.convertPerFile': 'Convert',
+  'dialog.createPdf.outputMode': 'Output',
+  'dialog.createPdf.outputMode.single': 'One PDF',
+  'dialog.createPdf.outputMode.perFile': 'One PDF per file',
+  'dialog.createPdf.perFileHint':
+    'Each PDF is saved next to its source file. An existing file is never replaced; the new name gets a number.',
+  'dialog.createPdf.perFileProgress': 'Converting {{current}} of {{total}}',
+  'dialog.createPdf.perFileDone_one': '{{count}} PDF created',
+  'dialog.createPdf.perFileDone_other': '{{count}} PDFs created',
+  'dialog.createPdf.perFileFailed_one': '{{count}} file failed',
+  'dialog.createPdf.perFileFailed_other': '{{count}} files failed',
+  'dialog.createPdf.perFileStopped_one': 'Stopped: {{count}} file was not converted.',
+  'dialog.createPdf.perFileStopped_other': 'Stopped: {{count}} files were not converted.',
+  'dialog.createPdf.openAll': 'Open all',
 
   // Combine Files. It shares Create PDF's row vocabulary
   // deliberately — `kind*`, `moveUp`, `moveDown`, `remove`, `blankPage` are
@@ -824,6 +839,7 @@ export const DIALOG_STRINGS = {
   // own title, so this sentence never carries a second, drifting copy of it.
   'dialog.batch.presetNote':
     'Saves every setting in this dialog under a name, including the folders. {{schedule}} can start from one of these.',
+  'dialog.batch.presetNoteUnscheduled': 'Saves every setting in this dialog under a name, including the folders.',
   'dialog.batch.presetProblem.empty': 'Give these settings a name before saving them.',
   'dialog.batch.presetProblem.tooLong': 'That name is too long — 80 characters at most.',
   'dialog.batch.presetProblem.duplicate': 'Another set of settings already has that name.',

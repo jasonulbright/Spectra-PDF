@@ -22,8 +22,7 @@ import {
   blankRow,
   captureIdToReleaseOnRowRemoval,
   createLimiter,
-  dragTargetIndex,
-  edgeScrollStep,
+  effectiveOutputMode,
   hasThumbnail,
   orderSelection,
   rowFromPath,
@@ -31,10 +30,18 @@ import {
   hasUnsupported,
   moveRow,
   needsQualityPreset,
+  perFileEligible,
+  perFileTargets,
+  reserveFreeOutput,
   removeRow,
   reorderRows,
   toEngineSources,
+  type OutputMode,
+  type OutputReservation,
 } from '../lib/create-pdf';
+import { claimOutputFile, type OutputRootClaim } from '../lib/output-root-claim';
+import { contractFailureMessage, isCommandMissing } from '../lib/shell-action';
+import { useRowDrag, rowDragClass } from './useRowDrag';
 import {
   CLIPBOARD_KIND_LABEL_KEYS,
   clipboardRow,
@@ -69,6 +76,22 @@ interface CreatePdfSourceReport {
   fonts_substituted?: string[];
 }
 
+/** An absent backend command: no later source of the run can succeed. */
+class MissingContractError extends Error {}
+
+/** One source of a per-file run: the PDF it became, or why it did not. */
+interface PerFileOutcome {
+  source: string;
+  output?: string;
+  error?: string;
+}
+
+interface PerFileResult {
+  outcomes: PerFileOutcome[];
+  /** Sources a Stop left unconverted. */
+  stopped: number;
+}
+
 interface CreatePdfResult {
   output: string;
   pages: number;
@@ -80,7 +103,9 @@ export function CreatePdfDialog({
   onClose,
   onOpenResult,
   initialPaths,
+  initialOutputMode,
   autoStart,
+  onOpenAll,
 }: {
   onClose: () => void;
   /** Open the created PDF through the normal open funnel; rejection is
@@ -90,6 +115,10 @@ export function CreatePdfDialog({
   /** Sources the dialog opens pre-populated with — a drop of non-PDF files
    * on the window lands here rather than doing nothing. */
   initialPaths?: readonly string[];
+  /** The output mode a seed asks for; null leaves the current mode. */
+  initialOutputMode?: OutputMode | null;
+  /** Open every PDF a per-file run built, through the normal open funnel. */
+  onOpenAll: (paths: string[]) => Promise<void>;
   /** The acquisition to start on, when the dialog was opened from one of the
    * File ▸ Create siblings rather than from Create PDF itself. */
   autoStart?: 'clipboard' | 'web' | null;
@@ -116,7 +145,11 @@ export function CreatePdfDialog({
   const webCaptureIds = useRef(new Set<string>());
   const clipboardDialogMounted = useRef(true);
   const listRef = useRef<HTMLUListElement | null>(null);
-  const [drag, setDrag] = useState<{ from: number; to: number } | null>(null);
+  const [outputMode, setOutputMode] = useState<OutputMode>(initialOutputMode ?? 'single');
+  const [perFile, setPerFile] = useState<PerFileResult | null>(null);
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const stopRef = useRef(false);
   // Ref, not state: convert()'s reentrancy window opens BEFORE any state
   // updates land (the whole native save-dialog round trip) — a second
   // click read a stale busy=false closure, both clicks awaited the SAME
@@ -160,6 +193,11 @@ export function CreatePdfDialog({
     if (seeded.length === 0) return;
     setRows((prev) => addPaths(prev, orderSelection(seeded)));
   }, [seedKey]);
+  // A File Explorer seed names its mode; a drop or a menu open does not.
+  React.useEffect(() => {
+    if (initialOutputMode) setOutputMode(initialOutputMode);
+  }, [seedKey, initialOutputMode]);
+  const mode = effectiveOutputMode(outputMode, rows);
 
   const gs = useGsCapability();
   // `needsQualityPreset` is true for exactly the PostScript rows, which are
@@ -243,60 +281,11 @@ export function CreatePdfDialog({
     setRows((prev) => removeRow(prev, rowId));
   }, [rows, clipboardInfo, releaseClipboardScratch, releaseWebCapture]);
 
-  // HTML5 drag-and-drop never completes in the webview while native file drop
-  // is enabled, so the reorder is pointer-driven with window-level listeners.
-  // Row positions are re-measured on every move and scroll, because the list
-  // scrolls under a held drag (wheel or edge auto-scroll).
-  const endDragRef = useRef<(() => void) | null>(null);
-  const startRowDrag = useCallback((event: React.PointerEvent, from: number) => {
-    const list = listRef.current;
-    if (event.button !== 0 || !list) return;
-    event.preventDefault();
-    endDragRef.current?.();
-    let to = from;
-    let pointerY = event.clientY;
-    let frame = 0;
-    const retarget = () => {
-      const midpoints = Array.from(
-        list.querySelectorAll<HTMLElement>('[data-testid="create-pdf-row"]'),
-      ).map((item) => {
-        const rect = item.getBoundingClientRect();
-        return rect.top + rect.height / 2;
-      });
-      to = dragTargetIndex(midpoints, from, pointerY);
-      setDrag({ from, to });
-    };
-    const tick = () => {
-      const box = list.getBoundingClientRect();
-      const step = edgeScrollStep(box.top, box.bottom, pointerY);
-      if (step !== 0) list.scrollTop += step;
-      frame = requestAnimationFrame(tick);
-    };
-    const onMove = (e: PointerEvent) => {
-      pointerY = e.clientY;
-      retarget();
-    };
-    const finish = (commit: boolean) => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
-      list.removeEventListener('scroll', retarget);
-      endDragRef.current = null;
-      setDrag(null);
-      if (commit && to !== from) setRows((prev) => reorderRows(prev, from, to));
-    };
-    const onUp = () => finish(true);
-    const onCancel = () => finish(false);
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
-    list.addEventListener('scroll', retarget);
-    endDragRef.current = onCancel;
-    setDrag({ from, to });
-    frame = requestAnimationFrame(tick);
-  }, []);
-  React.useEffect(() => () => endDragRef.current?.(), []);
+  const reorder = useCallback(
+    (from: number, to: number) => setRows((prev) => reorderRows(prev, from, to)),
+    [],
+  );
+  const { drag, startRowDrag } = useRowDrag(listRef, '[data-testid="create-pdf-row"]', reorder);
 
   // A capture arrives as one row per captured page, in capture order, each
   // carrying the title its bookmark will use. Partial-crawl status moves to
@@ -351,7 +340,14 @@ export function CreatePdfDialog({
       setError(null);
       setNotice(null);
       setResult(null);
+      setPerFile(null);
+      let claim: OutputRootClaim | null = null;
       try {
+        claim = await claimOutputFile(out);
+        if (!claim.granted) {
+          setError(claim.message);
+          return null;
+        }
         // Both converters resolve up front: which arms a run needs depends on
         // the LIST, and asking per row would stall the conversion mid-way.
         const [gsPath, sofficePath] = await Promise.all([
@@ -393,6 +389,7 @@ export function CreatePdfDialog({
         setError(err instanceof Error ? err.message : String(err));
         return null;
       } finally {
+        await claim?.release();
         convertingRef.current = false;
         setBusy(false);
       }
@@ -400,20 +397,124 @@ export function CreatePdfDialog({
     [callRaw, track],
   );
 
-  const convert = useCallback(async () => {
-    // The ref is the guard (see its comment); state only drives the UI.
-    if (blocked || convertingRef.current) return;
-    const suggested = defaultOutputPath(rows) ?? 'document.pdf';
-    const out = await dialog.saveFile({ defaultPath: suggested });
-    if (!out || convertingRef.current) return;
+  // One engine call per source, each output beside its source under a name
+  // nothing occupies, held by a claim on that name for the write. A failed
+  // source is reported on its own row and the run goes on; Stop takes effect
+  // between sources, never inside an engine call.
+  const convertPerFile = useCallback(
+    async (sourceRows: readonly SourceRow[], options: CreatePdfRunOptions): Promise<PerFileResult | null> => {
+      if (convertingRef.current) return null;
+      convertingRef.current = true;
+      stopRef.current = false;
+      setStopping(false);
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      setResult(null);
+      setPerFile(null);
+      const targets = perFileTargets(sourceRows);
+      const freeName = async (path: string): Promise<string> => {
+        try {
+          return await app.freeOutputPath(path);
+        } catch (err) {
+          throw isCommandMissing(err, 'free_output_path')
+            ? new MissingContractError(contractFailureMessage(err, 'free_output_path'), { cause: err })
+            : err;
+        }
+      };
+      const claimName = (path: string) => claimOutputFile(path);
+      try {
+        const [gsPath, sofficePath] = await Promise.all([
+          needsQualityPreset(sourceRows) ? requireGsPath() : gsPathIfAvailable(),
+          app.getSofficePath(),
+        ]);
+        const outcomes: PerFileOutcome[] = [];
+        for (const [index, target] of targets.entries()) {
+          if (stopRef.current) break;
+          setProgress({ current: index + 1, total: targets.length });
+          const source = target.row.path as string;
+          let reservation: OutputReservation | null = null;
+          try {
+            reservation = await reserveFreeOutput(target.desired, freeName, claimName);
+            const out = reservation.out;
+            await track('create_pdf', { file: out }, () =>
+              callRaw('create_pdf', {
+                sources: toEngineSources([target.row]),
+                output: out,
+                page_size: options.pageSize ?? 'auto',
+                orientation: options.orientation ?? 'auto',
+                margin_pt: options.marginPt ?? 0,
+                gs_path: gsPath,
+                soffice_path: sofficePath,
+                distill_preset: options.preset ?? 'printer',
+              }),
+            );
+            outcomes.push({ source, output: out });
+          } catch (err) {
+            // Every later source would fail the same way.
+            if (err instanceof MissingContractError) throw err;
+            outcomes.push({ source, error: err instanceof Error ? err.message : String(err) });
+          } finally {
+            await reservation?.release();
+          }
+          setPerFile({ outcomes: [...outcomes], stopped: 0 });
+        }
+        const finished = { outcomes, stopped: targets.length - outcomes.length };
+        setPerFile(finished);
+        return finished;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        return null;
+      } finally {
+        setProgress(null);
+        convertingRef.current = false;
+        setBusy(false);
+      }
+    },
+    [callRaw, track],
+  );
+
+  const runOptions = useCallback((): CreatePdfRunOptions => {
     const marginPt = Number.parseFloat(margin);
-    await convertTo(rows, out, {
+    return {
       pageSize,
       orientation,
       marginPt: Number.isFinite(marginPt) && marginPt >= 0 ? marginPt : 0,
       preset,
-    });
-  }, [blocked, rows, margin, pageSize, orientation, preset, convertTo]);
+    };
+  }, [margin, pageSize, orientation, preset]);
+
+  const convert = useCallback(async () => {
+    // The ref is the guard (see its comment); state only drives the UI.
+    if (blocked || convertingRef.current) return;
+    if (mode === 'perFile') {
+      await convertPerFile(rows, runOptions());
+      return;
+    }
+    const suggested = defaultOutputPath(rows) ?? 'document.pdf';
+    const out = await dialog.saveFile({ defaultPath: suggested });
+    if (!out || convertingRef.current) return;
+    await convertTo(rows, out, runOptions());
+  }, [blocked, mode, rows, runOptions, convertTo, convertPerFile]);
+
+  const stop = useCallback(() => {
+    stopRef.current = true;
+    setStopping(true);
+  }, []);
+
+  const openAll = (paths: string[]) => {
+    setBusy(true);
+    onOpenAll(paths)
+      .then(() => onClose())
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => setBusy(false));
+  };
+  const builtOutputs = (perFile?.outcomes ?? [])
+    .map((o) => o.output)
+    .filter((o): o is string => o !== undefined);
+  const failedCount = (perFile?.outcomes ?? []).filter((o) => o.error !== undefined).length;
 
   // Harness bridge: native pickers are undrivable by WebDriver — e2e injects
   // the source LIST and runs the REAL conversion path. `addPaths` is the same
@@ -530,15 +631,7 @@ export function CreatePdfDialog({
                 data-testid="create-pdf-row"
                 data-kind={row.kind || 'unsupported'}
                 data-dragging={drag?.from === index ? 'yes' : undefined}
-                className={
-                  'flex items-center gap-2 px-2 py-1.5 text-xs ' +
-                  (drag?.from === index ? 'opacity-50 ' : '') +
-                  (drag && drag.from !== index && drag.to === index
-                    ? drag.to > drag.from
-                      ? 'border-b-2 border-b-blue-500'
-                      : 'border-t-2 border-t-blue-500'
-                    : '')
-                }
+                className={'flex items-center gap-2 px-2 py-1.5 text-xs ' + rowDragClass(drag, index)}
               >
                 <span
                   data-testid="create-pdf-row-grip"
@@ -616,6 +709,43 @@ export function CreatePdfDialog({
           <p className="text-sm text-red-400" data-testid="create-pdf-unsupported" aria-live="polite">
             {tChrome('dialog.createPdf.unsupportedRow')}
           </p>
+        )}
+
+        {perFileEligible(rows) && (
+          <fieldset className="flex flex-col gap-1.5" data-testid="create-pdf-output-mode">
+            <legend className="text-xs text-neutral-400 mb-1">
+              {tChrome('dialog.createPdf.outputMode')}
+            </legend>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 text-xs text-neutral-300">
+                <input
+                  type="radio"
+                  name="create-pdf-output-mode"
+                  data-testid="create-pdf-output-single"
+                  checked={mode === 'single'}
+                  disabled={busy}
+                  onChange={() => setOutputMode('single')}
+                />
+                {tChrome('dialog.createPdf.outputMode.single')}
+              </label>
+              <label className="flex items-center gap-2 text-xs text-neutral-300">
+                <input
+                  type="radio"
+                  name="create-pdf-output-mode"
+                  data-testid="create-pdf-output-perfile"
+                  checked={mode === 'perFile'}
+                  disabled={busy}
+                  onChange={() => setOutputMode('perFile')}
+                />
+                {tChrome('dialog.createPdf.outputMode.perFile')}
+              </label>
+            </div>
+            {mode === 'perFile' && (
+              <p className="text-xs text-neutral-500" data-testid="create-pdf-perfile-hint">
+                {tChrome('dialog.createPdf.perFileHint')}
+              </p>
+            )}
+          </fieldset>
         )}
 
         <div className="grid grid-cols-3 gap-2">
@@ -727,7 +857,73 @@ export function CreatePdfDialog({
           </div>
         )}
 
+        {progress && (
+          <p className="text-xs text-neutral-400" data-testid="create-pdf-progress" aria-live="polite">
+            {tChrome('dialog.createPdf.perFileProgress', progress)}
+          </p>
+        )}
+
+        {perFile && (
+          <div aria-live="polite" data-testid="create-pdf-perfile-result">
+            <p className="text-sm" data-testid="create-pdf-perfile-summary">
+              {tChromeCount('dialog.createPdf.perFileDone', builtOutputs.length)}
+            </p>
+            {failedCount > 0 && (
+              <p className="text-sm text-red-400" data-testid="create-pdf-perfile-failed">
+                {tChromeCount('dialog.createPdf.perFileFailed', failedCount)}
+              </p>
+            )}
+            {perFile.stopped > 0 && (
+              <p className="text-xs text-amber-400" data-testid="create-pdf-perfile-stopped">
+                {tChromeCount('dialog.createPdf.perFileStopped', perFile.stopped)}
+              </p>
+            )}
+            <ul className="mt-1 flex flex-col gap-0.5 max-h-32 overflow-y-auto text-xs">
+              {perFile.outcomes.map((outcome) => (
+                <li
+                  key={outcome.source}
+                  data-testid="create-pdf-perfile-row"
+                  data-state={outcome.output !== undefined ? 'built' : 'failed'}
+                  data-output={outcome.output}
+                  className={'break-all ' + (outcome.output !== undefined ? 'text-neutral-300' : 'text-red-400')}
+                >
+                  {outcome.output !== undefined
+                    ? tChrome('dialog.common.route', {
+                      source: baseName(outcome.source),
+                      dest: outcome.output,
+                    })
+                    : tChrome('canvas.common.fileFailure', {
+                      name: baseName(outcome.source),
+                      message: outcome.error ?? '',
+                    })}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 pt-1">
+          {perFile && !busy && builtOutputs.length > 0 && (
+            <button
+              type="button"
+              data-testid="create-pdf-open-all"
+              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded font-medium"
+              onClick={() => openAll(builtOutputs)}
+            >
+              {tChrome('dialog.createPdf.openAll')}
+            </button>
+          )}
+          {progress && (
+            <button
+              type="button"
+              data-testid="create-pdf-stop"
+              className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-60 rounded font-medium"
+              disabled={stopping}
+              onClick={stop}
+            >
+              {tChrome('dialog.batch.stop')}
+            </button>
+          )}
           {result && (
             <>
               <button
@@ -758,7 +954,13 @@ export function CreatePdfDialog({
             disabled={blocked || busy}
             onClick={() => void convert()}
           >
-            {tChrome(busy ? 'dialog.createPdf.converting' : 'dialog.createPdf.convert')}
+            {tChrome(
+              busy
+                ? 'dialog.createPdf.converting'
+                : mode === 'perFile'
+                  ? 'dialog.createPdf.convertPerFile'
+                  : 'dialog.createPdf.convert',
+            )}
           </button>
           <button
             type="button"

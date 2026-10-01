@@ -2637,6 +2637,19 @@ export const PANEL_STRINGS = {
   'panel.settings.minimizeToTray': 'Minimize to system tray on close',
   'panel.settings.startMinimized': 'Start minimized to tray',
   'panel.settings.startWithWindows': 'Start with Windows',
+  'panel.settings.explorerMenu': 'Show Spectra PDF commands in the File Explorer context menu',
+  'panel.settings.explorerMenu.hint':
+    'Adds Convert to PDF and Combine into one PDF when you right-click files.',
+  'panel.settings.explorerMenu.portableHint':
+    'This portable copy adds the commands for your Windows account only. Turn this off before you move or delete this folder.',
+  'panel.settings.explorerMenu.managed': 'Your organization manages this setting.',
+  'panel.settings.explorerMenu.installedCopy':
+    'The installed copy of Spectra PDF provides these commands.',
+  'panel.settings.explorerMenu.failed': 'The commands could not be added: {{reason}}',
+  'panel.settings.explorerMenu.blocked':
+    'Windows blocked the commands. Your organization may not allow app packages; the classic menu entries were added instead.',
+  'panel.settings.explorerMenu.restart':
+    'File Explorer may show the change after you sign out and back in.',
   'panel.settings.restoreWindows': 'Reopen last session on launch',
   'panel.settings.restoreWindowsHint':
     'Reopens the windows and documents that were open when you last quit. Window size and position are always remembered; this decides whether the documents come back too.',

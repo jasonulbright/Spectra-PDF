@@ -1562,6 +1562,7 @@ pub struct PlatformCapabilities {
     pub console_attach: bool,
     pub start_with_system: bool,
     pub hidden_animation_frames: bool,
+    pub explorer_menu: bool,
 }
 
 impl PlatformCapabilities {
@@ -1584,6 +1585,7 @@ impl PlatformCapabilities {
             console_attach: true,
             start_with_system: true,
             hidden_animation_frames: true,
+            explorer_menu: true,
         }
     }
 
@@ -1606,6 +1608,7 @@ impl PlatformCapabilities {
             console_attach: false,
             start_with_system: false,
             hidden_animation_frames: false,
+            explorer_menu: false,
         }
     }
 
@@ -1628,6 +1631,7 @@ impl PlatformCapabilities {
             console_attach: false,
             start_with_system: false,
             hidden_animation_frames: true,
+            explorer_menu: false,
         }
     }
 }
@@ -2584,7 +2588,7 @@ pub async fn check_auto_update_disabled() -> Result<bool, String> {
 
 /// Whether an administrator set a machine policy flag to 1.
 #[cfg(windows)]
-fn machine_policy_set(name: &str) -> bool {
+pub(crate) fn machine_policy_set(name: &str) -> bool {
     use winreg::enums::HKEY_LOCAL_MACHINE;
     use winreg::RegKey;
 
@@ -2601,7 +2605,7 @@ fn machine_policy_set(name: &str) -> bool {
 /// No machine policy store is read here yet, so no administrator can have set
 /// a flag: every policy reads as unset.
 #[cfg(not(windows))]
-fn machine_policy_set(_name: &str) -> bool {
+pub(crate) fn machine_policy_set(_name: &str) -> bool {
     false
 }
 
@@ -2612,6 +2616,20 @@ fn machine_policy_set(_name: &str) -> bool {
 #[tauri::command]
 pub async fn check_field_scripts_disabled() -> Result<bool, String> {
     Ok(machine_policy_set("DisableFieldScripts"))
+}
+
+/// Whether this machine hides the File Explorer commands. The handler reads
+/// the same value in `GetState`, so the verbs are hidden on every copy.
+#[tauri::command]
+pub async fn check_explorer_menu_disabled() -> Result<bool, String> {
+    Ok(machine_policy_set("DisableExplorerMenu"))
+}
+
+/// `path` when nothing exists there, else the first free `<stem> (n)<ext>`.
+/// The caller holds a write claim on the name for the write that follows.
+#[tauri::command]
+pub async fn free_output_path(path: String) -> Result<String, String> {
+    Ok(unique_destination(Path::new(&path)).to_string_lossy().into_owned())
 }
 
 // ── Startup (Start with Windows) ─────────────────────────────────────────
@@ -2840,6 +2858,21 @@ fn write_startup_entry(enabled: bool, start_minimized: bool) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_taken_output_name_gets_the_first_free_number() {
+        let dir = tempfile::tempdir().unwrap();
+        let wanted = dir.path().join("x.pdf");
+        let free = |p: &std::path::Path| super::unique_destination(p);
+        assert_eq!(free(&wanted), wanted);
+        std::fs::write(&wanted, b"%PDF").unwrap();
+        assert_eq!(free(&wanted), dir.path().join("x (2).pdf"));
+        std::fs::write(dir.path().join("x (2).pdf"), b"%PDF").unwrap();
+        assert_eq!(free(&wanted), dir.path().join("x (3).pdf"));
+        let bare = dir.path().join("notes");
+        std::fs::write(&bare, b"x").unwrap();
+        assert_eq!(free(&bare), dir.path().join("notes (2)"));
+    }
+
+    #[test]
     fn platform_capabilities_serialize_every_flag_in_camel_case() {
         let value = serde_json::to_value(super::platform_capabilities()).unwrap();
         let map = value.as_object().unwrap();
@@ -2848,7 +2881,7 @@ mod tests {
             "systemPrinting", "virtualPrinter", "scanning", "scheduledActions",
             "storeCertificates", "sendByEmail", "webCapture", "clipboardRead", "snapshot",
             "accentColor", "enterprisePolicy", "trayResidency", "backdrop", "consoleAttach",
-            "startWithSystem", "hiddenAnimationFrames",
+            "startWithSystem", "hiddenAnimationFrames", "explorerMenu",
         ];
         let mut got = keys.clone();
         expected.sort_unstable();

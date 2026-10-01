@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 
@@ -70,7 +71,13 @@ def test_ghostscript_offer_is_skipped_when_an_install_is_found() -> None:
         for key in (r"SOFTWARE\GPL Ghostscript", r"SOFTWARE\Artifex\GPL Ghostscript"):
             assert f'SPECTRA_GS_SCAN_KEY {root} "{key}"' in detect
     assert 'SPECTRA_GS_SCAN_PATH "gswin64c.exe"' in detect
-    assert "ExecWait" not in hooks and "nsExec" not in hooks
+    # The installer runs no program but its own executable's File Explorer
+    # registration: never Ghostscript, not even to read its version.
+    executed = re.findall(r"\bExecWait '([^']*)'", hooks)
+    assert hooks.count("ExecWait") == len(executed) == 2
+    for command in executed:
+        assert command.startswith('"$INSTDIR\\spectrapdf.exe" shell-menu '), command
+    assert "nsExec" not in hooks and "gswin" not in "".join(executed)
 
 
 def test_installer_ghostscript_floor_matches_discovery() -> None:

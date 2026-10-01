@@ -1,0 +1,27 @@
+[package]
+name = "spectrapdf-shell-menu"
+version = "0.0.0"
+description = "Spectra PDF File Explorer commands"
+authors = ["Jason Ulbright"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77"
+publish = false
+
+[lib]
+name = "spectrapdf_shell"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_System_Registry", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_Security", "Win32_UI_WindowsAndMessaging", "Win32_Globalization"] }
+windows-core = "0.62"
+
+[build-dependencies]
+serde_json = "1"
+embed-resource = "3"
+
+[dev-dependencies]
+tempfile = "3"

@@ -22,6 +22,7 @@ export const PLATFORM_FEATURES = [
   'consoleAttach',
   'startWithSystem',
   'hiddenAnimationFrames',
+  'explorerMenu',
 ] as const;
 
 export type PlatformFeature = (typeof PLATFORM_FEATURES)[number];

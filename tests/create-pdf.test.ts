@@ -23,14 +23,18 @@ import {
   defaultOutputPath,
   dragTargetIndex,
   edgeScrollStep,
+  effectiveOutputMode,
   extensionOf,
   hasThumbnail,
   hasUnsupported,
   moveRow,
   needsQualityPreset,
   orderSelection,
+  perFileEligible,
+  perFileTargets,
   removeRow,
   reorderRows,
+  reserveFreeOutput,
   rowFromPath,
   toEngineSources,
 } from '../src/renderer/lib/create-pdf';
@@ -430,5 +434,54 @@ describe('post-OCR save covers every changed file', () => {
       pageDirtyPaths: ['C:/ghost.pdf'],
     } as unknown as AppState;
     expect(unsavedAmong(state, ['C:/ghost.pdf'])).toEqual([]);
+  });
+});
+
+
+describe('one PDF per file', () => {
+  it('is offered only for two or more picked files', () => {
+    const a = rowFromPath('C:/in/a.png');
+    const b = rowFromPath('C:/in/b.docx');
+    expect(perFileEligible([a])).toBe(false);
+    expect(perFileEligible([a, b])).toBe(true);
+    expect(perFileEligible([a, b, blankRow()])).toBe(false);
+    expect(perFileEligible([a, { ...b, origin: 'clipboard' }])).toBe(false);
+    expect(effectiveOutputMode('perFile', [a, b])).toBe('perFile');
+    expect(effectiveOutputMode('perFile', [a])).toBe('single');
+    expect(effectiveOutputMode('single', [a, b])).toBe('single');
+  });
+
+  it('puts each output beside its source, in list order', () => {
+    const rows = [rowFromPath('D:/scans/page.tiff'), rowFromPath('C:/in/notes.txt')];
+    expect(perFileTargets(rows).map((t) => t.desired)).toEqual(['D:/scans/page.pdf', 'C:/in/notes.pdf']);
+  });
+
+  it('holds a free name, and moves on when the name fills under the claim', async () => {
+    const taken = new Set(['C:/in/a.pdf']);
+    const freeName = async (path: string): Promise<string> => {
+      if (!taken.has(path)) return path;
+      const stem = path.replace(/( \(\d+\))?\.pdf$/, '');
+      let n = 2;
+      while (taken.has(`${stem} (${n}).pdf`)) n += 1;
+      return `${stem} (${n}).pdf`;
+    };
+    const released: string[] = [];
+    let raced = false;
+    const claim = async (path: string) => {
+      // Another writer fills the first name offered, between the check and the claim.
+      if (!raced) {
+        raced = true;
+        taken.add(path);
+      }
+      return { granted: true, message: '', release: async () => { released.push(path); } };
+    };
+    const held = await reserveFreeOutput('C:/in/a.pdf', freeName, claim);
+    expect(held.out).toBe('C:/in/a (3).pdf');
+    expect(released).toEqual(['C:/in/a (2).pdf']);
+  });
+
+  it('rejects with the claim refusal', async () => {
+    const refused = async () => ({ granted: false, message: 'busy', release: async () => {} });
+    await expect(reserveFreeOutput('C:/in/a.pdf', async (p) => p, refused)).rejects.toThrow('busy');
   });
 });

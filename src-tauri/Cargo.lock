@@ -4006,11 +4006,24 @@ dependencies = [
  "webview2-com",
  "window-vibrancy 0.8.0",
  "windows 0.62.2",
+ "windows-collections 0.3.2",
  "windows-core 0.61.2",
  "windows-core 0.62.2",
+ "windows-future 0.3.2",
  "windows-version",
  "winreg 0.56.0",
  "zeroize",
+]
+
+[[package]]
+name = "spectrapdf-shell-menu"
+version = "0.0.0"
+dependencies = [
+ "embed-resource",
+ "serde_json",
+ "tempfile",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]

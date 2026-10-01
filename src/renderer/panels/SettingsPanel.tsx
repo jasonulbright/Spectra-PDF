@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { app, batch, dialog, virtualPrinter, type GsAnswer, type VirtualPrinterStatus } from '../lib/tauri-bridge';
+import {
+  app,
+  batch,
+  dialog,
+  shellMenu,
+  virtualPrinter,
+  type GsAnswer,
+  type ShellMenuStatus,
+  type VirtualPrinterStatus,
+} from '../lib/tauri-bridge';
+import { contractCall, explorerMenuView } from '../lib/shell-action';
 import { gsBlocked, gsStateKey, refreshGsCapability } from '../lib/gs-capability';
 import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { useGsCapability } from '../hooks/useGsCapability';
@@ -638,6 +648,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         </p>
       </div>
       {platformCapability('virtualPrinter') && <VirtualPrinterBlock />}
+      {preferenceAvailable('explorerMenu') && <ExplorerMenuBlock />}
       </>
       )}
 
@@ -865,6 +876,75 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
 
       <StatusBar message={status} />
       </div>
+    </div>
+  );
+}
+
+/** The File Explorer context-menu commands. The registration is the source of
+ * truth: the checkbox shows what Windows has, read on mount and after every
+ * change, never a stored preference. */
+function ExplorerMenuBlock(): React.JSX.Element {
+  const [status, setStatus] = useState<ShellMenuStatus | null>(null);
+  const [changed, setChanged] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    contractCall('get_shell_menu_status', () => shellMenu.getStatus()).then(
+      (next) => { if (live) setStatus(next); },
+      (e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)); },
+    );
+    return () => { live = false; };
+  }, []);
+
+  const toggle = async (enabled: boolean): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await contractCall('set_shell_menu_enabled', () => shellMenu.setEnabled(enabled)));
+      setChanged(true);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const view = status ? explorerMenuView(status, changed) : null;
+  return (
+    <div data-testid="explorer-menu-pref">
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          data-testid="pref-explorer-menu"
+          checked={view?.checked ?? false}
+          disabled={busy || view === null || view.disabled}
+          onChange={() => void toggle(!(view?.checked ?? false))}
+          className="rounded bg-neutral-800 border-neutral-700 disabled:opacity-60"
+        />
+        <span className="text-sm text-neutral-400">{tChrome('panel.settings.explorerMenu')}</span>
+      </label>
+      {(view?.notes ?? [{ key: 'panel.settings.explorerMenu.hint' as const }]).map((note) => (
+        <p
+          key={note.key}
+          data-testid={`explorer-menu-note-${note.key.split('.').pop()}`}
+          className={
+            'text-xs mt-1.5 ' +
+            (note.key === 'panel.settings.explorerMenu.failed' ||
+            note.key === 'panel.settings.explorerMenu.blocked'
+              ? 'text-amber-300/80'
+              : 'text-neutral-500')
+          }
+        >
+          {tChrome(note.key, 'vars' in note ? note.vars : undefined)}
+        </p>
+      ))}
+      {error && (
+        <p data-testid="explorer-menu-error" className="text-xs text-red-400 mt-1.5" aria-live="polite">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

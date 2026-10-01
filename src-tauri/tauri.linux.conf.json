@@ -1,6 +1,10 @@
 {
+  "build": {
+    "beforeBundleCommand": null
+  },
   "bundle": {
     "resources": {
+      "../resources/shell": null,
       "../resources/python": null,
       "../resources/libreoffice": null,
       "../resources/tesseract": null,

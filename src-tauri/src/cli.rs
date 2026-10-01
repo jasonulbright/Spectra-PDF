@@ -62,7 +62,8 @@ pub enum LaunchMode {
 ///
 /// Options are skipped, `--gs-path` consuming its separated value so that value
 /// is never mistaken for the first positional. `--` introduces positionals,
-/// which only the GUI accepts.
+/// which only the GUI accepts. `--shell-action` (a File Explorer verb's
+/// handoff) is a GUI launch whatever follows it.
 pub fn classify_launch(args: &[String]) -> LaunchMode {
     let command = <Cli as clap::CommandFactory>::command();
     let is_subcommand = |token: &str| {
@@ -80,6 +81,9 @@ pub fn classify_launch(args: &[String]) -> LaunchMode {
             } else {
                 LaunchMode::Parse
             };
+        }
+        if token == crate::shell_action::ARG || token.starts_with("--shell-action=") {
+            return LaunchMode::Gui;
         }
         if token.starts_with('-') && token != "-" {
             index += if token == "--gs-path" { 2 } else { 1 };
@@ -330,6 +334,17 @@ pub enum CliCommand {
     /// Apply an edited copy's annotate/fill/add-page changes onto a SIGNED
     /// original as one incremental append (signatures keep verifying)
     IncrementalSave(IncrementalSaveArgs),
+    /// Register or remove the File Explorer commands (run by the installer)
+    #[command(hide = true)]
+    ShellMenu(ShellMenuArgs),
+}
+
+#[derive(Args)]
+pub struct ShellMenuArgs {
+    /// install-machine and uninstall-machine need elevation; register-user and
+    /// unregister-user act on the current user only
+    #[arg(value_enum)]
+    pub action: crate::shell_menu::CliAction,
 }
 
 #[derive(Args)]
@@ -3111,6 +3126,7 @@ fn command_gs_need(command: &CliCommand) -> GsNeed {
         | C::Printers(_)
         | C::Scanners(_)
         | C::ScanTest(_)
+        | C::ShellMenu(_)
         | C::IncrementalSave(_) => Never,
     };
     GsNeed::Command(demand)
@@ -4032,6 +4048,7 @@ pub fn platform_refusal(
         {
             feature::SCANNING
         }
+        CliCommand::ShellMenu(_) if !capabilities.explorer_menu => feature::EXPLORER_MENU,
         CliCommand::Sign(args)
             if !capabilities.store_certificates
                 && (args.store_cert.is_some() || args.store_machine || args.list_store_certs) =>
@@ -4043,7 +4060,8 @@ pub fn platform_refusal(
     Some(Unsupported::new(missing))
 }
 
-/// `--minimized` asks for a tray-resident start, which needs the tray.
+/// `--minimized` asks for a tray-resident start, which needs the tray, and
+/// `--shell-action` comes only from the File Explorer command handler.
 pub fn launch_refusal(argv: &[String]) -> Option<crate::platform::Unsupported> {
     launch_refusal_for(argv, &crate::commands::PlatformCapabilities::current())
 }
@@ -4052,8 +4070,17 @@ fn launch_refusal_for(
     argv: &[String],
     capabilities: &crate::commands::PlatformCapabilities,
 ) -> Option<crate::platform::Unsupported> {
-    (!capabilities.tray_residency && argv.iter().skip(1).any(|a| a == "--minimized"))
-        .then(|| crate::platform::Unsupported::new(crate::platform::feature::START_MINIMIZED))
+    use crate::platform::{feature, Unsupported};
+    let args = || argv.iter().skip(1);
+    if !capabilities.tray_residency && args().any(|a| a == "--minimized") {
+        return Some(Unsupported::new(feature::START_MINIMIZED));
+    }
+    let shell_action =
+        |a: &String| a == crate::shell_action::ARG || a.starts_with("--shell-action=");
+    if !capabilities.explorer_menu && args().any(shell_action) {
+        return Some(Unsupported::new(feature::EXPLORER_MENU));
+    }
+    None
 }
 
 // ── Main CLI entry point ────────────────────────────────────────────────────
@@ -4070,6 +4097,10 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
     {
         eprintln!("error: {refusal}");
         return 2;
+    }
+
+    if let CliCommand::ShellMenu(args) = &command {
+        return crate::shell_menu::run_cli(args.action);
     }
 
     // Printer enumeration/capabilities are pure winspool — no Python engine
@@ -4348,6 +4379,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         CliCommand::Printers(_) => unreachable!("printers is dispatched before engine start"),
         CliCommand::Scanners(_) => unreachable!("scanners is dispatched before engine start"),
         CliCommand::ScanTest(_) => unreachable!("scan-test is dispatched before engine start"),
+        CliCommand::ShellMenu(_) => unreachable!("shell-menu is dispatched before engine start"),
 
         CliCommand::Rotate(args) => {
             engine.call(
@@ -6708,6 +6740,7 @@ mod tests {
             console_attach: present,
             start_with_system: present,
             hidden_animation_frames: present,
+            explorer_menu: present,
         }
     }
 
@@ -6762,6 +6795,48 @@ mod tests {
         );
         assert_eq!(launch_refusal_for(&minimized, &capabilities(true)), None);
         assert_eq!(launch_refusal_for(&argv(&["spectrapdf", "a.pdf"]), &capabilities(false)), None);
+    }
+
+    #[test]
+    fn a_shell_action_launch_is_the_gui_and_needs_the_explorer_menu() {
+        let handoff = r"C:\Users\u\AppData\Local\Temp\spectrapdf\shell-handoff\0123456789abcdef0123456789abcdef.json";
+        assert_eq!(classify(&["spectrapdf.exe", "--shell-action", handoff]), LaunchMode::Gui);
+        let joined = format!("--shell-action={handoff}");
+        assert_eq!(classify(&["spectrapdf.exe", &joined]), LaunchMode::Gui);
+        // The handoff value is never read as a subcommand.
+        assert_eq!(classify(&["spectrapdf.exe", "--shell-action", "compress"]), LaunchMode::Gui);
+
+        let argv = |args: &[&str]| args.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        let launch = argv(&["spectrapdf", "--shell-action", handoff]);
+        assert_eq!(
+            launch_refusal_for(&launch, &capabilities(false)).map(|r| r.to_string()),
+            Some("The File Explorer context menu is not available on this platform".to_string())
+        );
+        assert_eq!(launch_refusal_for(&launch, &capabilities(true)), None);
+    }
+
+    #[test]
+    fn the_hidden_shell_menu_subcommand_parses_every_action() {
+        assert_eq!(classify(&["spectrapdf.exe", "shell-menu", "install-machine"]), LaunchMode::Parse);
+        for (word, action) in [
+            ("install-machine", crate::shell_menu::CliAction::InstallMachine),
+            ("uninstall-machine", crate::shell_menu::CliAction::UninstallMachine),
+            ("register-user", crate::shell_menu::CliAction::RegisterUser),
+            ("unregister-user", crate::shell_menu::CliAction::UnregisterUser),
+        ] {
+            match parse(&["spectrapdf", "shell-menu", word]).command {
+                Some(CliCommand::ShellMenu(args)) => assert_eq!(args.action, action, "{word}"),
+                _ => panic!("{word} did not parse as shell-menu"),
+            }
+        }
+        assert!(Cli::try_parse_from(["spectrapdf", "shell-menu", "everything"]).is_err());
+        let help = <Cli as clap::CommandFactory>::command().render_long_help().to_string();
+        assert!(!help.contains("shell-menu"), "the installer's subcommand is listed in --help");
+        assert_eq!(
+            refusal(&["spectrapdf", "shell-menu", "register-user"], false),
+            Some("The File Explorer context menu is not available on this platform".to_string())
+        );
+        assert_eq!(refusal(&["spectrapdf", "shell-menu", "register-user"], true), None);
     }
 
     #[test]

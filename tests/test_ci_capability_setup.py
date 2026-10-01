@@ -1144,6 +1144,9 @@ def test_the_redo_selects_a_regime_every_released_tag_can_run(index: int) -> Non
             continue
         if "signing-regime.outputs.signed" in cond and not _redo_signs(tag):
             continue
+        # A step gated on the tag carrying its script runs only for such a tag.
+        if f"hashFiles('{ref}') != ''" in cond and not _tag_has(tag, ref):
+            continue
         if ref.startswith("verifier/"):
             rel = ref.removeprefix("verifier/")
             assert rel in head_tracked, (tag, step, ref)
@@ -2754,16 +2757,29 @@ SIGNED_SET_FIXTURES = {
     _BUNDLED + r"\target\release\openpdfstudio.exe": False,
     _BUNDLED + r"\target\release\bundle\nsis\Spectra PDF_1.2.1_x64.exe": False,
     _BUNDLED + r"\target\release\build\spectrapdf.exe": False,
+    # The File Explorer command handler and its packages, at the paths
+    # scripts/build-shell-menu.ps1 signs them before copying them into the
+    # resource tree, where the copies are never signed again.
+    _BUNDLED + r"\target\x86_64-pc-windows-msvc\release\spectrapdf_shell.dll": True,
+    _BUNDLED + r"\target\aarch64-pc-windows-msvc\release\spectrapdf_shell.dll": True,
+    _BUNDLED + r"\target\shell-menu-stage\SpectraPDF.ExplorerCommands_x64.msix": True,
+    _BUNDLED + r"\target\shell-menu-stage\SpectraPDF.ExplorerCommands_arm64.msix": True,
+    _BUNDLED + r"\..\resources\shell\x64\spectrapdf_shell.dll": False,
+    _BUNDLED + r"\..\resources\shell\SpectraPDF.ExplorerCommands_x64.msix": False,
+    _BUNDLED + r"\target\release\deps\spectrapdf_shell.dll": False,
+    _BUNDLED + r"\target\shell-menu-stage\SpectraPDF.ExplorerCommands_x86.msix": False,
+    _BUNDLED + r"\target\shell-menu-check\SpectraPDF.ExplorerCommands_x64.msix": False,
 }
 
 
-def test_the_signed_set_is_exactly_three_artifacts() -> None:
+def test_the_signed_set_is_exactly_this_projects_artifacts() -> None:
     """The bundler's sign command runs for far more than this project signs.
 
     Every path a real bundle passed to the script is classified here: the app
-    executable, the installer and the uninstaller are signed and nothing else
-    is. Signing a vendored binary re-attributes someone else's code, and
-    signing an NSIS plugin changes bytes the toolchain ships.
+    executable, the installer, the uninstaller, and the File Explorer command
+    handler and its packages are signed and nothing else is. Signing a
+    vendored binary re-attributes someone else's code, and signing an NSIS
+    plugin changes bytes the toolchain ships.
     """
     paths = list(SIGNED_SET_FIXTURES)
     script = (

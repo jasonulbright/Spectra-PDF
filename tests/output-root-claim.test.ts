@@ -341,3 +341,39 @@ describe('the bridge sends what the arbiter declares', () => {
     expect(handlers).toMatch(/^\s*app_windows::release_output_roots,\s*$/m);
   });
 });
+
+describe('claimOutputFile', () => {
+  let claimOutputFile: ClaimModule['claimOutputFile'];
+  beforeEach(async () => {
+    ({ claimOutputFile } = await import('../src/renderer/lib/output-root-claim'));
+  });
+
+  it('claims exactly the output file', async () => {
+    claimRoots.mockResolvedValue(granted(3));
+    const run = await claimOutputFile('C:/out/a.pdf');
+    expect(run.granted).toBe(true);
+    expect(claimRoots).toHaveBeenCalledWith(['C:/out/a.pdf']);
+  });
+
+  it('a refusal by the open file names the file, not a folder', async () => {
+    claimRoots.mockResolvedValue({ ...refused('main', true, 'C:/out/a.pdf'), document: 'C:/out/a.pdf' });
+    expect((await claimOutputFile('C:/out/a.pdf')).message).toBe(
+      tChrome('app.window.outputOpenHere', { name: 'a.pdf' }),
+    );
+    claimRoots.mockResolvedValue({ ...refused('doc-2', false, 'C:/out/a.pdf'), document: 'C:/out/a.pdf' });
+    expect((await claimOutputFile('C:/out/a.pdf')).message).toBe(
+      tChrome('app.window.outputOpenElsewhere', { name: 'a.pdf' }),
+    );
+  });
+
+  it('a refusal by a run names the file', async () => {
+    claimRoots.mockResolvedValue(refused('doc-2', false, 'C:/out/a.pdf'));
+    expect((await claimOutputFile('C:/out/a.pdf')).message).toBe(
+      tChrome('app.window.outputBusy', { name: 'a.pdf' }),
+    );
+    claimRoots.mockResolvedValue(refused('main', true, 'C:/out/a.pdf'));
+    expect((await claimOutputFile('C:/out/a.pdf')).message).toBe(
+      tChrome('app.window.outputBusyHere', { name: 'a.pdf' }),
+    );
+  });
+});

@@ -16,6 +16,7 @@ import {
   rangeCount,
   rowContribution,
   rowState,
+  seedRows,
   setRowError,
   setRowPageCount,
   setRowRange,
@@ -268,5 +269,13 @@ describe('when Combine refuses to run, and why', () => {
       'dialog.combine.needsDestination',
     ];
     for (const key of keys) expect(DIALOG_STRINGS, key).toHaveProperty(key);
+  });
+});
+
+describe('seeding the list', () => {
+  it('adds a delivered batch in folder name order, after what is listed', () => {
+    const listed = seedRows([], ['C:/b/x.pdf']);
+    const rows = seedRows(listed, ['C:/a/img10.png', 'C:/a/img2.png', 'C:/b/x.pdf']);
+    expect(rows.map((r) => r.path)).toEqual(['C:/b/x.pdf', 'C:/a/img2.png', 'C:/a/img10.png']);
   });
 });

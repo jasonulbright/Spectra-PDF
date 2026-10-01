@@ -101,6 +101,7 @@ pub mod feature {
     pub const FOLDER_LEASES: &str = "Folder-claim leasing";
     pub const START_MINIMIZED: &str = "Starting minimized to the tray";
     pub const TRAY_RESIDENCY: &str = "The system tray";
+    pub const EXPLORER_MENU: &str = "The File Explorer context menu";
 }
 
 #[cfg(test)]

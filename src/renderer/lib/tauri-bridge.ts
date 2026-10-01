@@ -140,12 +140,48 @@ export interface PhysicalScreenRect extends PhysicalScreenPoint {
   height: number;
 }
 
+/** A File Explorer verb's selection, carried to one window. */
+export interface ShellCreate {
+  action: 'convert' | 'combine';
+  paths: string[];
+  /** Selected items the handler could not pass on. */
+  skipped: number;
+}
+
 export interface PendingOpen {
   files: string[];
   merge: boolean;
   index: number | null;
   handover?: { token: number; from: string };
+  /** Present only for a File Explorer verb; `files` is empty then. */
+  create?: ShellCreate;
+  /** A File Explorer verb whose selection could not be read: the reason.
+   * `files` is empty then. */
+  shellRefused?: string;
 }
+
+/** The File Explorer menu registration as Preferences shows it. */
+export interface ShellMenuStatus {
+  mechanism: 'sparse' | 'classic' | 'none';
+  registered: boolean;
+  visible: boolean;
+  managed: boolean;
+  container: 'installed' | 'portable';
+  otherCopy: boolean;
+  /** Raw Windows error text of the last registration attempt. */
+  error: string | null;
+}
+
+/** The File Explorer context-menu commands. */
+export const shellMenu = {
+  getStatus: () => invoke<ShellMenuStatus>('get_shell_menu_status'),
+  setEnabled: (enabled: boolean) => invoke<ShellMenuStatus>('set_shell_menu_enabled', { enabled }),
+  /** The language the verb labels follow. */
+  setLanguage: (lng: string) => invoke<void>('set_shell_menu_language', { lng }),
+  checkDisabled: () => invoke<boolean>('check_explorer_menu_disabled'),
+  /** The launch-time repair failure, or "". Reading it clears it. */
+  repairNotice: () => invoke<string>('shell_menu_repair_notice'),
+};
 
 /** The cross-window tab drag. The source window streams the pointer here and
  * Rust answers the two questions a renderer cannot: whose strip is under the
@@ -962,6 +998,8 @@ export const app = {
   appendOperationLog: (line: string) => invoke('append_operation_log', { line }),
   checkAutoUpdateDisabled: () => invoke<boolean>('check_auto_update_disabled'),
   checkFieldScriptsDisabled: () => invoke<boolean>('check_field_scripts_disabled'),
+  /** `path` when nothing exists there, else the first free `<stem> (n)<ext>`. */
+  freeOutputPath: (path: string) => invoke<string>('free_output_path', { path }),
 
   /** Read the "Start with Windows" state. Returns [enabled, minimized]. */
   getStartupEnabled: () => invoke<[boolean, boolean]>('get_startup_enabled'),
