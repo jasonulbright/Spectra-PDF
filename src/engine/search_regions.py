@@ -58,6 +58,7 @@ import pikepdf
 from engine.credentials import open_pdf
 
 from engine.content_walk import GraphicsTextState
+from engine.reading_order import line_tolerance, order_lines, orientation, page_rotation, to_frame_point
 from engine.redact import IDENTITY, _resolve_resources, _span_bbox
 from engine.text_match import (
     compile_matcher,
@@ -89,10 +90,6 @@ WORD_GAP_FRACTION = 0.5
 # subsetted faces that dropped it). text_paragraphs' FALLBACK_SPACE_1000.
 FALLBACK_SPACE_1000 = 250.0
 
-# Baseline clustering window, in ems of the larger run — the same tolerance
-# the paragraph lister uses to decide two runs share a line.
-BASELINE_TOL_EM = 0.12
-
 MAX_HITS_DEFAULT = 50000
 
 
@@ -121,13 +118,14 @@ class _Run(NamedTuple):
     # Deliberately NOT the lister's rect: that is an EM box (a click target),
     # and a mark derived from it leaves the descenders visible.
     full_rect: list
-    # Ordering: the writing direction as a rounded unit vector, and the pen's
-    # position resolved onto (along, across) in that frame.
-    direction: tuple
+    # The pen's position resolved onto (along, across) in the run's own
+    # writing direction; `_order_runs` re-resolves it in its part's frame.
     along0: float
     along1: float
     across: float
     space_w: float
+    # The page's /Rotate, which turns user-space angles into the reader's.
+    rotate: int = 0
 
 
 def _unit_vector(combined: tuple, vertical: bool) -> tuple[float, float]:
@@ -152,6 +150,7 @@ def _collect_runs(pdf, page) -> tuple[list[_Run], list[dict]]:
     agreement with `list_text_runs` is by construction rather than by a
     parallel implementation."""
     resources = _resolve_resources(page)
+    rotate = page_rotation(page)
     listing: list[dict] = []
     detail: list[dict] = []
     fonts = _FontCache()
@@ -236,50 +235,48 @@ def _collect_runs(pdf, page) -> tuple[list[_Run], list[dict]]:
                 cap=cap,
                 text=str(row.get("text") or ""),
                 full_rect=full_rect,
-                direction=(round(dx, 3), round(dy, 3)),
                 along0=along0,
                 along1=along0 + width,
                 across=across,
                 space_w=max(space_w, 1e-6),
+                rotate=rotate,
             )
         )
     return runs, listing
 
 
 def _order_runs(runs: list[_Run]) -> list[list[_Run]]:
-    """Group runs into LINES and order them for reading.
-
-    A line is runs sharing a writing direction whose baselines sit within
-    `BASELINE_TOL_EM` of each other, ordered along the writing axis; lines are
-    ordered by their perpendicular coordinate, decreasing — which is top-to-
-    bottom for upright text and the correct reading order for a rotated or
-    vertical frame too, because the frame is what "perpendicular" is measured
-    in. Stream order is NOT reading order: a generator is free to draw a
+    """Group runs into LINES and order them for reading, through
+    `reading_order`: runs partition by the direction their pen advances as
+    the reader sees the page, and each part clusters into lines in its own
+    frame. A line is runs whose baselines sit within `line_tolerance` of
+    each other, ordered along the writing axis; lines read top to bottom in
+    the frame, and parts read in `reading_order.partition`'s order. Each
+    returned run carries its along and across coordinates in its part's
+    frame. Stream order is NOT reading order: a generator is free to draw a
     footer before its body, and a phrase that wraps must still be findable.
     """
-    by_direction: dict[tuple, list[_Run]] = {}
-    for run in runs:
-        by_direction.setdefault(run.direction, []).append(run)
+    if not runs:
+        return []
+    rotate = runs[0].rotate
+
+    def key_of(run: _Run) -> tuple[float, bool]:
+        a, b, c, d, _e, _f = run.combined
+        return orientation(a, b, c, d, run.vertical, rotate)
+
+    def place(run: _Run, frame: tuple[float, bool]) -> tuple[float, float, float]:
+        along, across = to_frame_point(run.combined[4], run.combined[5], frame)
+        return along, across, line_tolerance(run.state.font_size, run.combined[2], run.combined[3])
+
     lines: list[list[_Run]] = []
-    for group in by_direction.values():
-        clusters: list[list[_Run]] = []
-        for run in sorted(group, key=lambda r: -r.across):
-            placed = False
-            for cluster in clusters:
-                ref = cluster[0]
-                tol = BASELINE_TOL_EM * max(
-                    ref.state.font_size, run.state.font_size, 0.01
-                )
-                if abs(run.across - ref.across) <= tol:
-                    cluster.append(run)
-                    placed = True
-                    break
-            if not placed:
-                clusters.append([run])
-        for cluster in clusters:
-            cluster.sort(key=lambda r: r.along0)
-            lines.append(cluster)
-    lines.sort(key=lambda line: -max(r.across for r in line))
+    for _key, part in order_lines(runs, key_of, lambda run: len(run.text), place, rotate):
+        for line in part:
+            lines.append(
+                [
+                    run._replace(along0=along, along1=along + (run.along1 - run.along0), across=across)
+                    for run, along, across in line
+                ]
+            )
     return lines
 
 

@@ -259,13 +259,13 @@ class TestReadAloudSpeaksTheRunSurface:
         page.Resources = Dictionary(Font=Dictionary(F1=Dictionary(
             Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica)))
         page.Contents = pdf.make_stream(
-            b"BT /F1 12 Tf 100 500 Td (Level words) Tj ET "
+            b"BT /F1 12 Tf 100 500 Td (Level words of the body text) Tj ET "
             b"BT /F1 12 Tf 0.7071 0.7071 -0.7071 0.7071 100 100 Tm (Words at an angle) Tj ET")
         src = os.path.join(tmp_dir, "angle.pdf")
         pdf.save(src)
         pdf.close()
         blocks = read_aloud_page(src, 1)["blocks"]
-        assert [b["text"] for b in blocks] == ["Level words", "Words at an angle"]
+        assert [b["text"] for b in blocks] == ["Level words of the body text", "Words at an angle"]
         assert blocks[1]["spans"][0]["exact"] is True
 
     def test_text_drawn_at_no_size_is_not_read(self, tmp_dir):
@@ -276,13 +276,13 @@ class TestReadAloudSpeaksTheRunSurface:
         page.Resources = Dictionary(Font=Dictionary(F1=Dictionary(
             Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica)))
         page.Contents = pdf.make_stream(
-            b"BT /F1 12 Tf 100 500 Td (Level words) Tj ET "
+            b"BT /F1 12 Tf 100 500 Td (Level words of the body text) Tj ET "
             b"BT /F1 1 Tf 0 0 0 0 396 474 Tm (Unseen words) Tj ET "
             b"BT /F1 12 Tf 0.7071 0.7071 -0.7071 0.7071 100 100 Tm (Words at an angle) Tj ET")
         src = os.path.join(tmp_dir, "unseen.pdf")
         pdf.save(src)
         pdf.close()
-        assert [b["text"] for b in read_aloud_page(src, 1)["blocks"]] == ["Level words", "Words at an angle"]
+        assert [b["text"] for b in read_aloud_page(src, 1)["blocks"]] == ["Level words of the body text", "Words at an angle"]
 
     def test_a_climbing_column_is_read_in_the_structure_order(self, tmp_dir):
         from engine.read_aloud import read_aloud_page

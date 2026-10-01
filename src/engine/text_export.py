@@ -17,22 +17,21 @@ from pathlib import Path
 import pikepdf
 from engine.inplace import write_text_staged
 from engine.credentials import open_pdf
-from pdfminer.layout import LAParams
 from pdfminer.pdfinterp import PDFResourceManager
 
-from engine.extract_text import LayoutTextConverter, TextStateInterpreter, document_pages
+from engine.extract_text import LayoutTextConverter, TextStateInterpreter, document_pages, layout_params
 
 LAYOUTS = ("reading", "layout")
 PAGE_BREAK = "\f"
 
 
-def _laparams(layout: str) -> LAParams:
+def _laparams(layout: str):
     if layout == "layout":
         # boxes_flow disabled orders text boxes by position alone, so a
         # multi-column page transcribes column by column instead of being
         # interleaved into a single flow.
-        return LAParams(boxes_flow=None)
-    return LAParams()
+        return layout_params(boxes_flow=None)
+    return layout_params()
 
 
 def page_numbers(pages, pdf) -> list[int]:

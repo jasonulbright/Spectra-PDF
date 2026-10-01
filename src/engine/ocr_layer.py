@@ -36,6 +36,7 @@ from pikepdf import Dictionary, Name
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_metrics import text_width_em
 from engine.pdf_save import save_pdf
+from engine.reading_order import from_frame_point, page_rotation, to_frame
 
 OCR_XOBJECT_NAME = "/SpectraPDFOCR"
 MIN_WORD_FONT = 1.0
@@ -53,22 +54,37 @@ def _escape_text(value: str) -> bytes:
     return raw.replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)")
 
 
-def _build_layer_stream(pdf: pikepdf.Pdf, words: list[dict], media: tuple[float, float, float, float]):
-    """The invisible-text Form XObject for one page."""
+_UPRIGHT_ON_DISPLAY = {0: "1 0 0 1", 90: "0 1 -1 0", 180: "-1 0 0 -1", 270: "0 -1 1 0"}
+"""The text matrix's linear part, per page /Rotate, under which a word reads
+left to right on the displayed page: /Rotate turns the page clockwise for
+display (ISO 32000-2 §7.7.3.3), so the baseline turns counter-clockwise by
+the same angle in user space."""
+
+
+def _build_layer_stream(
+    pdf: pikepdf.Pdf, words: list[dict], media: tuple[float, float, float, float], rotate: int = 0
+):
+    """The invisible-text Form XObject for one page.
+
+    Recognition reads the displayed page, so each word is written along the
+    displayed baseline: a word written upright in user space on a rotated
+    page runs across the visible line it transcribes and extracts one word
+    per line."""
     x0, y0, x1, y1 = media
+    frame = (float(rotate), False)
     parts = [b"q", b"BT", b"3 Tr"]
     for word in words:
-        wx0, wy0, wx1, wy1 = word["rect"]
-        box_w = max(wx1 - wx0, 0.01)
-        box_h = max(wy1 - wy0, 0.01)
+        u0, v0, u1, v1 = to_frame(word["rect"], frame)
+        box_w = max(u1 - u0, 0.01)
+        box_h = max(v1 - v0, 0.01)
         text = word["text"]
         width_em = max(text_width_em(text), 0.05)
         size = min(box_w / width_em, box_h)
         size = max(MIN_WORD_FONT, min(MAX_WORD_FONT, size))
         # Baseline a bit above the box bottom (descent share).
-        baseline = wy0 + 0.2 * size
+        ox, oy = from_frame_point(u0, v0 + 0.2 * size, frame)
         parts.append(f"/F0 {_fmt(size)} Tf".encode("ascii"))
-        parts.append(f"1 0 0 1 {_fmt(wx0)} {_fmt(baseline)} Tm".encode("ascii"))
+        parts.append(f"{_UPRIGHT_ON_DISPLAY[rotate]} {_fmt(ox)} {_fmt(oy)} Tm".encode("ascii"))
         parts.append(b"(" + _escape_text(text) + b") Tj")
     parts.extend([b"ET", b"Q"])
 
@@ -161,7 +177,7 @@ def apply_ocr_layer(file: str, output: str, pages: list[dict]) -> dict:
         for page_num, words in plan:
             page = pdf.pages[page_num - 1]
             media = _page_media(page)
-            stream = _build_layer_stream(pdf, words, media)
+            stream = _build_layer_stream(pdf, words, media, page_rotation(page))
 
             resources = page.obj.get("/Resources")
             if resources is None:
