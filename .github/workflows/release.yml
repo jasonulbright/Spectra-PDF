@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           git ls-remote --tags --refs origin 'v*' > "$RUNNER_TEMP/remote-tags.txt"
-          python scripts/release_version.py tag "$TAG" --existing-file "$RUNNER_TEMP/remote-tags.txt"
+          python scripts/release_version.py tag "$TAG" --existing-file "$RUNNER_TEMP/remote-tags.txt" --release-workflow
         env:
           TAG: ${{ github.ref_name }}
 

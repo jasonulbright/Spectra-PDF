@@ -154,36 +154,43 @@ def _pulled_while_busy(monkeypatch, *, items: int, max_bytes: int, total: int) -
     return how many input lines the reader pulled while it blocked, and the
     replies once released."""
     import threading
-    import time
 
     from engine import ipc
 
     monkeypatch.setattr(ipc, "MAX_QUEUED_REQUESTS", items)
     monkeypatch.setattr(ipc, "MAX_QUEUED_BYTES", max_bytes)
     release = threading.Event()
+    started = threading.Event()
+    drained = threading.Event()
     pulled = 0
 
     def lines():
         nonlocal pulled
         for index in range(total):
+            if index == 1:
+                assert started.wait(5), "the first handler did not start"
             pulled += 1
             method = "block" if index == 0 else "echo"
             yield f'{{"jsonrpc":"2.0","id":{index},"method":"{method}","params":{{}}}}\n'
+        drained.set()
+
+    def block():
+        started.set()
+        assert release.wait(10), "the blocked handler was not released"
+        return "done"
 
     server = JsonRpcServer()
-    server.register("block", lambda: release.wait(10) and "done")
+    server.register("block", block)
     server.register("echo", lambda **kw: kw)
     out = io.StringIO()
     runner = threading.Thread(target=server.run, args=(lines(), out))
     runner.start()
-    deadline = time.monotonic() + 5
-    last = -1
-    while time.monotonic() < deadline and last != pulled:
-        last = pulled
-        time.sleep(0.2)
-    seen = pulled
-    release.set()
-    runner.join(10)
+    try:
+        assert drained.wait(5), "the reader did not drain input while the handler was blocked"
+        seen = pulled
+    finally:
+        release.set()
+        runner.join(10)
     assert not runner.is_alive()
     return seen, [json.loads(line) for line in out.getvalue().splitlines()]
 
@@ -198,11 +205,11 @@ def _split(replies: list) -> tuple[list, list]:
 
 def test_a_busy_handler_refuses_requests_past_the_queued_request_bound(monkeypatch):
     seen, replies = _pulled_while_busy(monkeypatch, items=4, max_bytes=1 << 30, total=200)
-    # The reader drains all input. At most the running request and four queued
-    # run; the reader may fill the inbox before the first request is taken.
+    # The first handler is running before the remaining input arrives, so
+    # exactly four more requests fit while it is blocked.
     assert seen == 200
     served, refused = _split(replies)
-    assert 4 <= len(served) <= 5 and served == list(range(len(served)))
+    assert served == list(range(5))
     assert refused == list(range(len(served), 200))
 
 

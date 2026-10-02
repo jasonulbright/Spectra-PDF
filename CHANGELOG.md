@@ -4,12 +4,14 @@
 
 *Released 2026-10-03*
 
-- Convert PDFs from File Explorer or combine selected files into one PDF.
-- Install Linux builds as AppImage, `.deb`, or `.rpm` packages.
-- Print, scan, schedule tasks, send email, and use the tray on Linux.
-- Preserve reading order on rotated pages and vertically written text.
-- Queue Windows printer jobs until Spectra PDF is open.
-- Explain Ghostscript setup for older supported Linux releases.
+**3 Linux package formats and 2 new File Explorer commands**
+
+### New
+- Windows File Explorer Contextual Menu Items
+- First Linux release
+
+### Fixed
+
 - Fix various bugs.
 
 Full changelog: CHANGELOG.md

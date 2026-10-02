@@ -41,7 +41,6 @@ LEGACY_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 FIELD_LIMIT = 65536
 FIRST_YEAR = 2026
 FIRST_RELEASE_NUMBER = 150
-FORMAT_RULING_DATE = datetime.date(2026, 9, 30)
 
 HEADING = re.compile(r"^## (.*)$")
 LEGACY_HEADING = re.compile(r"^(\d+\.\d+\.\d+)(?: — .+)?$")
@@ -125,18 +124,27 @@ def _date_tags(tags: Iterable[str], exclude: str) -> list[DateVersion]:
     return found
 
 
+def _local_today() -> datetime.date:
+    return datetime.date.today()
+
+
 def _utc_today() -> datetime.date:
     return datetime.datetime.now(datetime.timezone.utc).date()
 
 
 def check_next(
-    version: str, tags: Iterable[str], today: datetime.date | None = None
+    version: str,
+    tags: Iterable[str],
+    today: datetime.date | None = None,
+    release_workflow: bool = False,
 ) -> DateVersion:
     """`version` is the next release after the date tags in `tags`.
 
-    With no date tag to follow, the first date release's own date is the only
-    check on a mistyped date: it lies between the format ruling and the day
-    after `today` (UTC).
+    Every new release must use today's local date. With `release_workflow`,
+    `today` is the runner's UTC date and the version date may equal it or the
+    day before it: a tag cut in a US evening is already the next day in UTC.
+    A date later than the UTC date is always refused. Already published
+    versions remain readable through check_release_tag and check_surfaces.
     """
     current = parse_date_version(version)
     previous = _date_tags(tags, exclude=f"v{version}")
@@ -146,21 +154,26 @@ def check_next(
                 f"'{version}': no date release is tagged yet, so the release number is "
                 f"{FIRST_RELEASE_NUMBER}, not {current.number}"
             )
-        date = datetime.date(*current.date)
-        latest = (today or _utc_today()) + datetime.timedelta(days=1)
-        if date < FORMAT_RULING_DATE:
-            raise ValueError(f"'{version}': its date is before the format ruling ({FORMAT_RULING_DATE})")
-        if date > latest:
-            raise ValueError(f"'{version}': its date is later than {latest} (today in UTC plus one day)")
+    else:
+        newest = max(previous, key=lambda v: v.number)
+        if current.number != newest.number + 1:
+            raise ValueError(
+                f"'{version}': the newest tag is v{newest.text}, so the release number is "
+                f"{newest.number + 1}, not {current.number} (numbers never skip or repeat)"
+            )
+        if current.date < newest.date:
+            raise ValueError(f"'{version}': its date is earlier than v{newest.text}")
+    date = datetime.date(*current.date)
+    if release_workflow:
+        utc_day = today or _utc_today()
+        if date not in (utc_day, utc_day - datetime.timedelta(days=1)):
+            raise ValueError(
+                f"'{version}': its date must be the UTC date ({utc_day}) or the day before it"
+            )
         return current
-    newest = max(previous, key=lambda v: v.number)
-    if current.number != newest.number + 1:
-        raise ValueError(
-            f"'{version}': the newest tag is v{newest.text}, so the release number is "
-            f"{newest.number + 1}, not {current.number} (numbers never skip or repeat)"
-        )
-    if current.date < newest.date:
-        raise ValueError(f"'{version}': its date is earlier than v{newest.text}")
+    local_day = today or _local_today()
+    if date != local_day:
+        raise ValueError(f"'{version}': its date must be today's local date ({local_day})")
     return current
 
 
@@ -180,10 +193,15 @@ def check_release_tag(tag: str) -> str:
     return tag[1:]
 
 
-def check_tag(tag: str, tags: Iterable[str], today: datetime.date | None = None) -> DateVersion:
+def check_tag(
+    tag: str,
+    tags: Iterable[str],
+    today: datetime.date | None = None,
+    release_workflow: bool = False,
+) -> DateVersion:
     if not tag.startswith("v"):
         raise ValueError(f"tag '{tag}' does not start with a lowercase 'v'")
-    return check_next(tag[1:], tags, today)
+    return check_next(tag[1:], tags, today, release_workflow)
 
 
 def check_surfaces(version: str, tags: Iterable[str], today: datetime.date | None = None) -> str:
@@ -257,6 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     tag.add_argument("tag")
     tag.add_argument("existing", nargs="*")
     tag.add_argument("--existing-file")
+    tag.add_argument("--release-workflow", action="store_true")
     surfaces = sub.add_parser("surfaces")
     surfaces.add_argument("version")
     surfaces.add_argument("existing", nargs="*")
@@ -275,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
             existing = list(args.existing)
             if args.existing_file:
                 existing += read_ls_remote(Path(args.existing_file).read_text(encoding="utf-8"))
-            print(f"{check_tag(args.tag, existing).text} is the next release")
+            print(f"{check_tag(args.tag, existing, release_workflow=args.release_workflow).text} is the next release")
         elif args.command == "surfaces":
             print(check_surfaces(args.version, args.existing))
         else:
