@@ -37,9 +37,10 @@ def _preuninstall() -> str:
     return _block("!macro NSIS_HOOK_PREUNINSTALL")
 
 
-def _update_guarded(body: str) -> str:
-    """The body of the `$UpdateMode <> 1` block."""
-    return body.split("${If} $UpdateMode <> 1", 1)[1].split("${EndIf}\n", 1)[0]
+def _real_uninstall_only(body: str) -> str:
+    """The body of the block that runs only when no other version replaces
+    this one."""
+    return body.split("${If} $SpectraReplacing <> 1", 1)[1].split("${EndIf}\n", 1)[0]
 
 
 def test_install_registers_for_every_user_then_the_installing_user() -> None:
@@ -67,7 +68,7 @@ def test_the_per_file_merge_verb_is_gone() -> None:
 
 def test_only_a_real_uninstall_removes_the_commands_and_the_policy_key() -> None:
     pre = _preuninstall()
-    guarded = _update_guarded(pre)
+    guarded = _real_uninstall_only(pre)
     assert """ExecWait '"$INSTDIR\\spectrapdf.exe" shell-menu uninstall-machine' $R9""" in guarded
     assert pre.count("shell-menu uninstall-machine") == 1
     assert pre.count('DeleteRegKey HKLM "${SPECTRA_POLICY_KEY}"') == 2
@@ -139,11 +140,23 @@ def test_policy_values_are_read_before_and_restored_after_an_upgrade() -> None:
     for name in POLICIES:
         assert re.search(rf'SPECTRA_CAPTURE_POLICY "{name}" \$SpectraPolicy\w+', gui), name
         assert re.search(rf'SPECTRA_RESTORE_POLICY "{name}" \$SpectraPolicy\w+', post), name
-    assert gui.index("SetRegView 64") < gui.index("SPECTRA_CAPTURE_POLICY") < gui.index("SetRegView default")
+    assert gui.index("SetRegView 64") < gui.index("SPECTRA_CAPTURE_POLICY") < gui.index("SetRegView lastused")
     restore = post.index("SPECTRA_RESTORE_POLICY")
-    assert post.rindex("SetRegView 64", 0, restore) < restore < post.index("SetRegView default")
+    assert post.rindex("SetRegView 64", 0, restore) < restore < post.index("SetRegView lastused")
     silent = post.index('WriteRegDWORD HKLM "${SPECTRA_POLICY_KEY}" "DisableAutoUpdate" 1')
-    assert post.rindex("SetRegView 64", 0, silent) < silent < post.index("SetRegView default")
+    assert post.rindex("SetRegView 64", 0, silent) < silent < post.index("SetRegView lastused")
+
+
+def test_every_registry_view_switch_is_undone() -> None:
+    # `default` is the 32-bit view, not the view the template's SetContext
+    # chose; the template reads its uninstall key after these hooks run.
+    hooks = _hooks()
+    assert "SetRegView default" not in hooks
+    switches = re.findall(r"^\s*SetRegView (\w+)", hooks, re.M)
+    assert switches, "no registry view switch found"
+    for chosen, restored in zip(switches[::2], switches[1::2]):
+        assert chosen in ("32", "64") and restored == "lastused", switches
+    assert len(switches) % 2 == 0, switches
 
 
 def _makensis() -> Path:
@@ -224,6 +237,37 @@ def test_captured_policy_values_come_back_and_present_ones_are_kept(tmp_path: Pa
     # Restored when gone; an administrator's newer value is kept; a value that
     # was never set is not invented.
     assert got == "1|1|absent"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NSIS probe runs on Windows")
+def test_the_policy_blocks_leave_the_registry_view_as_they_found_it(tmp_path: Path) -> None:
+    hive = BS.join(["Software", f"SpectraPdfViewProbe-{uuid.uuid4().hex}"])
+    probe_key = f'HKCU "{hive}"'
+    shared = _shared_block().replace('HKLM "${SPECTRA_POLICY_KEY}"', probe_key)
+    gui = _block("Function SpectraPdfGuiInit", "FunctionEnd")
+    capture = gui[gui.index("SetRegView 64") : gui.index("SetRegView lastused") + len("SetRegView lastused")]
+    guarded = _real_uninstall_only(_preuninstall())
+    removal = guarded[guarded.index("SetRegView 64") : guarded.rindex("SetRegView lastused") + len("SetRegView lastused")]
+    removal = removal.replace('HKLM "${SPECTRA_POLICY_KEY}"', probe_key)
+    assert "HKLM" not in capture + removal
+    read = 'ReadRegStr {0} HKLM "SOFTWARE\\Microsoft\\Windows\\CurrentVersion" "ProgramFilesDir"'
+    body = f"""
+  ; The template's SetContext selects the 64-bit view on 64-bit Windows.
+  SetRegView 64
+  {read.format("$2")}
+{capture}
+  {read.format("$3")}
+{removal}
+  {read.format("$4")}
+  StrCpy $1 "$2|$3|$4"
+"""
+    try:
+        got = _run_probe(tmp_path, body, shared)
+    finally:
+        subprocess.run(["reg", "delete", f"HKCU{BS}{hive}", "/f"], capture_output=True, check=False)
+    before, after_capture, after_removal = got.split("|")
+    assert before and "(x86)" not in before, got
+    assert after_capture == before and after_removal == before, got
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="NSIS probe runs on Windows")

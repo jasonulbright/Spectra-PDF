@@ -1683,7 +1683,7 @@ fn interactive_user_matches(user_id: Option<&str>, current_user_sid: Option<&str
 
 /// SID for the user whose interactive token will bind an InteractiveToken task.
 #[cfg(windows)]
-fn current_user_sid() -> Option<String> {
+pub(crate) fn current_user_sid() -> Option<String> {
     use windows::Win32::Foundation::{CloseHandle, HANDLE};
     use windows::Win32::Security::{GetTokenInformation, SID, TOKEN_QUERY, TOKEN_USER, TokenUser};
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -1746,7 +1746,7 @@ fn current_user_sid() -> Option<String> {
 }
 
 #[cfg(not(windows))]
-fn current_user_sid() -> Option<String> {
+pub(crate) fn current_user_sid() -> Option<String> {
     None
 }
 

@@ -1673,6 +1673,10 @@ pub(super) fn status(app: &AppHandle) -> Result<VirtualPrinterStatus, String> {
         listener,
         last_job_error,
         printer_name: queue,
+        replaced: false,
+        legacy_present: false,
+        staging: String::new(),
+        service_error: String::new(),
     })
 }
 

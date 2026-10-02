@@ -337,6 +337,9 @@ pub enum CliCommand {
     /// Register or remove the File Explorer commands (run by the installer)
     #[command(hide = true)]
     ShellMenu(ShellMenuArgs),
+    /// Retire or remove the virtual printer queues (run by the installer)
+    #[command(hide = true)]
+    VirtualPrinter(VirtualPrinterArgs),
 }
 
 #[derive(Args)]
@@ -345,6 +348,13 @@ pub struct ShellMenuArgs {
     /// unregister-user act on the current user only
     #[arg(value_enum)]
     pub action: crate::shell_menu::CliAction,
+}
+
+#[derive(Args)]
+pub struct VirtualPrinterArgs {
+    /// Both actions need elevation
+    #[arg(value_enum)]
+    pub action: crate::print_to_pdf::CliAction,
 }
 
 #[derive(Args)]
@@ -3134,6 +3144,7 @@ fn command_gs_need(command: &CliCommand) -> GsNeed {
         | C::Scanners(_)
         | C::ScanTest(_)
         | C::ShellMenu(_)
+        | C::VirtualPrinter(_)
         | C::IncrementalSave(_) => Never,
     };
     GsNeed::Command(demand)
@@ -4056,6 +4067,7 @@ pub fn platform_refusal(
             feature::SCANNING
         }
         CliCommand::ShellMenu(_) if !capabilities.explorer_menu => feature::EXPLORER_MENU,
+        CliCommand::VirtualPrinter(_) if !capabilities.virtual_printer => feature::VIRTUAL_PRINTER,
         CliCommand::Sign(args)
             if !capabilities.store_certificates
                 && (args.store_cert.is_some() || args.store_machine || args.list_store_certs) =>
@@ -4117,6 +4129,10 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
 
     if let CliCommand::ShellMenu(args) = &command {
         return crate::shell_menu::run_cli(args.action);
+    }
+
+    if let CliCommand::VirtualPrinter(args) = &command {
+        return crate::print_to_pdf::run_cli(args.action);
     }
 
     // Printer enumeration/capabilities are pure winspool or CUPS — no Python
@@ -4405,6 +4421,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         CliCommand::Scanners(_) => unreachable!("scanners is dispatched before engine start"),
         CliCommand::ScanTest(_) => unreachable!("scan-test is dispatched before engine start"),
         CliCommand::ShellMenu(_) => unreachable!("shell-menu is dispatched before engine start"),
+        CliCommand::VirtualPrinter(_) => {
+            unreachable!("virtual-printer is dispatched before engine start")
+        }
 
         CliCommand::Rotate(args) => {
             engine.call(
@@ -6868,6 +6887,28 @@ mod tests {
             Some("The File Explorer context menu is not available on this platform".to_string())
         );
         assert_eq!(refusal(&["spectrapdf", "shell-menu", "register-user"], true), None);
+    }
+
+    #[test]
+    fn the_hidden_virtual_printer_subcommand_parses_every_action() {
+        assert_eq!(
+            classify(&["spectrapdf.exe", "virtual-printer", "retire-legacy"]),
+            LaunchMode::Parse
+        );
+        for (word, action) in [
+            ("retire-legacy", crate::print_to_pdf::CliAction::RetireLegacy),
+            ("remove-all", crate::print_to_pdf::CliAction::RemoveAll),
+        ] {
+            match parse(&["spectrapdf", "virtual-printer", word]).command {
+                Some(CliCommand::VirtualPrinter(args)) => assert_eq!(args.action, action, "{word}"),
+                _ => panic!("{word} did not parse as virtual-printer"),
+            }
+        }
+        assert!(Cli::try_parse_from(["spectrapdf", "virtual-printer", "install"]).is_err());
+        let help = <Cli as clap::CommandFactory>::command().render_long_help().to_string();
+        assert!(!help.contains("virtual-printer"), "the installer's subcommand is listed in --help");
+        assert_eq!(refusal(&["spectrapdf", "virtual-printer", "remove-all"], true), None);
+        assert!(refusal(&["spectrapdf", "virtual-printer", "remove-all"], false).is_some());
     }
 
     #[test]

@@ -72,11 +72,14 @@ def test_ghostscript_offer_is_skipped_when_an_install_is_found() -> None:
             assert f'SPECTRA_GS_SCAN_KEY {root} "{key}"' in detect
     assert 'SPECTRA_GS_SCAN_PATH "gswin64c.exe"' in detect
     # The installer runs no program but its own executable's File Explorer
-    # registration: never Ghostscript, not even to read its version.
+    # registration and virtual-printer step: never Ghostscript, not even to
+    # read its version.
     executed = re.findall(r"\bExecWait '([^']*)'", hooks)
-    assert hooks.count("ExecWait") == len(executed) == 2
+    assert hooks.count("ExecWait") == len(executed) == 3
     for command in executed:
-        assert command.startswith('"$INSTDIR\\spectrapdf.exe" shell-menu '), command
+        assert command.startswith(
+            ('"$INSTDIR\\spectrapdf.exe" shell-menu ', '"$INSTDIR\\spectrapdf.exe" virtual-printer ')
+        ), command
     assert "nsExec" not in hooks and "gswin" not in "".join(executed)
 
 

@@ -534,8 +534,8 @@ pub fn run() {
             app.manage(watchers::WatcherState::new());
             watchers::start_all(app.handle());
 
-            // The virtual printer's loopback listener — also part of the
-            // product under test (e2e streams a job straight at the port).
+            // The virtual printer's receiver — also part of the product under
+            // test (e2e hands it a staged job).
             app.manage(print_to_pdf::PrinterState::new());
             if commands::PlatformCapabilities::current().virtual_printer {
                 print_to_pdf::start_listener(app.handle());
