@@ -18,6 +18,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { parse, type DefaultTreeAdapterTypes } from 'parse5';
 
 const root = resolve(__dirname, '..');
 const conf = JSON.parse(readFileSync(resolve(root, 'src-tauri', 'tauri.conf.json'), 'utf8'));
@@ -27,6 +28,22 @@ const csp = security.csp as Record<string, string>;
 function sources(directive: string): string[] {
   const value = csp[directive];
   return typeof value === 'string' ? value.trim().split(/\s+/) : [];
+}
+
+function hasOnlyExternalScripts(html: string): boolean {
+  const pending: DefaultTreeAdapterTypes.Node[] = [parse(html)];
+  let scripts = 0;
+  while (pending.length) {
+    const node = pending.pop()!;
+    if ('tagName' in node && node.tagName === 'script') {
+      scripts++;
+      if (!node.attrs.some(attr => attr.name === 'src' && attr.value.trim())) return false;
+      if (node.childNodes.some(child => !('value' in child) || child.value.trim())) return false;
+    }
+    if ('childNodes' in node) pending.push(...node.childNodes);
+    if ('content' in node) pending.push(node.content);
+  }
+  return scripts > 0;
 }
 
 describe('webview content security policy', () => {
@@ -93,13 +110,17 @@ describe('webview content security policy', () => {
   it('has no second policy or inline script in index.html', () => {
     const html = readFileSync(resolve(root, 'src', 'renderer', 'index.html'), 'utf8');
     expect(html).not.toMatch(/http-equiv\s*=\s*["']Content-Security-Policy/i);
-    const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
-    expect(scripts.length).toBeGreaterThan(0);
-    for (const [, attrs, body] of scripts) {
-      expect(attrs).toMatch(/\bsrc\s*=/);
-      expect(body.trim()).toBe('');
-    }
+    expect(hasOnlyExternalScripts(html)).toBe(true);
   });
+
+  it.each(['</script>', '</script >', '</script\n>', '</SCRIPT >', '</script foo>', '</script/>', ''])(
+    'rejects an inline script after the external bundle with closing tag %s',
+    closing => {
+      const external = '<script src="./index.tsx"></script>';
+      expect(hasOnlyExternalScripts(`<html>${external}</html>`)).toBe(true);
+      expect(hasOnlyExternalScripts(`<html>${external}<script>alert(1)${closing}</html>`)).toBe(false);
+    },
+  );
 });
 
 describe('adoptStyleNonce', () => {

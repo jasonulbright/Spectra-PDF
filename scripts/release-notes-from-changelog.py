@@ -79,6 +79,10 @@ def extract(changelog: str, version: str) -> str:
             body = body[i + 1:]
             break
     notes = "\n".join(body).strip()
+    # A changelog section may already carry the public footer. Normalize its
+    # trailing copies before appending the one used by both publishers.
+    while notes and notes.split("\n")[-1].strip() == FOOTER:
+        notes = "\n".join(notes.split("\n")[:-1]).rstrip()
     if not notes:
         raise ValueError(f"the `{heading}` section of CHANGELOG.md is empty")
     for line in notes.split("\n"):

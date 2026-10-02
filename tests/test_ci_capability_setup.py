@@ -2512,6 +2512,15 @@ def test_the_extractor_keeps_the_sections_own_structure() -> None:
     )
 
 
+@pytest.mark.parametrize("copies", (1, 2))
+def test_the_extractor_emits_one_existing_changelog_footer(copies: int) -> None:
+    text = "## 2026.1003.150\n\n*Released 2026-10-03*\n\n### Fixed\n- Fix bugs."
+    text += ("\n\n" + CHANGELOG_FOOTER) * copies + "\n"
+    assert _release_notes_module().extract(text, "2026.1003.150") == (
+        "### Fixed\n- Fix bugs.\n\n" + CHANGELOG_FOOTER
+    )
+
+
 @pytest.mark.parametrize(
     "text,version,message",
     (
@@ -3793,34 +3802,65 @@ def test_the_next_release_number_never_skips_or_repeats() -> None:
     with pytest.raises(ValueError, match="release number is 150, not 151"):
         module.check_next("2026.1004.151", legacy, RELEASE_DAY)
     tags = legacy + ["v2026.1004.150"]
-    assert module.check_next("2026.1004.151", tags).number == 151
-    assert module.check_next("2026.1011.151", tags).number == 151
+    assert module.check_next("2026.1004.151", tags, RELEASE_DAY).number == 151
+    assert module.check_next("2026.1011.151", tags, RELEASE_DAY.replace(day=11)).number == 151
     for skipped in ("2026.1011.152", "2026.1011.150"):
         with pytest.raises(ValueError, match="never skip or repeat"):
-            module.check_next(skipped, tags)
+            module.check_next(skipped, tags, RELEASE_DAY.replace(day=11))
     with pytest.raises(ValueError, match="earlier than v2026.1004.150"):
-        module.check_next("2026.1003.151", tags)
+        module.check_next("2026.1003.151", tags, RELEASE_DAY.replace(day=3))
     # A re-cut of an unpublished tag is checked against the tags before it.
     assert module.check_tag("v2026.1004.150", tags, RELEASE_DAY).number == 150
 
 
-@pytest.mark.parametrize(
-    "version,message",
-    (
-        ("2026.929.150", "before the format ruling (2026-09-30)"),
-        ("2026.1006.150", "later than 2026-10-05"),
-        ("2027.1004.150", "later than 2026-10-05"),
-    ),
-)
-def test_the_first_date_release_refuses_a_mistyped_date(version: str, message: str) -> None:
+@pytest.mark.parametrize("number,tags", ((150, ["v1.2.8"]), (151, ["v2026.930.150"])))
+@pytest.mark.parametrize("day", ("2026.1001", "2026.1003", "2027.1002"))
+def test_a_new_release_requires_the_actual_local_day(number: int, tags: list[str], day: str) -> None:
     module = _versions()
-    legacy = ["v1.2.8"]
-    for accepted in ("2026.930.150", "2026.1004.150", "2026.1005.150"):
-        assert module.check_next(accepted, legacy, RELEASE_DAY).number == 150
-    with pytest.raises(ValueError, match=re.escape(message)):
-        module.check_next(version, legacy, RELEASE_DAY)
-    with pytest.raises(ValueError, match=re.escape(message)):
-        module.check_tag("v" + version, legacy, RELEASE_DAY)
+    today = RELEASE_DAY.replace(day=2)
+    assert module.check_next(f"2026.1002.{number}", tags, today).number == number
+    version = f"{day}.{number}"
+    for check, candidate in ((module.check_next, version), (module.check_tag, "v" + version),
+                             (module.check_surfaces, version)):
+        with pytest.raises(ValueError, match="today's local date"):
+            check(candidate, tags, today)
+
+
+def test_new_release_uses_local_day_but_existing_releases_remain_valid(monkeypatch) -> None:
+    module = _versions()
+    monkeypatch.setattr(module, "_local_today", lambda: RELEASE_DAY.replace(day=2))
+    assert module.check_next("2026.1002.150", []).number == 150
+    with pytest.raises(ValueError, match="today's local date"):
+        module.check_next("2026.1003.150", [])
+    assert "already tagged" in module.check_surfaces("2026.1003.150", ["v2026.1003.150"])
+    assert module.check_release_tag("v2026.1003.150") == "2026.1003.150"
+
+
+def test_the_release_workflow_accepts_the_utc_day_or_the_day_before() -> None:
+    module = _versions()
+    utc = RELEASE_DAY.replace(day=3)
+    for day in ("2026.1003", "2026.1002"):
+        assert module.check_next(f"{day}.151", ["v2026.930.150"], utc, release_workflow=True).number == 151
+        assert module.check_tag(f"v{day}.151", ["v2026.930.150"], utc, release_workflow=True).number == 151
+    for day in ("2026.1001", "2026.1004"):
+        with pytest.raises(ValueError, match="UTC date"):
+            module.check_tag(f"v{day}.151", ["v2026.930.150"], utc, release_workflow=True)
+
+
+def test_the_release_workflow_flag_reads_the_utc_clock(monkeypatch) -> None:
+    module = _versions()
+    monkeypatch.setattr(module, "_utc_today", lambda: RELEASE_DAY.replace(day=3))
+    monkeypatch.setattr(module, "_local_today", lambda: RELEASE_DAY.replace(day=2))
+    assert module.main(["tag", "v2026.1002.150", "--release-workflow"]) == 0
+    assert module.main(["tag", "v2026.1004.150", "--release-workflow"]) != 0
+    assert module.main(["tag", "v2026.1003.150"]) != 0
+    assert module.main(["tag", "v2026.1002.150"]) == 0
+
+
+def test_the_local_check_refuses_a_future_date() -> None:
+    module = _versions()
+    with pytest.raises(ValueError, match="today's local date"):
+        module.check_tag("v2026.1003.150", [], RELEASE_DAY.replace(day=2))
 
 
 def test_the_surfaces_rule_allows_an_unbumped_tree_and_refuses_a_new_legacy_version() -> None:
@@ -3835,14 +3875,16 @@ def test_the_surfaces_rule_allows_an_unbumped_tree_and_refuses_a_new_legacy_vers
 def test_the_tag_rule_reads_ls_remote_output(tmp_path: Path) -> None:
     listing = tmp_path / "tags.txt"
     listing.write_text(
-        "0123\trefs/tags/v1.2.8\n4567\trefs/tags/v2026.1004.150\n89ab\trefs/tags/vendor-cache\n",
+        "0123\trefs/tags/v1.2.8\n4567\trefs/tags/v2026.930.150\n89ab\trefs/tags/vendor-cache\n",
         encoding="utf-8",
     )
     script = str(ROOT / RELEASE_VERSION)
-    good = subprocess.run([sys.executable, script, "tag", "v2026.1011.151", "--existing-file", str(listing)],
+    today = __import__("datetime").date.today()
+    day = f"{today.year}.{today.month * 100 + today.day}"
+    good = subprocess.run([sys.executable, script, "tag", f"v{day}.151", "--existing-file", str(listing)],
                           capture_output=True, text=True)
     assert good.returncode == 0, good.stderr
-    bad = subprocess.run([sys.executable, script, "tag", "v2026.1011.152", "--existing-file", str(listing)],
+    bad = subprocess.run([sys.executable, script, "tag", f"v{day}.152", "--existing-file", str(listing)],
                          capture_output=True, text=True)
     assert bad.returncode == 1 and "the release number is 151, not 152" in bad.stderr
     legacy = subprocess.run([sys.executable, script, "release-tag", "v1.1.15"], capture_output=True, text=True)
