@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.1003.150
+
+*Released 2026-10-03*
+
+- Convert PDFs from File Explorer or combine selected files into one PDF.
+- Install Linux builds as AppImage, `.deb`, or `.rpm` packages.
+- Print, scan, schedule tasks, send email, and use the tray on Linux.
+- Preserve reading order on rotated pages and vertically written text.
+- Queue Windows printer jobs until Spectra PDF is open.
+- Explain Ghostscript setup for older supported Linux releases.
+- Fix various bugs.
+
+Full changelog: CHANGELOG.md
+
 ## 1.2.8
 
 *Released 2026-09-29*
