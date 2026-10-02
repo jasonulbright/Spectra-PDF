@@ -5354,7 +5354,7 @@
   "panel.settings.openedRust": "已打开 Rust crate 声明",
   "panel.settings.printTo": "打印到 Spectra PDF",
   "panel.settings.printerBlurb": "会在每个应用程序的打印对话框中安装一台名为“Spectra PDF”的打印机。打印到它时，页面会作为新的 PDF 在这里打开。转换使用随附的工具在本机完成；只有本应用在运行时（最小化到托盘也算）才会接收作业 — 应用关闭时打印的作业会留在 Windows 打印队列中等待。",
-  "panel.settings.printerBlurbLinux": "在每个应用程序的打印对话框中添加一台名为“Spectra PDF”的打印机。打印到它时，页面会在这里作为新的 PDF 打开。只有在此应用运行时才会接收作业；应用关闭时打印的作业会在系统打印队列中等待。",
+  "panel.settings.printerBlurbLinux": "在每个应用程序的打印对话框中添加一台名为“Spectra PDF”的打印机。打印到它时，页面会在这里作为新的 PDF 打开。只有您的帐户可以打印到这台打印机。系统打印队列会保留每个作业，直到此应用取走它；应用关闭时打印的作业会在下次启动应用时打开。",
   "panel.settings.printerDown": "接收端已停止：{{status}}",
   "panel.settings.printerInstalled": "打印机已安装",
   "panel.settings.printerNotInstalled": "打印机未安装",

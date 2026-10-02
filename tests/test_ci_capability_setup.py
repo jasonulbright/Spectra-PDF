@@ -3719,6 +3719,7 @@ RELEASE_PLATFORMS = "scripts/release_platforms.py"
 PLATFORMS_FILE = ".github/release-platforms.txt"
 CI_PARITY = "scripts/ci-parity-gates.sh"
 CI_PARITY_LINUX = "scripts/ci-parity-linux.sh"
+CI_PARITY_LINUX_HOOK = "scripts/ci-parity-linux-host.local.sh"
 LINUX_SMOKE = "scripts/linux-install-smoke.sh"
 LINUX_BUNDLE_DIR = "src-tauri/target/release/bundle/linux"
 
@@ -4199,17 +4200,23 @@ def test_the_checksum_step_adds_the_linux_packages_only_when_linux_ships() -> No
         assert ").Checksummed)" in step
 
 
-def test_the_linux_parity_gates_follow_the_switch_and_fail_without_wsl() -> None:
+def test_the_linux_parity_gates_follow_the_switch_and_fail_without_a_linux_environment() -> None:
     script = (ROOT / CI_PARITY).read_text(encoding="utf-8")
     block = script[script.index('LINUX_RELEASE="$('):script.index("esac", script.index('LINUX_RELEASE="$('))]
     assert "scripts/release_platforms.py" in block
+    assert f'LINUX_HOOK="{CI_PARITY_LINUX_HOOK}"' in block
     enabled = block[block.index("linux=true)"):block.index("linux=false)")]
     assert "gate python-linux-toolchain" in enabled and "check-toolchains.py python-linux" in enabled
-    assert "gate linux sh scripts/ci-parity-linux.sh" in enabled
-    assert "wsl.exe -e sh -lc" in enabled and "sh scripts/ci-parity-linux.sh" in enabled
-    # The System32 stub exists without a distribution; the gate asks for one.
-    assert enabled.index("wsl.exe -l -q") < enabled.index("wsl.exe -e sh -lc")
-    assert "exit 1" in enabled[enabled.index("else"):], "a host without WSL must fail the gate"
+    on_linux = enabled.index('if [ "$(uname -s)" = "Linux" ]; then')
+    direct = enabled.index("gate linux sh scripts/ci-parity-linux.sh")
+    hook = enabled.index('elif [ -f "$R/$LINUX_HOOK" ]; then')
+    delegated = enabled.index('gate linux sh "$LINUX_HOOK"')
+    refused = enabled.index("the Linux gates need a Linux environment; run scripts/ci-parity-linux.sh on a Linux host")
+    assert on_linux < direct < hook < delegated < enabled.index("else") < refused
+    assert "exit 1" in enabled[refused:], "a host that is neither Linux nor holds the hook must fail the gate"
+    # The hook is host-specific: ignored and untracked (check-ignore exits 1
+    # for a tracked path).
+    _git("check-ignore", "-q", CI_PARITY_LINUX_HOOK)
     linux = (ROOT / CI_PARITY_LINUX).read_text(encoding="utf-8")
     for step in (
         "sh scripts/build-appimage.sh --prepare",
@@ -4225,13 +4232,25 @@ def test_the_linux_parity_gates_follow_the_switch_and_fail_without_wsl() -> None
     assert 'FLOOR="2.35"' in linux
 
 
-def test_the_readme_claims_no_linux_package_before_the_switch_lists_linux() -> None:
-    """The README is a public surface: it names the Linux packages in the
-    commit that turns the Linux release on, never before."""
+def test_the_readme_describes_the_linux_release_exactly_when_the_switch_lists_linux() -> None:
+    """The README is a public surface: it names the Linux packages, their
+    requirements and the policy file in the commit that turns the Linux
+    release on, and drops them in the commit that turns it off."""
     module = _script_module(RELEASE_PLATFORMS, "release_platforms")
-    if "linux" in module.read(ROOT):
-        return
+    linux = "linux" in module.read(ROOT)
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     for claim in ("AppImage", ".deb", ".rpm", "rpm --import", "platform-Windows%20%7C%20Linux",
-                  "/etc/spectrapdf/policies.json"):
-        assert claim not in readme, claim
+                  "/etc/spectrapdf/policies.json", "**Linux end users**", "glibc 2.35 or newer",
+                  "WebKitGTK 4.1"):
+        assert (claim in readme) == linux, (claim, linux)
+    if not linux:
+        return
+    # The package verification lines belong to the code-signing note and
+    # nowhere else.
+    note = readme[readme.index("> **Code signing:**"):]
+    note = note[:note.index("\n\n")]
+    for line in ("> sudo rpm --import https://raw.githubusercontent.com/jasonulbright/Spectra-PDF/main/"
+                 "keys/spectrapdf-rpm-signing.pub.asc",
+                 "> rpm -K spectrapdf-<version>-1.x86_64.rpm"):
+        assert line in note, line
+    assert readme.count("rpm --import") == 1 and readme.count("rpm -K") == 1

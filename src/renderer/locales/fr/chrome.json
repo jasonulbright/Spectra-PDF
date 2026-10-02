@@ -5602,7 +5602,7 @@
   "panel.settings.openedRust": "Notices des crates Rust ouvertes",
   "panel.settings.printTo": "Imprimer vers Spectra PDF",
   "panel.settings.printerBlurb": "Installe une imprimante nommée « Spectra PDF » dans la boîte de dialogue d’impression de chaque application. Y imprimer ouvre les pages ici sous forme de nouveau PDF. La conversion a lieu sur ce PC avec les outils fournis ; les tâches ne sont reçues que tant que cette application s’exécute (réduite dans la zone de notification, cela compte) — une tâche imprimée alors qu’elle est fermée attend dans la file d’attente d’impression de Windows.",
-  "panel.settings.printerBlurbLinux": "Ajoute une imprimante nommée « Spectra PDF » à la boîte de dialogue d’impression de toutes les applications. Imprimer vers celle-ci ouvre les pages ici dans un nouveau PDF. Les travaux ne sont reçus que lorsque cette application est en cours d’exécution ; un travail imprimé pendant qu’elle est fermée attend dans la file d’impression du système.",
+  "panel.settings.printerBlurbLinux": "Ajoute une imprimante nommée « Spectra PDF » à la boîte de dialogue d’impression de toutes les applications. Imprimer vers celle-ci ouvre les pages ici dans un nouveau PDF. Seul votre compte peut y imprimer. La file d’impression du système retient chaque travail jusqu’à ce que cette application le récupère ; un travail imprimé pendant que l’application est fermée s’ouvre à son prochain démarrage.",
   "panel.settings.printerDown": "récepteur arrêté : {{status}}",
   "panel.settings.printerInstalled": "Imprimante installée",
   "panel.settings.printerNotInstalled": "Imprimante non installée",

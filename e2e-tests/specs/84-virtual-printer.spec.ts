@@ -70,7 +70,7 @@ describe('virtual printer', () => {
       };
       return (await w.__TAURI_INTERNALS__.invoke('virtual_printer_status')).staging;
     });
-    expect(staging.endsWith('\\virtual-printer\\staging')).toBe(true);
+    expect(/[\\/]virtual-printer[\\/]staging$/.test(staging)).toBe(true);
     const ps =
       '%!PS\n/Helvetica findfont 24 scalefont setfont\n72 700 moveto (VPRINT E2E) show\nshowpage\n';
     // The receiver skips a `.part` name, so it never takes a half-written job.

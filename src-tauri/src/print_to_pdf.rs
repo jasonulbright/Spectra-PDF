@@ -16,13 +16,12 @@
 //! UTF-16LE-encoded PowerShell command, never a silent elevation or a
 //! swappable script file.
 //!
-//! On Linux the queue is a CUPS IPP Everywhere queue and the receiver is an
-//! IPP printer on loopback (`print_to_pdf_linux.rs`); it reuses the job naming
-//! and staging rules below.
+//! On Linux the queue is a per-user CUPS queue that holds every job, and the
+//! receiver copies each job out of the spool (`print_to_pdf_linux.rs`); it
+//! reuses the job naming and conversion rules below.
 
 #![cfg_attr(target_os = "linux", allow(dead_code))]
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -42,15 +41,6 @@ mod windows_receiver;
 pub const PRINTER_NAME: &str = "Spectra PDF";
 /// A print job larger than this is refused (a runaway client, not a page).
 const MAX_JOB_BYTES: u64 = 512 * 1024 * 1024;
-/// Idle read timeout for one connection. A client may pause mid-job, so this
-/// is generous. Without it a client that connects and never writes holds the
-/// socket forever.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
-/// A client cannot keep one of the eight job slots alive forever by sending
-/// bytes just before each idle timeout expires.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-const MAX_JOB_RECEIVE_DURATION: Duration = Duration::from_secs(10 * 60);
 /// Concurrent job cap: each job runs on its own thread.
 const MAX_CONCURRENT_JOBS: usize = 8;
 
@@ -94,17 +84,6 @@ fn printed_dir() -> PathBuf {
 
 /// How every name a job writes into the printed folder begins.
 const PRINTED_PREFIX: &str = "Printed ";
-
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn timestamp_name() -> String {
-    // Seconds precision keeps names sortable and human. Not unique; `claim`
-    // guarantees that.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("{PRINTED_PREFIX}{now}")
-}
 
 /// Where the distiller writes before its output is renamed over the
 /// reservation.
@@ -198,7 +177,7 @@ fn reserve_pdf(dir: &Path, stem: &str) -> std::io::Result<PathBuf> {
 /// `before_rename` runs once that name is known and the PDF is complete; an
 /// error from it fails the conversion. On failure the printed folder keeps
 /// nothing and `staged` is untouched.
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 fn convert_staged(
     staged: &Path,
     stem: &str,
@@ -253,7 +232,7 @@ fn convert_staged(
 
 /// Open a printed PDF through the normal open funnel, exactly what a second
 /// instance's argv does.
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 fn open_printed(app: &AppHandle, pdf_path: &Path) {
     if let Some(state) = app.try_state::<PrinterState>() {
         state.last_job_error.lock().unwrap().clear();
@@ -271,37 +250,6 @@ pub fn start_listener(app: &AppHandle) {
 
 #[cfg(not(any(windows, target_os = "linux")))]
 pub fn start_listener(_app: &AppHandle) {}
-
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn copy_job<R: std::io::Read, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
-    limit: u64,
-    max_duration: Duration,
-) -> std::io::Result<u64> {
-    let deadline = std::time::Instant::now() + max_duration;
-    let mut total = 0u64;
-    let mut buffer = [0u8; 64 * 1024];
-    loop {
-        if std::time::Instant::now() >= deadline {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "print job receive deadline exceeded",
-            ));
-        }
-        let remaining = limit.saturating_add(1).saturating_sub(total);
-        if remaining == 0 {
-            return Ok(total);
-        }
-        let capacity = remaining.min(buffer.len() as u64) as usize;
-        let read = reader.read(&mut buffer[..capacity])?;
-        if read == 0 {
-            return Ok(total);
-        }
-        writer.write_all(&buffer[..read])?;
-        total = total.saturating_add(read as u64);
-    }
-}
 
 fn run_powershell(args: &[&str]) -> Result<String, String> {
     let executable = powershell_executable()?;
@@ -501,7 +449,7 @@ pub fn run_cli(action: CliAction) -> i32 {
     }
 }
 
-/// Start the loopback IPP printer — the app-setup hook.
+/// Start the receiver of the held CUPS queue — the app-setup hook.
 #[cfg(target_os = "linux")]
 pub fn start_listener(app: &AppHandle) {
     linux::start_listener(app);
@@ -514,11 +462,12 @@ pub async fn virtual_printer_status(app: AppHandle) -> Result<VirtualPrinterStat
     linux::status(&app)
 }
 
+/// `comment` is the queue's location text, in the installing user's language.
 #[cfg(target_os = "linux")]
 #[tauri::command]
-pub async fn install_virtual_printer(app: AppHandle) -> Result<(), String> {
+pub async fn install_virtual_printer(comment: Option<String>) -> Result<(), String> {
     virtual_printer_available()?;
-    linux::install(&app)
+    linux::install(comment.as_deref().unwrap_or_default())
 }
 
 #[cfg(target_os = "linux")]
@@ -723,7 +672,7 @@ mod tests {
     #[test]
     fn a_bound_listener_clears_only_what_unfinished_jobs_left() {
         let dir = tempfile::tempdir().unwrap();
-        let stem = timestamp_name();
+        let stem = format!("{PRINTED_PREFIX}1700000000");
         std::fs::write(dir.path().join(format!("{stem}-0.ps")), b"%!PS-Adobe-3.0").unwrap();
         let reserved = reserve_pdf(dir.path(), &stem).unwrap();
         let distilled = part_path(&reserved);
@@ -776,44 +725,5 @@ mod tests {
 
         let kept: std::collections::BTreeSet<String> = kept.into_iter().collect();
         assert_eq!(names(dir.path()), kept);
-    }
-
-    #[test]
-    fn streamed_job_copy_reads_only_one_byte_past_its_limit() {
-        let mut source = std::io::Cursor::new(b"four bytes".to_vec());
-        let mut staged = Vec::new();
-        let copied = copy_job(&mut source, &mut staged, 4, Duration::from_secs(1)).unwrap();
-        assert_eq!(copied, 5);
-        assert_eq!(staged, b"four ");
-    }
-
-    #[test]
-    fn a_slow_trickle_cannot_hold_a_job_slot_forever() {
-        struct Trickle {
-            remaining: usize,
-        }
-        impl std::io::Read for Trickle {
-            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
-                std::thread::sleep(Duration::from_millis(10));
-                if self.remaining == 0 {
-                    return Ok(0);
-                }
-                out[0] = b'x';
-                self.remaining -= 1;
-                Ok(1)
-            }
-        }
-
-        let mut source = Trickle { remaining: 100 };
-        let mut staged = Vec::new();
-        let error = copy_job(
-            &mut source,
-            &mut staged,
-            1024,
-            Duration::from_millis(35),
-        )
-        .expect_err("the total receive deadline must stop an active trickle");
-        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
-        assert!(staged.len() < 100);
     }
 }

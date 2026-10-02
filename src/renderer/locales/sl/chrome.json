@@ -5726,7 +5726,7 @@
   "panel.settings.openedRust": "Obvestila zabojev Rust odprta",
   "panel.settings.printTo": "Natisni v Spectra PDF",
   "panel.settings.printerBlurb": "Namesti tiskalnik z imenom »Spectra PDF« v tiskalno pogovorno okno vsakega programa. Tiskanje nanj odpre strani tukaj kot nov PDF. Pretvorba poteka na tem računalniku s priloženimi orodji; opravila se sprejemajo samo, dokler ta program teče (pomanjšan v opravilno vrstico šteje) — opravilo, natisnjeno, ko je zaprt, čaka v tiskalni vrsti Windows.",
-  "panel.settings.printerBlurbLinux": "V pogovorno okno za tiskanje vsake aplikacije doda tiskalnik z imenom »Spectra PDF«. Tiskanje nanj odpre strani tukaj kot nov PDF. Posli se sprejemajo le, ko se ta aplikacija izvaja; posel, natisnjen, ko je zaprta, čaka v sistemski tiskalni vrsti.",
+  "panel.settings.printerBlurbLinux": "V pogovorno okno za tiskanje vsake aplikacije doda tiskalnik z imenom »Spectra PDF«. Tiskanje nanj odpre strani tukaj kot nov PDF. Nanj lahko tiska samo vaš račun. Sistemska tiskalna vrsta zadrži vsak posel, dokler ga ta aplikacija ne prevzame; posel, natisnjen, ko je aplikacija zaprta, se odpre ob njenem naslednjem zagonu.",
   "panel.settings.printerDown": "sprejemnik ne deluje: {{status}}",
   "panel.settings.printerInstalled": "Tiskalnik nameščen",
   "panel.settings.printerNotInstalled": "Tiskalnik ni nameščen",

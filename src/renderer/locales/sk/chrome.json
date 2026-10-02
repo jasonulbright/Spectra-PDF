@@ -5726,7 +5726,7 @@
   "panel.settings.openedRust": "Otvorené oznámenia balíkov Rust",
   "panel.settings.printTo": "Tlač do Spectra PDF",
   "panel.settings.printerBlurb": "Nainštaluje tlačiareň s názvom „Spectra PDF“ do tlačového dialógu každej aplikácie. Tlač na ňu otvorí strany tu ako nové PDF. Prevod prebieha na tomto počítači dodanými nástrojmi; úlohy sa prijímajú, len kým táto aplikácia beží (minimalizovaná do oblasti oznámení sa počíta) — úloha vytlačená pri zavretej aplikácii čaká v tlačovom rade systému Windows.",
-  "panel.settings.printerBlurbLinux": "Pridá do dialógového okna tlače každej aplikácie tlačiareň s názvom „Spectra PDF“. Tlač na ňu otvorí stránky tu ako nové PDF. Úlohy sa prijímajú, len keď je táto aplikácia spustená; úloha vytlačená, keď je zatvorená, čaká v systémovom tlačovom fronte.",
+  "panel.settings.printerBlurbLinux": "Pridá do dialógového okna tlače každej aplikácie tlačiareň s názvom „Spectra PDF“. Tlač na ňu otvorí stránky tu ako nové PDF. Tlačiť na ňu môže len váš účet. Systémový tlačový front drží každú úlohu, kým si ju táto aplikácia neprevezme; úloha vytlačená, keď je aplikácia zatvorená, sa otvorí pri jej ďalšom spustení.",
   "panel.settings.printerDown": "príjem nefunguje: {{status}}",
   "panel.settings.printerInstalled": "Tlačiareň nainštalovaná",
   "panel.settings.printerNotInstalled": "Tlačiareň nenainštalovaná",

@@ -5602,7 +5602,7 @@
   "panel.settings.openedRust": "Avisos dos crates Rust abertos",
   "panel.settings.printTo": "Imprimir no Spectra PDF",
   "panel.settings.printerBlurb": "Instala uma impressora chamada “Spectra PDF” na caixa de impressão de todos os aplicativos. Imprimir nela abre as páginas aqui como um PDF novo. A conversão acontece neste PC com as ferramentas incluídas; os trabalhos só são recebidos enquanto este aplicativo estiver em execução (minimizado na bandeja conta) — um trabalho impresso com ele fechado espera na fila de impressão do Windows.",
-  "panel.settings.printerBlurbLinux": "Adiciona uma impressora chamada “Spectra PDF” à caixa de diálogo de impressão de todos os aplicativos. Imprimir nela abre as páginas aqui como um novo PDF. Os trabalhos só são recebidos enquanto este aplicativo está em execução; um trabalho impresso enquanto ele está fechado aguarda na fila de impressão do sistema.",
+  "panel.settings.printerBlurbLinux": "Adiciona uma impressora chamada “Spectra PDF” à caixa de diálogo de impressão de todos os aplicativos. Imprimir nela abre as páginas aqui como um novo PDF. Somente a sua conta pode imprimir nela. A fila de impressão do sistema retém cada trabalho até que este aplicativo o receba; um trabalho impresso enquanto o aplicativo está fechado abre na próxima vez que ele for iniciado.",
   "panel.settings.printerDown": "receptor fora do ar: {{status}}",
   "panel.settings.printerInstalled": "Impressora instalada",
   "panel.settings.printerNotInstalled": "Impressora não instalada",

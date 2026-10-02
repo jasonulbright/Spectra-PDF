@@ -28,20 +28,21 @@ gate node-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py no
 #     Linux Python runtime may trail .python-version by patches of the same
 #     minor until python-build-standalone publishes the matching patch.
 #     scripts/ci-parity-linux.sh mirrors the Linux build job's compile, notice
-#     gates and glibc floor; on Windows it runs in WSL, and a host without WSL
-#     fails the gate. ---
+#     gates and glibc floor. A Linux host runs it directly. Any other host runs
+#     the untracked hook scripts/ci-parity-linux-host.local.sh, which must run
+#     the mirror in a Linux environment and exit with its status. A host with
+#     neither fails the gate. ---
 LINUX_RELEASE="$(cd "$R" && "$R/.venv/Scripts/python.exe" scripts/release_platforms.py)"
+LINUX_HOOK="scripts/ci-parity-linux-host.local.sh"
 case "$LINUX_RELEASE" in
   linux=true)
     gate python-linux-toolchain "$R/.venv/Scripts/python.exe" scripts/check-toolchains.py python-linux
     if [ "$(uname -s)" = "Linux" ]; then
       gate linux sh scripts/ci-parity-linux.sh
-    elif command -v wsl.exe >/dev/null 2>&1 &&
-         [ -n "$(wsl.exe -l -q 2>/dev/null | tr -d '\000\r[:space:]')" ]; then
-      gate linux env MSYS_NO_PATHCONV=1 wsl.exe -e sh -lc 'cd "$(wslpath -u "$1")" && sh scripts/ci-parity-linux.sh' sh "$(cygpath -w "$R")"
+    elif [ -f "$R/$LINUX_HOOK" ]; then
+      gate linux sh "$LINUX_HOOK"
     else
-      # wsl.exe exists in System32 even with no distribution installed.
-      gate linux sh -c 'echo "no WSL distribution found (wsl.exe -l -q lists none): the Linux gates run in WSL on a Windows host"; exit 1'
+      gate linux sh -c 'echo "the Linux gates need a Linux environment; run scripts/ci-parity-linux.sh on a Linux host"; exit 1'
     fi
     ;;
   linux=false)

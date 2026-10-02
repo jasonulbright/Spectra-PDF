@@ -5478,7 +5478,7 @@
   "panel.settings.openedRust": "Åpnet Rust-crate-merknader",
   "panel.settings.printTo": "Skriv ut til Spectra PDF",
   "panel.settings.printerBlurb": "Installerer en skriver med navnet “Spectra PDF” i utskriftsvinduet til alle programmer. Å skrive ut til den åpner sidene her som en ny PDF. Konverteringen skjer på denne PC-en med de medfølgende verktøyene; jobber tas bare imot mens dette programmet kjører (minimert til systemkurven teller med) — en jobb som skrives ut mens det er lukket, venter i Windows-utskriftskøen.",
-  "panel.settings.printerBlurbLinux": "Legger til en skriver som heter «Spectra PDF» i utskriftsdialogen i alle programmer. Når du skriver ut til den, åpnes sidene her som en ny PDF. Jobber mottas bare mens dette programmet kjører; en jobb som skrives ut mens det er lukket, venter i systemets utskriftskø.",
+  "panel.settings.printerBlurbLinux": "Legger til en skriver som heter «Spectra PDF» i utskriftsdialogen i alle programmer. Når du skriver ut til den, åpnes sidene her som en ny PDF. Bare kontoen din kan skrive ut til den. Systemets utskriftskø holder hver jobb til dette programmet henter den; en jobb som skrives ut mens programmet er lukket, åpnes neste gang det starter.",
   "panel.settings.printerDown": "mottakeren er nede: {{status}}",
   "panel.settings.printerInstalled": "Skriveren er installert",
   "panel.settings.printerNotInstalled": "Skriveren er ikke installert",

@@ -963,8 +963,9 @@ function VirtualPrinterBlock(): React.JSX.Element {
   // print dialog that accepts jobs and produces nothing — a failure OUTSIDE
   // this app, where no notice of ours can reach it.
   const gs = useGsCapability();
-  // The Linux printer is a CUPS queue that hands the job over as PDF, so it
-  // needs no distiller and Ghostscript is not a prerequisite there.
+  // The Linux printer takes most jobs as PDF, which open as received; a
+  // PostScript job without Ghostscript stays staged under a named failure,
+  // so Ghostscript is not a prerequisite there.
   const linux = hostOs() === 'linux';
   const needsGs = !linux;
   const [vpStatus, setVpStatus] = useState<VirtualPrinterStatus | null>(null);
