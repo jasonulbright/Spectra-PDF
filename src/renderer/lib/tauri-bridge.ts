@@ -714,16 +714,30 @@ export interface WatchedFolder {
 
 export interface VirtualPrinterStatus {
   installed: boolean;
-  /** 'listening', or the named reason the loopback listener is down. */
+  /** 'listening', or the named reason the receiver is down. */
   listener: string;
   lastJobError: string;
   printerName: string;
+  /** An update removed the machine's loopback printer, none is left, and this
+   *  account has neither installed nor removed its own printer since
+   *  (Windows). */
+  replaced: boolean;
+  /** A printer of the releases that delivered jobs over loopback TCP is still
+   *  installed (Windows). */
+  legacyPresent: boolean;
+  /** The folder of jobs taken from the queue and not yet converted (Windows);
+   *  empty elsewhere. */
+  staging: string;
+  /** Why the print service could not list its printers (Windows); empty while
+   *  it answers. `installed` means nothing while this is set. */
+  serviceError: string;
 }
 
 export const virtualPrinter = {
   status: () => invoke<VirtualPrinterStatus>('virtual_printer_status'),
-  /** One visible UAC elevation over a staged pure-ASCII script. */
-  install: () => invoke<void>('install_virtual_printer'),
+  /** One visible UAC elevation over an encoded pure-ASCII script. `comment` is
+   *  the queue's Comment field, in the user's language (Windows). */
+  install: (comment: string) => invoke<void>('install_virtual_printer', { comment }),
   uninstall: () => invoke<void>('uninstall_virtual_printer'),
 };
 

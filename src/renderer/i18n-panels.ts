@@ -2681,6 +2681,15 @@ export const PANEL_STRINGS = {
     'Adds a printer named “Spectra PDF” to every application’s print dialog. Printing to it opens the pages here as a new PDF. Jobs are received only while this app is running; a job printed while it is closed waits in the system print queue.',
   'panel.settings.printerInstalled': 'Printer installed',
   'panel.settings.printerNotInstalled': 'Printer not installed',
+  'panel.settings.printerReplaced':
+    'An update replaced this printer with one for each Windows account. Install it again to keep printing to Spectra PDF.',
+  'panel.settings.printerHeld':
+    'Windows shows this printer as paused. Each job stays in its queue until this app takes it.',
+  'panel.settings.printerLegacy':
+    'An earlier Spectra PDF printer is still installed. It can send print jobs to other accounts on this computer. Install or remove the printer here to retire it.',
+  'panel.settings.printService': 'The Windows print service is not available: {{error}}',
+  'panel.settings.printerQueueComment': 'Held for Spectra PDF; jobs open in the app',
+  'panel.settings.printerChangeFailed': 'The printer was not changed. Windows reported no reason.',
   'panel.settings.printerReady': 'ready to receive jobs',
   'panel.settings.printerDown': 'receiver down: {{status}}',
   'panel.settings.lastJobFailed': 'Last job failed: {{error}}',

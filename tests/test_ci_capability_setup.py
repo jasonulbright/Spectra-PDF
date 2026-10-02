@@ -1871,6 +1871,32 @@ path = "tests/accepting_verifier.local.rs"
 """
 
 
+#: One full Cargo target per tag revision the `tag_package` fixture builds.
+VERIFIER_TARGETS = ROOT / "src-tauri" / "target" / "verifier-tags"
+
+
+def _checked_out_revisions() -> set[str]:
+    """The HEAD of every registered worktree whose directory still exists."""
+    revisions: set[str] = set()
+    path = None
+    for line in _git("worktree", "list", "--porcelain").splitlines():
+        if line.startswith("worktree "):
+            path = Path(line.removeprefix("worktree "))
+        elif line.startswith("HEAD ") and path is not None and path.is_dir():
+            revisions.add(line.removeprefix("HEAD "))
+    return revisions
+
+
+def _prune_verifier_targets(root: Path, keep: set[str]) -> None:
+    """Delete every revision-named target under `root` that is not in `keep`;
+    entries not named as a revision are never touched."""
+    if not root.is_dir():
+        return
+    for entry in root.iterdir():
+        if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", entry.name) and entry.name not in keep:
+            shutil.rmtree(entry, ignore_errors=True)
+
+
 @pytest.fixture
 def tag_package(tmp_path: Path):
     """A scratch package standing in for a TAG's `src-tauri`, with the
@@ -1881,7 +1907,14 @@ def tag_package(tmp_path: Path):
     an unhashed libspectrapdf_lib.rlib output. A tag's different feature graph
     can overwrite it while Cargo still calls the live package fresh, linking
     tests against incompatible Tauri types or a stale build script.
-    The isolated cache is reused only by fixtures for the same tag revision.
+    The isolated cache is reused only by fixtures for the same tag revision:
+    Cargo judges a path package fresh by file mtimes, so a target shared by
+    two revisions whose builds interleave can serve one revision the other's
+    outputs. Every other revision's target is deleted before use unless a
+    registered worktree still has that revision checked out. Each fixture
+    holds its worktree for as long as it uses the target, so the deletion
+    never reaches a target a concurrent session is building, and the folder
+    holds one target per revision in use.
     The build script requires every
     `resources/` entry of tauri.conf.json to exist; empty stubs satisfy it
     the way the CI jobs' stubs do. Yields (verifier args, downloaded dir,
@@ -1899,9 +1932,8 @@ def tag_package(tmp_path: Path):
         args, downloaded = _draft_fixture(tmp_path)
         args[args.index("-CargoPackage") + 1] = str(package)
         revision = _git("rev-parse", "HEAD", cwd=worktree).strip()
-        env = _verifier_env({
-            "CARGO_TARGET_DIR": str(ROOT / "src-tauri" / "target" / "verifier-tags" / revision),
-        })
+        _prune_verifier_targets(VERIFIER_TARGETS, _checked_out_revisions() | {revision})
+        env = _verifier_env({"CARGO_TARGET_DIR": str(VERIFIER_TARGETS / revision)})
         yield args, downloaded, package, env
     finally:
         _git("worktree", "remove", "--force", str(worktree))
@@ -1916,6 +1948,25 @@ def _staged_leftovers(package: Path) -> list[Path]:
     )
 
 
+def _staged_build_outputs(target: Path, stem: str) -> list[Path]:
+    """The test binary, debug symbols and incremental cache one staged
+    verifier target left in a Cargo target directory."""
+    debug = target / "debug"
+    return sorted([*(debug / "deps").glob(f"{stem}-*"), *(debug / "incremental").glob(f"{stem}-*")])
+
+
+def test_verifier_targets_are_kept_only_for_revisions_still_checked_out(tmp_path: Path) -> None:
+    """Each tag revision's target is a full build. A revision no worktree
+    holds is deleted, a held one is kept, and an entry not named as a
+    revision is never touched."""
+    assert _git("rev-parse", "HEAD").strip() in _checked_out_revisions()
+    stale, held = "a" * 40, "b" * 64
+    for name in (stale, held, "unrelated"):
+        (tmp_path / name / "debug").mkdir(parents=True)
+    _prune_verifier_targets(tmp_path, {held})
+    assert sorted(p.name for p in tmp_path.iterdir()) == [held, "unrelated"]
+
+
 def test_the_draft_verifier_ignores_an_accepting_test_the_verified_package_carries(
     tag_package,
 ) -> None:
@@ -1927,6 +1978,7 @@ def test_the_draft_verifier_ignores_an_accepting_test_the_verified_package_carri
     """
     args, downloaded, package, env = tag_package
     source = (ROOT / UPDATER_MANIFEST_TEST).read_bytes()
+    target = Path(env["CARGO_TARGET_DIR"])
 
     # A real foreign-package build must leave the live checkout's unhashed
     # package slots alone, whether they were provisioned before this test or
@@ -1967,6 +2019,10 @@ def test_the_draft_verifier_ignores_an_accepting_test_the_verified_package_carri
     # accepting test is left exactly as planted: never read, never touched.
     assert _staged_leftovers(package) == []
     assert (package / "tests" / "updater_manifest.rs").read_text(encoding="utf-8") == ACCEPTING_UPDATER_TEST
+    # The build ran in this target, and nothing the staged target compiled
+    # outlives the run.
+    assert (target / "debug" / "deps" / "libspectrapdf_lib.rlib").is_file()
+    assert _staged_build_outputs(target, Path(staged.group(1)).stem) == []
 
     _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="2026-09-02T15:00:00.000Z"))
     run = subprocess.run(args, capture_output=True, text=True, env=env)
@@ -1976,6 +2032,7 @@ def test_the_draft_verifier_ignores_an_accepting_test_the_verified_package_carri
     second = re.search(rf"as .*({VERIFIER_TEST_PREFIX}[0-9a-f]{{16}}_updater_manifest)\.rs", run.stdout)
     assert second and second.group(1) != Path(staged.group(1)).stem
     assert _staged_leftovers(package) == []
+    assert _staged_build_outputs(target, second.group(1)) == []
     assert live_digests() == live_before, "tag verifier overwrote the live package's build outputs"
 
 

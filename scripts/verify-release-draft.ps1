@@ -58,7 +58,8 @@
 # anything under the reserved prefix; and the `Running <path>` line cargo
 # prints for the executed binary must resolve to the staged file. The staged
 # bytes are hashed against the source after the copy and removed after the
-# run; the package's own updater_manifest.rs is never read.
+# run, with the build outputs of their target; the package's own
+# updater_manifest.rs is never read.
 #
 # An executed target is not yet an executed test: the harness takes a test
 # name as a substring filter and a run that matches nothing passes with
@@ -447,6 +448,7 @@ if (-not (Test-OrdinalEqual $sourceSha $stagedSha)) {
     throw "staged verifier test $testTarget (sha256 $stagedSha) is not the verifier's source $testSource (sha256 $sourceSha)"
 }
 Write-Host "staged $testSource as $testTarget (sha256 $stagedSha)"
+$metadata = $null
 try {
     $stagedPath = Get-CanonicalPath $testTarget
     $manifestPath = Get-CanonicalPath $packageManifest
@@ -580,6 +582,18 @@ try {
     Write-Host "verifier test '$verifierFunction' executed: $($tallies[0])"
 } finally {
     Remove-Item -LiteralPath $testTarget -Force -ErrorAction SilentlyContinue
+    # The target name is unique to this run, so no later build reuses its test
+    # binary, debug symbols or incremental cache; left in place, they
+    # accumulate in the build directory with every run. An error raised here
+    # would replace the verdict, so every step is non-terminating.
+    if ($metadata) {
+        $buildDirectory = $metadata.PSObject.Properties["build_directory"]
+        $buildRoot = if ($buildDirectory) { [string]$buildDirectory.Value } else { [string]$metadata.target_directory }
+        foreach ($area in "deps", "incremental") {
+            Get-ChildItem -LiteralPath (Join-Path (Join-Path $buildRoot "debug") $area) -Filter "$verifierTest-*" -Force -ErrorAction SilentlyContinue |
+                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 Write-Host "draft $ReleaseId verified from downloaded bytes: $($actual.Count) assets hashed, latest.json at $version"

@@ -140,7 +140,7 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 
 ![The web capture dialog naming the site and the page limit before anything is fetched](docs/images/shot_web_capture.png)
 - **Print** (`Ctrl+P`) — printer picker, page range, copies, fit/actual/custom scale, duplex, paper, orientation, colour, odd/even, reverse, collation, comments-and-forms handling, and N-up, booklet or poster layouts, to any Windows printer **(requires Ghostscript)**
-- **A virtual printer** — optionally install a "Spectra PDF" printer that appears in every application's print dialog; printing to it lands the pages here as a fresh PDF. It uses an in-box Windows driver over a loopback port, ships no driver of its own and installs no service, and the listener lives only while the app is running. Installing or removing it needs one visible administrator prompt, because printer ports are machine-wide objects
+- **A virtual printer** — optionally install a "Spectra PDF" printer that appears in every application's print dialog; printing to it lands the pages here as a fresh PDF. Each Windows account gets its own printer, which only that account can print to. It uses an in-box Windows driver, ships no driver of its own and installs no service. Windows holds each job in the printer's queue, which shows as paused, and the app reads its own jobs from there; nothing listens on a network port. Jobs are received only while the app is running; a job printed while it is closed waits in the queue. Installing or removing it needs one visible administrator prompt, because printers are machine-wide objects
 - **Create PDF from PostScript** — convert `.ps`/`.eps` to PDF with quality presets (Smallest / eBook / Print / Press), the classic distilling job **(requires Ghostscript)**
 - **Watched folders** (Tools ▸ Watched Folders…) — drop a PDF into an intake folder and a saved guided action runs over it: results mirror into a destination and the original files into a processed folder. Polling, with a file counted as arrived only once its size holds steady across two ticks, so a half-copied file never triggers a run
 - **Scheduled batch runs** (Tools ▸ Scheduled Batch Runs…) — create, list, enable, disable, run now and delete. Windows Task Scheduler runs them, so a schedule survives logoff and reboot without this app needing to be open
@@ -535,7 +535,7 @@ spectrapdf/
 │   │   ├── engine.rs          # Python sidecar lifecycle + response routing
 │   │   ├── printers.rs        # winspool printer enumeration + capabilities
 │   │   ├── scanner.rs         # WIA scanner enumeration and acquisition
-│   │   ├── print_to_pdf.rs    # The virtual printer + its loopback listener
+│   │   ├── print_to_pdf.rs    # The virtual printer + its job receiver
 │   │   ├── web_capture.rs     # Web-page capture window
 │   │   ├── clipboard_read.rs  # Clipboard sources for Create PDF
 │   │   ├── scheduler.rs       # Scheduled batch runs (Windows Task Scheduler)

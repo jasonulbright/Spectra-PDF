@@ -87,7 +87,7 @@ pub fn handoff_dir_in(local_app_data: &Path) -> PathBuf {
 }
 
 #[cfg(windows)]
-fn local_app_data() -> PathBuf {
+pub(crate) fn local_app_data() -> PathBuf {
     use windows::Win32::System::Com::CoTaskMemFree;
     use windows::Win32::UI::Shell::{FOLDERID_LocalAppData, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
     match unsafe { SHGetKnownFolderPath(&FOLDERID_LocalAppData, KF_FLAG_DEFAULT, None) } {
@@ -103,7 +103,7 @@ fn local_app_data() -> PathBuf {
 }
 
 #[cfg(not(windows))]
-fn local_app_data() -> PathBuf {
+pub(crate) fn local_app_data() -> PathBuf {
     std::env::temp_dir()
 }
 

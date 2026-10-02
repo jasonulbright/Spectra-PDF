@@ -952,11 +952,11 @@ function ExplorerMenuBlock(): React.JSX.Element {
 }
 
 // Virtual printer: "Spectra PDF" in every app's print dialog. The
-// loopback listener + install/remove orchestration live in Rust
-// (print_to_pdf.rs); this block is the whole GUI surface. Install/Remove is
-// ONE visible UAC elevation (printer ports are machine objects) — never
-// silent; the listener status and the last failed job are shown verbatim so
-// a taken port or a bad job is a named condition, not a mystery.
+// receiver + install/remove orchestration live in Rust (print_to_pdf.rs);
+// this block is the whole GUI surface. Install/Remove is ONE visible UAC
+// elevation (printer ports are machine objects) — never silent; the receiver
+// status and the last failed job are shown verbatim so a held receiver or a
+// bad job is a named condition, not a mystery.
 function VirtualPrinterBlock(): React.JSX.Element {
   // The printer's backend is the CLI's PostScript distiller, so installing
   // one without a Ghostscript would put a printer in every application's
@@ -988,7 +988,8 @@ function VirtualPrinterBlock(): React.JSX.Element {
     try {
       await fn();
     } catch (e: unknown) {
-      setVpError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setVpError(message.trim() !== '' ? message : tChrome('panel.settings.printerChangeFailed'));
     } finally {
       setVpBusy(false);
       void refresh();
@@ -1007,20 +1008,43 @@ function VirtualPrinterBlock(): React.JSX.Element {
       ) : (
         <>
           <p className="text-sm text-neutral-300" data-testid="virtual-printer-status">
-            {vpStatus.installed
-              ? tChrome('panel.settings.printerInstalled')
-              : tChrome('panel.settings.printerNotInstalled')}
-            {linux && vpStatus.printerName !== '' && (
+            {vpStatus.serviceError !== '' ? (
+              <span data-testid="virtual-printer-service">
+                {tChrome('panel.settings.printService', { error: vpStatus.serviceError })}
+              </span>
+            ) : (
               <>
+                {vpStatus.installed
+                  ? tChrome('panel.settings.printerInstalled')
+                  : tChrome('panel.settings.printerNotInstalled')}
+                {(linux || vpStatus.installed) && vpStatus.printerName !== '' && (
+                  <>
+                    {' · '}
+                    <span className="font-mono" data-testid="virtual-printer-queue">{vpStatus.printerName}</span>
+                  </>
+                )}
                 {' · '}
-                <span className="font-mono" data-testid="virtual-printer-queue">{vpStatus.printerName}</span>
+                {vpStatus.listener === 'listening'
+                  ? tChrome('panel.settings.printerReady')
+                  : tChrome('panel.settings.printerDown', { status: vpStatus.listener })}
               </>
             )}
-            {' · '}
-            {vpStatus.listener === 'listening'
-              ? tChrome('panel.settings.printerReady')
-              : tChrome('panel.settings.printerDown', { status: vpStatus.listener })}
           </p>
+          {!linux && vpStatus.installed && vpStatus.serviceError === '' && (
+            <p className="text-xs text-neutral-500 mt-1" data-testid="virtual-printer-held">
+              {tChrome('panel.settings.printerHeld')}
+            </p>
+          )}
+          {vpStatus.legacyPresent && (
+            <p className="text-xs text-amber-400 mt-1" data-testid="virtual-printer-legacy">
+              {tChrome('panel.settings.printerLegacy')}
+            </p>
+          )}
+          {vpStatus.replaced && (
+            <p className="text-xs text-amber-400 mt-1" data-testid="virtual-printer-replaced">
+              {tChrome('panel.settings.printerReplaced')}
+            </p>
+          )}
           {vpStatus.lastJobError !== '' && (
             <p className="text-xs text-amber-400 mt-1" data-testid="virtual-printer-job-error">
               {tChrome('panel.settings.lastJobFailed', { error: vpStatus.lastJobError })}
@@ -1042,7 +1066,7 @@ function VirtualPrinterBlock(): React.JSX.Element {
                 type="button"
                 data-testid="virtual-printer-install"
                 disabled={vpBusy || (needsGs && gsBlocked(gs))}
-                onClick={() => void run(() => virtualPrinter.install())}
+                onClick={() => void run(() => virtualPrinter.install(tChrome('panel.settings.printerQueueComment')))}
                 className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
               >
                 {tChrome('panel.settings.installPrinter')}

@@ -1,5 +1,4 @@
-import { createConnection } from 'node:net';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -7,11 +6,12 @@ import { expect } from '@wdio/globals';
 import { waitForHarness, invokeAppCommand, getState, saveActiveAs, requirePlatformFeatures } from '../support/harness.js';
 import { APP_BINARY } from '../support/app-data.js';
 
-// The virtual printer: the loopback RAW listener + Ghostscript distill
-// + the open funnel, driven exactly the way the Windows spooler drives it —
-// a TCP stream of PostScript at 127.0.0.1:9100. No printer install needed
-// for this path (that half is admin-gated UI, asserted as affordance only),
-// so the whole conversion chain is exercised for real.
+// The virtual printer: the receiver's staging folder + Ghostscript distill +
+// the open funnel. A job enters in the state the receiver leaves it in after
+// reading it from the queue: a `Printed <seconds>-<key>.ps` file in the private
+// staging folder. Reading from a real queue needs an installed printer, which
+// is admin-gated UI (asserted as affordance only); the receiver's unit tests
+// cover the spooler half against a fake spooler.
 
 const APP_EXE = APP_BINARY;
 
@@ -57,22 +57,26 @@ describe('virtual printer', () => {
     await $('[data-testid="prefs-close"]').click();
   });
 
-  it('a raw PostScript job streamed at the port opens here as a PDF', async function () {
+  it('a staged PostScript job opens here as a PDF', async function () {
     if (!listenerReady) {
-      // Port 9100 is held by something else on this machine — the listener
-      // said so by name in the previous leg; the conversion chain cannot be
-      // exercised through a foreign socket.
+      // Another window of this account holds the receiver — the status said
+      // so by name in the previous leg.
       this.skip();
       return;
     }
+    const staging = await browser.execute(async () => {
+      const w = window as unknown as {
+        __TAURI_INTERNALS__: { invoke: (c: string) => Promise<{ staging: string }> };
+      };
+      return (await w.__TAURI_INTERNALS__.invoke('virtual_printer_status')).staging;
+    });
+    expect(staging.endsWith('\\virtual-printer\\staging')).toBe(true);
     const ps =
       '%!PS\n/Helvetica findfont 24 scalefont setfont\n72 700 moveto (VPRINT E2E) show\nshowpage\n';
-    await new Promise<void>((resolvePromise, reject) => {
-      const sock = createConnection({ host: '127.0.0.1', port: 9100 }, () => {
-        sock.end(ps, () => resolvePromise());
-      });
-      sock.on('error', reject);
-    });
+    // The receiver skips a `.part` name, so it never takes a half-written job.
+    const staged = resolve(staging, `Printed ${Math.floor(Date.now() / 1000)}-1.ps`);
+    writeFileSync(`${staged}.part`, ps);
+    renameSync(`${staged}.part`, staged);
 
     // The distilled PDF opens through the normal funnel: the printed file
     // becomes the ACTIVE document (never keyed on view alone — earlier specs

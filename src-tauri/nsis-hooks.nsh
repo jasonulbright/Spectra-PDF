@@ -17,6 +17,7 @@
 ; with no path, and a /D= location is lost, which leaves a second copy on disk.
 ; SPECTRA_PRODUCT_KEY must equal Software\<bundle.publisher>\<productName>.
 !define SPECTRA_PRODUCT_KEY "Software\Jason Ulbright\Spectra PDF"
+!define SPECTRA_PUBLISHER_KEY "Software\Jason Ulbright"
 !define SPECTRA_LEGACY_MANU_KEY "Software\spectrapdf"
 !define SPECTRA_LEGACY_PRODUCT_KEY "${SPECTRA_LEGACY_MANU_KEY}\Spectra PDF"
 
@@ -53,11 +54,15 @@
 ; The application is 64-bit and reads HKLM\SOFTWARE\Spectra PDF through the
 ; 64-bit registry view. This installer is a 32-bit process, whose HKLM\SOFTWARE
 ; writes land in WOW6432Node unless the view is set, so every policy read and
-; write here runs under SetRegView 64.
+; write here runs under SetRegView 64. Each such block ends with SetRegView
+; lastused, never `default`: `default` is the 32-bit view, and after these
+; hooks the template reads and writes its uninstall and install-directory
+; keys in the view its SetContext chose.
 ;
-; An interactive upgrade runs the previous uninstaller without /UPDATE, and an
-; uninstaller deletes the policy key. The values are read before that
-; uninstaller runs and written back after the install when they are gone.
+; The reinstall page can run the previous uninstaller (see Version
+; replacement). An uninstaller that predates the replacement signal deletes
+; the policy key, so the values are read before that uninstaller runs and
+; written back after the install when they are gone.
 !define SPECTRA_POLICY_KEY "SOFTWARE\Spectra PDF"
 Var SpectraPolicyAutoUpdate
 Var SpectraPolicyFieldScripts
@@ -131,6 +136,93 @@ Var SpectraPolicyExplorerMenu
   ${EndIf}
 !macroend
 
+; ── Virtual printer ─────────────────────────────────────────────────────
+; retire-legacy: a queue on the loopback TCP port of earlier releases sends
+; every job to whichever local account binds that port, and no current build
+; listens there. remove-all: every account's printer and port. A failure is
+; reported and never fails the run.
+!macro SPECTRA_VIRTUAL_PRINTER ACTION
+  ClearErrors
+  ExecWait '"$INSTDIR\spectrapdf.exe" virtual-printer ${ACTION}' $R9
+  ${If} ${Errors}
+    DetailPrint "Virtual printer: spectrapdf.exe could not be started."
+  ${ElseIf} $R9 != 0
+    DetailPrint "Virtual printer: ${ACTION} failed (exit $R9)."
+  ${EndIf}
+!macroend
+
+; remove-all deletes the printer's marker key, which lives in the 32-bit view
+; under the product key's path. Those 32-bit parents go only when they hold
+; nothing else; the installer's own keys are in the 64-bit view.
+!macro SPECTRA_DROP_EMPTY_MARKER_PARENTS
+  SetRegView 32
+  DeleteRegKey /ifnosubkeys /ifnovalues HKLM "${SPECTRA_PRODUCT_KEY}"
+  DeleteRegKey /ifnosubkeys /ifnovalues HKLM "${SPECTRA_PUBLISHER_KEY}"
+  SetRegView lastused
+!macroend
+
+; ── Version replacement ─────────────────────────────────────────────────
+; The template's reinstall page runs the previous uninstaller as
+; `"<UninstallString>" [/P] _?=<dir>` and never with /UPDATE, so $UpdateMode
+; cannot tell an install from a real uninstall. That page runs it in three
+; cases: an interactive upgrade or downgrade ("Uninstall before installing"),
+; a passive install of the same version (a passive run reads no radio button,
+; which selects the same-version uninstall branch), and the maintenance
+; page's Uninstall choice for the same version. Only the last is a real
+; uninstall. A passive upgrade or downgrade, the same version's
+; "Add/Reinstall" choice and a silent install run no uninstaller.
+;
+; The installer sets SPECTRA_INSTALLER_ENV to "installer <its version>" before
+; any page can run that uninstaller, and the uninstaller inherits it from the
+; installer process that starts it. The value is never a bare version. The
+; uninstaller runs a real uninstall when the variable is absent (Apps,
+; Control Panel, a script) or is exactly "installer <its own version>"
+; without /P (the maintenance page); every other value is a replacement, so a
+; later installer can always ask for one. The uninstaller of every installed
+; release reads this name and value format, so they never change. The hooks
+; are included before the template defines VERSION, so the installer reads
+; its own version from its version resource (VIProductVersion).
+!define SPECTRA_INSTALLER_ENV "SPECTRA_PDF_INSTALLER"
+Var SpectraReplacing
+
+!macro SPECTRA_MARK_REPLACEMENT
+  ClearErrors
+  GetDLLVersion "$EXEPATH" $R2 $R3
+  ${If} ${Errors}
+    StrCpy $R4 "unknown"
+  ${Else}
+    IntOp $R4 $R2 >> 16
+    IntOp $R4 $R4 & 0xFFFF
+    IntOp $R2 $R2 & 0xFFFF
+    IntOp $R3 $R3 >> 16
+    IntOp $R3 $R3 & 0xFFFF
+    StrCpy $R4 "$R4.$R2.$R3"
+  ${EndIf}
+  System::Call 'kernel32::SetEnvironmentVariable(t "${SPECTRA_INSTALLER_ENV}", t "installer $R4")'
+!macroend
+
+; Sets $SpectraReplacing to 1 when an installer replaces this copy, else 0.
+; Inserted where VERSION names this uninstaller's own version and
+; $PassiveMode holds its /P switch.
+!macro SPECTRA_READ_REPLACEMENT
+  StrCpy $SpectraReplacing 0
+  ${If} $UpdateMode = 1
+    StrCpy $SpectraReplacing 1
+  ${EndIf}
+  ClearErrors
+  ReadEnvStr $R9 "${SPECTRA_INSTALLER_ENV}"
+  ${IfNot} ${Errors}
+  ${AndIf} $R9 != ""
+    ${If} $R9 != "installer ${VERSION}"
+    ${OrIf} $PassiveMode = 1
+      StrCpy $SpectraReplacing 1
+    ${EndIf}
+  ${EndIf}
+  ${If} $SpectraReplacing = 1
+    DetailPrint "An installer replaces this copy: printers, held jobs, File Explorer commands and machine policy are kept."
+  ${EndIf}
+!macroend
+
 Function SpectraPdfGuiInit
   ${GetParameters} $0
   ${GetOptions} $0 "/?" $1
@@ -172,11 +264,12 @@ Function SpectraPdfGuiInit
   !insertmacro SPECTRA_ADOPT_LEGACY_INSTALL_DIR
 
   ; Before the reinstall page can run the previous uninstaller.
+  !insertmacro SPECTRA_MARK_REPLACEMENT
   SetRegView 64
   !insertmacro SPECTRA_CAPTURE_POLICY "DisableAutoUpdate" $SpectraPolicyAutoUpdate
   !insertmacro SPECTRA_CAPTURE_POLICY "DisableFieldScripts" $SpectraPolicyFieldScripts
   !insertmacro SPECTRA_CAPTURE_POLICY "DisableExplorerMenu" $SpectraPolicyExplorerMenu
-  SetRegView default
+  SetRegView lastused
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
@@ -352,6 +445,10 @@ FunctionEnd
     nsis_tauri_utils::RunAsUser "$INSTDIR\spectrapdf.exe" "shell-menu register-user"
   ${EndIf}
 
+  ; Every install, updates included: an update is what moves a machine off
+  ; the loopback queue.
+  !insertmacro SPECTRA_VIRTUAL_PRINTER "retire-legacy"
+
   SetRegView 64
   ; Silent install (MECM/Intune/PDQ): disable auto-update so IT controls the update cycle
   ${If} ${Silent}
@@ -360,7 +457,7 @@ FunctionEnd
   !insertmacro SPECTRA_RESTORE_POLICY "DisableAutoUpdate" $SpectraPolicyAutoUpdate
   !insertmacro SPECTRA_RESTORE_POLICY "DisableFieldScripts" $SpectraPolicyFieldScripts
   !insertmacro SPECTRA_RESTORE_POLICY "DisableExplorerMenu" $SpectraPolicyExplorerMenu
-  SetRegView default
+  SetRegView lastused
 
   ; Refresh shell icon cache
   System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, p 0, p 0)'
@@ -397,21 +494,26 @@ FunctionEnd
   DeleteRegKey HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Open"
   DeleteRegKey HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Merge"
 
-  ; /UPDATE: the next version installs over this one and keeps the File
-  ; Explorer commands and the machine policy. A real uninstall removes the
-  ; commands for every user, moves the handler DLLs aside so the plain
-  ; resource deletion that follows cannot leave a loaded one behind, and
-  ; removes the policy key from both registry views (older silent installs
+  ; A replacement (see Version replacement): an installer puts its copy in
+  ; place of this one and keeps every account's printer and held jobs, the
+  ; File Explorer commands and the machine policy. A real uninstall removes the
+  ; printers and the commands for every user, moves the handler DLLs aside so
+  ; the plain resource deletion that follows cannot leave a loaded one behind,
+  ; and removes the policy key from both registry views (older silent installs
   ; wrote it to WOW6432Node).
-  ${If} $UpdateMode <> 1
+  !insertmacro SPECTRA_READ_REPLACEMENT
+  ${If} $SpectraReplacing <> 1
     ExecWait '"$INSTDIR\spectrapdf.exe" shell-menu uninstall-machine' $R9
+    !insertmacro SPECTRA_VIRTUAL_PRINTER "remove-all"
+    !insertmacro SPECTRA_DROP_EMPTY_MARKER_PARENTS
     !insertmacro SPECTRA_RETIRE_SHELL_DLL "x64"
     !insertmacro SPECTRA_RETIRE_SHELL_DLL "arm64"
     SetRegView 64
     DeleteRegKey HKLM "${SPECTRA_POLICY_KEY}"
+    SetRegView lastused
     SetRegView 32
     DeleteRegKey HKLM "${SPECTRA_POLICY_KEY}"
-    SetRegView default
+    SetRegView lastused
   ${EndIf}
 
   ; The install record. Removed with the rest of the payload so a leftover
