@@ -5354,7 +5354,7 @@
   "panel.settings.openedRust": "Rust 크레이트 고지를 열었습니다",
   "panel.settings.printTo": "Spectra PDF로 인쇄",
   "panel.settings.printerBlurb": "모든 응용 프로그램의 인쇄 대화 상자에 “Spectra PDF”라는 프린터를 설치합니다. 이 프린터로 인쇄하면 해당 페이지가 새 PDF로 여기에 열립니다. 변환은 포함된 도구로 이 PC에서 이루어지며, 작업은 이 앱이 실행 중일 때만(트레이로 최소화한 상태 포함) 수신됩니다. 앱이 닫혀 있을 때 인쇄한 작업은 Windows 인쇄 대기열에서 기다립니다.",
-  "panel.settings.printerBlurbLinux": "모든 응용 프로그램의 인쇄 대화 상자에 “Spectra PDF”라는 프린터를 추가합니다. 이 프린터로 인쇄하면 페이지가 여기에서 새 PDF로 열립니다. 작업은 이 앱이 실행 중일 때만 받으며, 앱이 닫혀 있을 때 인쇄한 작업은 시스템 인쇄 대기열에서 기다립니다.",
+  "panel.settings.printerBlurbLinux": "모든 응용 프로그램의 인쇄 대화 상자에 “Spectra PDF”라는 프린터를 추가합니다. 이 프린터로 인쇄하면 페이지가 여기에서 새 PDF로 열립니다. 이 프린터에는 사용자 계정만 인쇄할 수 있습니다. 시스템 인쇄 대기열은 이 앱이 가져갈 때까지 각 작업을 보관하며, 앱이 닫혀 있을 때 인쇄한 작업은 다음에 앱을 시작할 때 열립니다.",
   "panel.settings.printerDown": "수신기 중지됨: {{status}}",
   "panel.settings.printerInstalled": "프린터 설치됨",
   "panel.settings.printerNotInstalled": "프린터가 설치되지 않음",

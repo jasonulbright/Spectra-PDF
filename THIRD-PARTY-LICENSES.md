@@ -641,12 +641,20 @@ resolves to a row in the manifest named in its section.
 
 ### Python runtime
 
-- CPython 3.14.7 from python-build-standalone release 20260924
+- CPython 3.14.8 from python-build-standalone release 20261001
   (`scripts/setup-python-embed.sh`). The build links OpenSSL, SQLite, libffi,
-  XZ, bzip2, zlib, expat, mpdecimal, libedit, ncurses, libuuid, Tcl/Tk, libX11,
-  libXau and libxcb. Their licence texts, and `PYTHON.json` naming each linked
-  library, ship at `python/licenses/`, taken from the full archive of the same
-  build. The `_dbm` extension, which links Berkeley DB, is removed and does not
+  XZ, bzip2, zlib, zlib-ng, expat, mpdecimal, libedit, ncurses, libuuid, Tcl/Tk,
+  libX11, libXau, libxcb and Zstandard. Their licence texts, and `PYTHON.json`
+  naming each linked library, ship at `python/licenses/`, taken from the full
+  archive of the same build. The archive omits two of those texts; they are
+  pinned in `scripts/python-linux-licenses/`:
+  - **Zstandard** 1.5.7 — BSD-3-Clause (elected from BSD-3-Clause OR
+    GPL-2.0-only) — <https://github.com/facebook/zstd> —
+    `python/licenses/LICENSE.zstd.txt`
+  - **zlib-ng** 2.2.4 — Zlib — <https://github.com/zlib-ng/zlib-ng> —
+    `python/licenses/LICENSE.zlib-ng.txt`
+
+  The `_dbm` extension, which links Berkeley DB, is removed and does not
   ship.
 - Packages: the versions of `scripts/python-requirements.txt`, resolved to
   manylinux wheels in `scripts/python-requirements-linux.txt`, plus the

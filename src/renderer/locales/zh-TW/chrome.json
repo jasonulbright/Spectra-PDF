@@ -5354,7 +5354,7 @@
   "panel.settings.openedRust": "已開啟 Rust crate 聲明",
   "panel.settings.printTo": "列印至 Spectra PDF",
   "panel.settings.printerBlurb": "在每個應用程式的列印對話方塊中安裝一台名為「Spectra PDF」的印表機。列印到它會把頁面以新的 PDF 開啟在這裡。轉換是用隨附工具在這台電腦上完成的；只有在本應用程式執行時才會接收工作（最小化至系統匣也算）— 在它關閉時列印的工作會留在 Windows 列印佇列中等待。",
-  "panel.settings.printerBlurbLinux": "在每個應用程式的列印對話方塊中加入一台名為「Spectra PDF」的印表機。列印到它時，頁面會在這裡以新的 PDF 開啟。只有在此應用程式執行時才會接收工作；應用程式關閉時列印的工作會在系統列印佇列中等候。",
+  "panel.settings.printerBlurbLinux": "在每個應用程式的列印對話方塊中加入一台名為「Spectra PDF」的印表機。列印到它時，頁面會在這裡以新的 PDF 開啟。只有您的帳戶可以列印到這台印表機。系統列印佇列會保留每個工作，直到此應用程式取走它；應用程式關閉時列印的工作會在下次啟動應用程式時開啟。",
   "panel.settings.printerDown": "接收器已停止：{{status}}",
   "panel.settings.printerInstalled": "印表機已安裝",
   "panel.settings.printerNotInstalled": "印表機未安裝",

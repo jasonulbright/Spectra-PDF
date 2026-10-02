@@ -5478,7 +5478,7 @@
   "panel.settings.openedRust": "A Rust-csomagközlemények megnyitva",
   "panel.settings.printTo": "Nyomtatás a Spectra PDF-be",
   "panel.settings.printerBlurb": "„Spectra PDF” néven nyomtatót telepít minden alkalmazás nyomtatási párbeszédpanelére. Az ide való nyomtatás itt nyitja meg az oldalakat új PDF-ként. Az átalakítás ezen a gépen történik a csomagolt eszközökkel; a feladatokat csak akkor fogadja, amíg ez az alkalmazás fut (a tálcára kicsinyítve is) — a bezárt állapotban nyomtatott feladat a Windows nyomtatási sorában vár.",
-  "panel.settings.printerBlurbLinux": "Hozzáad egy „Spectra PDF” nevű nyomtatót minden alkalmazás nyomtatási párbeszédablakához. Ha erre nyomtat, az oldalak itt nyílnak meg új PDF-ként. A feladatok csak akkor érkeznek meg, amikor ez az alkalmazás fut; a bezárt állapotában nyomtatott feladat a rendszer nyomtatási sorában várakozik.",
+  "panel.settings.printerBlurbLinux": "Hozzáad egy „Spectra PDF” nevű nyomtatót minden alkalmazás nyomtatási párbeszédablakához. Ha erre nyomtat, az oldalak itt nyílnak meg új PDF-ként. Csak az Ön fiókja nyomtathat rá. A rendszer nyomtatási sora minden feladatot megtart, amíg ez az alkalmazás át nem veszi; az alkalmazás bezárt állapotában nyomtatott feladat az alkalmazás következő indításakor nyílik meg.",
   "panel.settings.printerDown": "a fogadó nem működik: {{status}}",
   "panel.settings.printerInstalled": "A nyomtató telepítve",
   "panel.settings.printerNotInstalled": "A nyomtató nincs telepítve",

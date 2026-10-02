@@ -21,9 +21,9 @@ esac
 # CPython patch after python.org does, so the Linux runtime may trail
 # .python-version by patch releases of the SAME minor. The `python-linux` arm
 # of scripts/check-toolchains.py fails once a newer build of that minor exists.
-PBS_RELEASE="20260924"
-PBS_PINNED_VERSION="3.14.7"
-PBS_SHA256="bd0d0568ccded07bbf1c87727230dc5dd0187e706a87da23c4de78388a229b78"
+PBS_RELEASE="20261001"
+PBS_PINNED_VERSION="3.14.8"
+PBS_SHA256="b373a4a4e4e70fc05f368c9b53d7738bf37637682b650d96c742805d2da26c32"
 pin_minor="${PBS_PINNED_VERSION%.*}"
 pin_patch="${PBS_PINNED_VERSION##*.}"
 [ "${PYTHON_VERSION%.*}" = "$pin_minor" ] && [ "$pin_patch" -le "${PYTHON_VERSION##*.}" ] ||
@@ -65,9 +65,12 @@ fi
 # build does: its licenses/ directory and PYTHON.json (which names each
 # linked library and its licence) ship in the runtime as licenses/.
 PBS_FULL_NAME="cpython-$PBS_PINNED_VERSION+$PBS_RELEASE-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst"
-PBS_FULL_SHA256="4a4d145c228b59c4e5e615177ea25f07b5c8d08c152f8251e7236f5d15bb6636"
+PBS_FULL_SHA256="0f5cfcf664aa406ee958625ed5b29b1bfc76d553e8ad1304f48fec39b74e0554"
 PBS_FULL_URL="https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_RELEASE/$(printf %s "$PBS_FULL_NAME" | sed 's/+/%2B/g')"
-if [ ! -f "$DEST/licenses/PYTHON.json" ]; then
+notices_version() {
+  "$PY" -B -S -c "import json, sys; print(json.load(open(sys.argv[1]))['python_version'])" "$DEST/licenses/PYTHON.json" 2>/dev/null || true
+}
+if [ "$(notices_version)" != "$PBS_PINNED_VERSION" ]; then
   full="$(fetch_verified "$PBS_FULL_URL" "$PBS_FULL_SHA256" "$PBS_FULL_NAME")"
   "$PY" - "$full" "$DEST/licenses" <<'EOF'
 import compression.zstd, pathlib, shutil, sys, tarfile
@@ -94,6 +97,31 @@ shutil.rmtree(dest, ignore_errors=True)
 staging.rename(dest)
 EOF
 fi
+
+# PYTHON.json names a licence file for every linked library, but the full
+# archive omits some of them (zstd, zlib-ng). Those texts are pinned in
+# scripts/python-linux-licenses/ at the versions the build's downloads.json
+# records. A licence file that neither source provides refuses the runtime.
+"$PY" -B -S - "$DEST/licenses" "$REPO_ROOT/scripts/python-linux-licenses" <<'EOF'
+import json, pathlib, shutil, sys
+dest, pinned = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+info = json.loads((dest / "PYTHON.json").read_text(encoding="utf-8"))
+wanted = {info["license_path"]}
+for variants in info["build_info"]["extensions"].values():
+    for variant in variants:
+        wanted.update(variant.get("license_paths") or [])
+missing = []
+for rel in sorted(wanted):
+    name = pathlib.PurePosixPath(rel).name
+    if (dest / name).is_file():
+        continue
+    if (pinned / name).is_file():
+        shutil.copyfile(pinned / name, dest / name)
+    else:
+        missing.append(name)
+if missing:
+    sys.exit("no licence text for: " + ", ".join(missing))
+EOF
 
 echo "Installing pinned pip..."
 pip_wheel="$(fetch_verified "$PIP_URL" "$PIP_SHA256" "$PIP_WHEEL")"

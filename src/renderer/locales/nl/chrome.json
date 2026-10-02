@@ -5478,7 +5478,7 @@
   "panel.settings.openedRust": "Rust-crate-meldingen geopend",
   "panel.settings.printTo": "Afdrukken naar Spectra PDF",
   "panel.settings.printerBlurb": "Installeert een printer met de naam “Spectra PDF” in het afdrukvenster van elke toepassing. Ernaartoe afdrukken opent de pagina's hier als een nieuwe PDF. De conversie gebeurt op deze pc met de meegeleverde hulpmiddelen; taken worden alleen ontvangen terwijl deze toepassing draait (geminimaliseerd naar het systeemvak telt mee) — een taak die wordt afgedrukt terwijl de toepassing gesloten is, wacht in de Windows-afdrukwachtrij.",
-  "panel.settings.printerBlurbLinux": "Voegt een printer met de naam ‘Spectra PDF’ toe aan het afdrukvenster van elke toepassing. Afdrukken naar deze printer opent de pagina’s hier als een nieuwe PDF. Taken worden alleen ontvangen terwijl deze app actief is; een taak die wordt afgedrukt terwijl de app gesloten is, wacht in de afdrukwachtrij van het systeem.",
+  "panel.settings.printerBlurbLinux": "Voegt een printer met de naam ‘Spectra PDF’ toe aan het afdrukvenster van elke toepassing. Afdrukken naar deze printer opent de pagina’s hier als een nieuwe PDF. Alleen uw account kan ernaar afdrukken. De afdrukwachtrij van het systeem houdt elke taak vast tot deze app hem ophaalt; een taak die wordt afgedrukt terwijl de app gesloten is, wordt geopend wanneer de app de volgende keer start.",
   "panel.settings.printerDown": "ontvanger buiten werking: {{status}}",
   "panel.settings.printerInstalled": "Printer geïnstalleerd",
   "panel.settings.printerNotInstalled": "Printer niet geïnstalleerd",

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Local mirror of the Linux release job, for scripts/ci-parity-gates.sh. Runs
-# on a Linux host or in WSL from the repository root. The container build, the
+# on a Linux host from the repository root. The container build, the
 # package signatures and the install checks are not mirrored: they need the
 # release keys and clean distribution containers.
 #

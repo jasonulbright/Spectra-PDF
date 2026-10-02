@@ -5478,7 +5478,7 @@
   "panel.settings.openedRust": "Hinweise zu Rust-Crates geöffnet",
   "panel.settings.printTo": "Auf Spectra PDF drucken",
   "panel.settings.printerBlurb": "Installiert einen Drucker namens „Spectra PDF“ im Druckdialog jeder Anwendung. Ein Druck darauf öffnet die Seiten hier als neues PDF. Die Umwandlung geschieht auf diesem PC mit den mitgelieferten Werkzeugen; Aufträge werden nur entgegengenommen, solange diese Anwendung läuft (in den Infobereich minimiert zählt) – ein Auftrag, der bei geschlossener Anwendung gedruckt wird, wartet in der Windows-Druckwarteschlange.",
-  "panel.settings.printerBlurbLinux": "Fügt dem Druckdialog jeder Anwendung einen Drucker namens „Spectra PDF“ hinzu. Wenn Sie darauf drucken, öffnen sich die Seiten hier als neues PDF. Aufträge werden nur angenommen, während diese App läuft; ein Auftrag, der gedruckt wird, während sie geschlossen ist, wartet in der Druckwarteschlange des Systems.",
+  "panel.settings.printerBlurbLinux": "Fügt dem Druckdialog jeder Anwendung einen Drucker namens „Spectra PDF“ hinzu. Wenn Sie darauf drucken, öffnen sich die Seiten hier als neues PDF. Nur Ihr Konto kann darauf drucken. Die Druckwarteschlange des Systems hält jeden Auftrag zurück, bis diese App ihn übernimmt; ein Auftrag, der bei geschlossener App gedruckt wird, öffnet sich beim nächsten Start der App.",
   "panel.settings.printerDown": "Empfänger nicht aktiv: {{status}}",
   "panel.settings.printerInstalled": "Drucker installiert",
   "panel.settings.printerNotInstalled": "Drucker nicht installiert",

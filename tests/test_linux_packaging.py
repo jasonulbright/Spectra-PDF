@@ -196,6 +196,18 @@ def test_the_linux_runtime_is_the_pinned_minor_at_or_below_the_patch():
     assert f"CPython {linux} from python-build-standalone release {_assigned(text, 'PBS_RELEASE')}" in notices
 
 
+
+def test_every_pinned_python_runtime_notice_has_a_notice_row():
+    pinned = sorted((SCRIPTS / "python-linux-licenses").iterdir())
+    assert {f.name for f in pinned} == {"LICENSE.zstd.txt", "LICENSE.zlib-ng.txt"}
+    notices = _text(ROOT / "THIRD-PARTY-LICENSES.md")
+    for f in pinned:
+        assert f"`python/licenses/{f.name}`" in notices
+        assert f.read_text(encoding="utf-8").strip()
+    text = _text(SCRIPTS / "setup-python-embed.sh")
+    assert '"$REPO_ROOT/scripts/python-linux-licenses"' in text
+    assert 'sys.exit("no licence text for: "' in text
+
 def _toolchains():
     spec = importlib.util.spec_from_file_location("check_toolchains_linux", SCRIPTS / "check-toolchains.py")
     module = importlib.util.module_from_spec(spec)

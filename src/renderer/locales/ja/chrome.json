@@ -5354,7 +5354,7 @@
   "panel.settings.openedRust": "Rust クレートの告知を開きました",
   "panel.settings.printTo": "Spectra PDF に印刷",
   "panel.settings.printerBlurb": "すべてのアプリケーションの印刷ダイアログに「Spectra PDF」という名前のプリンターをインストールします。そこへ印刷すると、ページが新しい PDF としてここで開きます。変換は同梱のツールを使ってこの PC 上で行われます。ジョブを受け取れるのはこのアプリが動作している間だけで（トレイに最小化中も含みます）、閉じている間に印刷したジョブは Windows の印刷キューで待機します。",
-  "panel.settings.printerBlurbLinux": "すべてのアプリの印刷ダイアログに「Spectra PDF」という名前のプリンターを追加します。このプリンターに印刷すると、ページがここで新しい PDF として開きます。ジョブはこのアプリの実行中にのみ受け付けます。アプリを閉じている間に印刷したジョブは、システムの印刷キューで待機します。",
+  "panel.settings.printerBlurbLinux": "すべてのアプリの印刷ダイアログに「Spectra PDF」という名前のプリンターを追加します。このプリンターに印刷すると、ページがここで新しい PDF として開きます。このプリンターに印刷できるのはお使いのアカウントだけです。システムの印刷キューは、このアプリが受け取るまで各ジョブを保持します。アプリを閉じている間に印刷したジョブは、次にアプリを起動したときに開きます。",
   "panel.settings.printerDown": "受け取り側が停止中：{{status}}",
   "panel.settings.printerInstalled": "プリンターをインストール済み",
   "panel.settings.printerNotInstalled": "プリンターは未インストール",

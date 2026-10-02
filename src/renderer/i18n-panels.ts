@@ -2678,7 +2678,7 @@ export const PANEL_STRINGS = {
   'panel.settings.printerBlurb':
     'Installs a printer named “Spectra PDF” in every application’s print dialog. Printing to it opens the pages here as a new PDF. Conversion happens on this PC with the bundled tools; jobs are received only while this app is running (minimized to the tray counts) — a job printed while it is closed waits in the Windows print queue.',
   'panel.settings.printerBlurbLinux':
-    'Adds a printer named “Spectra PDF” to every application’s print dialog. Printing to it opens the pages here as a new PDF. Jobs are received only while this app is running; a job printed while it is closed waits in the system print queue.',
+    'Adds a printer named “Spectra PDF” to every application’s print dialog. Printing to it opens the pages here as a new PDF. Only your account can print to it. The system print queue holds each job until this app takes it; a job printed while the app is closed opens the next time the app starts.',
   'panel.settings.printerInstalled': 'Printer installed',
   'panel.settings.printerNotInstalled': 'Printer not installed',
   'panel.settings.printerReplaced':

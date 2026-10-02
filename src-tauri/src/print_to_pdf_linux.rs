@@ -1,69 +1,113 @@
-//! The virtual printer on Linux: an IPP Everywhere printer on loopback.
+//! The virtual printer on Linux: a per-user CUPS queue that holds every job.
 //!
-//! This process serves IPP/2.0 (encoding RFC 8010, semantics RFC 8011) on
-//! `127.0.0.1` at a per-user port and accepts `application/pdf` documents.
-//! The CUPS queue is created with `lpadmin -m everywhere`, the one model
-//! lpadmin(8) does not mark as deprecated: lpadmin asks this printer for its
-//! attributes and CUPS generates the queue's PPD from the answer. Every
-//! application's print dialog then prints to the queue, CUPS converts the job
-//! to PDF, and its IPP backend delivers the PDF here. The PDF is kept as
-//! received (no Ghostscript run) and opens through the normal open funnel.
+//! The queue `Spectra-PDF-<user>` is configured so that no job printed to it
+//! is processed or sent anywhere:
 //!
-//! The queue belongs to one user: it is named after the user, accepts jobs
-//! from that user only (`-u allow:`), points at that user's port, and this
-//! printer refuses a job whose `requesting-user-name` is anyone else. The
-//! port is fixed per user id because the queue's device URI records it.
+//! - `job-hold-until-default=indefinite`: a job that names no hold time is
+//!   'pending-held' until a Release-Job (RFC 8011 sections 5.2.2 and 5.3.7).
+//! - the queue is stopped (`printer-state` 5): a released job, or one that
+//!   asks for 'no-hold', stays 'pending' (RFC 8011 section 5.3.8).
+//! - the device URI is `file:///dev/null`, which cups-files.conf(5) allows
+//!   whatever `FileDevice` says: a job processed anyway reaches nobody.
+//! - `printer-op-policy=authenticated`, a policy of the stock cupsd.conf:
+//!   job creation and the job operations need an authenticated user, so a
+//!   `requesting-user-name` alone neither submits as the owner nor cancels,
+//!   releases or moves the owner's job. `-u allow:` admits the owner alone.
 //!
-//! The client is identified by the kernel, not by what it sends: on accept,
-//! the connection's client socket is looked up in `/proc/net/tcp` (proc(5))
-//! and only its owner uid counts. Root, the CUPS `User` account (the IPP
-//! backend's identity, cups-files.conf(5)) and this user are admitted; any
-//! other account is refused before a byte of its request is read, so it can
-//! neither submit a job nor list one.
+//! No process listens. This process lists its own jobs (Get-Jobs with
+//! `my-jobs`, RFC 8011 section 4.2.6), copies each document out of the spool
+//! (CUPS-Get-Document, CUPS IPP extensions), stages it privately and records
+//! the job in a durable ledger, then cancels it with `purge-job`, which
+//! removes the job's files and history. A job whose cancel fails is never
+//! taken twice, and delivery records each PDF before the PDF takes its final
+//! name. A PDF document opens as received; a PostScript document goes through
+//! the CLI `distill` arm.
 //!
-//! The device URI carries `contimeout` (CUPS ipp backend option, network.html)
-//! and the queue `printer-error-policy=abort-job`: a job sent while this app
-//! is not listening is aborted after the timeout instead of waiting for
-//! whatever process binds the port next.
+//! Requests travel through libcups (`cupsDoIORequest`), which reaches the
+//! scheduler over its local socket and answers an authentication challenge
+//! with the socket's peer credentials (cups-files.conf(5) `PeerCred`).
 //!
-//! Adding or removing a queue is a scheduler administration operation.
-//! `lpadmin` runs first as the user, which the scheduler authorizes for
-//! members of its system group through the local socket's peer credentials.
-//! When the scheduler refuses, the same command runs through `pkexec`, a
-//! visible polkit prompt. Nothing elevates silently; without pkexec or a
-//! polkit agent, the refusal names the exact command an administrator runs.
+//! Adding, changing or removing the queue is a scheduler administration
+//! operation. `lpadmin` runs first as the user, which the scheduler
+//! authorizes for members of its system group; when the scheduler refuses,
+//! the same command runs through `pkexec`, a visible polkit prompt. Nothing
+//! elevates silently; without pkexec or a polkit agent, the refusal names the
+//! exact command an administrator runs.
 
-use std::collections::VecDeque;
-use std::ffi::{c_char, CStr};
-use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
+use std::collections::{HashMap, HashSet};
+use std::ffi::{c_char, c_int, CStr};
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
 use super::{
-    copy_job, part_path, reclaim_job_intermediates, reserve_pdf, timestamp_name, JobSlot,
+    convert_staged, open_printed, part_path, reclaim_job_intermediates, reserve_pdf, JobSlot,
     PrinterState, VirtualPrinterStatus, IN_FLIGHT, MAX_CONCURRENT_JOBS, MAX_JOB_BYTES,
-    MAX_JOB_RECEIVE_DURATION, READ_IDLE_TIMEOUT,
+    PRINTED_PREFIX,
 };
 
-/// The resource the printer answers at.
-const RESOURCE: &str = "/ipp/print";
 /// What a print dialog shows for the queue (`printer-info`).
 const DESCRIPTION: &str = "Spectra PDF";
 const MAKE_AND_MODEL: &str = "Spectra PDF Virtual Printer";
 /// Queue names are at most 127 bytes (lpadmin(8)).
 const MAX_QUEUE_NAME: usize = 127;
-/// The attribute section of one request; documents follow it.
-const MAX_ATTRIBUTE_BYTES: usize = 1024 * 1024;
-const MAX_HEAD_BYTES: usize = 64 * 1024;
-/// Finished jobs kept for Get-Job-Attributes and Get-Jobs.
-const MAX_JOBS_KEPT: usize = 64;
 const LPADMIN_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The device URI of every held queue: the one file device path that needs
+/// no `FileDevice` setting (cups-files.conf(5)).
+pub(super) const SINK_URI: &str = "file:///dev/null";
+const HELD_OP_POLICY: &str = "authenticated";
+const HOLD_INDEFINITE: &str = "indefinite";
+const ERROR_POLICY: &str = "stop-printer";
+/// `printer-state` 'stopped' (RFC 8011 section 5.4.11).
+const PRINTER_STOPPED: i32 = 5;
+/// The queue's location when the app passes none.
+const DEFAULT_LOCATION: &str = "Held for Spectra PDF; jobs open in the app";
+/// `printer-location` is text(127) (RFC 8011 section 5.4.5).
+const MAX_LOCATION_CHARS: usize = 127;
+
+const POLL_INTERVAL: Duration = Duration::from_secs(2);
+const CLAIM_RETRY: Duration = Duration::from_secs(5);
+/// A job that keeps failing is named at its first failure and left alone
+/// after this many passes.
+const MAX_READ_ATTEMPTS: u32 = 3;
+/// A listing this long may be cut short, so it never prunes the ledger; the
+/// jobs beyond it are taken once earlier ones are cancelled.
+const MAX_JOBS_PER_PASS: usize = 1000;
+/// Staged names carry the document number in three digits.
+const MAX_DOCUMENTS: u32 = 999;
+/// The attribute section of one response from the scheduler.
+const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
+const PRINTER_DIR: &str = "virtual-printer";
+const STAGING_DIR: &str = "staging";
+const LEDGER_DIR: &str = "ledger";
+const LOCK_FILE: &str = "receiver.lock";
+const PART_SUFFIX: &str = ".part";
+/// A document while CUPS-Get-Document copies it; never counted as staged.
+const DOWNLOAD_SUFFIX: &str = ".download";
+/// A gzip-compressed document while it is expanded; never counted as staged.
+const EXPANDED_SUFFIX: &str = ".expanded";
+/// Ledger entry: every document of the job is staged, so the job is never
+/// read again while its queue lists it. The content is the queue's name.
+const TAKEN_SUFFIX: &str = ".taken";
+/// A ledger entry before its rename into place; never counts as an entry.
+const ENTRY_TEMP_SUFFIX: &str = ".new";
+/// Ledger entry: the file name of a staged document's printed PDF, written
+/// before the PDF takes that name.
+const DELIVERED_SUFFIX: &str = ".delivered";
+
+pub(super) const HELD_ELSEWHERE: &str =
+    "another Spectra PDF window of this account is receiving the printer's jobs";
+const SERVICE_UNAVAILABLE: &str = "the print system is not available";
 
 // ── identity ────────────────────────────────────────────────────────────────
 
@@ -84,16 +128,6 @@ pub(super) fn current_user() -> Option<String> {
         .map(str::to_string)
 }
 
-/// The loopback port a user's printer listens on: below the kernel's default
-/// ephemeral range, and fixed because the queue's device URI records it.
-pub(super) fn port_for(uid: u32) -> u16 {
-    10_000 + (uid % 22_768) as u16
-}
-
-fn own_port() -> u16 {
-    port_for(unsafe { libc::geteuid() })
-}
-
 /// `Spectra-PDF-<user>`, restricted to characters every CUPS release accepts
 /// in a queue name.
 pub(super) fn queue_name(user: &str) -> String {
@@ -111,101 +145,38 @@ pub(super) fn queue_name(user: &str) -> String {
     name
 }
 
-pub(super) fn device_uri(port: u16) -> String {
-    format!("ipp://127.0.0.1:{port}{RESOURCE}")
+/// The scheduler's URI for a local queue.
+pub(super) fn printer_uri(queue: &str) -> String {
+    format!("ipp://localhost/printers/{queue}")
 }
 
-/// How long the CUPS IPP backend tries to reach this printer before the job
-/// fails, in seconds. Its default is seven days.
-const CONNECT_TIMEOUT_S: u32 = 30;
-
-/// The queue's device URI: the printer plus the backend's connection timeout.
-pub(super) fn queue_uri(port: u16) -> String {
-    format!("{}?contimeout={CONNECT_TIMEOUT_S}", device_uri(port))
-}
-
-// ── who connected ───────────────────────────────────────────────────────────
-
-/// `ip:port` as `/proc/net/tcp` prints it: the address as the hexadecimal
-/// value of its network-order bytes read as a host integer, the port in
-/// hexadecimal.
-fn proc_endpoint(text: &str) -> Option<SocketAddrV4> {
-    let (addr, port) = text.split_once(':')?;
-    if addr.len() != 8 {
-        return None;
-    }
-    let raw = u32::from_str_radix(addr, 16).ok()?;
-    let port = u16::from_str_radix(port, 16).ok()?;
-    Some(SocketAddrV4::new(Ipv4Addr::from(raw.to_ne_bytes()), port))
-}
-
-/// The uid owning the client end of a loopback connection: the table row
-/// whose local address is the client's and whose remote address is this
-/// server's. TIME_WAIT and CLOSE rows carry no owner (the kernel prints uid
-/// 0 for them), so only states in which the client socket is still owned
-/// count: ESTABLISHED (01), FIN_WAIT1 (04), FIN_WAIT2 (05).
-pub(super) fn peer_uid_in(table: &str, client: SocketAddrV4, server: SocketAddrV4) -> Option<u32> {
-    table.lines().skip(1).find_map(|line| {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        if fields.len() < 8 || !matches!(fields[3], "01" | "04" | "05") {
-            return None;
-        }
-        if proc_endpoint(fields[1])? != client || proc_endpoint(fields[2])? != server {
-            return None;
-        }
-        fields[7].parse().ok()
-    })
-}
-
-fn peer_uid(stream: &TcpStream) -> Option<u32> {
-    let (SocketAddr::V4(client), SocketAddr::V4(server)) =
-        (stream.peer_addr().ok()?, stream.local_addr().ok()?)
-    else {
-        return None;
+/// A queue of the releases that delivered jobs to this app over loopback
+/// TCP: `ipp://127.0.0.1:<port>/ipp/print`, with or without `contimeout`.
+pub(super) fn is_legacy_uri(uri: &str) -> bool {
+    let Some(rest) = uri.strip_prefix("ipp://127.0.0.1:") else {
+        return false;
     };
-    let table = std::fs::read_to_string("/proc/net/tcp").ok()?;
-    peer_uid_in(&table, client, server)
+    let path = rest.split('?').next().unwrap_or("");
+    let Some((port, resource)) = path.split_once('/') else {
+        return false;
+    };
+    !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) && resource == "ipp/print"
 }
 
-/// The account cupsd runs its backends as: the `User` directive of
-/// cups-files.conf, `lp` when the file names none.
-pub(super) fn cups_user_name(conf: Option<&str>) -> String {
-    conf.and_then(|text| {
-        text.lines().find_map(|line| {
-            let line = line.trim();
-            let (key, value) = line.split_once(char::is_whitespace)?;
-            (!line.starts_with('#') && key.eq_ignore_ascii_case("User"))
-                .then(|| value.trim().to_string())
-                .filter(|v| !v.is_empty())
-        })
-    })
-    .unwrap_or_else(|| "lp".to_string())
-}
-
-fn uid_of(name: &str) -> Option<u32> {
-    if let Ok(uid) = name.parse::<u32>() {
-        return Some(uid);
+/// The queue's location: display text from the app without control
+/// characters, cut to its bound; the English text when nothing is left.
+pub(super) fn queue_location(text: &str) -> String {
+    let kept: String = text
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_LOCATION_CHARS)
+        .collect();
+    let kept = kept.trim();
+    if kept.is_empty() {
+        DEFAULT_LOCATION.to_string()
+    } else {
+        kept.to_string()
     }
-    let name = std::ffi::CString::new(name).ok()?;
-    let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
-    let mut buf = vec![0 as c_char; 16 * 1024];
-    let mut found: *mut libc::passwd = std::ptr::null_mut();
-    let rc = unsafe { libc::getpwnam_r(name.as_ptr(), &mut pwd, buf.as_mut_ptr(), buf.len(), &mut found) };
-    (rc == 0 && !found.is_null()).then_some(pwd.pw_uid)
-}
-
-/// Root, this user, and the CUPS backend account.
-pub(super) fn admitted_uids(own: u32, cups_user: Option<u32>) -> Vec<u32> {
-    let mut uids = vec![0, own];
-    uids.extend(cups_user);
-    uids.sort_unstable();
-    uids.dedup();
-    uids
-}
-
-fn system_admitted_uids() -> Vec<u32> {
-    let conf = std::fs::read_to_string("/etc/cups/cups-files.conf").ok();
-    admitted_uids(unsafe { libc::geteuid() }, uid_of(&cups_user_name(conf.as_deref())))
 }
 
 /// Letter for the territories whose locales default to it, A4 elsewhere.
@@ -226,6 +197,16 @@ pub(super) fn default_media_for_locale(locale: &str) -> &'static str {
     }
 }
 
+fn session_locale() -> String {
+    ["LC_ALL", "LC_PAPER", "LANG"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .find(|v| !v.is_empty())
+        .unwrap_or_default()
+}
+
+// ── folders ─────────────────────────────────────────────────────────────────
+
 /// `$XDG_CACHE_HOME/spectrapdf/printed`; a per-user folder under the temp
 /// directory only when no home is known.
 pub(super) fn printed_dir() -> PathBuf {
@@ -245,7 +226,7 @@ pub(super) fn printed_dir() -> PathBuf {
 /// Create `dir` readable by its owner only, and refuse a folder another
 /// account owns or a symbolic link put in its place.
 pub(super) fn private_dir(dir: &Path) -> io::Result<()> {
-    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
     let meta = std::fs::symlink_metadata(dir)?;
     if !meta.is_dir() || meta.uid() != unsafe { libc::geteuid() } {
@@ -257,22 +238,81 @@ pub(super) fn private_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn session_locale() -> String {
-    ["LC_ALL", "LC_PAPER", "LANG"]
-        .iter()
-        .filter_map(|v| std::env::var(v).ok())
-        .find(|v| !v.is_empty())
-        .unwrap_or_default()
+/// The receiver's private folder: staged documents, the ledger and the
+/// receiver lock, under `$XDG_STATE_HOME/com.spectrapdf.app`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Layout {
+    pub root: PathBuf,
+    pub staging: PathBuf,
+    pub ledger: PathBuf,
+    pub lock: PathBuf,
+}
+
+impl Layout {
+    pub fn under(state_home: &Path) -> Self {
+        let root = state_home
+            .join(crate::portable::APP_IDENTIFIER)
+            .join(PRINTER_DIR);
+        Self {
+            staging: root.join(STAGING_DIR),
+            ledger: root.join(LEDGER_DIR),
+            lock: root.join(LOCK_FILE),
+            root,
+        }
+    }
+
+    fn current() -> Option<Self> {
+        crate::portable::xdg_state_home().map(|home| Self::under(&home))
+    }
+}
+
+pub(super) fn prepare(layout: &Layout) -> Result<(), String> {
+    for dir in [&layout.root, &layout.staging, &layout.ledger] {
+        private_dir(dir).map_err(|e| format!("cannot prepare {}: {e}", dir.display()))?;
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+pub(super) enum ClaimFailure {
+    HeldElsewhere,
+    Failed(String),
+}
+
+/// An exclusive `flock` on the lock file for the receiver's life, so a second
+/// receiver of the same account is refused.
+pub(super) struct ReceiverClaim {
+    _file: File,
+}
+
+pub(super) fn claim_receiver(lock: &Path) -> Result<ReceiverClaim, ClaimFailure> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(lock)
+        .map_err(|e| ClaimFailure::Failed(format!("cannot hold {}: {e}", lock.display())))?;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let e = io::Error::last_os_error();
+        return Err(if e.raw_os_error() == Some(libc::EWOULDBLOCK) {
+            ClaimFailure::HeldElsewhere
+        } else {
+            ClaimFailure::Failed(format!("cannot hold {}: {e}", lock.display()))
+        });
+    }
+    Ok(ReceiverClaim { _file: file })
 }
 
 // ── IPP encoding (RFC 8010) ─────────────────────────────────────────────────
 
-mod tag {
+pub(super) mod tag {
     pub const OPERATION: u8 = 0x01;
     pub const JOB: u8 = 0x02;
     pub const END: u8 = 0x03;
     pub const PRINTER: u8 = 0x04;
-    pub const UNSUPPORTED_GROUP: u8 = 0x05;
 
     pub const INTEGER: u8 = 0x21;
     pub const BOOLEAN: u8 = 0x22;
@@ -295,50 +335,34 @@ mod tag {
     pub const EXTENSION: u8 = 0x7F;
 }
 
-mod status {
+/// Status codes (RFC 8011 section 4.1.6 and appendix B).
+pub(super) mod status {
     pub const OK: u16 = 0x0000;
-    pub const OK_IGNORED: u16 = 0x0001;
     pub const BAD_REQUEST: u16 = 0x0400;
+    pub const FORBIDDEN: u16 = 0x0401;
+    pub const NOT_AUTHENTICATED: u16 = 0x0402;
     pub const NOT_AUTHORIZED: u16 = 0x0403;
     pub const NOT_POSSIBLE: u16 = 0x0404;
     pub const NOT_FOUND: u16 = 0x0406;
-    pub const ENTITY_TOO_LARGE: u16 = 0x0408;
-    pub const FORMAT_NOT_SUPPORTED: u16 = 0x040A;
-    pub const FORMAT_ERROR: u16 = 0x0411;
-    pub const INTERNAL: u16 = 0x0500;
     pub const OPERATION_NOT_SUPPORTED: u16 = 0x0501;
-    pub const VERSION_NOT_SUPPORTED: u16 = 0x0503;
-    pub const BUSY: u16 = 0x0507;
 }
 
-mod op {
-    pub const PRINT_JOB: u16 = 0x0002;
-    pub const VALIDATE_JOB: u16 = 0x0004;
-    pub const CREATE_JOB: u16 = 0x0005;
-    pub const SEND_DOCUMENT: u16 = 0x0006;
+pub(super) mod op {
     pub const CANCEL_JOB: u16 = 0x0008;
-    pub const GET_JOB_ATTRIBUTES: u16 = 0x0009;
     pub const GET_JOBS: u16 = 0x000A;
     pub const GET_PRINTER_ATTRIBUTES: u16 = 0x000B;
-    pub const SUPPORTED: &[u16] = &[
-        PRINT_JOB,
-        VALIDATE_JOB,
-        CREATE_JOB,
-        SEND_DOCUMENT,
-        CANCEL_JOB,
-        GET_JOB_ATTRIBUTES,
-        GET_JOBS,
-        GET_PRINTER_ATTRIBUTES,
-    ];
+    /// CUPS IPP extensions.
+    pub const CUPS_GET_PRINTERS: u16 = 0x4002;
+    pub const CUPS_GET_DOCUMENT: u16 = 0x4027;
 }
 
 /// `job-state` (RFC 8011 section 5.3.7).
-mod job_state {
+pub(super) mod job_state {
     pub const PENDING: i32 = 3;
+    pub const HELD: i32 = 4;
     pub const PROCESSING: i32 = 5;
+    pub const STOPPED: i32 = 6;
     pub const CANCELED: i32 = 7;
-    pub const ABORTED: i32 = 8;
-    pub const COMPLETED: i32 = 9;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -361,7 +385,7 @@ pub(super) enum Value {
 }
 
 impl Value {
-    fn text(&self) -> Option<&str> {
+    pub fn text(&self) -> Option<&str> {
         match self {
             Value::Text(s)
             | Value::Name(s)
@@ -374,14 +398,14 @@ impl Value {
         }
     }
 
-    fn integer(&self) -> Option<i32> {
+    pub fn integer(&self) -> Option<i32> {
         match self {
             Value::Integer(i) | Value::Enum(i) => Some(*i),
             _ => None,
         }
     }
 
-    fn boolean(&self) -> Option<bool> {
+    pub fn boolean(&self) -> Option<bool> {
         match self {
             Value::Boolean(b) => Some(*b),
             _ => None,
@@ -396,7 +420,7 @@ pub(super) struct Attr {
 }
 
 impl Attr {
-    fn new(name: &str, values: Vec<Value>) -> Self {
+    pub fn new(name: &str, values: Vec<Value>) -> Self {
         Self {
             name: name.to_string(),
             values,
@@ -420,7 +444,7 @@ pub(super) struct Message {
 }
 
 impl Message {
-    fn attr(&self, group: u8, name: &str) -> Option<&Attr> {
+    pub fn attr(&self, group: u8, name: &str) -> Option<&Attr> {
         self.groups
             .iter()
             .filter(|g| g.tag == group)
@@ -428,22 +452,24 @@ impl Message {
             .find(|a| a.name == name)
     }
 
-    fn op_text(&self, name: &str) -> Option<&str> {
+    /// The first attribute of that name in any group.
+    pub fn any_attr(&self, name: &str) -> Option<&Attr> {
+        self.groups
+            .iter()
+            .flat_map(|g| g.attrs.iter())
+            .find(|a| a.name == name)
+    }
+
+    pub fn op_text(&self, name: &str) -> Option<&str> {
         self.attr(tag::OPERATION, name)
             .and_then(|a| a.values.first())
             .and_then(Value::text)
     }
 
-    fn op_integer(&self, name: &str) -> Option<i32> {
+    pub fn op_integer(&self, name: &str) -> Option<i32> {
         self.attr(tag::OPERATION, name)
             .and_then(|a| a.values.first())
             .and_then(Value::integer)
-    }
-
-    fn op_boolean(&self, name: &str) -> Option<bool> {
-        self.attr(tag::OPERATION, name)
-            .and_then(|a| a.values.first())
-            .and_then(Value::boolean)
     }
 }
 
@@ -451,8 +477,8 @@ fn bad(what: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, what.to_string())
 }
 
-/// Reads the attribute section through a budget, so a request cannot make
-/// this process buffer more than `MAX_ATTRIBUTE_BYTES` before its document.
+/// Reads the attribute section through a budget, so a message cannot make
+/// this process buffer more than its limit.
 struct Budget<'a, R: Read + ?Sized> {
     inner: &'a mut R,
     left: usize,
@@ -461,7 +487,7 @@ struct Budget<'a, R: Read + ?Sized> {
 impl<R: Read + ?Sized> Budget<'_, R> {
     fn bytes(&mut self, n: usize) -> io::Result<Vec<u8>> {
         if n > self.left {
-            return Err(bad("the request's attributes exceed the size limit"));
+            return Err(bad("the message's attributes exceed the size limit"));
         }
         self.left -= n;
         let mut buf = vec![0u8; n];
@@ -583,12 +609,12 @@ fn decode_collection<R: Read + ?Sized>(r: &mut Budget<'_, R>, depth: usize) -> i
     }
 }
 
-/// Decode one IPP message's header and attribute section. The reader is left
-/// at the first byte of the document data, if any.
-pub(super) fn decode<R: Read + ?Sized>(reader: &mut R) -> io::Result<Message> {
+/// Decode one IPP message's header and attribute section, buffering at most
+/// `limit` bytes. The reader is left at the first byte of the data, if any.
+pub(super) fn decode_limited<R: Read + ?Sized>(reader: &mut R, limit: usize) -> io::Result<Message> {
     let mut r = Budget {
         inner: reader,
-        left: MAX_ATTRIBUTE_BYTES,
+        left: limit,
     };
     let version = (r.u8()?, r.u8()?);
     let code = r.u16()?;
@@ -625,7 +651,11 @@ pub(super) fn decode<R: Read + ?Sized>(reader: &mut R) -> io::Result<Message> {
     })
 }
 
-fn put_item(out: &mut Vec<u8>, value_tag: u8, name: &str, value: &[u8]) {
+pub(super) fn decode<R: Read + ?Sized>(reader: &mut R) -> io::Result<Message> {
+    decode_limited(reader, MAX_RESPONSE_BYTES)
+}
+
+pub(super) fn put_item(out: &mut Vec<u8>, value_tag: u8, name: &str, value: &[u8]) {
     out.push(value_tag);
     out.extend_from_slice(&(name.len() as u16).to_be_bytes());
     out.extend_from_slice(name.as_bytes());
@@ -688,1018 +718,1392 @@ pub(super) fn encode(message: &Message) -> Vec<u8> {
     out
 }
 
-// ── HTTP/1.1 framing ────────────────────────────────────────────────────────
+// ── requests ────────────────────────────────────────────────────────────────
 
-pub(super) struct Head {
-    pub method: String,
-    pub target: String,
-    pub http10: bool,
-    pub headers: Vec<(String, String)>,
-}
+/// Each request is its own HTTP exchange, so one id serves them all.
+const REQUEST_ID: u32 = 1;
 
-impl Head {
-    pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .iter()
-            .find(|(n, _)| n.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v.as_str())
-    }
-
-    fn keep_alive(&self) -> bool {
-        let connection = self.header("connection").unwrap_or("").to_ascii_lowercase();
-        if self.http10 {
-            connection.contains("keep-alive")
-        } else {
-            !connection.contains("close")
-        }
-    }
-}
-
-fn read_line<R: BufRead>(r: &mut R, budget: &mut usize) -> io::Result<Option<String>> {
-    let mut line = Vec::new();
-    loop {
-        let available = r.fill_buf()?;
-        if available.is_empty() {
-            return if line.is_empty() {
-                Ok(None)
-            } else {
-                Err(bad("the connection closed inside a line"))
-            };
-        }
-        let (taken, done) = match available.iter().position(|&b| b == b'\n') {
-            Some(at) => (at + 1, true),
-            None => (available.len(), false),
-        };
-        if taken > *budget {
-            return Err(bad("an HTTP line exceeds the size limit"));
-        }
-        *budget -= taken;
-        line.extend_from_slice(&available[..taken]);
-        r.consume(taken);
-        if done {
-            while matches!(line.last(), Some(b'\n' | b'\r')) {
-                line.pop();
-            }
-            return Ok(Some(String::from_utf8_lossy(&line).into_owned()));
-        }
-    }
-}
-
-/// One request head, or `None` when the client closed between requests.
-pub(super) fn read_head<R: BufRead>(r: &mut R) -> io::Result<Option<Head>> {
-    let mut budget = MAX_HEAD_BYTES;
-    let request_line = loop {
-        match read_line(r, &mut budget)? {
-            None => return Ok(None),
-            // RFC 9112 section 2.2: an empty line before the request line is
-            // ignored.
-            Some(line) if line.is_empty() => continue,
-            Some(line) => break line,
-        }
-    };
-    let mut parts = request_line.split_whitespace();
-    let (Some(method), Some(target), Some(version)) = (parts.next(), parts.next(), parts.next())
-    else {
-        return Err(bad("malformed request line"));
-    };
-    let mut headers = Vec::new();
-    loop {
-        let line = read_line(r, &mut budget)?.ok_or_else(|| bad("the connection closed in a head"))?;
-        if line.is_empty() {
-            break;
-        }
-        let (name, value) = line.split_once(':').ok_or_else(|| bad("malformed header"))?;
-        headers.push((name.trim().to_string(), value.trim().to_string()));
-    }
-    Ok(Some(Head {
-        method: method.to_string(),
-        target: target.to_string(),
-        http10: version == "HTTP/1.0",
-        headers,
-    }))
-}
-
-/// A request body: `Content-Length` or chunked transfer coding (RFC 9112
-/// sections 6.2 and 7.1).
-pub(super) struct Body<'a, R: BufRead> {
-    inner: &'a mut R,
-    chunked: bool,
-    left: u64,
-    done: bool,
-}
-
-impl<'a, R: BufRead> Body<'a, R> {
-    pub fn new(inner: &'a mut R, head: &Head) -> io::Result<Self> {
-        let chunked = head
-            .header("transfer-encoding")
-            .is_some_and(|v| v.to_ascii_lowercase().contains("chunked"));
-        if chunked {
-            return Ok(Self {
-                inner,
-                chunked: true,
-                left: 0,
-                done: false,
-            });
-        }
-        let left = match head.header("content-length") {
-            Some(v) => v.trim().parse::<u64>().map_err(|_| bad("invalid Content-Length"))?,
-            None => 0,
-        };
-        Ok(Self {
-            inner,
-            chunked: false,
-            left,
-            done: left == 0,
-        })
-    }
-
-    fn next_chunk(&mut self) -> io::Result<()> {
-        let mut budget = 4096;
-        let line = read_line(self.inner, &mut budget)?.ok_or_else(|| bad("truncated chunk"))?;
-        let size_text = line.split(';').next().unwrap_or("").trim();
-        let size = u64::from_str_radix(size_text, 16).map_err(|_| bad("invalid chunk size"))?;
-        if size == 0 {
-            loop {
-                let mut budget = 4096;
-                match read_line(self.inner, &mut budget)? {
-                    None => break,
-                    Some(trailer) if trailer.is_empty() => break,
-                    Some(_) => {}
-                }
-            }
-            self.done = true;
-        } else {
-            self.left = size;
-        }
-        Ok(())
-    }
-
-    /// Read and discard what the handler left, so the connection can carry
-    /// the next request. A remainder over the job limit closes it instead.
-    pub fn drain(&mut self) -> io::Result<()> {
-        let mut sink = io::sink();
-        let copied = io::copy(&mut self.take(MAX_JOB_BYTES + 1), &mut sink)?;
-        if copied > MAX_JOB_BYTES {
-            return Err(bad("the request body exceeds the size limit"));
-        }
-        Ok(())
-    }
-}
-
-impl<R: BufRead> Read for Body<'_, R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-        loop {
-            if self.done {
-                return Ok(0);
-            }
-            if self.left == 0 {
-                if !self.chunked {
-                    self.done = true;
-                    return Ok(0);
-                }
-                self.next_chunk()?;
-                continue;
-            }
-            let want = buf.len().min(self.left.min(usize::MAX as u64) as usize);
-            let n = self.inner.read(&mut buf[..want])?;
-            if n == 0 {
-                return Err(bad("the connection closed inside the body"));
-            }
-            self.left -= n as u64;
-            if self.left == 0 && self.chunked {
-                let mut budget = 16;
-                read_line(self.inner, &mut budget)?;
-            } else if self.left == 0 {
-                self.done = true;
-            }
-            return Ok(n);
-        }
-    }
-}
-
-fn write_response(out: &mut impl Write, status: &str, content_type: Option<&str>, body: &[u8], close: bool) -> io::Result<()> {
-    let mut head = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\n", body.len());
-    if let Some(ct) = content_type {
-        head.push_str(&format!("Content-Type: {ct}\r\n"));
-    }
-    if close {
-        head.push_str("Connection: close\r\n");
-    }
-    head.push_str("\r\n");
-    out.write_all(head.as_bytes())?;
-    out.write_all(body)?;
-    out.flush()
-}
-
-// ── the printer ─────────────────────────────────────────────────────────────
-
-/// Sizes the printer offers (PWG 5101.1 names), in hundredths of millimetres.
-const MEDIA: &[(&str, i32, i32)] = &[
-    ("na_letter_8.5x11in", 21590, 27940),
-    ("na_legal_8.5x14in", 21590, 35560),
-    ("na_ledger_11x17in", 27940, 43180),
-    ("na_executive_7.25x10.5in", 18415, 26670),
-    ("iso_a3_297x420mm", 29700, 42000),
-    ("iso_a4_210x297mm", 21000, 29700),
-    ("iso_a5_148x210mm", 14800, 21000),
-    ("iso_a6_105x148mm", 10500, 14800),
-    ("iso_b5_176x250mm", 17600, 25000),
-    ("jis_b5_182x257mm", 18200, 25700),
-    ("iso_dl_110x220mm", 11000, 22000),
-    ("na_number-10_4.125x9.5in", 10478, 24130),
-];
-/// Custom sizes: 1 inch to 48 inches on either side.
-const CUSTOM_MIN: i32 = 2540;
-const CUSTOM_MAX: i32 = 121_920;
-
-#[derive(Clone, Debug)]
-struct Job {
-    id: i32,
-    state: i32,
-    reasons: &'static str,
-    message: String,
-    name: String,
-    user: String,
-    created: i32,
-    completed: Option<i32>,
-    documents: u32,
-}
-
-/// What a received document became.
-pub(super) enum Delivery {
-    Delivered(PathBuf),
-    Empty,
-}
-
-pub(super) struct IppPrinter {
-    port: u16,
-    user: String,
-    default_media: &'static str,
-    started: Instant,
-    next_job: AtomicI32,
-    jobs: Mutex<VecDeque<Job>>,
-    receiving: AtomicUsize,
-    dir: PathBuf,
-    deliver: Box<dyn Fn(PathBuf) + Send + Sync>,
-    record_error: Box<dyn Fn(String) + Send + Sync>,
-    /// The uids whose connections are served.
-    admitted: Vec<u32>,
-}
-
-impl IppPrinter {
-    pub(super) fn new(
-        port: u16,
-        user: String,
-        dir: PathBuf,
-        deliver: Box<dyn Fn(PathBuf) + Send + Sync>,
-        record_error: Box<dyn Fn(String) + Send + Sync>,
-    ) -> Self {
-        Self {
-            port,
-            user,
-            default_media: default_media_for_locale(&session_locale()),
-            started: Instant::now(),
-            next_job: AtomicI32::new(1),
-            jobs: Mutex::new(VecDeque::new()),
-            receiving: AtomicUsize::new(0),
-            dir,
-            deliver,
-            record_error,
-            admitted: system_admitted_uids(),
-        }
-    }
-
-    /// Whether a connection's client may be served at all.
-    pub(super) fn admits(&self, uid: Option<u32>) -> bool {
-        uid.is_some_and(|uid| self.admitted.contains(&uid))
-    }
-
-    fn uri(&self) -> String {
-        device_uri(self.port)
-    }
-
-    fn up_time(&self) -> i32 {
-        i32::try_from(self.started.elapsed().as_secs())
-            .unwrap_or(i32::MAX)
-            .saturating_add(1)
-    }
-
-    fn uuid(&self) -> String {
-        format!("urn:uuid:5bd0f6a4-3c1e-4d55-9a6e-{:012x}", unsafe { libc::geteuid() })
-    }
-
-    fn media_col(x: Value, y: Value) -> Value {
-        let size = Value::Collection(vec![
-            Attr::new("x-dimension", vec![x]),
-            Attr::new("y-dimension", vec![y]),
-        ]);
-        let mut members = vec![Attr::new("media-size", vec![size])];
-        for margin in ["media-bottom-margin", "media-left-margin", "media-right-margin", "media-top-margin"] {
-            members.push(Attr::new(margin, vec![Value::Integer(0)]));
-        }
-        Value::Collection(members)
-    }
-
-    pub(super) fn printer_attributes(&self) -> Vec<Attr> {
-        let kw = |s: &str| Value::Keyword(s.to_string());
-        let kws = |list: &[&str]| list.iter().map(|s| kw(s)).collect::<Vec<_>>();
-        let (dx, dy) = MEDIA
-            .iter()
-            .find(|(name, _, _)| *name == self.default_media)
-            .map(|(_, x, y)| (*x, *y))
-            .unwrap_or((21000, 29700));
-        let mut database: Vec<Value> = MEDIA
-            .iter()
-            .map(|(_, x, y)| Self::media_col(Value::Integer(*x), Value::Integer(*y)))
-            .collect();
-        database.push(Self::media_col(
-            Value::Range(CUSTOM_MIN, CUSTOM_MAX),
-            Value::Range(CUSTOM_MIN, CUSTOM_MAX),
-        ));
-        let sizes: Vec<Value> = MEDIA
-            .iter()
-            .map(|(_, x, y)| {
-                Value::Collection(vec![
-                    Attr::new("x-dimension", vec![Value::Integer(*x)]),
-                    Attr::new("y-dimension", vec![Value::Integer(*y)]),
-                ])
-            })
-            .collect();
-        let queued = self
-            .jobs
-            .lock()
-            .map(|jobs| jobs.iter().filter(|j| j.state < job_state::CANCELED).count())
-            .unwrap_or(0);
-        let processing = self.receiving.load(Ordering::SeqCst) > 0;
-        vec![
-            Attr::new("charset-configured", vec![Value::Charset("utf-8".into())]),
-            Attr::new("charset-supported", vec![Value::Charset("utf-8".into())]),
-            Attr::new("color-supported", vec![Value::Boolean(true)]),
-            Attr::new("compression-supported", kws(&["none"])),
-            Attr::new("copies-default", vec![Value::Integer(1)]),
-            Attr::new("copies-supported", vec![Value::Range(1, 999)]),
-            Attr::new("document-format-default", vec![Value::Mime("application/pdf".into())]),
-            Attr::new("document-format-supported", vec![Value::Mime("application/pdf".into())]),
-            Attr::new("generated-natural-language-supported", vec![Value::Language("en".into())]),
-            Attr::new("ipp-versions-supported", kws(&["1.1", "2.0"])),
-            Attr::new("job-ids-supported", vec![Value::Boolean(true)]),
-            Attr::new(
-                "job-creation-attributes-supported",
-                kws(&["copies", "media", "media-col", "orientation-requested", "print-color-mode", "sides"]),
-            ),
-            Attr::new("media-bottom-margin-supported", vec![Value::Integer(0)]),
-            Attr::new("media-left-margin-supported", vec![Value::Integer(0)]),
-            Attr::new("media-right-margin-supported", vec![Value::Integer(0)]),
-            Attr::new("media-top-margin-supported", vec![Value::Integer(0)]),
-            Attr::new("media-col-database", database),
-            Attr::new(
-                "media-col-default",
-                vec![Self::media_col(Value::Integer(dx), Value::Integer(dy))],
-            ),
-            Attr::new(
-                "media-col-ready",
-                vec![Self::media_col(Value::Integer(dx), Value::Integer(dy))],
-            ),
-            Attr::new(
-                "media-col-supported",
-                kws(&[
-                    "media-bottom-margin",
-                    "media-left-margin",
-                    "media-right-margin",
-                    "media-size",
-                    "media-top-margin",
-                ]),
-            ),
-            Attr::new("media-default", vec![kw(self.default_media)]),
-            Attr::new("media-ready", vec![kw(self.default_media)]),
-            Attr::new("media-size-supported", sizes),
-            Attr::new("media-supported", MEDIA.iter().map(|(n, _, _)| kw(n)).collect()),
-            Attr::new(
-                "multiple-document-handling-supported",
-                kws(&["separate-documents-uncollated-copies", "separate-documents-collated-copies"]),
-            ),
-            Attr::new("multiple-document-jobs-supported", vec![Value::Boolean(true)]),
-            Attr::new("multiple-operation-time-out", vec![Value::Integer(60)]),
-            Attr::new("natural-language-configured", vec![Value::Language("en".into())]),
-            Attr::new(
-                "operations-supported",
-                op::SUPPORTED.iter().map(|o| Value::Enum(*o as i32)).collect(),
-            ),
-            Attr::new("orientation-requested-default", vec![Value::Enum(3)]),
-            Attr::new(
-                "orientation-requested-supported",
-                vec![Value::Enum(3), Value::Enum(4), Value::Enum(5), Value::Enum(6)],
-            ),
-            Attr::new("output-bin-default", vec![kw("face-up")]),
-            Attr::new("output-bin-supported", kws(&["face-up"])),
-            Attr::new("pdl-override-supported", vec![kw("attempted")]),
-            Attr::new("print-color-mode-default", vec![kw("color")]),
-            Attr::new("print-color-mode-supported", kws(&["auto", "color", "monochrome"])),
-            Attr::new("print-quality-default", vec![Value::Enum(4)]),
-            Attr::new("print-quality-supported", vec![Value::Enum(4)]),
-            Attr::new(
-                "printer-device-id",
-                vec![Value::Text("MFG:Spectra PDF;MDL:Virtual Printer;CMD:PDF;CLS:PRINTER;".into())],
-            ),
-            Attr::new("printer-info", vec![Value::Text(DESCRIPTION.into())]),
-            Attr::new("printer-is-accepting-jobs", vec![Value::Boolean(true)]),
-            Attr::new("printer-make-and-model", vec![Value::Text(MAKE_AND_MODEL.into())]),
-            Attr::new("printer-name", vec![Value::Name(DESCRIPTION.into())]),
-            Attr::new("printer-resolution-default", vec![Value::Resolution(300, 300, 3)]),
-            Attr::new("printer-resolution-supported", vec![Value::Resolution(300, 300, 3)]),
-            Attr::new("printer-state", vec![Value::Enum(if processing { 4 } else { 3 })]),
-            Attr::new("printer-state-reasons", kws(&["none"])),
-            Attr::new("printer-up-time", vec![Value::Integer(self.up_time())]),
-            Attr::new("printer-uri-supported", vec![Value::Uri(self.uri())]),
-            Attr::new("printer-uuid", vec![Value::Uri(self.uuid())]),
-            Attr::new("queued-job-count", vec![Value::Integer(queued as i32)]),
-            Attr::new("sides-default", vec![kw("one-sided")]),
-            Attr::new("sides-supported", kws(&["one-sided"])),
-            Attr::new("uri-authentication-supported", kws(&["none"])),
-            Attr::new("uri-security-supported", kws(&["none"])),
-            Attr::new("which-jobs-supported", kws(&["completed", "not-completed", "all"])),
-        ]
-    }
-
-    fn job_attributes(&self, job: &Job) -> Vec<Attr> {
-        let mut attrs = vec![
-            Attr::new("job-id", vec![Value::Integer(job.id)]),
-            Attr::new("job-uri", vec![Value::Uri(format!("{}/{}", self.uri(), job.id))]),
-            Attr::new("job-printer-uri", vec![Value::Uri(self.uri())]),
-            Attr::new("job-name", vec![Value::Name(job.name.clone())]),
-            Attr::new("job-originating-user-name", vec![Value::Name(job.user.clone())]),
-            Attr::new("job-state", vec![Value::Enum(job.state)]),
-            Attr::new("job-state-reasons", vec![Value::Keyword(job.reasons.into())]),
-            Attr::new("job-impressions-completed", vec![Value::Integer(0)]),
-            Attr::new("job-media-sheets-completed", vec![Value::Integer(0)]),
-            Attr::new("time-at-creation", vec![Value::Integer(job.created)]),
-        ];
-        if !job.message.is_empty() {
-            attrs.push(Attr::new("job-state-message", vec![Value::Text(job.message.clone())]));
-        }
-        if let Some(done) = job.completed {
-            attrs.push(Attr::new("time-at-completed", vec![Value::Integer(done)]));
-        }
-        attrs
-    }
-
-    fn response(&self, request: &Message, code: u16, message: Option<&str>, groups: Vec<Group>) -> Vec<u8> {
-        let mut op_attrs = vec![
-            Attr::new("attributes-charset", vec![Value::Charset("utf-8".into())]),
-            Attr::new("attributes-natural-language", vec![Value::Language("en".into())]),
-        ];
-        if let Some(text) = message {
-            op_attrs.push(Attr::new("status-message", vec![Value::Text(text.to_string())]));
-        }
-        let mut all = vec![Group {
+/// The operation attributes every request starts with (RFC 8011 section
+/// 4.1.4), then the rest in order.
+fn request(operation: u16, rest: Vec<Attr>) -> Message {
+    let mut attrs = vec![
+        Attr::new("attributes-charset", vec![Value::Charset("utf-8".into())]),
+        Attr::new("attributes-natural-language", vec![Value::Language("en".into())]),
+    ];
+    attrs.extend(rest);
+    Message {
+        version: (2, 0),
+        code: operation,
+        request_id: REQUEST_ID,
+        groups: vec![Group {
             tag: tag::OPERATION,
-            attrs: op_attrs,
-        }];
-        all.extend(groups);
-        let version = if matches!(request.version.0, 1 | 2) {
-            request.version
-        } else {
-            (1, 1)
-        };
-        encode(&Message {
-            version,
-            code,
-            request_id: request.request_id,
-            groups: all,
-        })
-    }
-
-    fn refuse(&self, request: &Message, code: u16, message: &str) -> Vec<u8> {
-        self.response(request, code, Some(message), Vec::new())
-    }
-
-    /// The requester, when it is the user this printer belongs to.
-    fn authorize(&self, request: &Message) -> Result<String, Vec<u8>> {
-        match request.op_text("requesting-user-name") {
-            Some(user) if user == self.user => Ok(user.to_string()),
-            _ => Err(self.refuse(
-                request,
-                status::NOT_AUTHORIZED,
-                "This printer accepts jobs only from the user it belongs to.",
-            )),
-        }
-    }
-
-    fn check_format(&self, request: &Message) -> Result<(), Vec<u8>> {
-        match request.op_text("document-format") {
-            None | Some("application/pdf") | Some("application/octet-stream") => Ok(()),
-            Some(other) => Err(self.refuse(
-                request,
-                status::FORMAT_NOT_SUPPORTED,
-                &format!("The document format {other} is not supported; send application/pdf."),
-            )),
-        }
-    }
-
-    fn now(&self) -> i32 {
-        self.up_time()
-    }
-
-    fn new_job(&self, request: &Message, user: String) -> Result<Job, Vec<u8>> {
-        let mut jobs = self.jobs.lock().map_err(|_| self.refuse(request, status::INTERNAL, "job table unusable"))?;
-        let active = jobs.iter().filter(|j| j.state < job_state::CANCELED).count();
-        if active >= MAX_CONCURRENT_JOBS {
-            return Err(self.refuse(request, status::BUSY, "Too many jobs are in progress."));
-        }
-        let job = Job {
-            id: self.next_job.fetch_add(1, Ordering::SeqCst),
-            state: job_state::PENDING,
-            reasons: "job-incoming",
-            message: String::new(),
-            name: request.op_text("job-name").unwrap_or("Untitled").chars().take(255).collect(),
-            user,
-            created: self.now(),
-            completed: None,
-            documents: 0,
-        };
-        jobs.push_back(job.clone());
-        while jobs.len() > MAX_JOBS_KEPT {
-            match jobs.iter().position(|j| j.state >= job_state::CANCELED) {
-                Some(at) => {
-                    jobs.remove(at);
-                }
-                None => break,
-            }
-        }
-        Ok(job)
-    }
-
-    fn update_job(&self, id: i32, change: impl FnOnce(&mut Job)) -> Option<Job> {
-        let mut jobs = self.jobs.lock().ok()?;
-        let job = jobs.iter_mut().find(|j| j.id == id)?;
-        change(job);
-        Some(job.clone())
-    }
-
-    fn find_job(&self, request: &Message) -> Result<Job, Vec<u8>> {
-        let id = request
-            .op_integer("job-id")
-            .or_else(|| {
-                request
-                    .op_text("job-uri")
-                    .and_then(|uri| uri.rsplit('/').next())
-                    .and_then(|tail| tail.parse().ok())
-            })
-            .ok_or_else(|| self.refuse(request, status::BAD_REQUEST, "The request names no job."))?;
-        self.jobs
-            .lock()
-            .ok()
-            .and_then(|jobs| jobs.iter().find(|j| j.id == id).cloned())
-            .ok_or_else(|| self.refuse(request, status::NOT_FOUND, "No such job."))
-    }
-
-    /// Stream the document to its reserved name, then hand it over.
-    fn receive(&self, mut body: &mut dyn Read) -> Result<Delivery, (u16, String)> {
-        private_dir(&self.dir)
-            .map_err(|e| (status::INTERNAL, format!("cannot create the printed-jobs folder: {e}")))?;
-        let pdf_path = reserve_pdf(&self.dir, &timestamp_name())
-            .map_err(|e| (status::INTERNAL, format!("cannot name the printed file: {e}")))?;
-        let part = part_path(&pdf_path);
-        let release = |what: (u16, String)| {
-            let _ = std::fs::remove_file(&part);
-            let _ = std::fs::remove_file(&pdf_path);
-            what
-        };
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&part)
-            .map_err(|e| release((status::INTERNAL, format!("cannot stage the printed file: {e}"))))?;
-        let count = copy_job(&mut body, &mut file, MAX_JOB_BYTES, MAX_JOB_RECEIVE_DURATION)
-            .map_err(|e| release((status::INTERNAL, format!("could not receive the job: {e}"))))?;
-        if count > MAX_JOB_BYTES {
-            return Err(release((
-                status::ENTITY_TOO_LARGE,
-                format!("the job is over the {MAX_JOB_BYTES}-byte limit"),
-            )));
-        }
-        if let Err(e) = file.flush().and_then(|()| file.sync_all()) {
-            return Err(release((status::INTERNAL, format!("could not store the job: {e}"))));
-        }
-        drop(file);
-        if count == 0 {
-            release((status::OK, String::new()));
-            return Ok(Delivery::Empty);
-        }
-        if !starts_as_pdf(&part) {
-            return Err(release((status::FORMAT_ERROR, "the job is not a PDF document".to_string())));
-        }
-        std::fs::rename(&part, &pdf_path)
-            .map_err(|e| release((status::INTERNAL, format!("could not finalize the printed file: {e}"))))?;
-        Ok(Delivery::Delivered(pdf_path))
-    }
-
-    /// Receive one document of a job and settle the job's state.
-    fn document(&self, request: &Message, job: &Job, body: &mut dyn Read, last: bool) -> Vec<u8> {
-        self.update_job(job.id, |j| {
-            j.state = job_state::PROCESSING;
-            j.reasons = "job-printing";
-        });
-        self.receiving.fetch_add(1, Ordering::SeqCst);
-        let outcome = self.receive(body);
-        self.receiving.fetch_sub(1, Ordering::SeqCst);
-        match outcome {
-            Ok(delivery) => {
-                if let Delivery::Delivered(path) = delivery {
-                    (self.deliver)(path);
-                }
-                let settled = self.update_job(job.id, |j| {
-                    j.documents += 1;
-                    if last {
-                        j.state = job_state::COMPLETED;
-                        j.reasons = "job-completed-successfully";
-                        j.completed = Some(self.up_time());
-                    } else {
-                        j.state = job_state::PENDING;
-                        j.reasons = "job-incoming";
-                    }
-                });
-                let attrs = settled.map(|j| self.job_attributes(&j)).unwrap_or_default();
-                self.response(request, status::OK, None, vec![Group { tag: tag::JOB, attrs }])
-            }
-            Err((code, message)) => {
-                (self.record_error)(message.clone());
-                self.update_job(job.id, |j| {
-                    j.state = job_state::ABORTED;
-                    j.reasons = "aborted-by-system";
-                    j.message = message.clone();
-                    j.completed = Some(self.up_time());
-                });
-                self.refuse(request, code, &message)
-            }
-        }
-    }
-
-    /// Answer one IPP request. `body` is positioned after the HTTP head.
-    pub(super) fn handle(&self, body: &mut dyn Read) -> Vec<u8> {
-        let request = match decode(body) {
-            Ok(message) => message,
-            Err(_) => {
-                let empty = Message {
-                    version: (1, 1),
-                    code: 0,
-                    request_id: 0,
-                    groups: Vec::new(),
-                };
-                return self.refuse(&empty, status::BAD_REQUEST, "The request could not be read.");
-            }
-        };
-        if !matches!(request.version.0, 1 | 2) {
-            return self.refuse(&request, status::VERSION_NOT_SUPPORTED, "IPP 1.1 and 2.0 are supported.");
-        }
-        match request.code {
-            op::GET_PRINTER_ATTRIBUTES => {
-                let attrs = filter_requested(&request, self.printer_attributes());
-                self.response(&request, status::OK, None, vec![Group { tag: tag::PRINTER, attrs }])
-            }
-            op::VALIDATE_JOB => match self.authorize(&request).and_then(|_| self.check_format(&request)) {
-                Ok(()) => self.response(&request, status::OK, None, Vec::new()),
-                Err(refusal) => refusal,
-            },
-            op::PRINT_JOB => {
-                let user = match self.authorize(&request) {
-                    Ok(user) => user,
-                    Err(refusal) => return refusal,
-                };
-                if let Err(refusal) = self.check_format(&request) {
-                    return refusal;
-                }
-                match self.new_job(&request, user) {
-                    Ok(job) => self.document(&request, &job, body, true),
-                    Err(refusal) => refusal,
-                }
-            }
-            op::CREATE_JOB => {
-                let user = match self.authorize(&request) {
-                    Ok(user) => user,
-                    Err(refusal) => return refusal,
-                };
-                match self.new_job(&request, user) {
-                    Ok(job) => {
-                        let attrs = self.job_attributes(&job);
-                        self.response(&request, status::OK, None, vec![Group { tag: tag::JOB, attrs }])
-                    }
-                    Err(refusal) => refusal,
-                }
-            }
-            op::SEND_DOCUMENT => {
-                let user = match self.authorize(&request) {
-                    Ok(user) => user,
-                    Err(refusal) => return refusal,
-                };
-                if let Err(refusal) = self.check_format(&request) {
-                    return refusal;
-                }
-                let job = match self.find_job(&request) {
-                    Ok(job) => job,
-                    Err(refusal) => return refusal,
-                };
-                if job.user != user {
-                    return self.refuse(&request, status::NOT_AUTHORIZED, "The job belongs to another user.");
-                }
-                if job.state != job_state::PENDING {
-                    return self.refuse(&request, status::NOT_POSSIBLE, "The job is not accepting documents.");
-                }
-                let last = request.op_boolean("last-document").unwrap_or(true);
-                self.document(&request, &job, body, last)
-            }
-            op::CANCEL_JOB => {
-                let job = match self.find_job(&request) {
-                    Ok(job) => job,
-                    Err(refusal) => return refusal,
-                };
-                if self.authorize(&request).map(|u| u != job.user).unwrap_or(true) {
-                    return self.refuse(&request, status::NOT_AUTHORIZED, "The job belongs to another user.");
-                }
-                if job.state >= job_state::CANCELED {
-                    return self.refuse(&request, status::NOT_POSSIBLE, "The job has already finished.");
-                }
-                self.update_job(job.id, |j| {
-                    j.state = job_state::CANCELED;
-                    j.reasons = "job-canceled-by-user";
-                    j.completed = Some(self.up_time());
-                });
-                self.response(&request, status::OK, None, Vec::new())
-            }
-            op::GET_JOB_ATTRIBUTES => match self.find_job(&request) {
-                Ok(job) => {
-                    let attrs = self.job_attributes(&job);
-                    self.response(&request, status::OK, None, vec![Group { tag: tag::JOB, attrs }])
-                }
-                Err(refusal) => refusal,
-            },
-            op::GET_JOBS => {
-                let which = request.op_text("which-jobs").unwrap_or("not-completed").to_string();
-                let jobs: Vec<Job> = self
-                    .jobs
-                    .lock()
-                    .map(|jobs| jobs.iter().cloned().collect())
-                    .unwrap_or_default();
-                let groups = jobs
-                    .iter()
-                    .filter(|j| match which.as_str() {
-                        "completed" => j.state >= job_state::CANCELED,
-                        "all" => true,
-                        _ => j.state < job_state::CANCELED,
-                    })
-                    .map(|j| Group {
-                        tag: tag::JOB,
-                        attrs: self.job_attributes(j),
-                    })
-                    .collect();
-                self.response(&request, status::OK, None, groups)
-            }
-            _ => self.refuse(&request, status::OPERATION_NOT_SUPPORTED, "The operation is not supported."),
-        }
+            attrs,
+        }],
     }
 }
 
-/// The attributes a Get-Printer-Attributes request asked for. `all` and the
-/// group names return everything (RFC 8011 section 4.2.5.1).
-fn filter_requested(request: &Message, attrs: Vec<Attr>) -> Vec<Attr> {
-    let Some(requested) = request.attr(tag::OPERATION, "requested-attributes") else {
-        return attrs;
-    };
-    let names: Vec<&str> = requested.values.iter().filter_map(Value::text).collect();
-    if names
-        .iter()
-        .any(|n| matches!(*n, "all" | "printer-description" | "job-template"))
-    {
-        return attrs;
-    }
+fn target(queue: &str) -> Attr {
+    Attr::new("printer-uri", vec![Value::Uri(printer_uri(queue))])
+}
+
+fn requester(user: &str) -> Attr {
+    Attr::new("requesting-user-name", vec![Value::Name(user.to_string())])
+}
+
+fn keywords(name: &str, list: &[&str]) -> Attr {
+    Attr::new(name, list.iter().map(|k| Value::Keyword(k.to_string())).collect())
+}
+
+const QUEUE_ATTRIBUTES: &[&str] = &[
+    "device-uri",
+    "job-hold-until-default",
+    "job-sheets-default",
+    "printer-error-policy",
+    "printer-is-accepting-jobs",
+    "printer-is-shared",
+    "printer-op-policy",
+    "printer-state",
+    "requesting-user-name-allowed",
+    "requesting-user-name-denied",
+];
+
+const JOB_ATTRIBUTES: &[&str] = &[
+    "job-id",
+    "job-k-octets",
+    "job-originating-user-name",
+    "job-state",
+    "job-state-reasons",
+    "number-of-documents",
+    "time-at-creation",
+];
+
+pub(super) fn printer_attributes_request(queue: &str, user: &str) -> Message {
+    request(
+        op::GET_PRINTER_ATTRIBUTES,
+        vec![target(queue), requester(user), keywords("requested-attributes", QUEUE_ATTRIBUTES)],
+    )
+}
+
+/// This user's jobs that are not finished (RFC 8011 section 4.2.6.1).
+pub(super) fn get_jobs_request(queue: &str, user: &str) -> Message {
+    request(
+        op::GET_JOBS,
+        vec![
+            target(queue),
+            requester(user),
+            Attr::new("limit", vec![Value::Integer(MAX_JOBS_PER_PASS as i32)]),
+            keywords("requested-attributes", JOB_ATTRIBUTES),
+            Attr::new("which-jobs", vec![Value::Keyword("not-completed".into())]),
+            Attr::new("my-jobs", vec![Value::Boolean(true)]),
+        ],
+    )
+}
+
+/// One document of a job; its data follows the response.
+pub(super) fn get_document_request(queue: &str, user: &str, job: i32, document: u32) -> Message {
+    request(
+        op::CUPS_GET_DOCUMENT,
+        vec![
+            target(queue),
+            Attr::new("job-id", vec![Value::Integer(job)]),
+            requester(user),
+            Attr::new("document-number", vec![Value::Integer(document as i32)]),
+        ],
+    )
+}
+
+/// Cancel a job and remove its files and history (`purge-job`).
+pub(super) fn cancel_job_request(queue: &str, user: &str, job: i32) -> Message {
+    request(
+        op::CANCEL_JOB,
+        vec![
+            target(queue),
+            Attr::new("job-id", vec![Value::Integer(job)]),
+            requester(user),
+            Attr::new("purge-job", vec![Value::Boolean(true)]),
+        ],
+    )
+}
+
+pub(super) fn get_printers_request(user: &str) -> Message {
+    request(
+        op::CUPS_GET_PRINTERS,
+        vec![requester(user), keywords("requested-attributes", &["printer-name"])],
+    )
+}
+
+// ── responses ───────────────────────────────────────────────────────────────
+
+/// The 'successful' status class, 0x0000 to 0x00FF (RFC 8011 appendix B).
+fn succeeded(code: u16) -> bool {
+    code < 0x0100
+}
+
+fn status_text(response: &Message) -> String {
+    response
+        .op_text("status-message")
+        .filter(|text| !text.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("IPP status {:#06x}", response.code))
+}
+
+fn texts(attrs: &[Attr], name: &str) -> Vec<String> {
     attrs
-        .into_iter()
-        .filter(|a| names.contains(&a.name.as_str()))
+        .iter()
+        .filter(|a| a.name == name)
+        .flat_map(|a| a.values.iter())
+        .filter_map(Value::text)
+        .map(str::to_string)
         .collect()
 }
 
-fn starts_as_pdf(path: &Path) -> bool {
-    let Ok(file) = std::fs::File::open(path) else {
-        return false;
-    };
-    let mut head = Vec::with_capacity(1024);
-    if file.take(1024).read_to_end(&mut head).is_err() {
-        return false;
+fn first_text(attrs: &[Attr], name: &str) -> Option<String> {
+    texts(attrs, name).into_iter().next()
+}
+
+fn first_integer(attrs: &[Attr], name: &str) -> Option<i32> {
+    attrs
+        .iter()
+        .find(|a| a.name == name)
+        .and_then(|a| a.values.first())
+        .and_then(Value::integer)
+}
+
+fn first_boolean(attrs: &[Attr], name: &str) -> Option<bool> {
+    attrs
+        .iter()
+        .find(|a| a.name == name)
+        .and_then(|a| a.values.first())
+        .and_then(Value::boolean)
+}
+
+/// What the scheduler reports about the queue with this user's name.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(super) struct QueueFacts {
+    pub device_uri: String,
+    pub hold_default: String,
+    pub sheets: Vec<String>,
+    pub error_policy: String,
+    pub accepting: bool,
+    pub shared: bool,
+    pub op_policy: String,
+    pub state: i32,
+    pub allowed: Vec<String>,
+    pub denied: Vec<String>,
+}
+
+/// The queue's facts, or none when no queue has the name.
+pub(super) fn queue_facts_from(response: &Message) -> Result<Option<QueueFacts>, String> {
+    if response.code == status::NOT_FOUND {
+        return Ok(None);
     }
-    head.windows(5).any(|w| w == b"%PDF-")
-}
-
-/// One client connection: requests until it closes, idles out, or errs.
-pub(super) fn serve_connection(stream: TcpStream, printer: &IppPrinter) {
-    let _ = stream.set_read_timeout(Some(READ_IDLE_TIMEOUT));
-    let Ok(read_half) = stream.try_clone() else {
-        return;
-    };
-    let mut reader = BufReader::new(read_half);
-    let mut writer = stream;
-    loop {
-        let head = match read_head(&mut reader) {
-            Ok(Some(head)) => head,
-            _ => return,
-        };
-        let close = !head.keep_alive();
-        if head
-            .header("expect")
-            .is_some_and(|v| v.eq_ignore_ascii_case("100-continue"))
-            && writer.write_all(b"HTTP/1.1 100 Continue\r\n\r\n").is_err()
-        {
-            return;
-        }
-        let path = head.target.split('?').next().unwrap_or("");
-        let result = match head.method.as_str() {
-            "POST" if path == RESOURCE || path.starts_with(&format!("{RESOURCE}/")) => {
-                let is_ipp = head
-                    .header("content-type")
-                    .is_some_and(|ct| ct.to_ascii_lowercase().starts_with("application/ipp"));
-                let encoded = head
-                    .header("content-encoding")
-                    .is_some_and(|ce| !ce.eq_ignore_ascii_case("identity"));
-                let mut body = match Body::new(&mut reader, &head) {
-                    Ok(body) => body,
-                    Err(_) => return,
-                };
-                if !is_ipp || encoded {
-                    let _ = body.drain();
-                    write_response(&mut writer, "415 Unsupported Media Type", None, &[], close)
-                } else {
-                    let response = printer.handle(&mut body);
-                    if body.drain().is_err() {
-                        let _ = write_response(&mut writer, "200 OK", Some("application/ipp"), &response, true);
-                        return;
-                    }
-                    write_response(&mut writer, "200 OK", Some("application/ipp"), &response, close)
-                }
-            }
-            "OPTIONS" => {
-                let mut body = match Body::new(&mut reader, &head) {
-                    Ok(body) => body,
-                    Err(_) => return,
-                };
-                let _ = body.drain();
-                writer
-                    .write_all(b"HTTP/1.1 200 OK\r\nAllow: OPTIONS, POST\r\nContent-Length: 0\r\n\r\n")
-                    .and_then(|()| writer.flush())
-            }
-            _ => {
-                let mut body = match Body::new(&mut reader, &head) {
-                    Ok(body) => body,
-                    Err(_) => return,
-                };
-                let _ = body.drain();
-                write_response(&mut writer, "404 Not Found", None, &[], close)
-            }
-        };
-        if result.is_err() || close {
-            return;
-        }
+    if !succeeded(response.code) {
+        return Err(status_text(response));
     }
+    let attrs: Vec<Attr> = response
+        .groups
+        .iter()
+        .filter(|g| g.tag == tag::PRINTER)
+        .flat_map(|g| g.attrs.iter().cloned())
+        .collect();
+    Ok(Some(QueueFacts {
+        device_uri: first_text(&attrs, "device-uri").unwrap_or_default(),
+        hold_default: first_text(&attrs, "job-hold-until-default").unwrap_or_default(),
+        sheets: texts(&attrs, "job-sheets-default"),
+        error_policy: first_text(&attrs, "printer-error-policy").unwrap_or_default(),
+        accepting: first_boolean(&attrs, "printer-is-accepting-jobs").unwrap_or(false),
+        shared: first_boolean(&attrs, "printer-is-shared").unwrap_or(true),
+        op_policy: first_text(&attrs, "printer-op-policy").unwrap_or_default(),
+        state: first_integer(&attrs, "printer-state").unwrap_or(0),
+        allowed: texts(&attrs, "requesting-user-name-allowed"),
+        denied: texts(&attrs, "requesting-user-name-denied"),
+    }))
 }
 
-/// The accept loop. Connections are served on their own threads, bounded by
-/// the same in-flight cap as the Windows receiver.
-pub(super) fn serve(listener: TcpListener, printer: Arc<IppPrinter>) {
-    for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
-        if !printer.admits(peer_uid(&stream)) {
-            let _ = write_response(&mut &stream, "403 Forbidden", None, &[], true);
-            continue;
-        }
-        if IN_FLIGHT.load(Ordering::Relaxed) >= MAX_CONCURRENT_JOBS {
-            let _ = write_response(&mut &stream, "503 Service Unavailable", None, &[], true);
-            continue;
-        }
-        IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
-        let printer = printer.clone();
-        std::thread::spawn(move || {
-            let _slot = JobSlot;
-            serve_connection(stream, &printer);
-        });
-    }
-}
-
-// ── the app wiring ──────────────────────────────────────────────────────────
-
-fn record(app: &AppHandle, message: String) {
-    eprintln!("virtual printer: {message}");
-    if let Some(state) = app.try_state::<PrinterState>() {
-        *state.last_job_error.lock().unwrap() = message;
-    }
-}
-
-/// Start the loopback printer. Never panics: a taken port or an unknown user
-/// becomes the named status the Settings block shows.
-pub(super) fn start_listener(app: &AppHandle) {
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        let set_status = |status: String| {
-            if let Some(state) = handle.try_state::<PrinterState>() {
-                *state.listener_status.lock().unwrap() = status;
-            }
-        };
-        let Some(user) = current_user() else {
-            set_status("the current user has no entry in the password database".to_string());
-            return;
-        };
-        let port = own_port();
-        let listener = match TcpListener::bind(("127.0.0.1", port)) {
-            Ok(l) => l,
-            Err(e) => {
-                set_status(format!("port {port} is unavailable: {e}"));
-                return;
-            }
-        };
-        let dir = super::printed_dir();
-        reclaim_job_intermediates(&dir);
-        set_status("listening".to_string());
-        let delivering = handle.clone();
-        let failing = handle.clone();
-        let printer = Arc::new(IppPrinter::new(
-            port,
-            user,
-            dir,
-            Box::new(move |path: PathBuf| {
-                if let Some(state) = delivering.try_state::<PrinterState>() {
-                    state.last_job_error.lock().unwrap().clear();
-                }
-                let canonical = crate::commands::canonical_path(&path.to_string_lossy());
-                crate::app_windows::route_open(&delivering, vec![canonical], false);
-            }),
-            Box::new(move |message: String| record(&failing, message)),
-        ));
-        serve(listener, printer);
-    });
-}
-
-/// What the print system holds under this user's queue name.
-#[derive(Debug, PartialEq)]
-pub(super) enum QueueState {
+/// What the queue with this user's name is.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum QueueKind {
     Absent,
-    Ours,
-    /// A queue with the name exists and points somewhere else.
+    /// Holds this user's jobs with every protection in place.
+    Held,
+    /// This user's queue on the sink, with a protection gone.
+    Drifted,
+    /// The loopback-TCP queue of earlier releases.
+    Legacy,
+    /// Another printer, or another account's, uses the name.
     Foreign(String),
 }
 
-fn queue_state(queue: &str, uri: &str) -> Result<QueueState, String> {
-    let cups = crate::cups_linux::cups()?;
-    let dests = cups.destinations()?;
-    let Some(dest) = dests.iter().find(|d| crate::cups_linux::display_name(d) == queue) else {
-        return Ok(QueueState::Absent);
+pub(super) fn classify(facts: Option<&QueueFacts>, user: &str) -> QueueKind {
+    let Some(facts) = facts else {
+        return QueueKind::Absent;
     };
-    match cups.option(dest, "device-uri") {
-        Some(found) if found == uri => Ok(QueueState::Ours),
-        Some(found) => Ok(QueueState::Foreign(found)),
-        None => Ok(QueueState::Foreign(String::new())),
+    let only_user = facts.denied.is_empty()
+        && facts.allowed.len() == 1
+        && facts.allowed[0].eq_ignore_ascii_case(user);
+    let no_list = facts.denied.is_empty() && facts.allowed.is_empty();
+    let sink = facts.device_uri == SINK_URI || facts.device_uri == "file:/dev/null";
+    if sink && only_user && facts.hold_default == HOLD_INDEFINITE && facts.op_policy == HELD_OP_POLICY {
+        QueueKind::Held
+    } else if sink && (only_user || no_list) {
+        QueueKind::Drifted
+    } else if is_legacy_uri(&facts.device_uri) && (only_user || no_list) {
+        QueueKind::Legacy
+    } else {
+        QueueKind::Foreign(facts.device_uri.clone())
     }
 }
 
-pub(super) fn status(app: &AppHandle) -> Result<VirtualPrinterStatus, String> {
-    let user = current_user()
-        .ok_or_else(|| "The current user has no entry in the password database.".to_string())?;
-    let queue = queue_name(&user);
-    let installed = matches!(queue_state(&queue, &queue_uri(own_port())), Ok(QueueState::Ours));
-    let state = app.state::<PrinterState>();
-    let listener = state.listener_status.lock().unwrap().clone();
-    let last_job_error = state.last_job_error.lock().unwrap().clone();
-    Ok(VirtualPrinterStatus {
-        installed,
-        listener,
-        last_job_error,
-        printer_name: queue,
-        replaced: false,
-        legacy_present: false,
-        staging: String::new(),
-        service_error: String::new(),
+/// The settings Install leaves beyond the held ones. The scheduler reports
+/// `job-sheets-default` only when banner files are installed.
+pub(super) fn fully_configured(facts: &QueueFacts) -> bool {
+    !facts.shared
+        && facts.state == PRINTER_STOPPED
+        && facts.accepting
+        && facts.error_policy == ERROR_POLICY
+        && facts.sheets.iter().all(|sheet| sheet == "none")
+}
+
+/// What Get-Jobs reports about one job.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct JobFacts {
+    pub id: i32,
+    pub state: i32,
+    pub reasons: Vec<String>,
+    /// `time-at-creation`; the scheduler counts in seconds since the epoch.
+    pub created: i64,
+    pub documents: u32,
+    pub k_octets: u64,
+    /// Absent when the scheduler keeps it private (cupsd.conf(5)
+    /// `JobPrivateValues`).
+    pub owner: Option<String>,
+}
+
+pub(super) fn jobs_from(response: &Message) -> Result<Vec<JobFacts>, String> {
+    if !succeeded(response.code) {
+        return Err(status_text(response));
+    }
+    Ok(response
+        .groups
+        .iter()
+        .filter(|g| g.tag == tag::JOB)
+        .filter_map(|g| {
+            let id = first_integer(&g.attrs, "job-id").filter(|id| *id > 0)?;
+            Some(JobFacts {
+                id,
+                state: first_integer(&g.attrs, "job-state").unwrap_or(0),
+                reasons: texts(&g.attrs, "job-state-reasons"),
+                created: first_integer(&g.attrs, "time-at-creation").map_or(0, i64::from),
+                documents: first_integer(&g.attrs, "number-of-documents")
+                    .map_or(0, |n| n.max(0) as u32),
+                k_octets: first_integer(&g.attrs, "job-k-octets").map_or(0, |k| k.max(0) as u64),
+                owner: first_text(&g.attrs, "job-originating-user-name"),
+            })
+        })
+        .collect())
+}
+
+/// Every document of a job is in the spool once the job stops being
+/// 'job-incoming' (RFC 8011 section 5.3.8); a finished job has no future.
+pub(super) fn job_is_complete(job: &JobFacts) -> bool {
+    matches!(
+        job.state,
+        job_state::PENDING | job_state::HELD | job_state::PROCESSING | job_state::STOPPED
+    ) && !job.reasons.iter().any(|reason| reason == "job-incoming")
+}
+
+// ── the scheduler ───────────────────────────────────────────────────────────
+
+/// Why an exchange produced no response.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum Refusal {
+    /// The scheduler refused this user (HTTP 401 or 403).
+    Denied(String),
+    /// The scheduler could not be reached.
+    Unavailable(String),
+    Failed(String),
+}
+
+impl Refusal {
+    fn text(&self) -> &str {
+        match self {
+            Refusal::Denied(t) | Refusal::Unavailable(t) | Refusal::Failed(t) => t,
+        }
+    }
+}
+
+/// One IPP exchange with the scheduler. Requests and responses are RFC 8010
+/// messages.
+pub(super) trait Scheduler {
+    fn exchange(&self, request: &[u8]) -> Result<Vec<u8>, Refusal>;
+    /// The same, with the data that follows the response written to `out`.
+    fn exchange_document(&self, request: &[u8], out: &File) -> Result<Vec<u8>, Refusal>;
+}
+
+/// The system scheduler through libcups.
+pub(super) struct SystemScheduler {
+    cups: &'static crate::cups_linux::Cups,
+}
+
+impl SystemScheduler {
+    pub fn open() -> Result<Self, String> {
+        let cups = crate::cups_linux::cups()?;
+        cups.refuse_password_prompts();
+        Ok(Self { cups })
+    }
+}
+
+/// `cupsLastError` as a refusal: the authentication statuses and their CUPS
+/// extensions (0x1000 authentication cancelled, 0x1002 upgrade required) are
+/// the scheduler refusing this user, 'server-error-service-unavailable' is
+/// what libcups reports when it cannot connect.
+fn refusal_for(code: c_int, text: String) -> Refusal {
+    let text = if text.trim().is_empty() {
+        format!("IPP status {code:#06x}")
+    } else {
+        text
+    };
+    match code {
+        0x0401 | 0x0402 | 0x0403 | 0x1000 | 0x1002 => Refusal::Denied(text),
+        0x0502 => Refusal::Unavailable(text),
+        _ => Refusal::Failed(text),
+    }
+}
+
+impl Scheduler for SystemScheduler {
+    fn exchange(&self, request: &[u8]) -> Result<Vec<u8>, Refusal> {
+        self.cups
+            .exchange(request, None)
+            .map_err(|(code, text)| refusal_for(code, text))
+    }
+
+    fn exchange_document(&self, request: &[u8], out: &File) -> Result<Vec<u8>, Refusal> {
+        self.cups
+            .exchange(request, Some(out.as_raw_fd()))
+            .map_err(|(code, text)| refusal_for(code, text))
+    }
+}
+
+fn call(scheduler: &dyn Scheduler, request: &Message) -> Result<Message, Refusal> {
+    let bytes = scheduler.exchange(&encode(request))?;
+    decode(&mut bytes.as_slice())
+        .map_err(|e| Refusal::Failed(format!("the print system's answer could not be read: {e}")))
+}
+
+pub(super) fn queue_facts(
+    scheduler: &dyn Scheduler,
+    queue: &str,
+    user: &str,
+) -> Result<Option<QueueFacts>, Refusal> {
+    let response = call(scheduler, &printer_attributes_request(queue, user))?;
+    queue_facts_from(&response).map_err(Refusal::Failed)
+}
+
+/// The lowercase names of every queue the scheduler lists.
+fn existing_queues(scheduler: &dyn Scheduler, user: &str) -> Result<HashSet<String>, Refusal> {
+    let response = call(scheduler, &get_printers_request(user))?;
+    if !succeeded(response.code) && response.code != status::NOT_FOUND {
+        return Err(Refusal::Failed(status_text(&response)));
+    }
+    Ok(response
+        .groups
+        .iter()
+        .filter(|g| g.tag == tag::PRINTER)
+        .filter_map(|g| first_text(&g.attrs, "printer-name"))
+        .map(|name| name.to_lowercase())
+        .collect())
+}
+
+// ── staging and the ledger ──────────────────────────────────────────────────
+
+/// What a staged document is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DocKind {
+    Pdf,
+    PostScript,
+}
+
+impl DocKind {
+    fn extension(self) -> &'static str {
+        match self {
+            DocKind::Pdf => "pdf",
+            DocKind::PostScript => "ps",
+        }
+    }
+}
+
+/// A fetched document by its format, as the scheduler typed it, and its
+/// first bytes.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Content {
+    Kind(DocKind),
+    /// A job sheet the scheduler adds (`job-sheets`), not printed content.
+    Banner,
+    /// The message that names why the document is not converted.
+    Unsupported(String),
+}
+
+/// The Universal Exit Language that opens a PJL envelope; the `distill` arm
+/// unwraps one around PostScript.
+const UEL: &[u8] = b"\x1b%-12345X";
+
+pub(super) fn content_of(format: &str, head: &[u8]) -> Content {
+    let format = format
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if format == "application/vnd.cups-banner" {
+        return Content::Banner;
+    }
+    let pdf = head[..head.len().min(1024)].windows(5).any(|w| w == b"%PDF-");
+    let postscript = head.starts_with(b"%!") || head.starts_with(UEL);
+    let unwrapped = matches!(
+        format.as_str(),
+        "application/octet-stream" | "application/vnd.cups-raw"
+    );
+    match format.as_str() {
+        "application/pdf" | "application/vnd.cups-pdf" if pdf => Content::Kind(DocKind::Pdf),
+        "application/postscript" | "application/vnd.cups-postscript" if postscript => {
+            Content::Kind(DocKind::PostScript)
+        }
+        _ if unwrapped && pdf => Content::Kind(DocKind::Pdf),
+        _ if unwrapped && postscript => Content::Kind(DocKind::PostScript),
+        "application/pdf" | "application/vnd.cups-pdf" | "application/postscript"
+        | "application/vnd.cups-postscript" => Content::Unsupported(format!(
+            "a print job arrived as {format} data that does not begin as that format"
+        )),
+        "" => Content::Unsupported(
+            "a print job arrived in a format the print system did not name".to_string(),
+        ),
+        _ => Content::Unsupported(format!(
+            "a print job arrived as {format} data, which Spectra PDF does not convert"
+        )),
+    }
+}
+
+/// A job's ledger key: `Printed <time-at-creation>-<job-id>`. The creation
+/// time travels with the id because the scheduler numbers jobs afresh once
+/// it forgets every job.
+pub(super) fn job_key(job: &JobFacts) -> String {
+    format!("{PRINTED_PREFIX}{}-{:010}", job.created.max(0), job.id)
+}
+
+/// The staged file of one document: its job's key, the document number and
+/// the format's extension.
+pub(super) fn staged_name(key: &str, document: u32, kind: DocKind) -> String {
+    format!("{key}{document:03}.{}", kind.extension())
+}
+
+/// The job key of a staged document's name, for names this receiver writes.
+pub(super) fn key_of(staged: &str) -> Option<String> {
+    let (rest, extension) = staged.rsplit_once('.')?;
+    if !matches!(extension, "pdf" | "ps") || rest.len() < 3 || !rest.is_char_boundary(rest.len() - 3) {
+        return None;
+    }
+    let (key, document) = rest.split_at(rest.len() - 3);
+    let (stamp, id) = key.strip_prefix(PRINTED_PREFIX)?.split_once('-')?;
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    (digits(document) && digits(stamp) && digits(id)).then(|| key.to_string())
+}
+
+/// The output stem of a staged document: its name without the
+/// `-<digits>.<extension>` tail.
+pub(super) fn stem_of(staged: &Path) -> Option<String> {
+    let name = staged.file_name()?.to_str()?;
+    let (rest, extension) = name.rsplit_once('.')?;
+    if !matches!(extension, "pdf" | "ps") {
+        return None;
+    }
+    let (stem, key) = rest.rsplit_once('-')?;
+    if !stem.starts_with(PRINTED_PREFIX) || key.is_empty() || !key.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(stem.to_string())
+}
+
+fn ledger_entry(ledger: &Path, name: &str, suffix: &str) -> PathBuf {
+    ledger.join(format!("{name}{suffix}"))
+}
+
+/// The staged documents of one job.
+fn staged_copies(staging: &Path, key: &str) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(staging) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .and_then(key_of)
+                .is_some_and(|of| of == key)
+        })
+        .collect()
+}
+
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    File::open(dir)?.sync_all()
+}
+
+/// Create `path` holding `contents`, on disk before this returns. A write or
+/// flush that fails removes the file again.
+fn write_durable(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    let written = file.write_all(contents).and_then(|()| file.sync_all());
+    if written.is_err() {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+    }
+    written
+}
+
+/// Rename `from` to `to` and flush the folder that holds the new name.
+fn rename_durable(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)?;
+    sync_dir(to.parent().unwrap_or_else(|| Path::new(".")))
+}
+
+/// Write a ledger entry under a temporary name and rename it into place, so
+/// the entry exists whole or not at all.
+fn write_entry_file(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let mut temp = path.as_os_str().to_os_string();
+    temp.push(ENTRY_TEMP_SUFFIX);
+    let temp = PathBuf::from(temp);
+    write_durable(&temp, contents)?;
+    rename_durable(&temp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&temp);
     })
 }
 
-/// lpadmin's arguments that add this user's queue.
-pub(super) fn install_args(queue: &str, uri: &str, user: &str) -> Vec<String> {
+/// Whether `path` is gone, removing it if it is there.
+fn removed(path: &Path) -> bool {
+    match std::fs::remove_file(path) {
+        Ok(()) => true,
+        Err(e) => e.kind() == io::ErrorKind::NotFound,
+    }
+}
+
+/// What a receiver remembers between passes, by job key.
+pub(super) struct Taker {
+    /// Jobs taken, refused or given up on by this process.
+    passed: HashSet<String>,
+    failures: HashMap<String, u32>,
+    /// Writes a job's ledger entry (path, queue name).
+    write_entry: fn(&Path, &[u8]) -> io::Result<()>,
+}
+
+impl Default for Taker {
+    fn default() -> Self {
+        Self {
+            passed: HashSet::new(),
+            failures: HashMap::new(),
+            write_entry: write_entry_file,
+        }
+    }
+}
+
+/// Expands a gzip-compressed document into a sink, stopping once more than
+/// the limit was written; returns the count.
+pub(super) type Expand<'a> = &'a dyn Fn(&Path, &mut dyn Write, u64) -> Result<u64, String>;
+
+/// The receiver's view of one pass.
+pub(super) struct Pass<'a> {
+    pub scheduler: &'a dyn Scheduler,
+    pub user: &'a str,
+    pub queue: &'a str,
+    pub staging: &'a Path,
+    pub ledger: &'a Path,
+    pub record_error: &'a dyn Fn(String),
+    pub expand: Expand<'a>,
+}
+
+/// One pass over this user's queue: stage every finished job of the held
+/// queue, record it in the ledger and cancel it. Returns what the queue is;
+/// nothing is taken from a queue that is not held. An error means the print
+/// system did not answer.
+pub(super) fn take_jobs(pass: &Pass, taker: &mut Taker) -> Result<QueueKind, String> {
+    finish_staging(pass.staging, pass.ledger);
+    let facts = queue_facts(pass.scheduler, pass.queue, pass.user).map_err(|r| r.text().to_string())?;
+    let kind = classify(facts.as_ref(), pass.user);
+    if kind != QueueKind::Held {
+        return Ok(kind);
+    }
+    let jobs = match call(pass.scheduler, &get_jobs_request(pass.queue, pass.user))
+        .map_err(|r| r.text().to_string())
+        .and_then(|response| jobs_from(&response))
+    {
+        Ok(jobs) => jobs,
+        Err(e) => {
+            (pass.record_error)(format!("the jobs of {} could not be listed: {e}", pass.queue));
+            return Ok(kind);
+        }
+    };
+    let listed_in_full = jobs.len() < MAX_JOBS_PER_PASS;
+    let mut seen: HashSet<String> = HashSet::new();
+    for job in &jobs {
+        if job
+            .owner
+            .as_deref()
+            .is_some_and(|owner| !owner.eq_ignore_ascii_case(pass.user))
+        {
+            continue;
+        }
+        let key = job_key(job);
+        take_one(pass, job, &key, taker);
+        seen.insert(key);
+    }
+    taker.passed.retain(|key| seen.contains(key));
+    taker.failures.retain(|key, _| seen.contains(key));
+    if listed_in_full {
+        prune_ledger(pass, &seen);
+    }
+    Ok(kind)
+}
+
+fn take_one(pass: &Pass, job: &JobFacts, key: &str, taker: &mut Taker) {
+    if taker.passed.contains(key) || !job_is_complete(job) {
+        return;
+    }
+    let taken = ledger_entry(pass.ledger, key, TAKEN_SUFFIX);
+    if !taken.exists() {
+        let copies = staged_copies(pass.staging, key);
+        let ready = if copies.is_empty() {
+            stage_job(pass, job, key, &taken, taker)
+        } else {
+            // Staging writes the entry before any staged name, so these
+            // copies came from elsewhere; they are recorded like fresh ones.
+            record_taken(pass, taker, key, &taken, &copies)
+        };
+        if !ready {
+            return;
+        }
+    }
+    remove_from_queue(pass, job, key, taker);
+}
+
+/// Write the job's ledger entry, naming its queue. When the write fails, the
+/// copies of the job's data go too, but only once the entry is gone: a copy
+/// without an entry would be delivered while a later pass reads the job
+/// again, and an entry without a copy would let that pass cancel the job.
+/// Returns whether the entry is there.
+fn record_taken(pass: &Pass, taker: &mut Taker, key: &str, taken: &Path, copies: &[PathBuf]) -> bool {
+    let Err(e) = (taker.write_entry)(taken, pass.queue.as_bytes()) else {
+        return true;
+    };
+    failed_attempt(
+        pass,
+        taker,
+        key,
+        format!("the print job could not be recorded as taken: {e}"),
+    );
+    if removed(taken) {
+        for copy in copies {
+            let _ = std::fs::remove_file(copy);
+        }
+        false
+    } else {
+        true
+    }
+}
+
+/// How one document's fetch ended.
+enum Fetched {
+    /// Staged under its part name, to be renamed to the staged name.
+    Staged { part: PathBuf, staged: PathBuf },
+    /// A job sheet or an empty document: nothing to deliver.
+    Skipped,
+    Refused(String),
+    OverLimit,
+}
+
+enum FetchFailure {
+    /// The scheduler refused this user the document.
+    Denied,
+    /// The job or the document left the spool.
+    Gone,
+    Failed(String),
+}
+
+/// Read every document of the job and stage it: each is flushed under its
+/// part name, the parts' folder is flushed, the ledger entry is written, and
+/// only then do the parts take their staged names. True once the job needs
+/// nothing more from its queue: its data is staged, or it holds nothing
+/// deliverable and is dropped. A failed read stages nothing and keeps the
+/// job.
+fn stage_job(pass: &Pass, job: &JobFacts, key: &str, taken: &Path, taker: &mut Taker) -> bool {
+    let queue = pass.queue;
+    if job.documents > MAX_DOCUMENTS {
+        (pass.record_error)(format!(
+            "a print job in {queue} has {} documents, more than the {MAX_DOCUMENTS} this printer takes, and was removed",
+            job.documents
+        ));
+        return write_or_name(pass, taker, key, taken);
+    }
+    // job-k-octets is rounded up to whole kilobytes (RFC 8011 section
+    // 5.3.17.1), one rounding per document in the scheduler.
+    let slack = 1024 * u64::from(job.documents.max(1));
+    if job.k_octets.saturating_mul(1024) > MAX_JOB_BYTES.saturating_add(slack) {
+        (pass.record_error)(format!(
+            "a print job in {queue} is over the {MAX_JOB_BYTES}-byte limit and was not converted"
+        ));
+        return write_or_name(pass, taker, key, taken);
+    }
+    let mut parts: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut refused: Vec<String> = Vec::new();
+    let discard = |parts: &[(PathBuf, PathBuf)]| {
+        for (part, _) in parts {
+            let _ = std::fs::remove_file(part);
+        }
+    };
+    for document in 1..=job.documents {
+        match fetch_document(pass, job, key, document) {
+            Ok(Fetched::Staged { part, staged }) => parts.push((part, staged)),
+            Ok(Fetched::Skipped) => {}
+            Ok(Fetched::Refused(message)) => refused.push(message),
+            Ok(Fetched::OverLimit) => {
+                discard(&parts);
+                (pass.record_error)(format!(
+                    "a print job in {queue} is over the {MAX_JOB_BYTES}-byte limit and was not converted"
+                ));
+                return write_or_name(pass, taker, key, taken);
+            }
+            Err(failure) => {
+                discard(&parts);
+                match failure {
+                    FetchFailure::Denied => {
+                        taker.passed.insert(key.to_string());
+                        (pass.record_error)(format!(
+                            "a print job in {queue} cannot be read by this account; it stays in the queue"
+                        ));
+                    }
+                    FetchFailure::Gone => failed_attempt(
+                        pass,
+                        taker,
+                        key,
+                        format!("a print job was removed from {queue} before it could be read"),
+                    ),
+                    FetchFailure::Failed(e) => failed_attempt(
+                        pass,
+                        taker,
+                        key,
+                        format!("the print job could not be read from {queue}: {e}"),
+                    ),
+                }
+                return false;
+            }
+        }
+    }
+    for message in &refused {
+        (pass.record_error)(format!("{message}; it was removed from {queue}"));
+    }
+    if parts.is_empty() {
+        return write_or_name(pass, taker, key, taken);
+    }
+    if let Err(e) = sync_dir(pass.staging) {
+        discard(&parts);
+        failed_attempt(pass, taker, key, format!("the print job could not be staged: {e}"));
+        return false;
+    }
+    let copies: Vec<PathBuf> = parts.iter().map(|(part, _)| part.clone()).collect();
+    if !record_taken(pass, taker, key, taken, &copies) {
+        return false;
+    }
+    for (part, staged) in &parts {
+        if let Err(e) = rename_durable(part, staged) {
+            // The entry stays: the part is complete and on disk, and the next
+            // pass, or the next start, finishes the rename.
+            failed_attempt(pass, taker, key, format!("the print job could not be staged: {e}"));
+        }
+    }
+    true
+}
+
+fn read_head(path: &Path) -> io::Result<Vec<u8>> {
+    let mut head = Vec::with_capacity(1024);
+    File::open(path)?.take(1024).read_to_end(&mut head)?;
+    Ok(head)
+}
+
+fn create_private(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+}
+
+/// Copy one document out of the spool with CUPS-Get-Document and stage it
+/// under its part name. A gzip-compressed spool file (the scheduler keeps a
+/// document as it arrived) is expanded first.
+fn fetch_document(pass: &Pass, job: &JobFacts, key: &str, document: u32) -> Result<Fetched, FetchFailure> {
+    let base = format!("{key}{document:03}");
+    let download = pass.staging.join(format!("{base}{DOWNLOAD_SUFFIX}"));
+    let expanded = pass.staging.join(format!("{base}{EXPANDED_SUFFIX}"));
+    let _ = std::fs::remove_file(&download);
+    let _ = std::fs::remove_file(&expanded);
+    let file = create_private(&download)
+        .map_err(|e| FetchFailure::Failed(format!("cannot stage the job: {e}")))?;
+    let outcome = (|| {
+        let request = encode(&get_document_request(pass.queue, pass.user, job.id, document));
+        let bytes = pass
+            .scheduler
+            .exchange_document(&request, &file)
+            .map_err(|refusal| match refusal {
+                Refusal::Denied(_) => FetchFailure::Denied,
+                Refusal::Unavailable(e) | Refusal::Failed(e) => FetchFailure::Failed(e),
+            })?;
+        let response = decode(&mut bytes.as_slice()).map_err(|e| {
+            FetchFailure::Failed(format!("the print system's answer could not be read: {e}"))
+        })?;
+        match response.code {
+            code if succeeded(code) => {}
+            status::NOT_FOUND => return Err(FetchFailure::Gone),
+            status::FORBIDDEN | status::NOT_AUTHENTICATED | status::NOT_AUTHORIZED => {
+                return Err(FetchFailure::Denied)
+            }
+            _ => return Err(FetchFailure::Failed(status_text(&response))),
+        }
+        file.sync_all()
+            .map_err(|e| FetchFailure::Failed(format!("cannot stage the job: {e}")))?;
+        let format = response
+            .any_attr("document-format")
+            .and_then(|a| a.values.first())
+            .and_then(Value::text)
+            .unwrap_or("")
+            .to_string();
+        if content_of(&format, b"") == Content::Banner {
+            return Ok(Fetched::Skipped);
+        }
+        let failed = |e: io::Error| FetchFailure::Failed(format!("cannot stage the job: {e}"));
+        let mut data = download.clone();
+        if read_head(&download).map_err(failed)?.starts_with(&[0x1f, 0x8b]) {
+            let mut out = create_private(&expanded).map_err(failed)?;
+            let count = (pass.expand)(&download, &mut out, MAX_JOB_BYTES)
+                .map_err(FetchFailure::Failed)?;
+            if count > MAX_JOB_BYTES {
+                return Ok(Fetched::OverLimit);
+            }
+            out.sync_all().map_err(failed)?;
+            data = expanded.clone();
+        }
+        let length = std::fs::metadata(&data).map_err(failed)?.len();
+        if length > MAX_JOB_BYTES {
+            return Ok(Fetched::OverLimit);
+        }
+        if length == 0 {
+            return Ok(Fetched::Skipped);
+        }
+        match content_of(&format, &read_head(&data).map_err(failed)?) {
+            Content::Banner => Ok(Fetched::Skipped),
+            Content::Unsupported(message) => Ok(Fetched::Refused(message)),
+            Content::Kind(kind) => {
+                let staged = pass.staging.join(staged_name(key, document, kind));
+                let part = part_path(&staged);
+                std::fs::rename(&data, &part).map_err(failed)?;
+                Ok(Fetched::Staged { part, staged })
+            }
+        }
+    })();
+    drop(file);
+    let _ = std::fs::remove_file(&download);
+    let _ = std::fs::remove_file(&expanded);
+    outcome
+}
+
+/// The entry of a job dropped without a copy (empty, refused or over the
+/// limit).
+fn write_or_name(pass: &Pass, taker: &mut Taker, key: &str, taken: &Path) -> bool {
+    match (taker.write_entry)(taken, pass.queue.as_bytes()) {
+        Ok(()) => true,
+        Err(e) => {
+            failed_attempt(
+                pass,
+                taker,
+                key,
+                format!("the print job could not be recorded as taken: {e}"),
+            );
+            !removed(taken)
+        }
+    }
+}
+
+/// Count one failed attempt at a job. The first failure is named; after the
+/// last attempt this process leaves the job alone.
+fn failed_attempt(pass: &Pass, taker: &mut Taker, key: &str, message: String) {
+    let attempts = {
+        let count = taker.failures.entry(key.to_string()).or_insert(0);
+        *count += 1;
+        *count
+    };
+    if attempts == 1 {
+        (pass.record_error)(message);
+    }
+    if attempts >= MAX_READ_ATTEMPTS {
+        taker.passed.insert(key.to_string());
+    }
+}
+
+/// Cancel a taken job and purge its files, once per process: its ledger entry
+/// already keeps it from being read again. A job already gone counts as
+/// removed.
+fn remove_from_queue(pass: &Pass, job: &JobFacts, key: &str, taker: &mut Taker) {
+    let cancelled = call(pass.scheduler, &cancel_job_request(pass.queue, pass.user, job.id))
+        .map_err(|r| r.text().to_string())
+        .and_then(|response| {
+            if succeeded(response.code) || response.code == status::NOT_FOUND {
+                Ok(())
+            } else {
+                Err(status_text(&response))
+            }
+        });
+    if let Err(e) = cancelled {
+        (pass.record_error)(format!(
+            "the print job was taken but stays in {}, because the print system did not remove it: {e}. It is not taken a second time.",
+            pass.queue
+        ));
+    }
+    taker.passed.insert(key.to_string());
+}
+
+/// Drop the entries of jobs that can never be read again; runs only after a
+/// pass that listed the held queue in full. An entry of this queue goes once
+/// the listing lacks its job. The entry of another queue that still exists
+/// stays; one whose queue is gone, or that names none, goes.
+fn prune_ledger(pass: &Pass, seen: &HashSet<String>) {
+    let Ok(entries) = std::fs::read_dir(pass.ledger) else {
+        return;
+    };
+    let mut queues: Option<Option<HashSet<String>>> = None;
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(key) = file_name.to_str().and_then(|name| name.strip_suffix(TAKEN_SUFFIX)) else {
+            continue;
+        };
+        if seen.contains(key) {
+            continue;
+        }
+        let named = std::fs::read_to_string(entry.path()).unwrap_or_default();
+        let named = named.trim();
+        let gone = named.is_empty()
+            || named.eq_ignore_ascii_case(pass.queue)
+            || queues
+                .get_or_insert_with(|| existing_queues(pass.scheduler, pass.user).ok())
+                .as_ref()
+                .is_some_and(|queues| !queues.contains(&named.to_lowercase()));
+        if gone {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Finish the renames of parts whose job is recorded as taken: such a part
+/// was complete and on disk before the entry was written.
+fn finish_staging(staging: &Path, ledger: &Path) {
+    let Ok(entries) = std::fs::read_dir(staging) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str().and_then(|name| name.strip_suffix(PART_SUFFIX)) else {
+            continue;
+        };
+        let staged = staging.join(name);
+        if key_of(name).is_some_and(|key| ledger_entry(ledger, &key, TAKEN_SUFFIX).exists())
+            && !staged.exists()
+        {
+            let _ = rename_durable(&entry.path(), &staged);
+        }
+    }
+}
+
+/// Settle what a stopped process left; returns the files removed. Runs once
+/// the receiver holds its claim and before any job is read or delivered.
+///
+/// A part whose job has a ledger entry was complete and on disk before the
+/// entry was written, so its rename is finished; any other part, download or
+/// expansion belongs to a job still in its queue and is removed. An entry
+/// still under its temporary name never counted, and a delivery record whose
+/// staged document is gone guards nothing.
+pub(super) fn reclaim_staging(staging: &Path, ledger: &Path) -> usize {
+    finish_staging(staging, ledger);
+    let mut removed_count = 0;
+    if let Ok(entries) = std::fs::read_dir(staging) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let Some(name) = file_name.to_str() else {
+                continue;
+            };
+            let leftover = name.starts_with(PRINTED_PREFIX)
+                && (name.ends_with(PART_SUFFIX)
+                    || name.ends_with(DOWNLOAD_SUFFIX)
+                    || name.ends_with(EXPANDED_SUFFIX));
+            if leftover && std::fs::remove_file(entry.path()).is_ok() {
+                removed_count += 1;
+            }
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir(ledger) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let Some(name) = file_name.to_str() else {
+                continue;
+            };
+            let stale = name.ends_with(ENTRY_TEMP_SUFFIX)
+                || name
+                    .strip_suffix(DELIVERED_SUFFIX)
+                    .is_some_and(|staged| !staging.join(staged).exists());
+            if stale && std::fs::remove_file(entry.path()).is_ok() {
+                removed_count += 1;
+            }
+        }
+    }
+    removed_count
+}
+
+// ── delivery ────────────────────────────────────────────────────────────────
+
+/// Hand every staged document not yet attempted by this process to
+/// `deliver`, up to the concurrency cap. Staging writes each job's ledger
+/// entry before any staged name exists, so delivering a staged document
+/// never lets its job be read again. Documents a stopped process left behind
+/// are delivered again, never discarded.
+pub(super) fn deliver_staged(
+    staging: &Path,
+    attempted: &Mutex<HashSet<PathBuf>>,
+    record_error: &dyn Fn(String),
+    deliver: &dyn Fn(String, PathBuf),
+) {
+    let Ok(entries) = std::fs::read_dir(staging) else {
+        return;
+    };
+    let mut ready: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter_map(|path| stem_of(&path).map(|stem| (stem, path)))
+        .collect();
+    ready.sort();
+    for (stem, path) in ready {
+        if attempted.lock().unwrap().contains(&path) {
+            continue;
+        }
+        let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        if len > MAX_JOB_BYTES {
+            let _ = std::fs::remove_file(&path);
+            record_error(format!(
+                "a staged print job is over the {MAX_JOB_BYTES}-byte limit and was removed"
+            ));
+            continue;
+        }
+        if IN_FLIGHT.load(Ordering::Relaxed) >= MAX_CONCURRENT_JOBS {
+            return;
+        }
+        attempted.lock().unwrap().insert(path.clone());
+        deliver(stem, path);
+    }
+}
+
+/// Turns a staged document into a printed PDF and returns it; `before_rename`
+/// runs once the PDF is complete and before it takes its final name.
+pub(super) type Convert<'a> =
+    &'a dyn Fn(&Path, &str, &dyn Fn(&Path) -> Result<(), String>) -> Result<PathBuf, String>;
+
+/// Deliver one staged document: convert it, open the PDF, then drop the
+/// staged file. The PDF's file name goes into the ledger before the PDF takes
+/// that name, so after a stop past that point the next start opens the
+/// existing PDF instead of converting a second copy. On failure the staged
+/// document stays for the next start, and the message says so.
+pub(super) fn deliver_one(
+    ledger: &Path,
+    printed: &Path,
+    staged: &Path,
+    stem: &str,
+    convert: Convert<'_>,
+    open: &dyn Fn(&Path),
+) -> Result<PathBuf, String> {
+    let name = staged
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "the staged print job has no readable name".to_string())?;
+    let record = ledger_entry(ledger, name, DELIVERED_SUFFIX);
+    let earlier = std::fs::read_to_string(&record)
+        .ok()
+        .map(|file_name| file_name.trim().to_string())
+        .filter(|file_name| !file_name.is_empty() && !file_name.contains('/'))
+        .map(|file_name| printed.join(file_name))
+        .filter(|pdf| std::fs::metadata(pdf).is_ok_and(|meta| meta.is_file() && meta.len() > 0));
+    let pdf = match earlier {
+        Some(pdf) => pdf,
+        None => {
+            let _ = std::fs::remove_file(&record);
+            let note = |pdf: &Path| {
+                let file_name = pdf
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or_else(|| "the printed file has no readable name".to_string())?;
+                write_durable(&record, file_name.as_bytes())
+                    .map_err(|e| format!("the printed file could not be recorded: {e}"))
+            };
+            match convert(staged, stem, &note) {
+                Ok(pdf) => pdf,
+                Err(e) => {
+                    let _ = std::fs::remove_file(&record);
+                    let folder = staged.parent().unwrap_or(staged);
+                    return Err(format!(
+                        "{e}. The job is kept in {} and tried again the next time Spectra PDF starts.",
+                        folder.display()
+                    ));
+                }
+            }
+        }
+    };
+    open(&pdf);
+    // The record outlives a staged file that could not be removed, so the
+    // next start opens this PDF again rather than converting the job twice.
+    if std::fs::remove_file(staged).is_ok() || !staged.exists() {
+        let _ = std::fs::remove_file(&record);
+    }
+    Ok(pdf)
+}
+
+/// A staged PDF copied into the printed folder under its reserved name; the
+/// copy is flushed before `before_rename` runs.
+pub(super) fn copy_staged_pdf(
+    printed: &Path,
+    staged: &Path,
+    stem: &str,
+    before_rename: &dyn Fn(&Path) -> Result<(), String>,
+) -> Result<PathBuf, String> {
+    private_dir(printed).map_err(|e| format!("cannot create the printed-jobs folder: {e}"))?;
+    let pdf = reserve_pdf(printed, stem).map_err(|e| format!("cannot name the printed file: {e}"))?;
+    let part = part_path(&pdf);
+    let finished = (|| {
+        let mut from = File::open(staged).map_err(|e| format!("cannot read the staged job: {e}"))?;
+        let mut to = create_private(&part).map_err(|e| format!("cannot write the printed file: {e}"))?;
+        io::copy(&mut from, &mut to)
+            .and_then(|_| to.sync_all())
+            .map_err(|e| format!("cannot write the printed file: {e}"))?;
+        drop(to);
+        before_rename(&pdf)?;
+        std::fs::rename(&part, &pdf).map_err(|e| format!("could not finalize the printed file: {e}"))
+    })();
+    match finished {
+        Ok(()) => Ok(pdf),
+        Err(e) => {
+            // A zero-byte PDF would look like a finished print and keep the
+            // name taken.
+            let _ = std::fs::remove_file(&part);
+            let _ = std::fs::remove_file(&pdf);
+            Err(e)
+        }
+    }
+}
+
+/// A staged document as a printed PDF: a PDF as received, PostScript through
+/// the CLI `distill` arm.
+fn convert_document(
+    staged: &Path,
+    stem: &str,
+    before_rename: &dyn Fn(&Path) -> Result<(), String>,
+) -> Result<PathBuf, String> {
+    match staged.extension().and_then(|e| e.to_str()) {
+        Some("ps") => {
+            private_dir(&printed_dir())
+                .map_err(|e| format!("cannot create the printed-jobs folder: {e}"))?;
+            convert_staged(staged, stem, before_rename)
+        }
+        Some("pdf") => copy_staged_pdf(&printed_dir(), staged, stem, before_rename),
+        _ => Err("the staged print job is neither PDF nor PostScript".to_string()),
+    }
+}
+
+// ── the queue's PPD ─────────────────────────────────────────────────────────
+
+/// The sizes the queue offers: PWG 5101.1 name, PPD name, display text, and
+/// the size in hundredths of millimetres.
+pub(super) const PAGES: &[(&str, &str, &str, i32, i32)] = &[
+    ("na_letter_8.5x11in", "Letter", "US Letter", 21590, 27940),
+    ("na_legal_8.5x14in", "Legal", "US Legal", 21590, 35560),
+    ("na_ledger_11x17in", "Tabloid", "Tabloid", 27940, 43180),
+    ("na_executive_7.25x10.5in", "Executive", "Executive", 18415, 26670),
+    ("iso_a3_297x420mm", "A3", "A3", 29700, 42000),
+    ("iso_a4_210x297mm", "A4", "A4", 21000, 29700),
+    ("iso_a5_148x210mm", "A5", "A5", 14800, 21000),
+    ("iso_a6_105x148mm", "A6", "A6", 10500, 14800),
+    ("iso_b5_176x250mm", "ISOB5", "B5 (ISO)", 17600, 25000),
+    ("jis_b5_182x257mm", "B5", "B5 (JIS)", 18200, 25700),
+    ("iso_dl_110x220mm", "EnvDL", "Envelope DL", 11000, 22000),
+    ("na_number-10_4.125x9.5in", "Env10", "Envelope #10", 10478, 24130),
+];
+
+/// Hundredths of millimetres as PostScript points, two decimals at most.
+fn points(hundredths_mm: i32) -> String {
+    let text = format!("{:.2}", f64::from(hundredths_mm) * 72.0 / 2540.0);
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// The queue's PPD (PPD 4.3 with the CUPS extensions of the CUPS PPD
+/// Extensions specification): every size, a custom size from 1 to 48 inches,
+/// colour, and the same `cupsFilter2` line a generated IPP Everywhere PPD
+/// carries for a PDF printer. It offers no option a held job would ignore.
+pub(super) fn queue_ppd(default_media: &str) -> String {
+    let default = PAGES
+        .iter()
+        .find(|(pwg, ..)| *pwg == default_media)
+        .map_or("A4", |(_, ppd, ..)| *ppd);
+    let mut out = String::new();
+    let mut line = |text: String| {
+        out.push_str(&text);
+        out.push('\n');
+    };
+    for fixed in [
+        "*PPD-Adobe: \"4.3\"".to_string(),
+        "*FormatVersion: \"4.3\"".to_string(),
+        "*FileVersion: \"1.0\"".to_string(),
+        "*LanguageVersion: English".to_string(),
+        "*LanguageEncoding: ISOLatin1".to_string(),
+        "*PCFileName: \"SPECTRA.PPD\"".to_string(),
+        format!("*Manufacturer: \"{DESCRIPTION}\""),
+        format!("*Product: \"({MAKE_AND_MODEL})\""),
+        format!("*ModelName: \"{MAKE_AND_MODEL}\""),
+        format!("*ShortNickName: \"{MAKE_AND_MODEL}\""),
+        format!("*NickName: \"{MAKE_AND_MODEL}\""),
+        "*PSVersion: \"(3010.000) 0\"".to_string(),
+        "*LanguageLevel: \"3\"".to_string(),
+        "*ColorDevice: True".to_string(),
+        "*FileSystem: False".to_string(),
+        "*cupsVersion: 1.6".to_string(),
+        "*cupsLanguages: \"en\"".to_string(),
+        "*cupsFilter2: \"application/vnd.cups-pdf application/pdf 10 -\"".to_string(),
+    ] {
+        line(fixed);
+    }
+    for keyword in ["PageSize", "PageRegion"] {
+        line(format!("*OpenUI *{keyword}/Media Size: PickOne"));
+        line(format!("*OrderDependency: 10 AnySetup *{keyword}"));
+        line(format!("*Default{keyword}: {default}"));
+        for (_, ppd, text, x, y) in PAGES {
+            line(format!(
+                "*{keyword} {ppd}/{text}: \"<</PageSize[{} {}]/ImagingBBox null>>setpagedevice\"",
+                points(*x),
+                points(*y)
+            ));
+        }
+        line(format!("*CloseUI: *{keyword}"));
+    }
+    line(format!("*DefaultImageableArea: {default}"));
+    for (_, ppd, text, x, y) in PAGES {
+        line(format!("*ImageableArea {ppd}/{text}: \"0 0 {} {}\"", points(*x), points(*y)));
+    }
+    line(format!("*DefaultPaperDimension: {default}"));
+    for (_, ppd, text, x, y) in PAGES {
+        line(format!("*PaperDimension {ppd}/{text}: \"{} {}\"", points(*x), points(*y)));
+    }
+    for fixed in [
+        "*HWMargins: \"0 0 0 0\"",
+        "*ParamCustomPageSize Width: 1 points 72 3456",
+        "*ParamCustomPageSize Height: 2 points 72 3456",
+        "*ParamCustomPageSize WidthOffset: 3 points 0 0",
+        "*ParamCustomPageSize HeightOffset: 4 points 0 0",
+        "*ParamCustomPageSize Orientation: 5 int 0 3",
+        "*CustomPageSize True: \"pop pop pop <</PageSize[5 -2 roll]/ImagingBBox null>>setpagedevice\"",
+        "*DefaultResolution: 300dpi",
+    ] {
+        line(fixed.to_string());
+    }
+    out
+}
+
+/// A PPD file that exists while its guard lives.
+struct PpdFile {
+    path: PathBuf,
+}
+
+impl Drop for PpdFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// A folder only this user can write that root can read on every file
+/// system: `$XDG_RUNTIME_DIR` (a local folder of mode 0700 by the XDG Base
+/// Directory Specification) when it qualifies, else the receiver's folder.
+/// Root reads the PPD when lpadmin runs through pkexec, and a home folder on
+/// a network file system may refuse root.
+fn ppd_folder() -> Result<PathBuf, String> {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .filter(|dir| {
+            std::fs::symlink_metadata(dir).is_ok_and(|meta| {
+                meta.is_dir() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o077 == 0
+            })
+        });
+    if let Some(dir) = runtime {
+        return Ok(dir);
+    }
+    let layout = Layout::current()
+        .ok_or_else(|| "The account has no home folder for the printer's settings.".to_string())?;
+    prepare(&layout)?;
+    Ok(layout.root)
+}
+
+fn write_ppd() -> Result<PpdFile, String> {
+    let path = ppd_folder()?.join(format!(
+        "spectrapdf-queue-{}-{}.ppd",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    let text = queue_ppd(default_media_for_locale(&session_locale()));
+    create_private(&path)
+        .and_then(|mut file| file.write_all(text.as_bytes()).and_then(|()| file.sync_all()))
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&path);
+            format!("The printer settings file could not be written: {e}")
+        })?;
+    Ok(PpdFile { path })
+}
+
+// ── administration ──────────────────────────────────────────────────────────
+
+/// lpadmin's arguments that create this user's held queue, or turn the queue
+/// with its name into one. `-E` is absent on purpose: it would also enable
+/// the queue (lpadmin(8)), and the queue stays stopped while it accepts jobs.
+pub(super) fn configure_args(queue: &str, user: &str, location: &str, ppd: &Path) -> Vec<String> {
     vec![
         "-p".into(),
         queue.into(),
         "-D".into(),
         DESCRIPTION.into(),
         "-L".into(),
-        "This computer".into(),
+        location.into(),
         "-v".into(),
-        uri.into(),
-        "-m".into(),
-        "everywhere".into(),
+        SINK_URI.into(),
+        "-P".into(),
+        ppd.to_string_lossy().into_owned(),
         "-o".into(),
         "printer-is-shared=false".into(),
         "-o".into(),
-        "printer-error-policy=abort-job".into(),
+        format!("printer-error-policy={ERROR_POLICY}"),
+        "-o".into(),
+        format!("printer-op-policy={HELD_OP_POLICY}"),
+        "-o".into(),
+        format!("job-hold-until-default={HOLD_INDEFINITE}"),
+        "-o".into(),
+        "job-sheets-default=none,none".into(),
+        "-o".into(),
+        "printer-is-accepting-jobs=true".into(),
+        "-o".into(),
+        format!("printer-state={PRINTER_STOPPED}"),
         "-u".into(),
         format!("allow:{user}"),
-        "-E".into(),
     ]
 }
 
@@ -1821,24 +2225,37 @@ pub(super) fn pkexec_refusal(code: Option<i32>, output: &str, manual: &str) -> O
     }
 }
 
+fn lpadmin() -> Result<PathBuf, String> {
+    find_program("lpadmin").ok_or_else(|| {
+        "The CUPS administration tool (lpadmin) is not installed, so the printer cannot be changed."
+            .to_string()
+    })
+}
+
+/// lpadmin as the user. `Err(None)` means the scheduler refused for lack of
+/// rights; `Err(Some(_))` names any other failure.
+fn administer_direct(args: &[String]) -> Result<(), Option<String>> {
+    let ran = run_detached(&lpadmin().map_err(Some)?, args).map_err(Some)?;
+    if ran.code == Some(0) {
+        Ok(())
+    } else if refused_for_rights(&ran.output) {
+        Err(None)
+    } else if ran.output.is_empty() {
+        Err(Some("The print system did not accept the change.".to_string()))
+    } else {
+        Err(Some(ran.output))
+    }
+}
+
 /// Run lpadmin as the user, then through pkexec when the scheduler refuses
 /// for lack of rights.
 fn administer(args: Vec<String>) -> Result<(), String> {
-    let lpadmin = find_program("lpadmin").ok_or_else(|| {
-        "The CUPS administration tool (lpadmin) is not installed, so the printer cannot be changed."
-            .to_string()
-    })?;
+    let lpadmin = lpadmin()?;
     let manual = shell_line(&lpadmin, &args);
-    let direct = run_detached(&lpadmin, &args)?;
-    if direct.code == Some(0) {
-        return Ok(());
-    }
-    if !refused_for_rights(&direct.output) {
-        return Err(if direct.output.is_empty() {
-            "The print system did not accept the change.".to_string()
-        } else {
-            direct.output
-        });
+    match administer_direct(&args) {
+        Ok(()) => return Ok(()),
+        Err(Some(message)) => return Err(message),
+        Err(None) => {}
     }
     let Some(pkexec) = find_program("pkexec") else {
         return Err(format!(
@@ -1854,29 +2271,46 @@ fn administer(args: Vec<String>) -> Result<(), String> {
     }
 }
 
-pub(super) fn install(app: &AppHandle) -> Result<(), String> {
+/// Create or reconfigure this user's held queue in one lpadmin run, through
+/// pkexec when `prompt` allows it.
+fn configure(queue: &str, user: &str, location: &str, prompt: bool) -> Result<(), String> {
+    let ppd = write_ppd()?;
+    let args = configure_args(queue, user, location, &ppd.path);
+    if prompt {
+        administer(args)
+    } else {
+        administer_direct(&args).map_err(|failure| {
+            failure.unwrap_or_else(|| "Changing the printer needs administrator rights.".to_string())
+        })
+    }
+}
+
+fn refusal_message(refusal: Refusal) -> String {
+    match refusal {
+        Refusal::Unavailable(e) => format!("The print system is not available: {e}"),
+        Refusal::Denied(e) | Refusal::Failed(e) => format!("The print system did not answer: {e}"),
+    }
+}
+
+pub(super) fn install(comment: &str) -> Result<(), String> {
     let user = current_user()
         .ok_or_else(|| "The current user has no entry in the password database.".to_string())?;
-    let listener = app.state::<PrinterState>().listener_status.lock().unwrap().clone();
-    if listener != "listening" {
-        return Err(format!(
-            "The printer cannot be added while its receiver is down ({listener})."
-        ));
-    }
     let queue = queue_name(&user);
-    let uri = queue_uri(own_port());
-    match queue_state(&queue, &uri)? {
-        QueueState::Ours => return Ok(()),
-        QueueState::Foreign(_) => {
+    let scheduler = SystemScheduler::open()?;
+    let facts = queue_facts(&scheduler, &queue, &user).map_err(refusal_message)?;
+    match classify(facts.as_ref(), &user) {
+        QueueKind::Foreign(_) => {
             return Err(format!(
                 "A different printer already uses the name {queue}; it was not changed."
             ))
         }
-        QueueState::Absent => {}
+        QueueKind::Held if facts.as_ref().is_some_and(fully_configured) => return Ok(()),
+        _ => {}
     }
-    administer(install_args(&queue, &uri, &user))?;
-    match queue_state(&queue, &uri)? {
-        QueueState::Ours => Ok(()),
+    configure(&queue, &user, &queue_location(comment), true)?;
+    let facts = queue_facts(&scheduler, &queue, &user).map_err(refusal_message)?;
+    match (classify(facts.as_ref(), &user), facts) {
+        (QueueKind::Held, Some(facts)) if fully_configured(&facts) => Ok(()),
         _ => Err("The printer was added but could not be verified.".to_string()),
     }
 }
@@ -1885,12 +2319,168 @@ pub(super) fn uninstall() -> Result<(), String> {
     let user = current_user()
         .ok_or_else(|| "The current user has no entry in the password database.".to_string())?;
     let queue = queue_name(&user);
-    match queue_state(&queue, &queue_uri(own_port()))? {
-        QueueState::Absent => Ok(()),
-        QueueState::Foreign(_) => Err(format!(
+    let scheduler = SystemScheduler::open()?;
+    let facts = queue_facts(&scheduler, &queue, &user).map_err(refusal_message)?;
+    match classify(facts.as_ref(), &user) {
+        QueueKind::Absent => Ok(()),
+        QueueKind::Foreign(_) => Err(format!(
             "A different printer already uses the name {queue}; it was not removed."
         )),
-        QueueState::Ours => administer(remove_args(&queue)),
+        _ => administer(remove_args(&queue)),
+    }
+}
+
+pub(super) fn status(app: &AppHandle) -> Result<VirtualPrinterStatus, String> {
+    let user = current_user()
+        .ok_or_else(|| "The current user has no entry in the password database.".to_string())?;
+    let queue = queue_name(&user);
+    let facts = SystemScheduler::open()
+        .ok()
+        .and_then(|scheduler| queue_facts(&scheduler, &queue, &user).ok())
+        .flatten();
+    let kind = classify(facts.as_ref(), &user);
+    let state = app.state::<PrinterState>();
+    let listener = state.listener_status.lock().unwrap().clone();
+    let last_job_error = state.last_job_error.lock().unwrap().clone();
+    Ok(VirtualPrinterStatus {
+        installed: kind == QueueKind::Held && facts.as_ref().is_some_and(fully_configured),
+        listener,
+        last_job_error,
+        printer_name: queue,
+        replaced: false,
+        legacy_present: kind == QueueKind::Legacy,
+        staging: Layout::current()
+            .map(|layout| layout.staging.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        service_error: String::new(),
+    })
+}
+
+/// Turn a loopback-TCP queue of earlier releases into the held queue when the
+/// scheduler lets this account do it without a prompt. Otherwise Settings
+/// names the old queue and Install turns it.
+fn retire_legacy_queue(scheduler: &dyn Scheduler, user: &str) {
+    let queue = queue_name(user);
+    let Ok(facts) = queue_facts(scheduler, &queue, user) else {
+        return;
+    };
+    if classify(facts.as_ref(), user) != QueueKind::Legacy {
+        return;
+    }
+    if let Err(e) = configure(&queue, user, DEFAULT_LOCATION, false) {
+        eprintln!("virtual printer: the earlier printer {queue} was not replaced: {e}");
+    }
+}
+
+// ── the receiver ────────────────────────────────────────────────────────────
+
+fn set_listener(app: &AppHandle, text: &str) {
+    if let Some(state) = app.try_state::<PrinterState>() {
+        *state.listener_status.lock().unwrap() = text.to_string();
+    }
+}
+
+fn record_job_error(app: &AppHandle, message: String) {
+    eprintln!("virtual printer: {message}");
+    if let Some(state) = app.try_state::<PrinterState>() {
+        *state.last_job_error.lock().unwrap() = message;
+    }
+}
+
+/// Start the receiver: the app-setup hook. Never panics: every failure is a
+/// named listener status in Settings.
+pub(super) fn start_listener(app: &AppHandle) {
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let Some(user) = current_user() else {
+            return set_listener(&handle, "the current user has no entry in the password database");
+        };
+        let Some(layout) = Layout::current() else {
+            return set_listener(&handle, "the account has no home folder for the printer's jobs");
+        };
+        if let Err(e) = prepare(&layout) {
+            return set_listener(&handle, &format!("the printer folder cannot be prepared: {e}"));
+        }
+        let claim = loop {
+            match claim_receiver(&layout.lock) {
+                Ok(claim) => break claim,
+                Err(ClaimFailure::HeldElsewhere) => {
+                    set_listener(&handle, HELD_ELSEWHERE);
+                    std::thread::sleep(CLAIM_RETRY);
+                }
+                Err(ClaimFailure::Failed(e)) => {
+                    return set_listener(&handle, &format!("the printer folder cannot be prepared: {e}"))
+                }
+            }
+        };
+        let scheduler = match SystemScheduler::open() {
+            Ok(scheduler) => scheduler,
+            Err(e) => return set_listener(&handle, &e),
+        };
+        scheduler.cups.refuse_password_prompts();
+        let printed = printed_dir();
+        if let Err(e) = private_dir(&printed) {
+            return set_listener(&handle, &format!("the printed-jobs folder cannot be prepared: {e}"));
+        }
+        reclaim_job_intermediates(&printed);
+        reclaim_staging(&layout.staging, &layout.ledger);
+        retire_legacy_queue(&scheduler, &user);
+        set_listener(&handle, "listening");
+        run(&layout, &user, &scheduler, claim, handle.clone());
+    });
+}
+
+fn run(layout: &Layout, user: &str, scheduler: &SystemScheduler, _claim: ReceiverClaim, app: AppHandle) -> ! {
+    let queue = queue_name(user);
+    let mut taker = Taker::default();
+    let attempted: Arc<Mutex<HashSet<PathBuf>>> = Arc::default();
+    let record_error = |message: String| record_job_error(&app, message);
+    let expand = |from: &Path, to: &mut dyn Write, limit: u64| scheduler.cups.expand_into(from, to, limit);
+    let mut shown = "listening".to_string();
+    loop {
+        let pass = Pass {
+            scheduler,
+            user,
+            queue: &queue,
+            staging: &layout.staging,
+            ledger: &layout.ledger,
+            record_error: &record_error,
+            expand: &expand,
+        };
+        let listener = match take_jobs(&pass, &mut taker) {
+            Ok(QueueKind::Drifted) => format!(
+                "the settings of {queue} no longer hold its jobs for this account; install the printer again"
+            ),
+            Ok(QueueKind::Foreign(_)) => format!("a different printer uses the name {queue}"),
+            Ok(_) => "listening".to_string(),
+            Err(e) => format!("{SERVICE_UNAVAILABLE}: {e}"),
+        };
+        if listener != shown {
+            set_listener(&app, &listener);
+            shown = listener;
+        }
+        let deliver = |stem: String, staged: PathBuf| {
+            IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
+            let app = app.clone();
+            let ledger = layout.ledger.clone();
+            let attempted = Arc::clone(&attempted);
+            std::thread::spawn(move || {
+                let _slot = JobSlot;
+                let open = |pdf: &Path| open_printed(&app, pdf);
+                match deliver_one(&ledger, &printed_dir(), &staged, &stem, &convert_document, &open) {
+                    // A staged document that is still on disk stays
+                    // attempted, so this process does not open its PDF twice.
+                    Ok(_) => {
+                        if !staged.exists() {
+                            attempted.lock().unwrap().remove(&staged);
+                        }
+                    }
+                    Err(e) => record_job_error(&app, e),
+                }
+            });
+        };
+        deliver_staged(&layout.staging, &attempted, &record_error, &deliver);
+        std::thread::sleep(POLL_INTERVAL);
     }
 }
 

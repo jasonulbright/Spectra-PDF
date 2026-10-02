@@ -723,10 +723,10 @@ export interface VirtualPrinterStatus {
    *  (Windows). */
   replaced: boolean;
   /** A printer of the releases that delivered jobs over loopback TCP is still
-   *  installed (Windows). */
+   *  installed. */
   legacyPresent: boolean;
-  /** The folder of jobs taken from the queue and not yet converted (Windows);
-   *  empty elsewhere. */
+  /** The folder of jobs taken from the queue and not yet converted; empty
+   *  when the account has none. */
   staging: string;
   /** Why the print service could not list its printers (Windows); empty while
    *  it answers. `installed` means nothing while this is set. */
@@ -735,8 +735,9 @@ export interface VirtualPrinterStatus {
 
 export const virtualPrinter = {
   status: () => invoke<VirtualPrinterStatus>('virtual_printer_status'),
-  /** One visible UAC elevation over an encoded pure-ASCII script. `comment` is
-   *  the queue's Comment field, in the user's language (Windows). */
+  /** One visible elevation prompt at most (UAC on Windows, polkit on Linux).
+   *  `comment` is the queue's Comment field on Windows and its location on
+   *  Linux, in the user's language. */
   install: (comment: string) => invoke<void>('install_virtual_printer', { comment }),
   uninstall: () => invoke<void>('uninstall_virtual_printer'),
 };

@@ -29,8 +29,7 @@ use sha2::{Digest, Sha256};
 use super::{ScheduleProfile, ScheduledRun};
 
 pub const NO_USER_MANAGER: &str = "Scheduled runs need a systemd user session, and this session \
-     has none (for example on a system that does not run systemd, or under WSL without systemd \
-     enabled).";
+     has none (for example on a system that does not run systemd).";
 const RUNS_AS_YOU: &str =
     "On this system a scheduled run always runs as you. Leave \"Run as\" empty.";
 

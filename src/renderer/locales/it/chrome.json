@@ -5602,7 +5602,7 @@
   "panel.settings.openedRust": "Note sulle crate Rust aperte",
   "panel.settings.printTo": "Stampa su Spectra PDF",
   "panel.settings.printerBlurb": "Installa una stampante di nome «Spectra PDF» nella finestra di stampa di ogni applicazione. Stampandovi, le pagine si aprono qui come nuovo PDF. La conversione avviene su questo computer con gli strumenti inclusi; i processi vengono ricevuti solo mentre questa applicazione è in esecuzione (anche ridotta nell’area di notifica): un processo stampato mentre è chiusa resta in attesa nella coda di stampa di Windows.",
-  "panel.settings.printerBlurbLinux": "Aggiunge una stampante chiamata «Spectra PDF» alla finestra di stampa di ogni applicazione. Stampando su di essa, le pagine si aprono qui come nuovo PDF. I lavori vengono ricevuti solo mentre questa app è in esecuzione; un lavoro stampato mentre è chiusa resta in attesa nella coda di stampa del sistema.",
+  "panel.settings.printerBlurbLinux": "Aggiunge una stampante chiamata «Spectra PDF» alla finestra di stampa di ogni applicazione. Stampando su di essa, le pagine si aprono qui come nuovo PDF. Solo il tuo account può stampare su di essa. La coda di stampa del sistema trattiene ogni lavoro finché questa app non lo prende; un lavoro stampato mentre l’app è chiusa si apre al suo avvio successivo.",
   "panel.settings.printerDown": "ricevitore non attivo: {{status}}",
   "panel.settings.printerInstalled": "Stampante installata",
   "panel.settings.printerNotInstalled": "Stampante non installata",

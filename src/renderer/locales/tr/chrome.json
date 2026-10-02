@@ -5478,7 +5478,7 @@
   "panel.settings.openedRust": "Rust paketi bildirimleri açıldı",
   "panel.settings.printTo": "Spectra PDF'ye yazdır",
   "panel.settings.printerBlurb": "Her uygulamanın yazdırma iletişim kutusuna “Spectra PDF” adlı bir yazıcı kurar. Ona yazdırmak, sayfaları burada yeni bir PDF olarak açar. Dönüştürme, pakete dahil araçlarla bu bilgisayarda gerçekleşir; işler yalnızca bu uygulama çalışırken alınır (tepsiye küçültülmüş olması yeterlidir) — uygulama kapalıyken yazdırılan bir iş Windows yazdırma kuyruğunda bekler.",
-  "panel.settings.printerBlurbLinux": "Her uygulamanın yazdırma iletişim kutusuna “Spectra PDF” adlı bir yazıcı ekler. Bu yazıcıya yazdırdığınızda sayfalar burada yeni bir PDF olarak açılır. İşler yalnızca bu uygulama çalışırken alınır; uygulama kapalıyken yazdırılan bir iş sistemin yazdırma kuyruğunda bekler.",
+  "panel.settings.printerBlurbLinux": "Her uygulamanın yazdırma iletişim kutusuna “Spectra PDF” adlı bir yazıcı ekler. Bu yazıcıya yazdırdığınızda sayfalar burada yeni bir PDF olarak açılır. Bu yazıcıya yalnızca sizin hesabınız yazdırabilir. Sistemin yazdırma kuyruğu her işi bu uygulama alana kadar bekletir; uygulama kapalıyken yazdırılan bir iş, uygulama bir sonraki açılışında açılır.",
   "panel.settings.printerDown": "alıcı kapalı: {{status}}",
   "panel.settings.printerInstalled": "Yazıcı kuruldu",
   "panel.settings.printerNotInstalled": "Yazıcı kurulmadı",

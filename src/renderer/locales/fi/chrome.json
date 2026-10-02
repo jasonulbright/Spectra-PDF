@@ -5478,7 +5478,7 @@
   "panel.settings.openedRust": "Rust-cratejen ilmoitukset avattu",
   "panel.settings.printTo": "Tulosta Spectra PDF:ään",
   "panel.settings.printerBlurb": "Asentaa ”Spectra PDF” -nimisen tulostimen jokaisen sovelluksen tulostusikkunaan. Sille tulostaminen avaa sivut tänne uutena PDF-tiedostona. Muunnos tapahtuu tällä tietokoneella mukana toimitetuilla työkaluilla; töitä vastaanotetaan vain, kun tämä sovellus on käynnissä (ilmoitusalueelle pienennettynä lasketaan mukaan) — työ, joka tulostetaan sovelluksen ollessa suljettuna, jää odottamaan Windowsin tulostusjonoon.",
-  "panel.settings.printerBlurbLinux": "Lisää kaikkien sovellusten tulostusikkunaan tulostimen nimeltä ”Spectra PDF”. Kun tulostat sille, sivut avautuvat tänne uutena PDF-tiedostona. Töitä vastaanotetaan vain, kun tämä sovellus on käynnissä; työ, joka tulostetaan sovelluksen ollessa suljettuna, odottaa järjestelmän tulostusjonossa.",
+  "panel.settings.printerBlurbLinux": "Lisää kaikkien sovellusten tulostusikkunaan tulostimen nimeltä ”Spectra PDF”. Kun tulostat sille, sivut avautuvat tänne uutena PDF-tiedostona. Vain tilisi voi tulostaa sille. Järjestelmän tulostusjono pitää jokaisen työn, kunnes tämä sovellus noutaa sen; työ, joka tulostetaan sovelluksen ollessa suljettuna, avautuu, kun sovellus käynnistyy seuraavan kerran.",
   "panel.settings.printerDown": "vastaanotin ei ole käytössä: {{status}}",
   "panel.settings.printerInstalled": "Tulostin asennettu",
   "panel.settings.printerNotInstalled": "Tulostinta ei ole asennettu",

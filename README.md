@@ -5,10 +5,10 @@
 [![Release recovery](https://img.shields.io/github/actions/workflow/status/jasonulbright/Spectra-PDF/release-redo.yml?label=release%20recovery)](https://github.com/jasonulbright/Spectra-PDF/actions/workflows/release-redo.yml)
 [![Latest release](https://img.shields.io/github/v/release/jasonulbright/Spectra-PDF?label=release)](https://github.com/jasonulbright/Spectra-PDF/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/jasonulbright/Spectra-PDF/total?label=downloads)](https://github.com/jasonulbright/Spectra-PDF/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows-0078D4)](#requirements)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D4)](#requirements)
 [![License](https://img.shields.io/github/license/jasonulbright/Spectra-PDF)](LICENSE)
 
-A modern, open-source PDF workbench for Windows. Tauri v2 + React, with an embedded Python engine. No ads, no telemetry, no upsells. Ships as an installer or as a portable zip you extract and run. WebView2 prerequisite (ships with Windows 10/11). A handful of features — listed below, each marked — additionally need Ghostscript, which you install separately.
+A modern, open-source PDF workbench for Windows and Linux. Tauri v2 + React, with an embedded Python engine. No ads, no telemetry, no upsells. On Windows it ships as an installer or as a portable zip you extract and run, with a WebView2 prerequisite (ships with Windows 10/11). On x86-64 Linux it ships as an AppImage, a `.deb` and an `.rpm`, with a WebKitGTK 4.1 prerequisite (the `.deb` and `.rpm` install it). A handful of features — listed below, each marked — additionally need Ghostscript, which you install separately.
 
 Nothing here reaches the network on its own. The only network actions are ones you start and confirm: the update check (notify-only, and switchable off), opening a document from a web address, capturing a web page, submitting a form through its own Submit button behind a consent dialog, and signing through a signing service you configure. Everything else — OCR, spell check, signature trust, export, print production — runs entirely on your machine.
 
@@ -153,7 +153,7 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 - **Signed documents edit by incremental append** where the change allows it: annotating, filling and adding pages land as the original bytes verbatim plus one revision, so existing signatures keep verifying. A change that goes further falls back to an ordinary rewrite, and says so before it does
 
 ### Desktop citizenship
-NSIS installer with silent modes and enterprise policy — or a **portable zip**: extract and run, with settings, dictionaries, session state and logs kept beside the app instead of in the user profile (its first run presents the bundled colour-profile licence, and declining leaves everything working except the profile-dependent features, each disabled by name). File associations, Explorer context menu, system tray, start-with-Windows, update notifications (the app never downloads or installs updates itself), light/dark/high-contrast/system themes carrying the Windows accent + Mica, 28 interface languages, WCAG 2.1 AA (an axe-core audit of every surface in all three themes runs in the test battery, alongside a keyboard-operability suite and a theme-consistency audit), full keyboard navigation (single-key tool accelerators available, off by default).
+On Linux: an **AppImage** (the portable form), a `.deb` and an `.rpm`, each with a desktop entry that opens PDF files. On Windows: an NSIS installer with silent modes and enterprise policy — or a **portable zip**: extract and run, with settings, dictionaries, session state and logs kept beside the app instead of in the user profile (its first run presents the bundled colour-profile licence, and declining leaves everything working except the profile-dependent features, each disabled by name). File associations, Explorer context menu, system tray, start-with-Windows, update notifications (the app never downloads or installs updates itself), light/dark/high-contrast/system themes carrying the Windows accent + Mica, 28 interface languages, WCAG 2.1 AA (an axe-core audit of every surface in all three themes runs in the test battery, alongside a keyboard-operability suite and a theme-consistency audit), full keyboard navigation (single-key tool accelerators available, off by default).
 
 ## Command Line
 
@@ -382,16 +382,37 @@ Two subcommands are deliberately more aggressive headlessly than in the app, bec
 
 A portable zip is published alongside the installer for deployments that cannot install: extract it to a share or a stick and run it, with all per-user state beside the app. It carries the same bundled runtimes and the same feature set.
 
-Updates are notify-only — the app checks for a newer release and shows a banner, and never downloads or installs anything itself. Even the check can be disabled machine-wide via `HKLM\SOFTWARE\Spectra PDF\DisableAutoUpdate = 1` (set automatically by the silent installer). The installer adds the File Explorer commands Convert to PDF and Combine into one PDF for all users. A portable copy adds them only when the user turns them on in Preferences. `HKLM\SOFTWARE\Spectra PDF\DisableExplorerMenu = 1` hides both commands on every copy. An upgrade keeps these policy values. Everything the app needs is inside the installer — the Python runtime, the LibreOffice export runtime, the native OCR engine and its offline language data, the JBIG2 encoder, the edit fonts, the colour profiles, and the spelling dictionaries — so there is no second deployment step and no machine needs its own copy of any of them. The one exception is Ghostscript, which is not distributed here: deploy it separately if your users need the features marked above, and the app will find a per-machine install without any per-user step. Third-party licence notices are installed alongside the app and open from Settings ▸ Updates & Licenses. Interactive installation presents the bundled colour-profile licence and requires acceptance. Silent (`/S`) and passive (`/P`) deployment must include `/acceptEULA`; otherwise the installer exits with code 2 before copying the application. The installer's own `/?` dialog documents all switches.
+Updates are notify-only — the app checks for a newer release and shows a banner, and never downloads or installs anything itself. Even the check can be disabled machine-wide via `HKLM\SOFTWARE\Spectra PDF\DisableAutoUpdate = 1` (set automatically by the silent installer). The installer adds the File Explorer commands Convert to PDF and Combine into one PDF for all users. A portable copy adds them only when the user turns them on in Preferences. `HKLM\SOFTWARE\Spectra PDF\DisableExplorerMenu = 1` hides both commands on every copy. An upgrade keeps these policy values. On Linux the same policies live in `/etc/spectrapdf/policies.json`, a JSON object such as `{"DisableAutoUpdate": 1, "DisableFieldScripts": 1}`. The file and its folder must be owned by root and writable by no other account; otherwise the app ignores the file. Everything the app needs is inside the installer — the Python runtime, the LibreOffice export runtime, the native OCR engine and its offline language data, the JBIG2 encoder, the edit fonts, the colour profiles, and the spelling dictionaries — so there is no second deployment step and no machine needs its own copy of any of them. The one exception is Ghostscript, which is not distributed here: deploy it separately if your users need the features marked above, and the app will find a per-machine install without any per-user step. Third-party licence notices are installed alongside the app and open from Settings ▸ Updates & Licenses. Interactive installation presents the bundled colour-profile licence and requires acceptance. Silent (`/S`) and passive (`/P`) deployment must include `/acceptEULA`; otherwise the installer exits with code 2 before copying the application. The installer's own `/?` dialog documents all switches.
 
 
 ## Requirements
 
 **End users**: WebView2 (included with Windows 10/11 via Edge). The interactive installer downloads the bootstrapper if missing.
 
+**Linux end users**: x86-64 with glibc 2.35 or newer (Ubuntu 22.04 or newer, Debian 12 or newer, Fedora 36 or newer). The app uses the system WebKitGTK 4.1 and GTK 3:
+
+- The `.deb` and the `.rpm` install them as dependencies:
+
+  ```bash
+  sudo apt install ./spectrapdf_<version>_amd64.deb
+  sudo dnf install ./spectrapdf-<version>-1.x86_64.rpm
+  ```
+
+- The AppImage needs them on the system before it starts. Without them it names the missing libraries and exits. Install them with `sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0 tzdata` (Debian, Ubuntu) or `sudo dnf install webkit2gtk4.1 gtk3 tzdata` (Fedora). Then run `chmod +x spectrapdf_<version>_amd64.AppImage` and start the file. The AppImage uses FUSE 3 (`fusermount3`). Without FUSE, start it with `--appimage-extract-and-run`.
+- To verify any download, put it beside `SHA256SUMS.txt` from the same release and run `sha256sum -c SHA256SUMS.txt --ignore-missing`.
+- The Ghostscript features listed below need Ghostscript 10.0 or newer. The `ghostscript` package of Debian 12, Ubuntu 24.04 and Fedora 38 or later meets this. Ubuntu 22.04 and Debian 11 ship 9.5x, which Spectra refuses. On those releases, download the Linux x86-64 build from the [official Ghostscript download page](https://ghostscript.com/releases/gsdnld.html) and set the `SPECTRAPDF_GS_PATH` environment variable to the full path of its program before you start Spectra.
+- These features are Windows-only and have no entry in the Linux interface: signing with a certificate from the Windows certificate store, the File Explorer commands, and the translucent window backdrop with the Windows accent colour. Scheduled actions need a systemd user session, and the tray icon needs a desktop that shows a tray.
+
 Ghostscript **10.0 or newer** is a separately installed requirement for these features: scan cleanup and OCR rendering (including batch OCR and the OCR arm of Find); scan-based automatic form detection; visual Compare; printing; PostScript/EPS input and distilling; compression, grayscale, PDF/A, MRC and repair tier 2; PDF/X and CMYK conversion; Output Preview, Ink Manager, soft proofing, raster preflight measurements and repairs, transparency flattening, trapping and object-inspector ink readings; page-image export; the rendered page graphics in slide export; and content-aware crop's fallback for an image the embedded decoder cannot read. Features and sub-features outside that list remain available without Ghostscript. A normal interactive Spectra installer offers to open the [official Ghostscript download page](https://ghostscript.com/releases/gsdnld.html); Ghostscript then has its own download, installer and licence. Silent (`/S`) and passive (`/P`) Spectra installs never download, launch or install Ghostscript.
 
 > **Code signing:** Official Windows release builds published on the [releases page](https://github.com/jasonulbright/Spectra-PDF/releases) are Authenticode code-signed. An installer you build locally with `npm run package:unsigned` is not signed.
+>
+> To verify the Linux `.rpm`, import its public key ([keys/spectrapdf-rpm-signing.pub.asc](keys/spectrapdf-rpm-signing.pub.asc)), then check the package:
+>
+> ```bash
+> sudo rpm --import https://raw.githubusercontent.com/jasonulbright/Spectra-PDF/main/keys/spectrapdf-rpm-signing.pub.asc
+> rpm -K spectrapdf-<version>-1.x86_64.rpm
+> ```
 
 **Developers**:
 
