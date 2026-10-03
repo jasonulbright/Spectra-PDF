@@ -2218,13 +2218,7 @@ mod tests {
     #[test]
     #[ignore]
     fn com_registration_creates_the_missing_folder() {
-        // Pid + nanos: a pid alone is reusable across runs, and a stale
-        // probe folder would make this test pass without the feature.
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        let folder = format!("Spectra PDF Probe {}-{nanos}", std::process::id());
+        let folder = probe_folder("fresh");
         let mut p = action_profile();
         p.name = "ZZ Fresh DELETE ME".into();
         let xml = build_task_xml(r"C:\Windows\System32\cmd.exe", &p, None).unwrap();
@@ -2243,6 +2237,24 @@ mod tests {
             found,
             "task registered into a fresh folder but schtasks could not see it"
         );
+    }
+
+    /// A probe folder name that no other test in this process and no earlier
+    /// run holds. Parallel tests share the pid and can read the same clock
+    /// tick, which puts two tests' tasks in one folder; the counter separates
+    /// them. The clock separates a reused pid from a probe folder that an
+    /// aborted run left behind, which would otherwise pass a test without the
+    /// feature.
+    #[cfg(windows)]
+    fn probe_folder(test: &str) -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
+        format!("Spectra PDF Probe {}-{serial}-{nanos} {test}", std::process::id())
     }
 
     /// Test-only cleanup: schtasks can delete tasks but not FOLDERS.
@@ -2633,7 +2645,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let folder = format!("Spectra PDF Probe {}-{suffix}", std::process::id());
+        let folder = probe_folder("readback");
         let mut profile = action_profile();
         profile.name = format!("Readback {}-{suffix}", std::process::id());
         profile.enabled = false;
@@ -3301,11 +3313,7 @@ mod tests {
     #[test]
     #[ignore]
     fn com_definitions_read_back_the_action_a_registration_names() {
-        let nanos = SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        let folder = format!("Spectra PDF Probe {}-{nanos}", std::process::id());
+        let folder = probe_folder("definitions");
         let dir = tempfile::tempdir().unwrap();
         let mut p = action_profile();
         p.name = "ZZ Actions DELETE ME".into();
@@ -3341,11 +3349,7 @@ mod tests {
     #[test]
     #[ignore]
     fn com_a_replaced_schedule_names_its_own_complete_action() {
-        let nanos = SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        let folder = format!("Spectra PDF Probe {}-{nanos}", std::process::id());
+        let folder = probe_folder("replace");
         let dir = tempfile::tempdir().unwrap();
         let task = "ZZ Replace DELETE ME";
         let full = format!("\\{folder}\\{task}");
