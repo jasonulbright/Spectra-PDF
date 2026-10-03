@@ -7,7 +7,7 @@
 // carry real AcroForm fields under the detected names, that an already
 // prepared form reports itself rather than silently offering nothing, and
 // that an unchecked candidate never became a field.
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
@@ -119,7 +119,7 @@ describe('Prepare Forms across a folder', () => {
     const reviewed = await formPrepSnapshot();
     const byRel = new Map((reviewed?.files ?? []).map((f) => [f.rel, f]));
     expect(byRel.get('alpha.pdf')?.candidates).toBe(3);
-    expect(byRel.get('sub\\beta.pdf')?.candidates).toBe(3);
+    expect(byRel.get(join('sub', 'beta.pdf'))?.candidates).toBe(3);
     expect(byRel.get('alpha.pdf')?.names).toEqual([
       'First_name',
       'Last_name',
@@ -152,7 +152,7 @@ describe('Prepare Forms across a folder', () => {
     expect(report?.cancelled).toBe(false);
     const results = new Map((report?.results ?? []).map((r) => [r.rel, r]));
     expect(results.get('alpha.pdf')?.status).toBe('prepared');
-    expect(results.get('sub\\beta.pdf')?.status).toBe('prepared');
+    expect(results.get(join('sub', 'beta.pdf'))?.status).toBe('prepared');
     expect(results.get('prepared.pdf')?.status).toBe('prepared');
     expect(results.get('alpha.pdf')?.fields).toBe(2);
 

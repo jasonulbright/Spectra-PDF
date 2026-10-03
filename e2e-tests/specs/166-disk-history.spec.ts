@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
-import { copyFileSync, mkdtempSync, readFileSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
 import { waitForHarness, openByPaths, closeAllFiles, getState, setView,
@@ -112,14 +113,14 @@ describe('disk history publication', () => {
     const before = await history();
     const disk = readFileSync(working);
     const target = readFileSync(before.undo.at(-1)!);
-    chmodSync(working, 0o444);
+    refuseWrites(working);
     try {
       await invokeAppCommand('edit.undo');
       await browser.waitUntil(async () => (await $('[data-testid="commit-error-bar"]').getText()).includes('Undo/redo failed'));
       expect(await history()).toEqual(before);
       expect(readFileSync(working).equals(disk)).toBe(true);
     } finally {
-      chmodSync(working, 0o666);
+      allowWrites(working);
     }
     await $('[data-testid="commit-error-bar"] button').click();
     await browser.waitUntil(async () => (await history()).undo.length === 1);

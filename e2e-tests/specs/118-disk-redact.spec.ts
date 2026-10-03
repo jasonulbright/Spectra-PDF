@@ -6,7 +6,7 @@
 // the ones only this spec can make: the ORIGINALS are byte-identical
 // afterwards, the MIRROR carries the redaction, and an unchecked occurrence of
 // the same term — in the same mirrored file — is still readable.
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   readFileSync,
   writeFileSync,
@@ -126,7 +126,7 @@ describe('Search & Redact across a folder', () => {
     const reviewed = await diskRedactSnapshot();
     const byRel = new Map((reviewed?.files ?? []).map((f) => [f.rel, f]));
     expect(byRel.get('alpha.pdf')?.hits).toBe(2);
-    expect(byRel.get('sub\\beta.pdf')?.hits).toBe(1);
+    expect(byRel.get(join('sub', 'beta.pdf'))?.hits).toBe(1);
     expect(byRel.get('clean.pdf')?.hits).toBe(0);
     // Three hits are offered and NONE is checked: the run pre-consents to
     // nothing.
@@ -150,7 +150,7 @@ describe('Search & Redact across a folder', () => {
     expect(report?.cancelled).toBe(false);
     const results = new Map((report?.results ?? []).map((r) => [r.rel, r]));
     expect(results.get('alpha.pdf')?.status).toBe('redacted');
-    expect(results.get('sub\\beta.pdf')?.status).toBe('redacted');
+    expect(results.get(join('sub', 'beta.pdf'))?.status).toBe('redacted');
     // A file with no hits still lands in the mirror: the output is a copy of
     // the tree, not a scatter of the files that happened to match.
     expect(results.get('clean.pdf')?.status).toBe('copied');

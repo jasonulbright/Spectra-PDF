@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
-import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync, chmodSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -111,14 +112,14 @@ describe('links manager', () => {
     await $('[data-testid="link-edit-1-0"]').click();
     await setReactInputValue('[data-testid="link-edit-1-0-url"]', 'https://atomic.example/');
     await setReactInputValue('[data-testid="link-edit-1-0-width"]', '3');
-    chmodSync(working, 0o444);
+    refuseWrites(working);
     try {
       await $('[data-testid="link-save-1-0"]').click();
       await browser.waitUntil(async () => /read.only|denied/i.test(await $('[data-testid="status-bar"]').getText()));
       expect(readFileSync(working).equals(prior)).toBe(true); expect(await history()).toEqual(before);
       expect(await $('[data-testid="link-edit-1-0-url"]').getValue()).toBe('https://atomic.example/');
       expect(await $('[data-testid="link-edit-1-0-width"]').getValue()).toBe('3');
-    } finally { chmodSync(working, 0o666); }
+    } finally { allowWrites(working); }
     await $('[data-testid="link-save-1-0"]').click();
     await browser.waitUntil(async () => (await history()).undo.length === before.undo.length + 1);
     expect(await firstLinkUrl(working)).toBe('https://atomic.example/');
@@ -140,12 +141,12 @@ describe('links manager', () => {
     const history = () => browser.execute(() => (window as any).__SPECTRA_TEST__.getHistoryState()) as Promise<{ undo: string[]; redo: string[]; buffer: number[] }>;
     const before = await history();
     await $('[data-testid="link-delete-1-0"]').waitForDisplayed();
-    chmodSync(working, 0o444);
+    refuseWrites(working);
     try {
       await $('[data-testid="link-delete-1-0"]').click();
       await browser.waitUntil(async () => (await $('[data-testid="status-bar"]').getText()).toLowerCase().match(/read.only|denied/) !== null);
       expect(readFileSync(working).equals(prior)).toBe(true); expect(await history()).toEqual(before);
-    } finally { chmodSync(working, 0o666); }
+    } finally { allowWrites(working); }
     await $('[data-testid="link-delete-1-0"]').click();
     await browser.waitUntil(async () => (await history()).undo.length === before.undo.length + 1);
     expect(await firstLinkUrl(working)).toBeUndefined();

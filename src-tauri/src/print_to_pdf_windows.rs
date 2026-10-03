@@ -1260,7 +1260,7 @@ pub(super) fn status(app: &AppHandle) -> Result<VirtualPrinterStatus, String> {
     let layout = Layout::current();
     let state = app.state::<PrinterState>();
     let listener = state.listener_status.lock().unwrap().clone();
-    let last_job_error = state.last_job_error.lock().unwrap().clone();
+    let report = state.job_report.lock().unwrap().clone();
     let (queues, service_error) = match WinSpooler.queues() {
         Ok(queues) => (queues, String::new()),
         Err(e) => (Vec::new(), e),
@@ -1275,7 +1275,8 @@ pub(super) fn status(app: &AppHandle) -> Result<VirtualPrinterStatus, String> {
     Ok(VirtualPrinterStatus {
         installed: view.installed,
         listener,
-        last_job_error,
+        last_job_error: report.error,
+        last_job_note: report.note,
         printer_name: view.name.unwrap_or_else(|| PRINTER_NAME.to_string()),
         replaced,
         legacy_present: view.legacy_present,
@@ -2040,7 +2041,7 @@ fn set_listener(app: &AppHandle, text: &str) {
 fn record_job_error(app: &AppHandle, message: String) {
     eprintln!("virtual printer: {message}");
     if let Some(state) = app.try_state::<PrinterState>() {
-        *state.last_job_error.lock().unwrap() = message;
+        state.job_report.lock().unwrap().failed(message);
     }
 }
 
@@ -2118,6 +2119,9 @@ fn run(layout: &Layout, account: &Account, _claim: ReceiverClaim, app: AppHandle
             let attempted = Arc::clone(&attempted);
             std::thread::spawn(move || {
                 let _slot = JobSlot;
+                let ticket = app
+                    .try_state::<PrinterState>()
+                    .map(|state| state.job_report.lock().unwrap().begin());
                 let open = |pdf: &Path| open_printed(&app, pdf);
                 match deliver_one(
                     &ledger,
@@ -2132,6 +2136,9 @@ fn run(layout: &Layout, account: &Account, _claim: ReceiverClaim, app: AppHandle
                     Ok(_) => {
                         if !staged.exists() {
                             attempted.lock().unwrap().remove(&staged);
+                        }
+                        if let (Some(state), Some(ticket)) = (app.try_state::<PrinterState>(), ticket) {
+                            state.job_report.lock().unwrap().delivered(ticket, String::new());
                         }
                     }
                     Err(e) => record_job_error(&app, e),

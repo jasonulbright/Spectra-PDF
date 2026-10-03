@@ -2205,6 +2205,11 @@ EXCLUDED_DOORS = {
         "its input is a PostScript file and its output a PDF; the door "
         "refuses an output resolving to the input outright"
     ),
+    "printed_job": (
+        "its input is a job copied out of the print queue and its output the "
+        "PDF delivered from it; the door refuses an output resolving to the "
+        "input outright (tests/test_printed_job.py)"
+    ),
     "export_document": (
         "writes a Word, Excel or PowerPoint file — the output is a different "
         "format from the document it was handed and can never be it"

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, watch, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, watch, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { PDFDocument } from 'pdf-lib';
@@ -31,6 +31,8 @@ describe('private background health input', () => {
     await healthy();
     expect(healthFiles().filter((name) => !oldFiles.has(name))).toEqual([]);
 
+    // A fresh profile has no scratch folder until the first collection.
+    mkdirSync(scratch, { recursive: true });
     const observed = new Set<string>();
     const watcher = watch(scratch, (_event, filename) => {
       const name = filename?.toString();

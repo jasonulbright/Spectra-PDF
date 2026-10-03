@@ -8,7 +8,7 @@
 // target can use reports its refusal against its own row instead of ending the
 // run, that the run log names both outcomes, and that the ORIGINALS are
 // byte-identical afterwards.
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { readFileSync, existsSync, rmSync, mkdtempSync, mkdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
@@ -124,9 +124,9 @@ describe('Export a folder', () => {
     expect(report?.cancelled).toBe(false);
     const byRel = new Map((report?.results ?? []).map((r) => [r.rel, r]));
     expect(byRel.get('alpha.pdf')?.status).toBe('exported');
-    expect(byRel.get('sub\\beta.pdf')?.status).toBe('exported');
+    expect(byRel.get(join('sub', 'beta.pdf'))?.status).toBe('exported');
     // The row is keyed by the SOURCE's tree position and names the output.
-    expect(byRel.get('sub\\beta.pdf')?.out).toBe('sub\\beta.txt');
+    expect(byRel.get(join('sub', 'beta.pdf'))?.out).toBe(join('sub', 'beta.txt'));
 
     const alphaTxt = resolve(textDest, 'alpha.txt');
     const betaTxt = resolve(textDest, 'sub', 'beta.txt');
@@ -180,7 +180,7 @@ describe('Export a folder', () => {
     const report = (await folderExportSnapshot())?.report;
     const byRel = new Map((report?.results ?? []).map((r) => [r.rel, r]));
     expect(byRel.get('alpha.pdf')?.status).toBe('exported');
-    expect(byRel.get('sub\\beta.pdf')?.out).toBe('sub\\beta.xlsx');
+    expect(byRel.get(join('sub', 'beta.pdf'))?.out).toBe(join('sub', 'beta.xlsx'));
 
     const alphaXlsx = resolve(sheetDest, 'alpha.xlsx');
     const betaXlsx = resolve(sheetDest, 'sub', 'beta.xlsx');

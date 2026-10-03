@@ -717,6 +717,9 @@ export interface VirtualPrinterStatus {
   /** 'listening', or the named reason the receiver is down. */
   listener: string;
   lastJobError: string;
+  /** What the latest delivered job's PDF leaves out of its options; empty
+   *  when it left nothing out, and on Windows. */
+  lastJobNote: string;
   printerName: string;
   /** An update removed the machine's loopback printer, none is left, and this
    *  account has neither installed nor removed its own printer since

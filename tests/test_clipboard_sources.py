@@ -289,7 +289,7 @@ class TestClipboardHtml:
             out_dir.mkdir()
             profile = Path(tempfile.mkdtemp(prefix="lo-unseeded-clip-"))
             try:
-                subprocess.run(
+                done = subprocess.run(
                     [
                         str(SOFFICE),
                         f"-env:UserInstallation={profile.as_uri()}",
@@ -307,6 +307,7 @@ class TestClipboardHtml:
                 )
             finally:
                 shutil.rmtree(profile, ignore_errors=True)
+        assert done.returncode == 0, done.stderr.decode(errors="replace")
         assert listener.hits, "an UNSEEDED profile no longer reaches out — re-measure"
 
     def test_a_pasted_fragment_reaches_the_create_pdf_door(self, tmp_dir):

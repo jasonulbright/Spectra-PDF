@@ -85,7 +85,7 @@ def test_office_import_replaces_an_existing_output_by_swap(tmp_path, monkeypatch
     _pdf(out, 1)
     identity = _identity(out)
 
-    def convert(soffice_path, convert_to, src, out_dir, want_ext):
+    def convert(soffice_path, convert_to, src, out_dir, want_ext, infilter=""):
         produced = Path(out_dir) / (Path(src).stem + want_ext)
         _pdf(produced, 2)
         return produced

@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
-import { mkdtempSync, readFileSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { PDFDocument } from 'pdf-lib';
@@ -50,7 +51,7 @@ describe('form fill publication', () => {
   it('native refusal preserves bytes, history and pending input for retry', async () => {
     const before = readFileSync(working), prior = await history();
     expect(await setCanvasFormValue(source, 'name', 'Retry')).toBe(true);
-    chmodSync(working, 0o444);
+    refuseWrites(working);
     try {
       let failure = '';
       await applyCanvasFormValues().catch(error => { failure = String(error); });
@@ -58,7 +59,7 @@ describe('form fill publication', () => {
       expect(await browser.$('[data-testid="forms-fill-error"]').getText()).toMatch(/read.only|denied/i);
       expect(await pendingFormValueCount()).toBe(1);
       expect(readFileSync(working).equals(before)).toBe(true); expect(await history()).toEqual(prior);
-    } finally { chmodSync(working, 0o666); }
+    } finally { allowWrites(working); }
     await applyCanvasFormValues();
     await browser.waitUntil(async () => await pendingFormValueCount() === 0);
     expect((await history()).undo).toHaveLength(1);

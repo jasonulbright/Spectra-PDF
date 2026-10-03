@@ -241,7 +241,8 @@ async function waitForRows(
   try {
     await browser.waitUntil(
       async () => {
-        seen = await commentRows();
+        // A driver may return object keys in any order; JSON comparison needs one.
+        seen = (await commentRows()).map(({ id, pending }) => ({ id, pending }));
         return JSON.stringify(seen) === JSON.stringify(expected);
       },
       { timeout: 20_000, interval: 200 },

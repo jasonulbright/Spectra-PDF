@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import {
   readFileSync,
   writeFileSync,
@@ -40,6 +40,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 // native Tesseract via the engine (14-ocr-find precedent; tesseract.js is
 // retired — the GUI, CLI and scheduled runs share one recognizer).
 
+const SEP = sep.replace(/\\/g, '\\\\');
 const SCANNED = resolve(__dirname, '..', 'fixtures', 'scanned.pdf');
 
 async function extractAllText(path: string): Promise<string> {
@@ -136,7 +137,7 @@ describe('batch OCR folder mirror', () => {
     // "expected ocr, received skipped" as the whole record of the failure.
     // A passing `ocr` can carry a reason of its own (pages with no recognizable
     // text), so only a MISS spends the reason on the failure text.
-    const scan = byRel.get('a\\scan.pdf');
+    const scan = byRel.get(join('a', 'scan.pdf'));
     expect(scan?.status === 'ocr' ? 'ocr' : `${scan?.status} — ${scan?.reason ?? ''}`).toBe('ocr');
     expect(byRel.get('born.pdf')?.status).toBe('copied');
     expect(byRel.get('broken.pdf')?.status).toBe('skipped');
@@ -171,7 +172,7 @@ describe('batch OCR folder mirror', () => {
     expect(log).toContain('Result:       completed');
     expect(log).toContain('Files: 3 processed');
     // One greppable line per file, status first — what the format exists for.
-    expect(log).toMatch(/\[ocr\] +a\\scan\.pdf — \d+ pages? made searchable/);
+    expect(log).toMatch(new RegExp(`\\[ocr\\] +a${SEP}scan\\.pdf — \\d+ pages? made searchable`));
     expect(log).toContain('[copied]  born.pdf');
     expect(log).toMatch(/\[skipped\] broken\.pdf — /);
     await $('[data-testid="batch-ocr-log-path"]').waitForDisplayed({ timeout: 5_000 });
@@ -250,7 +251,7 @@ describe('batch OCR folder mirror', () => {
 
     const results = (await batchOcrSnapshot())!.report!.results;
     const byRel = new Map(results.map((r) => [r.rel, r]));
-    const good = byRel.get('nested\\good.pdf')!;
+    const good = byRel.get(join('nested', 'good.pdf'))!;
     const bad = byRel.get('rubbish.pdf')!;
     expect(good.status).toBe('copied');
     expect(bad.status).toBe('skipped');
@@ -471,7 +472,7 @@ describe('batch OCR folder mirror', () => {
 
     const snapshot = (await batchOcrSnapshot())!;
     const byRel = new Map(snapshot.report!.results.map((r) => [r.rel, r]));
-    const fixed = byRel.get('sub\\damaged.pdf');
+    const fixed = byRel.get(join('sub', 'damaged.pdf'));
     expect(`${fixed?.status} — ${fixed?.reason ?? ''}`).toBe('repaired — ');
     expect(fixed?.repairFixes).toBeGreaterThan(0);
     expect(byRel.get('sound.pdf')?.status).toBe('copied');
@@ -492,7 +493,7 @@ describe('batch OCR folder mirror', () => {
     expect(log).toContain('Mode:         repair only (no OCR)');
     expect(log).toContain('Languages:    not used (repair only)');
     expect(log).toContain('Files: 3 processed — 1 repaired · 1 no repair needed · 1 skipped');
-    expect(log).toMatch(/\[repaired\] sub\\damaged\.pdf — \d+ problems? fixed/);
+    expect(log).toMatch(new RegExp(`\\[repaired\\] sub${SEP}damaged\\.pdf — \\d+ problems? fixed`));
     expect(log).not.toContain('made searchable');
 
     // Leave the shared dialog state as the other tests expect it.

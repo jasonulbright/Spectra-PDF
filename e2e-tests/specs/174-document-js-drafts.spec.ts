@@ -1,4 +1,5 @@
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { resolve } from 'node:path';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString, PDFRawStream, decodePDFRawStream } from 'pdf-lib';
 import { expect } from '@wdio/globals';
@@ -49,12 +50,12 @@ describe('Document JavaScripts working-session drafts', () => {
     await focusTab({ doc: b }); await shown('// Draft B'); expect(readFileSync(bw).equals(beforeB)).toBe(true);
   });
   it('native refusal retains input; retry publishes one undo and Undo restores exact bytes', async () => {
-    const before = readFileSync(aw); chmodSync(aw, 0o444);
+    const before = readFileSync(aw); refuseWrites(aw);
     try {
       await setReactInputValue(editor, '// Retry'); await $(save).click(); await $('[data-testid="docjs-error"]').waitForDisplayed();
       await openByPaths([b]); await shown('// Original B'); await focusTab({ doc: a }); await shown('// Retry');
       expect(readFileSync(aw).equals(before)).toBe(true); expect((await history()).undo).toHaveLength(0);
-    } finally { chmodSync(aw, 0o666); }
+    } finally { allowWrites(aw); }
     await $(save).waitForEnabled(); await $(save).click(); await saved(aw, '// Retry'); expect((await history()).undo).toHaveLength(1);
     await invokeAppCommand('edit.undo'); await shown('// Original A'); expect(readFileSync(aw).equals(before)).toBe(true);
   });

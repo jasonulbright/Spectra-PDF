@@ -14,6 +14,11 @@ use std::process::{Command, Stdio};
 /// Callers may retry this run after that other writer releases its lease.
 pub const EXIT_FOLDER_BUSY: i32 = 75;
 
+/// `printed-job` refused the job for its own bytes or options (EX_DATAERR);
+/// running it again gives the same answer. Every other failure exit is the
+/// machine's and may pass.
+pub const EXIT_INPUT_REFUSED: i32 = 65;
+
 // ── CLI argument definitions ────────────────────────────────────────────────
 
 #[derive(Parser)]
@@ -340,6 +345,48 @@ pub enum CliCommand {
     /// Retire or remove the virtual printer queues (run by the installer)
     #[command(hide = true)]
     VirtualPrinter(VirtualPrinterArgs),
+    /// Deliver a job taken from the held print queue (run by the receiver)
+    #[command(hide = true)]
+    PrintedJob(PrintedJobArgs),
+}
+
+#[derive(Args)]
+pub struct PrintedJobArgs {
+    /// The staged job: PDF, PostScript, text or an image
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Pages per sheet: 1 | 2 | 4 | 6 | 9 | 16
+    #[arg(long, default_value_t = 1)]
+    pub number_up: u32,
+    /// Page order on the sheet: lrtb | lrbt | rltb | rlbt | tblr | tbrl | btlr | btrl
+    #[arg(long, default_value = "lrtb")]
+    pub number_up_layout: String,
+    /// Write the sheets back to front
+    #[arg(long)]
+    pub reverse: bool,
+    /// Portrait sheet width in points (with --sheet-height)
+    #[arg(long)]
+    pub sheet_width: Option<f64>,
+    /// Portrait sheet height in points (with --sheet-width)
+    #[arg(long)]
+    pub sheet_height: Option<f64>,
+    /// Document pages to print by their number: all | odd | even
+    #[arg(long, default_value = "all")]
+    pub page_set: String,
+    /// Document pages to print, as 1-3,5 (all when empty)
+    #[arg(long, default_value = "")]
+    pub page_ranges: String,
+    /// Mirror each sheet left to right
+    #[arg(long)]
+    pub mirror: bool,
+    /// Page scaling: fit | fill | auto-fit | a percentage 1-800 (none when empty)
+    #[arg(long, default_value = "")]
+    pub scaling: String,
+    /// A text job's character set (IANA name); detected when empty
+    #[arg(long, default_value = "")]
+    pub charset: String,
 }
 
 #[derive(Args)]
@@ -3023,6 +3070,7 @@ fn command_gs_need(command: &CliCommand) -> GsNeed {
             }
         }
         C::CreatePdf(args) => create_pdf_demand(&args.sources),
+        C::PrintedJob(args) => create_pdf_demand([&args.input]),
         C::Merge(args) => {
             if merge_converts(&args.inputs) {
                 create_pdf_demand(&args.inputs)
@@ -4226,6 +4274,12 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
         Ok(output) => {
             // Print JSON result to stdout
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            if let (CliCommand::PrintedJob(_), Some(refused)) =
+                (&command, output.get("refused").and_then(Value::as_str))
+            {
+                eprintln!("error: {refused}");
+                return EXIT_INPUT_REFUSED;
+            }
             0
         }
         Err(msg) => {
@@ -4548,6 +4602,26 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 }),
             )
         }
+
+        CliCommand::PrintedJob(args) => engine.call(
+            "printed_job",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "number_up": args.number_up,
+                "number_up_layout": args.number_up_layout,
+                "reverse": args.reverse,
+                "sheet_width": args.sheet_width,
+                "sheet_height": args.sheet_height,
+                "page_set": args.page_set,
+                "page_ranges": args.page_ranges,
+                "mirror": args.mirror,
+                "scaling": args.scaling,
+                "charset": args.charset,
+                "gs_path": gs,
+                "soffice_path": resolve_soffice(),
+            }),
+        ),
 
         CliCommand::CreatePdf(args) => {
             if args.sources.is_empty() && !args.blank {

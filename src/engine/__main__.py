@@ -228,6 +228,7 @@ from engine.spelling import (
     spelling_suggestions,
 )
 from engine.printer import print_pdf, print_preview, print_preview_cleanup
+from engine.print_layout import printed_job
 from engine.incremental import signature_policy, transplant_incremental
 from engine.redact_marks import list_redact_annotations, save_redaction_marks
 from engine.signatures import (
@@ -468,6 +469,7 @@ def main() -> None:
     server.register("print", print_pdf)
     server.register("print_preview", print_preview)
     server.register("print_preview_cleanup", print_preview_cleanup)
+    server.register("printed_job", printed_job)
     server.register("verify_signatures", verify_signatures)
     server.register("sign_pdf", sign_pdf)
     server.register("generate_signer", generate_signer)
