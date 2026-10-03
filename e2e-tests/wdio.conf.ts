@@ -42,7 +42,9 @@ import { scanText } from './scan-run-log.js';
 import { launchOwnedProcess } from './support/owned-process.js';
 
 const REPO_ROOT = resolve(__dirname, '..');
-const APP_BINARY = resolve(REPO_ROOT, 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_BINARY = process.env.SPECTRAPDF_E2E_APP
+  ? resolve(process.env.SPECTRAPDF_E2E_APP)
+  : resolve(REPO_ROOT, 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
 const NATIVE_DRIVER = resolve(__dirname, 'msedgedriver.exe');
 const TAURI_DRIVER_PORT = 4444;
 const RUN_LOG_DIR = resolve(__dirname, 'logs');

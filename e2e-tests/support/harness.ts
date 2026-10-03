@@ -63,19 +63,23 @@ export async function requirePlatformFeatures(
   context.skip();
 }
 
-export async function openByPaths(paths: string[]): Promise<void> {
-  const result = await browser.executeAsync<string | null, [string[]]>(
-    function (p, done) {
+export async function openByPaths(
+  paths: string[],
+  opts: { webOrigin?: string } = {},
+): Promise<void> {
+  const result = await browser.executeAsync<string | null, [string[], { webOrigin?: string }]>(
+    function (p, o, done) {
       const h = (window as any).__SPECTRA_TEST__;
       if (!h) {
         done('__SPECTRA_TEST__ missing — was the binary built with VITE_E2E=1?');
         return;
       }
-      h.openByPaths(p)
+      h.openByPaths(p, o)
         .then(() => done(null))
         .catch((err: unknown) => done(String(err)));
     },
     paths,
+    opts,
   );
   if (typeof result === 'string') throw new Error(`openByPaths failed: ${result}`);
 }

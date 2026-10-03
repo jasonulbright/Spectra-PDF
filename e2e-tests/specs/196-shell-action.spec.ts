@@ -82,8 +82,11 @@ function writeHandoff(action: 'convert' | 'combine', paths: string[]): string {
 async function launchWith(handoff: string): Promise<void> {
   const requested = browser.requestedCapabilities as Record<string, { application: string }>;
   const application = requested['tauri:options'].application;
+  // msedgedriver passes `args` as browser switches: a separated value gains a
+  // `--` prefix and a lowercased drive, and the switches are reordered. Only
+  // the joined `--switch=value` form reaches the app's argv intact.
   await browser.reloadSession({
-    'tauri:options': { application, args: ['--shell-action', handoff] },
+    'tauri:options': { application, args: [`--shell-action=${handoff}`] },
   } as WebdriverIO.Capabilities);
   await waitForHarness();
 }

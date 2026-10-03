@@ -3723,7 +3723,7 @@ function AppContent(): React.ReactElement {
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     installTestHarness({
-      openByPaths: async (paths) => { await openByPaths(paths); },
+      openByPaths: async (paths, opts) => { await openByPaths(paths, opts); },
       setView: (v) => harnessSetView(v),
       focusTab: (tab) => dispatch({ type: 'UI_FOCUS_TAB', tab }),
       setActiveOp: (op) => setActiveOp(op as Operation),
