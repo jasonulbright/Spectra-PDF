@@ -592,9 +592,8 @@ pub fn webview2_version() -> Option<String> {
 ///
 /// Called BEFORE any window is built, because the report has to reach the user
 /// through the only surface that still exists without a webview: a native
-/// message box. This is the Ghostscript posture applied one layer lower — name
-/// the missing prerequisite and point at where it comes from, never fail with a
-/// blank window or a loader error.
+/// message box: name the missing prerequisite and point at where it comes
+/// from, never fail with a blank window or a loader error.
 ///
 /// The installer never reaches this: `webviewInstallMode` is
 /// `downloadBootstrapper`, so an installed machine has the runtime by the time

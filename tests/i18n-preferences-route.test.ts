@@ -14,7 +14,7 @@ const ROUTES: Record<string, number> = {
   'dialog.gsMissing.route': 1,
   'panel.common.gsRequired': 1,
   'panel.common.gsNotExecutable': 1,
-  'panel.common.gsProbeFailed': 2,
+  'panel.common.gsProbeFailed': 1,
   'panel.common.gsTooOld': 1,
   'refusal.action.needsGhostscript': 1,
   'refusal.action.needsGhostscriptOne': 1,

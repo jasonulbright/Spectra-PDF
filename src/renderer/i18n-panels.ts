@@ -35,16 +35,17 @@ export const PANEL_STRINGS = {
     'This works on the open document. To run the same steps over every document in a folder, build an action.',
   'panel.common.folderRouteOpen': 'Open Guided Actions',
   // The ONE explanation every Ghostscript-gated surface renders, plus the
-  // three states a configured-but-unusable install can be in. Ghostscript is
-  // a user-supplied prerequisite; nothing in the product ships it.
+  // three states an unusable copy can be in. Only `gsNotExecutable` is
+  // specific to a path chosen in Preferences; the other states can belong to
+  // the included copy, so their text names no origin.
   'panel.common.gsRequired':
-    'This needs Ghostscript, which Spectra PDF does not include. Install it, then point Spectra PDF at it in Preferences ▸ Engine.',
+    'This needs Ghostscript, and none was found. Reinstall Spectra PDF, or choose a Ghostscript program in Preferences ▸ Engine.',
   'panel.common.gsNotExecutable':
     'The Ghostscript set in Preferences ▸ Engine is not there any more. Choose the program again.',
   'panel.common.gsProbeFailed':
-    'The Ghostscript set in Preferences ▸ Engine did not run. Check the install, then try again in Preferences ▸ Engine.',
+    'Ghostscript did not run. Check the installation, then try again in Preferences ▸ Engine.',
   'panel.common.gsTooOld':
-    'The Ghostscript set in Preferences ▸ Engine is older than this version needs. Install a newer one.',
+    'The Ghostscript in use is older than this version needs. Install a newer one, then choose it in Preferences ▸ Engine.',
   'panel.common.gsSetUp': 'Set up Ghostscript',
   // The ONE explanation every bundled-colour-profile surface renders while the
   // profiles' separate licence is unaccepted. Three surfaces depend on them:
@@ -2573,15 +2574,16 @@ export const PANEL_STRINGS = {
   'panel.settings.gsNonePath': 'None found',
   'panel.settings.gsDiscovered': 'Found on this PC',
   'panel.settings.gsChosen': 'Chosen by you',
+  'panel.settings.gsBundled': 'Included with Spectra PDF',
   'panel.settings.gsBrowse': 'Choose Ghostscript…',
   'panel.settings.gsPickTitle': 'Choose the Ghostscript program',
-  'panel.settings.gsUseDiscovered': 'Use the one found on this PC',
+  'panel.settings.gsUseDiscovered': 'Use the default Ghostscript',
   'panel.settings.gsRecheck': 'Check again',
   'panel.settings.gsChecking': 'Checking…',
   'panel.settings.gsDetail': 'Details: {{detail}}',
   'panel.settings.gsWhereToGet': 'Ghostscript is available from ghostscript.com.',
   'panel.settings.gsLicense':
-    'Ghostscript is not part of Spectra PDF. It is a separate program under its own license (AGPL-3.0, or a commercial license from Artifex), which you install and license yourself. Spectra PDF runs it as a separate program and ships no copy of it.',
+    'Ghostscript is a separate program that Spectra PDF runs as a separate process; it is listed in the third-party notices.',
   'panel.settings.gsPromptOnLaunch': 'Tell me at startup when Ghostscript is missing',
   'panel.settings.gsPromptOnLaunchHint':
     'Shown once per startup, and only when no Ghostscript is found on this PC. Turning it off changes nothing else — the features that need Ghostscript still say so where they are used.',
@@ -2666,7 +2668,7 @@ export const PANEL_STRINGS = {
     'Spectra PDF never installs updates itself. When a newer release exists it shows a notice, and opening it takes you to the download page. You can always check manually with Help ▸ Check for Updates.',
   'panel.settings.thirdParty': 'Third-party components',
   'panel.settings.licensesP2':
-    'Also bundled or embedded: Python (PSF license) with pikepdf (MPL-2.0), pdfminer.six (MIT), and pyHanko (MIT) among its packages; pdf.js (Apache-2.0); pdf-lib (MIT); Tesseract — the bundled OCR engine, also run strictly as a separate program — and its language models (Apache-2.0), with the redistribution notices for every library it links installed beside it; the Liberation and Libertinus fonts (SIL OFL 1.1); Tauri and the compiled Rust crates (MIT/Apache-2.0 and similar).',
+    'Also bundled or embedded: Python (PSF license) with pikepdf (MPL-2.0), pdfminer.six (MIT), and pyHanko (MIT) among its packages; pdf.js (Apache-2.0); pdf-lib (MIT); Tesseract — the bundled OCR engine, also run strictly as a separate program — and its language models (Apache-2.0), with the redistribution notices for every library it links installed beside it; Ghostscript, also run strictly as a separate program; the Liberation and Libertinus fonts (SIL OFL 1.1); Tauri and the compiled Rust crates (MIT/Apache-2.0 and similar).',
   'panel.settings.licensesP3':
     "The complete notices ship with the app: the aggregate list (with each component's license and source) and the per-crate Rust listing.",
   'panel.settings.openLicenses': 'Open third-party licenses',

@@ -1,16 +1,17 @@
 """The two Ghostscript test axes, and the one place each is named.
 
-Ghostscript is a user-supplied prerequisite: the distribution ships none, so
+A Ghostscript can be bundled, installed, configured, broken or absent, so
 every suite runs on one of two axes and has to say which.
 
 * The CAPABILITY-PRESENT axis needs a usable Ghostscript on the machine. It
   is the axis every existing gs test is on, and it SKIPS where none is
   configured. Which Ghostscript that is, and where it lives, is the
   authority's question (`engine.gs_capability.resolve`) and no longer a
-  path this file knows: keying the skip on `resources/ghostscript/…` made
-  the suites answer "is the tree vendored?", which stops being the same
-  question the moment the tree is not shipped, and would have silently
-  skipped the whole axis rather than running against an installed copy.
+  path this file knows: keying the skip on `resources/ghostscript/…` would
+  make the suites answer "is the tree vendored?", which is a different
+  question from "does a usable Ghostscript resolve?" (an installed copy, the
+  environment override and the Linux distribution package all answer the
+  second without the first).
 * The CAPABILITY-ABSENT axis runs EVERYWHERE, including on a machine with a
   perfectly good Ghostscript, because it forces the authority's answer off
   rather than arranging for one to be missing. PATH games cannot do that
@@ -40,7 +41,7 @@ from engine import gs_capability as gc  # noqa: E402
 ENGINE_DIR = pathlib.Path(__file__).resolve().parents[1] / "src" / "engine"
 
 #: The ONE reason a present-axis test is skipped. Named as an AXIS, not as a
-#: missing file: what is absent is the prerequisite, not a vendored tree.
+#: missing file: what is absent is a usable Ghostscript, not a vendored tree.
 PRESENT_AXIS_SKIP = (
     "capability-present axis: no usable Ghostscript is configured on this machine"
 )

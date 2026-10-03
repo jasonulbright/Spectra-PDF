@@ -63,9 +63,9 @@ export async function recognizePage(
  *
  * No `file`, and no Ghostscript: the viewer has already rasterised the page it
  * is showing, and the engine op takes those pixels on stdin. That matters
- * beyond saving a render — the distribution ships no Ghostscript, so a
- * reading-view capability that is on by default cannot route through the
- * page-rendering arm above.
+ * beyond saving a render — a reading-view capability that is on by default
+ * must keep working where no Ghostscript resolves, so it cannot route through
+ * the page-rendering arm above.
  *
  * `callRaw` rather than `call` deliberately, and by a wider margin than the
  * redaction-mark seed's documented exception: that one at least names a

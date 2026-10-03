@@ -10,8 +10,9 @@ The band matters more than "non-blank": a stencil written with the wrong
 polarity renders 100% BLACK, which passes any not-blank check while being
 exactly as wrong (polarity is a MEASUREMENT). So
 each fixture is drawn from one synthetic pattern whose ink fraction is known
-by construction, and this generator DECODES ITS OWN OUTPUT with the bundled
-Ghostscript and refuses to write a fixture whose coverage is off.
+by construction, and this generator DECODES ITS OWN OUTPUT with the
+Ghostscript `engine.gs_capability` resolves and refuses to write a fixture
+whose coverage is off, or to run at all when no Ghostscript resolves.
 
 Deterministic and offline: the pattern is drawn from constants, so a rerun
 produces byte-identical PDFs and a regeneration is reviewable as a diff.
@@ -35,7 +36,9 @@ from PIL.TiffImagePlugin import ROWSPERSTRIP
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
-GS = ROOT / "resources" / "ghostscript" / "gswin64c.exe"
+sys.path.insert(0, str(ROOT / "src"))
+
+from engine import gs_capability  # noqa: E402
 
 # 200 dpi over a 612x792 pt page. Small enough that the fixtures stay tiny,
 # large enough that the decoders do real work.
@@ -167,18 +170,16 @@ def image_stream(pdf: pikepdf.Pdf, data: bytes, filt: str, extra: dict) -> pikep
 
 # --------------------------------------------------------------- verification
 def gs_ink(pdf: Path) -> float:
-    """Render with the bundled Ghostscript and measure the ink fraction.
+    """Render with the resolved Ghostscript and measure the ink fraction.
 
     Ghostscript carries jbig2dec, an openjpeg and its own CCITT decoder, so it
     is an INDEPENDENT decoder from pdf.js — a fixture that renders correctly
     here and blank in the app is an app defect, which is the whole point.
     """
-    if not GS.exists():
-        print(f"  ! Ghostscript absent at {GS} — cannot verify {pdf.name}")
-        return float("nan")
+    gs = gs_capability.require().path
     png = pdf.with_suffix(".verify.png")
     proc = subprocess.run(
-        [str(GS), "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=pnggray",
+        [gs, "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=pnggray",
          "-r72", f"-sOutputFile={png}", str(pdf)],
         capture_output=True, text=True,
     )

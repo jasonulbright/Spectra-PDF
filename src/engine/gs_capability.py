@@ -1,14 +1,16 @@
 """Is a usable Ghostscript configured? — the one place that answers.
 
-Ghostscript is a USER-SUPPLIED prerequisite: nothing in the distribution
-provides it, so every gs-backed op has to answer "is one there, and does it
-work?" before it spawns anything. Answering that by file existence is what
-this module exists to stop. A path can name a file that is not a program, a
-program that cannot initialise (a copied `gswin64c.exe` without its
-`Resource/` tree exits non-zero on the first render while `--version` still
-answers), or a build too old for the flags the engine passes. Each of those
-reaches the user as a different broken thing when the answer is `os.path
-.isfile`, and as one named refusal when the answer is a probe.
+Every gs-backed op has to answer "is one there, and does it work?" before it
+spawns anything. The Windows install tree and the portable zip carry a copy
+in `ghostscript/`, the .deb and .rpm depend on the distribution's package,
+and the AppImage carries its own; an explicit path or `PATH_ENV_VAR`
+outranks all of them, and the answer can still be "none" (a broken explicit
+path, a damaged tree, a host without the package). Answering by file
+existence is what this module exists to stop. A path can name a file that is
+not a program, a program that cannot initialise, or a build too old for the
+flags the engine passes. Each of those reaches the user as a different
+broken thing when the answer is `os.path.isfile`, and as one named refusal
+when the answer is a probe.
 
 The answer is structured — `available`, `path`, `version`, `reason` — because
 callers need the REASON, not a boolean: "no Ghostscript is configured" and
@@ -60,8 +62,9 @@ PROBE_FAILED = "probe-failed"
 VERSION_BELOW_MINIMUM = "version-below-minimum"
 
 #: The first place discovery looks. It is a search candidate, not a configured
-#: path: a candidate here that fails gives way to PATH. A configured path, from
-#: the GUI or the CLI, arrives as the `path` argument of `resolve` instead.
+#: path: a candidate here that fails gives way to the bundled copy, then PATH.
+#: A configured path, from the GUI or the CLI, arrives as the `path` argument
+#: of `resolve` instead.
 PATH_ENV_VAR = "SPECTRAPDF_GS_PATH"
 
 #: Console executable names, most specific first. The Windows console builds
@@ -284,18 +287,41 @@ def _looks_like_a_path(text: str) -> bool:
     return bool(text) and (os.sep in text or bool(os.altsep and os.altsep in text))
 
 
+def bundled_candidates() -> list[str]:
+    """The Windows install tree's `ghostscript/gswin64c.exe`, when it exists.
+
+    Only files count: an empty stub `ghostscript/` folder (the CI resource
+    stubs) must leave the answer NOT_CONFIGURED rather than turn it into
+    NOT_EXECUTABLE for a path nothing was ever going to run. The AppImage's
+    own `bin/gs` needs no entry here: the image puts its `bin/` first on PATH.
+    """
+    if os.name != "nt":
+        return []
+    return [
+        str(candidate)
+        for candidate in platform_support.vendored_candidates(
+            Path(__file__).parent, "ghostscript", "gswin64c.exe"
+        )
+        if candidate.is_file()
+    ]
+
+
 def discover() -> list[str]:
     """Candidate paths when nothing explicit was configured, best first.
 
-    The environment override, then PATH. A bare command name is never spawned
-    blind: `shutil.which` turns it into a real path first, and that path is
-    then probed like any other. Registry-installed copies that are not on PATH
-    are found on the Rust side and arrive here as an explicit path.
+    The environment override, then the bundled copy, then PATH. A bare
+    command name is never spawned blind: `shutil.which` turns it into a real
+    path first, and that path is then probed like any other. Registry-installed
+    copies that are not on PATH are found on the Rust side and arrive here as
+    an explicit path.
     """
     found: list[str] = []
     override = os.environ.get(PATH_ENV_VAR, "").strip()
     if override:
         found.append(override)
+    for candidate in bundled_candidates():
+        if candidate not in found:
+            found.append(candidate)
     for name in _CANDIDATE_NAMES:
         resolved = shutil.which(name)
         if resolved and resolved not in found:
@@ -372,8 +398,8 @@ def _refuse(answer: GsCapability) -> None:
     if answer.reason == NOT_EXECUTABLE:
         raise GsUnavailable(
             f"Ghostscript is required for this operation and there is no program "
-            f"at {answer.path}. Install Ghostscript from ghostscript.com, then "
-            f"set its path in Preferences > Engine.",
+            f"at {answer.path}. Reinstall Spectra PDF, or choose a Ghostscript "
+            f"program in Preferences > Engine.",
             reason=answer.reason,
             path=answer.path,
             version=answer.version,
@@ -382,9 +408,8 @@ def _refuse(answer: GsCapability) -> None:
     if answer.reason == PROBE_FAILED:
         raise GsUnavailable(
             f"Ghostscript at {answer.path} did not pass its capability check "
-            f"({answer.detail or 'the probe render produced nothing'}). Install "
-            f"Ghostscript from ghostscript.com, then set its path in "
-            f"Preferences > Engine.",
+            f"({answer.detail or 'the probe render produced nothing'}). Reinstall "
+            f"Spectra PDF, or choose a Ghostscript program in Preferences > Engine.",
             reason=answer.reason,
             path=answer.path,
             version=answer.version,
@@ -393,9 +418,8 @@ def _refuse(answer: GsCapability) -> None:
     if answer.reason == VERSION_BELOW_MINIMUM:
         raise GsUnavailable(
             f"Ghostscript {answer.version or '(unknown version)'} at {answer.path} "
-            f"is older than the {_minimum_text()} this build requires. Install a "
-            f"newer Ghostscript from ghostscript.com, then set its path in "
-            f"Preferences > Engine.",
+            f"is older than the {_minimum_text()} this build requires. Reinstall "
+            f"Spectra PDF, or choose a Ghostscript program in Preferences > Engine.",
             reason=answer.reason,
             path=answer.path,
             version=answer.version,
@@ -403,7 +427,7 @@ def _refuse(answer: GsCapability) -> None:
         )
     raise GsUnavailable(
         "Ghostscript is required for this operation and none is configured. "
-        "Install Ghostscript from ghostscript.com, then set its path in "
+        "Reinstall Spectra PDF, or choose a Ghostscript program in "
         "Preferences > Engine.",
         reason=NOT_CONFIGURED,
         path=answer.path,
@@ -418,27 +442,27 @@ def _cli_text(refusal: GsUnavailable) -> str:
     English only and never localized: the renderer never receives it, so it
     has no row in the refusal table.
     """
-    fix = f"then name it with --gs-path or the {PATH_ENV_VAR} environment variable."
+    fix = (
+        "Reinstall Spectra PDF, or name a Ghostscript program with --gs-path or "
+        f"the {PATH_ENV_VAR} environment variable."
+    )
     if refusal.reason == NOT_EXECUTABLE:
         return (
             f"Ghostscript is required for this operation and there is no program "
-            f"at {refusal.path}. Install Ghostscript from ghostscript.com, {fix}"
+            f"at {refusal.path}. {fix}"
         )
     if refusal.reason == PROBE_FAILED:
         return (
             f"Ghostscript at {refusal.path} did not pass its capability check "
-            f"({refusal.detail or 'the probe render produced nothing'}). Install "
-            f"Ghostscript from ghostscript.com, {fix}"
+            f"({refusal.detail or 'the probe render produced nothing'}). {fix}"
         )
     if refusal.reason == VERSION_BELOW_MINIMUM:
         return (
             f"Ghostscript {refusal.version or '(unknown version)'} at {refusal.path} "
-            f"is older than the {_minimum_text()} this build requires. Install a "
-            f"newer Ghostscript from ghostscript.com, {fix}"
+            f"is older than the {_minimum_text()} this build requires. {fix}"
         )
     return (
-        "Ghostscript is required for this operation and none is configured. "
-        f"Install Ghostscript from ghostscript.com, {fix}"
+        f"Ghostscript is required for this operation and none is configured. {fix}"
     )
 
 

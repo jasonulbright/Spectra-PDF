@@ -3694,25 +3694,34 @@ export interface GsAnswer {
   version: string;
   reason: string;
   detail: string;
+  /** Which resolver candidate answered; absent from a bridge without it. */
+  source?: string;
   pending: boolean;
 }
 
 /**
  * Pin this session's Ghostscript answer to "none configured".
  *
- * Every machine that can run this suite HAS a Ghostscript — the present axis
- * needs one — so absence cannot be arranged from outside the app: discovery
- * reads the registry and the environment as well as PATH. The pin sits on the
- * renderer's one answer, so the disabled panels, the gated menu commands, the
- * partial legs and Preferences ▸ Engine all read it.
+ * The binary under test carries the included copy beside it, and that copy
+ * resolves before the registry and PATH are read, so absence cannot be
+ * arranged from outside the app. The pin sits on the renderer's one answer,
+ * so the disabled panels, the gated menu commands, the partial legs and
+ * Preferences ▸ Engine all read it.
  *
- * `reason` selects which absent state renders; the default is the
- * fresh-install one.
+ * `reason` selects which absent state renders; the default is the one where
+ * nothing resolves anywhere.
  */
 export async function gsForceAbsent(reason?: string): Promise<void> {
   await browser.execute(function (r: string | undefined) {
     (window as any).__SPECTRA_TEST__.gsForceAbsent(r);
   }, reason);
+}
+
+/** Pin this session's Ghostscript answer to exactly `answer`. */
+export async function gsPin(answer: Omit<GsAnswer, 'pending'>): Promise<void> {
+  await browser.execute(function (a: Omit<GsAnswer, 'pending'>) {
+    (window as any).__SPECTRA_TEST__.gsPin(a);
+  }, answer);
 }
 
 /** Lift the pin and probe for real. Resolves with the answer that landed —

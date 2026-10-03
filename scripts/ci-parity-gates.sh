@@ -103,6 +103,14 @@ if command -v powershell >/dev/null 2>&1; then
   gate portable-checkmap powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -CheckMap
 fi
 
+# --- Release job: the vendored Ghostscript tree ships only its two binaries
+#     and its licence file, and THIRD-PARTY-LICENSES.md carries the pinned
+#     version's Ghostscript section. The release job runs the same gate inside
+#     scripts/bundle-ghostscript.ps1. (PowerShell-only.) ---
+if command -v powershell >/dev/null 2>&1; then
+  gate gs-notice powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 -GateOnly
+fi
+
 # --- Release job: the File Explorer command handler builds, and both package
 #     manifests render with the committed publisher and pass MakeAppx's schema
 #     validation. The release job runs the same script (-CompileOnly before

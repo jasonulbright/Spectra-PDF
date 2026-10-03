@@ -1,15 +1,14 @@
-// The launch offer for a copy with no Ghostscript anywhere.
+// The launch offer for a copy where no Ghostscript resolves — not the included
+// copy, not a configured path, not an install discovery finds.
 //
-// Ghostscript is a user-supplied prerequisite: the distribution ships none.
 // Every dependent surface names itself disabled (`GsRequiredNotice`), but a
-// user who never opens one of those ten surfaces never learns that a program
-// they can install is what stands between them and the feature — so the gap
-// is stated once, at launch, on the primary window only.
+// user who never opens one of those ten surfaces never learns that a missing
+// Ghostscript is what stands between them and the feature — so the gap is
+// stated once, at launch, on the primary window only.
 //
-// Nothing here is a warning: the product is fully usable without Ghostscript,
-// and the copy says so rather than implying a broken install. Declining is a
-// legitimate answer, and "Don't ask again" makes it permanent; Preferences ▸
-// Engine stays the always-open door either way.
+// The rest of the product works without Ghostscript, and the text says so.
+// Declining is a legitimate answer, and "Don't ask again" makes it permanent;
+// Preferences ▸ Engine stays the always-open door either way.
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppModal } from '../hooks/useAppModal';

@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D4)](#requirements)
 [![License](https://img.shields.io/github/license/jasonulbright/Spectra-PDF)](LICENSE)
 
-A modern, open-source PDF workbench for Windows and Linux. Tauri v2 + React, with an embedded Python engine. No ads, no telemetry, no upsells. On Windows it ships as an installer or as a portable zip you extract and run, with a WebView2 prerequisite (ships with Windows 10/11). On x86-64 Linux it ships as an AppImage, a `.deb` and an `.rpm`, with a WebKitGTK 4.1 prerequisite (the `.deb` and `.rpm` install it). A handful of features — listed below, each marked — additionally need Ghostscript, which you install separately.
+A modern, open-source PDF workbench for Windows and Linux. Tauri v2 + React, with an embedded Python engine. No ads, no telemetry, no upsells. On Windows it ships as an installer or as a portable zip you extract and run, with a WebView2 prerequisite (ships with Windows 10/11). On x86-64 Linux it ships as an AppImage, a `.deb` and an `.rpm`, with a WebKitGTK 4.1 prerequisite (the `.deb` and `.rpm` install it). The Windows installer and the portable zip include Ghostscript; the `.deb` and the `.rpm` install the distribution's Ghostscript package; the AppImage carries its own.
 
 Nothing here reaches the network on its own. The only network actions are ones you start and confirm: the update check (notify-only, and switchable off), opening a document from a web address, capturing a web page, submitting a form through its own Submit button behind a consent dialog, and signing through a signing service you configure. Everything else — OCR, spell check, signature trust, export, print production — runs entirely on your machine.
 
@@ -42,13 +42,6 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 
 ### The twenty-six tools
 
-> Features marked **(requires Ghostscript)** need a Ghostscript installation,
-> which you install separately — it is not part of this download and is
-> licensed to you by its own publisher. Point the app at it under
-> Preferences ▸ Engine, or let it find one on your machine; every marked feature
-> then works exactly as described. Until then each one is disabled and says so
-> by name — nothing here is removed or silently degraded.
-
 - **Organize Pages** — reorder, rotate, delete, split, extract — and merge pages between open files by dragging
 
 ![Organize view with several pages multi-selected for reorder](docs/images/shot_organize_select.png)
@@ -81,19 +74,19 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 - **Guided Actions** — save sequences of steps and run them on a document with one click. The steps are create a PDF, one PDF per folder, compress, optimize, grayscale, PDF/A, bring up to a print profile, header/footer, watermark, strip metadata, remove hidden information, search & redact, OCR, enhance scans, links from web addresses, bookmarks from structure, prepare forms, export to a document format, export pages as images, and encrypt to a new file. Steps built on a marked feature carry that requirement, and a saved action naming one reports it when the plan is built rather than part-way through a run. Any setting can be asked for at run time — passwords always are, and are never stored
 
 ![Guided Actions editor assembling a saved sequence of steps](docs/images/shot_guided_actions.png)
-- **Scan & OCR** — acquire pages straight from a scanner (flatbed, feeder or duplex), deskew, despeckle, whiten and re-orient them, then make them searchable in 47 languages, fully offline. The cleanup and recognition passes render each page first, so **(requires Ghostscript)** for scanned input; acquisition and the dialog's own assembly do not
+- **Scan & OCR** — acquire pages straight from a scanner (flatbed, feeder or duplex), deskew, despeckle, whiten and re-orient them, then make them searchable in 47 languages, fully offline.
 
 ![Scan & OCR panel measuring a scanned page before making it searchable](docs/images/shot_ocr.png)
-- **Compare** — text and visual diff. The text diff is always available; the visual diff **(requires Ghostscript)**
+- **Compare** — text and visual diff.
 
 ![Compare Files showing a text diff between two revisions of a document](docs/images/shot_compare.png)
 - **Protect** — AES-256 encrypt/decrypt with owner-permission controls, and certificate encryption to named recipients (no shared password)
 
 ![Protect tool setting encryption passwords and reader permissions](docs/images/shot_protect.png)
-- **Optimize** — compress, grayscale, linearize, PDF/A, PDF version, and **MRC** for scans **(compress, grayscale, PDF/A and MRC require Ghostscript; linearize and PDF version do not)**: the page separates into a text stencil, an ink colour and a paper background, so the type stays at the scan's own resolution while the background compresses hard. Three presets, and an option to recognise each compressed page and revert any whose text did not survive
+- **Optimize** — compress, grayscale, linearize, PDF/A, PDF version, and **MRC** for scans: the page separates into a text stencil, an ink colour and a paper background, so the type stays at the scan's own resolution while the background compresses hard. Three presets, and an option to recognise each compressed page and revert any whose text did not survive
 
 ![Optimize auditing where a document's bytes go, by category](docs/images/shot_optimize.png)
-- **Repair** — three tiers, up to per-page salvage; tier 2 **(requires Ghostscript)**, tiers 1 and 3 do not
+- **Repair** — three tiers, up to per-page salvage
 - **Watermark** — text, an image, or a page of another PDF stamped as vector artwork
 
 ![Watermark tool placing a text watermark behind page content](docs/images/shot_watermark.png)
@@ -117,7 +110,7 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 - **Accessibility** — 56 checks across seven areas (Document, Page Content, Forms, Alternate Text, Tables, Lists, Headings), each sourced to a clause of the accessibility standard itself, with colour contrast measured against what is actually painted under each line of text. A check with nothing to check reports "not applicable" rather than a pass; a check that could not read part of the document says so rather than claiming one; a check no machine can settle asks for review. A judgement that genuinely cannot be settled from the file alone — artifact versus content, semantic appropriateness, reading order — is reported for review with its evidence rather than guessed either way. Clicking a finding takes you to it. Twenty-one of the checks repair from the report — sixteen need nothing from you, and the rest need one value only you can supply (the document's language and title, a field's description, a figure's alternate text, a table's summary, and whether a run of untagged content is content or decoration), and **nothing is ever invented for you**. The report exports as a web page or plain text, and states in its own footer that it is not a conformance certificate. Structure-tag editor and reading-order panel included; an untagged document can be tagged heuristically as a starting point
 
 ![Accessibility Check reporting its 56 checks over a document](docs/images/shot_accessibility.png)
-- **Print Production** **(the raster-based half requires Ghostscript: output preview, ink manager, soft proof, the object inspector's ink readings, transparency flattening, trapping, CMYK conversion, DSC PostScript export and preflight's raster measurements; printer marks, hairline finding, outline conversion, profile editing and preflight's structural checks do not)** — **Output Preview** rasters the page through the separation device: individual plates, overprint, ink density, a total-ink alarm, and a **soft proof** through a named press profile — the document's own output intent, a bundled press profile, or an ICC file you pick. Simulate Paper White shows the paper's tint instead of screen white (and forces Simulate Black Ink, since it already holds black at its own value). A profile the preview cannot use is named and the page stays unproofed. Processing-steps content is left out of the composite, the plates and the total-ink figure by default — the excluded inks are named — and a toggle brings it back when you want it. The **object inspector** reads a point you click: what is painted there, its colour space, its ink values taken from the plates, and a placed image's effective resolution at the size it appears — stacked objects are listed topmost first, and bare paper says so. Also ink manager, printer marks, hairline finding and fixing, transparency flattener with preview, outline conversion, in-RIP trap presets, DSC PostScript export, colour conversion to CMYK, and **preflight**: 38 checks across seven categories measured against one of nine shipped profiles (sheetfed offset, heatset web, newsprint, digital, large format, PDF/X-1a, PDF/X-3, PDF/X-4, office), with 20 repairs offered on the rows that need them and run in a fixed order. Profiles can be duplicated, edited, exported and imported; editing a shipped one saves a copy. A profile can require processing-steps declarations or flag a step set to print. Where a check could not read part of the document it reports that separately rather than passing. Conversion and preflight results state what the saved file actually declares, read back from the file itself, and say by name where a report does not verify a standard's full requirements
+- **Print Production** — **Output Preview** rasters the page through the separation device: individual plates, overprint, ink density, a total-ink alarm, and a **soft proof** through a named press profile — the document's own output intent, a bundled press profile, or an ICC file you pick. Simulate Paper White shows the paper's tint instead of screen white (and forces Simulate Black Ink, since it already holds black at its own value). A profile the preview cannot use is named and the page stays unproofed. Processing-steps content is left out of the composite, the plates and the total-ink figure by default — the excluded inks are named — and a toggle brings it back when you want it. The **object inspector** reads a point you click: what is painted there, its colour space, its ink values taken from the plates, and a placed image's effective resolution at the size it appears — stacked objects are listed topmost first, and bare paper says so. Also ink manager, printer marks, hairline finding and fixing, transparency flattener with preview, outline conversion, in-RIP trap presets, DSC PostScript export, colour conversion to CMYK, and **preflight**: 38 checks across seven categories measured against one of nine shipped profiles (sheetfed offset, heatset web, newsprint, digital, large format, PDF/X-1a, PDF/X-3, PDF/X-4, office), with 20 repairs offered on the rows that need them and run in a fixed order. Profiles can be duplicated, edited, exported and imported; editing a shipped one saves a copy. A profile can require processing-steps declarations or flag a step set to print. Where a check could not read part of the document it reports that separately rather than passing. Conversion and preflight results state what the saved file actually declares, read back from the file itself, and say by name where a report does not verify a standard's full requirements
 
 ![Output Preview separating a press sheet into plates with an ink density readout](docs/images/shot_output_preview.png)
 
@@ -125,23 +118,23 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 - **Links** — draw a link region anywhere on a page, or create one from selected text or from every web and email address in the text. Target it at a page in this document (at a view you choose), a named destination the document declares, another file and a page inside it, or a web address. Style its border — width, solid/dashed/underlined, colour — and its click effect. Links are invisible by default. A PDF a link names opens in this app once you confirm; any other file is named and never run, and a link to a program is reported by name and never written
 
 ![Links tool creating link regions from the web addresses in the text](docs/images/shot_links.png)
-- **Export** — text extraction, and export to Word, RTF, ODT, HTML, XHTML, plain text, **spreadsheet (.xlsx)** and **presentation (.pptx)**; page images as PNG/JPEG/TIFF **(page-image export, and the slide export's page rendering, require Ghostscript)**. Detected tables can be reviewed on the page before they become a spreadsheet
+- **Export** — text extraction, and export to Word, RTF, ODT, HTML, XHTML, plain text, **spreadsheet (.xlsx)** and **presentation (.pptx)**; page images as PNG/JPEG/TIFF. Detected tables can be reviewed on the page before they become a spreadsheet
 
 ![Export tool extracting text and reviewing detected tables](docs/images/shot_export.png)
 
 ![Tools](docs/images/screenshot_tools.png)
 
 ### Documents & files
-- **Create PDF** (File ▸ Create) — from files on disk (images, Office and text documents, HTML, PDFs, and PostScript **(requires Ghostscript)**), from a blank page, **from the clipboard** (a picture at its own resolution, formatted text with its tables and colours, or plain text), **from a web page**, or **from a scanner**. Sources are one list you can reorder and combine
+- **Create PDF** (File ▸ Create) — from files on disk (images, Office and text documents, HTML, PDFs, and PostScript), from a blank page, **from the clipboard** (a picture at its own resolution, formatted text with its tables and colours, or plain text), **from a web page**, or **from a scanner**. Sources are one list you can reorder and combine
 
 ![Create PDF combining an image, documents and a blank page in one reorderable source list](docs/images/shot_create_pdf.png)
 - **Open from web address** (File ▸ Open from web address) — type or paste a URL and the document downloads and opens like any file. Saving one always asks where; it never silently overwrites. A recent entry from the web reopens the dialog pre-filled rather than re-downloading behind your back, and nothing inside a document can start a download by itself
 - **Web capture** — a capture window opens where you can watch the page load; nothing is fetched in the background and closing the window cancels the run. The dialog states the site and the page limit before it loads anything. Capture the page alone or follow its links one or two levels deep, on the same site only; reaching your limit is reported rather than looking complete. Each captured page becomes a bookmark named after the page's own title
 
 ![The web capture dialog naming the site and the page limit before anything is fetched](docs/images/shot_web_capture.png)
-- **Print** (`Ctrl+P`) — printer picker, page range, copies, fit/actual/custom scale, duplex, paper, orientation, colour, odd/even, reverse, collation, comments-and-forms handling, and N-up, booklet or poster layouts, to any Windows printer **(requires Ghostscript)**
+- **Print** (`Ctrl+P`) — printer picker, page range, copies, fit/actual/custom scale, duplex, paper, orientation, colour, odd/even, reverse, collation, comments-and-forms handling, and N-up, booklet or poster layouts, to any Windows printer
 - **A virtual printer** — optionally install a "Spectra PDF" printer that appears in every application's print dialog; printing to it lands the pages here as a fresh PDF. Each Windows account gets its own printer, which only that account can print to. It uses an in-box Windows driver, ships no driver of its own and installs no service. Windows holds each job in the printer's queue, which shows as paused, and the app reads its own jobs from there; nothing listens on a network port. Jobs are received only while the app is running; a job printed while it is closed waits in the queue. Installing or removing it needs one visible administrator prompt, because printers are machine-wide objects
-- **Create PDF from PostScript** — convert `.ps`/`.eps` to PDF with quality presets (Smallest / eBook / Print / Press), the classic distilling job **(requires Ghostscript)**
+- **Create PDF from PostScript** — convert `.ps`/`.eps` to PDF with quality presets (Smallest / eBook / Print / Press), the classic distilling job
 - **Watched folders** (Tools ▸ Watched Folders…) — drop a PDF into an intake folder and a saved guided action runs over it: results mirror into a destination and the original files into a processed folder. Polling, with a file counted as arrived only once its size holds steady across two ticks, so a half-copied file never triggers a run
 - **Scheduled batch runs** (Tools ▸ Scheduled Batch Runs…) — create, list, enable, disable, run now and delete. Windows Task Scheduler runs them, so a schedule survives logoff and reboot without this app needing to be open
 - **Folder tools** — Batch OCR, Export a Folder, Preflight a Folder, Search & Redact a Folder, Prepare Forms in a Folder, One PDF per Folder. Each reads by path and writes into a mirror tree; none of them touches your open documents
@@ -162,7 +155,7 @@ When invoked with a subcommand, Spectra PDF runs headless — no window, same en
 The examples below show one form of each subcommand; most carry more options than are shown.
 
 ```bash
-# Compress — quality presets, or MRC for scanned paper (both require Ghostscript)
+# Compress — quality presets, or MRC for scanned paper
 spectrapdf compress input.pdf -o compressed.pdf --quality ebook
 spectrapdf compress scan.pdf -o small.pdf --quality mrc --mrc-preset balanced --mrc-verify-text
 
@@ -178,7 +171,7 @@ spectrapdf delete input.pdf -o trimmed.pdf --pages 3,7
 spectrapdf create-pdf scan.jpg notes.docx cover.pdf -o combined.pdf --page-size a4
 spectrapdf create-pdf-folders C:\jobs\ -d C:\assembled\   # one PDF per folder of images
 
-# Print — to any installed Windows printer (requires Ghostscript)
+# Print — to any installed Windows printer
 spectrapdf printers                       # list printers (JSON, with the default)
 spectrapdf printers --capabilities "Brother HL-L2400D"   # papers/duplex/colour as JSON
 spectrapdf print input.pdf --printer "Brother HL-L2400D" --pages 1-3 --copies 2 --fit fit
@@ -382,7 +375,7 @@ Two subcommands are deliberately more aggressive headlessly than in the app, bec
 
 A portable zip is published alongside the installer for deployments that cannot install: extract it to a share or a stick and run it, with all per-user state beside the app. It carries the same bundled runtimes and the same feature set.
 
-Updates are notify-only — the app checks for a newer release and shows a banner, and never downloads or installs anything itself. Even the check can be disabled machine-wide via `HKLM\SOFTWARE\Spectra PDF\DisableAutoUpdate = 1` (set automatically by the silent installer). The installer adds the File Explorer commands Convert to PDF and Combine into one PDF for all users. A portable copy adds them only when the user turns them on in Preferences. `HKLM\SOFTWARE\Spectra PDF\DisableExplorerMenu = 1` hides both commands on every copy. An upgrade keeps these policy values. On Linux the same policies live in `/etc/spectrapdf/policies.json`, a JSON object such as `{"DisableAutoUpdate": 1, "DisableFieldScripts": 1}`. The file and its folder must be owned by root and writable by no other account; otherwise the app ignores the file. Everything the app needs is inside the installer — the Python runtime, the LibreOffice export runtime, the native OCR engine and its offline language data, the JBIG2 encoder, the edit fonts, the colour profiles, and the spelling dictionaries — so there is no second deployment step and no machine needs its own copy of any of them. The one exception is Ghostscript, which is not distributed here: deploy it separately if your users need the features marked above, and the app will find a per-machine install without any per-user step. Third-party licence notices are installed alongside the app and open from Settings ▸ Updates & Licenses. Interactive installation presents the bundled colour-profile licence and requires acceptance. Silent (`/S`) and passive (`/P`) deployment must include `/acceptEULA`; otherwise the installer exits with code 2 before copying the application. The installer's own `/?` dialog documents all switches.
+Updates are notify-only — the app checks for a newer release and shows a banner, and never downloads or installs anything itself. Even the check can be disabled machine-wide via `HKLM\SOFTWARE\Spectra PDF\DisableAutoUpdate = 1` (set automatically by the silent installer). The installer adds the File Explorer commands Convert to PDF and Combine into one PDF for all users. A portable copy adds them only when the user turns them on in Preferences. `HKLM\SOFTWARE\Spectra PDF\DisableExplorerMenu = 1` hides both commands on every copy. An upgrade keeps these policy values. On Linux the same policies live in `/etc/spectrapdf/policies.json`, a JSON object such as `{"DisableAutoUpdate": 1, "DisableFieldScripts": 1}`. The file and its folder must be owned by root and writable by no other account; otherwise the app ignores the file. Everything the app needs is inside the installer — the Python runtime, Ghostscript, the LibreOffice export runtime, the native OCR engine and its offline language data, the JBIG2 encoder, the edit fonts, the colour profiles, and the spelling dictionaries — so there is no second deployment step and no machine needs its own copy of any of them. Third-party licence notices are installed alongside the app and open from Settings ▸ Updates & Licenses. Interactive installation presents the bundled colour-profile licence and requires acceptance. Silent (`/S`) and passive (`/P`) deployment must include `/acceptEULA`; otherwise the installer exits with code 2 before copying the application. The installer's own `/?` dialog documents all switches.
 
 
 ## Requirements
@@ -403,7 +396,7 @@ Updates are notify-only — the app checks for a newer release and shows a banne
 - The Ghostscript features listed below need Ghostscript 10.0 or newer. The AppImage carries a copy and uses it unless another Ghostscript is named in the settings or in `SPECTRAPDF_GS_PATH`. For the `.deb` and the `.rpm`, the `ghostscript` package of Debian 12 (10.0.0), Ubuntu 24.04 (10.02.1) and Fedora 38 or later (10.02.1 on Fedora 38) meets this. Ubuntu 22.04 (9.55.0), Debian 11 (9.53.3), Fedora 36 and Fedora 37 (9.56.1) ship older versions, which Spectra refuses. On those releases, download the Linux x86-64 build from the [official Ghostscript download page](https://ghostscript.com/releases/gsdnld.html) and set the `SPECTRAPDF_GS_PATH` environment variable to the full path of its program before you start Spectra.
 - These features are Windows-only and have no entry in the Linux interface: signing with a certificate from the Windows certificate store, the File Explorer commands, and the translucent window backdrop with the Windows accent colour. Scheduled actions need a systemd user session, and the tray icon needs a desktop that shows a tray.
 
-Ghostscript **10.0 or newer** is a separately installed requirement for these features: scan cleanup and OCR rendering (including batch OCR and the OCR arm of Find); scan-based automatic form detection; visual Compare; printing; PostScript/EPS input and distilling; compression, grayscale, PDF/A, MRC and repair tier 2; PDF/X and CMYK conversion; Output Preview, Ink Manager, soft proofing, raster preflight measurements and repairs, transparency flattening, trapping and object-inspector ink readings; page-image export; the rendered page graphics in slide export; and content-aware crop's fallback for an image the embedded decoder cannot read. Features and sub-features outside that list remain available without Ghostscript. A normal interactive Spectra installer offers to open the [official Ghostscript download page](https://ghostscript.com/releases/gsdnld.html); Ghostscript then has its own download, installer and licence. Silent (`/S`) and passive (`/P`) Spectra installs never download, launch or install Ghostscript.
+These features use Ghostscript **10.0 or newer**: scan cleanup and OCR rendering (including batch OCR and the OCR arm of Find); scan-based automatic form detection; visual Compare; printing; PostScript/EPS input and distilling; compression, grayscale, PDF/A, MRC and repair tier 2; PDF/X and CMYK conversion; Output Preview, Ink Manager, soft proofing, raster preflight measurements and repairs, transparency flattening, trapping and object-inspector ink readings; page-image export; the rendered page graphics in slide export; and content-aware crop's fallback for an image the embedded decoder cannot read. The Windows installer and the portable zip include Ghostscript in Spectra's own install folder; nothing is installed system-wide and nothing is downloaded during installation. The `.deb` and the `.rpm` install the distribution's `ghostscript` package. A Ghostscript named in Preferences ▸ Engine or in `SPECTRAPDF_GS_PATH` is used instead of the included one. Features and sub-features outside that list do not use Ghostscript.
 
 > **Code signing:** Official Windows release builds published on the [releases page](https://github.com/jasonulbright/Spectra-PDF/releases) are Authenticode code-signed. An installer you build locally with `npm run package:unsigned` is not signed.
 >
@@ -422,7 +415,7 @@ Ghostscript **10.0 or newer** is a separately installed requirement for these fe
 | Rust | Stable toolchain; packaging also needs the `aarch64-pc-windows-msvc` target (`rustup target add aarch64-pc-windows-msvc`) |
 | Visual Studio C++ build tools | Packaging only: in the Visual Studio Installer, *MSVC C++ ARM64/ARM64EC build tools (Latest)* under *Desktop development with C++* supplies the ARM64 linker |
 | Windows SDK | Packaging only: `makeappx.exe` packs the File Explorer command packages |
-| Ghostscript | 10.0+; optional except for the end-user features listed above. Not vendored or shipped; install it separately to use those features and to run the capability-present half of the test suite |
+| Ghostscript | 10.0+. On Windows, `npm run prepackage` vendors it. On Linux, install the distribution's `ghostscript` package. The capability-present half of the test suite uses it |
 
 Python 3.14 is embedded automatically — no system install needed.
 
@@ -442,19 +435,13 @@ npm run prepackage
 npm run dev
 ```
 
-`npm run prepackage` runs eleven provisioning steps in order: embedded Python,
-the ICC colour profiles, the edit fonts, LibreOffice, native Tesseract, the
-JBIG2 encoder, the spelling dictionaries, the Finnish morphological analyser,
-the File Explorer command folder, the OCR language models, and the pdf.js
-assets. The File Explorer command handler itself is built, signed and packed
+`npm run prepackage` runs twelve provisioning steps in order: embedded Python,
+Ghostscript, the ICC colour profiles, the edit fonts, LibreOffice, native
+Tesseract, the JBIG2 encoder, the spelling dictionaries, the Finnish
+morphological analyser, the File Explorer command folder, the OCR language
+models, and the pdf.js assets. The File Explorer command handler itself is built, signed and packed
 during the bundle step of `cargo tauri build`. To run one on its own, see
 **Individual steps** below.
-
-Ghostscript is deliberately not among them: it is not shipped with the product
-and no script vendors it. Install it on your development machine the way a user
-would — the app, the CLI and the test suite all discover a system install — and
-the features that need it light up. Without one, the suite's
-capability-present half cannot run; nothing else is affected.
 
 ## Build
 
@@ -473,7 +460,7 @@ a local installer use `package:unsigned`: the installer is identical, it just
 skips the updater artifacts, which only the publish workflow
 (`.github/workflows/release.yml`) has any use for.
 
-Either package script runs, in order: `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-icc.ps1` (stages the 22 ICC colour profiles committed under `vendor/icc`, each sha256-verified against `scripts/icc-profiles.tsv` on the way out and again on disk — no network, and the build refuses if a profile lacks its notice row), `scripts/sync-edit-fonts.ps1` (the hash-pinned edit faces and their OFL licence texts — Liberation, Libertinus, Noto Sans CJK SC, IBM Plex Sans Arabic, Noto Sans Hebrew and Noto Sans Mongolian), `scripts/bundle-libreoffice.ps1` (the pinned, checksum-verified export runtime — copies a local install if you have one, else downloads it), `scripts/bundle-tesseract.ps1` (the pinned, SHA-256-verified native OCR engine, plus every redistribution notice for the ~50 libraries it links — the build REFUSES if any shipped binary lacks one), `scripts/bundle-jbig2enc.ps1` (the pinned upstream JBIG2 encoder the MRC pass needs, under the same notice gate), `scripts/bundle-dictionaries.ps1` (the 35 hash-pinned Hunspell spelling dictionaries and their notices), `scripts/bundle-voikko.ps1` (the hash-pinned Finnish morphological analyser and its notices — it writes into the same dictionaries tree, which `bundle-dictionaries.ps1` rebuilds wholesale, so it must run after it), `scripts/build-shell-menu.ps1 -Prepare` (creates the File Explorer command folder), `scripts/sync-ocr-assets.mjs` (the 47 pinned OCR language models) and `scripts/sync-pdfjs-assets.mjs` — all into `resources/` — then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, runs `scripts/build-shell-menu.ps1` to build the x64 and ARM64 File Explorer command handlers and their packages, produces the NSIS installer). Eight of those produce a `tauri.conf.json` resource directory (`python`, `icc`, `fonts`, `libreoffice`, `tesseract`, `jbig2enc`, `dictionaries`, `shell`), and **every one must exist before a build can succeed** — Tauri validates resource paths even with `--no-bundle`.
+Either package script runs, in order: `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (the pinned, SHA-256-verified upstream Ghostscript, unpacked without running its installer — the build refuses if the tree carries an unlisted binary or the notice row is missing), `scripts/bundle-icc.ps1` (stages the 22 ICC colour profiles committed under `vendor/icc`, each sha256-verified against `scripts/icc-profiles.tsv` on the way out and again on disk — no network, and the build refuses if a profile lacks its notice row), `scripts/sync-edit-fonts.ps1` (the hash-pinned edit faces and their OFL licence texts — Liberation, Libertinus, Noto Sans CJK SC, IBM Plex Sans Arabic, Noto Sans Hebrew and Noto Sans Mongolian), `scripts/bundle-libreoffice.ps1` (the pinned, checksum-verified export runtime — copies a local install if you have one, else downloads it), `scripts/bundle-tesseract.ps1` (the pinned, SHA-256-verified native OCR engine, plus every redistribution notice for the ~50 libraries it links — the build REFUSES if any shipped binary lacks one), `scripts/bundle-jbig2enc.ps1` (the pinned upstream JBIG2 encoder the MRC pass needs, under the same notice gate), `scripts/bundle-dictionaries.ps1` (the 35 hash-pinned Hunspell spelling dictionaries and their notices), `scripts/bundle-voikko.ps1` (the hash-pinned Finnish morphological analyser and its notices — it writes into the same dictionaries tree, which `bundle-dictionaries.ps1` rebuilds wholesale, so it must run after it), `scripts/build-shell-menu.ps1 -Prepare` (creates the File Explorer command folder), `scripts/sync-ocr-assets.mjs` (the 47 pinned OCR language models) and `scripts/sync-pdfjs-assets.mjs` — all into `resources/` — then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, runs `scripts/build-shell-menu.ps1` to build the x64 and ARM64 File Explorer command handlers and their packages, produces the NSIS installer). Nine of those produce a `tauri.conf.json` resource directory (`python`, `ghostscript`, `icc`, `fonts`, `libreoffice`, `tesseract`, `jbig2enc`, `dictionaries`, `shell`), and **every one must exist before a build can succeed** — Tauri validates resource paths even with `--no-bundle`.
 
 Output: `src-tauri/target/release/bundle/nsis/Spectra PDF_X.Y.Z_x64-setup.exe`
 
@@ -502,7 +489,7 @@ Output: `src-tauri/target/release/bundle/nsis/Spectra PDF_X.Y.Z_x64-setup.exe`
   - Organize board (page strips)           - Sidecar management                     - pdfminer.six (text)
   - Navigation pane                        - System tray                            - pyHanko (signatures)
   - Tool dock (26 tools) + status bar      - Single instance + window claims        - Tesseract (upstream: OCR)
-  - Command registry + keymap              - Update check (notify-only)             - Ghostscript (user-installed:
+  - Command registry + keymap              - Update check (notify-only)             - Ghostscript (upstream:
   - pdf.js render + text layer             - Registry policy check                    compress, PDF/A, print,
                                            - Scheduler / watched folders              distill, separations)
                                            - Virtual printer listener
@@ -511,7 +498,7 @@ Output: `src-tauri/target/release/bundle/nsis/Spectra PDF_X.Y.Z_x64-setup.exe`
 Documents are owned by one window at a time; a second window is a second workspace, and ownership is held in Rust so a renderer that goes away cannot leave a document claimed.
 
 **Frontend**: Tauri v2 (WebView2), React 19, TailwindCSS, pdf.js, pdf-lib
-**Backend**: Rust (Tauri commands) + Python 3.14 (embedded), pikepdf, pdfminer.six, pyHanko, Tesseract (upstream, Apache-2.0), and a user-installed Ghostscript where a feature needs one
+**Backend**: Rust (Tauri commands) + Python 3.14 (embedded), pikepdf, pdfminer.six, pyHanko, Tesseract (upstream, Apache-2.0), and Ghostscript (upstream, separate process)
 **IPC**: Tauri `invoke()` (JS→Rust), JSON-RPC 2.0 over stdin/stdout (Rust→Python)
 
 ### What powers each feature
@@ -531,7 +518,7 @@ versions: [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
 | Signer identity vouched for by a public trust programme | Bundled trust-list snapshots from multiple sources (read offline; nothing downloaded while you work) | see notices |
 | Signing where the key stays at a service | Cloud Signature Consortium API | open specification |
 | OCR — single documents and batch folder mirroring | Native Tesseract (bundled, separate process) | Apache-2.0 |
-| Compress, grayscale, PDF/A, PDF/X, separations & soft proof, print rasterization, page-image export, repair tier 2, **Create PDF from PostScript (distilling)** | Ghostscript — **user-installed, not shipped**, invoked as a separate process | AGPL-3.0, licensed to you by Artifex |
+| Compress, grayscale, PDF/A, PDF/X, separations & soft proof, print rasterization, page-image export, repair tier 2, **Create PDF from PostScript (distilling)** | Ghostscript (bundled on Windows and in the AppImage; the distribution's package for the .deb and .rpm; separate process) | AGPL-3.0 |
 | JBIG2 text stencils for MRC scan compression | jbig2enc (vendored upstream, separate process) | Apache-2.0 |
 | Export to Word / RTF / ODT / HTML / XHTML | LibreOffice (bundled, separate process) | MPL-2.0 |
 | Export to spreadsheet / presentation / plain text | The Python engine itself | MIT |
@@ -596,4 +583,4 @@ spectrapdf/
 
 ## License
 
-MIT (application code). Bundled third-party components and their licenses are listed in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md). Ghostscript is not bundled: it is an optional prerequisite you install and are licensed for separately, by Artifex, under the AGPL-3.0.
+MIT (application code). Bundled third-party components and their licenses are listed in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).

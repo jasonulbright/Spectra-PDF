@@ -17,8 +17,8 @@ describe('preferences dialog', () => {
   });
 
   it('shows ONE category at a time', async () => {
-    // The point of the split: the licence notice is not sharing a column with
-    // the Ghostscript picker any more.
+    // The point of the split: the licence notice does not share a column with
+    // the Ghostscript setting.
     await expect($('[data-testid="licenses-note"]')).not.toBeExisting();
     await $('[data-testid="prefs-cat-engine"]').click();
     await expect($('[data-testid="prefs-body-engine"]')).toBeDisplayed();

@@ -1,7 +1,6 @@
 // The renderer's ONE Ghostscript answer (lib/gs-capability), and the
 // decisions the 25 gs-bearing surfaces take from it.
 //
-// Ghostscript is a user-supplied prerequisite: the distribution ships none.
 // Three resolvers used to answer this question independently and each
 // returned a PATH — a string a spawn can fail on rather than an answer a
 // surface can render. What is tested here is the collapse: one probe per
@@ -17,13 +16,17 @@ import {
   GS_NOT_CONFIGURED,
   GS_NOT_EXECUTABLE,
   GS_PROBE_FAILED,
+  GS_SOURCE_BUNDLED,
+  GS_SOURCE_REGISTRY,
   GS_UNRESOLVED,
   GS_VERSION_BELOW_MINIMUM,
   GsUnavailableError,
   ensureGsCapability,
   gsBlocked,
   gsCapability,
+  gsOriginKey,
   gsPathIfAvailable,
+  pinGsCapability,
   gsStateKey,
   openGsSetup,
   refreshGsCapability,
@@ -100,14 +103,72 @@ describe('the session answer', () => {
   it('asks about the CONFIGURED path, and about discovery when there is none', async () => {
     probe.mockResolvedValue(ready);
     await ensureGsCapability();
-    // '' is "find one", never "use the bundled copy" — there is no bundled
-    // copy to fall back to.
+    // Nothing configured asks for the default; the resolver, not the
+    // renderer, decides between the included copy and discovery.
     expect(probe).toHaveBeenLastCalledWith(undefined);
 
     resetGsCapability();
     store.set('spectra-settings', JSON.stringify({ gsPath: 'D:\\gs\\gswin64c.exe' }));
     await ensureGsCapability();
     expect(probe).toHaveBeenLastCalledWith('D:\\gs\\gswin64c.exe');
+  });
+});
+
+describe('where the answer came from', () => {
+  const bundled = {
+    ...ready,
+    path: 'C:\\Program Files\\Spectra PDF\\ghostscript\\gswin64c.exe',
+    version: '10.08.0',
+    source: GS_SOURCE_BUNDLED,
+  };
+
+  it('passes the resolver source through a first probe', async () => {
+    probe.mockResolvedValue(bundled);
+    expect((await ensureGsCapability()).source).toBe(GS_SOURCE_BUNDLED);
+  });
+
+  it('passes it through a refresh', async () => {
+    reprobe.mockResolvedValue({ ...ready, source: GS_SOURCE_REGISTRY });
+    expect((await refreshGsCapability()).source).toBe(GS_SOURCE_REGISTRY);
+    expect(gsCapability().source).toBe(GS_SOURCE_REGISTRY);
+  });
+
+  it('reads a missing or malformed field as no source', async () => {
+    probe.mockResolvedValue(ready);
+    expect((await ensureGsCapability()).source).toBe('');
+    resetGsCapability();
+    probe.mockResolvedValue({ ...ready, source: 7 as unknown as string });
+    expect((await ensureGsCapability()).source).toBe('');
+  });
+
+  it('starts with no source while pending, and a failed refresh carries none', async () => {
+    expect(gsCapability().source).toBe('');
+    reprobe.mockRejectedValue(new Error('no'));
+    expect((await refreshGsCapability('X:\\nothing.exe')).source).toBe('');
+  });
+
+  it('keeps the source of a pinned answer', () => {
+    expect(pinGsCapability(bundled).source).toBe(GS_SOURCE_BUNDLED);
+    expect(pinGsCapability({ ...absent }).source).toBe('');
+  });
+
+  it('names the origin: chosen, included, or found', () => {
+    const settle = (answer: object) => pinGsCapability(answer as typeof ready);
+    expect(gsOriginKey(false, settle(bundled))).toBe('panel.settings.gsBundled');
+    expect(gsOriginKey(false, settle({ ...ready, source: GS_SOURCE_REGISTRY }))).toBe(
+      'panel.settings.gsDiscovered',
+    );
+    expect(gsOriginKey(false, settle(ready))).toBe('panel.settings.gsDiscovered');
+    // A chosen path is named as chosen whether or not it runs.
+    expect(gsOriginKey(true, settle(bundled))).toBe('panel.settings.gsChosen');
+    expect(gsOriginKey(true, settle({ ...absent, reason: GS_NOT_EXECUTABLE }))).toBe(
+      'panel.settings.gsChosen',
+    );
+  });
+
+  it('names no origin when nothing resolved', () => {
+    expect(gsOriginKey(false, pinGsCapability(absent))).toBeNull();
+    expect(gsOriginKey(false, pinGsCapability({ ...absent, reason: GS_PROBE_FAILED }))).toBeNull();
   });
 });
 

@@ -52,9 +52,9 @@ def tmp_pdf(sample_pdf, tmp_dir):
 def gs_path():
     """The capability-present axis: the Ghostscript the authority validated.
 
-    Not a vendored path — nothing in the distribution provides Ghostscript,
-    so the question is "did the authority find a usable one?" and the answer
-    comes from `engine.gs_capability` rather than from a directory listing.
+    Not a vendored path: the question is "did the authority find a usable
+    one?", and the answer comes from `engine.gs_capability` (explicit,
+    environment, bundled, PATH) rather than from a directory listing.
     """
     if not GS_PATH:
         pytest.skip(PRESENT_AXIS_SKIP)

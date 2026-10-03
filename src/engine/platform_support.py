@@ -277,8 +277,47 @@ def image_env(args, env=None, root: str | None = None):
     return cleaned
 
 
+#: The bundled Ghostscript's search path: its compiled-in ROM file system
+#: alone. Ghostscript reads GS_LIB from the environment and consults the
+#: registry value of the same name only when the variable is absent; a
+#: separately installed Ghostscript of the same version registers its own lib
+#: and fonts directories there, which would otherwise precede the ROM.
+BUNDLED_GS_LIB = "%rom%Resource/Init/;%rom%lib/"
+
+
+def bundled_gs_programs(engine_dir: Path | None = None) -> tuple[str, ...]:
+    """The bundled Windows Ghostscript's possible paths, normalized for comparison."""
+    if not IS_WINDOWS:
+        return ()
+    base = engine_dir if engine_dir is not None else Path(__file__).parent
+    return tuple(
+        os.path.normcase(os.path.realpath(candidate))
+        for candidate in vendored_candidates(base, "ghostscript", "gswin64c.exe")
+    )
+
+
+def bundled_gs_env(args, env=None, engine_dir: Path | None = None):
+    """The environment for a child that is the bundled Ghostscript, or None to keep `env`."""
+    programs = bundled_gs_programs(engine_dir)
+    if not programs:
+        return None
+    if isinstance(args, (str, bytes, os.PathLike)):
+        words = os.fsdecode(args).split()
+        first = words[0] if words else ""
+    else:
+        first = os.fsdecode(os.fspath(args[0])) if args else ""
+    if not first or os.path.normcase(os.path.realpath(first)) not in programs:
+        return None
+    child = dict(os.environ if env is None else env)
+    child["GS_LIB"] = BUNDLED_GS_LIB
+    return child
+
+
 def _image_spawn(args, kwargs):
     env = image_env(args, kwargs.get("env"))
+    if env is not None:
+        kwargs = dict(kwargs, env=env)
+    env = bundled_gs_env(args, kwargs.get("env"))
     if env is not None:
         kwargs = dict(kwargs, env=env)
     return image_argv(args), kwargs

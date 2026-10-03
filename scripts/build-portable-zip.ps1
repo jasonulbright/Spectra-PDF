@@ -70,6 +70,7 @@ $ErrorActionPreference = "Stop"
 $runtimes = @{
     "engine"       = ""
     "python"       = "Python"
+    "ghostscript"  = "## Ghostscript"
     "tesseract"    = "Tesseract"
     "libreoffice"  = "LibreOffice"
     "jbig2enc"     = "jbig2enc"

@@ -6,9 +6,9 @@
 // consumers; nothing here may touch the DOM, Tauri, or React.
 
 export interface Settings {
-  /** The Ghostscript program the user chose, or '' to use whichever install
-   * discovery finds. Never written without a passing probe — and never a
-   * bundled path: the distribution ships no Ghostscript. */
+  /** The Ghostscript program the user chose, or '' for the default: the
+   * included copy, else an install discovery finds. Never written without a
+   * passing probe. */
   gsPath: string;
   defaultOutputDir: string;
   compressionQuality: string;
@@ -32,9 +32,9 @@ export interface Settings {
   checkUpdatesOnLaunch: boolean;
   /** Offer the Ghostscript set-up route at launch when nothing answers.
    *
-   * Default ON. Ghostscript is a user-supplied prerequisite the distribution
-   * ships none of, so a copy that has never had one gated ten features
-   * silently until the user opened Preferences ▸ Engine on their own. The
+   * Default ON. A copy where no Ghostscript resolves — the included copy
+   * damaged or a system package removed — gates ten features, and without
+   * the offer nothing says so until the user opens Preferences ▸ Engine. The
    * dialog's "Don't ask again" clears this; Preferences ▸ Engine is the way
    * back. Off changes nothing else — the per-surface notices still name the
    * prerequisite where it is needed. */
@@ -170,10 +170,10 @@ export function loadSettings(): Settings {
     if (typeof parsed.minimizeToTray === 'string') {
       parsed.minimizeToTray = parsed.minimizeToTray === 'true';
     }
-    // An install upgraded from the bundled-Ghostscript build carries a
-    // gsPath pointing into the app's own resource tree, which no longer
-    // exists. Dropping it returns that install to discovery rather than
-    // leaving it pinned to a path nothing answers at.
+    // A gsPath under a `resources/ghostscript` directory names a layout no
+    // install carries; the included copy sits in `ghostscript/` beside the
+    // executable. Dropping it returns resolution to the default, which finds
+    // the included copy, instead of pinning a path nothing answers at.
     if (typeof parsed.gsPath === 'string' && /[\\/]resources[\\/]ghostscript[\\/]/i.test(parsed.gsPath)) {
       parsed.gsPath = '';
     }

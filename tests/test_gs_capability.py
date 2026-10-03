@@ -7,6 +7,7 @@ ONE named refusal rather than as a spawn failure at whichever door was asked.
 """
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -190,6 +191,99 @@ def test_the_environment_override_is_discovered(monkeypatch, tmp_path):
     assert answer.path == GS
 
 
+def test_discovery_orders_the_environment_then_the_bundle_then_path(monkeypatch, tmp_path):
+    env = str(tmp_path / "env" / "gswin64c.exe")
+    bundled = str(tmp_path / "bundle" / "gswin64c.exe")
+    on_path = str(tmp_path / "path" / "gswin64c.exe")
+    monkeypatch.setenv(gc.PATH_ENV_VAR, env)
+    monkeypatch.setattr(gc, "bundled_candidates", lambda: [bundled])
+    monkeypatch.setattr(
+        gc.shutil, "which", lambda name, *_a, **_k: on_path if name == gc._CANDIDATE_NAMES[0] else None
+    )
+    assert gc.discover() == [env, bundled, on_path]
+
+
+def test_a_bundled_copy_named_again_on_path_is_one_candidate(monkeypatch, tmp_path):
+    bundled = str(tmp_path / "bundle" / "gswin64c.exe")
+    monkeypatch.setattr(gc, "bundled_candidates", lambda: [bundled])
+    monkeypatch.setattr(gc.shutil, "which", lambda *_a, **_k: bundled)
+    assert gc.discover() == [bundled]
+
+
+def test_the_bundled_candidate_is_the_windows_tree_and_only_a_file(monkeypatch, tmp_path):
+    engine_dir = tmp_path / "engine"
+    engine_dir.mkdir()
+    stub_dir = tmp_path / "ghostscript"
+    stub_dir.mkdir()
+    monkeypatch.setattr(gc, "__file__", str(engine_dir / "gs_capability.py"))
+    (stub_dir / "gswin64c.exe").write_bytes(b"")
+    if os.name != "nt":
+        assert gc.bundled_candidates() == []
+        return
+    assert gc.bundled_candidates() == [str(stub_dir / "gswin64c.exe")]
+    (stub_dir / "gswin64c.exe").unlink()
+    # An empty stub folder (the CI resource stubs) is no candidate: it must
+    # leave the answer NOT_CONFIGURED, not turn it into NOT_EXECUTABLE.
+    assert gc.bundled_candidates() == []
+    (stub_dir / "gswin64c.exe").mkdir()
+    assert gc.bundled_candidates() == []
+
+
+def test_an_empty_bundle_folder_leaves_nothing_configured(monkeypatch, tmp_path):
+    engine_dir = tmp_path / "engine"
+    engine_dir.mkdir()
+    (tmp_path / "ghostscript").mkdir()
+    monkeypatch.setattr(gc, "__file__", str(engine_dir / "gs_capability.py"))
+    monkeypatch.setattr(gc.platform_support, "DEV_PLATFORM_DIR", "")
+    monkeypatch.setattr(gc.shutil, "which", lambda *_a, **_k: None)
+    answer = gc.resolve("")
+    assert not answer.available
+    assert answer.reason == gc.NOT_CONFIGURED
+
+
+def test_only_the_bundled_program_is_spawned_on_the_rom_search_path(monkeypatch, tmp_path):
+    ps = gc.platform_support
+    engine_dir = tmp_path / "engine"
+    engine_dir.mkdir()
+    bundled = tmp_path / "ghostscript" / "gswin64c.exe"
+    monkeypatch.setattr(ps, "IS_WINDOWS", True)
+    monkeypatch.setattr(ps, "DEV_PLATFORM_DIR", "")
+    env = ps.bundled_gs_env([str(bundled), "--version"], {"PATH": "x"}, engine_dir)
+    assert env == {"PATH": "x", "GS_LIB": ps.BUNDLED_GS_LIB}
+    assert ps.bundled_gs_env(str(bundled) + " --version", {}, engine_dir)["GS_LIB"] == ps.BUNDLED_GS_LIB
+    other = tmp_path / "gs" / "bin" / "gswin64c.exe"
+    assert ps.bundled_gs_env([str(other), "--version"], {}, engine_dir) is None
+    assert ps.bundled_gs_env([], {}, engine_dir) is None
+    monkeypatch.setattr(ps, "IS_WINDOWS", False)
+    assert ps.bundled_gs_env([str(bundled), "--version"], {}, engine_dir) is None
+
+
+@pytest.mark.skipif(
+    not gc.bundled_candidates(), reason="no vendored resources/ghostscript in this checkout"
+)
+def test_the_vendored_copy_searches_only_its_rom(monkeypatch):
+    # With GS_LIB absent from the parent, a same-version registry value
+    # would otherwise appear first in this listing.
+    monkeypatch.delenv("GS_LIB", raising=False)
+    result = gc.platform_support.run(
+        [gc.bundled_candidates()[0], "-h"], capture_output=True, text=True, timeout=60
+    )
+    listing = result.stdout.split("Search path:", 1)[1].split("Initialization files", 1)[0]
+    entries = [entry.strip() for entry in " ".join(listing.split()).split(" ; ") if entry.strip()]
+    assert entries and all(entry.startswith("%rom%") for entry in entries), entries
+
+
+def test_the_bundled_version_meets_the_minimum():
+    script = os.path.join(
+        os.path.dirname(__file__), "..", "scripts", "bundle-ghostscript.ps1"
+    )
+    with open(script, encoding="utf-8") as handle:
+        text = handle.read()
+    pinned = re.findall(r'\[string\]\$GsVersion = "([0-9.]+)"', text)
+    assert len(pinned) == 1, pinned
+    assert gc.parse_version(pinned[0])[:2] >= gc.MINIMUM_VERSION
+
+
 def test_an_explicit_failure_never_falls_through_to_discovery(tmp_path, monkeypatch):
     # A machine with a working Ghostscript elsewhere must not silently answer
     # for the path the user actually named — a settings screen that reports
@@ -270,7 +364,7 @@ def test_require_raises_the_named_refusal_carrying_its_reason(monkeypatch):
         gc.require("")
     assert caught.value.reason == gc.NOT_CONFIGURED
     assert "Ghostscript" in str(caught.value)
-    assert "ghostscript.com" in str(caught.value)
+    assert "Reinstall Spectra PDF" in str(caught.value)
 
 
 def test_every_reason_has_its_own_message(tmp_path):
@@ -284,7 +378,7 @@ def test_every_reason_has_its_own_message(tmp_path):
 
 
 #: The fix the window's text names, as `_refuse` writes it.
-WINDOW_FIX = "then set its path in Preferences > Engine."
+WINDOW_FIX = "Reinstall Spectra PDF, or choose a Ghostscript program in Preferences > Engine."
 
 
 def _unavailable_answers(directory):
@@ -315,12 +409,13 @@ def test_the_command_line_names_its_flag_and_variable_for_every_reason(tmp_path,
     for reason, answer in answers.items():
         text = gc.message(answer)
         assert text.endswith(
-            f"then name it with --gs-path or the {gc.PATH_ENV_VAR} environment variable."
+            "Reinstall Spectra PDF, or name a Ghostscript program with --gs-path or "
+            f"the {gc.PATH_ENV_VAR} environment variable."
         ), (reason, text)
         assert "Preferences" not in text, (reason, text)
         # The problem half is built from the refusal's own fields, so it
         # reads as the window's does: only the fix differs.
-        assert text.split(". Install")[0] == window[reason].split(". Install")[0], reason
+        assert text.split(". Reinstall")[0] == window[reason].split(". Reinstall")[0], reason
 
 
 def test_the_raised_refusal_names_the_fix_of_the_surface_that_shows_it(tmp_path, monkeypatch):

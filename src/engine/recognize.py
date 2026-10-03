@@ -5,8 +5,8 @@ runs. Keeping recognition in the engine supports headless operation and avoids
 multiple recognizers disagreeing about the same page.
 
 The pipeline is two external tools, both already required by the product
-(tesseract ships with it; Ghostscript is user-supplied and validated before
-each raster):
+(tesseract ships with it; Ghostscript is bundled with it or installed as a
+package dependency, and validated before each raster):
 
     page -> Ghostscript raster (PNG, 300 dpi) -> tesseract TSV -> word boxes
 

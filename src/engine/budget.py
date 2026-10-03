@@ -416,8 +416,8 @@ def gs(cmd: list[str], *, what: str, path: str | Path, pages: int = 0,
     ones get more. Lowering the floor would have converted a slow-but-passing
     small job into a new failure — fixing a timeout by introducing one.
 
-    Ghostscript is user-supplied, so this is also where its availability is
-    decided: `cmd[0]` is validated by `gs_capability` and REPLACED with the
+    A configured Ghostscript can be missing or broken, so this is also where
+    its availability is decided: `cmd[0]` is validated by `gs_capability` and REPLACED with the
     validated path before anything spawns. Deciding it here rather than at
     each door is what makes the refusal one message instead of a dozen
     spellings of "file not found", and what stops an unconfigured run from

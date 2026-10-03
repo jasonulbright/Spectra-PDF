@@ -871,16 +871,19 @@ pub fn get_tesseract_path(app: &AppHandle) -> String {
     dunce::simplified(&exe).to_string_lossy().to_string()
 }
 
-/// The vendored Ghostscript path, if this build still carries one.
+/// The bundled Ghostscript path: the install tree's `ghostscript/gswin64c.exe`,
+/// else an AppImage's own `bin/gs`; `None` when neither file exists.
 ///
-/// A CANDIDATE, never the answer: Ghostscript is user-supplied, the resource
-/// tree may hold no copy at all, and a path string is not a capability. It is
-/// the last input to `gs::resolve` and nothing else may consume it.
+/// A CANDIDATE, never the answer: a path string is not a capability, and an
+/// explicit setting or `SPECTRAPDF_GS_PATH` outranks it. It is an input to
+/// `gs::resolve` and nothing else may consume it. The verbatim prefix that
+/// `resource_dir()` carries on Windows is stripped, because the path is shown
+/// on the settings surface and handed to the engine as-is.
 pub fn bundled_gs_candidate(app: &AppHandle) -> Option<PathBuf> {
     let resource_dir = app.path().resource_dir().ok()?;
     let exe = resource_dir.join("ghostscript").join("gswin64c.exe");
     if exe.is_file() {
-        return Some(exe);
+        return Some(dunce::simplified(&exe).to_path_buf());
     }
     crate::gs::image_candidate()
 }

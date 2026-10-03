@@ -1,7 +1,9 @@
 // Is a usable Ghostscript configured? — the renderer's ONE answer.
 //
-// Ghostscript is a user-supplied prerequisite: the distribution provides
-// none. Three resolvers used to answer this question independently — the
+// Resolution order lives in Rust (`src-tauri/src/gs.rs`): an explicit path,
+// the environment, the copy included with the app, the registry, then PATH.
+// A configured path that fails is the whole answer and never falls through.
+// Three resolvers used to answer this question independently — the
 // settings panel's `ensureGsPath`, `ocr-recognize.ghostscriptPath`, and a
 // direct `app.getGsPath()` in the scan dialog — and each returned a PATH,
 // which is a string a spawn can fail on rather than an answer a surface can
@@ -14,8 +16,8 @@
 // theme and IPC side effects into the command layer and into vitest, which
 // has no `window`. Nothing here may touch React, the DOM, or a component.
 //
-// The answer is LIVE: installing Ghostscript and pointing the setting at it
-// lights every dependent surface up in place. Two halves make that work — a
+// The answer is LIVE: pointing the setting at a working Ghostscript lights
+// every dependent surface up in place. Two halves make that work — a
 // synchronous snapshot for render-time and `when`-predicate reads, and a
 // subscription every surface re-renders on when a probe lands.
 
@@ -31,6 +33,14 @@ export const GS_VERSION_BELOW_MINIMUM = 'version-below-minimum';
 /** No probe has landed yet this session — not a refusal. */
 export const GS_UNRESOLVED = 'unresolved';
 
+/** Which resolver candidate answered, mirroring `GsAnswer.source` in
+ * `src-tauri/src/gs.rs`. Empty when nothing resolved. */
+export const GS_SOURCE_EXPLICIT = 'explicit';
+export const GS_SOURCE_ENVIRONMENT = 'environment';
+export const GS_SOURCE_BUNDLED = 'bundled';
+export const GS_SOURCE_REGISTRY = 'registry';
+export const GS_SOURCE_PATH = 'path';
+
 /** One validated answer about Ghostscript. The Rust command's shape plus
  * `pending`, which the renderer alone knows: whether a probe has landed. */
 export interface GsCapability {
@@ -41,6 +51,9 @@ export interface GsCapability {
   reason: string;
   /** Probe output for the settings surface; never matched on. */
   detail: string;
+  /** One of the `GS_SOURCE_*` values; empty when nothing resolved or when
+   * the bridge predates the field. */
+  source: string;
   /** True until the first probe of this session resolves. A pending answer
    * is NOT an absent one: a surface disabled on it would flash disabled on
    * every launch, and a run started in that window is refused by name by
@@ -54,10 +67,11 @@ const UNRESOLVED: GsCapability = {
   version: '',
   reason: GS_UNRESOLVED,
   detail: '',
+  source: '',
   pending: true,
 };
 
-type BridgeAnswer = Omit<GsCapability, 'pending'>;
+type BridgeAnswer = Omit<GsCapability, 'pending' | 'source'> & { source?: string };
 
 let current: GsCapability = UNRESOLVED;
 let inFlight: Promise<GsCapability> | null = null;
@@ -77,13 +91,13 @@ function settled(answer: BridgeAnswer): GsCapability {
     version: answer.version ?? '',
     reason: answer.available ? '' : (answer.reason || GS_PROBE_FAILED),
     detail: answer.detail ?? '',
+    source: typeof answer.source === 'string' ? answer.source : '',
     pending: false,
   };
 }
 
 /** The explicit path the user configured, or undefined for discovery
- * (environment → registry → PATH). Empty means "find one", never "use the
- * bundled copy" — there is no bundled copy to fall back to. */
+ * (environment → included copy → registry → PATH). */
 function configuredPath(): string | undefined {
   const stored = loadSettings().gsPath.trim();
   return stored === '' ? undefined : stored;
@@ -174,8 +188,8 @@ export class GsUnavailableError extends Error {
  * use the catalog key (`panel.common.gsRequired`); this is what reaches a
  * caller that can only show `String(error)`. */
 export const GS_REQUIRED_MESSAGE =
-  'This feature needs Ghostscript, which Spectra PDF does not include. ' +
-  'Install it and point Spectra PDF at it in Preferences ▸ Engine.';
+  'This feature needs a working Ghostscript, and none is available. ' +
+  'Reinstall Spectra PDF, or choose a Ghostscript program in Preferences ▸ Engine.';
 
 /**
  * The gs path for a call that cannot proceed without one.
@@ -204,7 +218,8 @@ export async function requireGsPath(): Promise<string> {
  *
  * A pending answer means no probe reached the resolver, whose search also
  * reads the registry; the engine's own search on `''` reads only the
- * environment and PATH. So a second probe runs before `''` is handed over.
+ * environment, the included copy and PATH. So a second probe runs before
+ * `''` is handed over.
  */
 export async function gsPathIfAvailable(): Promise<string> {
   let capability = await ensureGsCapability();
@@ -243,6 +258,22 @@ export function gsStateKey(capability: GsCapability = current): string | null {
   }
 }
 
+/**
+ * The catalog key naming where the Ghostscript in use comes from, or null when
+ * there is nothing to name.
+ *
+ * A configured path is the user's choice whether or not it runs. Without one,
+ * an origin is named only for a copy that resolved: an unresolved answer has
+ * no source, and "found on this PC" beside "not set up" would contradict it.
+ */
+export function gsOriginKey(configured: boolean, capability: GsCapability = current): string | null {
+  if (configured) return 'panel.settings.gsChosen';
+  if (!capability.available) return null;
+  return capability.source === GS_SOURCE_BUNDLED
+    ? 'panel.settings.gsBundled'
+    : 'panel.settings.gsDiscovered';
+}
+
 // ── Launch recovery ─────────────────────────────────────────────────────
 
 /**
@@ -250,9 +281,9 @@ export function gsStateKey(capability: GsCapability = current): string | null {
  *
  * An upgrade or uninstall removes the executable a saved path names, and the
  * saved path then refuses every Ghostscript surface by that path's name while
- * a working install may sit elsewhere on the machine. A configured path whose
+ * the included copy or another install still works. A configured path whose
  * probe reports `not-executable` is therefore replaced by what Preferences ▸
- * Engine "Use Ghostscript from this PC" stores — the empty path, which
+ * Engine "Use the default Ghostscript" stores — the empty path, which
  * resolves by discovery — and discovery is probed at once. A configured path
  * that probes usable, or that exists but refuses for another reason, is kept.
  * When discovery finds nothing, the stored path is empty, so the launch offer
@@ -328,19 +359,18 @@ export function openGsSetup(): void {
 /**
  * Test seam: hold this answer for the session, whatever the machine has.
  *
- * The end-to-end suite has to walk the absent surfaces on a machine that has
- * a working Ghostscript — every developer box and the CI test runner do,
- * because the PRESENT axis needs one — and there is no way to arrange the
- * absence from outside: discovery reads the registry and the environment as
- * well as PATH, so uninstalling is the only real answer and no suite may do
- * that. A pinned answer is therefore the seam, and it sits at the same place
- * `setTabOrderChannel` does: the module the shipped code already reads,
+ * The end-to-end suite has to walk the absent surfaces with a working
+ * Ghostscript beside the binary, and there is no way to arrange the absence
+ * from outside: the included copy resolves before the registry and PATH are
+ * read, so only deleting files from the build would remove it, and no suite
+ * may do that. A pinned answer is therefore the seam, and it sits at the same
+ * place `setTabOrderChannel` does: the module the shipped code already reads,
  * reached only from the harness, which exists only in a `VITE_E2E` build.
  *
  * Pinning wins over both probe paths, so a surface's own `refresh` cannot
  * lift it. `null` unpins and leaves the session UNRESOLVED — the next ask
- * probes for real, which is how a spec proves that installing Ghostscript
- * lights the surfaces up without a restart.
+ * probes for real, which is how a spec proves that a Ghostscript that starts
+ * resolving lights the surfaces up without a restart.
  */
 export function pinGsCapability(answer: BridgeAnswer | null): GsCapability {
   inFlight = null;

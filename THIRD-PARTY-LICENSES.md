@@ -5,8 +5,6 @@ Spectra PDF's own code is MIT-licensed (see [LICENSE](LICENSE)). The application
 first-party system prerequisite" approach). Each is listed below with its license
 and source. First-party system prerequisites that are **not** vendored — Microsoft
 WebView2, the MSVC runtime — are obtained from the user's Windows installation.
-Ghostscript is a third-party prerequisite on the same footing: optional,
-installed and licensed by the user, never distributed here (see below).
 
 This file ships inside the installed application (as a bundled resource beside the
 other runtime resources) so the notices are available offline; Settings ▸ Updates &
@@ -30,22 +28,23 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-## Ghostscript — not bundled
+## Ghostscript
 
-Ghostscript is **not distributed with Spectra PDF** and no part of it ships in
-the installer, so there is nothing to notice here. It is an optional,
-user-supplied prerequisite: Ghostscript is published by Artifex Software under
-the AGPL-3.0 and is licensed to you by Artifex, separately from Spectra PDF.
-Install it yourself if you want the features that need it — the app discovers
-an installed copy, names it in Settings ▸ Engine, and names Ghostscript plainly
-wherever a feature is unavailable because none is configured.
+- **Version:** 10.08.0 (unmodified upstream Windows x64 build; version- and
+  SHA-256-pinned — vendored by `scripts/bundle-ghostscript.ps1`, which
+  verifies the official installer's SHA-256 and unpacks it with 7-Zip without
+  running it)
+- **License:** GNU Affero General Public License v3, as stated in the vendor's
+  licence file
+- **Role:** Invoked by Spectra PDF as a separate process (no linking).
+- **Binary source:** <https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/tag/gs10080>
+- **Corresponding source:** `ghostscript-10.08.0.tar.gz` from the same
+  release, SHA-256-pinned in `scripts/corresponding-source.tsv`
+- **License text shipped at:** `resources/ghostscript/LICENSE-Ghostscript.txt`
 
-During a normal interactive Spectra PDF installation, the installer may offer
-to open Artifex's official Ghostscript download page. Spectra PDF does not
-download or run the Ghostscript installer: the user chooses a Ghostscript
-licence and completes Artifex's separate installation. Silent (`/S`) and
-passive (`/P`) Spectra PDF installations do not open the page and never
-download, launch, install or accept terms for Ghostscript.
+The Linux .deb and .rpm depend on the distribution's `ghostscript` package;
+the AppImage carries the Arch Linux `ghostscript` package listed under
+AppImage libraries below.
 
 ## JBIG2 encoder (jbig2enc)
 

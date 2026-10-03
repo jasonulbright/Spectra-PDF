@@ -10,8 +10,8 @@
  * Prereqs (one-time per machine):
  *   cargo install tauri-driver --locked
  *   the distribution's WebKitWebDriver package
- *   the distribution's Ghostscript package (a user-supplied prerequisite the
- *   suite needs present, as on Windows)
+ *   the distribution's Ghostscript package (the .deb and .rpm depend on it;
+ *   the debug binary has no included copy, so the suite needs it on PATH)
  *
  * Build the app harness with (from the repo root):
  *   VITE_E2E=1 npx tauri build --debug --no-bundle --features e2e-net-private
@@ -149,7 +149,7 @@ export const config: WebdriverIO.Config = {
     }
     if (!which('gs')) {
       throw new Error(
-        'Ghostscript (gs) is not on PATH. The suite needs the user-supplied prerequisite present; ' +
+        'Ghostscript (gs) is not on PATH. The suite needs it present, as the .deb and .rpm do; ' +
           'install the distribution package.',
       );
     }

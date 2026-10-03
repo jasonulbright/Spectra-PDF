@@ -37,7 +37,7 @@ def _git(*args: str, cwd: Path = ROOT) -> str:
 AXIS_PROVISIONING = {
     ("gs_axis", "PRESENT_AXIS_SKIP"):
         "powershell -ExecutionPolicy Bypass -File "
-        "scripts/install-ghostscript-test-tool.ps1",
+        "scripts/bundle-ghostscript.ps1",
     ("ghent_corpus", "CORPUS_AXIS_SKIP"): "python scripts/fetch-ghent-suite.py --check",
     ("processing_steps_corpus", "PROCESSING_STEPS_AXIS_SKIP"):
         "python scripts/fetch-processing-steps-suite.py --check",
@@ -2276,121 +2276,6 @@ def test_scan_fixture_uses_the_ghostscript_authority() -> None:
     assert "resources\" / \"ghostscript" not in text
 
 
-def test_the_ghostscript_test_tool_install_retries_and_falls_back_pinned() -> None:
-    """The capability-present axis does not rest on one flaky package feed.
-
-    The primary path stays the unpinned current package (what a user gets);
-    the fallback is a pinned upstream installer, hash-verified before it is
-    executed, so an exhausted retry cannot run an unverified binary.
-    """
-    text = (ROOT / "scripts" / "install-ghostscript-test-tool.ps1").read_text(encoding="utf-8")
-    assert "choco install ghostscript -y --no-progress" in text
-    assert "$attempt -le $ChocoAttempts" in text
-    assert "$FallbackSha256 = " in text
-    verify = text.index("$actual -ne $FallbackSha256")
-    assert verify < text.index("Start-Process -FilePath $installer")
-
-
-GS_TEST_TOOL_SCRIPT = "scripts/install-ghostscript-test-tool.ps1"
-
-
-def _gs_script_constant(text: str, name: str) -> int:
-    found = re.findall(rf"^\${name} = (\d+)$", text, re.MULTILINE)
-    assert len(found) == 1, (name, found)
-    return int(found[0])
-
-
-def test_the_ghostscript_test_tool_install_is_bounded_under_its_step_deadline() -> None:
-    """A vendor installer that never exits hung the step for six hours.
-
-    Every Chocolatey attempt carries an execution timeout, leftover installers
-    are killed before anything else runs, the fallback waits on its own
-    process with a deadline (Start-Process -Wait also waits on descendants),
-    and every workflow step running the script has a deadline above the
-    script's worst case.
-    """
-    text = (ROOT / GS_TEST_TOOL_SCRIPT).read_text(encoding="utf-8")
-    attempts = _gs_script_constant(text, "ChocoAttempts")
-    choco_timeout = _gs_script_constant(text, "ChocoTimeoutSeconds")
-    retry_sleep = _gs_script_constant(text, "RetrySleepSeconds")
-    termination_wait = _gs_script_constant(text, "TerminationWaitSeconds")
-    download_attempts = _gs_script_constant(text, "FallbackDownloadAttempts")
-    download_timeout = _gs_script_constant(text, "FallbackDownloadTimeoutSeconds")
-    download_sleep = _gs_script_constant(text, "FallbackDownloadRetrySleepSeconds")
-    fallback_timeout = _gs_script_constant(text, "FallbackTimeoutSeconds")
-    assert 1 <= attempts <= 3
-    assert 0 < choco_timeout <= 600
-    assert 0 < fallback_timeout <= 900
-    # The fallback fetch retries a transient answer; its whole budget, not one
-    # attempt, is what the deadline below has to hold.
-    assert 1 <= download_attempts <= 4
-    assert 0 < download_timeout <= 300
-    assert 0 < download_sleep <= 30
-
-    choco_calls = re.findall(r"^\s*choco install ghostscript\b.*$", text, re.MULTILINE)
-    assert choco_calls == [
-        "    choco install ghostscript -y --no-progress "
-        "--execution-timeout=$ChocoTimeoutSeconds"
-    ]
-    assert "-TimeoutSec $FallbackDownloadTimeoutSeconds" in text
-
-    starts = re.findall(r"^.*Start-Process -FilePath \$installer.*$", text, re.MULTILINE)
-    assert len(starts) == 1, starts
-    assert "-PassThru" in starts[0]
-    assert "-Wait" not in starts[0]
-    start = text.index(starts[0])
-    assert "$proc.WaitForExit($FallbackTimeoutSeconds * 1000)" in text[start:]
-    assert "$null = $proc.Handle" in text[start:]
-    assert not re.search(r"^\s*Wait-Process\b", text, re.MULTILINE)
-    assert not re.search(r"(?m)^[^#\n]*Start-Process\b[^\n]*-Wait\b", text)
-
-    loop = text.index("for ($attempt = 1;")
-    loop_body = text[loop:text.index("if (-not $installed)")]
-    assert "Stop-GhostscriptInstallerProcess" in loop_body
-    assert text.index("function Stop-GhostscriptInstallerProcess") < loop
-    assert "'lib\\Ghostscript.app'" in text
-    assert "'lib-bad\\Ghostscript.app'" in text
-    assert "'^gs\\d+w64\\.exe$'" in text
-
-    worst_case_seconds = (
-        attempts * (choco_timeout + termination_wait)
-        + retry_sleep * attempts * (attempts - 1) // 2
-        + download_attempts * download_timeout
-        + download_sleep * download_attempts * (download_attempts - 1) // 2
-        + fallback_timeout
-        + termination_wait
-    )
-    # Chocolatey's package download and the runner's process start are not
-    # covered by the constants above.
-    overhead_seconds = 300
-
-    invoking_steps = []
-    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
-        raw = workflow.read_text(encoding="utf-8")
-        if GS_TEST_TOOL_SCRIPT not in raw:
-            continue
-        lines = raw.splitlines()
-        jobs = [
-            line[2:-1]
-            for line in lines[lines.index("jobs:") + 1:]
-            if re.fullmatch(r"  [A-Za-z][\w-]*:", line)
-        ]
-        found = [
-            (workflow.name, job, name, step)
-            for job in jobs
-            for name, step in _job_steps(workflow.name, job)
-            if GS_TEST_TOOL_SCRIPT in step
-        ]
-        assert len(found) == raw.count(GS_TEST_TOOL_SCRIPT), workflow.name
-        invoking_steps.extend(found)
-    for workflow, job, name, step in invoking_steps:
-        deadlines = re.findall(r"^        timeout-minutes: (\d+)$", step, re.MULTILINE)
-        assert len(deadlines) == 1, (workflow, job, name, deadlines)
-        assert worst_case_seconds + overhead_seconds < int(deadlines[0]) * 60, (
-            workflow, job, name, worst_case_seconds, deadlines[0],
-        )
-
-
 def test_the_test_hsm_download_is_version_and_hash_pinned() -> None:
     text = (ROOT / "scripts" / "setup-test-softhsm.ps1").read_text(encoding="utf-8")
     assert '$Version = "2.5.0"' in text
@@ -3294,7 +3179,7 @@ RETRY_ROUTED_PS = (
     "install-signing-tools.ps1",
     "verify-release-draft.ps1",
     "add-linux-updater-entry.ps1",
-    "install-ghostscript-test-tool.ps1",
+    "bundle-ghostscript.ps1",
 )
 RETRY_ROUTED_PY = (
     "fetch-ghent-suite.py",
@@ -3611,6 +3496,35 @@ def test_release_smokes_its_vendored_engine_before_publication() -> None:
     assert "tests/fixtures/sample.pdf" in command
     assert "$process.ExitCode -ne 0" in command
     assert "$report.valid -ne $true" in command
+
+
+def test_release_vendors_and_smokes_the_bundled_ghostscript() -> None:
+    steps = _job_steps("release.yml", "release")
+    names = [name for name, _ in steps]
+    vendor = names.index("Vendor Ghostscript (unmodified upstream, SHA-256 pinned)")
+    assert "scripts/bundle-ghostscript.ps1" in steps[vendor][1]
+    assert vendor < names.index("Build, sign, and upload to a draft release")
+    smoke = names.index("Built CLI runs the bundled Ghostscript")
+    assert names.index("Built CLI starts the vendored engine") < smoke
+    assert smoke < names.index("Verify the draft's assets and updater manifest")
+    assert smoke < names.index("Publish the release")
+    command = steps[smoke][1]
+    assert "src-tauri/target/release/ghostscript/gswin64c.exe" in command
+    assert "scripts/bundle-ghostscript.ps1" in command
+    assert "'compress', $fixture" in command
+    assert "Remove-Item Env:SPECTRAPDF_GS_PATH" in command
+    assert "@('gs-status')" in command
+    assert "$answer.source -ne 'bundled'" in command
+    assert command.index("@('gs-status')") < command.index("'compress', $fixture")
+    assert "$process.ExitCode -ne 0" in command
+    redo = dict(_job_steps("release-redo.yml", "release"))
+    guarded = redo["Vendor Ghostscript (unmodified upstream, SHA-256 pinned)"]
+    assert "if: hashFiles('scripts/bundle-ghostscript.ps1') != ''" in guarded
+    parity = (ROOT / "scripts/ci-parity-gates.sh").read_text(encoding="utf-8")
+    assert (
+        "gate gs-notice powershell -ExecutionPolicy Bypass -File "
+        "scripts/bundle-ghostscript.ps1 -GateOnly"
+    ) in parity
 
 
 def test_local_toolchain_parity_precedes_candidate_metadata_checks() -> None:
@@ -4158,6 +4072,11 @@ def test_the_catalog_gate_runs_on_the_ubuntu_22_04_runner_beside_the_install_che
 #: The Ubuntu 26.04 install check: the AppImage runs on a system without
 #: WebKitGTK and GTK 3 before the .deb installs them.
 UBUNTU_SMOKE = f"ubuntu:26.04 sh {LINUX_SMOKE} linux-packages --bare-cli --deb --appimage"
+#: The release also checks the distribution Ghostscript the packages depend on.
+#: The redo runs the tag's own smoke script, which can predate that step.
+UBUNTU_RELEASE_SMOKE = (
+    f"ubuntu:26.04 sh {LINUX_SMOKE} linux-packages --bare-cli --deb --ghostscript --appimage"
+)
 #: A legacy tag's AppImage needs the host's WebKitGTK, which the .deb installs.
 UBUNTU_LEGACY_SMOKE = f"ubuntu:26.04 sh {LINUX_SMOKE} linux-packages --deb --appimage"
 
@@ -4170,11 +4089,12 @@ def test_the_install_checks_cover_fedora_and_ubuntu(workflow: str) -> None:
     steps = _job_steps(workflow, "linux-smoke")
     runs = [t for _n, t in steps if "docker run" in t]
     fedora = runs[0]
-    assert f"fedora:44 sh {LINUX_SMOKE} linux-packages --rpm --appimage" in fedora
     if workflow == "release.yml":
+        assert f"fedora:44 sh {LINUX_SMOKE} linux-packages --rpm --ghostscript --appimage" in fedora
         assert len(runs) == 2
-        assert UBUNTU_SMOKE in runs[1]
+        assert UBUNTU_RELEASE_SMOKE in runs[1]
     else:
+        assert f"fedora:44 sh {LINUX_SMOKE} linux-packages --rpm --appimage" in fedora
         assert len(runs) == 3
         assert UBUNTU_SMOKE in runs[1]
         assert f"if: needs.{switch}.outputs.appimage == 'selfcontained'" in runs[1]

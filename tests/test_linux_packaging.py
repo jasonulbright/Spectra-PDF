@@ -66,13 +66,13 @@ def test_the_linux_bundle_ships_its_own_dictionary_tree():
         assert 'DEST="$RESOURCES_ROOT/dictionaries' not in text, script
 
 
-def test_the_packages_declare_the_time_zone_database_and_carry_the_product_licence():
+def test_the_packages_declare_the_time_zone_database_and_ghostscript_and_carry_the_product_licence():
     """tauri-cli itself adds WebKitGTK 4.1, GTK 3 and, with the tray-icon
     feature, the appindicator library to both packages' dependencies; the
     config adds only what the engine needs beyond that."""
     linux = _linux_conf()["bundle"]["linux"]
-    assert linux["deb"]["depends"] == ["tzdata"]
-    assert linux["rpm"]["depends"] == ["tzdata"]
+    assert linux["deb"]["depends"] == ["tzdata", "ghostscript"]
+    assert linux["rpm"]["depends"] == ["tzdata", "ghostscript"]
     assert linux["deb"]["files"]["/usr/share/doc/spectrapdf/copyright"] == "../LICENSE"
     assert linux["rpm"]["files"]["/usr/share/licenses/spectrapdf/LICENSE"] == "../LICENSE"
     for kind in ("deb", "rpm"):
