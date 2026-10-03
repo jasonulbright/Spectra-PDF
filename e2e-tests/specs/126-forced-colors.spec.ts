@@ -21,8 +21,10 @@ import {
 } from '../support/harness.js';
 
 const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
+let forcedColorsEngine = true;
 
 async function setForcedColors(on: boolean): Promise<void> {
+  if (!forcedColorsEngine) return;
   await (browser as unknown as {
     sendCommandAndGetResult(cmd: string, params: unknown): Promise<unknown>;
   }).sendCommandAndGetResult('Emulation.setEmulatedMedia', {
@@ -82,8 +84,15 @@ async function probeButtonBorder(parentSelector: string): Promise<number> {
 describe('OS forced colors', () => {
   let unforcedContentBg = '';
 
-  before(async () => {
+  before(async function () {
     await waitForHarness();
+    // A webview with no forced-colors mode has neither the property nor the
+    // media emulation; the OS setting cannot reach the document there.
+    forcedColorsEngine = await browser.execute(() => CSS.supports('forced-color-adjust', 'none'));
+    if (!forcedColorsEngine) {
+      console.log('SKIP: the webview has no forced-colors mode');
+      this.skip();
+    }
     await openByPaths([SAMPLE]);
     await setView('canvas');
     await browser.waitUntil(async () => (await getState()).activeFile !== null, {

@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PDFDocument, PDFArray, PDFDict, PDFName, PDFString } from 'pdf-lib';
@@ -73,13 +74,13 @@ describe('article draft ownership in the live workspace', () => {
   });
 
   it('retains input after native publication refusal, retries once, and undoes exact bytes', async () => {
-    const before = readFileSync(aw); await author('Retry'); chmodSync(aw, 0o444);
+    const before = readFileSync(aw); await author('Retry'); refuseWrites(aw);
     try {
       await saveArticles();
       expect(await $('[data-testid="article-status"]').getText()).toMatch(/read.only|denied/i);
       expect(readFileSync(aw).equals(before)).toBe(true); expect((await history()).undo).toHaveLength(0);
       expect((await getArticles())[0].title).toBe('Retry');
-    } finally { chmodSync(aw, 0o666); }
+    } finally { allowWrites(aw); }
     await saveArticles(); expect(await titles(aw)).toEqual(['Retry']); expect((await history()).undo).toHaveLength(1);
     await invokeAppCommand('edit.undo');
     await browser.waitUntil(async () => (await history()).undo.length === 0);

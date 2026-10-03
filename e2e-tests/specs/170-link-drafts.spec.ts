@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { resolve } from 'node:path';
 import { PDFDocument, PDFArray, PDFDict, PDFName, PDFString } from 'pdf-lib';
 import { expect } from '@wdio/globals';
@@ -106,13 +107,13 @@ describe('link draft ownership in the live workspace', () => {
   });
 
   it('native write refusal keeps the draft; retry publishes once and Undo restores exact bytes', async () => {
-    const before = readFileSync(aw); await draw('https://example.invalid/retry'); chmodSync(aw, 0o444);
+    const before = readFileSync(aw); await draw('https://example.invalid/retry'); refuseWrites(aw);
     try {
       await $('[data-testid="link-new-create"]').click();
       await browser.waitUntil(async () => /read.only|denied/i.test(await $('[data-testid="status-bar"]').getText()));
       expect(readFileSync(aw).equals(before)).toBe(true); expect((await history()).undo).toHaveLength(0);
       expect(await $('[data-testid="link-new-url"]').getValue()).toBe('https://example.invalid/retry');
-    } finally { chmodSync(aw, 0o666); }
+    } finally { allowWrites(aw); }
     await create(); expect(await uris(aw)).toEqual(['https://example.invalid/retry']);
     expect((await history()).undo).toHaveLength(1); await invokeAppCommand('edit.undo');
     await $('[data-testid="links-empty"]').waitForDisplayed(); expect(readFileSync(aw).equals(before)).toBe(true);

@@ -123,8 +123,13 @@ describe('snapshot tool', () => {
     const info = (await card())!;
 
     // Both clipboard formats are present, read back OUT of the clipboard.
-    expect(info.formats.split(',')).toContain('CF_DIB');
-    expect(info.formats.split(',')).toContain('PNG');
+    // Off Windows the toolkit offers the image under MIME type names.
+    if (process.platform === 'win32') {
+      expect(info.formats.split(',')).toContain('CF_DIB');
+      expect(info.formats.split(',')).toContain('PNG');
+    } else {
+      expect(info.formats.split(',')).toContain('image/png');
+    }
 
     // ...and the image on the clipboard is the size of the band at the
     // snapshot resolution, not at the current zoom.

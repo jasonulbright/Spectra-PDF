@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { resolve } from 'node:path';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from 'pdf-lib';
 import { expect } from '@wdio/globals';
@@ -51,7 +52,7 @@ describe('bookmark draft sessions and destination identity', () => {
     expect((await history()).undo).toHaveLength(2);
   });
   it('native refusal preserves input across A-B-A and pane remount without writing into B', async () => {
-    const before = readFileSync(aw); chmodSync(aw, 0o444);
+    const before = readFileSync(aw); refuseWrites(aw);
     try {
       await type('Only A'); await browser.keys(['Enter']); await $('[data-testid="bookmarks-retry"]').waitForEnabled();
       await openByPaths([b]); await shown('Original B'); const bw = (await getState()).activeFile!.workingPath, beforeB = readFileSync(bw);
@@ -59,7 +60,7 @@ describe('bookmark draft sessions and destination identity', () => {
       await $('[data-testid="navicon-pages"]').click(); await panel(); await shown('Only A');
       expect(readFileSync(aw).equals(before)).toBe(true); expect(readFileSync(bw).equals(beforeB)).toBe(true);
       expect((await history()).undo).toHaveLength(0);
-    } finally { chmodSync(aw, 0o666); }
+    } finally { allowWrites(aw); }
     await $('[data-testid="bookmarks-retry"]').waitForEnabled(); await $('[data-testid="bookmarks-retry"]').click(); await saved(aw, 'Only A');
     expect((await history()).undo).toHaveLength(1); await invokeAppCommand('edit.undo'); await shown('Original A');
     expect(readFileSync(aw).equals(before)).toBe(true);
@@ -72,9 +73,9 @@ describe('bookmark draft sessions and destination identity', () => {
     expect((await outlines(a))[0].title).toBe('Original A'); expect((await outlines(b))[0].title).toBe('Original B');
   });
   it('close retires a refused draft; reopening the original cannot resurrect it', async () => {
-    chmodSync(aw, 0o444);
+    refuseWrites(aw);
     try { await type('Closed'); await browser.keys(['Enter']); await $('[data-testid="bookmarks-retry"]').waitForEnabled(); }
-    finally { chmodSync(aw, 0o666); }
+    finally { allowWrites(aw); }
     await closeAllFiles(); await openByPaths([a]); await panel(); await shown('Original A');
     expect((await history()).undo).toHaveLength(0);
   });

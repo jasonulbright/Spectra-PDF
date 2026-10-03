@@ -248,10 +248,14 @@ describe('find + OCR', () => {
     // Every offered language must have its traineddata staged where the
     // recognizer actually reads it — an offered-but-unstaged language OCRs to
     // nothing (the silent-degradation class). The traineddata lives in
-    // resources/tesseract/tessdata, DECOMPRESSED, for native Tesseract —
-    // not in public/ocr/lang, which served the retired WASM worker.
+    // resources/tesseract/tessdata (resources/linux-x86_64/tesseract/share/
+    // tessdata off Windows), DECOMPRESSED, for native Tesseract — not in
+    // public/ocr/lang, which served the retired WASM worker.
     const { readFileSync } = await import('node:fs');
-    const tessdata = resolve(__dirname, '..', '..', 'resources', 'tesseract', 'tessdata');
+    const resources = resolve(__dirname, '..', '..', 'resources');
+    const tessdata = process.platform === 'win32'
+      ? resolve(resources, 'tesseract', 'tessdata')
+      : resolve(resources, 'linux-x86_64', 'tesseract', 'share', 'tessdata');
     for (const c of codes) {
       // Presence + non-empty is the staging proof (models are ~1-20 MB).
       const buf = readFileSync(resolve(tessdata, `${c}.traineddata`));

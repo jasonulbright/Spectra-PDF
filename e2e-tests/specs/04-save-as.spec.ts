@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
-import { existsSync, statSync, rmSync, mkdtempSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, statSync, rmSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
 import {
@@ -48,14 +49,14 @@ describe('save active file to a known path', () => {
   it('keeps a read-only destination intact on refusal and saves after it becomes writable', async () => {
     const original = Buffer.from('protected original contents');
     writeFileSync(dest, original);
-    chmodSync(dest, 0o444);
+    refuseWrites(dest);
     try {
       let error = '';
       try { await saveActiveAs(dest); } catch (e) { error = String(e); }
       expect(error).toContain('saveActiveAs failed');
       expect(readFileSync(dest).equals(original)).toBe(true);
     } finally {
-      chmodSync(dest, 0o666);
+      allowWrites(dest);
     }
     await saveActiveAs(dest);
     expect(readFileSync(dest).equals(readFileSync((await getState()).activeFile!.workingPath))).toBe(true);

@@ -151,6 +151,8 @@ def place_in_cell(
     cell: tuple[float, float, float, float],
     auto_rotate: bool,
     scale_override: float | None = None,
+    fit: str = "fit",
+    factor: float = 1.0,
 ) -> tuple[list[float], bool]:
     """Placement matrix [a b c d e f] for one page into one cell.
 
@@ -159,7 +161,10 @@ def place_in_cell(
     applies). ``auto_rotate`` adds a further 90° when the displayed aspect
     fits the cell better rotated (multiple-per-sheet's "auto-rotate pages").
     Scaling preserves aspect and centers; ``scale_override`` (fraction, e.g.
-    0.5) replaces fit-to-cell for the custom-scale mode.
+    0.5) replaces fit-to-cell for the custom-scale mode. Without it, ``fit``
+    picks the scale: ``fit`` (whole page in the cell), ``fill`` (cell covered,
+    the overflow outside it) or ``shrink`` (fit only a page larger than the
+    cell, otherwise actual size); ``factor`` multiplies that scale.
 
     Returns (matrix, extra_rotated). Matrix maps the page's UNROTATED
     coordinate space (origin at its crop origin — the caller subtracts the
@@ -177,8 +182,12 @@ def place_in_cell(
 
     if scale_override is not None:
         s = scale_override
+    elif fit == "fill":
+        s = max(cw / out_w, ch / out_h) * factor
+    elif fit == "shrink":
+        s = min(1.0, cw / out_w, ch / out_h) * factor
     else:
-        s = min(cw / out_w, ch / out_h)
+        s = min(cw / out_w, ch / out_h) * factor
 
     # Rotation matrices place the page's [0,w]x[0,h] box into [0,out_w]x
     # [0,out_h] rotated CLOCKWISE as viewed (the /Rotate convention).
@@ -367,6 +376,8 @@ def impose_sheets(
     border: bool = False,
     auto_rotate: bool = True,
     scale_override: float | None = None,
+    fit: str = "fit",
+    factor: float = 1.0,
 ) -> int:
     """Write ``dst``: one page per entry of ``sheets``; each entry is a list
     of (source page index | None, cell rect) placements. Returns sheet count.
@@ -375,7 +386,11 @@ def impose_sheets(
     carry content only; live annotations would silently vanish here, which
     is exactly why the pipeline bakes them first (workspace-commit's
     allowlist lesson, applied to print).
+
+    ``fit`` and ``factor`` pass to `place_in_cell`; a placement that can
+    overflow its cell (``fill``, or ``factor`` above 1) is clipped to it.
     """
+    clip = fit == "fill" or factor > 1.0
     with open_pdf(src) as src_pdf:
         geo = []
         for page in src_pdf.pages:
@@ -391,7 +406,7 @@ def impose_sheets(
                     continue
                 w, h, rot = geo[idx]
                 matrix, _ = place_in_cell(
-                    w, h, rot, cell, auto_rotate, scale_override
+                    w, h, rot, cell, auto_rotate, scale_override, fit, factor
                 )
                 xobj = _xobject_for(out, src_pdf, idx, cache)
                 name = f"/P{slot}"
@@ -404,9 +419,13 @@ def impose_sheets(
                 )
                 e -= a * px0 + c * py0
                 f -= b * px0 + d * py0
+                cut = ""
+                if clip:
+                    cx, cy, cw, ch = cell
+                    cut = "{} {} {} {} re W n ".format(_fmt(cx), _fmt(cy), _fmt(cw), _fmt(ch))
                 content.append(
-                    "q {} {} {} {} {} {} cm {} Do Q".format(
-                        _fmt(a), _fmt(b), _fmt(c), _fmt(d), _fmt(e), _fmt(f), name
+                    "q {}{} {} {} {} {} {} cm {} Do Q".format(
+                        cut, _fmt(a), _fmt(b), _fmt(c), _fmt(d), _fmt(e), _fmt(f), name
                     )
                 )
                 if border:
@@ -617,3 +636,472 @@ def render_preview(
         key=lambda p: int(p.stem.split("-")[1]),
     )
     return [str(p) for p in produced]
+
+
+# ---------------------------------------------------------------------------
+# Jobs printed to the held virtual-printer queue (Linux)
+# ---------------------------------------------------------------------------
+
+# `number-up` values the queue reports as supported, as (rows, cols) on a
+# portrait sheet. A grid with more columns than rows lays out on the sheet
+# turned to landscape, as the CUPS pdftopdf filter does.
+CUPS_NUMBER_UP = {1: (1, 1), 2: (1, 2), 4: (2, 2), 6: (2, 3), 9: (3, 3), 16: (4, 4)}
+
+# `number-up-layout` keywords: the `nup_cells` order and whether rows fill
+# from the bottom of the sheet.
+CUPS_NUMBER_UP_LAYOUTS = {
+    "lrtb": ("horizontal", False),
+    "rltb": ("horizontal-reversed", False),
+    "lrbt": ("horizontal", True),
+    "rlbt": ("horizontal-reversed", True),
+    "tblr": ("vertical", False),
+    "tbrl": ("vertical-reversed", False),
+    "btlr": ("vertical", True),
+    "btrl": ("vertical-reversed", True),
+}
+
+
+def number_up_cells(
+    sheet_w: float, sheet_h: float, number_up: int, layout: str
+) -> tuple[float, float, list[tuple[float, float, float, float]]]:
+    """(sheet_w, sheet_h, cells) for a CUPS `number-up` and
+    `number-up-layout`. ``sheet_w``/``sheet_h`` is the portrait sheet."""
+    if number_up not in CUPS_NUMBER_UP:
+        raise ValueError(
+            f"{number_up} pages per sheet is not a layout this printer offers "
+            f"({', '.join(str(n) for n in CUPS_NUMBER_UP)})"
+        )
+    if layout not in CUPS_NUMBER_UP_LAYOUTS:
+        raise ValueError(
+            f"unknown page order {layout!r} ({', '.join(CUPS_NUMBER_UP_LAYOUTS)})"
+        )
+    rows, cols = CUPS_NUMBER_UP[number_up]
+    short, long_ = min(sheet_w, sheet_h), max(sheet_w, sheet_h)
+    sw, sh = (long_, short) if cols > rows else (short, long_)
+    order, bottom_up = CUPS_NUMBER_UP_LAYOUTS[layout]
+    cells = nup_cells(sw, sh, rows, cols, order)
+    if bottom_up:
+        cells = [(x, sh - y - h, w, h) for x, y, w, h in cells]
+    return sw, sh, cells
+
+
+# LibreOffice's Writer import filter for UTF-8 plain text. Named explicitly,
+# LibreOffice reads the bytes as text and runs no content-based type
+# detection, which would import a text job holding HTML, RTF or another
+# recognisable format as that format. A text job is decoded by its own
+# character set first and handed over as UTF-8.
+TEXT_IMPORT_FILTER = "Text (encoded):UTF8"
+
+# The 8-bit character set a text job with no declared character set is read
+# in when its bytes are not UTF-8.
+TEXT_FALLBACK_CHARSET = "windows-1252"
+
+
+class ConverterUnavailable(RuntimeError):
+    """A converter the job needs is not installed; the job waits for it."""
+
+
+class JobRefused(ValueError):
+    """The job's own bytes or options cannot be printed; every attempt fails
+    the same way. Raised only at the data checks of `_printed_job`: a
+    converter's failure is never one, since converters report a killed
+    process, a full disk and bad input alike."""
+
+
+def _text_codec(name: str) -> str | None:
+    """The codec of a declared character set, when it names a text encoding;
+    none for an unknown name or a bytes-to-bytes codec (base64, zip)."""
+    import codecs
+
+    try:
+        info = codecs.lookup(name)
+    except LookupError:
+        return None
+    return info.name if getattr(info, "_is_text_encoding", True) else None
+
+
+def decode_text_job(data: bytes, charset: str) -> tuple[str, list[str]]:
+    """(text, notes) for a text job's bytes.
+
+    A declared ``charset`` that names a text encoding decides. Otherwise (no
+    character set, or one Python does not read as text, which a note names):
+    a UTF-32 or UTF-16 byte order mark selects that encoding, bytes that are
+    valid UTF-8 (with or without its mark) are UTF-8, and anything else is
+    `TEXT_FALLBACK_CHARSET`, which a note names. Bytes the chosen character
+    set does not define print as U+FFFD, and a note says so."""
+    import codecs
+
+    notes: list[str] = []
+    codec = _text_codec(charset) if charset else None
+    if charset and codec is None:
+        notes.append(
+            f"the text job's character set {charset!r} is not one Spectra PDF reads, "
+            "so its character set was detected"
+        )
+    if codec is not None:
+        pass
+    elif data.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        codec = "utf-32"
+    elif data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        codec = "utf-16"
+    else:
+        try:
+            data.decode("utf-8")
+            codec = "utf-8"
+        except UnicodeDecodeError:
+            codec = "cp1252"
+            notes.append(
+                "the text job named no character set it could be read in and is not "
+                f"UTF-8, so it was read as {TEXT_FALLBACK_CHARSET}"
+            )
+    try:
+        text = data.decode(codec)
+    except UnicodeDecodeError:
+        text = data.decode(codec, errors="replace")
+        notes.append(
+            f"the text job holds bytes that are not {codec} text; they print as \ufffd"
+        )
+    return text.removeprefix("\ufeff"), notes
+
+
+def _check_image(path: str) -> None:
+    """Refuse an image whose own bytes Pillow cannot decode. An OSError with
+    an errno is the machine's (a read that failed) and propagates."""
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        with Image.open(path) as image:
+            image.verify()
+    except (UnidentifiedImageError, SyntaxError, Image.DecompressionBombError) as exc:
+        raise JobRefused(f"the image cannot be decoded: {exc}") from None
+    except OSError as exc:
+        if exc.errno is not None:
+            raise
+        raise JobRefused(f"the image cannot be decoded: {exc}") from None
+
+# `print-scaling` (PWG 5100.13) values `printed_job` applies, as the
+# `place_in_cell` fit mode. 'auto' arrives as 'auto-fit'.
+PRINT_SCALINGS = {"fit": "fit", "fill": "fill", "auto-fit": "shrink"}
+
+# `scaling` percentages: the page fills this share of its cell.
+SCALING_PERCENT_RANGE = (1, 800)
+
+PAGE_SETS = ("all", "odd", "even")
+
+
+def parse_page_ranges(text: str) -> list[tuple[int, int | None]]:
+    """``"1-3,5,7-"`` -> [(1, 3), (5, 5), (7, None)]; ``"-4"`` -> [(1, 4)];
+    ``""`` -> []. 1-based and inclusive; None runs through the last page, and
+    a bound past the last page stops at it."""
+    ranges: list[tuple[int, int | None]] = []
+    if not text:
+        return ranges
+    for token in text.split(","):
+        m = re.fullmatch(r"(\d{1,10})?(-)?(\d{1,10})?", token.strip(), flags=re.ASCII)
+        if not m or (m.group(1) is None and m.group(3) is None) or (
+            m.group(2) is None and m.group(3) is not None
+        ):
+            raise ValueError(f"the page range {token!r} is not a page number, N-M, N- or -M")
+        lo = int(m.group(1)) if m.group(1) is not None else 1
+        if m.group(2) is None:
+            hi: int | None = lo
+        else:
+            hi = int(m.group(3)) if m.group(3) is not None else None
+        if lo < 1 or (hi is not None and hi < lo):
+            raise ValueError(f"the page range {token!r} selects no page")
+        ranges.append((lo, hi))
+    return ranges
+
+
+def select_pages(page_count: int, page_set: str, page_ranges: str) -> list[int]:
+    """0-based indices of the document pages a job prints: `page-set` parity
+    and `page-ranges` both apply to the document's own page numbers, before
+    any number-up."""
+    if page_set not in PAGE_SETS:
+        raise ValueError(f"unknown page set {page_set!r} ({', '.join(PAGE_SETS)})")
+    ranges = parse_page_ranges(page_ranges)
+    order = apply_subset(list(range(page_count)), page_set)
+    if ranges:
+        order = [
+            i for i in order
+            if any(lo <= i + 1 and (hi is None or i + 1 <= hi) for lo, hi in ranges)
+        ]
+    return order
+
+
+def scaling_mode(scaling: str) -> tuple[str, float] | None:
+    """(`place_in_cell` fit mode, factor) for a `printed_job` ``scaling``
+    value: a `PRINT_SCALINGS` key, a whole percentage, or ``""`` for none."""
+    if scaling == "":
+        return None
+    if scaling in PRINT_SCALINGS:
+        return PRINT_SCALINGS[scaling], 1.0
+    lo, hi = SCALING_PERCENT_RANGE
+    if scaling.isascii() and scaling.isdigit() and lo <= int(scaling) <= hi:
+        return "fit", int(scaling) / 100.0
+    raise ValueError(
+        f"unknown scaling {scaling!r} ({', '.join(PRINT_SCALINGS)}, or {lo}-{hi} percent)"
+    )
+
+
+def flatten_for_layout(src: str, dst: str) -> None:
+    """Write ``dst`` with every printable annotation baked into its page.
+
+    A form whose /AcroForm says /NeedAppearances true may hold field values
+    with no appearance stream; qpdf flattens no such field, and imposition
+    then drops the widget with its value. Appearances are generated first."""
+    with open_pdf(src) as pdf:
+        if "/AcroForm" in pdf.Root:
+            pdf.generate_appearance_streams()
+        pdf.flatten_annotations(mode="print")
+        save_pdf(pdf, dst)
+
+
+def mirror_pages(src: str, dst: str) -> None:
+    """Write ``dst`` with every page mirrored left to right as displayed.
+
+    The source is flattened: remaining annotations keep unmirrored
+    rectangles, so they are dropped."""
+    with open_pdf(src) as pdf:
+        for page in pdf.pages:
+            x0, y0, w, h = _crop_box(page)
+            if _page_rotate(page) % 180 == 0:
+                matrix = f"-1 0 0 1 {_fmt(2 * x0 + w)} 0 cm"
+            else:
+                matrix = f"1 0 0 -1 0 {_fmt(2 * y0 + h)} cm"
+            page.contents_add(pdf.make_stream(f"q {matrix}\n".encode("ascii")), prepend=True)
+            page.contents_add(pdf.make_stream(b"\nQ"))
+            if "/Annots" in page.obj:
+                del page.obj["/Annots"]
+        save_pdf(pdf, dst)
+
+
+def _displayed(page) -> tuple[float, float]:
+    _, _, w, h = _crop_box(page)
+    return (h, w) if _page_rotate(page) % 180 == 90 else (w, h)
+
+
+def printed_job(
+    file: str,
+    output: str,
+    number_up: int = 1,
+    number_up_layout: str = "lrtb",
+    reverse: bool = False,
+    sheet_width: float | None = None,
+    sheet_height: float | None = None,
+    page_set: str = "all",
+    page_ranges: str = "",
+    mirror: bool = False,
+    scaling: str = "",
+    charset: str = "",
+    soffice_path: str = "",
+    gs_path: str = "",
+) -> dict:
+    """Write ``output``: one job taken from the held print queue as the PDF
+    the print system would have produced, or refuse it.
+
+    A job whose bytes or options cannot be printed (`JobRefused`, or a PDF
+    job whose own bytes pikepdf cannot open) is refused with the result
+    ``{"refused": message}`` and nothing is written. Every other failure
+    raises, so the job is kept and tried again later.
+    ``notes`` in the result name what the delivered PDF reads differently
+    from the job (a text job's assumed character set).
+    """
+    try:
+        return _printed_job(
+            file, output, number_up, number_up_layout, reverse, sheet_width,
+            sheet_height, page_set, page_ranges, mirror, scaling, charset,
+            soffice_path, gs_path,
+        )
+    except JobRefused as exc:
+        return {"output": output, "refused": str(exc) or type(exc).__name__}
+
+
+def _printed_job(
+    file: str,
+    output: str,
+    number_up: int,
+    number_up_layout: str,
+    reverse: bool,
+    sheet_width: float | None,
+    sheet_height: float | None,
+    page_set: str,
+    page_ranges: str,
+    mirror: bool,
+    scaling: str,
+    charset: str,
+    soffice_path: str,
+    gs_path: str,
+) -> dict:
+    """`printed_job` without its refusal boundary.
+
+    A source that is not a PDF converts first: text decoded by
+    `decode_text_job` (``charset``) and converted through LibreOffice with
+    `TEXT_IMPORT_FILTER`, images and PostScript through `create_pdf`. The job
+    options then apply in the print system's order:
+
+    1. ``page_set`` (all/odd/even) and ``page_ranges`` (``"1-3,5"``) select
+       document pages by their own numbers;
+    2. ``scaling`` (`scaling_mode`) sizes each page in its cell, and
+       ``number_up`` places that many pages on each sheet in the
+       ``number_up_layout`` order (fit is the number-up default);
+    3. ``mirror`` mirrors each sheet left to right;
+    4. ``reverse`` writes the sheets back to front.
+
+    The sheet is ``sheet_width`` x ``sheet_height`` points (portrait), or the
+    first selected page's displayed size when absent. Scaling, number-up and
+    mirroring carry page content only, so annotations are flattened into it
+    first. A refusal names the option that cannot be applied; nothing is
+    written then.
+    """
+    import shutil
+    import tempfile
+
+    from engine import create_pdf as create_pdf_mod
+    from engine import soffice as soffice_mod
+
+    try:
+        if not isinstance(number_up, int) or isinstance(number_up, bool):
+            raise ValueError(f"pages per sheet must be a whole number, got {number_up!r}")
+        for name, value in (("reverse", reverse), ("mirror", mirror)):
+            if not isinstance(value, bool):
+                raise ValueError(f"{name} must be true or false, got {value!r}")
+        number_up_cells(612.0, 792.0, number_up, number_up_layout)
+        scale = scaling_mode(scaling)
+        if page_set not in PAGE_SETS:
+            raise ValueError(f"unknown page set {page_set!r} ({', '.join(PAGE_SETS)})")
+        parse_page_ranges(page_ranges)
+        if (sheet_width is None) != (sheet_height is None):
+            raise ValueError("the sheet needs both a width and a height")
+        if sheet_width is not None and not (sheet_width > 0 and sheet_height > 0):
+            raise ValueError("the sheet size must be positive")
+    except ValueError as exc:
+        raise JobRefused(str(exc)) from None
+    if Path(output).exists() and Path(file).exists() and Path(output).samefile(file):
+        raise JobRefused("the output is the printed job itself — choose another name")
+
+    stages: list[str] = []
+    notes: list[str] = []
+    is_text = Path(file).suffix.lower() == ".txt"
+    if is_text and not (soffice_path and Path(soffice_path).is_file()):
+        raise ConverterUnavailable(
+            "LibreOffice, which prints text jobs, is not installed with Spectra PDF"
+        )
+    with tempfile.TemporaryDirectory(prefix="spectra-printed-") as td:
+        tdp = Path(td)
+        current = file
+        kind = create_pdf_mod.classify(file)
+        if is_text:
+            text, notes = decode_text_job(Path(file).read_bytes(), charset)
+            if not text.strip():
+                raise JobRefused("the text job holds no printable text")
+            utf8 = tdp / "text.txt"
+            utf8.write_text(text, encoding="utf-8", newline="")
+            converted = str(tdp / "converted.pdf")
+            soffice_mod.to_pdf(str(utf8), converted, soffice_path, infilter=TEXT_IMPORT_FILTER)
+            current = converted
+            stages.append("convert:text")
+        elif kind != "pdf":
+            if kind == "image":
+                _check_image(file)
+            converted = str(tdp / "converted.pdf")
+            create_pdf_mod.create_pdf(
+                [{"path": file}], converted,
+                soffice_path=soffice_path, gs_path=gs_path,
+            )
+            current = converted
+            stages.append(f"convert:{kind or 'unknown'}")
+
+        try:
+            opened = open_pdf(current)
+        except (pikepdf.PdfError, pikepdf.PasswordError) as exc:
+            if current != file:
+                raise
+            raise JobRefused(f"the PDF cannot be read: {exc}") from None
+        with opened as pdf:
+            page_count = len(pdf.pages)
+            if page_count == 0:
+                raise JobRefused("the printed job has no pages")
+            order = select_pages(page_count, page_set, page_ranges)
+            if not order:
+                raise JobRefused(
+                    f"the page selection (page set {page_set}, pages "
+                    f"{page_ranges or 'all'}) selects none of the job's "
+                    f"{page_count} pages"
+                )
+            if sheet_width is None:
+                sheet_width, sheet_height = _displayed(pdf.pages[order[0]])
+            sizes = [_displayed(pdf.pages[i]) for i in order]
+        if order != list(range(page_count)):
+            stages.append(f"select:{page_set}:{page_ranges or 'all'}")
+
+        # A 1-up fit, fill or shrink of pages already the sheet's size moves
+        # nothing; imposing them would only flatten their annotations.
+        if scale is not None and scale[1] == 1.0 and number_up == 1:
+            sheet = sorted((float(sheet_width), float(sheet_height)))
+            if all(
+                abs(a - b) < 0.5 for size in sizes for a, b in zip(sorted(size), sheet)
+            ):
+                scale = None
+
+        sheets = len(order)
+        if number_up > 1 or scale is not None or mirror:
+            flat = str(tdp / "flat.pdf")
+            flatten_for_layout(current, flat)
+            current = flat
+            if number_up > 1 or scale is not None:
+                fit, factor = scale if scale is not None else ("fit", 1.0)
+                sw, sh, cells = number_up_cells(
+                    float(sheet_width), float(sheet_height), number_up, number_up_layout
+                )
+                per = len(cells)
+                sheet_defs = [
+                    list(zip(order[i : i + per], cells)) for i in range(0, len(order), per)
+                ]
+                imposed = str(tdp / "imposed.pdf")
+                sheets = impose_sheets(
+                    current, imposed, sheet_defs, sw, sh,
+                    auto_rotate=True, fit=fit, factor=factor,
+                )
+                current = imposed
+                if number_up > 1:
+                    stages.append(f"number-up:{number_up}:{number_up_layout}")
+                if scale is not None:
+                    stages.append(f"scaling:{scaling}")
+            else:
+                sequenced = str(tdp / "selected.pdf")
+                build_sequence(current, sequenced, order)
+                current = sequenced
+            if mirror:
+                mirrored = str(tdp / "mirrored.pdf")
+                mirror_pages(current, mirrored)
+                current = mirrored
+                stages.append("mirror")
+        elif order != list(range(page_count)):
+            sequenced = str(tdp / "selected.pdf")
+            build_sequence(current, sequenced, order)
+            current = sequenced
+
+        if reverse and sheets > 1:
+            reversed_path = str(tdp / "reversed.pdf")
+            build_sequence(current, reversed_path, list(range(sheets - 1, -1, -1)))
+            current = reversed_path
+            stages.append("reverse")
+
+        shutil.copyfile(current, output)
+
+    return {
+        "output": output,
+        "pages": page_count,
+        "printed_pages": len(order),
+        "sheets": sheets,
+        "number_up": number_up,
+        "number_up_layout": number_up_layout,
+        "reverse": reverse,
+        "page_set": page_set,
+        "page_ranges": page_ranges,
+        "mirror": mirror,
+        "scaling": scaling,
+        "prepass": stages,
+        "notes": notes,
+    }

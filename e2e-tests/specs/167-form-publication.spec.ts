@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
-import { mkdtempSync, readFileSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { tmpdir } from 'node:os';
 import { PDFDocument, PDFName, PDFDict, PDFRawStream, decodePDFRawStream } from 'pdf-lib';
 import { expect } from '@wdio/globals';
@@ -69,12 +70,12 @@ describe('form creation publication', () => {
   it('a native replacement refusal preserves bytes and history, then the same placement retries', async () => {
     const before = readFileSync(working); const prior = await history();
     let failure = '';
-    chmodSync(working, 0o444);
+    refuseWrites(working);
     try {
       await createPlacedField({ name: 'retry_field', type: 'text' }).catch(error => { failure = String(error); });
       expect(failure.toLowerCase()).toMatch(/read.only|denied/);
       expect(readFileSync(working).equals(before)).toBe(true); expect(await history()).toEqual(prior);
-    } finally { chmodSync(working, 0o666); }
+    } finally { allowWrites(working); }
     await createPlacedField({ name: 'retry_field', type: 'text' }, { path: source });
     expect((await history()).undo).toHaveLength(1);
     expect((await PDFDocument.load(readFileSync(working))).getForm().getFields().map(f => f.getName())).toEqual(['retry_field']);

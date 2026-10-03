@@ -2693,6 +2693,7 @@ export const PANEL_STRINGS = {
   'panel.settings.printerReady': 'ready to receive jobs',
   'panel.settings.printerDown': 'receiver down: {{status}}',
   'panel.settings.lastJobFailed': 'Last job failed: {{error}}',
+  'panel.settings.lastJobNote': 'Last job: {{note}}',
   'panel.settings.removePrinter': 'Remove printer…',
   'panel.settings.installPrinter': 'Install printer…',
   'panel.settings.uacNote': 'Windows asks for administrator approval — printers are system devices.',

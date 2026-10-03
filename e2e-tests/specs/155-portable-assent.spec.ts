@@ -235,7 +235,9 @@ describe('the portable container: colour-profile assent and data beside the app'
     expect(existsSync(join(ROAMING_APP_DIR, 'icc-assent.json'))).toBe(false);
   });
 
-  it('the WebView2 probe reports the runtime this machine actually has', async () => {
+  it('the WebView2 probe reports the runtime this machine actually has', async function () {
+    // WebView2 exists only on Windows; other hosts run the toolkit's webview.
+    if (process.platform !== 'win32') this.skip();
     // The absent case cannot be arranged (a suite may not uninstall a system
     // runtime, and no webview means no window to assert from). The PRESENT
     // case is what a machine running this suite is in, and it is worth

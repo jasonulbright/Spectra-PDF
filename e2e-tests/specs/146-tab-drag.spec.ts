@@ -1,7 +1,6 @@
 import { expect } from '@wdio/globals';
 import { resolve } from 'node:path';
 import {
-  chmodSync,
   copyFileSync,
   existsSync,
   mkdtempSync,
@@ -9,6 +8,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { PDFDocument } from 'pdf-lib';
 import {
   closeAllFiles,
@@ -501,7 +501,7 @@ describe('cross-window tab drag', () => {
     const source = await readFrame();
     const point = physical(stripCssPoint(target, 40), source.dpr);
 
-    chmodSync(working, 0o444);
+    refuseWrites(working);
     try {
       expect(await tabDragDrop(dirtyPdf, point)).toBe(false);
       // A refusal is a result: the notice says why, the document is still here
@@ -518,7 +518,7 @@ describe('cross-window tab drag', () => {
       expect((await getState()).fileCount).toBe(0);
       expect(readFileSync(working).equals(beforeRefusal)).toBe(true);
     } finally {
-      chmodSync(working, 0o666);
+      allowWrites(working);
     }
 
     // Unblock the staging and drop again: the commit runs, and what the other
@@ -884,11 +884,6 @@ describe('cross-window tab drag', () => {
       timeoutMsg: 'the page delete never landed in the page tier',
     });
 
-    // Make the write fail for real rather than stubbing it: the move copies the
-    // working copy over the user's own path, and a read-only destination is a
-    // copy the OS refuses.
-    chmodSync(lockedPdf, 0o444);
-
     await browser.switchToWindow(secondHandle);
     const target = await readFrame();
     const targetFiles = (await getState()).fileCount;
@@ -900,9 +895,13 @@ describe('cross-window tab drag', () => {
     // reported afterwards, and waiting on the user holds nothing.
     let moved: boolean;
     try {
+      // Make the write fail for real rather than stubbing it: the move copies
+      // the working copy over the user's own path, and a read-only destination
+      // is a copy the OS refuses.
+      refuseWrites(lockedPdf);
       moved = await tabDragDrop(lockedPdf, point);
     } finally {
-      chmodSync(lockedPdf, 0o666);
+      allowWrites(lockedPdf);
     }
     expect(moved).toBe(false);
     await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 15_000 });

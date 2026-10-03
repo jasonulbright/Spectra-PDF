@@ -1,4 +1,5 @@
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { resolve } from 'node:path';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFString } from 'pdf-lib';
 import { expect } from '@wdio/globals';
@@ -75,11 +76,11 @@ describe('Document action preservation through actual page commits', () => {
     await rotate((await getWorkspacePageIds())[0]); await commitPendingEdits(); await assertActions(work);
   });
   it('native publication refusal retains pending rotation for retry without losing actions', async () => {
-    await rotate((await getWorkspacePageIds())[0]); chmodSync(work, 0o444);
+    await rotate((await getWorkspacePageIds())[0]); refuseWrites(work);
     try {
       await expect(commitPendingEdits()).rejects.toThrow('commitPendingEdits failed');
       expect(readFileSync(work).equals(before)).toBe(true); expect((await history()).undo).toHaveLength(0);
-    } finally { chmodSync(work, 0o666); }
+    } finally { allowWrites(work); }
     await commitPendingEdits(); expect((await assertActions(work)).getPage(0).getRotation().angle).toBe(90);
     expect((await history()).undo).toHaveLength(1); expect(readFileSync(source).equals(before)).toBe(true);
   });

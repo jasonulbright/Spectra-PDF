@@ -1,4 +1,5 @@
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { resolve } from 'node:path';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from 'pdf-lib';
 import { expect } from '@wdio/globals';
@@ -38,13 +39,13 @@ describe('Layers revision and session ownership', () => {
     expect(oc.lookup(N('D'), PDFDict).lookup(N('OFF'), PDFArray).asArray().map(ref => ref.toString())).toContain(rendered!.toString());
   });
   it('native refusal and retry stay with A across B, Home and remount; Undo restores exact bytes', async () => {
-    const before = readFileSync(aw); chmodSync(aw, 0o444);
+    const before = readFileSync(aw); refuseWrites(aw);
     try { await $('[data-testid="layer-toggle-1"]').click(); await $('[data-testid="layers-error"]').waitForDisplayed();
       await openByPaths([b]); await ready(); const bw = (await getState()).activeFile!.workingPath;
       expect((await snapshot(bw)).every(l => l.visible)).toBe(true); expect(await $('[data-testid="layers-error"]').isExisting()).toBe(false);
       await focusTab('home'); await focusTab({ doc: a }); await panel(); await $('[data-testid="layers-error"]').waitForDisplayed();
       expect(readFileSync(aw).equals(before)).toBe(true); expect((await history()).undo).toHaveLength(0);
-    } finally { chmodSync(aw, 0o666); }
+    } finally { allowWrites(aw); }
     await ready(); await $('[data-testid="layer-toggle-1"]').click(); await browser.waitUntil(async () => !(await snapshot(aw))[1].visible);
     expect((await history()).undo).toHaveLength(1); await invokeAppCommand('edit.undo'); await ready();
     await browser.waitUntil(async () => readFileSync(aw).equals(before)); expect(await $('[data-testid="layer-toggle-1"]').isSelected()).toBe(true);

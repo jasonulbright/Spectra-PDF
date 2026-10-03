@@ -21,7 +21,9 @@
 //! removes the job's files and history. A job whose cancel fails is never
 //! taken twice, and delivery records each PDF before the PDF takes its final
 //! name. A PDF document opens as received; a PostScript document goes through
-//! the CLI `distill` arm.
+//! the CLI `distill` arm; text and images, and any job with layout options
+//! (number-up, order, page selection, scaling, mirror), go through the CLI
+//! `printed-job` arm, since a held job never passes through the CUPS filters.
 //!
 //! Requests travel through libcups (`cupsDoIORequest`), which reaches the
 //! scheduler over its local socket and answers an authentication challenge
@@ -49,7 +51,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
 use super::{
-    convert_staged, open_printed, part_path, reclaim_job_intermediates, reserve_pdf, JobSlot,
+    open_printed, part_path, reclaim_job_intermediates, reserve_pdf, run_cli_conversion, JobReport, JobSlot,
     PrinterState, VirtualPrinterStatus, IN_FLIGHT, MAX_CONCURRENT_JOBS, MAX_JOB_BYTES,
     PRINTED_PREFIX,
 };
@@ -104,6 +106,16 @@ const ENTRY_TEMP_SUFFIX: &str = ".new";
 /// Ledger entry: the file name of a staged document's printed PDF, written
 /// before the PDF takes that name.
 const DELIVERED_SUFFIX: &str = ".delivered";
+/// Ledger entry: how many deliveries of a staged document failed for a
+/// reason that was not its own bytes.
+const ATTEMPTS_SUFFIX: &str = ".attempts";
+/// A staged document whose delivery fails this many times, across restarts,
+/// is removed: a job that always exhausts its time or memory budget never
+/// reaches the converter's refusal, and would otherwise be retried at every
+/// start.
+pub(super) const MAX_DELIVERY_ATTEMPTS: u32 = 3;
+/// Beside a staged document: the job's layout options, applied at delivery.
+const LAYOUT_SUFFIX: &str = ".layout";
 
 pub(super) const HELD_ELSEWHERE: &str =
     "another Spectra PDF window of this account is receiving the printer's jobs";
@@ -349,6 +361,7 @@ pub(super) mod status {
 
 pub(super) mod op {
     pub const CANCEL_JOB: u16 = 0x0008;
+    pub const GET_JOB_ATTRIBUTES: u16 = 0x0009;
     pub const GET_JOBS: u16 = 0x000A;
     pub const GET_PRINTER_ATTRIBUTES: u16 = 0x000B;
     /// CUPS IPP extensions.
@@ -777,6 +790,27 @@ const JOB_ATTRIBUTES: &[&str] = &[
     "time-at-creation",
 ];
 
+/// The job options the CUPS filters would apply. A held job never passes
+/// through the filters, so delivery applies them. cupsd keeps every job
+/// template attribute a client sends, named or not in the queue's PPD, and
+/// Get-Job-Attributes returns those requested here. `outputorder` is the
+/// CUPS name `lp -o outputorder=` sends; `output-order` and `page-delivery`
+/// are the IPP names.
+const LAYOUT_ATTRIBUTES: &[&str] = &[
+    "fit-to-page",
+    "media",
+    "mirror",
+    "number-up",
+    "number-up-layout",
+    "output-order",
+    "outputorder",
+    "page-delivery",
+    "page-ranges",
+    "page-set",
+    "print-scaling",
+    "scaling",
+];
+
 pub(super) fn printer_attributes_request(queue: &str, user: &str) -> Message {
     request(
         op::GET_PRINTER_ATTRIBUTES,
@@ -795,6 +829,19 @@ pub(super) fn get_jobs_request(queue: &str, user: &str) -> Message {
             keywords("requested-attributes", JOB_ATTRIBUTES),
             Attr::new("which-jobs", vec![Value::Keyword("not-completed".into())]),
             Attr::new("my-jobs", vec![Value::Boolean(true)]),
+        ],
+    )
+}
+
+/// One job's layout options (RFC 8011 section 4.3.4).
+pub(super) fn get_job_attributes_request(queue: &str, user: &str, job: i32) -> Message {
+    request(
+        op::GET_JOB_ATTRIBUTES,
+        vec![
+            target(queue),
+            Attr::new("job-id", vec![Value::Integer(job)]),
+            requester(user),
+            keywords("requested-attributes", LAYOUT_ATTRIBUTES),
         ],
     )
 }
@@ -1012,6 +1059,447 @@ pub(super) fn job_is_complete(job: &JobFacts) -> bool {
     ) && !job.reasons.iter().any(|reason| reason == "job-incoming")
 }
 
+/// `number-up` values the queue offers (cupsd's `number-up-supported`).
+pub(super) const NUMBER_UP: &[i32] = &[1, 2, 4, 6, 9, 16];
+/// `number-up-layout` keywords (CUPS IPP spec).
+pub(super) const NUMBER_UP_LAYOUTS: &[&str] =
+    &["lrtb", "lrbt", "rltb", "rlbt", "tblr", "tbrl", "btlr", "btrl"];
+/// `page-set` keywords (CUPS job options).
+pub(super) const PAGE_SETS: &[&str] = &["all", "odd", "even"];
+/// The `print-scaling` keywords delivery applies; `none` is no scaling and
+/// `auto` scales as `auto-fit` does.
+pub(super) const PRINT_SCALINGS: &[&str] = &["fit", "fill", "auto-fit"];
+/// The `scaling` percentages delivery applies.
+pub(super) const SCALING_PERCENT: std::ops::RangeInclusive<i32> = 1..=800;
+/// The page ranges one job may name; more is not laid out.
+pub(super) const MAX_PAGE_RANGES: usize = 64;
+/// The upper bound of a page range that runs through the last page: libcups
+/// encodes `lp -P 3-` as `3-2147483647`.
+pub(super) const OPEN_RANGE: i32 = i32::MAX;
+
+/// The layout options of one job.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct JobLayout {
+    pub number_up: i32,
+    pub number_up_layout: String,
+    pub reverse: bool,
+    /// A media name of `[A-Za-z0-9._-]` only: a PWG 5101.1 name, a PPD
+    /// size name or a `Custom.` size.
+    pub media: Option<String>,
+    /// One of `PAGE_SETS`.
+    pub page_set: String,
+    /// 1-based inclusive document page ranges; empty selects every page.
+    pub page_ranges: Vec<(i32, i32)>,
+    pub mirror: bool,
+    /// One of `PRINT_SCALINGS`, or a percentage in `SCALING_PERCENT`.
+    pub scaling: Option<String>,
+    /// The attributes of the job that arrived with a value delivery does not
+    /// apply, reported when the job is delivered.
+    pub not_applied: Vec<String>,
+    /// A text document's declared character set (`charset_of`); per document.
+    pub charset: Option<String>,
+}
+
+impl Default for JobLayout {
+    fn default() -> Self {
+        Self {
+            number_up: 1,
+            number_up_layout: "lrtb".to_string(),
+            reverse: false,
+            media: None,
+            page_set: "all".to_string(),
+            page_ranges: Vec::new(),
+            mirror: false,
+            scaling: None,
+            not_applied: Vec::new(),
+            charset: None,
+        }
+    }
+}
+
+/// Whether a character-set name is safe to stage and pass on: an IANA name's
+/// characters only.
+pub(super) fn charset_is_valid(charset: &str) -> bool {
+    !charset.is_empty()
+        && charset.len() <= 40
+        && charset
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b':' | b'+'))
+}
+
+/// The `charset` parameter of a document format, lower case; none when it
+/// is absent. `Err` for a value outside an IANA name's characters.
+pub(super) fn charset_of(format: &str) -> Result<Option<String>, ()> {
+    for parameter in format.split(';').skip(1) {
+        let Some((name, value)) = parameter.split_once('=') else {
+            continue;
+        };
+        if name.trim().eq_ignore_ascii_case("charset") {
+            let value = value.trim().trim_matches('"').to_ascii_lowercase();
+            return if charset_is_valid(&value) { Ok(Some(value)) } else { Err(()) };
+        }
+    }
+    Ok(None)
+}
+
+/// Whether a text document's bytes are two or four bytes per character: a
+/// UTF-16 or UTF-32 byte order mark, or such a declared character set.
+fn wide_text(head: &[u8], charset: Option<&str>) -> bool {
+    head.starts_with(b"\xff\xfe")
+        || head.starts_with(b"\xfe\xff")
+        || head.starts_with(b"\x00\x00\xfe\xff")
+        || charset.is_some_and(|c| c.starts_with("utf-16") || c.starts_with("utf-32") || c.starts_with("ucs-"))
+}
+
+/// Whether a media value is safe to stage: one line of name characters.
+pub(super) fn media_is_valid(media: &str) -> bool {
+    !media.is_empty()
+        && media.len() <= 255
+        && media.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+fn scaling_is_valid(value: &str) -> bool {
+    PRINT_SCALINGS.contains(&value)
+        || (value.bytes().all(|b| b.is_ascii_digit())
+            && value.parse::<i32>().is_ok_and(|n| SCALING_PERCENT.contains(&n)))
+}
+
+fn ranges_text(ranges: &[(i32, i32)]) -> String {
+    ranges
+        .iter()
+        .map(|&(lo, hi)| match hi {
+            OPEN_RANGE => format!("{lo}-"),
+            hi if hi == lo => lo.to_string(),
+            hi => format!("{lo}-{hi}"),
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// `1-3,5`, `7-` and `-4` as ranges; none for an empty, malformed or
+/// empty-range text. An upper bound past `i32::MAX`, or none, is open-ended.
+fn parse_ranges(text: &str) -> Option<Vec<(i32, i32)>> {
+    let mut ranges = Vec::new();
+    for token in text.split(',') {
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        let (lo, hi) = match token.split_once('-') {
+            None if digits(token) => (token, token),
+            Some((lo, hi)) if (lo.is_empty() || digits(lo)) && (hi.is_empty() || digits(hi)) => {
+                if lo.is_empty() && hi.is_empty() {
+                    return None;
+                }
+                (if lo.is_empty() { "1" } else { lo }, hi)
+            }
+            _ => return None,
+        };
+        let lo: i32 = lo.parse().ok()?;
+        let hi = if hi.is_empty() { OPEN_RANGE } else { hi.parse().unwrap_or(OPEN_RANGE) };
+        if lo < 1 || hi < lo {
+            return None;
+        }
+        ranges.push((lo, hi));
+    }
+    (!ranges.is_empty() && ranges.len() <= MAX_PAGE_RANGES).then_some(ranges)
+}
+
+/// A dimension pair `<w>x<h>` in `per_unit` points each, as a portrait sheet.
+fn portrait(numbers: &str, per_unit: f64) -> Option<(f64, f64)> {
+    let (w, h) = numbers.split_once('x')?;
+    let (w, h): (f64, f64) = (w.parse().ok()?, h.parse().ok()?);
+    (w > 0.0 && h > 0.0 && w.is_finite() && h.is_finite())
+        .then(|| (w.min(h) * per_unit, w.max(h) * per_unit))
+}
+
+impl JobLayout {
+    /// Whether delivery has nothing to apply.
+    pub fn is_plain(&self) -> bool {
+        self.number_up == 1
+            && !self.reverse
+            && self.page_set == "all"
+            && self.page_ranges.is_empty()
+            && !self.mirror
+            && self.scaling.is_none()
+    }
+
+    /// Whether a layout file is staged beside the job's documents.
+    pub fn is_staged(&self) -> bool {
+        !self.is_plain() || !self.not_applied.is_empty() || self.charset.is_some()
+    }
+
+    /// No layout options: the document as sent, read in its own character
+    /// set.
+    pub fn plain(&self) -> Self {
+        Self { charset: self.charset.clone(), ..Self::default() }
+    }
+
+    /// The options delivery applies, in words, for a report.
+    pub fn describe(&self) -> String {
+        let mut parts = Vec::new();
+        if self.number_up > 1 {
+            parts.push(format!("{} pages per sheet", self.number_up));
+        }
+        if self.page_set != "all" {
+            parts.push(format!("{} pages", self.page_set));
+        }
+        if !self.page_ranges.is_empty() {
+            parts.push(format!("pages {}", ranges_text(&self.page_ranges)));
+        }
+        if let Some(scaling) = &self.scaling {
+            if scaling.bytes().all(|b| b.is_ascii_digit()) {
+                parts.push(format!("scaled to {scaling}%"));
+            } else {
+                parts.push(format!("scaling {scaling}"));
+            }
+        }
+        if self.mirror {
+            parts.push("mirrored".to_string());
+        }
+        if self.reverse {
+            parts.push("reverse order".to_string());
+        }
+        parts.join(", ")
+    }
+
+    pub fn to_text(&self) -> String {
+        let mut text = format!(
+            "number-up={}\nnumber-up-layout={}\nreverse={}\n",
+            self.number_up, self.number_up_layout, self.reverse
+        );
+        if let Some(media) = &self.media {
+            text.push_str(&format!("media={media}\n"));
+        }
+        if self.page_set != "all" {
+            text.push_str(&format!("page-set={}\n", self.page_set));
+        }
+        if !self.page_ranges.is_empty() {
+            text.push_str(&format!("page-ranges={}\n", ranges_text(&self.page_ranges)));
+        }
+        if self.mirror {
+            text.push_str("mirror=true\n");
+        }
+        if let Some(scaling) = &self.scaling {
+            text.push_str(&format!("scaling={scaling}\n"));
+        }
+        for name in &self.not_applied {
+            text.push_str(&format!("not-applied={name}\n"));
+        }
+        if let Some(charset) = &self.charset {
+            text.push_str(&format!("charset={charset}\n"));
+        }
+        text
+    }
+
+    pub fn from_text(text: &str) -> Result<Self, String> {
+        let mut layout = Self::default();
+        for line in text.lines().filter(|line| !line.is_empty()) {
+            let (name, value) = line
+                .split_once('=')
+                .ok_or_else(|| format!("the job's layout line {line:?} has no value"))?;
+            match name {
+                "number-up" => {
+                    layout.number_up = value
+                        .parse()
+                        .ok()
+                        .filter(|n| NUMBER_UP.contains(n))
+                        .ok_or_else(|| format!("the job's pages per sheet {value:?} is not offered"))?
+                }
+                "number-up-layout" if NUMBER_UP_LAYOUTS.contains(&value) => {
+                    layout.number_up_layout = value.to_string()
+                }
+                "reverse" | "mirror" => {
+                    let flag = value
+                        .parse()
+                        .map_err(|_| format!("the job's {name} {value:?} is not true or false"))?;
+                    if name == "reverse" {
+                        layout.reverse = flag;
+                    } else {
+                        layout.mirror = flag;
+                    }
+                }
+                "media" if media_is_valid(value) => layout.media = Some(value.to_string()),
+                "page-set" if PAGE_SETS.contains(&value) => layout.page_set = value.to_string(),
+                "page-ranges" => {
+                    layout.page_ranges = parse_ranges(value)
+                        .ok_or_else(|| format!("the job's page ranges {value:?} are not understood"))?
+                }
+                "scaling" if scaling_is_valid(value) => layout.scaling = Some(value.to_string()),
+                "not-applied" if !value.is_empty() && value.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') => {
+                    layout.not_applied.push(value.to_string())
+                }
+                "charset" if charset_is_valid(value) => layout.charset = Some(value.to_string()),
+                _ => return Err(format!("the job's layout line {line:?} is not understood")),
+            }
+        }
+        Ok(layout)
+    }
+
+    /// The portrait sheet in points from the media name: a PPD size name
+    /// (`A4`, `Letter`, any case), a `Custom.<w>x<h>[unit]` size, or a PWG
+    /// 5101.1 name whose last field is `<w>x<h>mm` or `<w>x<h>in`.
+    pub fn sheet_points(&self) -> Option<(f64, f64)> {
+        let media = self.media.as_deref()?;
+        let named = if media.eq_ignore_ascii_case("Ledger") { "Tabloid" } else { media };
+        if let Some((.., x, y)) = PAGES
+            .iter()
+            .find(|(pwg, ppd, ..)| named.eq_ignore_ascii_case(ppd) || named == *pwg)
+        {
+            let per = 72.0 / 2540.0;
+            let (x, y) = (f64::from(*x) * per, f64::from(*y) * per);
+            return Some((x.min(y), x.max(y)));
+        }
+        if media.len() > 7 && media[..7].eq_ignore_ascii_case("Custom.") {
+            let size = &media[7..];
+            let split = size.find(|c: char| c.is_ascii_alphabetic() && c != 'x').unwrap_or(size.len());
+            let per_unit = match size[split..].to_ascii_lowercase().as_str() {
+                "" | "pt" => 1.0,
+                "in" => 72.0,
+                "ft" => 864.0,
+                "mm" => 72.0 / 25.4,
+                "cm" => 72.0 / 2.54,
+                "m" => 72.0 / 0.0254,
+                _ => return None,
+            };
+            return portrait(&size[..split], per_unit);
+        }
+        let size = media.rsplit('_').next()?;
+        if let Some(n) = size.strip_suffix("mm") {
+            portrait(n, 72.0 / 25.4)
+        } else if let Some(n) = size.strip_suffix("in") {
+            portrait(n, 72.0)
+        } else {
+            None
+        }
+    }
+}
+
+/// Whether a value says yes: a boolean, or the text CUPS options carry.
+fn yes(value: &Value) -> Option<bool> {
+    if let Some(flag) = value.boolean() {
+        return Some(flag);
+    }
+    match value.text()?.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" => Some(true),
+        "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+/// The layout options in a Get-Job-Attributes response. An option with a
+/// value delivery does not apply is listed in `not_applied` and left at its
+/// default; no value removes the job.
+pub(super) fn layout_from(response: &Message) -> JobLayout {
+    let mut layout = JobLayout::default();
+    let Some(group) = response.groups.iter().find(|g| g.tag == tag::JOB) else {
+        return layout;
+    };
+    let first = |name: &str| {
+        group
+            .attrs
+            .iter()
+            .find(|a| a.name == name)
+            .and_then(|a| a.values.first())
+    };
+    let integer = |value: &Value| value.integer().or_else(|| value.text().and_then(|t| t.trim().parse().ok()));
+    let keyword = |value: &Value| value.text().map(str::to_ascii_lowercase);
+    let mut skipped: Vec<String> = Vec::new();
+    let mut skip = |name: &str| skipped.push(name.to_string());
+
+    if let Some(value) = first("number-up") {
+        match integer(value).filter(|n| NUMBER_UP.contains(n)) {
+            Some(n) => layout.number_up = n,
+            None => skip("number-up"),
+        }
+    }
+    if let Some(value) = first("number-up-layout") {
+        match keyword(value).filter(|order| NUMBER_UP_LAYOUTS.contains(&order.as_str())) {
+            Some(order) => layout.number_up_layout = order,
+            None => skip("number-up-layout"),
+        }
+    }
+    for name in ["outputorder", "output-order"] {
+        if let Some(value) = first(name) {
+            match keyword(value).as_deref() {
+                Some("reverse") => layout.reverse = true,
+                Some("normal") => {}
+                _ => skip(name),
+            }
+        }
+    }
+    if let Some(value) = first("page-delivery") {
+        match keyword(value).as_deref() {
+            Some(delivery) if delivery.starts_with("reverse-order") => layout.reverse = true,
+            Some(delivery) if delivery.starts_with("same-order") || delivery == "system-specified" => {}
+            _ => skip("page-delivery"),
+        }
+    }
+    match first("media") {
+        None => {}
+        Some(value) => match value.text() {
+            Some(media) if media_is_valid(media) => layout.media = Some(media.to_string()),
+            _ => skip("media"),
+        },
+    }
+    if let Some(value) = first("page-set") {
+        match keyword(value) {
+            Some(set) if PAGE_SETS.contains(&set.as_str()) => layout.page_set = set,
+            _ => skip("page-set"),
+        }
+    }
+    if let Some(attr) = group.attrs.iter().find(|a| a.name == "page-ranges") {
+        let mut ranges: Vec<(i32, i32)> = Vec::new();
+        let mut understood = !attr.values.is_empty();
+        for value in &attr.values {
+            match value {
+                Value::Range(lo, hi) if *lo >= 1 && hi >= lo => ranges.push((*lo, *hi)),
+                Value::Integer(n) if *n >= 1 => ranges.push((*n, *n)),
+                other => match other.text().and_then(parse_ranges) {
+                    Some(parsed) => ranges.extend(parsed),
+                    None => understood = false,
+                },
+            }
+        }
+        if understood && ranges.len() <= MAX_PAGE_RANGES {
+            layout.page_ranges = ranges;
+        } else {
+            skip("page-ranges");
+        }
+    }
+    if let Some(value) = first("mirror") {
+        match yes(value) {
+            Some(flag) => layout.mirror = flag,
+            None => skip("mirror"),
+        }
+    }
+    // `print-scaling`, when present, alone decides the scaling; without it
+    // `scaling` outranks `fit-to-page`, the order of the CUPS image filter.
+    // Every job format takes the same order and applies `scaling`, which the
+    // CUPS PDF filter ignores.
+    if let Some(value) = first("print-scaling") {
+        match keyword(value).as_deref() {
+            Some("none") => {}
+            Some("auto" | "auto-fit") => layout.scaling = Some("auto-fit".to_string()),
+            Some(scaling) if PRINT_SCALINGS.contains(&scaling) => layout.scaling = Some(scaling.to_string()),
+            _ => skip("print-scaling"),
+        }
+    } else {
+        if let Some(value) = first("scaling") {
+            match integer(value).filter(|n| SCALING_PERCENT.contains(n)) {
+                Some(n) => layout.scaling = Some(n.to_string()),
+                None => skip("scaling"),
+            }
+        }
+        if let Some(value) = first("fit-to-page") {
+            match yes(value) {
+                Some(true) if layout.scaling.is_none() => layout.scaling = Some("fit".to_string()),
+                Some(_) => {}
+                None => skip("fit-to-page"),
+            }
+        }
+    }
+    layout.not_applied = skipped;
+    layout
+}
+
 // ── the scheduler ───────────────────────────────────────────────────────────
 
 /// Why an exchange produced no response.
@@ -1121,6 +1609,10 @@ fn existing_queues(scheduler: &dyn Scheduler, user: &str) -> Result<HashSet<Stri
 pub(super) enum DocKind {
     Pdf,
     PostScript,
+    /// `text/plain`, converted through Create PDF at delivery.
+    Text,
+    /// An image, by its extension; converted through Create PDF at delivery.
+    Image(&'static str),
 }
 
 impl DocKind {
@@ -1128,8 +1620,23 @@ impl DocKind {
         match self {
             DocKind::Pdf => "pdf",
             DocKind::PostScript => "ps",
+            DocKind::Text => "txt",
+            DocKind::Image(extension) => extension,
         }
     }
+}
+
+/// The image formats the queue takes that Create PDF converts: MIME type,
+/// staged extension, and the signatures the data must begin with.
+pub(super) const IMAGE_FORMATS: &[(&str, &str, &[&[u8]])] = &[
+    ("image/png", "png", &[b"\x89PNG\r\n\x1a\n"]),
+    ("image/jpeg", "jpg", &[b"\xff\xd8\xff"]),
+    ("image/tiff", "tif", &[b"II*\x00", b"MM\x00*"]),
+];
+
+/// Whether `extension` names a staged document.
+fn staged_extension(extension: &str) -> bool {
+    matches!(extension, "pdf" | "ps" | "txt") || IMAGE_FORMATS.iter().any(|(_, e, _)| *e == extension)
 }
 
 /// A fetched document by its format, as the scheduler typed it, and its
@@ -1148,6 +1655,7 @@ pub(super) enum Content {
 const UEL: &[u8] = b"\x1b%-12345X";
 
 pub(super) fn content_of(format: &str, head: &[u8]) -> Content {
+    let charset = charset_of(format).ok().flatten();
     let format = format
         .split(';')
         .next()
@@ -1163,6 +1671,7 @@ pub(super) fn content_of(format: &str, head: &[u8]) -> Content {
         format.as_str(),
         "application/octet-stream" | "application/vnd.cups-raw"
     );
+    let image = IMAGE_FORMATS.iter().find(|(mime, ..)| *mime == format);
     match format.as_str() {
         "application/pdf" | "application/vnd.cups-pdf" if pdf => Content::Kind(DocKind::Pdf),
         "application/postscript" | "application/vnd.cups-postscript" if postscript => {
@@ -1170,8 +1679,22 @@ pub(super) fn content_of(format: &str, head: &[u8]) -> Content {
         }
         _ if unwrapped && pdf => Content::Kind(DocKind::Pdf),
         _ if unwrapped && postscript => Content::Kind(DocKind::PostScript),
+        "text/plain" if head.starts_with(b"%PDF-") => Content::Kind(DocKind::Pdf),
+        "text/plain" if postscript => Content::Kind(DocKind::PostScript),
+        "text/plain" if wide_text(head, charset.as_deref()) => Content::Kind(DocKind::Text),
+        "text/plain" if head.contains(&0) => Content::Unsupported(
+            "a print job arrived as text/plain data that holds binary bytes, which Spectra PDF does not print as text"
+                .to_string(),
+        ),
+        "text/plain" => Content::Kind(DocKind::Text),
+        _ if image.is_some_and(|(_, _, signatures)| signatures.iter().any(|s| head.starts_with(s))) => {
+            Content::Kind(DocKind::Image(image.map_or("", |(_, extension, _)| extension)))
+        }
         "application/pdf" | "application/vnd.cups-pdf" | "application/postscript"
         | "application/vnd.cups-postscript" => Content::Unsupported(format!(
+            "a print job arrived as {format} data that does not begin as that format"
+        )),
+        _ if image.is_some() => Content::Unsupported(format!(
             "a print job arrived as {format} data that does not begin as that format"
         )),
         "" => Content::Unsupported(
@@ -1199,7 +1722,7 @@ pub(super) fn staged_name(key: &str, document: u32, kind: DocKind) -> String {
 /// The job key of a staged document's name, for names this receiver writes.
 pub(super) fn key_of(staged: &str) -> Option<String> {
     let (rest, extension) = staged.rsplit_once('.')?;
-    if !matches!(extension, "pdf" | "ps") || rest.len() < 3 || !rest.is_char_boundary(rest.len() - 3) {
+    if !staged_extension(extension) || rest.len() < 3 || !rest.is_char_boundary(rest.len() - 3) {
         return None;
     }
     let (key, document) = rest.split_at(rest.len() - 3);
@@ -1213,7 +1736,7 @@ pub(super) fn key_of(staged: &str) -> Option<String> {
 pub(super) fn stem_of(staged: &Path) -> Option<String> {
     let name = staged.file_name()?.to_str()?;
     let (rest, extension) = name.rsplit_once('.')?;
-    if !matches!(extension, "pdf" | "ps") {
+    if !staged_extension(extension) {
         return None;
     }
     let (stem, key) = rest.rsplit_once('-')?;
@@ -1416,8 +1939,9 @@ fn record_taken(pass: &Pass, taker: &mut Taker, key: &str, taken: &Path, copies:
 
 /// How one document's fetch ended.
 enum Fetched {
-    /// Staged under its part name, to be renamed to the staged name.
-    Staged { part: PathBuf, staged: PathBuf },
+    /// Staged under its part name, to be renamed to the staged name, with a
+    /// text document's declared character set.
+    Staged { part: PathBuf, staged: PathBuf, charset: Result<Option<String>, ()> },
     /// A job sheet or an empty document: nothing to deliver.
     Skipped,
     Refused(String),
@@ -1456,16 +1980,33 @@ fn stage_job(pass: &Pass, job: &JobFacts, key: &str, taken: &Path, taker: &mut T
         ));
         return write_or_name(pass, taker, key, taken);
     }
+    let layout = match fetch_layout(pass, job) {
+        Ok(layout) => layout,
+        Err(failure) => {
+            fetch_failed(pass, taker, key, failure);
+            return false;
+        }
+    };
     let mut parts: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut layouts: Vec<JobLayout> = Vec::new();
     let mut refused: Vec<String> = Vec::new();
     let discard = |parts: &[(PathBuf, PathBuf)]| {
-        for (part, _) in parts {
+        for (part, staged) in parts {
             let _ = std::fs::remove_file(part);
+            let _ = std::fs::remove_file(layout_path(staged));
         }
     };
     for document in 1..=job.documents {
         match fetch_document(pass, job, key, document) {
-            Ok(Fetched::Staged { part, staged }) => parts.push((part, staged)),
+            Ok(Fetched::Staged { part, staged, charset }) => {
+                let mut own = layout.clone();
+                match charset {
+                    Ok(charset) => own.charset = charset,
+                    Err(()) => own.not_applied.push("charset".to_string()),
+                }
+                parts.push((part, staged));
+                layouts.push(own);
+            }
             Ok(Fetched::Skipped) => {}
             Ok(Fetched::Refused(message)) => refused.push(message),
             Ok(Fetched::OverLimit) => {
@@ -1477,26 +2018,7 @@ fn stage_job(pass: &Pass, job: &JobFacts, key: &str, taken: &Path, taker: &mut T
             }
             Err(failure) => {
                 discard(&parts);
-                match failure {
-                    FetchFailure::Denied => {
-                        taker.passed.insert(key.to_string());
-                        (pass.record_error)(format!(
-                            "a print job in {queue} cannot be read by this account; it stays in the queue"
-                        ));
-                    }
-                    FetchFailure::Gone => failed_attempt(
-                        pass,
-                        taker,
-                        key,
-                        format!("a print job was removed from {queue} before it could be read"),
-                    ),
-                    FetchFailure::Failed(e) => failed_attempt(
-                        pass,
-                        taker,
-                        key,
-                        format!("the print job could not be read from {queue}: {e}"),
-                    ),
-                }
+                fetch_failed(pass, taker, key, failure);
                 return false;
             }
         }
@@ -1506,6 +2028,18 @@ fn stage_job(pass: &Pass, job: &JobFacts, key: &str, taken: &Path, taker: &mut T
     }
     if parts.is_empty() {
         return write_or_name(pass, taker, key, taken);
+    }
+    // The layout file is on disk before its document takes the staged name,
+    // so delivery never sees the document without its options.
+    for ((_, staged), own) in parts.iter().zip(&layouts) {
+        if !own.is_staged() {
+            continue;
+        }
+        if let Err(e) = write_durable(&layout_path(staged), own.to_text().as_bytes()) {
+            discard(&parts);
+            failed_attempt(pass, taker, key, format!("the print job could not be staged: {e}"));
+            return false;
+        }
     }
     if let Err(e) = sync_dir(pass.staging) {
         discard(&parts);
@@ -1524,6 +2058,52 @@ fn stage_job(pass: &Pass, job: &JobFacts, key: &str, taken: &Path, taker: &mut T
         }
     }
     true
+}
+
+fn fetch_failed(pass: &Pass, taker: &mut Taker, key: &str, failure: FetchFailure) {
+    let queue = pass.queue;
+    match failure {
+        FetchFailure::Denied => {
+            taker.passed.insert(key.to_string());
+            (pass.record_error)(format!(
+                "a print job in {queue} cannot be read by this account; it stays in the queue"
+            ));
+        }
+        FetchFailure::Gone => failed_attempt(
+            pass,
+            taker,
+            key,
+            format!("a print job was removed from {queue} before it could be read"),
+        ),
+        FetchFailure::Failed(e) => failed_attempt(
+            pass,
+            taker,
+            key,
+            format!("the print job could not be read from {queue}: {e}"),
+        ),
+    }
+}
+
+/// The layout file beside a staged document.
+pub(super) fn layout_path(staged: &Path) -> PathBuf {
+    let mut name = staged.file_name().unwrap_or_default().to_os_string();
+    name.push(LAYOUT_SUFFIX);
+    staged.with_file_name(name)
+}
+
+/// The job's layout options, with Get-Job-Attributes.
+fn fetch_layout(pass: &Pass, job: &JobFacts) -> Result<JobLayout, FetchFailure> {
+    let response = call(pass.scheduler, &get_job_attributes_request(pass.queue, pass.user, job.id))
+        .map_err(|refusal| match refusal {
+            Refusal::Denied(_) => FetchFailure::Denied,
+            Refusal::Unavailable(e) | Refusal::Failed(e) => FetchFailure::Failed(e),
+        })?;
+    match response.code {
+        code if succeeded(code) => Ok(layout_from(&response)),
+        status::NOT_FOUND => Err(FetchFailure::Gone),
+        status::FORBIDDEN | status::NOT_AUTHENTICATED | status::NOT_AUTHORIZED => Err(FetchFailure::Denied),
+        _ => Err(FetchFailure::Failed(status_text(&response))),
+    }
 }
 
 fn read_head(path: &Path) -> io::Result<Vec<u8>> {
@@ -1608,7 +2188,8 @@ fn fetch_document(pass: &Pass, job: &JobFacts, key: &str, document: u32) -> Resu
                 let staged = pass.staging.join(staged_name(key, document, kind));
                 let part = part_path(&staged);
                 std::fs::rename(&data, &part).map_err(failed)?;
-                Ok(Fetched::Staged { part, staged })
+                let charset = if kind == DocKind::Text { charset_of(&format) } else { Ok(None) };
+                Ok(Fetched::Staged { part, staged, charset })
             }
         }
     })();
@@ -1750,6 +2331,18 @@ pub(super) fn reclaim_staging(staging: &Path, ledger: &Path) -> usize {
             }
         }
     }
+    // A layout file whose document never took its staged name guards nothing.
+    if let Ok(entries) = std::fs::read_dir(staging) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let Some(staged) = file_name.to_str().and_then(|name| name.strip_suffix(LAYOUT_SUFFIX)) else {
+                continue;
+            };
+            if !staging.join(staged).exists() && std::fs::remove_file(entry.path()).is_ok() {
+                removed_count += 1;
+            }
+        }
+    }
     if let Ok(entries) = std::fs::read_dir(ledger) {
         for entry in entries.flatten() {
             let file_name = entry.file_name();
@@ -1759,6 +2352,7 @@ pub(super) fn reclaim_staging(staging: &Path, ledger: &Path) -> usize {
             let stale = name.ends_with(ENTRY_TEMP_SUFFIX)
                 || name
                     .strip_suffix(DELIVERED_SUFFIX)
+                    .or_else(|| name.strip_suffix(ATTEMPTS_SUFFIX))
                     .is_some_and(|staged| !staging.join(staged).exists());
             if stale && std::fs::remove_file(entry.path()).is_ok() {
                 removed_count += 1;
@@ -1797,6 +2391,7 @@ pub(super) fn deliver_staged(
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         if len > MAX_JOB_BYTES {
             let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_file(layout_path(&path));
             record_error(format!(
                 "a staged print job is over the {MAX_JOB_BYTES}-byte limit and was removed"
             ));
@@ -1810,16 +2405,28 @@ pub(super) fn deliver_staged(
     }
 }
 
+/// Why a staged document produced no printed PDF.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum Failure {
+    /// The document's own bytes cannot be printed: every attempt fails the
+    /// same way, so the job is removed.
+    Refused(String),
+    /// The machine failed (a converter missing, a full disk, a folder that
+    /// cannot be written): the job stays staged for the next start.
+    Retry(String),
+}
+
 /// Turns a staged document into a printed PDF and returns it; `before_rename`
 /// runs once the PDF is complete and before it takes its final name.
 pub(super) type Convert<'a> =
-    &'a dyn Fn(&Path, &str, &dyn Fn(&Path) -> Result<(), String>) -> Result<PathBuf, String>;
+    &'a dyn Fn(&Path, &str, &dyn Fn(&Path) -> Result<(), String>) -> Result<PathBuf, Failure>;
 
 /// Deliver one staged document: convert it, open the PDF, then drop the
 /// staged file. The PDF's file name goes into the ledger before the PDF takes
 /// that name, so after a stop past that point the next start opens the
-/// existing PDF instead of converting a second copy. On failure the staged
-/// document stays for the next start, and the message says so.
+/// existing PDF instead of converting a second copy. A document refused for
+/// its own bytes is removed with its layout and record; on any other failure
+/// it stays for the next start. The message says which.
 pub(super) fn deliver_one(
     ledger: &Path,
     printed: &Path,
@@ -1833,6 +2440,7 @@ pub(super) fn deliver_one(
         .and_then(|name| name.to_str())
         .ok_or_else(|| "the staged print job has no readable name".to_string())?;
     let record = ledger_entry(ledger, name, DELIVERED_SUFFIX);
+    let attempts = ledger_entry(ledger, name, ATTEMPTS_SUFFIX);
     let earlier = std::fs::read_to_string(&record)
         .ok()
         .map(|file_name| file_name.trim().to_string())
@@ -1853,8 +2461,29 @@ pub(super) fn deliver_one(
             };
             match convert(staged, stem, &note) {
                 Ok(pdf) => pdf,
-                Err(e) => {
+                Err(Failure::Refused(e)) => {
+                    let _ = std::fs::remove_file(staged);
+                    let _ = std::fs::remove_file(layout_path(staged));
                     let _ = std::fs::remove_file(&record);
+                    let _ = std::fs::remove_file(&attempts);
+                    return Err(format!("{e}. The print job cannot be printed and was removed."));
+                }
+                Err(Failure::Retry(e)) => {
+                    let _ = std::fs::remove_file(&record);
+                    let failed = std::fs::read_to_string(&attempts)
+                        .ok()
+                        .and_then(|count| count.trim().parse::<u32>().ok())
+                        .unwrap_or(0)
+                        .saturating_add(1);
+                    if failed >= MAX_DELIVERY_ATTEMPTS {
+                        let _ = std::fs::remove_file(staged);
+                        let _ = std::fs::remove_file(layout_path(staged));
+                        let _ = std::fs::remove_file(&attempts);
+                        return Err(format!(
+                            "{e}. The print job failed {failed} times and was removed."
+                        ));
+                    }
+                    let _ = write_entry_file(&attempts, failed.to_string().as_bytes());
                     let folder = staged.parent().unwrap_or(staged);
                     return Err(format!(
                         "{e}. The job is kept in {} and tried again the next time Spectra PDF starts.",
@@ -1867,7 +2496,9 @@ pub(super) fn deliver_one(
     open(&pdf);
     // The record outlives a staged file that could not be removed, so the
     // next start opens this PDF again rather than converting the job twice.
+    let _ = std::fs::remove_file(&attempts);
     if std::fs::remove_file(staged).is_ok() || !staged.exists() {
+        let _ = std::fs::remove_file(layout_path(staged));
         let _ = std::fs::remove_file(&record);
     }
     Ok(pdf)
@@ -1906,22 +2537,176 @@ pub(super) fn copy_staged_pdf(
     }
 }
 
-/// A staged document as a printed PDF: a PDF as received, PostScript through
-/// the CLI `distill` arm.
+/// The layout options staged beside a document; none means the defaults.
+pub(super) fn staged_layout(staged: &Path) -> Result<JobLayout, LayoutError> {
+    match std::fs::read_to_string(layout_path(staged)) {
+        Ok(text) => JobLayout::from_text(&text).map_err(LayoutError::Unparsed),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(JobLayout::default()),
+        Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+            Err(LayoutError::Unparsed(format!("the print job's layout is not text: {e}")))
+        }
+        Err(e) => Err(LayoutError::Unreadable(format!("the print job's layout could not be read: {e}"))),
+    }
+}
+
+/// Why a staged layout file gave no layout.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum LayoutError {
+    /// The file was read and is not a layout this receiver writes.
+    Unparsed(String),
+    /// The file is there and could not be read; its options and the text
+    /// job's character set are unknown.
+    Unreadable(String),
+}
+
+/// The layout a delivery starts from: a layout that cannot be parsed is the
+/// inner error, which `convert_with_layout` delivers without; one that cannot
+/// be read keeps the job for the next start.
+pub(super) fn delivery_layout(staged: &Path) -> Result<Result<JobLayout, String>, Failure> {
+    match staged_layout(staged) {
+        Ok(layout) => Ok(Ok(layout)),
+        Err(LayoutError::Unparsed(e)) => Ok(Err(e)),
+        Err(LayoutError::Unreadable(e)) => Err(Failure::Retry(e)),
+    }
+}
+
+/// The CLI `printed-job` arguments that convert a staged document and apply
+/// its layout, writing `output`.
+pub(super) fn printed_job_args(staged: &Path, layout: &JobLayout, output: &Path) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = vec![
+        "printed-job".into(),
+        staged.into(),
+        "--output".into(),
+        output.into(),
+        "--number-up".into(),
+        layout.number_up.to_string().into(),
+        "--number-up-layout".into(),
+        layout.number_up_layout.clone().into(),
+    ];
+    if layout.reverse {
+        args.push("--reverse".into());
+    }
+    if let Some((w, h)) = layout.sheet_points() {
+        args.extend(["--sheet-width".into(), format!("{w:.2}").into()]);
+        args.extend(["--sheet-height".into(), format!("{h:.2}").into()]);
+    }
+    if layout.page_set != "all" {
+        args.extend(["--page-set".into(), layout.page_set.clone().into()]);
+    }
+    if let Some(charset) = &layout.charset {
+        args.extend(["--charset".into(), charset.clone().into()]);
+    }
+    if !layout.page_ranges.is_empty() {
+        args.extend(["--page-ranges".into(), ranges_text(&layout.page_ranges).into()]);
+    }
+    if layout.mirror {
+        args.push("--mirror".into());
+    }
+    if let Some(scaling) = &layout.scaling {
+        args.extend(["--scaling".into(), scaling.clone().into()]);
+    }
+    args
+}
+
+/// Convert a staged document with its layout through `run`, reporting what
+/// delivery leaves out. A layout file that cannot be read, and a layout the
+/// engine refuses (a job that needs a password, a page selection of no page),
+/// deliver the document as sent with a report. A machine failure of the laid
+/// out run is returned as it is, so the job waits rather than printing
+/// without its options.
+pub(super) fn convert_with_layout(
+    layout: Result<JobLayout, String>,
+    run: &dyn Fn(&JobLayout) -> Result<PathBuf, Failure>,
+    report: &dyn Fn(String),
+) -> Result<PathBuf, Failure> {
+    let layout = layout.unwrap_or_else(|e| {
+        report(format!("{e}; the print job was delivered without its layout options"));
+        JobLayout::default()
+    });
+    if !layout.not_applied.is_empty() {
+        report(format!(
+            "the print job's {} option{} not applied",
+            layout.not_applied.join(", "),
+            if layout.not_applied.len() == 1 { " was" } else { "s were" }
+        ));
+    }
+    if layout.is_plain() {
+        return run(&layout);
+    }
+    match run(&layout) {
+        Err(Failure::Refused(e)) => {
+            let pdf = run(&layout.plain())?;
+            report(format!(
+                "the print job's layout ({}) could not be applied, so it was delivered as sent: {e}",
+                layout.describe()
+            ));
+            Ok(pdf)
+        }
+        other => other,
+    }
+}
+
+/// The `notes` array of a `printed-job` result on the CLI's standard output.
+pub(super) fn result_notes(stdout: &[u8]) -> Vec<String> {
+    serde_json::from_slice::<serde_json::Value>(stdout)
+        .ok()
+        .and_then(|result| result.get("notes").and_then(|n| n.as_array()).cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|note| note.as_str().map(str::to_string))
+        .collect()
+}
+
+/// A staged document as a printed PDF: a PDF without layout options as
+/// received, everything else through the CLI `printed-job` arm, whose exit
+/// code tells a refusal of the document from a machine failure. `report`
+/// receives what the delivered PDF leaves out of the job.
 fn convert_document(
     staged: &Path,
     stem: &str,
     before_rename: &dyn Fn(&Path) -> Result<(), String>,
-) -> Result<PathBuf, String> {
-    match staged.extension().and_then(|e| e.to_str()) {
-        Some("ps") => {
-            private_dir(&printed_dir())
-                .map_err(|e| format!("cannot create the printed-jobs folder: {e}"))?;
-            convert_staged(staged, stem, before_rename)
-        }
-        Some("pdf") => copy_staged_pdf(&printed_dir(), staged, stem, before_rename),
-        _ => Err("the staged print job is neither PDF nor PostScript".to_string()),
+    report: &dyn Fn(String),
+) -> Result<PathBuf, Failure> {
+    let extension = staged.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if !staged_extension(extension) {
+        return Err(Failure::Refused("the staged print job is in no format this printer takes".to_string()));
     }
+    let run = |layout: &JobLayout| {
+        if extension == "pdf" && layout.is_plain() {
+            return copy_staged_pdf(&printed_dir(), staged, stem, before_rename).map_err(Failure::Retry);
+        }
+        private_dir(&printed_dir())
+            .map_err(|e| Failure::Retry(format!("cannot create the printed-jobs folder: {e}")))?;
+        match run_cli_conversion(stem, before_rename, &|part| printed_job_args(staged, layout, part)) {
+            Ok((pdf, stdout)) => {
+                for note in result_notes(&stdout) {
+                    report(note);
+                }
+                Ok(pdf)
+            }
+            Err(failure) if failure.refused => Err(Failure::Refused(failure.message)),
+            Err(failure) => Err(Failure::Retry(failure.message)),
+        }
+    };
+    convert_with_layout(delivery_layout(staged)?, &run, report)
+}
+
+/// Deliver one staged document and settle `report`: a delivered document's
+/// notes become the note, a failure the error. The delivery's ticket is taken
+/// before it starts, so an error another delivery records meanwhile stays.
+pub(super) fn deliver_reported(
+    report: &Mutex<JobReport>,
+    deliver: &dyn Fn(&dyn Fn(String)) -> Result<PathBuf, String>,
+) -> Result<PathBuf, String> {
+    let ticket = report.lock().unwrap().begin();
+    let notes: Mutex<Vec<String>> = Mutex::default();
+    let result = deliver(&|note| notes.lock().unwrap().push(note));
+    let mut report = report.lock().unwrap();
+    match &result {
+        Ok(_) => report.delivered(ticket, notes.into_inner().unwrap_or_default().join("; ")),
+        Err(e) => report.failed(e.clone()),
+    }
+    result
 }
 
 // ── the queue's PPD ─────────────────────────────────────────────────────────
@@ -2341,11 +3126,12 @@ pub(super) fn status(app: &AppHandle) -> Result<VirtualPrinterStatus, String> {
     let kind = classify(facts.as_ref(), &user);
     let state = app.state::<PrinterState>();
     let listener = state.listener_status.lock().unwrap().clone();
-    let last_job_error = state.last_job_error.lock().unwrap().clone();
+    let report = state.job_report.lock().unwrap().clone();
     Ok(VirtualPrinterStatus {
         installed: kind == QueueKind::Held && facts.as_ref().is_some_and(fully_configured),
         listener,
-        last_job_error,
+        last_job_error: report.error,
+        last_job_note: report.note,
         printer_name: queue,
         replaced: false,
         legacy_present: kind == QueueKind::Legacy,
@@ -2383,7 +3169,7 @@ fn set_listener(app: &AppHandle, text: &str) {
 fn record_job_error(app: &AppHandle, message: String) {
     eprintln!("virtual printer: {message}");
     if let Some(state) = app.try_state::<PrinterState>() {
-        *state.last_job_error.lock().unwrap() = message;
+        state.job_report.lock().unwrap().failed(message);
     }
 }
 
@@ -2467,7 +3253,16 @@ fn run(layout: &Layout, user: &str, scheduler: &SystemScheduler, _claim: Receive
             std::thread::spawn(move || {
                 let _slot = JobSlot;
                 let open = |pdf: &Path| open_printed(&app, pdf);
-                match deliver_one(&ledger, &printed_dir(), &staged, &stem, &convert_document, &open) {
+                let deliver = |report: &dyn Fn(String)| {
+                    let convert = |staged: &Path, stem: &str, before: &dyn Fn(&Path) -> Result<(), String>| {
+                        convert_document(staged, stem, before, report)
+                    };
+                    deliver_one(&ledger, &printed_dir(), &staged, &stem, &convert, &open)
+                };
+                let Some(state) = app.try_state::<PrinterState>() else {
+                    return;
+                };
+                match deliver_reported(&state.job_report, &deliver) {
                     // A staged document that is still on disk stays
                     // attempted, so this process does not open its PDF twice.
                     Ok(_) => {
@@ -2475,7 +3270,12 @@ fn run(layout: &Layout, user: &str, scheduler: &SystemScheduler, _claim: Receive
                             attempted.lock().unwrap().remove(&staged);
                         }
                     }
-                    Err(e) => record_job_error(&app, e),
+                    Err(e) => {
+                        eprintln!("virtual printer: {e}");
+                        if !staged.exists() {
+                            attempted.lock().unwrap().remove(&staged);
+                        }
+                    }
                 }
             });
         };

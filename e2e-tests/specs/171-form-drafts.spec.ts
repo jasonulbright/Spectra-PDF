@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { resolve } from 'node:path';
 import { PDFDocument } from 'pdf-lib';
 import { expect } from '@wdio/globals';
@@ -74,13 +75,13 @@ describe('Forms-panel draft ownership in the live workspace', () => {
   });
 
   it('native refusal retains input; retry writes once and Undo restores bytes and the clean editor baseline', async () => {
-    const before = readFileSync(aw); await setReactInputValue(input, 'Retry'); chmodSync(aw, 0o444);
+    const before = readFileSync(aw); await setReactInputValue(input, 'Retry'); refuseWrites(aw);
     try {
       await $(apply).click();
       await browser.waitUntil(async () => /read.only|denied/i.test(await $('[data-testid="status-bar"]').getText()));
       expect(readFileSync(aw).equals(before)).toBe(true); expect((await history()).undo).toHaveLength(0);
       expect(await $(input).getValue()).toBe('Retry');
-    } finally { chmodSync(aw, 0o666); }
+    } finally { allowWrites(aw); }
     await save(aw, 'Retry'); expect((await history()).undo).toHaveLength(1);
     await invokeAppCommand('edit.undo'); await value('Original A'); expect(readFileSync(aw).equals(before)).toBe(true);
   });

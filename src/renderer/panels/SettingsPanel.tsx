@@ -26,6 +26,7 @@ import { tChrome, tOcrLanguage, setAppLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_N
 import { OCR_LANGUAGES } from '../ocr/languages';
 import { AUTO_OCR_LANGUAGE } from '../ocr/language-selection';
 import type { PanelKey } from '../i18n-panels';
+import { jobReportLine } from '../lib/virtual-printer-report';
 // Re-exported for the ~6 existing panel consumers; the implementation is the
 // leaf module (the keymap reads it too — see lib/app-settings.ts).
 export { getSettings } from '../lib/app-settings';
@@ -1046,11 +1047,19 @@ function VirtualPrinterBlock(): React.JSX.Element {
               {tChrome('panel.settings.printerReplaced')}
             </p>
           )}
-          {vpStatus.lastJobError !== '' && (
-            <p className="text-xs text-amber-400 mt-1" data-testid="virtual-printer-job-error">
-              {tChrome('panel.settings.lastJobFailed', { error: vpStatus.lastJobError })}
-            </p>
-          )}
+          {(() => {
+            const line = jobReportLine(vpStatus);
+            if (line === null) return null;
+            return line.kind === 'error' ? (
+              <p className="text-xs text-amber-400 mt-1" data-testid="virtual-printer-job-error">
+                {tChrome(line.key, line.vars)}
+              </p>
+            ) : (
+              <p className="text-xs text-neutral-500 mt-1" data-testid="virtual-printer-job-note">
+                {tChrome(line.key, line.vars)}
+              </p>
+            );
+          })()}
           <div className="flex items-center gap-2 mt-2">
             {vpStatus.installed ? (
               <button

@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
+import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { PDFDocument } from 'pdf-lib';
 import { expect } from '@wdio/globals';
 import {
@@ -11,7 +12,15 @@ import {
 
 // FileShare.Read permits native snapshots but denies replacement. This is a
 // real Windows fault at the second destination, not a mocked bridge response.
+// POSIX has no share modes, and the stage, the snapshot and the rename all
+// write in the working copy's directory: no unprivileged setting refuses the
+// rename alone. There the read-only directory refuses the stage, before any
+// rename, so the rollback after a partial rename runs on Windows only.
 async function lockAgainstReplacement(path: string): Promise<() => Promise<void>> {
+  if (process.platform !== 'win32') {
+    refuseWrites(path);
+    return async () => allowWrites(path);
+  }
   const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
     '$f = [IO.File]::Open($env:PAGE_COMMIT_LOCK_PATH, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read); ' +
     'try { [Console]::WriteLine("LOCKED"); $null = [Console]::ReadLine() } finally { $f.Dispose() }',

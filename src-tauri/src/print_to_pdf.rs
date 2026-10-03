@@ -28,7 +28,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use base64::Engine as _;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 #[cfg(target_os = "linux")]
 #[path = "print_to_pdf_linux.rs"]
@@ -58,15 +58,59 @@ pub struct PrinterState {
     /// "listening" once the receiver is up, else the named reason it is
     /// not, shown verbatim in Settings.
     pub listener_status: Mutex<String>,
-    pub last_job_error: Mutex<String>,
+    /// The latest job error and note. One lock covers both, so delivery
+    /// threads finishing together settle them in one order.
+    pub job_report: Mutex<JobReport>,
 }
 
 impl PrinterState {
     pub fn new() -> Self {
         Self {
             listener_status: Mutex::new("starting".to_string()),
-            last_job_error: Mutex::new(String::new()),
+            job_report: Mutex::new(JobReport::default()),
         }
+    }
+}
+
+/// What Settings shows about the latest jobs.
+///
+/// - `error` is set by a job that failed or was removed. A later failure
+///   replaces it. A delivered job clears it only when the error was recorded
+///   before that job began; an error recorded while the job ran stays.
+/// - `note` is set by a delivered job whose PDF leaves part of the job's
+///   options out, and replaced by every later delivered job (an empty note
+///   for a job delivered whole). A failure clears it. A note never touches
+///   the error, and Settings shows the note only while there is no error.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct JobReport {
+    pub error: String,
+    pub note: String,
+    /// The sequence number the error was recorded at.
+    error_at: u64,
+    sequence: u64,
+}
+
+impl JobReport {
+    /// A delivery begins; the number its outcome is settled against.
+    pub fn begin(&mut self) -> u64 {
+        self.sequence += 1;
+        self.sequence
+    }
+
+    pub fn failed(&mut self, message: String) {
+        self.sequence += 1;
+        self.error = message;
+        self.error_at = self.sequence;
+        self.note.clear();
+    }
+
+    /// The delivery that began at `ticket` succeeded, with `note` naming what
+    /// its PDF leaves out.
+    pub fn delivered(&mut self, ticket: u64, note: String) {
+        if self.error_at < ticket {
+            self.error.clear();
+        }
+        self.note = note;
     }
 }
 
@@ -177,49 +221,93 @@ fn reserve_pdf(dir: &Path, stem: &str) -> std::io::Result<PathBuf> {
 /// `before_rename` runs once that name is known and the PDF is complete; an
 /// error from it fails the conversion. On failure the printed folder keeps
 /// nothing and `staged` is untouched.
-#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+#[cfg_attr(not(windows), allow(dead_code))]
 fn convert_staged(
     staged: &Path,
     stem: &str,
     before_rename: &dyn Fn(&Path) -> Result<(), String>,
 ) -> Result<PathBuf, String> {
+    convert_with_cli(stem, before_rename, &|part| {
+        vec![
+            "distill".into(),
+            staged.into(),
+            "--output".into(),
+            part.into(),
+            "--preset".into(),
+            "printer".into(),
+        ]
+    })
+}
+
+/// Run this executable's CLI with the arguments `args` builds for the `.part`
+/// path, and return the finished PDF under its reserved name in the printed
+/// folder. The same naming and failure rules as `convert_staged`.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn convert_with_cli(
+    stem: &str,
+    before_rename: &dyn Fn(&Path) -> Result<(), String>,
+    args: &dyn Fn(&Path) -> Vec<std::ffi::OsString>,
+) -> Result<PathBuf, String> {
+    run_cli_conversion(stem, before_rename, args)
+        .map(|(pdf, _)| pdf)
+        .map_err(|failure| failure.message)
+}
+
+/// Why a CLI conversion produced no PDF.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CliFailure {
+    /// The CLI exited with `cli::EXIT_INPUT_REFUSED`: the job's own bytes or
+    /// options cannot be printed.
+    pub refused: bool,
+    pub message: String,
+}
+
+/// `convert_with_cli` with the CLI's standard output on success and the
+/// refusal class of a failure.
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+fn run_cli_conversion(
+    stem: &str,
+    before_rename: &dyn Fn(&Path) -> Result<(), String>,
+    args: &dyn Fn(&Path) -> Vec<std::ffi::OsString>,
+) -> Result<(PathBuf, Vec<u8>), CliFailure> {
+    let machine = |message: String| CliFailure { refused: false, message };
     let dir = printed_dir();
     std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("cannot create the printed-jobs folder: {e}"))?;
-    let pdf_path =
-        reserve_pdf(&dir, stem).map_err(|e| format!("cannot name the printed file: {e}"))?;
+        .map_err(|e| machine(format!("cannot create the printed-jobs folder: {e}")))?;
+    let pdf_path = reserve_pdf(&dir, stem)
+        .map_err(|e| machine(format!("cannot name the printed file: {e}")))?;
     let part_path = part_path(&pdf_path);
     let finished = (|| {
-        let exe = std::env::current_exe().map_err(|_| "cannot resolve the app path".to_string())?;
+        let exe = std::env::current_exe()
+            .map_err(|_| machine("cannot resolve the app path".to_string()))?;
         let mut cmd = std::process::Command::new(exe);
-        cmd.arg("distill")
-            .arg(staged)
-            .arg("--output")
-            .arg(&part_path)
-            .arg("--preset")
-            .arg("printer");
+        cmd.args(args(&part_path));
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        match crate::gs::output_within(cmd, Duration::from_secs(2 * 60 * 60)) {
-            Ok(out) if out.status.success() && part_path.is_file() => {}
+        let stdout = match crate::gs::output_within(cmd, Duration::from_secs(2 * 60 * 60)) {
+            Ok(out) if out.status.success() && part_path.is_file() => out.stdout,
             Ok(out) => {
-                return Err(format!(
-                    "the print job could not be converted: {}",
-                    String::from_utf8_lossy(&out.stderr).trim()
-                ))
+                return Err(CliFailure {
+                    refused: out.status.code() == Some(crate::cli::EXIT_INPUT_REFUSED),
+                    message: format!(
+                        "the print job could not be converted: {}",
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    ),
+                })
             }
-            Err(e) => return Err(format!("the converter could not finish: {e}")),
-        }
-        before_rename(&pdf_path)?;
+            Err(e) => return Err(machine(format!("the converter could not finish: {e}"))),
+        };
+        before_rename(&pdf_path).map_err(machine)?;
         std::fs::rename(&part_path, &pdf_path)
-            .map_err(|e| format!("could not finalize the printed file: {e}"))
+            .map_err(|e| machine(format!("could not finalize the printed file: {e}")))?;
+        Ok(stdout)
     })();
     match finished {
-        Ok(()) => Ok(pdf_path),
+        Ok(stdout) => Ok((pdf_path, stdout)),
         Err(e) => {
             // A zero-byte PDF would look like a finished print and keep the
             // name taken.
@@ -234,9 +322,6 @@ fn convert_staged(
 /// instance's argv does.
 #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 fn open_printed(app: &AppHandle, pdf_path: &Path) {
-    if let Some(state) = app.try_state::<PrinterState>() {
-        state.last_job_error.lock().unwrap().clear();
-    }
     let canonical = crate::commands::canonical_path(&pdf_path.to_string_lossy());
     crate::app_windows::route_open(app, vec![canonical], false);
 }
@@ -394,6 +479,9 @@ pub struct VirtualPrinterStatus {
     pub installed: bool,
     pub listener: String,
     pub last_job_error: String,
+    /// What the latest delivered job's PDF leaves out of its options; empty
+    /// when it left nothing out, and on Windows.
+    pub last_job_note: String,
     pub printer_name: String,
     /// An update removed the machine's loopback printer, none is left, and
     /// this account has neither installed nor removed its own printer since.

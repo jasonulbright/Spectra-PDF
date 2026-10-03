@@ -108,6 +108,7 @@ def run_convert(
     src: Path,
     out_dir: Path,
     want_ext: str,
+    infilter: str = "",
 ) -> Path:
     """One `soffice --headless --convert-to` pass. Returns the produced file.
 
@@ -119,6 +120,9 @@ def run_convert(
     intermediate and the new file share a stem in the same directory, so a
     stem-only match could grab the intermediate. Match on the expected
     extension and exclude the source file.
+
+    ``infilter`` names the import filter (``--infilter``); LibreOffice then
+    skips its content-based type detection for ``src``.
     """
     src = Path(src)
     out_dir = Path(out_dir)
@@ -140,6 +144,7 @@ def run_convert(
             f"-env:UserInstallation={profile.as_uri()}",
             "--headless",
             "--norestore",
+            *([f"--infilter={infilter}"] if infilter else []),
             "--convert-to",
             convert_to,
             "--outdir",
@@ -670,8 +675,11 @@ def substituted_faces(
     return missing
 
 
-def to_pdf(source: str | Path, output: str | Path, soffice_path: str) -> dict:
-    """Convert ONE Office / text / web source to a PDF at ``output``.
+def to_pdf(
+    source: str | Path, output: str | Path, soffice_path: str, infilter: str = ""
+) -> dict:
+    """Convert ONE Office / text / web source to a PDF at ``output``;
+    ``infilter`` forces LibreOffice's import filter (see `run_convert`).
 
     Success is proven by opening the result and counting its pages — never by
     the exit code.
@@ -689,7 +697,7 @@ def to_pdf(source: str | Path, output: str | Path, soffice_path: str) -> dict:
 
     work = Path(tempfile.mkdtemp(prefix="lo-topdf-"))
     try:
-        produced = run_convert(soffice_path, "pdf", src, work, ".pdf")
+        produced = run_convert(soffice_path, "pdf", src, work, ".pdf", infilter)
         try:
             with open_pdf(str(produced)) as pdf:
                 pages = len(pdf.pages)

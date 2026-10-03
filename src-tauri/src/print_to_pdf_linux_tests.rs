@@ -6,6 +6,7 @@ use std::net::{TcpListener, TcpStream};
 
 const PDF: &[u8] = b"%PDF-1.7\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n";
 const PS: &[u8] = b"%!PS\n/Helvetica findfont 24 scalefont setfont\n72 700 moveto (HELD) show\nshowpage\n";
+const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR";
 const USER: &str = "alice";
 const QUEUE: &str = "Spectra-PDF-alice";
 
@@ -36,6 +37,8 @@ struct FakeJob {
     /// Fail only this document number.
     fail_document: Option<u32>,
     k_octets: Option<i32>,
+    /// What Get-Job-Attributes answers for the job's layout options.
+    options: Vec<Attr>,
 }
 
 fn job(id: i32, docs: Vec<(&str, &[u8])>) -> FakeJob {
@@ -52,6 +55,7 @@ fn job(id: i32, docs: Vec<(&str, &[u8])>) -> FakeJob {
         fetch: Fetch::Data,
         fail_document: None,
         k_octets: None,
+        options: Vec::new(),
     }
 }
 
@@ -223,6 +227,16 @@ impl FakeCups {
                     })
                     .collect();
                 Ok(Self::reply(status::OK, groups))
+            }
+            op::GET_JOB_ATTRIBUTES => {
+                let id = message.op_integer("job-id").expect("a job id");
+                let jobs = self.jobs.borrow();
+                let Some(job) = jobs.iter().find(|job| job.id == id) else {
+                    return Ok(Self::reply(status::NOT_FOUND, Vec::new()));
+                };
+                let mut attrs = vec![Attr::new("job-id", vec![Value::Integer(id)])];
+                attrs.extend(job.options.iter().cloned());
+                Ok(Self::reply(status::OK, vec![Group { tag: tag::JOB, attrs }]))
             }
             op::CUPS_GET_DOCUMENT => {
                 let id = message.op_integer("job-id").expect("a job id");
@@ -512,13 +526,13 @@ fn a_document_in_another_format_is_refused_by_name_and_its_job_removed() {
     let fake = FakeCups::held();
     fake.add(job(
         11,
-        vec![("text/plain", b"plain words"), ("application/pdf", PDF)],
+        vec![("image/pwg-raster", b"RaS2"), ("application/pdf", PDF)],
     ));
     let errors = pass_ok(&fake, &f, &mut Taker::default());
     assert_eq!(
         errors,
         [format!(
-            "a print job arrived as text/plain data, which Spectra PDF does not convert; it was removed from {QUEUE}"
+            "a print job arrived as image/pwg-raster data, which Spectra PDF does not convert; it was removed from {QUEUE}"
         )]
     );
     assert_eq!(
@@ -864,7 +878,7 @@ fn staged_names_round_trip_to_their_job_key_and_output_stem() {
     assert_eq!(stem_of(Path::new("Printed 1700000000-1.ps")).as_deref(), Some("Printed 1700000000"));
     for not_staged in [
         "Printed 1-0000000001001.pdf.part",
-        "Printed 1-0000000001001.txt",
+        "Printed 1-0000000001001.exe",
         "notes-0000000001001.pdf",
         "Printed 1-x.pdf",
     ] {
@@ -890,9 +904,16 @@ fn content_is_judged_by_the_scheduler_format_and_the_first_bytes() {
     let mut late_header = vec![b' '; 1000];
     late_header.extend_from_slice(PDF);
     assert_eq!(content_of("application/pdf", &late_header), Content::Kind(DocKind::Pdf));
+    assert_eq!(content_of("text/plain", b"words"), Content::Kind(DocKind::Text));
+    assert_eq!(content_of("text/plain", b"<html><body>x</body></html>"), Content::Kind(DocKind::Text));
+    assert_eq!(content_of("text/plain;charset=utf-8", b"words"), Content::Kind(DocKind::Text));
+    assert_eq!(content_of("image/png", PNG), Content::Kind(DocKind::Image("png")));
+    assert_eq!(content_of("image/jpeg", b"\xff\xd8\xff\xe0"), Content::Kind(DocKind::Image("jpg")));
+    assert_eq!(content_of("image/tiff", b"MM\x00*"), Content::Kind(DocKind::Image("tif")));
     for (format, head) in [
-        ("text/plain", &b"words"[..]),
         ("image/png", &b"\x89PNG"[..]),
+        ("image/jpeg", &b"GIF89a"[..]),
+        ("image/pwg-raster", &b"RaS2"[..]),
         ("application/pdf", &b"%!PS"[..]),
         ("application/octet-stream", &b"PCL"[..]),
         ("", PDF),
@@ -1302,7 +1323,7 @@ fn a_staged_pdf_opens_once_as_received_and_leaves_no_staged_file_or_record() {
     let opened = RefCell::new(Vec::new());
     let printed = d.printed.clone();
     let convert = move |staged: &Path, stem: &str, before: &dyn Fn(&Path) -> Result<(), String>| {
-        copy_staged_pdf(&printed, staged, stem, before)
+        copy_staged_pdf(&printed, staged, stem, before).map_err(Failure::Retry)
     };
     let pdf = deliver_one(&d.ledger, &d.printed, &staged, "Printed 1700000000", &convert, &|p| {
         opened.borrow_mut().push(p.to_path_buf())
@@ -1326,9 +1347,9 @@ fn a_stop_after_the_pdf_was_named_opens_that_pdf_instead_of_converting_again() {
     std::fs::write(d.printed.join("Printed 1700000000.pdf"), PDF).unwrap();
     std::fs::write(d.ledger.join(format!("{name}{DELIVERED_SUFFIX}")), "Printed 1700000000.pdf").unwrap();
     let converted = Cell::new(false);
-    let convert = |_: &Path, _: &str, _: &dyn Fn(&Path) -> Result<(), String>| -> Result<PathBuf, String> {
+    let convert = |_: &Path, _: &str, _: &dyn Fn(&Path) -> Result<(), String>| -> Result<PathBuf, Failure> {
         converted.set(true);
-        Err("must not run".into())
+        Err(Failure::Retry("must not run".into()))
     };
     let pdf = deliver_one(&d.ledger, &d.printed, &staged, "Printed 1700000000", &convert, &|_| {}).unwrap();
     assert!(!converted.get());
@@ -1342,14 +1363,14 @@ fn a_failed_conversion_keeps_the_staged_document_and_names_the_retry() {
     let d = delivery();
     let staged = d.staging.join("Printed 1700000000-0000000001001.ps");
     std::fs::write(&staged, PS).unwrap();
-    let convert = |_: &Path, _: &str, _: &dyn Fn(&Path) -> Result<(), String>| -> Result<PathBuf, String> {
-        Err("the print job could not be converted: no Ghostscript".into())
+    let convert = |_: &Path, _: &str, _: &dyn Fn(&Path) -> Result<(), String>| -> Result<PathBuf, Failure> {
+        Err(Failure::Retry("the print job could not be converted: no Ghostscript".into()))
     };
     let error = deliver_one(&d.ledger, &d.printed, &staged, "Printed 1700000000", &convert, &|_| {}).unwrap_err();
     assert!(error.contains("no Ghostscript"));
     assert!(error.contains("tried again the next time Spectra PDF starts"));
     assert!(staged.exists());
-    assert!(names(&d.ledger).is_empty());
+    assert_eq!(names(&d.ledger).into_iter().collect::<Vec<_>>(), [format!("Printed 1700000000-0000000001001.ps{ATTEMPTS_SUFFIX}")]);
 }
 
 #[test]
@@ -2051,16 +2072,27 @@ fn a_held_queue_keeps_printed_jobs_until_a_pass_takes_and_purges_them() {
     // 'no-hold': the stopped queue keeps the job pending.
     lp(&queue, &["-H", "immediate"], &[file("three.pdf", PDF)]);
     lp(&queue, &[], &[file("four.pdf", PDF), file("five.ps", PS)]);
-    lp(&queue, &[], &[file("six.txt", b"plain words\n")]);
+    let laid_out = ["-o", "number-up=2", "-o", "outputorder=reverse"];
+    lp(&queue, &laid_out, &[file("six.txt", b"plain words\n")]);
+    lp(&queue, &laid_out, &[file("seven.pdf", PDF)]);
+    lp(&queue, &laid_out, &[file("eight.png", PNG)]);
+    let page_options = [
+        "-o", "page-set=odd", "-o", "page-ranges=1-3,5", "-o", "mirror", "-o", "fit-to-page", "-o", "scaling=80",
+        "-o", "print-scaling=fill", "-o", "media=A4",
+    ];
+    lp(&queue, &page_options, &[file("nine.pdf", PDF)]);
+    lp(&queue, &["-P", "3-"], &[file("ten.pdf", PDF)]);
+    lp(&queue, &["-P", "-5"], &[file("eleven.pdf", PDF)]);
+    lp(&queue, &[], &[file("twelve.txt", b"caf\xe9 in latin-1\n")]);
     let listed = jobs_from(&call(&scheduler, &get_jobs_request(&queue, &user)).unwrap()).unwrap();
-    assert_eq!(listed.len(), 6, "{listed:?}");
+    assert_eq!(listed.len(), 12, "{listed:?}");
     for job in &listed {
         assert!(job_is_complete(job), "{job:?}");
         assert_eq!(job.owner.as_deref(), Some(user.as_str()));
     }
     // The job the loopback queue was sending and the 'no-hold' job wait
     // pending on the stopped queue; the others are held.
-    assert_eq!(listed.iter().filter(|job| job.state == job_state::HELD).count(), 4, "{listed:?}");
+    assert_eq!(listed.iter().filter(|job| job.state == job_state::HELD).count(), 10, "{listed:?}");
     assert_eq!(listed.iter().filter(|job| job.state == job_state::PENDING).count(), 2, "{listed:?}");
     assert_eq!(listed.iter().filter(|job| job.documents == 2).count(), 1, "{listed:?}");
 
@@ -2079,17 +2111,33 @@ fn a_held_queue_keeps_printed_jobs_until_a_pass_takes_and_purges_them() {
     };
     let mut taker = Taker::default();
     assert_eq!(take_jobs(&pass, &mut taker), Ok(QueueKind::Held));
-    assert_eq!(
-        *errors.borrow(),
-        [format!(
-            "a print job arrived as text/plain data, which Spectra PDF does not convert; it was removed from {queue}"
-        )]
-    );
+    assert!(errors.borrow().is_empty(), "{:?}", errors.borrow());
     let staged = staged(&f);
-    assert_eq!(staged.len(), 6, "{:?}", staged.keys());
-    assert_eq!(staged.values().filter(|data| data.as_slice() == PDF).count(), 4);
+    assert_eq!(staged.len(), 19, "{:?}", staged.keys());
+    assert_eq!(staged.values().filter(|data| data.as_slice() == PDF).count(), 8);
     assert_eq!(staged.values().filter(|data| data.as_slice() == PS).count(), 2);
-    assert_eq!(names(&f.ledger).len(), 6);
+    assert_eq!(staged.values().filter(|data| data.as_slice() == b"plain words\n").count(), 1);
+    assert_eq!(staged.keys().filter(|name| name.ends_with(".txt")).count(), 2);
+    assert_eq!(staged.keys().filter(|name| name.ends_with(".png")).count(), 1);
+    assert_eq!(staged.values().filter(|data| data.as_slice() == PNG).count(), 1);
+    let layouts: Vec<JobLayout> = staged
+        .keys()
+        .filter(|name| name.ends_with(LAYOUT_SUFFIX))
+        .map(|name| JobLayout::from_text(&String::from_utf8(staged[name].clone()).unwrap()).unwrap())
+        .collect();
+    assert_eq!(layouts.len(), 6, "{:?}", staged.keys());
+    assert_eq!(layouts.iter().filter(|l| (l.number_up, l.reverse) == (2, true)).count(), 3, "{layouts:?}");
+    // libcups sends `-P 3-` with the upper bound 2147483647 and `-P -5` from 1.
+    assert!(layouts.iter().any(|l| l.page_ranges == [(3, OPEN_RANGE)]), "{layouts:?}");
+    assert!(layouts.iter().any(|l| l.page_ranges == [(1, 5)]), "{layouts:?}");
+    let paged = layouts.iter().find(|l| l.page_set == "odd").expect("the page options' layout");
+    assert_eq!(paged.page_set, "odd", "{paged:?}");
+    assert_eq!(paged.page_ranges, [(1, 3), (5, 5)], "{paged:?}");
+    assert!(paged.mirror, "{paged:?}");
+    assert_eq!(paged.scaling.as_deref(), Some("fill"), "{paged:?}");
+    assert!(paged.media.is_some() && paged.sheet_points().is_some(), "{paged:?}");
+    assert!(paged.not_applied.is_empty(), "{paged:?}");
+    assert_eq!(names(&f.ledger).len(), 12);
     let left = jobs_from(&call(&scheduler, &get_jobs_request(&queue, &user)).unwrap()).unwrap();
     assert!(left.is_empty(), "{left:?}");
     let mut completed = get_jobs_request(&queue, &user);
@@ -2111,4 +2159,846 @@ fn a_held_queue_keeps_printed_jobs_until_a_pass_takes_and_purges_them() {
     assert!(history.iter().all(|job| job.documents == 0), "purged jobs keep no documents: {history:?}");
     assert_eq!(take_jobs(&pass, &mut taker), Ok(QueueKind::Held));
     assert!(names(&f.ledger).is_empty(), "a full listing without the jobs prunes their entries");
+}
+
+// ── layout options and converted formats ────────────────────────────────────
+
+fn reply_with(attrs: Vec<Attr>) -> Message {
+    Message {
+        version: (2, 0),
+        code: status::OK,
+        request_id: REQUEST_ID,
+        groups: vec![Group { tag: tag::JOB, attrs }],
+    }
+}
+
+#[test]
+fn the_layout_request_names_the_job_and_the_options() {
+    let request = get_job_attributes_request(QUEUE, USER, 42);
+    assert_eq!(request.code, op::GET_JOB_ATTRIBUTES);
+    assert_eq!(request.op_integer("job-id"), Some(42));
+    assert_eq!(request.op_text("requesting-user-name"), Some(USER));
+    let asked: Vec<&str> = request
+        .any_attr("requested-attributes")
+        .unwrap()
+        .values
+        .iter()
+        .filter_map(Value::text)
+        .collect();
+    for name in [
+        "number-up",
+        "number-up-layout",
+        "outputorder",
+        "output-order",
+        "page-delivery",
+        "media",
+        "page-set",
+        "page-ranges",
+        "mirror",
+        "fit-to-page",
+        "scaling",
+        "print-scaling",
+    ] {
+        assert!(asked.contains(&name), "{name}");
+    }
+}
+
+#[test]
+fn number_up_is_read_and_an_unoffered_count_is_named() {
+    let layout = layout_from(&reply_with(vec![Attr::new("number-up", vec![Value::Integer(4)])]));
+    assert_eq!(layout.number_up, 4);
+    assert!(!layout.is_plain());
+    assert_eq!(layout_from(&reply_with(Vec::new())), JobLayout::default());
+    let unoffered = layout_from(&reply_with(vec![Attr::new("number-up", vec![Value::Integer(3)])]));
+    assert_eq!((unoffered.number_up, unoffered.not_applied.as_slice()), (1, &["number-up".to_string()][..]));
+}
+
+#[test]
+fn number_up_layout_is_read_and_an_unknown_order_is_named() {
+    let layout = layout_from(&reply_with(vec![
+        Attr::new("number-up", vec![Value::Integer(2)]),
+        Attr::new("number-up-layout", vec![Value::Keyword("tbrl".into())]),
+    ]));
+    assert_eq!(layout.number_up_layout, "tbrl");
+    let refused = layout_from(&reply_with(vec![Attr::new(
+        "number-up-layout",
+        vec![Value::Keyword("spiral".into())],
+    )]));
+    assert_eq!(refused.number_up_layout, "lrtb");
+    assert_eq!(refused.not_applied, ["number-up-layout"]);
+}
+
+#[test]
+fn reverse_order_is_read_from_each_name_it_travels_under() {
+    for attr in [
+        Attr::new("outputorder", vec![Value::Name("reverse".into())]),
+        Attr::new("output-order", vec![Value::Keyword("reverse".into())]),
+        Attr::new("page-delivery", vec![Value::Keyword("reverse-order-face-down".into())]),
+    ] {
+        let name = attr.name.clone();
+        let layout = layout_from(&reply_with(vec![attr]));
+        assert!(layout.reverse, "{name}");
+        assert!(!layout.is_plain(), "{name}");
+    }
+    let normal = layout_from(&reply_with(vec![Attr::new("outputorder", vec![Value::Name("normal".into())])]));
+    assert!(!normal.reverse);
+}
+
+#[test]
+fn the_layout_file_round_trips_and_refuses_what_it_does_not_know() {
+    let layout = JobLayout {
+        number_up: 6,
+        number_up_layout: "btlr".to_string(),
+        reverse: true,
+        media: Some("na_letter_8.5x11in".to_string()),
+        page_set: "even".to_string(),
+        page_ranges: vec![(1, 3), (5, OPEN_RANGE)],
+        mirror: true,
+        scaling: Some("75".to_string()),
+        not_applied: vec!["print-scaling".to_string()],
+        charset: Some("iso-8859-1".to_string()),
+    };
+    assert_eq!(JobLayout::from_text(&layout.to_text()), Ok(layout));
+    assert!(JobLayout::from_text("page-set=some\n").is_err());
+    assert!(JobLayout::from_text("page-ranges=3-1\n").is_err());
+    assert!(JobLayout::from_text("scaling=900\n").is_err());
+    assert!(JobLayout::from_text("media=a b\n").is_err());
+    assert!(JobLayout::from_text("number-up=5\n").is_err());
+    assert!(JobLayout::from_text("number-up-layout=zz\n").is_err());
+    assert!(JobLayout::from_text("colour=red\n").is_err());
+}
+
+#[test]
+fn the_sheet_follows_the_media_name() {
+    let sheet = |media: &str| {
+        JobLayout { media: Some(media.to_string()), ..JobLayout::default() }.sheet_points()
+    };
+    let (w, h) = sheet("iso_a4_210x297mm").unwrap();
+    assert!((w - 595.28).abs() < 0.01 && (h - 841.89).abs() < 0.01, "{w} {h}");
+    assert_eq!(sheet("na_letter_8.5x11in"), Some((612.0, 792.0)));
+    assert_eq!(sheet("na_ledger_17x11in"), Some((792.0, 1224.0)), "the sheet is portrait");
+    assert_eq!(sheet("roll_max_36x0in"), None);
+    assert_eq!(sheet("custom"), None);
+}
+
+#[test]
+fn the_cli_arguments_carry_every_option() {
+    let layout = JobLayout {
+        number_up: 2,
+        number_up_layout: "rltb".to_string(),
+        reverse: true,
+        media: Some("na_letter_8.5x11in".to_string()),
+        ..JobLayout::default()
+    };
+    let args: Vec<String> = printed_job_args(Path::new("/s/job.txt"), &layout, Path::new("/p/out.pdf.part"))
+        .into_iter()
+        .map(|a| a.into_string().unwrap())
+        .collect();
+    assert_eq!(
+        args,
+        [
+            "printed-job", "/s/job.txt", "--output", "/p/out.pdf.part", "--number-up", "2",
+            "--number-up-layout", "rltb", "--reverse", "--sheet-width", "612.00", "--sheet-height", "792.00",
+        ]
+    );
+    let plain: Vec<String> = printed_job_args(Path::new("a.png"), &JobLayout::default(), Path::new("b"))
+        .into_iter()
+        .map(|a| a.into_string().unwrap())
+        .collect();
+    assert!(!plain.contains(&"--reverse".to_string()) && !plain.contains(&"--sheet-width".to_string()));
+    let selected = JobLayout {
+        page_set: "odd".to_string(),
+        page_ranges: vec![(2, 4), (7, 7)],
+        mirror: true,
+        scaling: Some("fit".to_string()),
+        ..JobLayout::default()
+    };
+    let args: Vec<String> = printed_job_args(Path::new("a.pdf"), &selected, Path::new("b"))
+        .into_iter()
+        .map(|a| a.into_string().unwrap())
+        .collect();
+    assert_eq!(
+        args[8..],
+        ["--page-set", "odd", "--page-ranges", "2-4,7", "--mirror", "--scaling", "fit"]
+    );
+}
+
+#[test]
+fn a_job_with_layout_options_stages_them_beside_each_document() {
+    let f = folders();
+    let fake = FakeCups::held();
+    let mut held = job(21, vec![("application/pdf", PDF), ("text/plain", b"words\n")]);
+    held.options = vec![
+        Attr::new("number-up", vec![Value::Integer(2)]),
+        Attr::new("outputorder", vec![Value::Name("reverse".into())]),
+    ];
+    fake.add(held);
+    let errors = pass_ok(&fake, &f, &mut Taker::default());
+    assert!(errors.is_empty(), "{errors:?}");
+    let staged = staged(&f);
+    let pdf = format!("{}001.pdf", key(21));
+    let text = format!("{}002.txt", key(21));
+    assert_eq!(staged[&pdf], PDF);
+    assert_eq!(staged[&text], b"words\n");
+    for name in [&pdf, &text] {
+        let layout = staged_layout(&f.staging.join(name)).unwrap();
+        assert_eq!(layout.number_up, 2, "{name}");
+        assert!(layout.reverse, "{name}");
+    }
+    assert_eq!(staged.len(), 4, "{:?}", staged.keys());
+    assert!(fake.operations().contains(&op::GET_JOB_ATTRIBUTES));
+    assert_eq!(*fake.cancels.borrow(), [21]);
+}
+
+#[test]
+fn a_job_without_layout_options_stages_no_layout_file() {
+    let f = folders();
+    let fake = FakeCups::held();
+    fake.add(job(22, vec![("image/png", PNG)]));
+    let errors = pass_ok(&fake, &f, &mut Taker::default());
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(staged(&f).keys().cloned().collect::<Vec<_>>(), [format!("{}001.png", key(22))]);
+}
+
+#[test]
+fn an_unoffered_layout_value_stages_the_job_and_is_reported_not_applied() {
+    let f = folders();
+    let fake = FakeCups::held();
+    let mut held = pdf_job(23);
+    held.options = vec![
+        Attr::new("number-up", vec![Value::Integer(5)]),
+        Attr::new("number-up-layout", vec![Value::Keyword("spiral".into())]),
+        Attr::new("outputorder", vec![Value::Keyword("sideways".into())]),
+        Attr::new("page-delivery", vec![Value::Keyword("upside-down".into())]),
+    ];
+    fake.add(held);
+    let errors = pass_ok(&fake, &f, &mut Taker::default());
+    assert!(errors.is_empty(), "{errors:?}");
+    let name = format!("{}001.pdf", key(23));
+    assert_eq!(staged(&f)[&name], PDF);
+    let layout = staged_layout(&f.staging.join(&name)).unwrap();
+    assert!(layout.is_plain());
+    assert_eq!(layout.not_applied, ["number-up", "number-up-layout", "outputorder", "page-delivery"]);
+    assert_eq!(*fake.cancels.borrow(), [23]);
+}
+
+#[test]
+fn a_layout_file_without_its_document_is_reclaimed_and_delivery_removes_its_own() {
+    let f = folders();
+    let orphan = f.staging.join(format!("{}001.pdf{LAYOUT_SUFFIX}", key(31)));
+    std::fs::write(&orphan, "number-up=2\n").unwrap();
+    let kept_doc = f.staging.join(format!("{}001.pdf", key(32)));
+    std::fs::write(&kept_doc, PDF).unwrap();
+    let kept = layout_path(&kept_doc);
+    std::fs::write(&kept, "number-up=2\n").unwrap();
+    assert_eq!(reclaim_staging(&f.staging, &f.ledger), 1);
+    assert!(!orphan.exists());
+    assert!(kept.exists());
+
+    let printed = tempfile::tempdir().unwrap();
+    let convert = |_: &Path, _: &str, before: &dyn Fn(&Path) -> Result<(), String>| {
+        let pdf = printed.path().join("out.pdf");
+        std::fs::write(&pdf, PDF).unwrap();
+        before(&pdf).map_err(Failure::Retry)?;
+        Ok(pdf)
+    };
+    deliver_one(&f.ledger, printed.path(), &kept_doc, "Printed", &convert, &|_| {}).unwrap();
+    assert!(!kept_doc.exists());
+    assert!(!kept.exists());
+}
+
+#[test]
+fn staged_names_take_the_converted_formats() {
+    for extension in ["txt", "png", "jpg", "tif"] {
+        let name = format!("{}001.{extension}", key(5));
+        assert_eq!(key_of(&name), Some(key(5)), "{extension}");
+    }
+    assert_eq!(key_of(&format!("{}001.pdf{LAYOUT_SUFFIX}", key(5))), None);
+    assert_eq!(key_of(&format!("{}001.exe", key(5))), None);
+}
+
+// ── declared text, intake validation, fallbacks, page options ───────────────
+
+#[test]
+fn declared_text_never_overrides_the_bytes() {
+    assert_eq!(content_of("text/plain", PDF), Content::Kind(DocKind::Pdf));
+    assert_eq!(content_of("text/plain", PS), Content::Kind(DocKind::PostScript));
+    assert_eq!(content_of("text/plain; charset=utf-8", b"%!PS-Adobe-3.0\n"), Content::Kind(DocKind::PostScript));
+    let refused = |head: &[u8]| match content_of("text/plain", head) {
+        Content::Unsupported(message) => message,
+        other => panic!("{other:?}"),
+    };
+    let binary = "a print job arrived as text/plain data that holds binary bytes, which Spectra PDF does not print as text";
+    assert_eq!(refused(b"PK\x03\x04\x14\x00\x06\x00"), binary, "a zip-based office file");
+    assert_eq!(refused(b"\xffh\x00i\x00"), binary, "NUL bytes without a byte order mark");
+    assert_eq!(refused(b"\x7fELF\x02\x01\x01\x00"), binary);
+    assert_eq!(refused(PNG), binary, "an image declared as text");
+}
+
+#[test]
+fn a_text_job_holding_binary_bytes_is_refused_by_name_and_removed() {
+    let f = folders();
+    let fake = FakeCups::held();
+    fake.add(job(41, vec![("text/plain", b"PK\x03\x04\x14\x00\x00\x00word/document.xml")]));
+    let errors = pass_ok(&fake, &f, &mut Taker::default());
+    assert_eq!(
+        errors,
+        [format!(
+            "a print job arrived as text/plain data that holds binary bytes, which Spectra PDF does not print as text; it was removed from {QUEUE}"
+        )]
+    );
+    assert!(staged(&f).is_empty());
+    assert_eq!(*fake.cancels.borrow(), [41]);
+}
+
+#[test]
+fn a_pdf_declared_as_text_is_staged_as_a_pdf() {
+    let f = folders();
+    let fake = FakeCups::held();
+    fake.add(job(42, vec![("text/plain", PDF)]));
+    let errors = pass_ok(&fake, &f, &mut Taker::default());
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(staged(&f).keys().cloned().collect::<Vec<_>>(), [format!("{}001.pdf", key(42))]);
+}
+
+#[test]
+fn a_media_value_outside_the_name_characters_is_dropped_and_reported() {
+    for bad in ["A4\nnumber-up=9", "A4\r", "iso a4", "A4/../x", "", "\u{e9}"] {
+        let layout = layout_from(&reply_with(vec![
+            Attr::new("number-up", vec![Value::Integer(2)]),
+            Attr::new("media", vec![Value::Keyword(bad.into())]),
+        ]));
+        assert_eq!(layout.media, None, "{bad:?}");
+        assert_eq!(layout.not_applied, ["media"], "{bad:?}");
+        assert_eq!(JobLayout::from_text(&layout.to_text()), Ok(layout.clone()), "{bad:?}");
+    }
+    let good = layout_from(&reply_with(vec![Attr::new("media", vec![Value::Keyword("Custom.200x300mm".into())])]));
+    assert_eq!(good.media.as_deref(), Some("Custom.200x300mm"));
+}
+
+#[test]
+fn a_job_whose_media_breaks_a_line_is_staged_and_delivered() {
+    let f = folders();
+    let fake = FakeCups::held();
+    let mut held = pdf_job(43);
+    held.options = vec![
+        Attr::new("number-up", vec![Value::Integer(2)]),
+        Attr::new("media", vec![Value::Keyword("A4\nreverse=maybe".into())]),
+    ];
+    fake.add(held);
+    let errors = pass_ok(&fake, &f, &mut Taker::default());
+    assert!(errors.is_empty(), "{errors:?}");
+    let name = format!("{}001.pdf", key(43));
+    let layout = staged_layout(&f.staging.join(&name)).unwrap();
+    assert_eq!((layout.number_up, layout.media.as_deref()), (2, None));
+    assert_eq!(layout.not_applied, ["media"]);
+}
+
+fn fake_run<'a>(
+    seen: &'a std::cell::RefCell<Vec<JobLayout>>,
+    fail_laid_out: bool,
+) -> impl Fn(&JobLayout) -> Result<PathBuf, Failure> + 'a {
+    move |layout: &JobLayout| {
+        seen.borrow_mut().push(layout.clone());
+        if fail_laid_out && !layout.is_plain() {
+            Err(Failure::Refused("the print job could not be converted: password required".to_string()))
+        } else {
+            Ok(PathBuf::from("/printed/out.pdf"))
+        }
+    }
+}
+
+#[test]
+fn a_layout_file_that_cannot_be_parsed_delivers_the_job_without_it() {
+    let f = folders();
+    let doc = f.staging.join(format!("{}001.pdf", key(44)));
+    std::fs::write(&doc, PDF).unwrap();
+    std::fs::write(layout_path(&doc), "number-up=2\nmedia=A4\nnumber-up=5\n").unwrap();
+    let seen = std::cell::RefCell::new(Vec::new());
+    let reports = std::cell::RefCell::new(Vec::new());
+    let pdf = convert_with_layout(delivery_layout(&doc).unwrap(), &fake_run(&seen, false), &|r| reports.borrow_mut().push(r));
+    assert_eq!(pdf, Ok(PathBuf::from("/printed/out.pdf")));
+    assert_eq!(*seen.borrow(), [JobLayout::default()]);
+    assert_eq!(
+        *reports.borrow(),
+        ["the job's pages per sheet \"5\" is not offered; the print job was delivered without its layout options"]
+    );
+}
+
+#[test]
+fn a_layout_that_cannot_be_applied_delivers_the_job_as_sent_and_says_so() {
+    let layout = JobLayout { number_up: 2, reverse: true, ..JobLayout::default() };
+    let seen = std::cell::RefCell::new(Vec::new());
+    let reports = std::cell::RefCell::new(Vec::new());
+    let pdf = convert_with_layout(Ok(layout.clone()), &fake_run(&seen, true), &|r| reports.borrow_mut().push(r));
+    assert_eq!(pdf, Ok(PathBuf::from("/printed/out.pdf")));
+    assert_eq!(*seen.borrow(), [layout, JobLayout::default()]);
+    assert_eq!(
+        *reports.borrow(),
+        ["the print job's layout (2 pages per sheet, reverse order) could not be applied, so it was delivered as sent: the print job could not be converted: password required"]
+    );
+}
+
+#[test]
+fn a_refusal_of_the_plain_delivery_too_is_returned_as_a_refusal() {
+    let layout = JobLayout { mirror: true, ..JobLayout::default() };
+    let reports = std::cell::RefCell::new(Vec::new());
+    let run = |_: &JobLayout| Err::<PathBuf, Failure>(Failure::Refused("the image cannot be decoded".to_string()));
+    let result = convert_with_layout(Ok(layout), &run, &|r| reports.borrow_mut().push(r));
+    assert_eq!(result, Err(Failure::Refused("the image cannot be decoded".to_string())));
+    assert!(reports.borrow().is_empty());
+}
+
+#[test]
+fn options_with_values_delivery_does_not_apply_are_reported_at_delivery() {
+    let layout = layout_from(&reply_with(vec![
+        Attr::new("page-set", vec![Value::Keyword("thirds".into())]),
+        Attr::new("print-scaling", vec![Value::Keyword("stretch".into())]),
+        Attr::new("scaling", vec![Value::Integer(0)]),
+    ]));
+    assert_eq!(layout.not_applied, ["page-set", "print-scaling"], "print-scaling alone decides");
+    assert!(layout.is_plain() && layout.is_staged());
+    let seen = std::cell::RefCell::new(Vec::new());
+    let reports = std::cell::RefCell::new(Vec::new());
+    convert_with_layout(Ok(layout), &fake_run(&seen, false), &|r| reports.borrow_mut().push(r)).unwrap();
+    assert_eq!(*reports.borrow(), ["the print job's page-set, print-scaling options were not applied"]);
+}
+
+#[test]
+fn page_selection_mirror_and_scaling_are_read() {
+    let layout = layout_from(&reply_with(vec![
+        Attr::new("page-set", vec![Value::Keyword("Odd".into())]),
+        Attr::new("page-ranges", vec![Value::Range(1, 3), Value::Range(7, 7)]),
+        Attr::new("mirror", vec![Value::Boolean(true)]),
+        Attr::new("fit-to-page", vec![Value::Boolean(true)]),
+    ]));
+    assert_eq!(layout.page_set, "odd");
+    assert_eq!(layout.page_ranges, [(1, 3), (7, 7)]);
+    assert!(layout.mirror);
+    assert_eq!(layout.scaling.as_deref(), Some("fit"));
+    assert!(layout.not_applied.is_empty());
+    assert!(!layout.is_plain());
+    assert_eq!(layout.describe(), "odd pages, pages 1-3,7, scaling fit, mirrored");
+
+    let from_text = layout_from(&reply_with(vec![
+        Attr::new("page-ranges", vec![Value::Text("2-4,9".into())]),
+        Attr::new("mirror", vec![Value::Name("true".into())]),
+        Attr::new("scaling", vec![Value::Text("50".into())]),
+    ]));
+    assert_eq!(from_text.page_ranges, [(2, 4), (9, 9)]);
+    assert!(from_text.mirror);
+    assert_eq!(from_text.scaling.as_deref(), Some("50"));
+}
+
+#[test]
+fn print_scaling_outranks_scaling_which_outranks_fit_to_page() {
+    let scaling = |attrs: Vec<Attr>| layout_from(&reply_with(attrs)).scaling;
+    let print_scaling = |v: &str| Attr::new("print-scaling", vec![Value::Keyword(v.into())]);
+    let fit = Attr::new("fit-to-page", vec![Value::Boolean(true)]);
+    let percent = Attr::new("scaling", vec![Value::Integer(80)]);
+    assert_eq!(scaling(vec![print_scaling("fill"), fit.clone(), percent.clone()]).as_deref(), Some("fill"));
+    assert_eq!(scaling(vec![fit.clone(), percent.clone()]).as_deref(), Some("80"));
+    assert_eq!(scaling(vec![percent.clone(), fit.clone()]).as_deref(), Some("80"), "attribute order does not matter");
+    let bad_percent = Attr::new("scaling", vec![Value::Integer(0)]);
+    let fallback = layout_from(&reply_with(vec![bad_percent, fit.clone()]));
+    assert_eq!((fallback.scaling.as_deref(), fallback.not_applied.as_slice()), (Some("fit"), &["scaling".to_string()][..]));
+    assert_eq!(scaling(vec![fit.clone()]).as_deref(), Some("fit"));
+    assert_eq!(scaling(vec![percent.clone()]).as_deref(), Some("80"));
+    assert_eq!(scaling(vec![print_scaling("auto")]).as_deref(), Some("auto-fit"));
+    assert_eq!(scaling(vec![print_scaling("none")]), None);
+    assert_eq!(scaling(vec![Attr::new("fit-to-page", vec![Value::Boolean(false)])]), None);
+}
+
+#[test]
+fn a_bad_page_range_is_reported_not_applied() {
+    for values in [
+        vec![Value::Range(0, 2)],
+        vec![Value::Range(5, 3)],
+        vec![Value::Text("1-x".into())],
+        vec![Value::Text("abc".into())],
+        (1..=65).map(|n| Value::Range(n, n)).collect(),
+    ] {
+        let layout = layout_from(&reply_with(vec![Attr::new("page-ranges", values.clone())]));
+        assert!(layout.page_ranges.is_empty(), "{values:?}");
+        assert_eq!(layout.not_applied, ["page-ranges"], "{values:?}");
+    }
+}
+
+#[test]
+fn a_job_with_page_options_stages_them_beside_its_document() {
+    let f = folders();
+    let fake = FakeCups::held();
+    let mut held = pdf_job(45);
+    held.options = vec![
+        Attr::new("page-set", vec![Value::Keyword("even".into())]),
+        Attr::new("page-ranges", vec![Value::Range(2, 6)]),
+        Attr::new("mirror", vec![Value::Boolean(true)]),
+        Attr::new("print-scaling", vec![Value::Keyword("fit".into())]),
+    ];
+    fake.add(held);
+    let errors = pass_ok(&fake, &f, &mut Taker::default());
+    assert!(errors.is_empty(), "{errors:?}");
+    let layout = staged_layout(&f.staging.join(format!("{}001.pdf", key(45)))).unwrap();
+    assert_eq!(
+        (layout.page_set.as_str(), layout.page_ranges.as_slice(), layout.mirror, layout.scaling.as_deref()),
+        ("even", &[(2, 6)][..], true, Some("fit"))
+    );
+}
+
+#[test]
+fn the_sheet_follows_legacy_and_custom_media_names() {
+    let sheet = |media: &str| {
+        JobLayout { media: Some(media.to_string()), ..JobLayout::default() }.sheet_points()
+    };
+    let close = |got: Option<(f64, f64)>, want: (f64, f64)| {
+        let (w, h) = got.unwrap();
+        assert!((w - want.0).abs() < 0.01 && (h - want.1).abs() < 0.01, "{w} {h} vs {want:?}");
+    };
+    close(sheet("A4"), (595.28, 841.89));
+    close(sheet("a4"), (595.28, 841.89));
+    close(sheet("Letter"), (612.0, 792.0));
+    close(sheet("LEGAL"), (612.0, 1008.0));
+    close(sheet("A3"), (841.89, 1190.55));
+    close(sheet("A5"), (419.53, 595.28));
+    close(sheet("Tabloid"), (792.0, 1224.0));
+    close(sheet("Ledger"), (792.0, 1224.0));
+    close(sheet("Custom.200x300mm"), (566.93, 850.39));
+    close(sheet("Custom.8.5x11in"), (612.0, 792.0));
+    close(sheet("custom.612x792"), (612.0, 792.0));
+    assert_eq!(sheet("Custom.200x300furlong"), None);
+    assert_eq!(sheet("Tray1"), None);
+}
+
+// ── the job report, refusals, ranges, scaling precedence, character sets ────
+
+#[test]
+fn a_delivered_job_with_an_unapplied_option_sets_the_note_and_no_error() {
+    let report = Mutex::new(JobReport::default());
+    let result = deliver_reported(&report, &|note| {
+        note("the print job's mirror option was not applied".to_string());
+        Ok(PathBuf::from("/printed/a.pdf"))
+    });
+    assert_eq!(result, Ok(PathBuf::from("/printed/a.pdf")));
+    let report = report.into_inner().unwrap();
+    assert_eq!(report.error, "");
+    assert_eq!(report.note, "the print job's mirror option was not applied");
+}
+
+#[test]
+fn a_failed_job_sets_the_error_and_clears_an_earlier_note() {
+    let report = Mutex::new(JobReport::default());
+    let _ = deliver_reported(&report, &|note| {
+        note("noted".to_string());
+        Ok(PathBuf::from("/printed/a.pdf"))
+    });
+    let result = deliver_reported(&report, &|_| Err("the image cannot be decoded".to_string()));
+    assert!(result.is_err());
+    let report = report.into_inner().unwrap();
+    assert_eq!((report.error.as_str(), report.note.as_str()), ("the image cannot be decoded", ""));
+}
+
+#[test]
+fn a_note_never_overwrites_an_error_recorded_while_its_job_ran() {
+    let report = Mutex::new(JobReport::default());
+    let result = deliver_reported(&report, &|note| {
+        // Another delivery fails while this one converts.
+        report.lock().unwrap().failed("job B failed".to_string());
+        note("job A left its mirror option out".to_string());
+        Ok(PathBuf::from("/printed/a.pdf"))
+    });
+    assert!(result.is_ok());
+    let report = report.into_inner().unwrap();
+    assert_eq!(report.error, "job B failed");
+    assert_eq!(report.note, "job A left its mirror option out");
+}
+
+#[test]
+fn a_delivery_clears_an_error_recorded_before_it_began() {
+    let report = Mutex::new(JobReport::default());
+    report.lock().unwrap().failed("an older job failed".to_string());
+    let _ = deliver_reported(&report, &|_| Ok(PathBuf::from("/printed/a.pdf")));
+    let report = report.into_inner().unwrap();
+    assert_eq!((report.error.as_str(), report.note.as_str()), ("", ""));
+}
+
+#[test]
+fn a_refused_document_is_removed_with_its_layout_and_named() {
+    let d = delivery();
+    for (name, bytes) in [
+        ("Printed 1700000000-0000000001001.png", PNG),
+        ("Printed 1700000000-0000000002001.ps", PS),
+        ("Printed 1700000000-0000000003001.txt", b"words".as_slice()),
+        ("Printed 1700000000-0000000004001.pdf", PDF),
+    ] {
+        let staged = d.staging.join(name);
+        std::fs::write(&staged, bytes).unwrap();
+        std::fs::write(layout_path(&staged), "number-up=2\n").unwrap();
+        let convert = |_: &Path, _: &str, _: &dyn Fn(&Path) -> Result<(), String>| -> Result<PathBuf, Failure> {
+            Err(Failure::Refused("the print job could not be converted: the data is damaged".into()))
+        };
+        let error = deliver_one(&d.ledger, &d.printed, &staged, "Printed 1700000000", &convert, &|_| {}).unwrap_err();
+        assert_eq!(
+            error,
+            "the print job could not be converted: the data is damaged. The print job cannot be printed and was removed.",
+            "{name}"
+        );
+        assert!(!staged.exists() && !layout_path(&staged).exists(), "{name}");
+        assert!(names(&d.ledger).is_empty(), "{name}");
+    }
+}
+
+#[test]
+fn a_machine_failure_keeps_every_format_staged() {
+    let d = delivery();
+    for (name, bytes) in [
+        ("Printed 1700000000-0000000001001.png", PNG),
+        ("Printed 1700000000-0000000002001.ps", PS),
+        ("Printed 1700000000-0000000003001.txt", b"words".as_slice()),
+        ("Printed 1700000000-0000000004001.pdf", PDF),
+    ] {
+        let staged = d.staging.join(name);
+        std::fs::write(&staged, bytes).unwrap();
+        let convert = |_: &Path, _: &str, _: &dyn Fn(&Path) -> Result<(), String>| -> Result<PathBuf, Failure> {
+            Err(Failure::Retry("LibreOffice, which prints text jobs, is not installed with Spectra PDF".into()))
+        };
+        let error = deliver_one(&d.ledger, &d.printed, &staged, "Printed 1700000000", &convert, &|_| {}).unwrap_err();
+        assert!(error.contains("tried again the next time Spectra PDF starts"), "{name}: {error}");
+        assert!(staged.exists(), "{name}");
+    }
+}
+
+#[test]
+fn a_laid_out_run_that_fails_for_the_machine_is_not_delivered_as_sent() {
+    let layout = JobLayout { number_up: 2, ..JobLayout::default() };
+    let seen = std::cell::RefCell::new(Vec::new());
+    let run = |l: &JobLayout| {
+        seen.borrow_mut().push(l.clone());
+        Err::<PathBuf, Failure>(Failure::Retry("no space left on device".to_string()))
+    };
+    let reports = std::cell::RefCell::new(Vec::new());
+    let result = convert_with_layout(Ok(layout.clone()), &run, &|r| reports.borrow_mut().push(r));
+    assert_eq!(result, Err(Failure::Retry("no space left on device".to_string())));
+    assert_eq!(*seen.borrow(), [layout]);
+    assert!(reports.borrow().is_empty());
+}
+
+#[test]
+fn the_plain_fallback_keeps_the_text_jobs_character_set() {
+    let layout = JobLayout { mirror: true, charset: Some("iso-8859-1".into()), ..JobLayout::default() };
+    let seen = std::cell::RefCell::new(Vec::new());
+    convert_with_layout(Ok(layout), &fake_run(&seen, true), &|_| {}).unwrap();
+    assert_eq!(seen.borrow()[1].charset.as_deref(), Some("iso-8859-1"));
+    assert!(seen.borrow()[1].is_plain());
+}
+
+#[test]
+fn the_cli_result_notes_are_read_from_its_output() {
+    let stdout = br#"{"output": "x", "notes": ["read as windows-1252"], "prepass": []}"#;
+    assert_eq!(result_notes(stdout), ["read as windows-1252"]);
+    assert!(result_notes(b"not json").is_empty());
+    assert!(result_notes(br#"{"notes": "x"}"#).is_empty());
+}
+
+#[test]
+fn an_open_ended_page_range_stays_open_to_the_engine() {
+    for (values, text) in [
+        (vec![Value::Range(3, i32::MAX)], "3-"),
+        (vec![Value::Text("3-".into())], "3-"),
+        (vec![Value::Text("3-99999999999".into())], "3-"),
+        (vec![Value::Text("-5".into())], "1-5"),
+        (vec![Value::Range(2, 4), Value::Range(9, i32::MAX)], "2-4,9-"),
+        (vec![Value::Range(40, 50)], "40-50"),
+    ] {
+        let layout = layout_from(&reply_with(vec![Attr::new("page-ranges", values.clone())]));
+        assert!(layout.not_applied.is_empty(), "{values:?}");
+        let args: Vec<String> = printed_job_args(Path::new("a.pdf"), &layout, Path::new("b"))
+            .into_iter()
+            .map(|a| a.into_string().unwrap())
+            .collect();
+        let at = args.iter().position(|a| a == "--page-ranges").unwrap();
+        assert_eq!(args[at + 1], text, "{values:?}");
+        assert_eq!(JobLayout::from_text(&layout.to_text()), Ok(layout), "{values:?}");
+    }
+    for bad in ["-", "3--4", "x-2", ""] {
+        assert_eq!(parse_ranges(bad), None, "{bad:?}");
+    }
+}
+
+#[test]
+fn print_scaling_alone_decides_when_present() {
+    let with = |keyword: &str| {
+        layout_from(&reply_with(vec![
+            Attr::new("print-scaling", vec![Value::Keyword(keyword.into())]),
+            Attr::new("fit-to-page", vec![Value::Boolean(true)]),
+            Attr::new("scaling", vec![Value::Integer(50)]),
+        ]))
+    };
+    for (keyword, scaling, not_applied) in [
+        ("none", None, vec![]),
+        ("auto", Some("auto-fit"), vec![]),
+        ("auto-fit", Some("auto-fit"), vec![]),
+        ("fit", Some("fit"), vec![]),
+        ("fill", Some("fill"), vec![]),
+        ("stretch", None, vec!["print-scaling".to_string()]),
+    ] {
+        let layout = with(keyword);
+        assert_eq!(layout.scaling.as_deref(), scaling, "{keyword}");
+        assert_eq!(layout.not_applied, not_applied, "{keyword}");
+    }
+}
+
+#[test]
+fn a_bad_value_of_any_layout_option_never_removes_its_job() {
+    let f = folders();
+    let fake = FakeCups::held();
+    let mut held = pdf_job(46);
+    held.options = [
+        "number-up", "number-up-layout", "outputorder", "output-order", "page-delivery", "media", "page-set",
+        "page-ranges", "mirror", "fit-to-page", "scaling",
+    ]
+    .iter()
+    .map(|name| Attr::new(*name, vec![Value::Keyword("bogus\nvalue".into())]))
+    .collect();
+    fake.add(held);
+    let errors = pass_ok(&fake, &f, &mut Taker::default());
+    assert!(errors.is_empty(), "{errors:?}");
+    let name = format!("{}001.pdf", key(46));
+    let layout = staged_layout(&f.staging.join(&name)).unwrap();
+    assert!(layout.is_plain());
+    assert_eq!(layout.not_applied.len(), 11, "{:?}", layout.not_applied);
+}
+
+#[test]
+fn text_with_a_utf16_mark_or_a_wide_charset_is_text_not_binary() {
+    assert_eq!(content_of("text/plain", b"\xff\xfeh\x00i\x00"), Content::Kind(DocKind::Text));
+    assert_eq!(content_of("text/plain", b"\xfe\xff\x00h\x00i"), Content::Kind(DocKind::Text));
+    assert_eq!(content_of("text/plain; charset=UTF-16LE", b"h\x00i\x00"), Content::Kind(DocKind::Text));
+    assert!(matches!(content_of("text/plain; charset=iso-8859-1", b"h\x00i"), Content::Unsupported(_)));
+    assert_eq!(charset_of("text/plain; charset=\"ISO-8859-1\""), Ok(Some("iso-8859-1".to_string())));
+    assert_eq!(charset_of("text/plain"), Ok(None));
+    assert_eq!(charset_of("text/plain; charset=a b"), Err(()));
+}
+
+#[test]
+fn a_text_jobs_declared_charset_is_staged_with_its_document() {
+    let f = folders();
+    let fake = FakeCups::held();
+    fake.add(job(
+        47,
+        vec![("text/plain; charset=iso-8859-1", b"caf\xe9\n".as_slice()), ("text/plain", b"plain\n".as_slice())],
+    ));
+    fake.add(job(48, vec![("text/plain; charset=bad value", b"words\n".as_slice())]));
+    fake.add(job(49, vec![("text/plain", b"\xff\xfeh\x00i\x00".as_slice())]));
+    let errors = pass_ok(&fake, &f, &mut Taker::default());
+    assert!(errors.is_empty(), "{errors:?}");
+    let first = staged_layout(&f.staging.join(format!("{}001.txt", key(47)))).unwrap();
+    assert_eq!(first.charset.as_deref(), Some("iso-8859-1"));
+    assert!(!layout_path(&f.staging.join(format!("{}002.txt", key(47)))).exists());
+    let bad = staged_layout(&f.staging.join(format!("{}001.txt", key(48)))).unwrap();
+    assert_eq!((bad.charset, bad.not_applied), (None, vec!["charset".to_string()]));
+    assert!(f.staging.join(format!("{}001.txt", key(49))).exists());
+    let args: Vec<String> =
+        printed_job_args(Path::new("a.txt"), &first, Path::new("b")).into_iter().map(|a| a.into_string().unwrap()).collect();
+    assert_eq!(args[args.len() - 2..], ["--charset", "iso-8859-1"]);
+}
+
+// ── capped retries and unreadable layouts ───────────────────────────────────
+
+fn failing_retry(_: &Path, _: &str, _: &dyn Fn(&Path) -> Result<(), String>) -> Result<PathBuf, Failure> {
+    Err(Failure::Retry("LibreOffice conversion did not finish within the derived budget".into()))
+}
+
+#[test]
+fn a_job_failing_for_the_machine_is_kept_until_its_last_attempt() {
+    let d = delivery();
+    let name = "Printed 1700000000-0000000001001.txt";
+    let staged = d.staging.join(name);
+    std::fs::write(&staged, b"words").unwrap();
+    std::fs::write(layout_path(&staged), "charset=utf-8\n").unwrap();
+    for attempt in 1..MAX_DELIVERY_ATTEMPTS {
+        let error = deliver_one(&d.ledger, &d.printed, &staged, "Printed 1700000000", &failing_retry, &|_| {})
+            .unwrap_err();
+        assert!(error.contains("tried again the next time Spectra PDF starts"), "{attempt}: {error}");
+        assert!(staged.exists(), "{attempt}");
+        // The count is on disk, so a restart continues it.
+        assert_eq!(
+            std::fs::read_to_string(d.ledger.join(format!("{name}{ATTEMPTS_SUFFIX}"))).unwrap(),
+            attempt.to_string()
+        );
+    }
+    let error =
+        deliver_one(&d.ledger, &d.printed, &staged, "Printed 1700000000", &failing_retry, &|_| {}).unwrap_err();
+    assert_eq!(
+        error,
+        "LibreOffice conversion did not finish within the derived budget. The print job failed 3 times and was removed."
+    );
+    assert!(!staged.exists() && !layout_path(&staged).exists());
+    assert!(names(&d.ledger).is_empty());
+
+    // A new job under the same name starts from no failures.
+    std::fs::write(&staged, b"words").unwrap();
+    let error =
+        deliver_one(&d.ledger, &d.printed, &staged, "Printed 1700000000", &failing_retry, &|_| {}).unwrap_err();
+    assert!(error.contains("tried again"), "{error}");
+    assert_eq!(std::fs::read_to_string(d.ledger.join(format!("{name}{ATTEMPTS_SUFFIX}"))).unwrap(), "1");
+}
+
+#[test]
+fn a_delivered_or_refused_job_leaves_no_attempt_count() {
+    let d = delivery();
+    let staged = d.staging.join("Printed 1700000000-0000000001001.pdf");
+    std::fs::write(&staged, PDF).unwrap();
+    deliver_one(&d.ledger, &d.printed, &staged, "Printed 1700000000", &failing_retry, &|_| {}).unwrap_err();
+    let printed = d.printed.clone();
+    let copy = move |staged: &Path, stem: &str, before: &dyn Fn(&Path) -> Result<(), String>| {
+        copy_staged_pdf(&printed, staged, stem, before).map_err(Failure::Retry)
+    };
+    deliver_one(&d.ledger, &d.printed, &staged, "Printed 1700000000", &copy, &|_| {}).unwrap();
+    assert!(names(&d.ledger).is_empty());
+
+    let refused = d.staging.join("Printed 1700000000-0000000002001.png");
+    std::fs::write(&refused, PNG).unwrap();
+    deliver_one(&d.ledger, &d.printed, &refused, "Printed 1700000000", &failing_retry, &|_| {}).unwrap_err();
+    let refuse = |_: &Path, _: &str, _: &dyn Fn(&Path) -> Result<(), String>| -> Result<PathBuf, Failure> {
+        Err(Failure::Refused("the image cannot be decoded".into()))
+    };
+    let error = deliver_one(&d.ledger, &d.printed, &refused, "Printed 1700000000", &refuse, &|_| {}).unwrap_err();
+    assert!(error.ends_with("cannot be printed and was removed."), "{error}");
+    assert!(names(&d.ledger).is_empty());
+}
+
+#[test]
+fn an_attempt_count_without_its_document_is_reclaimed() {
+    let f = folders();
+    let orphan = f.ledger.join(format!("{}001.txt{ATTEMPTS_SUFFIX}", key(61)));
+    std::fs::write(&orphan, "2").unwrap();
+    let kept_doc = f.staging.join(format!("{}001.txt", key(62)));
+    std::fs::write(&kept_doc, b"words").unwrap();
+    let kept = f.ledger.join(format!("{}001.txt{ATTEMPTS_SUFFIX}", key(62)));
+    std::fs::write(&kept, "1").unwrap();
+    assert_eq!(reclaim_staging(&f.staging, &f.ledger), 1);
+    assert!(!orphan.exists() && kept.exists());
+}
+
+#[test]
+fn a_layout_file_that_cannot_be_read_keeps_the_job() {
+    let f = folders();
+    let doc = f.staging.join(format!("{}001.txt", key(63)));
+    std::fs::write(&doc, b"words").unwrap();
+    // A folder in the layout file's place: it exists and cannot be read as a file.
+    std::fs::create_dir(layout_path(&doc)).unwrap();
+    assert!(matches!(staged_layout(&doc), Err(LayoutError::Unreadable(_))));
+    assert!(matches!(delivery_layout(&doc), Err(Failure::Retry(e)) if e.starts_with("the print job's layout could not be read")));
+}
+
+#[test]
+fn a_layout_file_that_cannot_be_parsed_is_delivered_without_it() {
+    let f = folders();
+    let doc = f.staging.join(format!("{}001.txt", key(64)));
+    std::fs::write(&doc, b"words").unwrap();
+    std::fs::write(layout_path(&doc), b"number-up=7\n").unwrap();
+    assert!(matches!(delivery_layout(&doc), Ok(Err(_))));
+    std::fs::write(layout_path(&doc), b"\xff\xfe not text").unwrap();
+    assert!(matches!(staged_layout(&doc), Err(LayoutError::Unparsed(_))));
+    assert!(matches!(delivery_layout(&doc), Ok(Err(_))));
 }
