@@ -39,7 +39,6 @@ $ExpectedSha256 = "52A91B8BF09298788D7A57B9206127026C23EACD75405F0A131E26DC381DC
 $Tag = "gs" + ($GsVersion -replace '\.', '')
 $Url = "https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/$Tag/${Tag}w64.exe"
 
-$ShippedBinaries = @("gswin64c.exe", "gsdll64.dll")
 $LicenseName = "LICENSE-Ghostscript.txt"
 
 # Pinned SHA-256 of each shipped file -- update alongside $ExpectedSha256.
@@ -67,38 +66,69 @@ function Get-RowProblems {
     return @()
 }
 
-function Get-NoticeProblems {
+# The integrity check every execution depends on. It runs no program: it
+# enumerates the tree (refusing a missing, extra or nested entry) and hashes
+# each pinned file through a handle that denies writers and deleters. It
+# returns the problems and, when there are none, those open handles, so a
+# caller that keeps them open executes exactly the bytes it verified.
+function Open-VerifiedTree {
     param([string]$Root)
     $problems = @()
-    if (-not (Test-Path (Join-Path $Root $LicenseName))) {
-        $problems += "  $LicenseName missing from $Root"
+    $handles = @()
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+        return [pscustomobject]@{ Problems = @("  no tree at $Root"); Handles = @() }
     }
-    foreach ($name in $ShippedBinaries) {
-        if (-not (Test-Path (Join-Path $Root $name))) {
-            $problems += "  $name missing from $Root"
-        }
-    }
-    $shipped = @($ShippedBinaries + $LicenseName)
-    foreach ($entry in @(Get-ChildItem $Root -Force -ErrorAction SilentlyContinue)) {
-        if ($entry.PSIsContainer -or $entry.Name -notin $shipped) {
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Root -Force)) {
+        if ($entry.PSIsContainer -or -not $ShippedSha256.Contains($entry.Name)) {
             $problems += "  $($entry.FullName): not a file this script ships"
         }
     }
     foreach ($name in $ShippedSha256.Keys) {
-        $file = Join-Path $Root $name
-        if (Test-Path -LiteralPath $file -PathType Leaf) {
-            $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+        if (-not (Test-Path -LiteralPath (Join-Path $Root $name) -PathType Leaf)) {
+            $problems += "  $name missing from $Root"
+        }
+    }
+    if ($problems) {
+        return [pscustomobject]@{ Problems = $problems; Handles = @() }
+    }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        foreach ($name in $ShippedSha256.Keys) {
+            $path = (Get-Item -LiteralPath (Join-Path $Root $name)).FullName
+            $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+            $handles += $stream
+            $actual = ([System.BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '')
             if ($actual -ne $ShippedSha256[$name]) {
                 $problems += "  ${name}: SHA-256 $actual is not the pinned upstream $($ShippedSha256[$name])"
             }
         }
+    } finally {
+        $sha.Dispose()
     }
-    # A changed executable is never run: the version check needs pinned bytes.
-    $exe = Join-Path $Root "gswin64c.exe"
-    if ((Test-Path $exe) -and -not ($problems -match '^  gswin64c\.exe: SHA-256')) {
-        $reported = Get-GsVersion $exe
+    if ($problems) {
+        foreach ($handle in $handles) { $handle.Dispose() }
+        $handles = @()
+    }
+    return [pscustomobject]@{ Problems = $problems; Handles = $handles }
+}
+
+function Get-TreeProblems {
+    param([string]$Root)
+    $verified = Open-VerifiedTree $Root
+    foreach ($handle in $verified.Handles) { $handle.Dispose() }
+    return @($verified.Problems)
+}
+
+function Get-NoticeProblems {
+    param([string]$Root)
+    $problems = @(Get-TreeProblems $Root)
+    # The version run is the only execution here, and it happens only for a
+    # tree whose every file just matched its pin.
+    if (-not $problems) {
+        $reported = Get-GsVersion $Root
         if ($reported -ne $GsVersion) {
-            $problems += "  $exe reports '$reported', expected '$GsVersion'"
+            $problems += "  $(Join-Path $Root 'gswin64c.exe') reports '$reported', expected '$GsVersion'"
         }
     }
     return @($problems + @(Get-RowProblems))
@@ -111,7 +141,7 @@ function Assert-Notices {
         Write-Error ("Ghostscript notice gate FAILED -- refusing to ship:`n" + ($problems -join "`n"))
         exit 1
     }
-    Write-Host "  Notice gate: gswin64c.exe reports $GsVersion; $($ShippedBinaries -join ', ') and $LicenseName present; notice row names $GsVersion."
+    Write-Host "  Notice gate: every file matches its SHA-256 pin; gswin64c.exe reports $GsVersion; notice row names $GsVersion."
 }
 
 # Every run of the bundled program here matches how Spectra runs it: GS_LIB
@@ -126,22 +156,32 @@ function Assert-Notices {
 # is a terminating error, so the call relaxes it locally.
 $BundledGsLib = "%rom%Resource/Init/;%rom%lib/"
 
+# The only way this script runs the bundled program. It takes the tree, not
+# an executable path, verifies the whole tree immediately before the run and
+# holds the verified files open (no writer, no deleter) until the program
+# exits, so the executable and the DLL it loads are the pinned bytes.
 function Invoke-BundledGs {
-    param([string]$Exe, [string[]]$Arguments)
+    param([string]$Root, [string[]]$Arguments)
+    $verified = Open-VerifiedTree $Root
+    if ($verified.Problems) {
+        throw ("refusing to run Ghostscript from an unverified tree:`n" + ($verified.Problems -join "`n"))
+    }
     $ErrorActionPreference = "Continue"
     $saved = $env:GS_LIB
     $env:GS_LIB = $BundledGsLib
     try {
-        $out = @(& $Exe @Arguments 2>&1)
+        $exe = (Get-Item -LiteralPath (Join-Path $Root "gswin64c.exe")).FullName
+        $out = @(& $exe @Arguments 2>&1)
         return [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
     } finally {
         $env:GS_LIB = $saved
+        foreach ($handle in $verified.Handles) { $handle.Dispose() }
     }
 }
 
 function Get-GsVersion {
-    param([string]$Exe)
-    $run = Invoke-BundledGs $Exe @("--version")
+    param([string]$Root)
+    $run = Invoke-BundledGs $Root @("--version")
     $lines = @($run.Output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
     if ($run.Code -ne 0 -or $lines.Count -eq 0) { return "" }
     return ("" + $lines[0]).Trim()
@@ -149,12 +189,12 @@ function Get-GsVersion {
 
 # The capability probe's own render (gs.rs `smoke`, gs_capability._smoke).
 function Invoke-GsSmoke {
-    param([string]$Exe)
+    param([string]$Root)
     $work = Join-Path $env:TEMP ("gs-vendor-smoke-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force $work | Out-Null
     try {
         $png = Join-Path $work "probe.png"
-        $run = Invoke-BundledGs $Exe @("-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=png16m",
+        $run = Invoke-BundledGs $Root @("-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=png16m",
             "-g16x16", "-r72", "-sOutputFile=$png", "-c",
             "0 0 moveto 16 16 lineto 0.5 setlinewidth stroke showpage")
         if ($run.Code -ne 0) { return "exit $($run.Code)`: $($run.Output -join ' ')" }
@@ -264,12 +304,12 @@ try {
         Write-Host "  Copied $name"
     }
 
-    $reported = Get-GsVersion $gsExe
+    $reported = Get-GsVersion $DestDir
     if ($reported -ne $GsVersion) {
         Write-Error "The vendored binary reports '$reported', expected '$GsVersion'."
         exit 1
     }
-    $smoke = Invoke-GsSmoke $gsExe
+    $smoke = Invoke-GsSmoke $DestDir
     if ($smoke) {
         Write-Error "The vendored Ghostscript failed its 16x16 render: $smoke"
         exit 1

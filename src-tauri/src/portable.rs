@@ -29,12 +29,25 @@
 //! media), every new record goes to the per-user folders together, and the log
 //! says so once; a volume that changes mid-run moves nothing.
 //!
-//! The colour-profile answer is READ from beside the copy whenever a readable
-//! record exists there, whatever the decision: the record beside the copy wins
-//! for that copy over a per-user one, so a copy moved onto read-only media
-//! keeps the answer it carries, and a new answer that record would shadow is
-//! refused by name. Other records follow the decision for reads as well as
-//! writes (see [`data_root`]).
+//! The colour-profile answer is READ in a fixed order that no writability
+//! decision enters ([`assent_read_path`]): (a) the installer's record, the
+//! only record an installed copy has; (b) the record beside a portable copy,
+//! when it reads as an answer; (c) the per-user record. The record beside the
+//! copy therefore wins for that copy over a per-user one, and a copy moved
+//! onto read-only media keeps the answer it carries. The decision chooses only
+//! where a NEW answer is written; a writer whose chosen place fails falls to
+//! the per-user folder, which (c) reads. A new answer replaces a readable
+//! record beside the copy, because that is where it is read first, and is
+//! refused by name when that record cannot be replaced. Other records follow
+//! the decision for reads as well as writes (see [`data_root`]).
+//!
+//! The creating decision and a non-creating one are the same function of the
+//! same facts, examined without following a link first: a real folder is
+//! probed; a link (a junction included) counts only when it resolves to a
+//! folder, which is probed; a dangling link or any other object at the name is
+//! a fallback; an absent name is decided by its nearest existing ancestor. The
+//! creating variant then creates, and a creation that still fails makes the
+//! decision a fallback, which no reader depends on.
 //!
 //! On Linux the executable's directory is never a state root, whoever runs
 //! the app. Linux has two more shapes:
@@ -64,8 +77,7 @@
 //! directory. One resolver ([`assent_read_path`]) answers the assent question
 //! for the window, the CLI and the engine environment ([`ICC_ASSENT_ENV`]), so
 //! the answer read back is always the answer written. A status query and an
-//! engine spawn create nothing: they read the process's decision when it has
-//! been made, else probe without creating the portable root.
+//! engine spawn read only: they make no decision and create nothing.
 
 use std::path::{Path, PathBuf};
 use tauri::Manager;
@@ -403,25 +415,6 @@ pub fn root_decision() -> Result<&'static RootDecision, String> {
     }))
 }
 
-/// The running copy's decision without creating anything: the decision when
-/// this process has made one, else what it would be, from a probe that leaves
-/// the tree as it found it.
-fn root_decision_without_creating(running: &Running) -> RootDecision {
-    decision_or(ROOT_DECISION.get(), || {
-        decide_root(
-            &running.dir,
-            running.container,
-            running.appimage.as_deref(),
-            writable_without_creating,
-        )
-    })
-}
-
-/// A decision this process already made always wins over a fresh probe.
-fn decision_or(made: Option<&RootDecision>, probe: impl FnOnce() -> RootDecision) -> RootDecision {
-    made.cloned().unwrap_or_else(probe)
-}
-
 /// The per-user root that takes a record when no portable root is in force.
 pub fn resolve_root(decision: &RootDecision, standard: Option<PathBuf>) -> Option<PathBuf> {
     decision.root().map(Path::to_path_buf).or(standard)
@@ -478,37 +471,43 @@ fn read_accepted_flag(path: &Path) -> Option<bool> {
     value.get(ACCEPTED_KEY)?.as_bool()
 }
 
+/// The record beside a portable copy, whether or not it exists.
+fn portable_record(dir: &Path, container: Container, appimage: Option<&Path>) -> Option<PathBuf> {
+    if container != Container::Portable {
+        return None;
+    }
+    portable_root_for(dir, appimage).map(|root| root.join(ICC_ASSENT_FILE))
+}
+
 /// The portable copy's own record, when it exists and reads as an answer.
 fn readable_portable_record(
     dir: &Path,
     container: Container,
     appimage: Option<&Path>,
 ) -> Option<PathBuf> {
-    if container != Container::Portable {
-        return None;
-    }
-    let record = portable_root_for(dir, appimage)?.join(ICC_ASSENT_FILE);
-    read_accepted_flag(&record).is_some().then_some(record)
+    portable_record(dir, container, appimage).filter(|record| read_accepted_flag(record).is_some())
 }
 
-/// The file the answer is read from.
+/// The file the answer is read from, or None when no record reads as one.
 ///
-/// Installed: the installer's record. Otherwise the record beside a portable
-/// copy whenever it exists and reads as an answer, whatever the writability
-/// decision says — a copy moved onto read-only media keeps the answer it
-/// carries. With no such record, the file at [`assent_write_dir`].
+/// A fixed order that no writability decision enters: (a) the installer's
+/// record, which is the only record an installed copy has; (b) the record
+/// beside a portable copy, when it reads as an answer; (c) the per-user
+/// record. So a writer that could not use its preferred place, for whatever
+/// reason, leaves an answer the next reader finds.
 pub fn assent_read_path(
     dir: &Path,
     container: Container,
     appimage: Option<&Path>,
-    decision: &RootDecision,
     user_config: Option<PathBuf>,
 ) -> Option<PathBuf> {
     if container == Container::Installed {
         return Some(dir.join(INSTALL_RECORD));
     }
     readable_portable_record(dir, container, appimage).or_else(|| {
-        assent_write_dir(container, decision, user_config).map(|root| root.join(ICC_ASSENT_FILE))
+        user_config
+            .map(|config| config.join(ICC_ASSENT_FILE))
+            .filter(|record| read_accepted_flag(record).is_some())
     })
 }
 
@@ -522,10 +521,9 @@ pub fn icc_assent_for(
     dir: &Path,
     container: Container,
     appimage: Option<&Path>,
-    decision: &RootDecision,
     user_config: Option<PathBuf>,
 ) -> IccAssent {
-    let Some(record) = assent_read_path(dir, container, appimage, decision, user_config) else {
+    let Some(record) = assent_read_path(dir, container, appimage, user_config) else {
         return IccAssent::Unrecorded;
     };
     match read_accepted_flag(&record) {
@@ -535,13 +533,29 @@ pub fn icc_assent_for(
     }
 }
 
+fn write_answer_in(root: &Path, accepted: bool) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(root)
+        .map_err(|e| format!("Cannot create {}: {}", root.display(), e))?;
+    let body = format!("{{\n  \"{ACCEPTED_KEY}\": {accepted}\n}}\n");
+    let path = root.join(ICC_ASSENT_FILE);
+    crate::staging::write_record(&path, body.as_bytes())
+        .map_err(|e| format!("Cannot write {}: {}", path.display(), e))?;
+    Ok(path)
+}
+
 /// Records the user's answer in a container that asks in the app.
+///
+/// The decision chooses only where a NEW answer goes: the portable root when
+/// it is in force, else the per-user folder. A write to the portable root that
+/// fails anyway (a race, a quota) falls to the per-user folder, which the
+/// reader consults next. The answer must land where [`assent_read_path`]
+/// finds it first: when a record beside the copy reads as an answer, the new
+/// answer replaces that record, and when it cannot, the answer is refused by
+/// name rather than written where that record would hide it.
 ///
 /// Refuses in the installed container rather than writing a second record: two
 /// records would give one machine two answers, and the installer's is the one
-/// the licence terms were satisfied through. Refuses also when the copy
-/// carries an answer beside itself that its folder no longer lets it replace:
-/// a new answer written elsewhere would be shadowed by that record.
+/// the licence terms were satisfied through.
 pub fn record_icc_assent_for(
     dir: &Path,
     container: Container,
@@ -557,23 +571,26 @@ pub fn record_icc_assent_for(
                 .to_string(),
         );
     }
-    if decision.root().is_none() {
-        if let Some(record) = readable_portable_record(dir, container, appimage) {
-            return Err(format!(
+    if let Some(beside) = readable_portable_record(dir, container, appimage) {
+        let root = beside.parent().map(Path::to_path_buf).unwrap_or_default();
+        return write_answer_in(&root, accepted).map(|_| ()).map_err(|_| {
+            format!(
                 "The colour-profile answer is recorded in {}, which cannot be written, so it \
                  cannot be changed here.",
-                record.display()
-            ));
-        }
+                beside.display()
+            )
+        });
     }
-    let root = assent_write_dir(container, decision, user_config)
-        .ok_or_else(|| "Cannot resolve the configuration folder.".to_string())?;
-    std::fs::create_dir_all(&root)
-        .map_err(|e| format!("Cannot create {}: {}", root.display(), e))?;
-    let body = format!("{{\n  \"{ACCEPTED_KEY}\": {accepted}\n}}\n");
-    let path = root.join(ICC_ASSENT_FILE);
-    crate::staging::write_record(&path, body.as_bytes())
-        .map_err(|e| format!("Cannot write {}: {}", path.display(), e))
+    let per_user = || -> Result<(), String> {
+        let config = user_config
+            .clone()
+            .ok_or_else(|| "Cannot resolve the configuration folder.".to_string())?;
+        write_answer_in(&config, accepted).map(|_| ())
+    };
+    match decision.root() {
+        Some(root) => write_answer_in(root, accepted).map(|_| ()).or_else(|_| per_user()),
+        None => per_user(),
+    }
 }
 
 /// The running copy, as the resolvers above take it.
@@ -591,7 +608,8 @@ fn running() -> Result<Running, String> {
 }
 
 /// What a status query reports for the running copy: its container, its
-/// answer and the record the answer is read from. Creates nothing.
+/// answer and the record the answer is read from. Reads only: no decision is
+/// made and nothing is created.
 pub struct AssentStatus {
     pub container: Container,
     pub assent: IccAssent,
@@ -600,12 +618,11 @@ pub struct AssentStatus {
 
 pub fn assent_status() -> Result<AssentStatus, String> {
     let running = running()?;
-    let decision = root_decision_without_creating(&running);
     let image = running.appimage.as_deref();
     Ok(AssentStatus {
         container: running.container,
-        assent: icc_assent_for(&running.dir, running.container, image, &decision, user_config_dir()),
-        record: assent_read_path(&running.dir, running.container, image, &decision, user_config_dir()),
+        assent: icc_assent_for(&running.dir, running.container, image, user_config_dir()),
+        record: assent_read_path(&running.dir, running.container, image, user_config_dir()),
     })
 }
 
@@ -726,32 +743,39 @@ pub fn webview_data_in_force() -> Option<PathBuf> {
 
 /// Create `dir` if needed and prove it can accept a new file.
 ///
-/// `create_dir_all` succeeds when the directory already exists, even when its
-/// volume or permissions have since become read-only. A portable copy may be
-/// moved onto read-only media after a prior launch, so existence alone cannot
-/// decide whether the app can keep using the portable root. The creating and
-/// the non-creating decisions answer from the same facts: this one first asks
-/// [`writable_without_creating`], so a fresh process that only reads reaches
-/// the decision the writer reached.
+/// The same classification as [`writable_without_creating`], then the
+/// creation: the creating and the non-creating decisions are one function of
+/// the same filesystem facts. A creation that still fails (a race, a quota)
+/// makes the decision a fallback, which readers never depend on.
 fn ensure_writable_dir(dir: &Path) -> bool {
     writable_without_creating(dir) && std::fs::create_dir_all(dir).is_ok() && probe_file_in(dir)
 }
 
-/// Whether `dir` could hold a new file, without creating it. An existing
-/// folder is probed in place; anything else at the name (a file) can never be
-/// the root. An absent folder is decided by its nearest existing ancestor,
-/// which must be a folder that accepts a new file. Every probe file is removed
-/// before returning.
+/// Whether `dir` could hold a new file, examined without creating it and
+/// without following anything first: a real folder is probed in place; a link
+/// (a junction included) counts only when it resolves to a folder, which is
+/// then probed; a dangling link or any other object at the name can never be
+/// the root; an absent name is decided by its nearest existing ancestor under
+/// the same rules. Every probe file is removed before returning.
 fn writable_without_creating(dir: &Path) -> bool {
-    match std::fs::metadata(dir) {
-        Ok(meta) => meta.is_dir() && probe_file_in(dir),
+    match std::fs::symlink_metadata(dir) {
+        Ok(meta) => existing_folder_accepts_a_file(dir, &meta),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => dir
             .ancestors()
             .skip(1)
-            .find_map(|ancestor| std::fs::metadata(ancestor).ok().map(|meta| (ancestor, meta)))
-            .is_some_and(|(ancestor, meta)| meta.is_dir() && probe_file_in(ancestor)),
+            .find_map(|ancestor| {
+                std::fs::symlink_metadata(ancestor).ok().map(|meta| (ancestor, meta))
+            })
+            .is_some_and(|(ancestor, meta)| existing_folder_accepts_a_file(ancestor, &meta)),
         Err(_) => false,
     }
+}
+
+fn existing_folder_accepts_a_file(path: &Path, meta: &std::fs::Metadata) -> bool {
+    if meta.file_type().is_symlink() {
+        return std::fs::metadata(path).is_ok_and(|target| target.is_dir()) && probe_file_in(path);
+    }
+    meta.is_dir() && probe_file_in(path)
 }
 
 fn probe_file_in(dir: &Path) -> bool {
@@ -785,8 +809,12 @@ fn root_from(standard: Option<PathBuf>, what: &str) -> Result<PathBuf, String> {
 /// not from an older copy left in the portable root: reading some files from
 /// one root while writing them to another would split one set of records, and
 /// the startup warning already names that existing settings do not move. The
+/// startup flags, the session and the watched-folder list are rewritten as the
+/// user works: reading a stale copy beside the media while writing per-user would
+/// make every later change invisible, so they keep one root for both. The
 /// colour-profile answer is the one exception ([`assent_read_path`]): it is a
-/// licence decision, and asking it again would look like a lost answer.
+/// licence decision written once, and asking it again would look like a lost
+/// answer.
 ///
 /// No migration exists in either direction: a portable first run starts fresh,
 /// and an installed copy resolves exactly where it always did.
@@ -1098,7 +1126,7 @@ mod tests {
         .unwrap();
         let decision = decide_root(&dir, Container::Installed, None, no_probe);
         assert_eq!(decision, RootDecision::PerUser);
-        let read = || icc_assent_for(&dir, Container::Installed, None, &decision, None);
+        let read = || icc_assent_for(&dir, Container::Installed, None, None);
         assert_eq!(read(), IccAssent::Accepted);
         // And it is not asked again, nor overwritten from inside the app.
         assert!(record_icc_assent_for(&dir, Container::Installed, None, &decision, None, false).is_err());
@@ -1112,7 +1140,7 @@ mod tests {
         let dir = scratch("portable-assent");
         let config = dir.join("per-user").join(APP_IDENTIFIER);
         let decision = decide_root(&dir, Container::Portable, None, ensure_writable_dir);
-        let read = || icc_assent_for(&dir, Container::Portable, None, &decision, Some(config.clone()));
+        let read = || icc_assent_for(&dir, Container::Portable, None, Some(config.clone()));
         let record = |accepted| {
             record_icc_assent_for(&dir, Container::Portable, None, &decision, Some(config.clone()), accepted)
         };
@@ -1139,7 +1167,7 @@ mod tests {
         std::fs::create_dir_all(record.parent().unwrap()).unwrap();
         std::fs::write(&record, "{\n  \"adobeIccEulaAcc").unwrap();
         let decision = decide_root(&dir, Container::Portable, None, ensure_writable_dir);
-        let read = || icc_assent_for(&dir, Container::Portable, None, &decision, None);
+        let read = || icc_assent_for(&dir, Container::Portable, None, None);
         assert_eq!(read(), IccAssent::Unrecorded);
         let mut writer = std::process::Command::new("cmd")
             .args(["/C", "exit 0"])
@@ -1165,7 +1193,7 @@ mod tests {
         let dir = scratch("garbled-assent");
         std::fs::write(dir.join(INSTALL_RECORD), "not json at all").unwrap();
         assert_eq!(
-            icc_assent_for(&dir, Container::Installed, None, &RootDecision::PerUser, None),
+            icc_assent_for(&dir, Container::Installed, None, None),
             IccAssent::Unrecorded
         );
         assert_eq!(assent_env_value(IccAssent::Unrecorded), "0");
@@ -1180,7 +1208,7 @@ mod tests {
         std::fs::write(dir.join(INSTALL_RECORD), record).unwrap();
 
         assert_eq!(
-            icc_assent_for(&dir, Container::Installed, None, &RootDecision::PerUser, None),
+            icc_assent_for(&dir, Container::Installed, None, None),
             IccAssent::Unrecorded
         );
         std::fs::remove_dir_all(&dir).ok();
@@ -1239,9 +1267,9 @@ mod tests {
         );
     }
 
-    /// Once made, the decision is what every record reads: a portable root
-    /// that becomes writable (or unwritable) mid-run moves nothing, because no
-    /// record probes again.
+    /// Once made, the decision is what every record writes to: a portable
+    /// root that becomes writable (or unwritable) mid-run moves nothing,
+    /// because no record probes again.
     #[test]
     fn every_record_follows_one_decision_and_a_made_decision_is_never_reprobed() {
         let root = std::env::temp_dir().join("portable-root");
@@ -1272,12 +1300,6 @@ mod tests {
         // path that does not exist.
         assert_eq!(resolve_root(&fallback, None), None);
 
-        assert_eq!(
-            decision_or(Some(&fallback), || panic!("a made decision is never probed again")),
-            fallback
-        );
-        assert_eq!(decision_or(None, || portable.clone()), portable);
-
         let mut probes = 0;
         decide_root(Path::new("/x"), Container::Portable, None, |_| {
             probes += 1;
@@ -1286,11 +1308,11 @@ mod tests {
         assert!(probes <= 1);
     }
 
-    /// The record beside the copy wins for that copy: a copy moved onto
-    /// read-only media keeps the answer it carries rather than asking again,
-    /// and a new answer that would be shadowed by it is refused by name.
+    /// The record beside the copy wins for that copy over the per-user one,
+    /// so a new answer replaces that record; when its folder is read-only the
+    /// answer is refused by name rather than written where it would be hidden.
     #[test]
-    fn an_answer_beside_a_read_only_copy_is_read_and_wins_over_the_per_user_one() {
+    fn an_answer_beside_the_copy_wins_and_a_new_answer_replaces_it_or_is_refused() {
         let temp = tempfile::tempdir().unwrap();
         let mount = temp.path().join("mount");
         std::fs::create_dir_all(&mount).unwrap();
@@ -1298,29 +1320,35 @@ mod tests {
         let config = temp.path().join("roaming").join(APP_IDENTIFIER);
         write_answer(&root.join(ICC_ASSENT_FILE), true);
         write_answer(&config.join(ICC_ASSENT_FILE), false);
-
-        let read_only = RootDecision::Fallback(root.clone());
         let image = Some(image.as_path());
+        let read = || icc_assent_for(&mount, Container::Portable, image, Some(config.clone()));
+
         assert_eq!(
-            assent_read_path(&mount, Container::Portable, image, &read_only, Some(config.clone())),
+            assent_read_path(&mount, Container::Portable, image, Some(config.clone())),
             Some(root.join(ICC_ASSENT_FILE))
         );
-        assert_eq!(
-            icc_assent_for(&mount, Container::Portable, image, &read_only, Some(config.clone())),
-            IccAssent::Accepted
-        );
-        let refused =
-            record_icc_assent_for(&mount, Container::Portable, image, &read_only, Some(config.clone()), false)
-                .unwrap_err();
-        assert!(refused.contains("cannot be written"), "{refused}");
+        assert_eq!(read(), IccAssent::Accepted);
+
+        // Whatever the decision, the new answer lands where it is read first.
+        let fallback = RootDecision::Fallback(root.clone());
+        record_icc_assent_for(&mount, Container::Portable, image, &fallback, Some(config.clone()), false)
+            .unwrap();
+        assert_eq!(read(), IccAssent::Declined);
+
+        if let Some(_guard) = ReadOnly::new(&root) {
+            let refused = record_icc_assent_for(
+                &mount, Container::Portable, image, &fallback, Some(config.clone()), true,
+            )
+            .unwrap_err();
+            assert!(refused.contains("cannot be written"), "{refused}");
+            assert_eq!(read(), IccAssent::Declined);
+        }
 
         // An unreadable record beside the copy tells nothing; the per-user
         // record answers.
         std::fs::write(root.join(ICC_ASSENT_FILE), "garbled").unwrap();
-        assert_eq!(
-            icc_assent_for(&mount, Container::Portable, image, &read_only, Some(config)),
-            IccAssent::Declined
-        );
+        write_answer(&config.join(ICC_ASSENT_FILE), true);
+        assert_eq!(read(), IccAssent::Accepted);
     }
 
     #[cfg(windows)]
@@ -1333,7 +1361,7 @@ mod tests {
         let read_only = decide_root(&dir, Container::Portable, None, |_| false);
         assert_eq!(read_only, RootDecision::Fallback(dir.join(PORTABLE_DATA_DIR)));
         assert_eq!(
-            icc_assent_for(&dir, Container::Portable, None, &read_only, Some(config)),
+            icc_assent_for(&dir, Container::Portable, None, Some(config)),
             IccAssent::Declined
         );
     }
@@ -1353,7 +1381,7 @@ mod tests {
             .unwrap();
         assert!(config.join(ICC_ASSENT_FILE).is_file());
         assert_eq!(
-            icc_assent_for(&blocked, Container::Portable, None, &decision, Some(config)),
+            icc_assent_for(&blocked, Container::Portable, None, Some(config)),
             IccAssent::Accepted
         );
     }
@@ -1379,11 +1407,11 @@ mod tests {
         let reader = decide_root(&mount, Container::Portable, image, writable_without_creating);
         assert_eq!(reader, writer);
         assert_eq!(
-            icc_assent_for(&mount, Container::Portable, image, &reader, Some(config.clone())),
+            icc_assent_for(&mount, Container::Portable, image, Some(config.clone())),
             IccAssent::Accepted
         );
         assert_eq!(
-            assent_read_path(&mount, Container::Portable, image, &reader, Some(config.clone())),
+            assent_read_path(&mount, Container::Portable, image, Some(config.clone())),
             Some(config.join(ICC_ASSENT_FILE))
         );
     }
@@ -1402,38 +1430,264 @@ mod tests {
         let reader = decide_root(&dir, Container::Portable, None, writable_without_creating);
         assert_eq!(reader, RootDecision::Fallback(dir.join(PORTABLE_DATA_DIR)));
         assert_eq!(
-            icc_assent_for(&dir, Container::Portable, None, &reader, Some(config)),
+            icc_assent_for(&dir, Container::Portable, None, Some(config)),
             IccAssent::Declined
         );
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn a_read_only_parent_is_a_fallback_for_the_writer_and_a_fresh_reader_alike() {
-        use std::os::unix::fs::PermissionsExt;
-        let temp = tempfile::tempdir().unwrap();
-        let mount = temp.path().join("mount");
-        std::fs::create_dir_all(&mount).unwrap();
-        let (image, root) = portable_image(temp.path());
-        let parent = root.parent().unwrap().to_path_buf();
-        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
-        if probe_file_in(&parent) {
-            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
-            return; // running with privileges that ignore the mode
+    /// A folder made read-only for the life of the guard: mode 0555 on Unix,
+    /// a deny-write entry for everyone on Windows. None when the account
+    /// ignores the restriction (an administrator, root), so the case cannot be
+    /// arranged here.
+    struct ReadOnly(PathBuf);
+
+    impl ReadOnly {
+        fn new(dir: &Path) -> Option<Self> {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o555)).ok()?;
+            }
+            #[cfg(windows)]
+            {
+                let status = std::process::Command::new("icacls")
+                    .arg(dir)
+                    .args(["/deny", "*S-1-1-0:(W)"])
+                    .stdout(std::process::Stdio::null())
+                    .status()
+                    .ok()?;
+                if !status.success() {
+                    return None;
+                }
+            }
+            let guard = ReadOnly(dir.to_path_buf());
+            (!probe_file_in(dir)).then_some(guard)
         }
-        let config = temp.path().join("home").join(".config").join(APP_IDENTIFIER);
-        let image = Some(image.as_path());
-        let writer = decide_root(&mount, Container::Portable, image, ensure_writable_dir);
-        assert_eq!(writer, RootDecision::Fallback(root.clone()));
-        record_icc_assent_for(&mount, Container::Portable, image, &writer, Some(config.clone()), true)
+    }
+
+    impl Drop for ReadOnly {
+        fn drop(&mut self) {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+            }
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("icacls")
+                    .arg(&self.0)
+                    .args(["/remove:d", "*S-1-1-0"])
+                    .stdout(std::process::Stdio::null())
+                    .status();
+            }
+        }
+    }
+
+    /// Two processes: a writer that may create its root, then a fresh reader
+    /// that may not. Returns both decisions and what the reader reads.
+    fn writer_then_reader(
+        dir: &Path,
+        image: Option<&Path>,
+        config: &Path,
+    ) -> (RootDecision, RootDecision, IccAssent) {
+        let writer = decide_root(dir, Container::Portable, image, ensure_writable_dir);
+        record_icc_assent_for(dir, Container::Portable, image, &writer, Some(config.to_path_buf()), true)
             .unwrap();
-        let reader = decide_root(&mount, Container::Portable, image, writable_without_creating);
+        let reader = decide_root(dir, Container::Portable, image, writable_without_creating);
+        let read = icc_assent_for(dir, Container::Portable, image, Some(config.to_path_buf()));
+        (writer, reader, read)
+    }
+
+    /// An image whose portable folder exists, with `occupy` deciding what sits
+    /// at the root's name. Returns the mount, the image, the root and the
+    /// per-user folder.
+    fn occupied_root(temp: &Path, occupy: impl FnOnce(&Path)) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+        let mount = temp.join("mount");
+        std::fs::create_dir_all(&mount).unwrap();
+        let (image, root) = portable_image(temp);
+        occupy(&root);
+        (mount, image, root, temp.join("per-user").join(APP_IDENTIFIER))
+    }
+
+    fn link_dir(target: &Path, link: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(target, link).is_ok()
+        }
+        #[cfg(windows)]
+        {
+            std::os::windows::fs::symlink_dir(target, link).is_ok()
+        }
+    }
+
+    fn link_file(target: &Path, link: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(target, link).is_ok()
+        }
+        #[cfg(windows)]
+        {
+            std::os::windows::fs::symlink_file(target, link).is_ok()
+        }
+    }
+
+    /// The reviewer's case: an existing portable folder whose root entry is a
+    /// link to nothing. Both decisions fall back, and the fresh reader finds
+    /// the saved answer.
+    #[test]
+    fn a_dangling_link_at_the_root_is_a_fallback_for_writer_and_reader() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("missing-target");
+        let mut linked = false;
+        let (mount, image, _root, config) =
+            occupied_root(temp.path(), |root| linked = link_dir(&missing, root));
+        if !linked {
+            return; // this account cannot create symbolic links
+        }
+        let (writer, reader, read) = writer_then_reader(&mount, Some(&image), &config);
+        assert!(matches!(writer, RootDecision::Fallback(_)), "{writer:?}");
         assert_eq!(reader, writer);
+        assert_eq!(read, IccAssent::Accepted);
+        assert!(config.join(ICC_ASSENT_FILE).is_file());
+    }
+
+    #[test]
+    fn a_link_to_a_file_at_the_root_is_a_fallback_for_writer_and_reader() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("a-file");
+        std::fs::write(&file, b"x").unwrap();
+        let mut linked = false;
+        let (mount, image, _root, config) =
+            occupied_root(temp.path(), |root| linked = link_file(&file, root));
+        if !linked {
+            return;
+        }
+        let (writer, reader, read) = writer_then_reader(&mount, Some(&image), &config);
+        assert!(matches!(writer, RootDecision::Fallback(_)), "{writer:?}");
+        assert_eq!(reader, writer);
+        assert_eq!(read, IccAssent::Accepted);
+        assert_eq!(std::fs::read(&file).unwrap(), b"x");
+    }
+
+    #[test]
+    fn a_link_to_a_writable_folder_is_the_root_for_writer_and_reader() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("elsewhere");
+        std::fs::create_dir_all(&target).unwrap();
+        let mut linked = false;
+        let (mount, image, root, config) =
+            occupied_root(temp.path(), |root| linked = link_dir(&target, root));
+        if !linked {
+            return;
+        }
+        let (writer, reader, read) = writer_then_reader(&mount, Some(&image), &config);
+        assert_eq!(writer, RootDecision::Portable(root));
+        assert_eq!(reader, writer);
+        assert_eq!(read, IccAssent::Accepted);
+        assert!(target.join(ICC_ASSENT_FILE).is_file());
+    }
+
+    #[test]
+    fn a_link_to_a_read_only_folder_is_a_fallback_for_writer_and_reader() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("elsewhere");
+        std::fs::create_dir_all(&target).unwrap();
+        let mut linked = false;
+        let (mount, image, _root, config) =
+            occupied_root(temp.path(), |root| linked = link_dir(&target, root));
+        if !linked {
+            return;
+        }
+        let Some(_guard) = ReadOnly::new(&target) else { return };
+        let (writer, reader, read) = writer_then_reader(&mount, Some(&image), &config);
+        assert!(matches!(writer, RootDecision::Fallback(_)), "{writer:?}");
+        assert_eq!(reader, writer);
+        assert_eq!(read, IccAssent::Accepted);
+    }
+
+    #[test]
+    fn a_read_only_root_folder_is_a_fallback_for_writer_and_reader() {
+        let temp = tempfile::tempdir().unwrap();
+        let (mount, image, root, config) =
+            occupied_root(temp.path(), |root| std::fs::create_dir_all(root).unwrap());
+        let Some(_guard) = ReadOnly::new(&root) else { return };
+        let (writer, reader, read) = writer_then_reader(&mount, Some(&image), &config);
+        assert_eq!(writer, RootDecision::Fallback(root));
+        assert_eq!(reader, writer);
+        assert_eq!(read, IccAssent::Accepted);
+    }
+
+    /// The root is absent and its parent cannot take a new folder: the
+    /// read-only volume case, arranged with permissions.
+    #[test]
+    fn a_read_only_parent_of_an_absent_root_is_a_fallback_for_writer_and_reader() {
+        let temp = tempfile::tempdir().unwrap();
+        let (mount, image, root, config) = occupied_root(temp.path(), |_| {});
+        let Some(_guard) = ReadOnly::new(root.parent().unwrap()) else { return };
+        let (writer, reader, read) = writer_then_reader(&mount, Some(&image), &config);
+        assert_eq!(writer, RootDecision::Fallback(root.clone()));
+        assert_eq!(reader, writer);
+        assert_eq!(read, IccAssent::Accepted);
+        assert!(!root.exists());
+    }
+
+    #[cfg(windows)]
+    fn junction(target: &Path, link: &Path) -> bool {
+        std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_is_the_root_while_its_target_exists_and_a_fallback_after() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("elsewhere");
+        std::fs::create_dir_all(&target).unwrap();
+        let (mount, image, root, config) =
+            occupied_root(temp.path(), |root| assert!(junction(&target, root)));
+        let (writer, reader, read) = writer_then_reader(&mount, Some(&image), &config);
+        assert_eq!(writer, RootDecision::Portable(root.clone()));
+        assert_eq!(reader, writer);
+        assert_eq!(read, IccAssent::Accepted);
+        assert!(target.join(ICC_ASSENT_FILE).is_file());
+
+        // The same junction once its target is gone: dangling. The record
+        // beside the copy went with the target, so the answer lands per user.
+        std::fs::remove_dir_all(&target).unwrap();
+        let (writer, reader, read) = writer_then_reader(&mount, Some(&image), &config);
+        assert_eq!(writer, RootDecision::Fallback(root));
+        assert_eq!(reader, writer);
+        assert_eq!(read, IccAssent::Accepted);
+        assert!(config.join(ICC_ASSENT_FILE).is_file());
+    }
+
+    /// The zip's `data` folder spelled in another case is the same folder on
+    /// a case-insensitive volume: its record is read, and both decisions use it.
+    #[cfg(windows)]
+    #[test]
+    fn a_data_folder_in_another_case_is_the_same_root_for_writer_and_reader() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("zip");
+        let upper = dir.join("DATA");
+        std::fs::create_dir_all(&upper).unwrap();
+        write_answer(&upper.join(ICC_ASSENT_FILE), false);
+        let config = temp.path().join("roaming").join(APP_IDENTIFIER);
         assert_eq!(
-            icc_assent_for(&mount, Container::Portable, image, &reader, Some(config)),
-            IccAssent::Accepted
+            icc_assent_for(&dir, Container::Portable, None, Some(config.clone())),
+            IccAssent::Declined
         );
-        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (writer, reader, read) = writer_then_reader(&dir, None, &config);
+        assert_eq!(writer, RootDecision::Portable(dir.join(PORTABLE_DATA_DIR)));
+        assert_eq!(reader, writer);
+        assert_eq!(read, IccAssent::Accepted);
+        assert!(!config.join(ICC_ASSENT_FILE).exists());
     }
 
     /// A status query creates nothing: the decision it reads is probed without
@@ -1450,10 +1704,10 @@ mod tests {
             let decision = decide_root(dir, Container::Portable, image, writable_without_creating);
             assert!(decision.root().is_some(), "{decision:?}");
             assert_eq!(
-                icc_assent_for(dir, Container::Portable, image, &decision, Some(config.clone())),
+                icc_assent_for(dir, Container::Portable, image, Some(config.clone())),
                 IccAssent::Unrecorded
             );
-            assert!(assent_read_path(dir, Container::Portable, image, &decision, Some(config.clone())).is_some());
+            assert_eq!(assent_read_path(dir, Container::Portable, image, Some(config.clone())), None);
             assert_eq!(snapshot(temp.path()), before);
         };
         check(&mount, Some(&image));
@@ -1595,12 +1849,12 @@ mod tests {
         let config = temp.path().join("home").join(".config").join(APP_IDENTIFIER);
         let package = Container::Package;
         let decision = decide_root(&bin, package, None, no_probe);
-        let read = || icc_assent_for(&bin, package, None, &decision, Some(config.clone()));
+        let read = || icc_assent_for(&bin, package, None, Some(config.clone()));
 
         assert_eq!(read(), IccAssent::Unrecorded);
         record_icc_assent_for(&bin, package, None, &decision, Some(config.clone()), true).unwrap();
         assert_eq!(
-            assent_read_path(&bin, package, None, &decision, Some(config.clone())),
+            assent_read_path(&bin, package, None, Some(config.clone())),
             Some(config.join(ICC_ASSENT_FILE))
         );
         // The next launch reads the same answer back: the dialog stays shut.
@@ -1627,7 +1881,7 @@ mod tests {
         assert_eq!(decision, RootDecision::PerUser);
         record_icc_assent_for(&mount, portable, image, &decision, Some(config.clone()), false).unwrap();
         assert_eq!(
-            icc_assent_for(&mount, portable, image, &decision, Some(config.clone())),
+            icc_assent_for(&mount, portable, image, Some(config.clone())),
             IccAssent::Declined
         );
 
@@ -1636,14 +1890,15 @@ mod tests {
         let root = beside.join(APP_IDENTIFIER);
         let decision = decide_root(&mount, portable, image, ensure_writable_dir);
         assert_eq!(decision, RootDecision::Portable(root.clone()));
+        // The per-user answer is still read until the portable folder has one.
         assert_eq!(
-            icc_assent_for(&mount, portable, image, &decision, Some(config.clone())),
-            IccAssent::Unrecorded
+            icc_assent_for(&mount, portable, image, Some(config.clone())),
+            IccAssent::Declined
         );
         record_icc_assent_for(&mount, portable, image, &decision, Some(config.clone()), true).unwrap();
         assert!(root.join(ICC_ASSENT_FILE).is_file());
         assert_eq!(
-            icc_assent_for(&mount, portable, image, &decision, Some(config)),
+            icc_assent_for(&mount, portable, image, Some(config)),
             IccAssent::Accepted
         );
         assert_eq!(std::fs::read_dir(&mount).unwrap().count(), 0);

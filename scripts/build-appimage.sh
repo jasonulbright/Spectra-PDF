@@ -77,6 +77,7 @@ OFFICE_LAUNCHER="$LINUX_DIR/libreoffice-launcher"
 PYTHON_LAUNCHER="$LINUX_DIR/python-launcher"
 APPRUN_SCRIPT="$LINUX_DIR/AppRun.sh"
 IMAGE_EXEC_SOURCE="$LINUX_DIR/image-exec.c"
+IMAGE_EXEC_TRAMPOLINE_SOURCE="$LINUX_DIR/image-exec-trampoline.c"
 ICON="$REPO_ROOT/src-tauri/icons/128x128@2x.png"
 RUNTIME_NOTICES="$REPO_ROOT/vendor/appimage-runtime"
 RUNTIME_NOTICE_FILES="LICENSE-type2-runtime.txt LICENSE-libfuse-LGPL-2.1.txt LICENSE-squashfuse.txt
@@ -351,6 +352,8 @@ ln -s ../spectrapdf/libreoffice/share "$APPDIR/lib/libreoffice-launcher/share"
 mkdir -p "$APPDIR/lib/python-launcher" "$APPDIR/lib/image-exec"
 gcc -shared -fPIC -O2 -Wall -Wextra -Werror -o "$APPDIR/lib/image-exec/image-exec.so" "$IMAGE_EXEC_SOURCE" ||
   die "src-tauri/linux/image-exec.c did not compile"
+gcc -static -O2 -Wall -Wextra -Werror -o "$APPDIR/lib/image-exec/image-exec-trampoline" "$IMAGE_EXEC_TRAMPOLINE_SOURCE" ||
+  die "src-tauri/linux/image-exec-trampoline.c did not compile"
 sh "$REPO_ROOT/scripts/test-image-exec.sh" "$APPDIR/lib/image-exec/image-exec.so" ||
   die "lib/image-exec/image-exec.so failed its regression test"
 install -m 0755 "$PYTHON_LAUNCHER" "$APPDIR/lib/python-launcher/python3"

@@ -222,6 +222,10 @@ need_file bin/10-webkit-sandbox.hook
   fail "lib/libreoffice-launcher/share does not link to the payload's libreoffice/share"
 [ -x lib/python-launcher/python3 ] || fail "lib/python-launcher/python3 is missing or not executable"
 need_elf lib/image-exec/image-exec.so
+need_elf lib/image-exec/image-exec-trampoline
+[ -x lib/image-exec/image-exec-trampoline ] && ! is_dynamic lib/image-exec/image-exec-trampoline &&
+  ! readelf -lW lib/image-exec/image-exec-trampoline 2>/dev/null | grep -q "program interpreter" ||
+  fail "lib/image-exec/image-exec-trampoline is not a static executable"
 set -- bin/*fix-namespaces*
 [ ! -e "$1" ] || fail "the image carries a namespace hook that changes a system setting"
 grep -qx '+/webkit2gtk-4.1/injected-bundle' lib/lib.path 2>/dev/null ||
@@ -370,6 +374,10 @@ if [ -f "$MANIFEST" ]; then
     fail "webkit2gtk-4.1 $webkit_version is older than the minimum $WEBKIT_MINIMUM"
   fi
   [ -d usr/share/doc/spectrapdf/appimage-licenses/webkit2gtk-4.1 ] || fail "the webkit2gtk-4.1 notices are missing"
+  awk -F '\t' '$1 == "lib/image-exec/image-exec-trampoline" && $2 == "static:glibc" && $3 != "" && $3 != "-" { found = 1 }
+    END { exit !found }' "$MANIFEST" ||
+    fail "$MANIFEST records no glibc version for the statically linked lib/image-exec/image-exec-trampoline"
+  [ -d usr/share/doc/spectrapdf/appimage-licenses/glibc ] || fail "the glibc notices are missing"
   for f in LICENSE-sharun.txt LICENSE-cross-libc-dlopen.txt LICENSE-linuxdeploy-plugin-checkrt.txt; do
     [ -s "usr/share/doc/spectrapdf/anylinux-sharun/$f" ] || fail "usr/share/doc/spectrapdf/anylinux-sharun/$f is missing"
   done

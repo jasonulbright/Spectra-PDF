@@ -772,6 +772,7 @@ The sharun files come from two pinned release tarballs
 | cross-libc-dlopen.so (`lib/sharun-preload/`) | v0.2.7 | MIT | <https://github.com/pkgforge-dev/cross-libc-dlopen/releases/tag/v0.2.7> | `63129854b553a8af6f19a3b54a97e19059f90ae67bc4342d0e2d03fc80c92478` |
 | musl libc (statically linked into sharun) | as built by sharun 3.5.0 | MIT | <https://musl.libc.org/> | (inside sharun) |
 | Ghostscript (Arch Linux `ghostscript` package: `bin/gs`, `shared/bin/gs`, `lib/libgs.so.*`, `share/ghostscript/`) | the package version in `appimage-libraries.tsv` | AGPL-3.0-or-later | <https://ghostscript.com/> | listed per file in `appimage-libraries.tsv` |
+| `lib/image-exec/image-exec-trampoline`: Spectra PDF's own program, statically linked with the C library of the Arch Linux `glibc` package (notices in `usr/share/doc/spectrapdf/appimage-licenses/glibc/`) | the `glibc` version in its `static:glibc` row of `appimage-libraries.tsv` | LGPL-2.1-or-later | <https://www.gnu.org/software/libc/> | listed in `appimage-libraries.tsv` |
 
 ## Frontend / runtime libraries
 

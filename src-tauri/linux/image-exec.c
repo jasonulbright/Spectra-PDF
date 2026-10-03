@@ -10,22 +10,47 @@
  * starts with no preload (the library is built against the image's C library,
  * not the host's) and without the variables that name the image: every LD_
  * variable goes, image entries leave colon-separated lists, and other
- * variables naming the image go.
+ * variables naming the image go. The decisions live in image-exec.h.
  *
- * Each wrapper keeps the C library's own semantics: a name without a slash is
- * relative to the current directory for execve, execv, execl, execle and
- * posix_spawn, and searched in PATH for execvp, execvpe, execlp and
- * posix_spawnp. execvp, execvpe and execlp run a file the kernel refuses with
- * ENOEXEC through /bin/sh, continue the PATH search past EACCES, ENOENT,
- * ESTALE, ENOTDIR, ENODEV and ETIMEDOUT, and report EACCES when one was seen.
- * posix_spawn and posix_spawnp have no shell fallback in the default symbol
- * version of glibc 2.15 and later, which the image carries; neither do these.
+ * The wrapper is transparent for every other start:
  *
- * execve may run in a vfork child: the next functions are bound once at load,
- * every buffer is on the stack, nothing calls malloc, printf or a locale
- * function, and a start that does not fit the buffers fails with E2BIG.
- * system(3) and popen(3) start /bin/sh through the C library's internal spawn,
- * which no preload intercepts; a program the shell then starts is not moved.
+ * R1. No limit is lower than the C library's. argv and envp are counted and
+ *     the arrays a rewrite needs are variable-length arrays of exactly that
+ *     size. A rewrite whose pointer arrays reach the kernel's argument limit
+ *     is not built: a payload start fails with E2BIG, the kernel's answer for
+ *     the rewritten start, and a host start goes to the kernel unfiltered,
+ *     which refuses it with the errno it gives the filtered one.
+ * R2. A host program receives the caller's own argv pointer, and the
+ *     caller's own envp pointer when no entry is removed. A filtered copy
+ *     exists only when an LD_ variable or a variable naming the image is
+ *     present.
+ * R3. A program name resolves in the context of the process that executes
+ *     it. A posix_spawn or posix_spawnp whose file actions run in the child
+ *     (any action: chdir and fchdir change the directory, later action kinds
+ *     are covered without reading glibc's private action records) and whose
+ *     program name is relative, and every posix_spawnp PATH search that can
+ *     reach a file inside the image, spawn the static program
+ *     lib/image-exec/image-exec-trampoline of the image with the caller's
+ *     file actions and attributes. It
+ *     makes the payload, image and host decision after the actions, then
+ *     execs. It connects to an abstract socket this library listens on and
+ *     sends the errno of a failed exec, so posix_spawn fails with that errno
+ *     and the child is reaped, as glibc does; a successful exec closes the
+ *     socket. An absolute name, a relative name without file actions, and a
+ *     search that reaches only host files keep the direct path.
+ * R4. execvp, execvpe and execlp follow glibc's __execvpe_common: a name
+ *     without a slash is tried in every PATH entry, ENOEXEC runs the file
+ *     through /bin/sh, EACCES, ENOENT, ESTALE, ENOTDIR, ENODEV and ETIMEDOUT
+ *     continue the search, EACCES is reported when one was seen. posix_spawnp
+ *     searches the same way without the shell fallback (the default symbol
+ *     version of glibc 2.15 and later, which the image carries), with the
+ *     caller's PATH, in the child. A name without a slash is relative to the
+ *     current directory for execve, execv, execl, execle and posix_spawn.
+ *
+ * The exec wrappers may run in a vfork child: the next functions are bound
+ * once at load, and image-exec.h allocates on the stack only. system(3) and
+ * popen(3) start /bin/sh through the C library's internal spawn, which no
+ * preload intercepts; a program the shell then starts is not moved.
  * fexecve(3) and execveat(2) are not wrapped: they name a program by file
  * descriptor, and neither LibreOffice's process launcher nor the engine's
  * subprocess module calls them.
@@ -37,26 +62,18 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
-#include <elf.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <limits.h>
+#include <poll.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdarg.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <sys/un.h>
+#include <sys/wait.h>
+
+#include "image-exec.h"
 
 extern char **environ;
-
-#define MAX_ARGS 1024
-#define MAX_ENV 2048
-#define MAX_LISTS 8
-#define LIST_SIZE 4096
-#define SEARCH_SIZE 16384
-#define SHELL "/bin/sh"
-#define DEFAULT_PATH "/bin:/usr/bin"
 
 typedef int (*execve_fn)(const char *, char *const[], char *const[]);
 typedef int (*spawn_fn)(pid_t *, const char *, const posix_spawn_file_actions_t *,
@@ -73,420 +90,345 @@ __attribute__((constructor)) static void bind_next(void)
 	next_spawnp = (spawn_fn)dlsym(RTLD_NEXT, "posix_spawnp");
 }
 
-static int starts_with(const char *text, const char *prefix)
+static struct image image_settings(void)
 {
-	return strncmp(text, prefix, strlen(prefix)) == 0;
-}
-
-/* Appends `len` bytes of `text` to `buf`; 0 when they do not fit. */
-static int append(char *buf, size_t size, size_t *used, const char *text, size_t len)
-{
-	if (*used + len + 1 > size)
-		return 0;
-	memcpy(buf + *used, text, len);
-	*used += len;
-	buf[*used] = '\0';
-	return 1;
-}
-
-static int append_str(char *buf, size_t size, size_t *used, const char *text)
-{
-	return append(buf, size, used, text, strlen(text));
-}
-
-static int requests_interpreter(const char *path)
-{
-	int fd = open(path, O_RDONLY | O_CLOEXEC);
-	if (fd < 0)
-		return 0;
-	Elf64_Ehdr eh;
-	int found = 0;
-	if (pread(fd, &eh, sizeof eh, 0) == (ssize_t)sizeof eh &&
-	    memcmp(eh.e_ident, ELFMAG, SELFMAG) == 0 && eh.e_ident[EI_CLASS] == ELFCLASS64 &&
-	    eh.e_phentsize == sizeof(Elf64_Phdr)) {
-		for (int i = 0; i < eh.e_phnum && !found; i++) {
-			Elf64_Phdr ph;
-			if (pread(fd, &ph, sizeof ph, (off_t)(eh.e_phoff + (Elf64_Off)i * sizeof ph)) != (ssize_t)sizeof ph)
-				break;
-			found = ph.p_type == PT_INTERP;
-		}
-	}
-	close(fd);
-	return found;
-}
-
-static const char *image_root(void)
-{
+	struct image im = { NULL, NULL, NULL };
 	const char *root = getenv("SPECTRAPDF_IMAGE_ROOT");
-	return root && root[0] == '/' ? root : NULL;
-}
-
-/* Everything one rewritten start needs, on the caller's stack. */
-struct start {
-	char loader[PATH_MAX];
-	char program[PATH_MAX];
-	char search[SEARCH_SIZE];
-	char *argv[MAX_ARGS + 8];
-	char *envp[MAX_ENV + 1];
-	char lists[MAX_LISTS][LIST_SIZE];
-};
-
-/*
- * When `filename` (absolute, or relative to the current directory) is a
- * payload program, fills s->argv and returns 1; returns 0 for any other
- * file, and -1 with errno E2BIG when the start does not fit the buffers.
- */
-static int payload_start(const char *filename, char *const argv[], struct start *s)
-{
-	const char *root = image_root();
-	const char *self = getenv("SPECTRAPDF_IMAGE_EXEC");
-	const char *image_path = getenv("SPECTRAPDF_IMAGE_LIBRARY_PATH");
-	if (!root || !self || !*self || !image_path || !filename || !*filename)
-		return 0;
-	char payload[PATH_MAX], office[PATH_MAX];
-	size_t pu = 0, ou = 0;
-	if (!append_str(payload, sizeof payload, &pu, root) || !append_str(payload, sizeof payload, &pu, "/lib/spectrapdf/") ||
-	    !append_str(office, sizeof office, &ou, root) ||
-	    !append_str(office, sizeof office, &ou, "/lib/spectrapdf/libreoffice/"))
-		return 0;
-	if (!realpath(filename, s->program) || !starts_with(s->program, payload) || !requests_interpreter(s->program))
-		return 0;
-
-	size_t argc = 0;
-	while (argv && argv[argc])
-		argc++;
-	size_t dir_len = (size_t)(strrchr(s->program, '/') - s->program);
-	size_t su = 0, lu = 0;
-	s->search[0] = '\0';
-	int fits = append(s->search, sizeof s->search, &su, s->program, dir_len) &&
-	           append_str(s->search, sizeof s->search, &su, ":") &&
-	           append(s->search, sizeof s->search, &su, s->program, dir_len) &&
-	           append_str(s->search, sizeof s->search, &su, "/../lib:");
-	if (fits && starts_with(s->program, office))
-		fits = append_str(s->search, sizeof s->search, &su, root) &&
-		       append_str(s->search, sizeof s->search, &su, "/lib/spectrapdf/libreoffice/program:");
-	fits = fits && append_str(s->search, sizeof s->search, &su, image_path) &&
-	       append_str(s->loader, sizeof s->loader, &lu, root) &&
-	       append_str(s->loader, sizeof s->loader, &lu, "/lib/ld-linux-x86-64.so.2") && argc <= MAX_ARGS;
-	if (!fits) {
-		errno = E2BIG;
-		return -1;
+	if (root && root[0] == '/') {
+		im.root = root;
+		im.self = getenv("SPECTRAPDF_IMAGE_EXEC");
+		im.library_path = getenv("SPECTRAPDF_IMAGE_LIBRARY_PATH");
 	}
-	size_t n = 0;
-	s->argv[n++] = s->loader;
-	s->argv[n++] = "--preload";
-	s->argv[n++] = (char *)self;
-	s->argv[n++] = "--library-path";
-	s->argv[n++] = s->search;
-	if (argc > 0) {
-		s->argv[n++] = "--argv0";
-		s->argv[n++] = argv[0];
-	}
-	s->argv[n++] = s->program;
-	for (size_t i = 1; i < argc; i++)
-		s->argv[n++] = argv[i];
-	s->argv[n] = NULL;
-	return 1;
+	return im;
 }
 
-/* Whether `filename` lies inside the image (a launcher, a sharun link). */
-static int inside_image(const char *filename)
+static int launch_execve(const char *path, char *const argv[], char *const envp[], void *context)
 {
-	const char *root = image_root();
-	char real[PATH_MAX], prefix[PATH_MAX];
-	size_t used = 0;
-	if (!root || !filename || !*filename || !realpath(filename, real) ||
-	    !append_str(prefix, sizeof prefix, &used, root) || !append_str(prefix, sizeof prefix, &used, "/"))
-		return 0;
-	return starts_with(real, prefix);
-}
-
-/*
- * s->envp: `envp` (NULL is an empty environment) without the variables that
- * name the image. Returns 1 when built, 0 outside an image, -1 with errno
- * E2BIG when the environment does not fit the buffers.
- */
-static int host_environment(char *const envp[], struct start *s)
-{
-	const char *root = image_root();
-	if (!root)
-		return 0;
-	size_t n = 0, lists = 0;
-	for (size_t i = 0; envp && envp[i]; i++) {
-		const char *entry = envp[i];
-		if (n >= MAX_ENV) {
-			errno = E2BIG;
-			return -1;
-		}
-		if (starts_with(entry, "LD_"))
-			continue;
-		const char *eq = strchr(entry, '=');
-		if (!eq || !strstr(eq + 1, root)) {
-			s->envp[n++] = (char *)entry;
-			continue;
-		}
-		if (!strchr(eq + 1, ':'))
-			continue;
-		if (lists >= MAX_LISTS) {
-			errno = E2BIG;
-			return -1;
-		}
-		char *out = s->lists[lists];
-		size_t used = 0;
-		int kept = 0;
-		if (!append(out, LIST_SIZE, &used, entry, (size_t)(eq - entry) + 1)) {
-			errno = E2BIG;
-			return -1;
-		}
-		const char *part = eq + 1;
-		for (;;) {
-			const char *end = strchr(part, ':');
-			size_t part_len = end ? (size_t)(end - part) : strlen(part);
-			const char *hit = strstr(part, root);
-			if (!hit || (end && hit >= end)) {
-				if ((kept && !append_str(out, LIST_SIZE, &used, ":")) ||
-				    !append(out, LIST_SIZE, &used, part, part_len)) {
-					errno = E2BIG;
-					return -1;
-				}
-				kept = 1;
-			}
-			if (!end)
-				break;
-			part = end + 1;
-		}
-		if (kept) {
-			s->envp[n++] = out;
-			lists++;
-		}
-	}
-	s->envp[n] = NULL;
-	return 1;
-}
-
-/* execve(2) through the payload rewrite and the host environment. */
-static int start_execve(const char *filename, char *const argv[], char *const envp[])
-{
+	(void)context;
 	if (!next_execve)
 		bind_next();
-	struct start s;
-	int rewritten = payload_start(filename, argv, &s);
-	if (rewritten < 0)
-		return -1;
-	if (rewritten)
-		return next_execve(s.loader, s.argv, envp);
-	if (!inside_image(filename)) {
-		int built = host_environment(envp, &s);
-		if (built < 0)
-			return -1;
-		if (built)
-			return next_execve(filename, argv, s.envp);
-	}
-	return next_execve(filename, argv, envp);
+	next_execve(path, argv, envp);
+	return errno;
 }
 
-/* glibc's maybe_script_execute: run `file` as a shell script. */
-static void script_execute(const char *file, char *const argv[], char *const envp[])
+/* errno and -1 for an exec wrapper; -1 from image-exec.h keeps `saved`. */
+static int failed(int err, int saved)
 {
-	char *args[MAX_ARGS + 2];
-	size_t argc = 1;
-	while (argv && argv[0] && argv[argc])
-		argc++;
-	if (argc > MAX_ARGS) {
-		errno = E2BIG;
-		return;
-	}
-	size_t n = 0;
-	args[n++] = SHELL;
-	args[n++] = (char *)file;
-	for (size_t i = 1; argv && argv[0] && i < argc; i++)
-		args[n++] = argv[i];
-	args[n] = NULL;
-	start_execve(SHELL, args, envp);
+	errno = err > 0 ? err : saved;
+	return -1;
+}
+
+static int start_exec(const char *filename, char *const argv[], char *const envp[])
+{
+	int saved = errno;
+	struct image im = image_settings();
+	return failed(image_start(&im, filename, argv, envp, launch_execve, NULL), saved);
+}
+
+static int search_exec(const char *file, char *const argv[], char *const envp[])
+{
+	int saved = errno;
+	struct image im = image_settings();
+	return failed(image_search(&im, file, argv, envp, getenv("PATH"), 1, launch_execve, NULL), saved);
 }
 
 int execve(const char *filename, char *const argv[], char *const envp[])
 {
-	return start_execve(filename, argv, envp);
+	return start_exec(filename, argv, envp);
 }
 
 int execv(const char *path, char *const argv[])
 {
-	return start_execve(path, argv, environ);
+	return start_exec(path, argv, environ);
 }
 
 int execvpe(const char *file, char *const argv[], char *const envp[])
 {
-	if (*file == '\0') {
-		errno = ENOENT;
-		return -1;
-	}
-	if (strchr(file, '/')) {
-		start_execve(file, argv, envp);
-		if (errno == ENOEXEC)
-			script_execute(file, argv, envp);
-		return -1;
-	}
-	size_t file_len = strnlen(file, NAME_MAX + 1);
-	if (file_len > NAME_MAX) {
-		errno = ENAMETOOLONG;
-		return -1;
-	}
-	const char *path = getenv("PATH");
-	if (!path)
-		path = DEFAULT_PATH;
-	int got_eacces = 0;
-	for (const char *p = path;;) {
-		const char *end = strchrnul(p, ':');
-		char candidate[PATH_MAX];
-		size_t used = 0;
-		int fits = append(candidate, sizeof candidate, &used, p, (size_t)(end - p)) &&
-		           (end == p || append_str(candidate, sizeof candidate, &used, "/")) &&
-		           append(candidate, sizeof candidate, &used, file, file_len);
-		if (fits) {
-			start_execve(candidate, argv, envp);
-			if (errno == ENOEXEC)
-				script_execute(candidate, argv, envp);
-			switch (errno) {
-			case EACCES:
-				got_eacces = 1;
-				break;
-			case ENOENT:
-			case ESTALE:
-			case ENOTDIR:
-			case ENODEV:
-			case ETIMEDOUT:
-				break;
-			default:
-				return -1;
-			}
-		}
-		if (*end == '\0')
-			break;
-		p = end + 1;
-	}
-	if (got_eacces)
-		errno = EACCES;
-	return -1;
+	return search_exec(file, argv, envp);
 }
 
 int execvp(const char *file, char *const argv[])
 {
-	return execvpe(file, argv, environ);
+	return search_exec(file, argv, environ);
 }
 
-/*
- * Collects the variadic arguments of execl, execlp and execle on the stack;
- * more than MAX_ARGS fails with E2BIG.
- */
-#define COLLECT_ARGS(first, args, read_env, envp_out)                         \
-	do {                                                                  \
-		va_list ap;                                                   \
-		size_t count = 0;                                             \
-		va_start(ap, first);                                          \
-		args[count++] = (char *)(first);                              \
-		char *next_arg = (char *)(first);                             \
-		while (next_arg && (next_arg = va_arg(ap, char *)) != NULL) { \
-			if (count >= MAX_ARGS) {                              \
-				va_end(ap);                                   \
-				errno = E2BIG;                                \
-				return -1;                                    \
-			}                                                     \
-			args[count++] = next_arg;                             \
-		}                                                             \
-		args[count] = NULL;                                           \
-		if (read_env)                                                 \
-			envp_out = va_arg(ap, char **);                       \
-		va_end(ap);                                                   \
+/* glibc's execl family: the variadic list counted, then copied to the stack. */
+#define COUNT_ARGS(first, argc)                                         \
+	do {                                                            \
+		va_list ap;                                             \
+		va_start(ap, first);                                    \
+		argc = 1;                                               \
+		while (va_arg(ap, char *)) {                            \
+			if (argc == INT_MAX) {                          \
+				va_end(ap);                             \
+				errno = E2BIG;                          \
+				return -1;                              \
+			}                                               \
+			argc++;                                         \
+		}                                                       \
+		va_end(ap);                                             \
+	} while (0)
+
+#define COPY_ARGS(first, args, argc, read_env, envp_out)                \
+	do {                                                            \
+		va_list ap;                                             \
+		va_start(ap, first);                                    \
+		args[0] = (char *)(first);                              \
+		for (size_t i = 1; i < argc; i++)                       \
+			args[i] = va_arg(ap, char *);                   \
+		args[argc] = NULL;                                      \
+		(void)va_arg(ap, char *);                               \
+		if (read_env)                                           \
+			envp_out = va_arg(ap, char **);                 \
+		va_end(ap);                                             \
 	} while (0)
 
 int execl(const char *path, const char *arg, ...)
 {
-	char *args[MAX_ARGS + 1];
+	size_t argc;
+	COUNT_ARGS(arg, argc);
+	char *args[argc + 1];
 	char **unused = NULL;
-	COLLECT_ARGS(arg, args, 0, unused);
+	COPY_ARGS(arg, args, argc, 0, unused);
 	(void)unused;
-	return start_execve(path, args, environ);
+	return start_exec(path, args, environ);
 }
 
 int execlp(const char *file, const char *arg, ...)
 {
-	char *args[MAX_ARGS + 1];
+	size_t argc;
+	COUNT_ARGS(arg, argc);
+	char *args[argc + 1];
 	char **unused = NULL;
-	COLLECT_ARGS(arg, args, 0, unused);
+	COPY_ARGS(arg, args, argc, 0, unused);
 	(void)unused;
-	return execvpe(file, args, environ);
+	return search_exec(file, args, environ);
 }
 
 int execle(const char *path, const char *arg, ...)
 {
-	char *args[MAX_ARGS + 1];
+	size_t argc;
+	COUNT_ARGS(arg, argc);
+	char *args[argc + 1];
 	char **envp = environ;
-	COLLECT_ARGS(arg, args, 1, envp);
-	return start_execve(path, args, envp);
+	COPY_ARGS(arg, args, argc, 1, envp);
+	return start_exec(path, args, envp);
+}
+
+struct spawn_call {
+	spawn_fn next;
+	pid_t *pid;
+	const posix_spawn_file_actions_t *actions;
+	const posix_spawnattr_t *attr;
+};
+
+static int launch_spawn(const char *path, char *const argv[], char *const envp[], void *context)
+{
+	struct spawn_call *c = context;
+	return c->next(c->pid, path, c->actions, c->attr, argv, envp);
+}
+
+static int has_actions(const posix_spawn_file_actions_t *actions)
+{
+	return actions && actions->__used > 0;
+}
+
+/* Whether a PATH entry glibc's search tries for `file` names a file inside the image. */
+static int search_reaches_image(const struct image *im, const char *file, const char *path)
+{
+	if (!path)
+		path = IMAGE_DEFAULT_PATH;
+	size_t file_len = strnlen(file, NAME_MAX + 1) + 1;
+	size_t path_len = strnlen(path, PATH_MAX - 1) + 1;
+	if (file_len - 1 > NAME_MAX)
+		return 0;
+	char buffer[path_len + file_len + 1];
+	char real[PATH_MAX];
+	const char *subp;
+	for (const char *p = path;; p = subp) {
+		subp = strchrnul(p, ':');
+		if ((size_t)(subp - p) >= path_len) {
+			if (*subp == '\0')
+				return 0;
+			continue;
+		}
+		char *pend = mempcpy(buffer, p, (size_t)(subp - p));
+		*pend = '/';
+		memcpy(pend + (p < subp), file, file_len);
+		if (image_classify(im, buffer, real) != IMAGE_HOST)
+			return 1;
+		if (*subp++ == '\0')
+			return 0;
+	}
+}
+
+static int child_exited(pid_t child)
+{
+	siginfo_t info;
+	memset(&info, 0, sizeof info);
+	return waitid(P_PID, (id_t)child, &info, WEXITED | WNOHANG | WNOWAIT) == 0 && info.si_pid == child;
 }
 
 /*
- * The program posix_spawnp would start: the first regular executable file
- * named `file` in PATH. 0 when none is found; posix_spawnp then reports it.
+ * Waits until the trampoline `child` connects to `listener` or exits.
+ * Returns the connection, or -1 when the child exited without connecting.
  */
-static int search_path(const char *file, char *found, size_t size)
+static int await_trampoline(int listener, pid_t child)
 {
-	const char *path = getenv("PATH");
-	if (!path)
-		path = DEFAULT_PATH;
-	for (const char *p = path;;) {
-		const char *end = strchrnul(p, ':');
-		size_t used = 0;
-		struct stat st;
-		if (append(found, size, &used, p, (size_t)(end - p)) &&
-		    (end == p || append_str(found, size, &used, "/")) && append_str(found, size, &used, file) &&
-		    stat(found, &st) == 0 && S_ISREG(st.st_mode) && access(found, X_OK) == 0)
-			return 1;
-		if (*end == '\0')
-			return 0;
-		p = end + 1;
+	int pidfd = -1;
+#ifdef SYS_pidfd_open
+	pidfd = (int)syscall(SYS_pidfd_open, child, 0);
+#endif
+	int connection = -1;
+	for (;;) {
+		struct pollfd fds[2] = { { listener, POLLIN, 0 }, { pidfd, POLLIN, 0 } };
+		int ready = poll(fds, pidfd >= 0 ? 2 : 1, pidfd >= 0 ? -1 : 10);
+		if (ready < 0 && errno != EINTR)
+			break;
+		if (ready > 0 && (fds[0].revents & POLLIN)) {
+			int c = accept4(listener, NULL, NULL, SOCK_CLOEXEC);
+			if (c >= 0) {
+				struct ucred cred;
+				socklen_t len = sizeof cred;
+				if (getsockopt(c, SOL_SOCKET, SO_PEERCRED, &cred, &len) == 0 && cred.pid == child) {
+					connection = c;
+					break;
+				}
+				close(c);
+			}
+			continue;
+		}
+		if (pidfd >= 0 ? ready > 0 && (fds[1].revents & POLLIN) : child_exited(child))
+			break;
 	}
+	if (pidfd >= 0)
+		close(pidfd);
+	return connection;
 }
 
-static int spawn(spawn_fn next, int use_path, pid_t *pid, const char *path,
-                 const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr,
-                 char *const argv[], char *const envp[])
+/*
+ * posix_spawn of `file` through the trampoline, which resolves it after the
+ * caller's file actions. `use_path` makes it search PATH like posix_spawnp.
+ */
+static int spawn_in_child(const struct image *im, int use_path, pid_t *pid, const char *file,
+                          const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr,
+                          char *const argv[], char *const envp[])
 {
-	if (!next)
-		return ENOSYS;
-	struct start s;
-	char found[PATH_MAX];
-	const char *program = path;
-	if (use_path && !strchr(path, '/'))
-		program = search_path(path, found, sizeof found) ? found : NULL;
-	if (program) {
-		int rewritten = payload_start(program, argv, &s);
-		if (rewritten < 0)
-			return errno;
-		if (rewritten)
-			return next_spawn(pid, s.loader, actions, attr, s.argv, envp);
-		if (inside_image(program))
-			return next(pid, path, actions, attr, argv, envp);
-	}
-	int built = host_environment(envp, &s);
-	if (built < 0)
+	size_t argc = image_count(argv);
+	if (image_pointers_refused(8 + argc + image_count(envp), image_argument_limit()))
+		return E2BIG;
+	char trampoline[strlen(im->root) + sizeof IMAGE_TRAMPOLINE];
+	image_copy(image_copy(trampoline, im->root), IMAGE_TRAMPOLINE);
+
+	int listener = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (listener < 0)
 		return errno;
-	return next(pid, path, actions, attr, argv, built ? s.envp : envp);
+	struct sockaddr_un address;
+	memset(&address, 0, sizeof address);
+	address.sun_family = AF_UNIX;
+	socklen_t length = sizeof(sa_family_t);
+	if (bind(listener, (struct sockaddr *)&address, length) != 0 || listen(listener, 4) != 0 ||
+	    (length = sizeof address, getsockname(listener, (struct sockaddr *)&address, &length) != 0) ||
+	    length <= offsetof(struct sockaddr_un, sun_path) + 1) {
+		int err = errno;
+		close(listener);
+		return err ? err : EADDRNOTAVAIL;
+	}
+	size_t name_len = length - offsetof(struct sockaddr_un, sun_path) - 1;
+	char name[name_len + 1];
+	memcpy(name, address.sun_path + 1, name_len);
+	name[name_len] = '\0';
+
+	const char *path = getenv("PATH");
+	size_t path_len = path ? strlen(path) : 0;
+	char path_arg[path_len + 2];
+	path_arg[0] = path ? 'P' : 'U';
+	memcpy(path_arg + 1, path ? path : "", path_len + 1);
+	size_t library_len = im->library_path ? strlen(im->library_path) : 0;
+	char library_arg[library_len + 2];
+	library_arg[0] = im->library_path ? 'P' : 'U';
+	memcpy(library_arg + 1, im->library_path ? im->library_path : "", library_len + 1);
+
+	char *args[8 + argc + 1];
+	size_t n = 0;
+	args[n++] = trampoline;
+	args[n++] = name;
+	args[n++] = use_path ? "spawnp" : "spawn";
+	args[n++] = path_arg;
+	args[n++] = (char *)im->root;
+	args[n++] = (char *)im->self;
+	args[n++] = library_arg;
+	args[n++] = (char *)file;
+	for (size_t i = 0; i < argc; i++)
+		args[n++] = argv[i];
+	args[n] = NULL;
+
+	pid_t child = -1;
+	int err = next_spawn(&child, trampoline, actions, attr, args, envp);
+	if (err != 0) {
+		close(listener);
+		return err;
+	}
+	int connection = await_trampoline(listener, child);
+	close(listener);
+	int child_err = 0;
+	if (connection >= 0) {
+		size_t got = 0;
+		while (got < sizeof child_err) {
+			ssize_t r = read(connection, (char *)&child_err + got, sizeof child_err - got);
+			if (r < 0 && errno == EINTR)
+				continue;
+			if (r <= 0)
+				break;
+			got += (size_t)r;
+		}
+		close(connection);
+		if (got != sizeof child_err)
+			child_err = 0;
+	}
+	if (child_err > 0) {
+		while (waitpid(child, NULL, 0) < 0 && errno == EINTR)
+			;
+		return child_err;
+	}
+	if (pid)
+		*pid = child;
+	return 0;
+}
+
+static int spawn(int use_path, pid_t *pid, const char *file, const posix_spawn_file_actions_t *actions,
+                 const posix_spawnattr_t *attr, char *const argv[], char *const envp[])
+{
+	if (!next_spawn)
+		bind_next();
+	if (!next_spawn || !next_spawnp)
+		return ENOSYS;
+	int saved = errno;
+	struct image im = image_settings();
+	int bare = use_path && !strchr(file, '/');
+	int err;
+	if (!im.root) {
+		err = (bare ? next_spawnp : next_spawn)(pid, file, actions, attr, argv, envp);
+	} else if (im.self && *im.self && *file && file[0] != '/' &&
+	           (has_actions(actions) || (bare && search_reaches_image(&im, file, getenv("PATH"))))) {
+		err = spawn_in_child(&im, bare, pid, file, actions, attr, argv, envp);
+	} else {
+		struct spawn_call call = { bare ? next_spawnp : next_spawn, pid, actions, attr };
+		err = bare ? image_launch_host(&im, file, argv, envp, launch_spawn, &call)
+		           : image_start(&im, file, argv, envp, launch_spawn, &call);
+	}
+	errno = saved;
+	return err;
 }
 
 int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *actions,
                 const posix_spawnattr_t *attr, char *const argv[], char *const envp[])
 {
-	if (!next_spawn)
-		bind_next();
-	return spawn(next_spawn, 0, pid, path, actions, attr, argv, envp);
+	return spawn(0, pid, path, actions, attr, argv, envp);
 }
 
 int posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file_actions_t *actions,
                  const posix_spawnattr_t *attr, char *const argv[], char *const envp[])
 {
-	if (!next_spawnp)
-		bind_next();
-	return spawn(next_spawnp, 1, pid, file, actions, attr, argv, envp);
+	return spawn(1, pid, file, actions, attr, argv, envp);
 }
