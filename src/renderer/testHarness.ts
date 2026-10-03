@@ -1510,8 +1510,10 @@ export function registerDocumentJsHandler(handler: DocumentJsHandler | null): vo
 export interface TestHarness {
   /** Every content-security-policy refusal this document has raised. */
   cspViolations: () => string[];
-  /** Open one or more PDFs by absolute path, bypassing the OS dialog. */
-  openByPaths: (paths: string[]) => Promise<void>;
+  /** Open one or more PDFs by absolute path, bypassing the OS dialog.
+   * `webOrigin` is the address a downloaded copy came from, as the
+   * open-from-web dialog passes it. */
+  openByPaths: (paths: string[], opts?: { webOrigin?: string }) => Promise<void>;
   /** Save the active working copy to a known destination, no dialog. */
   saveActiveAs: (destPath: string) => Promise<void>;
   /** Send To ▸ Email's STAGING half: copy the active working file into the
@@ -2389,7 +2391,7 @@ export interface TestHarness {
 }
 
 export interface TestHarnessDeps {
-  openByPaths: (paths: string[]) => Promise<void>;
+  openByPaths: (paths: string[], opts?: { webOrigin?: string }) => Promise<void>;
   setView: (view: 'welcome' | 'operations' | 'canvas') => void;
   focusTab: (tab: FocusedTab) => void;
   setActiveOp: (op: string) => void;
@@ -2596,10 +2598,10 @@ export function installTestHarness(deps: TestHarnessDeps): void {
 
   const harness: TestHarness = {
     cspViolations: () => [...cspViolationLog.values()],
-    openByPaths: async (paths) => {
+    openByPaths: async (paths, opts) => {
       try {
         await waitForEngine();
-        await deps.openByPaths(paths);
+        await deps.openByPaths(paths, opts);
       } catch (err) {
         captureError('openByPaths', err);
         throw err;

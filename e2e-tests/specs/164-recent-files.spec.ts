@@ -241,32 +241,14 @@ async function openRecentMenuNames(): Promise<string[]> {
   return names;
 }
 
-/** Attach a download's PROVENANCE to a path, the way a download does.
- *
- * A downloaded document's local copy is a temp path; its origin is recorded on
- * the Rust side and recovered by the open, which is what puts `sourceUrl` on
- * the recent entry. Registered rather than fetched: what these cases are about
- * is the entry, not the download. */
-async function registerWebOrigin(filePath: string, address: string): Promise<void> {
-  const failure = await browser.executeAsync<string | null, [string, string]>(
-    function (path, url, done) {
-      const invoke = (
-        window as unknown as {
-          __TAURI_INTERNALS__?: { invoke: (cmd: string, args?: unknown) => Promise<unknown> };
-        }
-      ).__TAURI_INTERNALS__?.invoke;
-      if (!invoke) {
-        done('no ipc');
-        return;
-      }
-      invoke('register_web_origin', { path, url })
-        .then(() => done(null))
-        .catch((err: unknown) => done(String(err)));
-    },
-    filePath,
-    address,
-  );
-  expect(failure).toBe(null);
+/** Open a local copy as a download from `address`, the way the open-from-web
+ * dialog hands its temp copy to the open funnel. The Rust side records an
+ * origin only for a path this window holds a write claim on, so the address
+ * travels with the open rather than being registered ahead of it. Opened
+ * rather than fetched: what these cases are about is the entry, not the
+ * download. */
+async function openAsDownload(filePath: string, address: string): Promise<void> {
+  await openByPaths([filePath], { webOrigin: address });
 }
 
 /** The provenance a row is SHOWING, for the row named `name`.
@@ -608,8 +590,7 @@ describe('recent files: removing an entry, and the launch that prunes dead ones'
       // the removal it feeds are both live in this session.
       const address = 'https://example.test/downloads/reveal-me.pdf';
       const downloaded = copy('web-reveal.pdf');
-      await registerWebOrigin(downloaded, address);
-      await openByPaths([downloaded]);
+      await openAsDownload(downloaded, address);
       await closeAllFiles();
       await focusTab('home');
       await waitForRecents(
@@ -663,9 +644,8 @@ describe('recent files: removing an entry, and the launch that prunes dead ones'
       const doomed = copy('sweep-doomed.pdf');
       const downloaded = copy('sweep-from-web.pdf');
 
-      await registerWebOrigin(downloaded, WEB_ADDRESS);
-
-      for (const path of [survivor, doomed, downloaded]) await openByPaths([path]);
+      for (const path of [survivor, doomed]) await openByPaths([path]);
+      await openAsDownload(downloaded, WEB_ADDRESS);
       await closeAllFiles();
       await focusTab('home');
       await waitForRecents(

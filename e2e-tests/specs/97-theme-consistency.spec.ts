@@ -133,13 +133,18 @@ describe('theme consistency audit', () => {
         const host = document.createElement('div');
         host.id = 'theme-control-probes';
         host.style.cssText = 'position:fixed;left:10px;top:150px;z-index:999999;display:flex;gap:10px;background:black';
-        const sheet = document.createElement('style');
-        sheet.textContent = `
+        // A constructed sheet, because the content security policy refuses an
+        // inline <style> element and the probes would then keep the theme's
+        // own colors. An inline style attribute cannot reach ::before, and it
+        // would mark the input as an excused color chip.
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(`
           #theme-control-probes input { background:white !important; }
           #theme-control-probes [data-testid="probe-white-mark"]::before { background:white !important; }
           #theme-control-probes [data-testid="probe-hidden-mark"]::before { opacity:0 !important; }
-        `;
-        host.append(sheet);
+        `);
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+        (window as unknown as { __themeProbeSheet?: CSSStyleSheet }).__themeProbeSheet = sheet;
         for (const id of ['checked', 'radio', 'mixed', 'unchecked', 'white-mark', 'hidden-mark']) {
           const el = document.createElement('input');
           el.type = id === 'radio' ? 'radio' : 'checkbox';
@@ -157,7 +162,12 @@ describe('theme consistency audit', () => {
         expect(bad.some((descriptor) => descriptor.includes(`[probe-${id}]`))).toBe(true);
       }
     } finally {
-      await browser.execute(() => document.getElementById('theme-control-probes')?.remove());
+      await browser.execute(() => {
+        document.getElementById('theme-control-probes')?.remove();
+        const probe = window as unknown as { __themeProbeSheet?: CSSStyleSheet };
+        document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== probe.__themeProbeSheet);
+        delete probe.__themeProbeSheet;
+      });
       await stampTheme('dark');
     }
   });

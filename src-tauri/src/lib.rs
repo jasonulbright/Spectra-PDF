@@ -181,6 +181,26 @@ fn route_shell_handoff(app: &tauri::AppHandle, handoff: String) {
     });
 }
 
+/// The first launch's document paths, `--merge` and File Explorer verb
+/// handoff. Queued immediately and drained by whichever window asks: the
+/// payload waits in the registry rather than riding an event a renderer that
+/// has not mounted yet cannot receive.
+fn route_launch_args(app: &tauri::AppHandle, args: &[String]) {
+    let files: Vec<String> = args
+        .iter()
+        .skip(1)
+        .filter(|a| commands::is_openable_document_path(a))
+        .map(|a| commands::canonical_path(a))
+        .collect();
+    let merge = args.iter().any(|a| a == "--merge");
+    if !files.is_empty() {
+        app_windows::route_open(app, files, merge);
+    }
+    if let Some(handoff) = shell_action::arg_value(args) {
+        route_shell_handoff(app, handoff);
+    }
+}
+
 /// When true, the binary is running under end-to-end test control:
 /// single-instance hijacking and tray-persistence are disabled so each WDIO
 /// session gets a clean launch and exit. Enabled via the SPECTRAPDF_E2E
@@ -545,6 +565,7 @@ pub fn run() {
                 // E2E: skip tray + force-show window; every launch must be
                 // self-contained and exit cleanly when the WDIO session ends.
                 app_windows::show_when_ready(app.handle(), app_windows::MAIN_LABEL, true);
+                route_launch_args(app.handle(), &args);
                 return Ok(());
             }
             if tray {
@@ -581,24 +602,7 @@ pub fn run() {
                 app_windows::show_when_ready(app.handle(), app_windows::MAIN_LABEL, true);
             }
 
-            // Handle CLI file args on first launch
-            let files: Vec<String> = args
-                .iter()
-                .skip(1)
-                .filter(|a| commands::is_openable_document_path(a))
-                .map(|a| commands::canonical_path(a))
-                .collect();
-            let merge = args.iter().any(|a| a == "--merge");
-
-            if !files.is_empty() {
-                // Queued immediately and drained by whichever window asks: the
-                // payload waits in the registry rather than riding an event a
-                // renderer that has not mounted yet cannot receive.
-                app_windows::route_open(&app.handle().clone(), files, merge);
-            }
-            if let Some(handoff) = shell_action::arg_value(&args) {
-                route_shell_handoff(app.handle(), handoff);
-            }
+            route_launch_args(app.handle(), &args);
 
             Ok(())
         })
