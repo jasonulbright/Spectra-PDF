@@ -35,7 +35,7 @@
         "section": "text",
         "desktopTemplate": "linux/spectrapdf.desktop",
         "files": {
-          "/usr/share/metainfo/com.spectrapdf.app.metainfo.xml": "linux/com.spectrapdf.app.metainfo.xml",
+          "/usr/share/metainfo/com.spectrapdf.app.appdata.xml": "linux/com.spectrapdf.app.appdata.xml",
           "/usr/share/doc/spectrapdf/copyright": "../LICENSE"
         }
       },
@@ -44,7 +44,7 @@
         "release": "1",
         "desktopTemplate": "linux/spectrapdf.desktop",
         "files": {
-          "/usr/share/metainfo/com.spectrapdf.app.metainfo.xml": "linux/com.spectrapdf.app.metainfo.xml",
+          "/usr/share/metainfo/com.spectrapdf.app.appdata.xml": "linux/com.spectrapdf.app.appdata.xml",
           "/usr/share/licenses/spectrapdf/LICENSE": "../LICENSE"
         }
       }

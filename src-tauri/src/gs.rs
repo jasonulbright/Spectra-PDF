@@ -13,10 +13,11 @@
 //! without its `Resource/` tree passes the first and fails the second, which
 //! is exactly the install the old existence check called usable.
 //!
-//! Discovery is ordered explicit → environment → registry → PATH → bundled
-//! candidate. The registry scan is kept because it finds per-machine installs
-//! that were never put on PATH; the bundled candidate is LAST and optional —
-//! the resolution must not assume the vendored tree exists.
+//! Discovery is ordered explicit → environment → bundled (the installer's
+//! tree, then an AppImage's own copy) → registry → PATH. The registry scan is
+//! kept because it finds per-machine installs that were never put on PATH;
+//! the bundled candidates are optional — the resolution must not assume a
+//! vendored copy exists.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -503,13 +504,39 @@ pub fn which(name: &str) -> Option<String> {
     None
 }
 
+/// The Ghostscript an AppImage carries: `bin/gs`, which starts the image's
+/// own copy on the image's own libraries.
+fn image_candidate_in(root: Option<&Path>) -> Option<PathBuf> {
+    let exe = root?.join("bin").join("gs");
+    exe.is_file().then_some(exe)
+}
+
+pub fn image_candidate() -> Option<PathBuf> {
+    image_candidate_in(crate::engine::image_root().as_deref())
+}
+
+/// Whether `dir` lies inside `root`. The image's start puts its own `bin`
+/// first on PATH; that copy is already the bundled candidate, and a PATH
+/// entry inside the image is not a discovered install.
+fn inside(dir: &Path, root: &Path) -> bool {
+    let resolve = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    resolve(dir).starts_with(resolve(root))
+}
+
 /// Console executables reachable through PATH.
 pub fn path_candidates() -> Vec<String> {
+    path_candidates_in(std::env::var_os("PATH"), crate::engine::image_root().as_deref())
+}
+
+fn path_candidates_in(path_var: Option<std::ffi::OsString>, image: Option<&Path>) -> Vec<String> {
     let mut found = Vec::new();
-    let Some(path_var) = std::env::var_os("PATH") else {
+    let Some(path_var) = path_var else {
         return found;
     };
     for dir in std::env::split_paths(&path_var).take(MAX_PATH_DIRECTORIES) {
+        if image.is_some_and(|root| inside(&dir, root)) {
+            continue;
+        }
         for name in exe_names() {
             let candidate = dir.join(&name);
             if candidate.is_file() {
@@ -605,9 +632,26 @@ pub fn registry_candidates() -> Vec<(String, String, String)> {
     Vec::new()
 }
 
-/// Every candidate path, best first: explicit, environment, registry, PATH,
-/// then the bundled tree if one is still present.
+/// Every candidate path, best first: explicit, environment, the bundled
+/// copies (the installer's tree, then an AppImage's own), then what discovery
+/// finds (registry, PATH).
 pub fn candidates(explicit: Option<&str>, bundled: Option<&Path>) -> Vec<String> {
+    let mut discovered: Vec<String> = registry_candidates()
+        .into_iter()
+        .map(|(path, _, _)| path)
+        .collect();
+    discovered.extend(path_candidates());
+    let env = std::env::var(PATH_ENV_VAR).ok();
+    let image = image_candidate();
+    ordered_candidates(explicit, env.as_deref(), &[bundled, image.as_deref()], discovered)
+}
+
+fn ordered_candidates(
+    explicit: Option<&str>,
+    env: Option<&str>,
+    bundled: &[Option<&Path>],
+    discovered: Vec<String>,
+) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     let mut push = |text: String| {
         if found.len() < MAX_DISCOVERY_CANDIDATES
@@ -620,17 +664,14 @@ pub fn candidates(explicit: Option<&str>, bundled: Option<&Path>) -> Vec<String>
     if let Some(explicit) = explicit {
         push(explicit.to_string());
     }
-    if let Ok(env) = std::env::var(PATH_ENV_VAR) {
+    if let Some(env) = env {
         push(env.trim().to_string());
     }
-    for (path, _, _) in registry_candidates() {
-        push(path);
+    for copy in bundled.iter().flatten() {
+        push(copy.to_string_lossy().to_string());
     }
-    for path in path_candidates() {
+    for path in discovered {
         push(path);
-    }
-    if let Some(bundled) = bundled {
-        push(bundled.to_string_lossy().to_string());
     }
     found
 }
@@ -806,16 +847,69 @@ mod tests {
     }
 
     #[test]
-    fn discovery_puts_an_explicit_path_first_and_the_bundle_last() {
-        let bundled = PathBuf::from("C:\\app\\ghostscript\\gswin64c.exe");
-        let found = candidates(Some("C:\\chosen\\gswin64c.exe"), Some(&bundled));
-        assert_eq!(
-            found.first().map(String::as_str),
-            Some("C:\\chosen\\gswin64c.exe")
+    fn discovery_puts_explicit_then_environment_then_bundled_then_discovered() {
+        let bundled = PathBuf::from(r"C:\app\ghostscript\gswin64c.exe");
+        let image = PathBuf::from("/tmp/.mount_spectra/bin/gs");
+        let found = ordered_candidates(
+            Some(r"C:\chosen\gswin64c.exe"),
+            Some(r"C:\env\gswin64c.exe"),
+            &[Some(&bundled), Some(&image)],
+            vec![r"C:\Program Files\gs\bin\gswin64c.exe".to_string(), "/usr/bin/gs".to_string()],
         );
         assert_eq!(
-            found.last().map(String::as_str),
-            Some("C:\\app\\ghostscript\\gswin64c.exe")
+            found,
+            vec![
+                r"C:\chosen\gswin64c.exe",
+                r"C:\env\gswin64c.exe",
+                r"C:\app\ghostscript\gswin64c.exe",
+                "/tmp/.mount_spectra/bin/gs",
+                r"C:\Program Files\gs\bin\gswin64c.exe",
+                "/usr/bin/gs",
+            ]
+        );
+        let found = candidates(Some(r"C:\chosen\gswin64c.exe"), Some(&bundled));
+        assert_eq!(found.first().map(String::as_str), Some(r"C:\chosen\gswin64c.exe"));
+        let at = found.iter().position(|p| p == r"C:\app\ghostscript\gswin64c.exe");
+        let env = usize::from(std::env::var(PATH_ENV_VAR).is_ok_and(|v| !v.trim().is_empty()));
+        assert_eq!(at, Some(1 + env));
+    }
+
+    #[test]
+    fn an_image_directory_on_path_is_not_a_path_candidate() {
+        let scratch = tempfile::tempdir().unwrap();
+        let image = scratch.path().join("mount");
+        let host = scratch.path().join("host");
+        let name = exe_names()[0].clone();
+        for dir in [image.join("bin"), host.join("bin")] {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(&name), b"").unwrap();
+        }
+        let path_var = std::env::join_paths([image.join("bin"), host.join("bin")]).unwrap();
+        let host_copy = host.join("bin").join(&name).to_string_lossy().to_string();
+        assert_eq!(
+            path_candidates_in(Some(path_var.clone()), Some(&image)),
+            vec![host_copy.clone()]
+        );
+        assert_eq!(path_candidates_in(Some(path_var), None).len(), 2);
+    }
+
+    #[test]
+    fn a_copy_named_twice_is_probed_once() {
+        let image = PathBuf::from("/tmp/.mount_spectra/bin/gs");
+        let once = ordered_candidates(None, None, &[Some(&image), Some(&image)], vec![image.to_string_lossy().to_string()]);
+        assert_eq!(once, vec!["/tmp/.mount_spectra/bin/gs".to_string()]);
+    }
+
+    #[test]
+    fn the_image_candidate_exists_only_when_the_image_carries_bin_gs() {
+        let scratch = tempfile::tempdir().unwrap();
+        assert_eq!(image_candidate_in(Some(scratch.path())), None);
+        assert_eq!(image_candidate_in(None), None);
+        std::fs::create_dir_all(scratch.path().join("bin")).unwrap();
+        std::fs::write(scratch.path().join("bin").join("gs"), b"").unwrap();
+        assert_eq!(
+            image_candidate_in(Some(scratch.path())),
+            Some(scratch.path().join("bin").join("gs"))
         );
     }
 
@@ -968,6 +1062,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn a_program_that_never_exits_is_killed_at_its_budget_on_unix() {
+        let started = Instant::now();
+        let mut cmd = std::process::Command::new("sh");
+        cmd.args(["-c", "sleep 60"]);
+        let err = output_within(cmd, Duration::from_millis(500)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(10));
+
+        let mut cmd = std::process::Command::new("sh");
+        cmd.args(["-c", "echo 10.05.1"]);
+        let out = output_within(cmd, Duration::from_secs(10)).unwrap();
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "10.05.1");
+    }
+
+    #[test]
+    #[cfg(windows)]
     fn a_program_that_never_exits_is_killed_at_its_budget() {
         let started = Instant::now();
         let mut cmd = std::process::Command::new("powershell.exe");

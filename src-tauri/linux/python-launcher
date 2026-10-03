@@ -1,0 +1,22 @@
+#!/bin/sh
+# The AppImage's engine interpreter, installed as lib/python-launcher/python3.
+# The payload's python3 names the system loader as its interpreter and would
+# run on the host's C library; this starts it on the image's dynamic loader
+# with the payload's own libraries first, then the image's. lib/image-exec
+# moves the payload programs Python starts onto the same loader.
+
+here="$(dirname "$(readlink -f "$0")")"
+root="${here%/lib/python-launcher}"
+python="$root/lib/spectrapdf/python"
+image="$root/lib"
+while IFS= read -r dir; do
+  case "$dir" in
+    "+"/*) image="$image:$root/lib${dir#+}" ;;
+  esac
+done < "$root/lib/lib.path"
+SPECTRAPDF_IMAGE_ROOT="$root"
+SPECTRAPDF_IMAGE_EXEC="$root/lib/image-exec/image-exec.so"
+SPECTRAPDF_IMAGE_LIBRARY_PATH="$image"
+export SPECTRAPDF_IMAGE_ROOT SPECTRAPDF_IMAGE_EXEC SPECTRAPDF_IMAGE_LIBRARY_PATH
+exec "$root/lib/ld-linux-x86-64.so.2" --preload "$SPECTRAPDF_IMAGE_EXEC" \
+  --library-path "$python/bin:$python/lib:$image" "$python/bin/python3" "$@"

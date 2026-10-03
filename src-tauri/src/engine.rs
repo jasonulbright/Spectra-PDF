@@ -832,6 +832,9 @@ pub fn get_engine_script_path<R: Runtime>(app: &AppHandle<R>) -> String {
 
 /// Resolves the path to the embedded Python executable.
 pub fn get_python_path<R: Runtime>(app: &AppHandle<R>) -> String {
+    if let Some(launcher) = image_python() {
+        return launcher.to_string_lossy().to_string();
+    }
     let resource_dir = app
         .path()
         .resource_dir()
@@ -876,7 +879,10 @@ pub fn get_tesseract_path(app: &AppHandle) -> String {
 pub fn bundled_gs_candidate(app: &AppHandle) -> Option<PathBuf> {
     let resource_dir = app.path().resource_dir().ok()?;
     let exe = resource_dir.join("ghostscript").join("gswin64c.exe");
-    exe.is_file().then_some(exe)
+    if exe.is_file() {
+        return Some(exe);
+    }
+    crate::gs::image_candidate()
 }
 
 /// Resolves a USABLE Ghostscript, or "" when there is none.
@@ -956,6 +962,9 @@ pub fn get_icc_path(app: &AppHandle) -> String {
 /// build without the bundle still exports. "" when none is found — the engine
 /// then refuses the export with a clear message rather than crashing.
 pub fn get_soffice_path(app: &AppHandle) -> String {
+    if let Some(launcher) = image_soffice() {
+        return launcher.to_string_lossy().to_string();
+    }
     if let Ok(resource_dir) = app.path().resource_dir() {
         let bundled = resource_dir.join(crate::platform::soffice_relative());
         if bundled.is_file() {
@@ -985,8 +994,13 @@ pub fn get_soffice_path(app: &AppHandle) -> String {
 ///   places, and this binary is the one authority on which container it is.
 ///   `icc_profiles` refuses to open a profile when this says "0". See
 ///   `portable::assent_env_value`.
+/// - In an AppImage only: `SPECTRAPDF_IMAGE_ROOT`, the image's mount point,
+///   which `platform_support` reads to start payload programs on the image's
+///   dynamic loader; and `PYTHONTZPATH`, the host's time zone directories, then
+///   the image's own `share/zoneinfo`. The engine's signature code resolves
+///   named time zones, and a host without tzdata has none.
 pub fn python_env() -> Vec<(String, String)> {
-    vec![
+    let mut env = vec![
         ("PYTHONUTF8".to_string(), "1".to_string()),
         ("PYTHONNOUSERSITE".to_string(), "1".to_string()),
         ("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string()),
@@ -994,7 +1008,74 @@ pub fn python_env() -> Vec<(String, String)> {
             crate::portable::ICC_ASSENT_ENV.to_string(),
             crate::portable::assent_env_value(crate::portable::icc_assent()).to_string(),
         ),
-    ]
+    ];
+    if let Some(root) = image_root() {
+        env.push((IMAGE_ROOT_ENV.to_string(), root.to_string_lossy().to_string()));
+        if let Some(tzpath) = image_tzpath(&root) {
+            env.push(("PYTHONTZPATH".to_string(), tzpath));
+        }
+    }
+    env
+}
+
+/// Read by `engine/platform_support.py`.
+pub const IMAGE_ROOT_ENV: &str = "SPECTRAPDF_IMAGE_ROOT";
+
+/// The running AppImage's mount point. `APPDIR` alone is not proof: a process
+/// started from another AppImage's environment inherits that image's `APPDIR`,
+/// so this executable must itself lie inside it, and a system prefix such as
+/// /usr holds no image loader, so the image's loader and payload must exist.
+pub fn image_root() -> Option<PathBuf> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let appdir = std::env::var_os("APPDIR").map(PathBuf::from);
+    let exe = std::env::current_exe().ok();
+    image_root_from(appdir.as_deref(), exe.as_deref())
+}
+
+fn image_root_from(appdir: Option<&std::path::Path>, exe: Option<&std::path::Path>) -> Option<PathBuf> {
+    let root = appdir.filter(|dir| dir.is_absolute())?.canonicalize().ok()?;
+    let exe = exe?.canonicalize().ok()?;
+    let carries_image = root.join("lib").join("ld-linux-x86-64.so.2").is_file()
+        && root.join("lib").join("spectrapdf").is_dir();
+    (exe.starts_with(&root) && carries_image).then_some(root)
+}
+
+/// An AppImage's LibreOffice launcher, which starts the payload's soffice.bin
+/// on the image's own loader and libraries. The payload's `soffice` needs
+/// libdbus and libcups from the host and does not start without them.
+pub fn image_soffice() -> Option<PathBuf> {
+    image_launcher(&image_root()?, &["libreoffice-launcher", "program", "soffice"])
+}
+
+/// An AppImage's engine interpreter launcher, which starts the payload's
+/// Python on the image's own loader and libraries instead of the host's.
+pub fn image_python() -> Option<PathBuf> {
+    image_launcher(&image_root()?, &["python-launcher", "python3"])
+}
+
+fn image_launcher(root: &std::path::Path, relative: &[&str]) -> Option<PathBuf> {
+    let launcher = relative.iter().fold(root.join("lib"), |path, part| path.join(part));
+    launcher.is_file().then_some(launcher)
+}
+
+/// CPython's compiled-in time zone search path on Linux.
+const SYSTEM_TZPATH: [&str; 4] = [
+    "/usr/share/zoneinfo",
+    "/usr/lib/zoneinfo",
+    "/usr/share/lib/zoneinfo",
+    "/etc/zoneinfo",
+];
+
+fn image_tzpath(root: &std::path::Path) -> Option<String> {
+    let bundled = root.join("share").join("zoneinfo");
+    if !bundled.is_dir() {
+        return None;
+    }
+    let mut parts: Vec<String> = SYSTEM_TZPATH.iter().map(|dir| dir.to_string()).collect();
+    parts.push(bundled.to_string_lossy().to_string());
+    Some(parts.join(":"))
 }
 
 /// Interpreter argv for every engine child. The runtime's `._pth` runs
@@ -1673,6 +1754,61 @@ mod start_tests {
         assert!(replayed(&mut ledger).is_empty());
         ledger.answered(1, &answer(serde_json::json!({ "encrypted": true, "opener": "user" })));
         assert!(replayed(&mut ledger).is_empty());
+    }
+
+    #[test]
+    fn an_image_is_recognized_only_around_its_own_executable() {
+        let scratch = tempfile::tempdir().unwrap();
+        let image = scratch.path().join("mount");
+        let elsewhere = scratch.path().join("usr").join("bin");
+        std::fs::create_dir_all(image.join("bin")).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(image.join("bin").join("spectrapdf"), b"").unwrap();
+        std::fs::write(elsewhere.join("spectrapdf"), b"").unwrap();
+        let exe = image.join("bin").join("spectrapdf");
+        assert_eq!(image_root_from(Some(&image), Some(&exe)), None, "a prefix without the image loader and payload");
+        std::fs::create_dir_all(image.join("lib").join("spectrapdf")).unwrap();
+        assert_eq!(image_root_from(Some(&image), Some(&exe)), None, "a prefix without the image loader");
+        std::fs::write(image.join("lib").join("ld-linux-x86-64.so.2"), b"").unwrap();
+        let root = image.canonicalize().unwrap();
+        assert_eq!(
+            image_root_from(Some(&image), Some(&image.join("bin").join("spectrapdf"))),
+            Some(root)
+        );
+        assert_eq!(image_root_from(Some(&image), Some(&elsewhere.join("spectrapdf"))), None);
+        assert_eq!(image_root_from(None, Some(&image.join("bin").join("spectrapdf"))), None);
+        assert_eq!(
+            image_root_from(Some(std::path::Path::new("mount")), Some(&image.join("bin").join("spectrapdf"))),
+            None
+        );
+    }
+
+    #[test]
+    fn the_image_launchers_are_used_only_where_the_image_carries_them() {
+        let scratch = tempfile::tempdir().unwrap();
+        let soffice = ["libreoffice-launcher", "program", "soffice"];
+        let python = ["python-launcher", "python3"];
+        assert_eq!(image_launcher(scratch.path(), &soffice), None);
+        assert_eq!(image_launcher(scratch.path(), &python), None);
+        let program = scratch.path().join("lib").join("libreoffice-launcher").join("program");
+        let interpreter = scratch.path().join("lib").join("python-launcher");
+        std::fs::create_dir_all(&program).unwrap();
+        std::fs::create_dir_all(&interpreter).unwrap();
+        std::fs::write(program.join("soffice"), b"").unwrap();
+        std::fs::write(interpreter.join("python3"), b"").unwrap();
+        assert_eq!(image_launcher(scratch.path(), &soffice), Some(program.join("soffice")));
+        assert_eq!(image_launcher(scratch.path(), &python), Some(interpreter.join("python3")));
+    }
+
+    #[test]
+    fn an_image_child_reads_the_host_zones_before_the_image_copy() {
+        let scratch = tempfile::tempdir().unwrap();
+        assert_eq!(image_tzpath(scratch.path()), None);
+        let zones = scratch.path().join("share").join("zoneinfo");
+        std::fs::create_dir_all(&zones).unwrap();
+        let tzpath = image_tzpath(scratch.path()).unwrap();
+        assert!(tzpath.starts_with(&format!("{}:", SYSTEM_TZPATH.join(":"))));
+        assert!(tzpath.ends_with(&*zones.to_string_lossy()));
     }
 
     #[test]

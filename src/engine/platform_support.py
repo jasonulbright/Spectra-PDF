@@ -148,10 +148,147 @@ def spawn_options() -> dict:
     return _spawn_options()
 
 
+#: Set by the host to the AppImage's mount point when the engine runs from one.
+IMAGE_ROOT_ENV = "SPECTRAPDF_IMAGE_ROOT"
+
+_ELF_MAGIC = b"\x7fELF"
+_PT_INTERP = 3
+
+
+def _requests_interpreter(program: Path) -> bool:
+    """Whether `program` is a 64-bit little-endian ELF file with a PT_INTERP header."""
+    try:
+        with program.open("rb") as handle:
+            header = handle.read(64)
+            if len(header) < 64 or header[:4] != _ELF_MAGIC or header[4] != 2 or header[5] != 1:
+                return False
+            phoff = int.from_bytes(header[0x20:0x28], "little")
+            phentsize = int.from_bytes(header[0x36:0x38], "little")
+            phnum = int.from_bytes(header[0x38:0x3A], "little")
+            handle.seek(phoff)
+            table = handle.read(phentsize * phnum)
+    except OSError:
+        return False
+    return any(
+        int.from_bytes(table[i:i + 4], "little") == _PT_INTERP
+        for i in range(0, len(table) - 3, max(phentsize, 1))
+    )
+
+
+def image_library_path(root: Path, program: Path) -> str:
+    """The library search path a payload program runs with inside an AppImage:
+    its own directory and `../lib`, LibreOffice's `program/` for that tree,
+    then the image's `lib/` and every directory `lib/lib.path` names."""
+    dirs = [program.parent, program.parent.parent / "lib"]
+    office = root / "lib" / "spectrapdf" / "libreoffice" / "program"
+    if office in program.parents:
+        dirs.append(office)
+    dirs.append(root / "lib")
+    try:
+        lines = (root / "lib" / "lib.path").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    dirs += [root / "lib" / line[1:].lstrip("/") for line in lines if line.startswith("+") and line != "+"]
+    return ":".join(str(d) for d in dirs)
+
+
+def image_root(root: str | None = None) -> Path | None:
+    """The AppImage this engine runs from, or None.
+
+    `SPECTRAPDF_IMAGE_ROOT` alone is not proof: a process started from another
+    AppImage inherits it, and a system prefix such as /usr holds no image
+    loader. The image's loader and its payload must both be there.
+    """
+    raw = os.environ.get(IMAGE_ROOT_ENV) if root is None else root
+    if not raw or not os.path.isabs(raw):
+        return None
+    image = Path(raw)
+    if (image / "lib" / "ld-linux-x86-64.so.2").is_file() and (image / "lib" / "spectrapdf").is_dir():
+        return image
+    return None
+
+
+def image_argv(args, root: str | None = None):
+    """`args`, with a payload program started on the AppImage's dynamic loader.
+
+    Payload programs name the system loader as their interpreter and would
+    otherwise run on the host's C library, whatever its version. A program
+    outside the payload (the image's own `bin/gs`, a launcher script, a host
+    program) is left as it is.
+    """
+    image = image_root(root)
+    if image is None or isinstance(args, (str, bytes, os.PathLike)) or not args:
+        return args
+    first = os.fspath(args[0])
+    if not os.path.isabs(first):
+        return args
+    program = Path(os.path.realpath(first))
+    payload = Path(os.path.realpath(image / "lib" / "spectrapdf"))
+    if payload not in program.parents or not _requests_interpreter(program):
+        return args
+    loader = image / "lib" / "ld-linux-x86-64.so.2"
+    return [str(loader), "--library-path", image_library_path(image, program), str(program), *list(args)[1:]]
+
+
+def _program_path(args, env) -> str | None:
+    if isinstance(args, (str, bytes, os.PathLike)):
+        first = os.fsdecode(args).split()[0] if os.fsdecode(args).split() else ""
+    else:
+        first = os.fsdecode(os.fspath(args[0])) if args else ""
+    if not first:
+        return None
+    if os.path.sep in first:
+        return os.path.realpath(first)
+    import shutil
+
+    found = shutil.which(first, path=(env or os.environ).get("PATH"))
+    return os.path.realpath(found) if found else None
+
+
+def image_env(args, env=None, root: str | None = None):
+    """The environment for a child of an AppImage engine, or None to keep `env`.
+
+    The image's start sets variables that name the image (GS_LIB at the
+    image's Ghostscript init files, GTK_PATH, GIO_MODULE_DIR, XDG_DATA_DIRS
+    entries, and more). A program outside the image, such as a Ghostscript
+    the user named, reads them as its own and fails. For such a program every
+    LD_ variable goes, every image entry leaves a colon-separated list, and
+    every other variable that names the image goes. A program inside the image
+    keeps the environment as it is.
+    """
+    image = image_root(root)
+    if image is None:
+        return None
+    roots = {str(image), os.path.realpath(image)}
+    program = _program_path(args, env)
+    if program is not None and any(program == r or program.startswith(r + os.sep) for r in roots):
+        return None
+    cleaned = {}
+    for name, value in (os.environ if env is None else env).items():
+        if name.startswith("LD_"):
+            continue
+        if not any(r in value for r in roots):
+            cleaned[name] = value
+            continue
+        if ":" in value:
+            kept = [part for part in value.split(":") if not any(r in part for r in roots)]
+            if kept:
+                cleaned[name] = ":".join(kept)
+    return cleaned
+
+
+def _image_spawn(args, kwargs):
+    env = image_env(args, kwargs.get("env"))
+    if env is not None:
+        kwargs = dict(kwargs, env=env)
+    return image_argv(args), kwargs
+
+
 def popen(args, **kwargs):
     """`subprocess.Popen` with `spawn_options`. Every engine spawn uses this or `run`."""
     import subprocess
 
+    args, kwargs = _image_spawn(args, kwargs)
     return subprocess.Popen(args, **kwargs, **spawn_options())
 
 
@@ -159,4 +296,5 @@ def run(args, **kwargs):
     """`subprocess.run` with `spawn_options`."""
     import subprocess
 
+    args, kwargs = _image_spawn(args, kwargs)
     return subprocess.run(args, **kwargs, **spawn_options())

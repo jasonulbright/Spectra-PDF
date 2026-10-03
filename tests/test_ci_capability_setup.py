@@ -3731,6 +3731,24 @@ CI_PARITY_LINUX = "scripts/ci-parity-linux.sh"
 CI_PARITY_LINUX_HOOK = "scripts/ci-parity-linux-host.local.sh"
 LINUX_SMOKE = "scripts/linux-install-smoke.sh"
 LINUX_BUNDLE_DIR = "src-tauri/target/release/bundle/linux"
+#: The Linux jobs, in file order: the .deb and .rpm, the AppImage built from
+#: that .deb, then the install checks and the AppImage catalog's checks, both
+#: against that AppImage.
+LINUX_JOBS = ("linux", "linux-appimage", "linux-smoke", "linux-appimage-catalog")
+#: The Windows job runs when the tag builds Windows only, or when every Linux
+#: job passed; a redo of a tag whose Linux job built the AppImage itself
+#: (legacy) skips the AppImage jobs.
+RELEASE_LINUX_CONDITION = {
+    "release.yml": (
+        "(needs.verify.outputs.linux != 'true' || (needs.linux-appimage.result == 'success' && "
+        "needs.linux-smoke.result == 'success' && needs.linux-appimage-catalog.result == 'success'))"
+    ),
+    "release-redo.yml": (
+        "(needs.regime.outputs.linux != 'true' || (needs.linux-smoke.result == 'success' && "
+        "(needs.regime.outputs.appimage != 'selfcontained' || (needs.linux-appimage.result == 'success' && "
+        "needs.linux-appimage-catalog.result == 'success'))))"
+    ),
+}
 
 
 def _script_module(relative: str, name: str):
@@ -4026,13 +4044,14 @@ def test_the_linux_jobs_run_only_when_the_tag_lists_linux(workflow: str, switch:
     assert "linux: ${{ steps.platforms.outputs.linux }}" in header
     platforms = dict(_job_steps(workflow, switch))["Release platforms from the tag's tree"]
     assert "release_platforms.py" in platforms and "--github-output" in platforms
-    for job in ("linux", "linux-smoke"):
-        assert f"if: {flag}" in _job_header(workflow, job), (workflow, job)
+    for job in LINUX_JOBS:
+        header = _job_header(workflow, job)
+        assert "    if: " in header and flag in header.split("    if: ", 1)[1], (workflow, job)
     windows = _job_header(workflow, "release")
-    assert f"needs: [{switch}, linux, linux-smoke]" in windows
+    assert f"needs: [{switch}, linux, linux-appimage, linux-smoke, linux-appimage-catalog]" in windows
     assert "!cancelled()" in windows
     assert f"needs.{switch}.result == 'success'" in windows
-    assert f"(needs.{switch}.outputs.linux != 'true' || needs.linux-smoke.result == 'success')" in windows
+    assert RELEASE_LINUX_CONDITION[workflow] in " ".join(windows.split())
     # Every Linux step of the Windows job is behind the same switch.
     for name, text in _job_steps(workflow, "release"):
         if "Linux" in name:
@@ -4055,19 +4074,118 @@ def test_the_linux_build_job_is_the_floor_container_with_both_keys(workflow: str
     assert 'TAURI_SIGNING_RPM_KEY_PASSPHRASE: ""' in build
     keep = steps["Keep the Linux packages for the Windows job"]
     assert "retention-days: 1" in keep and "if-no-files-found: error" in keep
+    for package in ("spectrapdf_*_amd64.deb", "spectrapdf-*-1.x86_64.rpm"):
+        assert f"{LINUX_BUNDLE_DIR}/{package}" in keep, package
+    # The AppImage comes from its own job; only a legacy tag's build in the
+    # redo still writes one.
+    assert ("AppImage" in keep) == (workflow == "release-redo.yml"), workflow
     install = steps["Install the build packages"]
     assert "libwebkit2gtk-4.1-dev" in install and "rpm" in install and "tzdata" in install
     assert "=" not in install.split("apt-get install", 1)[1].split("\n", 1)[0], "no version pins"
 
 
+@pytest.mark.parametrize("workflow,switch", (("release.yml", "verify"), ("release-redo.yml", "regime")))
+def test_the_appimage_is_built_on_arch_from_the_deb_and_signed(workflow: str, switch: str) -> None:
+    header = _job_header(workflow, "linux-appimage")
+    assert "runs-on: ubuntu-24.04" in header
+    assert "container: archlinux:latest" in header
+    assert f"needs: [{switch}, linux]" in header
+    assert "timeout-minutes:" in header
+    if workflow == "release-redo.yml":
+        assert f"needs.{switch}.outputs.appimage == 'selfcontained'" in header
+    steps = _job_steps(workflow, "linux-appimage")
+    names = [n for n, _t in steps]
+    by_name = dict(steps)
+    checkout = steps[0][1]
+    assert "actions/checkout@" in checkout
+    if workflow == "release-redo.yml":
+        assert "ref: refs/tags/${{ inputs.tag }}" in checkout
+        assert "git checkout origin/main" not in "\n".join(t for _n, t in steps)
+    install = by_name["Install the Arch build packages"]
+    assert "run: sh scripts/build-appimage.sh --install-packages" in install
+    download = by_name["Download the Linux packages"]
+    assert "name: linux-packages" in download and "path: linux-packages" in download
+    build = by_name["Build, check, smoke and sign the AppImage"]
+    assert ("run: sh scripts/build-appimage.sh --deb linux-packages/spectrapdf_*_amd64.deb "
+            "--out linux-appimage --release") in build
+    assert "TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" in build
+    assert 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""' in build
+    assert "TAURI_SIGNING_RPM_KEY" not in "\n".join(t for _n, t in steps)
+    keep = by_name["Keep the AppImage for the Windows job"]
+    assert "name: linux-appimage" in keep
+    for suffix in ("AppImage", "AppImage.zsync", "AppImage.sig"):
+        assert f"linux-appimage/spectrapdf_*_amd64.{suffix}\n" in keep + "\n", suffix
+    assert "retention-days: 1" in keep and "if-no-files-found: error" in keep
+    assert (names.index("Install the Arch build packages") < names.index("Download the Linux packages")
+            < names.index("Build, check, smoke and sign the AppImage")
+            < names.index("Keep the AppImage for the Windows job"))
+    script = (ROOT / "scripts" / "build-appimage.sh").read_text(encoding="utf-8")
+    for option in ("  --install-packages)", "    --deb) ", "    --out) ", "    --release) "):
+        assert option in script, option
+    assert "die \"a release build needs TAURI_SIGNING_PRIVATE_KEY" in script
+
+
+@pytest.mark.parametrize("workflow,switch", (("release.yml", "verify"), ("release-redo.yml", "regime")))
+def test_the_catalog_gate_runs_on_the_ubuntu_22_04_runner_beside_the_install_checks(
+    workflow: str, switch: str
+) -> None:
+    header = _job_header(workflow, "linux-appimage-catalog")
+    assert "runs-on: ubuntu-22.04" in header
+    assert "container:" not in header, "FUSE and a setuid firejail need the runner itself"
+    assert f"needs: [{switch}, linux-appimage]" in header
+    assert "timeout-minutes:" in header
+    steps = _job_steps(workflow, "linux-appimage-catalog")
+    checkout = steps[0][1]
+    assert "sparse-checkout-cone-mode: false" in checkout
+    for path in ("/scripts/appimage-catalog-gate.sh", "/scripts/posix-common.sh"):
+        assert path in checkout, path
+    if workflow == "release-redo.yml":
+        assert "ref: ${{ github.sha }}" in checkout
+        assert f"needs.{switch}.outputs.appimage == 'selfcontained'" in header
+    by_name = dict(steps)
+    download = by_name["Download the AppImage"]
+    assert "name: linux-appimage" in download and "path: linux-appimage" in download
+    gate = by_name["The AppImage catalog's checks pass without WebKitGTK and GTK 3"]
+    assert "chmod 0755 linux-appimage/spectrapdf_*_amd64.AppImage" in gate
+    assert "sudo sh scripts/appimage-catalog-gate.sh linux-appimage/spectrapdf_*_amd64.AppImage --work" in gate
+    assert "--no-firejail" not in gate
+    script = (ROOT / "scripts" / "appimage-catalog-gate.sh").read_text(encoding="utf-8")
+    assert 'VERSION_ID="22.04"' in script
+    assert "apt-get purge -y $remove" in script
+    assert "X-AppImage-Self-Contained=true" in script
+
+
+#: The Ubuntu 26.04 install check: the AppImage runs on a system without
+#: WebKitGTK and GTK 3 before the .deb installs them.
+UBUNTU_SMOKE = f"ubuntu:26.04 sh {LINUX_SMOKE} linux-packages --bare-cli --deb --appimage"
+#: A legacy tag's AppImage needs the host's WebKitGTK, which the .deb installs.
+UBUNTU_LEGACY_SMOKE = f"ubuntu:26.04 sh {LINUX_SMOKE} linux-packages --deb --appimage"
+
+
 @pytest.mark.parametrize("workflow", ("release.yml", "release-redo.yml"))
 def test_the_install_checks_cover_fedora_and_ubuntu(workflow: str) -> None:
+    header = _job_header(workflow, "linux-smoke")
+    switch = "verify" if workflow == "release.yml" else "regime"
+    assert f"needs: [{switch}, linux, linux-appimage]" in header
     steps = _job_steps(workflow, "linux-smoke")
     runs = [t for _n, t in steps if "docker run" in t]
-    assert len(runs) == 2
-    fedora, ubuntu = runs
+    fedora = runs[0]
     assert f"fedora:44 sh {LINUX_SMOKE} linux-packages --rpm --appimage" in fedora
-    assert f"ubuntu:26.04 sh {LINUX_SMOKE} linux-packages --expect-missing-webkit --deb --appimage" in ubuntu
+    if workflow == "release.yml":
+        assert len(runs) == 2
+        assert UBUNTU_SMOKE in runs[1]
+    else:
+        assert len(runs) == 3
+        assert UBUNTU_SMOKE in runs[1]
+        assert f"if: needs.{switch}.outputs.appimage == 'selfcontained'" in runs[1]
+        assert UBUNTU_LEGACY_SMOKE in runs[2]
+        assert f"if: needs.{switch}.outputs.appimage != 'selfcontained'" in runs[2]
+    for run in runs:
+        assert "if:" not in run or "appimage" in run.split("if:", 1)[1].split("\n", 1)[0]
+    downloads = [t for n, t in steps if n.startswith("Download the")]
+    assert len(downloads) == 2
+    assert "name: linux-packages" in downloads[0] and "path: linux-packages" in downloads[0]
+    assert "name: linux-appimage" in downloads[1] and "path: linux-packages" in downloads[1]
     checkout = steps[0][1]
     assert "sparse-checkout-cone-mode: false" in checkout
     for path in ("/keys/spectrapdf-rpm-signing.pub.asc", f"/{LINUX_SMOKE}",
@@ -4076,11 +4194,48 @@ def test_the_install_checks_cover_fedora_and_ubuntu(workflow: str) -> None:
     smoke = (ROOT / LINUX_SMOKE).read_text(encoding="utf-8")
     rpm = smoke[smoke.index("    --rpm)"):]
     assert rpm.index("sh scripts/verify-rpm-signature.sh") < rpm.index("dnf -y install")
+    # Every step a docker run names is one the smoke script still accepts.
+    for run in runs:
+        for flag in re.findall(r"(?<= )--[a-z-]+", run.split("linux-packages", 1)[1]):
+            assert f"    {flag})" in smoke, (workflow, flag)
+    bare = smoke[smoke.index("    --bare-cli)"):smoke.index("    --deb)")]
+    assert "ldconfig -p" in bare and "libgtk-3" in bare and "libwebkit2gtk-4" in bare
+
+
+def test_the_redo_selects_the_appimage_regime_from_the_tag_tree() -> None:
+    header = _job_header("release-redo.yml", "regime")
+    assert "appimage: ${{ steps.appimage.outputs.regime }}" in header
+    select = dict(_job_steps("release-redo.yml", "regime"))["Select the AppImage regime from the tag's tree"]
+    assert "id: appimage" in select
+    assert "git cat-file -e HEAD:scripts/appimage-catalog-gate.sh" in select
+    assert "regime=selfcontained" in select and "regime=legacy" in select
+    assert "${{ inputs.tag }}" not in select.split("run: |", 1)[1].split("env:", 1)[0]
+    # The tree that introduces the gate builds the AppImage in its own job.
+    assert (ROOT / "scripts" / "appimage-catalog-gate.sh").is_file()
+    release_build = (ROOT / "scripts" / "linux-release-build.sh").read_text(encoding="utf-8")
+    assert "build-appimage.sh --" not in release_build and ".AppImage" not in release_build
 
 
 def test_the_linux_jobs_precede_any_windows_minutes() -> None:
-    assert _workflow_jobs("release.yml") == ["verify", "linux", "linux-smoke", "release"]
-    assert _workflow_jobs("release-redo.yml") == ["regime", "linux", "linux-smoke", "release"]
+    assert _workflow_jobs("release.yml") == ["verify", *LINUX_JOBS, "release"]
+    assert _workflow_jobs("release-redo.yml") == ["regime", *LINUX_JOBS, "release"]
+
+
+@pytest.mark.parametrize("workflow,switch", (("release.yml", "verify"), ("release-redo.yml", "regime")))
+def test_the_windows_job_collects_both_linux_artifacts_into_one_directory(workflow: str, switch: str) -> None:
+    steps = _job_steps(workflow, "release")
+    names = [n for n, _t in steps]
+    by_name = dict(steps)
+    packages = by_name["Download the Linux packages"]
+    appimage = by_name["Download the Linux AppImage"]
+    assert "name: linux-packages" in packages and "name: linux-appimage" in appimage
+    for text in (packages, appimage):
+        assert f"path: {LINUX_BUNDLE_DIR}\n" in text + "\n"
+    if workflow == "release-redo.yml":
+        assert f"needs.{switch}.outputs.appimage == 'selfcontained'" in appimage
+    upload = names.index("Upload the Linux packages to the draft")
+    assert names.index("Download the Linux packages") < upload
+    assert names.index("Download the Linux AppImage") < upload
 
 
 def _linux_assets(directory: Path, version: str) -> subprocess.CompletedProcess:

@@ -1,13 +1,14 @@
 #!/bin/sh
-# Installs the built Linux packages on a clean distribution container and runs
-# the installed CLI against the fixture. Runs as root inside the container,
-# from the repository root (keys/, scripts/ and tests/fixtures/sample.pdf).
+# Installs the built Linux packages on a system without WebKitGTK or GTK
+# installed and runs the installed CLI against the fixture. Runs as root, from
+# the repository root (keys/, scripts/ and tests/fixtures/sample.pdf).
 #
 #   sh scripts/linux-install-smoke.sh DIR STEP...
 #
 # DIR holds the release's AppImage, .deb and .rpm. Steps run in the order given:
-#   --expect-missing-webkit  the AppImage exits 127 and names libwebkit2gtk-4.1.so.0
-#                            (run before any package installs WebKitGTK)
+#   --bare-cli               on a system without WebKitGTK and GTK 3 (run before
+#                            any package installs them), the AppImage passes the
+#                            CLI check
 #   --deb                    apt-get install the .deb, then the CLI check
 #   --rpm                    verify the .rpm signature, dnf install it, then the CLI check
 #   --appimage               the AppImage (extract-and-run) passes the CLI check
@@ -54,19 +55,13 @@ $report"
 
 for step in "$@"; do
   case "$step" in
-    --expect-missing-webkit)
+    --bare-cli)
       appimage="$(one 'spectrapdf_*_amd64.AppImage')"
       chmod 0755 "$appimage"
-      set +e
-      out="$(APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" check "$FIXTURE" 2>&1)"
-      code=$?
-      set -e
-      [ "$code" -eq 127 ] || die "AppImage without WebKitGTK exited $code, expected 127:
-$out"
-      printf '%s\n' "$out" | grep -Fq libwebkit2gtk-4.1.so.0 ||
-        die "AppImage without WebKitGTK did not name libwebkit2gtk-4.1.so.0:
-$out"
-      echo "AppImage without WebKitGTK: exit 127, missing library named"
+      if ldconfig -p | grep -E 'libwebkit2gtk-4\.1\.so|libgtk-3\.so'; then
+        die "this system has WebKitGTK 4.1 or GTK 3; --bare-cli needs a system without them"
+      fi
+      cli_check "AppImage without WebKitGTK and GTK 3" env APPIMAGE_EXTRACT_AND_RUN=1 "$appimage"
       ;;
     --deb)
       deb="$(one 'spectrapdf_*_amd64.deb')"

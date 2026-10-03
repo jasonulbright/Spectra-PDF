@@ -1,0 +1,8 @@
+# Files the AppImage ships from the two release tarballs quick-sharun deploys.
+# scripts/build-appimage.sh fetches each tarball by url and sha256;
+# scripts/appimage-packages.py refuses an image whose copy of a file differs.
+file	version	url	tarball_sha256	file_sha256	notices
+sharun	3.5.0	https://github.com/pkgforge-dev/Anylinux-sharun/releases/download/3.5.0/sharun+helper-libs-x86_64.tar	a84935e91826cc38834f35eee099269ab643f97a47d3aaf5c171d87fda3d3c1f	19ced768f1e76ebf578d119e9683f7dcb1377dcab55dd1128934fe503718597e	LICENSE-sharun.txt
+anylinux.so	3.5.0	https://github.com/pkgforge-dev/Anylinux-sharun/releases/download/3.5.0/sharun+helper-libs-x86_64.tar	a84935e91826cc38834f35eee099269ab643f97a47d3aaf5c171d87fda3d3c1f	32cab61fe1ee9b35265534b863a1c06259900a83c039a8eb3b0841098c6fa3c4	LICENSE-sharun.txt,LICENSE-linuxdeploy-plugin-checkrt.txt
+glycin-fix.so	3.5.0	https://github.com/pkgforge-dev/Anylinux-sharun/releases/download/3.5.0/sharun+helper-libs-x86_64.tar	a84935e91826cc38834f35eee099269ab643f97a47d3aaf5c171d87fda3d3c1f	dc5fe0f963e1cee49de280dd34f9954205e53efd2b8fcd643da6e1597ec256bd	LICENSE-sharun.txt
+cross-libc-dlopen.so	v0.2.7	https://github.com/pkgforge-dev/cross-libc-dlopen/releases/download/v0.2.7/cross-libc-dlopen-x86_64.tar	5b4a9c799b4875e7687b9b4158105a64056031c6c8a8719cbf00fa20839c9cf3	63129854b553a8af6f19a3b54a97e19059f90ae67bc4342d0e2d03fc80c92478	LICENSE-cross-libc-dlopen.txt

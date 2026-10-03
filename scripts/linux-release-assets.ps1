@@ -1,8 +1,9 @@
 # The Linux release files for one version, by exact name. Dot-source it:
 # . "$PSScriptRoot/linux-release-assets.ps1"
 #
-# The build (scripts/linux-release-build.sh) writes exactly five files: the
-# AppImage, its .zsync, its updater .sig, the .deb and the .rpm. The names
+# The Linux builds (scripts/linux-release-build.sh for the .deb and .rpm,
+# scripts/build-appimage.sh for the AppImage, its .zsync and its updater .sig)
+# write exactly five files between them. The names
 # carry only [A-Za-z0-9._-], so GitHub serves each asset under the same name;
 # the AppImage's embedded update information and the .zsync both depend on
 # that. A missing, extra, or differently named file is refused: it is not this

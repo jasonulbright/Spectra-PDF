@@ -75,11 +75,11 @@ jobs:
           if ($cargo -cne $tag) { $bad += "Cargo.toml ($cargo)" }
           if ($bad) { throw "Tag $tag disagrees with: $($bad -join ', ')" }
 
-  # The Linux packages: AppImage (+ .zsync), .deb and signed .rpm, built in an
-  # Ubuntu 22.04 container so every shipped ELF file needs glibc 2.35 at most.
-  # Runs before the Windows job, so a Linux failure costs no Windows minutes
-  # and leaves no draft. Skipped unless the tag's tree lists linux in
-  # .github/release-platforms.txt.
+  # The Linux packages: .deb and signed .rpm, built in an Ubuntu 22.04
+  # container so every shipped ELF file needs glibc 2.35 at most. The AppImage
+  # is built from this .deb by the next job. Runs before the Windows job, so a
+  # Linux failure costs no Windows minutes and leaves no draft. Skipped unless
+  # the tag's tree lists linux in .github/release-platforms.txt.
   linux:
     name: Build (Linux)
     needs: verify
@@ -130,10 +130,9 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
-      # Provisions every vendored tree, builds the .deb and .rpm, assembles
-      # the AppImage, signs the AppImage for the updater manifest and the .rpm
-      # with the package key, and runs the built CLI from the .deb payload and
-      # the AppImage. --release refuses without either key.
+      # Provisions every vendored tree, builds the .deb and .rpm, signs the
+      # .rpm with the package key, and runs the built CLI from the .deb
+      # payload. --release refuses without the package key.
       - name: Build, sign and smoke the Linux packages
         run: sh scripts/linux-release-build.sh --release
         env:
@@ -146,27 +145,78 @@ jobs:
       - name: Install the .deb on Ubuntu 22.04
         run: sh scripts/linux-install-smoke.sh src-tauri/target/release/bundle/linux --deb
 
-      # The .sig is the linux-x86_64 signature in latest.json, never an asset.
       - name: Keep the Linux packages for the Windows job
         uses: actions/upload-artifact@v7
         with:
           name: linux-packages
           path: |
-            src-tauri/target/release/bundle/linux/spectrapdf_*_amd64.AppImage
-            src-tauri/target/release/bundle/linux/spectrapdf_*_amd64.AppImage.zsync
-            src-tauri/target/release/bundle/linux/spectrapdf_*_amd64.AppImage.sig
             src-tauri/target/release/bundle/linux/spectrapdf_*_amd64.deb
             src-tauri/target/release/bundle/linux/spectrapdf-*-1.x86_64.rpm
+          if-no-files-found: error
+          retention-days: 1
+
+  # The self-contained AppImage, built from the .deb above on Arch Linux: the
+  # image carries WebKitGTK, GTK 3, the tray library, Ghostscript, the time
+  # zone database and the C library from the Arch packages current that day,
+  # within the allowlist scripts/appimage-packages.tsv. The build refuses an
+  # image that fails the contents gate (scripts/verify-appimage-contents.sh)
+  # or the image's CLI check, and --release refuses without the updater key.
+  linux-appimage:
+    name: Build (Linux AppImage)
+    needs: [verify, linux]
+    if: needs.verify.outputs.linux == 'true'
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # The pinned tools the AppImage build fetches. Every file is re-verified
+      # by SHA-256 and size on use, so a cache hit changes no input.
+      - name: Cache the pinned AppImage tools
+        uses: actions/cache@v6
+        with:
+          path: resources/linux-x86_64/.downloads
+          key: Linux-appimage-downloads-${{ hashFiles('scripts/build-appimage.sh') }}
+
+      # No version pins: the image deploys the Arch packages current that day.
+      - name: Install the Arch build packages
+        run: sh scripts/build-appimage.sh --install-packages
+
+      - name: Download the Linux packages
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-packages
+          path: linux-packages
+
+      - name: Build, check, smoke and sign the AppImage
+        run: sh scripts/build-appimage.sh --deb linux-packages/spectrapdf_*_amd64.deb --out linux-appimage --release
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+
+      # The .sig is the linux-x86_64 signature in latest.json, never an asset.
+      - name: Keep the AppImage for the Windows job
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-appimage
+          path: |
+            linux-appimage/spectrapdf_*_amd64.AppImage
+            linux-appimage/spectrapdf_*_amd64.AppImage.zsync
+            linux-appimage/spectrapdf_*_amd64.AppImage.sig
           if-no-files-found: error
           retention-days: 1
 
   # Clean installs on the current Fedora and Ubuntu releases, one runner, two
   # containers with floating tags. Fedora checks the .rpm signature against
   # keys/spectrapdf-rpm-signing.pub.asc: Ubuntu 22.04's rpm reports valid
-  # signatures of this kind as invalid, so the build job cannot.
+  # signatures of this kind as invalid, so the build job cannot. Ubuntu runs
+  # the AppImage before anything installs WebKitGTK or GTK 3.
   linux-smoke:
     name: Install check (Linux)
-    needs: [verify, linux]
+    needs: [verify, linux, linux-appimage]
     if: needs.verify.outputs.linux == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -188,20 +238,61 @@ jobs:
           name: linux-packages
           path: linux-packages
 
+      - name: Download the AppImage
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-appimage
+          path: linux-packages
+
       - name: Fedora 44 installs the .rpm and runs the AppImage
         run: docker run --rm -v "$PWD:/w" -w /w fedora:44 sh scripts/linux-install-smoke.sh linux-packages --rpm --appimage
 
-      - name: Ubuntu 26.04 refuses the AppImage without WebKitGTK, then installs the .deb
-        run: docker run --rm -v "$PWD:/w" -w /w ubuntu:26.04 sh scripts/linux-install-smoke.sh linux-packages --expect-missing-webkit --deb --appimage
+      - name: Ubuntu 26.04 runs the AppImage without WebKitGTK and GTK 3, then installs the .deb
+        run: docker run --rm -v "$PWD:/w" -w /w ubuntu:26.04 sh scripts/linux-install-smoke.sh linux-packages --bare-cli --deb --appimage
+
+  # The AppImage catalog's own checks, on a base Ubuntu 22.04 system without
+  # WebKitGTK or GTK 3: the catalog's AppDir lint, its C library rating
+  # (X-AppImage-Self-Contained=true), a window under firejail on Xvfb, and the
+  # catalog's screenshot check. Every catalog file is pinned by SHA-256 in the
+  # script. The gate mounts the image with FUSE and installs a setuid
+  # firejail, so it runs on the runner itself, as root.
+  linux-appimage-catalog:
+    name: Catalog check (Linux AppImage)
+    needs: [verify, linux-appimage]
+    if: needs.verify.outputs.linux == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/appimage-catalog-gate.sh
+            /scripts/posix-common.sh
+
+      - name: Download the AppImage
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-appimage
+          path: linux-appimage
+
+      - name: The AppImage catalog's checks pass without WebKitGTK and GTK 3
+        run: |
+          chmod 0755 linux-appimage/spectrapdf_*_amd64.AppImage
+          sudo sh scripts/appimage-catalog-gate.sh linux-appimage/spectrapdf_*_amd64.AppImage --work "$RUNNER_TEMP/appimage-catalog-gate"
 
   release:
     name: Build & publish (Windows)
-    needs: [verify, linux, linux-smoke]
+    needs: [verify, linux, linux-appimage, linux-smoke, linux-appimage-catalog]
     # Runs after the Linux jobs pass, or when they were skipped because the
     # tag's tree builds Windows only. A Linux failure skips this job.
     if: >-
       !cancelled() && needs.verify.result == 'success' &&
-      (needs.verify.outputs.linux != 'true' || needs.linux-smoke.result == 'success')
+      (needs.verify.outputs.linux != 'true' ||
+      (needs.linux-appimage.result == 'success' && needs.linux-smoke.result == 'success' &&
+      needs.linux-appimage-catalog.result == 'success'))
     runs-on: windows-latest
     # Gates the OIDC federated credential: the app registration trusts this
     # repository only through this environment.
@@ -554,6 +645,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: linux-packages
+          path: src-tauri/target/release/bundle/linux
+
+      - name: Download the Linux AppImage
+        if: needs.verify.outputs.linux == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-appimage
           path: src-tauri/target/release/bundle/linux
 
       # The AppImage, its .zsync, the .deb and the .rpm, under the names the
