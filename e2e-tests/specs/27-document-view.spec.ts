@@ -485,6 +485,27 @@ describe('organize board page drags', () => {
     });
   }
 
+  /** Waits until no page cell is displaced by the reorder animation
+   * (hooks/useFlipReorder.ts). A rect sampled mid-animation is not where the
+   * cell lands: its centre can resolve to the gap between two cells by the
+   * time the pointer goes down, and a press there pans the board instead of
+   * grabbing a page. Both the inverted transform before its release frame and
+   * the running transition after it count as in flight. */
+  async function waitForBoardAtRest(): Promise<void> {
+    await browser.waitUntil(
+      async () =>
+        await browser.execute(function () {
+          for (const el of Array.from(document.querySelectorAll('.canvas-world [data-page-id]'))) {
+            const cell = el as HTMLElement;
+            if (cell.style.transform !== '') return false;
+            if (cell.getAnimations().some((a) => a.playState !== 'finished')) return false;
+          }
+          return true;
+        }),
+      { timeout: 5_000, timeoutMsg: 'the board page cells never came to rest' },
+    );
+  }
+
   /** The on-screen height of a document card — the quantity the drop gate
    * measures (lib/drop-gate.ts). */
   async function cardScreenHeight(): Promise<number> {
@@ -530,6 +551,7 @@ describe('organize board page drags', () => {
 
   it('a drag lands the page at the slot it was dropped on', async () => {
     const before = await getWorkspacePageIds();
+    await waitForBoardAtRest();
     const cells = await pageCells();
     expect(cells.length).toBeGreaterThan(2);
     const moving = cells[0];
@@ -558,6 +580,7 @@ describe('organize board page drags', () => {
     expect(await cardScreenHeight()).toBeLessThan(90);
 
     const before = await getWorkspacePageIds();
+    await waitForBoardAtRest();
     const cells = await pageCells();
     const moving = cells[0];
     const target = cells[cells.length - 1];
