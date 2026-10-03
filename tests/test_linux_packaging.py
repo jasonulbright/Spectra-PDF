@@ -157,14 +157,35 @@ def test_the_start_script_quotes_every_expansion_and_launches_the_app():
 
 
 def test_the_exec_library_moves_payload_programs_onto_the_image_loader():
-    source = _text(LINUX / "image-exec.c")
-    for symbol in ("int execve(", "int execv(", "int execvp(", "int execvpe(", "int posix_spawn(", "int posix_spawnp("):
-        assert symbol in source, symbol
-    for needle in ('"--preload"', '"--library-path"', '"--argv0"', "PT_INTERP", '"/lib/spectrapdf/"', "ENOEXEC", "script_execute",
-                   "SPECTRAPDF_IMAGE_ROOT", "SPECTRAPDF_IMAGE_EXEC", "SPECTRAPDF_IMAGE_LIBRARY_PATH"):
-        assert needle in source, needle
+    library = _text(LINUX / "image-exec.c")
+    core = _text(LINUX / "image-exec.h")
+    trampoline = _text(LINUX / "image-exec-trampoline.c")
+    for symbol in ("int execve(", "int execv(", "int execvp(", "int execvpe(", "int execl(", "int execlp(", "int execle(",
+                   "int posix_spawn(", "int posix_spawnp("):
+        assert symbol in library, symbol
+    for rule in ("R1.", "R2.", "R3.", "R4."):
+        assert rule in library, rule
+    for needle in ("SPECTRAPDF_IMAGE_ROOT", "SPECTRAPDF_IMAGE_EXEC", "SPECTRAPDF_IMAGE_LIBRARY_PATH", '#include "image-exec.h"',
+                   "spawn_in_child", "SO_PEERCRED"):
+        assert needle in library, needle
+    for needle in ('"--preload"', '"--library-path"', '"--argv0"', "PT_INTERP", '"/lib/spectrapdf/"', "ENOEXEC", "image_script",
+                   '"/lib/image-exec/image-exec-trampoline"', "image_argument_limit"):
+        assert needle in core, needle
+    for limit in ("MAX_ARGS", "MAX_ENV", "LIST_SIZE", "SEARCH_SIZE", "malloc("):
+        assert limit not in library and limit not in core and limit not in trampoline, limit
+    assert '#include "image-exec.h"' in trampoline
     build = _text(SCRIPTS / "build-appimage.sh")
     assert 'gcc -shared -fPIC -O2 -Wall -Wextra -Werror -o "$APPDIR/lib/image-exec/image-exec.so" "$IMAGE_EXEC_SOURCE"' in build
+    assert ('gcc -static -O2 -Wall -Wextra -Werror -o "$APPDIR/lib/image-exec/image-exec-trampoline" '
+            '"$IMAGE_EXEC_TRAMPOLINE_SOURCE"') in build
+    gate = _text(SCRIPTS / "verify-appimage-contents.sh")
+    assert "need_elf lib/image-exec/image-exec-trampoline" in gate
+    assert "lib/image-exec/image-exec-trampoline is not a static executable" in gate
+    generator = _text(SCRIPTS / "appimage-packages.py")
+    assert '"lib/image-exec/image-exec-trampoline": "glibc",' in generator
+    assert 'rows.append((rel, f"static:{STATIC_LINKED[rel]}", digest))' in generator
+    assert '$1 == "lib/image-exec/image-exec-trampoline" && $2 == "static:glibc"' in gate
+    assert "statically linked with the C library of the Arch Linux `glibc` package" in _text(ROOT / "THIRD-PARTY-LICENSES.md")
     for launcher in ("python-launcher", "libreoffice-launcher"):
         text = _text(LINUX / launcher)
         assert 'SPECTRAPDF_IMAGE_EXEC="$root/lib/image-exec/image-exec.so"' in text, launcher

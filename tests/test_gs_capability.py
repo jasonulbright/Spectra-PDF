@@ -348,6 +348,87 @@ def test_the_vendored_tree_holds_the_pinned_upstream_bytes():
             assert hashlib.sha256(handle.read()).hexdigest() == digest, name
 
 
+_GATE_HARNESS = r"""
+param([string]$Script, [string]$Tree, [string]$Notices)
+$ErrorActionPreference = 'Stop'
+$source = Get-Content -LiteralPath $Script -Raw
+$prefix = $source.Substring(0, $source.IndexOf('if ($GateOnly) {'))
+. ([scriptblock]::Create($prefix)) -DestDir $Tree -Notices $Notices
+try {
+    Invoke-BundledGs $Tree @('--version') | Out-Null
+    Write-Host 'GUARD=RAN'
+} catch {
+    Write-Host 'GUARD=REFUSED'
+}
+function Invoke-BundledGs {
+    param([string]$Root, [string[]]$Arguments)
+    Write-Host "NATIVE_EXECUTION_REQUESTED: $Root $Arguments"
+    return [pscustomobject]@{ Code = 0; Output = @('10.08.0') }
+}
+foreach ($problem in @(Get-NoticeProblems -Root $Tree)) { Write-Host "PROBLEM:$problem" }
+"""
+
+
+def _tamper_append(name):
+    def change(tree):
+        with open(os.path.join(tree, name), "ab") as handle:
+            handle.write(b"\0")
+    return change
+
+
+def _tamper_extra_dll(tree):
+    with open(os.path.join(tree, "vcruntime140.dll"), "wb") as handle:
+        handle.write(b"MZ")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the bundle script is Windows PowerShell")
+@pytest.mark.parametrize(
+    "named, tamper",
+    [
+        ("gsdll64.dll", _tamper_append("gsdll64.dll")),
+        ("LICENSE-Ghostscript.txt", _tamper_append("LICENSE-Ghostscript.txt")),
+        ("vcruntime140.dll", _tamper_extra_dll),
+        ("gswin64c.exe", _tamper_append("gswin64c.exe")),
+    ],
+    ids=["changed-dll", "changed-licence", "extra-dll", "changed-exe"],
+)
+def test_the_gate_never_runs_a_tree_that_fails_its_pins(tmp_path, named, tamper):
+    import shutil
+
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    vendored = os.path.join(root, "resources", "ghostscript")
+    if not os.path.isfile(os.path.join(vendored, "gswin64c.exe")):
+        pytest.skip("no vendored resources/ghostscript in this checkout")
+    script = os.path.join(root, "scripts", "bundle-ghostscript.ps1")
+    notices = os.path.join(root, "THIRD-PARTY-LICENSES.md")
+    tree = str(tmp_path / "ghostscript")
+    shutil.copytree(vendored, tree)
+    tamper(tree)
+    harness = tmp_path / "gate-harness.ps1"
+    harness.write_text(_GATE_HARNESS, encoding="utf-8")
+
+    probed = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness),
+         "-Script", script, "-Tree", tree, "-Notices", notices],
+        capture_output=True, text=True, timeout=120,
+    )
+    out = probed.stdout + probed.stderr
+    assert probed.returncode == 0, out
+    assert "GUARD=REFUSED" in out, out
+    assert "NATIVE_EXECUTION_REQUESTED" not in out, out
+    assert any(line.startswith("PROBLEM:") and named in line for line in out.splitlines()), out
+
+    gated = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+         "-GateOnly", "-DestDir", tree],
+        capture_output=True, text=True, timeout=120,
+    )
+    refusal = gated.stdout + gated.stderr
+    assert gated.returncode == 1, refusal
+    # The console wraps a long error line, so compare without whitespace.
+    assert named in "".join(refusal.split()), refusal
+
+
 def test_the_bundled_version_meets_the_minimum():
     script = os.path.join(
         os.path.dirname(__file__), "..", "scripts", "bundle-ghostscript.ps1"

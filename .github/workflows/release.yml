@@ -571,8 +571,12 @@ jobs:
           $exe = 'src-tauri/target/release/spectrapdf.exe'
           $fixture = 'tests/fixtures/sample.pdf'
           if (-not (Test-Path -LiteralPath $gs -PathType Leaf)) { throw 'bundled Ghostscript is missing' }
-          powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 -GateOnly -DestDir src-tauri/target/release/ghostscript
-          if ($LASTEXITCODE -ne 0) { throw "the built tree's Ghostscript does not match its pinned files (exit $LASTEXITCODE)" }
+          # resources/ghostscript is what the installer and the zip pack; the
+          # copy beside the built CLI is what the smoke below runs.
+          foreach ($tree in @('resources/ghostscript', 'src-tauri/target/release/ghostscript')) {
+            powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 -GateOnly -DestDir $tree
+            if ($LASTEXITCODE -ne 0) { throw "$tree does not match the pinned Ghostscript files (exit $LASTEXITCODE)" }
+          }
           Remove-Item Env:SPECTRAPDF_GS_PATH -ErrorAction SilentlyContinue
           $statusOut = Join-Path $env:RUNNER_TEMP 'spectrapdf-gs-status.out'
           $statusErr = Join-Path $env:RUNNER_TEMP 'spectrapdf-gs-status.err'

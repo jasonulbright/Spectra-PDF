@@ -14,7 +14,8 @@
 #    --check). --prepare fetches the five pinned tools once into the download
 #    cache. The package allowlist and the sharun pins lint on their own, and
 #    the contents gate and the catalog gate parse. scripts/test-image-exec.sh
-#    compiles the AppImage's exec library and checks its exec semantics.
+#    compiles the AppImage's exec library and its spawn trampoline and checks
+#    their exec and spawn semantics against the native C library.
 # 2. Every Linux vendored tree is at its pin and passes its notice gate. Each
 #    script skips the download when its tree already matches its pin.
 # 3. cargo check of the app for Linux, all targets, with the Linux config.

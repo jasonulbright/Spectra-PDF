@@ -78,8 +78,9 @@ src/engine/** -text
 # The Linux packaging inputs are read on a Linux host from the same checkout:
 # webkit-sandbox.hook, libreoffice-launcher and python-launcher are POSIX shell
 # scripts without the .sh suffix, AppRun.sh is copied into the AppImage as it
-# is, image-exec.c is compiled into it, and the desktop entry and AppStream
-# files are copied into the packages byte for byte.
+# is, image-exec.c, image-exec-trampoline.c and image-exec.h are compiled into
+# it, and the desktop entry and AppStream files are copied into the packages
+# byte for byte.
 
 src-tauri/linux/** text eol=lf
 keys/*.asc text eol=lf

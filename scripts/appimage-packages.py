@@ -57,6 +57,12 @@ OWN_EXACT = {
 }
 OWN_PREFIXES = ("usr/share/icons/hicolor/", "usr/share/doc/spectrapdf/")
 
+# Spectra's own programs linked statically with a package's library: the
+# manifest row names that package (source static:<package>) and its version.
+STATIC_LINKED = {
+    "lib/image-exec/image-exec-trampoline": "glibc",
+}
+
 # Files quick-sharun writes from its own text.
 TOOL_EXACT = {
     "AppRun.lib",
@@ -219,6 +225,9 @@ def survey(appdir: Path, pins: dict, owner: dict) -> tuple:
             if path.is_symlink() or rel == PAYLOAD_LINK:
                 continue
             digest = sha256_of(path)
+            if rel in STATIC_LINKED:
+                rows.append((rel, f"static:{STATIC_LINKED[rel]}", digest))
+                continue
             if rel in OWN_EXACT or rel.startswith(OWN_PREFIXES):
                 continue
             if digest == sharun_sha:
@@ -259,11 +268,12 @@ def build(args) -> None:
     pins_path = Path(args.pins)
     pins = load_pins(pins_path)
     rows, problems = survey(appdir, pins, pacman_files())
-    packages = sorted({source for _, source, _ in rows if ":" not in source})
+    packages = sorted({source for _, source, _ in rows if ":" not in source} |
+                      {source[len("static:"):] for _, source, _ in rows if source.startswith("static:")})
     info = pacman_info(packages) if packages else {}
     for package in packages:
         if package not in allow:
-            files = [rel for rel, source, _ in rows if source == package]
+            files = [rel for rel, source, _ in rows if source in (package, f"static:{package}")]
             row = f"{package}\t{','.join(proposed_notices(package, info.get(package, {})))}"
             problems.append(f"package {package} is not in {args.allowlist} ({len(files)} files, e.g. {files[0]}); "
                             f"its row from this host's notices: {row!r}")
@@ -291,6 +301,9 @@ def build(args) -> None:
             lines.append(f"{rel}\t{source[4:]}\t{pin['version']}\t{pin['url']}\t{digest}")
         elif source.startswith("tool:"):
             lines.append(f"{rel}\tquick-sharun\t-\t-\t{digest}")
+        elif source.startswith("static:"):
+            meta = info[source[len("static:"):]]
+            lines.append(f"{rel}\t{source}\t{meta.get('Version', '-')}\t{meta.get('URL', '-')}\t{digest}")
         else:
             meta = info[source]
             lines.append(f"{rel}\t{source}\t{meta.get('Version', '-')}\t{meta.get('URL', '-')}\t{digest}")
