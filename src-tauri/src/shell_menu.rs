@@ -519,16 +519,16 @@ mod win {
         windows_version::OsVersion::current().build
     }
 
-    fn layout() -> Layout {
-        Layout::new(&crate::portable::exe_dir())
+    fn layout() -> Result<Layout, String> {
+        crate::portable::exe_dir().map(|dir| Layout::new(&dir))
     }
 
-    fn container() -> ContainerKind {
-        if crate::portable::is_portable() {
+    fn container() -> Result<ContainerKind, String> {
+        Ok(if crate::portable::is_portable()? {
             ContainerKind::Portable
         } else {
             ContainerKind::Installed
-        }
+        })
     }
 
     pub fn managed() -> bool {
@@ -911,7 +911,10 @@ mod win {
         let Some(arch) = native_arch() else {
             return unsupported_arch();
         };
-        let layout = layout();
+        let layout = match layout() {
+            Ok(layout) => layout,
+            Err(refusal) => return Outcome::Failed(refusal),
+        };
         let identity = PackageIdentity::read(&layout);
         let family = identity.as_ref().ok().map(PackageIdentity::family_name);
         if let Ok(pm) = manager() {
@@ -959,13 +962,19 @@ mod win {
     }
 
     pub fn uninstall_machine() -> Outcome {
-        let family = PackageIdentity::read(&layout()).ok().map(|i| i.family_name());
+        let layout = layout().ok();
+        let family = layout
+            .as_ref()
+            .and_then(|layout| PackageIdentity::read(layout).ok())
+            .map(|i| i.family_name());
         let removal = manager().and_then(|pm| remove_all_users(&pm, family.as_deref()));
         remove_classic(&hklm());
         // The elevating account's own per-user fallback keys, when they name
         // this copy; no other profile's hive is reachable from here.
-        if native_arch().is_some_and(|arch| classic_present(&hkcu(), &layout(), arch)) {
-            remove_classic(&hkcu());
+        if let (Some(arch), Some(layout)) = (native_arch(), &layout) {
+            if classic_present(&hkcu(), layout, arch) {
+                remove_classic(&hkcu());
+            }
         }
         let _ = hklm().delete_subkey_with_flags(MACHINE_RECORD_KEY, KEY_WOW64_32KEY);
         notify_shell();
@@ -979,10 +988,10 @@ mod win {
         let Some(arch) = native_arch() else {
             return unsupported_arch();
         };
-        let layout = layout();
-        let outcome = match container() {
-            ContainerKind::Installed => register_installed_user(&layout, arch),
-            ContainerKind::Portable => register_portable_user(&layout, arch),
+        let outcome = match (layout(), container()) {
+            (Ok(layout), Ok(ContainerKind::Installed)) => register_installed_user(&layout, arch),
+            (Ok(layout), Ok(ContainerKind::Portable)) => register_portable_user(&layout, arch),
+            (Err(refusal), _) | (_, Err(refusal)) => Outcome::Failed(refusal),
         };
         if let Outcome::Failed(reason) = &outcome {
             record_user_error(reason);
@@ -1095,10 +1104,22 @@ mod win {
     }
 
     pub fn status() -> ShellMenuStatus {
-        let layout = layout();
-        let container = container();
         let managed = managed();
         let visible = visible();
+        let (layout, container) = match (layout(), container()) {
+            (Ok(layout), Ok(container)) => (layout, container),
+            (Err(refusal), _) | (_, Err(refusal)) => {
+                return ShellMenuStatus {
+                    mechanism: Mechanism::None,
+                    registered: false,
+                    visible,
+                    managed,
+                    container: ContainerKind::Installed,
+                    other_copy: false,
+                    error: Some(refusal),
+                };
+            }
+        };
         let other_copy =
             container == ContainerKind::Portable && installed_copy_elsewhere(&layout.root);
         let Some(arch) = native_arch() else {
@@ -1176,8 +1197,8 @@ mod win {
         if managed() || native_arch().is_none() {
             return Ok(());
         }
-        let layout = layout();
-        match container() {
+        let layout = layout()?;
+        match container()? {
             ContainerKind::Portable => {
                 let Some(location) = recorded_location() else {
                     return Ok(());

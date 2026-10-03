@@ -5,8 +5,8 @@
 // licence has to be PRESENTED to the user and accepted. The installer does
 // that through its licence page (or `/acceptEULA` when unattended) and records
 // the answer beside the executable, so an installed copy never asks again. A
-// portable copy has no installer, so the application presents the same text on
-// first run and records the answer itself.
+// portable copy or a Linux package has no installer dialog, so the application
+// presents the same text on first run and records the answer itself.
 //
 // `gs-capability.ts` is the model and the reason for the shape: a LEAF module
 // (no React, no DOM, no component imports) holding a synchronous snapshot for
@@ -29,8 +29,10 @@ export const ICC_DECLINED = 'declined';
 export const ICC_UNRECORDED = 'unrecorded';
 
 export interface IccAssentState {
-  /** True in the portable container. An installed copy is never portable and
-   * never presents the dialog, because its record always exists. */
+  /** True when the app presents the licence itself: a portable copy or a
+   * Linux package, neither of which has an installer dialog. The field keeps
+   * its wire name. A copy laid down by the Windows installer never presents
+   * the dialog, because the installer's record always exists. */
   portable: boolean;
   assent: typeof ICC_ACCEPTED | typeof ICC_DECLINED | typeof ICC_UNRECORDED;
   /** The licence file in the payload tree, or '' when it is absent. */
@@ -152,9 +154,9 @@ export function iccBlocked(state: IccAssentState = current): boolean {
 /**
  * Should the first-run dialog open?
  *
- * Only an unrecorded answer in the portable container. A decline is a recorded
- * answer and must not re-open the dialog on every launch; the notice on each
- * disabled surface is how the user gets back to it.
+ * Only an unrecorded answer in a copy that asks in the app (`portable`). A
+ * decline is a recorded answer and must not re-open the dialog on every
+ * launch; the notice on each disabled surface is how the user gets back to it.
  */
 export function iccNeedsAssent(state: IccAssentState = current): boolean {
   return !state.pending && state.portable && state.assent === ICC_UNRECORDED;

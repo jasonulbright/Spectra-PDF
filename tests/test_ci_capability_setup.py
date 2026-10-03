@@ -4072,10 +4072,14 @@ def test_the_catalog_gate_runs_on_the_ubuntu_22_04_runner_beside_the_install_che
 #: The Ubuntu 26.04 install check: the AppImage runs on a system without
 #: WebKitGTK and GTK 3 before the .deb installs them.
 UBUNTU_SMOKE = f"ubuntu:26.04 sh {LINUX_SMOKE} linux-packages --bare-cli --deb --appimage"
-#: The release also checks the distribution Ghostscript the packages depend on.
-#: The redo runs the tag's own smoke script, which can predate that step.
+#: The release also checks the distribution Ghostscript the packages depend on
+#: and the colour-profile answer an installed package records per user. The
+#: redo runs the tag's own smoke script, which can predate those steps.
 UBUNTU_RELEASE_SMOKE = (
-    f"ubuntu:26.04 sh {LINUX_SMOKE} linux-packages --bare-cli --deb --ghostscript --appimage"
+    f"ubuntu:26.04 sh {LINUX_SMOKE} linux-packages --bare-cli --deb --icc-assent --ghostscript --appimage"
+)
+FEDORA_RELEASE_SMOKE = (
+    f"fedora:44 sh {LINUX_SMOKE} linux-packages --rpm --icc-assent --ghostscript --appimage"
 )
 #: A legacy tag's AppImage needs the host's WebKitGTK, which the .deb installs.
 UBUNTU_LEGACY_SMOKE = f"ubuntu:26.04 sh {LINUX_SMOKE} linux-packages --deb --appimage"
@@ -4090,7 +4094,7 @@ def test_the_install_checks_cover_fedora_and_ubuntu(workflow: str) -> None:
     runs = [t for _n, t in steps if "docker run" in t]
     fedora = runs[0]
     if workflow == "release.yml":
-        assert f"fedora:44 sh {LINUX_SMOKE} linux-packages --rpm --ghostscript --appimage" in fedora
+        assert FEDORA_RELEASE_SMOKE in fedora
         assert len(runs) == 2
         assert UBUNTU_RELEASE_SMOKE in runs[1]
     else:
@@ -4120,6 +4124,16 @@ def test_the_install_checks_cover_fedora_and_ubuntu(workflow: str) -> None:
             assert f"    {flag})" in smoke, (workflow, flag)
     bare = smoke[smoke.index("    --bare-cli)"):smoke.index("    --deb)")]
     assert "ldconfig -p" in bare and "libgtk-3" in bare and "libwebkit2gtk-4" in bare
+    if workflow == "release.yml":
+        for run in runs:
+            flags = run.split("linux-packages", 1)[1].split()
+            installed = "--deb" if "--deb" in flags else "--rpm"
+            assert flags.index(installed) < flags.index("--icc-assent"), run
+        assent = smoke[smoke.index("    --icc-assent)"):smoke.index("    --appimage)")]
+        for needle in ('env -u XDG_CONFIG_HOME HOME="$home"', "icc-assent --accept",
+                       '"assent": "accepted"', '"container": "package"',
+                       '.config/com.spectrapdf.app/icc-assent.json', "/usr/bin/data"):
+            assert needle in assent, needle
 
 
 def test_the_redo_selects_the_appimage_regime_from_the_tag_tree() -> None:

@@ -245,10 +245,10 @@ jobs:
           path: linux-packages
 
       - name: Fedora 44 installs the .rpm and runs the AppImage
-        run: docker run --rm -v "$PWD:/w" -w /w fedora:44 sh scripts/linux-install-smoke.sh linux-packages --rpm --ghostscript --appimage
+        run: docker run --rm -v "$PWD:/w" -w /w fedora:44 sh scripts/linux-install-smoke.sh linux-packages --rpm --icc-assent --ghostscript --appimage
 
       - name: Ubuntu 26.04 runs the AppImage without WebKitGTK and GTK 3, then installs the .deb
-        run: docker run --rm -v "$PWD:/w" -w /w ubuntu:26.04 sh scripts/linux-install-smoke.sh linux-packages --bare-cli --deb --ghostscript --appimage
+        run: docker run --rm -v "$PWD:/w" -w /w ubuntu:26.04 sh scripts/linux-install-smoke.sh linux-packages --bare-cli --deb --icc-assent --ghostscript --appimage
 
   # The AppImage catalog's own checks, on a base Ubuntu 22.04 system without
   # WebKitGTK or GTK 3: the catalog's AppDir lint, its C library rating

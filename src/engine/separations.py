@@ -52,7 +52,7 @@ import json
 import os
 import re
 import shutil
-import tempfile
+import stat
 from pathlib import Path
 
 import pikepdf
@@ -63,6 +63,7 @@ from .acroform import has_form_fields
 from .color_spaces import build_resolver
 from .pdf_save import save_pdf
 from .pdf_tree import name_bytes, name_label, name_object, name_text, token_text
+from .platform_support import owned_entry, private_cache_dir
 from .preflight import COLORSPACE, walk_page_resources
 from .processing_steps import hide_processing_steps, processing_step_only_colorants
 from .validate import validate_pdf
@@ -538,9 +539,20 @@ def list_inks(file: str, pages=None, show_processing_steps: bool = False) -> dic
 
 
 def _cache_root() -> Path:
-    root = Path(tempfile.gettempdir()) / "spectrapdf" / _PREVIEW_DIR_NAME
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    return private_cache_dir(_PREVIEW_DIR_NAME)
+
+
+def _discard_set(out_dir: Path) -> None:
+    """Remove whatever holds a set's name, a link included, without following
+    it, so the fresh set is a folder this run creates."""
+    try:
+        meta = os.lstat(out_dir)
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(meta.st_mode):
+        shutil.rmtree(out_dir)
+    else:
+        out_dir.unlink()
 
 
 def _evict_old_sets(root: Path) -> None:
@@ -948,8 +960,8 @@ def render_separations(
         return _describe_set(out_dir, inks, file, page, dpi, gs_path, overprint,
                              suppressed)
 
-    shutil.rmtree(out_dir, ignore_errors=True)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    _discard_set(out_dir)
+    out_dir.mkdir(mode=0o700)
 
     # A widget carrying no appearance is given one BEFORE either arm reads
     # this document as content: the preview then rasters what the fill would
@@ -1064,6 +1076,9 @@ def _set_is_whole(out_dir: Path, marker: Path) -> bool:
     therefore treated as absent and re-rendered; a marker carrying no manifest
     (a set written by an earlier version) is absent for the same reason.
     """
+    if not (owned_entry(out_dir, directory=True)
+            and owned_entry(marker, directory=False)):
+        return False
     try:
         stored = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError):

@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect } from '@wdio/globals';
-import { APP_BINARY } from '../support/app-data.js';
+import { APP_BINARY, ICC_ASSENT_RECORD } from '../support/app-data.js';
 import {
   answerIccPicker,
   getState,
@@ -19,7 +19,8 @@ import {
 } from '../support/harness.js';
 
 // The PORTABLE container: the colour-profile licence presented in-app,
-// and the app's data living beside the executable.
+// and the app's data living beside the executable on Windows (in the per-user
+// directories on Linux, where the executable's folder is never a state root).
 //
 // The suite's harness binary runs from a folder with no `install-record.json`
 // beside it, which IS the portable shape — that is not an approximation, it is
@@ -27,8 +28,8 @@ import {
 // spec removes and restores is the real one, in the real place, written by the
 // product's own command.
 //
-// `wdio.conf.ts`'s `onPrepare` seeds an ACCEPTED record beside the binary so
-// the licence dialog does not stand in front of every other spec in the
+// The WDIO config's `onPrepare` seeds an ACCEPTED record where the binary
+// reads it so the licence dialog does not stand in front of every other spec in the
 // battery. This spec is the one that is about the unanswered state, so it
 // removes that record and puts it back — which is exactly what the seeding
 // comment says the first-run spec must do.
@@ -42,9 +43,7 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 const APP_EXE = APP_BINARY;
-const EXE_DIR = resolve(APP_EXE, '..');
-const PORTABLE_DATA = join(EXE_DIR, 'data');
-const ASSENT_RECORD = join(PORTABLE_DATA, 'icc-assent.json');
+const ASSENT_RECORD = ICC_ASSENT_RECORD;
 const SEEDED_RECORD = '{\n  "adobeIccEulaAccepted": true\n}\n';
 
 /** The standard per-user directory an INSTALLED copy would use. A portable run
@@ -209,7 +208,10 @@ describe('the portable container: colour-profile assent and data beside the app'
     expect(await $(DIALOG).isExisting()).toBe(false);
   });
 
-  it('the portable answer lands under the executable folder, and %APPDATA% is untouched', async () => {
+  it('the portable answer lands under the executable folder, and %APPDATA% is untouched', async function () {
+    // On Linux the executable's folder is never a state root: the answer
+    // lands in the per-user configuration directory instead.
+    if (process.platform !== 'win32') this.skip();
     const beforeListing = roamingListing();
 
     rmSync(ASSENT_RECORD, { force: true });

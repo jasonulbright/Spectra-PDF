@@ -3,8 +3,8 @@
  *
  * The harness binary runs from `src-tauri/target/debug/`, a folder with no
  * `install-record.json` beside it — which the product reads as the PORTABLE
- * container and answers with `<exe dir>\data`, not the standard per-user
- * directory. A spec that resolves the record from `%APPDATA%` therefore reads a
+ * container and, on Windows, answers with `<exe dir>\data`, not the standard
+ * per-user directory. On Linux the answer is the per-user directories. A spec that resolves the record from `%APPDATA%` therefore reads a
  * file the binary under test never writes: it silently passes for as long as a
  * stale copy sits there with the right shape, and asserts against some earlier
  * run's session forever after.
@@ -31,8 +31,31 @@ export const VENV_PYTHON =
     ? resolve(REPO_ROOT, '.venv', 'Scripts', 'python.exe')
     : resolve(REPO_ROOT, '.venv', 'bin', 'python');
 
-/** `portable::data_root` for that binary: `<exe dir>\data`. */
-export const APP_DATA_ROOT = resolve(APP_BINARY, '..', 'data');
+/** The bundle identifier every per-user root is keyed by. */
+const APP_IDENTIFIER = 'com.spectrapdf.app';
+
+/**
+ * The per-user base directories the Linux run hands the binary under test.
+ * On Linux the executable's folder is never a state root, so the suite points
+ * `XDG_CONFIG_HOME` and `XDG_DATA_HOME` at folders of its own beside the
+ * binary instead of the developer's home.
+ */
+export const E2E_XDG_CONFIG_HOME = resolve(APP_BINARY, '..', 'e2e-xdg', 'config');
+export const E2E_XDG_DATA_HOME = resolve(APP_BINARY, '..', 'e2e-xdg', 'data');
+
+/** `portable::data_root` for that binary: `<exe dir>\data` on Windows, the
+ * per-user data directory on Linux. */
+export const APP_DATA_ROOT =
+  process.platform === 'win32'
+    ? resolve(APP_BINARY, '..', 'data')
+    : resolve(E2E_XDG_DATA_HOME, APP_IDENTIFIER);
+
+/** Where the binary records the colour-profile answer: the portable root on
+ * Windows, the per-user configuration directory on Linux. */
+export const ICC_ASSENT_RECORD =
+  process.platform === 'win32'
+    ? resolve(APP_DATA_ROOT, 'icc-assent.json')
+    : resolve(E2E_XDG_CONFIG_HOME, APP_IDENTIFIER, 'icc-assent.json');
 
 /** The session record, written entirely on the Rust side. */
 export const SESSION_FILE = resolve(APP_DATA_ROOT, 'session.json');

@@ -70,13 +70,29 @@ pub fn resource_root_for(exe_dir: &Path) -> PathBuf {
     if cfg!(windows) || exe_dir.join("engine").is_dir() {
         return exe_dir.to_path_buf();
     }
-    if let Ok(installed) = exe_dir.join("..").join("lib").join(PRODUCT_NAME).canonicalize() {
+    if let Some(installed) = package_resource_root(exe_dir) {
         return installed;
     }
     if let Some(appdir) = std::env::var_os("APPDIR") {
         return PathBuf::from(appdir).join("usr").join("lib").join(PRODUCT_NAME);
     }
     exe_dir.to_path_buf()
+}
+
+/// The `<exe>/../lib/<product>` resource tree a Linux package lays down beside
+/// its `bin` directory, or None when the executable is not laid out that way.
+/// A directory holding `engine` is its own resource root and never a package.
+pub fn package_resource_root(exe_dir: &Path) -> Option<PathBuf> {
+    if cfg!(windows) || exe_dir.join("engine").is_dir() {
+        return None;
+    }
+    exe_dir
+        .join("..")
+        .join("lib")
+        .join(PRODUCT_NAME)
+        .canonicalize()
+        .ok()
+        .filter(|root| root.is_dir())
 }
 
 /// `productName` of the platform's Tauri config; Tauri names the Linux
