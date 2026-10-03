@@ -286,14 +286,26 @@ BUNDLED_GS_LIB = "%rom%Resource/Init/;%rom%lib/"
 
 
 def bundled_gs_programs(engine_dir: Path | None = None) -> tuple[str, ...]:
-    """The bundled Windows Ghostscript's possible paths, normalized for comparison."""
+    """The bundled Windows Ghostscript's possible paths that exist."""
     if not IS_WINDOWS:
         return ()
     base = engine_dir if engine_dir is not None else Path(__file__).parent
     return tuple(
-        os.path.normcase(os.path.realpath(candidate))
+        str(candidate)
         for candidate in vendored_candidates(base, "ghostscript", "gswin64c.exe")
+        if os.path.isfile(candidate)
     )
+
+
+def _same_file(first: str, second: str) -> bool:
+    """Whether two paths name one file, by volume and file index rather than
+    by spelling: a hard link, a junction-reached path, a short name and a case
+    variant of the bundled program are the bundled program. A path that does
+    not exist names no file."""
+    try:
+        return os.path.samefile(first, second)
+    except (OSError, ValueError):
+        return False
 
 
 def bundled_gs_env(args, env=None, engine_dir: Path | None = None):
@@ -306,7 +318,7 @@ def bundled_gs_env(args, env=None, engine_dir: Path | None = None):
         first = words[0] if words else ""
     else:
         first = os.fsdecode(os.fspath(args[0])) if args else ""
-    if not first or os.path.normcase(os.path.realpath(first)) not in programs:
+    if not first or not any(_same_file(first, program) for program in programs):
         return None
     child = dict(os.environ if env is None else env)
     child["GS_LIB"] = BUNDLED_GS_LIB

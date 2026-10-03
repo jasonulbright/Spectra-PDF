@@ -2691,6 +2691,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "Преобразование в PDF/A средствами Ghostscript не удалось: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "В результате нет условия вывода PDF/A, поэтому {{requested}} не получен.",
   "engine.pdfa.outputDeclaresPdfConformance": "Результат не объявляет никакого соответствия PDF/A, поэтому {{requested}} не получен.",
+  "engine.platform_support.folderUserOwns": "{{path}} не является папкой, принадлежащей этому пользователю",
   "engine.portfolio.documentAlreadyPortfolio": "этот документ уже является портфолио",
   "engine.portfolio.memberNamed": "нет участника с именем {{name}}",
   "engine.portfolio.memberSourceFound": "источник участника не найден: {{s}}",

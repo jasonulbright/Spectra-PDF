@@ -3511,6 +3511,10 @@ def test_release_vendors_and_smokes_the_bundled_ghostscript() -> None:
     command = steps[smoke][1]
     assert "src-tauri/target/release/ghostscript/gswin64c.exe" in command
     assert "scripts/bundle-ghostscript.ps1" in command
+    gate = command.index(
+        "scripts/bundle-ghostscript.ps1 -GateOnly -DestDir src-tauri/target/release/ghostscript"
+    )
+    assert gate < command.index("@('gs-status')")
     assert "'compress', $fixture" in command
     assert "Remove-Item Env:SPECTRAPDF_GS_PATH" in command
     assert "@('gs-status')" in command

@@ -2559,6 +2559,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "PDF/A-conversie door Ghostscript is mislukt: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "De uitvoer bevat geen PDF/A-uitvoerintentie, dus {{requested}} is niet gemaakt.",
   "engine.pdfa.outputDeclaresPdfConformance": "De uitvoer meldt helemaal geen PDF/A-conformiteit, dus {{requested}} is niet gemaakt.",
+  "engine.platform_support.folderUserOwns": "{{path}} is geen map die eigendom is van deze gebruiker",
   "engine.portfolio.documentAlreadyPortfolio": "dit document is al een portfolio",
   "engine.portfolio.memberNamed": "geen lid met de naam {{name}}",
   "engine.portfolio.memberSourceFound": "bron van het lid niet gevonden: {{s}}",

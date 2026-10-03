@@ -2823,6 +2823,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "تعذّر تحويل Ghostscript إلى PDF/A: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "لا يحمل الإخراج نية إخراج PDF/A، لذلك لم تُنتج {{requested}}.",
   "engine.pdfa.outputDeclaresPdfConformance": "لا يعلن الإخراج أي مطابقة لمعيار PDF/A، لذلك لم تُنتج {{requested}}.",
+  "engine.platform_support.folderUserOwns": "{{path}} ليس مجلدًا يملكه هذا المستخدم",
   "engine.portfolio.documentAlreadyPortfolio": "هذا المستند حافظة بالفعل",
   "engine.portfolio.memberNamed": "لا يوجد عضو بالاسم {{name}}",
   "engine.portfolio.memberSourceFound": "تعذّر العثور على مصدر العضو: {{s}}",

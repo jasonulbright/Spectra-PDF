@@ -2493,6 +2493,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "Ghostscript による PDF/A 変換に失敗しました：{{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "出力に PDF/A 出力インテントがないため、{{requested}} は生成されませんでした。",
   "engine.pdfa.outputDeclaresPdfConformance": "出力は PDF/A 適合をまったく宣言していないため、{{requested}} は生成されませんでした。",
+  "engine.platform_support.folderUserOwns": "{{path}} はこのユーザーが所有するフォルダーではありません",
   "engine.portfolio.documentAlreadyPortfolio": "この文書はすでにポートフォリオです",
   "engine.portfolio.memberNamed": "{{name}} という名前のメンバーはありません",
   "engine.portfolio.memberSourceFound": "メンバーの元ファイルが見つかりません：{{s}}",

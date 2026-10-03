@@ -2625,6 +2625,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "La conversión a PDF/A de Ghostscript falló: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "La salida no lleva ninguna intención de salida PDF/A, por lo que no se produjo {{requested}}.",
   "engine.pdfa.outputDeclaresPdfConformance": "La salida no declara ninguna conformidad PDF/A, por lo que no se produjo {{requested}}.",
+  "engine.platform_support.folderUserOwns": "{{path}} no es una carpeta que pertenezca a este usuario",
   "engine.portfolio.documentAlreadyPortfolio": "este documento ya es una cartera",
   "engine.portfolio.memberNamed": "no hay ningún miembro llamado {{name}}",
   "engine.portfolio.memberSourceFound": "origen del miembro no encontrado: {{s}}",

@@ -1,0 +1,9 @@
+# Pinned SHA-256 of each file scripts/bundle-ghostscript.ps1 ships, as
+# extracted, unmodified, from gs10080w64.exe (the installer whose SHA-256 that
+# script pins). The script carries the same values; tests/test_gs_capability.py
+# requires the two to agree and, when resources/ghostscript exists, the tree
+# to match them.
+file	member	sha256
+gswin64c.exe	bin/gswin64c.exe	9b29d3b5128c6d53bb4e9eee77e3919d05038cdfdd8e07697af4d9c319f9d5ad
+gsdll64.dll	bin/gsdll64.dll	a134ed0d3af749bdab93c66029180e676d36d9cc624c192ea287f73c891fb0af
+LICENSE-Ghostscript.txt	doc/COPYING	57c8ff33c9c0cfc3ef00e650a1cc910d7ee479a8bc509f6c9209a7c2a11399d6

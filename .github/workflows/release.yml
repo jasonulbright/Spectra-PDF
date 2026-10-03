@@ -561,8 +561,8 @@ jobs:
             throw "built CLI did not validate the fixture: $(Get-Content $stdout -Raw)"
           }
 
-      # The bundled Ghostscript beside the built CLI answers the pinned
-      # version and serves one Ghostscript command with nothing configured.
+      # The bundled Ghostscript beside the built CLI holds the pinned upstream
+      # bytes, and serves one Ghostscript command with nothing configured.
       - name: Built CLI runs the bundled Ghostscript
         timeout-minutes: 3
         shell: pwsh
@@ -571,9 +571,8 @@ jobs:
           $exe = 'src-tauri/target/release/spectrapdf.exe'
           $fixture = 'tests/fixtures/sample.pdf'
           if (-not (Test-Path -LiteralPath $gs -PathType Leaf)) { throw 'bundled Ghostscript is missing' }
-          $pinned = [regex]::Match((Get-Content scripts/bundle-ghostscript.ps1 -Raw), '\[string\]\$GsVersion = "([0-9.]+)"').Groups[1].Value
-          $reported = (& (Resolve-Path $gs).Path --version | Select-Object -First 1).Trim()
-          if (-not $pinned -or $reported -ne $pinned) { throw "bundled Ghostscript reports '$reported', expected '$pinned'" }
+          powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 -GateOnly -DestDir src-tauri/target/release/ghostscript
+          if ($LASTEXITCODE -ne 0) { throw "the built tree's Ghostscript does not match its pinned files (exit $LASTEXITCODE)" }
           Remove-Item Env:SPECTRAPDF_GS_PATH -ErrorAction SilentlyContinue
           $statusOut = Join-Path $env:RUNNER_TEMP 'spectrapdf-gs-status.out'
           $statusErr = Join-Path $env:RUNNER_TEMP 'spectrapdf-gs-status.err'

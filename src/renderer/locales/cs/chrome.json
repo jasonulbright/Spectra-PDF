@@ -2691,6 +2691,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "Převod do PDF/A Ghostscriptem se nezdařil: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Výstup nenese žádný výstupní záměr PDF/A, takže {{requested}} nevznikl.",
   "engine.pdfa.outputDeclaresPdfConformance": "Výstup nedeklaruje žádnou shodu s PDF/A, takže {{requested}} nevznikl.",
+  "engine.platform_support.folderUserOwns": "{{path}} není složka, kterou vlastní tento uživatel",
   "engine.portfolio.documentAlreadyPortfolio": "tento dokument už je portfolio",
   "engine.portfolio.memberNamed": "žádná položka s názvem {{name}}",
   "engine.portfolio.memberSourceFound": "zdroj položky nenalezen: {{s}}",

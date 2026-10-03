@@ -2559,6 +2559,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "Ghostscript-PDF/A-konverteringen mislyktes: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Utdataene har ingen PDF/A-utdatahensikt, så {{requested}} ble ikke laget.",
   "engine.pdfa.outputDeclaresPdfConformance": "Utdataene oppgir ikke PDF/A-samsvar i det hele tatt, så {{requested}} ble ikke laget.",
+  "engine.platform_support.folderUserOwns": "{{path}} er ikke en mappe som denne brukeren eier",
   "engine.portfolio.documentAlreadyPortfolio": "dette dokumentet er allerede en portefølje",
   "engine.portfolio.memberNamed": "ingen medlem med navnet {{name}}",
   "engine.portfolio.memberSourceFound": "kilden til medlemmet ble ikke funnet: {{s}}",

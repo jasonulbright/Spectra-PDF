@@ -44,7 +44,6 @@ from __future__ import annotations
 import hashlib
 import io
 import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,6 +52,7 @@ from engine.credentials import open_pdf
 
 from . import icc_profiles
 from .color_spaces import build_function
+from .inplace import write_bytes_staged
 from .pdf_tree import name_bytes, name_object, name_text
 from .platform_support import owned_entry, private_cache_dir
 
@@ -245,26 +245,21 @@ def materialize(raw: bytes) -> Path:
     Ghostscript reads the profile by path for the staged separation, and two
     sources carrying the same profile must land on one path so they share one
     plate cache entry. An existing file is reused only when it is a regular
-    file this user owns holding exactly these bytes; anything else is replaced
-    whole through a fresh file in the same private folder.
+    file this user owns holding exactly these bytes. Anything else at the name
+    (a link included) is removed without being followed, and the bytes land
+    whole through the engine's staged writer.
     """
     digest = hashlib.sha256(raw).hexdigest()[:32]
-    folder = profile_cache_dir()
-    dest = folder / f"{digest}.icc"
+    dest = profile_cache_dir() / f"{digest}.icc"
     if owned_entry(dest, directory=False):
         try:
             if dest.read_bytes() == raw:
                 return dest
         except OSError:
             pass
-    handle, staged = tempfile.mkstemp(prefix=".profile-", suffix=".icc", dir=folder)
-    try:
-        with os.fdopen(handle, "wb") as out:
-            out.write(raw)
-        os.replace(staged, dest)
-    except BaseException:
-        Path(staged).unlink(missing_ok=True)
-        raise
+    elif os.path.lexists(dest):
+        os.unlink(dest)
+    write_bytes_staged(dest, raw)
     return dest
 
 

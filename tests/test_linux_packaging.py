@@ -160,7 +160,7 @@ def test_the_exec_library_moves_payload_programs_onto_the_image_loader():
     source = _text(LINUX / "image-exec.c")
     for symbol in ("int execve(", "int execv(", "int execvp(", "int execvpe(", "int posix_spawn(", "int posix_spawnp("):
         assert symbol in source, symbol
-    for needle in ('"--preload"', '"--library-path"', '"--argv0"', "PT_INTERP", '"%s/lib/spectrapdf/"',
+    for needle in ('"--preload"', '"--library-path"', '"--argv0"', "PT_INTERP", '"/lib/spectrapdf/"', "ENOEXEC", "script_execute",
                    "SPECTRAPDF_IMAGE_ROOT", "SPECTRAPDF_IMAGE_EXEC", "SPECTRAPDF_IMAGE_LIBRARY_PATH"):
         assert needle in source, needle
     build = _text(SCRIPTS / "build-appimage.sh")
@@ -169,6 +169,20 @@ def test_the_exec_library_moves_payload_programs_onto_the_image_loader():
         text = _text(LINUX / launcher)
         assert 'SPECTRAPDF_IMAGE_EXEC="$root/lib/image-exec/image-exec.so"' in text, launcher
         assert "LD_PRELOAD" not in text, launcher
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux") or shutil.which("gcc") is None,
+                    reason="compiles and runs the exec library on Linux")
+def test_the_exec_library_keeps_exec_semantics_and_moves_payload_programs():
+    run = subprocess.run(["sh", str(SCRIPTS / "test-image-exec.sh")], capture_output=True, text=True, timeout=300)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "image-exec: every case passed" in run.stdout
+
+
+def test_the_exec_library_test_runs_in_the_build_and_the_linux_parity():
+    build = _text(SCRIPTS / "build-appimage.sh")
+    assert 'sh "$REPO_ROOT/scripts/test-image-exec.sh" "$APPDIR/lib/image-exec/image-exec.so" ||' in build
+    assert "step sh scripts/test-image-exec.sh" in _text(SCRIPTS / "ci-parity-linux.sh")
 
 
 def test_the_python_launcher_starts_the_payload_interpreter_on_the_image_loader():

@@ -2559,6 +2559,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "A Ghostscript PDF/A-átalakítása sikertelen: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "A kimenet nem tartalmaz PDF/A kimeneti szándékot, ezért nem jött létre ez: {{requested}}.",
   "engine.pdfa.outputDeclaresPdfConformance": "A kimenet semmilyen PDF/A-megfelelőséget nem jelent, ezért nem jött létre ez: {{requested}}.",
+  "engine.platform_support.folderUserOwns": "A(z) {{path}} nem ennek a felhasználónak a tulajdonában lévő mappa",
   "engine.portfolio.documentAlreadyPortfolio": "ez a dokumentum már portfólió",
   "engine.portfolio.memberNamed": "nincs ilyen nevű tag: {{name}}",
   "engine.portfolio.memberSourceFound": "a tag forrása nem található: {{s}}",
