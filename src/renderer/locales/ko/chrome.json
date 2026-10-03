@@ -2493,6 +2493,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "Ghostscript PDF/A 변환에 실패했습니다: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "출력에 PDF/A 출력 의도가 없으므로 {{requested}}이(가) 생성되지 않았습니다.",
   "engine.pdfa.outputDeclaresPdfConformance": "출력이 PDF/A 적합성을 전혀 선언하지 않으므로 {{requested}}이(가) 생성되지 않았습니다.",
+  "engine.platform_support.folderUserOwns": "{{path}}은(는) 이 사용자가 소유한 폴더가 아닙니다",
   "engine.portfolio.documentAlreadyPortfolio": "이 문서는 이미 포트폴리오입니다",
   "engine.portfolio.memberNamed": "{{name}} 이름의 구성원이 없습니다",
   "engine.portfolio.memberSourceFound": "구성원 원본을 찾을 수 없습니다: {{s}}",

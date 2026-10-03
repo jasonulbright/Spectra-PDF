@@ -13,7 +13,8 @@
 # 1. The AppImage inputs lint (scripts/build-appimage.sh --prepare, then
 #    --check). --prepare fetches the five pinned tools once into the download
 #    cache. The package allowlist and the sharun pins lint on their own, and
-#    the contents gate and the catalog gate parse.
+#    the contents gate and the catalog gate parse. scripts/test-image-exec.sh
+#    compiles the AppImage's exec library and checks its exec semantics.
 # 2. Every Linux vendored tree is at its pin and passes its notice gate. Each
 #    script skips the download when its tree already matches its pin.
 # 3. cargo check of the app for Linux, all targets, with the Linux config.
@@ -38,6 +39,7 @@ step sh scripts/build-appimage.sh --check
 step python3 scripts/appimage-packages.py --lint scripts/appimage-packages.tsv --pins vendor/anylinux-sharun/PIN.tsv
 step sh -n scripts/verify-appimage-contents.sh
 step sh -n scripts/appimage-catalog-gate.sh
+step sh scripts/test-image-exec.sh
 step sh scripts/bundle-libreoffice.sh
 step sh scripts/bundle-tesseract.sh
 step sh scripts/bundle-jbig2enc.sh

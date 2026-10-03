@@ -2559,6 +2559,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "Ghostscript PDF/A dönüştürmesi başarısız oldu: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Çıktı hiçbir PDF/A çıktı amacı taşımıyor, bu yüzden {{requested}} üretilmedi.",
   "engine.pdfa.outputDeclaresPdfConformance": "Çıktı hiçbir PDF/A uygunluğu bildirmiyor, bu yüzden {{requested}} üretilmedi.",
+  "engine.platform_support.folderUserOwns": "{{path}}, bu kullanıcıya ait bir klasör değil",
   "engine.portfolio.documentAlreadyPortfolio": "bu belge zaten bir portföy",
   "engine.portfolio.memberNamed": "şu adı taşıyan bir üye yok: {{name}}",
   "engine.portfolio.memberSourceFound": "üye kaynağı bulunamadı: {{s}}",

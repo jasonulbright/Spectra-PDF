@@ -2559,6 +2559,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "Ghostscriptin PDF/A-muunnos epäonnistui: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Tulosteessa ei ole PDF/A-tulostetarkoitusta, joten muotoa {{requested}} ei tuotettu.",
   "engine.pdfa.outputDeclaresPdfConformance": "Tuloste ei ilmoita lainkaan PDF/A-yhdenmukaisuutta, joten muotoa {{requested}} ei tuotettu.",
+  "engine.platform_support.folderUserOwns": "{{path}} ei ole tämän käyttäjän omistama kansio",
   "engine.portfolio.documentAlreadyPortfolio": "tämä asiakirja on jo portfolio",
   "engine.portfolio.memberNamed": "ei jäsentä nimeltä {{name}}",
   "engine.portfolio.memberSourceFound": "jäsenen lähdettä ei löytynyt: {{s}}",

@@ -42,6 +42,18 @@ $Url = "https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/
 $ShippedBinaries = @("gswin64c.exe", "gsdll64.dll")
 $LicenseName = "LICENSE-Ghostscript.txt"
 
+# Pinned SHA-256 of each shipped file -- update alongside $ExpectedSha256.
+# Derived once by extracting the installer pinned above with 7-Zip and hashing
+# bin\gswin64c.exe, bin\gsdll64.dll and doc\COPYING as extracted, unmodified.
+# scripts/ghostscript.tsv carries the same pins. The gate checks these on every
+# tree, so a reused or released tree is held to the upstream bytes, not to the
+# version string a changed executable can still print.
+$ShippedSha256 = [ordered]@{
+    "gswin64c.exe"            = "9B29D3B5128C6D53BB4E9EEE77E3919D05038CDFDD8E07697AF4D9C319F9D5AD"
+    "gsdll64.dll"             = "A134ED0D3AF749BDAB93C66029180E676D36D9CC624C192EA287F73C891FB0AF"
+    "LICENSE-Ghostscript.txt" = "57C8FF33C9C0CFC3EF00E650A1CC910D7EE479A8BC509F6C9209A7C2A11399D6"
+}
+
 function Get-RowProblems {
     if (-not (Test-Path $Notices)) { return @("  notice file missing: $Notices") }
     $text = Get-Content $Notices -Raw -Encoding UTF8
@@ -72,8 +84,18 @@ function Get-NoticeProblems {
             $problems += "  $($entry.FullName): not a file this script ships"
         }
     }
+    foreach ($name in $ShippedSha256.Keys) {
+        $file = Join-Path $Root $name
+        if (Test-Path -LiteralPath $file -PathType Leaf) {
+            $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+            if ($actual -ne $ShippedSha256[$name]) {
+                $problems += "  ${name}: SHA-256 $actual is not the pinned upstream $($ShippedSha256[$name])"
+            }
+        }
+    }
+    # A changed executable is never run: the version check needs pinned bytes.
     $exe = Join-Path $Root "gswin64c.exe"
-    if (Test-Path $exe) {
+    if ((Test-Path $exe) -and -not ($problems -match '^  gswin64c\.exe: SHA-256')) {
         $reported = Get-GsVersion $exe
         if ($reported -ne $GsVersion) {
             $problems += "  $exe reports '$reported', expected '$GsVersion'"

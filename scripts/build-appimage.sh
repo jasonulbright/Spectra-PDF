@@ -351,6 +351,8 @@ ln -s ../spectrapdf/libreoffice/share "$APPDIR/lib/libreoffice-launcher/share"
 mkdir -p "$APPDIR/lib/python-launcher" "$APPDIR/lib/image-exec"
 gcc -shared -fPIC -O2 -Wall -Wextra -Werror -o "$APPDIR/lib/image-exec/image-exec.so" "$IMAGE_EXEC_SOURCE" ||
   die "src-tauri/linux/image-exec.c did not compile"
+sh "$REPO_ROOT/scripts/test-image-exec.sh" "$APPDIR/lib/image-exec/image-exec.so" ||
+  die "lib/image-exec/image-exec.so failed its regression test"
 install -m 0755 "$PYTHON_LAUNCHER" "$APPDIR/lib/python-launcher/python3"
 
 DOC="$APPDIR/usr/share/doc/spectrapdf"

@@ -248,14 +248,48 @@ def test_only_the_bundled_program_is_spawned_on_the_rom_search_path(monkeypatch,
     bundled = tmp_path / "ghostscript" / "gswin64c.exe"
     monkeypatch.setattr(ps, "IS_WINDOWS", True)
     monkeypatch.setattr(ps, "DEV_PLATFORM_DIR", "")
+    # A bundled program that does not exist names no file.
+    assert ps.bundled_gs_env([str(bundled), "--version"], {}, engine_dir) is None
+    bundled.parent.mkdir()
+    bundled.write_bytes(b"MZ bundled")
     env = ps.bundled_gs_env([str(bundled), "--version"], {"PATH": "x"}, engine_dir)
     assert env == {"PATH": "x", "GS_LIB": ps.BUNDLED_GS_LIB}
     assert ps.bundled_gs_env(str(bundled) + " --version", {}, engine_dir)["GS_LIB"] == ps.BUNDLED_GS_LIB
     other = tmp_path / "gs" / "bin" / "gswin64c.exe"
     assert ps.bundled_gs_env([str(other), "--version"], {}, engine_dir) is None
+    other.parent.mkdir(parents=True)
+    other.write_bytes(b"MZ bundled")
+    # Equal bytes at another path are another installation.
+    assert ps.bundled_gs_env([str(other), "--version"], {}, engine_dir) is None
     assert ps.bundled_gs_env([], {}, engine_dir) is None
     monkeypatch.setattr(ps, "IS_WINDOWS", False)
     assert ps.bundled_gs_env([str(bundled), "--version"], {}, engine_dir) is None
+
+
+def test_a_link_to_the_bundled_program_is_the_bundled_program(monkeypatch, tmp_path):
+    ps = gc.platform_support
+    engine_dir = tmp_path / "engine"
+    engine_dir.mkdir()
+    bundled = tmp_path / "ghostscript" / "gswin64c.exe"
+    bundled.parent.mkdir()
+    bundled.write_bytes(b"MZ bundled")
+    alias = tmp_path / "elsewhere" / "gs-alias.exe"
+    alias.parent.mkdir()
+    try:
+        os.link(bundled, alias)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"hard links are not supported here: {exc}")
+    monkeypatch.setattr(ps, "IS_WINDOWS", True)
+    monkeypatch.setattr(ps, "DEV_PLATFORM_DIR", "")
+    inherited = {"GS_LIB": "C:/other/gs/lib"}
+    assert ps.bundled_gs_env([str(alias), "--version"], inherited, engine_dir) == {
+        "GS_LIB": ps.BUNDLED_GS_LIB
+    }
+    # A case variant of the bundled path names the same file where the file
+    # system ignores case.
+    variant = bundled.with_name(bundled.name.upper())
+    if variant.exists():
+        assert ps.bundled_gs_env([str(variant)], {}, engine_dir)["GS_LIB"] == ps.BUNDLED_GS_LIB
 
 
 @pytest.mark.skipif(
@@ -271,6 +305,47 @@ def test_the_vendored_copy_searches_only_its_rom(monkeypatch):
     listing = result.stdout.split("Search path:", 1)[1].split("Initialization files", 1)[0]
     entries = [entry.strip() for entry in " ".join(listing.split()).split(" ; ") if entry.strip()]
     assert entries and all(entry.startswith("%rom%") for entry in entries), entries
+
+
+def _pinned_files():
+    root = os.path.join(os.path.dirname(__file__), "..")
+    with open(os.path.join(root, "scripts", "bundle-ghostscript.ps1"), encoding="utf-8") as handle:
+        script = handle.read()
+    block = script.split("$ShippedSha256 = [ordered]@{", 1)[1].split("}", 1)[0]
+    in_script = {
+        name: digest.lower()
+        for name, digest in re.findall(r'"([^"]+)"\s*=\s*"([0-9A-F]{64})"', block)
+    }
+    in_table = {}
+    with open(os.path.join(root, "scripts", "ghostscript.tsv"), encoding="utf-8") as handle:
+        rows = [
+            line.rstrip("\r\n").split("\t")
+            for line in handle
+            if line.strip() and not line.startswith("#")
+        ]
+    assert rows[0] == ["file", "member", "sha256"]
+    for name, _member, digest in rows[1:]:
+        in_table[name] = digest
+    return root, in_script, in_table
+
+
+def test_the_shipped_file_pins_agree_and_name_every_shipped_file():
+    _root, in_script, in_table = _pinned_files()
+    assert in_script == in_table
+    assert set(in_script) == {"gswin64c.exe", "gsdll64.dll", "LICENSE-Ghostscript.txt"}
+
+
+def test_the_vendored_tree_holds_the_pinned_upstream_bytes():
+    import hashlib
+
+    root, in_script, _table = _pinned_files()
+    tree = os.path.join(root, "resources", "ghostscript")
+    if not os.path.isfile(os.path.join(tree, "gswin64c.exe")):
+        pytest.skip("no vendored resources/ghostscript in this checkout")
+    assert sorted(os.listdir(tree)) == sorted(in_script)
+    for name, digest in in_script.items():
+        with open(os.path.join(tree, name), "rb") as handle:
+            assert hashlib.sha256(handle.read()).hexdigest() == digest, name
 
 
 def test_the_bundled_version_meets_the_minimum():
@@ -567,18 +642,32 @@ def _absent(tmp_path):
     return str(tmp_path / "nowhere" / "gswin64c.exe")
 
 
-def test_printing_refuses_before_the_first_job_spawns(tmp_pdf, tmp_path):
+@pytest.mark.parametrize("through_cups", [False, True], ids=["ghostscript-spool", "cups-spool"])
+def test_printing_refuses_before_the_first_job_spawns(tmp_pdf, tmp_path, monkeypatch, through_cups):
     # Decided before the copies loop: an unusable Ghostscript must refuse
-    # once, not once per copy.
-    from engine.printer import print_pdf
+    # once, not once per copy. The printer lookup and both spool routes are
+    # replaced, so the host's printers (winspool, CUPS or none) decide nothing.
+    from engine import cups_print, printer
 
-    if sys.platform != "win32":
-        with pytest.raises(RuntimeError, match="Printing to a system printer is not available"):
-            print_pdf(tmp_pdf, "Microsoft Print to PDF", gs_path=_absent(tmp_path), copies=3)
-        return
+    spawned = []
+
+    def _never(*args, **kwargs):
+        spawned.append(args)
+        raise AssertionError("a print job spawned before the Ghostscript refusal")
+
+    monkeypatch.setattr(printer, "_SPOOL_THROUGH_CUPS", through_cups)
+    monkeypatch.setattr(printer, "printer_exists", lambda _name: True)
+    monkeypatch.setattr(printer.platform_support, "run", _never)
+    monkeypatch.setattr(cups_print, "print_file", _never)
+    # The CUPS route spools the document itself; its Ghostscript stage is the
+    # raster render that precedes the spool.
     with pytest.raises(gc.GsUnavailable) as caught:
-        print_pdf(tmp_pdf, "Microsoft Print to PDF", gs_path=_absent(tmp_path), copies=3)
+        printer.print_pdf(
+            tmp_pdf, "Any Printer", gs_path=_absent(tmp_path), copies=3, as_image=through_cups
+        )
     assert caught.value.reason == gc.NOT_EXECUTABLE
+    assert caught.value.path == _absent(tmp_path)
+    assert spawned == []
 
 
 def test_every_print_render_stage_refuses_by_name(tmp_pdf, tmp_path, tmp_dir):

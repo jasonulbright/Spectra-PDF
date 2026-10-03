@@ -513,6 +513,7 @@ pdfa.ghostscriptPdfConversionDid	pattern	pdfa	Ghostscript PDF/A conversion did n
 pdfa.ghostscriptPdfConversionFailed	pattern	pdfa	Ghostscript PDF/A conversion failed: {{v0}}
 pdfa.outputCarriesPdfOutput	pattern	pdfa	The output carries no PDF/A output intent, so {{requested}} was not produced.
 pdfa.outputDeclaresPdfConformance	pattern	pdfa	The output declares no PDF/A conformance at all, so {{requested}} was not produced.
+platform_support.folderUserOwns	pattern	platform_support	{{path}} is not a folder this user owns
 portfolio.documentAlreadyPortfolio	exact	portfolio	this document is already a portfolio
 portfolio.memberNamed	pattern	portfolio	no member named {{name}}
 portfolio.memberSourceFound	pattern	portfolio	member source not found: {{s}}

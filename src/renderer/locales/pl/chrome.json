@@ -2691,6 +2691,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "Konwersja na PDF/A przez Ghostscript nie powiodła się: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Wynik nie zawiera intencji wyjściowej PDF/A, więc {{requested}} nie powstał.",
   "engine.pdfa.outputDeclaresPdfConformance": "Wynik nie deklaruje żadnej zgodności PDF/A, więc {{requested}} nie powstał.",
+  "engine.platform_support.folderUserOwns": "{{path}} nie jest folderem należącym do tego użytkownika",
   "engine.portfolio.documentAlreadyPortfolio": "ten dokument jest już portfolio",
   "engine.portfolio.memberNamed": "brak elementu o nazwie {{name}}",
   "engine.portfolio.memberSourceFound": "nie znaleziono źródła elementu: {{s}}",

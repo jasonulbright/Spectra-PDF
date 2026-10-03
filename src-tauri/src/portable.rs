@@ -729,21 +729,29 @@ pub fn webview_data_in_force() -> Option<PathBuf> {
 /// `create_dir_all` succeeds when the directory already exists, even when its
 /// volume or permissions have since become read-only. A portable copy may be
 /// moved onto read-only media after a prior launch, so existence alone cannot
-/// decide whether the app can keep using the portable root.
+/// decide whether the app can keep using the portable root. The creating and
+/// the non-creating decisions answer from the same facts: this one first asks
+/// [`writable_without_creating`], so a fresh process that only reads reaches
+/// the decision the writer reached.
 fn ensure_writable_dir(dir: &Path) -> bool {
-    if std::fs::create_dir_all(dir).is_err() {
-        return false;
-    }
-    probe_file_in(dir)
+    writable_without_creating(dir) && std::fs::create_dir_all(dir).is_ok() && probe_file_in(dir)
 }
 
-/// The same question without creating `dir`: a probe file in `dir` when it
-/// exists, else in its parent, removed before returning.
+/// Whether `dir` could hold a new file, without creating it. An existing
+/// folder is probed in place; anything else at the name (a file) can never be
+/// the root. An absent folder is decided by its nearest existing ancestor,
+/// which must be a folder that accepts a new file. Every probe file is removed
+/// before returning.
 fn writable_without_creating(dir: &Path) -> bool {
-    if dir.is_dir() {
-        return probe_file_in(dir);
+    match std::fs::metadata(dir) {
+        Ok(meta) => meta.is_dir() && probe_file_in(dir),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => dir
+            .ancestors()
+            .skip(1)
+            .find_map(|ancestor| std::fs::metadata(ancestor).ok().map(|meta| (ancestor, meta)))
+            .is_some_and(|(ancestor, meta)| meta.is_dir() && probe_file_in(ancestor)),
+        Err(_) => false,
     }
-    dir.parent().is_some_and(|parent| parent.is_dir() && probe_file_in(parent))
 }
 
 fn probe_file_in(dir: &Path) -> bool {
@@ -1348,6 +1356,84 @@ mod tests {
             icc_assent_for(&blocked, Container::Portable, None, &decision, Some(config)),
             IccAssent::Accepted
         );
+    }
+
+    /// The writer and a fresh reader decide from the same facts: an answer
+    /// saved by one process is the answer a brand-new non-creating decision
+    /// reads back, when a file occupies the portable root's name.
+    #[test]
+    fn a_fresh_reader_finds_the_answer_saved_past_a_file_in_the_roots_place() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount = temp.path().join("mount");
+        std::fs::create_dir_all(&mount).unwrap();
+        let (image, root) = portable_image(temp.path());
+        std::fs::write(&root, b"not a folder").unwrap();
+        let config = temp.path().join("roaming").join(APP_IDENTIFIER);
+        let image = Some(image.as_path());
+
+        let writer = decide_root(&mount, Container::Portable, image, ensure_writable_dir);
+        assert_eq!(writer, RootDecision::Fallback(root.clone()));
+        record_icc_assent_for(&mount, Container::Portable, image, &writer, Some(config.clone()), true)
+            .unwrap();
+
+        let reader = decide_root(&mount, Container::Portable, image, writable_without_creating);
+        assert_eq!(reader, writer);
+        assert_eq!(
+            icc_assent_for(&mount, Container::Portable, image, &reader, Some(config.clone())),
+            IccAssent::Accepted
+        );
+        assert_eq!(
+            assent_read_path(&mount, Container::Portable, image, &reader, Some(config.clone())),
+            Some(config.join(ICC_ASSENT_FILE))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_fresh_reader_of_a_windows_zip_with_a_file_named_data_reads_the_saved_answer() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("zip");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(PORTABLE_DATA_DIR), b"").unwrap();
+        let config = temp.path().join("roaming").join(APP_IDENTIFIER);
+
+        let writer = decide_root(&dir, Container::Portable, None, ensure_writable_dir);
+        record_icc_assent_for(&dir, Container::Portable, None, &writer, Some(config.clone()), false).unwrap();
+        let reader = decide_root(&dir, Container::Portable, None, writable_without_creating);
+        assert_eq!(reader, RootDecision::Fallback(dir.join(PORTABLE_DATA_DIR)));
+        assert_eq!(
+            icc_assent_for(&dir, Container::Portable, None, &reader, Some(config)),
+            IccAssent::Declined
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_parent_is_a_fallback_for_the_writer_and_a_fresh_reader_alike() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let mount = temp.path().join("mount");
+        std::fs::create_dir_all(&mount).unwrap();
+        let (image, root) = portable_image(temp.path());
+        let parent = root.parent().unwrap().to_path_buf();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if probe_file_in(&parent) {
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return; // running with privileges that ignore the mode
+        }
+        let config = temp.path().join("home").join(".config").join(APP_IDENTIFIER);
+        let image = Some(image.as_path());
+        let writer = decide_root(&mount, Container::Portable, image, ensure_writable_dir);
+        assert_eq!(writer, RootDecision::Fallback(root.clone()));
+        record_icc_assent_for(&mount, Container::Portable, image, &writer, Some(config.clone()), true)
+            .unwrap();
+        let reader = decide_root(&mount, Container::Portable, image, writable_without_creating);
+        assert_eq!(reader, writer);
+        assert_eq!(
+            icc_assent_for(&mount, Container::Portable, image, &reader, Some(config)),
+            IccAssent::Accepted
+        );
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     /// A status query creates nothing: the decision it reads is probed without

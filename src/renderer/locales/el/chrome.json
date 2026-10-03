@@ -2559,6 +2559,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "Η μετατροπή σε PDF/A με το Ghostscript απέτυχε: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Η έξοδος δεν φέρει πρόθεση εξόδου PDF/A, οπότε δεν παρήχθη {{requested}}.",
   "engine.pdfa.outputDeclaresPdfConformance": "Η έξοδος δεν δηλώνει καμία συμμόρφωση PDF/A, οπότε δεν παρήχθη {{requested}}.",
+  "engine.platform_support.folderUserOwns": "Το {{path}} δεν είναι φάκελος που ανήκει σε αυτόν τον χρήστη",
   "engine.portfolio.documentAlreadyPortfolio": "αυτό το έγγραφο είναι ήδη χαρτοφυλάκιο",
   "engine.portfolio.memberNamed": "δεν υπάρχει μέλος με όνομα {{name}}",
   "engine.portfolio.memberSourceFound": "η προέλευση του μέλους δεν βρέθηκε: {{s}}",

@@ -2625,6 +2625,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "Conversia în PDF/A cu Ghostscript a eșuat: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Rezultatul nu conține nicio intenție de ieșire PDF/A, așa că {{requested}} nu a fost produs.",
   "engine.pdfa.outputDeclaresPdfConformance": "Rezultatul nu declară nicio conformitate PDF/A, așa că {{requested}} nu a fost produs.",
+  "engine.platform_support.folderUserOwns": "{{path}} nu este un folder deținut de acest utilizator",
   "engine.portfolio.documentAlreadyPortfolio": "acest document este deja un portofoliu",
   "engine.portfolio.memberNamed": "nu există niciun membru cu numele {{name}}",
   "engine.portfolio.memberSourceFound": "sursa membrului nu a fost găsită: {{s}}",

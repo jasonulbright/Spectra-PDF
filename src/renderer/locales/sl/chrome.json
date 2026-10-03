@@ -2691,6 +2691,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "Pretvorba v PDF/A z Ghostscript ni uspela: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "Izhod nima izhodnega namena PDF/A, zato {{requested}} ni bil ustvarjen.",
   "engine.pdfa.outputDeclaresPdfConformance": "Izhod ne navaja nobene skladnosti PDF/A, zato {{requested}} ni bil ustvarjen.",
+  "engine.platform_support.folderUserOwns": "{{path}} ni mapa, katere lastnik je ta uporabnik",
   "engine.portfolio.documentAlreadyPortfolio": "ta dokument je že portfelj",
   "engine.portfolio.memberNamed": "člana z imenom {{name}} ni",
   "engine.portfolio.memberSourceFound": "vira člana ni mogoče najti: {{s}}",

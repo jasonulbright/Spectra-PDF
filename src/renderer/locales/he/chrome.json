@@ -2625,6 +2625,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "המרת PDF/A באמצעות Ghostscript נכשלה: {{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "הפלט אינו נושא כוונת פלט PDF/A, ולכן {{requested}} לא הופק.",
   "engine.pdfa.outputDeclaresPdfConformance": "הפלט אינו מצהיר על שום תאימות PDF/A, ולכן {{requested}} לא הופק.",
+  "engine.platform_support.folderUserOwns": "{{path}} אינה תיקייה בבעלות משתמש זה",
   "engine.portfolio.documentAlreadyPortfolio": "מסמך זה כבר תיק מסמכים",
   "engine.portfolio.memberNamed": "אין פריט בשם {{name}}",
   "engine.portfolio.memberSourceFound": "מקור הפריט לא נמצא: {{s}}",

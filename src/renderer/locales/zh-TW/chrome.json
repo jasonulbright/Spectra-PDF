@@ -2493,6 +2493,7 @@
   "engine.pdfa.ghostscriptPdfConversionFailed": "Ghostscript PDF/A 轉換失敗：{{v0}}",
   "engine.pdfa.outputCarriesPdfOutput": "輸出不含 PDF/A 輸出意圖，因此未產生 {{requested}}。",
   "engine.pdfa.outputDeclaresPdfConformance": "輸出未宣告任何 PDF/A 符合性，因此未產生 {{requested}}。",
+  "engine.platform_support.folderUserOwns": "{{path}} 不是此使用者擁有的資料夾",
   "engine.portfolio.documentAlreadyPortfolio": "本文件已經是文件集",
   "engine.portfolio.memberNamed": "沒有名為 {{name}} 的成員",
   "engine.portfolio.memberSourceFound": "找不到成員來源：{{s}}",
