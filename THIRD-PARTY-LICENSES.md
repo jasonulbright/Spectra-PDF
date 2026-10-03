@@ -749,6 +749,31 @@ link when the combined work's terms allow modification and the user can
 relink it against a changed library. The runtime's own source is MIT and
 public at the pinned tag, with its build scripts, so both conditions hold.
 
+### AppImage libraries and launcher
+
+The AppImage starts through sharun and carries the WebKitGTK, GTK and Mesa
+stack, Ghostscript, the time zone database and the GNU C library from the Arch
+Linux packages current on the day of the build, used unmodified apart from the
+path rewrites that `scripts/build-appimage.sh` lists. The `.deb` and `.rpm` do
+not contain them. Each image lists every such file with its package, package
+version, upstream URL and SHA-256 in
+`usr/share/doc/spectrapdf/appimage-libraries.tsv`, and carries each package's
+notices in `usr/share/doc/spectrapdf/appimage-licenses/<package>/`. The packages
+an image may contain are listed in `scripts/appimage-packages.tsv`.
+
+The sharun files come from two pinned release tarballs
+(`vendor/anylinux-sharun/PIN.tsv`). Their notices ship in
+`usr/share/doc/spectrapdf/anylinux-sharun/`.
+
+| Component | Version | License | Source | SHA-256 of the shipped file |
+|---|---|---|---|---|
+| sharun (`AppRun`, `sharun` and the program links in `bin/`) | 3.5.0 | MIT | <https://github.com/pkgforge-dev/Anylinux-sharun/releases/tag/3.5.0> | `19ced768f1e76ebf578d119e9683f7dcb1377dcab55dd1128934fe503718597e` |
+| anylinux.so (`lib/sharun-preload/`) | 3.5.0 | MIT | <https://github.com/pkgforge-dev/Anylinux-sharun/releases/tag/3.5.0> | `32cab61fe1ee9b35265534b863a1c06259900a83c039a8eb3b0841098c6fa3c4` |
+| glycin-fix.so (`lib/sharun-preload/`) | 3.5.0 | MIT | <https://github.com/pkgforge-dev/Anylinux-sharun/releases/tag/3.5.0> | `dc5fe0f963e1cee49de280dd34f9954205e53efd2b8fcd643da6e1597ec256bd` |
+| cross-libc-dlopen.so (`lib/sharun-preload/`) | v0.2.7 | MIT | <https://github.com/pkgforge-dev/cross-libc-dlopen/releases/tag/v0.2.7> | `63129854b553a8af6f19a3b54a97e19059f90ae67bc4342d0e2d03fc80c92478` |
+| musl libc (statically linked into sharun) | as built by sharun 3.5.0 | MIT | <https://musl.libc.org/> | (inside sharun) |
+| Ghostscript (Arch Linux `ghostscript` package: `bin/gs`, `shared/bin/gs`, `lib/libgs.so.*`, `share/ghostscript/`) | the package version in `appimage-libraries.tsv` | AGPL-3.0-or-later | <https://ghostscript.com/> | listed per file in `appimage-libraries.tsv` |
+
 ## Frontend / runtime libraries
 
 Bundled into the WebView2 renderer (see `package.json` for exact versions):

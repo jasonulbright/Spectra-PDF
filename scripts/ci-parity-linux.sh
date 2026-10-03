@@ -1,14 +1,19 @@
 #!/bin/sh
-# Local mirror of the Linux release job, for scripts/ci-parity-gates.sh. Runs
-# on a Linux host from the repository root. The container build, the
-# package signatures and the install checks are not mirrored: they need the
-# release keys and clean distribution containers.
+# Local mirror of the Linux release jobs, for scripts/ci-parity-gates.sh. Runs
+# on a Linux host from the repository root. The package build, the package
+# signatures and the install checks are not mirrored: they need the release
+# keys and freshly installed systems. The AppImage build with its contents gate
+# and the AppImage catalog gate need environments of their own and run in the
+# release workflow: the build deploys the package database of an Arch Linux
+# system as root, and the catalog gate removes GTK 3 and WebKitGTK from a
+# disposable Ubuntu 22.04 system and installs a setuid firejail as root.
 #
 #   sh scripts/ci-parity-linux.sh
 #
 # 1. The AppImage inputs lint (scripts/build-appimage.sh --prepare, then
-#    --check). --prepare fetches the two pinned tools once into the download
-#    cache.
+#    --check). --prepare fetches the five pinned tools once into the download
+#    cache. The package allowlist and the sharun pins lint on their own, and
+#    the contents gate and the catalog gate parse.
 # 2. Every Linux vendored tree is at its pin and passes its notice gate. Each
 #    script skips the download when its tree already matches its pin.
 # 3. cargo check of the app for Linux, all targets, with the Linux config.
@@ -30,6 +35,9 @@ step() {
 cd "$REPO_ROOT"
 step sh scripts/build-appimage.sh --prepare
 step sh scripts/build-appimage.sh --check
+step python3 scripts/appimage-packages.py --lint scripts/appimage-packages.tsv --pins vendor/anylinux-sharun/PIN.tsv
+step sh -n scripts/verify-appimage-contents.sh
+step sh -n scripts/appimage-catalog-gate.sh
 step sh scripts/bundle-libreoffice.sh
 step sh scripts/bundle-tesseract.sh
 step sh scripts/bundle-jbig2enc.sh

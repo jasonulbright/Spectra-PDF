@@ -37,14 +37,26 @@ name: Release (redo)
 #
 # Two platform regimes, also chosen from the TAG's tree: a tag whose
 # .github/release-platforms.txt lists linux rebuilds the Linux packages first
-# (the `linux` and `linux-smoke` jobs, copies of release.yml's) and the draft
-# verifier holds the draft to the Linux assets; any other tag is Windows-only
-# and both Linux jobs are skipped. A redo therefore rebuilds exactly the
-# platform set the tag was released with.
+# (the `linux`, `linux-appimage`, `linux-smoke` and `linux-appimage-catalog`
+# jobs, copies of release.yml's) and the draft verifier holds the draft to the
+# Linux assets; any other tag is Windows-only and every Linux job is skipped.
+# A redo therefore rebuilds exactly the platform set the tag was released
+# with.
+#
+# Two AppImage regimes for a Linux tag, chosen from the TAG's tree:
+#   selfcontained -- the tag carries scripts/appimage-catalog-gate.sh; its
+#                    `linux` job builds the .deb and .rpm, `linux-appimage`
+#                    builds the AppImage from that .deb on Arch Linux, and the
+#                    catalog gate runs against it.
+#   legacy        -- the tag's own `linux` job also builds the AppImage;
+#                    `linux-appimage` and `linux-appimage-catalog` are
+#                    skipped, and Ubuntu runs the AppImage after the .deb
+#                    installs WebKitGTK.
 #
 # The build/sign/publish steps below are copies of release.yml's `linux`,
-# `linux-smoke` and `release` jobs. They are kept in step with them by hand; a
-# change to those jobs that matters to a republish belongs here too.
+# `linux-appimage`, `linux-smoke`, `linux-appimage-catalog` and `release`
+# jobs. They are kept in step with them by hand; a change to those jobs that
+# matters to a republish belongs here too.
 
 on:
   workflow_dispatch:
@@ -73,6 +85,7 @@ jobs:
       contents: read
     outputs:
       linux: ${{ steps.platforms.outputs.linux }}
+      appimage: ${{ steps.appimage.outputs.regime }}
     steps:
       - name: Check out the tag
         uses: actions/checkout@v7
@@ -96,6 +109,19 @@ jobs:
       - name: Release platforms from the tag's tree
         id: platforms
         run: python3 verifier/scripts/release_platforms.py --rev HEAD --github-output
+
+      - name: Select the AppImage regime from the tag's tree
+        id: appimage
+        run: |
+          if git cat-file -e HEAD:scripts/appimage-catalog-gate.sh 2>/dev/null; then
+            regime=selfcontained
+          else
+            regime=legacy
+          fi
+          echo "regime=$regime" >> "$GITHUB_OUTPUT"
+          echo "AppImage regime for $TAG: $regime"
+        env:
+          TAG: ${{ inputs.tag }}
 
   linux:
     name: Rebuild from tag (Linux)
@@ -174,6 +200,8 @@ jobs:
       - name: Install the .deb on Ubuntu 22.04
         run: sh verifier/scripts/linux-install-smoke.sh src-tauri/target/release/bundle/linux --deb
 
+      # A legacy tag's build also writes the AppImage, its .zsync and its
+      # .sig; a self-contained tag's build writes the .deb and .rpm only.
       - name: Keep the Linux packages for the Windows job
         uses: actions/upload-artifact@v7
         with:
@@ -187,12 +215,71 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # The self-contained AppImage, built from the .deb above on Arch Linux: the
+  # image carries WebKitGTK, GTK 3, the tray library, Ghostscript, the time
+  # zone database and the C library from the Arch packages current that day,
+  # within the allowlist scripts/appimage-packages.tsv. The build refuses an
+  # image that fails the contents gate (scripts/verify-appimage-contents.sh)
+  # or the image's CLI check, and --release refuses without the updater key.
+  linux-appimage:
+    name: Rebuild from tag (Linux AppImage)
+    needs: [regime, linux]
+    if: needs.regime.outputs.linux == 'true' && needs.regime.outputs.appimage == 'selfcontained'
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+
+      # The pinned tools the AppImage build fetches. Every file is re-verified
+      # by SHA-256 and size on use, so a cache hit changes no input.
+      - name: Cache the pinned AppImage tools
+        uses: actions/cache@v6
+        with:
+          path: resources/linux-x86_64/.downloads
+          key: Linux-appimage-downloads-${{ hashFiles('scripts/build-appimage.sh') }}
+
+      # No version pins: the image deploys the Arch packages current that day.
+      - name: Install the Arch build packages
+        run: sh scripts/build-appimage.sh --install-packages
+
+      - name: Download the Linux packages
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-packages
+          path: linux-packages
+
+      - name: Build, check, smoke and sign the AppImage
+        run: sh scripts/build-appimage.sh --deb linux-packages/spectrapdf_*_amd64.deb --out linux-appimage --release
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+
+      # The .sig is the linux-x86_64 signature in latest.json, never an asset.
+      - name: Keep the AppImage for the Windows job
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-appimage
+          path: |
+            linux-appimage/spectrapdf_*_amd64.AppImage
+            linux-appimage/spectrapdf_*_amd64.AppImage.zsync
+            linux-appimage/spectrapdf_*_amd64.AppImage.sig
+          if-no-files-found: error
+          retention-days: 1
+
   # Verifier tooling only: the install checks and the signature check run from
   # the workflow's revision against the packages the tag built.
   linux-smoke:
     name: Install check (Linux)
-    needs: [regime, linux]
-    if: needs.regime.outputs.linux == 'true'
+    needs: [regime, linux, linux-appimage]
+    if: >-
+      !cancelled() && needs.regime.outputs.linux == 'true' && needs.linux.result == 'success' &&
+      (needs.regime.outputs.appimage != 'selfcontained' || needs.linux-appimage.result == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -214,18 +301,66 @@ jobs:
           name: linux-packages
           path: linux-packages
 
+      - name: Download the AppImage
+        if: needs.regime.outputs.appimage == 'selfcontained'
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-appimage
+          path: linux-packages
+
       - name: Fedora 44 installs the .rpm and runs the AppImage
         run: docker run --rm -v "$PWD:/w" -w /w fedora:44 sh scripts/linux-install-smoke.sh linux-packages --rpm --appimage
 
-      - name: Ubuntu 26.04 refuses the AppImage without WebKitGTK, then installs the .deb
-        run: docker run --rm -v "$PWD:/w" -w /w ubuntu:26.04 sh scripts/linux-install-smoke.sh linux-packages --expect-missing-webkit --deb --appimage
+      - name: Ubuntu 26.04 runs the AppImage without WebKitGTK and GTK 3, then installs the .deb
+        if: needs.regime.outputs.appimage == 'selfcontained'
+        run: docker run --rm -v "$PWD:/w" -w /w ubuntu:26.04 sh scripts/linux-install-smoke.sh linux-packages --bare-cli --deb --appimage
+
+      - name: Ubuntu 26.04 installs the .deb, then runs the legacy AppImage
+        if: needs.regime.outputs.appimage != 'selfcontained'
+        run: docker run --rm -v "$PWD:/w" -w /w ubuntu:26.04 sh scripts/linux-install-smoke.sh linux-packages --deb --appimage
+
+  # The AppImage catalog's own checks, on a base Ubuntu 22.04 system without
+  # WebKitGTK or GTK 3: the catalog's AppDir lint, its C library rating
+  # (X-AppImage-Self-Contained=true), a window under firejail on Xvfb, and the
+  # catalog's screenshot check. Every catalog file is pinned by SHA-256 in the
+  # script. The gate mounts the image with FUSE and installs a setuid
+  # firejail, so it runs on the runner itself, as root.
+  linux-appimage-catalog:
+    name: Catalog check (Linux AppImage)
+    needs: [regime, linux-appimage]
+    if: needs.regime.outputs.linux == 'true' && needs.regime.outputs.appimage == 'selfcontained'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/appimage-catalog-gate.sh
+            /scripts/posix-common.sh
+
+      - name: Download the AppImage
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-appimage
+          path: linux-appimage
+
+      - name: The AppImage catalog's checks pass without WebKitGTK and GTK 3
+        run: |
+          chmod 0755 linux-appimage/spectrapdf_*_amd64.AppImage
+          sudo sh scripts/appimage-catalog-gate.sh linux-appimage/spectrapdf_*_amd64.AppImage --work "$RUNNER_TEMP/appimage-catalog-gate"
 
   release:
     name: Rebuild & publish from tag (Windows)
-    needs: [regime, linux, linux-smoke]
+    needs: [regime, linux, linux-appimage, linux-smoke, linux-appimage-catalog]
     if: >-
       !cancelled() && needs.regime.result == 'success' &&
-      (needs.regime.outputs.linux != 'true' || needs.linux-smoke.result == 'success')
+      (needs.regime.outputs.linux != 'true' || (needs.linux-smoke.result == 'success' &&
+      (needs.regime.outputs.appimage != 'selfcontained' ||
+      (needs.linux-appimage.result == 'success' && needs.linux-appimage-catalog.result == 'success'))))
     runs-on: windows-latest
     # Gates the OIDC federated credential: the app registration trusts this
     # repository only through this environment.
@@ -546,6 +681,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: linux-packages
+          path: src-tauri/target/release/bundle/linux
+
+      - name: Download the Linux AppImage
+        if: needs.regime.outputs.linux == 'true' && needs.regime.outputs.appimage == 'selfcontained'
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-appimage
           path: src-tauri/target/release/bundle/linux
 
       - name: Upload the Linux packages to the draft

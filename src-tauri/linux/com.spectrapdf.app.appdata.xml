@@ -16,9 +16,7 @@
   <launchable type="desktop-id">spectrapdf.desktop</launchable>
   <url type="homepage">https://github.com/jasonulbright/Spectra-PDF</url>
   <url type="bugtracker">https://github.com/jasonulbright/Spectra-PDF/issues</url>
-  <developer id="com.spectrapdf">
-    <name>Jason Ulbright</name>
-  </developer>
+  <developer_name>Jason Ulbright</developer_name>
   <categories>
     <category>Office</category>
     <category>Viewer</category>
@@ -27,5 +25,7 @@
     <binary>spectrapdf</binary>
     <mediatype>application/pdf</mediatype>
   </provides>
-  <content_rating type="oars-1.1"/>
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-info">none</content_attribute>
+  </content_rating>
 </component>

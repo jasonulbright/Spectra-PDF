@@ -76,8 +76,10 @@ src/engine/** -text
 *.sh text eol=lf
 
 # The Linux packaging inputs are read on a Linux host from the same checkout:
-# AppRun is a POSIX shell script without the .sh suffix, and the desktop entry
-# and AppStream files are copied into the packages byte for byte.
+# webkit-sandbox.hook, libreoffice-launcher and python-launcher are POSIX shell
+# scripts without the .sh suffix, AppRun.sh is copied into the AppImage as it
+# is, image-exec.c is compiled into it, and the desktop entry and AppStream
+# files are copied into the packages byte for byte.
 
 src-tauri/linux/** text eol=lf
 keys/*.asc text eol=lf

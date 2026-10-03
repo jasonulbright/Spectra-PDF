@@ -1,0 +1,35 @@
+#!/bin/sh
+# The AppImage's LibreOffice entry point, installed as
+# lib/libreoffice-launcher/program/soffice with share/ linked to the payload's
+# libreoffice/share, so the engine finds the payload fonts at ../../share.
+# The official LibreOffice build loads libdbus, libcups and the X11 and cairo
+# libraries from the host; this starts soffice.bin on the image's dynamic
+# loader with the image's libraries, so a host without them converts too.
+# lib/image-exec moves the payload programs LibreOffice starts itself
+# (xpdfimport for PDF import) onto the same loader.
+# soffice.bin exits with 81 after it creates a user profile and must start
+# again; the shipped soffice script leaves that to oosplash.
+
+program="$(dirname "$(readlink -f "$0")")"
+root="${program%/lib/libreoffice-launcher/program}"
+office="$root/lib/spectrapdf/libreoffice/program"
+image="$root/lib"
+while IFS= read -r dir; do
+  case "$dir" in
+    "+"/*) image="$image:$root/lib${dir#+}" ;;
+  esac
+done < "$root/lib/lib.path"
+SAL_ENABLE_FILE_LOCKING=1
+SPECTRAPDF_IMAGE_ROOT="$root"
+SPECTRAPDF_IMAGE_EXEC="$root/lib/image-exec/image-exec.so"
+SPECTRAPDF_IMAGE_LIBRARY_PATH="$image"
+export SAL_ENABLE_FILE_LOCKING SPECTRAPDF_IMAGE_ROOT SPECTRAPDF_IMAGE_EXEC SPECTRAPDF_IMAGE_LIBRARY_PATH
+
+attempt=1
+while :; do
+  "$root/lib/ld-linux-x86-64.so.2" --preload "$SPECTRAPDF_IMAGE_EXEC" \
+    --library-path "$office:$image" "$office/soffice.bin" "$@"
+  status=$?
+  [ "$status" -eq 81 ] && [ "$attempt" -lt 3 ] || exit "$status"
+  attempt=$((attempt + 1))
+done

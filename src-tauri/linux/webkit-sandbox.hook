@@ -1,0 +1,14 @@
+#!/bin/sh
+# AppRun.sh sources this before the application starts, under set -e.
+# WebKitGTK starts its web processes inside bubblewrap. A host that forbids
+# unprivileged user namespaces makes every web process fail and leaves the
+# window blank. One probe of the bundled bwrap decides; on failure only this
+# run starts WebKitGTK without that sandbox. No system setting is changed.
+
+if [ -z "${WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS:-}" ] && [ -x "$APPDIR/bin/bwrap" ]; then
+  if ! "$APPDIR/bin/bwrap" --unshare-user --unshare-pid --unshare-ipc --unshare-uts --unshare-net \
+      --ro-bind / / --dev /dev --proc /proc /bin/sh -c : >/dev/null 2>&1; then
+    export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+    >&2 echo "Spectra PDF: this system does not allow unprivileged user namespaces; web content runs without the WebKitGTK sandbox"
+  fi
+fi

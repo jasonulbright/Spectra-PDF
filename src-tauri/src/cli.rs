@@ -2785,7 +2785,7 @@ fn exe_dir() -> PathBuf {
 }
 
 fn resolve_python() -> PathBuf {
-    exe_dir().join(crate::platform::python_relative())
+    crate::engine::image_python().unwrap_or_else(|| exe_dir().join(crate::platform::python_relative()))
 }
 
 fn resolve_engine_script() -> PathBuf {
@@ -2904,13 +2904,18 @@ fn parse_page_numbers(pages: &str) -> Result<Vec<i64>, String> {
     Ok(parsed)
 }
 
-/// LibreOffice's `soffice` for Office export. Prefers the vendored copy
+/// LibreOffice's `soffice` for Office export. Inside an AppImage this is the
+/// image's launcher: the payload's own `soffice` needs host libraries a bare
+/// system lacks. Otherwise it prefers the vendored copy
 /// (resources/libreoffice) and falls back to a standard system install — the
 /// runtime is large and assembled by a setup script (gitignored like the gs /
 /// python runtimes), so a dev machine without the bundle still exports against
 /// an installed LibreOffice. Returns "" when none is found; the engine then
 /// refuses the export with a clear message rather than crashing.
 fn resolve_soffice() -> String {
+    if let Some(launcher) = crate::engine::image_soffice() {
+        return launcher.to_string_lossy().to_string();
+    }
     let bundled = exe_dir().join(crate::platform::soffice_relative());
     if bundled.is_file() {
         return bundled.to_string_lossy().to_string();

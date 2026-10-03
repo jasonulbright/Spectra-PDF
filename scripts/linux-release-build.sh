@@ -1,20 +1,22 @@
 #!/bin/sh
 # Builds the Linux x86-64 release packages: provisions every vendored tree,
-# builds the .deb and .rpm with Tauri, assembles the AppImage from the .deb,
-# signs, and runs the built CLI against the fixture from each package.
+# builds the .deb and .rpm with Tauri, checks the .rpm signature, runs the
+# payload gate on the .deb's payload (it runs on the host's C library: no ELF
+# file above the SPECTRA_GLIBC_FLOOR symbol version, no stray Windows PE file,
+# no dangling link), and runs the built CLI from the .deb payload against the
+# fixture. The AppImage is built
+# from this .deb by scripts/build-appimage.sh on an Arch Linux host.
 #
 #   sh scripts/linux-release-build.sh            local build; signing optional
 #   sh scripts/linux-release-build.sh --release  release build; refuses unsigned
 #
-# Output: src-tauri/target/release/bundle/linux/ holds the AppImage, its .zsync
-# and its updater .sig, the .deb and the .rpm.
+# Output: src-tauri/target/release/bundle/linux/ holds the .deb and the .rpm.
 #
-# TAURI_SIGNING_PRIVATE_KEY (and _PASSWORD) sign the AppImage for the updater
-# manifest. TAURI_SIGNING_RPM_KEY (and _PASSPHRASE) is read by the Tauri RPM
-# bundler, which signs the package. This script checks that the signature is
-# present; scripts/verify-rpm-signature.sh checks it against
+# TAURI_SIGNING_RPM_KEY (and _PASSPHRASE) is read by the Tauri RPM bundler,
+# which signs the package. This script checks that the signature is present;
+# scripts/verify-rpm-signature.sh checks it against
 # keys/spectrapdf-rpm-signing.pub.asc on rpm 4.18 or newer. A release build
-# requires both keys, the rpm tool and the configured glibc floor 2.35.
+# requires that key, the rpm tool and the configured glibc floor 2.35.
 
 . "$(dirname "$0")/posix-common.sh"
 
@@ -31,10 +33,9 @@ BUNDLE="$TARGET_ROOT/release/bundle"
 OUT="$BUNDLE/linux"
 FIXTURE="$REPO_ROOT/tests/fixtures/sample.pdf"
 
-require_tool curl sha256sum tar dpkg-deb readelf objdump objcopy python3 node npx
+require_tool curl sha256sum tar dpkg-deb readelf objdump python3 node npx
 [ -f "$RPM_PUBLIC_KEY" ] || die "missing $RPM_PUBLIC_KEY"
 if [ "$RELEASE" -eq 1 ]; then
-  [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] || die "a release build needs TAURI_SIGNING_PRIVATE_KEY (updater signature)"
   [ -n "${TAURI_SIGNING_RPM_KEY:-}" ] || die "a release build needs TAURI_SIGNING_RPM_KEY (RPM signature)"
   [ "${SPECTRA_GLIBC_FLOOR:-2.35}" = "2.35" ] || die "a release build runs with the glibc floor 2.35, not $SPECTRA_GLIBC_FLOOR"
   require_tool rpmkeys
@@ -61,7 +62,7 @@ if find "$LINUX_RESOURCES" -path "$FETCH_CACHE" -prune -o -type f -iname '*.dll'
   die "a Windows DLL is under $LINUX_RESOURCES"
 fi
 
-rm -rf "$BUNDLE/deb" "$BUNDLE/rpm" "$BUNDLE/appimage" "$OUT"
+rm -rf "$BUNDLE/deb" "$BUNDLE/rpm" "$OUT"
 (cd "$REPO_ROOT" && step npx tauri build --bundles deb,rpm) || exit 1
 
 set -- "$BUNDLE"/deb/spectrapdf_*_amd64.deb
@@ -72,14 +73,6 @@ set -- "$BUNDLE"/rpm/spectrapdf-*-1.x86_64.rpm
 RPM="$1"
 VERSION="$(dpkg-deb -f "$DEB" Version)"
 [ "$(basename "$RPM")" = "spectrapdf-$VERSION-1.x86_64.rpm" ] || die "$(basename "$RPM") does not carry the .deb version $VERSION"
-
-step sh "$REPO_ROOT/scripts/build-appimage.sh" --deb "$DEB" --out "$BUNDLE/appimage"
-APPIMAGE="$BUNDLE/appimage/spectrapdf_${VERSION}_amd64.AppImage"
-
-if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-  (cd "$REPO_ROOT" && step npx tauri signer sign "$APPIMAGE") || exit 1
-  [ -s "$APPIMAGE.sig" ] || die "tauri signer wrote no $APPIMAGE.sig"
-fi
 
 if [ -n "${TAURI_SIGNING_RPM_KEY:-}" ]; then
   report="$(rpmkeys -Kv "$RPM" 2>&1 || true)"
@@ -105,13 +98,11 @@ work="$BUNDLE/.smoke"
 rm -rf "$work"
 mkdir -p "$work/deb"
 dpkg-deb -x "$DEB" "$work/deb"
+step env SPECTRA_GLIBC_FLOOR="${SPECTRA_GLIBC_FLOOR:-2.35}" sh "$REPO_ROOT/scripts/verify-appimage-contents.sh" --deb-payload "$work/deb"
 smoke ".deb payload" "$work/deb/usr/bin/spectrapdf"
-smoke "AppImage" env APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGE"
 rm -rf "$work"
 
 mkdir -p "$OUT"
-cp "$DEB" "$RPM" "$APPIMAGE" "$OUT/"
-[ -f "$APPIMAGE.zsync" ] && cp "$APPIMAGE.zsync" "$OUT/"
-[ -f "$APPIMAGE.sig" ] && cp "$APPIMAGE.sig" "$OUT/"
+cp "$DEB" "$RPM" "$OUT/"
 echo "Done. Linux packages in $OUT:"
 (cd "$OUT" && ls -l)
