@@ -1,6 +1,6 @@
 [package]
 name = "spectrapdf"
-version = "2026.1003.150"
+version = "2026.1003.151"
 description = "Open-source PDF workbench for Windows"
 authors = ["Jason Ulbright"]
 license = "MIT"
