@@ -676,6 +676,20 @@ mod tests {
     }
 
     #[test]
+    fn a_run_scheduled_from_an_image_starts_the_image_not_its_mount() {
+        let image = PathBuf::from("/home/u/Apps/Spectra_PDF.AppImage");
+        let program = crate::autostart_linux::launch_target_for(
+            Some(image.clone()),
+            Ok(PathBuf::from("/tmp/.mount_SpectrXYZ/usr/bin/spectrapdf")),
+        )
+        .unwrap();
+        let service = service_text(&program.to_string_lossy(), &profile()).unwrap();
+        let exec = unit_value(&service, "ExecStart").unwrap();
+        assert!(exec.starts_with(&quote(&image.to_string_lossy()).unwrap()), "{exec}");
+        assert!(!service.contains("/tmp/.mount_"));
+    }
+
+    #[test]
     fn the_units_read_back_as_the_profile_that_wrote_them() {
         let program = Path::new("/opt/Spectra PDF/spectrapdf");
         for p in [

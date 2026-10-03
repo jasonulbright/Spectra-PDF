@@ -83,17 +83,49 @@ fn ensure_private_as(base: &Path, dir: &Path, uid: u32) -> io::Result<()> {
     Ok(())
 }
 
+/// The private base when the cache folder cannot be used (no `HOME`, an
+/// unwritable `~/.cache`, a cache folder another account owns):
+/// `<temp>/spectrapdf-<euid>` when it is a private folder this user owns,
+/// else a fresh folder created 0700 under an unpredictable name.
+/// Never the shared temp directory itself.
+fn fallback_base(temp: &Path, uid: u32) -> Option<PathBuf> {
+    let stable = temp.join(format!("spectrapdf-{uid}"));
+    if ensure_private_as(temp, &stable, uid).is_ok() {
+        return Some(stable);
+    }
+    tempfile::Builder::new()
+        .prefix("spectrapdf-")
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir_in(temp)
+        .ok()
+        .map(tempfile::TempDir::keep)
+}
+
 /// Point `TMPDIR` at this session's private base. Called first thing in
 /// `main`, while the process has one thread.
 pub fn adopt() {
+    let uid = euid();
     let base = private_base(
         std::env::var_os("XDG_CACHE_HOME"),
         std::env::var_os("HOME").map(PathBuf::from),
-        euid(),
-    );
-    if let Some(base) = base {
-        std::env::set_var("TMPDIR", &base);
-        let _ = ensure_private_under(&base, &base.join("spectrapdf"));
+        uid,
+    )
+    .or_else(|| {
+        let fallback = fallback_base(&std::env::temp_dir(), uid);
+        if let Some(dir) = &fallback {
+            eprintln!(
+                "The per-user cache folder cannot hold temporary files; using {} instead.",
+                dir.display()
+            );
+        }
+        fallback
+    });
+    match base {
+        Some(base) => {
+            std::env::set_var("TMPDIR", &base);
+            let _ = ensure_private_under(&base, &base.join("spectrapdf"));
+        }
+        None => eprintln!("No private folder for temporary files could be created."),
     }
 }
 
@@ -145,6 +177,38 @@ mod tests {
         let base = tempfile::tempdir().unwrap();
         assert!(ensure_private_under(base.path(), Path::new("/elsewhere/x")).is_err());
         assert!(ensure_private_under(base.path(), &base.path().join("a").join("..").join("b")).is_err());
+    }
+
+    #[test]
+    fn without_the_cache_folder_the_base_is_a_private_folder_of_this_user() {
+        let uid = euid();
+        let temp = tempfile::tempdir().unwrap();
+        let stable = temp.path().join(format!("spectrapdf-{uid}"));
+        assert_eq!(fallback_base(temp.path(), uid), Some(stable.clone()));
+        assert_eq!(mode(&stable), 0o700);
+
+        // A folder of that name another account holds (here: owned by this
+        // test's uid, presented as someone else's) is not adopted; a fresh
+        // private folder is.
+        let other = uid + 1;
+        let squatted = temp.path().join(format!("spectrapdf-{other}"));
+        std::fs::create_dir(&squatted).unwrap();
+        std::fs::set_permissions(&squatted, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let fresh = fallback_base(temp.path(), other).unwrap();
+        assert_ne!(fresh, squatted);
+        assert_ne!(fresh, temp.path());
+        assert_eq!(fresh.parent(), Some(temp.path()));
+        assert_eq!(mode(&fresh), 0o700);
+        assert_eq!(std::fs::symlink_metadata(&fresh).unwrap().uid(), uid);
+
+        // A link in place of the stable folder is not followed.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let linked = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(elsewhere.path(), linked.path().join(format!("spectrapdf-{uid}")))
+            .unwrap();
+        let chosen = fallback_base(linked.path(), uid).unwrap();
+        assert!(!chosen.starts_with(elsewhere.path()));
+        assert_eq!(std::fs::read_dir(elsewhere.path()).unwrap().count(), 0);
     }
 
     #[test]

@@ -11,6 +11,10 @@
 #                            CLI check
 #   --deb                    apt-get install the .deb, then the CLI check
 #   --rpm                    verify the .rpm signature, dnf install it, then the CLI check
+#   --icc-assent             after --deb or --rpm: the installed CLI records the
+#                            colour-profile answer in the per-user configuration
+#                            folder of a scratch HOME, reads it back as accepted,
+#                            and writes nothing beside the executable
 #   --appimage               the AppImage (extract-and-run) passes the CLI check
 #   --ghostscript            the distribution's ghostscript package is installed,
 #                            `gs --version` is 10 or newer, and the installed CLI
@@ -78,6 +82,32 @@ for step in "$@"; do
       sh scripts/verify-rpm-signature.sh "$rpm"
       dnf -y install "$(installable "$rpm")"
       cli_check ".rpm" /usr/bin/spectrapdf
+      ;;
+    --icc-assent)
+      [ -x /usr/bin/spectrapdf ] || die "--icc-assent needs --deb or --rpm first"
+      home="$(mktemp -d)"
+      record="$home/.config/com.spectrapdf.app/icc-assent.json"
+      assent() {
+        env -u XDG_CONFIG_HOME HOME="$home" /usr/bin/spectrapdf icc-assent "$@"
+      }
+      report="$(assent --status)" || die "icc-assent --status failed"
+      printf '%s\n' "$report" | grep -Eq '^  "container": "package",?$' ||
+        die "the installed copy is not the package container:
+$report"
+      printf '%s\n' "$report" | grep -Eq '^  "assent": "unrecorded",?$' ||
+        die "a fresh HOME already has an answer:
+$report"
+      assent --accept >/dev/null || die "icc-assent --accept failed"
+      [ -f "$record" ] || die "the answer is not in $record"
+      report="$(assent --status)" || die "icc-assent --status failed after --accept"
+      printf '%s\n' "$report" | grep -Eq '^  "assent": "accepted",?$' ||
+        die "the recorded answer does not read back as accepted:
+$report"
+      printf '%s\n' "$report" | grep -Fq "\"record\": \"$record\"" ||
+        die "the status names another record:
+$report"
+      [ ! -e /usr/bin/data ] || die "the CLI wrote beside the executable: /usr/bin/data"
+      echo "icc-assent: recorded in $record and read back as accepted"
       ;;
     --appimage)
       appimage="$(one 'spectrapdf_*_amd64.AppImage')"

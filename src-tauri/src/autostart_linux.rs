@@ -41,12 +41,19 @@ pub(crate) fn config_home(xdg: Option<PathBuf>, home: Option<PathBuf>) -> Option
 /// The program a launch of this copy runs: the AppImage file when running
 /// from one, else this executable.
 pub(crate) fn launch_target() -> Result<PathBuf, String> {
-    if let Some(image) = std::env::var_os("APPIMAGE").map(PathBuf::from) {
-        if image.is_absolute() && image.is_file() {
-            return Ok(image);
-        }
+    launch_target_for(crate::portable::appimage(), std::env::current_exe())
+}
+
+/// The image file wins over the executable: inside an AppImage the executable
+/// sits in a mount that disappears when the image exits.
+pub(crate) fn launch_target_for(
+    image: Option<PathBuf>,
+    exe: std::io::Result<PathBuf>,
+) -> Result<PathBuf, String> {
+    match image {
+        Some(image) => Ok(image),
+        None => exe.map_err(|e| format!("Cannot resolve this application's path: {e}")),
     }
-    std::env::current_exe().map_err(|e| format!("Cannot resolve this application's path: {e}"))
 }
 
 /// One argument of an `Exec` value: quoted, field-code escaped, then escaped
@@ -274,6 +281,18 @@ mod tests {
         assert_eq!(config_home(None, home), Some("/home/u/.config".into()));
         assert_eq!(config_home(None, None), None);
         assert_eq!(config_home(None, Some("rel".into())), None);
+    }
+
+    #[test]
+    fn a_launch_from_an_image_names_the_image_not_its_mount() {
+        let image = PathBuf::from("/home/u/Apps/Spectra_PDF.AppImage");
+        let mounted = Ok(PathBuf::from("/tmp/.mount_SpectrXYZ/usr/bin/spectrapdf"));
+        assert_eq!(launch_target_for(Some(image.clone()), mounted), Ok(image));
+        assert_eq!(
+            launch_target_for(None, Ok(PathBuf::from("/usr/bin/spectrapdf"))),
+            Ok(PathBuf::from("/usr/bin/spectrapdf"))
+        );
+        assert!(launch_target_for(None, Err(std::io::Error::other("gone"))).is_err());
     }
 
     #[test]

@@ -28,12 +28,17 @@ import { accessSync, constants, existsSync, mkdirSync, rmSync, writeFileSync } f
 import { createServer } from 'node:net';
 import { basename, dirname, resolve } from 'node:path';
 import { config as windowsConfig } from './wdio.conf';
+import {
+  APP_DATA_ROOT,
+  E2E_XDG_CONFIG_HOME,
+  E2E_XDG_DATA_HOME,
+  ICC_ASSENT_RECORD,
+} from './support/app-data';
 
 const REPO_ROOT = resolve(__dirname, '..');
 const TARGET_DIR = process.env.CARGO_TARGET_DIR ?? resolve(REPO_ROOT, 'src-tauri', 'target');
 const APP_BINARY = resolve(TARGET_DIR, 'debug', 'spectrapdf');
 const TAURI_DRIVER_PORT = 4444;
-const PORTABLE_DATA = resolve(dirname(APP_BINARY), 'data');
 // Fits a single 1080p monitor at its origin, whatever the desktop layout.
 const WINDOW_RECT = { x: 0, y: 0, width: 1600, height: 1000 } as const;
 
@@ -153,13 +158,10 @@ export const config: WebdriverIO.Config = {
           'install the distribution package.',
       );
     }
-    // The same answered colour-profile baseline the Windows run seeds.
-    const portableData = PORTABLE_DATA;
-    mkdirSync(portableData, { recursive: true });
-    writeFileSync(
-      resolve(portableData, 'icc-assent.json'),
-      '{\n  "adobeIccEulaAccepted": true\n}\n',
-    );
+    // The same answered colour-profile baseline the Windows run seeds, in
+    // the per-user configuration directory the binary reads on Linux.
+    mkdirSync(dirname(ICC_ASSENT_RECORD), { recursive: true });
+    writeFileSync(ICC_ASSENT_RECORD, '{\n  "adobeIccEulaAccepted": true\n}\n');
   },
   beforeSession: async (_config, _caps, specs: string[]) => {
     await stopDriver();
@@ -167,8 +169,15 @@ export const config: WebdriverIO.Config = {
     await requireFreeDriverPort();
     // A restored rectangle from an earlier session can span every monitor:
     // each session starts from the default placement instead.
-    rmSync(resolve(PORTABLE_DATA, 'session.json'), { force: true });
-    const env: NodeJS.ProcessEnv = { ...process.env, SPECTRAPDF_E2E: '1' };
+    rmSync(resolve(APP_DATA_ROOT, 'session.json'), { force: true });
+    // The binary keeps no state beside itself on Linux; these keep its
+    // per-user state out of the developer's home.
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      SPECTRAPDF_E2E: '1',
+      XDG_CONFIG_HOME: E2E_XDG_CONFIG_HOME,
+      XDG_DATA_HOME: E2E_XDG_DATA_HOME,
+    };
     if (specs?.some((s) => s.includes('backdrop-fallback'))) {
       env.SPECTRAPDF_E2E_FORCE_OPAQUE = '1';
     }

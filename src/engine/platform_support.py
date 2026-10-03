@@ -337,3 +337,66 @@ def run(args, **kwargs):
 
     args, kwargs = _image_spawn(args, kwargs)
     return subprocess.run(args, **kwargs, **spawn_options())
+
+
+# ── cache folders under the temp directory ─────────────────────────────────
+#
+# On a POSIX host the temp directory can be shared by every account. A cache
+# folder there that another account created first, or a file another account
+# placed in it, would let that account choose what the engine reads back as a
+# cached result. Each folder is created 0700 and checked without following a
+# symbolic link: a folder, owned by the effective user, with no bits for
+# anyone else. A folder this user owns with looser bits is tightened; anything
+# else is a refusal. The Windows temp directory is per-user.
+
+_CACHE_ROOT_NAME = "spectrapdf"
+_OTHERS = 0o077
+
+
+def _owned_by_this_user(meta: os.stat_result) -> bool:
+    return meta.st_uid == os.geteuid()
+
+
+def ensure_private_dir(path: Path) -> None:
+    """Create `path` 0700 if absent, then refuse unless this user owns it as a
+    real folder; loose permission bits of an owned folder are tightened."""
+    import stat
+
+    try:
+        os.mkdir(path, 0o700)
+    except FileExistsError:
+        pass
+    meta = os.lstat(path)
+    if not stat.S_ISDIR(meta.st_mode) or not _owned_by_this_user(meta):
+        raise PermissionError(f"{path} is not a folder this user owns")
+    if stat.S_IMODE(meta.st_mode) & _OTHERS:
+        os.chmod(path, 0o700)
+
+
+def private_cache_dir(name: str) -> Path:
+    """`<temp>/spectrapdf/<name>`, private to this user."""
+    import tempfile
+
+    root = Path(tempfile.gettempdir()) / _CACHE_ROOT_NAME
+    folder = root / name
+    if IS_WINDOWS:
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+    ensure_private_dir(root)
+    ensure_private_dir(folder)
+    return folder
+
+
+def owned_entry(path: Path, *, directory: bool) -> bool:
+    """Whether `path` is a real folder (or regular file) this user owns, never
+    a link. Under the per-user Windows temp directory the kind decides."""
+    import stat
+
+    try:
+        meta = os.lstat(path)
+    except OSError:
+        return False
+    kind = stat.S_ISDIR if directory else stat.S_ISREG
+    if not kind(meta.st_mode):
+        return False
+    return IS_WINDOWS or _owned_by_this_user(meta)

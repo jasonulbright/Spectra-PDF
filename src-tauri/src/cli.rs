@@ -333,6 +333,11 @@ pub enum CliCommand {
     /// Report the Ghostscript this command line resolves (JSON: available,
     /// path, version, reason, detail, source); exits 1 when none is usable
     GsStatus,
+    /// Report or record the answer to the bundled colour-profile licence
+    /// (JSON: container, assent, record). The licence text is the file
+    /// `Adobe-Color-Profile-License.txt` in the `icc` resource folder. An
+    /// installed copy carries the installer's answer and refuses a new one
+    IccAssent(IccAssentArgs),
     /// List connected scanners (JSON: ids + names)
     Scanners(ScannersArgs),
     /// Acquire pages from a scanner straight into a PDF
@@ -405,6 +410,25 @@ pub struct VirtualPrinterArgs {
     /// Both actions need elevation
     #[arg(value_enum)]
     pub action: crate::print_to_pdf::CliAction,
+}
+
+#[derive(Args)]
+#[command(group(
+    ArgGroup::new("icc_answer")
+        .args(["accept", "decline", "status"])
+        .required(true)
+        .multiple(false)
+))]
+pub struct IccAssentArgs {
+    /// Accept the colour-profile licence and record the answer
+    #[arg(long)]
+    pub accept: bool,
+    /// Decline the colour-profile licence and record the answer
+    #[arg(long)]
+    pub decline: bool,
+    /// Report the recorded answer without changing it
+    #[arg(long)]
+    pub status: bool,
 }
 
 #[derive(Args)]
@@ -2817,6 +2841,41 @@ fn gs_status(explicit: Option<&str>, bundled: Option<&Path>) -> i32 {
     i32::from(!answer.available)
 }
 
+/// The colour-profile answer through the same resolver the window and the
+/// engine environment use, so a recorded answer reads back here exactly as
+/// the next launch reads it.
+fn icc_assent(args: &IccAssentArgs) -> i32 {
+    if args.accept || args.decline {
+        if let Err(refusal) = crate::portable::record_running_assent(args.accept) {
+            eprintln!("error: {refusal}");
+            return 1;
+        }
+    }
+    match crate::portable::assent_status() {
+        Ok(status) => {
+            println!("{}", serde_json::to_string_pretty(&icc_assent_report(&status)).unwrap());
+            0
+        }
+        Err(refusal) => {
+            eprintln!("error: {refusal}");
+            1
+        }
+    }
+}
+
+fn icc_assent_report(status: &crate::portable::AssentStatus) -> serde_json::Value {
+    let container = match status.container {
+        crate::portable::Container::Installed => "installed",
+        crate::portable::Container::Package => "package",
+        crate::portable::Container::Portable => "portable",
+    };
+    serde_json::json!({
+        "container": container,
+        "assent": status.assent,
+        "record": status.record.as_ref().map(|path| path.to_string_lossy().into_owned()),
+    })
+}
+
 /// A PROBED Ghostscript, or the one named error every gs subcommand reports.
 ///
 /// One resolver for all 29 gs-needing subcommands: the error text is written
@@ -3206,6 +3265,7 @@ fn command_gs_need(command: &CliCommand) -> GsNeed {
         | C::Check(_)
         | C::Printers(_)
         | C::GsStatus
+        | C::IccAssent(_)
         | C::Scanners(_)
         | C::ScanTest(_)
         | C::ShellMenu(_)
@@ -4231,6 +4291,10 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
         return gs_status(explicit_gs().as_deref(), bundled_gs_candidate().as_deref());
     }
 
+    if let CliCommand::IccAssent(args) = &command {
+        return icc_assent(args);
+    }
+
     // Scanner enumeration/capabilities are pure WIA or SANE — no Python
     // engine to spawn, and the session store closes its devices when it
     // drops here.
@@ -4494,6 +4558,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         // Handled in run() before the engine spawns.
         CliCommand::Printers(_) => unreachable!("printers is dispatched before engine start"),
         CliCommand::GsStatus => unreachable!("gs-status is dispatched before engine start"),
+        CliCommand::IccAssent(_) => unreachable!("icc-assent is dispatched before engine start"),
         CliCommand::Scanners(_) => unreachable!("scanners is dispatched before engine start"),
         CliCommand::ScanTest(_) => unreachable!("scan-test is dispatched before engine start"),
         CliCommand::ShellMenu(_) => unreachable!("shell-menu is dispatched before engine start"),
@@ -6983,6 +7048,54 @@ mod tests {
             Some("The File Explorer context menu is not available on this platform".to_string())
         );
         assert_eq!(refusal(&["spectrapdf", "shell-menu", "register-user"], true), None);
+    }
+
+    #[test]
+    fn the_icc_assent_subcommand_takes_exactly_one_answer() {
+        assert_eq!(classify(&["spectrapdf", "icc-assent", "--status"]), LaunchMode::Parse);
+        for (flag, accept, decline, status) in [
+            ("--accept", true, false, false),
+            ("--decline", false, true, false),
+            ("--status", false, false, true),
+        ] {
+            match parse(&["spectrapdf", "icc-assent", flag]).command {
+                Some(CliCommand::IccAssent(args)) => {
+                    assert_eq!((args.accept, args.decline, args.status), (accept, decline, status))
+                }
+                _ => panic!("{flag} did not parse as icc-assent"),
+            }
+        }
+        assert!(Cli::try_parse_from(["spectrapdf", "icc-assent"]).is_err());
+        assert!(Cli::try_parse_from(["spectrapdf", "icc-assent", "--accept", "--decline"]).is_err());
+        assert!(Cli::try_parse_from(["spectrapdf", "icc-assent", "--accept", "--status"]).is_err());
+        assert_eq!(refusal(&["spectrapdf", "icc-assent", "--accept"], false), None);
+    }
+
+    #[test]
+    fn the_icc_assent_report_names_the_container_the_answer_and_the_record() {
+        use crate::portable::{AssentStatus, Container, IccAssent};
+        let record = std::env::temp_dir().join("icc-assent.json");
+        for (container, word) in [
+            (Container::Installed, "installed"),
+            (Container::Package, "package"),
+            (Container::Portable, "portable"),
+        ] {
+            let report = icc_assent_report(&AssentStatus {
+                container,
+                assent: IccAssent::Accepted,
+                record: Some(record.clone()),
+            });
+            assert_eq!(report["container"], word);
+            assert_eq!(report["assent"], "accepted");
+            assert_eq!(report["record"].as_str().map(PathBuf::from), Some(record.clone()));
+        }
+        let none = icc_assent_report(&AssentStatus {
+            container: Container::Package,
+            assent: IccAssent::Unrecorded,
+            record: None,
+        });
+        assert_eq!(none["assent"], "unrecorded");
+        assert!(none["record"].is_null());
     }
 
     #[test]

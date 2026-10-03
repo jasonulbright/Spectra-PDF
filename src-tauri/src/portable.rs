@@ -21,15 +21,51 @@
 //! carries its acceptance and never asks again; a portable run has no record
 //! until the first-run dialog writes one.
 //!
-//! On Linux the same record decides the same way: a distribution package lays
-//! `install-record.json` beside the executable, and anything without it is
-//! portable. An AppImage mounts read-only, so nothing can be written beside
-//! the executable; `$APPIMAGE` names the image file instead, and a portable
-//! AppImage keeps its root in the `<image>.config` or `<image>.home` folder
-//! beside that file, the directories the AppImage runtime itself treats as
-//! the portable home. An AppImage with neither folder has no portable root
-//! and uses the per-user XDG directories, exactly as the read-only-media
-//! fallback does on Windows.
+//! A Windows portable copy keeps every record — settings, session, logs, the
+//! webview data folder and the colour-profile answer — in `<exe dir>\data`.
+//! Whether that folder can be written is decided ONCE per process
+//! ([`root_decision`]), by one probe of `data` itself, and every record reads
+//! that decision. When the folder cannot be written (Program Files, read-only
+//! media), every new record goes to the per-user folders together, and the log
+//! says so once; a volume that changes mid-run moves nothing.
+//!
+//! The colour-profile answer is READ from beside the copy whenever a readable
+//! record exists there, whatever the decision: the record beside the copy wins
+//! for that copy over a per-user one, so a copy moved onto read-only media
+//! keeps the answer it carries, and a new answer that record would shadow is
+//! refused by name. Other records follow the decision for reads as well as
+//! writes (see [`data_root`]).
+//!
+//! On Linux the executable's directory is never a state root, whoever runs
+//! the app. Linux has two more shapes:
+//!
+//! - A distribution package (.deb, .rpm) is [`Container::Package`]. It has no
+//!   installer dialog and no install record, and its executable directory
+//!   (`/usr/bin`) belongs to the system. The package is recognised by its
+//!   layout, the same layout the resource resolver follows: an executable
+//!   whose `../lib/<product>` resource tree exists, outside an AppImage. An
+//!   inherited `$APPIMAGE` does not make a package an AppImage: the variable
+//!   counts only while this executable runs from an image mount. The
+//!   app asks for the colour-profile answer on first run and records it in
+//!   the per-user configuration directory (`$XDG_CONFIG_HOME`, default
+//!   `~/.config`, under the bundle identifier), which is the directory Tauri's
+//!   `app_config_dir` names. Every other per-user root is the standard one.
+//! - An AppImage mounts read-only and stays [`Container::Portable`] with no
+//!   root beside the executable. `$APPIMAGE` names the image file, and a
+//!   portable AppImage keeps its root in the `<image>.config` or
+//!   `<image>.home` folder beside that file, the directories the AppImage
+//!   runtime itself treats as the portable home. An AppImage with neither
+//!   folder has no portable root: its assent record and every other root are
+//!   the per-user ones, as for a package.
+//! - Any other tree (a build output, an extracted archive) is
+//!   [`Container::Portable`] with no portable root: the per-user folders.
+//!
+//! An executable path that cannot be resolved is a refusal, never the working
+//! directory. One resolver ([`assent_read_path`]) answers the assent question
+//! for the window, the CLI and the engine environment ([`ICC_ASSENT_ENV`]), so
+//! the answer read back is always the answer written. A status query and an
+//! engine spawn create nothing: they read the process's decision when it has
+//! been made, else probe without creating the portable root.
 
 use std::path::{Path, PathBuf};
 use tauri::Manager;
@@ -83,8 +119,19 @@ pub const WEBVIEW2_DOWNLOAD_URL: &str =
 pub enum Container {
     /// Laid down by the NSIS installer; carries `install-record.json`.
     Installed,
-    /// Extracted from the portable zip, or a `cargo build` tree.
+    /// A Linux distribution package: its executable directory is not
+    /// writable, and every record lives in a per-user directory.
+    Package,
+    /// Extracted from the portable zip, an AppImage, or a `cargo build` tree.
     Portable,
+}
+
+impl Container {
+    /// Whether the app presents the colour-profile licence itself. Only the
+    /// Windows installer presents it on the app's behalf.
+    pub fn asks_in_app(self) -> bool {
+        self != Container::Installed
+    }
 }
 
 /// Whether the Adobe colour-profile EULA has been assented to, and how.
@@ -111,8 +158,9 @@ impl IccAssent {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssentState {
-    /// True in the portable container. The installed container never presents
-    /// the dialog, because its record always exists.
+    /// True when the app presents the dialog itself ([`Container::asks_in_app`]):
+    /// the portable and package containers. The installed container never
+    /// presents it, because its record always exists.
     pub portable: bool,
     pub assent: IccAssent,
     /// The licence text file that must be presented, or "" when it is missing
@@ -130,45 +178,61 @@ pub struct AssentState {
 /// windowed build reaches the same tree through Tauri's `resource_dir()`. A
 /// portable copy therefore needs no new path machinery; it needs only the
 /// writable root below.
-pub fn exe_dir() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(Path::to_path_buf))
-        .unwrap_or_else(|| PathBuf::from("."))
+///
+/// An executable path that cannot be resolved is a refusal: the working
+/// directory is never a stand-in, because every root below would then follow
+/// whatever folder the process was started from.
+pub fn exe_dir() -> Result<PathBuf, String> {
+    exe_dir_from(std::env::current_exe())
+}
+
+fn exe_dir_from(exe: std::io::Result<PathBuf>) -> Result<PathBuf, String> {
+    let exe = exe.map_err(|e| format!("Cannot resolve this application's path: {e}"))?;
+    exe.parent()
+        .filter(|dir| dir.is_absolute())
+        .map(Path::to_path_buf)
+        .ok_or_else(|| format!("Cannot resolve the folder of {}.", exe.display()))
 }
 
 // ── container detection ────────────────────────────────────────────────────
 
-/// Pure over a payload directory, so the decision is testable without an
-/// installer. See the module docstring for why presence-of-a-file rather than
-/// a path shape.
-pub fn container_at(dir: &Path) -> Container {
+/// Pure over a payload directory and the running image, so the decision is
+/// testable without an installer. See the module docstring for why
+/// presence-of-a-file rather than a path shape, and why a Linux package is
+/// recognised by its resource layout.
+pub fn container_for(dir: &Path, appimage: Option<&Path>) -> Container {
     if dir.join(INSTALL_RECORD).is_file() {
         Container::Installed
+    } else if cfg!(target_os = "linux")
+        && appimage.is_none()
+        && crate::platform::package_resource_root(dir).is_some()
+    {
+        Container::Package
     } else {
         Container::Portable
     }
 }
 
-pub fn container() -> Container {
-    container_at(&exe_dir())
+pub fn container() -> Result<Container, String> {
+    exe_dir().map(|dir| container_for(&dir, appimage().as_deref()))
 }
 
-pub fn is_portable() -> bool {
-    container() == Container::Portable
+pub fn is_portable() -> Result<bool, String> {
+    container().map(|container| container == Container::Portable)
 }
 
 // ── the portable root ──────────────────────────────────────────────────────
 
 /// The portable container's writable root, or None when it has none.
 ///
-/// Pure over the image path so both layouts are pinnable. Without an image the
-/// root is `<exe dir>/data`, as in the Windows zip. With one, the root is the
-/// first of `<image>.config` and `<image>.home` that exists as a folder; the
-/// user creates one of them to make an AppImage portable.
+/// Pure over the image path so every layout is pinnable. On Windows, without
+/// an image, the root is `<exe dir>\data`, as in the zip. On Linux the
+/// executable's directory is never a root: only an AppImage has one, the
+/// first of `<image>.config` and `<image>.home` that exists as a folder,
+/// which the user creates to make the image portable.
 pub fn portable_root_for(dir: &Path, appimage: Option<&Path>) -> Option<PathBuf> {
     let Some(image) = appimage else {
-        return Some(dir.join(PORTABLE_DATA_DIR));
+        return (!cfg!(target_os = "linux")).then(|| dir.join(PORTABLE_DATA_DIR));
     };
     [".config", ".home"].into_iter().find_map(|suffix| {
         let mut beside = image.as_os_str().to_os_string();
@@ -179,21 +243,27 @@ pub fn portable_root_for(dir: &Path, appimage: Option<&Path>) -> Option<PathBuf>
 }
 
 /// The running AppImage file, when this process runs from one.
+///
+/// `$APPIMAGE` alone is not proof: a process started from another AppImage's
+/// environment (a launcher, a terminal opened from one) inherits that image's
+/// variable, and trusting it would put this copy's state in the other image's
+/// portable folder and point autostart and scheduled runs at the other image.
+/// The variable counts only while this executable runs from an image mount
+/// ([`crate::engine::image_root`]).
 pub fn appimage() -> Option<PathBuf> {
-    #[cfg(target_os = "linux")]
-    {
-        std::env::var_os(APPIMAGE_ENV)
-            .map(PathBuf::from)
-            .filter(|image| image.is_absolute() && image.is_file())
+    if !cfg!(target_os = "linux") {
+        return None;
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        None
-    }
+    appimage_from(
+        std::env::var_os(APPIMAGE_ENV).map(PathBuf::from),
+        crate::engine::image_root().is_some(),
+    )
 }
 
-pub fn portable_root(dir: &Path) -> Option<PathBuf> {
-    portable_root_for(dir, appimage().as_deref())
+pub(crate) fn appimage_from(image: Option<PathBuf>, runs_from_image: bool) -> Option<PathBuf> {
+    image
+        .filter(|_| runs_from_image)
+        .filter(|image| image.is_absolute() && image.is_file())
 }
 
 // ── the XDG base directories ───────────────────────────────────────────────
@@ -235,17 +305,140 @@ pub fn xdg_state_home() -> Option<PathBuf> {
     xdg_base("XDG_STATE_HOME", ".local/state")
 }
 
-/// Where a portable copy with no portable root records its assent: the
-/// per-user configuration folder. Only a Linux AppImage without a portable
-/// folder reaches this; a Windows portable copy always has its root.
-fn assent_record_dir(dir: &Path) -> Option<PathBuf> {
-    portable_root(dir).or_else(|| {
-        if cfg!(target_os = "linux") {
-            xdg_config_home().map(|config| config.join(APP_IDENTIFIER))
-        } else {
-            None
+/// The per-user configuration directory, the one Tauri's `app_config_dir`
+/// names: `$XDG_CONFIG_HOME` (default `~/.config`) on Linux, the roaming
+/// application data folder on Windows, under the bundle identifier. Resolved
+/// without an app handle so the CLI and the engine environment read the same
+/// place the window writes.
+pub fn user_config_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        roaming_app_data().map(|config| config.join(APP_IDENTIFIER))
+    }
+    #[cfg(not(windows))]
+    {
+        xdg_config_home().map(|config| config.join(APP_IDENTIFIER))
+    }
+}
+
+#[cfg(windows)]
+fn roaming_app_data() -> Option<PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_RoamingAppData, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
+    let path = unsafe { SHGetKnownFolderPath(&FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, None) }.ok()?;
+    let text = unsafe { path.to_string() }.ok();
+    unsafe { CoTaskMemFree(Some(path.0 as *const core::ffi::c_void)) };
+    text.map(PathBuf::from).filter(|dir| dir.is_absolute())
+}
+
+/// Where this process keeps its records. Decided once per process
+/// ([`root_decision`]) and read by every record — settings, session, logs, the
+/// webview data folder and the colour-profile answer — so a volume that fills
+/// or turns read-only mid-run cannot move some records and leave the rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RootDecision {
+    /// This container has no portable root: the per-user folders.
+    PerUser,
+    /// The portable root accepted a new file and holds every record.
+    Portable(PathBuf),
+    /// The portable root could not be written: the per-user folders hold
+    /// every new record.
+    Fallback(PathBuf),
+}
+
+impl RootDecision {
+    /// The portable root in force, or None for the per-user folders.
+    pub fn root(&self) -> Option<&Path> {
+        match self {
+            RootDecision::Portable(root) => Some(root),
+            _ => None,
         }
+    }
+}
+
+/// Pure over the container, the image and a writability probe. The probe is
+/// called once, on the portable root itself, and only when one exists.
+pub fn decide_root(
+    dir: &Path,
+    container: Container,
+    appimage: Option<&Path>,
+    writable: impl FnOnce(&Path) -> bool,
+) -> RootDecision {
+    let preferred = match container {
+        Container::Installed | Container::Package => None,
+        Container::Portable => portable_root_for(dir, appimage),
+    };
+    match preferred {
+        None => RootDecision::PerUser,
+        Some(root) if writable(&root) => RootDecision::Portable(root),
+        Some(root) => RootDecision::Fallback(root),
+    }
+}
+
+static ROOT_DECISION: std::sync::OnceLock<RootDecision> = std::sync::OnceLock::new();
+
+/// The running copy's decision, made on first use with a probe that creates
+/// the portable root. A fallback is logged once, here.
+pub fn root_decision() -> Result<&'static RootDecision, String> {
+    if let Some(decision) = ROOT_DECISION.get() {
+        return Ok(decision);
+    }
+    let dir = exe_dir()?;
+    Ok(ROOT_DECISION.get_or_init(|| {
+        let image = appimage();
+        let decision = decide_root(
+            &dir,
+            container_for(&dir, image.as_deref()),
+            image.as_deref(),
+            ensure_writable_dir,
+        );
+        if let RootDecision::Fallback(root) = &decision {
+            eprintln!(
+                "{} cannot be written; settings, records and the colour-profile answer are kept \
+                 in the per-user folders instead.",
+                root.display()
+            );
+        }
+        decision
+    }))
+}
+
+/// The running copy's decision without creating anything: the decision when
+/// this process has made one, else what it would be, from a probe that leaves
+/// the tree as it found it.
+fn root_decision_without_creating(running: &Running) -> RootDecision {
+    decision_or(ROOT_DECISION.get(), || {
+        decide_root(
+            &running.dir,
+            running.container,
+            running.appimage.as_deref(),
+            writable_without_creating,
+        )
     })
+}
+
+/// A decision this process already made always wins over a fresh probe.
+fn decision_or(made: Option<&RootDecision>, probe: impl FnOnce() -> RootDecision) -> RootDecision {
+    made.cloned().unwrap_or_else(probe)
+}
+
+/// The per-user root that takes a record when no portable root is in force.
+pub fn resolve_root(decision: &RootDecision, standard: Option<PathBuf>) -> Option<PathBuf> {
+    decision.root().map(Path::to_path_buf).or(standard)
+}
+
+/// Where a copy that asks in the app writes its answer, or None when it
+/// writes none (installed) or has nowhere to write it: the portable root in
+/// force, else the per-user configuration directory.
+pub fn assent_write_dir(
+    container: Container,
+    decision: &RootDecision,
+    user_config: Option<PathBuf>,
+) -> Option<PathBuf> {
+    match container {
+        Container::Installed => None,
+        _ => resolve_root(decision, user_config),
+    }
 }
 
 // ── the assent record ──────────────────────────────────────────────────────
@@ -285,49 +478,95 @@ fn read_accepted_flag(path: &Path) -> Option<bool> {
     value.get(ACCEPTED_KEY)?.as_bool()
 }
 
-/// The recorded assent for a payload directory, whichever container it is.
+/// The portable copy's own record, when it exists and reads as an answer.
+fn readable_portable_record(
+    dir: &Path,
+    container: Container,
+    appimage: Option<&Path>,
+) -> Option<PathBuf> {
+    if container != Container::Portable {
+        return None;
+    }
+    let record = portable_root_for(dir, appimage)?.join(ICC_ASSENT_FILE);
+    read_accepted_flag(&record).is_some().then_some(record)
+}
+
+/// The file the answer is read from.
+///
+/// Installed: the installer's record. Otherwise the record beside a portable
+/// copy whenever it exists and reads as an answer, whatever the writability
+/// decision says — a copy moved onto read-only media keeps the answer it
+/// carries. With no such record, the file at [`assent_write_dir`].
+pub fn assent_read_path(
+    dir: &Path,
+    container: Container,
+    appimage: Option<&Path>,
+    decision: &RootDecision,
+    user_config: Option<PathBuf>,
+) -> Option<PathBuf> {
+    if container == Container::Installed {
+        return Some(dir.join(INSTALL_RECORD));
+    }
+    readable_portable_record(dir, container, appimage).or_else(|| {
+        assent_write_dir(container, decision, user_config).map(|root| root.join(ICC_ASSENT_FILE))
+    })
+}
+
+/// The recorded assent, whichever container it is.
 ///
 /// The installer's record wins when it exists, because in that container it is
 /// the only record there is — the installer obtained the acceptance and the app
 /// must not re-ask. A malformed or unreadable record is `Unrecorded` rather
 /// than an assumed yes: an unreadable file has told us nothing.
-pub fn icc_assent_at(dir: &Path) -> IccAssent {
-    let record = dir.join(INSTALL_RECORD);
-    if record.is_file() {
-        return match read_accepted_flag(&record) {
-            Some(true) => IccAssent::Accepted,
-            Some(false) => IccAssent::Declined,
-            None => IccAssent::Unrecorded,
-        };
-    }
-    let Some(root) = assent_record_dir(dir) else {
+pub fn icc_assent_for(
+    dir: &Path,
+    container: Container,
+    appimage: Option<&Path>,
+    decision: &RootDecision,
+    user_config: Option<PathBuf>,
+) -> IccAssent {
+    let Some(record) = assent_read_path(dir, container, appimage, decision, user_config) else {
         return IccAssent::Unrecorded;
     };
-    match read_accepted_flag(&root.join(ICC_ASSENT_FILE)) {
+    match read_accepted_flag(&record) {
         Some(true) => IccAssent::Accepted,
         Some(false) => IccAssent::Declined,
         None => IccAssent::Unrecorded,
     }
 }
 
-pub fn icc_assent() -> IccAssent {
-    icc_assent_at(&exe_dir())
-}
-
-/// Records the user's answer in the portable container.
+/// Records the user's answer in a container that asks in the app.
 ///
 /// Refuses in the installed container rather than writing a second record: two
 /// records would give one machine two answers, and the installer's is the one
-/// the licence terms were satisfied through.
-pub fn record_icc_assent_at(dir: &Path, accepted: bool) -> Result<(), String> {
-    if container_at(dir) == Container::Installed {
+/// the licence terms were satisfied through. Refuses also when the copy
+/// carries an answer beside itself that its folder no longer lets it replace:
+/// a new answer written elsewhere would be shadowed by that record.
+pub fn record_icc_assent_for(
+    dir: &Path,
+    container: Container,
+    appimage: Option<&Path>,
+    decision: &RootDecision,
+    user_config: Option<PathBuf>,
+    accepted: bool,
+) -> Result<(), String> {
+    if container == Container::Installed {
         return Err(
             "This copy was installed, so its colour-profile licence acceptance was recorded \
              by the installer and cannot be changed here."
                 .to_string(),
         );
     }
-    let root = assent_record_dir(dir)
+    if decision.root().is_none() {
+        if let Some(record) = readable_portable_record(dir, container, appimage) {
+            return Err(format!(
+                "The colour-profile answer is recorded in {}, which cannot be written, so it \
+                 cannot be changed here.",
+                record.display()
+            ));
+        }
+    }
+    let root = assent_write_dir(container, decision, user_config)
         .ok_or_else(|| "Cannot resolve the configuration folder.".to_string())?;
     std::fs::create_dir_all(&root)
         .map_err(|e| format!("Cannot create {}: {}", root.display(), e))?;
@@ -335,6 +574,58 @@ pub fn record_icc_assent_at(dir: &Path, accepted: bool) -> Result<(), String> {
     let path = root.join(ICC_ASSENT_FILE);
     crate::staging::write_record(&path, body.as_bytes())
         .map_err(|e| format!("Cannot write {}: {}", path.display(), e))
+}
+
+/// The running copy, as the resolvers above take it.
+struct Running {
+    dir: PathBuf,
+    container: Container,
+    appimage: Option<PathBuf>,
+}
+
+fn running() -> Result<Running, String> {
+    let dir = exe_dir()?;
+    let appimage = appimage();
+    let container = container_for(&dir, appimage.as_deref());
+    Ok(Running { dir, container, appimage })
+}
+
+/// What a status query reports for the running copy: its container, its
+/// answer and the record the answer is read from. Creates nothing.
+pub struct AssentStatus {
+    pub container: Container,
+    pub assent: IccAssent,
+    pub record: Option<PathBuf>,
+}
+
+pub fn assent_status() -> Result<AssentStatus, String> {
+    let running = running()?;
+    let decision = root_decision_without_creating(&running);
+    let image = running.appimage.as_deref();
+    Ok(AssentStatus {
+        container: running.container,
+        assent: icc_assent_for(&running.dir, running.container, image, &decision, user_config_dir()),
+        record: assent_read_path(&running.dir, running.container, image, &decision, user_config_dir()),
+    })
+}
+
+/// The answer the engine is told. An executable path that cannot be resolved
+/// has no record to read, which is `Unrecorded`.
+pub fn icc_assent() -> IccAssent {
+    assent_status().map_or(IccAssent::Unrecorded, |status| status.assent)
+}
+
+/// Records the running copy's answer at the process's one root decision.
+pub fn record_running_assent(accepted: bool) -> Result<(), String> {
+    let running = running()?;
+    record_icc_assent_for(
+        &running.dir,
+        running.container,
+        running.appimage.as_deref(),
+        root_decision()?,
+        user_config_dir(),
+        accepted,
+    )
 }
 
 /// What the engine subprocess is told, as an environment value.
@@ -359,23 +650,6 @@ pub fn assent_env_value(assent: IccAssent) -> &'static str {
 
 // ── the WebView2 user data folder ──────────────────────────────────────────
 
-/// Where WebView2 keeps its user data folder, or None to leave its default.
-///
-/// Pure over the container so the decision can be pinned. Portable puts it
-/// BESIDE the app, under the one writable root: the folder holds localStorage,
-/// and localStorage is where every app setting, the recent-file list and each
-/// window's `workbench-ui`/`snap-ui`/`takeoff-ui`/`spectra-toolbar` key live —
-/// so a portable copy that left it in `%LOCALAPPDATA%` would carry its files
-/// and abandon its settings. Installed keeps WebView2's default, which is the
-/// per-user location an installed app should use and the one every prior
-/// release has written to; moving it would strand existing users' settings.
-pub fn webview_user_data_at(dir: &Path, container: Container) -> Option<PathBuf> {
-    match container {
-        Container::Installed => None,
-        Container::Portable => portable_root(dir).map(|root| root.join(WEBVIEW_DATA_DIR)),
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WebViewUserDataDecision {
     /// Leave WebView2's default alone (installed app or an explicit override).
@@ -387,49 +661,42 @@ pub enum WebViewUserDataDecision {
     PortableFallback,
 }
 
-/// Decides whether startup can keep WebView2 data beside a portable copy.
+/// Where the webview keeps its user data folder, read off the process's one
+/// root decision.
 ///
-/// The override is supplied by an administrator or test harness and takes
-/// precedence over this app's default. The writable probe is only called when
-/// the portable folder is actually needed.
+/// The folder holds localStorage, and localStorage is where every app setting,
+/// the recent-file list and each window's `workbench-ui`/`snap-ui`/
+/// `takeoff-ui`/`spectra-toolbar` key live — so a portable copy keeps it under
+/// its portable root, or it would carry its files and abandon its settings.
+/// Installed and packaged copies keep the webview's per-user default, the one
+/// every prior release has written to. The override is supplied by an
+/// administrator or test harness and outranks this app's default.
 pub fn decide_webview_user_data(
-    dir: &Path,
-    container: Container,
+    decision: &RootDecision,
     has_override: bool,
-    writable: impl FnOnce(&Path) -> bool,
 ) -> WebViewUserDataDecision {
-    if has_override || container == Container::Installed {
+    if has_override {
         return WebViewUserDataDecision::UseDefault;
     }
-    let Some(wanted) = webview_user_data_at(dir, container) else {
-        return WebViewUserDataDecision::UseDefault;
-    };
-    if writable(&wanted) {
-        WebViewUserDataDecision::SetPortable(wanted)
-    } else {
-        WebViewUserDataDecision::PortableFallback
+    match decision {
+        RootDecision::PerUser => WebViewUserDataDecision::UseDefault,
+        RootDecision::Portable(root) => {
+            WebViewUserDataDecision::SetPortable(root.join(WEBVIEW_DATA_DIR))
+        }
+        RootDecision::Fallback(_) => WebViewUserDataDecision::PortableFallback,
     }
 }
 
-/// Applies the decision to this process, before any WebView2 environment is
-/// created.
+/// Makes the process's root decision and applies it to the webview, before
+/// any WebView2 environment is created.
 ///
-/// Returns the folder actually in force, or None when WebView2's default is.
-/// A portable copy on read-only media cannot create the folder; that falls back
-/// to the default rather than failing to open a window. A native warning names
-/// that the settings will stay in this Windows profile instead of traveling
-/// with the portable copy.
-///
-/// An existing `WEBVIEW2_USER_DATA_FOLDER` in the environment is left alone:
-/// whoever set it (an administrator, a test harness) outranks this default.
+/// Returns the folder actually in force, or None when the webview's default
+/// is. A portable copy on read-only media falls back to the default rather
+/// than failing to open a window, and a native warning names that the
+/// settings will stay in this profile instead of traveling with the copy.
 pub fn apply_webview_user_data() -> Option<PathBuf> {
-    let dir = exe_dir();
-    match decide_webview_user_data(
-        &dir,
-        container_at(&dir),
-        std::env::var_os(WEBVIEW_USER_DATA_ENV).is_some(),
-        ensure_writable_dir,
-    ) {
+    let decision = root_decision().ok()?;
+    match decide_webview_user_data(decision, std::env::var_os(WEBVIEW_USER_DATA_ENV).is_some()) {
         WebViewUserDataDecision::UseDefault => None,
         WebViewUserDataDecision::SetPortable(wanted) => {
             #[cfg(not(target_os = "linux"))]
@@ -462,11 +729,24 @@ pub fn webview_data_in_force() -> Option<PathBuf> {
 /// `create_dir_all` succeeds when the directory already exists, even when its
 /// volume or permissions have since become read-only. A portable copy may be
 /// moved onto read-only media after a prior launch, so existence alone cannot
-/// decide whether WebView2 or the app can keep using the portable root.
+/// decide whether the app can keep using the portable root.
 fn ensure_writable_dir(dir: &Path) -> bool {
     if std::fs::create_dir_all(dir).is_err() {
         return false;
     }
+    probe_file_in(dir)
+}
+
+/// The same question without creating `dir`: a probe file in `dir` when it
+/// exists, else in its parent, removed before returning.
+fn writable_without_creating(dir: &Path) -> bool {
+    if dir.is_dir() {
+        return probe_file_in(dir);
+    }
+    dir.parent().is_some_and(|parent| parent.is_dir() && probe_file_in(parent))
+}
+
+fn probe_file_in(dir: &Path) -> bool {
     tempfile::Builder::new()
         .prefix(".spectrapdf-write-probe-")
         .tempfile_in(dir)
@@ -475,57 +755,30 @@ fn ensure_writable_dir(dir: &Path) -> bool {
 
 // ── the writable data root ─────────────────────────────────────────────────
 
-/// Chooses between the root beside the executable and the per-user standard
-/// one, given a probe for whether the first can actually be written.
-///
-/// Pure over the probe so both outcomes are pinnable without read-only media.
-/// `standard` is an Option because resolving the per-user directory can itself
-/// fail; when it does and the preferred root is unwritable there is no root at
-/// all, which is the None the caller reports.
-pub fn resolve_data_root(
-    preferred: Option<PathBuf>,
-    standard: Option<PathBuf>,
-    writable: impl FnOnce(&Path) -> bool,
-) -> Option<PathBuf> {
-    match preferred {
-        Some(dir) if writable(&dir) => Some(dir),
-        _ => standard,
-    }
-}
-
-/// The preferred root for a container: beside the executable when portable,
-/// the per-user standard directory when installed.
-///
-/// Installed is `None` here — "no preference, take the standard one" — so an
-/// installed copy resolves byte-identically to what every prior release wrote,
-/// with no second location for its settings to be split across.
-pub fn preferred_data_root(dir: &Path, container: Container) -> Option<PathBuf> {
-    match container {
-        Container::Installed => None,
-        Container::Portable => portable_root(dir),
-    }
-}
-
 fn root_from(standard: Option<PathBuf>, what: &str) -> Result<PathBuf, String> {
-    let dir = exe_dir();
-    let preferred = preferred_data_root(&dir, container_at(&dir));
-    resolve_data_root(preferred, standard, ensure_writable_dir)
+    resolve_root(root_decision()?, standard)
         .ok_or_else(|| format!("Cannot resolve the {what} folder."))
 }
 
-/// Where per-user state is written: `<exe dir>\data` in the portable
-/// container, the standard per-user directory otherwise.
+/// Where per-user state is written: the portable root when the process's one
+/// decision put it in force (`<exe dir>\data` on Windows, an AppImage's
+/// `<image>.config` or `<image>.home` folder on Linux), the standard per-user
+/// directory otherwise.
 ///
 /// One root for everything a portable copy must carry with it — dictionaries,
 /// batch and operation logs, the session, the pre-window startup flags, the
 /// extracted portfolio members — so a copy on a stick leaves nothing behind in
 /// the profile of whatever machine it was plugged into. It is the same root
-/// the WebView2 user data folder uses, and it inherits that folder's fallback:
-/// a copy on read-only media cannot create it, and falls back to the standard
-/// directory rather than failing the feature.
+/// the webview user data folder uses, and it shares that folder's fallback: a
+/// copy on read-only media falls back to the standard directory rather than
+/// failing the feature.
 ///
-/// Creating the root IS the writability probe, so the folder appears on the
-/// first launch that needs state and never before.
+/// After a fallback these records are read from the standard directory too,
+/// not from an older copy left in the portable root: reading some files from
+/// one root while writing them to another would split one set of records, and
+/// the startup warning already names that existing settings do not move. The
+/// colour-profile answer is the one exception ([`assent_read_path`]): it is a
+/// licence decision, and asking it again would look like a lost answer.
 ///
 /// No migration exists in either direction: a portable first run starts fresh,
 /// and an installed copy resolves exactly where it always did.
@@ -723,12 +976,12 @@ pub fn read_icc_license(icc_dir: &Path) -> Result<String, String> {
 /// What the renderer needs to decide whether to present the dialog.
 #[tauri::command]
 pub async fn icc_assent_state(app: tauri::AppHandle) -> Result<AssentState, String> {
-    let dir = exe_dir();
+    let status = assent_status()?;
     let icc = PathBuf::from(crate::engine::get_icc_path(&app));
     let license = icc.join("Adobe-Color-Profile-License.txt");
     Ok(AssentState {
-        portable: container_at(&dir) == Container::Portable,
-        assent: icc_assent_at(&dir),
+        portable: status.container.asks_in_app(),
+        assent: status.assent,
         license_path: if license.is_file() {
             license.to_string_lossy().into_owned()
         } else {
@@ -753,7 +1006,7 @@ pub async fn icc_license_text(app: tauri::AppHandle) -> Result<String, String> {
 /// before it serves a request (`engine::CredentialLedger`).
 #[tauri::command]
 pub async fn record_icc_assent(app: tauri::AppHandle, accepted: bool) -> Result<AssentState, String> {
-    record_icc_assent_at(&exe_dir(), accepted)?;
+    record_running_assent(accepted)?;
     crate::engine::restart_for_assent(&app).await;
     icc_assent_state(app).await
 }
@@ -769,15 +1022,61 @@ mod tests {
         dir
     }
 
+    fn no_probe(_: &Path) -> bool {
+        panic!("this container must not probe a folder beside its executable")
+    }
+
+    /// Every path under `root` with its bytes, for byte-identity checks.
+    fn snapshot(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut out = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    out.push((path.clone(), Vec::new()));
+                    stack.push(path);
+                } else {
+                    out.push((path.clone(), std::fs::read(&path).unwrap()));
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    fn write_answer(path: &Path, accepted: bool) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, format!("{{\"{ACCEPTED_KEY}\": {accepted}}}")).unwrap();
+    }
+
+    /// A package's tree: `usr/bin` holds the executable and `usr/lib/<product>`
+    /// the resources, with nothing writable beside the executable.
+    fn package_tree(root: &Path) -> PathBuf {
+        let bin = root.join("usr").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(root.join("usr").join("lib").join("spectrapdf")).unwrap();
+        bin
+    }
+
+    /// An image file with its `.config` portable folder beside it.
+    fn portable_image(root: &Path) -> (PathBuf, PathBuf) {
+        let image = root.join("Spectra_PDF.AppImage");
+        std::fs::write(&image, b"").unwrap();
+        let beside = root.join("Spectra_PDF.AppImage.config");
+        std::fs::create_dir_all(&beside).unwrap();
+        (image, beside.join(APP_IDENTIFIER))
+    }
+
     #[test]
     fn the_installer_marker_is_what_separates_the_containers() {
         let dir = scratch("container");
         // A zip's tree, wherever it was extracted to.
-        assert_eq!(container_at(&dir), Container::Portable);
+        assert_eq!(container_for(&dir, None), Container::Portable);
         // The same directory, once the installer's hook has run in it. Nothing
         // about the PATH changed, which is the point.
         std::fs::write(dir.join(INSTALL_RECORD), r#"{"adobeIccEulaAccepted":true}"#).unwrap();
-        assert_eq!(container_at(&dir), Container::Installed);
+        assert_eq!(container_for(&dir, None), Container::Installed);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -789,26 +1088,36 @@ mod tests {
             r#"{"installed":true,"adobeIccEulaAccepted":true}"#,
         )
         .unwrap();
-        assert_eq!(icc_assent_at(&dir), IccAssent::Accepted);
+        let decision = decide_root(&dir, Container::Installed, None, no_probe);
+        assert_eq!(decision, RootDecision::PerUser);
+        let read = || icc_assent_for(&dir, Container::Installed, None, &decision, None);
+        assert_eq!(read(), IccAssent::Accepted);
         // And it is not asked again, nor overwritten from inside the app.
-        assert!(record_icc_assent_at(&dir, false).is_err());
-        assert_eq!(icc_assent_at(&dir), IccAssent::Accepted);
+        assert!(record_icc_assent_for(&dir, Container::Installed, None, &decision, None, false).is_err());
+        assert_eq!(read(), IccAssent::Accepted);
+        assert!(!Container::Installed.asks_in_app());
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn a_portable_copy_starts_unrecorded_and_keeps_both_answers() {
         let dir = scratch("portable-assent");
-        assert_eq!(icc_assent_at(&dir), IccAssent::Unrecorded);
+        let config = dir.join("per-user").join(APP_IDENTIFIER);
+        let decision = decide_root(&dir, Container::Portable, None, ensure_writable_dir);
+        let read = || icc_assent_for(&dir, Container::Portable, None, &decision, Some(config.clone()));
+        let record = |accepted| {
+            record_icc_assent_for(&dir, Container::Portable, None, &decision, Some(config.clone()), accepted)
+        };
+        assert_eq!(read(), IccAssent::Unrecorded);
 
-        record_icc_assent_at(&dir, false).unwrap();
+        record(false).unwrap();
         // Declining is RECORDED: the dialog must not reappear every launch.
-        assert_eq!(icc_assent_at(&dir), IccAssent::Declined);
-        assert_eq!(assent_env_value(icc_assent_at(&dir)), "0");
+        assert_eq!(read(), IccAssent::Declined);
+        assert_eq!(assent_env_value(read()), "0");
 
-        record_icc_assent_at(&dir, true).unwrap();
-        assert_eq!(icc_assent_at(&dir), IccAssent::Accepted);
-        assert_eq!(assent_env_value(icc_assent_at(&dir)), "1");
+        record(true).unwrap();
+        assert_eq!(read(), IccAssent::Accepted);
+        assert_eq!(assent_env_value(read()), "1");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -821,7 +1130,9 @@ mod tests {
         let record = dir.join(PORTABLE_DATA_DIR).join(ICC_ASSENT_FILE);
         std::fs::create_dir_all(record.parent().unwrap()).unwrap();
         std::fs::write(&record, "{\n  \"adobeIccEulaAcc").unwrap();
-        assert_eq!(icc_assent_at(&dir), IccAssent::Unrecorded);
+        let decision = decide_root(&dir, Container::Portable, None, ensure_writable_dir);
+        let read = || icc_assent_for(&dir, Container::Portable, None, &decision, None);
+        assert_eq!(read(), IccAssent::Unrecorded);
         let mut writer = std::process::Command::new("cmd")
             .args(["/C", "exit 0"])
             .spawn()
@@ -830,9 +1141,9 @@ mod tests {
         let orphan = crate::staging::stage_path(&record, writer.id());
         std::fs::write(&orphan, "{\n  \"adobeIccEulaAccepted\": tr").unwrap();
 
-        record_icc_assent_at(&dir, true).unwrap();
+        record_icc_assent_for(&dir, Container::Portable, None, &decision, None, true).unwrap();
 
-        assert_eq!(icc_assent_at(&dir), IccAssent::Accepted);
+        assert_eq!(read(), IccAssent::Accepted);
         let beside: Vec<_> = std::fs::read_dir(record.parent().unwrap())
             .unwrap()
             .map(|e| e.unwrap().file_name())
@@ -845,7 +1156,10 @@ mod tests {
     fn an_unreadable_record_has_told_us_nothing() {
         let dir = scratch("garbled-assent");
         std::fs::write(dir.join(INSTALL_RECORD), "not json at all").unwrap();
-        assert_eq!(icc_assent_at(&dir), IccAssent::Unrecorded);
+        assert_eq!(
+            icc_assent_for(&dir, Container::Installed, None, &RootDecision::PerUser, None),
+            IccAssent::Unrecorded
+        );
         assert_eq!(assent_env_value(IccAssent::Unrecorded), "0");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -857,7 +1171,10 @@ mod tests {
         record.push_str(&" ".repeat(MAX_ASSENT_RECORD_BYTES as usize + 1));
         std::fs::write(dir.join(INSTALL_RECORD), record).unwrap();
 
-        assert_eq!(icc_assent_at(&dir), IccAssent::Unrecorded);
+        assert_eq!(
+            icc_assent_for(&dir, Container::Installed, None, &RootDecision::PerUser, None),
+            IccAssent::Unrecorded
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -871,91 +1188,195 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[cfg(windows)]
     #[test]
-    fn portable_keeps_its_webview_data_beside_the_app() {
+    fn a_windows_zip_decides_its_data_folder_and_an_installed_copy_does_not_probe() {
         let dir = PathBuf::from(r"D:\Tools\SpectraPDF");
+        let root = dir.join(PORTABLE_DATA_DIR);
         assert_eq!(
-            webview_user_data_at(&dir, Container::Portable),
-            Some(dir.join(PORTABLE_DATA_DIR).join(WEBVIEW_DATA_DIR)),
+            decide_root(&dir, Container::Portable, None, |probed| {
+                assert_eq!(probed, root, "the probe runs on the data folder itself");
+                true
+            }),
+            RootDecision::Portable(root.clone())
         );
-        // Installed keeps WebView2's own per-user default. Relocating it would
-        // strand every existing user's settings, which live in localStorage
-        // inside that folder.
-        assert_eq!(webview_user_data_at(&dir, Container::Installed), None);
+        assert_eq!(
+            decide_root(&dir, Container::Portable, None, |_| false),
+            RootDecision::Fallback(root)
+        );
+        assert_eq!(decide_root(&dir, Container::Installed, None, no_probe), RootDecision::PerUser);
     }
 
     #[test]
-    fn an_unwritable_portable_webview_folder_is_reported_as_a_fallback() {
-        let dir = PathBuf::from(r"E:\SpectraPDF");
-        let wanted = dir.join(PORTABLE_DATA_DIR).join(WEBVIEW_DATA_DIR);
-
+    fn the_webview_folder_follows_the_one_root_decision() {
+        let root = std::env::temp_dir().join("portable-root");
         assert_eq!(
-            decide_webview_user_data(&dir, Container::Portable, false, |path| path == wanted),
-            WebViewUserDataDecision::SetPortable(wanted.clone()),
+            decide_webview_user_data(&RootDecision::Portable(root.clone()), false),
+            WebViewUserDataDecision::SetPortable(root.join(WEBVIEW_DATA_DIR)),
         );
         assert_eq!(
-            decide_webview_user_data(&dir, Container::Portable, false, |_| false),
+            decide_webview_user_data(&RootDecision::Fallback(root.clone()), false),
             WebViewUserDataDecision::PortableFallback,
         );
+        // Installed and packaged copies keep the webview's own per-user
+        // default; relocating it would strand every existing user's settings.
         assert_eq!(
-            decide_webview_user_data(&dir, Container::Installed, false, |_| panic!(
-                "an installed copy must leave WebView2's default alone"
-            )),
+            decide_webview_user_data(&RootDecision::PerUser, false),
             WebViewUserDataDecision::UseDefault,
         );
+        // An explicit folder from an administrator or harness takes precedence.
         assert_eq!(
-            decide_webview_user_data(&dir, Container::Portable, true, |_| panic!(
-                "an explicit WebView2 folder takes precedence"
-            )),
+            decide_webview_user_data(&RootDecision::Portable(root), true),
             WebViewUserDataDecision::UseDefault,
         );
     }
 
+    /// Once made, the decision is what every record reads: a portable root
+    /// that becomes writable (or unwritable) mid-run moves nothing, because no
+    /// record probes again.
     #[test]
-    fn a_portable_copy_keeps_its_state_beside_the_exe_and_an_installed_one_does_not() {
-        let dir = PathBuf::from(r"D:\Tools\SpectraPDF");
-        let standard = PathBuf::from(r"C:\Users\u\AppData\Roaming\com.spectrapdf.app");
+    fn every_record_follows_one_decision_and_a_made_decision_is_never_reprobed() {
+        let root = std::env::temp_dir().join("portable-root");
+        let standard = std::env::temp_dir().join("per-user");
+        let config = std::env::temp_dir().join("per-user-config");
 
+        let fallback = RootDecision::Fallback(root.clone());
+        assert_eq!(resolve_root(&fallback, Some(standard.clone())), Some(standard.clone()));
+        assert_eq!(resolve_root(&fallback, Some(config.clone())), Some(config.clone()));
         assert_eq!(
-            preferred_data_root(&dir, Container::Portable),
-            Some(dir.join(PORTABLE_DATA_DIR)),
+            assent_write_dir(Container::Portable, &fallback, Some(config.clone())),
+            Some(config.clone())
+        );
+        assert_eq!(decide_webview_user_data(&fallback, false), WebViewUserDataDecision::PortableFallback);
+
+        let portable = RootDecision::Portable(root.clone());
+        assert_eq!(resolve_root(&portable, Some(standard.clone())), Some(root.clone()));
+        assert_eq!(
+            assent_write_dir(Container::Portable, &portable, Some(config.clone())),
+            Some(root.clone())
         );
         assert_eq!(
-            resolve_data_root(
-                preferred_data_root(&dir, Container::Portable),
-                Some(standard.clone()),
-                |_| true
-            ),
-            Some(dir.join(PORTABLE_DATA_DIR)),
+            decide_webview_user_data(&portable, false),
+            WebViewUserDataDecision::SetPortable(root.join(WEBVIEW_DATA_DIR))
         );
 
-        // Installed expresses no preference, so it resolves to the same
-        // per-user directory every prior release wrote to.
-        assert_eq!(preferred_data_root(&dir, Container::Installed), None);
+        // With nowhere left to write, the caller is told rather than handed a
+        // path that does not exist.
+        assert_eq!(resolve_root(&fallback, None), None);
+
         assert_eq!(
-            resolve_data_root(
-                preferred_data_root(&dir, Container::Installed),
-                Some(standard.clone()),
-                |_| panic!("an installed copy must not probe a root beside the exe"),
-            ),
-            Some(standard),
+            decision_or(Some(&fallback), || panic!("a made decision is never probed again")),
+            fallback
+        );
+        assert_eq!(decision_or(None, || portable.clone()), portable);
+
+        let mut probes = 0;
+        decide_root(Path::new("/x"), Container::Portable, None, |_| {
+            probes += 1;
+            true
+        });
+        assert!(probes <= 1);
+    }
+
+    /// The record beside the copy wins for that copy: a copy moved onto
+    /// read-only media keeps the answer it carries rather than asking again,
+    /// and a new answer that would be shadowed by it is refused by name.
+    #[test]
+    fn an_answer_beside_a_read_only_copy_is_read_and_wins_over_the_per_user_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount = temp.path().join("mount");
+        std::fs::create_dir_all(&mount).unwrap();
+        let (image, root) = portable_image(temp.path());
+        let config = temp.path().join("roaming").join(APP_IDENTIFIER);
+        write_answer(&root.join(ICC_ASSENT_FILE), true);
+        write_answer(&config.join(ICC_ASSENT_FILE), false);
+
+        let read_only = RootDecision::Fallback(root.clone());
+        let image = Some(image.as_path());
+        assert_eq!(
+            assent_read_path(&mount, Container::Portable, image, &read_only, Some(config.clone())),
+            Some(root.join(ICC_ASSENT_FILE))
+        );
+        assert_eq!(
+            icc_assent_for(&mount, Container::Portable, image, &read_only, Some(config.clone())),
+            IccAssent::Accepted
+        );
+        let refused =
+            record_icc_assent_for(&mount, Container::Portable, image, &read_only, Some(config.clone()), false)
+                .unwrap_err();
+        assert!(refused.contains("cannot be written"), "{refused}");
+
+        // An unreadable record beside the copy tells nothing; the per-user
+        // record answers.
+        std::fs::write(root.join(ICC_ASSENT_FILE), "garbled").unwrap();
+        assert_eq!(
+            icc_assent_for(&mount, Container::Portable, image, &read_only, Some(config)),
+            IccAssent::Declined
         );
     }
 
+    #[cfg(windows)]
     #[test]
-    fn unwritable_media_falls_back_rather_than_failing_the_feature() {
-        let dir = PathBuf::from(r"E:\SpectraPDF");
-        let standard = PathBuf::from(r"C:\Users\u\AppData\Roaming\com.spectrapdf.app");
+    fn a_windows_zip_on_read_only_media_keeps_its_recorded_answer() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("zip");
+        write_answer(&dir.join(PORTABLE_DATA_DIR).join(ICC_ASSENT_FILE), false);
+        let config = temp.path().join("roaming").join(APP_IDENTIFIER);
+        let read_only = decide_root(&dir, Container::Portable, None, |_| false);
+        assert_eq!(read_only, RootDecision::Fallback(dir.join(PORTABLE_DATA_DIR)));
         assert_eq!(
-            resolve_data_root(Some(dir.join(PORTABLE_DATA_DIR)), Some(standard.clone()), |_| false),
-            Some(standard),
+            icc_assent_for(&dir, Container::Portable, None, &read_only, Some(config)),
+            IccAssent::Declined
         );
-        // And with nowhere left to write, the caller is told rather than
-        // handed a path that does not exist.
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_unwritable_windows_zip_reads_back_the_answer_it_recorded_per_user() {
+        let temp = tempfile::tempdir().unwrap();
+        let blocked = temp.path().join("zip");
+        std::fs::create_dir_all(&blocked).unwrap();
+        // A file where the root folder belongs: the root cannot be created.
+        std::fs::write(blocked.join(PORTABLE_DATA_DIR), b"").unwrap();
+        let config = temp.path().join("roaming").join(APP_IDENTIFIER);
+        let decision = decide_root(&blocked, Container::Portable, None, ensure_writable_dir);
+        assert_eq!(decision, RootDecision::Fallback(blocked.join(PORTABLE_DATA_DIR)));
+        record_icc_assent_for(&blocked, Container::Portable, None, &decision, Some(config.clone()), true)
+            .unwrap();
+        assert!(config.join(ICC_ASSENT_FILE).is_file());
         assert_eq!(
-            resolve_data_root(Some(dir.join(PORTABLE_DATA_DIR)), None, |_| false),
-            None,
+            icc_assent_for(&blocked, Container::Portable, None, &decision, Some(config)),
+            IccAssent::Accepted
         );
+    }
+
+    /// A status query creates nothing: the decision it reads is probed without
+    /// creating the portable root, and the tree is byte-identical afterwards.
+    #[test]
+    fn a_status_query_leaves_a_fresh_portable_tree_byte_identical() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount = temp.path().join("mount");
+        std::fs::create_dir_all(&mount).unwrap();
+        let (image, root) = portable_image(temp.path());
+        let config = temp.path().join("roaming").join(APP_IDENTIFIER);
+        let check = |dir: &Path, image: Option<&Path>| {
+            let before = snapshot(temp.path());
+            let decision = decide_root(dir, Container::Portable, image, writable_without_creating);
+            assert!(decision.root().is_some(), "{decision:?}");
+            assert_eq!(
+                icc_assent_for(dir, Container::Portable, image, &decision, Some(config.clone())),
+                IccAssent::Unrecorded
+            );
+            assert!(assent_read_path(dir, Container::Portable, image, &decision, Some(config.clone())).is_some());
+            assert_eq!(snapshot(temp.path()), before);
+        };
+        check(&mount, Some(&image));
+        assert!(!root.exists());
+        #[cfg(windows)]
+        {
+            check(&mount, None);
+            assert!(!mount.join(PORTABLE_DATA_DIR).exists());
+        }
     }
 
     #[test]
@@ -965,11 +1386,13 @@ mod tests {
         std::fs::create_dir(&existing).unwrap();
 
         assert!(ensure_writable_dir(&existing));
+        assert!(writable_without_creating(&existing));
         assert_eq!(std::fs::read_dir(&existing).unwrap().count(), 0);
 
         let blocked = temp.path().join("not-a-directory");
         std::fs::write(&blocked, b"file").unwrap();
         assert!(!ensure_writable_dir(&blocked));
+        assert!(!writable_without_creating(&blocked.join("data")));
     }
 
     #[test]
@@ -987,10 +1410,14 @@ mod tests {
         let image = dir.join("Spectra_PDF.AppImage");
         std::fs::write(&image, b"").unwrap();
         let payload = dir.join("mount");
-        assert_eq!(
-            portable_root_for(&payload, None),
+        // Windows keeps the zip's root beside the executable; Linux never
+        // makes the executable's directory a root.
+        let beside = if cfg!(target_os = "linux") {
+            None
+        } else {
             Some(payload.join(PORTABLE_DATA_DIR))
-        );
+        };
+        assert_eq!(portable_root_for(&payload, None), beside);
         assert_eq!(portable_root_for(&payload, Some(&image)), None);
         let home = dir.join("Spectra_PDF.AppImage.home");
         std::fs::create_dir_all(&home).unwrap();
@@ -1005,6 +1432,143 @@ mod tests {
             Some(config.join(APP_IDENTIFIER))
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_inherited_appimage_variable_counts_only_inside_an_image() {
+        let temp = tempfile::tempdir().unwrap();
+        let image = temp.path().join("Other.AppImage");
+        std::fs::write(&image, b"").unwrap();
+        assert_eq!(appimage_from(Some(image.clone()), false), None);
+        assert_eq!(appimage_from(Some(image.clone()), true), Some(image));
+        assert_eq!(appimage_from(Some(PathBuf::from("relative.AppImage")), true), None);
+        assert_eq!(appimage_from(None, true), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_package_launched_from_another_images_environment_stays_a_package() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = package_tree(&temp.path().join("root"));
+        let (foreign, foreign_root) = portable_image(temp.path());
+        let config = temp.path().join("home").join(".config").join(APP_IDENTIFIER);
+        let exe = bin.join("spectrapdf");
+
+        // The package does not run from an image mount, so the inherited
+        // variable is not this copy's image.
+        let image = appimage_from(Some(foreign.clone()), false);
+        assert_eq!(image, None);
+        assert_eq!(container_for(&bin, image.as_deref()), Container::Package);
+        let decision = decide_root(&bin, Container::Package, image.as_deref(), no_probe);
+        assert_eq!(decision, RootDecision::PerUser);
+        assert_eq!(
+            assent_write_dir(Container::Package, &decision, Some(config.clone())),
+            Some(config)
+        );
+        assert!(!foreign_root.exists(), "the other image's portable folder was used");
+        assert_eq!(
+            crate::autostart_linux::launch_target_for(image, Ok(exe.clone())),
+            Ok(exe)
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_linux_package_layout_is_the_package_container() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = package_tree(temp.path());
+        assert_eq!(container_for(&bin, None), Container::Package);
+        assert!(Container::Package.asks_in_app());
+        assert_eq!(decide_root(&bin, Container::Package, None, no_probe), RootDecision::PerUser);
+
+        // The same layout mounted from an image is the AppImage, not a package.
+        let image = temp.path().join("Spectra_PDF.AppImage");
+        std::fs::write(&image, b"").unwrap();
+        assert_eq!(container_for(&bin, Some(&image)), Container::Portable);
+
+        // A cargo output directory carries its own engine and stays portable,
+        // with no root beside its executable.
+        let built = temp.path().join("target").join("debug");
+        std::fs::create_dir_all(built.join("engine")).unwrap();
+        assert_eq!(container_for(&built, None), Container::Portable);
+        assert_eq!(decide_root(&built, Container::Portable, None, no_probe), RootDecision::PerUser);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_package_layout_on_windows_stays_portable() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = package_tree(temp.path());
+        assert_eq!(container_for(&bin, None), Container::Portable);
+    }
+
+    #[test]
+    fn a_package_records_its_answer_in_the_user_configuration_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = package_tree(temp.path());
+        let config = temp.path().join("home").join(".config").join(APP_IDENTIFIER);
+        let package = Container::Package;
+        let decision = decide_root(&bin, package, None, no_probe);
+        let read = || icc_assent_for(&bin, package, None, &decision, Some(config.clone()));
+
+        assert_eq!(read(), IccAssent::Unrecorded);
+        record_icc_assent_for(&bin, package, None, &decision, Some(config.clone()), true).unwrap();
+        assert_eq!(
+            assent_read_path(&bin, package, None, &decision, Some(config.clone())),
+            Some(config.join(ICC_ASSENT_FILE))
+        );
+        // The next launch reads the same answer back: the dialog stays shut.
+        assert_eq!(read(), IccAssent::Accepted);
+        assert_eq!(std::fs::read_dir(&bin).unwrap().count(), 0);
+
+        // With no per-user folder there is nowhere to write, and the refusal
+        // names that instead of falling back beside the executable.
+        assert!(record_icc_assent_for(&bin, package, None, &decision, None, true).is_err());
+        assert_eq!(std::fs::read_dir(&bin).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn an_appimage_records_beside_the_image_only_when_it_was_made_portable() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount = package_tree(&temp.path().join("mount"));
+        let image = temp.path().join("Spectra_PDF.AppImage");
+        std::fs::write(&image, b"").unwrap();
+        let config = temp.path().join("home").join(".config").join(APP_IDENTIFIER);
+        let portable = Container::Portable;
+        let image = Some(image.as_path());
+
+        let decision = decide_root(&mount, portable, image, ensure_writable_dir);
+        assert_eq!(decision, RootDecision::PerUser);
+        record_icc_assent_for(&mount, portable, image, &decision, Some(config.clone()), false).unwrap();
+        assert_eq!(
+            icc_assent_for(&mount, portable, image, &decision, Some(config.clone())),
+            IccAssent::Declined
+        );
+
+        let beside = temp.path().join("Spectra_PDF.AppImage.config");
+        std::fs::create_dir_all(&beside).unwrap();
+        let root = beside.join(APP_IDENTIFIER);
+        let decision = decide_root(&mount, portable, image, ensure_writable_dir);
+        assert_eq!(decision, RootDecision::Portable(root.clone()));
+        assert_eq!(
+            icc_assent_for(&mount, portable, image, &decision, Some(config.clone())),
+            IccAssent::Unrecorded
+        );
+        record_icc_assent_for(&mount, portable, image, &decision, Some(config.clone()), true).unwrap();
+        assert!(root.join(ICC_ASSENT_FILE).is_file());
+        assert_eq!(
+            icc_assent_for(&mount, portable, image, &decision, Some(config)),
+            IccAssent::Accepted
+        );
+        assert_eq!(std::fs::read_dir(&mount).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn an_unresolvable_executable_is_a_refusal_never_the_working_directory() {
+        assert!(exe_dir_from(Err(std::io::Error::other("gone"))).is_err());
+        assert!(exe_dir_from(Ok(PathBuf::from("spectrapdf"))).is_err());
+        let exe = std::env::temp_dir().join("spectrapdf");
+        assert_eq!(exe_dir_from(Ok(exe.clone())), Ok(exe.parent().unwrap().to_path_buf()));
     }
 
     #[test]
