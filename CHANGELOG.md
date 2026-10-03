@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026.1003.151
+
+*Released 2026-10-03*
+
+**0 system packages needed by the Linux AppImage**
+
+### New
+- Ships a self-contained AppImage that runs with no system package installed
+- Includes Ghostscript inside the AppImage
+- Applies pages per side, reverse order, page selection, mirror and scaling to held Linux print jobs
+- Accepts text and image files on the Linux print queue
+
+### Fixed
+
+- Fix various bugs.
+
+Full changelog: CHANGELOG.md
+
 ## 2026.1003.150
 
 *Released 2026-10-03*
