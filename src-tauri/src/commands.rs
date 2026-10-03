@@ -1304,8 +1304,9 @@ pub async fn get_gs_path(app: AppHandle) -> Result<String, String> {
 
 /// The full capability answer for an explicit path, or for discovery.
 ///
-/// The one shape the settings surface reads: available, path, version, and a
-/// NAMED reason when it is not usable.
+/// The one shape the settings surface reads: available, path, version, the
+/// candidate kind that answered (`source`), and a NAMED reason when it is not
+/// usable.
 #[tauri::command]
 pub async fn gs_capability(app: AppHandle, path: Option<String>) -> Result<crate::gs::GsAnswer, String> {
     let bundled = engine::bundled_gs_candidate(&app);

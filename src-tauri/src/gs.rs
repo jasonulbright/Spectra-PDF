@@ -1,23 +1,22 @@
 //! Is a usable Ghostscript configured? — the Rust half of the one answer.
 //!
-//! Ghostscript is a user-supplied prerequisite: the distribution provides
-//! none. This module is the Rust mirror of `engine/gs_capability.py`, and it
-//! exists for the two places the engine cannot answer for itself — the GUI's
-//! settings surface, which has to report a path and a version before any
-//! document is open, and the CLI, which has to refuse by name before it
-//! starts an engine at all.
+//! This module is the Rust mirror of `engine/gs_capability.py`, and it exists
+//! for the two places the engine cannot answer for itself — the GUI's
+//! settings surface, which has to report a path, a version and a source
+//! before any document is open, and the CLI, which has to refuse by name
+//! before it starts an engine at all.
 //!
 //! Validation is a PROBE, never file existence: `--version` proves a file
-//! answers, and a one-page render proves the interpreter initialises, finds
-//! its resource tree, and can write through `-dSAFER`. A copied executable
-//! without its `Resource/` tree passes the first and fails the second, which
-//! is exactly the install the old existence check called usable.
+//! answers, and a one-page render proves the interpreter initialises and can
+//! write through `-dSAFER`. A damaged copy can pass the first and fail the
+//! second.
 //!
-//! Discovery is ordered explicit → environment → bundled (the installer's
-//! tree, then an AppImage's own copy) → registry → PATH. The registry scan is
-//! kept because it finds per-machine installs that were never put on PATH;
-//! the bundled candidates are optional — the resolution must not assume a
-//! vendored copy exists.
+//! Discovery is ordered explicit → environment → bundled (the Windows
+//! install tree's `ghostscript/`, then an AppImage's own `bin/gs`) → registry
+//! → PATH. Every candidate carries its source, and an available answer
+//! reports the source it came from. A bundled candidate exists only when its
+//! file does: a damaged or stubbed tree falls through to the installed
+//! copies instead of becoming the answer by default.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -46,9 +45,9 @@ const CANDIDATE_NAMES: [&str; 3] = ["gswin64c", "gswin32c", "gs"];
 ///
 /// It names the command line's own fix, `--gs-path` and `PATH_ENV_VAR`, and
 /// never the window's Preferences: the CLI is the only surface that shows it.
-pub const CLI_REQUIRED: &str = "this command requires Ghostscript; none is configured -- \
-install it from ghostscript.com, then name it with --gs-path or the SPECTRAPDF_GS_PATH \
-environment variable";
+pub const CLI_REQUIRED: &str = "this command requires Ghostscript; none was found -- \
+reinstall Spectra PDF, or name a Ghostscript program with --gs-path or the \
+SPECTRAPDF_GS_PATH environment variable";
 
 /// One validated answer about one Ghostscript path.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -60,7 +59,17 @@ pub struct GsAnswer {
     pub reason: String,
     /// Probe output for the settings surface; never matched on.
     pub detail: String,
+    /// Which candidate kind produced an available answer: one of the
+    /// `SOURCE_*` values. Empty when not `available`. Set by `resolve`, never
+    /// by `probe`, so the per-path cache stays source-free.
+    pub source: String,
 }
+
+pub const SOURCE_EXPLICIT: &str = "explicit";
+pub const SOURCE_ENVIRONMENT: &str = "environment";
+pub const SOURCE_BUNDLED: &str = "bundled";
+pub const SOURCE_REGISTRY: &str = "registry";
+pub const SOURCE_PATH: &str = "path";
 
 impl GsAnswer {
     fn unavailable(path: &str, reason: &str, detail: &str) -> Self {
@@ -70,7 +79,17 @@ impl GsAnswer {
             version: String::new(),
             reason: reason.to_string(),
             detail: detail.to_string(),
+            source: String::new(),
         }
+    }
+
+    fn from_source(mut self, source: &str) -> Self {
+        self.source = if self.available {
+            source.to_string()
+        } else {
+            String::new()
+        };
+        self
     }
 }
 
@@ -129,8 +148,39 @@ fn cacheable_probe_result(answer: &GsAnswer, budget: Duration) -> bool {
     budget >= RESOLUTION_BUDGET || answer.reason != PROBE_FAILED
 }
 
+/// The bundled copy's search path: its compiled-in ROM file system alone.
+///
+/// Ghostscript reads `GS_LIB` from the environment and consults the registry
+/// value of the same name only when the variable is absent. A separately
+/// installed Ghostscript of the same version registers its own `lib` and
+/// `fonts` directories there, which would otherwise precede the ROM and let
+/// that install's Fontmap, cidfmap or fonts change the bundled copy's output.
+pub const BUNDLED_GS_LIB: &str = "%rom%Resource/Init/;%rom%lib/";
+
+/// The Windows install tree's Ghostscript, beside this executable.
+fn bundled_program() -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    let root = crate::platform::resource_root_for(exe.parent()?);
+    Some(root.join("ghostscript").join("gswin64c.exe"))
+}
+
+/// Whether `exe` is the bundled program, by file identity.
+fn is_bundled(exe: &Path, bundled: Option<&Path>) -> bool {
+    bundled.is_some_and(|program| same_file::is_same_file(exe, program).unwrap_or(false))
+}
+
 fn command(exe: &str) -> std::process::Command {
+    command_with(exe, bundled_program().as_deref())
+}
+
+fn command_with(exe: &str, bundled: Option<&Path>) -> std::process::Command {
     let mut cmd = std::process::Command::new(exe);
+    if is_bundled(Path::new(exe), bundled) {
+        cmd.env("GS_LIB", BUNDLED_GS_LIB);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -432,6 +482,7 @@ fn probe_with_budget(path: &str, budget: Duration) -> GsAnswer {
                     version,
                     reason: VERSION_BELOW_MINIMUM.to_string(),
                     detail: String::new(),
+                    source: String::new(),
                 }
             } else {
                 let smoke_budget = budget
@@ -451,6 +502,7 @@ fn probe_with_budget(path: &str, budget: Duration) -> GsAnswer {
                             version,
                             reason: String::new(),
                             detail: String::new(),
+                            source: String::new(),
                         },
                         Err(detail) => GsAnswer {
                             available: false,
@@ -458,6 +510,7 @@ fn probe_with_budget(path: &str, budget: Duration) -> GsAnswer {
                             version,
                             reason: PROBE_FAILED.to_string(),
                             detail,
+                            source: String::new(),
                         },
                     }
                 }
@@ -632,46 +685,57 @@ pub fn registry_candidates() -> Vec<(String, String, String)> {
     Vec::new()
 }
 
+/// One candidate path and the `SOURCE_*` kind it came from.
+pub type Candidate = (String, &'static str);
+
 /// Every candidate path, best first: explicit, environment, the bundled
-/// copies (the installer's tree, then an AppImage's own), then what discovery
-/// finds (registry, PATH).
-pub fn candidates(explicit: Option<&str>, bundled: Option<&Path>) -> Vec<String> {
-    let mut discovered: Vec<String> = registry_candidates()
+/// copies (the install tree's, then an AppImage's own), registry, PATH.
+pub fn candidates(explicit: Option<&str>, bundled: Option<&Path>) -> Vec<Candidate> {
+    let registry: Vec<String> = registry_candidates()
         .into_iter()
         .map(|(path, _, _)| path)
         .collect();
-    discovered.extend(path_candidates());
     let env = std::env::var(PATH_ENV_VAR).ok();
     let image = image_candidate();
-    ordered_candidates(explicit, env.as_deref(), &[bundled, image.as_deref()], discovered)
+    ordered_candidates(
+        explicit,
+        env.as_deref(),
+        &[bundled, image.as_deref()],
+        registry,
+        path_candidates(),
+    )
 }
 
 fn ordered_candidates(
     explicit: Option<&str>,
     env: Option<&str>,
     bundled: &[Option<&Path>],
-    discovered: Vec<String>,
-) -> Vec<String> {
-    let mut found: Vec<String> = Vec::new();
-    let mut push = |text: String| {
+    registry: Vec<String>,
+    path: Vec<String>,
+) -> Vec<Candidate> {
+    let mut found: Vec<Candidate> = Vec::new();
+    let mut push = |text: String, source: &'static str| {
         if found.len() < MAX_DISCOVERY_CANDIDATES
             && !text.trim().is_empty()
-            && !found.contains(&text)
+            && !found.iter().any(|(seen, _)| seen == &text)
         {
-            found.push(text);
+            found.push((text, source));
         }
     };
     if let Some(explicit) = explicit {
-        push(explicit.to_string());
+        push(explicit.to_string(), SOURCE_EXPLICIT);
     }
     if let Some(env) = env {
-        push(env.trim().to_string());
+        push(env.trim().to_string(), SOURCE_ENVIRONMENT);
     }
     for copy in bundled.iter().flatten() {
-        push(copy.to_string_lossy().to_string());
+        push(copy.to_string_lossy().to_string(), SOURCE_BUNDLED);
     }
-    for path in discovered {
-        push(path);
+    for found_path in registry {
+        push(found_path, SOURCE_REGISTRY);
+    }
+    for found_path in path {
+        push(found_path, SOURCE_PATH);
     }
     found
 }
@@ -686,13 +750,13 @@ pub fn resolve(explicit: Option<&str>, bundled: Option<&Path>) -> GsAnswer {
         let explicit = explicit.trim();
         if !explicit.is_empty() {
             if explicit.contains('/') || explicit.contains('\\') {
-                return probe(explicit);
+                return probe(explicit).from_source(SOURCE_EXPLICIT);
             }
             // A bare name is still explicit: it resolves through PATH, and a
             // name PATH cannot resolve is the answer rather than a reason to
             // go looking for some other install.
             return match which(explicit) {
-                Some(found) => probe(&found),
+                Some(found) => probe(&found).from_source(SOURCE_EXPLICIT),
                 None => GsAnswer::unavailable(explicit, NOT_EXECUTABLE, ""),
             };
         }
@@ -705,14 +769,14 @@ pub fn resolve(explicit: Option<&str>, bundled: Option<&Path>) -> GsAnswer {
 }
 
 fn resolve_candidates_with(
-    candidates: impl IntoIterator<Item = String>,
+    candidates: impl IntoIterator<Item = Candidate>,
     budget: Duration,
     mut probe_candidate: impl FnMut(&str, Duration) -> GsAnswer,
 ) -> GsAnswer {
     let deadline = Instant::now() + budget;
     let mut first_failure: Option<GsAnswer> = None;
     let mut first_candidate = true;
-    for candidate in candidates.into_iter().take(MAX_DISCOVERY_CANDIDATES) {
+    for (candidate, source) in candidates.into_iter().take(MAX_DISCOVERY_CANDIDATES) {
         let remaining = if first_candidate {
             budget
         } else {
@@ -728,7 +792,7 @@ fn resolve_candidates_with(
         first_candidate = false;
         let answer = probe_candidate(&candidate, remaining);
         if answer.available {
-            return answer;
+            return answer.from_source(source);
         }
         if Instant::now() >= deadline {
             return GsAnswer::unavailable(
@@ -847,31 +911,79 @@ mod tests {
     }
 
     #[test]
-    fn discovery_puts_explicit_then_environment_then_bundled_then_discovered() {
+    fn discovery_orders_explicit_environment_bundled_registry_path_with_sources() {
         let bundled = PathBuf::from(r"C:\app\ghostscript\gswin64c.exe");
         let image = PathBuf::from("/tmp/.mount_spectra/bin/gs");
         let found = ordered_candidates(
             Some(r"C:\chosen\gswin64c.exe"),
             Some(r"C:\env\gswin64c.exe"),
             &[Some(&bundled), Some(&image)],
-            vec![r"C:\Program Files\gs\bin\gswin64c.exe".to_string(), "/usr/bin/gs".to_string()],
+            vec![r"C:\Program Files\gs\bin\gswin64c.exe".to_string()],
+            vec!["/usr/bin/gs".to_string()],
         );
-        assert_eq!(
-            found,
-            vec![
-                r"C:\chosen\gswin64c.exe",
-                r"C:\env\gswin64c.exe",
-                r"C:\app\ghostscript\gswin64c.exe",
-                "/tmp/.mount_spectra/bin/gs",
-                r"C:\Program Files\gs\bin\gswin64c.exe",
-                "/usr/bin/gs",
-            ]
-        );
+        let expected: Vec<Candidate> = vec![
+            (r"C:\chosen\gswin64c.exe".to_string(), SOURCE_EXPLICIT),
+            (r"C:\env\gswin64c.exe".to_string(), SOURCE_ENVIRONMENT),
+            (r"C:\app\ghostscript\gswin64c.exe".to_string(), SOURCE_BUNDLED),
+            ("/tmp/.mount_spectra/bin/gs".to_string(), SOURCE_BUNDLED),
+            (r"C:\Program Files\gs\bin\gswin64c.exe".to_string(), SOURCE_REGISTRY),
+            ("/usr/bin/gs".to_string(), SOURCE_PATH),
+        ];
+        assert_eq!(found, expected);
         let found = candidates(Some(r"C:\chosen\gswin64c.exe"), Some(&bundled));
-        assert_eq!(found.first().map(String::as_str), Some(r"C:\chosen\gswin64c.exe"));
-        let at = found.iter().position(|p| p == r"C:\app\ghostscript\gswin64c.exe");
+        assert_eq!(
+            found.first(),
+            Some(&(r"C:\chosen\gswin64c.exe".to_string(), SOURCE_EXPLICIT))
+        );
+        let at = found
+            .iter()
+            .position(|(p, _)| p == r"C:\app\ghostscript\gswin64c.exe");
         let env = usize::from(std::env::var(PATH_ENV_VAR).is_ok_and(|v| !v.trim().is_empty()));
         assert_eq!(at, Some(1 + env));
+        assert_eq!(found[1 + env].1, SOURCE_BUNDLED);
+    }
+
+    #[test]
+    fn an_available_answer_reports_the_source_of_the_candidate_that_passed() {
+        let candidates: Vec<Candidate> = vec![
+            ("broken-bundle".to_string(), SOURCE_BUNDLED),
+            ("installed".to_string(), SOURCE_REGISTRY),
+        ];
+        let answer = resolve_candidates_with(candidates, Duration::from_secs(10), |path, _| {
+            if path == "installed" {
+                GsAnswer {
+                    available: true,
+                    path: path.to_string(),
+                    version: "10.08.0".into(),
+                    reason: String::new(),
+                    detail: String::new(),
+                    source: String::new(),
+                }
+            } else {
+                GsAnswer::unavailable(path, PROBE_FAILED, "x")
+            }
+        });
+        assert!(answer.available);
+        assert_eq!(answer.path, "installed");
+        assert_eq!(answer.source, SOURCE_REGISTRY);
+    }
+
+    #[test]
+    fn an_unavailable_answer_carries_no_source() {
+        let candidates: Vec<Candidate> = vec![("broken-bundle".to_string(), SOURCE_BUNDLED)];
+        let answer = resolve_candidates_with(candidates, Duration::from_secs(10), |path, _| {
+            GsAnswer::unavailable(path, PROBE_FAILED, "x")
+        });
+        assert!(!answer.available);
+        assert_eq!(answer.path, "broken-bundle");
+        assert_eq!(answer.source, "");
+        let none = resolve_candidates_with(Vec::<Candidate>::new(), Duration::from_secs(10), |path, _| {
+            GsAnswer::unavailable(path, PROBE_FAILED, "x")
+        });
+        assert_eq!(none.reason, NOT_CONFIGURED);
+        assert_eq!(none.source, "");
+        let explicit = resolve(Some(r"C:\nowhere\gswin64c.exe"), None);
+        assert_eq!(explicit.source, "");
     }
 
     #[test]
@@ -896,8 +1008,14 @@ mod tests {
     #[test]
     fn a_copy_named_twice_is_probed_once() {
         let image = PathBuf::from("/tmp/.mount_spectra/bin/gs");
-        let once = ordered_candidates(None, None, &[Some(&image), Some(&image)], vec![image.to_string_lossy().to_string()]);
-        assert_eq!(once, vec!["/tmp/.mount_spectra/bin/gs".to_string()]);
+        let once = ordered_candidates(
+            None,
+            None,
+            &[Some(&image), Some(&image)],
+            Vec::new(),
+            vec![image.to_string_lossy().to_string()],
+        );
+        assert_eq!(once, vec![("/tmp/.mount_spectra/bin/gs".to_string(), SOURCE_BUNDLED)]);
     }
 
     #[test]
@@ -920,12 +1038,15 @@ mod tests {
         let found = candidates(None, None);
         assert!(found
             .iter()
-            .all(|p| !p.contains("\\ghostscript\\gswin64c.exe") || !p.starts_with("C:\\app")));
+            .all(|(p, _)| !p.contains("\\ghostscript\\gswin64c.exe") || !p.starts_with("C:\\app")));
     }
 
     #[test]
     fn discovery_stops_after_its_total_time_budget() {
-        let candidates = vec!["slow-candidate".to_string(), "later-candidate".to_string()];
+        let candidates: Vec<Candidate> = vec![
+            ("slow-candidate".to_string(), SOURCE_PATH),
+            ("later-candidate".to_string(), SOURCE_PATH),
+        ];
         let mut attempts = 0;
         let answer = resolve_candidates_with(
             candidates,
@@ -956,6 +1077,7 @@ mod tests {
             version: "9.50".into(),
             reason: VERSION_BELOW_MINIMUM.into(),
             detail: String::new(),
+            source: String::new(),
         };
         assert!(cacheable_probe_result(
             &old,
@@ -966,7 +1088,7 @@ mod tests {
     #[test]
     fn discovery_caps_the_number_of_candidates_it_probes() {
         let candidates = (0..MAX_DISCOVERY_CANDIDATES + 1)
-            .map(|index| format!("candidate-{index}"));
+            .map(|index| (format!("candidate-{index}"), SOURCE_PATH));
         let mut attempts = 0;
         let answer = resolve_candidates_with(candidates, Duration::from_secs(10), |path, _| {
             attempts += 1;
@@ -991,6 +1113,7 @@ mod tests {
             version: "9.50".into(),
             reason: VERSION_BELOW_MINIMUM.into(),
             detail: String::new(),
+            source: String::new(),
         };
         assert!(cli_error(&old).contains("9.50"));
         assert!(cli_error(&old).contains("10.0"));
@@ -1001,11 +1124,36 @@ mod tests {
     }
 
     #[test]
+    fn only_the_bundled_program_runs_on_the_rom_search_path() {
+        let scratch = tempfile::tempdir().unwrap();
+        let tree = scratch.path().join("ghostscript");
+        std::fs::create_dir_all(&tree).unwrap();
+        let bundled = tree.join("gswin64c.exe");
+        std::fs::write(&bundled, b"").unwrap();
+        let other = scratch.path().join("gswin64c.exe");
+        std::fs::write(&other, b"").unwrap();
+        let gs_lib = |cmd: &std::process::Command| {
+            cmd.get_envs()
+                .find(|(name, _)| *name == "GS_LIB")
+                .and_then(|(_, value)| value.map(|v| v.to_string_lossy().to_string()))
+        };
+        let spelled = bundled.to_string_lossy().to_string();
+        assert_eq!(
+            gs_lib(&command_with(&spelled, Some(&bundled))).as_deref(),
+            Some(BUNDLED_GS_LIB)
+        );
+        assert_eq!(gs_lib(&command_with(&other.to_string_lossy(), Some(&bundled))), None);
+        assert_eq!(gs_lib(&command_with(&spelled, None)), None);
+        let missing = scratch.path().join("missing").join("gswin64c.exe");
+        assert_eq!(gs_lib(&command_with(&missing.to_string_lossy(), Some(&missing))), None);
+    }
+
+    #[test]
     fn the_cli_error_names_the_command_lines_fix_for_every_reason() {
         assert_eq!(
             CLI_REQUIRED,
-            "this command requires Ghostscript; none is configured -- install it from \
-             ghostscript.com, then name it with --gs-path or the SPECTRAPDF_GS_PATH \
+            "this command requires Ghostscript; none was found -- reinstall Spectra PDF, \
+             or name a Ghostscript program with --gs-path or the SPECTRAPDF_GS_PATH \
              environment variable"
         );
         assert!(CLI_REQUIRED.contains(PATH_ENV_VAR));
@@ -1015,6 +1163,7 @@ mod tests {
             version: version.into(),
             reason: reason.into(),
             detail: detail.into(),
+            source: String::new(),
         };
         for answer in [
             at(NOT_CONFIGURED, "", ""),

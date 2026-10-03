@@ -12,6 +12,9 @@
 #   --deb                    apt-get install the .deb, then the CLI check
 #   --rpm                    verify the .rpm signature, dnf install it, then the CLI check
 #   --appimage               the AppImage (extract-and-run) passes the CLI check
+#   --ghostscript            the distribution's ghostscript package is installed,
+#                            `gs --version` is 10 or newer, and the installed CLI
+#                            compresses the fixture through it
 
 set -eu
 
@@ -80,6 +83,26 @@ for step in "$@"; do
       appimage="$(one 'spectrapdf_*_amd64.AppImage')"
       chmod 0755 "$appimage"
       cli_check "AppImage" env APPIMAGE_EXTRACT_AND_RUN=1 "$appimage"
+      ;;
+    --ghostscript)
+      if command -v dpkg >/dev/null 2>&1 && dpkg -s ghostscript >/dev/null 2>&1; then
+        echo "ghostscript: installed (dpkg)"
+      elif command -v rpm >/dev/null 2>&1 && rpm -q ghostscript >/dev/null 2>&1; then
+        echo "ghostscript: installed (rpm)"
+      else
+        die "the distribution's ghostscript package is not installed"
+      fi
+      version="$(gs --version)" || die "gs --version failed"
+      major="${version%%.*}"
+      case "$major" in
+        ''|*[!0-9]*) die "gs --version printed '$version'" ;;
+      esac
+      [ "$major" -ge 10 ] || die "gs $version is older than 10"
+      out="$(mktemp -d)/compressed.pdf"
+      /usr/bin/spectrapdf compress "$FIXTURE" -o "$out" --quality ebook ||
+        die "the installed CLI could not compress through gs $version"
+      [ -s "$out" ] || die "the installed CLI wrote no compressed output"
+      echo "ghostscript: gs $version compresses the fixture"
       ;;
     *)
       die "unknown step: $step"

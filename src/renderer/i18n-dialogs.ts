@@ -92,13 +92,13 @@ export const DIALOG_STRINGS = {
     'The answer could not be saved: {{detail}}',
 
   // The Ghostscript launch offer, shown once per launch on a copy where
-  // resolution found nothing anywhere. The copy states a GAP, never a fault:
-  // the product is fully usable without Ghostscript, and every other feature
-  // is unaffected.
+  // resolution found nothing anywhere, the included copy among them. The text
+  // names no cause: a damaged install and a removed system package reach the
+  // same state, and every other feature is unaffected by either.
   'dialog.gsMissing.aria': 'Ghostscript was not found',
   'dialog.gsMissing.title': 'Ghostscript was not found',
   'dialog.gsMissing.blurb':
-    'Ghostscript is a separate program that Spectra PDF does not include. Everything else works without it.',
+    'No working Ghostscript was found. Everything else works without it.',
   'dialog.gsMissing.usedFor':
     'Installing it adds Compress, Grayscale, PDF/A and PDF/X, printing, page rasterization and image export, visual comparison, OCR and scan enhancement, transparency flattening, Rebuild, and PostScript conversion.',
   'dialog.gsMissing.route':

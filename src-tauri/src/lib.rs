@@ -264,7 +264,7 @@ pub fn run() {
     // this point the only surfaces the app owns are inside a webview that
     // cannot be created. The portable zip carries no bootstrapper — a
     // first-party Microsoft platform runtime is never vendored — so naming the
-    // prerequisite IS the handling, the same posture Ghostscript gets.
+    // prerequisite IS the handling.
     if !portable::report_missing_webview2() {
         std::process::exit(1);
     }

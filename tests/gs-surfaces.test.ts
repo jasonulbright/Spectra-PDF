@@ -209,9 +209,9 @@ describe('guided actions take their Ghostscript need from the engine’s plan', 
       ['compress', 'required'],
     );
     expect(gsRequiredSteps(twice)).toEqual(['compress', 'grayscale']);
-    expect(gsBlocker(twice, false)).toContain('need Ghostscript');
+    expect(gsBlocker(twice, false)).toContain('need a working Ghostscript');
     const once = plan('required', ['optimize', 'never'], ['compress', 'required']);
-    expect(gsBlocker(once, false)).toContain('needs Ghostscript');
+    expect(gsBlocker(once, false)).toContain('needs a working Ghostscript');
   });
 });
 
@@ -280,16 +280,16 @@ describe('scan enhancement: the content, not the panel', () => {
   });
 });
 
-describe('the distribution never claims to carry Ghostscript', () => {
+describe('the Ghostscript notice and the package description', () => {
   const text = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
-  it('uses the translated user-installed explanation in Settings', () => {
+  it('uses the translated Ghostscript notice in Settings', () => {
     const panel = text('src/renderer/panels/SettingsPanel.tsx');
     expect(panel).toContain("tChrome('panel.settings.gsLicense')");
     expect(panel).not.toContain('panel.settings.licensesP1');
   });
 
-  it('describes the package with one description that claims no bundled Ghostscript', () => {
+  it('describes the package with one description that names no component', () => {
     const description = 'Open-source PDF workbench for Windows';
     const pkg = JSON.parse(text('package.json')) as { description: string };
     const conf = JSON.parse(text('src-tauri/tauri.conf.json')) as {

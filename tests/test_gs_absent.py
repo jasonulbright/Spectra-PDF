@@ -384,7 +384,7 @@ def test_every_gs_door_refuses_by_name(door, bench, gs_absent):
         gc.NOT_EXECUTABLE,
     }, (door, caught.value.reason)
     assert "Ghostscript" in str(caught.value)
-    assert "ghostscript.com" in str(caught.value)
+    assert "Reinstall Spectra PDF" in str(caught.value)
 
 
 @pytest.mark.parametrize("door", DOORS)
@@ -491,9 +491,9 @@ def test_the_absent_axis_runs_where_a_ghostscript_exists(gs_absent):
 def test_the_present_axis_keys_on_the_authority():
     """The present axis's skip is the authority's answer, not a directory.
 
-    If this ever keys on a vendored path again, the whole present axis
-    silently skips the moment the tree stops shipping — which is the change
-    this remediation is making.
+    A skip keyed on a vendored path would silently skip the whole present
+    axis on a machine whose usable Ghostscript is installed rather than
+    vendored (the Linux packages, a checkout without resources/).
     """
     if gs_axis.GS_AVAILABLE:
         assert gc.resolve(gs_axis.GS_PATH).available

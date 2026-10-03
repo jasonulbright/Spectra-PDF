@@ -42,35 +42,12 @@ def test_enterprise_documentation_does_not_advertise_unaccepted_install() -> Non
     assert 'setup.exe" /S\n' not in readme
 
 
-def test_only_the_visible_installer_offers_ghostscript_download() -> None:
+def test_the_installer_runs_and_offers_no_ghostscript() -> None:
     hooks = (ROOT / "src-tauri" / "nsis-hooks.nsh").read_text()
-    postinstall = hooks.split("!macro NSIS_HOOK_POSTINSTALL", 1)[1].split(
-        "!macroend", 1
-    )[0]
-    prompt = postinstall.index("Open the official Ghostscript download page now?")
-
-    assert postinstall.index("${IfNot} ${Silent}") < prompt
-    assert postinstall.index("${AndIf} $PassiveMode != 1") < prompt
-    assert 'ExecShell "open" "https://ghostscript.com/releases/gsdnld.html"' in postinstall
-
-
-def test_ghostscript_offer_is_skipped_when_an_install_is_found() -> None:
-    hooks = (ROOT / "src-tauri" / "nsis-hooks.nsh").read_text()
-    postinstall = hooks.split("!macro NSIS_HOOK_POSTINSTALL", 1)[1].split(
-        "!macroend", 1
-    )[0]
-    prompt = postinstall.index("Open the official Ghostscript download page now?")
-    check = postinstall.index("Call SpectraGhostscriptInstalled")
-    assert postinstall.index("${IfNot} ${Silent}") < check < prompt
-    assert postinstall.index("${If} $R9 != 1", check) < prompt
-
-    detect = hooks.split("Function SpectraGhostscriptInstalled", 1)[1].split(
-        "FunctionEnd", 1
-    )[0]
-    for root in ("HKLM64", "HKLM32", "HKCU64", "HKCU32"):
-        for key in (r"SOFTWARE\GPL Ghostscript", r"SOFTWARE\Artifex\GPL Ghostscript"):
-            assert f'SPECTRA_GS_SCAN_KEY {root} "{key}"' in detect
-    assert 'SPECTRA_GS_SCAN_PATH "gswin64c.exe"' in detect
+    assert "ghostscript.com" not in hooks
+    assert "ExecShell" not in hooks
+    assert "SpectraGhostscriptInstalled" not in hooks
+    assert "SPECTRA_GS_SCAN" not in hooks
     # The installer runs no program but its own executable's File Explorer
     # registration and virtual-printer step: never Ghostscript, not even to
     # read its version.
@@ -81,19 +58,6 @@ def test_ghostscript_offer_is_skipped_when_an_install_is_found() -> None:
             ('"$INSTDIR\\spectrapdf.exe" shell-menu ', '"$INSTDIR\\spectrapdf.exe" virtual-printer ')
         ), command
     assert "nsExec" not in hooks and "gswin" not in "".join(executed)
-
-
-def test_installer_ghostscript_floor_matches_discovery() -> None:
-    hooks = (ROOT / "src-tauri" / "nsis-hooks.nsh").read_text()
-    gs = (ROOT / "src-tauri" / "src" / "gs.rs").read_text()
-    assert "pub const MINIMUM_VERSION: (u32, u32) = (10, 0);" in gs
-    assert hooks.count("${If} $R3 >= 10") == 2
-
-
-def test_shipped_notice_keeps_ghostscript_separate() -> None:
-    notice = (ROOT / "THIRD-PARTY-LICENSES.md").read_text()
-    assert "does not\ndownload or run the Ghostscript installer" in notice
-    assert "never\ndownload, launch, install or accept terms for Ghostscript" in notice
 
 
 def test_end_user_requirements_name_the_guarded_feature_families() -> None:

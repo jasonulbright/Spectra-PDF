@@ -44,10 +44,8 @@ Desktop.ini
 # Embedded runtimes (downloaded/copied during build, not committed)
 resources/python/
 resources/fonts/
-# Ghostscript is NOT provisioned and NOT shipped: it is a user-supplied,
-# optional prerequisite the app discovers. No script writes this directory and
-# no build reads it; the entry stays so a tree left behind by a build from
-# before the change cannot land in git.
+# Ghostscript (vendored by scripts/bundle-ghostscript.ps1; unmodified upstream
+# binaries, same repo-hygiene class as resources/python).
 resources/ghostscript/
 # Native Tesseract (vendored by scripts/bundle-tesseract.ps1; large binaries +
 # 47 language models, same repo-hygiene class as resources/python).

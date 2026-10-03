@@ -11,7 +11,7 @@ import {
   type VirtualPrinterStatus,
 } from '../lib/tauri-bridge';
 import { contractCall, explorerMenuView } from '../lib/shell-action';
-import { gsBlocked, gsStateKey, refreshGsCapability } from '../lib/gs-capability';
+import { gsBlocked, gsOriginKey, gsStateKey, refreshGsCapability } from '../lib/gs-capability';
 import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { deriveAccentVars, type ThemeName } from '../lib/accent';
@@ -201,14 +201,13 @@ function useForcedColors(): boolean {
 }
 
 /**
- * Preferences ▸ Engine ▸ Ghostscript — the authority surface for a prerequisite
- * the product does not ship.
+ * Preferences ▸ Engine ▸ Ghostscript — the one surface that changes which
+ * Ghostscript the app uses.
  *
- * What it replaces: a Built-in/External pair of buttons over a bundled copy,
- * backed by a resolver that wrote a path into the settings whether or not
- * anything answered there. A path is only ever stored here after it PROBES
- * usable, and a candidate that fails is reported without disturbing the
- * install the app is currently using.
+ * The empty setting resolves the default: the included copy, else an install
+ * discovery finds. A chosen path outranks it and is the whole answer, so a
+ * path is only ever stored here after it PROBES usable, and a candidate that
+ * fails is reported without disturbing the copy the app is currently using.
  */
 function GhostscriptSection(): React.ReactElement {
   useTranslation();
@@ -261,8 +260,9 @@ function GhostscriptSection(): React.ReactElement {
 
   const shown = candidate ?? capability;
   const failureKey = candidate
-    ? (gsStateKey({ ...candidate, pending: false }) as PanelKey | null)
+    ? (gsStateKey({ ...candidate, source: '', pending: false }) as PanelKey | null)
     : (gsStateKey(capability) as PanelKey | null);
+  const originKey = gsOriginKey(configured !== '', capability) as PanelKey | null;
 
   return (
     <div data-testid="prefs-gs">
@@ -284,9 +284,11 @@ function GhostscriptSection(): React.ReactElement {
               {tChrome('panel.settings.version', { version: capability.version })}
             </span>
           )}
-          <span className="text-xs text-neutral-500">
-            {tChrome(configured ? 'panel.settings.gsChosen' : 'panel.settings.gsDiscovered')}
-          </span>
+          {originKey && (
+            <span className="text-xs text-neutral-500" data-testid="prefs-gs-origin">
+              {tChrome(originKey)}
+            </span>
+          )}
         </div>
         <div className="flex gap-2 text-xs text-neutral-400">
           <span className="shrink-0">{tChrome('panel.settings.gsPathLabel')}</span>

@@ -54,10 +54,13 @@ The output is `src-tauri/target/debug/spectrapdf.exe`.
 
 Prereqs for the binary to actually start the engine: `resources/python/`
 must contain a working `python.exe` (run `scripts/setup-python-embed.ps1`
-once). Ghostscript is not shipped and no stub is wanted: the specs that
-exercise it need a REAL Ghostscript installed on the machine, discovered the
-way the product discovers one. Without it those specs run the
-capability-ABSENT axis instead, where the surfaces must refuse by name.
+once). Ghostscript ships with the product, and the debug binary reads it from
+`src-tauri/target/debug/ghostscript/`. Run `scripts/bundle-ghostscript.ps1`
+once, then copy `resources/ghostscript` to `src-tauri/target/debug/`. Do not
+put a stub there: the specs that exercise Ghostscript need the real program.
+Without it, discovery falls back to an installed copy, and with none those
+specs run the capability-ABSENT axis, where the surfaces must refuse by name.
+`151-gs-absent` pins that axis from inside the app on every machine.
 
 ## Run the suite
 

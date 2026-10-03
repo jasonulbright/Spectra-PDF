@@ -37,10 +37,10 @@ pub struct Cli {
     #[arg(long)]
     pub minimized: bool,
 
-    /// Path to a Ghostscript console executable (gswin64c.exe). Ghostscript is
-    /// installed separately; without this the CLI looks at SPECTRAPDF_GS_PATH,
-    /// the machine's installed programs, and PATH. When this is given, no
-    /// other Ghostscript is used.
+    /// Path to a Ghostscript console executable (gswin64c.exe). Without this
+    /// the CLI looks at SPECTRAPDF_GS_PATH, the Ghostscript included with
+    /// Spectra PDF, the machine's installed programs, and PATH, in that order.
+    /// When this is given, no other Ghostscript is used.
     #[arg(long, global = true, value_name = "PATH")]
     pub gs_path: Option<String>,
 }
@@ -330,6 +330,9 @@ pub enum CliCommand {
     Print(PrintArgs),
     /// List installed Windows printers (JSON: names + default)
     Printers(PrintersArgs),
+    /// Report the Ghostscript this command line resolves (JSON: available,
+    /// path, version, reason, detail, source); exits 1 when none is usable
+    GsStatus,
     /// List connected scanners (JSON: ids + names)
     Scanners(ScannersArgs),
     /// Acquire pages from a scanner straight into a PDF
@@ -2799,11 +2802,19 @@ fn explicit_gs() -> Option<String> {
     EXPLICIT_GS.get().cloned().flatten()
 }
 
-/// The vendored Ghostscript, if this build still carries one. A CANDIDATE,
-/// never the answer — the resolution must not assume the tree exists.
+/// The install tree's Ghostscript, when its file exists. A CANDIDATE, never
+/// the answer: `--gs-path` and `SPECTRAPDF_GS_PATH` outrank it, and a damaged
+/// tree falls through to the installed copies.
 fn bundled_gs_candidate() -> Option<PathBuf> {
     let exe = exe_dir().join("ghostscript").join("gswin64c.exe");
     exe.is_file().then_some(exe)
+}
+
+/// `gs-status`: the resolution every gs subcommand would use, as JSON.
+fn gs_status(explicit: Option<&str>, bundled: Option<&Path>) -> i32 {
+    let answer = crate::gs::resolve(explicit, bundled);
+    println!("{}", serde_json::to_string_pretty(&answer).unwrap());
+    i32::from(!answer.available)
 }
 
 /// A PROBED Ghostscript, or the one named error every gs subcommand reports.
@@ -3194,6 +3205,7 @@ fn command_gs_need(command: &CliCommand) -> GsNeed {
         | C::Recover(_)
         | C::Check(_)
         | C::Printers(_)
+        | C::GsStatus
         | C::Scanners(_)
         | C::ScanTest(_)
         | C::ShellMenu(_)
@@ -4215,6 +4227,10 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
         };
     }
 
+    if let CliCommand::GsStatus = &command {
+        return gs_status(explicit_gs().as_deref(), bundled_gs_candidate().as_deref());
+    }
+
     // Scanner enumeration/capabilities are pure WIA or SANE — no Python
     // engine to spawn, and the session store closes its devices when it
     // drops here.
@@ -4477,6 +4493,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
 
         // Handled in run() before the engine spawns.
         CliCommand::Printers(_) => unreachable!("printers is dispatched before engine start"),
+        CliCommand::GsStatus => unreachable!("gs-status is dispatched before engine start"),
         CliCommand::Scanners(_) => unreachable!("scanners is dispatched before engine start"),
         CliCommand::ScanTest(_) => unreachable!("scan-test is dispatched before engine start"),
         CliCommand::ShellMenu(_) => unreachable!("shell-menu is dispatched before engine start"),

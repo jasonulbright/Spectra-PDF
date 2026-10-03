@@ -45,6 +45,7 @@
     ],
     "resources": {
       "../resources/python": "python",
+      "../resources/ghostscript": "ghostscript",
       "../resources/libreoffice": "libreoffice",
       "../resources/fonts": "fonts",
       "../resources/tesseract": "tesseract",

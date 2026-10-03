@@ -57,7 +57,7 @@ What "destroyed" writes, per raster:
 Codecs: the qpdf-decodable filters (Flate, LZW, RunLength, ASCIIHex, ASCII85)
 are edited as packed samples and re-encoded as Flate, every survivor exact.
 CCITT is decoded through the imaging library and re-encoded as Flate. JBIG2 is
-decoded by the user-supplied Ghostscript and re-encoded as CCITT group 4, the
+decoded by the resolved Ghostscript and re-encoded as CCITT group 4, the
 exact bitmap proved by decoding it back; the symbol dictionary it shared
 (/JBIG2Globals) can hold shapes from the destroyed area, so every other image
 that used it is converted the same way by the caller. DCT is re-encoded with

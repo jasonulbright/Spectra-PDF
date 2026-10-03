@@ -44,6 +44,7 @@ jobs:
       - name: Create resource stubs for Tauri build script
         run: |
           mkdir -p resources/python
+          mkdir -p resources/ghostscript
           mkdir -p resources/fonts
           mkdir -p resources/libreoffice
           mkdir -p resources/tesseract

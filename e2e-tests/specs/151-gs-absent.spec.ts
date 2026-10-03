@@ -6,6 +6,7 @@ import {
   answerAnyFilePicker,
   gsAnswer,
   gsForceAbsent,
+  gsPin,
   gsRestore,
   invokeAppCommand,
   openByPaths,
@@ -17,14 +18,15 @@ import {
 
 // The CAPABILITY-ABSENT axis, end to end.
 //
-// Ghostscript is a user-supplied prerequisite: nothing in the distribution
-// provides one. Every machine that can run this suite HAS one — the present
-// axis needs it — so absence is arranged from inside the app, by pinning the
-// renderer's one answer (`gsForceAbsent`). That is the same shape as
-// `breakTabOrderPublish`: a seam on the module the shipped code already
-// reads, reachable only from the harness, which exists only in a VITE_E2E
-// build. PATH cannot arrange it — discovery reads the registry and the
-// environment too — and uninstalling is not something a suite may do.
+// The absent state stays real where no Ghostscript resolves: a damaged
+// install, a removed system package, a configured path that no longer runs.
+// The binary under test carries the included copy beside it, so absence is
+// arranged from inside the app, by pinning the renderer's one answer
+// (`gsForceAbsent`). That is the same shape as `breakTabOrderPublish`: a seam
+// on the module the shipped code already reads, reachable only from the
+// harness, which exists only in a VITE_E2E build. PATH cannot arrange it —
+// the included copy resolves before the registry and PATH are read — and
+// deleting files from the build is not something a suite may do.
 //
 // What is under test is the GATING TABLE, not one panel: 25 surfaces gate on
 // this prerequisite and nine of them are PARTIAL, so a spec that only proved
@@ -46,6 +48,7 @@ const COMPARE_RUN = '[data-testid="compare-run"]';
 const GS_STATUS = '[data-testid="prefs-gs-status"]';
 const GS_PROBLEM = '[data-testid="prefs-gs-problem"]';
 const GS_BROWSE = '[data-testid="prefs-gs-browse"]';
+const GS_ORIGIN = '[data-testid="prefs-gs-origin"]';
 
 // A 1x1 PNG. Create PDF's image leg needs no interpreter, and proving that
 // takes an actual image rather than another PDF.
@@ -230,6 +233,9 @@ describe('the Ghostscript-absent axis', () => {
     await openEngineSettings();
     expect(await $(GS_STATUS).getAttribute('data-gs-available')).toBe('no');
     await expect($(GS_PROBLEM)).toBeDisplayed();
+    // Nothing resolved and nothing chosen: there is no origin to name.
+    expect(await storedGsPath()).toBe('');
+    await expect($(GS_ORIGIN)).not.toBeExisting();
   });
 
   it('a browsed path that does not answer is reported and NOT stored', async () => {
@@ -264,6 +270,25 @@ describe('the Ghostscript-absent axis', () => {
     await answerAnyFilePicker(null);
     await $(GS_BROWSE).click();
     expect(await storedGsPath()).toBe(before);
+  });
+
+  it('names the included copy as the origin when it is the one that resolved', async () => {
+    // Pinned rather than probed: the machine's own answer fixes the origin,
+    // and this asserts the label for one origin, whatever this box resolves.
+    await gsPin({
+      available: true,
+      path: join(tmp, 'ghostscript', 'gswin64c.exe'),
+      version: '10.08.0',
+      reason: '',
+      detail: '',
+      source: 'bundled',
+    });
+    await openEngineSettings();
+    expect(await storedGsPath()).toBe('');
+    expect(await $(GS_STATUS).getAttribute('data-gs-available')).toBe('yes');
+    expect(await $(GS_ORIGIN).getText()).toBe('Included with Spectra PDF');
+    await expect($(GS_PROBLEM)).not.toBeExisting();
+    await gsForceAbsent();
   });
 
   // ── The claim that makes the whole posture liveable ────────────────────

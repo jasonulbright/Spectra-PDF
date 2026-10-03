@@ -72,8 +72,7 @@ impl Verb {
         }
     }
 
-    /// Lowercase, without the dot. PostScript is never offered: it needs a
-    /// user-supplied Ghostscript that a default install does not have.
+    /// Lowercase, without the dot. PostScript is not offered.
     pub fn extensions(self) -> Vec<&'static str> {
         let mut out: Vec<&'static str> = Vec::new();
         if self == Verb::Combine {

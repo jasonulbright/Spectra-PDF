@@ -761,3 +761,46 @@ fn a_folder_of_folders_is_decided_per_folder() {
     assert!(refusal.contains("Ghostscript") && refusal.contains(&missing), "{report}");
     names_the_command_lines_fix(&refusal);
 }
+
+// ── gs-status ────────────────────────────────────────────────────────────────
+
+fn gs_status(args: &[&str]) -> (Option<i32>, Value) {
+    let output = Command::new(EXE)
+        .arg("gs-status")
+        .args(args)
+        .env_remove("SPECTRAPDF_GS_PATH")
+        .output()
+        .expect("spawn gs-status");
+    let report: Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|e| panic!("gs-status printed no JSON ({e}): {}", text(&output.stdout)));
+    (output.status.code(), report)
+}
+
+#[test]
+fn gs_status_reports_an_explicit_failure_with_no_source() {
+    let missing = std::env::temp_dir().join("spectra-no-such-gs").join("gswin64c.exe");
+    let missing = missing.to_string_lossy().to_string();
+    let (code, report) = gs_status(&["--gs-path", &missing]);
+    assert_eq!(code, Some(1), "{report}");
+    assert_eq!(report["available"], json!(false), "{report}");
+    assert_eq!(report["reason"], json!(spectrapdf_lib::gs::NOT_EXECUTABLE), "{report}");
+    assert_eq!(report["path"], json!(missing), "{report}");
+    assert_eq!(report["source"], json!(""), "{report}");
+}
+
+#[test]
+fn gs_status_names_the_bundled_copy_beside_the_binary() {
+    let bundled = Path::new(EXE).parent().expect("exe dir").join("ghostscript").join("gswin64c.exe");
+    if !cfg!(windows) || !bundled.is_file() {
+        eprintln!("skipped: no bundled Ghostscript beside {EXE}");
+        return;
+    }
+    let (code, report) = gs_status(&[]);
+    assert_eq!(code, Some(0), "{report}");
+    assert_eq!(report["available"], json!(true), "{report}");
+    assert_eq!(report["source"], json!(spectrapdf_lib::gs::SOURCE_BUNDLED), "{report}");
+    assert!(
+        same_file::is_same_file(report["path"].as_str().unwrap(), &bundled).unwrap(),
+        "{report}"
+    );
+}

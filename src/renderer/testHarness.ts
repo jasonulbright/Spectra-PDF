@@ -2105,17 +2105,31 @@ export interface TestHarness {
   /**
    * Force this session's Ghostscript answer OFF, whatever the machine has.
    *
-   * Every box that can run this suite has a Ghostscript — the present axis
-   * needs one — so the absent surfaces are otherwise unreachable end to end.
+   * The build under test carries the included copy beside its binary, so
+   * the absent surfaces are otherwise unreachable end to end.
    * The force is applied to the renderer's ONE answer rather than to a
    * panel's props, so the disabled states, the `when` predicates, the
    * partial legs and the settings surface all read the same pinned answer
    * the shipped code reads.
    *
    * `reason` picks which absent state is under test (`not-configured` is
-   * the fresh-install one); the surfaces branch on it.
+   * the one where nothing resolves anywhere); the surfaces branch on it.
    */
   gsForceAbsent: (reason?: string) => void;
+  /**
+   * Pin this session's Ghostscript answer to exactly `answer`, available or
+   * not. The settings surface names where a resolved copy came from, and the
+   * machine's own answer fixes that origin, so the other origins are
+   * reachable only through a pin.
+   */
+  gsPin: (answer: {
+    available: boolean;
+    path: string;
+    version: string;
+    reason: string;
+    detail: string;
+    source?: string;
+  }) => void;
   /**
    * Pin what the certificate-store enumeration answers, so the empty and
    * refused paths can be driven. `null` unpins and the next read goes to
@@ -3711,6 +3725,9 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         reason: reason ?? 'not-configured',
         detail: '',
       });
+    },
+    gsPin: (answer) => {
+      pinGsCapability(answer);
     },
     gsRestore: async () => {
       pinGsCapability(null);

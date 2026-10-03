@@ -507,6 +507,12 @@ jobs:
       - name: Vendor jbig2enc (MRC mask codec, Apache-2.0)
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1
 
+      # A tag cut before the bundle script existed ships no Ghostscript, and a
+      # redo rebuilds what the tag shipped.
+      - name: Vendor Ghostscript (unmodified upstream, SHA-256 pinned)
+        if: hashFiles('scripts/bundle-ghostscript.ps1') != ''
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1
+
       - name: Vendor spelling dictionaries
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-dictionaries.ps1
         shell: pwsh

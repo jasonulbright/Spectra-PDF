@@ -245,10 +245,10 @@ jobs:
           path: linux-packages
 
       - name: Fedora 44 installs the .rpm and runs the AppImage
-        run: docker run --rm -v "$PWD:/w" -w /w fedora:44 sh scripts/linux-install-smoke.sh linux-packages --rpm --appimage
+        run: docker run --rm -v "$PWD:/w" -w /w fedora:44 sh scripts/linux-install-smoke.sh linux-packages --rpm --ghostscript --appimage
 
       - name: Ubuntu 26.04 runs the AppImage without WebKitGTK and GTK 3, then installs the .deb
-        run: docker run --rm -v "$PWD:/w" -w /w ubuntu:26.04 sh scripts/linux-install-smoke.sh linux-packages --bare-cli --deb --appimage
+        run: docker run --rm -v "$PWD:/w" -w /w ubuntu:26.04 sh scripts/linux-install-smoke.sh linux-packages --bare-cli --deb --ghostscript --appimage
 
   # The AppImage catalog's own checks, on a base Ubuntu 22.04 system without
   # WebKitGTK or GTK 3: the catalog's AppDir lint, its C library rating
@@ -397,6 +397,13 @@ jobs:
         # if any statically-linked component named in upstream's depmf.json
         # lacks a row in scripts/jbig2enc-licenses.tsv.
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1
+
+      - name: Vendor Ghostscript (unmodified upstream, SHA-256 pinned)
+        # The vendor's Windows x64 installer, SHA-256 pinned in the script and
+        # unpacked with 7-Zip, never run. The script REFUSES to ship when the
+        # tree carries a binary it does not name, lacks the licence file, or
+        # THIRD-PARTY-LICENSES.md has no Ghostscript section for the pin.
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1
 
       - name: Vendor spelling dictionaries
         # 35 Hunspell .aff/.dic pairs from LibreOffice/dictionaries at the
@@ -552,6 +559,48 @@ jobs:
           $report = Get-Content $stdout -Raw | ConvertFrom-Json
           if ($report.valid -ne $true -or $report.size_bytes -le 0) {
             throw "built CLI did not validate the fixture: $(Get-Content $stdout -Raw)"
+          }
+
+      # The bundled Ghostscript beside the built CLI answers the pinned
+      # version and serves one Ghostscript command with nothing configured.
+      - name: Built CLI runs the bundled Ghostscript
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $gs = 'src-tauri/target/release/ghostscript/gswin64c.exe'
+          $exe = 'src-tauri/target/release/spectrapdf.exe'
+          $fixture = 'tests/fixtures/sample.pdf'
+          if (-not (Test-Path -LiteralPath $gs -PathType Leaf)) { throw 'bundled Ghostscript is missing' }
+          $pinned = [regex]::Match((Get-Content scripts/bundle-ghostscript.ps1 -Raw), '\[string\]\$GsVersion = "([0-9.]+)"').Groups[1].Value
+          $reported = (& (Resolve-Path $gs).Path --version | Select-Object -First 1).Trim()
+          if (-not $pinned -or $reported -ne $pinned) { throw "bundled Ghostscript reports '$reported', expected '$pinned'" }
+          Remove-Item Env:SPECTRAPDF_GS_PATH -ErrorAction SilentlyContinue
+          $statusOut = Join-Path $env:RUNNER_TEMP 'spectrapdf-gs-status.out'
+          $statusErr = Join-Path $env:RUNNER_TEMP 'spectrapdf-gs-status.err'
+          $status = Start-Process -FilePath (Resolve-Path $exe).Path `
+            -ArgumentList @('gs-status') -WorkingDirectory (Get-Location).Path `
+            -RedirectStandardOutput $statusOut -RedirectStandardError $statusErr `
+            -WindowStyle Hidden -PassThru -Wait
+          $answer = Get-Content $statusOut -Raw | ConvertFrom-Json
+          if ($status.ExitCode -ne 0 -or $answer.available -ne $true -or $answer.source -ne 'bundled') {
+            throw "the built CLI did not resolve the bundled Ghostscript: $(Get-Content $statusOut -Raw)"
+          }
+          if ((Resolve-Path -LiteralPath $answer.path).Path -ne (Resolve-Path -LiteralPath $gs).Path) {
+            throw "gs-status names $($answer.path), not the bundled $gs"
+          }
+          $out = Join-Path $env:RUNNER_TEMP 'spectrapdf-gs-smoke.pdf'
+          $stdout = Join-Path $env:RUNNER_TEMP 'spectrapdf-gs-smoke.out'
+          $stderr = Join-Path $env:RUNNER_TEMP 'spectrapdf-gs-smoke.err'
+          $process = Start-Process -FilePath (Resolve-Path $exe).Path `
+            -ArgumentList @('compress', $fixture, '-o', $out, '--quality', 'ebook') `
+            -WorkingDirectory (Get-Location).Path `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr `
+            -WindowStyle Hidden -PassThru -Wait
+          if ($process.ExitCode -ne 0) {
+            throw "built CLI compress failed (exit $($process.ExitCode)): $(Get-Content $stderr -Raw)"
+          }
+          if (-not (Test-Path -LiteralPath $out -PathType Leaf) -or (Get-Item -LiteralPath $out).Length -le 0) {
+            throw 'built CLI compress wrote no output'
           }
 
       # The portable distribution: the SAME payload the installer lays down,

@@ -21,6 +21,7 @@
       "../resources/libreoffice": null,
       "../resources/tesseract": null,
       "../resources/jbig2enc": null,
+      "../resources/ghostscript": null,
       "../resources/dictionaries": null,
       "../resources/linux-x86_64/python": "python",
       "../resources/linux-x86_64/libreoffice": "libreoffice",
@@ -31,7 +32,7 @@
     },
     "linux": {
       "deb": {
-        "depends": ["tzdata"],
+        "depends": ["tzdata", "ghostscript"],
         "section": "text",
         "desktopTemplate": "linux/spectrapdf.desktop",
         "files": {
@@ -40,7 +41,7 @@
         }
       },
       "rpm": {
-        "depends": ["tzdata"],
+        "depends": ["tzdata", "ghostscript"],
         "release": "1",
         "desktopTemplate": "linux/spectrapdf.desktop",
         "files": {

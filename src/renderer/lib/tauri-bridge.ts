@@ -842,6 +842,9 @@ export interface GsAnswer {
   version: string;
   reason: string;
   detail: string;
+  /** `explicit`, `environment`, `bundled`, `registry`, `path`, or `''` when
+   * unavailable. Optional: `lib/gs-capability` reads a missing field as `''`. */
+  source?: string;
 }
 
 export interface PrinterList {
